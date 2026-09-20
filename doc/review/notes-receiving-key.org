@@ -1,0 +1,260 @@
+#+TITLE: Notes: independent receiving keys, architecture of record
+#+DATE: 2026-09-20
+#+OPTIONS: toc:3 num:t
+#+PROPERTY: header-args :eval never-export
+
+* 1 Purpose and status
+:PROPERTIES:
+:CUSTOM_ID: purpose
+:END:
+
+This is the architecture for review finding R5: addressed Notes are encrypted
+to the recipient's identity point, so the identity scalar is the decryption
+key, and every party that legitimately holds it can read that recipient's
+note traffic. The finding was deferred behind the accumulator; this document
+records the approach, the prototype that establishes it, and what it costs.
+
+Status: prototyped, not implemented. The prototype is
+=scripts/review/receiving_key_proto.py=, which runs against the real wallet
+primitives and passes eleven checks. Nothing in the wallet, the circuits or
+the contracts has been changed.
+
+Dependency: the salted accumulator leaf of
+[[file:accumulator-spec.org][the accumulator specification]], because the
+binding between a receiving key and an identity must be hidden, and that leaf
+is where it hides.
+
+* 2 Why the current design cannot be patched
+:PROPERTIES:
+:CUSTOM_ID: contradiction
+:END:
+
+The system's read/write separation makes the identity scalar a *read
+capability*, disclosed to every counterparty by design: Bob learns Alice's
+scalar when she pays him. The note layer then used that same scalar as a
+*decryption key*. Those two roles are incompatible. A value handed to
+everyone you transact with cannot also be what decrypts your future traffic,
+because disclosure is then retroactive and prospective at once.
+
+No treatment of the ciphertext repairs this. If the identity scalar is the
+private key, whoever holds it decrypts, and the design discloses it on
+purpose. The key has to move off the identity.
+
+** 2.1 The precise defect, which is sharper than the general one
+
+An A1 note encrypts the recipient's identity point *under the recipient's
+identity point*:
+
+#+begin_example
+eRec = (r'G, M_rec + r'*M_rec) = (r'G, m_rec*(G + R))
+#+end_example
+
+That is not a Diffie-Hellman instance at all. The message and the key share
+one secret, so the usual hardness collapses: a candidate scalar is tested
+with a single multiplication, =C == m_i*(G + R)=, needing no proof, no key
+and no issuer secret. The prototype's first check does exactly that and
+identifies the recipient out of nine candidates.
+
+Encrypt the same plaintext under a key independent of the identity and the
+residual test is plaintext-checking under an independent key, which is a
+decisional Diffie-Hellman decision and infeasible. That is the same lock the
+registration layer already relies on.
+
+* 3 The architecture
+:PROPERTIES:
+:CUSTOM_ID: architecture
+:END:
+
+** 3.1 Notes are addressed to a receiving key
+
+The recipient holds an independent receiving secret =k= with =pk_recv = k*G=.
+A payer addresses a note by encrypting under =pk_recv= instead of under
+=M_rec=. The plaintexts do not change:
+
+#+begin_example
+A1   eNote = (r_n*G, v*G      + r_n*pk_recv)     was r_n*M_rec
+     eRec  = (r'*G,  M_rec    + r'*pk_recv)      was r'*M_rec
+A2   eNote = (r_n*G, v*G      + r_n*pk_recv)
+     eIss  = (r'*G,  M_iss    + r'*pk_recv)
+#+end_example
+
+Unilateral addressing survives: the payer needs =pk_recv=, learned out of
+band through the same channel that carries =M_rec= today, and needs nothing
+from the recipient at payment time.
+
+** 3.2 The binding is inside the accumulator leaf, not published
+
+A note addressed to a key of the payer's choosing would break mutual
+decryptability and the receipt, so the receiving key must be bound to the
+identity. That binding =MUST NOT= be public: a spend proving against a public
+binding would reveal the recipient's registered key and deanonymise them to
+everyone, which is worse than the problem being solved.
+
+The leaf therefore commits both:
+
+#+begin_example
+leaf = Poseidon(M.x, M.y, pk_recv.x, pk_recv.y, salt)
+#+end_example
+
+which is the salted leaf of the accumulator specification with the receiving
+key added. The binding is provable in zero knowledge, and the prototype
+confirms the leaf stays unscannable against a party holding every certified
+identity, the whole published subtree, and =pk_recv= itself.
+
+** 3.3 The circuits keep their shape
+
+The note-binding circuits avoid variable-base scalar multiplication by
+witnessing the product of the randomness and the recipient's scalar and
+computing it as a fixed-base multiple of =G=. Under the substitution the
+witness becomes =r*k= instead of =r*m_rec= and the shape is identical:
+
+#+begin_example
+R = r*G           C = M + (r*k)*G
+#+end_example
+
+So this is a substitution of which scalar the recipient proves knowledge of,
+not a redesign. The prototype checks both the identity and the value
+ciphertext in this form. Constraint counts should be close to unchanged, which
+=MUST= be measured rather than assumed.
+
+** 3.4 Rotation and succession
+
+A new receiving key is a new leaf with a fresh salt and the old leaf cleared:
+the re-association mechanism the accumulator already specifies. Two leaves for
+one identity with different keys do not link.
+
+** 3.5 The payer's assurance is a holder-produced proof
+
+For a receipt to name a person, the payer needs the identity, which it learns
+bilaterally as today, and assurance that =pk_recv= belongs to it. Because the
+binding is hidden, that assurance is a proof the recipient produces and the
+receipt captures at payment time. This is the pattern the accumulator already
+chose for every attribute, so it needs no new mechanism.
+
+** 3.6 B1 needs no change in kind
+
+B1 encrypts its depositor evidence under the issuer's *registered account
+key* (=elgamal_encrypt(M_dep, pk_iss, r)=), not under an identity scalar, so
+knowing a certified record does not decrypt it. B1 was right all along and
+A1 and A2 are the deviation. A design whose odd case turns out to be the
+correct one usually already contains its own answer.
+
+* 4 Blast radius
+:PROPERTIES:
+:CUSTOM_ID: blast-radius
+:END:
+
+| Location | Change |
+|----------+--------|
+| =wallet/unilateral_a1.py= lines 99, 102 | the encryption key argument: =M_rec= becomes =pk_recv= |
+| =wallet/unilateral_a2.py= lines 182, 185 | the same, twice |
+| =wallet/b1_binding.py= | none; it already uses a registered account key |
+| The receiving key itself | generation, seed-derived recovery, and its place in the wallet's key material |
+| =registry/tree.py= | a leaf variant committing the receiving key alongside the identity |
+| =circuits/note_binding.circom=, =note_binding_a1.circom= | the witnessed product becomes =r*k=; one private input renamed, the relation unchanged |
+| =circuits/spend.circom= | unchanged: it never sees the identity |
+| The registry | registration of a receiving key bound to the identity, and its rotation |
+| Receipts | capture of the binding proof, additive |
+| Vectors and fixtures | the A1 and A2 note vectors, the Notes end-to-end fixtures, and the mint fixtures pinned to them |
+
+Four wallet call sites carry the defect. That is the whole of it on the
+addressing side, which is the strongest argument that the architecture is
+right: a defect that takes four arguments to fix was a mistake about which
+key to use, not a mistake about structure.
+
+* 5 What it costs
+:PROPERTIES:
+:CUSTOM_ID: cost
+:END:
+
+*Recoverability changes from the certified record to the wallet seed.* Today,
+losing a wallet is not losing notes, because the identity scalar can be
+recomputed from the record and the identity scalar is the key. That property
+and the harvesting vulnerability are one fact seen twice: a decryption key
+recoverable from a disclosed record is a decryption key everyone holding the
+record already has. One cannot be kept without the other, and this
+specification chooses privacy.
+
+The mitigation available is the guardian mechanism the papers already
+contemplate: wrap a copy of the note payload to a guardian key, or to a
+threshold of them, which restores recovery without restoring universal
+readability because a guardian key is not the identity.
+
+*What is not lost:* unilateral addressing, the receipt and mutual
+decryptability results, membership proofs, and the circuits' structure.
+
+* 6 The prototype
+:PROPERTIES:
+:CUSTOM_ID: prototype
+:END:
+
+=scripts/review/receiving_key_proto.py=, run with
+=PYTHONPATH=.:core/python=. Eleven checks, all passing on 2026-09-20:
+
+| Check | Result |
+|-------+--------|
+| Today: one scalar multiplication per candidate identifies the recipient | 1 hit of 9 candidates |
+| Fixed: the identity-key test finds nothing | 0 hits |
+| Fixed: the only handle left is a DDH instance | honest witness exhibited |
+| The recipient still decrypts, with the receiving secret | yes |
+| A2: the recipient recovers the issuer identity | yes |
+| A2: the candidate-pair test finds nothing | 0 hits |
+| The circuit relation stays fixed-base for the identity ciphertext | yes |
+| The circuit relation stays fixed-base for the value ciphertext | yes |
+| Identity and receiving key commit in one salted leaf | path verifies |
+| The leaf is unscannable given every identity, the tree, and the key | 0 hits |
+| Rotation yields an unlinkable leaf | yes |
+
+* 7 Implementation plan
+:PROPERTIES:
+:CUSTOM_ID: plan
+:END:
+
+Prototype in =alberta-buck-notes-flow.org= before touching production code.
+That document is executable: its A2, A1 and B1 cycles run as one seeded
+Python session under =make nix-venv-doc-flow=, and those cycles are exactly
+the surface that changes. The A' work established the pattern, where making
+the document run first caught the properties that mattered.
+
+=alberta-buck-notes-serialized.org= is out of scope: serialization is B1-only
+by its own applicability table, and B1 does not address notes to identities.
+
+1. Add the receiving key to the wallet: generation, seed-derived recovery,
+   and its registration bound to the identity.
+2. Substitute the encryption key at the four call sites; keep the old form
+   behind a flag only if the vectors need a transition.
+3. Regenerate the A1 and A2 wallet vectors, then the Notes end-to-end
+   fixtures, then the mint fixtures pinned to them.
+4. Extend the leaf to commit the receiving key, with the accumulator's
+   conformance tests extended to it.
+5. Substitute the witnessed product in the note-binding circuits, and
+   measure the constraint count against the current one.
+6. Rebuild the circuits as one matched set, together with the finding-5
+   repairs and the aggregator depth raise, which are already sequenced
+   together for the same reason.
+7. Rewrite the flow document's cycles, and the addressing passages of
+   =alberta-buck-notes.org=.
+
+* 8 Open questions
+:PROPERTIES:
+:CUSTOM_ID: open
+:END:
+
+1. *Trial decryption cost.* The recipient scans candidate notes by trial
+   decryption, as it does today with the identity scalar. Unchanged in order,
+   but worth measuring at realistic note volumes.
+2. *One receiving key or one per payer.* A single key is simplest and, because
+   it is used as an encryption key rather than published per note, does not
+   link a recipient's notes under DDH. A key per counterparty would bound the
+   damage of a leaked receiving secret. Stealth addressing, which derives a
+   fresh key per note, appears to add little here for its complexity, since
+   the address is exchanged bilaterally rather than published.
+3. *Guardian wrapping.* Whether recovery wrapping is part of the note payload
+   or a wallet-side convention, and who the guardians are.
+4. *The A1 value ciphertext.* =eNote= encrypts the value under the recipient
+   key. Whether the face should remain derivable by the recipient alone, given
+   the spend publishes it anyway, is a simplification worth considering while
+   the payload is being changed.
+5. *A written security argument*, which this document does not contain and
+   which the architecture owes in the form Part I of
+   =alberta-buck-proofs.org= owes for the registration presentation.
