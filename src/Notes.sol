@@ -8,6 +8,7 @@ import {IMintVerifierA2}               from "./IMintVerifierA2.sol";
 import {ISpendVerifier}                from "./ISpendVerifier.sol";
 import {IIdentityMembershipVerifier}   from "./IIdentityMembershipVerifier.sol";
 import {INoteBindingVerifier}          from "./INoteBindingVerifier.sol";
+import {IDepositFoldVerifier}          from "./IDepositFoldVerifier.sol";
 import {IdentityRegistry}              from "./IdentityRegistry.sol";
 import {BN254}                         from "./BN254.sol";
 
@@ -186,6 +187,23 @@ contract Notes {
     ///         reach via `vm.store` stay unperturbed.
     INoteBindingVerifier public noteBindingVerifier;
 
+    /// @notice The folded deposit gate for ADDRESSED (A1/A2) spends.
+    ///
+    ///         When set, the addressed paths verify ONE proof carrying every
+    ///         relation instead of three co-bound checks.  That is not a
+    ///         consolidation for tidiness: an addressed Note is keyed to the
+    ///         recipient's receiving key while its authority belongs to the
+    ///         recipient's Identity, and those are two different secrets.
+    ///         Proved side by side they say nothing about their owner, and a
+    ///         thief holding a stolen payload satisfies both halves -- the
+    ///         reading half with the stolen key, the Identity half with its
+    ///         own registered Identity.  The fold states the tie instead.
+    ///
+    ///         Unset leaves the legacy three-check path in force, so a
+    ///         deployment migrates by setting this rather than by redeploying.
+    ///         See doc/review/notes-receiving-key.org section 3.3a.
+    IDepositFoldVerifier public depositFoldVerifier;
+
     // ---- events -----------------------------------------------------------
 
     event GovernanceTransferred(address indexed previous, address indexed next);
@@ -195,6 +213,7 @@ contract Notes {
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
     event IdentityMembershipVerifierUpdated(address indexed previous, address indexed next);
     event NoteBindingVerifierUpdated(address indexed previous, address indexed next);
+    event DepositFoldVerifierUpdated(address indexed previous, address indexed next);
 
     /// @notice Emitted on an identity-M-bound (unilateral) A2 deposit.  Publishes
     ///         the committed point `P_I = (piX, piY)` that the deposit-coupling
@@ -365,6 +384,15 @@ contract Notes {
         require(msg.sender == governance, "not governance");
         emit NoteBindingVerifierUpdated(address(noteBindingVerifier), next);
         noteBindingVerifier = INoteBindingVerifier(next);
+    }
+
+    /// @notice Point the addressed spend paths at the folded deposit gate.
+    ///         Setting it switches A1 and A2 from the three co-bound checks to
+    ///         one proof; clearing it reverts to the legacy path.
+    function setDepositFoldVerifier(address next) external {
+        require(msg.sender == governance, "not governance");
+        emit DepositFoldVerifierUpdated(address(depositFoldVerifier), next);
+        depositFoldVerifier = IDepositFoldVerifier(next);
     }
 
     // ---- views ------------------------------------------------------------
@@ -813,10 +841,13 @@ contract Notes {
         bool             a1Layout
     ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
-        require(address(identityMembershipVerifier) != address(0),
-                "Notes: membership verifier not set");
-        require(address(noteBindingVerifier) != address(0),
-                "Notes: note binding verifier not set");
+        bool folded = address(depositFoldVerifier) != address(0);
+        if (!folded) {
+            require(address(identityMembershipVerifier) != address(0),
+                    "Notes: membership verifier not set");
+            require(address(noteBindingVerifier) != address(0),
+                    "Notes: note binding verifier not set");
+        }
         require(recipient != address(0),  "Notes: zero recipient");
         require(face      > 0,            "Notes: zero face");
         require(_isAcceptedRoot(root),    "Notes: unknown root");
@@ -830,24 +861,41 @@ contract Notes {
             "Notes: bad spend proof"
         );
 
-        // Identity-M binding, half 1: the deposit-coupling sigma.
-        require(
-            identityRegistry.verifyDepositCoupling(msg.sender, eEnc, dc),
-            "Notes: bad deposit coupling"
-        );
+        if (folded) {
+            // ONE proof, every relation.  `noteBindingProof` carries the
+            // folded Groth16 triple; `membershipProof` and the coupling sigma
+            // `dc` go unused, because the fold subsumes both -- which is the
+            // point.  Three checks sharing the public point dc.P_I inferred an
+            // equality between two different secrets; one witness states it.
+            uint256 root_ = identityRegistry.identityRoot();
+            require(root_ != 0, "Notes: identity root not set");
+            require(noteBindingProof.length != 0, "Notes: empty fold proof");
 
-        nullifiers[nullifier] = true;
-        noteFaceSum          -= face;
+            bool ok = a1Layout
+                ? depositFoldVerifier.verifyFoldA1(
+                    noteBindingProof, nullifier, face, root_, eEnc, msg.sender)
+                : depositFoldVerifier.verifyFoldA2(
+                    noteBindingProof, nullifier, root_, eEnc, msg.sender);
+            require(ok, "Notes: bad folded deposit gate");
 
-        // Identity-M binding, half 2: membership of dc.P_I's point, bound to the
-        // SAME dc.P_I the coupling just constrained.
-        _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
+            nullifiers[nullifier] = true;
+            noteFaceSum          -= face;
+        } else {
+            // Legacy path: three co-bound checks over the shared point dc.P_I.
+            // Retained so a deployment migrates by setting the fold verifier
+            // rather than by redeploying, and superseded once it is set.
+            require(
+                identityRegistry.verifyDepositCoupling(msg.sender, eEnc, dc),
+                "Notes: bad deposit coupling"
+            );
 
-        // Identity-M binding, half 3: the note<->eEnc tie, binding `eEnc` to
-        // THIS note.  Empty proofs revert; the entry point required the
-        // verifier slot to be set.
-        _verifyNoteBinding(noteBindingProof, nullifier, a1Layout, face,
-                           eEnc, dc.P_I.X, dc.P_I.Y);
+            nullifiers[nullifier] = true;
+            noteFaceSum          -= face;
+
+            _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
+            _verifyNoteBinding(noteBindingProof, nullifier, a1Layout, face,
+                               eEnc, dc.P_I.X, dc.P_I.Y);
+        }
 
         require(
             buck.transfer(recipient, face),

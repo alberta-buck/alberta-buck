@@ -205,6 +205,19 @@ contract IdentityRegistry {
     ///         design currently exists off-chain in Python only; nothing
     ///         on-chain consumes a `FullMembershipProof`.  Reconciling them
     ///         needs either a composed circuit or a flattened accumulator.
+    /// @dev TEN, while the CIRCUITS are already twenty.
+    ///
+    ///      The accumulator specification raises this to 20 -- authorities are
+    ///      a population rather than a roster -- and the folded deposit gates
+    ///      and the B1 membership circuit are all built and set up at 20,
+    ///      because depth is baked into an r1cs and therefore into a ceremony.
+    ///      This constant is the cheap half and moves last.
+    ///
+    ///      What gates it: the Notes end-to-end fixtures embed a membership
+    ///      proof whose identityRoot is a PUBLIC INPUT, so raising the depth
+    ///      invalidates the proof rather than merely the root.  They are
+    ///      regenerated once, against the folded gates, and this flips in the
+    ///      same change.  ZERO_11..ZERO_20 are already here for that day.
     uint8   public constant IDENTITY_TREE_DEPTH = 10;
 
     /// @notice Empty-subtree roots at each depth, precomputed as
