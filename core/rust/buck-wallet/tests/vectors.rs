@@ -472,7 +472,10 @@ fn unilateral_a2_replay() {
         .iter()
         .map(jw)
         .collect();
-    let wrong_tree = IdentityMerkleTree::from_leaves(&wrong_leaves, 10).unwrap();
+    // Depth from the fixture, not a literal: the aggregator depth is a
+    // protocol parameter, and hardcoding it made this test fail when it moved.
+    let depth = u["tree"]["depth"].as_u64().unwrap() as usize;
+    let wrong_tree = IdentityMerkleTree::from_leaves(&wrong_leaves, depth).unwrap();
     assert_eq!(wrong_tree.root().unwrap(), jw(&u["wrong_root_tree"]["root"]));
     let res_bad = verify_receipt_a2(
         &rcpt,
@@ -520,7 +523,8 @@ fn unilateral_a1_replay() {
         .iter()
         .map(jw)
         .collect();
-    let tree = IdentityMerkleTree::from_leaves(&leaves, 10).unwrap();
+    let depth = v["unilateral_a2"]["tree"]["depth"].as_u64().unwrap() as usize;
+    let tree = IdentityMerkleTree::from_leaves(&leaves, depth).unwrap();
 
     let rcpt = make_receipt_a1(
         &jw(&u["k_recv"]),

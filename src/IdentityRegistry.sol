@@ -205,20 +205,19 @@ contract IdentityRegistry {
     ///         design currently exists off-chain in Python only; nothing
     ///         on-chain consumes a `FullMembershipProof`.  Reconciling them
     ///         needs either a composed circuit or a flattened accumulator.
-    /// @dev TEN, while the CIRCUITS are already twenty.
+    /// @dev TWENTY.  The accumulator specification raises it from ten because
+    ///      authorities are a population rather than a roster: clubs,
+    ///      community boards, congregations and delegated sub-regulators are
+    ///      all attribute authorities, and 2**10 = 1024 subtrees is the wrong
+    ///      order of magnitude.
     ///
-    ///      The accumulator specification raises this to 20 -- authorities are
-    ///      a population rather than a roster -- and the folded deposit gates
-    ///      and the B1 membership circuit are all built and set up at 20,
-    ///      because depth is baked into an r1cs and therefore into a ceremony.
-    ///      This constant is the cheap half and moves last.
-    ///
-    ///      What gates it: the Notes end-to-end fixtures embed a membership
-    ///      proof whose identityRoot is a PUBLIC INPUT, so raising the depth
-    ///      invalidates the proof rather than merely the root.  They are
-    ///      regenerated once, against the folded gates, and this flips in the
-    ///      same change.  ZERO_11..ZERO_20 are already here for that day.
-    uint8   public constant IDENTITY_TREE_DEPTH = 10;
+    ///      It moves in ONE change with the end-to-end fixtures, and it has to.
+    ///      The fixtures embed proofs whose identityRoot is a PUBLIC INPUT, so
+    ///      a deeper tree invalidates the proof rather than merely the root --
+    ///      and the spend circuits are built at twenty, so a depth-ten witness
+    ///      cannot even be generated for them.  Contract, wallet, kernel and
+    ///      fixtures are therefore one atomic step.
+    uint8   public constant IDENTITY_TREE_DEPTH = 20;
 
     /// @notice Empty-subtree roots at each depth, precomputed as
     ///         ZERO_{d+1} = Poseidon([ZERO_d, ZERO_d]) with ZERO_0 = 0.
@@ -247,8 +246,8 @@ contract IdentityRegistry {
     uint256 internal constant ZERO_19 = 10941962436777715901943463195175331263348098796018438960955633645115732864202;
     uint256 internal constant ZERO_20 = 15019797232609675441998260052101280400536945603062888308240081994073687793470;
 
-    /// @notice Root of the empty tree (depth 10).  Equal to ZERO_10.
-    uint256 public constant EMPTY_IDENTITY_ROOT = ZERO_10;
+    /// @notice Root of the empty tree (depth 20).  Equal to ZERO_20.
+    uint256 public constant EMPTY_IDENTITY_ROOT = ZERO_20;
 
     /// @notice Convenience: the zero-value at each depth as a Solidity array
     ///         (can't be constant, so we return from a pure function).

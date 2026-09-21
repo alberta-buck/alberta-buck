@@ -1198,13 +1198,13 @@
   "sk_iss": "0x0e3623f8ce6b556cf4f35325b91f1f8e9ab20003db1553392a3ae1f4edeeef9a",
   "t_vd": "0x1bf443a50d647d3466629f5a47354d7faa3eebaaf38cbb1ae659a0083ec51374",
   "tree": {
-   "depth": 10,
+   "depth": 20,
    "leaves": [
     "0x1a0dbdbc53ffed4b07231016fbc4f0c634ddb5f60ed8cf510c64045e420c0d6d",
     "0x22af83a441ceba33398631afe28ccc681887f124e5c12b8dba6b6a260712a0b6",
     "0x2eef0996fa9d8ba325b1ca6e62de8f80c97f0aa13131940851a5476c92c4e67b"
    ],
-   "root": "0x06eb24b51b610e7d15d438e4f1921aecc36f2aceaed64ac2f795382ff3ee5f6d"
+   "root": "0x16e99b84f2212d9b345bec9732da45e7e8a323e42ef99eaf73cf0ce10aa4f659"
   },
   "v": "0x0000000000000000000000000000000000000000000000000000000000000309",
   "verify": {
@@ -1215,7 +1215,7 @@
    "leaves": [
     "0x22af83a441ceba33398631afe28ccc681887f124e5c12b8dba6b6a260712a0b6"
    ],
-   "root": "0x12eb5253dc94cbd575904b086ec3eafcca0cbd7baf1f568ba2d38ca03895041a"
+   "root": "0x02ac1d79068fdead43d37619bd9f6dfed5b6a16010f35981ee083cda98d236b3"
   },
   "wrong_root_verify": {
    "reason": "issuer M not a registered identity",

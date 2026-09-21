@@ -177,7 +177,7 @@ def receiving_leaf(m_rec: int, k_recv: int, salt: int) -> int:
 # capacity knobs and may be raised independently, at the cost of regenerating
 # the vectors that pin them (core/vectors/registry-kernel-vectors.json records
 # aggregator.depth beside reg_a.depth / reg_b.depth).
-AGGREGATOR_DEPTH: int = 10
+AGGREGATOR_DEPTH: int = 20
 KYC_SUBTREE_DEPTH: int = 12
 FEATURE_SUBTREE_DEPTH: int = 10
 

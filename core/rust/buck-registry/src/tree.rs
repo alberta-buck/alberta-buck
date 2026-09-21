@@ -266,7 +266,7 @@ impl IdentityMerkleTree {
 /// This is the AGGREGATOR depth -- the tree whose root IS `identityRoot`.
 /// It is the only one of the three that is protocol-critical, because the
 /// circuits prove a path to exactly this root.
-pub const IDENTITY_TREE_DEPTH: usize = 10;
+pub const IDENTITY_TREE_DEPTH: usize = 20;
 
 /// Alias making the role explicit at call sites that compose sub-trees.
 pub const AGGREGATOR_DEPTH: usize = IDENTITY_TREE_DEPTH;

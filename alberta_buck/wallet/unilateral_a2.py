@@ -83,15 +83,17 @@ from alberta_buck.registry.tree import IdentityMerkleTree, identity_leaf
 # The registry-Identity accumulator -- the Poseidon Merkle tree of registered
 # identity *points* -- has one canonical implementation,
 # :class:`alberta_buck.registry.tree.IdentityMerkleTree`.  It is the same tree
-# the IdentityRegistry contract maintains on chain (IDENTITY_TREE_DEPTH = 10) and
-# that ``circuits/identity_membership_g1tie.circom`` proves membership against.
+# the IdentityRegistry contract maintains on chain (IDENTITY_TREE_DEPTH = 20) and
+# that the spend circuits prove membership against.
 # ``IdentityTree`` below is a thin *point-centric* facade over it for the
 # unilateral-A2 receipt flow; the Merkle algorithm itself is not duplicated.
 
-# On-chain depth: IdentityRegistry.IDENTITY_TREE_DEPTH and the
-# identity_membership_g1tie circuit both fix depth 10, so a wallet-built root
-# matches the contract's identityRoot and a path verifies in the circuit.
-IDENTITY_TREE_DEPTH = 10
+# On-chain depth: IdentityRegistry.IDENTITY_TREE_DEPTH and the spend circuits
+# all fix depth 20, so a wallet-built root matches the contract's identityRoot
+# and a path verifies in the circuit.  The three move together and must: a
+# depth-10 witness cannot be generated for a depth-20 circuit at all, and the
+# fixtures embed proofs whose root is a public input.
+IDENTITY_TREE_DEPTH = 20
 
 
 class IdentityTree(IdentityMerkleTree):
@@ -103,7 +105,7 @@ class IdentityTree(IdentityMerkleTree):
     insertion, path, root -- is the single canonical implementation in
     :mod:`alberta_buck.registry.tree`, matched byte-for-byte by the on-chain
     IdentityRegistry accumulator and the membership circuit.  Defaults to the
-    on-chain depth (10).
+    on-chain depth (20).
     """
 
     def __init__(self, depth: int = IDENTITY_TREE_DEPTH,
