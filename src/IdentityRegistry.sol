@@ -158,14 +158,36 @@ contract IdentityRegistry {
         BN254.G1Point P_dep;// M_dep + b*H             (blinded commitment of M_dep)
     }
 
-    /// @notice Second generator H for the A2 binding -- a nothing-up-my-sleeve
-    ///         point, H = keccak256("AlbertaBuck:IssuerReenc:H") (mod R) * G.
-    ///         Mirrors alberta_buck.wallet.issuer_reenc.H_POINT.  Used only to
-    ///         hide pk_rec in Q, so a known discrete log is acceptable.
+    /// @notice The MASKING generator, H = keccak256("AlbertaBuck:IssuerReenc:H")
+    ///         (mod R) * G.  Mirrors alberta_buck.wallet.issuer_reenc.H_POINT.
+    ///
+    ///         Its discrete log is public, and for this use that is fine: it
+    ///         hides a value INSIDE one sigma, where a knowledge extractor
+    ///         recovers both openings anyway.  It must NOT be used where a
+    ///         commitment is opened by two separate proofs that have to agree
+    ///         -- see H_PED_X below.
     uint256 internal constant H_X =
         6790145969673496972519463000972766565107694238233578011858059027187477289586;
     uint256 internal constant H_Y =
         3372178911466361414640845512261989709787490420390555908180501907382229222644;
+
+    /// @notice The PEDERSEN generator, hashed to the curve rather than
+    ///         multiplied out of G, so nobody knows its discrete log.
+    ///         Mirrors alberta_buck.wallet.nums.H_PEDERSEN.
+    ///
+    ///         B1 publishes P_dep = M_dep + b*H and then proves two things
+    ///         about it: this sigma opens it as m_dep*G + b*H, and a
+    ///         membership proof opens it as M + b'*H for a registered M.  With
+    ///         a known h = log_G(H) those openings need not agree: a depositor
+    ///         holding any registered identity scalar m' -- which
+    ///         counterparties hold by design, the identity being a disclosed
+    ///         read capability -- sets b' = b + (m_dep - m')/h, and an
+    ///         UNREGISTERED depositor spends.  Hashing to the curve leaves no
+    ///         such h.
+    uint256 internal constant H_PED_X =
+        4874316496556692606891596409622455203003376816484365272907071025845257250564;
+    uint256 internal constant H_PED_Y =
+        19291512317587897199422471138962718576030354246032844209163778927800273037816;
 
     /// @dev Fiat-Shamir protocol domain for registration; a full keccak word,
     ///      not reduced mod R.  This is transcript metadata, not contract API.
@@ -1259,7 +1281,7 @@ contract IdentityRegistry {
 
         // P: s_m*G + s_b*H == A_p + e*P_dep  (P_dep = m_dep*G + b*H, same m_dep)
         {
-            BN254.G1Point memory H = BN254.G1Point(H_X, H_Y);
+            BN254.G1Point memory H = BN254.G1Point(H_PED_X, H_PED_Y);
             if (!BN254.eq(
                 BN254.add(BN254.mul(BN254.g1(), pi.s_m), BN254.mul(H, pi.s_b)),
                 BN254.add(pi.A_p, BN254.mul(pi.P_dep, pi.e))

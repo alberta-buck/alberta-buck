@@ -341,7 +341,11 @@ class NotesStack:
             1, ch.deploy("MintBatchA2N1Groth16Verifier").address))
         spend_adapter = ch.deploy("SpendVerifierAdapter",
                                   ch.deploy("SpendGroth16Verifier").address)
-        mem_adapter  = ch.deploy("IdentityMembershipG1TieVerifierAdapter")
+        # B1's membership goes through the REPAIRED circuit: its blind is
+        # proven rather than witnessed, and its generator has no known
+        # logarithm.  The G1-tie adapter it replaces let a depositor shift the
+        # blind onto another registered Identity and spend while unregistered.
+        mem_adapter  = ch.deploy("IdentityMembershipB1VerifierAdapter")
         bind_adapter = ch.deploy("NoteBindingVerifierAdapter")
 
         self.notes = ch.deploy("Notes", self.buck.address, mint_adapter.address,
@@ -350,6 +354,12 @@ class NotesStack:
         ch.send(self.notes.functions.setA2MintVerifier(a2_adapter.address))
         ch.send(self.notes.functions.setIdentityMembershipVerifier(mem_adapter.address))
         ch.send(self.notes.functions.setNoteBindingVerifier(bind_adapter.address))
+
+        # The addressed flavours spend through the FOLDED gate: one proof
+        # carrying every relation, in place of the coupling sigma, the P-bound
+        # membership proof and the note<->eEnc tie.
+        fold_adapter = ch.deploy("DepositFoldVerifierAdapter", self.reg.address)
+        ch.send(self.notes.functions.setDepositFoldVerifier(fold_adapter.address))
 
         # The Notes pool is a Public-Identity Carrying contract with a REAL
         # key pair, so a private party's identity-bound approve toward it is
@@ -537,9 +547,15 @@ class NotesStack:
                                contract=self.notes)
 
     def spend(self) -> Step:
-        """Submit the fixture's REAL coupled spend as the depositor: the spend
-        Groth16 + the deposit sigma + the bound membership proof (+ the
-        note<->eEnc tie for the addressed flavors)."""
+        """Submit the fixture's REAL coupled spend as the depositor.
+
+        The shape differs by flavour, and the difference is the architecture.
+        The addressed flavours submit ONE folded proof: their two facts rest
+        on two different secrets -- the Identity and the receiving key -- so
+        no sigma can tie them, and three checks sharing a public point would
+        let a payload thief supply one of each.  B1's rest on one secret, so
+        its sigma is a genuine tie and it submits sigma plus membership.
+        """
         d = self.fx.raw
         dep = self._addr(self.fx.depositor.addr)
         self._impersonate(dep)
@@ -547,27 +563,26 @@ class NotesStack:
         proof = bytes.fromhex(d["spend"]["proofBytes"][2:])
         root, nf = int(sp["noteRoot"]), int(sp["nullifier"])
         face, rec = int(sp["face"]), self._addr(int(sp["recipient"], 16))
-        mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
         if self.fx.flavor == "b1":
             db = d["sigma"]["db"]
             b1p = (int(db["e"]), int(db["s_m"]), int(db["s_s"]), int(db["s_r"]),
                    int(db["s_b"]),
                    _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
                    _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
+            mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
             fn = self.notes.functions.spendCoupledB1(
                 proof, root, nf, face, rec, int(d["opening"]["cm"]),
                 self._addr(self.fx.issuer.addr),
                 _ct_tuple(d["sigma"]["eDepForIss"]), b1p, mem)
         else:
-            dc = d["sigma"]["dc"]
-            dcp = (int(dc["e"]), int(dc["s_m"]), int(dc["s_s"]), int(dc["s_b"]),
-                   _g1_tuple(dc["A2"]), _g1_tuple(dc["A3"]), _g1_tuple(dc["A4"]),
-                   _g1_tuple(dc["P_I"]))
-            nb = bytes.fromhex(d["noteBinding"]["proofBytes"][2:])
+            # The folded gate.  The coupling sigma and the membership argument
+            # are unused -- the fold subsumed both -- so they go in empty.
+            zdc = (0, 0, 0, 0, (0, 0), (0, 0), (0, 0), (0, 0))
+            fold = bytes.fromhex(d["depositFold"]["proofBytes"][2:])
             f = (self.notes.functions.spendCoupledA1 if self.fx.flavor == "a1"
                  else self.notes.functions.spendCoupledA2)
             fn = f(proof, root, nf, face, rec,
-                   _ct_tuple(d["sigma"]["eEnc"]), dcp, mem, nb)
+                   _ct_tuple(d["sigma"]["eEnc"]), zdc, b"", fold)
         return self._send_from(fn, dep, f"Notes.spendCoupled{self.fx.flavor.upper()}",
                                event=EVENT_BY_FLAVOR[self.fx.flavor],
                                contract=self.notes)

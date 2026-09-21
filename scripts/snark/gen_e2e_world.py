@@ -439,33 +439,43 @@ def assemble(flavor: str):
     assert int(spend["spend"]["public"]["nullifier"]) == int(world["opening"]["nullifier"]), \
         "spend/world nullifier mismatch"
 
-    # g1tie membership proof (snarkjs CLI output).
-    g1_proof = json.load(open(os.path.join(out_dir, "g1tie_proof.json")))
-    g1_public = json.load(open(os.path.join(out_dir, "g1tie_public.json")))
-    world["membership"] = {
-        "proofBytes": "0x" + "".join(
-            int(x).to_bytes(32, "big").hex() for x in [
-                g1_proof["pi_a"][0], g1_proof["pi_a"][1],
-                # pi_b EIP-197-ordered (im, re) -- the swap zkesc performs;
-                # the on-chain verifier is stock and expects it pre-swapped.
-                g1_proof["pi_b"][0][1], g1_proof["pi_b"][0][0],
-                g1_proof["pi_b"][1][1], g1_proof["pi_b"][1][0],
-                g1_proof["pi_c"][0], g1_proof["pi_c"][1],
-            ]),
-        "public": g1_public,
-    }
+    def _proof_bytes(pr):
+        """abi-packed Groth16 triple, pi_b pre-swapped to EIP-197 order.
 
-    # Note-binding proof (rapidsnark output; layout-matched circuit per flavor).
+        The on-chain verifiers are stock snarkjs exports, which expect each
+        pi_b pair in the opposite order to the one snarkjs writes -- the swap
+        its own `zkey export soliditycalldata` performs.  Doing it here keeps
+        the committed verifiers byte-for-byte as exported.
+        """
+        return "0x" + "".join(
+            int(x).to_bytes(32, "big").hex() for x in [
+                pr["pi_a"][0], pr["pi_a"][1],
+                pr["pi_b"][0][1], pr["pi_b"][0][0],
+                pr["pi_b"][1][1], pr["pi_b"][1][0],
+                pr["pi_c"][0], pr["pi_c"][1],
+            ])
+
     if flavor in ("a1", "a2"):
-        nb_proof = json.load(open(os.path.join(out_dir, "note_binding_proof.json")))
-        world["noteBinding"] = {
-            "proofBytes": "0x" + "".join(
-                int(x).to_bytes(32, "big").hex() for x in [
-                    nb_proof["pi_a"][0], nb_proof["pi_a"][1],
-                    nb_proof["pi_b"][0][1], nb_proof["pi_b"][0][0],
-                    nb_proof["pi_b"][1][1], nb_proof["pi_b"][1][0],
-                    nb_proof["pi_c"][0], nb_proof["pi_c"][1],
-                ]),
+        # ONE proof carrying every relation.  There is no membership proof and
+        # no note-binding proof beside it, because the fold subsumed both --
+        # three checks sharing the public point P_I inferred an equality
+        # between two different secrets, and one witness states it instead.
+        fold_proof = json.load(open(os.path.join(out_dir, "fold_proof.json")))
+        fold_public = json.load(open(os.path.join(out_dir, "fold_public.json")))
+        world["depositFold"] = {
+            "proofBytes": _proof_bytes(fold_proof),
+            "public": fold_public,
+        }
+    else:
+        # B1 keeps its sigma -- its two facts rest on ONE secret, so the shared
+        # nonce is a genuine tie -- and pairs it with the REPAIRED membership
+        # circuit, whose blind is proven rather than witnessed and whose
+        # generator has no known logarithm.
+        b1_proof = json.load(open(os.path.join(out_dir, "b1_membership_proof.json")))
+        b1_public = json.load(open(os.path.join(out_dir, "b1_membership_public.json")))
+        world["membership"] = {
+            "proofBytes": _proof_bytes(b1_proof),
+            "public": b1_public,
         }
 
     world["mint"] = {

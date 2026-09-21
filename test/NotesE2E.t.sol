@@ -20,6 +20,8 @@ import {SpendGroth16Verifier} from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
 import {IdentityMembershipG1TieVerifierAdapter} from "../src/IdentityMembershipG1TieVerifierAdapter.sol";
 import {NoteBindingVerifierAdapter} from "../src/NoteBindingVerifierAdapter.sol";
+import {IdentityMembershipB1VerifierAdapter} from "../src/IdentityMembershipB1VerifierAdapter.sol";
+import {DepositFoldVerifierAdapter} from "../src/DepositFoldVerifierAdapter.sol";
 
 /// @title NotesE2E -- the full Note lifecycle, every verifier REAL.
 /// @notice One mutually-consistent fixture per flavor
@@ -43,6 +45,8 @@ abstract contract NotesE2EBase is Test {
     SpendVerifierAdapter internal spendAdapter;
     IdentityMembershipG1TieVerifierAdapter internal memAdapter;
     NoteBindingVerifierAdapter internal bindAdapter;
+    IdentityMembershipB1VerifierAdapter internal b1MemAdapter;
+    DepositFoldVerifierAdapter internal foldAdapter;
 
     string  internal vj;
     address internal issuer;
@@ -72,23 +76,6 @@ abstract contract NotesE2EBase is Test {
     }
 
     function setUp() public {
-        // PENDING THE FIXTURE REGENERATION.
-        //
-        // The committed fixtures were generated against a depth-10 accumulator
-        // and the superseded three-check spend path.  Both have moved: the
-        // aggregator depth is now 20, and the addressed flavours spend through
-        // the folded gate.  These are not independent changes -- the fixtures
-        // embed proofs whose identityRoot is a PUBLIC INPUT, and the spend
-        // circuits are built at depth 20, so a depth-10 witness cannot be
-        // generated for them at all.
-        //
-        // scripts/snark/gen_e2e_world.py is already rewritten for the folds and
-        // its three worlds produce witnesses that check against the deployed
-        // circuits.  What remains is running the prove pipeline over them and
-        // rewiring this suite onto the folded entry points.  Skipped rather
-        // than deleted, so the gap stays visible and named.
-        vm.skip(true);
-
         vm.chainId(1);                       // every fixture transcript binds chainid=1
         // The fixture worlds live in the Python package tree (they ship as
         // alberta_buck package data so the wallet's E2E receipt tests run
@@ -148,8 +135,22 @@ abstract contract NotesE2EBase is Test {
         vm.startPrank(GOV);
         notes.setIdentityRegistry(address(reg));
         notes.setA2MintVerifier(address(a2Adapter));
-        notes.setIdentityMembershipVerifier(address(memAdapter));
+        // B1's membership goes through the REPAIRED circuit: its blind is
+        // proven rather than witnessed, and its generator has no known
+        // logarithm, without which a depositor could shift the blind onto
+        // another registered Identity and spend while unregistered.
+        b1MemAdapter = new IdentityMembershipB1VerifierAdapter();
+        notes.setIdentityMembershipVerifier(address(b1MemAdapter));
         notes.setNoteBindingVerifier(address(bindAdapter));
+
+        // The addressed flavours spend through the FOLDED gate: one proof
+        // carrying every relation, in place of the coupling sigma, the
+        // P-bound membership proof and the note<->eEnc tie.  Those three
+        // shared the public point P_I, and an equality inferred across proofs
+        // that merely share a point is what a payload thief exploits when the
+        // two halves rest on two different secrets.
+        foldAdapter = new DepositFoldVerifierAdapter(reg);
+        notes.setDepositFoldVerifier(address(foldAdapter));
         vm.stopPrank();
 
         // Notes pool: a Public-Identity carrying contract.
@@ -281,7 +282,13 @@ abstract contract NotesE2EBase is Test {
         bytes memory proof = _b(".spend.proofBytes");
         uint256 root = _u(".spend.public.noteRoot");
         uint256 nf   = _u(".spend.public.nullifier");
-        bytes memory memProof = _b(".membership.proofBytes");
+        // Whichever gate proof this world carries: B1 a membership proof,
+        // the addressed flavours a folded one.  Either way the spend SNARK's
+        // public flavor is what rejects a wrong entry point, so the gate proof
+        // only has to be nonempty.
+        bytes memory memProof = _isBearer()
+            ? _b(".membership.proofBytes")
+            : _b(".depositFold.proofBytes");
         IdentityRegistry.ElGamalCT memory zct;
         IdentityRegistry.DepositCouplingProof memory zdc;
         IdentityRegistry.DepositorBindingProof memory zdb;
@@ -318,11 +325,7 @@ abstract contract NotesE2EBase is Test {
         uint256 nf         = _u(".spend.public.nullifier");
         uint256 spendFace  = _u(".spend.public.face");
         address spendRec   = _addr(".spend.public.recipient");
-        bytes memory memProof = _b(".membership.proofBytes");
         uint256 idRoot     = _u(".identityRoot");
-        string memory pkey = _isBearer() ? ".sigma.db.P_dep" : ".sigma.dc.P_I";
-        uint256 px = _u(string.concat(pkey, ".x"));
-        uint256 py = _u(string.concat(pkey, ".y"));
 
         // Note proof (shared by all flavors; public flavor matches the entry point).
         uint256 g0 = gasleft();
@@ -333,15 +336,21 @@ abstract contract NotesE2EBase is Test {
         assertTrue(okSpend, "spend proof must verify");
         console2.log(string.concat("[gas:", _flavor(), "] spend proof:"), spendGas);
 
-        // Membership (G1-tie) of the committed point.
-        uint256 g1 = gasleft();
-        bool okMem = memAdapter.verifyMembership(memProof, idRoot, px, py);
-        uint256 memGas = g1 - gasleft();
-        assertTrue(okMem, "membership must verify");
-        console2.log(string.concat("[gas:", _flavor(), "] membership:"), memGas);
-
-        // The deposit sigma (verified against the registered payout/depositor).
+        // The deposit gate.  The shape differs by flavour, and the difference
+        // is the architecture: the addressed flavours prove ONE folded
+        // statement, because their two facts rest on two different secrets
+        // and no sigma can tie those.  B1's rest on one, so its sigma is a
+        // genuine tie and it pairs with a membership proof.
         if (_isBearer()) {
+            bytes memory memProof = _b(".membership.proofBytes");
+            uint256 px = _u(".sigma.db.P_dep.x");
+            uint256 py = _u(".sigma.db.P_dep.y");
+            uint256 g1 = gasleft();
+            bool okMem = b1MemAdapter.verifyMembership(memProof, idRoot, px, py);
+            uint256 memGas = g1 - gasleft();
+            assertTrue(okMem, "B1 membership must verify");
+            console2.log(string.concat("[gas:", _flavor(), "] membership:"), memGas);
+
             IdentityRegistry.ElGamalCT memory eDep = _ct(".sigma.eDepForIss");
             IdentityRegistry.DepositorBindingProof memory db = _db();
             uint256 g2 = gasleft();
@@ -350,34 +359,22 @@ abstract contract NotesE2EBase is Test {
             assertTrue(okSig, "depositor binding must verify");
             console2.log(string.concat("[gas:", _flavor(), "] depositor binding sigma:"), sigGas);
         } else {
+            bytes memory fold = _b(".depositFold.proofBytes");
             IdentityRegistry.ElGamalCT memory eEnc = _ct(".sigma.eEnc");
-            IdentityRegistry.DepositCouplingProof memory dc = _dc();
-            uint256 g2 = gasleft();
-            bool okSig = reg.verifyDepositCoupling(depositor, eEnc, dc);
-            uint256 sigGas = g2 - gasleft();
-            assertTrue(okSig, "deposit coupling must verify");
-            console2.log(string.concat("[gas:", _flavor(), "] deposit coupling sigma:"), sigGas);
+            bool isA1 = keccak256(bytes(_flavorPure())) == keccak256("a1");
+            uint256 g1 = gasleft();
+            bool okFold = isA1
+                ? foldAdapter.verifyFoldA1(fold, nf, face, idRoot, eEnc, depositor)
+                : foldAdapter.verifyFoldA2(fold, nf, idRoot, eEnc, depositor);
+            uint256 foldGas = g1 - gasleft();
+            assertTrue(okFold, "folded deposit gate must verify");
+            console2.log(string.concat("[gas:", _flavor(), "] folded deposit gate:"), foldGas);
         }
 
-        // The note<->eEnc binding (addressed flavors; layout-matched circuit).
-        if (!_isBearer()) {
-            bytes memory nb = _b(".noteBinding.proofBytes");
-            uint256 nfOpen = _u(".opening.nullifier");
-            uint256 eRx = _u(".sigma.eEnc.R.x");
-            uint256 eRy = _u(".sigma.eEnc.R.y");
-            uint256 eCx = _u(".sigma.eEnc.C.x");
-            uint256 eCy = _u(".sigma.eEnc.C.y");
-            uint256 pix = _u(".sigma.dc.P_I.x");
-            uint256 piy = _u(".sigma.dc.P_I.y");
-            bool isA1 = keccak256(bytes(_flavorPure())) == keccak256("a1");
-            uint256 g3 = gasleft();
-            bool okNb = isA1
-                ? bindAdapter.verifyNoteBindingA1(nb, nfOpen, face, eRx, eRy, eCx, eCy, pix, piy)
-                : bindAdapter.verifyNoteBinding(nb, nfOpen, eRx, eRy, eCx, eCy, pix, piy);
-            uint256 nbGas = g3 - gasleft();
-            assertTrue(okNb, "note binding must verify");
-            console2.log(string.concat("[gas:", _flavor(), "] note binding:"), nbGas);
-        }
+        // No separate note-binding phase to profile: the fold absorbed it,
+        // along with the membership proof and the coupling sigma.  That the
+        // addressed flavours now have ONE gate line instead of three is the
+        // architecture showing up in the gas table.
     }
 
     function _isBearer() internal pure returns (bool) {
@@ -448,12 +445,14 @@ contract NotesE2E_A1 is NotesE2EBase {
         uint256 root = _u(".spend.public.noteRoot");
         uint256 nf   = _u(".spend.public.nullifier");
         IdentityRegistry.ElGamalCT memory eEnc = _ct(".sigma.eEnc");
-        IdentityRegistry.DepositCouplingProof memory dc = _dc();
-        bytes memory memProof = _b(".membership.proofBytes");
-        bytes memory nbProof = _b(".noteBinding.proofBytes");   // real A1-layout tie
+        // The folded gate: ONE proof.  The coupling sigma and the membership
+        // argument are unused now -- the fold subsumed both -- so they go in
+        // empty, and the entry point ignores them when a fold verifier is set.
+        IdentityRegistry.DepositCouplingProof memory zdc;
+        bytes memory fold = _b(".depositFold.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledA1(proof, root, nf, face, payout, eEnc, dc, memProof, nbProof);
+        notes.spendCoupledA1(proof, root, nf, face, payout, eEnc, zdc, hex"", fold);
         gasUsed = g - gasleft();
     }
 }
@@ -489,12 +488,11 @@ contract NotesE2E_A2 is NotesE2EBase {
         uint256 root = _u(".spend.public.noteRoot");
         uint256 nf   = _u(".spend.public.nullifier");
         IdentityRegistry.ElGamalCT memory eEnc = _ct(".sigma.eEnc");
-        IdentityRegistry.DepositCouplingProof memory dc = _dc();
-        bytes memory memProof = _b(".membership.proofBytes");
-        bytes memory nbProof = _b(".noteBinding.proofBytes");
+        IdentityRegistry.DepositCouplingProof memory zdc;
+        bytes memory fold = _b(".depositFold.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledA2(proof, root, nf, face, payout, eEnc, dc, memProof, nbProof);
+        notes.spendCoupledA2(proof, root, nf, face, payout, eEnc, zdc, hex"", fold);
         gasUsed = g - gasleft();
     }
 }

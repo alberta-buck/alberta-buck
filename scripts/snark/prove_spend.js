@@ -201,6 +201,9 @@ async function main() {
                 recipient: RECIPIENT,
                 chainId:   input.chainId,
                 flavor:    input.flavor,
+                // The seventh public signal.  B1 binds its spend to the mint
+                // issuer through it; addressed flavours pin it to zero.
+                issuanceCommitment: input.issuanceCommitment,
             },
             witness: input,
             proof:   { pA, pB, pC },
