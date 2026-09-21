@@ -1,16 +1,17 @@
 #!/bin/bash
 # Generate the end-to-end Notes fixtures (alberta_buck/test/vectors/e2e/{a1,a2,b1}.json)
 # consumed by test/NotesE2E.t.sol: one mutually-consistent world per flavor,
-# with REAL proofs at every gate (mint, spend, sigma, membership, and -- for
-# A2 -- the note<->eEnc binding).
+# with REAL proofs at every gate: the mint, the spend, and the deposit gate --
+# one folded proof for the addressed flavours, the sigma plus the repaired
+# membership circuit for the bearer one.
 #
 # Prerequisites (built by the existing setups):
 #   build/snark/mint_batch_n1     -- scripts/snark/setup.sh (MINT_BATCH_PINS=1..)
 #   build/snark/mint_batch_a2_n1  -- setup.sh (MINT_BATCH_A2_PINS=1..)
 #   build/snark/spend             -- setup.sh
-#   build/snark/g1tie             -- make snark-g1tie
-#   build/snark/note_binding      -- make snark-note-binding
-#   build/snark/note_binding_a1   -- make snark-note-binding-a1
+#   build/snark/deposit_fold_a1   -- make snark-deposit-fold-a1   (A1)
+#   build/snark/deposit_fold_a2   -- make snark-deposit-fold-a2   (A2)
+#   build/snark/b1_membership     -- make snark-b1-membership     (B1)
 #
 # Usage:
 #   make nix-snark-e2e-fixtures

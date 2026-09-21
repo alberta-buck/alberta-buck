@@ -1462,6 +1462,21 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
 #+LATEX: \clearpage
 * Part IV: BUCK Notes Spend Predicates (A1, A2, B1)
 
+#+begin_quote
+*This Part states the wrong predicates and is being rewritten.*  Theorems 7,
+8 and 12 are proven over the shipped-then superseded composition: encryption
+under the recipient's identity POINT, a deposit-coupling sigma, and a
+note-binding proof beside it.  The implementation now addresses notes to an
+independent receiving key and verifies ONE folded proof whose relations state
+the tie the composition inferred, so the three theorems' statements no longer
+match the code they are about -- and A2's naming clause is FALSE of the code
+until the tie of section 4.6 lands.  Read
+[[file:doc/review/notes-receiving-key.org][the receiving-key architecture]]
+first; it carries the relations, their measured costs, and the one open
+attack.  The reasoning STYLE here is what that architecture still owes, which
+is why this Part is worth reading before it is rewritten.
+#+end_quote
+
 ** Setup
 
    *Pool.*  =noteTree=, a depth-20 Poseidon tree of leaves

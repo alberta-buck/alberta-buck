@@ -346,18 +346,17 @@ class NotesStack:
         # logarithm.  The G1-tie adapter it replaces let a depositor shift the
         # blind onto another registered Identity and spend while unregistered.
         mem_adapter  = ch.deploy("IdentityMembershipB1VerifierAdapter")
-        bind_adapter = ch.deploy("NoteBindingVerifierAdapter")
 
         self.notes = ch.deploy("Notes", self.buck.address, mint_adapter.address,
                                spend_adapter.address, gov)
         ch.send(self.notes.functions.setIdentityRegistry(self.reg.address))
         ch.send(self.notes.functions.setA2MintVerifier(a2_adapter.address))
         ch.send(self.notes.functions.setIdentityMembershipVerifier(mem_adapter.address))
-        ch.send(self.notes.functions.setNoteBindingVerifier(bind_adapter.address))
 
         # The addressed flavours spend through the FOLDED gate: one proof
-        # carrying every relation, in place of the coupling sigma, the P-bound
-        # membership proof and the note<->eEnc tie.
+        # carrying every relation.  The slot is not optional -- an addressed
+        # spend with it unset reverts, because there is no weaker path to fall
+        # back to.
         fold_adapter = ch.deploy("DepositFoldVerifierAdapter", self.reg.address)
         ch.send(self.notes.functions.setDepositFoldVerifier(fold_adapter.address))
 
@@ -575,14 +574,12 @@ class NotesStack:
                 self._addr(self.fx.issuer.addr),
                 _ct_tuple(d["sigma"]["eDepForIss"]), b1p, mem)
         else:
-            # The folded gate.  The coupling sigma and the membership argument
-            # are unused -- the fold subsumed both -- so they go in empty.
-            zdc = (0, 0, 0, 0, (0, 0), (0, 0), (0, 0), (0, 0))
+            # The folded gate: the re-encryption and one proof, nothing else.
             fold = bytes.fromhex(d["depositFold"]["proofBytes"][2:])
             f = (self.notes.functions.spendCoupledA1 if self.fx.flavor == "a1"
                  else self.notes.functions.spendCoupledA2)
             fn = f(proof, root, nf, face, rec,
-                   _ct_tuple(d["sigma"]["eEnc"]), zdc, b"", fold)
+                   _ct_tuple(d["sigma"]["eEnc"]), fold)
         return self._send_from(fn, dep, f"Notes.spendCoupled{self.fx.flavor.upper()}",
                                event=EVENT_BY_FLAVOR[self.fx.flavor],
                                contract=self.notes)

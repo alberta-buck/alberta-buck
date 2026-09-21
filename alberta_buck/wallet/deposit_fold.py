@@ -260,7 +260,7 @@ def deposit_fold_check(
 
 
 def _limbs(val: int, n: int = 4, bits: int = 64):
-    """Little-endian 64-bit limbs, matching `note_binding.to_limbs`."""
+    """Little-endian 64-bit limbs, the encoding every circuit input uses."""
     mask = (1 << bits) - 1
     return [(val >> (i * bits)) & mask for i in range(n)]
 

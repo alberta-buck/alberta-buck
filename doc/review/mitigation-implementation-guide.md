@@ -127,6 +127,17 @@ shape must land in all four plus the vectors, or cross-language parity breaks:
 
 ### P0-0. Fail closed on membership and note-binding (finding 8)
 
+> **Landed, and by deletion rather than by a `require`.** The addressed paths
+> no longer have a membership slot or a note-binding slot to leave unset: one
+> folded proof carries every relation, `Notes.setDepositFoldVerifier` refuses
+> `address(0)`, and an addressed spend with that slot unset reverts before the
+> spend SNARK. `INoteBindingVerifier`, its adapter and stub, and the G1-tie
+> membership adapter are gone from the tree. The named test files below are gone
+> with them; the surviving pins are `test/NotesIdentityMembership.t.sol` (the
+> slot cannot be cleared) and `test/NotesE2E.t.sol` (real proofs through the
+> fold). See `doc/review/notes-receiving-key.org` section 3.3a.
+
+
 **Why first.** One Solidity `require`. No trusted setup. Findings 5 and 7
 have no on-chain effect until empty proofs stop skipping the verifier.
 The A1-via-B1 theft-shaped spend used exactly this skip.

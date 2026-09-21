@@ -439,7 +439,7 @@ snark-g1tie:
 
 # Spend circuit only (circuits/spend.circom).  Isolated compile + setup, then
 # copy the matched set (r1cs/wasm/zkey/verifier + re-proved e2e spend vectors).
-# Does not rebuild mint, g1tie, or note-binding.
+# Does not rebuild mint or the gate circuits.
 snark-spend:
 	$(SNARK_PATH) bash scripts/snark/setup_spend.sh
 
@@ -456,7 +456,7 @@ snark-g1tie-clean:
 	rm -rf build/snark/g1tie
 
 # rapidsnark: prebuilt Groth16 prover/verifier binaries (iden3).  Used by
-# setup_note_binding.sh for fast proving of the 2.4M-constraint circuit
+# setup_deposit_fold.sh for fast proving of the multi-million-constraint gates
 # (snarkjs is the fallback, but takes many minutes per proof).
 RAPIDSNARK_ZIP	= lib/rapidsnark-macOS-arm64-v0.0.8.zip
 RAPIDSNARK_BIN	= lib/rapidsnark-macOS-arm64-v0.0.8/bin
@@ -471,38 +471,32 @@ $(RAPIDSNARK_BIN)/prover:	$(RAPIDSNARK_ZIP)
 .PHONY: rapidsnark
 rapidsnark:	$(RAPIDSNARK_BIN)/prover
 
-# Note-binding circuit (circuits/note_binding.circom).
-#   make snark-note-binding       # FULL atomic rebuild (always cleans first)
-#   make snark-note-binding-clean  # drop build dir
+# The three deposit gates.  Each is a full Groth16 setup under DEV ENTROPY --
+# not a ceremony -- and each bakes the aggregator depth into its r1cs, so a
+# depth change means redoing them.  The folds need ~16 GB of node heap and
+# rapidsnark for proving; the script handles both.
 #
-# Witness generation uses the circom C++ calculator (--no_asm); the WASM
-# calculator cannot handle the ~5.9M-wire circuit.  The C++ build REQUIRES
-# -fno-strict-aliasing (uint64_t* vs mp_limb_t* aliasing UB in the generic
-# fr.cpp silently corrupts field comparisons under gcc -O3) and a 64 MB
-# stack (the G-powers table expansion lives in ~5.4 MB template stack
-# frames); both are handled inside setup_note_binding.sh.  Groth16 setup
-# needs pot22+ (bootstrapped with dev entropy if absent; see
-# !! DEV ENTROPY !! above).
-snark-note-binding:	rapidsnark
-	rm -rf build/snark/note_binding
-	$(SNARK_PATH) bash scripts/snark/setup_note_binding.sh
+#   make snark-deposit-fold-a1    # the addressed gate, A1 layout (3.31M)
+#   make snark-deposit-fold-a2    # the addressed gate, A2 layout (3.34M)
+#   make snark-b1-membership      # the bearer membership circuit (492K)
+snark-deposit-fold-a1:	rapidsnark
+	$(SNARK_PATH) bash scripts/snark/setup_deposit_fold.sh a1
 
-snark-note-binding-clean:
-	rm -rf build/snark/note_binding
+snark-deposit-fold-a2:	rapidsnark
+	$(SNARK_PATH) bash scripts/snark/setup_deposit_fold.sh a2
 
-# A1-layout note-binding circuit (circuits/note_binding_a1.circom): the A1
-# sibling of snark-note-binding (same toolchain requirements; ~2.9M
-# non-linear constraints, five ScalarMulG + one ScalarMulH).
-snark-note-binding-a1:	rapidsnark
-	rm -rf build/snark/note_binding_a1
-	$(SNARK_PATH) bash scripts/snark/setup_note_binding_a1.sh
+snark-b1-membership:
+	$(SNARK_PATH) bash scripts/snark/setup_b1_membership.sh
 
-snark-note-binding-a1-clean:
-	rm -rf build/snark/note_binding_a1
+snark-deposit-fold-clean:
+	rm -rf build/snark/deposit_fold_a1 build/snark/deposit_fold_a2
+
+snark-b1-membership-clean:
+	rm -rf build/snark/b1_membership
 
 # End-to-end Notes fixtures: one mutually-consistent world per flavor (A1,
 # A2, B1) with REAL proofs at every gate, consumed by test/NotesE2E.t.sol.
-# Requires the mint/spend/g1tie/note-binding setups to exist (see the
+# Requires the mint, spend and deposit-gate setups to exist (see the
 # prerequisites comment in scripts/snark/gen_e2e_fixtures.sh).
 snark-e2e-fixtures:
 	rm -rf build/snark/e2e
@@ -511,7 +505,7 @@ snark-e2e-fixtures:
 snark-e2e-clean:
 	rm -rf build/snark/e2e alberta_buck/test/vectors/e2e
 
-# BN254 G-generator stride-8 powers table for note_binding.circom.
+# BN254 G-generator stride-8 powers table for the fixed-base multiplications.
 # The circom-lib EC library lacks a precomputed power table for BN254's
 # generator G=(1,2); without it the optimised scalar multiplication silently
 # produces garbage.  This target regenerates circuits/ec/powers/bn254_g_pows.circom

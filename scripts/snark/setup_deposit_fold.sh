@@ -7,7 +7,7 @@
 # ~3.3M constraints each, so pot22 and the circom C++ witness calculator (the
 # WASM one does not cope at this size).  The C++ build REQUIRES
 # -fno-strict-aliasing and a 64 MB stack, both handled below -- see
-# setup_note_binding.sh for why.
+# the trailer at the end of this script for why.
 #
 # IMPORTANT: snarkjs groth16 setup is non-deterministic.  The zkey, proof,
 # verifier and vectors are a MATCHED SET from a single run.

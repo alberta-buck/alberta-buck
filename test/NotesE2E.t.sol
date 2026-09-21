@@ -18,8 +18,6 @@ import {MintBatchN1Groth16Verifier} from "../src/MintBatchN1Groth16Verifier.sol"
 import {MintBatchA2N1Groth16Verifier} from "../src/MintBatchA2N1Groth16Verifier.sol";
 import {SpendGroth16Verifier} from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
-import {IdentityMembershipG1TieVerifierAdapter} from "../src/IdentityMembershipG1TieVerifierAdapter.sol";
-import {NoteBindingVerifierAdapter} from "../src/NoteBindingVerifierAdapter.sol";
 import {IdentityMembershipB1VerifierAdapter} from "../src/IdentityMembershipB1VerifierAdapter.sol";
 import {DepositFoldVerifierAdapter} from "../src/DepositFoldVerifierAdapter.sol";
 
@@ -43,8 +41,6 @@ abstract contract NotesE2EBase is Test {
     Buck  internal buck;
     Notes internal notes;
     SpendVerifierAdapter internal spendAdapter;
-    IdentityMembershipG1TieVerifierAdapter internal memAdapter;
-    NoteBindingVerifierAdapter internal bindAdapter;
     IdentityMembershipB1VerifierAdapter internal b1MemAdapter;
     DepositFoldVerifierAdapter internal foldAdapter;
 
@@ -128,8 +124,6 @@ abstract contract NotesE2EBase is Test {
         a2Adapter.registerVerifier(1, address(new MintBatchA2N1Groth16Verifier()));
         vm.stopPrank();
         spendAdapter = new SpendVerifierAdapter(address(new SpendGroth16Verifier()));
-        memAdapter   = new IdentityMembershipG1TieVerifierAdapter();
-        bindAdapter  = new NoteBindingVerifierAdapter();
 
         notes = new Notes(address(buck), address(mintAdapter), address(spendAdapter), GOV);
         vm.startPrank(GOV);
@@ -141,7 +135,6 @@ abstract contract NotesE2EBase is Test {
         // another registered Identity and spend while unregistered.
         b1MemAdapter = new IdentityMembershipB1VerifierAdapter();
         notes.setIdentityMembershipVerifier(address(b1MemAdapter));
-        notes.setNoteBindingVerifier(address(bindAdapter));
 
         // The addressed flavours spend through the FOLDED gate: one proof
         // carrying every relation, in place of the coupling sigma, the
@@ -218,17 +211,6 @@ abstract contract NotesE2EBase is Test {
     /// @dev Execute the flavor's real coupled spend; returns gas used.
     function _spend() internal virtual returns (uint256 gasUsed);
 
-    function _dc() internal view returns (IdentityRegistry.DepositCouplingProof memory p) {
-        p.e   = _u(".sigma.dc.e");
-        p.s_m = _u(".sigma.dc.s_m");
-        p.s_s = _u(".sigma.dc.s_s");
-        p.s_b = _u(".sigma.dc.s_b");
-        p.A2  = _g1(".sigma.dc.A2");
-        p.A3  = _g1(".sigma.dc.A3");
-        p.A4  = _g1(".sigma.dc.A4");
-        p.P_I = _g1(".sigma.dc.P_I");
-    }
-
     function _db() internal view returns (IdentityRegistry.DepositorBindingProof memory p) {
         p.e     = _u(".sigma.db.e");
         p.s_m   = _u(".sigma.db.s_m");
@@ -290,9 +272,7 @@ abstract contract NotesE2EBase is Test {
             ? _b(".membership.proofBytes")
             : _b(".depositFold.proofBytes");
         IdentityRegistry.ElGamalCT memory zct;
-        IdentityRegistry.DepositCouplingProof memory zdc;
         IdentityRegistry.DepositorBindingProof memory zdb;
-        bytes memory nb = hex"00";
 
         vm.startPrank(depositor);
         if (_flavorCode() != 3) {
@@ -304,11 +284,11 @@ abstract contract NotesE2EBase is Test {
         }
         if (_flavorCode() != 1) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
-            notes.spendCoupledA1(proof, root, nf, face, payout, zct, zdc, memProof, nb);
+            notes.spendCoupledA1(proof, root, nf, face, payout, zct, memProof);
         }
         if (_flavorCode() != 2) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
-            notes.spendCoupledA2(proof, root, nf, face, payout, zct, zdc, memProof, nb);
+            notes.spendCoupledA2(proof, root, nf, face, payout, zct, memProof);
         }
         vm.stopPrank();
     }
@@ -448,11 +428,10 @@ contract NotesE2E_A1 is NotesE2EBase {
         // The folded gate: ONE proof.  The coupling sigma and the membership
         // argument are unused now -- the fold subsumed both -- so they go in
         // empty, and the entry point ignores them when a fold verifier is set.
-        IdentityRegistry.DepositCouplingProof memory zdc;
         bytes memory fold = _b(".depositFold.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledA1(proof, root, nf, face, payout, eEnc, zdc, hex"", fold);
+        notes.spendCoupledA1(proof, root, nf, face, payout, eEnc, fold);
         gasUsed = g - gasleft();
     }
 }
@@ -488,11 +467,10 @@ contract NotesE2E_A2 is NotesE2EBase {
         uint256 root = _u(".spend.public.noteRoot");
         uint256 nf   = _u(".spend.public.nullifier");
         IdentityRegistry.ElGamalCT memory eEnc = _ct(".sigma.eEnc");
-        IdentityRegistry.DepositCouplingProof memory zdc;
         bytes memory fold = _b(".depositFold.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledA2(proof, root, nf, face, payout, eEnc, zdc, hex"", fold);
+        notes.spendCoupledA2(proof, root, nf, face, payout, eEnc, fold);
         gasUsed = g - gasleft();
     }
 }

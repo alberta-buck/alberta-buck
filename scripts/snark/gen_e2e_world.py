@@ -16,11 +16,10 @@ Subcommands:
 
 The driver is scripts/snark/gen_e2e_fixtures.sh.
 
-The note binding uses the layout-matched circuit per flavor: A2 opens
-idHash = Poseidon8(eNote, eIss) (circuits/note_binding.circom); A1's idHash
-commits (eNote, m_issuer, sigma), so its tie is through the note's own value
-ciphertext with the face public (circuits/note_binding_a1.circom,
-make_note_binding_a1_witness).  B1 is bearer -- no tie.
+The note tie is a RELATION of the folded gate, not a proof beside it: A2 opens
+idHash = Poseidon8(eNote, eIss) inside circuits/deposit_fold_a2.circom, and
+A1's idHash commits (eNote, m_issuer, sigma), so its tie runs through the
+note's own value ciphertext with the face public.  B1 is bearer -- no tie.
 """
 
 import argparse
@@ -54,9 +53,6 @@ from alberta_buck.wallet.deposit_fold import (
 from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.recvkey import receiving_key
 from alberta_buck.wallet.salt import derive_salt
-from alberta_buck.wallet.note_binding import (
-    make_note_binding_witness, make_note_binding_a1_witness,
-)
 from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
 from alberta_buck.registry.tree import (
     identity_leaf, identity_leaf_salted, receiving_leaf,
@@ -95,6 +91,15 @@ def pt(P):
 
 def ct(c: ElGamalCiphertext):
     return {"R": pt(c.R), "C": pt(c.C)}
+
+
+def ct_of(d):
+    """Parse a serialized ciphertext back.  The fold witness is built from the
+    PAYLOAD, not from the generator's memory, so a payload that cannot be spent
+    fails here instead of shipping as a fixture."""
+    def p(o):
+        return (int(o["x"]), int(o["y"]))
+    return ElGamalCiphertext(p(d["R"]), p(d["C"]))
 
 
 def account(m, rng):
@@ -204,7 +209,14 @@ def build_world(flavor: str):
         M_named = note.M_I                       # the membership target (issuer)
         r_committed = note.r_prime
         eNote = note.eNote
-        note_payload = {"eNote": ct(eNote), "eIss": ct(eCommitted)}
+        # What a delivery must carry.  The two ciphertexts alone are not
+        # enough: the fold opens eIss with r' and proves the decrypted issuer
+        # Identity registered under the salt of its NAMING association, so both
+        # travel with the note.  Neither is a secret of the recipient's, and
+        # neither reaches the chain.
+        note_payload = {"eNote": ct(eNote), "eIss": ct(eCommitted),
+                        "rPrime": str(note.r_prime),
+                        "saltIss": str(note.salt_iss)}
     elif flavor == "a1":
         # The in-payload (sigma_R, sigma_s) is the issuer's identity-binding
         # signature over the delivery payload (synthetic domain here, as in
@@ -220,8 +232,14 @@ def build_world(flavor: str):
         M_named = M_ctr                          # membership target (recipient)
         r_committed = note.r_prime
         eNote = note.eNote
+        # A1 needs eNote's randomness, because the fold pins eNote against the
+        # public face.  It needs no issuer salt: relation (2) already proves the
+        # decrypted Identity is the one the payout account is registered under,
+        # so A1 asserts nothing about a third party (the payload rule, section
+        # 4.4 of doc/review/notes-receiving-key.org).
         note_payload = {"eNote": ct(eNote), "eRec": ct(note.eRec),
-                        "sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
+                        "sigma_R": pt(sigma_R), "sigma_s": str(sigma_s),
+                        "rNote": str(note.r_note)}
     else:  # b1
         k = rand_scalar(rng)
         sigma_R = mul(G1, k)
@@ -263,24 +281,31 @@ def build_world(flavor: str):
             m_rec=m_ctr, k=k_ctr, sk_dep=dep_acct["sk"], salt=salt_ctr,
             E_dep=dep_acct["E"], note_ct=eEnc, tree=tree, b=b, rng=rng,
         )
+        # Everything below comes from the payload the channel carried, the
+        # opening, and the recipient's own secrets (k, m_rec, sk_dep, its salt).
+        # Nothing comes from the minter's memory.
         if flavor == "a1":
             fold_input = deposit_fold_a1_witness(
                 witness=w, rho=opening.rho, id_hash=opening.id_hash,
-                e_note=note.eNote, v=FACE, m_issuer=m_iss, sigma_R=sigma_R,
-                sigma_s=sigma_s, r_note=note.r_note, t=t_total,
+                e_note=ct_of(note_payload["eNote"]), v=FACE, m_issuer=m_iss,
+                sigma_R=sigma_R, sigma_s=sigma_s,
+                r_note=int(note_payload["rNote"]), t=t_total,
                 r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
                 identity_root=tree.root(),
             )
         else:
+            salt_iss_shipped = int(note_payload["saltIss"])
             iss_path = tree.path(tree.leaves.index(
-                identity_leaf_salted(w.M, note.salt_iss)))
+                identity_leaf_salted(w.M, salt_iss_shipped)))
             fold_input = deposit_fold_a2_witness(
                 witness=w, rho=opening.rho, id_hash=opening.id_hash,
-                e_note=note.eNote, e_iss=note.eIss, r_prime=note.r_prime,
+                e_note=ct_of(note_payload["eNote"]),
+                e_iss=ct_of(note_payload["eIss"]),
+                r_prime=int(note_payload["rPrime"]),
                 t=t_total, r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
-                salt_iss=note.salt_iss, iss_path=iss_path,
+                salt_iss=salt_iss_shipped, iss_path=iss_path,
                 identity_root=tree.root(),
             )
         with open(os.path.join(out_dir, "fold_input.json"), "w") as f:
@@ -382,6 +407,14 @@ def build_world(flavor: str):
                 "identity": ctr_canonical, "m": str(m_ctr),
                 "M": pt(dep_acct["M"]), "pk": pt(dep_acct["pk"]),
                 "sk": str(dep_acct["sk"]), "E": ct(dep_acct["E"]),
+                # The mailbox: an independent secret, derived from the wallet
+                # seed and never from the Identity, with the salt of the leaf
+                # that binds the two.  Present so a test can show the shipped
+                # payload SUFFICES -- that the delivery plus these three
+                # secrets rebuild the gate.  For B1 the pair is unused: a
+                # bearer note is addressed to nobody.
+                "kRecv": str(k_ctr), "pkRecv": pt(pk_ctr),
+                "salt": str(salt_ctr),
             },
         },
         # The Identity-M note payload (the idHash preimage material) that

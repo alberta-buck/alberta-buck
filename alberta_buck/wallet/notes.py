@@ -25,12 +25,11 @@ the spend-time issuer to match.  A1/A2 keep this public signal at zero.
 
 A-flavor identity binding: the spend circuit does **not** learn the
 recipient from ``id_hash`` -- it is opaque to the circuit.  The addressed
-(A1/A2) binding is enforced by the Identity-M deposit gate at spend: the
-deposit-coupling sigma plus the bound membership proof, plus the
-note<->eEnc binding SNARK (:file:`circuits/note_binding.circom` for the A2
-payload layout, :file:`circuits/note_binding_a1.circom` for A1), which
-re-derives this same nullifier in-circuit from ``(rho, id_hash)`` to tie
-the gate to the specific spent note.  Authorization keys on the recipient
+(A1/A2) binding is enforced by the folded deposit gate at spend
+(:file:`circuits/deposit_fold_a1.circom`, :file:`deposit_fold_a2.circom`),
+which carries the note<->eEnc tie as one of its relations: it re-derives this
+same nullifier in-circuit from ``(rho, id_hash)``, so the ciphertext it checks
+is the spent note's.  Authorization keys on the recipient
 *identity* ``m_rec``, not on any mint-time account key-pair, so key loss
 is recoverable by binding a new account to the same identity.  (The
 earlier account-pinned design -- an in-circuit Chaum-Pedersen equality on
