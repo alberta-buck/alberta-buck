@@ -148,9 +148,36 @@ class MintedA2:
     idHash:  int
     cm:      int
     opening: NoteOpening
-    binding: IssuerReencProof    # issuer_reenc with pk_rec := M_rec (anti-framing)
+    binding: IssuerReencProof    # issuer_reenc with pk_rec := pk_recv (anti-framing)
     r_prime: int                 # issuer-held randomness (off chain)
     r_note:  int                 # note-value encryption randomness (off chain)
+    salt_iss: Optional[int] = None
+    """The issuer's registry salt for the association that NAMES it.
+
+    A2's spend must prove that the point the recipient decrypts is a
+    registered Identity -- otherwise a colluding issuer keys the note to a
+    throwaway and the recipient holds garbage that no receipt can name.  That
+    relation is proven by the RECIPIENT about the ISSUER, so the recipient
+    needs the issuer's leaf preimage, and the only way to have it is for the
+    issuer to send it.  Hence this field: A2 is the sole flavour that ships
+    issuer-side witness material, and the reason is that A2 is the sole
+    flavour whose issuer is private.
+
+    It is NOT the issuer's receiving-leaf salt.  That leaf commits the
+    issuer's mailbox key, and disclosing its preimage would hand every
+    recipient the issuer's reading key.  This is the salt of a SECOND
+    association of the same Identity -- an ordinary salted identity leaf --
+    and because distinct associations carry distinct salts (accumulator
+    specification, section 8.3) the two are unlinkable: disclosing the one
+    that names the issuer says nothing about the one that reads its mail.
+
+    Only the salt travels.  The Merkle path is not shipped, because paths go
+    stale as the subtree grows while salts do not; the recipient rebuilds the
+    path from the published subtree at spend time.
+
+    Optional so that a deployment whose A2 issuers are institutions enrolled
+    in a PUBLIC subtree can leave it unset: there the leaf is unsalted and the
+    recipient computes it from the decrypted Identity alone."""
 
 
 def a2_id_hash(eNote: ElGamalCiphertext, eIss: ElGamalCiphertext) -> int:
@@ -175,6 +202,7 @@ def mint_unilateral_a2(
     chainid: int,
     r_prime: Optional[int] = None,
     predicate: int = 0,
+    salt_iss: Optional[int] = None,
     rng=None,
 ) -> MintedA2:
     """Issuer mints an A2 note keyed to the recipient's receiving key.
@@ -189,6 +217,10 @@ def mint_unilateral_a2(
     check that binding
     (:func:`alberta_buck.wallet.recvkey.verify_receiving_binding`) before
     minting, which is what assures it whom it is paying.
+
+    ``salt_iss`` is the issuer's own registry salt for the association that
+    names it, shipped so the recipient can prove at spend that the Identity it
+    decrypts is registered.  See :class:`MintedA2`.
     """
     r_prime = rand_scalar(rng) if r_prime is None else (r_prime % ORDER)
 
@@ -214,7 +246,7 @@ def mint_unilateral_a2(
     cm = note_commitment(opening)
     return MintedA2(eNote=eNote, eIss=eIss, M_I=M_I, idHash=idHash, cm=cm,
                     opening=opening, binding=binding, r_prime=r_prime,
-                    r_note=r_note)
+                    r_note=r_note, salt_iss=salt_iss)
 
 
 # ========================== Deposit coupling ================================

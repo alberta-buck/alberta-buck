@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.7
+#+TITLE: Identity accumulator specification, v0.8
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -30,7 +30,9 @@ receiving key itself is specified in
 [[file:notes-receiving-key.org][its own document]], and phase 2 of the plan
 implements both. v0.7 makes that leaf commit the two SCALARS rather than
 the two points, which the folded spend gate's constraint budget forced and
-which turns out to bind more tightly ([[#leaves]]). =MUST=, =MUST NOT=,
+which turns out to bind more tightly ([[#leaves]]). v0.8 records the second
+association an A2 issuer keeps so it can be named without disclosing its
+mailbox ([[#renewal]]). =MUST=, =MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -400,6 +402,19 @@ current value. On a change, the authority =MUST=:
 The new and old leaves =MUST NOT= share a salt. With distinct salts they are
 unlinkable to any party without the authority's own records, and the
 attesting authority =MUST= be named as a party alongside the issuer.
+
+*A second association, deliberately.* A holder =MAY= hold more than one
+association of the same identity in one registry: its receiving leaf, whose
+preimage includes its mailbox key, and a plain =identity_leaf_salted=
+association whose salt it can disclose in order to be NAMED. The two carry
+distinct salts, so disclosing the naming one reveals nothing about the
+mailbox one. An A2 issuer =MUST= hold such a second association and =MUST=
+ship its salt in the note payload, because the recipient has to prove at
+spend that the Identity it decrypted is registered, and that is a claim about
+a party other than the prover
+([[file:notes-receiving-key.org::#payload][why only A2 ships it]]). The salt
+alone travels: the recipient rebuilds the path from the published subtree,
+since paths go stale as a subtree grows and salts do not.
 
 *Retention.* An authority needs the current association only, the identity,
 its salt and its leaf index, in order to clear and re-insert. It does not

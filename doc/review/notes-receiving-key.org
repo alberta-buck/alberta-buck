@@ -365,6 +365,7 @@ whose output limbs the gadget does not range-check.
 | =note_binding.circom= (A2) | 2,416,748 | none -- r1cs unchanged |
 | =note_binding_a1.circom= | 2,859,018 | required |
 | =deposit_fold_a1.circom= | 3,303,970 | required, fits =pot22= |
+| =deposit_fold_a2.circom= | 3,336,421 | required, fits =pot22= |
 
 *Validated at the witness level, which needs no ceremony.* Two independently
 written implementations of the same four relations -- the circom and the
@@ -386,12 +387,92 @@ tamper breaks all three at once. That is what "state the tie instead of
 inferring it" buys: there is no seam between the two secrets for a thief to
 work in, because there are no longer two proofs to put a seam between.
 
-*What the gate does not yet have*: a trusted setup, a Solidity verifier, the
-=Notes.sol= call path that replaces =verifyDepositCoupling=, and an A2
-sibling -- A2's ciphertext decrypts to the ISSUER identity, so it carries one
-further relation, the membership of that decrypted point. Until those land
+*The A2 sibling is written too*, =circuits/deposit_fold_a2.circom=, and its
+extra relation is cheap: 3,336,421 constraints against A1's 3,303,970, under
+1% more. Both carry seven fixed-base multiplications; A2's fifth relation, its
+two curve additions and its limb range checks are all small beside one of
+those. Where A1 avoids curve addition by construction, A2 cannot -- its
+plaintext is an arbitrary point -- so it instead ENFORCES the incomplete
+gadget's precondition, asserting at each addition that the two x-coordinates
+differ, which excludes the doubling and the negation case together. Comparing
+them reduced mod the native field is sufficient, since equal true coordinates
+would be congruent.
+
+*What the gates do not yet have*: a trusted setup, Solidity verifiers, and the
+=Notes.sol= call paths that replace =verifyDepositCoupling=. Until those land
 the end-to-end fixtures stay as they are, for the reason [[#circuit-cost]]
 gives.
+
+** 4.4 Why only A2 ships issuer witness material
+:PROPERTIES:
+:CUSTOM_ID: payload
+:END:
+
+Settled 2026-09-21. The rule turns out to be one line, and it decides all
+three flavours at once:
+
+#+begin_quote
+A note ships witness material about a party *other than the prover* exactly
+when its spend proof must assert something about that party. Only A2 must.
+#+end_quote
+
+| Flavour | Who must be proven registered | Who makes the proof | Witness shipped |
+|---------+-------------------------------+---------------------+-----------------|
+| A1 | the recipient | the recipient | none -- it holds its own salt |
+| A2 | the recipient /and the issuer/ | the recipient | the issuer's salt |
+| B1 | the depositor | the depositor | none -- it holds its own salt |
+
+A1 and B1 prove membership of the prover's *own* Identity, so the prover has
+its own salt and nothing needs to travel. A2 is the exception because its
+ciphertext decrypts to the ISSUER's Identity, and the recipient must show that
+point is registered -- otherwise a colluding issuer keys the note to a
+throwaway and leaves the recipient holding garbage no receipt can name. That
+is a claim about a third party, so the third party must supply the witness.
+
+*What travels, and what does not.* Only the salt. Paths go stale as the
+subtree grows; salts do not. The recipient rebuilds the path from the
+published subtree at spend time, which is what publishing private subtrees in
+full was for ([[file:accumulator-spec.org::#publication][specification section
+9]]).
+
+*Which salt.* Not the issuer's receiving-leaf salt -- that leaf commits the
+issuer's mailbox key, and opening it would hand every recipient the issuer's
+reading key. It is the salt of a SECOND association of the same Identity, an
+ordinary =identity_leaf_salted=. Distinct associations carry distinct salts
+([[file:accumulator-spec.org::#renewal][section 8.3]]), so the one that names
+the issuer says nothing about the one that reads its mail. The mechanism
+already existed; A2 is simply its first consumer.
+
+*Would A1 or B1 gain from shipping more issuer data?* No, and in both
+directions the answer is instructive.
+
+- *It cannot reduce the proving cost.* Every fixed-base multiplication in
+  either fold pins one of the /prover's own/ secrets -- its randomness, its
+  receiving key, its account key, its identity. Public data about a
+  counterparty cannot discharge a constraint whose job is to pin a witness the
+  counterparty does not hold.
+- *For A1 it would add nothing and cost staleness.* A1's issuer is public by
+  the flavour's definition, so it belongs in a public subtree with an unsalted
+  leaf, and any party that knows the issuer's Identity computes that leaf
+  itself. A shipped path would only go stale.
+- *For B1 it would be a privacy loss for no gain.* The fact B1 needs -- the
+  depositor is registered -- travels as a /proof/ in the spend transaction,
+  which the issuer reads off chain and verifies with no witness at all. That
+  is already the cheapest possible form. Shipping the depositor's salt instead
+  would let the issuer locate and watch the depositor's leaf, which is strictly
+  worse.
+- *And B1 cannot be helped by issuer key material at all*, for a reason worth
+  recording because it looks like an optimisation waiting to happen. B1's
+  depositor forms =E_dep_for_iss = (rG, M_dep + r*pk_iss)=. To factor
+  =r*pk_iss= through =G= -- which is what makes A1 and A2 cheap -- the
+  depositor would need =sk_iss=. Any construction that gives it that hands the
+  depositor the key which is supposed to make the issuer the only reader. B1's
+  one variable-base product is irreducible, and that is a third reason not to
+  fold B1.
+
+So the three payloads are each minimal for their own privacy and proving
+requirements, and the differences are not incidental: they track exactly which
+party is private and which party is proving.
 
 * 5 What it costs
 :PROPERTIES:

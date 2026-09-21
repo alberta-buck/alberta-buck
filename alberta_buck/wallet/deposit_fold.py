@@ -66,6 +66,7 @@ __all__ = [
     "deposit_fold_witness",
     "deposit_fold_check",
     "deposit_fold_a1_witness",
+    "deposit_fold_a2_witness",
 ]
 
 
@@ -364,4 +365,132 @@ def deposit_fold_a1_witness(
         "salt": str(witness.salt),
         "pathElements": [str(x) for x in witness.siblings],
         "pathIndices": [str(x) for x in witness.index_bits],
+    }
+
+
+def deposit_fold_a2_witness(
+    *,
+    witness:  DepositFoldWitness,   # from deposit_fold_witness, already checked
+    rho:      int,
+    id_hash:  int,
+    e_note:   ElGamalCiphertext,    # the note's value ciphertext (hashed only)
+    e_iss:    ElGamalCiphertext,    # the note's committed issuer ciphertext
+    r_prime:  int,                  # the issuer's mint randomness
+    t:        int,                  # eEnc's total randomness (r' + s)
+    r_E:      int,
+    e_dep:    ElGamalCiphertext,
+    pk_dep,
+    e_enc:    ElGamalCiphertext,    # the spend's re-randomized ciphertext
+    salt_iss: int,                  # the issuer's salt, shipped in the payload
+    iss_path,                       # the issuer's MembershipProof
+    identity_root: int,
+) -> dict:
+    """Build the JSON witness for `circuits/deposit_fold_a2.circom`.
+
+    A2 differs from A1 in one fact with several consequences: the ciphertext
+    decrypts to the ISSUER's Identity, a point the spender holds no scalar for.
+
+    So the decrypted point cannot be folded into a scalar sum, and enters as
+    witnessed coordinates -- which is why the circuit range-checks its limbs
+    explicitly and asserts, at each addition, that the two x-coordinates
+    differ.  circom-lib offers only incomplete addition, so A2 enforces the
+    precondition where A1 avoided the operation entirely.
+
+    And a fifth relation appears: the decrypted Identity must itself be
+    registered, or a colluding issuer keys the note to a throwaway point and
+    the recipient holds garbage.  The recipient proves that about the issuer,
+    using the salt the issuer shipped (see ``MintedA2.salt_iss``) and a path it
+    rebuilds from the published subtree.
+
+    Raises:
+        AssertionError: naming the relation whose arithmetic does not close.
+    """
+    from alberta_buck.registry.tree import identity_leaf_salted
+    from alberta_buck.wallet.bn254 import point_to_words
+    from alberta_buck.wallet.notes import NULLIFIER_TAG_B
+    from alberta_buck.wallet.poseidon import F_R, poseidon
+
+    m_rec, k, sk_dep = witness.m_rec, witness.k, witness.sk_dep
+    r_prime %= ORDER
+    t %= ORDER
+    r_E %= ORDER
+
+    rm_val = (r_prime * k) % ORDER                # eIss.C = M_I + rm*G
+    tk_val = (t * k) % ORDER                      # eEnc.C = M_I + tk*G
+    cd_val = (m_rec + sk_dep * r_E) % ORDER       # E_dep.C = cd*G
+    M_I = witness.M                               # what k decrypted to
+
+    # -- the note tie ------------------------------------------------------
+    assert eq(e_iss.R, mul(G1, r_prime)), "eIss.R != r'*G"
+    assert eq(e_iss.C, add(M_I, mul(G1, rm_val))), "eIss.C != M_I + rm*G"
+    # -- (1) k decrypts the spend's ciphertext to the same M_I -------------
+    assert eq(e_enc.R, mul(G1, t)), "eEnc.R != t*G"
+    assert eq(e_enc.C, add(M_I, mul(G1, tk_val))), "eEnc.C != M_I + tk*G"
+    # -- the incomplete-addition precondition the circuit enforces ---------
+    for label, other in (("eIss.C", mul(G1, rm_val)), ("eEnc.C", mul(G1, tk_val))):
+        mx, _ = point_to_words(M_I)
+        ox, _ = point_to_words(other)
+        assert mx % F_R != ox % F_R, (
+            f"{label}: the addends share an x-coordinate mod F_R, so the "
+            "incomplete addition would land on a doubling or the identity")
+    # -- (2) the account credential decrypts to m_rec ----------------------
+    assert eq(pk_dep, mul(G1, sk_dep)), "pk_dep != sk_dep*G"
+    assert eq(e_dep.R, mul(G1, r_E)), "E_dep.R != r_E*G"
+    assert eq(e_dep.C, mul(G1, cd_val)), "E_dep.C != cd*G"
+    # -- (3)+(4) the recipient's leaf and its path -------------------------
+    assert witness.leaf == receiving_leaf(m_rec, k, witness.salt), \
+        "the witness leaf does not commit (m_rec, k, salt)"
+    assert witness.root == identity_root, "the witness root is not the posted root"
+    # -- (5) the issuer's leaf, under the shipped salt ---------------------
+    assert iss_path.leaf == identity_leaf_salted(M_I, salt_iss), \
+        "the shipped issuer salt does not open the issuer's leaf"
+    assert iss_path.verify() and iss_path.root == identity_root, \
+        "the issuer's path does not fold to the posted root"
+
+    nullifier = poseidon([rho, id_hash, NULLIFIER_TAG_B]) % F_R
+
+    def _w(P):
+        x, y = point_to_words(P)
+        return _limbs(x), _limbs(y)
+
+    eEncRx, eEncRy = _w(e_enc.R)
+    eEncCx, eEncCy = _w(e_enc.C)
+    pkDepX, pkDepY = _w(pk_dep)
+    eDepRx, eDepRy = _w(e_dep.R)
+    eDepCx, eDepCy = _w(e_dep.C)
+    MIx, MIy = _w(M_I)
+
+    nRx, nRy = point_to_words(e_note.R)
+    nCx, nCy = point_to_words(e_note.C)
+    iRx, iRy = point_to_words(e_iss.R)
+    iCx, iCy = point_to_words(e_iss.C)
+
+    return {
+        "nullifier": str(nullifier),
+        "identityRoot": str(identity_root),
+        "eEncRx": [str(x) for x in eEncRx], "eEncRy": [str(x) for x in eEncRy],
+        "eEncCx": [str(x) for x in eEncCx], "eEncCy": [str(x) for x in eEncCy],
+        "pkDepX": [str(x) for x in pkDepX], "pkDepY": [str(x) for x in pkDepY],
+        "eDepRx": [str(x) for x in eDepRx], "eDepRy": [str(x) for x in eDepRy],
+        "eDepCx": [str(x) for x in eDepCx], "eDepCy": [str(x) for x in eDepCy],
+        "rho": str(rho % F_R),
+        "idHash": str(id_hash % F_R),
+        "eNote": [str(nRx % F_R), str(nRy % F_R), str(nCx % F_R), str(nCy % F_R)],
+        "eIss0": [str(iRx % F_R), str(iRy % F_R), str(iCx % F_R), str(iCy % F_R)],
+        "r": [str(x) for x in _limbs(r_prime)],
+        "k_recv": [str(x) for x in _limbs(k)],
+        "rm": [str(x) for x in _limbs(rm_val)],
+        "t": [str(x) for x in _limbs(t)],
+        "tk": [str(x) for x in _limbs(tk_val)],
+        "m_rec": [str(x) for x in _limbs(m_rec)],
+        "sk_dep": [str(x) for x in _limbs(sk_dep)],
+        "r_E": [str(x) for x in _limbs(r_E)],
+        "cd": [str(x) for x in _limbs(cd_val)],
+        "MI": [[str(x) for x in MIx], [str(x) for x in MIy]],
+        "salt": str(witness.salt),
+        "saltIss": str(salt_iss),
+        "pathElements": [str(x) for x in witness.siblings],
+        "pathIndices": [str(x) for x in witness.index_bits],
+        "issPathElements": [str(x) for x in iss_path.siblings],
+        "issPathIndices": [str(x) for x in iss_path.index_bits],
     }
