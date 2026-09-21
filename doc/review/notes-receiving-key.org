@@ -368,9 +368,10 @@ whose output limbs the gadget does not range-check.
 | =deposit_fold_a2.circom= | 3,336,421 | required, fits =pot22= |
 
 *Validated at the witness level, which needs no ceremony.* Two independently
-written implementations of the same four relations -- the circom and the
-Python reference -- agree on an honest witness:
-=WITNESS IS CORRECT= across all 3,303,970 constraints.
+written implementations of the same relations -- the circom and the Python
+reference -- agree on an honest witness, for both gates:
+=WITNESS IS CORRECT= across all 3,303,970 constraints for A1, and across all
+3,336,421 for A2.
 
 And the relations are enforced /in the circuit/, not merely in the reference.
 Tampering with one private signal of an otherwise honest witness makes the
@@ -442,6 +443,17 @@ ordinary =identity_leaf_salted=. Distinct associations carry distinct salts
 ([[file:accumulator-spec.org::#renewal][section 8.3]]), so the one that names
 the issuer says nothing about the one that reads its mail. The mechanism
 already existed; A2 is simply its first consumer.
+
+*Where the hiding generator survives, and where it does not.* Neither fold
+instantiates =ScalarMulH=: folding removed the shared hidden point that
+needed a blind. So =H= remains in exactly two places, and they have opposite
+requirements. Inside =issuer_reenc= it blinds within ONE sigma, where the
+extractor recovers both openings and a known discrete log costs nothing --
+which is what that module's source comment says, and for that use it is
+right. Across B1's sigma and its membership proof it carries an equality
+between two proofs, and there a known log is fatal. So the hash-to-curve
+generator is needed for B1's =P_dep= and nothing else; the A2 mint binding
+can keep the generator it has.
 
 *Would A1 or B1 gain from shipping more issuer data?* No, and in both
 directions the answer is instructive.
