@@ -37,6 +37,11 @@ from alberta_buck.wallet.notes import (
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
+from alberta_buck.wallet.recvkey import (
+    receiving_key, prove_receiving_binding,
+)
+from alberta_buck.wallet.salt import derive_salt
+from alberta_buck.registry.tree import IdentityMerkleTree
 from alberta_buck.wallet.envelope import (
     serialize_core, envelope_text, receipt_id,
 )
@@ -341,6 +346,19 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # deterministic receipt_id.  Built after the pinned a2b section, so the
     # draws here are free to evolve.
 
+    # Alice's MAILBOX key, and the accumulator leaf that ties it to her
+    # Identity.  Derived from a fixed seed rather than the rng stream, so it
+    # adds no draw and perturbs nothing: the addressed ciphertexts are keyed to
+    # this, never to her Identity point, and a payer checks the tie with a
+    # Poseidon and a path.
+    alice_seed = 0xA11CE_5EED
+    alice_k, alice_pk_recv = receiving_key(alice_seed)
+    alice_mbx_salt = derive_salt(alice_seed, "mailbox")
+    _mbx_tree = IdentityMerkleTree(depth=10, private=True)
+    _mbx_tree.insert_mailbox(alice.M, alice_pk_recv, alice_mbx_salt)
+    alice_mbx = prove_receiving_binding(alice.M, alice_pk_recv,
+                                        alice_mbx_salt, _mbx_tree)
+
     RCPT_TIME = 1779999000
 
     # -- eoa-pub: Bob (payee, Private) receives from Alice as a Public Identity.
@@ -398,8 +416,10 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # addresses the note to Alice's identity POINT M_rec: eNote encrypts the
     # face under M_rec, eRec the recipient identity under itself, and
     # idHash = id_hash_a1(eNote, m_iss, sigma) binds both parties into the leaf.
-    a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice.M, rand_scalar(rng))
-    a1m_eRec    = elgamal_encrypt(alice.M, alice.M, rand_scalar(rng))
+    a1m_r_note  = rand_scalar(rng)
+    a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a1m_r_note)
+    a1m_r_rec   = rand_scalar(rng)
+    a1m_eRec    = elgamal_encrypt(alice.M, alice_pk_recv, a1m_r_rec)
     a1m_idHash  = id_hash_a1(a1m_eNote, bob.m, rcpt_sigma_R, rcpt_sigma_s)
     a1m_opening = NoteOpening(flavor=FLAVOR_A1, v=rcpt_face, rho=rcpt_rho,
                               id_hash=a1m_idHash, predicate=0)
@@ -417,6 +437,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=a1m_opening, cms=a1m_cms, issuer_sig=a1m_sig,
         eNote=a1m_eNote, eRec=a1m_eRec,
+        pk_recv=alice_pk_recv, mailbox_binding=alice_mbx,
         sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
         nullifier=a1m_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
@@ -424,19 +445,22 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         mint_txhash="0x" + "aa" * 32, mint_block=1234500,
     )
     note_a1_core = build_note_a1(
-        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_a1_common)
-    note_a1_iss_core = build_note_a1(role="issuer", rng=rng, **_a1_common)
+        role="recipient", payee_sk=alice.kp.sk, k_recv=alice_k, rng=rng,
+        **_a1_common)
+    note_a1_iss_core = build_note_a1(
+        role="issuer", r_note=a1m_r_note, r_id=a1m_r_rec, rng=rng, **_a1_common)
 
     # -- note-a2: identity-targeted (unilateral A2).  Bob, the PRIVATE issuer,
     # encrypts his own registered Identity under Alice's identity point
     # (eIss) and the face under the same point (eNote); the blinded
     # re-encryption binding (verified at mint by Notes' A2 overload) makes the
     # recovered issuer provably the registered minter.
-    a2m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice.M, rand_scalar(rng))
+    a2m_r_note  = rand_scalar(rng)
+    a2m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a2m_r_note)
     a2m_r_prime = rand_scalar(rng)
-    a2m_eIss    = elgamal_encrypt(bob.M, alice.M, a2m_r_prime)
+    a2m_eIss    = elgamal_encrypt(bob.M, alice_pk_recv, a2m_r_prime)
     a2m_binding = issuer_reenc_prove(
-        bob.kp.sk, a2m_r_prime, alice.M, bob.E, a2m_eIss,
+        bob.kp.sk, a2m_r_prime, alice_pk_recv, bob.E, a2m_eIss,
         BOB_ADDR, CHAINID, rng=rng,
     )
     a2m_idHash  = id_hash_a2(a2m_eNote, a2m_eIss)
@@ -454,15 +478,18 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=a2m_opening, cms=a2m_cms,
         eNote=a2m_eNote, eIss=a2m_eIss, binding=a2m_binding,
+        pk_recv=alice_pk_recv, mailbox_binding=alice_mbx,
         nullifier=a2m_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
         txhash="0x" + "a2" * 32, block=1234599, logindex=1,
         mint_txhash="0x" + "aa" * 32, mint_block=1234500,
     )
     note_a2_core = build_note_a2(
-        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_a2_common)
+        role="recipient", payee_sk=alice.kp.sk, k_recv=alice_k, rng=rng,
+        **_a2_common)
     note_a2_iss_core = build_note_a2(
-        role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_a2_common)
+        role="issuer", issuer_sk=bob.kp.sk, r_note=a2m_r_note,
+        r_id=a2m_r_prime, rng=rng, **_a2_common)
 
     # -- eoa-pub-unicode: the canonical-dialect torture split.  A payer whose
     # identity exercises the raw-UTF-8 canonical dialect (Latin accents +

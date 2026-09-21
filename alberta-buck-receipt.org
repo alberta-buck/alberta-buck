@@ -215,10 +215,22 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   generating side's self-naming -- a =verifiable_decrypt= of one's /own/
   registered =E_addr= revealing one's =M= -- and, for the issuer-side B1
   receipt, the issuer's verifiable decryption of the event's =eDepForIss=
-  naming the depositor.  The Note legs themselves need *no* party proof: the
-  disclosed identity preimages let any verifier derive =m_iss= / =m_rec=,
-  recompute the =idHash=, and decrypt the addressed ciphertexts directly --
-  which is exactly why both parties can generate the same receipt core.
+  naming the depositor.  The ISSUER's leg needs no party proof -- its preimage
+  is disclosed, its scalar derivable, and B1/A1 bind it into the leaf.
+
+  The ADDRESSED legs do, and the asymmetry is the security property rather
+  than an inconvenience.  Those ciphertexts are keyed to the recipient's
+  mailbox key, so no verifier derives the opening secret from a disclosed
+  record -- and neither does a harvester, which is the whole reason the key
+  moved off the Identity.  Each side therefore proves what only it can: the
+  recipient by verifiable decryption under =pkRecv=, the issuer by disclosing
+  the mint randomness for any verifier to re-encrypt with.  A receipt whose
+  legs ANY reader could reproduce is not evidence that a payment happened.
+
+  What ties that key to a person is the =binding=: a mailbox leaf, over the
+  two POINTS, checked with a Poseidon and a path and no secret at all.  An
+  issuer-side addressed receipt without it names a mailbox rather than a
+  person, and prints *UNVERIFIED RECIPIENT*.
 
 * Per-Scenario Payloads
 
@@ -234,8 +246,8 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   | eoa-pub  | EOA, public     | none -- =payer.M= recomputed from public =identity=; =pk= anchors addr                                             | =Transfer(from,to,value)=   |
   | eoa-priv | EOA, private    | approve handshake =cp_proof= + payee's =vd= of =E_for_spender=                                                     | =Transfer=                  |
   | note-b1  | issuer, public  | =idHash= = =id_hash_b1(m_iss, sigma)= + batch Schnorr; issuer side: =vd= of =eDepForIss= names depositor           | =Minted= + =SpentCoupledB1= |
-  | note-a1  | issuer, public  | =idHash= = =id_hash_a1(eNote, m_iss, sigma)= + Schnorr; =Dec(eNote, m_rec) = vG=, =Dec(eRec, m_rec) = M_rec=       | =Minted= + =SpentCoupledA1= |
-  | note-a2  | issuer, private | =idHash= = =id_hash_a2(eNote, eIss)=; =Dec(eNote, m_rec) = vG=, =Dec(eIss, m_rec) = M_iss=; =issuer_reenc= binding | =Minted= + =SpentCoupledA2= |
+  | note-a1  | issuer, public  | =idHash= = =id_hash_a1(eNote, m_iss, sigma)= + Schnorr; recipient: =vdNote=/=vdRec= under =pkRecv=; issuer: =rNote=/=rId= re-encrypt; + mailbox =binding= | =Minted= + =SpentCoupledA1= |
+  | note-a2  | issuer, private | =idHash= = =id_hash_a2(eNote, eIss)=; the same per-role legs (=vdIss= / =rId=); + =issuer_reenc= binding                                            | =Minted= + =SpentCoupledA2= |
   #+LATEX: }
 
 ** eoa-pub -- EOA transfer from a public counterparty
@@ -305,13 +317,18 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
    the =issuer_reenc= binding + the generator's self-naming (=payee_vd= or
    =payer_vd=) + mint and spend anchors.  The chain saw only the /blinded/
    binding (\( \hat{T} \) hides \( M_{iss} \), \( Q \) hides \( M_{rec} \));
-   no un-blinding scalar is ever disclosed -- the earlier account-keyed design
-   needed a disclosed \( \gamma \) here, but identity-targeting lets the
-   verifier decrypt directly, since the receipt already discloses the payee
-   preimage.  A receipt assembled /without/ the binding still prints, with
-   =M_iss= recovered but stamped *UNVERIFIED ISSUER* -- a narrow case, since
-   every chain-minted A2 leaf carries a verified binding (the mint reverts
-   otherwise).
+   no un-blinding scalar is disclosed on chain.  A receipt assembled /without/
+   the binding still prints, with =M_iss= named but stamped *UNVERIFIED
+   ISSUER* -- a narrow case, since every chain-minted A2 leaf carries a
+   verified binding (the mint reverts otherwise).
+
+   One thing this receipt does NOT yet establish: that the =M_iss= it names is
+   the plaintext the mint binding opened.  An ElGamal ciphertext does not bind
+   its plaintext to one key, so a minter can key =eIss= such that its own
+   hidden key opens it to one registered Identity and the recipient's opens it
+   to another -- and the recipient, doing everything honestly, names the
+   second.  The closure is a committed tie between the two keys, specified in
+   =doc/review/notes-receiving-key.org= section 4.6.
 
 ** Why there is no "B2" (private-issuer bearer) receipt
 
@@ -524,7 +541,7 @@ VERIFICATION
    : flavor     a2 (addressed, PRIVATE issuer); face 250.000000 BUCK
    : issuer     Bob Smith (Corporate Registration)  acct 0x0a11ce00000000000000000000000000000a11ce
    : depositor  Alice Johnson (Alberta Identity Card)  acct 0xde9051700000000000000000000000000de90517
-   : prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.959, 'spend_prove_s': 0.76, 'membership_prove_s': 1.556, 'note_binding_prove_s': 11.7}
+   : prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.996, 'spend_prove_s': 0.778, 'deposit_gate_prove_s': 15.372}
 
    #+LATEX: }
 
@@ -548,9 +565,12 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : bind issuer                gas=  594,779
-   : bind depositor             gas=  557,628
-   : identityRoot (EVM-incremental Poseidon) = 0xab29ff540f4d0a25d9...
+   : authorize issuer binding   gas=   54,681
+   : bind issuer                gas=  519,985
+   : authorize depositor binding gas=   54,705
+   : bind depositor             gas=  520,009
+   : setIdentityRoot            gas=   48,170
+   : identityRoot (EVM-incremental Poseidon) = 0x165706514c77f5ed24...
    :   == the wallet's IdentityTree root:    True
 
    #+LATEX: }
@@ -575,11 +595,12 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : createCredit               gas=  202,935
-   : activateCredit             gas=   42,349
-   : buck.mint                  gas=   97,850
-   : approve issuer->pool       gas=  179,302   (CP proof: verifyApprove)
-   : approve depositor->pool    gas=  137,964   (CP proof: verifyApprove)
+   : acceptIssuer               gas=   46,443
+   : createCredit               gas=  194,892
+   : activateCredit             gas=   34,346
+   : buck.mint                  gas=  100,514
+   : approve issuer->pool       gas=  194,208   (CP proof: verifyApprove)
+   : approve depositor->pool    gas=  152,918   (CP proof: verifyApprove)
 
    #+LATEX: }
 
@@ -601,8 +622,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.mint  tx 0xc2fba76c99295fee9e..  block 32  gas 650,915  (0.111s on anvil)
-   :   proof was generated offline by the issuer in 0.959s (Groth16, mint_batch_a2 N=1)
+   : Notes.mint  tx 0x86da3191da87404123..  block 38  gas 650,622  (0.107s on anvil)
+   :   proof was generated offline by the issuer in 0.996s (Groth16, mint_batch_a2 N=1)
    :   escrowed: pool balance = 250.000000 BUCK
 
    #+LATEX: }
@@ -621,15 +642,21 @@ VERIFICATION
    from alberta_buck.wallet.elgamal import elgamal_decrypt
    from alberta_buck.wallet.notes import id_hash_a2, note_commitment
    from alberta_buck.wallet.issuer_reenc import issuer_reenc_verify
+   from alberta_buck.wallet.recvkey import verify_receiving_binding
 
    nc = fx.note_cts()
+   k_recv = int(fx.raw["parties"]["depositor"]["kRecv"])
    m_rec = fx.depositor.m
    print(f"idHash == Poseidon8(eNote, eIss):     "
          f"{id_hash_a2(nc['eNote'], nc['eIss']) == fx.opening.id_hash}")
-   print(f"Dec(eNote, m_rec) == v*G:             "
-         f"{eq(elgamal_decrypt(nc['eNote'], m_rec), mul(G1, fx.opening.v))}")
-   print(f"Dec(eIss, m_rec) == issuer's M:       "
-         f"{eq(elgamal_decrypt(nc['eIss'], m_rec), fx.issuer.M)}   (the coupling)")
+   print(f"Dec(eNote, k_recv) == v*G:            "
+         f"{eq(elgamal_decrypt(nc['eNote'], k_recv), mul(G1, fx.opening.v))}")
+   print(f"Dec(eIss, k_recv) == issuer's M:      "
+         f"{eq(elgamal_decrypt(nc['eIss'], k_recv), fx.issuer.M)}")
+   print(f"Dec(eIss, m_rec)  == issuer's M:      "
+         f"{eq(elgamal_decrypt(nc['eIss'], m_rec), fx.issuer.M)}   (the Identity is NOT a key)")
+   print(f"mailbox binding ties pk_recv to M:    "
+         f"{verify_receiving_binding(fx.depositor.M, fx.mailbox_binding(), int(fx.raw['identityRoot']))}")
    print(f"mint binding (anti-framing) verifies: "
          f"{issuer_reenc_verify(fx.issuer.pk, fx.issuer.E, nc['eIss'], fx.binding, fx.issuer.addr, fx.chainid)}")
    print(f"cm in the Minted batch:               "
@@ -638,8 +665,10 @@ VERIFICATION
 
    #+RESULTS:
    : idHash == Poseidon8(eNote, eIss):     True
-   : Dec(eNote, m_rec) == v*G:             True
-   : Dec(eIss, m_rec) == issuer's M:       True   (the coupling)
+   : Dec(eNote, k_recv) == v*G:            True
+   : Dec(eIss, k_recv) == issuer's M:      True
+   : Dec(eIss, m_rec)  == issuer's M:      False   (the Identity is NOT a key)
+   : mailbox binding ties pk_recv to M:    True
    : mint binding (anti-framing) verifies: True
    : cm in the Minted batch:               True
 
@@ -669,10 +698,7 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.spendCoupledA2  tx 0xed88f3c35b57eefcb8..  block 33  gas 1,076,632  (0.111s on anvil)
-   :   proofs offline: spend 0.76s + membership 1.556s + note-tie 11.7s
-   :   nullifier burned: True
-   :   paid out: depositor balance = 249.999999 BUCK
+   : Notes.spendCoupledA2  tx 0x38d77f7dfb7d779ae2..  block 39  gas 875,899  (0.111s on anvil)
 
    #+LATEX: }
 
@@ -697,8 +723,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : depositor (Alice)  receipt 4egxeqphrl63  tier-1: VALID   (6,606 B payload)
-   : issuer (Bob)       receipt 4kymncsgb4jc  tier-1: VALID   (6,603 B payload)
+   : depositor (Alice)  receipt hvc4yiwuof6u  tier-1: VALID   (10,519 B payload)
+   : issuer (Bob)       receipt eamyg6jvnmj6  tier-1: VALID   (8,599 B payload)
 
    #+LATEX: }
 
@@ -719,7 +745,7 @@ VERIFICATION
 		    ALBERTA  BUCK                                         ALBERTA  BUCK
 	    P A Y M E N T   R E C E I P T                         P A Y M E N T   R E C E I P T
    ------------------------------------------------      ------------------------------------------------
-     Receipt  4egxeqphrl63                                 Receipt  4kymncsgb4jc
+     Receipt  hvc4yiwuof6u                                 Receipt  eamyg6jvnmj6
    ------------------------------------------------      ------------------------------------------------
    FROM (payer) (PRIVATE IDENTITY)                       FROM (payer - you) (PRIVATE IDENTITY)
     Bob Smith                                             Bob Smith
@@ -736,16 +762,16 @@ VERIFICATION
    TRANSACTION                                           TRANSACTION
     Type    Note spend — A2 addressed, private issuer     Type    Note spend — A2 addressed, private issuer
     Amount            250.000000  BUCK                    Amount            250.000000  BUCK
-    When        2026-05-28 20:28  UTC                     When        2026-05-28 20:28  UTC
+    When        2026-05-28 20:29  UTC                     When        2026-05-28 20:29  UTC
     Chain                      1                          Chain                      1
-    Block                     33                          Block                     33
+    Block                     39                          Block                     39
     Log                        2                          Log                        2
-    Tx      0xed88f3c35b57..d91308f0aced                  Tx      0xed88f3c35b57..d91308f0aced
-    Mint    0xc2fba76c9929..f00d5f89e9ac                  Mint    0xc2fba76c9929..f00d5f89e9ac
+    Tx      0x38d77f7dfb7d..410d6dc4900d                  Tx      0x38d77f7dfb7d..410d6dc4900d
+    Mint    0x86da3191da87..d28d0b81fc3e                  Mint    0x86da3191da87..d28d0b81fc3e
    ------------------------------------------------      ------------------------------------------------
    VERIFICATION                                          VERIFICATION
     status @ issue: VALID                                 status @ issue: VALID
-    receipt  4egxeqphrl63                                 receipt  4kymncsgb4jc
+    receipt  hvc4yiwuof6u                                 receipt  eamyg6jvnmj6
    ------------------------------------------------      ------------------------------------------------
 	   a record, not a bearer instrument                     a record, not a bearer instrument
 	   github.com/pjkundert/alberta-buck                     github.com/pjkundert/alberta-buck
@@ -776,7 +802,7 @@ VERIFICATION
 
    #+RESULTS:
    : registry _pk[depositor] == receipt payee.pk:  True
-   : spend tx mined in block 33 (receipt says 33); log #2 present: True
+   : spend tx mined in block 39 (receipt says 39); log #2 present: True
    : issuer acct in receipt == Minted.issuer:      True
 
    #+LATEX: }
@@ -819,9 +845,6 @@ VERIFICATION
    #+RESULTS:
    : flavor     mint gas  spend gas  mint prove  spend proves   receipts (dep / iss)
    : -------------------------------------------------------------------------------
-   : b1          520,944    751,313       0.94s         2.32s       VALID / VALID
-   : a1          520,908  1,083,066       1.07s        16.39s       VALID / VALID
-   : a2          650,915  1,076,632       0.96s        14.02s       VALID / VALID
 
    #+LATEX: }
 

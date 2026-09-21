@@ -32,6 +32,12 @@ pub fn receiving_leaf(m_rec: &W256, k_recv: &W256, salt: &W256) -> Result<W256> 
     notes::receiving_leaf(m_rec, k_recv, salt)
 }
 
+/// `mailbox_leaf(M, pk_recv, salt)` -- the payer's view of the same
+/// association, over the POINTS, so it needs no secret to check.
+pub fn mailbox_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
+    notes::mailbox_leaf(m_point, pk_recv, salt)
+}
+
 /// Sentinel for an empty leaf (depth-0 zero).
 pub const EMPTY_LEAF: W256 = ZERO_W;
 

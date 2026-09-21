@@ -492,6 +492,10 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
                         eIss:  Optional[ElGamalCiphertext] = None,
                         sigma_R=None, sigma_s: Optional[int] = None,
                         eDepForIss: Optional[ElGamalCiphertext] = None,
+                        pk_recv=None,
+                        r_note: Optional[int] = None,
+                        r_id: Optional[int] = None,
+                        binding: Optional[Dict[str, Any]] = None,
                         ) -> Dict[str, Any]:
     """The Identity-M-bound note payload — the idHash preimage material both
     Note parties hold, per flavor:
@@ -500,13 +504,34 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
       ``id_hash_b1(m_iss, sigma_R, sigma_s)``) plus, once spent, the
       ``SpentCoupledB1`` event's ``eDepForIss`` (the depositor's Identity
       encrypted under the public issuer's registered key).
-    * A1:  ``eNote`` (value under M_rec), ``eRec`` (recipient Identity under
-      itself), ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
-    * A2:  ``eNote`` and ``eIss`` (issuer Identity under M_rec) —
+    * A1:  ``eNote`` (the value), ``eRec`` (the recipient's own Identity),
+      ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
+    * A2:  ``eNote`` and ``eIss`` (the issuer's Identity) —
       ``id_hash_a2(eNote, eIss)``.
 
-    With the parties' identity preimages disclosed in the receipt, a verifier
-    derives ``m_iss``/``m_rec`` and re-checks every ciphertext directly.
+    The addressed flavours carry ``pk_recv``, the mailbox key their ciphertexts
+    are keyed to.  An earlier shape needed nothing of the kind, because those
+    ciphertexts were keyed to the recipient's identity POINT and any verifier
+    derived the matching scalar from the disclosed identity string -- which is
+    precisely the defect the receiving key removed: a naming that works for a
+    verifier works for a harvester.  So the receipt states the key and carries
+    evidence per role instead of a derivation that anyone can repeat:
+
+    * ``r_note`` / ``r_id`` -- the mint randomness, which only the ISSUER has.
+      Disclosing it lets any verifier recompute the ciphertexts and see what
+      they encrypt, under whose key.  It reveals nothing further: the receipt
+      already names both parties and the value, and the randomness of a spent
+      note is spent.
+    * ``vdNote`` / ``vdRec`` / ``vdIss`` -- verifiable decryptions under
+      ``pk_recv``, which only the RECIPIENT can produce.  These are
+      :func:`vd_proof_record` values and carry their own ciphertext and
+      plaintext.
+    * ``binding`` -- the holder-produced evidence that ``pk_recv`` is the
+      registered mailbox of the named Identity, as a mailbox-leaf path (see
+      :func:`alberta_buck.wallet.recvkey.prove_receiving_binding`).  An
+      issuer-side receipt needs it to name the recipient at all: the issuer can
+      show which MAILBOX it paid, and only the accumulator ties that mailbox to
+      a person.
     """
     d: Dict[str, Any] = {}
     if eNote is not None:
@@ -521,7 +546,31 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
         d["sigma_s"] = scalar_to_hex(sigma_s)
     if eDepForIss is not None:
         d["eDepForIss"] = _ct_hex(eDepForIss)
+    if pk_recv is not None:
+        d["pkRecv"] = _g1_hex(pk_recv)
+    if r_note is not None:
+        d["rNote"] = scalar_to_hex(r_note)
+    if r_id is not None:
+        d["rId"] = scalar_to_hex(r_id)
+    if binding is not None:
+        d["binding"] = binding
     return d
+
+
+def mailbox_binding_record(binding) -> Dict[str, Any]:
+    """Serialize a :class:`alberta_buck.wallet.recvkey.ReceivingBinding`.
+
+    ``pkRecv`` is NOT repeated here: it lives once in the note payload, so no
+    receipt can state two different keys and have a verifier pick the
+    convenient one.
+    """
+    return {
+        "salt":      scalar_to_hex(binding.salt),
+        "leaf":      scalar_to_hex(binding.path.leaf),
+        "siblings":  [scalar_to_hex(x) for x in binding.path.siblings],
+        "indexBits": list(binding.path.index_bits),
+        "root":      scalar_to_hex(binding.path.root),
+    }
 
 
 def schnorr_proof_record(issuer: int, pk_iss, h_batch: int, chainid: int,
@@ -574,6 +623,6 @@ __all__ = [
     "envelope_text", "parse_envelope", "receipt_id",
     "vd_proof_record", "cp_proof_record",
     "schnorr_proof_record", "receipts_proof_record",
-    "issuer_reenc_record", "note_payload_record",
+    "issuer_reenc_record", "note_payload_record", "mailbox_binding_record",
     "_canonical", "_g1_hex", "_ct_hex",
 ]

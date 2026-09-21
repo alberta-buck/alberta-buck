@@ -148,6 +148,55 @@ def receiving_leaf(m_rec: int, k_recv: int, salt: int) -> int:
     return poseidon([m_rec, k_recv, salt])
 
 
+def mailbox_leaf(M, pk_recv, salt: int) -> int:
+    """Compute Poseidon(M.x, M.y, pk_recv.x, pk_recv.y, salt) -- the PAYER's
+    view of the same association :func:`receiving_leaf` commits.
+
+    Two leaves for one fact, because it has two consumers that hold different
+    things, and neither leaf serves the other's consumer:
+
+      * The SPEND proves the association in zero knowledge, and the prover
+        holds the scalars, so :func:`receiving_leaf` commits ``(m_rec, k)`` and
+        costs one Poseidon.  Committing the points there would force the
+        circuit to re-derive them at 471,896 constraints apiece.
+      * A PAYER must check the association BEFORE paying, and holds no secret
+        at all -- only the two points, which it needs anyway: ``M_rec`` to name
+        the recipient in a receipt and ``pk_recv`` to address the note.  It
+        cannot open a scalar leaf without ``k``, and handing over ``k`` hands
+        over the mailbox, in both directions in time.  So the payer's leaf
+        commits the POINTS, and checking it is a hash and a path.
+
+    That is why this is a leaf and not a proof.  The alternative -- a circuit
+    proving the scalar leaf's preimage in zero knowledge -- costs a
+    fixed-base multiplication, a trusted setup and a Groth16 verifier inside
+    every receipt checker, to establish a fact that a fifth Poseidon input
+    establishes for free.  The scalar leaf stays exactly as it is, because the
+    gate's constraint budget is what forced it and this changes nothing there.
+
+    Distinct associations carry distinct salts (accumulator specification
+    section 8.3), so the salt a holder discloses to a payer here says nothing
+    about the salt its spend proves under.  A payer given this salt can locate
+    THIS leaf in the published subtree and nothing else: it learns that an
+    Identity it already knows has a mailbox key it was already given.
+
+    Args:
+        M: The Identity point.
+        pk_recv: The receiving key ``k*G``.
+        salt: The holder's blinding value for this association, in [1, F_R).
+
+    Returns:
+        Poseidon hash as a field element in [0, F_R).
+
+    Raises:
+        ValueError: if salt is outside [1, F_R).
+    """
+    if not isinstance(salt, int) or not (1 <= salt < F_R):
+        raise ValueError("salt must be in [1, F_R); 0 makes the leaf deterministic")
+    mx, my = point_to_words(M)
+    px, py = point_to_words(pk_recv)
+    return poseidon([mx % F_R, my % F_R, px % F_R, py % F_R, salt])
+
+
 # --- Tree depths ---------------------------------------------------------- #
 #
 # THREE depths, and they are meant to differ.  This has been mistaken for an
@@ -367,6 +416,25 @@ class IdentityMerkleTree:
         """
         return self.insert_leaf(receiving_leaf(m_rec, k_recv, salt))
 
+    def insert_mailbox(self, M, pk_recv, salt: int) -> int:
+        """Admit the PAYER's view of a receiving-key association.
+
+        The sibling of :meth:`insert_receiving`: the same association, committed
+        over the points so a payer with no secret can check it before paying
+        (:func:`mailbox_leaf`).  A holder that wants both consumers served
+        admits both leaves, under DIFFERENT salts.
+
+        Args:
+            M: The Identity point.
+            pk_recv: The receiving key.
+            salt: The holder's blinding value for this association -- NOT the
+                salt of the leaf its spend proves under.
+
+        Returns:
+            The leaf's index in the tree.
+        """
+        return self.insert_leaf(mailbox_leaf(M, pk_recv, salt))
+
     def clear_leaf(self, index: int) -> int:
         """Clear a leaf to EMPTY_LEAF: the revocation primitive.
 
@@ -562,5 +630,6 @@ __all__ = [
     "identity_leaf",
     "identity_leaf_salted",
     "receiving_leaf",
+    "mailbox_leaf",
     "EMPTY_LEAF",
 ]

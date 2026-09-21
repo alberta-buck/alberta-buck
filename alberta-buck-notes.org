@@ -542,6 +542,17 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
    does not open their mail, and it does not register accounts or
    authorize spends: only the PS credential \( \sigma \) does that.
 
+   That association is committed TWICE, and the duplication is the whole
+   point: the spend proves it in zero knowledge, where the prover holds the
+   scalars, while a payer must check it BEFORE paying, holding no secret at
+   all.  So a second leaf,
+   \( \mathrm{Poseidon}(M.x, M.y, pk_{\text{recv}}.x, pk_{\text{recv}}.y,
+   salt') \), commits the same fact over the two POINTS -- the two values a
+   payer has anyway -- and checking it is a hash and a path.  Under a
+   different salt, so the leaf a holder shows a payer does not locate the
+   leaf its spend proves under.  The alternative was handing the payer
+   \( k \), which is handing over the mailbox in both directions in time.
+
    *One naming relation, two gate shapes.*  Both halves of the handshake
    publish an ElGamal ciphertext of a registered Identity under a target
    key.  That is the relation the three flavours share.  The proof that

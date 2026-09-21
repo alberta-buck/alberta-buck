@@ -178,6 +178,26 @@ pub fn receiving_leaf(m_rec: &W256, k_recv: &W256, salt: &W256) -> Result<W256> 
     poseidon(&[*m_rec, *k_recv, *salt])
 }
 
+/// `mailbox_leaf(M, pk_recv, salt) = Poseidon([M.x, M.y, pk.x, pk.y, salt])`
+/// -- the PAYER's view of the association `receiving_leaf` commits.
+///
+/// Two leaves for one fact, because it has two consumers holding different
+/// things.  The spend proves the association in zero knowledge and the prover
+/// holds the scalars, so `receiving_leaf` commits them and costs one Poseidon.
+/// A payer must check the association BEFORE paying and holds no secret at all
+/// -- only the two points, which it needs anyway -- so its leaf commits the
+/// POINTS and checking it is a hash and a path.  Distinct associations carry
+/// distinct salts, so the salt a holder hands a payer does not locate the leaf
+/// its spend proves under.
+pub fn mailbox_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
+    if !salt_in_range(salt) {
+        return Err(IdError(
+            "salt must be in [1, F_R); 0 makes the leaf deterministic",
+        ));
+    }
+    poseidon(&[m_point.0, m_point.1, pk_recv.0, pk_recv.1, *salt])
+}
+
 /// `salt` is a field element in `[1, F_R)`.  Poseidon reduces its inputs
 /// mod `F_R`, so an out-of-range salt would alias onto an in-range one;
 /// refusing it here keeps the Python and Rust leaves byte-identical.

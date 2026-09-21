@@ -44,8 +44,11 @@ from alberta_buck.wallet.build_receipt import (
 )
 from alberta_buck.wallet.envelope import (
     serialize_core, deserialize_core, envelope_text, parse_envelope, receipt_id,
+    mailbox_binding_record,
 )
 from alberta_buck.wallet.verify_receipt import verify_receipt
+from alberta_buck.registry.tree import IdentityMerkleTree
+from alberta_buck.wallet.recvkey import prove_receiving_binding
 from alberta_buck.wallet.issuer import Issuer
 from alberta_buck.wallet.recvkey import receiving_key
 from alberta_buck.wallet.transcript import keccak_raw
@@ -353,8 +356,11 @@ def _build(seed: int) -> Dict[str, Any]:
     sigma_R_k, sigma_s, rho = draw(), draw(), draw()
     sigma_R = mul(G1, sigma_R_k)
     r_note, r_rec = draw(), draw()
-    eNote = elgamal_encrypt(mul(G1, FACE), alice["M"], r_note)
-    eRec = elgamal_encrypt(alice["M"], alice["M"], r_rec)
+    # Keyed to the MAILBOX, not to the Identity: encrypting an identity point
+    # under itself makes message and key share one secret, and one scalar
+    # multiplication per candidate identifies the recipient.
+    eNote = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
+    eRec = elgamal_encrypt(alice["M"], alice["pk_recv"], r_rec)
     idh = id_hash_a1(eNote, bob["m"], sigma_R, sigma_s)
     opening = NoteOpening(FLAVOR_A1, FACE, rho, idh, 0)
     cm = note_commitment(opening)
@@ -377,12 +383,20 @@ def _build(seed: int) -> Dict[str, Any]:
                    "r_rec": scalar_to_hex(r_rec),
                    "k_sig": scalar_to_hex(k_sig)},
     }
+    # The mailbox association, as the payer and the receipt verifier check it:
+    # a leaf over the two POINTS, so no secret is needed and none is disclosed.
+    mbx_salt = draw() % F_R or 1
+    mbx_tree = IdentityMerkleTree(depth=10, private=True)
+    mbx_tree.insert_mailbox(alice["M"], alice["pk_recv"], mbx_salt)
+    mbx = prove_receiving_binding(alice["M"], alice["pk_recv"], mbx_salt, mbx_tree)
     for role in ("recipient", "issuer"):
         nonces = {}
         if role == "recipient":
-            t_vd = draw()
-            nonces["t_vd"] = scalar_to_hex(t_vd)
-            rng_role = _replay([t_vd])
+            t_note, t_id, t_vd = draw(), draw(), draw()
+            nonces = {"t_note": scalar_to_hex(t_note),
+                      "t_id": scalar_to_hex(t_id),
+                      "t_vd": scalar_to_hex(t_vd)}
+            rng_role = _replay([t_note, t_id, t_vd])
         else:
             rng_role = _replay([])
         core = build_note_a1(
@@ -390,10 +404,16 @@ def _build(seed: int) -> Dict[str, Any]:
             eNote=eNote, eRec=eRec, sigma_R=sigma_R, sigma_s=sigma_s,
             nullifier=nf, face=FACE,
             role=role, payee_sk=alice["sk"],
+            pk_recv=alice["pk_recv"],
+            k_recv=(alice["k_recv"] if role == "recipient" else None),
+            r_note=(None if role == "recipient" else r_note),
+            r_id=(None if role == "recipient" else r_rec),
+            mailbox_binding=mbx,
             txhash="0x" + "a1" * 32, rng=rng_role,
             **party_kw, **txn_note)
         receipts.append({
             "kind": "note-a1", "role": role, "payer": "bob", "payee": "alice",
+            "mailboxBinding": mailbox_binding_record(mbx),
             "mint": a1_mint,
             "txn": {"txhash": "0x" + "a1" * 32, **txn_note},
             "nonces": nonces,
@@ -402,11 +422,11 @@ def _build(seed: int) -> Dict[str, Any]:
 
     # ---- note-a2 (both roles + the unbound row, over ONE mint) -------------
     rho, r_note = draw(), draw()
-    eNote = elgamal_encrypt(mul(G1, FACE), alice["M"], r_note)
+    eNote = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
     r_prime = draw()
-    eIss = elgamal_encrypt(bob["M"], alice["M"], r_prime)
+    eIss = elgamal_encrypt(bob["M"], alice["pk_recv"], r_prime)
     beta, gamma, k_r, k_b, k_s, k_g = (draw() for _ in range(6))
-    binding = issuer_reenc_prove(bob["sk"], r_prime, alice["M"], bob["E"],
+    binding = issuer_reenc_prove(bob["sk"], r_prime, alice["pk_recv"], bob["E"],
                                  eIss, bob["addr"], CHAINID,
                                  rng=_replay([k_r, k_b, k_s, k_g]),
                                  beta=beta, gamma=gamma)
@@ -432,27 +452,51 @@ def _build(seed: int) -> Dict[str, Any]:
         issuer_E_addr=bob["E"], opening=opening, cms=cms,
         eNote=eNote, eIss=eIss, nullifier=nf, face=FACE,
         payee_sk=alice["sk"], issuer_sk=bob["sk"],
+        pk_recv=alice["pk_recv"],
         txhash="0x" + "a2" * 32, **party_kw, **txn_note)
     for role in ("recipient", "issuer"):
-        t_vd = draw()
-        core = build_note_a2(binding=binding, role=role,
-                             rng=_replay([t_vd]), **a2_kw)
+        if role == "recipient":
+            t_note, t_id, t_vd = draw(), draw(), draw()
+            nonces = {"t_note": scalar_to_hex(t_note),
+                      "t_id": scalar_to_hex(t_id),
+                      "t_vd": scalar_to_hex(t_vd)}
+            rng_role = _replay([t_note, t_id, t_vd])
+        else:
+            t_vd = draw()
+            nonces = {"t_vd": scalar_to_hex(t_vd)}
+            rng_role = _replay([t_vd])
+        # A2's issuer row carries NO mailbox binding, deliberately: it pins the
+        # UNVERIFIED RECIPIENT banner, which is what an issuer-side receipt
+        # earns when nobody has tied the mailbox it paid to a person.
+        core = build_note_a2(
+            binding=binding, role=role, rng=rng_role,
+            k_recv=(alice["k_recv"] if role == "recipient" else None),
+            r_note=(None if role == "recipient" else r_note),
+            r_id=(None if role == "recipient" else r_prime),
+            mailbox_binding=(mbx if role == "recipient" else None),
+            **a2_kw)
         receipts.append({
             "kind": "note-a2", "role": role, "payer": "bob", "payee": "alice",
+            **({"mailboxBinding": mailbox_binding_record(mbx)}
+               if role == "recipient" else {}),
             "mint": a2_mint,
             "txn": {"txhash": "0x" + "a2" * 32, **txn_note},
-            "nonces": {"t_vd": scalar_to_hex(t_vd)},
+            "nonces": nonces,
             **_finish(core),
         })
     # UNVERIFIED ISSUER: the same mint without its binding.
-    t_vd = draw()
+    t_note, t_id, t_vd = draw(), draw(), draw()
     core = build_note_a2(binding=None, role="recipient",
-                         rng=_replay([t_vd]), **a2_kw)
+                         rng=_replay([t_note, t_id, t_vd]),
+                         k_recv=alice["k_recv"], mailbox_binding=mbx, **a2_kw)
     receipts.append({
         "kind": "note-a2-unbound", "role": "recipient",
         "payer": "bob", "payee": "alice", "mint": a2_mint,
+        "mailboxBinding": mailbox_binding_record(mbx),
         "txn": {"txhash": "0x" + "a2" * 32, **txn_note},
-        "nonces": {"t_vd": scalar_to_hex(t_vd)},
+        "nonces": {"t_note": scalar_to_hex(t_note),
+                   "t_id": scalar_to_hex(t_id),
+                   "t_vd": scalar_to_hex(t_vd)},
         **_finish(core),
     })
 

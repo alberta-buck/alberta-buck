@@ -10,7 +10,9 @@
 
 use serde_json::Value;
 
-use buck_identity::elgamal::elgamal_decrypt;
+use buck_identity::elgamal::elgamal_encrypt;
+use buck_identity::poseidon::poseidon;
+use buck_registry::tree::mailbox_leaf;
 use buck_identity::issuer_reenc::{issuer_reenc_verify, IssuerReencProof};
 use buck_identity::keccak::identity_scalar;
 use buck_identity::notes::{
@@ -20,9 +22,119 @@ use buck_identity::schnorr::{batch_commitment, issuer_schnorr_verify, SchnorrPro
 use buck_identity::verifiable_decrypt::{verifiable_decrypt_verify, VdProof};
 use buck_identity::{g1_generator, g1_mul};
 
-use crate::jsonv::{as_ct, get, get_ct, get_g1, get_opt, get_str, get_u128, get_w};
+use crate::jsonv::{as_ct, as_g1, get, get_ct, get_g1, get_opt, get_str, get_u128, get_w};
 use crate::receipt::RcptResult;
 use crate::{w_from_u128, Ctw, G1w, IdError, NoteOpening, Result, W256};
+
+/// What the generating side proved about the note's own ciphertexts.
+///
+/// Mirrors `verify_receipt.py::_check_addressed_legs`.  The addressed legs are
+/// keyed to a MAILBOX, not to an Identity, so no verifier derives the opening
+/// secret from a disclosed record any more -- which is the point -- and each
+/// side instead proves what only it can.
+#[allow(clippy::too_many_arguments)]
+fn check_addressed_legs(
+    t: &str,
+    np: &Value,
+    role: &str,
+    e_note: &Ctw,
+    e_id: &Ctw,
+    m_id: &G1w,
+    v: &W256,
+    payee_addr: &W256,
+    chainid: u128,
+) -> Result<Option<String>> {
+    let Some(pk_recv) = get_opt(np, "pkRecv") else {
+        return Ok(Some(format!("{t}: missing pkRecv")));
+    };
+    let pk_recv = as_g1(pk_recv)?;
+    let v_pt = g1_mul(&g1_generator(), v)?;
+    let chainid_w = w_from_u128(chainid);
+
+    if role == "recipient" {
+        let id_key = if t == "note-a1" { "vdRec" } else { "vdIss" };
+        for (key, e_expect, m_expect) in [
+            ("vdNote", e_note, &v_pt),
+            (id_key, e_id, m_id),
+        ] {
+            let Some(rec) = get_opt(np, key) else {
+                return Ok(Some(format!("{t}: recipient receipt needs {key}")));
+            };
+            let vd = vd_from_record(rec)?;
+            if vd.chainid != chainid || &vd.account != payee_addr {
+                return Ok(Some(format!("{t}: {key} context mismatch")));
+            }
+            if &vd.e_ct != e_expect {
+                return Ok(Some(format!("{t}: {key} is about a different ciphertext")));
+            }
+            if &vd.m_named != m_expect {
+                return Ok(Some(format!("{t}: {key} names the wrong plaintext")));
+            }
+            if !verifiable_decrypt_verify(
+                &vd.e_ct, &pk_recv, &vd.m_named, &vd.proof, &vd.account, &chainid_w,
+            )? {
+                return Ok(Some(format!("{t}: {key} does not verify under pkRecv")));
+            }
+        }
+        return Ok(None);
+    }
+
+    // Issuer side: it cannot open its own ciphertexts, but it chose their
+    // randomness, so it discloses it and any verifier recomputes them.
+    let (Some(rn), Some(ri)) = (get_opt(np, "rNote"), get_opt(np, "rId")) else {
+        return Ok(Some(format!(
+            "{t}: issuer receipt needs the mint randomness (rNote, rId)"
+        )));
+    };
+    let rn = crate::w_from_hex(rn.as_str().ok_or(IdError("rNote must be hex"))?)?;
+    let ri = crate::w_from_hex(ri.as_str().ok_or(IdError("rId must be hex"))?)?;
+    if elgamal_encrypt(&v_pt, &pk_recv, &rn)? != *e_note
+        || elgamal_encrypt(m_id, &pk_recv, &ri)? != *e_id
+    {
+        return Ok(Some(format!(
+            "{t}: the disclosed mint randomness does not produce these ciphertexts"
+        )));
+    }
+    Ok(None)
+}
+
+/// The mailbox leaf, when the receipt carries one: a Poseidon and a path over
+/// the two POINTS, checkable with no secret.  Mirrors
+/// `verify_receipt.py::_check_mailbox_binding`.
+fn check_mailbox_binding(np: &Value, m_rec: &G1w) -> Result<Option<String>> {
+    let Some(b) = get_opt(np, "binding") else {
+        return Ok(None);
+    };
+    let pk_recv = as_g1(get(np, "pkRecv")?)?;
+    let leaf = mailbox_leaf(m_rec, &pk_recv, &get_w(b, "salt")?)?;
+    if leaf != get_w(b, "leaf")? {
+        return Ok(Some(
+            "mailbox binding: leaf does not commit (M_rec, pkRecv, salt)".into(),
+        ));
+    }
+    let sibs = get(b, "siblings")?
+        .as_array()
+        .ok_or(IdError("mailbox binding: siblings must be an array"))?;
+    let bits = get(b, "indexBits")?
+        .as_array()
+        .ok_or(IdError("mailbox binding: indexBits must be an array"))?;
+    let mut cur = leaf;
+    for (sib, bit) in sibs.iter().zip(bits.iter()) {
+        let sib = crate::w_from_hex(sib.as_str().ok_or(IdError("sibling must be hex"))?)?;
+        let left_right = bit.as_u64().unwrap_or(0);
+        cur = if left_right == 0 {
+            poseidon(&[cur, sib])?
+        } else {
+            poseidon(&[sib, cur])?
+        };
+    }
+    if cur != get_w(b, "root")? {
+        return Ok(Some(
+            "mailbox binding: path does not fold to the stated root".into(),
+        ));
+    }
+    Ok(None)
+}
 
 /// `M' = keccak(identity) * G == M`.
 fn check_point_identity(m_pt: &G1w, identity: &str) -> Result<bool> {
@@ -258,7 +370,10 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
 
         // Identity scalars, derivable by ANY verifier.
         let m_iss = identity_scalar(payer.identity.as_bytes());
-        let m_rec = identity_scalar(payee.identity.as_bytes());
+        // The payee's identity scalar is deliberately NOT derived here.  It
+        // used to be, and used to open the addressed ciphertexts -- a naming
+        // procedure available to anyone who had ever seen a receipt, which is
+        // the harvesting defect stated as a feature.
 
         // (b) Identity-M idHash preimage; (A-flavors) addressed legs.
         let mut e_iss_a2: Option<Ctw> = None;
@@ -280,16 +395,14 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
                     "note-a1: idHash != id_hash_a1(eNote, m_iss, sigma)",
                 ));
             }
-            let v_pt = g1_mul(&g1_generator(), &opening.v)?;
-            if elgamal_decrypt(&e_note.0, &e_note.1, &m_rec)? != v_pt {
-                return Ok(RcptResult::fail(
-                    "note-a1: eNote does not decrypt to v·G under m_rec",
-                ));
+            if let Some(e) = check_addressed_legs(
+                "note-a1", np, role.as_str(), &e_note, &e_rec, &payee.m_pt, &opening.v,
+                &payee.addr, chainid,
+            )? {
+                return Ok(RcptResult::fail(e));
             }
-            if elgamal_decrypt(&e_rec.0, &e_rec.1, &m_rec)? != payee.m_pt {
-                return Ok(RcptResult::fail(
-                    "note-a1: eRec does not decrypt to M_rec under m_rec",
-                ));
+            if let Some(e) = check_mailbox_binding(np, &payee.m_pt)? {
+                return Ok(RcptResult::fail(format!("note-a1: {e}")));
             }
         } else {
             let e_note = get_ct(np, "eNote")?;
@@ -299,16 +412,14 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
                     "note-a2: idHash != id_hash_a2(eNote, eIss)",
                 ));
             }
-            let v_pt = g1_mul(&g1_generator(), &opening.v)?;
-            if elgamal_decrypt(&e_note.0, &e_note.1, &m_rec)? != v_pt {
-                return Ok(RcptResult::fail(
-                    "note-a2: eNote does not decrypt to v·G under m_rec",
-                ));
+            if let Some(e) = check_addressed_legs(
+                "note-a2", np, role.as_str(), &e_note, &e_iss, &payer.m_pt, &opening.v,
+                &payee.addr, chainid,
+            )? {
+                return Ok(RcptResult::fail(e));
             }
-            if elgamal_decrypt(&e_iss.0, &e_iss.1, &m_rec)? != payer.m_pt {
-                return Ok(RcptResult::fail(
-                    "note-a2: eIss does not decrypt to issuer M under m_rec",
-                ));
+            if let Some(e) = check_mailbox_binding(np, &payee.m_pt)? {
+                return Ok(RcptResult::fail(format!("note-a2: {e}")));
             }
             e_iss_a2 = Some(e_iss);
         }
@@ -412,11 +523,24 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
         return Ok(RcptResult::fail(format!("unknown receipt type: {t}")));
     }
 
-    let status = if t == "note-a2" && a2_unbound {
-        "UNVERIFIED ISSUER"
+    let mut flags: Vec<&str> = Vec::new();
+    if t == "note-a2" && a2_unbound {
+        flags.push("UNVERIFIED ISSUER");
+    }
+    if (t == "note-a1" || t == "note-a2")
+        && role == "issuer"
+        && get_opt(get(core, "note")?, "binding").is_none()
+    {
+        // The issuer proved which MAILBOX it paid.  Only the accumulator ties a
+        // mailbox to a person, and that evidence is the recipient's to give.
+        flags.push("UNVERIFIED RECIPIENT");
+    }
+    let status_owned = if flags.is_empty() {
+        "VALID".to_string()
     } else {
-        "VALID"
+        flags.join(" + ")
     };
+    let status = status_owned.as_str();
     let txn_value = get_u128(get(core, "txn")?, "value")?;
     Ok(RcptResult {
         ok: true,

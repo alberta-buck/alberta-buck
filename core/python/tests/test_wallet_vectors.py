@@ -91,6 +91,19 @@ def _receipt_args(wv, row):
             args["eIss"] = mint["eIss"]
             if kind == "note-a2":
                 args["binding"] = mint["binding"]
+        if kind.startswith("note-a1") or kind.startswith("note-a2"):
+            # The addressed legs: the mailbox key, and whichever evidence the
+            # generating role could produce.  The recipient holds k; the issuer
+            # holds the randomness it encrypted with.
+            alice = wv["parties"][row["payee"]]
+            args["pk_recv"] = alice["pk_recv"]
+            args["mailbox_binding"] = row.get("mailboxBinding")
+            if row["role"] == "recipient":
+                args["k_recv"] = alice["k_recv"]
+            else:
+                args["r_note"] = mint["nonces"]["r_note"]
+                args["r_id"] = mint["nonces"][
+                    "r_rec" if kind == "note-a1" else "r_prime"]
     return args
 
 

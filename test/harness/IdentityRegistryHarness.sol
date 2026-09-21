@@ -63,4 +63,20 @@ contract IdentityRegistryHarness is IdentityRegistry {
             identityRoot = newRoot;
         }
     }
+
+    /// @notice Admit one leaf that is an ASSOCIATION rather than an account
+    ///         binding -- a mailbox leaf, say, which commits an Identity and
+    ///         the receiving key its Notes are addressed to.  Such leaves have
+    ///         no address of their own, so they cannot arrive through a bind.
+    ///
+    ///         On a deployment they arrive the way every leaf does: the
+    ///         organisation admits them to its subtree and governance posts the
+    ///         composed root.  The harness inserts them directly only so a
+    ///         fixture's tree can be replayed incrementally on chain.
+    function fixtureInsertLeaf(uint256 leaf) external {
+        require(leaf != 0, "zero leaf");
+        uint256 newRoot = _insertIdentityLeaf(leaf);
+        emit IdentityRootUpdated(identityRoot, newRoot);
+        identityRoot = newRoot;
+    }
 }

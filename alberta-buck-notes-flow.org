@@ -2827,16 +2827,31 @@ adapter is the membership slot.  What is actually in the tree:
    nullifier from the \( idHash \) they open, so the ciphertext they
    check is this note's.
 
+5. *The receipt names by evidence, not by derivation.*  The canonical
+   AB-RCPT verifier no longer derives the payee's identity scalar and
+   decrypts the addressed ciphertexts with it: that procedure worked for
+   anyone who had ever seen a receipt.  The recipient proves by verifiable
+   decryption under \( pk_{\text{recv}} \); the issuer, which cannot open
+   its own ciphertexts, discloses the mint randomness instead; and the
+   mailbox leaf ties that key to the named Identity with a Poseidon and a
+   path.  An issuer-side receipt without it prints *UNVERIFIED RECIPIENT*.
+6. *The payload's scalars are wrapped to the mailbox key.*  A delivery must
+   carry \( r' \) (the fold needs the SCALAR \( r'k \), which the point
+   \( k R \) does not give) and, for A2, the issuer's naming salt.  In the
+   clear each undoes the encryption it travels beside -- \( r' \) turns
+   \( eIss \) into plaintext, the salt turns the issuer's naming leaf into a
+   scannable one.  Both travel masked by
+   \( \mathrm{keccak}(\mathtt{WRAP\_DOMAIN} \| \mathit{field} \| S) \), with
+   \( S = r' \cdot pk_{\text{recv}} = k \cdot R \): Diffie-Hellman, so only
+   the addressee unwraps, and the minter needs no round trip to wrap.  One
+   mask per field, because one pad over two scalars leaks their difference.
+
 The end-to-end test spends all three flavours through those gates, with
-dev-entropy setups.  A production ceremony has not been run.  Two things
-the architecture describes are not yet what a wallet delivers: the
-canonical AB-RCPT verifier still decrypts A1 and A2 under
-\( m_{\text{rec}} \), and the payer's binding evidence discloses
-\( k \) instead of proving the binding.  And one thing the architecture
-does not yet say: an A2 issuer can key its ciphertext so that the mint
-binding names one registered Identity and the recipient's key opens it to
-another, which =doc/review/notes-receiving-key.org= section 4.6 records
-along with the closure.
+dev-entropy setups.  A production ceremony has not been run.  And one thing
+the architecture does not yet enforce: an A2 issuer can key its ciphertext so
+that the mint binding names one registered Identity and the recipient's key
+opens it to another, which =doc/review/notes-receiving-key.org= section 4.6
+records along with the closure.
 
 Additional items tracked across the series:
 

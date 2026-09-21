@@ -36,7 +36,7 @@ import json
 import random
 from typing import List, Optional, Tuple
 
-from alberta_buck.wallet.bn254 import rand_scalar, scalar_to_hex
+from alberta_buck.wallet.bn254 import G1, mul, rand_scalar, scalar_to_hex
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.chaum_pedersen import CPProof
 from alberta_buck.wallet.verifiable_decrypt import VDProof, verifiable_decrypt_prove
@@ -48,6 +48,7 @@ from alberta_buck.wallet.envelope import (
     deserialize_core,
     vd_proof_record, cp_proof_record,
     receipts_proof_record, issuer_reenc_record, note_payload_record,
+    mailbox_binding_record,
 )
 from alberta_buck.wallet._kernel import kernel_wallet as _kernel_wallet
 
@@ -122,6 +123,50 @@ def _self_vd(E_own: ElGamalCiphertext, sk_own: int, M_own,
     """Self-naming — prove one's own registered E_addr decrypts to one's M."""
     vd = verifiable_decrypt_prove(E_own, sk_own, M_own, own_addr, chainid, rng=rng)
     return vd_proof_record(E_own, M_own, own_addr, chainid, vd)
+
+
+def _note_legs(role: str, flavor: str, *, eNote, eId, pk_recv, k_recv,
+               r_note, r_id, mailbox_binding, v, M_id, payee_addr, chainid,
+               rng) -> dict:
+    """The addressed flavours' evidence about their own ciphertexts.
+
+    The receipt used to need none: the ciphertexts were keyed to the
+    recipient's identity POINT, so any verifier derived the scalar from the
+    disclosed identity string and decrypted them.  That is the harvesting
+    defect stated as a feature -- a naming procedure available to every party
+    that has ever been shown a receipt.  Keyed to a mailbox key instead, the
+    ciphertexts open for exactly two parties, and each proves it differently:
+
+      recipient  holds k, so it produces verifiable decryptions under pk_recv
+      issuer     holds the randomness, so it discloses it and any verifier
+                 recomputes the ciphertexts
+
+    Neither can produce the other's evidence, which is what makes a receipt
+    evidence of a payment rather than of a computation anyone could repeat.
+    """
+    d = {"pk_recv": pk_recv}
+    id_key = "vdRec" if flavor == "a1" else "vdIss"
+    if role == "recipient":
+        if k_recv is None:
+            raise ValueError(f"note-{flavor} recipient receipt needs k_recv")
+        vd_note = verifiable_decrypt_prove(eNote, k_recv, mul(G1, v),
+                                           payee_addr, chainid, rng=rng)
+        vd_id = verifiable_decrypt_prove(eId, k_recv, M_id,
+                                         payee_addr, chainid, rng=rng)
+        d["vd"] = {
+            "vdNote": vd_proof_record(eNote, mul(G1, v), payee_addr, chainid, vd_note),
+            id_key:   vd_proof_record(eId, M_id, payee_addr, chainid, vd_id),
+        }
+    else:
+        if r_note is None or r_id is None:
+            raise ValueError(
+                f"note-{flavor} issuer receipt needs the mint randomness "
+                "(r_note, r_id): it cannot open its own ciphertexts")
+        d["r_note"] = r_note
+        d["r_id"] = r_id
+    if mailbox_binding is not None:
+        d["binding"] = mailbox_binding_record(mailbox_binding)
+    return d
 
 
 def _check_role(role: str) -> None:
@@ -384,6 +429,14 @@ def build_note_a1(
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,
     mint_txhash: str, mint_block: int,
+    # The mailbox the note is addressed to, and the evidence about it each side
+    # can produce (see _note_legs).  `mailbox_binding` ties pk_recv to the
+    # named Identity; without it an issuer-side receipt names a mailbox, not a
+    # person.
+    pk_recv=None,
+    k_recv: Optional[int] = None,
+    r_note: Optional[int] = None, r_id: Optional[int] = None,
+    mailbox_binding=None,
     # Generating side
     role: str = "recipient",
     payee_sk: Optional[int] = None, payee_E_addr: Optional[ElGamalCiphertext] = None,
@@ -395,15 +448,23 @@ def build_note_a1(
     either party's side.
 
     Both namings are deterministic from the payload + disclosed preimages:
-    ``opening.id_hash`` recomputes as ``id_hash_a1(eNote, m_iss, sigma_R,
-    sigma_s)`` (issuer bound into the leaf, batch Schnorr over keccak(cms));
-    ``eNote`` decrypts under the derivable ``m_rec`` to ``v*G`` and ``eRec``
-    to ``M_rec`` (recipient bound into the leaf).  An issuer-generated A1
-    receipt therefore needs no party proof at all; a recipient-generated one
-    adds the payee's self-naming ``payee_vd`` (the account ↔ Identity tie).
+    The issuer's naming is deterministic: ``opening.id_hash`` recomputes as
+    ``id_hash_a1(eNote, m_iss, sigma_R, sigma_s)``, with the batch Schnorr over
+    keccak(cms).  The recipient's is not, and must not be: the note's
+    ciphertexts are keyed to ``pk_recv``, so a verifier cannot open them and a
+    harvester cannot either.  Each side instead proves what it can -- the
+    recipient by verifiable decryption under ``pk_recv``, the issuer by
+    disclosing the mint randomness -- and the mailbox binding ties that key to
+    the named Identity.  A recipient-generated receipt also carries the payee's
+    self-naming ``payee_vd`` (the account <-> Identity tie).
     """
     _check_role(role)
     rng = rng or _rng()
+    # Drawn in consumption order, before branching, so the kernel and the
+    # reference emit identical bytes: the two note-leg proofs, then the
+    # self-naming one.
+    t_note = rand_scalar(rng) if role == "recipient" else None
+    t_id = rand_scalar(rng) if role == "recipient" else None
     t_vd = rand_scalar(rng) if role == "recipient" else None
     k = _kernel_wallet()
     if k is not None:
@@ -418,18 +479,36 @@ def build_note_a1(
             "issuer_sig": _args_schnorr(issuer_sig),
             "eNote": _ct_hex(eNote), "eRec": _ct_hex(eRec),
             "sigma_R": _g1_hex(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
+            "pk_recv": _g1_hex(pk_recv),
+            "k_recv": (scalar_to_hex(k_recv) if k_recv is not None else None),
+            "r_note": (scalar_to_hex(r_note) if r_note is not None else None),
+            "r_id": (scalar_to_hex(r_id) if r_id is not None else None),
+            "mailbox_binding": (mailbox_binding_record(mailbox_binding)
+                                if mailbox_binding is not None else None),
             "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
             "txn": {"value": value, "block_time": block_time, "txhash": txhash,
                     "block": block, "logindex": logindex,
                     "mint_txhash": mint_txhash, "mint_block": mint_block},
             "notes": notes,
-            "nonces": ({"t_vd": scalar_to_hex(t_vd)} if t_vd is not None else {}),
+            "nonces": ({"t_note": scalar_to_hex(t_note),
+                        "t_id": scalar_to_hex(t_id),
+                        "t_vd": scalar_to_hex(t_vd)} if t_vd is not None else {}),
         })
-    rng = _replay([t_vd] if t_vd is not None else [])
+    rng = _replay([t_note, t_id, t_vd] if t_vd is not None else [])
 
     rec_proof = receipts_proof_record(opening, cms, issuer_sig, nullifier, face)
+    legs = _note_legs(role, "a1", eNote=eNote, eId=eRec, pk_recv=pk_recv,
+                      k_recv=k_recv, r_note=r_note, r_id=r_id,
+                      mailbox_binding=mailbox_binding, v=opening.v,
+                      M_id=payee_M, payee_addr=payee_addr, chainid=chainid,
+                      rng=rng)
     payload = note_payload_record(eNote=eNote, eRec=eRec,
-                                  sigma_R=sigma_R, sigma_s=sigma_s)
+                                  sigma_R=sigma_R, sigma_s=sigma_s,
+                                  pk_recv=legs["pk_recv"],
+                                  r_note=legs.get("r_note"), r_id=legs.get("r_id"),
+                                  binding=legs.get("binding"))
+    if "vd" in legs:
+        payload.update(legs["vd"])
 
     payee_vd_rec = None
     if role == "recipient":
@@ -475,6 +554,11 @@ def build_note_a2(
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,
     mint_txhash: str, mint_block: int,
+    # The mailbox and the per-role evidence about it (see _note_legs).
+    pk_recv=None,
+    k_recv: Optional[int] = None,
+    r_note: Optional[int] = None, r_id: Optional[int] = None,
+    mailbox_binding=None,
     # Issuer binding (shipped with the note / verified at mint): the blinded A2
     # re-encryption proof.  When present the receipt is soundly bound; when
     # None it falls back to UNVERIFIED ISSUER.
@@ -490,17 +574,22 @@ def build_note_a2(
     """Build a note-a2 receipt (addressed note from a *private* issuer), from
     either party's side.
 
-    The note legs are deterministic from the payload + disclosed preimages:
-    ``opening.id_hash`` recomputes as ``id_hash_a2(eNote, eIss)``; ``eNote``
-    decrypts under the derivable ``m_rec`` to ``v*G`` and ``eIss`` to the
-    named issuer ``M_iss`` (which forces eIss's key to be M_rec — the
-    coupling); the ``binding`` proves ``eIss`` re-encrypts the issuer's
-    *registered* credential (anti-framing), so the named issuer is the true
-    minter.  Self-naming: role="recipient" — ``payee_vd``; role="issuer" —
-    ``payer_vd`` (the private issuer's own registered credential).
+    ``opening.id_hash`` recomputes as ``id_hash_a2(eNote, eIss)``, and the
+    ``binding`` proves ``eIss`` re-encrypts the issuer's *registered*
+    credential (anti-framing).  What ``eIss`` decrypts to is established by the
+    side that can: the recipient by verifiable decryption under ``pk_recv``,
+    the issuer by disclosing the mint randomness.  Self-naming:
+    role="recipient" -- ``payee_vd``; role="issuer" -- ``payer_vd``.
+
+    A2's named issuer is the point the recipient's key opens ``eIss`` to.  That
+    is not yet the same as the plaintext the mint binding opened -- see
+    doc/review/notes-receiving-key.org section 4.6 -- so an A2 receipt names
+    the issuer the ciphertext yields, which an honest minter makes its own.
     """
     _check_role(role)
     rng = rng or _rng()
+    t_note = rand_scalar(rng) if role == "recipient" else None
+    t_id = rand_scalar(rng) if role == "recipient" else None
     t_vd = rand_scalar(rng)
     k = _kernel_wallet()
     if k is not None:
@@ -514,18 +603,37 @@ def build_note_a2(
             "opening": _args_opening(opening),
             "cms": [scalar_to_hex(c) for c in cms],
             "eNote": _ct_hex(eNote), "eIss": _ct_hex(eIss),
+            "pk_recv": _g1_hex(pk_recv),
+            "k_recv": (scalar_to_hex(k_recv) if k_recv is not None else None),
+            "r_note": (scalar_to_hex(r_note) if r_note is not None else None),
+            "r_id": (scalar_to_hex(r_id) if r_id is not None else None),
+            "mailbox_binding": (mailbox_binding_record(mailbox_binding)
+                                if mailbox_binding is not None else None),
             "binding": issuer_reenc_record(binding) if binding is not None else None,
             "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
             "txn": {"value": value, "block_time": block_time, "txhash": txhash,
                     "block": block, "logindex": logindex,
                     "mint_txhash": mint_txhash, "mint_block": mint_block},
             "notes": notes,
-            "nonces": {"t_vd": scalar_to_hex(t_vd)},
+            "nonces": ({"t_note": scalar_to_hex(t_note),
+                        "t_id": scalar_to_hex(t_id),
+                        "t_vd": scalar_to_hex(t_vd)} if t_note is not None
+                       else {"t_vd": scalar_to_hex(t_vd)}),
         })
-    rng = _replay([t_vd])
+    rng = _replay([t_note, t_id, t_vd] if t_note is not None else [t_vd])
 
     rec_proof = receipts_proof_record(opening, cms, None, nullifier, face)
-    payload = note_payload_record(eNote=eNote, eIss=eIss)
+    legs = _note_legs(role, "a2", eNote=eNote, eId=eIss, pk_recv=pk_recv,
+                      k_recv=k_recv, r_note=r_note, r_id=r_id,
+                      mailbox_binding=mailbox_binding, v=opening.v,
+                      M_id=issuer_M, payee_addr=payee_addr, chainid=chainid,
+                      rng=rng)
+    payload = note_payload_record(eNote=eNote, eIss=eIss,
+                                  pk_recv=legs["pk_recv"],
+                                  r_note=legs.get("r_note"), r_id=legs.get("r_id"),
+                                  binding=legs.get("binding"))
+    if "vd" in legs:
+        payload.update(legs["vd"])
 
     payee_vd_rec = None
     payer_vd_rec = None

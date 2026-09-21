@@ -18,6 +18,7 @@ use buck_identity::chaum_pedersen::CpProof;
 use buck_identity::issuer_reenc::IssuerReencProof;
 use buck_identity::schnorr::SchnorrProof;
 use buck_identity::verifiable_decrypt::{verifiable_decrypt_prove, VdProof};
+use buck_identity::{g1_generator, g1_mul};
 
 use crate::{scalar_hex, w_from_u64, Ctw, G1w, IdError, NoteOpening, Result, W256};
 
@@ -114,6 +115,7 @@ pub fn issuer_reenc_record(proof: &IssuerReencProof) -> Value {
 }
 
 /// The Identity-M-bound note payload (idHash preimage material).
+#[allow(clippy::too_many_arguments)]
 pub fn note_payload_record(
     e_note: Option<&Ctw>,
     e_rec: Option<&Ctw>,
@@ -121,6 +123,10 @@ pub fn note_payload_record(
     sigma_r: Option<&G1w>,
     sigma_s: Option<&W256>,
     e_dep_for_iss: Option<&Ctw>,
+    pk_recv: Option<&G1w>,
+    r_note: Option<&W256>,
+    r_id: Option<&W256>,
+    binding: Option<&Value>,
 ) -> Value {
     let mut d = Map::new();
     if let Some(e) = e_note {
@@ -141,7 +147,75 @@ pub fn note_payload_record(
     if let Some(e) = e_dep_for_iss {
         d.insert("eDepForIss".into(), ct_hex(e));
     }
+    if let Some(p) = pk_recv {
+        d.insert("pkRecv".into(), g1_hex(p));
+    }
+    if let Some(r) = r_note {
+        d.insert("rNote".into(), Value::String(scalar_hex(r)));
+    }
+    if let Some(r) = r_id {
+        d.insert("rId".into(), Value::String(scalar_hex(r)));
+    }
+    if let Some(b) = binding {
+        d.insert("binding".into(), b.clone());
+    }
     Value::Object(d)
+}
+
+/// The addressed flavours' per-role evidence about their own ciphertexts.
+///
+/// Mirrors `alberta_buck/wallet/build_receipt.py::_note_legs`.  The recipient
+/// holds `k` and proves by verifiable decryption under `pk_recv`; the issuer
+/// holds the randomness it encrypted with and discloses it.  Neither can
+/// produce the other's evidence, which is what makes a receipt evidence of a
+/// payment rather than of a computation any verifier could repeat.
+pub struct AddressedLegs<'a> {
+    pub pk_recv: &'a G1w,
+    pub k_recv: Option<&'a W256>,
+    pub r_note: Option<&'a W256>,
+    pub r_id: Option<&'a W256>,
+    pub binding: Option<&'a Value>,
+    pub t_note: Option<&'a W256>,
+    pub t_id: Option<&'a W256>,
+}
+
+/// Returns `(r_note, r_id, vd_note, vd_id)` for the payload record: the first
+/// two set on the issuer side, the last two on the recipient side.
+#[allow(clippy::type_complexity)]
+fn note_legs(
+    role: &str,
+    flavor: &str,
+    legs: &AddressedLegs,
+    e_note: &Ctw,
+    e_id: &Ctw,
+    m_id: &G1w,
+    v: &W256,
+    payee_addr: &W256,
+    chainid: u64,
+) -> Result<(Option<W256>, Option<W256>, Option<Value>, Option<Value>)> {
+    if role == "recipient" {
+        let (Some(k), Some(tn), Some(ti)) = (legs.k_recv, legs.t_note, legs.t_id) else {
+            return Err(IdError("addressed recipient receipt needs k_recv"));
+        };
+        let v_pt = g1_mul(&g1_generator(), v)?;
+        let cid = w_from_u64(chainid);
+        let p_note = verifiable_decrypt_prove(e_note, k, &v_pt, payee_addr, &cid, tn)?;
+        let p_id = verifiable_decrypt_prove(e_id, k, m_id, payee_addr, &cid, ti)?;
+        Ok((
+            None,
+            None,
+            Some(vd_proof_record(e_note, &v_pt, payee_addr, chainid, &p_note)),
+            Some(vd_proof_record(e_id, m_id, payee_addr, chainid, &p_id)),
+        ))
+    } else {
+        let (Some(rn), Some(ri)) = (legs.r_note, legs.r_id) else {
+            return Err(IdError(
+                "addressed issuer receipt needs the mint randomness (r_note, r_id)",
+            ));
+        };
+        let _ = flavor;
+        Ok((Some(rn.clone()), Some(ri.clone()), None, None))
+    }
 }
 
 /// The Note opening/anchor record (`issuer_sig` present for B1/A1).
@@ -476,7 +550,18 @@ pub fn build_note_b1(
     check_role(role)?;
 
     let rec_proof = receipts_proof_record(opening, cms, Some(issuer_sig), nullifier, face);
-    let payload = note_payload_record(None, None, None, Some(sigma_r), Some(sigma_s), e_dep_for_iss);
+    let payload = note_payload_record(
+        None,
+        None,
+        None,
+        Some(sigma_r),
+        Some(sigma_s),
+        e_dep_for_iss,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let mut payee_vd_rec = None;
     let mut vd_payee_rec = None;
@@ -578,18 +663,31 @@ pub fn build_note_a1(
     payee_e_addr: Option<&Ctw>,
     notes: Option<&[String]>,
     t_vd: Option<&W256>,
+    legs: &AddressedLegs,
 ) -> Result<Value> {
     check_role(role)?;
 
     let rec_proof = receipts_proof_record(opening, cms, Some(issuer_sig), nullifier, face);
-    let payload = note_payload_record(
+    let (r_note, r_id, vd_note, vd_id) = note_legs(
+        role, "a1", legs, e_note, e_rec, payee_m, &opening.v, payee_addr, chainid,
+    )?;
+    let mut payload = note_payload_record(
         Some(e_note),
         Some(e_rec),
         None,
         Some(sigma_r),
         Some(sigma_s),
         None,
+        Some(legs.pk_recv),
+        r_note.as_ref(),
+        r_id.as_ref(),
+        legs.binding,
     );
+    if let (Some(n), Some(i)) = (vd_note, vd_id) {
+        let obj = payload.as_object_mut().ok_or(IdError("payload"))?;
+        obj.insert("vdNote".into(), n);
+        obj.insert("vdRec".into(), i);
+    }
 
     let mut payee_vd_rec = None;
     if role == "recipient" {
@@ -675,11 +773,31 @@ pub fn build_note_a2(
     issuer_sk: Option<&W256>,
     notes: Option<&[String]>,
     t_vd: &W256,
+    legs: &AddressedLegs,
 ) -> Result<Value> {
     check_role(role)?;
 
     let rec_proof = receipts_proof_record(opening, cms, None, nullifier, face);
-    let payload = note_payload_record(Some(e_note), None, Some(e_iss), None, None, None);
+    let (r_note, r_id, vd_note, vd_id) = note_legs(
+        role, "a2", legs, e_note, e_iss, issuer_m, &opening.v, payee_addr, chainid,
+    )?;
+    let mut payload = note_payload_record(
+        Some(e_note),
+        None,
+        Some(e_iss),
+        None,
+        None,
+        None,
+        Some(legs.pk_recv),
+        r_note.as_ref(),
+        r_id.as_ref(),
+        legs.binding,
+    );
+    if let (Some(n), Some(i)) = (vd_note, vd_id) {
+        let obj = payload.as_object_mut().ok_or(IdError("payload"))?;
+        obj.insert("vdNote".into(), n);
+        obj.insert("vdIss".into(), i);
+    }
 
     let mut payee_vd_rec = None;
     let mut payer_vd_rec = None;

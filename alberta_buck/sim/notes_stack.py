@@ -175,6 +175,28 @@ class E2EFixture:
             out["eDepForIss"] = _ct(self.raw["sigma"]["eDepForIss"])
         return out
 
+    def mailbox_binding(self):
+        """The recipient's holder-produced evidence, as a wallet object.
+
+        None for B1: a bearer note is addressed to nobody, so there is no
+        mailbox to bind.
+        """
+        b = self.raw.get("mailboxBinding")
+        if b is None:
+            return None
+        from alberta_buck.registry.tree import MembershipProof
+        from alberta_buck.wallet.recvkey import ReceivingBinding
+        return ReceivingBinding(
+            pk_recv=_pt(self.raw["parties"]["depositor"]["pkRecv"]),
+            salt=int(b["salt"]),
+            path=MembershipProof(
+                leaf=int(b["leaf"]),
+                siblings=[int(x) for x in b["siblings"]],
+                index_bits=[int(x) for x in b["indexBits"]],
+                root=int(b["root"]), leaf_index=0,
+            ),
+        )
+
     # -- receipts ------------------------------------------------------------
 
     def build_receipt(self, role: str, contracts: Dict[str, str],
@@ -204,6 +226,26 @@ class E2EFixture:
         )
         if role == "recipient":
             kw["payee_sk"] = dep.sk
+
+        if self.flavor != "b1":
+            # The addressed legs: the mailbox key, and whichever evidence about
+            # it this side can produce.  The recipient holds k; the issuer holds
+            # the randomness it encrypted with.  Neither holds the other's, and
+            # that is what makes the receipt evidence.
+            dp = self.raw["parties"]["depositor"]
+            kw["pk_recv"] = _pt(dp["pkRecv"])
+            kw["mailbox_binding"] = self.mailbox_binding()
+            if role == "recipient":
+                kw["k_recv"] = int(dp["kRecv"])
+            else:
+                # The minter's retained randomness -- not the payload's wrapped
+                # copy, which only the mailbox holder can open.  A1's identity
+                # ciphertext is eRec (randomness r'); A2's is eIss (also r').
+                # eNote carries the value under r_note in both flavours; the
+                # identity ciphertext (A1's eRec, A2's eIss) carries r'.
+                sec = self.raw["issuerSecrets"]
+                kw["r_note"] = int(sec["rNote"])
+                kw["r_id"] = int(sec["rPrime"])
 
         if self.flavor == "b1":
             return build_note_b1(

@@ -60,27 +60,16 @@ def fx(request):
 def test_fixture_receipt_verifies(fx, role):
     """The AB-RCPT/1 receipt over the real-proof world.
 
-    ADDRESSED FLAVOURS ARE PENDING, and the reason is architectural rather
-    than incidental.  This verifier re-derives the identity scalar from the
-    payee's canonical KYC preimage and decrypts the note's ciphertexts with
-    it.  Addressed notes are now keyed to the recipient's RECEIVING key, and
-    that secret is deliberately not derivable from any identity -- which is
-    the whole point of separating them, and which no amount of preimage buys
-    back.
+    The addressed flavours no longer name the recipient by decrypting with a
+    derived identity scalar, because that procedure was available to anyone who
+    had ever been shown a receipt -- the harvesting defect, stated as a feature.
+    Each side now proves what only it can: the recipient by verifiable
+    decryption under ``pk_recv``, the issuer by disclosing the mint randomness,
+    with the mailbox leaf tying that key to the named Identity.
 
-    So the check cannot stay a decryption: the receipt must carry `pk_recv`
-    and a verifiable-decryption proof under it, exactly as the unilateral
-    receipts already do (wallet/unilateral_a1.make_receipt_a1).  That is a
-    change to build_receipt, verify_receipt, their Rust port, the receipt
-    vectors and alberta-buck-receipt.org -- its own piece of work, named here
-    so the gap stays visible instead of being asserted away.
-
-    B1 is unaffected: its evidence is encrypted to the ISSUER's account key,
-    which the issuer holds, so nothing about it was ever identity-derived.
+    B1 was never affected: its evidence is encrypted to the ISSUER's account
+    key, which the issuer holds, so nothing about it was ever identity-derived.
     """
-    if fx.flavor in ("a1", "a2"):
-        pytest.skip("AB-RCPT addressed legs await the receiving-key rework; "
-                    "see this test's docstring")
     core = fx.build_receipt(role, CONTRACTS, rng=_rng(), **ANCHORS)
     b = serialize_core(core)
     core2 = deserialize_core(parse_envelope(envelope_text(b)))
@@ -92,12 +81,29 @@ def test_fixture_receipt_verifies(fx, role):
 
 
 def test_both_parties_share_note_payload(fx):
-    """The deterministic legs are identical from either side; only the
-    generator's self-naming differs."""
+    """The note's own material is identical from either side.
+
+    What differs is the EVIDENCE, and for the addressed flavours it must: the
+    recipient proves by verifiable decryption under its mailbox key, the issuer
+    by disclosing the randomness it encrypted with, and neither can produce the
+    other's.  An earlier shape had both sides carry the same legs, because both
+    sides could run the same derivation -- which is precisely what made the
+    naming reproducible by anyone holding a receipt.
+    """
     rec = fx.build_receipt("recipient", CONTRACTS, rng=_rng(1), **ANCHORS)
     iss = fx.build_receipt("issuer", CONTRACTS, rng=_rng(2), **ANCHORS)
-    assert rec.note == iss.note
     assert rec.proof == iss.proof
+
+    evidence = {"vdNote", "vdRec", "vdIss", "rNote", "rId"}
+    shared = lambda d: {k: v for k, v in d.items() if k not in evidence}
+    assert shared(rec.note) == shared(iss.note)
+
+    if fx.flavor == "b1":
+        assert set(rec.note) == set(iss.note)         # no addressed legs at all
+    else:
+        assert evidence & set(rec.note) and evidence & set(iss.note)
+        assert not (set(rec.note) & set(iss.note) & evidence), \
+            "neither side can produce the other's evidence"
     assert rec.issuer_binding == iss.issuer_binding
     assert (rec.role, iss.role) == ("recipient", "issuer")
 

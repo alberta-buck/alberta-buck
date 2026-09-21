@@ -72,6 +72,12 @@ __all__ = [
     "ReceivingBinding",
     "prove_receiving_binding",
     "verify_receiving_binding",
+    "WRAP_DOMAIN",
+    "wrap_mask",
+    "mailbox_shared_minter",
+    "mailbox_shared_recipient",
+    "wrap_scalar",
+    "unwrap_scalar",
 ]
 
 
@@ -79,6 +85,81 @@ __all__ = [
 # the wallet derives from the same seed (an identity scalar, an account key, a
 # salt).  Distinct domains are what let one seed hold every secret safely.
 RECV_DOMAIN = b"AlbertaBuck/Notes/ReceivingKey/v1"
+WRAP_DOMAIN = b"AlbertaBuck/Notes/PayloadWrap/v1"
+
+
+# --------------------------------------------------------------------------- #
+# Wrapping the payload's SCALARS to the same key its ciphertexts are keyed to.
+# --------------------------------------------------------------------------- #
+#
+# A delivered note carries more than ciphertexts.  A spend needs the issuer's
+# mint randomness (the fold's witness is the SCALAR r'*k, and a recipient
+# holding only the point k*R cannot produce it) and, for A2, the salt of the
+# issuer's naming association.  Both have to travel, and in the clear both
+# defeat the encryption they travel beside:
+#
+#   r'        with r' and pk_recv, any holder of the payload computes
+#             M = C - r'*pk_recv.  The channel reads the issuer's Identity
+#             without ever touching k.
+#   salt_iss  with the salt and the published subtree, a holder can TEST
+#             candidate Identities against identity_leaf_salted -- a scan, on
+#             the leaf whose whole purpose was to be unscannable.
+#
+# So the scalars are wrapped to the same mailbox key.  Both sides derive the
+# same point without an extra round trip -- the minter from what it chose, the
+# recipient from what it holds:
+#
+#   minter     S = r' * pk_recv
+#   recipient  S = k  * R          where R = r'*G is already in the payload
+#
+# which is Diffie-Hellman, and the only party that can compute it is the party
+# the note is addressed to.  The wrap is addition in the scalar field:
+# invertible, length-preserving, and nothing to get wrong about padding.  It is
+# not a new assumption -- the same DDH that keeps the ciphertexts shut keeps
+# the mask unguessable.
+#
+# Each field gets its OWN mask, keyed by a label.  One shared point masking two
+# scalars would be one pad used twice, and an observer subtracting the two
+# blobs would learn r' - salt_iss -- not either secret, but not nothing either,
+# and a pad reused is a pad to explain.  A label costs one hash.
+
+
+def wrap_mask(shared, label: bytes = b"") -> int:
+    """The one-time mask for ONE payload field, from the shared point.
+
+    Args:
+        shared: The Diffie-Hellman point both sides derive.
+        label: The field's name, so each field draws its own mask from the
+            same point.  A caller that omits it is masking a single field.
+    """
+    from alberta_buck.wallet.bn254 import point_to_words
+    from alberta_buck.wallet.transcript import keccak_raw
+    x, y = point_to_words(shared)
+    digest = keccak_raw(WRAP_DOMAIN + b"/" + label + b"/"
+                        + x.to_bytes(32, "big") + y.to_bytes(32, "big"))
+    return int.from_bytes(digest, "big") % ORDER
+
+
+def mailbox_shared_minter(r_prime: int, pk_recv):
+    """The shared point as the MINTER computes it: ``r' * pk_recv``."""
+    from alberta_buck.wallet.bn254 import mul
+    return mul(pk_recv, r_prime % ORDER)
+
+
+def mailbox_shared_recipient(k_recv: int, R):
+    """The shared point as the RECIPIENT computes it: ``k * R``."""
+    from alberta_buck.wallet.bn254 import mul
+    return mul(R, k_recv % ORDER)
+
+
+def wrap_scalar(value: int, shared, label: bytes = b"") -> int:
+    """Mask a payload scalar to the mailbox.  Inverse of :func:`unwrap_scalar`."""
+    return (value + wrap_mask(shared, label)) % ORDER
+
+
+def unwrap_scalar(blob: int, shared, label: bytes = b"") -> int:
+    """Recover a wrapped payload scalar.  The label MUST match the wrap's."""
+    return (blob - wrap_mask(shared, label)) % ORDER
 
 
 def derive_receiving_secret(seed: int, rotation: int = 0) -> int:
@@ -160,68 +241,73 @@ class ReceivingBinding:
     """Holder-produced evidence that ``pk_recv`` is the registered receiving
     key of the Identity ``M``.
 
+    It discloses NO secret.  An earlier shape carried ``k_recv`` itself, on the
+    reasoning that the holder was naming itself to this counterparty anyway --
+    which was wrong twice over: the mailbox key reads every note to that
+    address, in both directions in time, and a payer who checks the evidence is
+    not the only party who ever sees a receipt.  What the payer needs is that
+    the accumulator certifies the pair, and
+    :func:`alberta_buck.registry.tree.mailbox_leaf` states exactly that over
+    the two POINTS the payer already holds.  So the evidence is a hash and a
+    path, checkable by anyone, secret to no one.
+
     Attributes:
-        pk_recv: The receiving key claimed, as a point, so a verifier can check
-            a verifiable decryption under it.  Safe to disclose: deciding which
+        pk_recv: The receiving key ``k*G``.  Safe to disclose: deciding which
             ciphertexts it addresses, from the key alone, is DDH.
-        k_recv: The receiving secret, the leaf's actual preimage.  Disclosing
-            it hands over the mailbox, so this evidence is for a counterparty
-            the holder is already naming itself to -- and the circuit proves
-            the same statement without it.
-        salt: The holder's witness for the hiding leaf.  In the clear here;
-            private in the circuit.
-        path: The membership path of ``receiving_leaf(m_rec, k_recv, salt)``.
+        salt: The salt of the mailbox association -- NOT the salt the holder's
+            spend proves under.  Distinct associations carry distinct salts, so
+            this one locates the payer's leaf and says nothing about the gate's.
+        path: The membership path of ``mailbox_leaf(M, pk_recv, salt)``.
     """
     pk_recv: Tuple
-    k_recv: int
     salt: int
     path: "MembershipProof"
 
 
-def prove_receiving_binding(m_rec: int, k_recv: int, salt: int,
-                            tree) -> ReceivingBinding:
-    """Build the binding evidence for ``(m_rec, k_recv)`` from the holder's salt.
+def prove_receiving_binding(M_rec, pk_recv, salt: int, tree) -> ReceivingBinding:
+    """Build the binding evidence for ``(M_rec, pk_recv)`` from its mailbox salt.
+
+    Takes the two POINTS, because that is all it needs and all a payer can
+    check.  The holder's receiving secret is not an argument to this function
+    and must never become one.
 
     Args:
-        m_rec: The holder's identity scalar.
-        k_recv: The holder's receiving secret.
-        salt: The holder's salt for this subtree.
-        tree: The subtree the pair was admitted to.
+        M_rec: The holder's Identity point.
+        pk_recv: The holder's receiving key.
+        salt: The salt of the mailbox association.
+        tree: The subtree the association was admitted to.
 
     Raises:
         ValueError: if no leaf for this pair is in the tree, which is the
             honest answer when a holder claims a key it never registered.
     """
-    from alberta_buck.registry.tree import receiving_leaf
+    from alberta_buck.registry.tree import mailbox_leaf
 
-    leaf = receiving_leaf(m_rec, k_recv, salt)
+    leaf = mailbox_leaf(M_rec, pk_recv, salt)
     if leaf not in tree.leaves:
         raise ValueError(
             "no registered leaf commits this (Identity, receiving key) pair")
     return ReceivingBinding(
-        pk_recv=receiving_public(k_recv), k_recv=k_recv, salt=salt,
-        path=tree.path(tree.leaves.index(leaf)),
+        pk_recv=pk_recv, salt=salt, path=tree.path(tree.leaves.index(leaf)),
     )
 
 
-def verify_receiving_binding(m_rec: int, binding: "ReceivingBinding",
+def verify_receiving_binding(M_rec, binding: "ReceivingBinding",
                              root: int) -> bool:
-    """Check that ``binding`` ties ``m_rec`` to its receiving key under ``root``.
+    """Check that ``binding`` ties ``M_rec`` to its receiving key under ``root``.
+
+    Needs no secret, which is the whole point: a payer runs this before paying,
+    and a receipt verifier runs the same check offline.
 
     Recomputes the leaf from the claimed pair rather than trusting the one in
-    the path: a path proves that SOME leaf is a member, and the whole point is
-    which one.  Also checks that the disclosed secret really is the secret of
-    the disclosed key, so the point a verifier decrypts under is the one the
-    leaf commits.
+    the path: a path proves that SOME leaf is a member, and which one is the
+    entire question.
     """
-    from alberta_buck.registry.tree import receiving_leaf
-    from alberta_buck.wallet.bn254 import eq
+    from alberta_buck.registry.tree import mailbox_leaf
 
     try:
-        leaf = receiving_leaf(m_rec, binding.k_recv, binding.salt)
+        leaf = mailbox_leaf(M_rec, binding.pk_recv, binding.salt)
     except ValueError:
-        return False
-    if not eq(binding.pk_recv, receiving_public(binding.k_recv)):
         return False
     return (binding.path.leaf == leaf
             and binding.path.verify()

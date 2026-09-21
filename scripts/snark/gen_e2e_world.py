@@ -32,7 +32,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, REPO)
 
 from alberta_buck.wallet.bn254 import (
-    G1, ORDER, add, eq, mul, point_to_words, rand_scalar,
+    G1, ORDER, add, eq, mul, point_to_words, rand_scalar, words_to_point,
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.poseidon import F_R
@@ -51,7 +51,10 @@ from alberta_buck.wallet.deposit_fold import (
     deposit_fold_a1_witness, deposit_fold_a2_witness, deposit_fold_witness,
 )
 from alberta_buck.wallet.nums import H_PEDERSEN
-from alberta_buck.wallet.recvkey import receiving_key
+from alberta_buck.wallet.recvkey import (
+    receiving_key, prove_receiving_binding, verify_receiving_binding,
+    mailbox_shared_minter, mailbox_shared_recipient, wrap_scalar, unwrap_scalar,
+)
 from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
 from alberta_buck.registry.tree import (
@@ -98,7 +101,7 @@ def ct_of(d):
     PAYLOAD, not from the generator's memory, so a payload that cannot be spent
     fails here instead of shipping as a fixture."""
     def p(o):
-        return (int(o["x"]), int(o["y"]))
+        return words_to_point(int(o["x"]), int(o["y"]))
     return ElGamalCiphertext(p(d["R"]), p(d["C"]))
 
 
@@ -167,7 +170,13 @@ def build_world(flavor: str):
     # names it says nothing about the one that reads its mail.
     salt_iss_named = derive_salt(seed_iss, KYC, 1)
 
-    # Two leaves, in bind order, and which leaf each party contributes depends
+    # The addressed recipient keeps a THIRD association: the mailbox leaf, over
+    # the two POINTS, which is the payer's and the receipt verifier's view of
+    # the same fact the gate's scalar leaf proves.  Its own salt again, so the
+    # one it hands a payer does not locate the one it spends under.
+    salt_mbx = derive_salt(seed_ctr, KYC, 1)
+
+    # Leaves in bind order, and which leaf each party contributes depends
     # on what the flavour's gate must prove about it:
     #   A1  issuer: unused by the gate    depositor: its receiving leaf
     #   A2  issuer: its NAMED leaf        depositor: its receiving leaf
@@ -181,6 +190,8 @@ def build_world(flavor: str):
                 else receiving_leaf(m_ctr, k_ctr, salt_ctr))
     tree.insert_leaf(iss_leaf)
     tree.insert_leaf(dep_leaf)
+    if flavor != "b1":
+        tree.insert_mailbox(M_ctr, pk_ctr, salt_mbx)
 
     binds = [
         {
@@ -212,11 +223,16 @@ def build_world(flavor: str):
         # What a delivery must carry.  The two ciphertexts alone are not
         # enough: the fold opens eIss with r' and proves the decrypted issuer
         # Identity registered under the salt of its NAMING association, so both
-        # travel with the note.  Neither is a secret of the recipient's, and
-        # neither reaches the chain.
+        # travel with the note -- WRAPPED to the mailbox key, because in the
+        # clear each one undoes the encryption it travels beside.  r' turns eIss
+        # into plaintext for anyone holding the payload; salt_iss turns the
+        # issuer's naming leaf into a scannable one.  See recvkey.wrap_scalar.
+        S = mailbox_shared_minter(note.r_prime, pk_ctr)
         note_payload = {"eNote": ct(eNote), "eIss": ct(eCommitted),
-                        "rPrime": str(note.r_prime),
-                        "saltIss": str(note.salt_iss)}
+                        "rPrimeWrapped": str(
+                            wrap_scalar(note.r_prime, S, b"rPrime")),
+                        "saltIssWrapped": str(
+                            wrap_scalar(note.salt_iss, S, b"saltIss"))}
     elif flavor == "a1":
         # The in-payload (sigma_R, sigma_s) is the issuer's identity-binding
         # signature over the delivery payload (synthetic domain here, as in
@@ -236,10 +252,14 @@ def build_world(flavor: str):
         # public face.  It needs no issuer salt: relation (2) already proves the
         # decrypted Identity is the one the payout account is registered under,
         # so A1 asserts nothing about a third party (the payload rule, section
-        # 4.4 of doc/review/notes-receiving-key.org).
+        # 4.4 of doc/review/notes-receiving-key.org).  Wrapped, for the same
+        # reason A2's scalars are: a readable face is a leak while the note is
+        # in flight, even though the spend publishes it.
+        S = mailbox_shared_minter(note.r_note, pk_ctr)
         note_payload = {"eNote": ct(eNote), "eRec": ct(note.eRec),
                         "sigma_R": pt(sigma_R), "sigma_s": str(sigma_s),
-                        "rNote": str(note.r_note)}
+                        "rNoteWrapped": str(
+                            wrap_scalar(note.r_note, S, b"rNote"))}
     else:  # b1
         k = rand_scalar(rng)
         sigma_R = mul(G1, k)
@@ -285,24 +305,32 @@ def build_world(flavor: str):
         # opening, and the recipient's own secrets (k, m_rec, sk_dep, its salt).
         # Nothing comes from the minter's memory.
         if flavor == "a1":
+            # Unwrapped with k, from the payload's own R: the recipient is the
+            # only party that can, which is what the wrap is for.
+            S_rec = mailbox_shared_recipient(k_ctr, ct_of(note_payload["eNote"]).R)
             fold_input = deposit_fold_a1_witness(
                 witness=w, rho=opening.rho, id_hash=opening.id_hash,
                 e_note=ct_of(note_payload["eNote"]), v=FACE, m_issuer=m_iss,
                 sigma_R=sigma_R, sigma_s=sigma_s,
-                r_note=int(note_payload["rNote"]), t=t_total,
+                r_note=unwrap_scalar(int(note_payload["rNoteWrapped"]),
+                                     S_rec, b"rNote"),
+                t=t_total,
                 r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
                 identity_root=tree.root(),
             )
         else:
-            salt_iss_shipped = int(note_payload["saltIss"])
+            S_rec = mailbox_shared_recipient(k_ctr, ct_of(note_payload["eIss"]).R)
+            salt_iss_shipped = unwrap_scalar(
+                int(note_payload["saltIssWrapped"]), S_rec, b"saltIss")
             iss_path = tree.path(tree.leaves.index(
                 identity_leaf_salted(w.M, salt_iss_shipped)))
             fold_input = deposit_fold_a2_witness(
                 witness=w, rho=opening.rho, id_hash=opening.id_hash,
                 e_note=ct_of(note_payload["eNote"]),
                 e_iss=ct_of(note_payload["eIss"]),
-                r_prime=int(note_payload["rPrime"]),
+                r_prime=unwrap_scalar(int(note_payload["rPrimeWrapped"]),
+                                      S_rec, b"rPrime"),
                 t=t_total, r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
                 salt_iss=salt_iss_shipped, iss_path=iss_path,
@@ -414,7 +442,7 @@ def build_world(flavor: str):
                 # secrets rebuild the gate.  For B1 the pair is unused: a
                 # bearer note is addressed to nobody.
                 "kRecv": str(k_ctr), "pkRecv": pt(pk_ctr),
-                "salt": str(salt_ctr),
+                "salt": str(salt_ctr), "saltMailbox": str(salt_mbx),
             },
         },
         # The Identity-M note payload (the idHash preimage material) that
@@ -423,6 +451,26 @@ def build_world(flavor: str):
         # material and lives in sigma.eDepForIss.)
         "notePayload": note_payload,
     }
+    if flavor in ("a1", "a2"):
+        # What the MINTER retains.  It never travels: an issuer-side receipt
+        # discloses it deliberately, to a reader who is being told both parties
+        # anyway, and a payload that carried it would tell the channel.
+        world["issuerSecrets"] = {
+            "rNote": str(note.r_note),
+            "rPrime": str(note.r_prime),
+        }
+    if flavor != "b1":
+        # The payer's evidence, as a receipt carries it: a hash and a path over
+        # the two points, disclosing no secret.  A payer checks this BEFORE
+        # paying, which is why it cannot be the scalar leaf the spend proves.
+        mbx = prove_receiving_binding(M_ctr, pk_ctr, salt_mbx, tree)
+        world["mailboxBinding"] = {
+            "salt": str(mbx.salt), "leaf": str(mbx.path.leaf),
+            "siblings": [str(x) for x in mbx.path.siblings],
+            "indexBits": list(mbx.path.index_bits),
+            "root": str(mbx.path.root),
+        }
+        assert verify_receiving_binding(M_ctr, mbx, tree.root())
     if flavor == "a2":
         world["a2Binding"] = {
             "eIss": ct(eCommitted),

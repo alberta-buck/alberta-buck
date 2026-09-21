@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.8
+#+TITLE: Identity accumulator specification, v0.9
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -32,7 +32,11 @@ implements both. v0.7 makes that leaf commit the two SCALARS rather than
 the two points, which the folded spend gate's constraint budget forced and
 which turns out to bind more tightly ([[#leaves]]). v0.8 records the second
 association an A2 issuer keeps so it can be named without disclosing its
-mailbox ([[#renewal]]). =MUST=, =MUST NOT=,
+mailbox ([[#renewal]]). v0.9 adds the FOURTH leaf function, the same
+receiving-key association committed over the two POINTS, because the scalar
+leaf of v0.7 is openable only by the holder and a payer must check the
+association BEFORE paying, holding no secret ([[#leaves]]). =MUST=,
+=MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -45,11 +49,20 @@ unchanged and out of scope; see Part I of =alberta-buck-proofs.org=.
 
 Listed for a reviewer who wants the choices without the prose.
 
-1. Three leaf functions, not one. The existing unsalted leaf is retained
+1. Four leaf functions, not one. The existing unsalted leaf is retained
    for trees whose membership is advertised; a salted leaf is added for
-   trees whose membership is private; and a salted leaf over the pair
-   =(identity, receiving key)= is added for identity registries, whose
-   members address Notes ([[#leaves]]).
+   trees whose membership is private; and the receiving-key association of an
+   identity registry is committed TWICE, once over the two scalars and once
+   over the two points ([[#leaves]]). The duplication is not redundancy: the
+   association has two consumers holding different things. The spend proves
+   it in zero knowledge and the prover holds the scalars, so committing the
+   points there would cost two fixed-base multiplications to hash preimages
+   the prover already has. A payer must check it before paying and holds no
+   secret at all -- only the two points, which it needs anyway -- so for that
+   consumer a scalar leaf is unopenable and the alternative is a circuit, a
+   ceremony and a Groth16 verifier inside every receipt checker to establish
+   what a fifth Poseidon input establishes for free. Distinct associations
+   carry distinct salts, so the two leaves do not link.
 2. Leaf hiding rests on Poseidon modelled as a random oracle, which the
    system already assumes for the Notes nullifier, so the accumulator adds
    no assumption. No cheaper construction gives an information-theoretically
@@ -115,13 +128,15 @@ finding-5 repairs, because all three touch the same circuits.
 :CUSTOM_ID: leaves
 :END:
 
-Three functions. Implementations =MUST= provide all three and =MUST NOT=
+Four functions. Implementations =MUST= provide all four and =MUST NOT=
 change the first two.
 
 #+begin_example
 identity_leaf(M)              = Poseidon([M.x mod F_R, M.y mod F_R])
 identity_leaf_salted(M, salt) = Poseidon([M.x mod F_R, M.y mod F_R, salt])
 receiving_leaf(m, k, salt)    = Poseidon([m, k, salt])
+mailbox_leaf(M, pk, salt)     = Poseidon([M.x mod F_R, M.y mod F_R,
+                                          pk.x mod F_R, pk.y mod F_R, salt])
 #+end_example
 
 - =identity_leaf= is the function in the source today. It is retained
@@ -158,6 +173,27 @@ receiving_leaf(m, k, salt)    = Poseidon([m, k, salt])
   identity point and the receiving key, so under a coordinate leaf only the
   salt stood between it and a membership test, where here it would also need
   =k=, which is disclosed to nobody.
+- =mailbox_leaf= commits the SAME association over the two points, for the
+  consumer that cannot open the scalar one. =salt= =MUST= lie in =[1, F_R)=,
+  and it =MUST NOT= be the salt of the =receiving_leaf= association: they are
+  distinct associations of one identity and the salt discipline of
+  [[#renewal][section 8.3]] applies, so the salt a holder hands a payer does
+  not locate the leaf its spend proves under.
+
+  *Why two leaves rather than one.* A payer must check that the key it is
+  about to address a Note to really belongs to the person it intends to pay,
+  and it must check BEFORE paying, so no spend proof exists yet. It holds no
+  secret -- only =M= and =pk_recv=, both of which it needs anyway. Against
+  =receiving_leaf= it has three ways forward and all three are worse: take
+  =k= from the holder, which hands over the mailbox in both directions in
+  time; take a Groth16 proof of the scalar leaf's preimage, which costs a
+  fixed-base multiplication, a ceremony, and a pairing verifier inside every
+  receipt checker; or go without, and address Notes to unverified keys.
+  =mailbox_leaf= costs one Poseidon and one path.
+
+  It =MUST NOT= replace =receiving_leaf=: the spend gate's budget is what
+  forced the scalar form, and nothing about a payer's convenience changes
+  that.
 - Coordinates are reduced mod =F_R= exactly as today, because circom
   reduces its Poseidon inputs the same way.
 

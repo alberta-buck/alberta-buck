@@ -23,6 +23,7 @@ import pytest
 from alberta_buck.registry.tree import (
     IdentityMerkleTree,
     identity_leaf_salted,
+    mailbox_leaf,
     receiving_leaf,
 )
 from alberta_buck.wallet.bn254 import (
@@ -60,7 +61,11 @@ def _holder(i: int = 0):
     seed = SEEDS[i]
     k, pk_recv = receiving_key(seed)
     return dict(m=m, M=mul(G1, m), k=k, pk_recv=pk_recv,
-                salt=derive_salt(seed, KYC), seed=seed)
+                salt=derive_salt(seed, KYC),
+                # the mailbox association's own salt: a DIFFERENT association
+                # of the same pair, so the two leaves do not link
+                salt2=derive_salt(seed, KYC, 1),
+                seed=seed)
 
 
 # ---------------------------------------------------------------- derivation
@@ -199,24 +204,84 @@ def test_the_receiving_leaf_is_distinct_from_the_plain_salted_leaf():
 def test_the_binding_is_provable_and_pinned_to_the_pair():
     h = _holder()
     tree = IdentityMerkleTree(depth=10, private=True)
-    tree.insert_receiving(h["m"], h["k"], h["salt"])
+    tree.insert_mailbox(h["M"], h["pk_recv"], h["salt2"])
 
-    binding = prove_receiving_binding(h["m"], h["k"], h["salt"], tree)
-    assert verify_receiving_binding(h["m"], binding, tree.root())
+    binding = prove_receiving_binding(h["M"], h["pk_recv"], h["salt2"], tree)
+    assert verify_receiving_binding(h["M"], binding, tree.root())
     # A different Identity does not get to claim this key's binding.
-    assert not verify_receiving_binding(SCALARS[7], binding, tree.root())
+    assert not verify_receiving_binding(mul(G1, SCALARS[7]), binding, tree.root())
     # Nor does a stale root.
-    assert not verify_receiving_binding(h["m"], binding, tree.root() ^ 1)
+    assert not verify_receiving_binding(h["M"], binding, tree.root() ^ 1)
+
+
+def test_the_binding_discloses_no_secret():
+    """The whole reason for the mailbox leaf: a payer checks the association
+    with a hash and a path, and learns nothing it did not already hold."""
+    import dataclasses
+    h = _holder()
+    tree = IdentityMerkleTree(depth=10, private=True)
+    tree.insert_mailbox(h["M"], h["pk_recv"], h["salt2"])
+    binding = prove_receiving_binding(h["M"], h["pk_recv"], h["salt2"], tree)
+
+    fields = {f.name for f in dataclasses.fields(binding)}
+    assert fields == {"pk_recv", "salt", "path"}
+    # Nothing in the evidence is the receiving secret, or yields it.
+    flat = [binding.salt, *binding.path.siblings, *binding.path.index_bits]
+    assert h["k"] not in flat
+    assert not eq(mul(G1, binding.salt), h["pk_recv"])
+    # And the payer already had both points: the evidence adds the salt alone.
+    assert eq(binding.pk_recv, h["pk_recv"])
+
+
+def test_the_two_leaves_of_one_association_do_not_link():
+    """The gate's leaf and the payer's leaf commit the same fact under
+    different salts, so the salt a holder hands a payer does not locate the
+    leaf its spend proves under (specification section 8.3)."""
+    h = _holder()
+    gate = receiving_leaf(h["m"], h["k"], h["salt"])
+    payer = mailbox_leaf(h["M"], h["pk_recv"], h["salt2"])
+    assert gate != payer
+    # Given the payer's salt, the gate's leaf is still out of reach: it needs k.
+    assert mailbox_leaf(h["M"], h["pk_recv"], h["salt"]) != gate
+
+
+def test_each_wrapped_field_draws_its_own_mask():
+    """One shared point, one mask per FIELD.
+
+    Masking two scalars with one pad would let an observer subtract the two
+    blobs and learn their difference -- not either secret, but a pad reused is
+    a pad to explain.  A label costs one hash.
+    """
+    from alberta_buck.wallet.recvkey import (
+        mailbox_shared_minter, mailbox_shared_recipient, wrap_scalar,
+        unwrap_scalar, wrap_mask,
+    )
+    h = _holder()
+    r = SCALARS[3]
+    R = mul(G1, r)
+    S = mailbox_shared_minter(r, h["pk_recv"])
+    assert S == mailbox_shared_recipient(h["k"], R)     # both sides agree
+
+    a, b = SCALARS[4], SCALARS[5]
+    wa = wrap_scalar(a, S, b"rPrime")
+    wb = wrap_scalar(b, S, b"saltIss")
+    assert unwrap_scalar(wa, S, b"rPrime") == a
+    assert unwrap_scalar(wb, S, b"saltIss") == b
+    # The difference of the blobs is NOT the difference of the secrets.
+    assert (wa - wb) % ORDER != (a - b) % ORDER
+    assert wrap_mask(S, b"rPrime") != wrap_mask(S, b"saltIss")
+    # And the wrong label recovers the wrong value.
+    assert unwrap_scalar(wa, S, b"saltIss") != a
 
 
 def test_an_unregistered_receiving_key_has_no_binding():
     """A holder claiming a key it never registered gets the honest answer."""
     h = _holder()
     tree = IdentityMerkleTree(depth=10, private=True)
-    tree.insert_receiving(h["m"], h["k"], h["salt"])
-    k2, _ = receiving_key(h["seed"], 1)
+    tree.insert_mailbox(h["M"], h["pk_recv"], h["salt2"])
+    _, pk2 = receiving_key(h["seed"], 1)
     with pytest.raises(ValueError, match="no registered leaf"):
-        prove_receiving_binding(h["m"], k2, h["salt"], tree)
+        prove_receiving_binding(h["M"], pk2, h["salt2"], tree)
 
 
 # ------------------------------------------------- the folded deposit gate

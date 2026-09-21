@@ -363,13 +363,15 @@ Five things the survey had left open, each of which reduces the work.
    Extended on 2026-09-20 with the receiving-key architecture that
    settled finding R5 ([[file:notes-receiving-key.org][its own document]]):
    =receiving_leaf= and =insert_receiving= in =registry/tree.py=, the
-   third leaf function of the specification; =wallet/recvkey.py=, the
-   receiving key derived from seed material rather than from the identity,
-   with its holder-produced binding evidence; and
-   =wallet/deposit_fold.py=, the folded deposit gate whose four relations
-   over one witness refuse a payload thief that a split gate admits.
-   =alberta_buck/test/test_receiving_key.py= carries twenty-six tests,
-   including the theft as a test rather than a warning.
+   third leaf function of the specification, and =mailbox_leaf= /
+   =insert_mailbox=, the fourth -- the same association over the two POINTS,
+   because the spend's prover holds the scalars and a payer holds no secret
+   at all; =wallet/recvkey.py=, the receiving key derived from seed material
+   rather than from the identity, with holder-produced binding evidence that
+   discloses nothing; and =wallet/deposit_fold.py=, the folded deposit gate
+   whose four relations over one witness refuse a payload thief that a split
+   gate admits.  =alberta_buck/test/test_receiving_key.py= carries thirty-one
+   tests, including the theft as a test rather than a warning.
 3. *Circuits.* Started. =circuits/identity_membership.circom= now hashes
    the salt into the leaf as a private input, so the native membership
    circuit proves membership of a hiding commitment; it is rebuilt as a

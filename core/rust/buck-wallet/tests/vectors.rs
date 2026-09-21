@@ -150,6 +150,30 @@ fn party(v: &Value, name: &str) -> P {
     }
 }
 
+/// The addressed-note legs a row was built with: the mailbox key, and
+/// whichever evidence the generating role could produce.
+#[allow(clippy::too_many_arguments)]
+fn legs_of<'a>(
+    row: &'a Value,
+    pk_recv: &'a (W256, W256),
+    k_recv: &'a W256,
+    r_note: &'a W256,
+    r_id: &'a W256,
+    t_note: &'a Option<W256>,
+    t_id: &'a Option<W256>,
+) -> AddressedLegs<'a> {
+    let recipient = row["role"].as_str().unwrap() == "recipient";
+    AddressedLegs {
+        pk_recv,
+        k_recv: if recipient { Some(k_recv) } else { None },
+        r_note: if recipient { None } else { Some(r_note) },
+        r_id: if recipient { None } else { Some(r_id) },
+        binding: row.get("mailboxBinding"),
+        t_note: t_note.as_ref(),
+        t_id: t_id.as_ref(),
+    }
+}
+
 fn check_outputs(core: &Value, row: &Value) {
     let blob = serialize_core(core).unwrap();
     assert_eq!(
@@ -291,6 +315,14 @@ fn receipts_replay() {
                 let mint = &row["mint"];
                 let cms: Vec<W256> = mint["cms"].as_array().unwrap().iter().map(jw).collect();
                 let t_vd = nonces.get("t_vd").map(jw);
+                let t_note = nonces.get("t_note").map(jw);
+                let t_id = nonces.get("t_id").map(jw);
+                let pk_recv = jg1(&v["parties"]["alice"]["pk_recv"]);
+                let k_recv = jw(&v["parties"]["alice"]["k_recv"]);
+                let r_note = jw(&mint["nonces"]["r_note"]);
+                let r_id = jw(&mint["nonces"]["r_rec"]);
+                let legs = legs_of(row, &pk_recv, &k_recv, &r_note, &r_id,
+                                   &t_note, &t_id);
                 build_note_a1(
                     chainid,
                     contracts,
@@ -323,6 +355,7 @@ fn receipts_replay() {
                     Some(&payee.e),
                     None,
                     t_vd.as_ref(),
+                    &legs,
                 )
                 .unwrap()
             }
@@ -334,6 +367,14 @@ fn receipts_replay() {
                 } else {
                     None
                 };
+                let t_note = nonces.get("t_note").map(jw);
+                let t_id = nonces.get("t_id").map(jw);
+                let pk_recv = jg1(&v["parties"]["alice"]["pk_recv"]);
+                let k_recv = jw(&v["parties"]["alice"]["k_recv"]);
+                let r_note = jw(&mint["nonces"]["r_note"]);
+                let r_id = jw(&mint["nonces"]["r_prime"]);
+                let legs = legs_of(row, &pk_recv, &k_recv, &r_note, &r_id,
+                                   &t_note, &t_id);
                 build_note_a2(
                     chainid,
                     contracts,
@@ -366,6 +407,7 @@ fn receipts_replay() {
                     Some(&payer.sk),
                     None,
                     &jw(&nonces["t_vd"]),
+                    &legs,
                 )
                 .unwrap()
             }

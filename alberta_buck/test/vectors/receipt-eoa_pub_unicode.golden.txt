@@ -1,7 +1,7 @@
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  ueebrhjpczr4
+  Receipt  d6sdjmnutbzl
 ------------------------------------------------
 FROM (payer) (PUBLIC IDENTITY)
  Chloé Bélanger-李
@@ -26,7 +26,7 @@ TRANSACTION
 ------------------------------------------------
 VERIFICATION
  status @ issue: VALID
- receipt  ueebrhjpczr4
+ receipt  d6sdjmnutbzl
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck       

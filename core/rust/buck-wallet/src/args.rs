@@ -22,6 +22,17 @@ use crate::jsonv::{as_ct, as_g1, get, get_ct, get_g1, get_opt, get_str, get_u128
 use crate::verify::verify_receipt;
 use crate::{scalar_hex, Ctw, G1w, IdError, NoteOpening, Result, W256};
 
+/// An optional hex-string scalar: absent or JSON null both yield None, so a
+/// caller may pass every key and leave the ones its role does not use unset.
+fn opt_w(v: &Value, key: &str) -> Result<Option<W256>> {
+    match get_opt(v, key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(x) => Ok(Some(crate::w_from_hex(x.as_str().ok_or(IdError(
+            "args: expected a hex string",
+        ))?)?)),
+    }
+}
+
 fn opening_from(v: &Value) -> Result<NoteOpening> {
     let flavor_w = get_w(v, "flavor")?;
     if flavor_w[..24].iter().any(|b| *b != 0) {
@@ -266,6 +277,22 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         ))?)?),
                         None => None,
                     };
+                    let pk_recv = get_g1(args, "pk_recv")?;
+                    let k_recv = opt_w(args, "k_recv")?;
+                    let r_note = opt_w(args, "r_note")?;
+                    let r_id = opt_w(args, "r_id")?;
+                    let t_note = opt_w(nonces, "t_note")?;
+                    let t_id = opt_w(nonces, "t_id")?;
+                    let mbx = get_opt(args, "mailbox_binding").cloned();
+                    let legs = AddressedLegs {
+                        pk_recv: &pk_recv,
+                        k_recv: k_recv.as_ref(),
+                        r_note: r_note.as_ref(),
+                        r_id: r_id.as_ref(),
+                        binding: mbx.as_ref(),
+                        t_note: t_note.as_ref(),
+                        t_id: t_id.as_ref(),
+                    };
                     build_note_a1(
                         chainid,
                         contracts,
@@ -298,12 +325,29 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         payee.e_addr.as_ref(),
                         notes_ref,
                         t_vd.as_ref(),
+                        &legs,
                     )?
                 }
                 _ => {
                     let binding = match get_opt(args, "binding") {
                         Some(b) => Some(binding_from(b)?),
                         None => None,
+                    };
+                    let pk_recv = get_g1(args, "pk_recv")?;
+                    let k_recv = opt_w(args, "k_recv")?;
+                    let r_note = opt_w(args, "r_note")?;
+                    let r_id = opt_w(args, "r_id")?;
+                    let t_note = opt_w(nonces, "t_note")?;
+                    let t_id = opt_w(nonces, "t_id")?;
+                    let mbx = get_opt(args, "mailbox_binding").cloned();
+                    let legs = AddressedLegs {
+                        pk_recv: &pk_recv,
+                        k_recv: k_recv.as_ref(),
+                        r_note: r_note.as_ref(),
+                        r_id: r_id.as_ref(),
+                        binding: mbx.as_ref(),
+                        t_note: t_note.as_ref(),
+                        t_id: t_id.as_ref(),
                     };
                     build_note_a2(
                         chainid,
@@ -340,6 +384,7 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         payer.sk.as_ref(),
                         notes_ref,
                         &get_w(nonces, "t_vd")?,
+                        &legs,
                     )?
                 }
                 // unreachable: the outer match covers exactly these kinds

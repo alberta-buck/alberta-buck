@@ -1,7 +1,7 @@
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  wynyksrdcdc2
+  Receipt  ls3nbzn2po5x
 ------------------------------------------------
 FROM (payer) (PRIVATE IDENTITY)
  Bob Smith
@@ -27,7 +27,7 @@ TRANSACTION
 ------------------------------------------------
 VERIFICATION
  status @ issue: VALID
- receipt  wynyksrdcdc2
+ receipt  ls3nbzn2po5x
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck       

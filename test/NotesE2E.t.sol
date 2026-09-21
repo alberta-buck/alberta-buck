@@ -105,6 +105,14 @@ abstract contract NotesE2EBase is Test {
                 _u(string.concat(k, ".identityLeaf"))
             );
         }
+        // The addressed flavours carry a third leaf: the recipient's mailbox
+        // association, over the two POINTS, which is what a payer and a receipt
+        // verifier check with no secret.  It binds no address, so it arrives as
+        // a leaf rather than as a binding.
+        if (!_isBearer()) {
+            IdentityRegistryHarness(address(reg)).fixtureInsertLeaf(
+                _u(".mailboxBinding.leaf"));
+        }
         assertEq(reg.identityRoot(), _u(".identityRoot"),
                  "on-chain incremental identityRoot must replay the fixture tree");
 
