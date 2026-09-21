@@ -1,4 +1,4 @@
-#+TITLE: Identity accumulator specification, v0.6
+#+TITLE: Identity accumulator specification, v0.7
 #+DATE: 2026-09-20
 #+OPTIONS: toc:3 num:t
 #+PROPERTY: header-args :eval never-export
@@ -28,7 +28,9 @@ which binds an identity to the receiving key its Notes are addressed to
 ([[#leaves]]), and the two conformance tests that hold it in place; the
 receiving key itself is specified in
 [[file:notes-receiving-key.org][its own document]], and phase 2 of the plan
-implements both. =MUST=, =MUST NOT=,
+implements both. v0.7 makes that leaf commit the two SCALARS rather than
+the two points, which the folded spend gate's constraint budget forced and
+which turns out to bind more tightly ([[#leaves]]). =MUST=, =MUST NOT=,
 =SHOULD= and =MAY= are normative. Constants are given as the names already
 in the source, with their current values, so that a conformance test can
 compare rather than guess.
@@ -117,8 +119,7 @@ change the first two.
 #+begin_example
 identity_leaf(M)              = Poseidon([M.x mod F_R, M.y mod F_R])
 identity_leaf_salted(M, salt) = Poseidon([M.x mod F_R, M.y mod F_R, salt])
-receiving_leaf(M, K, salt)    = Poseidon([M.x mod F_R, M.y mod F_R,
-                                          K.x mod F_R, K.y mod F_R, salt])
+receiving_leaf(m, k, salt)    = Poseidon([m, k, salt])
 #+end_example
 
 - =identity_leaf= is the function in the source today. It is retained
@@ -128,12 +129,33 @@ receiving_leaf(M, K, salt)    = Poseidon([M.x mod F_R, M.y mod F_R,
   implementations =MUST= reject =0=, which would make the leaf a
   deterministic function of the identity in a tree declared private.
 - =receiving_leaf= is the leaf of an identity-registry subtree, and binds
-  two things rather than one: the identity =M= a Note names, and the
-  receiving key =K = k*G= a Note is encrypted to
-  ([[file:notes-receiving-key.org][the receiving-key architecture]]). The
-  same =salt= rules apply. It is a third function rather than a widened
-  second one because attribute subtrees bind no receiving key and their
-  leaves =MUST NOT= change.
+  two things rather than one: the identity a Note names, and the receiving
+  secret =k= whose public key =k*G= a Note is encrypted to
+  ([[file:notes-receiving-key.org][the receiving-key architecture]]). All
+  three arguments =MUST= lie in =[1, F_R)=. It is a third function rather
+  than a widened second one because attribute subtrees bind no receiving key
+  and their leaves =MUST NOT= change.
+
+  *It commits the SCALARS where its siblings commit coordinates, and that
+  difference is deliberate.* The siblings are computed by authorities that
+  hold identity points and nothing else. This leaf exists to be proven in
+  zero knowledge by a holder that has the scalars, and BN254's =G1= group
+  order equals =F_R=, so a scalar is a field element outright -- no
+  reduction, no limbs, no aliasing question about a limb decomposition.
+  Committing coordinates instead would oblige the spend circuit to re-derive
+  both points from those same scalars, at 471,896 constraints per fixed-base
+  multiplication: 943,792 to reach a commitment whose preimages the prover
+  already holds, and 22% of the circuit. Measured, not estimated: the gate is
+  4,247,066 constraints over coordinates and 3,303,970 over scalars, against
+  a =pot22= ceiling of 4,194,304.
+
+  Two properties improve rather than degrade. The circuit hashes the very
+  signals its other relations consume, so "the identity in the credential"
+  and "the identity in the leaf" are the /same signal/ rather than two values
+  joined by a derivation. And it is harder to scan: a payer is GIVEN both the
+  identity point and the receiving key, so under a coordinate leaf only the
+  salt stood between it and a membership test, where here it would also need
+  =k=, which is disclosed to nobody.
 - Coordinates are reduced mod =F_R= exactly as today, because circom
   reduces its Poseidon inputs the same way.
 
@@ -764,12 +786,13 @@ mode of [[#publication]] removes it.
    Rust kernel, both bindings and the circuit.
 2a. *Receiving-key leaf.* The collapsed design -- an identity point
     encrypted under itself -- is scannable with one scalar multiplication
-    per candidate, and keying the same plaintext to =K= is not; a party
-    holding every certified scalar, the whole published subtree and =K=
-    itself decides no membership of a =receiving_leaf=; the holder's
-    binding proof verifies for its own pair and for no other identity;
-    a rotated key yields an unlinkable leaf; and =receiving_leaf= agrees
-    across Python, the Rust kernel, both bindings and the circuit.
+    per candidate, and keying the same plaintext to =k*G= is not; a party
+    holding every certified scalar, the whole published subtree and the
+    receiving key itself decides no membership of a =receiving_leaf=; the
+    holder's binding proof verifies for its own pair and for no other
+    identity; a rotated key yields an unlinkable leaf; each argument
+    outside =[1, F_R)= is refused; and =receiving_leaf= agrees across
+    Python, the Rust kernel, both bindings and the circuit.
 2b. *The folded deposit gate.* A witness exists for the honest spender;
     a payload thief supplying the stolen receiving key with its own
     registered identity and account is refused, and refused specifically

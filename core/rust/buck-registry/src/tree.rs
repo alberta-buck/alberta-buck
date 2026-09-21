@@ -24,11 +24,12 @@ pub fn identity_leaf_salted(m_point: &G1w, salt: &W256) -> Result<W256> {
     notes::identity_leaf_salted(m_point, salt)
 }
 
-/// `receiving_leaf(M, K, salt) = Poseidon([M.x, M.y, K.x, K.y, salt])` --
-/// the leaf of a private identity-registry subtree, binding an Identity to
-/// the receiving key its Notes are addressed to.
-pub fn receiving_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
-    notes::receiving_leaf(m_point, pk_recv, salt)
+/// `receiving_leaf(m_rec, k_recv, salt) = Poseidon([m_rec, k_recv, salt])`
+/// -- the leaf of a private identity-registry subtree, binding an Identity
+/// to the receiving key its Notes are addressed to.  It commits the scalars,
+/// not the points; see the kernel function for why.
+pub fn receiving_leaf(m_rec: &W256, k_recv: &W256, salt: &W256) -> Result<W256> {
+    notes::receiving_leaf(m_rec, k_recv, salt)
 }
 
 /// Sentinel for an empty leaf (depth-0 zero).

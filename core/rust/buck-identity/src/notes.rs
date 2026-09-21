@@ -148,24 +148,34 @@ pub fn identity_leaf_salted(m_point: &G1w, salt: &W256) -> Result<W256> {
 }
 
 /// Hiding leaf of a private IDENTITY-REGISTRY subtree, binding the pair:
-/// `Poseidon([M.x, M.y, K.x, K.y, salt])`.
+/// `Poseidon([m_rec, k_recv, salt])`.
 ///
-/// Addressed Notes are keyed to the receiving key `K = k*G` rather than to
-/// the identity point, because an identity scalar is a read capability the
+/// Addressed Notes are keyed to the receiving key `k*G` rather than to the
+/// identity point, because an identity scalar is a read capability the
 /// design discloses to every counterparty and so cannot also be a
 /// decryption key.  That separation obliges the spend to prove the mailbox
 /// belongs to the Identity, and this leaf is where the binding lives --
 /// committed, never published, because a public binding would deanonymise
 /// the recipient at spend.
 ///
+/// It commits the SCALARS where its two siblings commit coordinates, and
+/// that difference is principled.  The siblings are computed by authorities
+/// holding identity points; this leaf exists to be proven in zero knowledge
+/// by a holder that has the scalars.  Committing points would cost the
+/// circuit two fixed-base multiplications -- 943,792 constraints -- to
+/// re-derive preimages the prover already holds.  BN254's G1 group order
+/// equals the Poseidon field, so a scalar is a field element outright.
+///
 /// Mirrors `alberta_buck/registry/tree.py::receiving_leaf`.
-pub fn receiving_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
-    if !salt_in_range(salt) {
-        return Err(IdError(
-            "salt must be in [1, F_R); 0 makes the leaf deterministic",
-        ));
+pub fn receiving_leaf(m_rec: &W256, k_recv: &W256, salt: &W256) -> Result<W256> {
+    for v in [m_rec, k_recv, salt] {
+        if !salt_in_range(v) {
+            return Err(IdError(
+                "receiving_leaf inputs must each lie in [1, F_R)",
+            ));
+        }
     }
-    poseidon(&[m_point.0, m_point.1, pk_recv.0, pk_recv.1, *salt])
+    poseidon(&[*m_rec, *k_recv, *salt])
 }
 
 /// `salt` is a field element in `[1, F_R)`.  Poseidon reduces its inputs

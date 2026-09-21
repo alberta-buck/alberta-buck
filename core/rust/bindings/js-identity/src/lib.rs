@@ -1004,19 +1004,17 @@ pub fn identity_leaf_salted(mx: &str, my: &str, salt: &str) -> Result<String, Js
     ))
 }
 
-/// `receiving_leaf(M, pk_recv, salt)` -- the hiding leaf binding an Identity
-/// to the receiving key its Notes are addressed to.
+/// `receiving_leaf(m_rec, k_recv, salt)` -- the hiding leaf binding an
+/// Identity to the receiving key its Notes are addressed to.  Over scalars.
 #[wasm_bindgen]
 pub fn receiving_leaf(
-    mx: &str,
-    my: &str,
-    kx: &str,
-    ky: &str,
+    m_rec: &str,
+    k_recv: &str,
     salt: &str,
 ) -> Result<String, JsError> {
     Ok(hx(&kernel::notes::receiving_leaf(
-        &g1(mx, my)?,
-        &g1(kx, ky)?,
+        &w(m_rec)?,
+        &w(k_recv)?,
         &w(salt)?,
     )
     .map_err(err)?))

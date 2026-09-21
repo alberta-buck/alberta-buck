@@ -65,6 +65,7 @@ __all__ = [
     "DepositFoldWitness",
     "deposit_fold_witness",
     "deposit_fold_check",
+    "deposit_fold_a1_witness",
 ]
 
 
@@ -101,7 +102,13 @@ class DepositFoldWitness:
         siblings, index_bits: The membership path of that leaf.
 
     Public:
-        P: ``M + b*H``, the decrypted point, hidden.
+        P: ``M + b*H``, the decrypted point, hidden.  The CIRCUIT needs no such
+            point, and that is worth knowing: ``P`` existed so that a sigma and
+            a separate membership SNARK could share a hidden value, and its
+            blind ``T = b*H`` was witnessed rather than proven -- finding 5's
+            first defect.  Folding removes the second proof, so it removes the
+            shared point, the blind, and the defect with them.  ``P`` is kept
+            here only as what a verifier may be shown without learning ``M``.
         root: The posted identity root the path folds to.
         M: The decrypted point itself -- present so a prover can check its
             own work and a test can name it.  It is NOT a public input; the
@@ -158,7 +165,6 @@ def deposit_fold_witness(
         raise DepositFoldRefused(1, "witness scalars must be nonzero")
 
     M_rec = mul(G1, m_rec)
-    pk_recv = mul(G1, k)
     b = rand_scalar(rng) if b is None else (b % ORDER)
 
     # (1) k decrypts the note ciphertext to the point committed in P.
@@ -173,7 +179,7 @@ def deposit_fold_witness(
     # (3) A registered leaf commits the pair, under the holder's own salt.
     #     This is the relation a split gate leaves out, and the one the thief
     #     of a stolen payload cannot satisfy.
-    leaf = receiving_leaf(M_rec, pk_recv, salt)
+    leaf = receiving_leaf(m_rec, k, salt)
     if leaf not in tree.leaves:
         raise DepositFoldRefused(
             3, "no registered leaf commits this (Identity, receiving key) pair")
@@ -207,7 +213,6 @@ def deposit_fold_check(
     Returns True only if every relation holds against the given public inputs.
     """
     M_rec = mul(G1, witness.m_rec)
-    pk_recv = mul(G1, witness.k)
 
     # (2a) the account key is the registered one -- this is what pins sk_dep,
     #      and without it relation (2) would hold for an unregistered account.
@@ -222,7 +227,7 @@ def deposit_fold_check(
         return False
     # (3) the leaf commits the pair under the holder's salt.
     try:
-        leaf = receiving_leaf(M_rec, pk_recv, witness.salt)
+        leaf = receiving_leaf(witness.m_rec, witness.k, witness.salt)
     except ValueError:
         return False
     if leaf != witness.leaf:
@@ -232,3 +237,131 @@ def deposit_fold_check(
     for sib, bit in zip(witness.siblings, witness.index_bits):
         cur = poseidon([cur, sib]) if bit == 0 else poseidon([sib, cur])
     return cur == root
+
+
+# ===================== The circuit witness ==================================
+#
+# `deposit_fold_witness` above is the clear-text reference: it decides the four
+# relations and refuses on the one that fails.  What follows turns an accepted
+# witness into the JSON `circuits/deposit_fold_a1.circom` consumes, which is a
+# different shape for two reasons.
+#
+# First, the circuit works in 4x64-bit limbs, because BN254's base field does
+# not fit the native field the constraints live in.
+#
+# Second, and more interesting, the circuit folds sums of POINTS into sums of
+# SCALARS before multiplying: it checks `eEnc.C = (m_rec + t*k)*G` rather than
+# `m_rec*G + (t*k)*G`.  That is not an optimisation.  Elliptic-curve addition in
+# circom is incomplete -- it misbehaves on doubling and identity cases, which is
+# one of the three finding-5 defects -- and a circuit that performs no point
+# addition at all cannot be driven into those cases.  The combined scalars are
+# the witnessed values `u`, `w` and `cd` below.
+
+
+def _limbs(val: int, n: int = 4, bits: int = 64):
+    """Little-endian 64-bit limbs, matching `note_binding.to_limbs`."""
+    mask = (1 << bits) - 1
+    return [(val >> (i * bits)) & mask for i in range(n)]
+
+
+def deposit_fold_a1_witness(
+    *,
+    witness:  DepositFoldWitness,   # from deposit_fold_witness, already checked
+    rho:      int,
+    id_hash:  int,
+    e_note:   ElGamalCiphertext,    # the note's value ciphertext
+    v:        int,                  # the note face (public at spend)
+    m_issuer: int,
+    sigma_R,
+    sigma_s:  int,
+    r_note:   int,                  # eNote's randomness (travels in the payload)
+    t:        int,                  # eEnc's total randomness (r' + s)
+    r_E:      int,                  # the account's registration randomness
+    e_dep:    ElGamalCiphertext,    # the account's registered credential
+    pk_dep,                         # the account's registered key
+    e_enc:    ElGamalCiphertext,    # the spend's re-randomized ciphertext
+    identity_root: int,
+) -> dict:
+    """Build the JSON witness for `circuits/deposit_fold_a1.circom`.
+
+    Every relation the circuit constrains is asserted here first, so a witness
+    that would fail inside the prover fails in Python with a message instead.
+
+    Raises:
+        AssertionError: naming the relation whose arithmetic does not close.
+    """
+    from alberta_buck.wallet.bn254 import point_to_words
+    from alberta_buck.wallet.notes import NULLIFIER_TAG_B
+    from alberta_buck.wallet.poseidon import F_R, poseidon
+
+    m_rec, k, sk_dep = witness.m_rec, witness.k, witness.sk_dep
+    t %= ORDER
+    r_note %= ORDER
+    r_E %= ORDER
+
+    # The combined scalars the circuit multiplies by, in place of adding points.
+    u_val = (v + r_note * k) % ORDER              # eNote.C = u*G
+    w_val = (m_rec + t * k) % ORDER               # eEnc.C  = w*G
+    cd_val = (m_rec + sk_dep * r_E) % ORDER       # E_dep.C = cd*G
+
+    # -- the note tie -------------------------------------------------------
+    assert eq(e_note.R, mul(G1, r_note)), "eNote.R != rn*G"
+    assert eq(e_note.C, mul(G1, u_val)), "eNote.C != u*G (u = v + rn*k)"
+    # -- (1) k decrypts the spend's ciphertext to M_rec ---------------------
+    assert eq(e_enc.R, mul(G1, t)), "eEnc.R != t*G"
+    assert eq(e_enc.C, mul(G1, w_val)), "eEnc.C != w*G (w = m_rec + t*k)"
+    # -- (2) the account credential decrypts to M_rec -----------------------
+    assert eq(pk_dep, mul(G1, sk_dep)), "pk_dep != sk_dep*G"
+    assert eq(e_dep.R, mul(G1, r_E)), "E_dep.R != r_E*G"
+    assert eq(e_dep.C, mul(G1, cd_val)), "E_dep.C != cd*G (cd = m_rec + sk*r_E)"
+    # -- (3) the leaf commits the pair --------------------------------------
+    assert witness.leaf == receiving_leaf(m_rec, k, witness.salt), \
+        "the witness leaf does not commit (m_rec, k, salt)"
+    # -- (4) the path folds to the posted root ------------------------------
+    assert witness.root == identity_root, \
+        "the witness root is not the posted identity root"
+
+    nullifier = poseidon([rho, id_hash, NULLIFIER_TAG_B]) % F_R
+
+    def _w(P):
+        x, y = point_to_words(P)
+        return _limbs(x), _limbs(y)
+
+    eEncRx, eEncRy = _w(e_enc.R)
+    eEncCx, eEncCy = _w(e_enc.C)
+    pkDepX, pkDepY = _w(pk_dep)
+    eDepRx, eDepRy = _w(e_dep.R)
+    eDepCx, eDepCy = _w(e_dep.C)
+
+    nRx, nRy = point_to_words(e_note.R)
+    nCx, nCy = point_to_words(e_note.C)
+    sigRx, sigRy = point_to_words(sigma_R)
+
+    return {
+        "nullifier": str(nullifier),
+        "v": str(v),
+        "identityRoot": str(identity_root),
+        "eEncRx": [str(x) for x in eEncRx], "eEncRy": [str(x) for x in eEncRy],
+        "eEncCx": [str(x) for x in eEncCx], "eEncCy": [str(x) for x in eEncCy],
+        "pkDepX": [str(x) for x in pkDepX], "pkDepY": [str(x) for x in pkDepY],
+        "eDepRx": [str(x) for x in eDepRx], "eDepRy": [str(x) for x in eDepRy],
+        "eDepCx": [str(x) for x in eDepCx], "eDepCy": [str(x) for x in eDepCy],
+        "rho": str(rho % F_R),
+        "idHash": str(id_hash % F_R),
+        "eNote": [str(nRx % F_R), str(nRy % F_R), str(nCx % F_R), str(nCy % F_R)],
+        "mIss": str(m_issuer % F_R),
+        "sigR": [str(sigRx % F_R), str(sigRy % F_R)],
+        "sigS": str(sigma_s % F_R),
+        "rn": [str(x) for x in _limbs(r_note)],
+        "m_rec": [str(x) for x in _limbs(m_rec)],
+        "k_recv": [str(x) for x in _limbs(k)],
+        "u": [str(x) for x in _limbs(u_val)],
+        "t": [str(x) for x in _limbs(t)],
+        "w": [str(x) for x in _limbs(w_val)],
+        "sk_dep": [str(x) for x in _limbs(sk_dep)],
+        "r_E": [str(x) for x in _limbs(r_E)],
+        "cd": [str(x) for x in _limbs(cd_val)],
+        "salt": str(witness.salt),
+        "pathElements": [str(x) for x in witness.siblings],
+        "pathIndices": [str(x) for x in witness.index_bits],
+    }

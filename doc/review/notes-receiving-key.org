@@ -327,6 +327,52 @@ fixtures need the folded gate to exist as a circuit /and/ an on-chain
 verifier first. That is the remaining circuit work, together with the
 finding-5 repairs, the aggregator depth raise and the B1 circuit.
 
+** 4.3 The folded gate, built and measured
+:PROPERTIES:
+:CUSTOM_ID: fold-built
+:END:
+
+=circuits/deposit_fold_a1.circom=, with
+=alberta_buck/wallet/deposit_fold.py= as its clear-text reference and
+=scripts/snark/gen_deposit_fold_a1_input.py= as its witness builder.
+
+*The three finding-5 defects are absent by construction rather than patched.*
+That is the fold's dividend, and it is worth stating precisely because the
+plan had them down as three separate repairs:
+
+| Defect | How folding removes it |
+|--------+------------------------|
+| The witnessed tie point =T= | =P_I= existed only so a sigma and a membership SNARK could share a hidden value. One proof needs no shared point, so there is no =P_I=, no blind, and no =ScalarMulH= |
+| Unchecked 64-bit limbs | Every witnessed limb array is consumed by =ScalarMulG=, which range-checks each limb with =Num2Bits(64)=. The intermediate products are native signals, so no limb of theirs exists to alias |
+| Incomplete addition | Sums of points become sums of SCALARS before multiplication -- =eEnc.C = (m_rec + t*k)*G= rather than =m_rec*G + (t*k)*G= -- so the circuit performs no curve addition at all |
+
+*The constraint budget forced a better leaf.* Built over point coordinates
+the gate is 4,247,066 constraints, against a =pot22= ceiling of 4,194,304 --
+a miss of 52,762, or 1.3%. The two fixed-base multiplications that re-derive
+=M_rec= and =pk_recv= from scalars the prover already holds cost 943,792 of
+that, 22% of the circuit, purely to reach the leaf. Committing the scalars
+instead brings it to *3,303,970*, inside the ceiling with 890,334 to spare --
+enough for the aggregator depth raise, which costs about 2,400.
+
+That change is in the specification as v0.7, and it binds more tightly than
+what it replaced: the circuit now hashes the very signals its other relations
+consume, so the identity in the credential relation and the identity in the
+leaf are the /same signal/ rather than two values joined by a derivation
+whose output limbs the gadget does not range-check.
+
+| Circuit | Constraints | Setup |
+|---------+-------------+-------|
+| =note_binding.circom= (A2) | 2,416,748 | none -- r1cs unchanged |
+| =note_binding_a1.circom= | 2,859,018 | required |
+| =deposit_fold_a1.circom= | 3,303,970 | required, fits =pot22= |
+
+*What the gate does not yet have*: a trusted setup, a Solidity verifier, the
+=Notes.sol= call path that replaces =verifyDepositCoupling=, and an A2
+sibling -- A2's ciphertext decrypts to the ISSUER identity, so it carries one
+further relation, the membership of that decrypted point. Until those land
+the end-to-end fixtures stay as they are, for the reason [[#circuit-cost]]
+gives.
+
 * 5 What it costs
 :PROPERTIES:
 :CUSTOM_ID: cost

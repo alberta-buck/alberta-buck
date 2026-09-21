@@ -155,19 +155,19 @@ def test_the_leaf_is_unscannable_given_every_identity_the_tree_and_the_key():
     tree = IdentityMerkleTree(depth=10, private=True)
     holders = [_holder(i) for i in range(16)]
     for h in holders:
-        tree.insert_receiving(h["M"], h["pk_recv"], h["salt"])
+        tree.insert_receiving(h["m"], h["k"], h["salt"])
     published = set(tree.leaves)
 
     target = holders[5]
     guesses = set()
     for h in holders:                      # every identity it certified
         for other in holders:              # paired with every key it has seen
-            guesses.add(receiving_leaf(h["M"], other["pk_recv"], 1))
+            guesses.add(receiving_leaf(h["m"], other["k"], 1))
             guesses.add(identity_leaf_salted(h["M"], 1))
     assert not (guesses & published), "the salt is what makes the leaf hiding"
 
     # With the holder's own salt -- which only the holder derives -- it is a member.
-    assert receiving_leaf(target["M"], target["pk_recv"], target["salt"]) in published
+    assert receiving_leaf(target["m"], target["k"], target["salt"]) in published
 
 
 def test_rotation_yields_an_unlinkable_leaf():
@@ -175,22 +175,22 @@ def test_rotation_yields_an_unlinkable_leaf():
     h = _holder()
     k2, pk2 = receiving_key(h["seed"], 1)
     salt2 = derive_salt(h["seed"], KYC, 1)
-    assert receiving_leaf(h["M"], pk2, salt2) != receiving_leaf(
-        h["M"], h["pk_recv"], h["salt"])
+    assert receiving_leaf(h["m"], k2, salt2) != receiving_leaf(
+        h["m"], h["k"], h["salt"])
 
 
 @pytest.mark.parametrize("bad", [0, F_R, F_R + 1, -1])
 def test_a_receiving_leaf_refuses_a_bad_salt(bad):
     h = _holder()
     with pytest.raises(ValueError):
-        receiving_leaf(h["M"], h["pk_recv"], bad)
+        receiving_leaf(h["m"], h["k"], bad)
 
 
 def test_the_receiving_leaf_is_distinct_from_the_plain_salted_leaf():
     """A third leaf function, not a changed one: the two-input and three-input
     leaves stay valid for the trees that use them, so committed vectors hold."""
     h = _holder()
-    assert receiving_leaf(h["M"], h["pk_recv"], h["salt"]) != identity_leaf_salted(
+    assert receiving_leaf(h["m"], h["k"], h["salt"]) != identity_leaf_salted(
         h["M"], h["salt"])
 
 
@@ -199,24 +199,24 @@ def test_the_receiving_leaf_is_distinct_from_the_plain_salted_leaf():
 def test_the_binding_is_provable_and_pinned_to_the_pair():
     h = _holder()
     tree = IdentityMerkleTree(depth=10, private=True)
-    tree.insert_receiving(h["M"], h["pk_recv"], h["salt"])
+    tree.insert_receiving(h["m"], h["k"], h["salt"])
 
-    binding = prove_receiving_binding(h["M"], h["pk_recv"], h["salt"], tree)
-    assert verify_receiving_binding(h["M"], binding, tree.root())
+    binding = prove_receiving_binding(h["m"], h["k"], h["salt"], tree)
+    assert verify_receiving_binding(h["m"], binding, tree.root())
     # A different Identity does not get to claim this key's binding.
-    assert not verify_receiving_binding(mul(G1, SCALARS[7]), binding, tree.root())
+    assert not verify_receiving_binding(SCALARS[7], binding, tree.root())
     # Nor does a stale root.
-    assert not verify_receiving_binding(h["M"], binding, tree.root() ^ 1)
+    assert not verify_receiving_binding(h["m"], binding, tree.root() ^ 1)
 
 
 def test_an_unregistered_receiving_key_has_no_binding():
     """A holder claiming a key it never registered gets the honest answer."""
     h = _holder()
     tree = IdentityMerkleTree(depth=10, private=True)
-    tree.insert_receiving(h["M"], h["pk_recv"], h["salt"])
-    _, pk2 = receiving_key(h["seed"], 1)
+    tree.insert_receiving(h["m"], h["k"], h["salt"])
+    k2, _ = receiving_key(h["seed"], 1)
     with pytest.raises(ValueError, match="no registered leaf"):
-        prove_receiving_binding(h["M"], pk2, h["salt"], tree)
+        prove_receiving_binding(h["m"], k2, h["salt"], tree)
 
 
 # ------------------------------------------------- the folded deposit gate
@@ -233,12 +233,12 @@ def _world():
     note_ct = elgamal_encrypt(M_iss, rec["pk_recv"], 0xBBB2)
 
     tree = IdentityMerkleTree(depth=10, private=True)
-    tree.insert_receiving(rec["M"], rec["pk_recv"], rec["salt"])
+    tree.insert_receiving(rec["m"], rec["k"], rec["salt"])
 
     thief = _holder(1)
     sk_thief = 0xBAD0_4321
     E_thief = elgamal_encrypt(thief["M"], mul(G1, sk_thief), 0xCCC3)
-    tree.insert_receiving(thief["M"], thief["pk_recv"], thief["salt"])
+    tree.insert_receiving(thief["m"], thief["k"], thief["salt"])
 
     return dict(rec=rec, sk_dep=sk_dep, pk_dep=pk_dep, E_dep=E_dep,
                 M_iss=M_iss, note_ct=note_ct, tree=tree,
@@ -328,7 +328,7 @@ def test_a_rotated_receiving_key_still_spends():
     rec = w_["rec"]
     k2, pk2 = receiving_key(rec["seed"], 1)
     salt2 = derive_salt(rec["seed"], KYC, 1)
-    w_["tree"].insert_receiving(rec["M"], pk2, salt2)
+    w_["tree"].insert_receiving(rec["m"], k2, salt2)
     note2 = elgamal_encrypt(w_["M_iss"], pk2, 0xDDD4)
 
     w = deposit_fold_witness(
@@ -337,4 +337,99 @@ def test_a_rotated_receiving_key_still_spends():
     )
     assert deposit_fold_check(w, pk_dep=w_["pk_dep"], E_dep=w_["E_dep"],
                               note_ct=note2, root=w_["tree"].root())
-    assert w.leaf != receiving_leaf(rec["M"], rec["pk_recv"], rec["salt"])
+    assert w.leaf != receiving_leaf(rec["m"], rec["k"], rec["salt"])
+
+
+# ---------------------------------------------- the folded gate's circuit
+
+def _fold_world():
+    """An honest A1 world, shaped for the circuit witness builder."""
+    from alberta_buck.wallet.notes import id_hash_a1
+    from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
+
+    rec = _holder(2)
+    sk_dep, r_E = 0xD0D0_1111, 0xE0E0_2222
+    pk_dep = mul(G1, sk_dep)
+    E_dep = elgamal_encrypt(rec["M"], pk_dep, r_E)
+
+    priv = IdentityMerkleTree(depth=10, private=True)
+    priv.insert_receiving(rec["m"], rec["k"], rec["salt"])
+
+    m_iss, sig_k = SCALARS[11], 0xABC_0001
+    sigma_R, sigma_s = mul(G1, sig_k), 0xABC_0002
+    rho, r_prime, face = 0xF00D, 0xBEEF_0003, 4242
+    note = mint_unilateral_a1(rec["M"], rec["pk_recv"], v=face, rho=rho,
+                              m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
+                              r_prime=r_prime, rng=lambda: 0xCAFE_0004)
+    t = (note.r_prime + 0x5115) % ORDER
+    eEnc = elgamal_encrypt(rec["M"], rec["pk_recv"], t)
+    return dict(rec=rec, sk_dep=sk_dep, r_E=r_E, pk_dep=pk_dep, E_dep=E_dep,
+                priv=priv, note=note, m_iss=m_iss, sigma_R=sigma_R,
+                sigma_s=sigma_s, rho=rho, face=face, t=t, eEnc=eEnc)
+
+
+def _fold_witness(w_):
+    from alberta_buck.wallet.deposit_fold import deposit_fold_a1_witness
+    rec = w_["rec"]
+    w = deposit_fold_witness(
+        m_rec=rec["m"], k=rec["k"], sk_dep=w_["sk_dep"], salt=rec["salt"],
+        E_dep=w_["E_dep"], note_ct=w_["eEnc"], tree=w_["priv"], b=0x99,
+    )
+    return deposit_fold_a1_witness(
+        witness=w, rho=w_["rho"], id_hash=w_["note"].idHash,
+        e_note=w_["note"].eNote, v=w_["face"], m_issuer=w_["m_iss"],
+        sigma_R=w_["sigma_R"], sigma_s=w_["sigma_s"], r_note=w_["note"].r_note,
+        t=w_["t"], r_E=w_["r_E"], e_dep=w_["E_dep"], pk_dep=w_["pk_dep"],
+        e_enc=w_["eEnc"], identity_root=w_["priv"].root(),
+    )
+
+
+def test_the_circuit_witness_closes_on_every_relation():
+    """Each assertion inside the builder is a constraint the circuit carries,
+    so a witness that would fail inside the prover fails here with a name."""
+    j = _fold_witness(_fold_world())
+    assert int(j["nullifier"]) > 0
+    # The combined scalars are what let the circuit avoid point addition.
+    for key in ("u", "w", "cd"):
+        assert len(j[key]) == 4
+
+
+def test_the_circuit_witness_matches_the_circuits_declared_inputs():
+    """Guards the drift that bit the note-binding rename: the circom witness
+    calculator maps JSON keys to signal names, so a builder that emits a key
+    the circuit does not declare fails only at proving time."""
+    import re
+    src = open("circuits/deposit_fold_a1.circom").read()
+    body = src[src.index("template DepositFoldA1"):src.index("component main")]
+    declared = set(re.findall(r"signal input\s+(\w+)", body))
+    emitted = set(_fold_witness(_fold_world()).keys())
+    assert emitted == declared, (
+        f"only in circuit: {sorted(declared - emitted)}; "
+        f"only in builder: {sorted(emitted - declared)}")
+
+
+def test_the_circuit_witness_refuses_a_tampered_registration_nonce():
+    """Refused at the relation that PINS the nonce, which is the one that makes
+    the credential relation mean anything.
+
+    Without `E_dep.R === r_E*G`, a prover could pick any r_E and solve
+    `cd = m' + sk*r_E` for its OWN identity m', since cd is fixed by the public
+    credential -- the credential relation would hold for anybody.  So this
+    refusal landing on R rather than C is the correct one."""
+    from alberta_buck.wallet.deposit_fold import deposit_fold_a1_witness
+    w_ = _fold_world()
+    rec = w_["rec"]
+    w = deposit_fold_witness(
+        m_rec=rec["m"], k=rec["k"], sk_dep=w_["sk_dep"], salt=rec["salt"],
+        E_dep=w_["E_dep"], note_ct=w_["eEnc"], tree=w_["priv"], b=0x99,
+    )
+    with pytest.raises(AssertionError, match=r"E_dep\.R != r_E\*G"):
+        deposit_fold_a1_witness(
+            witness=w, rho=w_["rho"], id_hash=w_["note"].idHash,
+            e_note=w_["note"].eNote, v=w_["face"], m_issuer=w_["m_iss"],
+            sigma_R=w_["sigma_R"], sigma_s=w_["sigma_s"],
+            r_note=w_["note"].r_note, t=w_["t"],
+            r_E=w_["r_E"] + 1,                 # the wrong registration nonce
+            e_dep=w_["E_dep"], pk_dep=w_["pk_dep"], e_enc=w_["eEnc"],
+            identity_root=w_["priv"].root(),
+        )

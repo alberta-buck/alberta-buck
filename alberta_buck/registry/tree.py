@@ -77,29 +77,51 @@ def identity_leaf_salted(M, salt: int) -> int:
     return poseidon([x % F_R, y % F_R, salt])
 
 
-def receiving_leaf(M, pk_recv, salt: int) -> int:
-    """Compute the hiding leaf commitment Poseidon(M.x, M.y, pk.x, pk.y, salt).
+def receiving_leaf(m_rec: int, k_recv: int, salt: int) -> int:
+    """Compute the hiding leaf commitment Poseidon(m_rec, k_recv, salt).
 
     The leaf of a private IDENTITY-REGISTRY subtree, which must bind two
-    things rather than one: the Identity that a note names, and the receiving
-    key that a note is encrypted to.
+    things rather than one: the Identity a Note names, and the receiving key a
+    Note is encrypted to.
 
     Why the pair belongs in one leaf.  Addressed Notes are keyed to
-    ``pk_recv``, not to the identity point, because an identity scalar is a
-    read capability the design discloses to every counterparty and so cannot
+    ``pk_recv = k*G``, not to the identity point, because an identity scalar is
+    a read capability the design discloses to every counterparty and so cannot
     also be a decryption key (alberta_buck.wallet.recvkey).  That separation
     buys the privacy and creates an obligation: a note addressed to a key of
     the payer's choosing would break mutual decryptability and the receipt, so
     the receiving key MUST be bound to the Identity -- and the spend gate must
     prove that binding rather than assume it.
 
+    Why the SCALARS and not the points.  Its two siblings commit coordinates
+    because the authorities that compute them hold identity POINTS and nothing
+    else.  This leaf is different in kind: its whole purpose is to be proven in
+    zero knowledge, and the prover holds the scalars.  Committing the points
+    would force the circuit to re-derive them, at 471,896 constraints per
+    fixed-base multiplication -- 943,792 to hash a commitment whose preimages
+    the prover already has.  Committing the scalars costs one Poseidon.
+
+    Three further things follow, and each is an improvement rather than a
+    trade:
+
+      * BN254's G1 group order equals the Poseidon field, so a scalar IS a
+        native field element.  No reduction, no limbs, and no aliasing
+        question about a limb decomposition.
+      * The circuit hashes the very same private signals its other relations
+        use, so the tie between "the Identity in the credential" and "the
+        Identity in the leaf" is direct rather than mediated by a point
+        derivation whose output limbs the gadget does not range-check.
+      * It is strictly harder to scan.  A payer is GIVEN both ``M_rec`` and
+        ``pk_recv``, so under a coordinate-committing leaf only the salt stood
+        between it and a membership test.  Here it would need ``k`` as well,
+        and ``k`` is disclosed to nobody.
+
     Why it is committed rather than published.  A spend proving against a
     PUBLIC binding would reveal the recipient's registered receiving key and
     deanonymise them to everyone, which is worse than the problem being
     solved.  Under the holder's own salt the leaf is provable in zero
-    knowledge and unscannable to a party holding every certified identity, the
-    whole published subtree, and ``pk_recv`` itself -- the last because
-    deciding a ciphertext's addressee from the public key alone is DDH.
+    knowledge and unscannable to a party holding every certified identity and
+    the whole published subtree.
 
     What it prevents.  A gate that proved "I can read this note" and "I am
     this registered Identity" side by side would state nothing about their
@@ -110,21 +132,20 @@ def receiving_leaf(M, pk_recv, salt: int) -> int:
     from two proofs that merely share a public point.
 
     Args:
-        M: A BN254 G1 point, the holder's Identity.
-        pk_recv: A BN254 G1 point, the holder's receiving key (= k*G).
+        m_rec: The holder's identity scalar, in [1, F_R).
+        k_recv: The holder's receiving secret, in [1, F_R).
         salt: The holder's blinding value for THIS subtree, in [1, F_R).
 
     Returns:
         Poseidon hash as a field element in [0, F_R).
 
     Raises:
-        ValueError: if salt is outside [1, F_R).
+        ValueError: if any argument is outside [1, F_R).
     """
-    if not isinstance(salt, int) or not (1 <= salt < F_R):
-        raise ValueError("salt must be in [1, F_R); 0 makes the leaf deterministic")
-    x, y = point_to_words(M)
-    kx, ky = point_to_words(pk_recv)
-    return poseidon([x % F_R, y % F_R, kx % F_R, ky % F_R, salt])
+    for name, val in (("m_rec", m_rec), ("k_recv", k_recv), ("salt", salt)):
+        if not isinstance(val, int) or not (1 <= val < F_R):
+            raise ValueError(f"{name} must be in [1, F_R)")
+    return poseidon([m_rec, k_recv, salt])
 
 
 # --- Tree depths ---------------------------------------------------------- #
@@ -318,30 +339,33 @@ class IdentityMerkleTree:
         """
         return self.insert_leaf(identity_leaf_salted(M, salt))
 
-    def insert_receiving(self, M, pk_recv, salt: int) -> int:
+    def insert_receiving(self, m_rec: int, k_recv: int, salt: int) -> int:
         """Insert the (Identity, receiving key) pair under the hiding leaf.
 
         The admission an identity registry performs: the holder derives the
         salt and the receiving key from its own seed material
         (alberta_buck.wallet.salt, alberta_buck.wallet.recvkey) and sends
         ``(M, pk_recv, salt)``; the authority, which knows ``M`` already,
-        computes the leaf and inserts it.  No proof is required or useful at
-        admission -- the authority is certifying ``M``, and a holder who lies
-        about its own receiving key only makes its own notes unspendable.
+        computes the leaf and inserts it.  The identity registry holds the
+        identity SCALAR it certified, so it can still check the leaf it
+        inserts.  No proof is required or useful at admission: a holder who
+        lies about its own receiving key, or about its own identity, only
+        makes its own notes unspendable -- the spend gate's credential
+        relation holds the true identity.
 
         Rotation is a re-association: insert at an incremented counter and
         clear the old leaf (accumulator specification, section 8.3).  The two
         leaves share no salt, so they do not link.
 
         Args:
-            M: A BN254 G1 point representing the identity.
-            pk_recv: The holder's receiving key for addressed Notes.
+            m_rec: The holder's identity scalar.
+            k_recv: The holder's receiving secret for addressed Notes.
             salt: The holder's blinding value for THIS subtree.
 
         Returns:
             The leaf's index in the tree.
         """
-        return self.insert_leaf(receiving_leaf(M, pk_recv, salt))
+        return self.insert_leaf(receiving_leaf(m_rec, k_recv, salt))
 
     def clear_leaf(self, index: int) -> int:
         """Clear a leaf to EMPTY_LEAF: the revocation primitive.

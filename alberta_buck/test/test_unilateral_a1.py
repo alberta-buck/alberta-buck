@@ -96,7 +96,7 @@ def world():
     tree.insert(rec0.M)
 
     priv = IdentityMerkleTree(depth=10, private=True)
-    priv.insert_receiving(rec0.M, pk_recv, salt_rec)
+    priv.insert_receiving(m_rec, k_rec, salt_rec)
 
     return dict(rng=rng, m_iss=m_iss, m_rec=m_rec, M_rec=rec0.M,
                 k_rec=k_rec, pk_recv=pk_recv, salt_rec=salt_rec,
@@ -181,7 +181,7 @@ def test_a_rotated_receiving_key_still_spends(world):
     a leaf that links to nothing, and the note still cashes."""
     k2, pk2 = receiving_key(world["seed_rec"], 1)
     salt2 = derive_salt(world["seed_rec"], KYC, 1)
-    world["priv"].insert_receiving(world["M_rec"], pk2, salt2)
+    world["priv"].insert_receiving(world["m_rec"], k2, salt2)
     note = mint_unilateral_a1(world["M_rec"], pk2, v=7,
                               rho=rand_scalar(world["rng"]),
                               m_issuer=world["m_iss"],
@@ -194,7 +194,7 @@ def test_a_rotated_receiving_key_still_spends(world):
     )
     assert deposit_fold_check(w, pk_dep=world["rec0"].pk, E_dep=world["rec0"].E,
                               note_ct=note.eRec, root=world["priv"].root())
-    assert w.leaf != receiving_leaf(world["M_rec"], world["pk_recv"],
+    assert w.leaf != receiving_leaf(world["m_rec"], world["k_rec"],
                                    world["salt_rec"])
 
 
@@ -213,9 +213,9 @@ def test_payload_thief_cannot_spend(world):
     m_thief = rand_scalar(rng)
     thief = Account(m_thief, rng)
     seed_t = rand_scalar(rng)
-    _, pk_t = receiving_key(seed_t)
+    k_t, _ = receiving_key(seed_t)
     salt_t = derive_salt(seed_t, KYC)
-    world["priv"].insert_receiving(thief.M, pk_t, salt_t)   # genuinely registered
+    world["priv"].insert_receiving(m_thief, k_t, salt_t)   # genuinely registered
 
     with pytest.raises(DepositFoldRefused) as exc:
         deposit_fold_witness(

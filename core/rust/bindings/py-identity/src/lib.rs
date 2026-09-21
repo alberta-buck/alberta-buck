@@ -831,17 +831,17 @@ fn identity_leaf_salted(m_point: PyG1, salt: BigUint) -> PyResult<BigUint> {
     ))
 }
 
-/// `receiving_leaf(M, pk_recv, salt)` -- the hiding leaf binding an Identity
-/// to the receiving key its Notes are addressed to.
+/// `receiving_leaf(m_rec, k_recv, salt)` -- the hiding leaf binding an
+/// Identity to the receiving key its Notes are addressed to.  Over scalars.
 #[pyfunction]
 fn receiving_leaf(
-    m_point: PyG1,
-    pk_recv: PyG1,
+    m_rec: BigUint,
+    k_recv: BigUint,
     salt: BigUint,
 ) -> PyResult<BigUint> {
     Ok(big(&kernel::notes::receiving_leaf(
-        &wg1(&m_point)?,
-        &wg1(&pk_recv)?,
+        &w(&m_rec)?,
+        &w(&k_recv)?,
         &w(&salt)?,
     )
     .map_err(err)?))

@@ -161,23 +161,30 @@ class ReceivingBinding:
     key of the Identity ``M``.
 
     Attributes:
-        pk_recv: The receiving key claimed.  Safe to disclose: deciding which
+        pk_recv: The receiving key claimed, as a point, so a verifier can check
+            a verifiable decryption under it.  Safe to disclose: deciding which
             ciphertexts it addresses, from the key alone, is DDH.
+        k_recv: The receiving secret, the leaf's actual preimage.  Disclosing
+            it hands over the mailbox, so this evidence is for a counterparty
+            the holder is already naming itself to -- and the circuit proves
+            the same statement without it.
         salt: The holder's witness for the hiding leaf.  In the clear here;
             private in the circuit.
-        path: The membership path of ``receiving_leaf(M, pk_recv, salt)``.
+        path: The membership path of ``receiving_leaf(m_rec, k_recv, salt)``.
     """
     pk_recv: Tuple
+    k_recv: int
     salt: int
     path: "MembershipProof"
 
 
-def prove_receiving_binding(M, pk_recv, salt: int, tree) -> ReceivingBinding:
-    """Build the binding evidence for ``(M, pk_recv)`` from the holder's salt.
+def prove_receiving_binding(m_rec: int, k_recv: int, salt: int,
+                            tree) -> ReceivingBinding:
+    """Build the binding evidence for ``(m_rec, k_recv)`` from the holder's salt.
 
     Args:
-        M: The holder's Identity point.
-        pk_recv: The holder's receiving key.
+        m_rec: The holder's identity scalar.
+        k_recv: The holder's receiving secret.
         salt: The holder's salt for this subtree.
         tree: The subtree the pair was admitted to.
 
@@ -187,29 +194,34 @@ def prove_receiving_binding(M, pk_recv, salt: int, tree) -> ReceivingBinding:
     """
     from alberta_buck.registry.tree import receiving_leaf
 
-    leaf = receiving_leaf(M, pk_recv, salt)
+    leaf = receiving_leaf(m_rec, k_recv, salt)
     if leaf not in tree.leaves:
         raise ValueError(
             "no registered leaf commits this (Identity, receiving key) pair")
     return ReceivingBinding(
-        pk_recv=pk_recv, salt=salt,
+        pk_recv=receiving_public(k_recv), k_recv=k_recv, salt=salt,
         path=tree.path(tree.leaves.index(leaf)),
     )
 
 
-def verify_receiving_binding(M, binding: "ReceivingBinding",
+def verify_receiving_binding(m_rec: int, binding: "ReceivingBinding",
                              root: int) -> bool:
-    """Check that ``binding`` ties ``M`` to its ``pk_recv`` under ``root``.
+    """Check that ``binding`` ties ``m_rec`` to its receiving key under ``root``.
 
     Recomputes the leaf from the claimed pair rather than trusting the one in
     the path: a path proves that SOME leaf is a member, and the whole point is
-    which one.
+    which one.  Also checks that the disclosed secret really is the secret of
+    the disclosed key, so the point a verifier decrypts under is the one the
+    leaf commits.
     """
     from alberta_buck.registry.tree import receiving_leaf
+    from alberta_buck.wallet.bn254 import eq
 
     try:
-        leaf = receiving_leaf(M, binding.pk_recv, binding.salt)
+        leaf = receiving_leaf(m_rec, binding.k_recv, binding.salt)
     except ValueError:
+        return False
+    if not eq(binding.pk_recv, receiving_public(binding.k_recv)):
         return False
     return (binding.path.leaf == leaf
             and binding.path.verify()

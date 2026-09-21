@@ -261,7 +261,7 @@ export function wrapIdentity(wasm) {
     // Identity to the receiving key its Notes are addressed to.
     identityLeafSalted: (M, salt) =>
       big(wasm.identity_leaf_salted(...flatP(M), hex(salt))),
-    receivingLeaf: (M, pkRecv, salt) =>
-      big(wasm.receiving_leaf(...flatP(M), ...flatP(pkRecv), hex(salt))),
+    receivingLeaf: (mRec, kRecv, salt) =>
+      big(wasm.receiving_leaf(hex(mRec), hex(kRecv), hex(salt))),
   };
 }
