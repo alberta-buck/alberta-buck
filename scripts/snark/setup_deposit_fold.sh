@@ -89,4 +89,29 @@ sed -i.bak "s/contract Groth16Verifier/contract DepositFold${UP}Verifier/g" \
 sed -i.bak 's/public view returns/public returns/g' "$BUILD_DIR/Groth16Verifier.sol"
 rm -f "$BUILD_DIR/Groth16Verifier.sol.bak"
 
+cp "$BUILD_DIR/Groth16Verifier.sol" \
+    "$REPO_ROOT/src/DepositFold${UP}Verifier.sol"
+# Committed STOCK -- byte-for-byte as snarkjs exports it, after the rename.
+# The EIP-197 pi_b swap happens at vector PACKING below, matching snarkjs's
+# own soliditycalldata export.
+echo "  -> src/DepositFold${UP}Verifier.sol"
+
+echo "--- Forge test vectors ---"
+VECTORS_DIR="$REPO_ROOT/test/vectors/${NAME}"
+mkdir -p "$VECTORS_DIR"
+python3 -c "
+import json
+proof = json.load(open('$BUILD_DIR/proof.json'))
+pub   = json.load(open('$BUILD_DIR/public.json'))
+json.dump({
+    'a': [str(proof['pi_a'][0]), str(proof['pi_a'][1])],
+    'b': [str(proof['pi_b'][0][1]), str(proof['pi_b'][0][0]),
+          str(proof['pi_b'][1][1]), str(proof['pi_b'][1][0])],
+    'c': [str(proof['pi_c'][0]), str(proof['pi_c'][1])],
+    'pub': [str(x) for x in pub],
+}, open('$VECTORS_DIR/proof.json', 'w'), indent=2)
+print('  public signals:', len(pub))
+"
+echo "  -> test/vectors/${NAME}/proof.json"
+
 echo "=== done: $BUILD_DIR ==="
