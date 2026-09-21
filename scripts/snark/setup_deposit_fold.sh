@@ -26,6 +26,11 @@ NAME="deposit_fold_${FLAVOR}"
 CIRCUIT="$REPO_ROOT/circuits/${NAME}.circom"
 BUILD_DIR="$REPO_ROOT/build/snark/${NAME}"
 
+# snarkjs needs a large heap for the ~870 MB R1CS and the pot22 operations.
+# Without this the groth16 setup dies with "Reached heap limit Allocation
+# failed - JavaScript heap out of memory", leaving a truncated zkey behind.
+export NODE_OPTIONS="--max-old-space-size=16384"
+
 echo "=== ${NAME} setup (DEV ENTROPY) ==="
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -47,6 +52,17 @@ echo "--- Groth16 setup (pot22) ---"
 PTAU="$REPO_ROOT/build/snark/ptau/pot22_final.ptau"
 [ -f "$PTAU" ] || { echo "ERROR: pot22_final.ptau missing"; exit 1; }
 snarkjs groth16 setup "$BUILD_DIR/${NAME}.r1cs" "$PTAU" "$BUILD_DIR/${NAME}_0000.zkey"
+# A heap death above leaves a small, VALID-LOOKING zkey behind rather than
+# failing loudly, and the next step would contribute to it happily.  Refuse
+# anything that could not possibly hold a 3.3M-constraint key.
+MIN_ZKEY=$((100 * 1024 * 1024))
+SZ=$(wc -c < "$BUILD_DIR/${NAME}_0000.zkey")
+[ "$SZ" -ge "$MIN_ZKEY" ] || {
+    echo "ERROR: ${NAME}_0000.zkey is only $SZ bytes -- the setup did not finish."
+    echo "       Check for 'JavaScript heap out of memory' above and raise"
+    echo "       NODE_OPTIONS=--max-old-space-size."
+    exit 1
+}
 snarkjs zkey contribute "$BUILD_DIR/${NAME}_0000.zkey" "$BUILD_DIR/${NAME}_0001.zkey" \
     --name="alberta-buck-dev-${NAME}" -v -e="alberta-buck-dev-${NAME}-entropy"
 snarkjs zkey export verificationkey "$BUILD_DIR/${NAME}_0001.zkey" \
