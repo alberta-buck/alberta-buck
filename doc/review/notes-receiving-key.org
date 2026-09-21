@@ -366,6 +366,26 @@ whose output limbs the gadget does not range-check.
 | =note_binding_a1.circom= | 2,859,018 | required |
 | =deposit_fold_a1.circom= | 3,303,970 | required, fits =pot22= |
 
+*Validated at the witness level, which needs no ceremony.* Two independently
+written implementations of the same four relations -- the circom and the
+Python reference -- agree on an honest witness:
+=WITNESS IS CORRECT= across all 3,303,970 constraints.
+
+And the relations are enforced /in the circuit/, not merely in the reference.
+Tampering with one private signal of an otherwise honest witness makes the
+C++ calculator abort at a named constraint:
+
+| Tamper | Refused at | Which relation |
+|--------+------------+----------------|
+| =salt= alone | =identityRoot === mp.root= | (4): the leaf moved, so the path stops folding to the posted root |
+| =m_rec= alone | =wV.out === mV.out + tk= | (1): the Identity IS the point =k= decrypts the note to |
+
+The second is the fold's argument made concrete. One =m_rec= signal carries
+the decryption relation, the credential relation and the leaf, so a single
+tamper breaks all three at once. That is what "state the tie instead of
+inferring it" buys: there is no seam between the two secrets for a thief to
+work in, because there are no longer two proofs to put a seam between.
+
 *What the gate does not yet have*: a trusted setup, a Solidity verifier, the
 =Notes.sol= call path that replaces =verifyDepositCoupling=, and an A2
 sibling -- A2's ciphertext decrypts to the ISSUER identity, so it carries one
