@@ -283,4 +283,4 @@ component main { public [
     eEncRx, eEncRy, eEncCx, eEncCy,
     pkDepX, pkDepY,
     eDepRx, eDepRy, eDepCx, eDepCy
-] } = DepositFoldA2(10);
+] } = DepositFoldA2(20);

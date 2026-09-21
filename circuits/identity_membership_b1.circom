@@ -152,4 +152,4 @@ template IdentityMembershipB1(depth) {
     identityRoot === mp.root;
 }
 
-component main { public [ identityRoot, PI_x, PI_y ] } = IdentityMembershipB1(10);
+component main { public [ identityRoot, PI_x, PI_y ] } = IdentityMembershipB1(20);

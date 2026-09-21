@@ -30,7 +30,7 @@ from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.salt import derive_salt
 
 KYC = "kyc:ca-ab-2026"
-DEPTH = 10
+DEPTH = 20          # the AGGREGATOR depth; see the circuit trailer
 DEPOSIT, CHAINID = 0xB0B, 1
 
 

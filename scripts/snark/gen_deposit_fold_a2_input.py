@@ -32,7 +32,7 @@ from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
 
 KYC = "kyc:ca-ab-2026"
-DEPTH = 10
+DEPTH = 20          # the AGGREGATOR depth; see the circuit trailer
 FACE = 100 * 10**18
 ISSUER, CHAINID = 0xA11CE, 1
 

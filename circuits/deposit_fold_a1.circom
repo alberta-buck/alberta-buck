@@ -242,14 +242,23 @@ template DepositFoldA1(depth) {
     identityRoot === mp.root;
 }
 
-// The depth is the AGGREGATOR depth, matching IdentityRegistry.
-// IDENTITY_TREE_DEPTH, buck_registry::tree::AGGREGATOR_DEPTH and
-// alberta_buck.registry.tree.AGGREGATOR_DEPTH.  Still 10 here; the
-// accumulator specification raises it to 20, and that raise belongs in the
-// same matched set as this circuit's first setup.
+// The depth is the AGGREGATOR depth.  TWENTY, not ten: the accumulator
+// specification raises it because authorities are a population rather than a
+// roster -- clubs, community boards, congregations and delegated
+// sub-regulators are all attribute authorities, and 2**10 = 1024 subtrees is
+// the wrong order of magnitude.  The ten extra levels cost ten Poseidon-2
+// hashes, about 2,400 constraints against this circuit's millions.
+//
+// It is raised HERE, in the circuits, because the depth is baked into the
+// r1cs and therefore into a trusted setup: building at ten would mean paying
+// for the ceremony twice.  The on-chain IDENTITY_TREE_DEPTH and the Python
+// and Rust AGGREGATOR_DEPTH follow when Notes.sol is rewired onto these
+// gates, since that is the change which re-folds the identity root the
+// end-to-end fixtures embed.  IdentityRegistry already carries
+// ZERO_11..ZERO_20 against that day.
 component main { public [
     nullifier, v, identityRoot,
     eEncRx, eEncRy, eEncCx, eEncCy,
     pkDepX, pkDepY,
     eDepRx, eDepRy, eDepCx, eDepCy
-] } = DepositFoldA1(10);
+] } = DepositFoldA1(20);
