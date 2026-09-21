@@ -14,8 +14,11 @@ key, and every party that legitimately holds it can read that recipient's
 note traffic. The finding was deferred behind the accumulator; this document
 records the approach, the prototype that establishes it, and what it costs.
 
-Status: the architecture's own surface is implemented and tested; the
-payload substitution is sequenced behind one regeneration ([[#sequencing]]).
+Status: implemented across four backends, with all three spend gates built,
+set up under dev entropy, and verifying on chain.  What remains is one
+coordinated change -- =Notes.sol= onto the new verifiers, which is also the
+event that flips the aggregator depth -- then the fixtures, then the papers.
+The reading plan ([[#reading-plan]]) has the current list.
 
 Implemented on 2026-09-20, with =alberta_buck/test/test_receiving_key.py=
 carrying twenty-six conformance tests:
@@ -486,6 +489,64 @@ So the three payloads are each minimal for their own privacy and proving
 requirements, and the differences are not incidental: they track exactly which
 party is private and which party is proving.
 
+** 4.5 What each flavour must prove, side by side
+:PROPERTIES:
+:CUSTOM_ID: flavours
+:END:
+
+The three flavours are not three variations on one gate. They differ along
+axes that turn out to be mostly consequences of two root facts, and this
+table is the compressed form of everything sections 3 and 4 establish.
+
+#+ATTR_LATEX: :font \scriptsize
+| | A1 addressed, public issuer | A2 addressed, private issuer | B1 bearer, public issuer |
+|---+-----------------------------+------------------------------+--------------------------|
+| Spend authority | the Identity named at mint | the Identity named at mint | knowledge of \( \rho \) |
+| Whose secret opens the payload | recipient's \( k \) | recipient's \( k \) | *issuer's* \( sk_{iss} \) |
+| Who produces the naming evidence | recipient | recipient | *issuer*, off chain |
+| Two facts, how many secrets | *two* (\( m_{rec}, k \)) | *two* (\( m_{rec}, k \)) | *one* (\( m_{dep} \)) |
+| Tie mechanism | leaf relation, in-circuit | leaf relation, in-circuit | shared FS nonce, sound once \( \log_G H \) unknown |
+| Note-to-spend tie needed | yes | yes | *no* -- evidence is fresh at spend |
+| Decrypted plaintext | \( M_{rec} = m_{rec}G \) | \( M_I \), arbitrary point | \( M_{dep} = m_{dep}G \) |
+| Curve addition needed | *no* -- scalar sums suffice | *yes* | no |
+| Encryption product factors through \( G \) | yes (\( r_n k \)) | yes (\( r' k \)) | *no* -- would need \( sk_{iss} \) |
+| Whose membership is proven | the recipient's own | *the issuer's* | the depositor's own |
+| Issuer witness shipped | none | the issuer's salt | none |
+| Gate | folded circuit | folded circuit, +1 relation | sigma + membership circuit |
+| Constraints (depth 20) | 3,306,390 | 3,341,261 | 491,764 |
+
+*The four asymmetries, and where each comes from.*
+
+1. *One secret or two.* A1 and A2 must prove two facts resting on two
+   DIFFERENT secrets -- the Identity scalar and the receiving key -- so no
+   shared nonce ties them and no choice of generator repairs it. The tie has
+   to become a relation, which is why they fold. B1's two facts rest on ONE
+   secret, so its sigma's shared nonce is a genuine tie and it needs no fold.
+   This is the deep one, and it decides the shape of each gate.
+2. *Whether the product factors through \( G \).* A1 and A2 are proven by the
+   RECIPIENT, which holds both the randomness and the receiving secret, so
+   every ElGamal product collapses to a multiple of \( G \) and stays
+   fixed-base. B1's depositor encrypts TO the issuer: it holds \( r \) but not
+   \( sk_{iss} \), so \( r \cdot pk_{iss} \) is irreducibly variable-base.
+   Any construction that made it fixed-base would hand the depositor the key
+   that makes the issuer the only reader. A third reason not to fold B1.
+3. *Whether the plaintext is a known multiple of \( G \).* A1 decrypts to the
+   recipient's own Identity, so its point sums fold into scalar sums and it
+   performs no curve addition at all -- which is how it escapes finding 5's
+   incomplete-addition defect by construction. A2 decrypts to an arbitrary
+   point and cannot, so it must ENFORCE the gadget's precondition instead.
+4. *Whose membership is proven.* A1 and B1 prove the prover's own, so the
+   prover holds its own salt. A2 alone proves a third party's, which is the
+   whole of [[#payload][the payload rule]].
+
+*What the three payloads therefore carry.* Each is minimal for its own
+privacy and proving requirements, and the differences are not incidental:
+they track exactly which party is private and which party is proving. A1
+carries its issuer in the clear because that issuer is public; A2 carries a
+salt because its issuer is private and must still be provably registered; B1
+carries neither, because the fact it needs travels as a proof the issuer
+verifies with no witness at all.
+
 * 5 What it costs
 :PROPERTIES:
 :CUSTOM_ID: cost
@@ -606,47 +667,92 @@ wrong, and the note says where.
    the reasoning style there -- state the game, prove the theorem, say what
    is not covered -- is what this architecture still owes.
 
-Then, to implement, in this order:
+Then, to implement.  Most of it is done; what remains is one coordinated
+landing and the papers.
 
-1. DONE *The receiving key in the wallet*: =wallet/recvkey.py=, modelled on
-   =wallet/salt.py= -- derived from seed material, never from the identity,
-   rotation indexed by the salt's own counter, plus the holder-produced
-   binding evidence.
-2. DONE *The leaf*: =receiving_leaf= and =insert_receiving= in
-   =registry/tree.py=, with the specification's third leaf function and its
-   two new conformance tests.
-3. DONE *The folded gate*: =wallet/deposit_fold.py=, the four relations of
-   section 3.3a over one witness, refusing the payload thief on relation
-   (3).  It is the reference the circuit is checked against, not a
-   replacement for it; do not ship the gate as a sigma plus a separate
-   membership proof.
-4. *The mint call sites and the receipts*, as [[#sequencing]] sets out: a
-   rename in A2, one new argument in A1, and =make_receipt= taking the
-   Identity separately from the secret it decrypts with.  This is the step
-   that makes the flow document's cycles rewirable.
-5. *The Rust kernel, both bindings and the JavaScript*, in the same change,
-   because =flows.rs= builds the same payload and the committed vectors are
-   asserted current.
-6. *The circuits*: the note-binding substitution and the folded gate, with
-   the finding-5 repairs and the aggregator depth raise, in one trusted
-   setup and one matched set.
-7. *Regeneration order*, once: the A1 and A2 wallet vectors, then the Notes
-   end-to-end fixtures, then the mint fixtures pinned to them.
-8. *Rewire the flow document's cycles* onto receiving keys and regenerate
-   the transcript.  The prover-timing block shells out to rapidsnark, so
-   budget for it.
+*Done, with a verifier behind it.*
 
-Steps 4 through 7 are one landing, for the reason [[#sequencing]] gives.
+1. *The receiving key*: =wallet/recvkey.py=, modelled on =wallet/salt.py= --
+   derived from seed material, never from the identity, rotation indexed by
+   the salt's own counter, plus the holder-produced binding evidence.
+2. *The leaf*: =receiving_leaf= over the SCALARS in =registry/tree.py=, the
+   specification's third leaf function ([[#fold-built][why scalars]]).
+3. *The payload substitution*, across Python, the Rust kernel, both bindings
+   and the JavaScript, with the wallet vectors regenerated -- one landing,
+   for the reason [[#sequencing]] gives.
+4. *The note-binding witnesses*: A2's =r1cs= is byte-identical under the
+   substitution and needed no setup; A1's gained an input
+   ([[#circuit-cost]]).
+5. *The three gates*, each with a dev-entropy setup, a Solidity verifier and
+   a real proof verifying on chain:
 
-Three traps worth naming, because each cost time to find:
+   | Circuit | Constraints | Public | Verifier |
+   |---------+-------------+--------+----------|
+   | =identity_membership_b1= | 491,764 | 9 | =IdentityMembershipB1Verifier= |
+   | =deposit_fold_a1= | 3,306,390 | 43 | =DepositFoldA1Verifier= |
+   | =deposit_fold_a2= | 3,341,261 | 42 | =DepositFoldA2Verifier= |
+
+   Each Forge test walks EVERY public input and requires it to break the
+   proof, because binding them together is the whole reason the A-gates are
+   one proof rather than two.
+6. *B1's generator*: =wallet/nums.py= =H_PEDERSEN=, hashed to the curve, and
+   the repaired membership circuit that uses it.
+
+*Remaining, and the first is one coordinated change.*
+
+7. *=Notes.sol=*: the A1 and A2 spend paths call the folded verifiers instead
+   of =verifyDepositCoupling=, and B1 calls the repaired membership verifier.
+   The SAME change flips =IDENTITY_TREE_DEPTH= and the Python and Rust
+   =AGGREGATOR_DEPTH= from 10 to 20, because it is the event that re-folds the
+   identity root the end-to-end fixtures embed.  The circuits are already at
+   20 and =IdentityRegistry= already carries =ZERO_11..ZERO_20=.
+8. *Regeneration*, once and in order: the Notes end-to-end fixtures, then the
+   mint fixtures pinned to them.
+9. *The papers*: =alberta-buck-notes.org= and =alberta-buck-notes-flow.org=,
+   with the flow document's cycles rewired onto receiving keys and its
+   prover-timing block re-run against the new keys.
+10. *The security argument* this architecture still owes, in the form Part I
+    of =alberta-buck-proofs.org= owes for the registration presentation
+    ([[#open][open question 5]]).
+
+Traps worth naming, because each cost a run or an hour:
+
+*Design.*
 
 - The coupling sigma's shared nonce is load-bearing.  It looks like an
-  optimisation.
-- Raising the aggregator depth re-folds every identity root, including the
-  one committed in the Notes end-to-end fixtures.
+  optimisation.  It is only a genuine tie when both jobs use the SAME secret,
+  which is true for B1 and false for A1 and A2 ([[#flavours]]).
 - =IdentityTree= in =wallet/unilateral_a2.py= subclasses the registry tree
   and overrides =contains= to take a /point/, not a leaf.  Passing a leaf
   fails obscurely.
+
+*Circuits and setups.*
+
+- *Depth is baked into the r1cs, so it is baked into the ceremony.*  Build at
+  the target depth or pay for the setup twice.  This was written into the A1
+  fold's own trailer and then walked past, costing B1 a redundant setup.
+- *=--O2= is required, not an optimisation.*  Without it circom leaves the
+  linear constraints in -- B1 goes 491,764 to over 1.2M and snarkjs refuses
+  outright.  It must also match the flags the witness was validated under.
+- *The folds need =NODE_OPTIONS=--max-old-space-size=16384=.*  Without it
+  snarkjs dies on the ~870 MB r1cs AND LEAVES A 700-BYTE ZKEY that the
+  contribute step would accept.  The setup script now refuses a phase-2 key
+  under 100 MB.
+- *Never edit a shell script while a run of it is in flight.*  Bash reads
+  lazily by byte offset and can resume mid-line.
+- *=snarkjs r1cs info= OOMs on a large r1cs.*  Parse the header instead:
+  section type 1 holds =fieldSize=, the prime, then =nWires=, =nPubOut=,
+  =nPubIn=, =nPrvIn= as u32, =nLabels= as u64, =nConstraints= as u32.
+- *A =ScalarMulG= costs about 471,896 constraints.*  It is the only real lever
+  on circuit size; hashes and Merkle paths are noise beside it.
+- The BN254 modulus helpers are =BN254_MOD_Q0..Q3=, and the curve-parameter
+  helpers live in =bn254_h_scalarmul.circom= -- include it even when no
+  multiple of H is wanted.
+- =build/= is gitignored.  The 4 GB of proving keys are local-only; the
+  durable artifacts are the committed verifiers and vectors.
+
+*The setups are DEV ENTROPY and every script says so.  They are not
+ceremonies, and nothing built on them should reach a deployment.*
 
 * 9 Open questions
 :PROPERTIES:
