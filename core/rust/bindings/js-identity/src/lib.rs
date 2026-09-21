@@ -109,6 +109,13 @@ pub fn h_point() -> Vec<String> {
     out_g1(&kernel::issuer_reenc::h_point())
 }
 
+/// The Pedersen generator: hashed to the curve, so its discrete log is
+/// unknown.  See the kernel's `nums` module for where that matters.
+#[wasm_bindgen]
+pub fn h_pedersen() -> Vec<String> {
+    out_g1(&kernel::nums::h_pedersen())
+}
+
 // ---------------------------------------------------------------------------
 // Curve ops / hashes
 // ---------------------------------------------------------------------------

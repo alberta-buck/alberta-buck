@@ -33,6 +33,7 @@ pub mod elgamal;
 pub mod issuer_reenc;
 pub mod keccak;
 pub mod nizk;
+pub mod nums;
 pub mod notes;
 pub mod pairing;
 pub mod poseidon;

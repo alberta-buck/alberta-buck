@@ -9,7 +9,7 @@
 use ark_bn254::{G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
 
-use crate::issuer_reenc::h_affine;
+use crate::nums::h_pedersen_affine;
 use crate::{fr_mod, g1_from_w, w_from_fr, w_from_g1, G1w, IdError, Result, Transcript, W256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +84,7 @@ pub fn b1_bind_prove(
     let c_d = g1_from_w(&e_dep.1)?;
     let pk_iss = g1_from_w(pk_iss)?;
     let g = G1Affine::generator();
-    let h = h_affine();
+    let h = h_pedersen_affine();
 
     let pk_dep = (g * sk).into_affine();
     let m_dep_pt: G1Projective = g * m;
@@ -176,7 +176,7 @@ pub fn b1_bind_verify(
     let s_r = fr_mod(&proof.s_r);
     let s_b = fr_mod(&proof.s_b);
     let g = G1Affine::generator();
-    let h = h_affine();
+    let h = h_pedersen_affine();
 
     // E4: s_s*G == A4 + e*pk_dep
     if g * s_s != pk_dep * e + a4 {

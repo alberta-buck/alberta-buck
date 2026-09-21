@@ -517,6 +517,14 @@ fn h_point() -> PyG1 {
     pyg1(&kernel::issuer_reenc::h_point())
 }
 
+/// The Pedersen generator: hashed to the curve, so its discrete log is
+/// unknown.  Used where a commitment is opened by two separate proofs that
+/// must agree; see the kernel's `nums` module.
+#[pyfunction]
+fn h_pedersen() -> PyG1 {
+    pyg1(&kernel::nums::h_pedersen())
+}
+
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn issuer_reenc_prove(
@@ -1106,6 +1114,8 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("G1", pyg1(&kernel::g1_generator()))?;
     m.add("G2", pyg2(&kernel::g2_generator()))?;
     m.add("H_POINT", pyg1(&kernel::issuer_reenc::h_point()))?;
+    m.add("H_PEDERSEN", pyg1(&kernel::nums::h_pedersen()))?;
+    m.add_function(wrap_pyfunction!(h_pedersen, m)?)?;
     m.add("NULLIFIER_TAG_B", kernel::notes::NULLIFIER_TAG_B)?;
     m.add("NULLIFIER_TAG_A", kernel::notes::NULLIFIER_TAG_A)?;
     m.add("FLAVOR_A1", kernel::notes::FLAVOR_A1)?;
