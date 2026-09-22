@@ -23,7 +23,7 @@ both need the accumulator leaf.
 
 The four relations over one witness:
 
-    (1) k decrypts the note ciphertext to the point committed in P
+    (1) k decrypts the note ciphertext to a point M
     (2) the account credential decrypts under sk_dep to the Identity M_rec
     (3) a registered leaf commits the pair (M_rec, k*G) under the holder's salt
     (4) that leaf's path folds to a posted identity root
@@ -38,10 +38,9 @@ the same role :mod:`alberta_buck.registry.regulator` plays for its Solidity
 port -- and it is what a prover feeds the circuit.  It is NOT the on-chain
 verifier: hiding the witness is the SNARK's job, and the gate must ship as
 one circuit carrying all four relations, never as a sigma plus a separate
-membership proof.  A2 additionally needs the membership of the point
-committed in ``P`` (the issuer Identity it decrypts to), which is the
-pre-existing P-bound membership statement and rides alongside these four
-rather than replacing any of them.
+membership proof.  What ``M`` must be is the flavour's business: A1's is the
+holder's own Identity, and A2's is the issuer's, which the A2 circuit proves
+registered (relation 5) and tied to the mint binding's ``T``.
 
 Reference: doc/review/notes-receiving-key.org section 3.3a (architecture of
 record), scripts/review/deposit_gate_folded.py (the prototype this promotes).
@@ -53,10 +52,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from alberta_buck.wallet.bn254 import (
-    G1, ORDER, add, eq, mul, neg, rand_scalar,
+    G1, ORDER, add, eq, mul, neg,
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
-from alberta_buck.wallet.issuer_reenc import H_POINT
+from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.poseidon import poseidon
 from alberta_buck.registry.tree import receiving_leaf
 
@@ -98,31 +97,25 @@ class DepositFoldWitness:
         m_rec: The spender's identity scalar.
         k: The receiving secret that opens the note.
         sk_dep: The deposit account's key.
-        b: The blinding that hides the decrypted point in ``P``.
         salt: The holder's salt for the leaf binding ``(M_rec, k*G)``.
         siblings, index_bits: The membership path of that leaf.
+        M: The point ``k`` decrypts the note to.  Never public: the chain
+            learns nothing that names it.  There is no hidden copy of it
+            either -- a split gate needed one, ``M + b*H``, so that a sigma
+            and a separate membership SNARK could share a value, and its blind
+            was witnessed rather than proven (finding 5's first defect).
+            Folding removes the second proof, and with it the shared point,
+            the blind, and the defect.
 
     Public:
-        P: ``M + b*H``, the decrypted point, hidden.  The CIRCUIT needs no such
-            point, and that is worth knowing: ``P`` existed so that a sigma and
-            a separate membership SNARK could share a hidden value, and its
-            blind ``T = b*H`` was witnessed rather than proven -- finding 5's
-            first defect.  Folding removes the second proof, so it removes the
-            shared point, the blind, and the defect with them.  ``P`` is kept
-            here only as what a verifier may be shown without learning ``M``.
         root: The posted identity root the path folds to.
-        M: The decrypted point itself -- present so a prover can check its
-            own work and a test can name it.  It is NOT a public input; the
-            whole purpose of ``P`` is that the chain does not see it.
     """
     m_rec: int
     k: int
     sk_dep: int
-    b: int
     salt: int
     siblings: List[int] = field(repr=False)
     index_bits: List[int] = field(repr=False)
-    P: Tuple = field(repr=False)
     root: int = 0
     M: Tuple = field(default=(), repr=False)
     leaf: int = 0
@@ -137,8 +130,6 @@ def deposit_fold_witness(
     E_dep:   ElGamalCiphertext,   # the deposit account's registered credential
     note_ct: ElGamalCiphertext,   # the note's addressed ciphertext (eIss or eRec)
     tree,                         # the private subtree holding the holder's leaf
-    b:       Optional[int] = None,
-    rng=None,
 ) -> DepositFoldWitness:
     """Build the folded witness, refusing loudly on the relation that fails.
 
@@ -150,11 +141,9 @@ def deposit_fold_witness(
         E_dep: The deposit account's registered credential ``(R_d, C_d)``.
         note_ct: The note's ciphertext, keyed to ``k*G``.
         tree: The subtree the holder's leaf was admitted to.
-        b: The blinding for ``P``; drawn fresh if omitted.
-        rng: Randomness source for ``b``.
 
     Returns:
-        The witness, with ``P``, ``root`` and the path filled in.
+        The witness, with ``M``, ``root`` and the path filled in.
 
     Raises:
         DepositFoldRefused: naming the relation that does not hold.
@@ -166,11 +155,9 @@ def deposit_fold_witness(
         raise DepositFoldRefused(1, "witness scalars must be nonzero")
 
     M_rec = mul(G1, m_rec)
-    b = rand_scalar(rng) if b is None else (b % ORDER)
 
-    # (1) k decrypts the note ciphertext to the point committed in P.
+    # (1) k decrypts the note ciphertext to M.
     M = add(note_ct.C, neg(mul(note_ct.R, k)))
-    P = add(M, mul(H_POINT, b))
 
     # (2) The account credential decrypts, under its own key, to the Identity.
     if not eq(E_dep.C, add(M_rec, mul(E_dep.R, sk_dep))):
@@ -191,9 +178,9 @@ def deposit_fold_witness(
         raise DepositFoldRefused(4, "the membership path does not fold to the root")
 
     return DepositFoldWitness(
-        m_rec=m_rec, k=k, sk_dep=sk_dep, b=b, salt=salt,
+        m_rec=m_rec, k=k, sk_dep=sk_dep, salt=salt,
         siblings=list(proof.siblings), index_bits=list(proof.index_bits),
-        P=P, root=proof.root, M=M, leaf=leaf,
+        root=proof.root, M=M, leaf=leaf,
     )
 
 
@@ -222,9 +209,9 @@ def deposit_fold_check(
     # (2b) the credential decrypts to the Identity under that key.
     if not eq(E_dep.C, add(M_rec, mul(E_dep.R, witness.sk_dep))):
         return False
-    # (1) k decrypts the note to the point committed in P.
+    # (1) k decrypts the note to the witness's M.
     M = add(note_ct.C, neg(mul(note_ct.R, witness.k)))
-    if not eq(witness.P, add(M, mul(H_POINT, witness.b))):
+    if not eq(witness.M, M):
         return False
     # (3) the leaf commits the pair under the holder's salt.
     try:
@@ -383,6 +370,8 @@ def deposit_fold_a2_witness(
     e_enc:    ElGamalCiphertext,    # the spend's re-randomized ciphertext
     salt_iss: int,                  # the issuer's salt, shipped in the payload
     iss_path,                       # the issuer's MembershipProof
+    T,                              # the mint binding's r'*pk_recv + gamma*H, in idHash
+    gamma:    int,                  # its blind, shipped in the payload
     identity_root: int,
 ) -> dict:
     """Build the JSON witness for `circuits/deposit_fold_a2.circom`.
@@ -402,6 +391,12 @@ def deposit_fold_a2_witness(
     using the salt the issuer shipped (see ``MintedA2.salt_iss``) and a path it
     rebuilds from the published subtree.
 
+    And the key tie: ``idHash`` commits the mint binding's ``T``, which must open
+    as ``rm*G + gamma*H`` for the ``rm = r'*k`` the note tie already fixes.  The
+    binding proved ``T = r'*pk_Q + gamma*H`` for the key hidden in its ``Q``, so
+    this says ``pk_Q`` is the spender's own key, up to a multiple of ``H`` whose
+    logarithm no one knows (doc/review/notes-receiving-key.org, section 4.6).
+
     Raises:
         AssertionError: naming the relation whose arithmetic does not close.
     """
@@ -414,8 +409,9 @@ def deposit_fold_a2_witness(
     r_prime %= ORDER
     t %= ORDER
     r_E %= ORDER
+    gamma %= ORDER
 
-    rm_val = (r_prime * k) % ORDER                # eIss.C = M_I + rm*G
+    rm_val = (r_prime * k) % ORDER                # eIss.C = M_I + rm*G, T = rm*G + gamma*H
     tk_val = (t * k) % ORDER                      # eEnc.C = M_I + tk*G
     cd_val = (m_rec + sk_dep * r_E) % ORDER       # E_dep.C = cd*G
     M_I = witness.M                               # what k decrypted to
@@ -426,11 +422,15 @@ def deposit_fold_a2_witness(
     # -- (1) k decrypts the spend's ciphertext to the same M_I -------------
     assert eq(e_enc.R, mul(G1, t)), "eEnc.R != t*G"
     assert eq(e_enc.C, add(M_I, mul(G1, tk_val))), "eEnc.C != M_I + tk*G"
+    # -- the key tie: T opens to this spender's k ---------------------------
+    gH = mul(H_PEDERSEN, gamma)
+    assert eq(T, add(mul(G1, rm_val), gH)), "T != rm*G + gamma*H (keyed to another mailbox)"
     # -- the incomplete-addition precondition the circuit enforces ---------
-    for label, other in (("eIss.C", mul(G1, rm_val)), ("eEnc.C", mul(G1, tk_val))):
-        mx, _ = point_to_words(M_I)
-        ox, _ = point_to_words(other)
-        assert mx % F_R != ox % F_R, (
+    for label, a, b in (("eIss.C", M_I, mul(G1, rm_val)), ("eEnc.C", M_I, mul(G1, tk_val)),
+                        ("T", mul(G1, rm_val), gH)):
+        ax, _ = point_to_words(a)
+        bx, _ = point_to_words(b)
+        assert ax % F_R != bx % F_R, (
             f"{label}: the addends share an x-coordinate mod F_R, so the "
             "incomplete addition would land on a doubling or the identity")
     # -- (2) the account credential decrypts to m_rec ----------------------
@@ -464,6 +464,7 @@ def deposit_fold_a2_witness(
     nCx, nCy = point_to_words(e_note.C)
     iRx, iRy = point_to_words(e_iss.R)
     iCx, iCy = point_to_words(e_iss.C)
+    Tx, Ty = point_to_words(T)
 
     return {
         "nullifier": str(nullifier),
@@ -477,6 +478,7 @@ def deposit_fold_a2_witness(
         "idHash": str(id_hash % F_R),
         "eNote": [str(nRx % F_R), str(nRy % F_R), str(nCx % F_R), str(nCy % F_R)],
         "eIss0": [str(iRx % F_R), str(iRy % F_R), str(iCx % F_R), str(iCy % F_R)],
+        "T": [str(Tx % F_R), str(Ty % F_R)],
         "r": [str(x) for x in _limbs(r_prime)],
         "k_recv": [str(x) for x in _limbs(k)],
         "rm": [str(x) for x in _limbs(rm_val)],
@@ -486,6 +488,7 @@ def deposit_fold_a2_witness(
         "sk_dep": [str(x) for x in _limbs(sk_dep)],
         "r_E": [str(x) for x in _limbs(r_E)],
         "cd": [str(x) for x in _limbs(cd_val)],
+        "gamma": [str(x) for x in _limbs(gamma)],
         "MI": [[str(x) for x in MIx], [str(x) for x in MIy]],
         "salt": str(witness.salt),
         "saltIss": str(salt_iss),

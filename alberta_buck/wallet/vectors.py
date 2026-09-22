@@ -459,11 +459,15 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     a2m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a2m_r_note)
     a2m_r_prime = rand_scalar(rng)
     a2m_eIss    = elgamal_encrypt(bob.M, alice_pk_recv, a2m_r_prime)
+    # beta then gamma, drawn here in the order the prover would draw them, so
+    # the stream is unchanged; gamma is kept because the receipt opens T with it.
+    a2m_beta    = rand_scalar(rng)
+    a2m_gamma   = rand_scalar(rng)
     a2m_binding = issuer_reenc_prove(
         bob.kp.sk, a2m_r_prime, alice_pk_recv, bob.E, a2m_eIss,
-        BOB_ADDR, CHAINID, rng=rng,
+        BOB_ADDR, CHAINID, beta=a2m_beta, gamma=a2m_gamma, rng=rng,
     )
-    a2m_idHash  = id_hash_a2(a2m_eNote, a2m_eIss)
+    a2m_idHash  = id_hash_a2(a2m_eNote, a2m_eIss, a2m_binding.T)
     a2m_opening = NoteOpening(flavor=FLAVOR_A2, v=rcpt_face, rho=rcpt_rho,
                               id_hash=a2m_idHash, predicate=0)
     a2m_cm      = note_commitment(a2m_opening)
@@ -477,7 +481,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=a2m_opening, cms=a2m_cms,
-        eNote=a2m_eNote, eIss=a2m_eIss, binding=a2m_binding,
+        eNote=a2m_eNote, eIss=a2m_eIss, binding=a2m_binding, gamma=a2m_gamma,
         pk_recv=alice_pk_recv, mailbox_binding=alice_mbx,
         nullifier=a2m_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,

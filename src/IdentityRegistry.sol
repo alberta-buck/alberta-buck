@@ -115,12 +115,12 @@ contract IdentityRegistry {
         uint256 s_g;        // response for gamma
         BN254.G1Point A1;   // k_r*G
         BN254.G1Point A2;   // k_r*H
-        BN254.G1Point A3;   // k_r*Q - k_b*U + k_g*G
+        BN254.G1Point A3;   // k_r*Q - k_b*U + k_g*H
         BN254.G1Point A4;   // k_s*G
-        BN254.G1Point A5;   // k_s*R_reg + k_g*G
+        BN254.G1Point A5;   // k_s*R_reg + k_g*H
         BN254.G1Point Q;    // pk_rec + beta*H            (blinded recipient key)
         BN254.G1Point U;    // r'*H
-        BN254.G1Point T;    // T_hat = r'*pk_rec + gamma*G (blinds M_iss)
+        BN254.G1Point T;    // r'*pk_rec + gamma*H        (blinds M_iss; in idHash_a2)
     }
 
     /// @notice B1 depositor binding proof (the dual of the A2 issuer binding).
@@ -142,36 +142,24 @@ contract IdentityRegistry {
         BN254.G1Point P_dep;// M_dep + b*H             (blinded commitment of M_dep)
     }
 
-    /// @notice The MASKING generator, H = keccak256("AlbertaBuck:IssuerReenc:H")
-    ///         (mod R) * G.  Mirrors alberta_buck.wallet.issuer_reenc.H_POINT.
+    /// @notice The one hiding generator: hashed to the curve under
+    ///         `AlbertaBuck/Pedersen/H/v2` rather than multiplied out of G, so
+    ///         nobody knows its discrete log.  Mirrors
+    ///         alberta_buck.wallet.nums.H_PEDERSEN.
     ///
-    ///         Its discrete log is public, and for this use that is fine: it
-    ///         hides a value INSIDE one sigma, where a knowledge extractor
-    ///         recovers both openings anyway.  It must NOT be used where a
-    ///         commitment is opened by two separate proofs that have to agree
-    ///         -- see H_PED_X below.
-    uint256 internal constant H_X =
-        6790145969673496972519463000972766565107694238233578011858059027187477289586;
-    uint256 internal constant H_Y =
-        3372178911466361414640845512261989709787490420390555908180501907382229222644;
-
-    /// @notice The PEDERSEN generator, hashed to the curve rather than
-    ///         multiplied out of G, so nobody knows its discrete log.
-    ///         Mirrors alberta_buck.wallet.nums.H_PEDERSEN.
-    ///
-    ///         B1 publishes P_dep = M_dep + b*H and then proves two things
-    ///         about it: this sigma opens it as m_dep*G + b*H, and a
-    ///         membership proof opens it as M + b'*H for a registered M.  With
-    ///         a known h = log_G(H) those openings need not agree: a depositor
-    ///         holding any registered identity scalar m' -- which
-    ///         counterparties hold by design, the identity being a disclosed
-    ///         read capability -- sets b' = b + (m_dep - m')/h, and an
-    ///         UNREGISTERED depositor spends.  Hashing to the curve leaves no
-    ///         such h.
+    ///         Every blind in this contract sits on it, because every blind here
+    ///         must BIND.  B1 publishes P_dep = M_dep + b*H and proves two things
+    ///         about it -- this sigma opens it as m_dep*G + b*H, a membership
+    ///         proof opens it as M + b'*H -- and with a known h = log_G(H) those
+    ///         openings need not agree: a depositor holding any registered
+    ///         identity scalar m' sets b' = b + (m_dep - m')/h and spends
+    ///         unregistered.  The A2 mint binding blinds its key commitment Q and
+    ///         its tie point T here for the same reason: on a known-log base, a
+    ///         minter could key one ciphertext to two issuers.
     uint256 internal constant H_PED_X =
-        4874316496556692606891596409622455203003376816484365272907071025845257250564;
+        4615963717079593411766916164683734882826555887582375840543993270654189828194;
     uint256 internal constant H_PED_Y =
-        19291512317587897199422471138962718576030354246032844209163778927800273037816;
+        13797334798855956307628720739803197698357468544121783721646444392020868779330;
 
     /// @dev Fiat-Shamir protocol domains, one per transcript this contract
     ///      verifies: full keccak words, not reduced mod R.  Transcript
@@ -1104,9 +1092,10 @@ contract IdentityRegistry {
     ///         Fiat-Shamir challenge.  `pk_rec` never appears: the verifier sees
     ///         only the blinded `Q` and the uniform `U`, `T`.
     ///
-    ///         This binds `eIss` to the key committed in `pi.Q`; proving that key
-    ///         is the addressed recipient's (the `E_note` <-> `Q` coupling) is a
-    ///         separate step keyed off the note ciphertext at spend time.
+    ///         This binds `eIss` to the key committed in `pi.Q`, not yet to the
+    ///         recipient's.  That is the spend's to prove: Notes.mint commits
+    ///         `pi.T` in the leaf, and the A2 deposit fold proves `T` opens under
+    ///         the spender's own key (doc/review/notes-receiving-key.org, 4.6).
     function verifyIssuerReenc(
         address issuer,
         ElGamalCT calldata eIss,
@@ -1116,7 +1105,10 @@ contract IdentityRegistry {
 
         BN254.G1Point memory pkIss = _pk[issuer];
         ElGamalCT     memory E_reg = _E_addr[issuer];
-        BN254.G1Point memory H     = BN254.G1Point(H_X, H_Y);
+        // Every blind here sits on H_PEDERSEN, whose logarithm nobody knows:
+        // on a known-log base the key in Q and the point in T would bind
+        // nothing, and one ciphertext could name two issuers.
+        BN254.G1Point memory H     = BN254.G1Point(H_PED_X, H_PED_Y);
 
         // L1: s_r*G == A1 + e*R_i
         if (!BN254.eq(
@@ -1130,11 +1122,11 @@ contract IdentityRegistry {
             BN254.add(pi.A2, BN254.mul(pi.U, pi.e))
         )) return false;
 
-        // L3: s_r*Q - s_b*U + s_g*G == A3 + e*T   (=> T = r'*pk_rec + gamma*G)
+        // L3: s_r*Q - s_b*U + s_g*H == A3 + e*T   (=> T = r'*pk_rec + gamma*H)
         if (!BN254.eq(
             BN254.add(
                 BN254.add(BN254.mul(pi.Q, pi.s_r), BN254.neg(BN254.mul(pi.U, pi.s_b))),
-                BN254.mul(BN254.g1(), pi.s_g)
+                BN254.mul(H, pi.s_g)
             ),
             BN254.add(pi.A3, BN254.mul(pi.T, pi.e))
         )) return false;
@@ -1145,11 +1137,11 @@ contract IdentityRegistry {
             BN254.add(pi.A4, BN254.mul(pkIss, pi.e))
         )) return false;
 
-        // L5: s_s*R_reg + s_g*G == A5 + e*(C_reg + T - C_i)
+        // L5: s_s*R_reg + s_g*H == A5 + e*(C_reg + T - C_i)
         BN254.G1Point memory Y =
             BN254.add(E_reg.C, BN254.add(pi.T, BN254.neg(eIss.C)));
         if (!BN254.eq(
-            BN254.add(BN254.mul(E_reg.R, pi.s_s), BN254.mul(BN254.g1(), pi.s_g)),
+            BN254.add(BN254.mul(E_reg.R, pi.s_s), BN254.mul(H, pi.s_g)),
             BN254.add(pi.A5, BN254.mul(Y, pi.e))
         )) return false;
 

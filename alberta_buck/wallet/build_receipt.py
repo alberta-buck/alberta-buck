@@ -561,8 +561,11 @@ def build_note_a2(
     mailbox_binding=None,
     # Issuer binding (shipped with the note / verified at mint): the blinded A2
     # re-encryption proof.  When present the receipt is soundly bound; when
-    # None it falls back to UNVERIFIED ISSUER.
+    # None it falls back to UNVERIFIED ISSUER.  T is committed in idHash, so it
+    # is needed either way (it defaults to the binding's); gamma opens it, and
+    # a receipt that carries the binding must carry gamma.
     binding=None,
+    T=None, gamma: Optional[int] = None,
     # Generating side
     role: str = "recipient",
     payee_sk: Optional[int] = None, payee_E_addr: Optional[ElGamalCiphertext] = None,
@@ -574,18 +577,24 @@ def build_note_a2(
     """Build a note-a2 receipt (addressed note from a *private* issuer), from
     either party's side.
 
-    ``opening.id_hash`` recomputes as ``id_hash_a2(eNote, eIss)``, and the
+    ``opening.id_hash`` recomputes as ``id_hash_a2(eNote, eIss, T)``, and the
     ``binding`` proves ``eIss`` re-encrypts the issuer's *registered*
     credential (anti-framing).  What ``eIss`` decrypts to is established by the
     side that can: the recipient by verifiable decryption under ``pk_recv``,
     the issuer by disclosing the mint randomness.  Self-naming:
     role="recipient" -- ``payee_vd``; role="issuer" -- ``payer_vd``.
 
-    A2's named issuer is the point the recipient's key opens ``eIss`` to.  That
-    is not yet the same as the plaintext the mint binding opened -- see
-    doc/review/notes-receiving-key.org section 4.6 -- so an A2 receipt names
-    the issuer the ciphertext yields, which an honest minter makes its own.
+    The named issuer is then tied to the binding's plaintext by ``gamma``: the
+    verifier checks ``M_named == C_iss - T + gamma*H``.  Without that tie a
+    minter could key ``eIss`` so the recipient's key opens it to a sock puppet
+    (doc/review/notes-receiving-key.org, section 4.6).
     """
+    if T is None and binding is not None:
+        T = binding.T
+    if T is None:
+        raise ValueError("note-a2 receipt needs T: idHash commits it")
+    if binding is not None and gamma is None:
+        raise ValueError("note-a2 receipt with a binding needs gamma, which ties it to the named issuer")
     _check_role(role)
     rng = rng or _rng()
     t_note = rand_scalar(rng) if role == "recipient" else None
@@ -610,6 +619,8 @@ def build_note_a2(
             "mailbox_binding": (mailbox_binding_record(mailbox_binding)
                                 if mailbox_binding is not None else None),
             "binding": issuer_reenc_record(binding) if binding is not None else None,
+            "T": _g1_hex(T),
+            "gamma": (scalar_to_hex(gamma) if gamma is not None else None),
             "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
             "txn": {"value": value, "block_time": block_time, "txhash": txhash,
                     "block": block, "logindex": logindex,
@@ -631,7 +642,7 @@ def build_note_a2(
     payload = note_payload_record(eNote=eNote, eIss=eIss,
                                   pk_recv=legs["pk_recv"],
                                   r_note=legs.get("r_note"), r_id=legs.get("r_id"),
-                                  binding=legs.get("binding"))
+                                  binding=legs.get("binding"), T=T, gamma=gamma)
     if "vd" in legs:
         payload.update(legs["vd"])
 

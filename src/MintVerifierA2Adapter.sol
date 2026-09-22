@@ -7,20 +7,21 @@ import {IMintVerifierA2} from "./IMintVerifierA2.sol";
 ///         mint_batch_a2 Groth16 verifiers.
 /// @notice Mirror of MintVerifierAdapter for the private-issuer (A2) mint
 ///         family.  Each pinned N has its own MintBatchA2N${N}Groth16Verifier
-///         with a fixed-length pubSignals array of size 5N+4; this adapter
+///         with a fixed-length pubSignals array of size 7N+4; this adapter
 ///         looks the verifier up by N == cms.length and dispatches the proof +
 ///         public inputs via a hand-crafted staticcall (snarkjs generates one
 ///         verifier per pubSignals arity).
 ///
 /// @dev    Public-signal layout (per circuits/mint_batch_a2.circom): the A2
-///         circuit's only OUTPUT is eIss[N][4], so it leads, followed by the
-///         public inputs in declaration order:
+///         circuit's OUTPUTS eIss[N][4] and T[N][2] lead, in that order,
+///         followed by the public inputs in declaration order:
 ///           pub[0..4N)       = eIss row-major (R.x, R.y, C.x, C.y per leaf)
-///           pub[4N]          = oldRoot
-///           pub[4N+1]        = newRoot
-///           pub[4N+2]        = nextLeafIndex
-///           pub[4N+3]        = totalFace
-///           pub[4N+4..5N+4)  = cm[0..N)
+///           pub[4N..6N)      = T row-major (x, y per leaf)
+///           pub[6N]          = oldRoot
+///           pub[6N+1]        = newRoot
+///           pub[6N+2]        = nextLeafIndex
+///           pub[6N+3]        = totalFace
+///           pub[6N+4..7N+4)  = cm[0..N)
 contract MintVerifierA2Adapter is IMintVerifierA2 {
 
     address public governance;
@@ -57,6 +58,7 @@ contract MintVerifierA2Adapter is IMintVerifierA2 {
     function verifyMint(
         bytes calldata proof,
         uint256[4][] calldata eIss,
+        uint256[2][] calldata T,
         uint256 oldRoot,
         uint256 newRoot,
         uint256 nextLeafIndex,
@@ -64,36 +66,47 @@ contract MintVerifierA2Adapter is IMintVerifierA2 {
         uint256[] calldata commitments
     ) external view returns (bool) {
         uint256 N = commitments.length;
-        if (eIss.length != N) return false;
+        if (eIss.length != N || T.length != N) return false;
         address v = verifiers[N];
         if (v == address(0)) return false;
         if (proof.length != 256) return false;  // 8 * 32 (pA, pB, pC)
 
+        uint256[] memory pub = _publicSignals(
+            eIss, T, [oldRoot, newRoot, nextLeafIndex, totalFace], commitments);
         (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC) =
             abi.decode(proof, (uint256[2], uint256[2][2], uint256[2]));
+        return _verifyN(v, pA, pB, pC, pub);
+    }
 
-        // Build the public-signal array of length 5N+4: eIss (outputs) lead
-        // row-major, then [oldRoot, newRoot, nextLeafIndex, totalFace], then cm[].
-        uint256[] memory pub = new uint256[](5 * N + 4);
+    /// @dev The public-signal array of length 7N+4: eIss then T (outputs) lead
+    ///      row-major, then `scalars` = [oldRoot, newRoot, nextLeafIndex,
+    ///      totalFace], then cm[].
+    function _publicSignals(
+        uint256[4][] calldata eIss,
+        uint256[2][] calldata T,
+        uint256[4] memory scalars,
+        uint256[] calldata commitments
+    ) internal pure returns (uint256[] memory pub) {
+        uint256 N = commitments.length;
+        pub = new uint256[](7 * N + 4);
         for (uint256 i = 0; i < N; i++) {
             pub[4 * i + 0] = eIss[i][0];
             pub[4 * i + 1] = eIss[i][1];
             pub[4 * i + 2] = eIss[i][2];
             pub[4 * i + 3] = eIss[i][3];
+            pub[4 * N + 2 * i + 0] = T[i][0];
+            pub[4 * N + 2 * i + 1] = T[i][1];
         }
-        pub[4 * N]     = oldRoot;
-        pub[4 * N + 1] = newRoot;
-        pub[4 * N + 2] = nextLeafIndex;
-        pub[4 * N + 3] = totalFace;
+        for (uint256 k = 0; k < 4; k++) {
+            pub[6 * N + k] = scalars[k];
+        }
         for (uint256 i = 0; i < N; i++) {
-            pub[4 * N + 4 + i] = commitments[i];
+            pub[6 * N + 4 + i] = commitments[i];
         }
-
-        return _verifyN(v, pA, pB, pC, pub);
     }
 
     /// @dev Hand-rolled calldata for `verifyProof(uint256[2], uint256[2][2],
-    ///      uint256[2], uint256[K])` where K = pub.length == 5N+4.  Identical
+    ///      uint256[2], uint256[K])` where K = pub.length == 7N+4.  Identical
     ///      dispatch shape to MintVerifierAdapter (every argument is fixed-size,
     ///      so the static ABI encoding is just the fields packed contiguously).
     function _verifyN(

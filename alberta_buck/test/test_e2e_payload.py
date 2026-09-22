@@ -62,9 +62,9 @@ def _recipient(w):
 def test_a2_payload_opens_the_issuer_ciphertext():
     w = _world("a2")
     np_ = w["notePayload"]
-    assert set(np_) == {"flavor", "predicate", "eNote", "eIss", "rhoWrapped", "vWrapped",
-                        "rPrimeWrapped", "saltIssWrapped"}, \
-        "an A2 delivery is the two ciphertexts and every secret scalar WRAPPED"
+    assert set(np_) == {"flavor", "predicate", "eNote", "eIss", "T", "rhoWrapped", "vWrapped",
+                        "rPrimeWrapped", "saltIssWrapped", "gammaWrapped"}, \
+        "an A2 delivery is the two ciphertexts, the binding's T, and every secret scalar WRAPPED"
 
     m_rec, k, salt, M_rec = _recipient(w)
     eIss = _ct(np_["eIss"])
@@ -146,11 +146,12 @@ def test_the_mailbox_binding_needs_no_secret():
 
 
 def test_a2_payload_value_ciphertext_is_the_committed_one():
-    """eNote is hashed into idHash, so a substituted one breaks the nullifier."""
+    """eNote and the binding's T are hashed into idHash, so a substituted one
+    breaks the nullifier."""
     w = _world("a2")
     from alberta_buck.wallet.notes import id_hash_a2
     np_ = w["notePayload"]
-    assert id_hash_a2(_ct(np_["eNote"]), _ct(np_["eIss"])) == \
+    assert id_hash_a2(_ct(np_["eNote"]), _ct(np_["eIss"]), _pt(np_["T"])) == \
         int(w["opening"]["idHash"])
 
 

@@ -8,13 +8,15 @@ What must travel.  The recipient recomputes the commitment, so it needs the open
 ``v``, the nullifier seed ``rho``, the predicate) and the ciphertexts ``idHash`` commits.  Its
 spend proves the note tie, and the fold's witness is the SCALAR ``r*k``, which the point ``k*R``
 does not give -- so the mint randomness travels too.  An A2 recipient also proves the issuer's
-Identity registered, under the salt of the issuer's naming association.
+Identity registered, under the salt of the issuer's naming association, and opens the mint
+binding's ``T = r'*pk_recv + gamma*H``, which ``idHash`` commits, so it needs ``gamma``.
 
 What the channel must not learn, and would, in the clear:
 
   ``v``         the face, while the note is in flight
   ``rho``       with ``idHash`` it is the nullifier, so the channel would learn WHEN the note is spent
   ``r'``        ``M = C - r'*pk_recv``: the issuer's Identity, read without ``k``
+  ``gamma``     ``M = C - T + gamma*H``: the same Identity, by the other road
   ``salt_iss``  a scan of the issuer's naming leaf against every identity the channel knows
 
 So every secret scalar travels WRAPPED to the mailbox key.  One shared point per delivery, from the
@@ -24,15 +26,15 @@ value ciphertext both flavours carry --
     recipient  S = k * eNote.R
 
 -- and one mask per field, keyed by the field's name (:func:`alberta_buck.wallet.recvkey.wrap_mask`),
-because one pad over several scalars leaks their differences.  The ciphertexts, the issuer's
-Schnorr signature (A1) and the predicate travel in the clear: none opens without ``k``.
+because one pad over several scalars leaks their differences.  The ciphertexts, ``T`` (A2), the
+issuer's Schnorr signature (A1) and the predicate travel in the clear: none opens without ``k``.
 
 A bearer (B1) note has no delivery in this sense.  Its opening IS the note, handed to whoever
 should be able to spend it, and wrapping it to a key would make it addressed.
 
 Opening a delivery checks what the wrap cannot: that the unwrapped randomness really is the
-randomness of the ciphertexts it arrived with, and that ``k`` opens the value ciphertext to the
-stated face.  A delivery addressed to someone else, or corrupted in transit, is refused here with
+randomness of the ciphertexts it arrived with, that ``k`` opens the value ciphertext to the stated
+face, and for A2 that ``T`` opens to this mailbox.  A delivery addressed to someone else, or corrupted in transit, is refused here with
 a reason, not discovered later as a spend that will not prove.
 """
 
@@ -41,8 +43,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from alberta_buck.wallet.bn254 import G1, eq, mul, point_to_words, words_to_point
+from alberta_buck.wallet.bn254 import G1, add, eq, mul, point_to_words, words_to_point
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_decrypt
+from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_A2, NoteOpening, id_hash_a1, id_hash_a2, note_commitment,
 )
@@ -98,7 +101,8 @@ class OpenedA1:
 @dataclass(frozen=True)
 class OpenedA2:
     """An A2 delivery opened by its recipient.  ``M_I`` is what ``k`` opens ``eIss`` to -- the
-    issuer the recipient will name, and the Identity relation (5) proves registered."""
+    issuer the recipient will name, and the Identity relation (5) proves registered.  ``T`` and
+    ``gamma`` are the mint binding's blinded point and its blind, which the fold ties to ``k``."""
     opening:                    NoteOpening
     cm:                         int
     eNote:                      ElGamalCiphertext
@@ -106,6 +110,8 @@ class OpenedA2:
     M_I:                        Tuple
     r_prime:                    int
     salt_iss:                   int
+    T:                          Tuple
+    gamma:                      int
 
 
 # ---- the minter's side ----------------------------------------------------------------------------
@@ -158,7 +164,9 @@ def deliver_a2(minted, pk_recv) -> Dict[str, Any]:
         "predicate":            str(o.predicate),
         "eNote":                _ct(minted.eNote),
         "eIss":                 _ct(minted.eIss),
-        **_wrapped(S, rho=o.rho, v=o.v, rPrime=minted.r_prime, saltIss=minted.salt_iss),
+        "T":                    _pt(minted.binding.T),
+        **_wrapped(S, rho=o.rho, v=o.v, rPrime=minted.r_prime, saltIss=minted.salt_iss,
+                   gamma=minted.gamma),
     }
 
 
@@ -209,8 +217,10 @@ def open_a1(delivery: Dict[str, Any], k: int, m_issuer: int) -> OpenedA1:
 def open_a2(delivery: Dict[str, Any], k: int) -> OpenedA2:
     """Open an A2 delivery with the mailbox secret ``k``.
 
-    Checks that the unwrapped ``r'`` is ``eIss``'s randomness -- the fold's note tie is
-    ``eIss.R == r'*G``, so a wrong ``r'`` would surface only as a proof that will not build.
+    Checks that the unwrapped ``r'`` is ``eIss``'s randomness, and that ``T == k*eIss.R +
+    gamma*H`` -- the fold's note tie and its key tie, so a wrong ``r'`` or ``gamma`` would
+    otherwise surface only as a proof that will not build.  A ``T`` keyed to some other point is
+    what a minter framing a sock puppet would have to send, and it is refused here.
 
     Raises:
         DeliveryRefused: naming what does not hold.
@@ -219,12 +229,16 @@ def open_a2(delivery: Dict[str, Any], k: int) -> OpenedA2:
         raise DeliveryRefused("not an A2 delivery")
     eNote                       = _ct_of(delivery["eNote"])
     eIss                        = _ct_of(delivery["eIss"])
+    T                           = _pt_of(delivery["T"])
     S                           = mailbox_shared_recipient(k, eNote.R)
-    u                           = _unwrap(delivery, S, "rho", "v", "rPrime", "saltIss")
+    u                           = _unwrap(delivery, S, "rho", "v", "rPrime", "saltIss", "gamma")
     _check_value(eNote, k, u["v"], None)
     if not eq(eIss.R, mul(G1, u["rPrime"])):
         raise DeliveryRefused("the unwrapped r' is not eIss's randomness")
-    idh                         = id_hash_a2(eNote, eIss)
+    if not eq(T, add(mul(eIss.R, k), mul(H_PEDERSEN, u["gamma"]))):
+        raise DeliveryRefused("T does not open to this mailbox under the unwrapped gamma")
+    idh                         = id_hash_a2(eNote, eIss, T)
     opening                     = NoteOpening(FLAVOR_A2, u["v"], u["rho"], idh, int(delivery["predicate"]))
     return OpenedA2(opening=opening, cm=note_commitment(opening), eNote=eNote, eIss=eIss,
-                    M_I=elgamal_decrypt(eIss, k), r_prime=u["rPrime"], salt_iss=u["saltIss"])
+                    M_I=elgamal_decrypt(eIss, k), r_prime=u["rPrime"], salt_iss=u["saltIss"],
+                    T=T, gamma=u["gamma"])

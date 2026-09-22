@@ -3,23 +3,26 @@
  * Generate a mint_batch_a2 (private-issuer A2) proof for an N-leaf batch and
  * emit a fixture JSON the forge tests ingest.  Mirrors prove_mint_batch.js but
  * for the A2 circuit: every leaf is flavor == A2, idHash opens to
- * Poseidon-8(eNote, eIss), and eIss = (R.x, R.y, C.x, C.y) is a PUBLIC OUTPUT
- * (it leads publicSignals).
+ * Poseidon-10(eNote, eIss, T), and eIss = (R.x, R.y, C.x, C.y) and the mint
+ * binding's T = (x, y) are PUBLIC OUTPUTS (they lead publicSignals, eIss first).
  *
  * Output (build/snark/mint_batch_a2_n${N}/fixtures/<name>.json):
  *   { N, depth,
- *     public: { eIss:[[..4..],..], oldRoot, newRoot, nextLeafIndex, totalFace, cm:[..] },
+ *     public: { eIss:[[..4..],..], T:[[..2..],..], oldRoot, newRoot, nextLeafIndex,
+ *               totalFace, cm:[..] },
  *     witness: {...}, proof: {pA,pB,pC}, proofBytes }
  *
  * CLI:
  *   prove_mint_batch_a2.js [--name=<n>] [--n=<N>] [--seed=<s>]
  *                          [--start-leaf=<i>] [--initial-state=<path>]
  *                          [--live-leaves=<v0,v1,..>] [--eiss=<i>:Rx,Ry,Cx,Cy ...]
+ *                          [--t=<i>:Tx,Ty ...]
  *
  *   --eiss   Pin leaf i's eIss to a specific ciphertext (repeatable).  Used to
  *            tie a fixture leaf to a real issuer_reenc binding (the leaf-tie /
  *            collusion regression tests).  Coords are reduced mod FIELD_R, so
  *            pass the registry point's raw coords; honest points are < FIELD_R.
+ *   --t      Pin leaf i's T to that binding's T, likewise (repeatable).
  */
 "use strict";
 
@@ -34,7 +37,7 @@ const DEPTH = 20;
 const FIELD_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 const ZERO_VALUE = (() => {
-    const k = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck:Notes:zero"));
+    const k = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"));
     return BigInt(k) % FIELD_R;
 })();
 
@@ -60,7 +63,7 @@ function mkRng(seed) {
 function parseArgs() {
     const out = {
         name: "basic", n: 2, seed: 1n, startLeaf: 0n,
-        initialState: null, liveLeaves: null, eiss: {}, enote: {}, rho: {},
+        initialState: null, liveLeaves: null, eiss: {}, t: {}, enote: {}, rho: {},
     };
     for (const a of process.argv.slice(2)) {
         const m = a.match(/^--([^=]+)=(.*)$/);
@@ -76,6 +79,12 @@ function parseArgs() {
             case "eiss": {
                 const [idx, words] = v.split(":");
                 out.eiss[parseInt(idx, 10)] = words.split(",").map((w) => fieldFrom(w));
+                break;
+            }
+            case "t": {
+                // --t=i:Tx,Ty -- pin leaf i's T to the binding's, beside --eiss.
+                const [idx, words] = v.split(":");
+                out.t[parseInt(idx, 10)] = words.split(",").map((w) => fieldFrom(w));
                 break;
             }
             case "enote": {
@@ -166,7 +175,7 @@ async function main() {
 
     const flavor = new Array(N), v = new Array(N), rho = new Array(N);
     const idHash = new Array(N), predicate = new Array(N);
-    const eNote = new Array(N), eIss = new Array(N);
+    const eNote = new Array(N), eIss = new Array(N), T = new Array(N);
     for (let i = 0; i < N; i++) {
         flavor[i]    = 2n;  // FLAVOR_A2 -- the A2 circuit constrains every leaf
         v[i]         = (i < liveCount)
@@ -176,7 +185,8 @@ async function main() {
         predicate[i] = 0n;
         eNote[i]     = args.enote[i] ? args.enote[i].slice() : [rng(), rng(), rng(), rng()];
         eIss[i]      = args.eiss[i] ? args.eiss[i].slice() : [rng(), rng(), rng(), rng()];
-        idHash[i]    = P([...eNote[i], ...eIss[i]]);  // Poseidon-8(eNote, eIss)
+        T[i]         = args.t[i] ? args.t[i].slice() : [rng(), rng()];
+        idHash[i]    = P([...eNote[i], ...eIss[i], ...T[i]]);  // Poseidon-10(eNote, eIss, T)
     }
 
     const cm = [];
@@ -212,6 +222,7 @@ async function main() {
         predicate:     predicate.map(String),
         eNote:         eNote.map((r) => r.map(String)),
         eIssW:         eIss.map((r) => r.map(String)),
+        TW:            T.map((r) => r.map(String)),
         siblings:      siblings.map((r) => r.map(String)),
     };
 
@@ -220,9 +231,10 @@ async function main() {
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, wasm, zkey);
     console.log(`        proof in ${(Date.now() - t0) / 1000}s`);
 
-    // publicSignals: [eIss(4N) outputs, oldRoot, newRoot, nextLeafIndex, totalFace, cm(N)]
+    // publicSignals: [eIss(4N), T(2N) outputs, oldRoot, newRoot, nextLeafIndex, totalFace, cm(N)]
     const expectPub = [
         ...eIss.flatMap((r) => r.map(String)),
+        ...T.flatMap((r) => r.map(String)),
         input.oldRoot, input.newRoot, input.nextLeafIndex, input.totalFace,
         ...input.cm,
     ];
@@ -246,6 +258,7 @@ async function main() {
         N, depth: DEPTH,
         public: {
             eIss:          eIss.map((r) => r.map(String)),
+            T:             T.map((r) => r.map(String)),
             oldRoot:       input.oldRoot,
             newRoot:       input.newRoot,
             nextLeafIndex: input.nextLeafIndex,

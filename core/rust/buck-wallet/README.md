@@ -4,7 +4,7 @@ The Alberta Buck wallet kernel -- the deterministic layer above the identity
 crypto:
 
 - `canonical` -- THE canonical JSON dialect and identity serialization
-- `envelope` -- the AB-RCPT/1 receipt envelope
+- `envelope` -- the AB-RCPT/2 receipt envelope
 - `verify` -- tier-1 offline receipt verification
 - `builders` / `receipt` -- the per-kind receipt builders and the
   public-issuer / approve verifiers
@@ -40,7 +40,7 @@ use buck_wallet::envelope::{envelope_text, parse_envelope, receipt_id};
 
 let bytes = serialize_core(&core)?;          // core: the receipt's JSON value
 let id    = receipt_id(&bytes, 16);          // base32(sha256(canonical bytes))
-let text  = envelope_text(&bytes, 64);       // the AB-RCPT/1 block, wrapped
+let text  = envelope_text(&bytes, 64);       // the AB-RCPT/2 block, wrapped
 assert_eq!(parse_envelope(&text)?, bytes);
 ```
 

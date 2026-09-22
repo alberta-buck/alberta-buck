@@ -1,20 +1,13 @@
-//! Nothing-up-my-sleeve generators, and the one whose discrete log must be
-//! unknown -- mirrors `alberta_buck/wallet/nums.py`.
+//! The one hiding generator, `H_PEDERSEN`, whose discrete log no one knows --
+//! mirrors `alberta_buck/wallet/nums.py`, which carries the full argument.
 //!
-//! The system uses a second G1 generator in two different ways with opposite
-//! requirements, and conflating them is what review finding 5 caught.
-//!
-//! `issuer_reenc::h_point` masks a value inside ONE sigma, where a knowledge
-//! extractor recovers both openings, so a known discrete log costs nothing and
-//! that generator is simply `keccak(domain)*G`.
-//!
-//! `h_pedersen` is for the other use: a commitment opened by two SEPARATE
-//! proofs that must agree.  B1 publishes `P_dep = M_dep + b*H` and then proves
-//! two things about it -- a sigma opening it as `m_dep*G + b*H`, and a
-//! membership proof opening it as `M + b'*H` for a registered `M`.  With a
-//! known `h = log_G(H)` those openings need not agree: a depositor holding any
-//! registered identity scalar `m'` sets `b' = b + (m_dep - m')/h`, and an
-//! unregistered depositor spends.  Hashing to the curve leaves no such `h`.
+//! Every blind the protocol opens in more than one proof sits on it.  B1's
+//! `P_dep = M_dep + b*H` is opened by a sigma and by a membership proof; with a
+//! known `h = log_G(H)` a depositor holding any registered scalar `m'` sets
+//! `b' = b + (m_dep - m')/h` and the halves name different identities (review
+//! finding 5).  The A2 binding's `T = r'*pk + gamma*H` is opened again by the
+//! A2 fold; with a known `h` a minter pays any difference of Identities in
+//! `gamma` (the A2 key split).  So there is no second, known-log generator.
 //!
 //! Derivation: try-and-increment, the standard construction for a FIXED public
 //! parameter.  Constant-time hashing matters when the input is secret; here the
@@ -28,7 +21,7 @@ use crate::keccak::keccak_raw;
 use crate::{w_from_g1, G1w};
 
 /// Domain separator.  Changing it changes the point.
-pub const H_PEDERSEN_DOMAIN: &[u8] = b"AlbertaBuck/Pedersen/H/v1";
+pub const H_PEDERSEN_DOMAIN: &[u8] = crate::domains::PEDERSEN_H;
 
 /// The Pedersen generator: on the curve, with nobody's knowledge of its
 /// discrete log, because it was never computed as a multiple of `G`.

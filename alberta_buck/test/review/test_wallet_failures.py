@@ -26,7 +26,7 @@ from alberta_buck.wallet.ps import ps_verify, ps_keygen, ps_sign, ps_present, PS
 from alberta_buck.wallet.nizk import registration_prove, registration_verify, presentation_point
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove, chaum_pedersen_verify
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
-from alberta_buck.wallet.issuer_reenc import H_POINT, H_SCALAR
+from alberta_buck.review.known_log import H_KNOWN, H_KNOWN_SCALAR, untagged_identity_leaf
 from alberta_buck.registry.tree import identity_leaf
 import pytest
 
@@ -160,15 +160,15 @@ def test_04_deterministic_leaf_links_accounts_salted_leaf_does_not_reuse(backend
 
 def test_05_arbitrary_T_and_known_log_are_independent_gaps(backend):
     member, outsider, P, tree, witness = mismatched_membership()
-    assert member != outsider and tree.path(0).leaf == identity_leaf(member)
+    assert member != outsider and tree.path(0).leaf == untagged_identity_leaf(member)
     T = add(P, neg(member))
     assert eq(P, add(member, T))
     assert "b" not in witness
     m1, b1, m2, b2, P2 = double_opening()
     assert m1 != m2 and b1 != b2
-    assert eq(P2, add(mul(G1, m2), mul(H_POINT, b2)))
+    assert eq(P2, add(mul(G1, m2), mul(H_KNOWN, b2)))
     H = independent_generator()
-    assert H != H_POINT and H != mul(G1, H_SCALAR)
+    assert H != H_KNOWN and H != mul(G1, H_KNOWN_SCALAR)
     assert not eq(add(mul(G1, m1), mul(H, b1)), add(mul(G1, m2), mul(H, b2)))
     # Unknown log alone does not bind arbitrary POINT messages.
     delta = 9
@@ -278,13 +278,6 @@ def test_receipt_offline_success_does_not_authenticate_invented_chain_anchor(fla
     from alberta_buck.sim.notes_stack import E2EFixture
     from alberta_buck.wallet.envelope import serialize_core, deserialize_core
     from alberta_buck.wallet.verify_receipt import verify_receipt
-    if flavor in ("a1", "a2"):
-        import pytest as _pytest
-        _pytest.skip(
-            "AB-RCPT addressed legs await the receiving-key rework: the "
-            "verifier decrypts with an identity-derived scalar, and addressed "
-            "notes are keyed to a receiving key that no identity yields.  See "
-            "test_receipt_e2e.test_fixture_receipt_verifies.")
     fx = E2EFixture.load(flavor)
     contracts = {k: "0x"+"11"*20 for k in ("registry", "buck", "notes")}
     anchor = dict(txhash="0x"+"22"*32, block=123, logindex=0, timestamp=123456)

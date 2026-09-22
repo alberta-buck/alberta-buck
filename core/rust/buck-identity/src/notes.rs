@@ -109,8 +109,12 @@ pub fn id_hash_a1(
     ])
 }
 
-/// A2 id-hash: `Poseidon([E_note.R, E_note.C, E_iss.R, E_iss.C])` (8 words).
-pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w)) -> Result<W256> {
+/// A2 id-hash: `Poseidon([E_note.R, E_note.C, E_iss.R, E_iss.C, T])` (10 words).
+///
+/// `T = r'*pk_recv + gamma*H` is the mint binding's blinded point.  The spend
+/// reaches the mint only through `idHash`, so committing `T` is what lets the
+/// A2 fold tie the binding's key to the recipient's own.
+pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w), t: &G1w) -> Result<W256> {
     poseidon(&[
         e_note.0 .0,
         e_note.0 .1,
@@ -120,16 +124,25 @@ pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w)) -> Result<W256> {
         e_iss.0 .1,
         e_iss.1 .0,
         e_iss.1 .1,
+        t.0,
+        t.1,
     ])
 }
 
-/// Identity Merkle leaf: `Poseidon([M.x, M.y])` -- matches
-/// `circuits/identity_membership.circom` and `registry/tree.py`.
-pub fn identity_leaf(m_point: &G1w) -> Result<W256> {
-    poseidon(&[m_point.0, m_point.1])
+/// The leaf kinds' leading Poseidon inputs, `keccak(tag) mod F_R`.  Without
+/// them a salted identity leaf and a receiving leaf were both three-input
+/// Poseidons, and one value could be a leaf of either kind.
+fn leaf_tag(tag: &[u8]) -> W256 {
+    crate::domains::field_tag(tag)
 }
 
-/// Hiding leaf of a PRIVATE subtree: `Poseidon([M.x, M.y, salt])`.
+/// Identity Merkle leaf: `Poseidon([TAG, M.x, M.y])` -- mirrors
+/// `registry/tree.py`.
+pub fn identity_leaf(m_point: &G1w) -> Result<W256> {
+    poseidon(&[leaf_tag(crate::domains::LEAF_IDENTITY), m_point.0, m_point.1])
+}
+
+/// Hiding leaf of a PRIVATE subtree: `Poseidon([TAG, M.x, M.y, salt])`.
 ///
 /// Membership in a private subtree is a fact about a person who did not
 /// publish it, so the leaf must not be a deterministic function of the
@@ -144,11 +157,11 @@ pub fn identity_leaf_salted(m_point: &G1w, salt: &W256) -> Result<W256> {
             "salt must be in [1, F_R); 0 makes the leaf deterministic",
         ));
     }
-    poseidon(&[m_point.0, m_point.1, *salt])
+    poseidon(&[leaf_tag(crate::domains::LEAF_IDENTITY_SALTED), m_point.0, m_point.1, *salt])
 }
 
 /// Hiding leaf of a private IDENTITY-REGISTRY subtree, binding the pair:
-/// `Poseidon([m_rec, k_recv, salt])`.
+/// `Poseidon([TAG, m_rec, k_recv, salt])`.
 ///
 /// Addressed Notes are keyed to the receiving key `k*G` rather than to the
 /// identity point, because an identity scalar is a read capability the
@@ -175,10 +188,10 @@ pub fn receiving_leaf(m_rec: &W256, k_recv: &W256, salt: &W256) -> Result<W256> 
             ));
         }
     }
-    poseidon(&[*m_rec, *k_recv, *salt])
+    poseidon(&[leaf_tag(crate::domains::LEAF_RECEIVING), *m_rec, *k_recv, *salt])
 }
 
-/// `mailbox_leaf(M, pk_recv, salt) = Poseidon([M.x, M.y, pk.x, pk.y, salt])`
+/// `mailbox_leaf(M, pk_recv, salt) = Poseidon([TAG, M.x, M.y, pk.x, pk.y, salt])`
 /// -- the PAYER's view of the association `receiving_leaf` commits.
 ///
 /// Two leaves for one fact, because it has two consumers holding different
@@ -195,7 +208,14 @@ pub fn mailbox_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
             "salt must be in [1, F_R); 0 makes the leaf deterministic",
         ));
     }
-    poseidon(&[m_point.0, m_point.1, pk_recv.0, pk_recv.1, *salt])
+    poseidon(&[
+        leaf_tag(crate::domains::LEAF_MAILBOX),
+        m_point.0,
+        m_point.1,
+        pk_recv.0,
+        pk_recv.1,
+        *salt,
+    ])
 }
 
 /// `salt` is a field element in `[1, F_R)`.  Poseidon reduces its inputs

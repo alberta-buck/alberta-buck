@@ -28,7 +28,6 @@ from alberta_buck.wallet.unilateral_a1 import (
     make_receipt_a1, verify_receipt_a1,
 )
 from alberta_buck.wallet.unilateral_a2 import IdentityTree
-from alberta_buck.wallet.issuer_reenc import H_POINT
 
 KYC = "kyc:ca-ab-2026"
 
@@ -142,11 +141,10 @@ def test_folded_spend_commits_recipient_identity(world):
     w = deposit_fold_witness(
         m_rec=world["m_rec"], k=world["k_rec"], sk_dep=world["rec0"].sk,
         salt=world["salt_rec"], E_dep=world["rec0"].E,
-        note_ct=_mint(world).eRec, tree=world["priv"], rng=world["rng"],
+        note_ct=_mint(world).eRec, tree=world["priv"],
     )
     # For A1 the decrypted point IS the recipient identity.
     assert eq(w.M, world["M_rec"])
-    assert eq(add(w.P, neg(mul(H_POINT, w.b))), world["M_rec"])
 
 
 def test_any_account_of_the_identity_can_deposit(world):
@@ -157,7 +155,7 @@ def test_any_account_of_the_identity_can_deposit(world):
         w = deposit_fold_witness(
             m_rec=world["m_rec"], k=world["k_rec"], sk_dep=acct.sk,
             salt=world["salt_rec"], E_dep=acct.E, note_ct=note.eRec,
-            tree=world["priv"], rng=world["rng"],
+            tree=world["priv"],
         )
         assert deposit_fold_check(w, pk_dep=acct.pk, E_dep=acct.E,
                                   note_ct=note.eRec, root=world["priv"].root())
@@ -190,7 +188,6 @@ def test_a_rotated_receiving_key_still_spends(world):
     w = deposit_fold_witness(
         m_rec=world["m_rec"], k=k2, sk_dep=world["rec0"].sk, salt=salt2,
         E_dep=world["rec0"].E, note_ct=note.eRec, tree=world["priv"],
-        rng=world["rng"],
     )
     assert deposit_fold_check(w, pk_dep=world["rec0"].pk, E_dep=world["rec0"].E,
                               note_ct=note.eRec, root=world["priv"].root())
@@ -221,7 +218,7 @@ def test_payload_thief_cannot_spend(world):
         deposit_fold_witness(
             m_rec=m_thief, k=world["k_rec"],          # its identity, the stolen key
             sk_dep=thief.sk, salt=salt_t, E_dep=thief.E,
-            note_ct=note.eRec, tree=world["priv"], rng=rng,
+            note_ct=note.eRec, tree=world["priv"],
         )
     assert exc.value.relation == 3
 
@@ -236,7 +233,7 @@ def test_spend_without_the_receiving_secret_is_refused(world):
     w = deposit_fold_witness(
         m_rec=world["m_rec"], k=world["k_rec"], sk_dep=world["rec0"].sk,
         salt=world["salt_rec"], E_dep=world["rec0"].E, note_ct=note.eRec,
-        tree=world["priv"], rng=world["rng"],
+        tree=world["priv"],
     )
     import dataclasses
     # Substituting the identity scalar for the receiving secret breaks (1).
@@ -252,7 +249,7 @@ def test_wrong_account_key_is_refused_on_the_credential_relation(world):
             m_rec=world["m_rec"], k=world["k_rec"],
             sk_dep=world["rec1"].sk,                 # wrong account for rec0's E
             salt=world["salt_rec"], E_dep=world["rec0"].E,
-            note_ct=_mint(world).eRec, tree=world["priv"], rng=world["rng"],
+            note_ct=_mint(world).eRec, tree=world["priv"],
         )
     assert exc.value.relation == 2
 
@@ -262,10 +259,10 @@ def test_tampered_witness_is_refused(world):
     w = deposit_fold_witness(
         m_rec=world["m_rec"], k=world["k_rec"], sk_dep=world["rec0"].sk,
         salt=world["salt_rec"], E_dep=world["rec0"].E, note_ct=note.eRec,
-        tree=world["priv"], rng=world["rng"],
+        tree=world["priv"],
     )
     import dataclasses
-    for bad in (dataclasses.replace(w, b=(w.b + 1) % ORDER),
+    for bad in (dataclasses.replace(w, M=add(w.M, G1)),
                 dataclasses.replace(w, salt=(w.salt + 1)),
                 dataclasses.replace(w, leaf=w.leaf ^ 1)):
         assert not deposit_fold_check(bad, pk_dep=world["rec0"].pk,

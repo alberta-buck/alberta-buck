@@ -59,7 +59,7 @@ and is a drop-in: put it in =build/snark/ptau/= under the expected name and
 | =pot18_final.ptau= | 288M | =mint_batch_n8= |
 | =pot19_final.ptau= | 576M | =mint_batch_n16= |
 | =pot20_final.ptau= | 1.1G | =mint_batch_n32= |
-| =pot22_final.ptau= | *4.8G* | note-binding circuits |
+| =pot22_final.ptau= | *4.8G* | the A1 and A2 deposit folds |
 
 =ptau_pow_for_n()= in =setup.sh= maps batch size to power: N=1 -> 2^15,
 doubling per doubling of N, to N=32 -> 2^20.  Constraint count roughly
@@ -73,7 +73,7 @@ Two things worth internalising:
 2. *The ptau survive circuit changes.*  Editing a circuit forces a new zkey
    and verifier, never a new ptau.  Keep them.
 
-=build/snark/= reaches *~17G* with the full pin set plus note-binding.  Budget
+=build/snark/= reaches *~30G* with the full pin set plus both folds.  Budget
 the disk before starting; =pot22= alone is 4.8G and is generated late, so
 running out mid-way wastes everything before it.
 
@@ -93,15 +93,30 @@ M-series Mac with the ptau already present:
 
 | # | target | needs | produces | time |
 |---+--------+-------+----------+------|
-| 1 | =snark-g1tie= | pot12/13 | G1-tie verifier + =test/vectors/g1tie/proof.json= | ~1 min |
-| 2 | =snark-setup SNARK_PINS="1"= | pot15 | mint, spend, =mint_batch_n1= | ~2 min |
-| 3 | =snark-a2-setup SNARK_PINS="1"= | pot15 | =mint_batch_a2_n1= | ~1 min |
-| 4 | =snark-note-binding-a1= | rapidsnark, pot22 | A1 note-binding + its proof vector | *~15 min* |
-| 5 | =snark-note-binding= | rapidsnark, pot22 | note-binding + its proof vector | *~15 min* |
-| 6 | =snark-e2e-fixtures= | ALL of the above | =alberta_buck/test/vectors/e2e/{a1,a2,b1}.json= | ~1 min |
+| 1 | =snark-g1tie= | pot12/13 | G1-tie verifier + =test/vectors/g1tie/proof.json= (review evidence) | ~1 min |
+| 2 | =snark-setup= | pot15..20 | =mint_batch_n*= verifiers (and legacy mint, spend) | minutes |
+| 3 | =snark-fixtures= | 2 | =build/snark/mint_batch_n*/fixtures= | ~1 min |
+| 4 | =snark-a2= | pot15..20 | =mint_batch_a2_n*= verifiers + fixtures | minutes |
+| 5 | =snark-b1-membership= | pot20/22 | B1 membership verifier + its proof vector | ~5 min |
+| 6 | =snark-deposit-fold-a1= | rapidsnark, pot22 | the A1 fold + its proof vector | *~20 min* |
+| 7 | =snark-deposit-fold-a2= | rapidsnark, pot22 | the A2 fold + its proof vector | *~25 min* |
+| 8 | =snark-e2e-fixtures= | ALL of the above | =alberta_buck/test/vectors/e2e/{a1,a2,b1}.json= | ~2 min |
 
-Steps 4 and 5 are the long ones: they compile a C++ witness calculator and
-generate =pot22= (4.8G) if it is absent.  Do not run them under a timeout.
+Steps 6 and 7 are the long ones: they compile a C++ witness calculator for
+about 3.3M and 3.8M constraints, need a 16 GB node heap, and generate =pot22=
+(4.8G) if it is absent.  Do not run them under a timeout, and run them one at
+a time.
+
+Two switches save a lot of wasted setup:
+
+- =WITNESS_ONLY=1= on either fold target stops after the witness stage: the
+  circuit compiles, the honest witness satisfies it, and every attack witness
+  is refused (the thief, the throwaway key and the A2 key split, the last one
+  both by the witness builder and, with the builder's check stepped around, by
+  the circuit itself).  Run it before spending a setup on a changed circuit.
+- =DO_LEGACY=0= on =snark-setup= leaves the legacy =mint= and =spend=
+  circuits alone.  They change rarely, and regenerating their keys would
+  invalidate every committed proof that verifies through them for nothing.
 
 Full pin set (=SNARK_PINS="1 2 4 8 16 32"=, both families) is substantially
 longer — the =n32= circuits alone need =pot20= — and is only necessary if you
@@ -111,13 +126,15 @@ regeneration, =SNARK_PINS="1"= is sufficient: only N=1 feeds the e2e fixtures.
 ** Recipe: suite is red after regenerating something
 
 #+begin_src bash
-make nix-snark-g1tie                      # if the g1tie verifier changed
-make nix-snark-setup    SNARK_PINS="1"
-make nix-snark-a2-setup SNARK_PINS="1"
-make nix-snark-note-binding-a1            # slow
-make nix-snark-note-binding               # slow
+make nix-snark-g1tie                      # only if the g1tie evidence changed
+DO_LEGACY=0 make nix-snark-setup          # the mint_batch pins
+make nix-snark-fixtures
+make nix-snark-a2                         # the A2 mint pins + their fixtures
+make nix-snark-b1-membership
+make nix-snark-deposit-fold-a1            # slow
+make nix-snark-deposit-fold-a2            # slow
 make nix-snark-e2e-fixtures
-make nix-test                             # expect 546 passed, 0 failed
+make nix-test
 #+end_src
 
 Commit the *whole* result in one commit: verifiers, proof vectors, and the
@@ -142,8 +159,9 @@ Read =proof.json=, and emit each =pi_b= pair as =[0][1], [0][0]= /
 #+end_quote
 
 The swap sites, should you need a model: =prove_mint.js= (JS),
-=setup_g1tie.sh= / =setup_note_binding*.sh= / =test_verifier_regression.sh=
-(shell-embedded python), =gen_e2e_world.py= (python).
+=setup_g1tie.sh=, =setup_deposit_fold.sh=, =setup_b1_membership.sh= and
+=test_verifier_regression.sh= (shell-embedded python), =gen_e2e_world.py=
+(python).
 
 ** History, briefly
 
@@ -165,7 +183,7 @@ that verifies fine off-chain.
 
 * Other prerequisites that are easy to miss
 
-- *rapidsnark* — needed by both note-binding targets.  =make rapidsnark=
+- *rapidsnark* — needed by both fold targets.  =make rapidsnark=
   unpacks =lib/rapidsnark-macOS-arm64-*.zip=.
 - *circomlib* — =circuits/*.circom= include it from =node_modules=, so
   =npm install= must have run.  Note this makes the circuits derivative of

@@ -24,9 +24,10 @@ Mirrored by ``core/rust/buck-identity/src/domains.rs`` and by the constants in
 ``src/IdentityRegistry.sol``.  A tag changed here and not there is a transcript
 that verifies nowhere, which the kernel vectors and the Forge suite both catch.
 
-Three tags live inside circuits and so move only with a trusted setup: the
-hash-to-curve generator's, the Notes tree's zero, and the accumulator leaf
-functions'.  They are listed at the end, with where they stand.
+Three kinds of tag live inside circuits and so moved only with a trusted setup:
+the hash-to-curve generator's, the Notes tree's zero, and the accumulator leaf
+functions'.  Poseidon commitments take their tag as a leading field element,
+``keccak(tag) mod F_R`` (:func:`field_tag`).
 """
 
 from __future__ import annotations
@@ -68,24 +69,43 @@ ACCUMULATOR_SALT                = b"AlbertaBuck/Accumulator/Salt/v2"
 NOTES_RECEIVING_KEY             = b"AlbertaBuck/Notes/ReceivingKey/v2"
 NOTES_PAYLOAD_WRAP              = b"AlbertaBuck/Notes/PayloadWrap/v2"
 
+# ---- constants compiled into circuits -----------------------------------------
+#
+# These move only with a trusted setup, and moved in the v2 setup round.
+
+#: Hash-to-curve domain of H_PEDERSEN, the one hiding generator with no known
+#: logarithm.  Its powers table is compiled into the B1 membership circuit and
+#: the A2 fold, and the A2 mint binding blinds on it.
+PEDERSEN_H                      = b"AlbertaBuck/Pedersen/H/v2"
+#: The Notes tree's empty leaf, keccak(tag) mod F_R: compiled into every
+#: batch-mint circuit and into Notes.sol.
+NOTES_ZERO                      = b"AlbertaBuck/Notes/Zero/v2"
+#: The accumulator leaf functions' leading field-element tags.  Two of the four
+#: are three-input Poseidons, so without a tag one value can be both kinds of
+#: leaf; the tag makes each leaf kind its own function.
+LEAF_IDENTITY                   = b"AlbertaBuck/Accumulator/Leaf/Identity/v2"
+LEAF_IDENTITY_SALTED            = b"AlbertaBuck/Accumulator/Leaf/IdentitySalted/v2"
+LEAF_RECEIVING                  = b"AlbertaBuck/Accumulator/Leaf/Receiving/v2"
+LEAF_MAILBOX                    = b"AlbertaBuck/Accumulator/Leaf/Mailbox/v2"
+
+
+def field_tag(tag: bytes) -> int:
+    """A tag as a Poseidon input: keccak(tag) mod F_R, the native field."""
+    from alberta_buck.wallet.poseidon import F_R
+    return int.from_bytes(keccak_raw(tag), "big") % F_R
+
+
 # ---- wire formats -----------------------------------------------------------
 
 RECEIPT_ENVELOPE                = "AB-RCPT/2"
 
-# ---- inside circuits: these move with the v2 trusted-setup round -----------
+# ---- retired -----------------------------------------------------------------
 #
-# PEDERSEN_H     "AlbertaBuck/Pedersen/H/v1" today.  Hash-to-curve domain of
-#                H_PEDERSEN, whose powers table is compiled into the B1
-#                membership circuit and will be into the A2 fold.
-# NOTES_ZERO     "AlbertaBuck:Notes:zero" today.  The Notes tree's empty leaf,
-#                compiled into every batch-mint circuit and Notes.sol.
-# leaf tags      none today.  identity_leaf_salted and receiving_leaf are both
-#                three-input Poseidons, so one value can be both kinds of leaf.
-#                A leading field-element tag separates them; every gate hashes
-#                a leaf.
-# H_POINT        "AlbertaBuck:IssuerReenc:H" today, a known-log generator that
-#                only the A2 mint binding uses.  Retired when that binding's
-#                blinds move to H_PEDERSEN, rather than renamed.
+# H_POINT ("AlbertaBuck:IssuerReenc:H") was a generator with a KNOWN logarithm
+# that the A2 mint binding blinded on.  A known-log blind binds nothing, which
+# is how a minter could key one ciphertext to two issuers; the binding now
+# blinds on H_PEDERSEN and the tag is gone.  alberta_buck/review keeps its own
+# copy, because a known logarithm is exactly what that evidence demonstrates.
 
 
 __all__ = [
@@ -95,5 +115,7 @@ __all__ = [
     "FS_ISSUER_REENC", "FS_DEPOSITOR_BINDING", "FS_VERIFIABLE_DECRYPT",
     "CONTRACT_BINDING_CONTROL",
     "ACCUMULATOR_SALT", "NOTES_RECEIVING_KEY", "NOTES_PAYLOAD_WRAP",
+    "PEDERSEN_H", "NOTES_ZERO",
+    "LEAF_IDENTITY", "LEAF_IDENTITY_SALTED", "LEAF_RECEIVING", "LEAF_MAILBOX", "field_tag",
     "RECEIPT_ENVELOPE",
 ]

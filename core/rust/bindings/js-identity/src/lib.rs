@@ -104,13 +104,8 @@ pub fn g2_generator() -> Vec<String> {
     vec![hx(&g.0 .0), hx(&g.0 .1), hx(&g.1 .0), hx(&g.1 .1)]
 }
 
-#[wasm_bindgen]
-pub fn h_point() -> Vec<String> {
-    out_g1(&kernel::issuer_reenc::h_point())
-}
-
 /// The Pedersen generator: hashed to the curve, so its discrete log is
-/// unknown.  See the kernel's `nums` module for where that matters.
+/// unknown.  Every blind in the protocol sits on it; see the kernel's `nums`.
 #[wasm_bindgen]
 pub fn h_pedersen() -> Vec<String> {
     out_g1(&kernel::nums::h_pedersen())
@@ -903,14 +898,20 @@ pub fn id_hash_a1(
     .map_err(err)?))
 }
 
+/// `id_hash_a2(eNote, eIss, T)` -- `T` is the mint binding's blinded point.
 #[wasm_bindgen]
-pub fn id_hash_a2(e_note: Vec<String>, e_iss: Vec<String>) -> Result<String, JsError> {
-    if e_note.len() != 4 || e_iss.len() != 4 {
-        return Err(JsError::new("ciphertexts need 4 words each"));
+pub fn id_hash_a2(
+    e_note: Vec<String>,
+    e_iss: Vec<String>,
+    t: Vec<String>,
+) -> Result<String, JsError> {
+    if e_note.len() != 4 || e_iss.len() != 4 || t.len() != 2 {
+        return Err(JsError::new("ciphertexts need 4 words each, and T 2"));
     }
     Ok(hx(&kernel::notes::id_hash_a2(
         &ct(&e_note[0], &e_note[1], &e_note[2], &e_note[3])?,
         &ct(&e_iss[0], &e_iss[1], &e_iss[2], &e_iss[3])?,
+        &g1(&t[0], &t[1])?,
     )
     .map_err(err)?))
 }
@@ -945,7 +946,7 @@ pub fn receiving_leaf(
 }
 
 // ---------------------------------------------------------------------------
-// buck-wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
+// buck-wallet: canonical dialect, AB-RCPT/2 envelope, receipt build /
 // verify, unilateral flows, issuer ceremony.  Structured inputs cross as
 // ONE JSON text of named args (the vector-fixture shapes); receipt cores
 // cross as their canonical text -- see buck-wallet's `args` module.

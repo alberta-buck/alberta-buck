@@ -14,6 +14,10 @@
 #
 # DEV ENTROPY: the contribution is reproducible and dev-only.  It is NOT a
 # ceremony and MUST NOT be used for a deployment.
+#
+# WITNESS_ONLY=1 stops after the witness stage: the circuit compiles, the
+# honest witness satisfies it, and every attack witness is refused -- the
+# check to run before spending a setup on a changed circuit.
 
 set -euo pipefail
 
@@ -47,6 +51,36 @@ PYTHONPATH="$REPO_ROOT:$REPO_ROOT/core/python" python \
 cat "$BUILD_DIR/witness_diag.txt"
 bash -c "ulimit -s 65520 && '$BUILD_DIR/${NAME}_cpp/${NAME}' '$BUILD_DIR/input.json' '$BUILD_DIR/witness.wtns'"
 snarkjs wtns check "$BUILD_DIR/${NAME}.r1cs" "$BUILD_DIR/witness.wtns"
+
+echo "--- Attack witnesses (each must be refused) ---"
+# The builder refuses these in Python, naming the relation; gen_*_input.py
+# exits 0 only when it does.
+REFUSED_BY_BUILDER="--bad"
+[ "$FLAVOR" = a2 ] && REFUSED_BY_BUILDER="--bad --bogus --split"
+for MODE in $REFUSED_BY_BUILDER; do
+    PYTHONPATH="$REPO_ROOT:$REPO_ROOT/core/python" python \
+        "$REPO_ROOT/scripts/snark/gen_${NAME}_input.py" "$MODE" > /dev/null
+    echo "  $MODE: refused by the witness builder"
+done
+# The A2 key split with the builder's own check stepped around: the circuit's
+# key tie is what must refuse it, so the witness calculator has to fail.
+if [ "$FLAVOR" = a2 ]; then
+    PYTHONPATH="$REPO_ROOT:$REPO_ROOT/core/python" python \
+        "$REPO_ROOT/scripts/snark/gen_${NAME}_input.py" --split-raw \
+        > "$BUILD_DIR/input_split.json"
+    if bash -c "ulimit -s 65520 && '$BUILD_DIR/${NAME}_cpp/${NAME}' '$BUILD_DIR/input_split.json' '$BUILD_DIR/split.wtns'" \
+            > "$BUILD_DIR/split_diag.txt" 2>&1; then
+        echo "ERROR: the circuit accepted the A2 key-split witness"
+        exit 1
+    fi
+    grep -i "assert" "$BUILD_DIR/split_diag.txt" | head -2 | sed 's/^/  /'
+    echo "  --split-raw: refused by the circuit's key tie"
+fi
+
+if [ "${WITNESS_ONLY:-0}" = 1 ]; then
+    echo "=== WITNESS_ONLY: $NAME compiles, witnesses check; no setup ==="
+    exit 0
+fi
 
 echo "--- Groth16 setup (pot22) ---"
 PTAU="$REPO_ROOT/build/snark/ptau/pot22_final.ptau"

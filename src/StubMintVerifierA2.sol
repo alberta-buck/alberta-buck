@@ -9,8 +9,8 @@ import {IMintVerifierA2} from "./IMintVerifierA2.sol";
 ///        proof.  Mirrors StubMintVerifier.
 ///
 /// @dev    DO NOT use in production -- performs zero cryptographic checks, so it
-///         does NOT enforce the eIss leaf-tie (a real MintBatchA2N*Groth16Verifier
-///         does).
+///         does NOT enforce the eIss / T leaf-tie (a real
+///         MintBatchA2N*Groth16Verifier does).
 contract StubMintVerifierA2 is IMintVerifierA2 {
 
     address public governance;
@@ -44,6 +44,7 @@ contract StubMintVerifierA2 is IMintVerifierA2 {
     function verifyMint(
         bytes calldata /*proof*/,
         uint256[4][] calldata /*eIss*/,
+        uint256[2][] calldata /*T*/,
         uint256 /*oldRoot*/,
         uint256 /*newRoot*/,
         uint256 /*nextLeafIndex*/,

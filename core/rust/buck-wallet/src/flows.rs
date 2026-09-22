@@ -2,11 +2,11 @@
 //! `alberta_buck/wallet/unilateral_a2.py` and `unilateral_a1.py`.
 //!
 //! A2 (addressed, private issuer): the issuer encrypts its own registered
-//! identity under the recipient's identity POINT; the recipient alone
-//! can produce a plaintext receipt naming both parties, with the
-//! anti-framing binding and registry-tree membership closing the
-//! collusion gaps.  A1 (addressed, public issuer) reuses the same
-//! machinery with `eRec` encrypting the recipient identity under itself.
+//! identity to the recipient's mailbox key; the recipient alone can produce a
+//! plaintext receipt naming both parties, with the anti-framing binding, its
+//! `T` tie and registry-tree membership closing the collusion gaps.  A1
+//! (addressed, public issuer) reuses the same machinery with `eRec`
+//! encrypting the recipient identity to the same mailbox.
 //!
 //! Nonce order per function matches the Python reference's rng draws
 //! exactly (documented on each signature).
@@ -17,7 +17,8 @@ use buck_identity::notes::{id_hash_a1, id_hash_a2, FLAVOR_A1, FLAVOR_A2};
 use buck_identity::verifiable_decrypt::{
     verifiable_decrypt_prove, verifiable_decrypt_verify, VdProof,
 };
-use buck_identity::{g1_generator, g1_mul, reduce_mod_order};
+use buck_identity::nums::h_pedersen;
+use buck_identity::{g1_add, g1_generator, g1_mul, g1_neg, reduce_mod_order};
 use buck_registry::tree::IdentityMerkleTree;
 
 use crate::{Ctw, G1w, NoteOpening, Result, W256};
@@ -38,6 +39,8 @@ pub struct MintedA2 {
     pub binding: IssuerReencProof,
     pub r_prime: W256,
     pub r_note: W256,
+    /// The binding's blind on `T`: the recipient opens `T` with it.
+    pub gamma: W256,
 }
 
 /// Issuer mints an A2 note keyed to the recipient's receiving key `pk_recv`.
@@ -86,7 +89,7 @@ pub fn mint_unilateral_a2(
         k_g,
     )?;
 
-    let id_hash = id_hash_a2(&e_note, &e_iss)?;
+    let id_hash = id_hash_a2(&e_note, &e_iss, &binding.t)?;
     let opening = NoteOpening {
         flavor: FLAVOR_A2,
         v: *v,
@@ -105,6 +108,7 @@ pub fn mint_unilateral_a2(
         binding,
         r_prime,
         r_note: reduce_mod_order(r_note),
+        gamma: reduce_mod_order(gamma),
     })
 }
 
@@ -123,6 +127,8 @@ pub struct UnilateralReceipt {
     pub e_iss: Ctw,
     pub vd: VdProof,
     pub binding: IssuerReencProof,
+    /// Opens `binding.t`: the tie `M_I = C - T + gamma*H`.
+    pub gamma: W256,
     pub issuer: W256,
     pub chainid: W256,
     pub m_i_member: bool,
@@ -165,6 +171,7 @@ pub fn make_receipt_a2(
         e_iss,
         vd,
         binding: minted.binding.clone(),
+        gamma: minted.gamma,
         issuer: *issuer,
         chainid: *chainid,
         m_i_member: tree.contains_identity(&m_i, None)?,
@@ -211,6 +218,14 @@ pub fn verify_receipt_a2(
         &receipt.chainid,
     )? {
         return Ok(fail("verifiable decryption invalid"));
+    }
+
+    // (2b) The tie: `C - T + gamma*H` is the binding's plaintext, and it must be
+    //      the Identity the recipient's key names.
+    let g_h = g1_mul(&h_pedersen(), &receipt.gamma)?;
+    let named = g1_add(&g1_add(&e_iss.1, &g1_neg(&receipt.binding.t)?)?, &g_h)?;
+    if named != receipt.m_i {
+        return Ok(fail("the binding's Identity is not the one decrypted"));
     }
 
     // (3) The decrypted issuer identity is registered (the coupling).

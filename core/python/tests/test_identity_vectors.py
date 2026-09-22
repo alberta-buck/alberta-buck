@@ -237,7 +237,7 @@ def test_notes_and_merkle(kv):
     e_note, e_iss = _ct(n["eNote"]), _ct(n["eIss"])
     assert bi.id_hash_b1(_i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_b1"])
     assert bi.id_hash_a1(e_note, _i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_a1"])
-    assert bi.id_hash_a2(e_note, e_iss) == _i(n["id_hash_a2"])
+    assert bi.id_hash_a2(e_note, e_iss, _pt(n["T"])) == _i(n["id_hash_a2"])
     op = n["opening"]
     assert bi.note_commitment(
         _i(op["flavor"]), _i(op["v"]), _i(op["rho"]), _i(op["idHash"]), _i(op["predicate"]),

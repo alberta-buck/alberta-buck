@@ -14,7 +14,7 @@
 //
 //   (1) T = b * H_PEDERSEN                 -- PROVEN, not witnessed
 //   (2) P_dep = M + T                      -- with the addition's precondition enforced
-//   (3) leaf = Poseidon(M.x, M.y, salt)    -- the salted private-subtree leaf
+//   (3) leaf = Poseidon(TAG, M.x, M.y, salt) -- the salted private-subtree leaf
 //   (4) the leaf's path folds to identityRoot
 //
 // and all three of review finding 5's defects are repaired here rather than
@@ -49,6 +49,7 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 include "./ec/bn254_hp_scalarmul.circom";
 include "./ec/get_bn254.circom";
 include "../lib/circom-lib/circuits/ec/curve.circom";
+include "./leaf_tags.circom";
 
 template MerkleProofB1(depth) {
     signal input  leaf;
@@ -138,10 +139,11 @@ template IdentityMembershipB1(depth) {
     }
 
     // ===== (3)+(4) the salted leaf, and its path =============================
-    component leafH = Poseidon(3);
-    leafH.inputs[0] <== MxV.out;
-    leafH.inputs[1] <== MyV.out;
-    leafH.inputs[2] <== salt;
+    component leafH = Poseidon(4);
+    leafH.inputs[0] <== LEAF_TAG_IDENTITY_SALTED();
+    leafH.inputs[1] <== MxV.out;
+    leafH.inputs[2] <== MyV.out;
+    leafH.inputs[3] <== salt;
 
     component mp = MerkleProofB1(depth);
     mp.leaf <== leafH.out;

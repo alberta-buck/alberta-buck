@@ -96,7 +96,7 @@ def build(thief: bool = False):
     w = deposit_fold_witness(
         m_rec=spender["m_rec"], k=spender["k"], sk_dep=spender["sk_dep"],
         salt=spender["salt"], E_dep=spender["E_dep"], note_ct=eEnc,
-        tree=priv, rng=rng,
+        tree=priv,
     )
     return deposit_fold_a1_witness(
         witness=w, rho=rho, id_hash=note.idHash, e_note=note.eNote, v=FACE,

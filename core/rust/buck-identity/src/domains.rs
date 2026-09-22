@@ -42,4 +42,20 @@ pub const ACCUMULATOR_SALT: &[u8] = b"AlbertaBuck/Accumulator/Salt/v2";
 pub const NOTES_RECEIVING_KEY: &[u8] = b"AlbertaBuck/Notes/ReceivingKey/v2";
 pub const NOTES_PAYLOAD_WRAP: &[u8] = b"AlbertaBuck/Notes/PayloadWrap/v2";
 
+/// Hash-to-curve domain of `H_PEDERSEN`, the hiding generator with no known
+/// logarithm (compiled into the B1 membership circuit and the A2 fold).
+pub const PEDERSEN_H: &[u8] = b"AlbertaBuck/Pedersen/H/v2";
+/// The Notes tree's empty leaf, `keccak(tag) mod F_R`.
+pub const NOTES_ZERO: &[u8] = b"AlbertaBuck/Notes/Zero/v2";
+/// The accumulator leaf functions' leading field-element tags.
+pub const LEAF_IDENTITY: &[u8] = b"AlbertaBuck/Accumulator/Leaf/Identity/v2";
+pub const LEAF_IDENTITY_SALTED: &[u8] = b"AlbertaBuck/Accumulator/Leaf/IdentitySalted/v2";
+pub const LEAF_RECEIVING: &[u8] = b"AlbertaBuck/Accumulator/Leaf/Receiving/v2";
+pub const LEAF_MAILBOX: &[u8] = b"AlbertaBuck/Accumulator/Leaf/Mailbox/v2";
+
+/// A tag as a Poseidon input: `keccak(tag) mod F_R`.
+pub fn field_tag(tag: &[u8]) -> W256 {
+    crate::reduce_mod_order(&keccak_raw(tag))
+}
+
 pub const RECEIPT_ENVELOPE: &str = "AB-RCPT/2";

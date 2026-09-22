@@ -17,11 +17,11 @@ records the approach, the prototype that establishes it, and what it costs.
 Status: implemented across four backends, with all three spend gates built,
 set up under dev entropy, and verifying on chain; =Notes.sol= verifies the
 folded gate and nothing else, and the superseded verifiers are deleted rather
-than deprecated.  Two things remain: the receipt layer still decrypts the
-addressed flavours under the identity scalar, and A2's naming is not yet
-non-frameable ([[#split][section 4.6]] -- found by reproduction, with the
-closure specified and costed).  The reading plan ([[#reading-plan]]) has the
-current list, as three landings.
+than deprecated.  Receipts name by evidence, never by a derivation anyone can
+repeat, and A2's naming is non-frameable: the mint binding's =T= is committed
+in =idHash= and the fold ties it to the spender's own key ([[#split][section
+4.6]], closed 2026-09-22).  The reading plan ([[#reading-plan]]) has what
+remains before the merge.
 
 Implemented on 2026-09-20, with =alberta_buck/test/test_receiving_key.py=
 carrying twenty-six conformance tests:
@@ -119,8 +119,8 @@ The leaf therefore commits both -- and it turns out to need committing
 *twice*, because the fact has two consumers that hold different things:
 
 #+begin_example
-receiving_leaf(m_rec, k, salt)       = Poseidon(m_rec, k, salt)
-mailbox_leaf(M_rec, pk_recv, salt')  = Poseidon(M.x, M.y, pk.x, pk.y, salt')
+receiving_leaf(m_rec, k, salt)       = Poseidon(TAG_R, m_rec, k, salt)
+mailbox_leaf(M_rec, pk_recv, salt')  = Poseidon(TAG_M, M.x, M.y, pk.x, pk.y, salt')
 #+end_example
 
 The SPEND proves the association in zero knowledge and the prover holds the
@@ -665,6 +665,7 @@ have the fold open it:
   discrete log. The same assumption B1's \( P_{dep} \) already rests on.
 - Cost: *3,341,261 + 471,896 = 3,813,157*, inside =pot22= with 381,147 to
   spare. Six small A2 mint setups (~6K R1CS per leaf), one 3.8M fold setup.
+  As built, with the leaf tags and the ten-word =idHash=: 3,827,527.
 - =verify_receipt= then checks \( M_{named} = C_i - T + \gamma H_{PED} \),
   which is the corrected form of the promise above. \( \gamma \) travels in the
   payload and in the receipt, never on chain.
@@ -969,23 +970,37 @@ The v2 tag convention:
     with the one kernel-vector row that still keyed a note to an identity
     point.  The review scripts keep their own inline sigma as attack evidence.
 
-*C. The ceremony round: close the A2 split, and the v2 tags inside circuits.*
-23. The A2 closure of [[#split][4.6]]: =issuer_reenc= blinds both =Q= and
-    =T= on \( H_{PEDERSEN} \), which retires =H_POINT= entirely;
-    =idHash_a2= commits =T=; the A2 fold adds =ScalarMulHP(gamma)= and the tie
-    check; =verify_receipt= checks \( M_{named} = C_i - T + \gamma H_{PED} \).
-24. The leaf functions take a leading tag.  Today =identity_leaf_salted(M, s)=
-    and =receiving_leaf(m, k, s)= are both a three-input Poseidon, so
-    =receiving_leaf(M.x, M.y, s)= IS a salted identity leaf: one accumulator
-    value belongs to two leaf kinds.  Not exploitable -- the fold's relation (2)
-    pins =m= to a certified identity scalar, and no certified scalar is a
-    point's x-coordinate -- but a collision between leaf kinds is exactly what
-    domain separation exists to rule out, and every gate hashes a leaf.
-25. =H_PEDERSEN= is re-derived under =AlbertaBuck/Pedersen/H/v2=, and the
-    Notes tree's zero under =AlbertaBuck/Notes/Zero/v2=.
-26. One setup each: the A1 fold, the A2 fold, the B1 membership circuit, and
-    all twelve batch-mint circuits.  Then the fixtures, and the Rust port of
-    what changed.
+*C. The ceremony round: close the A2 split, and the v2 tags inside circuits.
+Done 2026-09-22.*
+23. The A2 closure of [[#split][4.6]], as specified.  =issuer_reenc= blinds
+    =Q=, =U= and =T= on \( H_{PEDERSEN} \) in all four backends and in
+    =verifyIssuerReenc=, and =H_POINT= is gone from every protocol path; the
+    review evidence keeps its own copy (=alberta_buck/review/known_log.py=),
+    because a known logarithm is what it demonstrates.  =idHash_a2= commits
+    =T= (ten words); =mint_batch_a2= exposes =T= beside =eIss= and =Notes.mint=
+    passes the binding's, so the A2 mint verifiers take 7N+4 public signals.
+    The A2 fold adds relation (6), \( T = rm \cdot G + \gamma H_{PED} \), at
+    *3,827,527* constraints.  The delivery carries =T= in the clear and
+    =gamma= wrapped, and =open_a2= refuses a =T= that does not open under the
+    recipient's =k=.  Both receipt verifiers -- the envelope and the
+    unilateral -- check \( M_{named} = C_i - T + \gamma H_{PED} \).
+    The split is refused three times over, and each is a test: by the
+    delivery, by the fold's witness builder, and -- with the builder's check
+    stepped around -- by the circuit itself, which fails the witness at the
+    tie (=setup_deposit_fold.sh= now runs every attack witness before any
+    setup, and stops there under =WITNESS_ONLY=1=).
+24. The four leaf functions lead with their own tag, =keccak(tag) mod F_R=,
+    in Python, Rust and all four circuits that hash a leaf; the literals live
+    once, in =circuits/leaf_tags.circom=.  The g1tie evidence keeps its
+    untagged leaf.
+25. =H_PEDERSEN= is derived under =AlbertaBuck/Pedersen/H/v2= and the Notes
+    zero under =AlbertaBuck/Notes/Zero/v2=; =test_domains.py= pins every
+    compiled-in literal -- the leaf tags, the zero and empty root in fourteen
+    mint circuits and =Notes.sol=, and =H_PEDERSEN= in the registry and its
+    powers table -- against the registry.
+26. Setups, all dev entropy: twelve batch-mint circuits, B1 (491,797), the A1
+    fold (3,306,423) and the A2 fold.  The legacy mint and spend keys are
+    untouched (=DO_LEGACY=0=); nothing in them changed.
 
 *D. Accumulator phase 4 (Solidity).*  The root authority and policy, and
 =BuckCredit='s attestation entry point with its per-credit check
@@ -1033,11 +1048,30 @@ Traps worth naming, because each cost a run or an hour:
   =nPubIn=, =nPrvIn= as u32, =nLabels= as u64, =nConstraints= as u32.
 - *A =ScalarMulG= costs about 471,896 constraints.*  It is the only real lever
   on circuit size; hashes and Merkle paths are noise beside it.
-- The BN254 modulus helpers are =BN254_MOD_Q0..Q3=, and the curve-parameter
-  helpers live in =bn254_h_scalarmul.circom= -- include it even when no
-  multiple of H is wanted.
+- The BN254 modulus helpers are =BN254_MOD_Q0..Q3=; the curve-parameter
+  helpers live in =bn254_g_scalarmul.circom=, and the =H_PEDERSEN= gadget
+  carries its own under a =BN254HP_= prefix so both can be included.
 - =build/= is gitignored.  The 4 GB of proving keys are local-only; the
   durable artifacts are the committed verifiers and vectors.
+- *An attack the builder refuses has not been shown refused by the circuit.*
+  The Python witness builder asserts every relation first, so a missing
+  constraint is invisible through it.  =--split-raw= steps around the
+  builder's check and must fail in the witness calculator; do the same for
+  any new relation.
+
+*Vectors.*
+
+- *Rebuild the kernel before emitting =identity.json=.*  =emit-vectors=
+  dispatches receipt building to whichever kernel is installed, so a stale
+  =.so= writes the old code's receipts under the new code's hashes.  Run
+  =make nix-core-build= first, then confirm =BUCK_IDENTITY_BACKEND=py= emits
+  the same bytes.
+- *Some Forge vectors have no make target.*  =scripts/gen_b1_binding_vectors.py=
+  and =python -m alberta_buck.registry.vectors= write =test/vectors/b1_binding.json=
+  and =test/vectors/registry/=; a generator or leaf change needs both rerun.
+- *One more argument to =MintVerifierA2Adapter.verifyMint= overflowed the
+  stack.*  The public-signal assembly moved to a helper taking the four
+  scalars as one =uint256[4]=.
 
 *The setups are DEV ENTROPY and every script says so.  They are not
 ceremonies, and nothing built on them should reach a deployment.*

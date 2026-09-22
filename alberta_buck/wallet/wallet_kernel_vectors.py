@@ -430,7 +430,7 @@ def _build(seed: int) -> Dict[str, Any]:
                                  eIss, bob["addr"], CHAINID,
                                  rng=_replay([k_r, k_b, k_s, k_g]),
                                  beta=beta, gamma=gamma)
-    idh = id_hash_a2(eNote, eIss)
+    idh = id_hash_a2(eNote, eIss, binding.T)
     opening = NoteOpening(FLAVOR_A2, FACE, rho, idh, 0)
     cm = note_commitment(opening)
     cms = [cm]
@@ -452,7 +452,7 @@ def _build(seed: int) -> Dict[str, Any]:
         issuer_E_addr=bob["E"], opening=opening, cms=cms,
         eNote=eNote, eIss=eIss, nullifier=nf, face=FACE,
         payee_sk=alice["sk"], issuer_sk=bob["sk"],
-        pk_recv=alice["pk_recv"],
+        pk_recv=alice["pk_recv"], T=binding.T, gamma=gamma,
         txhash="0x" + "a2" * 32, **party_kw, **txn_note)
     for role in ("recipient", "issuer"):
         if role == "recipient":
@@ -572,6 +572,7 @@ def _build(seed: int) -> Dict[str, Any]:
             "M_I": _g1(minted.M_I), "idHash": _hx(minted.idHash),
             "cm": _hx(minted.cm), "opening": _opening_json(minted.opening),
             "binding": _binding_json(minted.binding),
+            "gamma": scalar_to_hex(minted.gamma),
         },
         "tree": {"depth": tree.depth,
                  "leaves": [_hx(l) for l in tree.leaves],
@@ -580,6 +581,7 @@ def _build(seed: int) -> Dict[str, Any]:
         "receipt": {"M_I": _g1(rcpt.M_I), "M_rec": _g1(rcpt.M_rec),
                     "pk_recv": _g1(rcpt.pk_recv),
                     "value": _hx(rcpt.value), "vd": _vd_json(rcpt.vd),
+                    "gamma": scalar_to_hex(rcpt.gamma),
                     "M_I_member": rcpt.M_I_member,
                     "M_rec_member": rcpt.M_rec_member},
         "verify": {"valid": res.valid, "reason": res.reason},
@@ -723,14 +725,16 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
     m2 = mint_unilateral_a2(bob["sk"], bob["E"], pk_a, v=face, rho=rho2, issuer=bob["addr"],
                             chainid=CHAINID, salt_iss=salt_iss, rng=rng)
     d2 = deliver_a2(m2, pk_a)
-    row("deliver_a2", {"eNote": _ct(m2.eNote), "eIss": _ct(m2.eIss), "v": _hx(face),
-                       "rho": scalar_to_hex(rho2), "predicate": _hx(0),
+    row("deliver_a2", {"eNote": _ct(m2.eNote), "eIss": _ct(m2.eIss), "T": _g1(m2.binding.T),
+                       "v": _hx(face), "rho": scalar_to_hex(rho2), "predicate": _hx(0),
                        "r_note": scalar_to_hex(m2.r_note), "r_prime": scalar_to_hex(m2.r_prime),
-                       "salt_iss": scalar_to_hex(salt_iss), "pk_recv": _g1(pk_a)}, d2)
+                       "salt_iss": scalar_to_hex(salt_iss), "gamma": scalar_to_hex(m2.gamma),
+                       "pk_recv": _g1(pk_a)}, d2)
     o2 = open_a2(d2, k_a)
     row("open_a2", {"delivery": d2, "k": scalar_to_hex(k_a)},
         {"opening": opening(o2.opening, o2.cm), "eNote": _ct(o2.eNote), "eIss": _ct(o2.eIss),
-         "M_I": _g1(o2.M_I), "r_prime": _hx(o2.r_prime), "salt_iss": _hx(o2.salt_iss)})
+         "M_I": _g1(o2.M_I), "r_prime": _hx(o2.r_prime), "salt_iss": _hx(o2.salt_iss),
+         "T": _g1(o2.T), "gamma": _hx(o2.gamma)})
 
     # One subtree holding the recipient's three associations' worth of leaves:
     # the gate's (scalars), the payer's (points), and the A2 issuer's naming leaf.
@@ -768,7 +772,7 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
     t1 = draw()
     eEnc1 = elgamal_encrypt(alice["M"], pk_a, t1)
     w1 = deposit_fold_witness(m_rec=alice["m"], k=k_a, sk_dep=sk_dep, salt=salt_rec, E_dep=E_dep,
-                              note_ct=eEnc1, tree=tree, b=draw())
+                              note_ct=eEnc1, tree=tree)
     row("deposit_fold_a1_witness",
         {**common(t1, eEnc1, o1), "eNote": _ct(o1.eNote), "v": _hx(face),
          "m_issuer": scalar_to_hex(bob["m"]), "sigma_R": _g1(o1.sigma_R),
@@ -781,16 +785,17 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
     t2 = draw()
     eEnc2 = elgamal_encrypt(o2.M_I, pk_a, t2)
     w2 = deposit_fold_witness(m_rec=alice["m"], k=k_a, sk_dep=sk_dep, salt=salt_rec, E_dep=E_dep,
-                              note_ct=eEnc2, tree=tree, b=draw())
+                              note_ct=eEnc2, tree=tree)
     iss_path = tree.path(2)
     row("deposit_fold_a2_witness",
         {**common(t2, eEnc2, o2), "eNote": _ct(o2.eNote), "eIss": _ct(o2.eIss),
          "r_prime": scalar_to_hex(o2.r_prime), "salt_iss": _hx(o2.salt_iss),
-         "issPath": path(iss_path)},
+         "issPath": path(iss_path), "T": _g1(o2.T), "gamma": scalar_to_hex(o2.gamma)},
         deposit_fold_a2_witness(witness=w2, rho=o2.opening.rho, id_hash=o2.opening.id_hash,
                                 e_note=o2.eNote, e_iss=o2.eIss, r_prime=o2.r_prime, t=t2,
                                 r_E=r_E, e_dep=E_dep, pk_dep=pk_dep, e_enc=eEnc2,
-                                salt_iss=o2.salt_iss, iss_path=iss_path, identity_root=root))
+                                salt_iss=o2.salt_iss, iss_path=iss_path, T=o2.T, gamma=o2.gamma,
+                                identity_root=root))
     return rows
 
 

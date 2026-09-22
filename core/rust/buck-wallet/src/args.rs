@@ -340,6 +340,7 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                     let t_note = opt_w(nonces, "t_note")?;
                     let t_id = opt_w(nonces, "t_id")?;
                     let mbx = get_opt(args, "mailbox_binding").cloned();
+                    let gamma = opt_w(args, "gamma")?;
                     let legs = AddressedLegs {
                         pk_recv: &pk_recv,
                         k_recv: k_recv.as_ref(),
@@ -378,6 +379,8 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         mint_txhash,
                         mint_block,
                         binding.as_ref(),
+                        &get_g1(args, "T")?,
+                        gamma.as_ref(),
                         role,
                         payee.sk.as_ref(),
                         payee.e_addr.as_ref(),
@@ -441,6 +444,7 @@ pub fn mint_unilateral_a2_args(args: &Value) -> Result<String> {
         "binding": issuer_reenc_record(&minted.binding),
         "r_prime": scalar_hex(&minted.r_prime),
         "r_note": scalar_hex(&minted.r_note),
+        "gamma": scalar_hex(&minted.gamma),
     })
     .to_string())
 }
@@ -460,6 +464,7 @@ pub fn make_receipt_a2_args(args: &Value) -> Result<String> {
         binding: binding_from(get(minted_v, "binding")?)?,
         r_prime: [0u8; 32],
         r_note: [0u8; 32],
+        gamma: get_w(minted_v, "gamma")?,
     };
     let tree = tree_from(get(args, "tree")?)?;
     let rcpt = make_receipt_a2(
@@ -479,6 +484,7 @@ pub fn make_receipt_a2_args(args: &Value) -> Result<String> {
         "eIss": ct_hex(&rcpt.e_iss),
         "vd": vd_json(&rcpt.vd),
         "binding": issuer_reenc_record(&rcpt.binding),
+        "gamma": scalar_hex(&rcpt.gamma),
         "issuer": scalar_hex(&rcpt.issuer),
         "chainid": scalar_hex(&rcpt.chainid),
         "M_I_member": rcpt.m_i_member,
@@ -503,6 +509,7 @@ pub fn verify_receipt_a2_args(args: &Value) -> Result<String> {
             t2: get_g1(get(r, "vd")?, "T2")?,
         },
         binding: binding_from(get(r, "binding")?)?,
+        gamma: get_w(r, "gamma")?,
         issuer: get_w(r, "issuer")?,
         chainid: get_w(r, "chainid")?,
         m_i_member: false,
@@ -725,12 +732,14 @@ pub fn deliver_a2_args(args: &Value) -> Result<String> {
     Ok(crate::delivery::deliver_a2(
         &get_ct(args, "eNote")?,
         &get_ct(args, "eIss")?,
+        &get_g1(args, "T")?,
         &get_w(args, "v")?,
         &get_w(args, "rho")?,
         &get_w(args, "predicate")?,
         &get_w(args, "r_note")?,
         &get_w(args, "r_prime")?,
         &get_w(args, "salt_iss")?,
+        &get_w(args, "gamma")?,
         &get_g1(args, "pk_recv")?,
     )?
     .to_string())
@@ -848,6 +857,7 @@ pub fn deposit_fold_a2_witness_args(args: &Value) -> Result<String> {
     let (e_note, e_iss) = (get_ct(args, "eNote")?, get_ct(args, "eIss")?);
     let (r_prime, salt_iss) = (get_w(args, "r_prime")?, get_w(args, "salt_iss")?);
     let (isib, ibits) = path_from(get(args, "issPath")?)?;
+    let (t, gamma) = (get_g1(args, "T")?, get_w(args, "gamma")?);
     fold_witness_args(args, |c| {
         crate::deposit_fold::deposit_fold_a2_witness(
             c,
@@ -856,6 +866,8 @@ pub fn deposit_fold_a2_witness_args(args: &Value) -> Result<String> {
             &r_prime,
             &salt_iss,
             crate::deposit_fold::Path { siblings: &isib, index_bits: &ibits },
+            &t,
+            &gamma,
         )
     })
 }

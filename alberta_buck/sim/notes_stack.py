@@ -167,7 +167,7 @@ class E2EFixture:
         for k, v in self.note.items():
             if k in ("eNote", "eRec", "eIss"):
                 out[k] = _ct(v)
-            elif k == "sigma_R":
+            elif k in ("sigma_R", "T"):
                 out[k] = _pt(v)
             else:
                 out[k] = int(v)
@@ -246,6 +246,15 @@ class E2EFixture:
                 sec = self.raw["issuerSecrets"]
                 kw["r_note"] = int(sec["rNote"])
                 kw["r_id"] = int(sec["rPrime"])
+            if self.flavor == "a2":
+                # gamma opens the binding's T and ties it to the named issuer.
+                # Each side uses its own copy: the recipient unwraps it from the
+                # delivery with k, and the issuer kept the one it drew.
+                if role == "recipient":
+                    from alberta_buck.wallet.delivery import open_a2
+                    kw["gamma"] = open_a2(np, int(dp["kRecv"])).gamma
+                else:
+                    kw["gamma"] = int(self.raw["issuerSecrets"]["gamma"])
 
         if self.flavor == "b1":
             return build_note_b1(

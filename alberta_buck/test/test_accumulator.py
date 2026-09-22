@@ -75,14 +75,16 @@ def test_private_tree_refuses_an_unsalted_leaf():
         tree.insert_identity(mul(G1, SCALARS[0]))
 
 
-def test_leaf_parity_unsalted_is_unchanged():
-    """Conformance 2: the unsalted leaf keeps its definition, so every
-    committed vector that records it stays valid."""
+def test_leaf_parity_unsalted_is_tagged():
+    """Conformance 2: the unsalted leaf is Poseidon(TAG_IDENTITY, M.x, M.y).  Each
+    leaf kind leads with its own tag, so no value is a leaf of two kinds."""
     M = mul(G1, SCALARS[0])
+    from alberta_buck.registry.tree import TAG_IDENTITY
     from alberta_buck.wallet.poseidon import poseidon
     from alberta_buck.wallet.bn254 import point_to_words
     x, y = point_to_words(M)
-    assert identity_leaf(M) == poseidon([x % F_R, y % F_R])
+    assert identity_leaf(M) == poseidon([TAG_IDENTITY, x % F_R, y % F_R])
+    assert identity_leaf(M) != poseidon([x % F_R, y % F_R])
 
 
 @pytest.mark.parametrize("bad", [0, -1, F_R, F_R + 1])

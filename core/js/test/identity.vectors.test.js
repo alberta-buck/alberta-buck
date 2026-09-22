@@ -200,7 +200,7 @@ test("notes family + merkle", { skip }, () => {
   assert.equal(
     id.idHashA1(ct(n.eNote), B(n.m_issuer), pt(n.sigma_R), B(n.sigma_s)),
     B(n.id_hash_a1));
-  assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss)), B(n.id_hash_a2));
+  assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss), pt(n.T)), B(n.id_hash_a2));
   const op = n.opening;
   assert.equal(
     id.noteCommitment(B(op.flavor), B(op.v), B(op.rho), B(op.idHash), B(op.predicate)),

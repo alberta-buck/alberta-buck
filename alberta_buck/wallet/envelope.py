@@ -497,6 +497,7 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
                         r_note: Optional[int] = None,
                         r_id: Optional[int] = None,
                         binding: Optional[Dict[str, Any]] = None,
+                        T=None, gamma: Optional[int] = None,
                         ) -> Dict[str, Any]:
     """The Identity-M-bound note payload — the idHash preimage material both
     Note parties hold, per flavor:
@@ -507,8 +508,10 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
       encrypted under the public issuer's registered key).
     * A1:  ``eNote`` (the value), ``eRec`` (the recipient's own Identity),
       ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
-    * A2:  ``eNote`` and ``eIss`` (the issuer's Identity) —
-      ``id_hash_a2(eNote, eIss)``.
+    * A2:  ``eNote``, ``eIss`` (the issuer's Identity) and the mint binding's
+      ``T`` -- ``id_hash_a2(eNote, eIss, T)`` -- with ``gamma``, the blind
+      that opens ``T``, so a verifier can check that the Identity the binding
+      proved registered is ``C_iss - T + gamma*H``, the one the receipt names.
 
     The addressed flavours carry ``pk_recv``, the mailbox key their ciphertexts
     are keyed to.  An earlier shape needed nothing of the kind, because those
@@ -555,6 +558,10 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
         d["rId"] = scalar_to_hex(r_id)
     if binding is not None:
         d["binding"] = binding
+    if T is not None:
+        d["T"] = _g1_hex(T)
+    if gamma is not None:
+        d["gamma"] = scalar_to_hex(gamma)
     return d
 
 

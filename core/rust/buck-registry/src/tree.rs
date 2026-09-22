@@ -1,8 +1,9 @@
 //! Identity Merkle tree -- Poseidon accumulator of registered identity
 //! points; mirrors `alberta_buck/registry/tree.py`.
 //!
-//! Each leaf is `identity_leaf(M) = Poseidon([M.x, M.y] % F_R)`, matching
-//! `circuits/identity_membership.circom` byte-for-byte.  Roots and paths
+//! Each leaf is one of four tagged Poseidon commitments -- `identity_leaf(M) =
+//! Poseidon([TAG, M.x, M.y] % F_R)` and its salted, receiving and mailbox
+//! siblings -- each led by its own field-element tag, as the circuits hash them.  Roots and paths
 //! are recomputed from the leaf list by explicit layer folding -- exactly
 //! the Python `_compute_root` / `_derive_path` algorithms -- so leaf
 //! REPLACEMENT (the aggregator's `update_sub_root`, the feature
@@ -12,19 +13,19 @@ use buck_identity::notes;
 use buck_identity::poseidon::poseidon;
 use buck_identity::{G1w, IdError, Result, W256, ZERO_W};
 
-/// `identity_leaf(M) = Poseidon([M.x, M.y])` -- re-exported from the
+/// `identity_leaf(M) = Poseidon([TAG, M.x, M.y])` -- re-exported from the
 /// identity kernel (the same function the circuits pin).
 pub fn identity_leaf(m_point: &G1w) -> Result<W256> {
     notes::identity_leaf(m_point)
 }
 
-/// `identity_leaf_salted(M, salt) = Poseidon([M.x, M.y, salt])` -- the leaf
+/// `identity_leaf_salted(M, salt) = Poseidon([TAG, M.x, M.y, salt])` -- the leaf
 /// of a private subtree, re-exported from the identity kernel.
 pub fn identity_leaf_salted(m_point: &G1w, salt: &W256) -> Result<W256> {
     notes::identity_leaf_salted(m_point, salt)
 }
 
-/// `receiving_leaf(m_rec, k_recv, salt) = Poseidon([m_rec, k_recv, salt])`
+/// `receiving_leaf(m_rec, k_recv, salt) = Poseidon([TAG, m_rec, k_recv, salt])`
 /// -- the leaf of a private identity-registry subtree, binding an Identity
 /// to the receiving key its Notes are addressed to.  It commits the scalars,
 /// not the points; see the kernel function for why.

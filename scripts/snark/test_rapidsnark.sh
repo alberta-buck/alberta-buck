@@ -15,15 +15,15 @@ PYTHONPATH="$R" python3 -c "
 import json, sys
 sys.path.insert(0,'$R')
 from alberta_buck.wallet.bn254 import G1,mul,point_to_words
-from alberta_buck.registry.tree import IdentityMerkleTree
+from alberta_buck.registry.tree import AGGREGATOR_DEPTH, IdentityMerkleTree
 from alberta_buck.wallet.poseidon import F_R
-M=mul(G1,12345); Mx,My=point_to_words(M)
-t=IdentityMerkleTree(depth=10); t.insert_identity(M); p=t.path(0)
-w={'identityRoot':str(p.root),'Mx':str(Mx%F_R),'My':str(My%F_R),'pathElements':[str(s)for s in p.siblings],'pathIndices':[str(b)for b in p.index_bits]}
+M=mul(G1,12345); Mx,My=point_to_words(M); salt=67890
+t=IdentityMerkleTree(depth=AGGREGATOR_DEPTH,private=True); t.insert_identity_salted(M,salt); p=t.path(0)
+w={'identityRoot':str(p.root),'Mx':str(Mx%F_R),'My':str(My%F_R),'salt':str(salt),'pathElements':[str(s)for s in p.siblings],'pathIndices':[str(b)for b in p.index_bits]}
 with open('$D/input.json','w')as f:json.dump(w,f)
 "
 node "$D/identity_membership_js/generate_witness.js" "$D/identity_membership_js/identity_membership.wasm" "$D/input.json" "$D/witness.wtns" 2>/dev/null
-"$S" g16s "$D/identity_membership.r1cs" "$R/build/snark/ptau/pot13_final.ptau" "$D/z.zkey" -v 2>/dev/null
+"$S" g16s "$D/identity_membership.r1cs" "$R/build/snark/ptau/pot15_final.ptau" "$D/z.zkey" -v 2>/dev/null
 echo fixed | "$S" zkc "$D/z.zkey" "$D/z1.zkey" --name=t -v 2>/dev/null
 "$S" zkev "$D/z1.zkey" "$D/vk.json" 2>/dev/null
 "$S" zkesv "$D/z1.zkey" "$D/V.sol" 2>/dev/null

@@ -35,7 +35,6 @@ from alberta_buck.wallet.deposit_fold import (
     deposit_fold_witness,
 )
 from alberta_buck.wallet.elgamal import elgamal_decrypt, elgamal_encrypt
-from alberta_buck.wallet.issuer_reenc import H_POINT
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.recvkey import (
     RECV_DOMAIN,
@@ -310,16 +309,14 @@ def _world():
                 thief=thief, sk_thief=sk_thief, E_thief=E_thief)
 
 
-def test_the_honest_spender_has_a_witness_and_P_hides_the_issuer():
+def test_the_honest_spender_has_a_witness():
     w_ = _world()
     rec = w_["rec"]
     w = deposit_fold_witness(
         m_rec=rec["m"], k=rec["k"], sk_dep=w_["sk_dep"], salt=rec["salt"],
-        E_dep=w_["E_dep"], note_ct=w_["note_ct"], tree=w_["tree"], b=0x51A1,
+        E_dep=w_["E_dep"], note_ct=w_["note_ct"], tree=w_["tree"],
     )
     assert eq(w.M, w_["M_iss"]), "(1) k must decrypt the note"
-    assert eq(add(w.P, neg(mul(H_POINT, w.b))), w_["M_iss"]), \
-        "P must commit the decrypted point"
     assert deposit_fold_check(w, pk_dep=w_["pk_dep"], E_dep=w_["E_dep"],
                               note_ct=w_["note_ct"], root=w_["tree"].root())
 
@@ -438,7 +435,7 @@ def _fold_witness(w_):
     rec = w_["rec"]
     w = deposit_fold_witness(
         m_rec=rec["m"], k=rec["k"], sk_dep=w_["sk_dep"], salt=rec["salt"],
-        E_dep=w_["E_dep"], note_ct=w_["eEnc"], tree=w_["priv"], b=0x99,
+        E_dep=w_["E_dep"], note_ct=w_["eEnc"], tree=w_["priv"],
     )
     return deposit_fold_a1_witness(
         witness=w, rho=w_["rho"], id_hash=w_["note"].idHash,
@@ -486,7 +483,7 @@ def test_the_circuit_witness_refuses_a_tampered_registration_nonce():
     rec = w_["rec"]
     w = deposit_fold_witness(
         m_rec=rec["m"], k=rec["k"], sk_dep=w_["sk_dep"], salt=rec["salt"],
-        E_dep=w_["E_dep"], note_ct=w_["eEnc"], tree=w_["priv"], b=0x99,
+        E_dep=w_["E_dep"], note_ct=w_["eEnc"], tree=w_["priv"],
     )
     with pytest.raises(AssertionError, match=r"E_dep\.R != r_E\*G"):
         deposit_fold_a1_witness(

@@ -1,35 +1,19 @@
 //! A2 issuer re-encryption binding -- mirrors
-//! `alberta_buck/wallet/issuer_reenc.py`.
+//! `alberta_buck/wallet/issuer_reenc.py`, whose docstring carries the argument.
 //!
-//! Recipient-blinded proof that a private issuer's `E_iss-for-rec`
-//! re-encrypts the issuer's REGISTERED Identity under the recipient's key,
-//! revealing neither `pk_rec` nor `M_iss`.  Five-relation Okamoto sigma
-//! (witnesses `r'`, `beta`, `sk_iss`, `gamma`) over the published blinds
-//! `Q = pk_rec + beta*H`, `U = r'*H`, `T = r'*pk_rec + gamma*G`.
+//! Recipient-blinded proof that a private issuer's `eIss` carries the issuer's
+//! REGISTERED Identity to the key committed in `Q`, revealing neither `pk_rec`
+//! nor `M_iss`.  Five-relation Okamoto sigma (witnesses `r'`, `beta`, `sk_iss`,
+//! `gamma`) over the published blinds `Q = pk_rec + beta*H`, `U = r'*H`,
+//! `T = r'*pk_rec + gamma*H`, with `H = H_PEDERSEN`: no one knows its log to G,
+//! and the blinds bind only because of that.  `T` is committed in `idHash_a2`,
+//! and the A2 fold ties it to the recipient's own key.
 
-use std::sync::OnceLock;
-
-use ark_bn254::{Fr, G1Affine, G1Projective};
+use ark_bn254::{G1Affine, G1Projective};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::PrimeField;
 
-use crate::keccak::keccak_raw;
+use crate::nums::h_pedersen_affine as h_affine;
 use crate::{fr_mod, g1_from_w, w_from_fr, w_from_g1, G1w, IdError, Result, Transcript, W256};
-
-/// Second generator H -- nothing-up-my-sleeve:
-/// `H = (keccak256("AlbertaBuck:IssuerReenc:H") mod ORDER) * G1`.
-pub(crate) fn h_affine() -> G1Affine {
-    static H: OnceLock<G1Affine> = OnceLock::new();
-    *H.get_or_init(|| {
-        let s = Fr::from_be_bytes_mod_order(&keccak_raw(b"AlbertaBuck:IssuerReenc:H"));
-        (G1Affine::generator() * s).into_affine()
-    })
-}
-
-/// H as a word pair (for bindings and callers).
-pub fn h_point() -> G1w {
-    w_from_g1(&h_affine())
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssuerReencProof {
@@ -110,7 +94,7 @@ pub fn issuer_reenc_prove(
     // Published values.
     let q = (G1Projective::from(pk_rec) + h * beta).into_affine(); // pk_rec + beta*H
     let u = (h * rp).into_affine(); //                                r'*H
-    let t = (pk_rec * rp + g * gamma).into_affine(); //               r'*pk_rec + gamma*G
+    let t = (pk_rec * rp + h * gamma).into_affine(); //               r'*pk_rec + gamma*H
 
     // Commitments.
     let k_r = fr_mod(k_r);
@@ -119,9 +103,9 @@ pub fn issuer_reenc_prove(
     let k_g = fr_mod(k_g);
     let a1 = (g * k_r).into_affine(); //                              k_r*G
     let a2 = (h * k_r).into_affine(); //                              k_r*H
-    let a3 = (q * k_r - u * k_b + g * k_g).into_affine(); //          k_r*Q - k_b*U + k_g*G
+    let a3 = (q * k_r - u * k_b + h * k_g).into_affine(); //          k_r*Q - k_b*U + k_g*H
     let a4 = (g * k_s).into_affine(); //                              k_s*G
-    let a5 = (r_reg * k_s + g * k_g).into_affine(); //                k_s*R_reg + k_g*G
+    let a5 = (r_reg * k_s + h * k_g).into_affine(); //                k_s*R_reg + k_g*H
 
     let e = transcript(
         &[&pk_iss, &r_reg, &c_reg, &r_i, &c_i, &q, &u, &t, &a1, &a2, &a3, &a4, &a5],
@@ -185,17 +169,17 @@ pub fn issuer_reenc_verify(
     if h * s_r != u * e + a2 {
         return Ok(false);
     }
-    // L3: s_r*Q - s_b*U + s_g*G == A3 + e*T
-    if q * s_r - u * s_b + g * s_g != t * e + a3 {
+    // L3: s_r*Q - s_b*U + s_g*H == A3 + e*T
+    if q * s_r - u * s_b + h * s_g != t * e + a3 {
         return Ok(false);
     }
     // L4: s_s*G == A4 + e*pk_iss
     if g * s_s != pk_iss * e + a4 {
         return Ok(false);
     }
-    // L5: s_s*R_reg + s_g*G == A5 + e*(C_reg + T - C_i)
+    // L5: s_s*R_reg + s_g*H == A5 + e*(C_reg + T - C_i)
     let y: G1Projective = G1Projective::from(c_reg) + t - c_i;
-    if r_reg * s_s + g * s_g != y * e + a5 {
+    if r_reg * s_s + h * s_g != y * e + a5 {
         return Ok(false);
     }
 

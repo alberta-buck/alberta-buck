@@ -20,7 +20,8 @@ use buck_identity::notes::{
 };
 use buck_identity::schnorr::{batch_commitment, issuer_schnorr_verify, SchnorrProof};
 use buck_identity::verifiable_decrypt::{verifiable_decrypt_verify, VdProof};
-use buck_identity::{g1_generator, g1_mul};
+use buck_identity::nums::h_pedersen;
+use buck_identity::{g1_add, g1_generator, g1_mul, g1_neg};
 
 use crate::jsonv::{as_ct, as_g1, get, get_ct, get_g1, get_opt, get_str, get_u128, get_w};
 use crate::receipt::RcptResult;
@@ -407,9 +408,12 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
         } else {
             let e_note = get_ct(np, "eNote")?;
             let e_iss = get_ct(np, "eIss")?;
-            if id_hash_a2(&e_note, &e_iss)? != opening.id_hash {
+            if get_opt(np, "T").is_none() {
+                return Ok(RcptResult::fail("note-a2: missing T"));
+            }
+            if id_hash_a2(&e_note, &e_iss, &get_g1(np, "T")?)? != opening.id_hash {
                 return Ok(RcptResult::fail(
-                    "note-a2: idHash != id_hash_a2(eNote, eIss)",
+                    "note-a2: idHash != id_hash_a2(eNote, eIss, T)",
                 ));
             }
             if let Some(e) = check_addressed_legs(
@@ -466,6 +470,22 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
                         &payer.pk, e_reg, e_iss, &binding, &payer.addr, &chainid_w,
                     )? {
                         return Ok(RcptResult::fail("note-a2: issuer binding fails"));
+                    }
+                    // The binding speaks of the T the leaf committed, and gamma
+                    // opens it: C_iss - T + gamma*H is the credential's
+                    // plaintext, which must be the Identity this receipt names.
+                    if binding.t != get_g1(np, "T")? {
+                        return Ok(RcptResult::fail("note-a2: binding T != committed T"));
+                    }
+                    if get_opt(np, "gamma").is_none() {
+                        return Ok(RcptResult::fail("note-a2: binding carried without gamma"));
+                    }
+                    let g_h = g1_mul(&h_pedersen(), &get_w(np, "gamma")?)?;
+                    let named = g1_add(&g1_add(&e_iss.1, &g1_neg(&binding.t)?)?, &g_h)?;
+                    if named != payer.m_pt {
+                        return Ok(RcptResult::fail(
+                            "note-a2: the binding's Identity is not the named issuer",
+                        ));
                     }
                 }
                 None => a2_unbound = true,

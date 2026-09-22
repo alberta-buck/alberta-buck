@@ -1,33 +1,33 @@
-"""Nothing-up-my-sleeve generators, and the one whose discrete log must be unknown.
+"""The one hiding generator: H_PEDERSEN, whose discrete log no one knows.
 
-The system uses a second G1 generator in two quite different ways, and they
-have opposite requirements.  Conflating them is what review finding 5 caught,
-so this module exists to keep them apart by name.
+Every blind in the protocol that is opened by more than one proof sits on this
+generator, and in the protocol every blind is.  Two defects found the rule:
 
-*Masking inside one proof.*  :data:`alberta_buck.wallet.issuer_reenc.H_POINT`
-blinds a value within a single sigma -- ``Q = pk_rec + beta*H``.  A knowledge
-extractor for that sigma recovers both openings, so a KNOWN discrete log costs
-nothing there, and ``H_POINT`` is simply ``keccak(domain)*G``.  That module's
-own comment says as much, and for that use it is right.
-
-*Committing across two proofs.*  B1 publishes ``P_dep = M_dep + b*H`` and then
-proves two separate things about it: a sigma that opens it as ``m_dep*G + b*H``,
-and a membership proof that opens it as ``M + b'*H`` for a registered ``M``.
-The composition is only sound if those two openings must agree, and with a
-known ``h = log_G(H)`` they need not.  An adversary holding any registered
-identity scalar ``m'`` -- which counterparties hold by design, since the
-identity is a disclosed read capability -- sets
+*B1's commitment.*  B1 publishes ``P_dep = M_dep + b*H`` and proves two things
+about it: a sigma that opens it as ``m_dep*G + b*H``, and a membership proof
+that opens it as ``M + b'*H`` for a registered ``M``.  The composition is
+sound only if the two openings must agree, and with a known ``h = log_G(H)``
+they need not.  An adversary holding any registered identity scalar ``m'`` --
+which counterparties hold by design, since the identity is a disclosed read
+capability -- sets
 
     b' = b + (m_dep - m') / h
 
 and the membership half then speaks about ``m'`` while the sigma half speaks
-about its own ``m_dep``.  An unregistered depositor spends a B1 note, and the
-KYC gate on that path is defeated.
+about its own ``m_dep``.  That is review finding 5.
 
-:data:`H_PEDERSEN` is the generator for that second use.  It is derived by
-hashing to the curve rather than by multiplying ``G``, so no one knows its
-discrete log -- which is exactly what a Pedersen commitment requires of its
-second generator, and why it is named for one.
+*A2's mint binding.*  The binding blinds ``T = r'*pk + gamma*H``, and the A2
+fold opens it again against the recipient's own key.  A blind on a known-log
+generator was once defended as harmless "inside one sigma", because the
+extractor recovers both openings; but the value crosses into the fold, and
+there a known ``h`` lets a minter pay any difference of Identities in gamma.
+That is the A2 key split (doc/review/notes-receiving-key.org, section 4.6).
+
+So there is no second, cheaper generator.  :data:`H_PEDERSEN` is derived by
+hashing to the curve rather than by multiplying ``G``, which is exactly what a
+Pedersen commitment requires of its second generator, and why it is named for
+one.  ``alberta_buck.review.known_log`` keeps the retired known-log generator
+for the evidence that needs it.
 
 Derivation: try-and-increment, which is the standard construction for a FIXED
 public parameter.  Constant-time hashing to the curve matters when the input is
@@ -41,6 +41,7 @@ from typing import Tuple
 
 from py_ecc import bn128 as _bc
 
+from alberta_buck.wallet.domains import PEDERSEN_H as H_PEDERSEN_DOMAIN
 from alberta_buck.wallet.transcript import keccak_raw
 
 __all__ = ["Q", "H_PEDERSEN_DOMAIN", "hash_to_curve_g1", "H_PEDERSEN"]
@@ -48,8 +49,6 @@ __all__ = ["Q", "H_PEDERSEN_DOMAIN", "hash_to_curve_g1", "H_PEDERSEN"]
 
 # The BN254 BASE field (coordinates), not the scalar field.
 Q = _bc.field_modulus
-
-H_PEDERSEN_DOMAIN = b"AlbertaBuck/Pedersen/H/v1"
 
 
 def hash_to_curve_g1(domain: bytes, limit: int = 256) -> Tuple:

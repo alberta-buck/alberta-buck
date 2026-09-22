@@ -147,16 +147,17 @@ def _mint_a2(alice, bob, rng, with_binding=True):
     eNote   = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
     r_prime = rand_scalar(rng)
     eIss    = elgamal_encrypt(bob["M"], alice["pk_recv"], r_prime)
+    gamma   = rand_scalar(rng)
     binding = issuer_reenc_prove(bob["sk"], r_prime, alice["pk_recv"], bob["E"],
-                                 eIss, bob["addr"], CHAINID, rng=rng) \
-              if with_binding else None
-    idh     = id_hash_a2(eNote, eIss)
+                                 eIss, bob["addr"], CHAINID, gamma=gamma, rng=rng)
+    idh     = id_hash_a2(eNote, eIss, binding.T)
     opening = NoteOpening(FLAVOR_A2, FACE, rho, idh, 0)
     cm      = note_commitment(opening)
     cms     = [cm]
+    # An unbound receipt still states T -- idHash commits it -- but not the proof.
     return dict(opening=opening, cms=cms, eNote=eNote, eIss=eIss,
-                binding=binding, r_note=r_note, r_id=r_prime,
-                nullifier=nullifier_b(rho, idh))
+                binding=binding if with_binding else None, T=binding.T, gamma=gamma,
+                r_note=r_note, r_id=r_prime, nullifier=nullifier_b(rho, idh))
 
 
 def _txn_kw(prefix: str) -> dict:
@@ -206,7 +207,7 @@ def _a2_core(alice, bob, role, rng, with_binding=True):
     return build_note_a2(
         issuer_E_addr=bob["E"],
         opening=a["opening"], cms=a["cms"],
-        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"],
+        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"], T=a["T"], gamma=a["gamma"],
         nullifier=a["nullifier"], face=FACE,
         role=role, payee_sk=alice["sk"], issuer_sk=bob["sk"],
         pk_recv=alice["pk_recv"], mailbox_binding=alice["mbx"],
@@ -428,7 +429,7 @@ def test_unaddressed_identity_cannot_claim_a2(vectors, parties):
         payee_addr=bob["addr"], payee_identity=bob["identity"],
         payee_M=bob["M"], payee_pk=bob["pk"], payee_E_addr=bob["E"],
         opening=a["opening"], cms=a["cms"],
-        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"],
+        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"], T=a["T"], gamma=a["gamma"],
         nullifier=a["nullifier"], face=FACE,
         role="recipient", payee_sk=bob["sk"],
         pk_recv=alice["pk_recv"], k_recv=bob_k,

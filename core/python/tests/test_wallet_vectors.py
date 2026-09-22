@@ -3,7 +3,7 @@
 Replays core/vectors/wallet-kernel-vectors.json (emitted by the Python
 reference via alberta_buck.wallet.wallet_kernel_vectors, nonces
 included) through the buck_core.buck_wallet binding: the canonical JSON
-dialect, the AB-RCPT/1 envelope, every receipt build (JSON-args ABI),
+dialect, the AB-RCPT/2 envelope, every receipt build (JSON-args ABI),
 the tier-1 verifier, the unilateral A1/A2 flows and the issuer
 ceremony.  The Rust and JS suites assert the same file.
 
@@ -89,6 +89,9 @@ def _receipt_args(wv, row):
         if kind.startswith("note-a2"):
             args["eNote"] = mint["eNote"]
             args["eIss"] = mint["eIss"]
+            # idHash commits the binding's T either way; gamma opens it.
+            args["T"] = mint["binding"]["T"]
+            args["gamma"] = mint["nonces"]["gamma"]
             if kind == "note-a2":
                 args["binding"] = mint["binding"]
         if kind.startswith("note-a1") or kind.startswith("note-a2"):

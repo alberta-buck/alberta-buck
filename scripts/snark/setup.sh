@@ -129,10 +129,10 @@ render_mint_batch_n() {
 }
 
 # Same idea for the A2 (private-issuer) mint circuit, which exposes per-leaf
-# eIss as a public output so Notes.mint can tie each committed leaf to its
-# re-encryption binding (the collusion-resistant A2 leaf-tie).  Reuses the same
-# ptau as mint_batch (the extra Poseidon-8 per leaf is small relative to the
-# dual Merkle walk that dominates).
+# eIss and the binding's T as public outputs so Notes.mint can tie each
+# committed leaf to its re-encryption binding (the collusion-resistant A2
+# leaf-tie).  Reuses the same ptau as mint_batch (the extra Poseidon-10 per leaf
+# is small relative to the dual Merkle walk that dominates).
 render_mint_batch_a2_n() {
     local N="$1"
     local SRC="$ROOT/circuits/mint_batch_a2.circom"

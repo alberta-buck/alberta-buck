@@ -2,6 +2,7 @@ pragma circom 2.1.4;
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
+include "./leaf_tags.circom";
 
 // Identity-membership circuit -- the native Poseidon-Merkle half of the unified
 // Notes membership gate (the A2 deposit coupling and the B1 depositor binding
@@ -10,7 +11,7 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // Proves that a registered Identity point M = (Mx, My) is a member of the
 // registry-Identity accumulator under a public root, WITHOUT revealing M:
 //
-//     leaf = Poseidon(2)(Mx, My)               // == identity_leaf(M)
+//     leaf = Poseidon(4)(TAG, Mx, My, salt)    // == identity_leaf_salted(M, salt)
 //     fold leaf up the authentication path      // == IdentityTree.verify_path
 //     identityRoot === computed root
 //
@@ -58,7 +59,7 @@ template IdentityMembership(depth) {
     signal input pathElements[depth];     // private: sibling hashes
     signal input pathIndices[depth];      // private: path bits
 
-    // leaf = Poseidon(3)(Mx, My, salt) == identity_leaf_salted(M, salt).
+    // leaf = Poseidon(4)(TAG, Mx, My, salt) == identity_leaf_salted(M, salt).
     //
     // The leaf of a PRIVATE subtree.  An unsalted Poseidon(2)(Mx, My) would be
     // a deterministic function of the identity, so any party holding a set of
@@ -71,10 +72,11 @@ template IdentityMembership(depth) {
     // PUBLIC subtrees -- a regulator's insurers, whose membership they
     // advertise -- keep the unsalted leaf and need no circuit at all: their
     // paths verify as plain Poseidon Merkle proofs.
-    component leafH = Poseidon(3);
-    leafH.inputs[0] <== Mx;
-    leafH.inputs[1] <== My;
-    leafH.inputs[2] <== salt;
+    component leafH = Poseidon(4);
+    leafH.inputs[0] <== LEAF_TAG_IDENTITY_SALTED();
+    leafH.inputs[1] <== Mx;
+    leafH.inputs[2] <== My;
+    leafH.inputs[3] <== salt;
 
     component mp = MerkleProof(depth);
     mp.leaf <== leafH.out;
@@ -87,30 +89,17 @@ template IdentityMembership(depth) {
     identityRoot === mp.root;
 }
 
-// Depth is the AGGREGATOR depth.  The accumulator specification raises it
-// from 10 to 20, so that authorities are a population rather than a roster:
-// clubs, community boards, congregations and delegated sub-regulators are all
-// attribute authorities, and 2**10 = 1024 sub-trees is the wrong order of
-// magnitude.  Ten extra levels cost ten Poseidon-2 hashes here and about two
-// thousand constraints.
-//
-// It is still 10 because raising it re-folds every identity root, including
-// the one committed in the Notes end-to-end fixtures, and regenerating those
-// runs the note-binding prover.  The finding-5 circuit repairs force that
-// same regeneration, so the depth rises with them rather than paying for it
-// twice.  IdentityRegistry already carries ZERO_11..ZERO_20, so the contract
-// side is ready.
-// The 10 here is the AGGREGATOR depth -- the tree whose root is the
-// on-chain `identityRoot`.  Named elsewhere as:
+// Depth is the AGGREGATOR depth -- the tree whose root is the on-chain
+// `identityRoot` -- and it is 20, so that authorities are a population rather
+// than a roster: clubs, community boards, congregations and delegated
+// sub-regulators are all attribute authorities, and 2**10 = 1024 sub-trees is
+// the wrong order of magnitude.  Named elsewhere as:
 //   Solidity  IdentityRegistry.IDENTITY_TREE_DEPTH
 //   Rust      buck_registry::tree::AGGREGATOR_DEPTH
 //   Python    alberta_buck.registry.tree.AGGREGATOR_DEPTH
 // It is NOT the registry sub-tree depth (12, KYC_SUBTREE_DEPTH); an
 // organization's own tree is deeper and composes into this one.
 //
-// Left as a literal on purpose: a compile-time `var` would very likely
-// produce identical R1CS, but "very likely" is not worth it here --
-// any change to this file forces a fresh trusted setup, hence a new
-// zkey, a new committed verifier and regenerated proof vectors, which
-// the Makefile calls a MATCHED SET from a single run.
-component main { public [ identityRoot ] } = IdentityMembership(10);
+// Left as a literal on purpose: the depth is baked into the r1cs, so any
+// change here is a new circuit, and should read as one.
+component main { public [ identityRoot ] } = IdentityMembership(20);

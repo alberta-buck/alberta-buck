@@ -76,7 +76,7 @@ export function wrapIdentity(wasm) {
       const g = wasm.g2_generator();
       return { x: [big(g[0]), big(g[1])], y: [big(g[2]), big(g[3])] };
     })(),
-    H_POINT: P(wasm.h_point()),
+    H_PEDERSEN: P(wasm.h_pedersen()),
     FLAVOR_A1: 1,
     FLAVOR_A2: 2,
     FLAVOR_B1: 3,
@@ -240,7 +240,7 @@ export function wrapIdentity(wasm) {
       big(wasm.id_hash_b1(hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
     idHashA1: (eNote, mIssuer, sigmaR, sigmaS) =>
       big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
-    idHashA2: (eNote, eIss) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss))),
+    idHashA2: (eNote, eIss, T) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss), flatP(T))),
     identityLeaf: (M) => big(wasm.identity_leaf(...flatP(M))),
     // The hiding leaf of a private subtree, and the one that binds an
     // Identity to the receiving key its Notes are addressed to.

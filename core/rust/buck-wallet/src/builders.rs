@@ -767,6 +767,8 @@ pub fn build_note_a2(
     mint_txhash: &str,
     mint_block: u64,
     binding: Option<&IssuerReencProof>,
+    t: &G1w,
+    gamma: Option<&W256>,
     role: &str,
     payee_sk: Option<&W256>,
     payee_e_addr: Option<&Ctw>,
@@ -776,6 +778,14 @@ pub fn build_note_a2(
     legs: &AddressedLegs,
 ) -> Result<Value> {
     check_role(role)?;
+    // T is committed in idHash, so it travels either way; gamma opens it, and a
+    // receipt that carries the binding must carry gamma to tie it to the named
+    // issuer (doc/review/notes-receiving-key.org, section 4.6).
+    if binding.is_some() && gamma.is_none() {
+        return Err(IdError(
+            "note-a2 receipt with a binding needs gamma, which ties it to the named issuer",
+        ));
+    }
 
     let rec_proof = receipts_proof_record(opening, cms, None, nullifier, face);
     let (r_note, r_id, vd_note, vd_id) = note_legs(
@@ -793,6 +803,13 @@ pub fn build_note_a2(
         r_id.as_ref(),
         legs.binding,
     );
+    {
+        let obj = payload.as_object_mut().ok_or(IdError("payload"))?;
+        obj.insert("T".into(), g1_hex(t));
+        if let Some(g) = gamma {
+            obj.insert("gamma".into(), Value::String(scalar_hex(g)));
+        }
+    }
     if let (Some(n), Some(i)) = (vd_note, vd_id) {
         let obj = payload.as_object_mut().ok_or(IdError("payload"))?;
         obj.insert("vdNote".into(), n);

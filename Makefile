@@ -307,7 +307,7 @@ plots:			plot-lifecycle plot-equilibrium plot-arb
 # One-shot: regenerate vectors then plots in the right order.
 images:			vectors plots
 
-# ── AB-RCPT/1 receipt golden-text renders ────────────────────────────
+# ── AB-RCPT/2 receipt golden-text renders ────────────────────────────
 #
 # Regenerates alberta_buck/test/vectors/receipt-*.golden.txt (all eight
 # kinds: the five recipient-side receipts plus the three issuer-side Note

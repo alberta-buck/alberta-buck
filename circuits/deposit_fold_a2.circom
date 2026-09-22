@@ -1,4 +1,4 @@
-// The folded deposit gate, A2 layout -- one witness, five relations.
+// The folded deposit gate, A2 layout -- one witness, six relations.
 //
 // The A1 sibling (deposit_fold_a1.circom) carries the argument for folding;
 // read its header first.  This file records only what A2 needs beyond it, and
@@ -13,6 +13,8 @@
 //   (4) that leaf's path folds to the posted identity root
 //   (5) a registered leaf commits M_I under the ISSUER's salt, and its path
 //       folds to the same root
+//   (6) the mint binding's T, committed in idHash, opens as rm*G + gamma*H
+//       for the rm = r*k_recv of the note tie -- the key tie
 //
 // WHY (5) EXISTS.  A colluding issuer could key the note to a throwaway point
 // instead of the recipient's mailbox.  The anti-framing binding still passes,
@@ -21,6 +23,17 @@
 // decrypts must be a REGISTERED Identity.  A1 needs no such relation: its
 // plaintext is the recipient's own Identity, which relation (3) already
 // commits.
+//
+// WHY (6) EXISTS.  The mint binding proves eIss carries the minter's own
+// registered Identity to the key hidden in its Q -- but an ElGamal ciphertext
+// does not bind its plaintext to one key.  A minter can pick that key so the
+// SAME eIss opens, under the recipient's k, to a registered sock puppet; (5)
+// holds, and the recipient would name the puppet.  The binding also proves
+// T = r*pk_Q + gamma*H, and idHash commits T, so (6) forces
+// r*(pk_Q - k*G) = (gamma' - gamma)*H: re-aiming the key needs the log of the
+// difference of two Identities to H_PEDERSEN, which no one has
+// (doc/review/notes-receiving-key.org, section 4.6).  gamma arrives wrapped in
+// the delivery.
 //
 // WHERE THE ISSUER'S SALT COMES FROM.  Relation (5) is proven by the
 // RECIPIENT about the ISSUER, so the recipient needs the issuer's leaf
@@ -38,7 +51,8 @@
 //  * A2 cannot fold its point sums into scalar sums.  A1 writes
 //    eEnc.C = (m_rec + t*k)*G because it knows m_rec; A2 can only write
 //    M_I + (t*k)*G.  So this circuit performs elliptic-curve addition, which
-//    A1 avoids by construction.
+//    A1 avoids by construction.  (6) adds a third, of two fixed-base
+//    multiples on generators whose relative log no one knows.
 //  * circom-lib offers no COMPLETE addition -- EllipticCurveAdd dispatches to
 //    the incomplete EllipticCurveAddOptimised, which is finding 5's third
 //    defect.  A1 escaped it; A2 must enforce its precondition instead.  Each
@@ -57,10 +71,11 @@ pragma circom 2.1.6;
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
-include "./ec/bn254_h_scalarmul.circom";
 include "./ec/bn254_g_scalarmul.circom";
+include "./ec/bn254_hp_scalarmul.circom";
 include "./ec/get_bn254.circom";
 include "../lib/circom-lib/circuits/ec/curve.circom";
+include "./leaf_tags.circom";
 
 template MerkleProofFoldA2(depth) {
     signal input  leaf;
@@ -117,9 +132,10 @@ template DepositFoldA2(depth) {
 
     // ===== PRIVATE ===========================================================
     signal input rho;
-    signal input idHash;                    // Poseidon8(eNote, eIss0)
+    signal input idHash;                    // Poseidon10(eNote, eIss0, T)
     signal input eNote[4];                  // eNote coords (mod F_R)
     signal input eIss0[4];                  // the note's eIss coords (mod F_R)
+    signal input T[2];                      // the mint binding's T (mod F_R)
     signal input r[4];                      // the issuer's mint randomness r'
     signal input k_recv[4];                 // the RECEIVING secret
     signal input rm[4];                     // r * k_recv        (witnessed)
@@ -129,6 +145,7 @@ template DepositFoldA2(depth) {
     signal input sk_dep[4];                 // the account key
     signal input r_E[4];                    // the account's registration nonce
     signal input cd[4];                     // m_rec + sk_dep*r_E (witnessed)
+    signal input gamma[4];                  // T's blind (shipped, wrapped)
     signal input MI[2][4];                  // the decrypted issuer Identity
     signal input salt;                      // the recipient's leaf salt
     signal input saltIss;                   // the ISSUER's leaf salt (shipped)
@@ -151,11 +168,12 @@ template DepositFoldA2(depth) {
     nf.inputs[2] <== 4242;
     nullifier === nf.out;
 
-    component idH = Poseidon(8);
+    component idH = Poseidon(10);
     idH.inputs[0] <== eNote[0];  idH.inputs[1] <== eNote[1];
     idH.inputs[2] <== eNote[2];  idH.inputs[3] <== eNote[3];
     idH.inputs[4] <== eIss0[0];  idH.inputs[5] <== eIss0[1];
     idH.inputs[6] <== eIss0[2];  idH.inputs[7] <== eIss0[3];
+    idH.inputs[8] <== T[0];      idH.inputs[9] <== T[1];
     idHash === idH.out;
 
     // ===== M_I's limbs are witnessed, so range-check them ====================
@@ -185,7 +203,7 @@ template DepositFoldA2(depth) {
     tkV.out === tV.out * kV.out;                 // tk = t * k
     cdV.out === mV.out + skr;                    // cd = m_rec + sk_dep*r_E
 
-    // ===== the seven fixed-base multiples ====================================
+    // ===== the seven fixed-base multiples of G (and one of H, in (6)) ========
     component rG  = ScalarMulG();  rG.b  <== r;        // eIss.R
     component rmG = ScalarMulG();  rmG.b <== rm;       // eIss.C = M_I + rm*G
     component tG  = ScalarMulG();  tG.b  <== t;        // eEnc.R = t*G
@@ -215,6 +233,23 @@ template DepositFoldA2(depth) {
     component c0y = Recompose4A2();  c0y.limbs <== addC0.out[1];
     c0x.out === eIss0[2];
     c0y.out === eIss0[3];
+
+    // ===== (6) the key tie: T = rm*G + gamma*H, committed in idHash ==========
+    component gH = ScalarMulHP();  gH.b <== gamma;
+    component ghx = Recompose4A2();  ghx.limbs <== gH.out[0];
+    component dxT = DistinctX();
+    dxT.x1 <== rmx.out;
+    dxT.x2 <== ghx.out;
+
+    component addT = EllipticCurveAddOptimised(64, 4, A, B, P);
+    addT.in1 <== rmG.out;
+    addT.in2 <== gH.out;
+    addT.dummy <== dummy;
+
+    component tx = Recompose4A2();  tx.limbs <== addT.out[0];
+    component ty = Recompose4A2();  ty.limbs <== addT.out[1];
+    tx.out === T[0];
+    ty.out === T[1];
 
     // ===== (1b) k decrypts the SPEND's ciphertext to the same M_I ============
     for (var i = 0; i < 4; i++) {
@@ -248,10 +283,11 @@ template DepositFoldA2(depth) {
     }
 
     // ===== (3)+(4) the recipient's leaf commits (m_rec, k) ===================
-    component leafH = Poseidon(3);
-    leafH.inputs[0] <== mV.out;
-    leafH.inputs[1] <== kV.out;
-    leafH.inputs[2] <== salt;
+    component leafH = Poseidon(4);
+    leafH.inputs[0] <== LEAF_TAG_RECEIVING();
+    leafH.inputs[1] <== mV.out;
+    leafH.inputs[2] <== kV.out;
+    leafH.inputs[3] <== salt;
 
     component mp = MerkleProofFoldA2(depth);
     mp.leaf <== leafH.out;
@@ -264,10 +300,11 @@ template DepositFoldA2(depth) {
     // ===== (5) the ISSUER's leaf commits M_I, under the shipped salt =========
     // identity_leaf_salted(M_I, saltIss): coordinates, because this is an
     // ordinary registry association rather than a receiving one.
-    component issLeaf = Poseidon(3);
-    issLeaf.inputs[0] <== MIx.out;
-    issLeaf.inputs[1] <== MIy.out;
-    issLeaf.inputs[2] <== saltIss;
+    component issLeaf = Poseidon(4);
+    issLeaf.inputs[0] <== LEAF_TAG_IDENTITY_SALTED();
+    issLeaf.inputs[1] <== MIx.out;
+    issLeaf.inputs[2] <== MIy.out;
+    issLeaf.inputs[3] <== saltIss;
 
     component issMp = MerkleProofFoldA2(depth);
     issMp.leaf <== issLeaf.out;

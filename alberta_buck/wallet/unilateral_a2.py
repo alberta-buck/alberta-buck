@@ -26,10 +26,12 @@ The three moving parts:
    authority remains the Identity even though reading does not.  The mint's
    :mod:`issuer_reenc` binding (with ``pk_rec := pk_recv``) proves ``eIss``
    encrypts the minter's *own* registered Identity under the key it hides in
-   ``Q``.  It does not yet prove that key IS ``pk_recv``: a minter can key one
+   ``Q``.  That alone would not make the key ``pk_recv``: a minter could key one
    ciphertext so that its hidden key opens it to its own Identity and the
-   recipient's opens it to another registered one.  The tie that closes this is
-   specified in doc/review/notes-receiving-key.org section 4.6.
+   recipient's opens it to another registered one.  So ``idHash`` commits the
+   binding's ``T = r'*pk_recv + gamma*H``, the recipient receives ``gamma``,
+   and the spend proves ``T`` opens under its own ``k``
+   (doc/review/notes-receiving-key.org section 4.6).
 
 2. *Deposit gate* (the on-chain gate, all identities hidden).  Reading the note
    and being the Identity are now facts about two different secrets, so the gate
@@ -37,7 +39,7 @@ The three moving parts:
    ``(m_rec, k, sk_dep, salt, ...)`` -- ``k`` decrypts the note to the issuer
    Identity ``M_I``, the deposit account's credential holds ``M_rec``, a
    registered leaf commits the pair ``(m_rec, k)``, its path folds to a posted
-   root, and ``M_I`` is itself registered.  See
+   root, ``M_I`` is itself registered, and ``T = r'*k*G + gamma*H``.  See
    :mod:`alberta_buck.wallet.deposit_fold`; the leaf relation is what a
    single-secret design got for free, and without it a payload thief spends with
    its own Identity.
@@ -45,9 +47,9 @@ The three moving parts:
 3. *Receipt* (off-chain, unilateral).  The recipient holds the secrets that name
    *both* parties: its own ``M_rec`` (which it knows, and which the note names),
    and the issuer's ``M_I = C_e - k*R_e`` by decryption under the receiving
-   secret.  A :mod:`verifiable_decrypt` proof + the mint binding + tree
-   membership of both points make the plaintext receipt third-party-checkable
-   with no secret.
+   secret.  A :mod:`verifiable_decrypt` proof + the mint binding + the tie
+   ``M_I = C_e - T + gamma*H`` + tree membership of both points make the
+   plaintext receipt third-party-checkable with no secret.
 
 Privacy invariant throughout: a passive observer (Mallory) learns neither
 ``m_rec``, ``M_rec`` (the recipient identity), nor ``M_I`` (the issuer identity)
@@ -67,13 +69,14 @@ from alberta_buck.wallet.bn254 import (
 from alberta_buck.wallet.elgamal import (
     ElGamalCiphertext, elgamal_encrypt, elgamal_decrypt,
 )
+from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.transcript import keccak_scalar
 from alberta_buck.wallet.notes import (
     FLAVOR_A2, NoteOpening, note_commitment, nullifier_a,
 )
 from alberta_buck.wallet.issuer_reenc import (
-    H_POINT, IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify,
+    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify,
 )
 from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
@@ -143,9 +146,9 @@ class MintedA2:
 
     ``eNote`` encrypts the note value ``v`` and ``eIss`` the issuer identity
     ``M_I``, both to the recipient's receiving key ``pk_recv``.  Both are committed in ``idHash``
-    (Poseidon8, matching ``mint_batch_a2.circom``).  ``eIss``/``binding`` go on
-    chain (the binding anchors anti-framing at mint); the full ``opening`` +
-    ``eNote`` + ``eIss`` travel to the recipient off chain.
+    with the binding's ``T`` (Poseidon10, matching ``mint_batch_a2.circom``).  ``eIss``/``binding``
+    go on chain (the binding anchors anti-framing at mint); the full ``opening`` + ``eNote`` +
+    ``eIss`` + ``gamma`` travel to the recipient off chain.
     """
     eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*pk_recv) -- value, to the mailbox
     eIss:    ElGamalCiphertext   # (r'*G, M_I + r'*pk_recv)   -- issuer M, to the mailbox
@@ -156,6 +159,7 @@ class MintedA2:
     binding: IssuerReencProof    # issuer_reenc with pk_rec := pk_recv (anti-framing)
     r_prime: int                 # issuer-held randomness (off chain)
     r_note:  int                 # note-value encryption randomness (off chain)
+    gamma:   int                 # the binding's blind on T (off chain, to the recipient)
     salt_iss: Optional[int] = None
     """The issuer's registry salt for the association that NAMES it.
 
@@ -185,16 +189,15 @@ class MintedA2:
     recipient computes it from the decrypted Identity alone."""
 
 
-def a2_id_hash(eNote: ElGamalCiphertext, eIss: ElGamalCiphertext) -> int:
-    """``idHash = Poseidon8(eNote, eIss)`` — 8 field elements reduced mod F_R.
+def a2_id_hash(eNote: ElGamalCiphertext, eIss: ElGamalCiphertext, T) -> int:
+    """``idHash = Poseidon10(eNote, eIss, T)`` -- 10 field elements reduced mod F_R.
 
     Matches the on-chain layout in ``mint_batch_a2.circom`` and
-    :func:`alberta_buck.wallet.notes.id_hash_a2`.  Both ciphertexts are committed
-    so the note-binding circuit can open ``idHash`` and re-encrypt ``eIss`` under
-    the recipient identity, proving the spend's ``eEnc`` binds to THIS note.
+    :func:`alberta_buck.wallet.notes.id_hash_a2`.  The fold opens ``idHash`` to tie
+    the spend's ``eEnc`` to THIS note's ``eIss``, and ``T`` to the spender's key.
     """
     from alberta_buck.wallet.notes import id_hash_a2
-    return id_hash_a2(eNote, eIss)
+    return id_hash_a2(eNote, eIss, T)
 
 
 def mint_unilateral_a2(
@@ -241,17 +244,20 @@ def mint_unilateral_a2(
 
     # Anti-framing binding: eIss re-encrypts the issuer's registered M_I under the
     # (blinded) point committed in Q.  issuer_reenc's second slot IS the
-    # recipient key, and now genuinely is one.
+    # recipient key.  gamma is kept, because the recipient opens T with it.
+    beta = rand_scalar(rng)
+    gamma = rand_scalar(rng)
     binding = issuer_reenc_prove(
-        sk_iss, r_prime, pk_recv, E_reg, eIss, issuer, chainid, rng=rng,
+        sk_iss, r_prime, pk_recv, E_reg, eIss, issuer, chainid,
+        beta=beta, gamma=gamma, rng=rng,
     )
 
-    idHash = a2_id_hash(eNote, eIss)
+    idHash = a2_id_hash(eNote, eIss, binding.T)
     opening = NoteOpening(FLAVOR_A2, v, rho, idHash, predicate)
     cm = note_commitment(opening)
     return MintedA2(eNote=eNote, eIss=eIss, M_I=M_I, idHash=idHash, cm=cm,
                     opening=opening, binding=binding, r_prime=r_prime,
-                    r_note=r_note, salt_iss=salt_iss)
+                    r_note=r_note, gamma=gamma, salt_iss=salt_iss)
 
 
 # =============================== Receipt ====================================
@@ -272,6 +278,7 @@ class UnilateralReceipt:
     eIss:       ElGamalCiphertext
     vd:         VDProof          # eIss decrypts under pk_recv to M_I
     binding:    IssuerReencProof # mint anti-framing (eIss over issuer's registered M_I)
+    gamma:      int              # opens binding.T: the tie M_I = C - T + gamma*H
     issuer:     int              # issuer account (msg.sender at mint)
     chainid:    int
     M_I_member:   bool           # convenience: was M_I in the tree at build time
@@ -308,7 +315,7 @@ def make_receipt(
     return UnilateralReceipt(
         M_I=M_I, M_rec=M_rec, pk_recv=mul(G1, k_recv % ORDER),
         value=minted.opening.v, eIss=eIss, vd=vd,
-        binding=minted.binding, issuer=issuer, chainid=chainid,
+        binding=minted.binding, gamma=minted.gamma, issuer=issuer, chainid=chainid,
         M_I_member=tree.contains(M_I), M_rec_member=tree.contains(M_rec),
     )
 
@@ -335,6 +342,14 @@ def verify_receipt(
     if not verifiable_decrypt_verify(eIss, receipt.pk_recv, receipt.M_I, receipt.vd,
                                      receipt.issuer, receipt.chainid):
         return RcptResult(False, None, None, receipt.value, "verifiable decryption invalid")
+
+    # (2b) The tie: the Identity the binding proved registered is the one the
+    #      recipient's key names.  C - T + gamma*H is the binding's plaintext;
+    #      without this a minter keys eIss so pk_recv opens it to a sock puppet.
+    named = add(add(eIss.C, neg(receipt.binding.T)), mul(H_PEDERSEN, receipt.gamma % ORDER))
+    if not eq(named, receipt.M_I):
+        return RcptResult(False, None, None, receipt.value,
+                          "the binding's Identity is not the one decrypted")
 
     # (3) Issuer identity is registered -- this is the coupling: a bogus eIss
     #     (keyed to anything but M_rec) decrypts to a non-member here.

@@ -73,12 +73,9 @@ pragma circom 2.1.6;
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
-// bn254_h_scalarmul defines the BN254 curve-parameter functions the G gadget
-// reads, so it is included for those even though this circuit needs no
-// multiple of H -- folding removed the reason for one.
-include "./ec/bn254_h_scalarmul.circom";
 include "./ec/bn254_g_scalarmul.circom";
 include "./ec/get_bn254.circom";
+include "./leaf_tags.circom";
 
 template MerkleProofFold(depth) {
     signal input  leaf;
@@ -227,10 +224,11 @@ template DepositFoldA1(depth) {
     // ===== (3) a registered leaf commits the pair (m_rec, k_recv) ===========
     // The same signals relations (1) and (2) consume, hashed directly: the tie
     // is an identity of signals rather than an inference across derivations.
-    component leafH = Poseidon(3);
-    leafH.inputs[0] <== mV.out;
-    leafH.inputs[1] <== kV.out;
-    leafH.inputs[2] <== salt;
+    component leafH = Poseidon(4);
+    leafH.inputs[0] <== LEAF_TAG_RECEIVING();
+    leafH.inputs[1] <== mV.out;
+    leafH.inputs[2] <== kV.out;
+    leafH.inputs[3] <== salt;
 
     // ===== (4) the leaf's path folds to the posted root ======================
     component mp = MerkleProofFold(depth);

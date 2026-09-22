@@ -12,7 +12,7 @@ Two independent modules ride in this package:
   JavaScript suites all replay.
 - **identity** -- BN254 curve arithmetic, Poseidon, keccak Fiat-Shamir
   transcripts, and the sigma protocols of the BUCK identity layer, together
-  with the wallet and registry kernels (canonical JSON, the AB-RCPT/1 receipt
+  with the wallet and registry kernels (canonical JSON, the AB-RCPT/2 receipt
   envelope, the Notes flows, the identity Merkle accumulator). One arkworks
   copy serves all three.
 

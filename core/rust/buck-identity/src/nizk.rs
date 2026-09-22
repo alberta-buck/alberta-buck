@@ -9,7 +9,7 @@
 //! One commitment `C1 = m_tilde*A + b_tilde*G` covers both credential
 //! exponents, so no proof field reveals `m*A` on its own.  Fiat-Shamir binds
 //! chainid, the registry contract address, and domain
-//! `AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3`.
+//! `AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2`.
 //! Verified on-chain by `IdentityRegistry.register`.
 
 use ark_bn254::{G1Affine, G2Affine};

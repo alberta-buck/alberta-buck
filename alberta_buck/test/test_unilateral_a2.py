@@ -28,7 +28,7 @@ from alberta_buck.wallet.deposit_fold import (
     DepositFoldRefused, deposit_fold_check, deposit_fold_witness,
 )
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
-from alberta_buck.wallet.issuer_reenc import H_POINT, issuer_reenc_verify
+from alberta_buck.wallet.issuer_reenc import issuer_reenc_verify
 from alberta_buck.wallet.recvkey import receiving_key
 from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.unilateral_a2 import (
@@ -65,8 +65,8 @@ class Account:
         self.M = mul(G1, self.m)                 # identity point M = m*G
         self.sk = rand_scalar(rng)               # account key
         self.pk = mul(G1, self.sk)
-        r = rand_scalar(rng)
-        self.E = elgamal_encrypt(self.M, self.pk, r)   # registered credential
+        self.r_E = rand_scalar(rng)
+        self.E = elgamal_encrypt(self.M, self.pk, self.r_E)   # registered credential
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def _witness(world, minted, acct=None, **kw):
     acct = acct or world["rec0"]
     args = dict(m_rec=world["m_rec"], k=world["k_rec"], sk_dep=acct.sk,
                 salt=world["salt_rec"], E_dep=acct.E, note_ct=minted.eIss,
-                tree=world["priv"], rng=world["rng"])
+                tree=world["priv"])
     args.update(kw)
     return deposit_fold_witness(**args)
 
@@ -234,11 +234,86 @@ def test_a_rotated_receiving_key_still_spends(world):
 # Collusion-resistance: a bogus eIss is un-nameable AND un-spendable.
 # --------------------------------------------------------------------------- #
 
+def _split_mint(world, M_puppet, salt_puppet, rng):
+    """The A2 key split (doc/review/notes-receiving-key.org, section 4.6), minted by hand: ONE
+    eIss that the binding opens to the minter's own Identity under a key of its choosing, and that
+    the recipient's k opens to ``M_puppet``.  mint_unilateral_a2 cannot produce it -- it keys both
+    to one point -- which is the point."""
+    from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
+    from alberta_buck.wallet.notes import FLAVOR_A2, NoteOpening, note_commitment
+    from alberta_buck.wallet.unilateral_a2 import MintedA2, a2_id_hash
+    iss                         = world["issuer"]
+    r_prime                     = rand_scalar(rng)
+    pk_mint                     = add(world["pk_recv"],
+                                      mul(add(M_puppet, neg(iss.M)), pow(r_prime, -1, ORDER)))
+    eIss                        = elgamal_encrypt(iss.M, pk_mint, r_prime)
+    gamma                       = rand_scalar(rng)
+    binding                     = issuer_reenc_prove(iss.sk, r_prime, pk_mint, iss.E, eIss,
+                                                     ISSUER_ADDR, CHAINID, gamma=gamma, rng=rng)
+    r_note                      = rand_scalar(rng)
+    eNote                       = elgamal_encrypt(mul(G1, 1000), world["pk_recv"], r_note)
+    idh                         = a2_id_hash(eNote, eIss, binding.T)
+    opening                     = NoteOpening(FLAVOR_A2, 1000, rand_scalar(rng), idh, 0)
+    return MintedA2(eNote=eNote, eIss=eIss, M_I=iss.M, idHash=idh, cm=note_commitment(opening),
+                    opening=opening, binding=binding, r_prime=r_prime, r_note=r_note,
+                    gamma=gamma, salt_iss=salt_puppet)
+
+
+def test_split_key_sock_puppet_is_refused(world):
+    """The A2 key split.  The minter's binding is true of its own registered Identity; the
+    recipient's key opens the same eIss to a REGISTERED sock puppet, so relation (5) holds too.
+    What refuses it is the committed T: it opens under the minter's chosen key, not the
+    recipient's -- at delivery, at the spend gate, and in the receipt."""
+    from alberta_buck.wallet.delivery import DeliveryRefused, deliver_a2, open_a2
+    from alberta_buck.wallet.deposit_fold import deposit_fold_a2_witness
+    from alberta_buck.registry.tree import identity_leaf_salted
+    rng, iss                    = world["rng"], world["issuer"]
+    M_puppet                    = mul(G1, rand_scalar(rng))
+    salt_puppet                 = derive_salt(rand_scalar(rng), KYC, 1)
+    world["priv"].insert_identity_salted(M_puppet, salt_puppet)
+    world["tree"].insert(M_puppet)
+    minted                      = _split_mint(world, M_puppet, salt_puppet, rng)
+
+    # The split is real: the binding verifies, and k opens eIss to the registered puppet.
+    assert issuer_reenc_verify(iss.pk, iss.E, minted.eIss, minted.binding, ISSUER_ADDR, CHAINID)
+    assert eq(elgamal_decrypt(minted.eIss, world["k_rec"]), M_puppet)
+    assert not eq(M_puppet, iss.M)
+
+    # (1) The recipient's wallet refuses the delivery.
+    with pytest.raises(DeliveryRefused, match="T does not open"):
+        open_a2(deliver_a2(minted, world["pk_recv"]), world["k_rec"])
+
+    # (2) The spend gate refuses it: relation (5) holds, the key tie does not.
+    acct                        = world["rec0"]
+    t                           = (minted.r_prime + rand_scalar(rng)) % ORDER
+    eEnc                        = elgamal_encrypt(M_puppet, world["pk_recv"], t)
+    w                           = deposit_fold_witness(
+        m_rec=world["m_rec"], k=world["k_rec"], sk_dep=acct.sk, salt=world["salt_rec"],
+        E_dep=acct.E, note_ct=eEnc, tree=world["priv"])
+    priv                        = world["priv"]
+    iss_path                    = priv.path(priv.leaves.index(identity_leaf_salted(M_puppet, salt_puppet)))
+    with pytest.raises(AssertionError, match="keyed to another mailbox"):
+        deposit_fold_a2_witness(
+            witness=w, rho=minted.opening.rho, id_hash=minted.idHash, e_note=minted.eNote,
+            e_iss=minted.eIss, r_prime=minted.r_prime, t=t, r_E=acct.r_E, e_dep=acct.E,
+            pk_dep=acct.pk, e_enc=eEnc, salt_iss=salt_puppet, iss_path=iss_path,
+            T=minted.binding.T, gamma=minted.gamma, identity_root=priv.root())
+
+    # (3) The receipt refuses to name the puppet.
+    receipt                     = make_receipt(world["k_rec"], world["M_rec"], minted, ISSUER_ADDR,
+                                               CHAINID, world["tree"], rng=rng)
+    res                         = verify_receipt(receipt, iss.pk, iss.E, world["tree"].root(),
+                                                 world["tree"])
+    assert not res.valid
+    assert "not the one decrypted" in res.reason
+
+
 def test_collusion_bogus_eiss_unnameable(world):
     """A colluding issuer keys eIss to a throwaway point (not pk_recv).  The
     mint binding still passes -- it only forces eIss over the issuer's own M --
-    but the recipient's decryption lands on a NON-member, so the receipt is
-    INVALID and the spend membership gate would reject it."""
+    but the recipient's decryption lands on a NON-member, and on a point the
+    binding's T does not open to, so the receipt is INVALID and the spend's
+    membership gate and key tie would each reject it."""
     iss, tree = world["issuer"], world["tree"]
     rng = world["rng"]
     pk_bogus = mul(G1, rand_scalar(rng))         # a key the recipient does not hold
@@ -246,8 +321,9 @@ def test_collusion_bogus_eiss_unnameable(world):
     r_prime = rand_scalar(rng)
     eIss_bogus = elgamal_encrypt(iss.M, pk_bogus, r_prime)
     from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
+    gamma = rand_scalar(rng)
     binding = issuer_reenc_prove(iss.sk, r_prime, pk_bogus, iss.E, eIss_bogus,
-                                 ISSUER_ADDR, CHAINID, rng=rng)
+                                 ISSUER_ADDR, CHAINID, gamma=gamma, rng=rng)
     assert issuer_reenc_verify(iss.pk, iss.E, eIss_bogus, binding, ISSUER_ADDR, CHAINID)
 
     # The recipient's decryption is garbage, not a registered identity.
@@ -260,16 +336,17 @@ def test_collusion_bogus_eiss_unnameable(world):
     )
     from alberta_buck.wallet.notes import NoteOpening, note_commitment, FLAVOR_A2
     eNote_bogus = elgamal_encrypt(mul(G1, 1000), pk_bogus, rand_scalar(rng))
-    idh = a2_id_hash(eNote_bogus, eIss_bogus)
+    idh = a2_id_hash(eNote_bogus, eIss_bogus, binding.T)
     opening = NoteOpening(FLAVOR_A2, 1000, rand_scalar(rng), idh, 0)
     minted_bogus = MintedA2(eNote=eNote_bogus, eIss=eIss_bogus, M_I=iss.M, idHash=idh,
                             cm=note_commitment(opening), opening=opening,
-                            binding=binding, r_prime=r_prime, r_note=rand_scalar(rng))
+                            binding=binding, r_prime=r_prime, r_note=rand_scalar(rng),
+                            gamma=gamma)
     receipt = mk(world["k_rec"], world["M_rec"], minted_bogus, ISSUER_ADDR,
                  CHAINID, tree, rng=rng)
     res = vr(receipt, iss.pk, iss.E, tree.root(), tree)
     assert not res.valid
-    assert "not a registered identity" in res.reason
+    assert "not the one decrypted" in res.reason
 
 
 # --------------------------------------------------------------------------- #
@@ -293,7 +370,7 @@ def test_payload_thief_cannot_spend(world):
         deposit_fold_witness(
             m_rec=thief.m, k=world["k_rec"],       # its identity, the stolen key
             sk_dep=thief.sk, salt=salt_t, E_dep=thief.E,
-            note_ct=minted.eIss, tree=world["priv"], rng=rng,
+            note_ct=minted.eIss, tree=world["priv"],
         )
     assert exc.value.relation == 3
 
@@ -327,7 +404,7 @@ def test_wrong_account_is_refused_on_the_credential_relation(world):
 def test_tampered_witness_rejected(world):
     minted = _mint(world, v=1)
     w = _witness(world, minted)
-    for bad in (dataclasses.replace(w, b=(w.b + 1) % ORDER),
+    for bad in (dataclasses.replace(w, M=add(w.M, G1)),
                 dataclasses.replace(w, k=(w.k + 1) % ORDER),
                 dataclasses.replace(w, salt=w.salt + 1),
                 dataclasses.replace(w, leaf=w.leaf ^ 1)):
@@ -358,16 +435,6 @@ def test_unregistered_account_rejected_by_the_check(world):
 # --------------------------------------------------------------------------- #
 # Privacy: no identity appears in the public gate; mints unlinkable.
 # --------------------------------------------------------------------------- #
-
-def test_gate_hides_identities(world):
-    minted = _mint(world, v=1)
-    M_I = elgamal_decrypt(minted.eIss, world["k_rec"])
-    w = _witness(world, minted)
-    # P is the only identity-derived public point, and it is blinded.
-    assert not eq(w.P, M_I)
-    assert not eq(w.P, world["M_rec"])
-    assert not eq(w.P, world["pk_recv"])
-
 
 def test_two_mints_unlinkable(world):
     """Two mints from the same issuer to the same recipient yield distinct eIss

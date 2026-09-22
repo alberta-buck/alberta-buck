@@ -511,14 +511,8 @@ fn verifiable_decrypt_verify(
 // A2 issuer re-encryption binding
 // ---------------------------------------------------------------------------
 
-#[pyfunction]
-fn h_point() -> PyG1 {
-    pyg1(&kernel::issuer_reenc::h_point())
-}
-
 /// The Pedersen generator: hashed to the curve, so its discrete log is
-/// unknown.  Used where a commitment is opened by two separate proofs that
-/// must agree; see the kernel's `nums` module.
+/// unknown.  Every blind in the protocol sits on it; see the kernel's `nums`.
 #[pyfunction]
 fn h_pedersen() -> PyG1 {
     pyg1(&kernel::nums::h_pedersen())
@@ -751,9 +745,12 @@ fn id_hash_a1(
     ))
 }
 
+/// `id_hash_a2(eNote, eIss, T)` -- `T` is the mint binding's blinded point.
 #[pyfunction]
-fn id_hash_a2(e_note: PyCt, e_iss: PyCt) -> PyResult<BigUint> {
-    Ok(big(&kernel::notes::id_hash_a2(&wct(&e_note)?, &wct(&e_iss)?).map_err(err)?))
+fn id_hash_a2(e_note: PyCt, e_iss: PyCt, t: PyG1) -> PyResult<BigUint> {
+    Ok(big(
+        &kernel::notes::id_hash_a2(&wct(&e_note)?, &wct(&e_iss)?, &wg1(&t)?).map_err(err)?,
+    ))
 }
 
 #[pyfunction]
@@ -786,7 +783,7 @@ fn receiving_leaf(
 }
 
 // ---------------------------------------------------------------------------
-// buck_wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
+// buck_wallet: canonical dialect, AB-RCPT/2 envelope, receipt build /
 // verify and the unilateral flows.  Structured inputs cross as ONE JSON
 // text of named args (the vector-fixture shapes); receipt cores cross as
 // their canonical text -- see buck-wallet's `args` module.
@@ -1105,7 +1102,6 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("FIELD_MODULUS", big(&kernel::field_modulus()))?;
     m.add("G1", pyg1(&kernel::g1_generator()))?;
     m.add("G2", pyg2(&kernel::g2_generator()))?;
-    m.add("H_POINT", pyg1(&kernel::issuer_reenc::h_point()))?;
     m.add("H_PEDERSEN", pyg1(&kernel::nums::h_pedersen()))?;
     m.add_function(wrap_pyfunction!(h_pedersen, m)?)?;
     m.add("NULLIFIER_TAG_B", kernel::notes::NULLIFIER_TAG_B)?;
@@ -1141,7 +1137,6 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chaum_pedersen_verify, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_prove, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_verify, m)?)?;
-    m.add_function(wrap_pyfunction!(h_point, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_prove, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_verify, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_prove, m)?)?;

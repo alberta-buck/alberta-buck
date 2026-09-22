@@ -17,7 +17,7 @@ Subcommands:
 The driver is scripts/snark/gen_e2e_fixtures.sh.
 
 The note tie is a RELATION of the folded gate, not a proof beside it: A2 opens
-idHash = Poseidon8(eNote, eIss) inside circuits/deposit_fold_a2.circom, and
+idHash = Poseidon10(eNote, eIss, T) inside circuits/deposit_fold_a2.circom, and
 A1's idHash commits (eNote, m_issuer, sigma), so its tie runs through the
 note's own value ciphertext with the face public.  B1 is bearer -- no tie.
 """
@@ -37,7 +37,6 @@ from alberta_buck.wallet.bn254 import (
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.issuer_reenc import H_POINT
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_B1, NoteOpening, note_commitment, id_hash_b1, nullifier_b,
 )
@@ -219,8 +218,8 @@ def build_world(flavor: str):
         r_committed = note.r_prime
         eNote = note.eNote
         # The delivery: what the minter hands the channel.  Every secret
-        # scalar in it -- rho, the face, r', the issuer's naming salt -- is
-        # wrapped to the mailbox key, so the channel learns neither the issuer
+        # scalar in it -- rho, the face, r', gamma, the issuer's naming salt --
+        # is wrapped to the mailbox key, so the channel learns neither the issuer
         # nor when the note is spent (wallet/delivery.py).
         note_payload = deliver_a2(note, pk_ctr)
     elif flavor == "a1":
@@ -282,7 +281,7 @@ def build_world(flavor: str):
 
         w = deposit_fold_witness(
             m_rec=m_ctr, k=k_ctr, sk_dep=dep_acct["sk"], salt=salt_ctr,
-            E_dep=dep_acct["E"], note_ct=eEnc, tree=tree, b=b, rng=rng,
+            E_dep=dep_acct["E"], note_ct=eEnc, tree=tree,
         )
         # Everything below comes from the payload the channel carried, the
         # opening, and the recipient's own secrets (k, m_rec, sk_dep, its salt).
@@ -313,7 +312,7 @@ def build_world(flavor: str):
                 t=t_total, r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
                 salt_iss=opened.salt_iss, iss_path=iss_path,
-                identity_root=tree.root(),
+                T=opened.T, gamma=opened.gamma, identity_root=tree.root(),
             )
         with open(os.path.join(out_dir, "fold_input.json"), "w") as f:
             json.dump(fold_input, f, indent=2)
@@ -362,15 +361,17 @@ def build_world(flavor: str):
     if flavor == "a2":
         en = ct_words_mod_fr(eNote)
         ei = ct_words_mod_fr(eCommitted)
+        tw = [w % F_R for w in point_to_words(note.binding.T)]
         mint_args = [
             "--name=e2e_a2", "--n=1", f"--live-leaves={FACE}",
             f"--rho=0:{opening.rho}",
             "--enote=0:" + ",".join(str(w) for w in en),
             "--eiss=0:" + ",".join(str(w) for w in ei),
+            "--t=0:" + ",".join(str(w) for w in tw),
         ]
-        # The wallet idHash must equal Poseidon8 over these words.
+        # The wallet idHash must equal Poseidon10 over these words.
         from alberta_buck.wallet.poseidon import poseidon
-        assert poseidon(en + ei) == opening.id_hash, "idHash layout mismatch"
+        assert poseidon(en + ei + tw) == opening.id_hash, "idHash layout mismatch"
     else:
         mint_args = [
             f"--name=e2e_{flavor}", "--n=1",
@@ -438,6 +439,10 @@ def build_world(flavor: str):
             "rNote": str(note.r_note),
             "rPrime": str(note.r_prime),
         }
+        if flavor == "a2":
+            # The binding's blind, which opens T: the recipient unwraps its own
+            # copy from the delivery, and the issuer keeps this one.
+            world["issuerSecrets"]["gamma"] = str(note.gamma)
     if flavor != "b1":
         # The payer's evidence, as a receipt carries it: a hash and a path over
         # the two points, disclosing no secret.  A payer checks this BEFORE

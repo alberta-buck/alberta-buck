@@ -1,7 +1,9 @@
 """Identity Merkle tree -- Poseidon accumulator of registered identity points.
 
-Each leaf is identity_leaf(M) = Poseidon([M.x, M.y] % F_R), matching the
-circuits/identity_membership.circom circuit byte-for-byte.  The tree is an
+Each leaf is one of four tagged Poseidon commitments -- identity_leaf(M) =
+Poseidon(TAG, M.x, M.y), and its salted, receiving and mailbox siblings -- each
+led by its own field-element tag (alberta_buck.wallet.domains, LEAF_*), so no
+value is a leaf of two kinds.  The circuits hash the same tags.  The tree is an
 incremental Poseidon Merkle tree with configurable depth, supporting batch
 insertion, membership proofs, and deterministic reconstruction from an event log.
 
@@ -26,15 +28,25 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from alberta_buck.wallet.bn254 import ORDER, point_to_words
+from alberta_buck.wallet.domains import (
+    LEAF_IDENTITY, LEAF_IDENTITY_SALTED, LEAF_MAILBOX, LEAF_RECEIVING, field_tag,
+)
 from alberta_buck.wallet.poseidon import F_R, poseidon
+
+# The leaf kinds' leading Poseidon inputs.  Two of the untagged leaves were
+# three-input Poseidons, so one value could be a salted identity leaf and a
+# receiving leaf at once; a tag per kind makes each its own function.
+TAG_IDENTITY                    = field_tag(LEAF_IDENTITY)
+TAG_IDENTITY_SALTED             = field_tag(LEAF_IDENTITY_SALTED)
+TAG_RECEIVING                   = field_tag(LEAF_RECEIVING)
+TAG_MAILBOX                     = field_tag(LEAF_MAILBOX)
 
 
 def identity_leaf(M) -> int:
-    """Compute the Poseidon leaf hash for an identity point M.
+    """Compute the leaf Poseidon(TAG_IDENTITY, M.x, M.y) for an identity point M.
 
-    Matches the IdentityMembership circom circuit's leafH = Poseidon(2) with
-    inputs Mx, My (auto-reduced mod F_R in circom).  The wallet's identity_leaf
-    in alberta_buck.wallet.unilateral_a2 uses the identical formula.
+    The coordinates are reduced mod F_R, as circom reduces its signals.  The
+    wallet's identity_leaf in alberta_buck.wallet.unilateral_a2 is this function.
 
     Args:
         M: A BN254 G1 point.
@@ -43,11 +55,11 @@ def identity_leaf(M) -> int:
         Poseidon hash as a field element in [0, F_R).
     """
     x, y = point_to_words(M)
-    return poseidon([x % F_R, y % F_R])
+    return poseidon([TAG_IDENTITY, x % F_R, y % F_R])
 
 
 def identity_leaf_salted(M, salt: int) -> int:
-    """Compute the hiding leaf commitment Poseidon(M.x, M.y, salt).
+    """Compute the hiding leaf commitment Poseidon(TAG_IDENTITY_SALTED, M.x, M.y, salt).
 
     The leaf of a PRIVATE subtree (accumulator specification, section 4):
     membership is a fact about a person who did not publish it, so the leaf
@@ -74,11 +86,11 @@ def identity_leaf_salted(M, salt: int) -> int:
     if not isinstance(salt, int) or not (1 <= salt < F_R):
         raise ValueError("salt must be in [1, F_R); 0 makes the leaf deterministic")
     x, y = point_to_words(M)
-    return poseidon([x % F_R, y % F_R, salt])
+    return poseidon([TAG_IDENTITY_SALTED, x % F_R, y % F_R, salt])
 
 
 def receiving_leaf(m_rec: int, k_recv: int, salt: int) -> int:
-    """Compute the hiding leaf commitment Poseidon(m_rec, k_recv, salt).
+    """Compute the hiding leaf commitment Poseidon(TAG_RECEIVING, m_rec, k_recv, salt).
 
     The leaf of a private IDENTITY-REGISTRY subtree, which must bind two
     things rather than one: the Identity a Note names, and the receiving key a
@@ -145,11 +157,11 @@ def receiving_leaf(m_rec: int, k_recv: int, salt: int) -> int:
     for name, val in (("m_rec", m_rec), ("k_recv", k_recv), ("salt", salt)):
         if not isinstance(val, int) or not (1 <= val < F_R):
             raise ValueError(f"{name} must be in [1, F_R)")
-    return poseidon([m_rec, k_recv, salt])
+    return poseidon([TAG_RECEIVING, m_rec, k_recv, salt])
 
 
 def mailbox_leaf(M, pk_recv, salt: int) -> int:
-    """Compute Poseidon(M.x, M.y, pk_recv.x, pk_recv.y, salt) -- the PAYER's
+    """Compute Poseidon(TAG_MAILBOX, M.x, M.y, pk_recv.x, pk_recv.y, salt) -- the PAYER's
     view of the same association :func:`receiving_leaf` commits.
 
     Two leaves for one fact, because it has two consumers that hold different
@@ -169,7 +181,7 @@ def mailbox_leaf(M, pk_recv, salt: int) -> int:
     That is why this is a leaf and not a proof.  The alternative -- a circuit
     proving the scalar leaf's preimage in zero knowledge -- costs a
     fixed-base multiplication, a trusted setup and a Groth16 verifier inside
-    every receipt checker, to establish a fact that a fifth Poseidon input
+    every receipt checker, to establish a fact that one more Poseidon
     establishes for free.  The scalar leaf stays exactly as it is, because the
     gate's constraint budget is what forced it and this changes nothing there.
 
@@ -194,7 +206,7 @@ def mailbox_leaf(M, pk_recv, salt: int) -> int:
         raise ValueError("salt must be in [1, F_R); 0 makes the leaf deterministic")
     mx, my = point_to_words(M)
     px, py = point_to_words(pk_recv)
-    return poseidon([mx % F_R, my % F_R, px % F_R, py % F_R, salt])
+    return poseidon([TAG_MAILBOX, mx % F_R, my % F_R, px % F_R, py % F_R, salt])
 
 
 # --- Tree depths ---------------------------------------------------------- #

@@ -75,9 +75,9 @@ async function main() {
     const H2 = (a, b)        => BigInt(F.toString(poseidon([a, b])));
     const H3 = (a, b, c)     => BigInt(F.toString(poseidon([a, b, c])));
 
-    // ZERO_VALUE matches Notes.sol: keccak256("AlbertaBuck:Notes:zero") % r.
+    // ZERO_VALUE matches Notes.sol: keccak256("AlbertaBuck/Notes/Zero/v2") % r.
     const zeroValue = BigInt(ethers.keccak256(
-        ethers.toUtf8Bytes("AlbertaBuck:Notes:zero")
+        ethers.toUtf8Bytes("AlbertaBuck/Notes/Zero/v2")
     )) % FIELD_R;
     const zeros = [zeroValue];
     for (let i = 1; i < TREE_DEPTH; i++) {

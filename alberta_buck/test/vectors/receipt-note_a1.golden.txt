@@ -1,7 +1,7 @@
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  25h6gzf6vgwm
+  Receipt  pt4w6ulhpyr2
 ------------------------------------------------
 FROM (payer) (PUBLIC IDENTITY)
  Bob Smith
@@ -27,7 +27,7 @@ TRANSACTION
 ------------------------------------------------
 VERIFICATION
  status @ issue: VALID
- receipt  25h6gzf6vgwm
+ receipt  pt4w6ulhpyr2
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck       

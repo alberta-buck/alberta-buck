@@ -48,7 +48,7 @@ from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
 from alberta_buck.wallet.issuer_reenc import (
-    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify, H_POINT,
+    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify,
 )
 from alberta_buck.wallet.receipt import (
     RegisteredIdentity, Receipt, RcptResult, receipt_verify,
@@ -114,7 +114,7 @@ __all__ = [
     "id_hash_a1", "id_hash_a2", "id_hash_b1",
     "SchnorrProof", "batch_commitment", "issuer_schnorr_sign", "issuer_schnorr_verify",
     "VDProof", "verifiable_decrypt_prove", "verifiable_decrypt_verify",
-    "IssuerReencProof", "issuer_reenc_prove", "issuer_reenc_verify", "H_POINT",
+    "IssuerReencProof", "issuer_reenc_prove", "issuer_reenc_verify",
     "RegisteredIdentity", "Receipt", "RcptResult", "receipt_verify",
     "ApproveReceipt", "approve_receipt_verify",
     "PartyRecord", "TxnRecord", "ReceiptCore",

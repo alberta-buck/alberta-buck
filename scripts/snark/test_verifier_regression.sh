@@ -35,17 +35,17 @@ circom "$ROOT/circuits/identity_membership.circom" --r1cs --wasm --output "$BUIL
 PYTHONPATH="$ROOT" python3 -c "
 import json
 from alberta_buck.wallet.bn254 import G1, mul, point_to_words
-from alberta_buck.registry.tree import IdentityMerkleTree
+from alberta_buck.registry.tree import AGGREGATOR_DEPTH, IdentityMerkleTree
 from alberta_buck.wallet.poseidon import F_R
-M=mul(G1,12345); Mx,My=point_to_words(M)
-t=IdentityMerkleTree(depth=10); t.insert_identity(M); p=t.path(0)
-w={\"identityRoot\":str(p.root),\"Mx\":str(Mx%F_R),\"My\":str(My%F_R),\"pathElements\":[str(s)for s in p.siblings],\"pathIndices\":[str(b)for b in p.index_bits]}
+M=mul(G1,12345); Mx,My=point_to_words(M); salt=67890
+t=IdentityMerkleTree(depth=AGGREGATOR_DEPTH,private=True); t.insert_identity_salted(M,salt); p=t.path(0)
+w={\"identityRoot\":str(p.root),\"Mx\":str(Mx%F_R),\"My\":str(My%F_R),\"salt\":str(salt),\"pathElements\":[str(s)for s in p.siblings],\"pathIndices\":[str(b)for b in p.index_bits]}
 with open(\"$BUILD/input.json\",\"w\")as f:json.dump(w,f)
 " 2>/dev/null
 echo "  Circuit compiled + witness generated"
 
 # groth16 setup (non-deterministic delta — but full pipeline is atomic)
-"$SNARKJS" g16s "$BUILD/identity_membership.r1cs" "$ROOT/build/snark/ptau/pot13_final.ptau" "$BUILD/z.zkey" -v 2>/dev/null
+"$SNARKJS" g16s "$BUILD/identity_membership.r1cs" "$ROOT/build/snark/ptau/pot15_final.ptau" "$BUILD/z.zkey" -v 2>/dev/null
 echo "fixed-entropy" | "$SNARKJS" zkc "$BUILD/z.zkey" "$BUILD/z1.zkey" --name=regression -v 2>/dev/null
 "$SNARKJS" zkev "$BUILD/z1.zkey" "$BUILD/vk.json" 2>/dev/null
 

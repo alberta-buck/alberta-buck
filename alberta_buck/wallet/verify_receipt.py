@@ -19,12 +19,13 @@ itself, recomputes the Identity-M ``idHash`` from the embedded note payload
 * note-a1:  idHash == id_hash_a1(eNote, m_iss, sigma_R, sigma_s);
   Dec(eNote, m_rec) == v·G and Dec(eRec, m_rec) == M_rec — both parties bound
   into the leaf (only the addressed identity satisfies the eNote relation).
-* note-a2:  idHash == id_hash_a2(eNote, eIss); Dec(eNote, m_rec) == v·G;
-  Dec(eIss, m_rec) == the named issuer M — which algebraically forces eIss's
-  key to BE M_rec (the coupling) — and the mint's issuer_reenc binding proves
-  eIss re-encrypts the issuer's *registered* credential (anti-framing).
-  Without a binding the receipt still verifies but is stamped
-  UNVERIFIED ISSUER.
+* note-a2:  idHash == id_hash_a2(eNote, eIss, T); the addressed legs open
+  eNote to v·G and eIss to the named issuer M under pkRecv; the mint's
+  issuer_reenc binding proves eIss re-encrypts the issuer's *registered*
+  credential (anti-framing); and M == C_iss - T + gamma·H ties that
+  credential's plaintext to the named M, so a minter cannot key eIss to open
+  to a sock puppet.  Without a binding the receipt still verifies but is
+  stamped UNVERIFIED ISSUER.
 
 All flavors use the unified spend nullifier ``Poseidon3(rho, idHash, 4242)``
 (the shipped spend.circom tag) anchored at the ``SpentCoupled*`` event.
@@ -35,11 +36,12 @@ embedded ``pk`` / ``E_addr`` and event references from a node.
 
 from __future__ import annotations
 
-from alberta_buck.wallet.bn254 import G1, mul, add, neg, eq
+from alberta_buck.wallet.bn254 import G1, ORDER, mul, add, neg, eq
 from alberta_buck.wallet.elgamal import (
     ElGamalCiphertext, elgamal_decrypt, elgamal_encrypt,
 )
 from alberta_buck.registry.tree import mailbox_leaf
+from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.poseidon import poseidon
 from alberta_buck.wallet.issuer_reenc import IssuerReencProof, issuer_reenc_verify
 from alberta_buck.wallet.identity import identity_scalar
@@ -334,9 +336,11 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
                 M_id, id_key = core.payee.M_pt, "vdRec"
             else:
                 eId = _ct_from_hex(np["eIss"])
-                if id_hash_a2(eNote, eId) != opening.id_hash:
+                if "T" not in np:
+                    return RcptResult(False, None, None, "note-a2: missing T")
+                if id_hash_a2(eNote, eId, _g1_from_hex(np["T"])) != opening.id_hash:
                     return RcptResult(False, None, None,
-                                      "note-a2: idHash != id_hash_a2(eNote, eIss)")
+                                      "note-a2: idHash != id_hash_a2(eNote, eIss, T)")
                 M_id, id_key = core.payer.M_pt, "vdIss"
 
             # The addressed legs are keyed to a MAILBOX, not to an Identity.
@@ -386,10 +390,21 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
                 E_reg = core.payer.E_addr_ct
                 if E_reg is None:
                     return RcptResult(False, None, None, "note-a2: issuer E_addr missing")
-                if not issuer_reenc_verify(core.payer.pk_pt, E_reg,
-                                           _ct_from_hex(np["eIss"]),
+                eIss = _ct_from_hex(np["eIss"])
+                if not issuer_reenc_verify(core.payer.pk_pt, E_reg, eIss,
                                            binding, core.payer.addr_int, core.chainid):
                     return RcptResult(False, None, None, "note-a2: issuer binding fails")
+                # The binding speaks of the T the leaf committed, and gamma opens
+                # it: C_iss - T + gamma*H is the credential's plaintext, which
+                # must be the Identity this receipt names.
+                if not eq(binding.T, _g1_from_hex(np["T"])):
+                    return RcptResult(False, None, None, "note-a2: binding T != committed T")
+                if "gamma" not in np:
+                    return RcptResult(False, None, None, "note-a2: binding carried without gamma")
+                named = add(add(eIss.C, neg(binding.T)), mul(H_PEDERSEN, _h(np["gamma"]) % ORDER))
+                if not eq(named, core.payer.M_pt):
+                    return RcptResult(False, None, None,
+                                      "note-a2: the binding's Identity is not the named issuer")
             # else: accept; UNVERIFIED ISSUER banner set below.
 
         # (d) Spend anchor: the unified 4242 nullifier + the paid face.

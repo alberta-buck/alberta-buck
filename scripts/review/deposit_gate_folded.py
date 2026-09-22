@@ -2,7 +2,7 @@
 import random
 from alberta_buck.wallet.bn254 import G1, ORDER, mul, add, neg, eq, rand_scalar, point_to_words
 from alberta_buck.wallet.elgamal import elgamal_encrypt
-from alberta_buck.wallet.issuer_reenc import H_POINT as H
+from alberta_buck.review.known_log import H_KNOWN as H
 from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.registry.tree import IdentityMerkleTree

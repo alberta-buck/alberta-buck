@@ -68,9 +68,9 @@ contract Notes {
     /// @notice Field element each empty leaf hashes to.  Hard-coded to match
     ///         the circuit's ZERO_VALUE() literal -- changing one without the
     ///         other breaks the in-circuit Merkle insertion.  Computed as
-    ///         `keccak256("AlbertaBuck:Notes:zero") % FIELD_R`.
+    ///         `keccak256("AlbertaBuck/Notes/Zero/v2") % FIELD_R`.
     uint256 public constant ZERO_VALUE =
-        12478158023141672556814566805819277863195393802640872128727997243357085450959;
+        460097596457234765974707969191747880107513410278794739541636231580225950866;
 
     /// @notice Empty-tree root: 20 levels of self-paired ZERO_VALUE.  The
     ///         constructor seeds `roots[0]` to this so a freshly-deployed
@@ -78,7 +78,7 @@ contract Notes {
     ///         check.  Computed off-chain from the same Poseidon-2 chain the
     ///         circuit uses; pinned literal here keeps the constructor pure.
     uint256 public constant EMPTY_ROOT =
-        6959478139657271248173638342125700921600510448444968095526832403890386862787;
+        6356158094200644324551957783828547278843291898127006657250053394249012399487;
 
     /// @notice Per-leaf issuer-mode labels, mirrored from the mint circuit's
     ///         `issuerMode` output (circuits/mint_batch.circom).  A leaf is
@@ -462,30 +462,31 @@ contract Notes {
     }
 
     /// @notice Mint a PRIVATE-issuer (A2) batch with the collusion-resistant
-    ///         per-leaf eIss leaf-tie.  Every leaf must be PRIVATE-mode
+    ///         per-leaf leaf-tie.  Every leaf must be PRIVATE-mode
     ///         (issuerMode[i] == MODE_PRIVATE); `msg.sender` must be a registered
     ///         PRIVATE Identity and supply exactly one A2 re-encryption binding
     ///         per committed leaf.  The proof is verified by the *A2* mint
     ///         circuit (mint_batch_a2), which constrains every leaf to flavor ==
-    ///         A2 and exposes each leaf's committed `eIss` as a public output; we
-    ///         pass the bindings' `eIss` as that public input, so a Groth16
-    ///         accept proves each binding's `eIss` *is* the committed leaf's --
-    ///         the leaf-tie that closes the floating-/missing-binding collusion
-    ///         sub-cases (per-batch count alone could not).
+    ///         A2 and exposes each leaf's committed `eIss` and `T` as public
+    ///         outputs; we pass the bindings' `eIss` and `proof.T` as those
+    ///         public inputs, so a Groth16 accept proves each binding answers
+    ///         for exactly the leaf it claims -- the leaf-tie that closes the
+    ///         floating-/missing-binding collusion sub-cases (per-batch count
+    ///         alone could not).
     ///
-    /// @dev    What the leaf-tie does and does NOT close.  It binds each
-    ///         committed leaf to a *verified* re-encryption of the issuer's
-    ///         registered Identity, so no leaf is left without a binding and no
-    ///         binding can float to a different leaf.  It does NOT force the
-    ///         binding's `pk_rec` to be the addressed recipient's registered key
-    ///         (verifyIssuerReenc binds `eIss` to the key committed in the
-    ///         proof's `Q`, which the issuer chooses); a colluding issuer+
-    ///         recipient can still encrypt `eIss` under a throwaway key, leaving
-    ///         the issuer un-nameable while the note stays spendable.  Closing
-    ///         that residual hole needs the eNote<->eIss recipient-key coupling
-    ///         at mint -- see alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 issuer binding at mint) ("The A2
-    ///         recipient-key coupling gap").  issuerMode here is a caller-facing
-    ///         assertion (the A2 circuit independently constrains flavor == A2).
+    /// @dev    What the leaf-tie closes here, and what the spend closes.  It
+    ///         binds each committed leaf to a *verified* re-encryption of the
+    ///         issuer's registered Identity, so no leaf is left without a
+    ///         binding and no binding can float to a different leaf.  The
+    ///         binding speaks of the key hidden in its `Q`, which the issuer
+    ///         chooses, and an ElGamal ciphertext does not bind its plaintext to
+    ///         one key.  So the leaf also commits the binding's
+    ///         `T = r'*pk + gamma*H`, and the A2 deposit fold proves `T` opens
+    ///         under the spender's own key: a note keyed so that the recipient
+    ///         reads someone other than its minter never spends
+    ///         (doc/review/notes-receiving-key.org, section 4.6).  issuerMode
+    ///         here is a caller-facing assertion (the A2 circuit independently
+    ///         constrains flavor == A2).
     function mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -505,16 +506,20 @@ contract Notes {
                 "Notes: private-mode leaf needs private issuer");
         require(a2Bindings.length == nPrivate, "Notes: A2 binding count");
 
-        // Leaf-tie: the bindings' eIss are the A2 circuit's public inputs, so a
-        // valid proof ties each committed leaf to the binding answering for it.
+        // Leaf-tie: the bindings' eIss and T are the A2 circuit's public
+        // inputs, so a valid proof ties each committed leaf to the binding
+        // answering for it.
         uint256[4][] memory eIss = new uint256[4][](a2Bindings.length);
+        uint256[2][] memory T    = new uint256[2][](a2Bindings.length);
         for (uint256 i = 0; i < a2Bindings.length; i++) {
             eIss[i][0] = a2Bindings[i].eIss.R.X;
             eIss[i][1] = a2Bindings[i].eIss.R.Y;
             eIss[i][2] = a2Bindings[i].eIss.C.X;
             eIss[i][3] = a2Bindings[i].eIss.C.Y;
+            T[i][0]    = a2Bindings[i].proof.T.X;
+            T[i][1]    = a2Bindings[i].proof.T.Y;
         }
-        _verifyA2MintOrRevert(proof, eIss, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        _verifyA2MintOrRevert(proof, eIss, T, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
 
         // Each committed eIss must carry a valid re-encryption of the issuer's
         // registered Identity (soundness of the binding itself).
@@ -572,16 +577,17 @@ contract Notes {
     }
 
     /// @dev A2 mint pre-flight: the same stale-state guards as
-    ///      `_verifyMintOrRevert`, plus the per-leaf `eIss` canonical bound, then
-    ///      the A2 Groth16 check.  `eIss` is the per-leaf E_iss-for-rec the
-    ///      bindings carry; passing it as the A2 circuit's public input makes the
-    ///      verifier's accept the leaf-tie (the circuit exposes the *committed*
-    ///      leaf's eIss, so equality with what we pass is a constraint, not a
-    ///      contract-side compare).  View-only -- reverts here abort before BUCK
-    ///      moves or tree state advances.
+    ///      `_verifyMintOrRevert`, plus the per-leaf `eIss` and `T` canonical
+    ///      bounds, then the A2 Groth16 check.  `eIss` and `T` are what the
+    ///      bindings carry; passing them as the A2 circuit's public inputs makes
+    ///      the verifier's accept the leaf-tie (the circuit exposes the
+    ///      *committed* leaf's, so equality with what we pass is a constraint,
+    ///      not a contract-side compare).  View-only -- reverts here abort
+    ///      before BUCK moves or tree state advances.
     function _verifyA2MintOrRevert(
         bytes   calldata proof,
         uint256[4][] memory eIss,
+        uint256[2][] memory T,
         uint256          oldRoot,
         uint256          newRoot,
         uint32           nextLeafIndex_,
@@ -609,11 +615,12 @@ contract Notes {
             require(eIss[i][0] < FIELD_R && eIss[i][1] < FIELD_R
                  && eIss[i][2] < FIELD_R && eIss[i][3] < FIELD_R,
                     "Notes: eIss out of field");
+            require(T[i][0] < FIELD_R && T[i][1] < FIELD_R, "Notes: T out of field");
         }
 
         require(
             a2MintVerifier.verifyMint(
-                proof, eIss, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
+                proof, eIss, T, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
             ),
             "Notes: bad mint proof"
         );

@@ -105,15 +105,15 @@ fn sanity_curve_and_hashes() {
         hex_w("0x090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b")
     );
 
-    // H = keccak("AlbertaBuck:IssuerReenc:H") % ORDER * G1
-    let h = issuer_reenc::h_point();
+    // H_PEDERSEN = hash_to_curve("AlbertaBuck/Pedersen/H/v2"), the Python reference's point
+    let h = nums::h_pedersen();
     assert_eq!(
         h.0,
-        hex_w("0x0f03161ff2a1eed34df6d415ebfa0953650cf9dcf990a3de0d3d0391cdb49a72")
+        hex_w("0x0a348afa1b7f9d733f1859da101a77b2eb9b8cb66c00f5ffc3f8cd384de9f862")
     );
     assert_eq!(
         h.1,
-        hex_w("0x077495eb98a6c0255d2ac55185d2865871aec4ad871e1bdaf831ae58a8bb44f4")
+        hex_w("0x1e8103c6fd7743dde39c36379e3a19b80e6bc98a989c6df8786da5c9bedecd42")
     );
 
     // e(G1, G2) * e(-G1, G2) == 1
@@ -801,7 +801,7 @@ fn kernel_vectors_replay() {
         jw(&nt["id_hash_a1"])
     );
     assert_eq!(
-        notes::id_hash_a2(&jct(&nt["eNote"]), &jct(&nt["eIss"])).unwrap(),
+        notes::id_hash_a2(&jct(&nt["eNote"]), &jct(&nt["eIss"]), &jg1(&nt["T"])).unwrap(),
         jw(&nt["id_hash_a2"])
     );
     let op = &nt["opening"];

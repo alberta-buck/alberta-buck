@@ -21,6 +21,7 @@
 use serde_json::{json, Value};
 
 use buck_identity::notes::{identity_leaf_salted, receiving_leaf, NULLIFIER_TAG_B};
+use buck_identity::nums::h_pedersen;
 use buck_identity::poseidon::poseidon;
 use buck_identity::{
     fr_mod, g1_add, g1_generator, g1_mul, g1_neg, reduce_mod_order, w_from_fr,
@@ -208,6 +209,9 @@ pub fn deposit_fold_a1_witness(
 /// doubling and the negation together.  Relation (5): that Identity is itself
 /// registered, under the salt of the issuer's naming association.
 #[allow(clippy::too_many_arguments)]
+/// `t` is the mint binding's `T`, which `idHash` commits, and `gamma` its blind:
+/// the key tie `T = rm*G + gamma*H` says the binding's key is the spender's own.
+#[allow(clippy::too_many_arguments)]
 pub fn deposit_fold_a2_witness(
     c: &FoldCommon,
     e_note: &Ctw,
@@ -215,6 +219,8 @@ pub fn deposit_fold_a2_witness(
     r_prime: &W256,
     salt_iss: &W256,
     iss_path: Path,
+    t: &G1w,
+    gamma: &W256,
 ) -> Result<Value> {
     // What k decrypts the spend's re-encryption to: the issuer Identity.
     let m_i = g1_add(&c.e_enc.1, &g1_neg(&g1_mul(&c.e_enc.0, c.k)?)?)?;
@@ -226,6 +232,12 @@ pub fn deposit_fold_a2_witness(
     require(e_iss.1 == g1_add(&m_i, &rm_g)?, "eIss.C != M_I + rm*G")?;
     require(c.e_enc.0 == g(c.t)?, "eEnc.R != t*G")?;
     require(c.e_enc.1 == g1_add(&m_i, &tk_g)?, "eEnc.C != M_I + tk*G")?;
+    let gamma = reduce_mod_order(gamma);
+    let g_h = g1_mul(&h_pedersen(), &gamma)?;
+    require(
+        *t == g1_add(&rm_g, &g_h)?,
+        "T != rm*G + gamma*H (keyed to another mailbox)",
+    )?;
     let mx = reduce_mod_order(&m_i.0);
     require(
         mx != reduce_mod_order(&rm_g.0),
@@ -235,6 +247,11 @@ pub fn deposit_fold_a2_witness(
     require(
         mx != reduce_mod_order(&tk_g.0),
         "eEnc.C: the addends share an x-coordinate mod F_R, so the incomplete addition \
+         would land on a doubling or the identity",
+    )?;
+    require(
+        reduce_mod_order(&rm_g.0) != reduce_mod_order(&g_h.0),
+        "T: the addends share an x-coordinate mod F_R, so the incomplete addition \
          would land on a doubling or the identity",
     )?;
     let cd = check_account_and_leaf(c, "E_dep.C != cd*G")?;
@@ -256,6 +273,7 @@ pub fn deposit_fold_a2_witness(
         ("idHash", dec_fr(c.id_hash)),
         ("eNote", ct4(e_note)),
         ("eIss0", ct4(e_iss)),
+        ("T", json!([dec_fr(&t.0), dec_fr(&t.1)])),
         ("r", limbs(&reduce_mod_order(r_prime))),
         ("k_recv", limbs(&reduce_mod_order(c.k))),
         ("rm", limbs(&rm)),
@@ -265,6 +283,7 @@ pub fn deposit_fold_a2_witness(
         ("sk_dep", limbs(&reduce_mod_order(c.sk_dep))),
         ("r_E", limbs(&reduce_mod_order(c.r_e))),
         ("cd", limbs(&cd)),
+        ("gamma", limbs(&gamma)),
         ("MI", json!([limbs(&m_i.0), limbs(&m_i.1)])),
         ("salt", dec(c.salt)),
         ("saltIss", dec(salt_iss)),

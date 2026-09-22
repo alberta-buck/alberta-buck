@@ -52,13 +52,13 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // ---- ZERO_VALUE ------------------------------------------------------------
 //
 // Mirrored from src/Notes.sol:
-//   ZERO_VALUE = uint256(keccak256("AlbertaBuck:Notes:zero")) % FIELD_R
+//   ZERO_VALUE = uint256(keccak256("AlbertaBuck/Notes/Zero/v2")) % FIELD_R
 // We harden the constant by computing it in the wallet and asserting on-chain
 // equality, but the circuit needs the literal here.  Recompute with:
-//   node -e 'console.log((BigInt(require("ethers").keccak256(require("ethers").toUtf8Bytes("AlbertaBuck:Notes:zero"))) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n).toString())'
-// -> 12478158023141672556814566805819277863195393802640872128727997243357085450959
+//   node -e 'console.log((BigInt(require("ethers").keccak256(require("ethers").toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"))) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n).toString())'
+// -> 460097596457234765974707969191747880107513410278794739541636231580225950866
 function ZERO_VALUE() {
-    return 12478158023141672556814566805819277863195393802640872128727997243357085450959;
+    return 460097596457234765974707969191747880107513410278794739541636231580225950866;
 }
 
 // One Tornado-style insertion step at a single tree level.  Given the rolling

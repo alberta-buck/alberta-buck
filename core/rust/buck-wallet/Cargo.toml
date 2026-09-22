@@ -1,7 +1,7 @@
 [package]
 # Published as alberta-buck-wallet; imported as buck_wallet.
 name = "alberta-buck-wallet"
-description = "Alberta Buck wallet kernel: canonical identity JSON, the AB-RCPT/1 envelope, receipt build/verify and the Notes flows matching the alberta_buck.wallet reference bit-for-bit"
+description = "Alberta Buck wallet kernel: canonical identity JSON, the AB-RCPT/2 envelope, receipt build/verify and the Notes flows matching the alberta_buck.wallet reference bit-for-bit"
 keywords = ["wallet", "receipt", "privacy", "ethereum", "stablecoin"]
 categories = ["cryptography::cryptocurrencies", "finance"]
 version.workspace = true

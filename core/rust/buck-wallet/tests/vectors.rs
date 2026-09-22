@@ -401,6 +401,8 @@ fn receipts_replay() {
                     txn["mint_txhash"].as_str().unwrap(),
                     txn["mint_block"].as_u64().unwrap(),
                     binding.as_ref(),
+                    &jg1(&mint["binding"]["T"]),
+                    Some(&jw(&mint["nonces"]["gamma"])),
                     role,
                     Some(&payee.sk),
                     Some(&payee.e),
@@ -464,6 +466,7 @@ fn unilateral_a2_replay() {
     assert_eq!(minted.cm, jw(&m["cm"]));
     assert_eq!(minted.opening, jopening(&m["opening"]));
     assert_eq!(minted.binding, jbinding(&m["binding"]));
+    assert_eq!(minted.gamma, jw(&m["gamma"]));
 
     // The registry-tree state and the receipt.
     let leaves: Vec<W256> = u["tree"]["leaves"].as_array().unwrap().iter().map(jw).collect();
@@ -493,6 +496,7 @@ fn unilateral_a2_replay() {
     assert_eq!(rcpt.vd.s, jw(&r["vd"]["s"]));
     assert_eq!(rcpt.vd.t1, jg1(&r["vd"]["T1"]));
     assert_eq!(rcpt.vd.t2, jg1(&r["vd"]["T2"]));
+    assert_eq!(rcpt.gamma, jw(&r["gamma"]));
     assert_eq!(rcpt.m_i_member, r["M_I_member"].as_bool().unwrap());
     assert_eq!(rcpt.m_rec_member, r["M_rec_member"].as_bool().unwrap());
 
