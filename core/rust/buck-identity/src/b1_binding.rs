@@ -56,7 +56,8 @@ fn transcript(
         .p(a_p)
         .p(p_dep)
         .w(account)
-        .w(chainid);
+        .w(chainid)
+        .w(&crate::domains::word(crate::domains::FS_DEPOSITOR_BINDING));
     t
 }
 

@@ -84,8 +84,10 @@ __all__ = [
 # Domain separator, so a receiving secret can never collide with another value
 # the wallet derives from the same seed (an identity scalar, an account key, a
 # salt).  Distinct domains are what let one seed hold every secret safely.
-RECV_DOMAIN = b"AlbertaBuck/Notes/ReceivingKey/v1"
-WRAP_DOMAIN = b"AlbertaBuck/Notes/PayloadWrap/v1"
+from alberta_buck.wallet.domains import (
+    NOTES_RECEIVING_KEY as RECV_DOMAIN,
+    NOTES_PAYLOAD_WRAP as WRAP_DOMAIN,
+)
 
 
 # --------------------------------------------------------------------------- #

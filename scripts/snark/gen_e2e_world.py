@@ -419,7 +419,7 @@ def build_world(flavor: str):
         # The two wallets, in full -- canonical KYC preimages, identity
         # scalars, and account keys.  TEST identities (the same published
         # Alice/Bob the canonical identity.json vectors commit), retained so
-        # the AB-RCPT/1 receipt layer can be exercised over this exact
+        # the AB-RCPT/2 receipt layer can be exercised over this exact
         # real-proof world (test_receipt_e2e.py and the executable receipt
         # document) -- the receipts' point->human bridge needs the preimages,
         # and the role-dependent self-naming proofs need the account secrets.
@@ -446,7 +446,7 @@ def build_world(flavor: str):
             },
         },
         # The Identity-M note payload (the idHash preimage material) that
-        # travels off chain with the note -- exactly what an AB-RCPT/1
+        # travels off chain with the note -- exactly what an AB-RCPT/2
         # receipt's `note` record conveys.  (B1's eDepForIss is spend-side
         # material and lives in sigma.eDepForIss.)
         "notePayload": note_payload,

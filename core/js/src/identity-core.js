@@ -23,7 +23,7 @@ export const big = (s) => BigInt(s);
 
 /** THE canonical JSON dialect: sorted keys, compact separators, raw
  *  UTF-8 -- byte-identical to Python's canonical_json(), shared by the
- *  identity preimage (canonical_identity_data) and the AB-RCPT/1 receipt
+ *  identity preimage (canonical_identity_data) and the AB-RCPT/2 receipt
  *  core.  Values must be strings and integers (floats are not canonical).
  *  JSON.stringify emits this natively once keys are sorted. */
 export function canonicalIdentity(fields) {

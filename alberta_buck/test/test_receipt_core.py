@@ -1,4 +1,4 @@
-"""End-to-end tests for the AB-RCPT/1 receipt core — build, serialize,
+"""End-to-end tests for the AB-RCPT/2 receipt core — build, serialize,
 re-parse, re-verify for all receipt kinds, from BOTH Note parties' sides.
 
 Round-trip: build_* → serialize_core → canonical bytes → deserialize_core →
@@ -335,7 +335,7 @@ def test_envelope_roundtrip(vectors, parties, kind):
     b = serialize_core(core)
 
     env = envelope_text(b)
-    assert env.startswith("AB-RCPT/1.")
+    assert env.startswith("AB-RCPT/2.")
     assert env.strip().endswith(".END")
     assert parse_envelope(env) == b
 
@@ -349,7 +349,7 @@ def test_parse_envelope_rejects_missing_header():
 
 def test_parse_envelope_rejects_missing_footer():
     with pytest.raises(ValueError, match="footer"):
-        parse_envelope("AB-RCPT/1.\nZm9v\n")
+        parse_envelope("AB-RCPT/2.\nZm9v\n")
 
 
 # ---- verify the vector-emitted envelopes parse and verify -------------------

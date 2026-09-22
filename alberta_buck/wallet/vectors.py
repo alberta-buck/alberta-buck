@@ -309,7 +309,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         "notes":    "0x" + "70" * 20,
     }
 
-    # Stream-preservation: the original (account-key) AB-RCPT/1 cores were
+    # Stream-preservation: the original (account-key) AB-RCPT/2 cores were
     # built here and consumed exactly 17 scalars (five payee-vd nonces, the
     # A1 cms/sig draws, and the A2 r/gamma/binding draws).  The Identity-M
     # receipt cores are now built AFTER the issuer_reenc (a2b) section below,
@@ -334,7 +334,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         BOB_ADDR, CHAINID, rng=rng,
     )
 
-    # ---- AB-RCPT/1 Identity-M receipt cores ---------------------------------
+    # ---- AB-RCPT/2 Identity-M receipt cores ---------------------------------
     #
     # The receipt envelopes for all five kinds, plus the issuer-side ("I paid
     # X") variants of the three Note flavors -- both Note parties hold the

@@ -124,7 +124,7 @@ def test_a_receiving_secret_out_of_range_is_refused(bad):
 
 def test_domain_separation_is_stable():
     """Pinned: changing it silently invalidates every wallet's derived key."""
-    assert RECV_DOMAIN == b"AlbertaBuck/Notes/ReceivingKey/v1"
+    assert RECV_DOMAIN == b"AlbertaBuck/Notes/ReceivingKey/v2"
 
 
 # -------------------------------------------------------- the scan, and its absence

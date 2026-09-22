@@ -58,7 +58,9 @@ fn transcript(
     for p in pts {
         t.p(p);
     }
-    t.w(issuer).w(chainid);
+    t.w(issuer)
+        .w(chainid)
+        .w(&crate::domains::word(crate::domains::FS_ISSUER_REENC));
     t
 }
 

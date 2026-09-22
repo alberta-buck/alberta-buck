@@ -28,7 +28,8 @@ fn transcript(
     chainid: &W256,
 ) -> Transcript {
     let mut t = Transcript::new();
-    t.p(e_r).p(e_c).p(pk).p(m).p(t1).p(t2).w(account).w(chainid);
+    t.p(e_r).p(e_c).p(pk).p(m).p(t1).p(t2).w(account).w(chainid)
+        .w(&crate::domains::word(crate::domains::FS_VERIFIABLE_DECRYPT));
     t
 }
 

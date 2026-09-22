@@ -909,22 +909,88 @@ identity scalar.*
     JavaScript wallet that must read a note needs =wrap_mask= ported, and the
     kernel vectors are where that port gets pinned.
 
-*Landing 3: close the A2 split ([[#split][4.6]]).  Two ceremonies, one
-regeneration.*
+*What remains before this branch merges into =feature/paper-editing=.*
+Decided 2026-09-22: the protocol and its papers are *v2*, and every hash the
+protocol relies on carries a v2 domain tag.  Nothing is deployed, so no
+earlier version needs to stay verifiable.  The remaining work is sequenced so
+each trusted setup runs once and each vector regenerates as few times as
+possible.
 
-15. =issuer_reenc= L3/L5 blind \( \gamma \) on \( H_{PEDERSEN} \) instead of
-    \( G \), in the sigma and in =verifyIssuerReenc=.
-16. =idHash_a2= commits \( T \); the six =mint_batch_a2_n*= circuits and their
-    generated verifiers are rebuilt (small -- about 6K R1CS per leaf).
-17. =deposit_fold_a2= gains =ScalarMulHP(gamma)= and the check
-    \( T = rm \cdot G + \gamma H_{PED} \): 3,813,157 constraints, inside
-    =pot22=, one full setup.
-18. Then the A2 fixtures, the mint fixtures pinned to them, and
-    =verify_receipt='s \( M_{named} = C_i - T + \gamma H_{PED} \).
-19. *The security argument*, which is blocked on 15-18 and not only on the
-    missing rewrite: =alberta-buck-proofs.org= Theorems 7 and 8 state
-    encryption under the identity point and soundness of the coupling sigma,
-    and the A2 naming theorem is FALSE of the code until the tie lands.
+The v2 tag convention:
+
+- Every tag reads =AlbertaBuck/<Area>/<Name>/v2=: slash-separated, version
+  last, one protocol version rather than a revision count per primitive.
+- A Fiat-Shamir transcript contains exactly one domain word,
+  =uint256(keccak256(tag))=, as its FINAL word -- the position the
+  registration transcript already uses, so =BN254.fsChallenge= and
+  =keccak_scalar= need no change.
+- Derived keys, masks, salts and generators hash the tag as bytes ahead of
+  their payload.
+- Poseidon commitments (accumulator leaves, the Notes tree) take a leading
+  field-element tag, =keccak(tag) mod F_R=.  These are baked into circuits, so
+  they move in step C.
+- Wire formats carry the version in their header: =AB-RCPT/2=.
+
+*A. v2 tags that need no trusted setup.*
+16. Rename =Register/v3=, =ContractBinding{Authorization,Control}:v1=,
+    =Accumulator/Salt/v1=, =Notes/{ReceivingKey,PayloadWrap}/v1= and the test
+    vectors' wallet-seed tag to the convention.
+17. Tag the five transcripts that carry NONE today -- the issuer batch
+    Schnorr, verifiable decryption, the approve Chaum-Pedersen, the A2 mint
+    binding and the B1 depositor binding.  Each hashes points, an account and
+    a chain id, and nothing that names the protocol, so a transcript of one
+    is structurally a candidate transcript of another.
+18. Tag the identity scalar: =m = keccak(tag || canonical record)=.  It is the
+    one hash in the system that maps a PERSON into the group, and it is the
+    one most worth keeping out of any other protocol's range.
+19. =AB-RCPT/1= becomes =AB-RCPT/2=: landing 2 changed the envelope's
+    addressed legs incompatibly.
+20. Regenerate every vector, the simulator's identity cache, the e2e
+    fixtures and the =NotesA2Tie= mint fixture, all by re-proving against the
+    existing keys.
+
+*B. Notes in the Rust/JS kernel.*
+21. Port the receiving key -- derivation, the payload wrap, the mailbox
+    binding -- and the folded gate's clear-text check and circuit-witness
+    builders, so a Rust or JavaScript wallet can mint, deliver, open and
+    spend a note.  Pinned by the kernel vectors, exposed through both
+    bindings.
+22. Retire the deposit-coupling sigma from the wallet in every backend: it
+    left the chain in landing 1 and survives only in the kernels.
+
+*C. The ceremony round: close the A2 split, and the v2 tags inside circuits.*
+23. The A2 closure of [[#split][4.6]]: =issuer_reenc= blinds both =Q= and
+    =T= on \( H_{PEDERSEN} \), which retires =H_POINT= entirely;
+    =idHash_a2= commits =T=; the A2 fold adds =ScalarMulHP(gamma)= and the tie
+    check; =verify_receipt= checks \( M_{named} = C_i - T + \gamma H_{PED} \).
+24. The leaf functions take a leading tag.  Today =identity_leaf_salted(M, s)=
+    and =receiving_leaf(m, k, s)= are both a three-input Poseidon, so
+    =receiving_leaf(M.x, M.y, s)= IS a salted identity leaf: one accumulator
+    value belongs to two leaf kinds.  Not exploitable -- the fold's relation (2)
+    pins =m= to a certified identity scalar, and no certified scalar is a
+    point's x-coordinate -- but a collision between leaf kinds is exactly what
+    domain separation exists to rule out, and every gate hashes a leaf.
+25. =H_PEDERSEN= is re-derived under =AlbertaBuck/Pedersen/H/v2=, and the
+    Notes tree's zero under =AlbertaBuck/Notes/Zero/v2=.
+26. One setup each: the A1 fold, the A2 fold, the B1 membership circuit, and
+    all twelve batch-mint circuits.  Then the fixtures, and the Rust port of
+    what changed.
+
+*D. Accumulator phase 4 (Solidity).*  The root authority and policy, and
+=BuckCredit='s attestation entry point with its per-credit check
+([[file:accumulator-plan.org][the plan]], phase 4).
+
+*E. Accumulator phase 5.*  The regulator, attribute and aggregator services in
+Rust and JavaScript, with their vectors.
+
+*F. Documents, last, because they describe everything above and re-execute
+once.*  Every =alberta-buck*.org= paper at v2; the accumulator sections the
+plan's phase 6 names; and =alberta-buck-proofs.org= Part IV rewritten for the
+folded gates.  The security argument can only be stated after C: until the A2
+tie lands, its naming clause is false of the code.
+
+Then merge.  Real ceremonies precede any deployment and are not part of this
+branch.
 
 Traps worth naming, because each cost a run or an hour:
 

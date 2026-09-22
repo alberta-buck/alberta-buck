@@ -1,6 +1,6 @@
 //! Typed accessors over the receipt-core JSON tree.
 //!
-//! The AB-RCPT/1 core is a canonical JSON map; the verifiers walk it the
+//! The AB-RCPT/2 core is a canonical JSON map; the verifiers walk it the
 //! way the Python reference walks its dicts.  These helpers convert the
 //! wallet's standard shapes -- `"0x..."` hex words, `{"x","y"}` G1
 //! points, `{"R","C"}` ciphertexts -- with kernel errors on anything

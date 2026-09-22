@@ -4,7 +4,7 @@ Emits ``core/vectors/wallet-kernel-vectors.json`` from the pure-Python
 reference path (``BUCK_IDENTITY_BACKEND=py``) so the Rust (``cargo``),
 Python (``pytest``) and JS (``node --test``) suites can replay the
 `buck-wallet` crate's surface bit-identically: THE canonical JSON
-dialect, the AB-RCPT/1 envelope (receipt ids, wrapping, parsing), every
+dialect, the AB-RCPT/2 envelope (receipt ids, wrapping, parsing), every
 receipt-core builder for all five kinds from both generating sides, the
 tier-1 verifier (positive, tampered and UNVERIFIED-ISSUER rows), the
 unilateral A1/A2 flows, and the credential-issuer ceremony.
@@ -125,7 +125,7 @@ def _party(name: str, fields: Dict[str, Any], addr: int, draw) -> Dict[str, Any]
     # the identity: a reading key recoverable from a disclosed record is a
     # reading key everyone holding the record already has.
     wallet_seed = int.from_bytes(
-        keccak_raw(b"AlbertaBuck/Vectors/WalletSeed/v1:" + name.encode()), "big"
+        keccak_raw(b"AlbertaBuck/Vectors/WalletSeed/v2:" + name.encode()), "big"
     ) % ORDER or 1
     k_recv, pk_recv = receiving_key(wallet_seed)
     return {

@@ -6,7 +6,7 @@ Two pieces:
 * :class:`E2EFixture` -- loads one ``alberta_buck/test/vectors/e2e/{a1,a2,
   b1}.json`` world (built by scripts/snark/gen_e2e_fixtures.sh: REAL Groth16
   proofs at every gate, REAL named identities -- the canonical Alice/Bob KYC
-  data) into wallet objects, and builds the AB-RCPT/1 receipt for either
+  data) into wallet objects, and builds the AB-RCPT/2 receipt for either
   party over it.  The fixtures are package data, so this layer works from a
   venv-installed wheel with no repo checkout.
 
@@ -202,7 +202,7 @@ class E2EFixture:
     def build_receipt(self, role: str, contracts: Dict[str, str],
                       mint: Dict[str, Any], spend: Dict[str, Any],
                       notes: Optional[List[str]] = None, rng=None):
-        """Build this world's AB-RCPT/1 :class:`ReceiptCore` from either side.
+        """Build this world's AB-RCPT/2 :class:`ReceiptCore` from either side.
 
         ``mint`` carries the Minted anchor (``txhash``, ``block``); ``spend``
         the SpentCoupled* anchor (``txhash``, ``block``, ``logindex``,

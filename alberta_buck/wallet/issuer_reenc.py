@@ -73,6 +73,7 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.transcript import keccak_scalar, keccak_raw
+from alberta_buck.wallet.domains import FS_ISSUER_REENC, word as _word
 
 
 # Second generator H -- a nothing-up-my-sleeve point.  Used only to hide pk_rec
@@ -121,6 +122,7 @@ def _transcript(pk_iss, R_reg, C_reg, R_i, C_i, Q, U, T,
         words.append(y)
     words.append(issuer)
     words.append(chainid)
+    words.append(_word(FS_ISSUER_REENC))
     return keccak_scalar(*words)
 
 

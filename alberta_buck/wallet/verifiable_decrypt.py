@@ -47,6 +47,7 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.transcript import keccak_scalar
+from alberta_buck.wallet.domains import FS_VERIFIABLE_DECRYPT, word as _word
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ def _vd_transcript(E: ElGamalCiphertext, pk, M, T1, T2, account: int, chainid: i
         Mx, My,
         T1x, T1y, T2x, T2y,
         account, chainid,
+        _word(FS_VERIFIABLE_DECRYPT),
     )
 
 

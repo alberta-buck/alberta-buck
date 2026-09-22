@@ -66,6 +66,7 @@ from alberta_buck.wallet.verifiable_decrypt import (
 )
 from alberta_buck.wallet.unilateral_a2 import IdentityTree, RcptResult
 from alberta_buck.wallet.nums import H_PEDERSEN
+from alberta_buck.wallet.domains import FS_DEPOSITOR_BINDING, word as _word
 
 
 # ========================= Depositor binding ================================
@@ -106,6 +107,7 @@ def _db_transcript(pk_dep, E_dep: ElGamalCiphertext, pk_iss,
         words.append(y)
     words.append(account)
     words.append(chainid)
+    words.append(_word(FS_DEPOSITOR_BINDING))
     return keccak_scalar(*words)
 
 

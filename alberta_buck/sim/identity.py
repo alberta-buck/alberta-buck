@@ -40,7 +40,12 @@ BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
-_CACHE_SCHEMA = 5
+# Schema 6 is protocol v2: the registration transcript's domain tag and the
+# identity scalar's tag both changed, so every schema-5 proof is structurally
+# valid and cryptographically stale -- it would revert `bad FS challenge`.  The
+# bump turns those entries into misses; the cache file is left as it is, since
+# it is an append-only accumulation that no test byte-compares.
+_CACHE_SCHEMA                   = 6
 
 # ---------------------------------------------------------------------------
 # Cache management
@@ -61,7 +66,9 @@ def _valid_cache_entry(data: Any) -> bool:
     RegistrationProof grew from six to eight fields in schema 3 and to nine
     (A' presentation: C1 replaces A_ps, s_b added) in schema 5.  Treat old
     or partially-written entries as cache misses instead of handing a stale
-    tuple to web3's ABI encoder.
+    tuple to web3's ABI encoder.  Schema 6 kept the shape and changed the
+    transcript, which is why the schema number -- part of every key -- is
+    what retires those entries, not this check.
     """
     return (
         isinstance(data, list)

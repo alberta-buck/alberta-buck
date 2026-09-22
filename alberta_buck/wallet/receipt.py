@@ -1,6 +1,6 @@
 """Off-chain non-deniable-receipt verifiers for BUCK payments.
 
-Reference: alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (AB-RCPT/1 receipts as independently verifiable proofs naming the registered counterparty).  Two payment paths, two receipt shapes, one verification idiom -- a
+Reference: alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (AB-RCPT/2 receipts as independently verifiable proofs naming the registered counterparty).  Two payment paths, two receipt shapes, one verification idiom -- a
 party assembles a receipt from data they hold plus public chain state, and any
 third party re-checks it with no secret, naming the counterparty's registered
 Identity:

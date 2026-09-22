@@ -1,7 +1,7 @@
 //! THE canonical JSON dialect -- mirrors `alberta_buck/wallet/identity.py`.
 //!
 //! One dialect for every spec surface (the identity preimage, the
-//! AB-RCPT/1 receipt core): sorted keys, compact separators, raw UTF-8,
+//! AB-RCPT/2 receipt core): sorted keys, compact separators, raw UTF-8,
 //! values restricted to strings, integers, booleans and null (floats are
 //! not canonical).  This is the output `json.dumps(obj, sort_keys=True,
 //! separators=(",", ":"), ensure_ascii=False)` produces, which is also

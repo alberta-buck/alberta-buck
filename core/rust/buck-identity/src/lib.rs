@@ -29,6 +29,7 @@
 
 pub mod b1_binding;
 pub mod chaum_pedersen;
+pub mod domains;
 pub mod elgamal;
 pub mod issuer_reenc;
 pub mod keccak;

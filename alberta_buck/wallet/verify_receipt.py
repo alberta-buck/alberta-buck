@@ -184,7 +184,7 @@ def _self_naming_ok(vd_rec: dict, party, chainid: int) -> str:
 
 
 def verify_receipt(core: ReceiptCore) -> RcptResult:
-    """Tier-1 offline verification of an AB-RCPT/1 receipt core.
+    """Tier-1 offline verification of an AB-RCPT/2 receipt core.
 
     Checks:
       1. Point→human bridge for both payer and payee.

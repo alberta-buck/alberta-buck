@@ -372,29 +372,17 @@ Five things the survey had left open, each of which reduces the work.
    whose four relations over one witness refuse a payload thief that a split
    gate admits.  =alberta_buck/test/test_receiving_key.py= carries thirty-one
    tests, including the theft as a test rather than a warning.
-3. *Circuits.* Started. =circuits/identity_membership.circom= now hashes
-   the salt into the leaf as a private input, so the native membership
-   circuit proves membership of a hiding commitment; it is rebuilt as a
-   matched set (circuit, proving key, verification key,
-   =IdentityMembershipVerifier.sol=, proof vector) and a real proof of a
-   Python-tree member verifies on chain, with a wrong root and a wrong
-   salt each refused at witness generation. =IdentityRegistry= carries
-   =ZERO_11..ZERO_20= so the contract side is ready for the depth raise.
-
-   Remaining, and deliberately sequenced together because they share one
-   regeneration: the finding-5 repairs to the G1-tie circuit (prove
-   =T = b*H= with the existing fixed-base gadget rather than witnessing
-   =T=; range-check the 64-bit limbs; complete the addition), the
-   hash-to-curve generator that retires =H_SCALAR=, the mitigation-B fold
-   of membership into the note-binding circuits, the B1 circuit, the
-   folded deposit gate and the A1/A2 payload substitution it belongs with
-   ([[file:notes-receiving-key.org::#sequencing][why those cannot land
-   alone]]), and the aggregator depth raise from 10 to 20. The depth was raised and backed
-   out on 2026-09-20: it re-folds every identity root, including the one
-   committed in the Notes end-to-end fixtures, and regenerating those
-   runs the note-binding prover over a 2.4M-constraint circuit. The
-   finding-5 work forces that same regeneration, so the depth rises with
-   it rather than paying for it twice.
+3. *Circuits.* Done, at aggregator depth 20.  The addressed spends prove
+   membership inside one folded gate per flavour (=deposit_fold_a1=,
+   =deposit_fold_a2=), which removed finding 5's three defects by
+   construction rather than by repair; B1 proves it in
+   =identity_membership_b1=, whose blind is proven on the hash-to-curve
+   generator =H_PEDERSEN=.  Each has a dev-entropy setup, a generated
+   verifier and real proofs spending on chain
+   ([[file:notes-receiving-key.org::#fold-built][the gates as built]]).
+   The leaf functions still take no domain tag, and that change is circuit
+   work: it moves with the v2 ceremony round
+   ([[file:notes-receiving-key.org::#reading-plan][step C]]).
 4. *Solidity.* The root authority and policy, the permanent caller-leaf
    refusal documented as such, and =BuckCredit='s attestation entry point
    and per-credit check.

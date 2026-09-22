@@ -55,6 +55,7 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.transcript import keccak_scalar
+from alberta_buck.wallet.domains import FS_APPROVE, word as _word
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,7 @@ def _cp_transcript(
         pax, pay, pbx, pby,
         T1x, T1y, T2x, T2y, T3x, T3y,
         sender, spender, chainid, registry,
+        _word(FS_APPROVE),
     )
 
 

@@ -173,14 +173,32 @@ contract IdentityRegistry {
     uint256 internal constant H_PED_Y =
         19291512317587897199422471138962718576030354246032844209163778927800273037816;
 
-    /// @dev Fiat-Shamir protocol domain for registration; a full keccak word,
-    ///      not reduced mod R.  This is transcript metadata, not contract API.
+    /// @dev Fiat-Shamir protocol domains, one per transcript this contract
+    ///      verifies: full keccak words, not reduced mod R.  Transcript
+    ///      metadata, not contract API.  The v2 convention is one tag per
+    ///      transcript, `AlbertaBuck/<Area>/<Name>/v2`; without one, a
+    ///      transcript of one sigma protocol is structurally a candidate
+    ///      transcript of another.  Mirrored by alberta_buck/wallet/domains.py
+    ///      and core/rust/buck-identity/src/domains.rs.
     uint256 internal constant REGISTER_DOMAIN = uint256(
-        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3")
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2")
+    );
+    uint256 internal constant APPROVE_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/Approve/v2")
+    );
+    uint256 internal constant ISSUER_SCHNORR_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/IssuerSchnorr/v2")
+    );
+    uint256 internal constant ISSUER_REENC_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/IssuerReenc/v2")
+    );
+    uint256 internal constant DEPOSITOR_BINDING_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/DepositorBinding/v2")
     );
 
-    uint256 public constant CONTRACT_BINDING_DOMAIN =
-        uint256(keccak256("AlbertaBuck:ContractBindingAuthorization:v1"));
+    uint256 public constant CONTRACT_BINDING_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/ContractBinding/v2")
+    );
 
     /// @notice Depth of the registry-Identity Merkle accumulator.
     ///
@@ -915,7 +933,7 @@ contract IdentityRegistry {
         bool isCarrying_
     ) internal view returns (bytes32) {
         return keccak256(abi.encode(
-            keccak256("AlbertaBuck:ContractBindingControl:v1"),
+            keccak256("AlbertaBuck/IdentityRegistry/ContractBindingControl/v2"),
             address(this), block.chainid, target, binder,
             pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y,
             isPublicIdentity_, isCarrying_
@@ -1163,9 +1181,10 @@ contract IdentityRegistry {
         pts[10] = pi.A3;
         pts[11] = pi.A4;
         pts[12] = pi.A5;
-        uint256[] memory scl = new uint256[](2);
+        uint256[] memory scl = new uint256[](3);
         scl[0] = uint256(uint160(issuer));
         scl[1] = chainid;
+        scl[2] = ISSUER_REENC_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 
@@ -1246,9 +1265,10 @@ contract IdentityRegistry {
         pts[9] = pi.B2;
         pts[10] = pi.A_p;
         pts[11] = pi.P_dep;
-        uint256[] memory scl = new uint256[](2);
+        uint256[] memory scl = new uint256[](3);
         scl[0] = uint256(uint160(depositor));
         scl[1] = chainid;
+        scl[2] = DEPOSITOR_BINDING_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 
@@ -1298,17 +1318,18 @@ contract IdentityRegistry {
         pts[6] = pi.T1;
         pts[7] = pi.T2;
         pts[8] = pi.T3;
-        uint256[] memory scl = new uint256[](4);
+        uint256[] memory scl = new uint256[](5);
         scl[0] = uint256(uint160(sender));
         scl[1] = uint256(uint160(spender));
         scl[2] = chainid;
         scl[3] = uint256(uint160(address(this)));
+        scl[4] = APPROVE_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 
     /// @dev Fiat-Shamir challenge for the public-issuer Schnorr binding.
-    ///      Order: points (pk_iss, R) then scalars (hBatch, issuer, chainid).
-    ///      Must match alberta_buck.wallet.schnorr byte-for-byte.
+    ///      Order: points (pk_iss, R) then scalars (hBatch, issuer, chainid,
+    ///      domain).  Must match alberta_buck.wallet.schnorr byte-for-byte.
     function _fsIssuerSchnorr(
         BN254.G1Point memory pkIss,
         BN254.G1Point memory R,
@@ -1319,10 +1340,11 @@ contract IdentityRegistry {
         BN254.G1Point[] memory pts = new BN254.G1Point[](2);
         pts[0] = pkIss;
         pts[1] = R;
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(hBatch);
         scl[1] = uint256(uint160(issuer));
         scl[2] = chainid;
+        scl[3] = ISSUER_SCHNORR_DOMAIN;
         return BN254.fsChallenge(pts, scl);
     }
 

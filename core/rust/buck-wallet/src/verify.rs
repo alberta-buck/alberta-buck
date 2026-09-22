@@ -1,4 +1,4 @@
-//! Tier-1 offline receipt verification from a deserialized AB-RCPT/1
+//! Tier-1 offline receipt verification from a deserialized AB-RCPT/2
 //! core -- mirrors `alberta_buck/wallet/verify_receipt.py` predicate for
 //! predicate (and reason string for reason string).
 //!
@@ -236,7 +236,7 @@ fn opening_from(o: &Value) -> Result<NoteOpening> {
     })
 }
 
-/// Tier-1 offline verification of an AB-RCPT/1 receipt core.
+/// Tier-1 offline verification of an AB-RCPT/2 receipt core.
 pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
     let t = get_str(core, "type")?.to_string();
     let role = match core.get("role") {

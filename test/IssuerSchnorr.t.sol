@@ -38,10 +38,11 @@ contract IssuerSchnorrTest is Test {
         BN254.G1Point[] memory pts = new BN254.G1Point[](2);
         pts[0] = pk;
         pts[1] = R;
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(hBatch);
         scl[1] = uint256(uint160(iss));
         scl[2] = block.chainid;
+        scl[3] = uint256(keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/IssuerSchnorr/v2"));
         return BN254.fsChallenge(pts, scl);
     }
 

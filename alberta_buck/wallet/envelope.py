@@ -1,7 +1,7 @@
-"""The AB-RCPT/1 receipt envelope — a deterministic, bit-identical, verifiable
+"""The AB-RCPT/2 receipt envelope — a deterministic, bit-identical, verifiable
 data record for a BUCK payment.
 
-Reference: alberta-buck-receipt.org ("The AB-RCPT/1 Envelope").
+Reference: alberta-buck-receipt.org ("The AB-RCPT/2 Envelope").
 
 Every receipt is a single canonical JSON map -- THE canonical dialect
 (identity.canonical_json: sorted keys, compact separators, raw UTF-8), the
@@ -11,7 +11,7 @@ same one the identity preimage uses.  Serialization:
     2. ``json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)``
        → canonical UTF-8 bytes.
     3. The receipt id is ``base32(sha256(canonical_bytes))`` truncated to a short handle.
-    4. The text envelope is ``AB-RCPT/1.`` followed by base64url of the bytes,
+    4. The text envelope is ``AB-RCPT/2.`` followed by base64url of the bytes,
        wrapped to the caller's width, terminated by ``.END``.
 
 Deserialize: reverse the text envelope → canonical bytes → ``json.loads``.
@@ -213,7 +213,7 @@ class ReceiptProofs:
 
 @dataclass(frozen=True)
 class ReceiptCore:
-    """The verified payload of an AB-RCPT/1 receipt.
+    """The verified payload of an AB-RCPT/2 receipt.
 
     ``payer`` is the party funds came FROM (for a Note, the issuer); ``payee``
     the party they went TO (the depositor/recipient).  ``role`` says which of
@@ -369,7 +369,8 @@ def deserialize_core(canonical_bytes: bytes) -> ReceiptCore:
 # Text envelope
 # ---------------------------------------------------------------------------
 
-ENVELOPE_HEADER = "AB-RCPT/1."
+from alberta_buck.wallet.domains import RECEIPT_ENVELOPE
+ENVELOPE_HEADER = RECEIPT_ENVELOPE + "."
 ENVELOPE_FOOTER = ".END"
 
 
@@ -383,7 +384,7 @@ def envelope_text(canonical_bytes: bytes, width: int = 64) -> str:
 
     Returns::
 
-        AB-RCPT/1.
+        AB-RCPT/2.
         <base64url of canonical_bytes, wrapped to width>
         .END
     """
@@ -399,7 +400,7 @@ def envelope_text(canonical_bytes: bytes, width: int = 64) -> str:
 def parse_envelope(text: str) -> bytes:
     """Extract canonical bytes from an envelope.
 
-    Strips everything outside ``AB-RCPT/1.`` … ``.END``, removes whitespace
+    Strips everything outside ``AB-RCPT/2.`` … ``.END``, removes whitespace
     from the base64url block, decodes.
     """
     from alberta_buck.wallet._kernel import kernel_wallet as _kw
@@ -412,7 +413,7 @@ def parse_envelope(text: str) -> bytes:
     start = text.find(ENVELOPE_HEADER)
     end = text.find(ENVELOPE_FOOTER, start + len(ENVELOPE_HEADER)) if start >= 0 else -1
     if start < 0 or end < 0:
-        raise ValueError("envelope: missing AB-RCPT/1. header or .END footer")
+        raise ValueError("envelope: missing AB-RCPT/2. header or .END footer")
     b64 = text[start + len(ENVELOPE_HEADER):end]
     b64 = "".join(b64.split())  # drop all whitespace
     # base64url → canonical bytes

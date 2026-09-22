@@ -1,4 +1,4 @@
-"""Both-party AB-RCPT/1 receipts over the REAL-proof e2e worlds.
+"""Both-party AB-RCPT/2 receipts over the REAL-proof e2e worlds.
 
 Two layers:
 
@@ -58,7 +58,7 @@ def fx(request):
 
 @pytest.mark.parametrize("role", ROLES)
 def test_fixture_receipt_verifies(fx, role):
-    """The AB-RCPT/1 receipt over the real-proof world.
+    """The AB-RCPT/2 receipt over the real-proof world.
 
     The addressed flavours no longer name the recipient by decrypting with a
     derived identity scalar, because that procedure was available to anyone who

@@ -34,6 +34,7 @@ from typing import Tuple
 
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, eq, rand_scalar, point_to_words
 from alberta_buck.wallet.transcript import keccak_scalar
+from alberta_buck.wallet.domains import FS_ISSUER_SCHNORR, word as _word
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,8 @@ def _issuer_schnorr_transcript(pk_iss, R, h_batch: int, issuer: int, chainid: in
     """Fiat-Shamir challenge; order matches IdentityRegistry._fsIssuerSchnorr."""
     pkx, pky = point_to_words(pk_iss)
     Rx, Ry = point_to_words(R)
-    return keccak_scalar(pkx, pky, Rx, Ry, h_batch, issuer, chainid)
+    return keccak_scalar(pkx, pky, Rx, Ry, h_batch, issuer, chainid,
+                         _word(FS_ISSUER_SCHNORR))
 
 
 def issuer_schnorr_sign(

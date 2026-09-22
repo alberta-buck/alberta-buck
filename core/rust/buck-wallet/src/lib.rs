@@ -2,7 +2,7 @@
 //!
 //! The deterministic wallet layer above the `buck-identity` crypto
 //! kernel: THE canonical JSON dialect and identity serialization
-//! (`canonical`), the AB-RCPT/1 receipt envelope (`envelope`), tier-1
+//! (`canonical`), the AB-RCPT/2 receipt envelope (`envelope`), tier-1
 //! offline receipt verification (`verify`), the per-kind receipt builders
 //! (`builders`), the public-issuer / approve receipt verifiers
 //! (`receipt`), the unilateral identity-targeted Note flows A1/A2

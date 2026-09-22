@@ -119,10 +119,11 @@ contract NotesIssuerModeTest is Test {
         BN254.G1Point[] memory pts = new BN254.G1Point[](2);
         pts[0] = BN254.mul(BN254.g1(), sk);
         pts[1] = BN254.mul(BN254.g1(), k);
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(keccak256(abi.encodePacked(cms)));
         scl[1] = uint256(uint160(iss));
         scl[2] = block.chainid;
+        scl[3] = uint256(keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/IssuerSchnorr/v2"));
         uint256 e = BN254.fsChallenge(pts, scl);
         uint256 sresp = addmod(k, mulmod(e, sk, BN254.R), BN254.R);
         sig = IdentityRegistry.SchnorrProof(e, sresp, pts[1]);

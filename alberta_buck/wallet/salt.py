@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.transcript import keccak_raw
+from alberta_buck.wallet.domains import ACCUMULATOR_SALT
 
 __all__ = ["tree_tag", "derive_salt", "SALT_DOMAIN"]
 
@@ -42,7 +43,7 @@ __all__ = ["tree_tag", "derive_salt", "SALT_DOMAIN"]
 # Domain separator, so a salt can never collide with another Poseidon
 # preimage the wallet computes (a leaf, a nullifier, a commitment).
 SALT_DOMAIN = int.from_bytes(
-    keccak_raw(b"AlbertaBuck/Accumulator/Salt/v1"), "big"
+    keccak_raw(ACCUMULATOR_SALT), "big"
 ) % F_R
 
 
