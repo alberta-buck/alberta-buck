@@ -20,7 +20,7 @@ use crate::flows::*;
 use crate::issuer::issue_credential;
 use crate::jsonv::{as_ct, as_g1, get, get_ct, get_g1, get_opt, get_str, get_u128, get_w};
 use crate::verify::verify_receipt;
-use crate::{scalar_hex, Ctw, G1w, IdError, NoteOpening, Result, W256};
+use crate::{scalar_hex, w_from_hex, Ctw, G1w, IdError, NoteOpening, Result, W256};
 
 /// An optional hex-string scalar: absent or JSON null both yield None, so a
 /// caller may pass every key and leave the ones its role does not use unset.
@@ -664,4 +664,198 @@ pub fn issue_credential_args(args: &Value) -> Result<String> {
         out.insert("delivery".into(), ct_hex(&ct));
     }
     Ok(Value::Object(out).to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Notes: the receiving key, the delivery, the mailbox binding, and the folded
+// gate's circuit witnesses.  Arguments and results are hex, as everywhere in
+// this ABI; the delivery and the witness are DOCUMENTS and keep their own
+// decimal convention (see `delivery` and `deposit_fold`).
+// ---------------------------------------------------------------------------
+
+fn path_from(v: &Value) -> Result<(Vec<W256>, Vec<u8>)> {
+    let sib = get(v, "siblings")?
+        .as_array()
+        .ok_or(IdError("args: path.siblings must be an array"))?
+        .iter()
+        .map(|x| w_from_hex(x.as_str().ok_or(IdError("args: sibling must be hex"))?))
+        .collect::<Result<Vec<W256>>>()?;
+    let bits = get(v, "indexBits")?
+        .as_array()
+        .ok_or(IdError("args: path.indexBits must be an array"))?
+        .iter()
+        .map(|b| b.as_u64().map(|x| x as u8).ok_or(IdError("args: index bit must be 0 or 1")))
+        .collect::<Result<Vec<u8>>>()?;
+    Ok((sib, bits))
+}
+
+/// `{seed, rotation}` -> `{k, pk_recv}`: the mailbox, from wallet seed material.
+pub fn receiving_key_args(args: &Value) -> Result<String> {
+    let rotation = get_u128(args, "rotation")? as u64;
+    let k = buck_identity::recvkey::derive_receiving_secret(&get_w(args, "seed")?, rotation)?;
+    let pk = buck_identity::recvkey::receiving_public(&k)?;
+    Ok(json!({"k": scalar_hex(&k), "pk_recv": g1_hex(&pk)}).to_string())
+}
+
+/// `{shared, label}` -> the one-time mask of one delivery field.
+pub fn wrap_mask_args(args: &Value) -> Result<String> {
+    let label = get_str(args, "label")?;
+    let m = buck_identity::recvkey::wrap_mask(&get_g1(args, "shared")?, label.as_bytes());
+    Ok(Value::String(scalar_hex(&m)).to_string())
+}
+
+/// The minter's A1 delivery (a decimal document).
+pub fn deliver_a1_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::deliver_a1(
+        &get_ct(args, "eNote")?,
+        &get_ct(args, "eRec")?,
+        &get_w(args, "v")?,
+        &get_w(args, "rho")?,
+        &get_w(args, "predicate")?,
+        &get_w(args, "r_note")?,
+        &get_g1(args, "pk_recv")?,
+        &get_g1(args, "sigma_R")?,
+        &get_w(args, "sigma_s")?,
+    )?
+    .to_string())
+}
+
+/// The minter's A2 delivery (a decimal document).
+pub fn deliver_a2_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::deliver_a2(
+        &get_ct(args, "eNote")?,
+        &get_ct(args, "eIss")?,
+        &get_w(args, "v")?,
+        &get_w(args, "rho")?,
+        &get_w(args, "predicate")?,
+        &get_w(args, "r_note")?,
+        &get_w(args, "r_prime")?,
+        &get_w(args, "salt_iss")?,
+        &get_g1(args, "pk_recv")?,
+    )?
+    .to_string())
+}
+
+/// `{delivery, k, m_issuer}` -> the opened A1 note.
+pub fn open_a1_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::open_a1(
+        get(args, "delivery")?,
+        &get_w(args, "k")?,
+        &get_w(args, "m_issuer")?,
+    )?
+    .to_string())
+}
+
+/// `{delivery, k}` -> the opened A2 note.
+pub fn open_a2_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::open_a2(get(args, "delivery")?, &get_w(args, "k")?)?.to_string())
+}
+
+/// `{M_rec, pk_recv, salt, leaves, depth}` -> the mailbox binding a payer
+/// checks before paying: a leaf and a path, disclosing no secret.
+pub fn prove_receiving_binding_args(args: &Value) -> Result<String> {
+    let m = get_g1(args, "M_rec")?;
+    let pk = get_g1(args, "pk_recv")?;
+    let salt = get_w(args, "salt")?;
+    let leaves = get(args, "leaves")?
+        .as_array()
+        .ok_or(IdError("args: leaves must be an array"))?
+        .iter()
+        .map(|x| w_from_hex(x.as_str().ok_or(IdError("args: leaf must be hex"))?))
+        .collect::<Result<Vec<W256>>>()?;
+    let depth = get_u128(args, "depth")? as usize;
+    let tree = IdentityMerkleTree::from_leaves(&leaves, depth)?;
+    let leaf = buck_registry::tree::mailbox_leaf(&m, &pk, &salt)?;
+    let proof = tree
+        .path(tree.index_of_leaf(&leaf).map_err(|_| {
+            IdError("no registered leaf commits this (Identity, receiving key) pair")
+        })?)?;
+    Ok(json!({
+        "pk_recv": g1_hex(&pk),
+        "salt": scalar_hex(&salt),
+        "path": {
+            "leaf": scalar_hex(&proof.leaf),
+            "siblings": proof.siblings.iter().map(scalar_hex).collect::<Vec<_>>(),
+            "indexBits": proof.index_bits,
+            "root": scalar_hex(&proof.root),
+        },
+    })
+    .to_string())
+}
+
+/// `{M_rec, binding, root}` -> `true` iff the binding's leaf commits the pair
+/// and its path folds to `root`.  Needs no secret: a payer runs it before
+/// paying.
+pub fn verify_receiving_binding_args(args: &Value) -> Result<String> {
+    let m = get_g1(args, "M_rec")?;
+    let b = get(args, "binding")?;
+    let leaf = buck_registry::tree::mailbox_leaf(&m, &get_g1(b, "pk_recv")?, &get_w(b, "salt")?)?;
+    let p = get(b, "path")?;
+    let (sib, bits) = path_from(p)?;
+    let ok = get_w(p, "leaf")? == leaf
+        && buck_registry::tree::fold_path(&leaf, &sib, &bits)? == get_w(args, "root")?;
+    Ok(json!(ok).to_string())
+}
+
+fn fold_witness_args(
+    args: &Value,
+    f: impl FnOnce(&crate::deposit_fold::FoldCommon) -> Result<Value>,
+) -> Result<String> {
+    let (sib, bits) = path_from(get(args, "path")?)?;
+    let (m_rec, k, sk_dep, salt) = (
+        get_w(args, "m_rec")?,
+        get_w(args, "k")?,
+        get_w(args, "sk_dep")?,
+        get_w(args, "salt")?,
+    );
+    let (t, r_e, rho, id_hash, root) = (
+        get_w(args, "t")?,
+        get_w(args, "r_E")?,
+        get_w(args, "rho")?,
+        get_w(args, "idHash")?,
+        get_w(args, "identityRoot")?,
+    );
+    let (e_dep, pk_dep, e_enc) = (get_ct(args, "E_dep")?, get_g1(args, "pk_dep")?, get_ct(args, "eEnc")?);
+    let common = crate::deposit_fold::FoldCommon {
+        m_rec: &m_rec,
+        k: &k,
+        sk_dep: &sk_dep,
+        salt: &salt,
+        path: crate::deposit_fold::Path { siblings: &sib, index_bits: &bits },
+        t: &t,
+        r_e: &r_e,
+        e_dep: &e_dep,
+        pk_dep: &pk_dep,
+        e_enc: &e_enc,
+        rho: &rho,
+        id_hash: &id_hash,
+        identity_root: &root,
+    };
+    Ok(f(&common)?.to_string())
+}
+
+/// The A1 folded gate's circuit witness (a decimal document for the prover).
+pub fn deposit_fold_a1_witness_args(args: &Value) -> Result<String> {
+    let (e_note, v, m_iss) = (get_ct(args, "eNote")?, get_w(args, "v")?, get_w(args, "m_issuer")?);
+    let (sig_r, sig_s, r_note) = (get_g1(args, "sigma_R")?, get_w(args, "sigma_s")?, get_w(args, "r_note")?);
+    fold_witness_args(args, |c| {
+        crate::deposit_fold::deposit_fold_a1_witness(c, &e_note, &v, &m_iss, &sig_r, &sig_s, &r_note)
+    })
+}
+
+/// The A2 folded gate's circuit witness (a decimal document for the prover).
+pub fn deposit_fold_a2_witness_args(args: &Value) -> Result<String> {
+    let (e_note, e_iss) = (get_ct(args, "eNote")?, get_ct(args, "eIss")?);
+    let (r_prime, salt_iss) = (get_w(args, "r_prime")?, get_w(args, "salt_iss")?);
+    let (isib, ibits) = path_from(get(args, "issPath")?)?;
+    fold_witness_args(args, |c| {
+        crate::deposit_fold::deposit_fold_a2_witness(
+            c,
+            &e_note,
+            &e_iss,
+            &r_prime,
+            &salt_iss,
+            crate::deposit_fold::Path { siblings: &isib, index_bits: &ibits },
+        )
+    })
 }

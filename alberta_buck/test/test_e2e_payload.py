@@ -27,6 +27,9 @@ from alberta_buck.registry.tree import (
 from alberta_buck.wallet.recvkey import (
     mailbox_shared_recipient, unwrap_scalar,
 )
+from alberta_buck.wallet.delivery import (
+    open_a1, open_a2,
+)
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "vectors", "e2e")
 
@@ -59,17 +62,18 @@ def _recipient(w):
 def test_a2_payload_opens_the_issuer_ciphertext():
     w = _world("a2")
     np_ = w["notePayload"]
-    assert set(np_) == {"eNote", "eIss", "rPrimeWrapped", "saltIssWrapped"}, \
-        "an A2 delivery is the two ciphertexts and two WRAPPED scalars"
+    assert set(np_) == {"flavor", "predicate", "eNote", "eIss", "rhoWrapped", "vWrapped",
+                        "rPrimeWrapped", "saltIssWrapped"}, \
+        "an A2 delivery is the two ciphertexts and every secret scalar WRAPPED"
 
     m_rec, k, salt, M_rec = _recipient(w)
     eIss = _ct(np_["eIss"])
 
-    # The scalars are wrapped to the mailbox: the recipient derives the shared
-    # point from the payload's own R, and unwraps.
-    S = mailbox_shared_recipient(k, eIss.R)
-    r_prime = unwrap_scalar(int(np_["rPrimeWrapped"]), S, b"rPrime")
-    salt_iss = unwrap_scalar(int(np_["saltIssWrapped"]), S, b"saltIss")
+    # The recipient opens the delivery with k, and it recomputes to the very
+    # commitment the minter folded into the tree.
+    opened = open_a2(np_, k)
+    assert opened.cm == int(w["opening"]["cm"])
+    r_prime, salt_iss = opened.r_prime, opened.salt_iss
 
     # The recovered r' is the randomness of the shipped ciphertext: the fold's
     # note tie is eIss.R == r'*G, and a wrong r' fails it rather than proving
@@ -93,26 +97,32 @@ def test_a2_payload_opens_the_issuer_ciphertext():
 def test_the_channel_cannot_read_the_payload_it_carries():
     """The delivery channel holds everything the recipient does except k.
 
-    That has to be enough to stop it, and the wrap is what makes it enough:
-    in the clear, r' turns eIss into plaintext (M = C - r'*pk_recv) and
-    salt_iss turns the issuer's naming leaf into a scannable one, so a payload
-    with readable scalars undoes the encryption it travels beside.
+    That has to be enough to stop it, and the wrap is what makes it enough.  In
+    the clear, r' turns eIss into plaintext (M = C - r'*pk_recv), salt_iss turns
+    the issuer's naming leaf into a scannable one, and rho with idHash IS the
+    nullifier -- so the channel would learn the issuer, and when the note is
+    spent.
     """
+    from alberta_buck.wallet.bn254 import add, neg
+    from alberta_buck.wallet.notes import nullifier_b
     w = _world("a2")
     np_ = w["notePayload"]
     eIss = _ct(np_["eIss"])
     pk_recv = _pt(w["parties"]["depositor"]["pkRecv"])
     M_iss = _pt(w["parties"]["issuer"]["M"])
+    nf = int(w["opening"]["nullifier"])
+    idh = int(w["opening"]["idHash"])
 
-    # What the channel has: the payload, both public points, no k.
-    blob = int(np_["rPrimeWrapped"])
-    from alberta_buck.wallet.bn254 import add, neg
-    assert not eq(add(eIss.C, neg(mul(pk_recv, blob))), M_iss), \
-        "the wrapped scalar must not work as the randomness"
+    # What the channel has: the delivery, both public points, no k.
+    assert not eq(add(eIss.C, neg(mul(pk_recv, int(np_["rPrimeWrapped"])))), M_iss), \
+        "the wrapped r' must not work as the randomness"
+    assert nullifier_b(int(np_["rhoWrapped"]), idh) != nf, \
+        "the wrapped rho must not yield the nullifier"
     # And with k it does, which is the other half of the statement.
     _, k, _, _ = _recipient(w)
-    r_prime = unwrap_scalar(blob, mailbox_shared_recipient(k, eIss.R), b"rPrime")
-    assert eq(add(eIss.C, neg(mul(pk_recv, r_prime))), M_iss)
+    opened = open_a2(np_, k)
+    assert eq(add(eIss.C, neg(mul(pk_recv, opened.r_prime))), M_iss)
+    assert nullifier_b(opened.opening.rho, idh) == nf
 
 
 def test_the_mailbox_binding_needs_no_secret():
@@ -153,15 +163,18 @@ def test_a2_payload_value_ciphertext_is_the_committed_one():
 def test_a1_payload_carries_its_own_randomness_and_no_issuer_salt():
     w = _world("a1")
     np_ = w["notePayload"]
-    assert set(np_) == {"eNote", "eRec", "sigma_R", "sigma_s", "rNoteWrapped"}
+    assert set(np_) == {"flavor", "predicate", "eNote", "eRec", "sigma_R", "sigma_s",
+                        "rhoWrapped", "vWrapped", "rNoteWrapped"}
     assert not any("salt" in k for k in np_), \
         "A1 asserts nothing about a third party, so nothing about one travels"
 
     m_rec, k, salt, M_rec = _recipient(w)
     eNote = _ct(np_["eNote"])
-    r_note = unwrap_scalar(int(np_["rNoteWrapped"]),
-                           mailbox_shared_recipient(k, eNote.R), b"rNote")
+    opened = open_a1(np_, k, int(w["parties"]["issuer"]["m"]))
+    assert opened.cm == int(w["opening"]["cm"])
+    r_note = opened.r_note
     face = int(w["face"])
+    assert opened.opening.v == face
 
     # eNote = (rn*G, v*G + rn*pk_recv): the fold checks it as (v + rn*k)*G with
     # v public, which is what makes the addressed Identity unique.

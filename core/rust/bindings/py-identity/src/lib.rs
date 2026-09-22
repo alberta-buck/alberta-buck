@@ -30,7 +30,6 @@ type PyIr = (
     (BigUint, BigUint, BigUint, BigUint, BigUint),
     (PyG1, PyG1, PyG1, PyG1, PyG1, PyG1, PyG1, PyG1),
 );
-type PyDc = (BigUint, BigUint, BigUint, BigUint, PyG1, PyG1, PyG1, PyG1);
 #[allow(clippy::type_complexity)]
 type PyDb = (
     BigUint, BigUint, BigUint, BigUint, BigUint,
@@ -616,77 +615,8 @@ fn issuer_reenc_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Deposit coupling / B1 depositor binding
+// B1 depositor binding
 // ---------------------------------------------------------------------------
-
-#[pyfunction]
-#[allow(clippy::too_many_arguments)]
-fn deposit_couple_prove(
-    m_rec: BigUint,
-    sk_dep: BigUint,
-    e_dep: PyCt,
-    e_iss: PyCt,
-    account: BigUint,
-    chainid: BigUint,
-    b: BigUint,
-    k_m: BigUint,
-    k_s: BigUint,
-    k_b: BigUint,
-) -> PyResult<PyDc> {
-    let p = kernel::unilateral_a2::deposit_couple_prove(
-        &w(&m_rec)?,
-        &w(&sk_dep)?,
-        &wct(&e_dep)?,
-        &wct(&e_iss)?,
-        &w(&account)?,
-        &w(&chainid)?,
-        &w(&b)?,
-        &w(&k_m)?,
-        &w(&k_s)?,
-        &w(&k_b)?,
-    )
-    .map_err(err)?;
-    Ok((
-        big(&p.e),
-        big(&p.s_m),
-        big(&p.s_s),
-        big(&p.s_b),
-        pyg1(&p.a2),
-        pyg1(&p.a3),
-        pyg1(&p.a4),
-        pyg1(&p.p_i),
-    ))
-}
-
-#[pyfunction]
-fn deposit_couple_verify(
-    pk_dep: PyG1,
-    e_dep: PyCt,
-    e_iss: PyCt,
-    proof: PyDc,
-    account: BigUint,
-    chainid: BigUint,
-) -> PyResult<bool> {
-    let p = kernel::unilateral_a2::DepositCouplingProof {
-        e: w(&proof.0)?,
-        s_m: w(&proof.1)?,
-        s_s: w(&proof.2)?,
-        s_b: w(&proof.3)?,
-        a2: wg1(&proof.4)?,
-        a3: wg1(&proof.5)?,
-        a4: wg1(&proof.6)?,
-        p_i: wg1(&proof.7)?,
-    };
-    kernel::unilateral_a2::deposit_couple_verify(
-        &wg1(&pk_dep)?,
-        &wct(&e_dep)?,
-        &wct(&e_iss)?,
-        &p,
-        &w(&account)?,
-        &w(&chainid)?,
-    )
-    .map_err(err)
-}
 
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
@@ -950,6 +880,58 @@ fn issue_credential(args_json: &str) -> PyResult<String> {
     wallet::args::issue_credential_args(&parse_args(args_json)?).map_err(jerr)
 }
 
+// ---- Notes: receiving key, delivery, mailbox binding, fold witnesses ----
+
+#[pyfunction]
+fn receiving_key(args_json: &str) -> PyResult<String> {
+    wallet::args::receiving_key_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn wrap_mask(args_json: &str) -> PyResult<String> {
+    wallet::args::wrap_mask_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deliver_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::deliver_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deliver_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::deliver_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn open_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::open_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn open_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::open_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn prove_receiving_binding(args_json: &str) -> PyResult<String> {
+    wallet::args::prove_receiving_binding_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn verify_receiving_binding(args_json: &str) -> PyResult<String> {
+    wallet::args::verify_receiving_binding_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deposit_fold_a1_witness(args_json: &str) -> PyResult<String> {
+    wallet::args::deposit_fold_a1_witness_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deposit_fold_a2_witness(args_json: &str) -> PyResult<String> {
+    wallet::args::deposit_fold_a2_witness_args(&parse_args(args_json)?).map_err(jerr)
+}
+
 #[pymodule]
 fn buck_wallet(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ENVELOPE_HEADER", wallet::envelope::ENVELOPE_HEADER)?;
@@ -962,6 +944,16 @@ fn buck_wallet(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_receipt, m)?)?;
     m.add_function(wrap_pyfunction!(build_receipt, m)?)?;
     m.add_function(wrap_pyfunction!(mint_unilateral_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(receiving_key, m)?)?;
+    m.add_function(wrap_pyfunction!(wrap_mask, m)?)?;
+    m.add_function(wrap_pyfunction!(deliver_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(deliver_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(open_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(open_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(prove_receiving_binding, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_receiving_binding, m)?)?;
+    m.add_function(wrap_pyfunction!(deposit_fold_a1_witness, m)?)?;
+    m.add_function(wrap_pyfunction!(deposit_fold_a2_witness, m)?)?;
     m.add_function(wrap_pyfunction!(make_receipt_a2, m)?)?;
     m.add_function(wrap_pyfunction!(verify_receipt_a2, m)?)?;
     m.add_function(wrap_pyfunction!(mint_unilateral_a1, m)?)?;
@@ -1152,8 +1144,6 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(h_point, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_prove, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_verify, m)?)?;
-    m.add_function(wrap_pyfunction!(deposit_couple_prove, m)?)?;
-    m.add_function(wrap_pyfunction!(deposit_couple_verify, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_prove, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_verify, m)?)?;
     m.add_function(wrap_pyfunction!(note_commitment, m)?)?;

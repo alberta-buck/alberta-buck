@@ -23,19 +23,22 @@ The three moving parts:
    counterparty because that is how a receipt names a person
    (:mod:`alberta_buck.wallet.recvkey`).  The issuer needs only ``pk_recv``,
    never an account, and any account the depositor later uses can spend, because
-   authority remains the Identity even though reading does not.  Anti-framing
-   rides on the shipped :mod:`issuer_reenc` binding (with ``pk_rec :=
-   pk_recv``): it forces ``eIss`` to re-encrypt the issuer's *own* registered
-   ``M_I``, so the recovered issuer is the true minter, never a victim.
+   authority remains the Identity even though reading does not.  The mint's
+   :mod:`issuer_reenc` binding (with ``pk_rec := pk_recv``) proves ``eIss``
+   encrypts the minter's *own* registered Identity under the key it hides in
+   ``Q``.  It does not yet prove that key IS ``pk_recv``: a minter can key one
+   ciphertext so that its hidden key opens it to its own Identity and the
+   recipient's opens it to another registered one.  The tie that closes this is
+   specified in doc/review/notes-receiving-key.org section 4.6.
 
 2. *Deposit gate* (the on-chain gate, all identities hidden).  Reading the note
    and being the Identity are now facts about two different secrets, so the gate
-   must state the tie rather than infer it: one witness carrying
-   ``(m_rec, k, sk_dep, b, salt)`` and four relations -- ``k`` decrypts ``eIss``
-   to the point committed in ``P_I``, the deposit account's credential holds
-   ``M_rec``, a registered accumulator leaf commits the pair ``(M_rec, k*G)``,
-   and that leaf's path folds to a posted root.  See
-   :mod:`alberta_buck.wallet.deposit_fold`; the third relation is what a
+   must state the tie rather than infer it: one Groth16 proof over one witness
+   ``(m_rec, k, sk_dep, salt, ...)`` -- ``k`` decrypts the note to the issuer
+   Identity ``M_I``, the deposit account's credential holds ``M_rec``, a
+   registered leaf commits the pair ``(m_rec, k)``, its path folds to a posted
+   root, and ``M_I`` is itself registered.  See
+   :mod:`alberta_buck.wallet.deposit_fold`; the leaf relation is what a
    single-secret design got for free, and without it a payload thief spends with
    its own Identity.
 
@@ -251,125 +254,6 @@ def mint_unilateral_a2(
                     r_note=r_note, salt_iss=salt_iss)
 
 
-# ========================== Deposit coupling ================================
-#
-# LEGACY SIGMA -- superseded by the folded gate, retained only for the vectors
-# and contracts that still replay it.  New code MUST use
-# :mod:`alberta_buck.wallet.deposit_fold`.
-#
-# This sigma proves knowledge of (m_rec, sk_dep, b) with:
-#
-#   E4:  pk_dep         = sk_dep * G                 (the real account key)
-#   E2:  C_d            = m_rec  * G + sk_dep * R_d   (account bound to M_rec=m_rec*G)
-#   E3:  C_e - P_I      = m_rec  * R_e - b * H        (eIss decrypts under m_rec to P_I-b*H)
-#
-# and it works only while ONE secret does both jobs.  Under the receiving key
-# the note decrypts under k and the account credential holds m_rec, so E3 and
-# E2 speak about different scalars and the shared Fiat-Shamir nonce no longer
-# ties them: E3 becomes "P commits whatever this scalar decrypts to", which
-# every scalar satisfies.  A thief holding a stolen payload then proves the
-# reading half with the stolen k and the Identity half with its OWN registered
-# Identity -- both true, neither joining them.
-#
-# The remedy is not a patch to this sigma.  It is one witness, one circuit, and
-# the tie stated as a relation over a registered accumulator leaf; see
-# deposit_fold and doc/review/notes-receiving-key.org section 3.3a.
-
-@dataclass(frozen=True)
-class DepositCouplingProof:
-    e:   int
-    s_m: int    # response for m_rec
-    s_s: int    # response for sk_dep
-    s_b: int    # response for b
-    A2:  Tuple  # k_m*G + k_s*R_d
-    A3:  Tuple  # k_m*R_e - k_b*H
-    A4:  Tuple  # k_s*G
-    P_I: Tuple  # M_I + b*H   (hides the decrypted issuer identity)
-
-
-def _dc_transcript(pk_dep, E_dep: ElGamalCiphertext, eIss: ElGamalCiphertext,
-                   P_I, A2, A3, A4, account: int, chainid: int) -> int:
-    pts = [pk_dep, E_dep.R, E_dep.C, eIss.R, eIss.C, P_I, A2, A3, A4]
-    words: List[int] = []
-    for P in pts:
-        x, y = point_to_words(P)
-        words.append(x)
-        words.append(y)
-    words.append(account)
-    words.append(chainid)
-    return keccak_scalar(*words)
-
-
-def deposit_couple_prove(
-    m_rec:   int,
-    sk_dep:  int,
-    E_dep:   ElGamalCiphertext,   # deposit account's registered credential (R_d, C_d)
-    eIss:    ElGamalCiphertext,   # the note leaf's eIss (R_e, C_e)
-    account: int,                 # deposit account address (msg.sender at spend)
-    chainid: int,
-    b:       Optional[int] = None,
-    rng=None,
-) -> DepositCouplingProof:
-    """Prove deposit eligibility for an identity-targeted A2 note, all identities
-    hidden.  Asserts the witness consistency before proving so misuse fails loudly.
-    """
-    pk_dep = mul(G1, sk_dep % ORDER)
-    R_d, C_d = E_dep.R, E_dep.C
-    R_e, C_e = eIss.R, eIss.C
-
-    M_rec = mul(G1, m_rec % ORDER)
-    M_I = add(C_e, neg(mul(R_e, m_rec % ORDER)))   # decrypt eIss under m_rec
-    # Sanity: the deposit account must be bound to identity m_rec.
-    assert eq(C_d, add(M_rec, mul(R_d, sk_dep % ORDER))), \
-        "E_dep does not decrypt to m_rec*G under sk_dep"
-
-    b = rand_scalar(rng) if b is None else (b % ORDER)
-    P_I = add(M_I, mul(H_POINT, b))                # commit/hide the issuer identity
-
-    k_m = rand_scalar(rng)
-    k_s = rand_scalar(rng)
-    k_b = rand_scalar(rng)
-    A4 = mul(G1, k_s)                                      # k_s*G
-    A2 = add(mul(G1, k_m), mul(R_d, k_s))                  # k_m*G + k_s*R_d
-    A3 = add(mul(R_e, k_m), neg(mul(H_POINT, k_b)))        # k_m*R_e - k_b*H
-
-    e = _dc_transcript(pk_dep, E_dep, eIss, P_I, A2, A3, A4, account, chainid)
-    s_m = (k_m + e * (m_rec % ORDER)) % ORDER
-    s_s = (k_s + e * (sk_dep % ORDER)) % ORDER
-    s_b = (k_b + e * b) % ORDER
-    return DepositCouplingProof(e=e, s_m=s_m, s_s=s_s, s_b=s_b,
-                                A2=A2, A3=A3, A4=A4, P_I=P_I)
-
-
-def deposit_couple_verify(
-    pk_dep,
-    E_dep:   ElGamalCiphertext,
-    eIss:    ElGamalCiphertext,
-    proof:   DepositCouplingProof,
-    account: int,
-    chainid: int,
-) -> bool:
-    """Verify deposit eligibility.  True iff some identity scalar binds the
-    deposit account *and* decrypts ``eIss`` to the point committed in ``P_I``."""
-    R_d, C_d = E_dep.R, E_dep.C
-    R_e, C_e = eIss.R, eIss.C
-    e, s_m, s_s, s_b = proof.e, proof.s_m, proof.s_s, proof.s_b
-
-    # E4: s_s*G == A4 + e*pk_dep
-    if not eq(mul(G1, s_s), add(proof.A4, mul(pk_dep, e))):
-        return False
-    # E2: s_m*G + s_s*R_d == A2 + e*C_d
-    if not eq(add(mul(G1, s_m), mul(R_d, s_s)), add(proof.A2, mul(C_d, e))):
-        return False
-    # E3: s_m*R_e - s_b*H == A3 + e*(C_e - P_I)
-    X = add(C_e, neg(proof.P_I))
-    if not eq(add(mul(R_e, s_m), neg(mul(H_POINT, s_b))), add(proof.A3, mul(X, e))):
-        return False
-    # Fiat-Shamir
-    return proof.e == _dc_transcript(pk_dep, E_dep, eIss, proof.P_I,
-                                     proof.A2, proof.A3, proof.A4, account, chainid)
-
-
 # =============================== Receipt ====================================
 
 @dataclass(frozen=True)
@@ -467,6 +351,5 @@ def verify_receipt(
 __all__ = [
     "identity_leaf", "IdentityTree",
     "MintedA2", "a2_id_hash", "mint_unilateral_a2",
-    "DepositCouplingProof", "deposit_couple_prove", "deposit_couple_verify",
     "UnilateralReceipt", "RcptResult", "make_receipt", "verify_receipt",
 ]

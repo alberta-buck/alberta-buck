@@ -210,24 +210,6 @@ def test_issuer_reenc(kv):
     )
 
 
-def test_deposit_couple(kv):
-    r = kv["deposit_couple"]
-    e_dep, e_iss = _ct(r["E_dep"]), _ct(r["eIss"])
-    proof = bi.deposit_couple_prove(
-        _i(r["m_rec"]), _i(r["sk_dep"]), e_dep, e_iss,
-        _i(r["account"]), _i(r["chainid"]),
-        _i(r["b"]), _i(r["k_m"]), _i(r["k_s"]), _i(r["k_b"]),
-    )
-    pf = r["proof"]
-    assert proof == (
-        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_s"]), _i(pf["s_b"]),
-        _pt(pf["A2"]), _pt(pf["A3"]), _pt(pf["A4"]), _pt(pf["P_I"]),
-    )
-    assert bi.deposit_couple_verify(
-        _pt(r["pk_dep"]), e_dep, e_iss, proof, _i(r["account"]), _i(r["chainid"]),
-    )
-
-
 def test_b1_bind(kv):
     r = kv["b1_bind"]
     e_dep = _ct(r["E_dep"])

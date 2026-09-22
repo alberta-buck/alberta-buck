@@ -732,91 +732,8 @@ pub fn issuer_reenc_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Deposit coupling / B1 depositor binding
+// B1 depositor binding
 // ---------------------------------------------------------------------------
-
-/// Returns 12 words: `[e, s_m, s_s, s_b, A2x,y, A3x,y, A4x,y, P_Ix,y]`.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn deposit_couple_prove(
-    m_rec: &str,
-    sk_dep: &str,
-    e_dep: Vec<String>,
-    e_iss: Vec<String>,
-    account: &str,
-    chainid: &str,
-    b: &str,
-    k_m: &str,
-    k_s: &str,
-    k_b: &str,
-) -> Result<Vec<String>, JsError> {
-    if e_dep.len() != 4 || e_iss.len() != 4 {
-        return Err(JsError::new("ciphertexts need 4 words each"));
-    }
-    let p = kernel::unilateral_a2::deposit_couple_prove(
-        &w(m_rec)?,
-        &w(sk_dep)?,
-        &ct(&e_dep[0], &e_dep[1], &e_dep[2], &e_dep[3])?,
-        &ct(&e_iss[0], &e_iss[1], &e_iss[2], &e_iss[3])?,
-        &w(account)?,
-        &w(chainid)?,
-        &w(b)?,
-        &w(k_m)?,
-        &w(k_s)?,
-        &w(k_b)?,
-    )
-    .map_err(err)?;
-    Ok(vec![
-        hx(&p.e),
-        hx(&p.s_m),
-        hx(&p.s_s),
-        hx(&p.s_b),
-        hx(&p.a2.0),
-        hx(&p.a2.1),
-        hx(&p.a3.0),
-        hx(&p.a3.1),
-        hx(&p.a4.0),
-        hx(&p.a4.1),
-        hx(&p.p_i.0),
-        hx(&p.p_i.1),
-    ])
-}
-
-/// `proof` = the 12 words `deposit_couple_prove` returns.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn deposit_couple_verify(
-    pk_depx: &str,
-    pk_depy: &str,
-    e_dep: Vec<String>,
-    e_iss: Vec<String>,
-    proof: Vec<String>,
-    account: &str,
-    chainid: &str,
-) -> Result<bool, JsError> {
-    if e_dep.len() != 4 || e_iss.len() != 4 || proof.len() != 12 {
-        return Err(JsError::new("bad word counts"));
-    }
-    let p = kernel::unilateral_a2::DepositCouplingProof {
-        e: w(&proof[0])?,
-        s_m: w(&proof[1])?,
-        s_s: w(&proof[2])?,
-        s_b: w(&proof[3])?,
-        a2: g1(&proof[4], &proof[5])?,
-        a3: g1(&proof[6], &proof[7])?,
-        a4: g1(&proof[8], &proof[9])?,
-        p_i: g1(&proof[10], &proof[11])?,
-    };
-    kernel::unilateral_a2::deposit_couple_verify(
-        &g1(pk_depx, pk_depy)?,
-        &ct(&e_dep[0], &e_dep[1], &e_dep[2], &e_dep[3])?,
-        &ct(&e_iss[0], &e_iss[1], &e_iss[2], &e_iss[3])?,
-        &p,
-        &w(account)?,
-        &w(chainid)?,
-    )
-    .map_err(err)
-}
 
 /// Returns 21 words: 17 proof words
 /// `[e, s_m, s_s, s_r, s_b, A2x,y, A4x,y, B1x,y, B2x,y, A_px,y, P_depx,y]`
@@ -1079,6 +996,58 @@ pub fn wallet_verify_receipt(core_text: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn wallet_build_receipt(args_json: &str) -> Result<String, JsError> {
     wallet::args::build_receipt_args(&parse_args(args_json)?).map_err(werr)
+}
+
+// ---- Notes: receiving key, delivery, mailbox binding, fold witnesses ----
+
+#[wasm_bindgen]
+pub fn wallet_receiving_key(args_json: &str) -> Result<String, JsError> {
+    wallet::args::receiving_key_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_wrap_mask(args_json: &str) -> Result<String, JsError> {
+    wallet::args::wrap_mask_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deliver_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deliver_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deliver_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deliver_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_open_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::open_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_open_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::open_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_prove_receiving_binding(args_json: &str) -> Result<String, JsError> {
+    wallet::args::prove_receiving_binding_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_verify_receiving_binding(args_json: &str) -> Result<String, JsError> {
+    wallet::args::verify_receiving_binding_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deposit_fold_a1_witness(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deposit_fold_a1_witness_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deposit_fold_a2_witness(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deposit_fold_a2_witness_args(&parse_args(args_json)?).map_err(werr)
 }
 
 #[wasm_bindgen]

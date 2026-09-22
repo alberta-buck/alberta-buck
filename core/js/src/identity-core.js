@@ -208,22 +208,7 @@ export function wrapIdentity(wasm) {
          ...flatP(proof.Q), ...flatP(proof.U), ...flatP(proof.T)],
         hex(issuer), hex(chainid)),
 
-    // ---- Deposit coupling / B1 depositor binding ----------------------------
-    depositCoupleProve(mRec, skDep, eDep, eIss, account, chainid, b, kM, kS, kB) {
-      const o = wasm.deposit_couple_prove(
-        hex(mRec), hex(skDep), flatCT(eDep), flatCT(eIss),
-        hex(account), hex(chainid), hex(b), hex(kM), hex(kS), hex(kB));
-      return {
-        e: big(o[0]), s_m: big(o[1]), s_s: big(o[2]), s_b: big(o[3]),
-        A2: P(o, 4), A3: P(o, 6), A4: P(o, 8), P_I: P(o, 10),
-      };
-    },
-    depositCoupleVerify: (pkDep, eDep, eIss, proof, account, chainid) =>
-      wasm.deposit_couple_verify(
-        ...flatP(pkDep), flatCT(eDep), flatCT(eIss),
-        [hex(proof.e), hex(proof.s_m), hex(proof.s_s), hex(proof.s_b),
-         ...flatP(proof.A2), ...flatP(proof.A3), ...flatP(proof.A4), ...flatP(proof.P_I)],
-        hex(account), hex(chainid)),
+    // ---- B1 depositor binding ---------------------------------------------------
     b1BindProve(mDep, skDep, eDep, pkIss, account, chainid, r, b, kM, kS, kR, kB) {
       const o = wasm.b1_bind_prove(
         hex(mDep), hex(skDep), flatCT(eDep), ...flatP(pkIss),

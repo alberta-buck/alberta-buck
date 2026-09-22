@@ -41,6 +41,20 @@ export function wrapWallet(wasm) {
     makeReceiptA1: (a) => JSON.parse(wasm.wallet_make_receipt_a1(toText(a))),
     verifyReceiptA1: (a) => JSON.parse(wasm.wallet_verify_receipt_a1(toText(a))),
 
+    // ---- Notes: the mailbox key, the delivery, and the folded gate --------
+    // A delivery and a fold witness are DOCUMENTS (decimal words); every other
+    // argument and result is hex, as throughout this ABI.
+    receivingKey: (a) => JSON.parse(wasm.wallet_receiving_key(toText(a))),
+    wrapMask: (a) => JSON.parse(wasm.wallet_wrap_mask(toText(a))),
+    deliverA1: (a) => JSON.parse(wasm.wallet_deliver_a1(toText(a))),
+    deliverA2: (a) => JSON.parse(wasm.wallet_deliver_a2(toText(a))),
+    openA1: (a) => JSON.parse(wasm.wallet_open_a1(toText(a))),
+    openA2: (a) => JSON.parse(wasm.wallet_open_a2(toText(a))),
+    proveReceivingBinding: (a) => JSON.parse(wasm.wallet_prove_receiving_binding(toText(a))),
+    verifyReceivingBinding: (a) => JSON.parse(wasm.wallet_verify_receiving_binding(toText(a))),
+    depositFoldA1Witness: (a) => JSON.parse(wasm.wallet_deposit_fold_a1_witness(toText(a))),
+    depositFoldA2Witness: (a) => JSON.parse(wasm.wallet_deposit_fold_a2_witness(toText(a))),
+
     // ---- issuer ceremony -----------------------------------------------
     issueCredential: (a) => JSON.parse(wasm.wallet_issue_credential(toText(a))),
 

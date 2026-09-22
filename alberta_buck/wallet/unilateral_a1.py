@@ -49,11 +49,7 @@ from alberta_buck.wallet.notes import (
 from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
-# Reuse the A2 gadgets verbatim -- A1's spend IS the A2 coupling + membership.
-from alberta_buck.wallet.unilateral_a2 import (
-    IdentityTree, RcptResult,
-    deposit_couple_prove, deposit_couple_verify,           # noqa: F401 (re-export)
-)
+from alberta_buck.wallet.unilateral_a2 import IdentityTree, RcptResult
 
 
 # ================================ Mint ======================================
@@ -222,5 +218,4 @@ __all__ = [
     "MintedA1", "mint_unilateral_a1",
     "A1Receipt", "make_receipt_a1", "verify_receipt_a1",
     # re-exported A2 gadgets the A1 deposit reuses:
-    "deposit_couple_prove", "deposit_couple_verify",
 ]

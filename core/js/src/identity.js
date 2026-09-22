@@ -25,7 +25,6 @@ export const {
   chaumPedersenProve, chaumPedersenVerify,
   verifiableDecryptProve, verifiableDecryptVerify,
   issuerReencProve, issuerReencVerify,
-  depositCoupleProve, depositCoupleVerify,
   b1BindProve, b1BindVerify,
   noteCommitment, nullifierB, nullifierA,
   idHashB1, idHashA1, idHashA2, identityLeaf,

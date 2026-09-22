@@ -18,6 +18,9 @@ export const {
   buildReceipt, verifyReceipt,
   mintUnilateralA2, makeReceiptA2, verifyReceiptA2,
   mintUnilateralA1, makeReceiptA1, verifyReceiptA1,
+  receivingKey, wrapMask, deliverA1, deliverA2, openA1, openA2,
+  proveReceivingBinding, verifyReceivingBinding,
+  depositFoldA1Witness, depositFoldA2Witness,
   issueCredential,
   registry,
 } = api;

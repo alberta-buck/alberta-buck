@@ -949,14 +949,25 @@ The v2 tag convention:
     fixtures and the =NotesA2Tie= mint fixture, all by re-proving against the
     existing keys.
 
-*B. Notes in the Rust/JS kernel.*
-21. Port the receiving key -- derivation, the payload wrap, the mailbox
-    binding -- and the folded gate's clear-text check and circuit-witness
-    builders, so a Rust or JavaScript wallet can mint, deliver, open and
-    spend a note.  Pinned by the kernel vectors, exposed through both
-    bindings.
-22. Retire the deposit-coupling sigma from the wallet in every backend: it
-    left the chain in landing 1 and survives only in the kernels.
+*B. Notes in the Rust/JS kernel.  Done 2026-09-22.*
+21. The delivery became a wallet function rather than a fixture-generator
+    detail: =wallet/delivery.py= (=deliver_a1/a2=, =open_a1/a2=) is the
+    reference, and =buck-wallet= mirrors it with the receiving-key derivation,
+    the payload wrap, the mailbox binding and both fold witness builders --
+    exposed through PyO3 and wasm, and replayed by all three backends from one
+    =notes= section of the wallet kernel vectors, eleven rows including both
+    circuit witnesses.  Opening a delivery refuses, with a reason, one that
+    another mailbox's key or corrupted randomness would otherwise surface only
+    as a proof that will not build.
+    One design change came with it: *the face and =rho= travel wrapped too.*
+    =rho= with =idHash= IS the nullifier, so in the clear the channel would
+    learn when the note is spent; the face would be readable while the note is
+    in flight.  Every wrapped field now draws its mask from one shared point,
+    =S = r_note * pk_recv = k * eNote.R=, which both flavours carry.
+22. The deposit-coupling sigma is gone from every backend -- Python, Rust,
+    both bindings, the JavaScript wrapper and three vector tests -- together
+    with the one kernel-vector row that still keyed a note to an identity
+    point.  The review scripts keep their own inline sigma as attack evidence.
 
 *C. The ceremony round: close the A2 split, and the v2 tags inside circuits.*
 23. The A2 closure of [[#split][4.6]]: =issuer_reenc= blinds both =Q= and

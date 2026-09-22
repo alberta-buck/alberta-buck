@@ -178,17 +178,6 @@ test("issuer re-encryption binding", { skip }, () => {
     pt(r.pk_iss), ct(r.E_reg), ct(r.E_iss), proof, B(r.issuer), B(r.chainid)));
 });
 
-test("deposit coupling", { skip }, () => {
-  const r = KV.deposit_couple;
-  const proof = id.depositCoupleProve(
-    B(r.m_rec), B(r.sk_dep), ct(r.E_dep), ct(r.eIss),
-    B(r.account), B(r.chainid), B(r.b), B(r.k_m), B(r.k_s), B(r.k_b));
-  for (const f of ["e", "s_m", "s_s", "s_b"]) assert.equal(proof[f], B(r.proof[f]), f);
-  for (const f of ["A2", "A3", "A4", "P_I"]) assert.deepEqual(proof[f], pt(r.proof[f]), f);
-  assert.ok(id.depositCoupleVerify(
-    pt(r.pk_dep), ct(r.E_dep), ct(r.eIss), proof, B(r.account), B(r.chainid)));
-});
-
 test("b1 depositor binding", { skip }, () => {
   const r = KV.b1_bind;
   const { proof, eDepForIss } = id.b1BindProve(

@@ -743,40 +743,6 @@ fn kernel_vectors_replay() {
     )
     .unwrap());
 
-    // ---- deposit coupling ----------------------------------------------------------
-    let dc = &v["deposit_couple"];
-    let dcp = unilateral_a2::deposit_couple_prove(
-        &jw(&dc["m_rec"]),
-        &jw(&dc["sk_dep"]),
-        &jct(&dc["E_dep"]),
-        &jct(&dc["eIss"]),
-        &jw(&dc["account"]),
-        &jw(&dc["chainid"]),
-        &jw(&dc["b"]),
-        &jw(&dc["k_m"]),
-        &jw(&dc["k_s"]),
-        &jw(&dc["k_b"]),
-    )
-    .unwrap();
-    let pf = &dc["proof"];
-    assert_eq!(dcp.e, jw(&pf["e"]));
-    assert_eq!(dcp.s_m, jw(&pf["s_m"]));
-    assert_eq!(dcp.s_s, jw(&pf["s_s"]));
-    assert_eq!(dcp.s_b, jw(&pf["s_b"]));
-    assert_eq!(dcp.a2, jg1(&pf["A2"]));
-    assert_eq!(dcp.a3, jg1(&pf["A3"]));
-    assert_eq!(dcp.a4, jg1(&pf["A4"]));
-    assert_eq!(dcp.p_i, jg1(&pf["P_I"]));
-    assert!(unilateral_a2::deposit_couple_verify(
-        &jg1(&dc["pk_dep"]),
-        &jct(&dc["E_dep"]),
-        &jct(&dc["eIss"]),
-        &dcp,
-        &jw(&dc["account"]),
-        &jw(&dc["chainid"]),
-    )
-    .unwrap());
-
     // ---- b1 depositor binding --------------------------------------------------------
     let db = &v["b1_bind"];
     let (dbp, e_dep_for_iss) = b1_binding::b1_bind_prove(

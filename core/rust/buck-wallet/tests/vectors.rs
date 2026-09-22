@@ -619,3 +619,34 @@ fn issuer_replay() {
     wrong_m[31] ^= 1;
     assert!(!verify_credential(&jg2(&i["pk_X"]), &jg2(&i["pk_Y"]), &cred.sigma, &wrong_m).unwrap());
 }
+
+/// The Notes section: the receiving key, the delivery, the mailbox binding and
+/// the folded gate's witnesses, each replayed through the JSON-args entry
+/// point a binding calls, and compared as parsed JSON with the reference.
+#[test]
+fn notes_kernel_replay() {
+    use buck_wallet::args;
+    let v = fixture();
+    let rows = v["notes"].as_array().expect("notes section");
+    assert!(rows.len() >= 11, "the notes section lost rows");
+    for row in rows {
+        let f = row["fn"].as_str().unwrap();
+        let a = &row["args"];
+        let got = match f {
+            "receiving_key" => args::receiving_key_args(a),
+            "wrap_mask" => args::wrap_mask_args(a),
+            "deliver_a1" => args::deliver_a1_args(a),
+            "deliver_a2" => args::deliver_a2_args(a),
+            "open_a1" => args::open_a1_args(a),
+            "open_a2" => args::open_a2_args(a),
+            "prove_receiving_binding" => args::prove_receiving_binding_args(a),
+            "verify_receiving_binding" => args::verify_receiving_binding_args(a),
+            "deposit_fold_a1_witness" => args::deposit_fold_a1_witness_args(a),
+            "deposit_fold_a2_witness" => args::deposit_fold_a2_witness_args(a),
+            other => panic!("unknown notes fn {other}"),
+        }
+        .unwrap_or_else(|e| panic!("{f}: {}", e.0));
+        let got: Value = serde_json::from_str(&got).unwrap();
+        assert_eq!(got, row["want"], "{f} diverges from the Python reference");
+    }
+}

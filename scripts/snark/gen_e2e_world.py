@@ -43,17 +43,15 @@ from alberta_buck.wallet.notes import (
 )
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
-from alberta_buck.wallet.unilateral_a2 import (
-    IdentityTree, mint_unilateral_a2, deposit_couple_prove, deposit_couple_verify,
-)
+from alberta_buck.wallet.unilateral_a2 import IdentityTree, mint_unilateral_a2
 from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
 from alberta_buck.wallet.deposit_fold import (
     deposit_fold_a1_witness, deposit_fold_a2_witness, deposit_fold_witness,
 )
 from alberta_buck.wallet.nums import H_PEDERSEN
+from alberta_buck.wallet.delivery import deliver_a1, deliver_a2, open_a1, open_a2
 from alberta_buck.wallet.recvkey import (
     receiving_key, prove_receiving_binding, verify_receiving_binding,
-    mailbox_shared_minter, mailbox_shared_recipient, wrap_scalar, unwrap_scalar,
 )
 from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
@@ -220,19 +218,11 @@ def build_world(flavor: str):
         M_named = note.M_I                       # the membership target (issuer)
         r_committed = note.r_prime
         eNote = note.eNote
-        # What a delivery must carry.  The two ciphertexts alone are not
-        # enough: the fold opens eIss with r' and proves the decrypted issuer
-        # Identity registered under the salt of its NAMING association, so both
-        # travel with the note -- WRAPPED to the mailbox key, because in the
-        # clear each one undoes the encryption it travels beside.  r' turns eIss
-        # into plaintext for anyone holding the payload; salt_iss turns the
-        # issuer's naming leaf into a scannable one.  See recvkey.wrap_scalar.
-        S = mailbox_shared_minter(note.r_prime, pk_ctr)
-        note_payload = {"eNote": ct(eNote), "eIss": ct(eCommitted),
-                        "rPrimeWrapped": str(
-                            wrap_scalar(note.r_prime, S, b"rPrime")),
-                        "saltIssWrapped": str(
-                            wrap_scalar(note.salt_iss, S, b"saltIss"))}
+        # The delivery: what the minter hands the channel.  Every secret
+        # scalar in it -- rho, the face, r', the issuer's naming salt -- is
+        # wrapped to the mailbox key, so the channel learns neither the issuer
+        # nor when the note is spent (wallet/delivery.py).
+        note_payload = deliver_a2(note, pk_ctr)
     elif flavor == "a1":
         # The in-payload (sigma_R, sigma_s) is the issuer's identity-binding
         # signature over the delivery payload (synthetic domain here, as in
@@ -248,18 +238,11 @@ def build_world(flavor: str):
         M_named = M_ctr                          # membership target (recipient)
         r_committed = note.r_prime
         eNote = note.eNote
-        # A1 needs eNote's randomness, because the fold pins eNote against the
-        # public face.  It needs no issuer salt: relation (2) already proves the
-        # decrypted Identity is the one the payout account is registered under,
-        # so A1 asserts nothing about a third party (the payload rule, section
-        # 4.4 of doc/review/notes-receiving-key.org).  Wrapped, for the same
-        # reason A2's scalars are: a readable face is a leak while the note is
-        # in flight, even though the spend publishes it.
-        S = mailbox_shared_minter(note.r_note, pk_ctr)
-        note_payload = {"eNote": ct(eNote), "eRec": ct(note.eRec),
-                        "sigma_R": pt(sigma_R), "sigma_s": str(sigma_s),
-                        "rNoteWrapped": str(
-                            wrap_scalar(note.r_note, S, b"rNote"))}
+        # A1's delivery carries eNote's randomness, because the fold pins eNote
+        # against the public face, and no issuer salt: relation (2) already
+        # proves the decrypted Identity is the payout account's, so A1 asserts
+        # nothing about a third party (doc/review/notes-receiving-key.org 4.4).
+        note_payload = deliver_a1(note, pk_ctr, sigma_R, sigma_s)
     else:  # b1
         k = rand_scalar(rng)
         sigma_R = mul(G1, k)
@@ -304,36 +287,32 @@ def build_world(flavor: str):
         # Everything below comes from the payload the channel carried, the
         # opening, and the recipient's own secrets (k, m_rec, sk_dep, its salt).
         # Nothing comes from the minter's memory.
+        # Opened with k: the recipient is the only party that can, which is
+        # what the wrap is for.  The opened note must recompute to the very
+        # commitment the minter folded into the tree.
         if flavor == "a1":
-            # Unwrapped with k, from the payload's own R: the recipient is the
-            # only party that can, which is what the wrap is for.
-            S_rec = mailbox_shared_recipient(k_ctr, ct_of(note_payload["eNote"]).R)
+            opened = open_a1(note_payload, k_ctr, m_iss)
+            assert opened.cm == note_commitment(opening), "delivery opens to another note"
             fold_input = deposit_fold_a1_witness(
-                witness=w, rho=opening.rho, id_hash=opening.id_hash,
-                e_note=ct_of(note_payload["eNote"]), v=FACE, m_issuer=m_iss,
-                sigma_R=sigma_R, sigma_s=sigma_s,
-                r_note=unwrap_scalar(int(note_payload["rNoteWrapped"]),
-                                     S_rec, b"rNote"),
-                t=t_total,
+                witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
+                e_note=opened.eNote, v=opened.opening.v, m_issuer=m_iss,
+                sigma_R=opened.sigma_R, sigma_s=opened.sigma_s,
+                r_note=opened.r_note, t=t_total,
                 r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
                 identity_root=tree.root(),
             )
         else:
-            S_rec = mailbox_shared_recipient(k_ctr, ct_of(note_payload["eIss"]).R)
-            salt_iss_shipped = unwrap_scalar(
-                int(note_payload["saltIssWrapped"]), S_rec, b"saltIss")
+            opened = open_a2(note_payload, k_ctr)
+            assert opened.cm == note_commitment(opening), "delivery opens to another note"
             iss_path = tree.path(tree.leaves.index(
-                identity_leaf_salted(w.M, salt_iss_shipped)))
+                identity_leaf_salted(opened.M_I, opened.salt_iss)))
             fold_input = deposit_fold_a2_witness(
-                witness=w, rho=opening.rho, id_hash=opening.id_hash,
-                e_note=ct_of(note_payload["eNote"]),
-                e_iss=ct_of(note_payload["eIss"]),
-                r_prime=unwrap_scalar(int(note_payload["rPrimeWrapped"]),
-                                      S_rec, b"rPrime"),
+                witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
+                e_note=opened.eNote, e_iss=opened.eIss, r_prime=opened.r_prime,
                 t=t_total, r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
-                salt_iss=salt_iss_shipped, iss_path=iss_path,
+                salt_iss=opened.salt_iss, iss_path=iss_path,
                 identity_root=tree.root(),
             )
         with open(os.path.join(out_dir, "fold_input.json"), "w") as f:

@@ -226,3 +226,13 @@ def test_issuer(wv):
     assert cred["sigma_1"] == i["sigma_1"]
     assert cred["sigma_2"] == i["sigma_2"]
     assert cred["delivery"] == i["delivery"]
+
+
+def test_notes_kernel_replay(wv):
+    """The Notes section -- receiving key, delivery, mailbox binding, fold witnesses -- through the
+    kernel's JSON-args entry points, compared as parsed JSON with the Python reference."""
+    rows = wv["notes"]
+    assert len(rows) >= 11, "the notes section lost rows"
+    for row in rows:
+        got = json.loads(getattr(bw, row["fn"])(json.dumps(row["args"])))
+        assert got == row["want"], f"{row['fn']} diverges from the Python reference"

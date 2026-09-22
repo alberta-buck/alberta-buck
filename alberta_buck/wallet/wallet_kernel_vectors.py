@@ -654,7 +654,144 @@ def _build(seed: int) -> Dict[str, Any]:
         "delivery": _ct(cred.delivery),
     }
 
+    # ---- Notes: the mailbox, the delivery, the binding, the folded gate ------
+    #
+    # One row shape, {fn, args, want}, so each backend replays the section with
+    # one loop.  Arguments and results are hex; a delivery and a fold witness
+    # are DOCUMENTS and keep their decimal words.  Drawn after every other row,
+    # so adding them moves nothing above.
+    out["notes"] = _notes_section(alice, bob, draw, rng)
+
     return out
+
+
+def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
+    from alberta_buck.wallet.delivery import deliver_a1, deliver_a2, open_a1, open_a2
+    from alberta_buck.wallet.deposit_fold import (
+        deposit_fold_witness, deposit_fold_a1_witness, deposit_fold_a2_witness,
+    )
+    from alberta_buck.wallet.recvkey import wrap_mask
+    from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
+    from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
+    from alberta_buck.registry.tree import (
+        AGGREGATOR_DEPTH, identity_leaf_salted, mailbox_leaf, receiving_leaf,
+    )
+
+    rows: List[Dict[str, Any]] = []
+
+    def row(fn, args, want):
+        rows.append({"fn": fn, "args": args, "want": want})
+
+    def opening(o, cm) -> Dict[str, Any]:
+        return {"flavor": o.flavor, "v": _hx(o.v), "rho": _hx(o.rho), "idHash": _hx(o.id_hash),
+                "predicate": _hx(o.predicate), "cm": _hx(cm)}
+
+    def path(proof) -> Dict[str, Any]:
+        return {"siblings": [_hx(x) for x in proof.siblings], "indexBits": list(proof.index_bits)}
+
+    k_a, pk_a = alice["k_recv"], alice["pk_recv"]
+    face = 250
+
+    # the receiving key, at two rotations of one seed
+    for rot in (0, 1):
+        k, pk = receiving_key(alice["wallet_seed"], rot)
+        row("receiving_key", {"seed": _hx(alice["wallet_seed"]), "rotation": rot},
+            {"k": scalar_to_hex(k), "pk_recv": _g1(pk)})
+
+    # one field's mask
+    shared = mul(G1, draw())
+    row("wrap_mask", {"shared": _g1(shared), "label": "rho"},
+        scalar_to_hex(wrap_mask(shared, b"rho")))
+
+    # A1: mint, deliver, open
+    sig_k, sig_s, rho1, rp1, rn1 = draw(), draw(), draw(), draw(), draw()
+    sig_R = mul(G1, sig_k)
+    m1 = mint_unilateral_a1(alice["M"], pk_a, v=face, rho=rho1, m_issuer=bob["m"],
+                            sigma_R=sig_R, sigma_s=sig_s, r_prime=rp1, rng=_replay([rn1]))
+    d1 = deliver_a1(m1, pk_a, sig_R, sig_s)
+    row("deliver_a1", {"eNote": _ct(m1.eNote), "eRec": _ct(m1.eRec), "v": _hx(face),
+                       "rho": scalar_to_hex(rho1), "predicate": _hx(0),
+                       "r_note": scalar_to_hex(m1.r_note), "pk_recv": _g1(pk_a),
+                       "sigma_R": _g1(sig_R), "sigma_s": scalar_to_hex(sig_s)}, d1)
+    o1 = open_a1(d1, k_a, bob["m"])
+    row("open_a1", {"delivery": d1, "k": scalar_to_hex(k_a), "m_issuer": scalar_to_hex(bob["m"])},
+        {"opening": opening(o1.opening, o1.cm), "eNote": _ct(o1.eNote), "eRec": _ct(o1.eRec),
+         "sigma_R": _g1(o1.sigma_R), "sigma_s": _hx(o1.sigma_s), "r_note": _hx(o1.r_note)})
+
+    # A2: mint (with the issuer's naming salt), deliver, open
+    rho2, salt_iss = draw(), draw() % F_R or 1
+    m2 = mint_unilateral_a2(bob["sk"], bob["E"], pk_a, v=face, rho=rho2, issuer=bob["addr"],
+                            chainid=CHAINID, salt_iss=salt_iss, rng=rng)
+    d2 = deliver_a2(m2, pk_a)
+    row("deliver_a2", {"eNote": _ct(m2.eNote), "eIss": _ct(m2.eIss), "v": _hx(face),
+                       "rho": scalar_to_hex(rho2), "predicate": _hx(0),
+                       "r_note": scalar_to_hex(m2.r_note), "r_prime": scalar_to_hex(m2.r_prime),
+                       "salt_iss": scalar_to_hex(salt_iss), "pk_recv": _g1(pk_a)}, d2)
+    o2 = open_a2(d2, k_a)
+    row("open_a2", {"delivery": d2, "k": scalar_to_hex(k_a)},
+        {"opening": opening(o2.opening, o2.cm), "eNote": _ct(o2.eNote), "eIss": _ct(o2.eIss),
+         "M_I": _g1(o2.M_I), "r_prime": _hx(o2.r_prime), "salt_iss": _hx(o2.salt_iss)})
+
+    # One subtree holding the recipient's three associations' worth of leaves:
+    # the gate's (scalars), the payer's (points), and the A2 issuer's naming leaf.
+    salt_rec, salt_mbx = draw() % F_R or 1, draw() % F_R or 1
+    tree = IdentityMerkleTree(depth=AGGREGATOR_DEPTH, private=True)
+    for leaf in (receiving_leaf(alice["m"], k_a, salt_rec),
+                 mailbox_leaf(alice["M"], pk_a, salt_mbx),
+                 identity_leaf_salted(bob["M"], salt_iss)):
+        tree.insert_leaf(leaf)
+    root = tree.root()
+
+    # the mailbox binding: a payer's check, with no secret
+    b = prove_receiving_binding(alice["M"], pk_a, salt_mbx, tree)
+    binding = {"pk_recv": _g1(pk_a), "salt": _hx(salt_mbx),
+               "path": {"leaf": _hx(b.path.leaf), **path(b.path), "root": _hx(b.path.root)}}
+    row("prove_receiving_binding",
+        {"M_rec": _g1(alice["M"]), "pk_recv": _g1(pk_a), "salt": _hx(salt_mbx),
+         "leaves": [_hx(x) for x in tree.leaves], "depth": AGGREGATOR_DEPTH}, binding)
+    row("verify_receiving_binding", {"M_rec": _g1(alice["M"]), "binding": binding, "root": _hx(root)},
+        True)
+
+    # the folded gate: a fresh deposit account registered to the recipient
+    sk_dep, r_E = draw(), draw()
+    pk_dep = mul(G1, sk_dep)
+    E_dep = elgamal_encrypt(alice["M"], pk_dep, r_E)
+    rec_path = tree.path(0)
+
+    def common(t, eEnc, o):
+        return {"m_rec": scalar_to_hex(alice["m"]), "k": scalar_to_hex(k_a),
+                "sk_dep": scalar_to_hex(sk_dep), "salt": _hx(salt_rec), "path": path(rec_path),
+                "t": scalar_to_hex(t), "r_E": scalar_to_hex(r_E), "E_dep": _ct(E_dep),
+                "pk_dep": _g1(pk_dep), "eEnc": _ct(eEnc), "rho": _hx(o.opening.rho),
+                "idHash": _hx(o.opening.id_hash), "identityRoot": _hx(root)}
+
+    t1 = draw()
+    eEnc1 = elgamal_encrypt(alice["M"], pk_a, t1)
+    w1 = deposit_fold_witness(m_rec=alice["m"], k=k_a, sk_dep=sk_dep, salt=salt_rec, E_dep=E_dep,
+                              note_ct=eEnc1, tree=tree, b=draw())
+    row("deposit_fold_a1_witness",
+        {**common(t1, eEnc1, o1), "eNote": _ct(o1.eNote), "v": _hx(face),
+         "m_issuer": scalar_to_hex(bob["m"]), "sigma_R": _g1(o1.sigma_R),
+         "sigma_s": scalar_to_hex(o1.sigma_s), "r_note": scalar_to_hex(o1.r_note)},
+        deposit_fold_a1_witness(witness=w1, rho=o1.opening.rho, id_hash=o1.opening.id_hash,
+                                e_note=o1.eNote, v=face, m_issuer=bob["m"], sigma_R=o1.sigma_R,
+                                sigma_s=o1.sigma_s, r_note=o1.r_note, t=t1, r_E=r_E, e_dep=E_dep,
+                                pk_dep=pk_dep, e_enc=eEnc1, identity_root=root))
+
+    t2 = draw()
+    eEnc2 = elgamal_encrypt(o2.M_I, pk_a, t2)
+    w2 = deposit_fold_witness(m_rec=alice["m"], k=k_a, sk_dep=sk_dep, salt=salt_rec, E_dep=E_dep,
+                              note_ct=eEnc2, tree=tree, b=draw())
+    iss_path = tree.path(2)
+    row("deposit_fold_a2_witness",
+        {**common(t2, eEnc2, o2), "eNote": _ct(o2.eNote), "eIss": _ct(o2.eIss),
+         "r_prime": scalar_to_hex(o2.r_prime), "salt_iss": _hx(o2.salt_iss),
+         "issPath": path(iss_path)},
+        deposit_fold_a2_witness(witness=w2, rho=o2.opening.rho, id_hash=o2.opening.id_hash,
+                                e_note=o2.eNote, e_iss=o2.eIss, r_prime=o2.r_prime, t=t2,
+                                r_E=r_E, e_dep=E_dep, pk_dep=pk_dep, e_enc=eEnc2,
+                                salt_iss=o2.salt_iss, iss_path=iss_path, identity_root=root))
+    return rows
 
 
 def emit_wallet_vectors(path: str, seed: int = 0x3A11E75EED) -> Dict[str, Any]:

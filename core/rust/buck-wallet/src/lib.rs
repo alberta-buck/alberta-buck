@@ -28,6 +28,8 @@
 pub mod args;
 pub mod builders;
 pub mod canonical;
+pub mod delivery;
+pub mod deposit_fold;
 pub mod envelope;
 pub mod flows;
 pub mod issuer;
@@ -103,6 +105,59 @@ pub fn hex_w(w: &W256) -> String {
 /// `bn254.scalar_to_hex`: the word reduced mod ORDER, full-width hex.
 pub fn scalar_hex(w: &W256) -> String {
     hex_w(&buck_identity::reduce_mod_order(w))
+}
+
+/// A word as a decimal string -- the convention of the delivery document and
+/// of every circuit witness (snarkjs and rapidsnark read decimal).
+pub fn dec_w(w: &W256) -> String {
+    let mut limbs = [0u64; 4]; // little-endian limbs
+    for (i, limb) in limbs.iter_mut().enumerate() {
+        let off = 32 - 8 * (i + 1);
+        *limb = u64::from_be_bytes(w[off..off + 8].try_into().expect("8 bytes"));
+    }
+    if limbs == [0u64; 4] {
+        return "0".to_string();
+    }
+    let mut digits = Vec::with_capacity(78);
+    while limbs != [0u64; 4] {
+        let mut rem: u128 = 0;
+        for limb in limbs.iter_mut().rev() {
+            let cur = (rem << 64) | u128::from(*limb);
+            *limb = (cur / 10) as u64;
+            rem = cur % 10;
+        }
+        digits.push(b'0' + rem as u8);
+    }
+    digits.reverse();
+    String::from_utf8(digits).expect("ascii digits")
+}
+
+/// Parse a decimal string into a word, refusing anything that does not fit.
+pub fn w_from_dec(s: &str) -> Result<W256> {
+    if s.is_empty() || s.len() > 78 {
+        return Err(IdError("decimal word must be 1..78 digits"));
+    }
+    let mut limbs = [0u64; 4];
+    for c in s.bytes() {
+        if !c.is_ascii_digit() {
+            return Err(IdError("invalid decimal"));
+        }
+        let mut carry = u128::from(c - b'0');
+        for limb in limbs.iter_mut() {
+            let cur = u128::from(*limb) * 10 + carry;
+            *limb = cur as u64;
+            carry = cur >> 64;
+        }
+        if carry != 0 {
+            return Err(IdError("decimal word exceeds 256 bits"));
+        }
+    }
+    let mut w = [0u8; 32];
+    for (i, limb) in limbs.iter().enumerate() {
+        let off = 32 - 8 * (i + 1);
+        w[off..off + 8].copy_from_slice(&limb.to_be_bytes());
+    }
+    Ok(w)
 }
 
 /// Parse a `0x`-hex string (any length up to 64 nybbles) into a word --

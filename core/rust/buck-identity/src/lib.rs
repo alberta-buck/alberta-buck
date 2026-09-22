@@ -39,8 +39,8 @@ pub mod notes;
 pub mod pairing;
 pub mod poseidon;
 pub mod ps;
+pub mod recvkey;
 pub mod schnorr;
-pub mod unilateral_a2;
 pub mod verifiable_decrypt;
 
 use ark_bn254::{Fq, Fq2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};

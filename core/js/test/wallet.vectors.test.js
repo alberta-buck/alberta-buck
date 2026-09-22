@@ -218,3 +218,14 @@ test("issuer ceremony", { skip }, () => {
   assert.deepEqual(cred.sigma_2, i.sigma_2);
   assert.deepEqual(cred.delivery, i.delivery);
 });
+
+test("notes: receiving key, delivery, binding, fold witnesses", { skip }, () => {
+  const camel = (s) => s.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
+  const name = { deposit_fold_a1_witness: "depositFoldA1Witness",
+                 deposit_fold_a2_witness: "depositFoldA2Witness" };
+  assert.ok(WV.notes.length >= 11, "the notes section lost rows");
+  for (const row of WV.notes) {
+    const f = name[row.fn] ?? camel(row.fn);
+    assert.deepEqual(w[f](row.args), row.want, `${row.fn} diverges from the Python reference`);
+  }
+});

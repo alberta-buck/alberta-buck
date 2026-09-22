@@ -72,3 +72,23 @@ pub fn get_u128(v: &Value, key: &str) -> Result<u128> {
 pub fn get_int_w(v: &Value, key: &str) -> Result<W256> {
     Ok(crate::w_from_u128(get_u128(v, key)?))
 }
+
+/// A decimal-string word -- the delivery and circuit-witness convention.
+pub fn get_dec_w(v: &Value, key: &str) -> Result<W256> {
+    crate::w_from_dec(as_str(get(v, key)?)?)
+}
+
+/// A `{"x": "<dec>", "y": "<dec>"}` G1 point.
+pub fn as_g1_dec(v: &Value) -> Result<G1w> {
+    Ok((get_dec_w(v, "x")?, get_dec_w(v, "y")?))
+}
+
+pub fn get_g1_dec(v: &Value, key: &str) -> Result<G1w> {
+    as_g1_dec(get(v, key)?)
+}
+
+/// A decimal `{"R": {..}, "C": {..}}` ElGamal ciphertext.
+pub fn get_ct_dec(v: &Value, key: &str) -> Result<Ctw> {
+    let c = get(v, key)?;
+    Ok((get_g1_dec(c, "R")?, get_g1_dec(c, "C")?))
+}
