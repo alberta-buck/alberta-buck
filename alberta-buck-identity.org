@@ -185,11 +185,14 @@ secret key and an archival node -- without any counterparty's cooperation.
      })
      #+end_example
 
-     The identity scalar is ~m = H(identity_data)~ where ~H~ is
-     keccak256 over the canonical encoding.  The canonical encoding is
-     deterministic: field order, encoding format, and whitespace are
-     fixed by the hApp DNA, so any party who holds the same
-     ~identity_data~ computes the same ~m~.
+     The identity scalar is ~m = H(identity_data)~ where ~H~ is keccak256
+     over the domain tag ~AlbertaBuck/Identity/Scalar/v2~ followed by the
+     canonical encoding, reduced mod the group order.  The tag keeps a
+     person's scalar out of every other protocol's range: the same record
+     hashed by anything else yields something else.  The canonical
+     encoding is deterministic: field order, encoding format, and
+     whitespace are fixed by the hApp DNA, so any party who holds the
+     same ~identity_data~ computes the same ~m~.
 
      The issuer verifies these claims during the KYC ceremony and
      computes ~m~.  Alice receives both ~m~ (the scalar) and
@@ -201,8 +204,10 @@ secret key and an archival node -- without any counterparty's cooperation.
 
      Different issuers may define different schemas (a province vs. a
      bank), but all schemas produce a single scalar ~m~ via the same
-     hash function.  The ~epoch~ field binds the credential to a
-     renewal period (see Epoch-Based Credential Renewal below).
+     hash function.  The ~epoch~ field records the epoch of first
+     certification and is never bumped, so ~m~ is stable for life;
+     whether a person is currently in good standing is a separate,
+     revocable fact (see Liveness Is Membership below).
 
 **** Derivation: Alice Generates Credentials Offline
 
@@ -312,24 +317,30 @@ secret key and an archival node -- without any counterparty's cooperation.
      account -- each carries the issuer's stamp of authenticity, each is
      cryptographically invisible to the others.
 
-**** Epoch-Based Credential Renewal
+**** Liveness Is Membership
      :PROPERTIES:
      :CUSTOM_ID: epoch-based-renewal
      :END:
 
-     If the issuer revokes Alice's identity (fraud, death, court order), all
-     her derived credentials must be invalidated -- without linking them.
+     If Alice's registry withdraws its certification (fraud, death, court
+     order), everything that relies on her being in good standing must stop
+     accepting her -- without linking her accounts.
 
-     Credentials carry an expiry epoch (e.g., one year).  The issuer publishes
-     epoch keys; credential derivation requires the current epoch key.
-     Revocation means the issuer refuses to provide Alice's next epoch key.
-     Expired credentials are rejected at ~isVerified~ time.  Alice must
-     periodically re-derive from a fresh issuance -- giving the issuer a
-     natural checkpoint for continued eligibility.
+     Registration does not lapse: an account's credential binding is a fact
+     about the past and stays true.  What lapses is /membership/.  Each
+     registry keeps a subtree of the identities it currently holds in good
+     standing, with salted leaves nobody else can test ([[#accumulator][The
+     Identity Accumulator]]).  Renewal is the registry continuing to include
+     Alice; revocation is clearing her leaf.  Every check that asks whether
+     she is live -- a Notes spend, an attribute proof a counterparty asks
+     for, an insurer's attestation -- is a membership proof against a
+     posted root no older than the checker allows, so a revoked holder
+     proves nothing once the roots from before the clearance age out.
 
-     This fits Alberta Buck's model: the issuer remains the trust anchor for
-     "is this person still in good standing," which is the real-world question
-     regardless of the cryptography.
+     This fits Alberta Buck's model: the registry remains the trust anchor
+     for "is this person still in good standing," which is the real-world
+     question regardless of the cryptography, and answering it never
+     re-issues the identity or links the accounts it backs.
 
 
 ** Accounts Belong to Someone
@@ -551,13 +562,17 @@ secret key and an archival node -- without any counterparty's cooperation.
     prevent replay and malleability:
 
     #+begin_example
-    e = H(G, pk_alice, pk_bob, R_a, C_a, R_b, C_b, T1, T2,
-          msg.sender, spender, block.chainid)
+    e = H(R_a, C_a, R_b, C_b, pk_alice, pk_bob, T1, T2, T3,
+          msg.sender, spender, block.chainid, registry,
+          keccak("AlbertaBuck/FiatShamir/IdentityRegistry/Approve/v2"))
     #+end_example
 
     Including ~msg.sender~ and ~spender~ (Ethereum addresses) binds the
     proof to the specific transaction context.  Including ~block.chainid~
-    prevents cross-chain replay.  On-chain, ~msg.sender~ is authenticated
+    and the registry address prevents cross-chain and cross-deployment
+    replay, and the final domain word keeps the transcript out of every
+    other protocol's range: each sigma protocol in the system ends its
+    challenge in its own v2 tag.  On-chain, ~msg.sender~ is authenticated
     by ECDSA and ~spender~ is a calldata argument to ~approve()~, but
     including them in the hash explicitly prevents a proof generated for
     one ~(sender, spender)~ pair from being replayed in another context.
@@ -647,6 +662,83 @@ secret key and an archival node -- without any counterparty's cooperation.
      many times, it is negligible.  Compare: Groth16 SNARK verification
      requires similar pairing operations (~200,000-300,000 gas) but must be
      performed /per transaction/ if used for re-encryption proofs.
+
+
+* The Identity Accumulator: Certified Attributes Without a Scan
+  :PROPERTIES:
+  :CUSTOM_ID: accumulator
+  :END:
+
+  Registration proves an account belongs to /some/ certified identity.  Many
+  checks need more: that the identity is in good standing today, that it is
+  over eighteen, that an insurer is licensed to write a policy of this size.
+  Each such fact is a membership in a set somebody certifies, and the
+  system keeps those sets in one accumulator whose root is on chain.  The
+  constraint that shapes it is the one that shaped the presentation: nobody
+  holding identity scalars -- the issuer, a registry, a past counterparty --
+  may be able to test which sets a person is in.
+
+** Subtrees, leaves and the posted root
+
+   Every certifying authority keeps subtrees of Poseidon leaves.  An
+   identity registry's are /private/, of depth 12, and its leaves are
+   salted:
+
+   #+begin_example
+   identity_leaf_salted(M, salt) = Poseidon(tag_S, M.x, M.y, salt)
+   receiving_leaf(m, k, salt)    = Poseidon(tag_R, m, k, salt)
+   #+end_example
+
+   The salt derives from the holder's wallet secret, never from ~m~, so a
+   party holding every scalar it ever certified and the whole published
+   subtree decides no membership.  The second form pairs an identity with
+   the key its Notes are addressed to (/Notes/, "The Receiving Key").
+   Institutions whose membership is a fact they advertise -- an insurer's
+   licence, its permitted scopes -- sit in /public/ subtrees with the
+   unsalted leaf ~Poseidon(tag_I, M.x, M.y)~.  Each leaf function leads with
+   its own ~AlbertaBuck/Accumulator/Leaf/.../v2~ tag.
+
+   An aggregator's tree, of depth 20, has the subtree roots for leaves.
+   Every level hashes alike, so a subtree path and an aggregator path
+   compose into one path of 32 levels, and a proof can hide which authority
+   certified the leaf.  Governance appoints one /root authority/ per
+   deployment, which enrolls each subtree at an aggregator slot and appoints
+   the aggregator; the aggregator alone posts roots, into a ring of 256
+   records with their posting times.  Each consumer declares the oldest
+   root it accepts -- Notes seven days, the insurer gate one day -- and
+   that age is the protocol's statement of how long a revoked member can
+   still prove membership.
+
+   Admission is certification.  ~register~ and ~bindContract~ refuse a
+   caller-supplied leaf, and must: a registration that accepted any leaf
+   would accept one pairing any identity with any key.
+
+** Attribute proofs belong to the holder
+
+   A feature check is a proof the holder produces, not a lookup a verifier
+   runs: one path per claimed subtree, all against one posted root, and the
+   verifier names the subtrees it requires and the maximum root age it
+   accepts.  A counterparty that needs durable evidence -- a merchant
+   selling to adults, a lender checking residency -- captures the proof in
+   the payment's receipt.  Nobody else learns the holder was asked.
+
+   Mutable facts, an address or a region, are re-associations: the
+   authority inserts a fresh leaf under a new salt in the subtree for the
+   new value and clears the old one, so the two leaves do not link for
+   anyone lacking the authority's own records, and the authority keeps the
+   current association only.
+
+** Insurers: a public attestation the credit gate reads
+
+   An insurance regulator is a periodic attestor with public subtrees, one
+   per predicate: standing, a face band on a ladder of powers of ten, each
+   permitted depreciation model, the maximum depreciation and premium
+   rates, and each asset scope.  Once per review period the insurer proves
+   its memberships to ~BuckCredit.attestInsurer~, together with an opening
+   of its registered identity bound to its account, and the envelope is
+   cached with an expiry; every ~createCredit~ then checks the credit's
+   parameters against it (/Ethereum/, "The Insurer Gate").  The regulator
+   attests what it already reviews; the chain holds it to the result.
 
 
 * Attacks and Defenses
@@ -1079,32 +1171,36 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 *** Why It Fails
 
-    The IdentityRegistry tracks credential validity.  When the issuer revokes
-    Alice's credential:
+    Revocation clears Alice's leaf from her registry's subtree and the
+    aggregator posts the new root.  Her registrations and old proofs remain
+    mathematically valid -- the cryptography is eternal -- but every check
+    that asks whether she is live asks for membership: a Notes spend proves
+    a certified leaf against a root Notes accepts for seven days, an
+    insurer's attestation against a root one day old, a counterparty's
+    attribute check against a root of the age the counterparty declares.
+    No root posted after the clearance contains her leaf, so once the older
+    roots age out she has nothing to prove against.
 
-    #+begin_example
-    identityRegistry.revokeIdentity(alice_address)
-    #+end_example
+    The clearance links nothing.  The cleared leaf was a hiding commitment,
+    so an observer learns that a member was removed, not which, and the
+    registry never needed Alice's accounts to remove her -- which it could
+    not have found anyway: under the A' presentation no one can find a
+    holder's addresses from chain data.
 
-    Subsequent calls to ~isVerified(alice)~ return false.  Alice's ~approve~
-    call -- and any ~transfer~ or ~transferFrom~ -- reverts at the identity
-    check, before the Chaum-Pedersen proof is even evaluated.
-
-    Alice's old credential and proofs remain mathematically valid (the
-    cryptography is eternal), but the contract refuses to accept them because
-    her registration is no longer active.  The revocation is a separate on-chain
-    state, controlled by the trusted issuer.
-
-    Per-address revocation needs an address the issuer has learned
-    legitimately -- a surrendered receipt, a disclosure.  Under the A'
-    presentation the issuer cannot find a holder's addresses from chain
-    data, so the route that invalidates every derived account without
-    linking them is the epoch expiry described above.
+    What revocation does not do is freeze an account.  A registered
+    account's ~approve~ and ~transfer~ are gated on its registration, which
+    does not lapse; a counterparty that needs to know its payer is in good
+    standing asks for a membership proof, the way a merchant asks for
+    current ID, and the receipt captures it.  A compromised issuer key is
+    the one case handled at the registry: ~revokeIssuer~ refuses new
+    registrations under it.
 
 *** What the Contract Sees
 
-    ~isVerified(alice) == false~.  Transaction reverts immediately.  The
-    still-valid-but-revoked credential is never consulted.
+    A spend or attestation naming a root posted after the clearance has no
+    witness; one naming an older root is refused once that root ages past
+    the consumer's maximum.  The still-valid-but-revoked credential is never
+    consulted.
 
 
 ** Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
@@ -1455,6 +1551,11 @@ secret key and an archival node -- without any counterparty's cooperation.
    |                      | (no claims yet)  | (publicly identified) | PS sig      | issuer PS-signs identity scalar.         |
    | Register in registry | Self             | N/A                   | Event log   | Derives credential offline; registers    |
    |                      |                  |                       |             | with PS signature + NIZK proof.          |
+   | Certify membership   | Registry         | N/A                   | Posted root | Salted leaf into the registry's subtree; |
+   |                      | (off chain)      |                       |             | the aggregator posts the new root.       |
+   | Revoke membership    | Registry         | N/A                   | Posted root | Clears the leaf; links no accounts.      |
+   | Attest insurer       | Insurer          | Regulator             | Event log   | Proves its envelope once per review      |
+   |                      |                  | (public subtrees)     |             | period; gates createCredit.              |
    | Add public identity  | Self             | Trusted issuer        | On-chain    | Opts in to public identification.        |
    | claim                | KYC (topic 1)    | (publicly identified) | claim       | Exempts counterparties from ~approve~.   |
    | Revoke claim         | Issuer or self   | N/A                   | Event log   | Removes a claim (e.g., expired license). |
@@ -2609,7 +2710,7 @@ secret key and an archival node -- without any counterparty's cooperation.
   Practical deployment scenarios beyond the simple Alice-to-Bob model:
   flash loans (atomic borrow-repay cycles), multi-hop swaps (BUCK
   through intermediate pools), contract-to-contract transfers (yield
-  aggregators), epoch-based credential expiry, Holochain integration
+  aggregators), liveness as accumulator membership, Holochain integration
   details (private entry storage, agent isolation, DHT identity
   delivery and non-publication detection), the 3-party ECDH regulatory
   escrow model (O(N) surveillance cost, no unilateral decryption), and
@@ -2718,11 +2819,13 @@ secret key and an archival node -- without any counterparty's cooperation.
 
    Three mitigations apply:
 
-   1. *Epoch-based credential expiry*: PS signatures are verified once at
-      registration and carry an expiry epoch.  An attacker who invests
-      computational resources to break a pairing equation recovers a
-      single credential that has likely already expired.  The Identity
-      Fountain's renewal model limits the value of any single break.
+   1. *A pairing break forges registrations, not certification*: PS
+      signatures are verified once, at registration.  Everything that
+      needs a person in good standing -- Notes spends, attribute checks,
+      the insurer gate -- proves membership in a registry's subtree, which
+      the registry fills from its own KYC records, not from the pairing.
+      An attacker who forges a credential registers accounts that no
+      registry has certified.
 
    2. *DLog security is unaffected*: Per-transaction Chaum-Pedersen proofs
       rely on discrete logarithm hardness in G_1, which remains at
@@ -2740,7 +2843,7 @@ secret key and an archival node -- without any counterparty's cooperation.
    The ~100-bit pairing security is adequate for the current threat model.
    The practical cost of a tower-NFS attack on BN254 pairings remains far
    beyond the value of any single Alberta Buck credential, particularly
-   given epoch-based expiry.  The system shares this constraint with the
+   since a forged one earns no registry certification.  The system shares this constraint with the
    entire Ethereum L2 scaling ecosystem.
 
 
