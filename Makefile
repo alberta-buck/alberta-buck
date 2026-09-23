@@ -154,8 +154,7 @@ fmt-check:
 # Build the Uniswap V2/V3 artifacts (via their compile-trigger stubs under
 # src/uniswap_v*_build and the v3 foundry profile) into the shared out/
 # directory.  Tests that use vm.deployCode("out/Uniswap*.json") (e.g.
-# BuckBasket, BuckLifecycle, UniswapV2Integration, BuckK*V3*, equilibrium/arb
-# scenarios) require these.  Also ensures the critical V2 init-code-hash patch
+# BuckBasket, UniswapV2Integration, BuckK*V3*) require these.  Also ensures the critical V2 init-code-hash patch
 # has been applied so UniswapV2Router02 computes the same pair addresses as the
 # locally-built V2Factory.
 build-uniswap-artifacts: stage-uniswap

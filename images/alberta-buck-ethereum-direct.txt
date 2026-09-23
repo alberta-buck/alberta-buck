@@ -642,15 +642,14 @@
      retained share)
 
 
-11.6 Layer 6: equilibrium simulation (analog of `BuckKArbScenarioTest')
-───────────────────────────────────────────────────────────────────────
+11.6 Layer 6: equilibrium simulation
+────────────────────────────────────
 
-  Recreate the existing 18-month Carol/Hank simulation against the
-  direct embodiment.  Two basket constituents (gold-pegged + BTC- pegged
-  synthetic tokens, both 6-dec mocks), starting weights 50/50.  Confirm
-  the same equilibrium-seeking behavior (BUCK price oscillates around
-  basket-implied parity, fundingFactor responds counter- cyclically)
-  without the USD reference.
+  A closed-loop simulation against the direct embodiment.  Two basket
+  constituents (gold-pegged + BTC-pegged synthetic tokens, both 6-dec
+  mocks), starting weights 50/50.  Confirm equilibrium-seeking behavior
+  (BUCK price oscillates around basket-implied parity, fundingFactor
+  responds counter-cyclically) without the USD reference.
 
 
 11.7 Acceptance gate
