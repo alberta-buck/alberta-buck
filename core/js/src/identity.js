@@ -24,6 +24,7 @@ export const {
   registrationProve, registrationVerify,
   chaumPedersenProve, chaumPedersenVerify,
   verifiableDecryptProve, verifiableDecryptVerify,
+  identityOpeningProve, identityOpeningVerify, treeTag, deriveSalt,
   issuerReencProve, issuerReencVerify,
   b1BindProve, b1BindVerify,
   noteCommitment, nullifierB, nullifierA,

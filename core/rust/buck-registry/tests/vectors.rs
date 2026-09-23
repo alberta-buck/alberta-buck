@@ -6,7 +6,12 @@
 use buck_identity::W256;
 use buck_registry::aggregator::CentralMerkleService;
 use buck_registry::certificate::*;
+use buck_registry::attributes::{prove_attributes, verify_attributes};
 use buck_registry::feature::FeatureAuthority;
+use buck_registry::regulator::{
+    band_for_face, check_issuance, scope_id, subtree_key, InsuranceRegulator, InsurerEnvelope,
+};
+use std::collections::BTreeSet;
 use buck_registry::tree::{identity_leaf, IdentityMerkleTree, MembershipProof};
 
 fn hex_w(s: &str) -> W256 {
@@ -221,7 +226,7 @@ fn aggregator_replay() {
     reg_a.insert_batch(&reg_a_leaves[..3]);
     let mut reg_b = IdentityMerkleTree::new(12).unwrap();
     reg_b.insert_batch(&reg_b_leaves);
-    let mut feat = FeatureAuthority::new("feature:age-over-18", 10).unwrap();
+    let mut feat = FeatureAuthority::new("feature:age-over-18", 10, false).unwrap();
 
     let mut svc = CentralMerkleService::new(a["depth"].as_u64().unwrap() as usize).unwrap();
     let ts = |i: u64| 1770000100.0 + i as f64;
@@ -239,7 +244,7 @@ fn aggregator_replay() {
     // Duplicate enrollment must be rejected.
     assert!(svc.enroll("ca-ab-2026", "kyc", reg_a.root().unwrap(), ts(0)).is_err());
 
-    feat.attest(&identity, ts(3), Some([0x11; 32])).unwrap();
+    feat.attest(&identity, None, ts(3), Some([0x11; 32])).unwrap();
     assert_eq!(
         svc.update_sub_root("feature:age-over-18", feat.sub_root().unwrap(), ts(3))
             .unwrap(),
@@ -308,12 +313,13 @@ fn feature_authority_replay() {
     let mut fa = FeatureAuthority::new(
         f["id"].as_str().unwrap(),
         f["depth"].as_u64().unwrap() as usize,
+        false,
     )
     .unwrap();
-    fa.attest(&pa, 1770000100.0, None).unwrap();
-    fa.attest(&pb, 1770000101.0, Some([0x22; 32])).unwrap();
+    fa.attest(&pa, None, 1770000100.0, None).unwrap();
+    fa.attest(&pb, None, 1770000101.0, Some([0x22; 32])).unwrap();
     assert_eq!(fa.sub_root().unwrap(), jw(&f["root_after_two"]));
-    assert_eq!(fa.attest(&pa, 0.0, None).is_err(), f["dup_rejected"].as_bool().unwrap());
+    assert_eq!(fa.attest(&pa, None, 0.0, None).is_err(), f["dup_rejected"].as_bool().unwrap());
     assert_eq!(
         fa.revoke(&pa).unwrap(),
         Some(f["revoked_index"].as_u64().unwrap() as usize)
@@ -323,5 +329,213 @@ fn feature_authority_replay() {
     assert_eq!(fa.has_identity(&pb).unwrap(), f["has_pb"].as_bool().unwrap());
 
     // The prefix convention is enforced.
-    assert!(FeatureAuthority::new("age-over-18", 10).is_err());
+    assert!(FeatureAuthority::new("age-over-18", 10, false).is_err());
+}
+
+
+// ---- phase 5 of the accumulator plan ----------------------------------------
+
+fn leaves(v: &serde_json::Value) -> Vec<W256> {
+    v.as_array().unwrap().iter().map(jw).collect()
+}
+
+fn tree_of(v: &serde_json::Value, depth: usize) -> IdentityMerkleTree {
+    IdentityMerkleTree::from_leaves(&leaves(v), depth).unwrap()
+}
+
+#[test]
+fn salt_replay() {
+    let v = fixture();
+    let s = &v["salt"];
+    let secret = jw(&s["secret"]);
+    for (id, tag) in s["tree_tags"].as_object().unwrap() {
+        assert_eq!(buck_identity::salt::tree_tag(id).unwrap(), jw(tag), "{id}");
+    }
+    for c in s["cases"].as_array().unwrap() {
+        let got = buck_identity::salt::derive_salt(
+            &secret,
+            c["tree_id"].as_str().unwrap(),
+            c["counter"].as_u64().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(got, jw(&c["salt"]));
+    }
+    assert!(buck_identity::salt::derive_salt(&[0u8; 32], "kyc:x", 0).is_err());
+    assert!(buck_identity::salt::tree_tag("").is_err());
+}
+
+#[test]
+fn feature_private_replay() {
+    let v = fixture();
+    let f = &v["feature_private"];
+    let (qa, qb) = (jg1(&f["points"][0]), jg1(&f["points"][1]));
+    let (sa, sb) = (jw(&f["salts"][0]), jw(&f["salts"][1]));
+    let mut fa =
+        FeatureAuthority::new(f["id"].as_str().unwrap(), f["depth"].as_u64().unwrap() as usize, true)
+            .unwrap();
+    assert_eq!(fa.attest(&qa, Some(&sa), 0.0, None).unwrap().leaf, jw(&f["leaf_a"]));
+    fa.attest(&qb, Some(&sb), 0.0, None).unwrap();
+    assert_eq!(fa.sub_root().unwrap(), jw(&f["root_after_two"]));
+    assert_eq!(fa.membership_proof_for_identity(&qa).unwrap().unwrap(), jproof(&f["proof_a"]));
+    let seven = buck_identity::g1_mul(&buck_identity::g1_generator(), &{
+        let mut w = [0u8; 32];
+        w[31] = 7;
+        w
+    })
+    .unwrap();
+    assert_eq!(fa.attest(&seven, None, 0.0, None).is_err(), f["no_salt_refused"].as_bool().unwrap());
+    assert_eq!(fa.attest(&qa, Some(&sa), 0.0, None).is_err(), f["dup_refused"].as_bool().unwrap());
+    assert_eq!(fa.revoke(&qa).unwrap(), Some(f["revoked_index"].as_u64().unwrap() as usize));
+    assert_eq!(fa.sub_root().unwrap(), jw(&f["root_after_revoke"]));
+    assert_eq!(fa.has_identity(&qa).unwrap(), f["has_a"].as_bool().unwrap());
+    assert_eq!(fa.has_identity(&qb).unwrap(), f["has_b"].as_bool().unwrap());
+    // A public subtree refuses a salt.
+    let mut public = FeatureAuthority::new("feature:x", 4, false).unwrap();
+    assert!(public.attest(&qa, Some(&sa), 0.0, None).is_err());
+}
+
+#[test]
+fn root_ring_replay() {
+    let v = fixture();
+    let r = &v["root_ring"];
+    let mut svc = CentralMerkleService::new(r["depth"].as_u64().unwrap() as usize).unwrap();
+    let id = r["sub_tree_id"].as_str().unwrap();
+    let mut one = [0u8; 32];
+    one[31] = 1;
+    svc.enroll(id, "kyc", one, r["enroll_ts"].as_f64().unwrap()).unwrap();
+    for p in r["posts"].as_array().unwrap() {
+        let mut sub = [0u8; 32];
+        sub[24..].copy_from_slice(&p["sub_root"].as_u64().unwrap().to_be_bytes());
+        let at = p["at"].as_f64().unwrap();
+        svc.update_sub_root(id, sub, at).unwrap();
+        let rec = svc.post(at).unwrap();
+        assert_eq!(rec.root, jw(&p["root"]));
+        assert_eq!(rec.sequence, p["sequence"].as_u64().unwrap());
+    }
+    let posts = r["posts"].as_array().unwrap();
+    let r0 = jw(&posts[0]["root"]);
+    let r1 = jw(&posts[1]["root"]);
+    assert_eq!(svc.root_record(&r0).is_some(), r["r0_retained"].as_bool().unwrap());
+    assert_eq!(svc.root_record(&r1).unwrap().posted_at, r["r1_posted_at"].as_f64().unwrap());
+    let now = r["now"].as_f64().unwrap();
+    assert_eq!(svc.max_retained_age(now), r["max_retained_age"].as_f64().unwrap());
+    for a in r["accepts"].as_array().unwrap() {
+        assert_eq!(
+            svc.accepts(&jw(&a["root"]), a["max_age"].as_f64().unwrap(), now),
+            a["want"].as_bool().unwrap()
+        );
+    }
+}
+
+#[test]
+fn composed_path_replay() {
+    let v = fixture();
+    let c = &v["composed"];
+    let depth = c["depth"].as_u64().unwrap() as usize;
+    let sub_depth = c["sub_depth"].as_u64().unwrap() as usize;
+    let mut svc = CentralMerkleService::new(depth).unwrap();
+    svc.enroll("kyc:neighbour", "kyc", tree_of(&c["neighbour_leaves"], sub_depth).root().unwrap(), 0.0)
+        .unwrap();
+    let kyc = tree_of(&c["kyc_leaves"], sub_depth);
+    svc.enroll("kyc:ca-ab-2026", "kyc", kyc.root().unwrap(), 0.0).unwrap();
+    let sub = kyc.path(1).unwrap();
+    assert_eq!(sub, jproof(&c["sub_proof"]));
+    let full = svc.full_proof("kyc:ca-ab-2026", sub, [0u8; 32], [0u8; 32]).unwrap();
+    let comp = full.composed();
+    assert_eq!(comp, jproof(&c["composed"]));
+    assert!(comp.verify().unwrap());
+    assert_eq!(comp.root, svc.identity_root().unwrap());
+}
+
+fn jenvelope(e: &serde_json::Value, scopes: BTreeSet<W256>) -> InsurerEnvelope {
+    InsurerEnvelope::new(
+        true,
+        e["face_band"].as_u64().unwrap() as u8,
+        e["dep_types"].as_array().unwrap().iter().map(|d| d.as_u64().unwrap() as u8).collect(),
+        e["max_dep_rate"].as_u64().unwrap() as u32,
+        e["max_premium_rate"].as_u64().unwrap() as u32,
+        e["expires_at"].as_f64().unwrap(),
+        scopes,
+    )
+    .unwrap()
+}
+
+#[test]
+fn regulator_replay() {
+    let v = fixture();
+    let r = &v["regulator"];
+    let mut reg =
+        InsuranceRegulator::new(r["jurisdiction"].as_str().unwrap(), r["depth"].as_u64().unwrap() as usize)
+            .unwrap();
+    let (ins, other) = (jg1(&r["insurer"]), jg1(&r["other"]));
+    let env = reg.attest(&ins, &jenvelope(&r["envelope"], BTreeSet::new()), &["asset:bicycle"], true).unwrap();
+    reg.attest(&other, &jenvelope(&r["other_envelope"], BTreeSet::new()), &["asset:car"], false).unwrap();
+    let want_scopes: Vec<W256> = r["scopes"].as_array().unwrap().iter().map(jw).collect();
+    assert_eq!(env.scopes.iter().copied().collect::<Vec<_>>(), want_scopes);
+    let names = reg.predicate_names(&env, &["asset:bicycle"]);
+    let want: Vec<&str> = r["predicate_names"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
+    assert_eq!(names, want);
+    for (n, k) in names.iter().zip(r["subtree_keys"].as_array().unwrap()) {
+        assert_eq!(subtree_key(n).unwrap(), jw(k));
+    }
+    assert_eq!(reg.membership_proof(&ins, "insurer:face:5").unwrap().unwrap(), jproof(&r["face_proof"]));
+    assert_eq!(reg.revoke(&other).unwrap(), r["cleared_other"].as_u64().unwrap() as usize);
+    let got: Vec<(String, W256)> = reg.sub_roots().unwrap();
+    for (pair, (n, root)) in r["sub_roots_after_revoke"].as_array().unwrap().iter().zip(got.iter()) {
+        assert_eq!(pair[0].as_str().unwrap(), n);
+        assert_eq!(jw(&pair[1]), *root);
+    }
+    assert_eq!(got.len(), r["sub_roots_after_revoke"].as_array().unwrap().len());
+    for b in r["bands"].as_array().unwrap() {
+        assert_eq!(band_for_face(b[0].as_str().unwrap().parse().unwrap()), b[1].as_u64().unwrap() as u8);
+    }
+    for c in r["cases"].as_array().unwrap() {
+        let got = check_issuance(
+            &env,
+            &jw(&c["scope"]),
+            c["face"].as_str().unwrap().parse().unwrap(),
+            c["dep_type"].as_u64().unwrap() as u8,
+            c["dep_rate"].as_u64().unwrap() as u32,
+            c["premium_rate"].as_u64().unwrap() as u32,
+            c["now"].as_f64().unwrap(),
+        );
+        let want = c["want"].as_str().unwrap();
+        match got {
+            Ok(()) => assert_eq!(want, ""),
+            Err(e) => assert_eq!(e.0, want),
+        }
+    }
+    assert!(env.scopes.contains(&scope_id(&reg.scope_name("asset:bicycle")).unwrap()));
+}
+
+#[test]
+fn attributes_replay() {
+    let v = fixture();
+    let a = &v["attributes"];
+    let depth = a["depth"].as_u64().unwrap() as usize;
+    let kyc = tree_of(&a["kyc_leaves"], 12);
+    let age = tree_of(&a["age_leaves"], 10);
+    let mut svc = CentralMerkleService::new(depth).unwrap();
+    svc.enroll("kyc:ca-ab-2026", "kyc", kyc.root().unwrap(), 0.0).unwrap();
+    svc.enroll("feature:age-over-18", "feature", age.root().unwrap(), 0.0).unwrap();
+    svc.post(a["posted_at"].as_f64().unwrap()).unwrap();
+    let person = jg1(&a["person"]);
+    let ap = prove_attributes(
+        &svc,
+        vec![
+            ("kyc:ca-ab-2026".to_string(), kyc.path(0).unwrap()),
+            ("feature:age-over-18".to_string(), age.path(0).unwrap()),
+        ],
+        person.0,
+        person.1,
+    )
+    .unwrap();
+    assert_eq!(ap.root, jw(&a["root"]));
+    for c in a["verify"].as_array().unwrap() {
+        let req: Vec<&str> = c["required"].as_array().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+        let got = verify_attributes(&svc, &ap, &req, c["max_age"].as_f64().unwrap(), c["now"].as_f64().unwrap())
+            .unwrap();
+        assert_eq!(got, c["want"].as_bool().unwrap());
+    }
+    assert!(verify_attributes(&svc, &ap, &[], 1.0, 0.0).is_err());
 }

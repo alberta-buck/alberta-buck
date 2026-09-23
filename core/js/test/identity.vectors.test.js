@@ -162,6 +162,27 @@ test("verifiable decryption", { skip }, () => {
     ct(r.E), pt(r.pk), pt(r.M), proof, B(r.account), B(r.chainid)));
 });
 
+test("identity opening", { skip }, () => {
+  const r = KV.identity_opening;
+  const proof = id.identityOpeningProve(
+    ct(r.E), B(r.sk), pt(r.M), B(r.account), B(r.chainid), B(r.registry), B(r.t));
+  assert.equal(proof.e, B(r.proof.e));
+  assert.equal(proof.s, B(r.proof.s));
+  assert.deepEqual(proof.T1, pt(r.proof.T1));
+  assert.deepEqual(proof.T2, pt(r.proof.T2));
+  const args = [ct(r.E), pt(r.pk), pt(r.M), proof, B(r.account), B(r.chainid)];
+  assert.equal(id.identityOpeningVerify(...args, B(r.registry)), r.verify);
+  assert.ok(!id.identityOpeningVerify(...args, B(r.registry) + 1n));
+  // Its own tag: a receipt's proof opens nothing, and the opening is no receipt.
+  const vd = KV.verifiable_decrypt.proof;
+  const vdProof = { e: B(vd.e), s: B(vd.s), T1: pt(vd.T1), T2: pt(vd.T2) };
+  assert.equal(
+    !id.identityOpeningVerify(ct(r.E), pt(r.pk), pt(r.M), vdProof, B(r.account), B(r.chainid),
+                              B(r.registry)),
+    r.not_a_receipt_proof);
+  assert.ok(!id.verifiableDecryptVerify(...args));
+});
+
 test("issuer re-encryption binding", { skip }, () => {
   const r = KV.issuer_reenc;
   const proof = id.issuerReencProve(

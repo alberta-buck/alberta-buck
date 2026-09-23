@@ -32,7 +32,9 @@ from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_verify, ps_rerandomize
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.nizk import registration_prove
-from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
+from alberta_buck.wallet.verifiable_decrypt import (
+    identity_opening_prove, identity_opening_verify, verifiable_decrypt_prove,
+)
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
 from alberta_buck.wallet.b1_binding import b1_bind_prove
 from alberta_buck.wallet.nums import H_PEDERSEN
@@ -414,6 +416,23 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
         "path_index": 2,
         "siblings": [_hx(s) for s in pf.siblings],
         "index_bits": pf.index_bits,
+    }
+
+    # ---- the identity opening (drawn last: the sections above stay put) -----------
+    # The verifiable-decryption relation, bound to the registry too, under its own
+    # tag: what BuckCredit.attestInsurer checks.
+    registry = 0x00000000000000000000000000000000000ACC5E
+    t_op = draw()
+    op = identity_opening_prove(E_b, sk_b, M, spender, chainid, registry, rng=_replay([t_op]))
+    out["identity_opening"] = {
+        "E": _ct(E_b), "sk": scalar_to_hex(sk_b), "pk": _g1(pk_b), "M": _g1(M),
+        "account": _hx(spender), "chainid": _hx(chainid), "registry": _hx(registry),
+        "t": scalar_to_hex(t_op),
+        "proof": {"e": scalar_to_hex(op.e), "s": scalar_to_hex(op.s),
+                  "T1": _g1(op.T1), "T2": _g1(op.T2)},
+        "verify": identity_opening_verify(E_b, pk_b, M, op, spender, chainid, registry),
+        "not_a_receipt_proof": not identity_opening_verify(E_b, pk_b, M, vd, spender, chainid,
+                                                           registry),
     }
 
     return out

@@ -507,6 +507,76 @@ fn verifiable_decrypt_verify(
     .map_err(err)
 }
 
+/// The same DLEQ, its transcript bound to (account, chainid, registry) under
+/// its own tag: an Identity opening to one registry, never a receipt.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn identity_opening_prove(
+    e_ct: PyCt,
+    sk: BigUint,
+    m_point: PyG1,
+    account: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
+    t: BigUint,
+) -> PyResult<PyVd> {
+    let p = kernel::verifiable_decrypt::identity_opening_prove(
+        &wct(&e_ct)?,
+        &w(&sk)?,
+        &wg1(&m_point)?,
+        &w(&account)?,
+        &w(&chainid)?,
+        &w(&registry)?,
+        &w(&t)?,
+    )
+    .map_err(err)?;
+    Ok((big(&p.e), big(&p.s), pyg1(&p.t1), pyg1(&p.t2)))
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn identity_opening_verify(
+    e_ct: PyCt,
+    pk: PyG1,
+    m_point: PyG1,
+    proof: PyVd,
+    account: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
+) -> PyResult<bool> {
+    let p = kernel::verifiable_decrypt::VdProof {
+        e: w(&proof.0)?,
+        s: w(&proof.1)?,
+        t1: wg1(&proof.2)?,
+        t2: wg1(&proof.3)?,
+    };
+    kernel::verifiable_decrypt::identity_opening_verify(
+        &wct(&e_ct)?,
+        &wg1(&pk)?,
+        &wg1(&m_point)?,
+        &p,
+        &w(&account)?,
+        &w(&chainid)?,
+        &w(&registry)?,
+    )
+    .map_err(err)
+}
+
+// ---------------------------------------------------------------------------
+// Holder-derived salts
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+fn tree_tag(tree_id: &str) -> PyResult<BigUint> {
+    Ok(big(&kernel::salt::tree_tag(tree_id).map_err(err)?))
+}
+
+#[pyfunction]
+#[pyo3(signature = (holder_secret, tree_id, association_counter=0))]
+fn derive_salt(holder_secret: BigUint, tree_id: &str, association_counter: u64) -> PyResult<BigUint> {
+    Ok(big(&kernel::salt::derive_salt(&w(&holder_secret)?, tree_id, association_counter).map_err(err)?))
+}
+
 // ---------------------------------------------------------------------------
 // A2 issuer re-encryption binding
 // ---------------------------------------------------------------------------
@@ -1079,8 +1149,67 @@ fn unseal_certificate(py: Python<'_>, envelope: &[u8], client_sk: BigUint) -> Py
     Ok(PyBytes::new(py, &signed.serialize()).into())
 }
 
+/// `(standing, face_band, dep_types, max_dep_rate, max_premium_rate,
+/// expires_at, scopes)`, the `InsurerEnvelope` fields in order.
+type PyEnv = (bool, u8, Vec<u8>, u32, u32, f64, Vec<BigUint>);
+
+fn face_units(v: &BigUint) -> PyResult<u128> {
+    u128::try_from(v).map_err(|_| PyValueError::new_err("face_units out of range (>= 2^128)"))
+}
+
+/// BuckCredit's issuance gate: "" if the credit is admitted, otherwise its
+/// revert reason.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn check_issuance(
+    env: PyEnv,
+    scope: BigUint,
+    face: BigUint,
+    dep_type: u8,
+    dep_rate: u32,
+    premium_rate: u32,
+    now: f64,
+) -> PyResult<String> {
+    let scopes = env.6.iter().map(w).collect::<PyResult<_>>()?;
+    let e = registry::regulator::InsurerEnvelope::new(
+        env.0,
+        env.1,
+        env.2.into_iter().collect(),
+        env.3,
+        env.4,
+        env.5,
+        scopes,
+    )
+    .map_err(jerr)?;
+    Ok(
+        match registry::regulator::check_issuance(&e, &w(&scope)?, face_units(&face)?, dep_type, dep_rate, premium_rate, now) {
+            Ok(()) => String::new(),
+            Err(r) => r.0.to_string(),
+        },
+    )
+}
+
+#[pyfunction]
+fn band_for_face(face: BigUint) -> PyResult<u8> {
+    Ok(registry::regulator::band_for_face(face_units(&face)?))
+}
+
+#[pyfunction]
+fn scope_id(name: &str) -> PyResult<BigUint> {
+    Ok(big(&registry::regulator::scope_id(name).map_err(jerr)?))
+}
+
+#[pyfunction]
+fn subtree_key(name: &str) -> PyResult<BigUint> {
+    Ok(big(&registry::regulator::subtree_key(name).map_err(jerr)?))
+}
+
 #[pymodule]
 fn buck_registry(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(check_issuance, m)?)?;
+    m.add_function(wrap_pyfunction!(band_for_face, m)?)?;
+    m.add_function(wrap_pyfunction!(scope_id, m)?)?;
+    m.add_function(wrap_pyfunction!(subtree_key, m)?)?;
     m.add_function(wrap_pyfunction!(registry_schnorr_sign, m)?)?;
     m.add_function(wrap_pyfunction!(registry_schnorr_verify, m)?)?;
     m.add_function(wrap_pyfunction!(registry_sign_certificate, m)?)?;
@@ -1137,6 +1266,10 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chaum_pedersen_verify, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_prove, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(identity_opening_prove, m)?)?;
+    m.add_function(wrap_pyfunction!(identity_opening_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(tree_tag, m)?)?;
+    m.add_function(wrap_pyfunction!(derive_salt, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_prove, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_verify, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_prove, m)?)?;

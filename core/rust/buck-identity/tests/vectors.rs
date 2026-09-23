@@ -701,6 +701,37 @@ fn kernel_vectors_replay() {
     assert_eq!(vdp.t1, jg1(&vd["proof"]["T1"]));
     assert_eq!(vdp.t2, jg1(&vd["proof"]["T2"]));
 
+    // ---- the identity opening: the same relation, bound to the registry -------------
+    let io = &v["identity_opening"];
+    let op = verifiable_decrypt::identity_opening_prove(
+        &jct(&io["E"]),
+        &jw(&io["sk"]),
+        &jg1(&io["M"]),
+        &jw(&io["account"]),
+        &jw(&io["chainid"]),
+        &jw(&io["registry"]),
+        &jw(&io["t"]),
+    )
+    .unwrap();
+    assert_eq!(op.e, jw(&io["proof"]["e"]));
+    assert_eq!(op.s, jw(&io["proof"]["s"]));
+    assert_eq!(op.t1, jg1(&io["proof"]["T1"]));
+    assert_eq!(op.t2, jg1(&io["proof"]["T2"]));
+    let opens = |p: &verifiable_decrypt::VdProof| {
+        verifiable_decrypt::identity_opening_verify(
+            &jct(&io["E"]),
+            &jg1(&io["pk"]),
+            &jg1(&io["M"]),
+            p,
+            &jw(&io["account"]),
+            &jw(&io["chainid"]),
+            &jw(&io["registry"]),
+        )
+        .unwrap()
+    };
+    assert_eq!(opens(&op), io["verify"].as_bool().unwrap());
+    assert_eq!(!opens(&vdp), io["not_a_receipt_proof"].as_bool().unwrap());
+
     // ---- issuer re-encryption binding ---------------------------------------------
     let ir = &v["issuer_reenc"];
     let irp = issuer_reenc::issuer_reenc_prove(

@@ -40,6 +40,7 @@ pub mod pairing;
 pub mod poseidon;
 pub mod ps;
 pub mod recvkey;
+pub mod salt;
 pub mod schnorr;
 pub mod verifiable_decrypt;
 

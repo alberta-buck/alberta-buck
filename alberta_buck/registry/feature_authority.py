@@ -167,7 +167,7 @@ class FeatureAuthority:
         if len(evs) != len(identities):
             raise ValueError("evidence_hashes length must match identities length")
         for M, ev in zip(identities, evs):
-            rec = self.attest(M, ev)
+            rec = self.attest(M, evidence_hash=ev)
             records.append(rec)
         return records
 

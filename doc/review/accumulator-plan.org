@@ -447,8 +447,27 @@ Five things the survey had left open, each of which reduces the work.
    which replays =scripts/gen_insurer_gate_vectors.py= -- the Python
    reference's subtrees, leaf, paths, opening and eight issuance decisions --
    byte for byte.
-5. *Rust, bindings and JavaScript*, with regenerated vectors, as every
-   identity change requires.
+5. *Rust, bindings and JavaScript.* Done 2026-09-22.  The kernel follows the
+   phase-2 reference module by module: holder salts in
+   =buck-identity/src/salt.rs=; the identity opening beside verifiable
+   decryption, under its own tag; the private feature subtree and its salt
+   in =buck-registry/src/feature.rs=; the root ring, consumer ages and the
+   composed 32-level path in =aggregator.rs=; the regulator, its envelope and
+   the issuance gate in =regulator.rs=, each refusal carrying =BuckCredit='s
+   revert string; holder attribute proofs in =attributes.rs=.  The wasm
+   package exports the services as classes -- =Aggregator= gains the ring,
+   composed paths and attribute proofs, =FeatureAuthority= and =Regulator=
+   are new -- and the gate, salts and opening as functions.  PyO3 binds only
+   the functions: the Python reference keeps its own classes.
+
+   The kernel vectors gain seven sections: =salt=, =feature_private=,
+   =root_ring=, =composed=, =regulator= and =attributes= in the registry
+   file, and =identity_opening= in the identity file.  They are drawn after
+   every existing draw, so no earlier section changed a byte and no identity
+   scalar moved.  Rust (37 tests), core Python (42) and the JS vector suites
+   (32) replay them, and the reference re-emits them byte for byte.  Porting
+   found one defect in the reference: =attest_batch= passed each evidence hash
+   where the salt goes.  Fixed.
 6. *Documents.* The epoch reinterpretation, the accumulator sections of the
    identity and Notes papers, and the insurer path in the credit
    documentation.

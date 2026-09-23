@@ -186,6 +186,24 @@ export function wrapIdentity(wasm) {
         [hex(proof.e), hex(proof.s), ...flatP(proof.T1), ...flatP(proof.T2)],
         hex(account), hex(chainid)),
 
+    // The same DLEQ bound to one registry under its own tag: an Identity
+    // opening an insurer presents to BuckCredit, never a receipt.
+    identityOpeningProve(E, sk, M, account, chainid, registry, t) {
+      const o = wasm.identity_opening_prove(
+        flatCT(E), hex(sk), ...flatP(M), hex(account), hex(chainid), hex(registry), hex(t));
+      return { e: big(o[0]), s: big(o[1]), T1: P(o, 2), T2: P(o, 4) };
+    },
+    identityOpeningVerify: (E, pk, M, proof, account, chainid, registry) =>
+      wasm.identity_opening_verify(
+        flatCT(E), ...flatP(pk), ...flatP(M),
+        [hex(proof.e), hex(proof.s), ...flatP(proof.T1), ...flatP(proof.T2)],
+        hex(account), hex(chainid), hex(registry)),
+
+    // ---- Holder-derived salts ------------------------------------------------
+    treeTag: (treeId) => big(wasm.tree_tag(treeId)),
+    deriveSalt: (holderSecret, treeId, counter = 0) =>
+      big(wasm.derive_salt(hex(holderSecret), treeId, BigInt(counter))),
+
     // ---- A2 issuer re-encryption binding -----------------------------------
     issuerReencProve(skIss, rPrime, pkRec, eReg, eIss, issuer, chainid,
                      beta, gamma, kR, kB, kS, kG) {

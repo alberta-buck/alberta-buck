@@ -904,11 +904,10 @@ identity scalar.*
     pad reused, and a label costs one hash.
 14. *Regenerated*: the three e2e fixtures, the wallet kernel vectors (Python
     reference, Rust replay, byte-identical), and the golden receipt renders.
-15. *Not yet four-backend*: the wrap lives in =wallet/recvkey.py= and the
-    world generator, because payload ASSEMBLY is still Python-only -- the Rust
-    kernel mints the ciphertexts but does not package a delivery.  A Rust or
-    JavaScript wallet that must read a note needs =wrap_mask= ported, and the
-    kernel vectors are where that port gets pinned.
+15. *Four-backend since step B*: payload assembly was Python-only when this
+    landed -- the Rust kernel minted the ciphertexts but packaged no delivery.
+    Step B ported =wrap_mask= and the delivery to =buck-wallet=, pinned by the
+    wallet kernel vectors.
 
 *What remains before this branch merges into =feature/paper-editing=.*
 Decided 2026-09-22: the protocol and its papers are *v2*, and every hash the
@@ -1015,8 +1014,13 @@ same Poseidon, so the fix was the depth: both folds, B1 and the specimen at
 posted root), and one more setup of the three gates -- the A1 fold
 3,309,327 constraints, the A2 fold 3,833,335, B1 494,701.
 
-*E. Accumulator phase 5.*  The regulator, attribute and aggregator services in
-Rust and JavaScript, with their vectors.
+*E. Accumulator phase 5.  Done 2026-09-22.*  The regulator, attribute and
+aggregator services in Rust, PyO3 and wasm, with seven new kernel-vector
+sections appended after every existing draw ([[file:accumulator-plan.org][the
+plan]], phase 5).  The identity opening joins the identity kernel under its own
+tag, so each check =BuckCredit.attestInsurer= makes now has a Rust and a
+JavaScript twin: the subtree keys, the composed path, the opening, the band
+ladder and every refusal reason.
 
 *F. Documents, last, because they describe everything above and re-execute
 once.*  Every =alberta-buck*.org= paper at v2; the accumulator sections the
