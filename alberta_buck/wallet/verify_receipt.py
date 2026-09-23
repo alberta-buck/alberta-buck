@@ -7,18 +7,20 @@ re-runs every check: the point→human bridge (keccak(identity)·G == M) for eac
 party, the generating side's self-naming verifiable decryption, and the
 type-specific naming of both parties.
 
-For the Note kinds the naming is *deterministic* — the receipt discloses both
-identity preimages, so the verifier derives the identity scalars m_iss/m_rec
-itself, recomputes the Identity-M ``idHash`` from the embedded note payload
-(``id_hash_b1/a1/a2``), and decrypts the payload ciphertexts directly:
+For the Note kinds the verifier derives the ISSUER's identity scalar m_iss
+from its disclosed preimage and recomputes the ``idHash`` from the embedded
+note payload (``id_hash_b1/a1/a2``).  It never derives the payee's: the
+addressed ciphertexts are keyed to the payee's receiving key ``pkRecv``, and
+each side proves what only it can -- the recipient by verifiable decryption
+under ``pkRecv``, the issuer by disclosing the mint randomness:
 
 * note-b1:  idHash == id_hash_b1(m_iss, sigma_R, sigma_s) — the issuer is
   bound INTO the leaf; the batch Schnorr binds the registered issuer key over
   keccak(cms).  An issuer-generated receipt additionally names the depositor
   via the verifiable decryption of the SpentCoupledB1 event's eDepForIss.
-* note-a1:  idHash == id_hash_a1(eNote, m_iss, sigma_R, sigma_s);
-  Dec(eNote, m_rec) == v·G and Dec(eRec, m_rec) == M_rec — both parties bound
-  into the leaf (only the addressed identity satisfies the eNote relation).
+* note-a1:  idHash == id_hash_a1(eNote, m_iss, sigma_R, sigma_s); the
+  addressed legs open eNote to v·G and eRec to the named M_rec under pkRecv,
+  and a carried mailbox binding ties pkRecv to M_rec.
 * note-a2:  idHash == id_hash_a2(eNote, eIss, T); the addressed legs open
   eNote to v·G and eIss to the named issuer M under pkRecv; the mint's
   issuer_reenc binding proves eIss re-encrypts the issuer's *registered*
