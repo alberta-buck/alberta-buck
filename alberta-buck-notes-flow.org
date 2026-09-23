@@ -73,7 +73,7 @@ It walks one concrete example
 -- Alice mints a 1,200-BUCK transfer into six notes of denominations
 =[1000, 100, 25, 25, 25, 25]= -- end-to-end through the SNARK-verified
 batch-mint pipeline, and then walks the /inverse/ flows: A2 deposit (Bob redeems
-his identity-targeted note via the deposit-coupling sigma + membership proof) and
+his identity-targeted note with one folded proof) and
 B1 deposit (Carol redeems a bearer note while the issuer learns who cashed it).
 Every actor, every artifact, and every check is named.
 
@@ -1012,12 +1012,12 @@ between a nullifier and a commitment is impossible.  Three properties follow:
 - *The note proof binds the opening and nullifier, not the identity.*  The
   flavor-agnostic =spend.circom= treats =idHash= as a witness scalar -- it does
   not constrain it to a registered Identity.  That binding is the /separate/
-  Step-4 deposit gate: the EIP-196 deposit-coupling (A1/A2) or depositor-binding
-  (B1) sigma proves the spender is bound to the named Identity scalar, and the
-  G1-tie membership -- bound to the sigma's committed point \( P \) -- proves that
-  Identity is registered.  Splitting the identity binding out of the SNARK (into
-  cheap EIP-196 sigmas, ~36K gas) avoids ~+250K R1CS of native BN254
-  \( \mathbb{G}_1 \) arithmetic in non-native circom.  And because the deposit is
+  Step-4 deposit gate: for A1/A2 one folded proof that recomputes this same
+  nullifier from the \( idHash \) it opens, and shows the spender is the
+  registered Identity paired with the key that reads the note; for B1 the
+  EIP-196 depositor-binding sigma and a membership proof over its committed
+  point.  Keeping the identity binding out of =spend.circom= keeps the one
+  proof every spend shares small.  And because the deposit is
   /identity/-keyed (not account-keyed), an addressed note survives the loss of
   any single account key: re-register a fresh Fountain account on the same
   \( M_{\text{rec}} \) and deposit (recovery, not finality).
@@ -1071,10 +1071,10 @@ same circuit and the same on-chain =spendVerifier.verifySpend= check for the
 cm-membership + nullifier discharge (nullifier tag 4242).  Bob's wallet
 serializes the Groth16 proof into the standard
 =(uint256[2], uint256[2][2], uint256[2])= ABI tuple (256 bytes).  The
-flavor-specific /identity/ material -- =eIss= and the deposit-coupling proof
-=dc= (A1/A2), or =eDepForIss= and the depositor-binding proof (B1), plus the
-G1-tie membership proof -- is assembled separately and submitted alongside the
-note proof in Step 4.
+flavor-specific /identity/ material -- the re-encryption =eEnc= and the fold
+proof (A1/A2), or =eDepForIss=, the depositor-binding proof and its membership
+proof (B1) -- is assembled separately and submitted alongside the note proof in
+Step 4.
 
 ** Step 4: Submit =Notes.spendCoupledA2= On Chain
 
@@ -1087,15 +1087,15 @@ Groth16 triple (=alberta_buck.wallet.deposit_fold=):
 
 #+LATEX: {\scriptsize
 #+BEGIN_SRC solidity
-notes.spendCoupledA2(proofBytes, noteRoot, nullifier, 1000e18, bob,
+notes.spendCoupledA2(proofBytes, noteRoot, identityRoot, nullifier, 1000e18, bob,
                      eEnc, foldProof);
 #+END_SRC
 #+LATEX: }
 
-That is the whole addressed calldata.  A sigma, a separate membership proof and
-a note-binding proof used to ride along beside it, sharing a public point; one
-witness states what they only jointly suggested, so they are gone and so is the
-point.  The honest EVM walks:
+That is the whole addressed calldata, with the identity root Bob proved against.
+A sigma, a separate membership proof and a note-binding proof used to ride along
+beside it, sharing a public point; one witness states what they only jointly
+suggested, so they are gone and so is the point.  The honest EVM walks:
 
 #+LATEX: {\scriptsize
 #+BEGIN_SRC solidity
@@ -1111,12 +1111,16 @@ require(spendVerifier.verifySpend(
     proof, root, nullifier, face, recipient, block.chainid, FLAVOR_A2, 0
 ),                                "Notes: bad spend proof");
 
-// (2) The folded gate.  The adapter reads msg.sender's registered key and
+// (2) The identity root: one the registry still retains, posted within
+//     the age the Notes consumer declares (seven days).
+require(identityRegistry.acceptsRoot(identityRoot, NOTES_MEMBERSHIP_CONSUMER),
+                                  "Notes: identity root not accepted");
+
+// (3) The folded gate.  The adapter reads msg.sender's registered key and
 //     credential and derives EVERY public input, so relation (2) is
 //     necessarily about an account that really is registered.
-uint256 idRoot = identityRegistry.identityRoot();
 require(depositFoldVerifier.verifyFoldA2(
-    foldProof, nullifier, idRoot, eEnc, msg.sender),
+    foldProof, nullifier, identityRoot, eEnc, msg.sender),
                                   "Notes: bad folded deposit gate");
 
 nullifiers[nullifier] = true;
@@ -1128,26 +1132,29 @@ emit SpentCoupledA2(nullifier, face, recipient);
 #+END_SRC
 #+LATEX: }
 
-Six invariants are enforced in order:
+Five invariants are enforced in order:
 
 a. =root= appears in the recent-roots window.  A root that has rotated out is
    stale -- Bob must rebuild the proof against a fresher root.
-b. =nullifier= has never been published before (Theorem 10.5 in [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][the proofs]]
+b. =nullifier= has never been published before (Theorem 10 in [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][the proofs]]
    says this single-bit check is sufficient for double-spend prevention).
 c. The note proof is valid against =SpendGroth16Verifier= via the
    =SpendVerifierAdapter=, which packs =[root, nullifier, face, recipient,
    chainid]= into the public-signal vector.  By soundness Bob holds a Poseidon-5
-   opening of a =cm= under =root=, with =nullifier = Poseidon3(rho, idHash, tag)=.
-d. =verifyFoldA2= succeeds.  One proof shows that \( k \) opens =eEnc=,
+   opening of a =cm= under =root=, with =nullifier = Poseidon3(rho, idHash, 4242)=.
+d. =identityRoot= is accepted: the registry still holds it in its ring of 256
+   postings, and it was posted within the seven days Notes declares.  That age
+   is how long a holder cleared from its registry can still spend.
+e. =verifyFoldA2= succeeds.  One proof shows that \( k \) opens =eEnc=,
    that =msg.sender='s registered credential opens to the same
    \( m_{\text{rec}} \) the receiving leaf commits beside \( k \), that the
-   decrypted issuer Identity is registered under the shipped salt, and that
-   the nullifier is the one this note's \( idHash \) produces.  The adapter
-   derives the public inputs, including the account read from the registry.
-   There is no \( P_I \) in the statement.  The event still logs
-   =dc.P_I=, which this branch does not check.
+   decrypted issuer Identity is registered under the shipped salt, that the
+   note's committed \( T \) opens against \( k \), and that the nullifier is
+   the one this note's \( idHash \) produces.  The adapter derives the public
+   inputs, including the account read from the registry.  There is no
+   committed point in the statement, and the event logs none.
 
-If any of (a)-(f) reverts, the whole transaction reverts: no BUCK moves, the
+If any of (a)-(e) reverts, the whole transaction reverts: no BUCK moves, the
 nullifier bit is never set, =noteFaceSum= is unchanged.  *Bob gets one attempt
 per root window*; a failed spend retries with a refreshed proof, but never
 consumes a nullifier without paying out the BUCK.
@@ -1224,12 +1231,12 @@ After =T_spend= confirms, Mallory can read:
 T_spend:
   from:  Bob (a registered IdentityRegistry account)
   to:    Notes (system-public)
-  data:  Notes.spendCoupledA2(proofBytes, noteRoot, nullifier, 1000e18, Bob,
-                              eIss, dc, membershipProof)
+  data:  Notes.spendCoupledA2(proofBytes, noteRoot, identityRoot, nullifier,
+                              1000e18, Bob, eEnc, foldProof)
 
 events:
   Buck.Transfer(Notes, Bob, 1000e18)
-  Notes.SpentCoupledA2(nullifier, 1000e18, Bob, P_I.x, P_I.y)
+  Notes.SpentCoupledA2(nullifier, 1000e18, Bob)
 #+END_SRC
 #+LATEX: }
 
@@ -1266,8 +1273,8 @@ core spend circuit and can be layered on top.
 ** Why Alice Cannot Steal Bob's Note (Even Between Rooms)
 
 Can /any/ actor other than Bob -- Alice-the-issuer, a prior holder, or a random
-Mallory -- redeem =cm_0=?  Three protections apply, the third being the
-Identity-M deposit binding (the deposit-coupling sigma + the bound membership):
+Mallory -- redeem =cm_0=?  Three protections apply, the third being the folded
+deposit gate:
 
 1. *Opening secrecy.*  =spend.circom= requires the full Poseidon-5 opening
    =(flavor, v, rho, idHash, predicate)= as a private witness.  Without =rho_0= and
@@ -1298,7 +1305,7 @@ depositor is the Identity paired with the mailbox the note was keyed to.
 ** B1 Bearer Notes
 
 A B1 note (bearer, public issuer) is redeemed the same way, with the depositor
-binding playing the role the coupling does for A2: =spendCoupledB1= calls
+binding playing the role the fold does for A2: =spendCoupledB1= calls
 =verifyDepositorBinding= (the depositor re-encrypts its own \( M_{\text{dep}} \)
 under the public issuer's key, coupled to its payout account) plus a membership
 proof of \( M_{\text{dep}} \).  Knowledge of the Poseidon-5 opening is still the
@@ -1362,14 +1369,17 @@ Merkle membership.
     is =identity_membership_b1=, bound to the sigma's \( P_{\text{dep}} \)
     by the contract passing that point in.  The issuer decrypts the event.
 
-  The posted root is =IdentityRegistry.identityRoot=, depth 20, set by
-  governance -- which is also how a receiving leaf is admitted, since
-  =register= refuses a caller-supplied leaf and must: a registration that
-  accepted any leaf would accept a leaf pairing any Identity with any key,
-  which is precisely what relation (3) relies on being impossible.
-  Addressed membership is inside the fold, as
-  \( \mathrm{Poseidon}(m, k, salt) \).  B1's membership is a separate
-  proof of a salted coordinate leaf.
+  Each spend names the identity root it proved against, and =Notes= accepts
+  one the registry retains and posted within seven days.  Roots are posted
+  by the aggregator the registry's root authority appoints.  A receiving
+  leaf is admitted by its registry's certification, since =register=
+  refuses a caller-supplied leaf and must: a registration that accepted any
+  leaf would accept a leaf pairing any Identity with any key, which is
+  precisely what relation (3) relies on being impossible.  Addressed
+  membership is inside the fold, as \( \mathrm{Poseidon}(\tau_R, m, k,
+  salt) \).  B1's membership is a separate proof of a salted coordinate
+  leaf.  Both prove 32-level paths: the registry's subtree, then the
+  aggregator.
 
   The note tie for A1 and A2 is inside the fold: the circuit recomputes
   the nullifier from the \( idHash \) it opens, so a substituted
@@ -1381,11 +1391,13 @@ Merkle membership.
    Before the flavour-specific walkthroughs, three primitives are common to
    all three:
 
-   - *The identity accumulator.*  The on-chain value is one root,
-     =IdentityRegistry.identityRoot=, depth 20.  Governance posts it.
-     =register= refuses a caller-supplied leaf.  The leaf the addressed
-     gate proves is \( \mathrm{Poseidon}(m, k, salt) \).  B1 proves
-     \( \mathrm{Poseidon}(M.x, M.y, salt) \).  The unsalted point leaf
+   - *The identity accumulator.*  Registries keep private subtrees of
+     depth 12, an aggregator of depth 20 has their roots for leaves, and
+     its root is posted on chain into a ring of 256, each with its time.
+     =register= refuses a caller-supplied leaf.  Every leaf function leads
+     with its own v2 field tag \( \tau \): the addressed gate proves
+     \( \mathrm{Poseidon}(\tau_R, m, k, salt) \), and B1 proves
+     \( \mathrm{Poseidon}(\tau_S, M.x, M.y, salt) \).  The unsalted point leaf
      remains for public trees and for the unilateral receipt's
      =contains= check, which is a different statement from the spend.
    - *B1's membership proof.*  =identity_membership_b1.circom= proves
@@ -1396,10 +1408,12 @@ Merkle membership.
      be shifted onto another registered Identity -- a circuit that
      WITNESSED \( T \) instead, on a generator whose logarithm is known,
      let an unregistered depositor spend.
-   - *The aggregator.*  Multiple registries and feature authorities feed
-     sub-roots into a =CentralMerkleService= (depth 10, up to 2^10 sub-trees),
-     whose single aggregated root is the on-chain =identityRoot=.
-     Prototyped in =alberta_buck.registry.merkle_service= (49 tests).
+   - *The aggregator.*  Registries, feature authorities and regulators feed
+     subtree roots into a =CentralMerkleService= (depth 20, up to 2^20
+     subtrees) whose root the registry's ring retains.  Every level hashes
+     alike, so a subtree path and the aggregator path compose into the one
+     32-level path the gates prove.  The reference is
+     =alberta_buck.registry.merkle_service=; Rust and JavaScript mirror it.
 
 ** A2 Identity-Targeted Spend (The Unilateral Receipt Flow)
 
@@ -1420,7 +1434,8 @@ Merkle membership.
    note = (
      flavor = A2,  v = 1000e18,  rho,  idHash,  predicate,  # the commitment opening
      eIss  = (R_e, C_e),                                      # M_I under pk_recv
-     r_prime, salt_iss,                                        # what the fold needs
+     T,                                                        # committed in idHash
+     r_prime, gamma, salt_iss,                                 # what the fold needs
      binding,                                                  # verifyIssuerReenc
      mint_tx_ref,                                              # where cm was folded
    )
@@ -1447,7 +1462,8 @@ Merkle membership.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC text
-   private:  k, m_rec, sk_dep, salt, r', salt_iss, two Merkle paths, eNote, eIss
+   private:  k, m_rec, sk_dep, salt, r', gamma, salt_iss, two Merkle paths,
+             eNote, eIss, T
    public:   nullifier, identityRoot, eEnc, and -- read from the registry, not
              accepted from the prover -- pk_dep and E_dep for msg.sender
    #+END_SRC
@@ -1459,7 +1475,7 @@ Merkle membership.
       \( eEnc \) re-encrypts that same \( M_I \) under the same \( k \).
    2. The account credential decrypts under \( sk_{\text{dep}} \) to
       \( M_{\text{rec}} = m_{\text{rec}} G \).
-   3. \( \mathrm{Poseidon}(m_{\text{rec}}, k, salt) \) is a registered leaf.
+   3. \( \mathrm{Poseidon}(\tau_R, m_{\text{rec}}, k, salt) \) is a registered leaf.
       This is the relation a split gate leaves out, and the one the thief
       cannot satisfy: no registered leaf pairs ITS Identity with the key it
       stole.
@@ -1467,6 +1483,9 @@ Merkle membership.
    5. \( M_I \) is itself registered, as
       \( \mathrm{identity\_leaf\_salted}(M_I, salt_{\text{iss}}) \) under the
       salt the note shipped.
+   6. The note's committed \( T \) opens as
+      \( (r'k)G + \gamma H_{\mathrm{PEDERSEN}} \): the key the mint binding
+      proved about is the key Bob holds.
 
    Relation (3) used to be free, because the two scalars were one value.  It is
    now the load-bearing one.  And because the circuit hashes the very signals
@@ -1474,10 +1493,10 @@ Merkle membership.
    the decryption, the credential and the leaf at once -- there is no seam
    between the two secrets for a thief to work in.
 
-   A1 is the same gate with relation (5) removed and the face made public: its
-   ciphertext decrypts to the recipient's OWN Identity, so relation (2) already
-   covers what (5) would say, and it ships no witness material about anyone
-   else.
+   A1 is the same gate with relations (5) and (6) removed and the face made
+   public: its ciphertext decrypts to the recipient's OWN Identity, so relation
+   (2) already covers what (5) would say, its public issuer has no key to
+   re-aim, and it ships no witness material about anyone else.
 
    ====== Step A3: What the Prover Does Not Choose ======
 
@@ -1495,7 +1514,8 @@ Merkle membership.
    notes.spendCoupledA2(
        proof,                            // Groth16: note opening + noteRoot membership
        noteRoot,
-       nullifier,                        // Poseidon(rho, idHash, A-tag)
+       identityRoot,                     // the posted root the fold proves against
+       nullifier,                        // Poseidon(rho, idHash, 4242)
        face,                             // 1000e18
        recipient,                        // Bob's payout address
        eIss,                             // eEnc: the fresh re-encryption under pk_recv
@@ -1506,16 +1526,18 @@ Merkle membership.
 
    ====== Step A5: On-Chain Verification ======
 
-   =spendCoupledA2= gates on four conditions:
+   =spendCoupledA2= gates on five conditions:
 
    1. The fold verifier is wired.  It cannot be cleared, so this is a
       deployment invariant rather than a configuration; an addressed spend
       without it reverts here, before anything else is checked.
    2. Standard note spend: =noteRoot= accepted, =nullifier= fresh, the
       Poseidon-5 opening proof verifies (=spendVerifier.verifySpend=).
-   3. The folded gate: =verifyFoldA2(foldProof, nullifier, identityRoot, eEnc,
+   3. =identityRoot= is accepted for the Notes consumer: retained in the
+      registry's ring and posted within seven days.
+   4. The folded gate: =verifyFoldA2(foldProof, nullifier, identityRoot, eEnc,
       msg.sender)= accepts.
-   4. BUCK transfer, then =nullifiers[nullifier] = true= and
+   5. BUCK transfer, then =nullifiers[nullifier] = true= and
       =SpentCoupledA2(nullifier, face, recipient)=.
 
    The event publishes no point.  An earlier shape logged the committed
@@ -1531,44 +1553,46 @@ Merkle membership.
    registered Identity, so no salt opens a leaf for it and relation (5) has no
    witness: *the deposit reverts*.  There is no spendable-but-unnameable note.
 
-   *What it does not close, and is open.*  An issuer can instead key the
-   ciphertext so that ITS OWN key opens it to \( M_A \) while Bob's key opens it
-   to a DIFFERENT registered Identity \( M_B \).  Both proofs are then true,
-   relation (5) is satisfied on \( M_B \)'s leaf, and the receipt Bob honestly
-   produces names \( M_B \).  The closure is a committed, unshiftable tie
-   between the key the mint binding hides and the key the fold opens; it is
-   specified in =doc/review/notes-receiving-key.org= section 4.6 and is not yet
-   implemented.  Until it is, an A2 receipt names the Identity the recipient
-   decrypted, which an honest issuer makes its own and a dishonest one can
-   choose.
+   *What relation (6) closes.*  An issuer can instead key the ciphertext so
+   that the key its binding proves about opens it to its own \( M_A \) while
+   Bob's key opens it to a DIFFERENT registered Identity \( M_B \).  The binding
+   is true and relation (5) holds on \( M_B \)'s leaf, so without (6) Bob would
+   honestly name \( M_B \).  But the note commits the binding's
+   \( T = r'\,pk + \gamma H_{\mathrm{PEDERSEN}} \), and (6) opens it against
+   Bob's own \( k \): re-aiming the key needs \( M_B - M_A \) as a known
+   multiple of \( H_{\mathrm{PEDERSEN}} \), a discrete logarithm (/Proofs/,
+   Theorem 12).  The executed transcript below mints exactly this note and
+   watches the delivery, the fold and the receipt each refuse it.
 
    ====== Step A6: The Unilateral Receipt ======
 
    After the spend confirms, Bob's wallet produces a /unilateral receipt/
-   naming both parties -- from \( m_{\text{rec}} \) /alone/:
+   naming both parties -- from \( k \) and his own Identity, two values
+   rather than one derived from the other:
 
    \begin{align*}
-     M_I            &= C_e - m_{\text{rec}} R_e && (\text{the issuer Identity}); \\
-     M_{\text{rec}} &= m_{\text{rec}} G         && (\text{the recipient's own}).
+     M_I            &= C_e - k R_e      && (\text{the issuer Identity}); \\
+     M_{\text{rec}} &= m_{\text{rec}} G && (\text{the recipient's own}).
    \end{align*}
 
    A /verifiable decryption/ proof (=verifiable_decrypt_prove=, a
    Chaum-Pedersen DLEQ) makes the receipt third-party-checkable without
-   revealing \( m_{\text{rec}} \).  The receipt tuple:
+   revealing \( k \).  The receipt tuple:
 
    \begin{align*}
-     \mathcal{R} = \bigl(M_I,\ M_{\text{rec}},\ v,\ eIss,\ \text{vd},\
-       \text{binding},\ \text{issuer addr},\ \text{chainid}\bigr).
+     \mathcal{R} = \bigl(M_I,\ M_{\text{rec}},\ pk_{\text{recv}},\ v,\ eIss,\ \text{vd},\
+       \text{binding},\ \gamma,\ \text{issuer addr},\ \text{chainid}\bigr).
    \end{align*}
 
-   A court or auditor checks four links (=verify_receipt=):
+   A court or auditor checks five links (=verify_receipt=):
 
-   | # | Check                                            | Establishes                                                             |
-   |---+--------------------------------------------------+-------------------------------------------------------------------------|
-   | 1 | =verifyIssuerReenc= vs. issuer's on-chain record | \( eIss \) re-encrypts the issuer's /registered/ \( M_I \) (no framing) |
-   | 2 | =verifiable_decrypt_verify(eIss, M_rec, M_I)=    | \( eIss \) decrypts under \( M_{\text{rec}} \) to \( M_I \)             |
-   | 3 | \( \ell(M_I) \in \mathsf{rt_{id}} \)             | the issuer Identity is registered (the /coupling/)                      |
-   | 4 | \( \ell(M_{\text{rec}}) \in \mathsf{rt_{id}} \)  | the recipient Identity is registered                                    |
+   | # | Check                                                       | Establishes                                                             |
+   |---+-------------------------------------------------------------+-------------------------------------------------------------------------|
+   | 1 | =verifyIssuerReenc= vs. issuer's on-chain record            | \( eIss \) carries the issuer's /registered/ \( M_I \) (no framing)     |
+   | 2 | =verifiable_decrypt_verify(eIss, pk_recv, M_I)=             | \( eIss \) decrypts under \( pk_{\text{recv}} \) to \( M_I \)           |
+   | 3 | \( C_e - T + \gamma H_{\mathrm{PEDERSEN}} = M_I \)          | the binding's Identity is the one decrypted (the key tie)               |
+   | 4 | \( \ell(M_I) \in \mathsf{rt_{id}} \)                        | the issuer Identity is registered                                       |
+   | 5 | \( \ell(M_{\text{rec}}) \in \mathsf{rt_{id}} \)             | the recipient Identity is registered                                    |
 
    Full specification and tests: /alberta-buck-notes-unilateral/.
 
@@ -1610,9 +1634,8 @@ Merkle membership.
        DepositFoldRefused, deposit_fold_check, deposit_fold_a2_witness,
        deposit_fold_witness,
    )
-   from alberta_buck.registry.tree import (
-       IdentityMerkleTree, identity_leaf_salted, receiving_leaf,
-   )
+   from alberta_buck.registry.tree import identity_leaf_salted, receiving_leaf
+   from alberta_buck.registry.merkle_service import rooted_registry
 
    assert backend() == "kernel", "transcript must run the production kernel"
    print(f"wallet crypto backend     = {backend()} (buck_core.buck_identity)")
@@ -1645,14 +1668,15 @@ Merkle membership.
    # private registry commits the pair (m_rec, k) under the holder's salt.
    # The issuer's SECOND association is an ordinary salted identity leaf: its
    # salt is what an A2 payload ships, and it says nothing about the issuer's
-   # own mailbox.  Depth 20 is the on-chain aggregator depth.
+   # own mailbox.  The registry's subtree is enrolled under an aggregator, so
+   # its paths are the 32-level paths the gates prove: 12, then 20.
    KYC = "kyc:ca-ab-2026"
    seed_rec = rand_scalar(rng)
    k_rec, pk_recv = receiving_key(seed_rec)
    salt_rec = derive_salt(seed_rec, KYC)
    seed_iss = rand_scalar(rng)
    salt_iss = derive_salt(seed_iss, KYC, 1)
-   priv = IdentityMerkleTree(depth=20, private=True)
+   priv = rooted_registry(KYC)
    priv.insert_leaf(identity_leaf_salted(issuer["M"], salt_iss))
    priv.insert_receiving(m_rec, k_rec, salt_rec)
 
@@ -1660,16 +1684,16 @@ Merkle membership.
    print(f"recipient Identity M_rec = {pt(M_rec)}  (accounts rec0, rec1)")
    print(f"receiving key      pk_recv = {pt(pk_recv)}  (not M_rec)")
    print(f"identity tree root        = {hex(tree.root())[:20]}...")
-   print(f"private registry root     = {hex(priv.root())[:20]}...")
+   print(f"posted identity root      = {hex(priv.root())[:20]}...  ({priv.depth}-level paths)")
    #+END_SRC
 
    #+RESULTS:
    : wallet crypto backend     = kernel (buck_core.buck_identity)
    : issuer Identity    M_I   = (34794633..., 55370756...)
    : recipient Identity M_rec = (78777287...,  1501867...)  (accounts rec0, rec1)
-   : receiving key      pk_recv = (85642753..., 52064782...)  (not M_rec)
-   : identity tree root        = 0x1fc1c0906350c1a077...
-   : private registry root     = 0x208b6f9b6ce3fa84c4...
+   : receiving key      pk_recv = (27820058..., 70606247...)  (not M_rec)
+   : identity tree root        = 0xff9f26af3a3e77cf95...
+   : posted identity root      = 0x638a64903f90cc47d9...  (32-level paths)
    #+LATEX: }
 
    *Mint: encrypt the issuer's own Identity under the recipient's mailbox.*
@@ -1681,11 +1705,12 @@ Merkle membership.
    registered \( M_I \).  The mint object carries \( salt_{\text{iss}} \), the
    salt of the issuer's naming association, and \( r' \), the randomness of
    \( eIss \).  The fold checks \( eIss.R = r'G \) and opens
-   \( \mathrm{identity\_leaf\_salted}(M_I, salt_{\text{iss}}) \).  Neither
-   value is the issuer's mailbox salt.  The serialized =notePayload= in the
-   end-to-end fixture records only the two ciphertexts; \( r' \) and
-   \( salt_{\text{iss}} \) stay in the generator.  A delivery record that
-   omits them cannot build the witness.
+   \( \mathrm{identity\_leaf\_salted}(M_I, salt_{\text{iss}}) \); neither
+   value is the issuer's mailbox salt.  The binding's \( T \) is committed in
+   \( idHash \) beside both ciphertexts, and its blind \( \gamma \) is the
+   third thing the recipient needs.  The delivery (=wallet/delivery.py=)
+   carries \( r' \), \( \gamma \) and \( salt_{\text{iss}} \) wrapped to
+   \( pk_{\text{recv}} \), with \( T \) in the clear.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
@@ -1697,14 +1722,14 @@ Merkle membership.
    assert note.salt_iss == salt_iss
    print(f"minted A2 note: v = {note.opening.v}")
    print(f"  cm     = {hex(note.cm)[:20]}...       (the only on-chain artifact)")
-   print(f"  idHash = {hex(note.idHash)[:20]}...   (Poseidon8(eNote, eIss))")
+   print(f"  idHash = {hex(note.idHash)[:20]}...   (Poseidon10(eNote, eIss, T))")
    print(f"  eIss   = ElGamal(M_I under pk_recv)  R = {pt(note.eIss.R)}")
    #+END_SRC
 
    #+RESULTS:
    : minted A2 note: v = 1000
-   :   cm     = 0x12c42376b33b823826...       (the only on-chain artifact)
-   :   idHash = 0xdf3e7f3051d2ac739a...   (Poseidon8(eNote, eIss))
+   :   cm     = 0xe61242769fe57dca10...       (the only on-chain artifact)
+   :   idHash = 0xf22f5585ad9a988d15...   (Poseidon10(eNote, eIss, T))
    :   eIss   = ElGamal(M_I under pk_recv)  R = (49017840..., 29504036...)
    #+LATEX: }
 
@@ -1744,7 +1769,7 @@ Merkle membership.
    for name, acct in (("rec0", rec0), ("rec1", rec1)):
        w_acct = deposit_fold_witness(
            m_rec=m_rec, k=k_rec, sk_dep=acct["sk"], salt=salt_rec,
-           E_dep=acct["E"], note_ct=note.eIss, tree=priv, rng=rng)
+           E_dep=acct["E"], note_ct=note.eIss, tree=priv)
        ok = deposit_fold_check(
            w_acct, pk_dep=acct["pk"], E_dep=acct["E"],
            note_ct=note.eIss, root=priv.root())
@@ -1767,9 +1792,10 @@ Merkle membership.
    #+LATEX: {\scriptsize
    #+BEGIN_SRC solidity
    // Notes._spendCoupled (abridged).
+   require(identityRegistry.acceptsRoot(identityRoot, NOTES_MEMBERSHIP_CONSUMER),
+           "Notes: identity root not accepted");
    bool ok = depositFoldVerifier.verifyFoldA2(
-       foldProof, nullifier, identityRegistry.identityRoot(),
-       eEnc, msg.sender);
+       foldProof, nullifier, identityRoot, eEnc, msg.sender);
    require(ok, "Notes: bad folded deposit gate");
    #+END_SRC
    #+LATEX: }
@@ -1777,9 +1803,10 @@ Merkle membership.
    *The fold witness: the note tie and the issuer's naming leaf, in one proof.*
    The spend supplies a fresh re-encryption of \( eIss \) under the same
    \( pk_{\text{recv}} \).  =deposit_fold_a2_witness= is the JSON the circuit
-   consumes.  It asserts the four relations above and the fifth: the decrypted
+   consumes.  It asserts the four relations above, the fifth -- the decrypted
    issuer Identity opens =identity_leaf_salted(M_I, salt_iss)=, and that
-   leaf's path folds to the same root.  A wrong salt is not a member.
+   leaf's path folds to the same root -- and the sixth, \( T \) opening
+   against \( k \).  A wrong salt is not a member.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
@@ -1788,7 +1815,7 @@ Merkle membership.
    eEnc = elgamal_encrypt(note.M_I, pk_recv, t)
    w = deposit_fold_witness(
        m_rec=m_rec, k=k_rec, sk_dep=rec0["sk"], salt=salt_rec,
-       E_dep=rec0["E"], note_ct=note.eIss, tree=priv, rng=rng)
+       E_dep=rec0["E"], note_ct=note.eIss, tree=priv)
    iss_leaf = identity_leaf_salted(issuer["M"], salt_iss)
    iss_path = priv.path(priv.leaves.index(iss_leaf))
    fold = deposit_fold_a2_witness(
@@ -1796,7 +1823,7 @@ Merkle membership.
        e_note=note.eNote, e_iss=note.eIss, r_prime=note.r_prime,
        t=t, r_E=rec0["r"], e_dep=rec0["E"], pk_dep=rec0["pk"],
        e_enc=eEnc, salt_iss=salt_iss, iss_path=iss_path,
-       identity_root=priv.root())
+       T=note.binding.T, gamma=note.gamma, identity_root=priv.root())
    print(f"A2 fold witness built: {len(fold)} signals, relations asserted")
    print(f"  public nullifier = {hex(int(fold['nullifier']))[:20]}...")
    print(f"  eEnc.R limb0     = {fold['eEncRx'][0]}  (fresh re-encryption)")
@@ -1809,21 +1836,21 @@ Merkle membership.
            e_note=note.eNote, e_iss=note.eIss, r_prime=note.r_prime,
            t=t, r_E=rec0["r"], e_dep=rec0["E"], pk_dep=rec0["pk"],
            e_enc=eEnc, salt_iss=(salt_iss + 1) % ORDER, iss_path=iss_path,
-           identity_root=priv.root())
+           T=note.binding.T, gamma=note.gamma, identity_root=priv.root())
        print("wrong issuer salt: BUILT (must not happen!)")
    except AssertionError as exc:
        print(f"wrong issuer salt: REFUSED ({exc})")
    #+END_SRC
 
    #+RESULTS:
-   : A2 fold witness built: 32 signals, relations asserted
-   :   public nullifier = 0x2d6f18598e59a1d445...
-   :   eEnc.R limb0     = 8107461165016651156  (fresh re-encryption)
+   : A2 fold witness built: 34 signals, relations asserted
+   :   public nullifier = 0x15373dec2a263756e1...
+   :   eEnc.R limb0     = 5454261353227722156  (fresh re-encryption)
    : wrong issuer salt: REFUSED (the shipped issuer salt does not open the issuer's leaf)
    #+LATEX: }
 
-   Proving this witness is the heavyweight step -- 3,341,261 constraints at
-   aggregator depth 20 -- and it runs in the build pipeline
+   Proving this witness is the heavyweight step -- 3,833,335 constraints along
+   32-level paths -- and it runs in the build pipeline
    (=scripts/snark/setup_deposit_fold_a2.sh=) rather than in this session.
    The setups are dev entropy.  =test/DepositFoldA2Verifier.t.sol= verifies a
    real proof on chain and requires every public input, walked alone, to
@@ -1858,7 +1885,7 @@ Merkle membership.
    : unilateral receipt: VALID
    :   names issuer    (34794633..., 55370756...)
    :   names recipient (78777287...,  1501867...)
-   :   decrypts under  (85642753..., 52064782...)
+   :   decrypts under  (27820058..., 70606247...)
    :   value           1000
    #+LATEX: }
 
@@ -1880,7 +1907,7 @@ Merkle membership.
    try:
        deposit_fold_witness(
            m_rec=m_thief, k=k_rec, sk_dep=thief["sk"], salt=salt_t,
-           E_dep=thief["E"], note_ct=note.eIss, tree=priv, rng=rng)
+           E_dep=thief["E"], note_ct=note.eIss, tree=priv)
        print("thief witness: BUILT (must not happen!)")
    except DepositFoldRefused as exc:
        print(f"thief witness: REFUSED on relation {exc.relation}")
@@ -1894,13 +1921,94 @@ Merkle membership.
 
    #+RESULTS:
    : thief witness: REFUSED on relation 3
-   : ciphertext under a throwaway key decrypts to (70407832..., 19342004...)
+   : ciphertext under a throwaway key decrypts to (49911686...,  9395411...)
    :   that point is a registered identity: False
    #+LATEX: }
 
+   *A split key names no puppet.*  The mint binding proves \( eIss \) carries
+   the minter's own Identity to the key hidden in \( Q \), and an ElGamal
+   ciphertext does not commit to its key.  So a minter holding a registered
+   sock puppet \( M_B \) picks
+   \( pk_{\text{mint}} = pk_{\text{recv}} + r'^{-1}(M_B - M_I) \): the same
+   \( eIss \) is its own \( M_I \) under \( pk_{\text{mint}} \) and
+   \( M_B \) under Bob's key.  The binding verifies, relation (5) holds on
+   \( M_B \)'s leaf, and without more an honest Bob would name the puppet.
+   The more is \( T \): the note commits it, and it opens under the key the
+   minter chose, not Bob's.  Bob's wallet refuses the delivery, the fold
+   refuses relation (6), and the receipt refuses to name \( M_B \).
+   =mint_unilateral_a2= cannot produce this note, so it is minted by hand:
+
+   #+LATEX: {\scriptsize
+   #+BEGIN_SRC python :session notesflow :results output
+   from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove, issuer_reenc_verify
+   from alberta_buck.wallet.unilateral_a2 import MintedA2, a2_id_hash
+   from alberta_buck.wallet.notes import FLAVOR_A2, NoteOpening, note_commitment
+   from alberta_buck.wallet.delivery import DeliveryRefused, deliver_a2, open_a2
+
+   _seed_sp = random.Random(0x5B1175)        # local; the shared transcript is untouched
+   rng_sp   = lambda: _seed_sp.getrandbits(256)
+
+   M_B    = mul(G1, rand_scalar(rng_sp))     # the minter's registered sock puppet
+   salt_B = derive_salt(rand_scalar(rng_sp), KYC, 1)
+   priv.insert_identity_salted(M_B, salt_B)
+   tree.insert(M_B)
+
+   r_s     = rand_scalar(rng_sp)
+   pk_mint = add(pk_recv, mul(add(M_B, neg(issuer["M"])), pow(r_s, -1, ORDER)))
+   eIss_s  = elgamal_encrypt(issuer["M"], pk_mint, r_s)
+   gamma_s = rand_scalar(rng_sp)
+   bind_s  = issuer_reenc_prove(issuer["sk"], r_s, pk_mint, issuer["E"], eIss_s,
+                                0xA11CE, CHAINID, gamma=gamma_s, rng=rng_sp)
+   rn_s    = rand_scalar(rng_sp)
+   eNote_s = elgamal_encrypt(mul(G1, 1000), pk_recv, rn_s)
+   idh_s   = a2_id_hash(eNote_s, eIss_s, bind_s.T)
+   open_s  = NoteOpening(FLAVOR_A2, 1000, rand_scalar(rng_sp), idh_s, 0)
+   split   = MintedA2(eNote=eNote_s, eIss=eIss_s, M_I=issuer["M"], idHash=idh_s,
+                      cm=note_commitment(open_s), opening=open_s, binding=bind_s,
+                      r_prime=r_s, r_note=rn_s, gamma=gamma_s, salt_iss=salt_B)
+
+   print(f"binding verifies against Alice's record: "
+         f"{issuer_reenc_verify(issuer['pk'], issuer['E'], eIss_s, bind_s, 0xA11CE, CHAINID)}")
+   print(f"Bob's k opens eIss to the puppet:        {eq(elgamal_decrypt(eIss_s, k_rec), M_B)}")
+   try:
+       open_a2(deliver_a2(split, pk_recv), k_rec)
+       print("delivery: OPENED (must not happen!)")
+   except DeliveryRefused as exc:
+       print(f"delivery: REFUSED ({exc})")
+
+   t_s   = (r_s + rand_scalar(rng_sp)) % ORDER
+   eEnc_s = elgamal_encrypt(M_B, pk_recv, t_s)
+   w_s   = deposit_fold_witness(m_rec=m_rec, k=k_rec, sk_dep=rec0["sk"], salt=salt_rec,
+                                E_dep=rec0["E"], note_ct=eEnc_s, tree=priv)
+   try:
+       deposit_fold_a2_witness(
+           witness=w_s, rho=open_s.rho, id_hash=idh_s, e_note=eNote_s, e_iss=eIss_s,
+           r_prime=r_s, t=t_s, r_E=rec0["r"], e_dep=rec0["E"], pk_dep=rec0["pk"],
+           e_enc=eEnc_s, salt_iss=salt_B,
+           iss_path=priv.path(priv.leaves.index(identity_leaf_salted(M_B, salt_B))),
+           T=bind_s.T, gamma=gamma_s, identity_root=priv.root())
+       print("fold: BUILT (must not happen!)")
+   except AssertionError as exc:
+       print(f"fold: REFUSED ({exc})")
+
+   res_s = verify_receipt(make_receipt(k_rec, M_rec, split, issuer=0xA11CE, chainid=CHAINID,
+                                       tree=tree, rng=rng_sp),
+                          issuer["pk"], issuer["E"], tree.root(), tree)
+   print(f"receipt: {'VALID' if res_s.valid else 'INVALID'} ({res_s.reason})")
+   #+END_SRC
+
+   #+RESULTS:
+   : binding verifies against Alice's record: True
+   : Bob's k opens eIss to the puppet:        True
+   : delivery: REFUSED (T does not open to this mailbox under the unwrapped gamma)
+   : fold: REFUSED (T != rm*G + gamma*H (keyed to another mailbox))
+   : receipt: INVALID (the binding's Identity is not the one decrypted)
+   #+LATEX: }
+
    That is the guarantee: the recipient holds the secret that names the
-   issuer, the identity scalar does not, and a stolen mailbox key does not
-   spend under a different Identity.
+   issuer, the identity scalar does not, a stolen mailbox key does not spend
+   under a different Identity, and a key chosen to frame a puppet does not
+   name one.
 
 ** The Receiving Key: Your Identity Is Not Your Mailbox Key
 
@@ -2024,11 +2132,11 @@ Merkle membership.
    \( k \) and the Identity half with its /own/ registered Identity.  Both
    halves are true.  Neither says they belong together.
 
-   So the gate states the tie instead of assuming it -- the same discipline
-   the membership and note-binding relations follow, and for the same reason:
-   /never infer equality from two proofs that happen to share a public point/.
-   One witness, one circuit, four relations, with the accumulator leaf
-   committing the scalars \( (m, k, salt) \):
+   So the gate states the tie instead of assuming it -- the discipline every
+   relation in the folded gates follows, and for the same reason: /never infer
+   equality from two proofs that happen to share a public point/.  One
+   witness, one circuit, four relations, with the accumulator leaf committing
+   the scalars \( (m, k, salt) \):
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesflow :results output
@@ -2043,27 +2151,25 @@ Merkle membership.
    # refuses on the one that fails.  It is the reference the circuit is
    # checked against, so this block runs the shipped gate, not a sketch.
    w = deposit_fold_witness(m_rec=m_rec_rk, k=k_rk, sk_dep=sk_rk, salt=salt_rk,
-                            E_dep=E_dep_rk, note_ct=eIss_rk, tree=tree_rk,
-                            b=rand_scalar(rng_rk))
-   print(f"honest witness: exists, P commits M_I = {eq(w.M, M_I_rk)}")
+                            E_dep=E_dep_rk, note_ct=eIss_rk, tree=tree_rk)
+   print(f"honest witness: exists, k decrypts to M_I = {eq(w.M, M_I_rk)}")
    try:
        deposit_fold_witness(m_rec=m_thief, k=k_rk, sk_dep=sk_thief, salt=salt_rk,
-                            E_dep=E_thief, note_ct=eIss_rk, tree=tree_rk,
-                            b=rand_scalar(rng_rk))
+                            E_dep=E_thief, note_ct=eIss_rk, tree=tree_rk)
        print("thief witness: BUILT (must not happen!)")
    except DepositFoldRefused as exc:
        print(f"thief witness: REFUSED on relation {exc.relation}")
    k2 = rand_scalar(rng_rk); salt2 = derive_salt(secret_rk, "kyc:ca-ab-2026", 1)
    tree_rk.insert_receiving(m_rec_rk, k2, salt2)
    w2 = deposit_fold_witness(m_rec=m_rec_rk, k=k2, sk_dep=sk_rk, salt=salt2,
-                             E_dep=E_dep_rk, tree=tree_rk, b=rand_scalar(rng_rk),
+                             E_dep=E_dep_rk, tree=tree_rk,
                              note_ct=elgamal_encrypt(M_I_rk, mul(G1, k2),
                                                      rand_scalar(rng_rk)))
    print(f"rotated key:   spends, under an unlinkable leaf = {w2.leaf != w.leaf}")
    #+END_SRC
 
    #+RESULTS:
-   : honest witness: exists, P commits M_I = True
+   : honest witness: exists, k decrypts to M_I = True
    : thief witness: REFUSED on relation 3
    : rotated key:   spends, under an unlinkable leaf = True
    #+LATEX: }
@@ -2086,10 +2192,10 @@ Merkle membership.
    *What the separation does not cost.*  Addressing stays unilateral: the
    payer needs \( pk_{\text{recv}} \), learned on the same out-of-band
    channel that carries \( M_{\text{rec}} \), and needs nothing from the
-   recipient at payment time.  Receipts still name both parties.  The
-   note-binding relation keeps its shape, since it witnesses a product of the
-   randomness and the recipient's scalar and computes it fixed-base, and
-   \( r \cdot k \) is as fixed-base as anything else.  And B1 needs none of
+   recipient at payment time.  Receipts still name both parties.  The note
+   tie keeps its shape, since it witnesses a product of the randomness and
+   the recipient's scalar and computes it fixed-base, and \( r \cdot k \) is
+   as fixed-base as anything else.  And B1 needs none of
    this: a bearer note is keyed to the /issuer's/ registered account key, so
    the question never arises.
 
@@ -2097,7 +2203,7 @@ Merkle membership.
    shipped surface is =wallet/recvkey.py= (the key, its seed derivation and
    its binding evidence), =registry/tree.py= =receiving_leaf= (the leaf that
    commits the pair) and =wallet/deposit_fold.py= (the gate above), with
-   twenty-six tests in =alberta_buck/test/test_receiving_key.py=.  The same
+   twenty-five tests in =alberta_buck/test/test_receiving_key.py=.  The same
    arguments also run standalone in =scripts/review/receiving_key_proto.py=,
    =deposit_gate_split.py= and =deposit_gate_folded.py=.
 
@@ -2146,8 +2252,8 @@ Merkle membership.
 
    #+RESULTS:
    : minted A1 note: v = 100
-   :   idHash = Poseidon8(eNote, m_issuer, sigma)  = 0x27d39810b143a0e1d0...
-   :   eRec   = ElGamal(M_rec under pk_recv)       R = (66698571..., 39625074...)
+   :   idHash = Poseidon8(eNote, m_issuer, sigma)  = 0x15db44b7e86fcdef0c...
+   :   eRec   = ElGamal(M_rec under pk_recv)       R = (92561594..., 14543584...)
    :   identity scalar opens eRec: False
    :   receiving secret opens eRec: True
    : A1 receipt: VALID -- issuer public, decryption under pk_recv
@@ -2157,7 +2263,7 @@ Merkle membership.
    =deposit_fold_a1_witness= is what =deposit_fold_a1.circom= consumes.  It
    checks \( eNote = (r_n G,\ (v + r_n k)G) \) and
    \( eEnc = (t G,\ (m_{\text{rec}} + t k)G) \), with \( v \) public, and the
-   same leaf \( \mathrm{Poseidon}(m_{\text{rec}}, k, salt) \).  A different
+   same leaf \( \mathrm{Poseidon}(\tau_R, m_{\text{rec}}, k, salt) \).  A different
    receiving secret does not open \( eNote \).  A thief that holds \( k \) and
    substitutes its own Identity is refused by the leaf, the same relation the
    A2 block already showed.
@@ -2166,7 +2272,7 @@ Merkle membership.
    #+BEGIN_SRC python :session notesflow :results output
    w_a1 = deposit_fold_witness(
        m_rec=m_rec, k=k_rec, sk_dep=rec0["sk"], salt=salt_rec,
-       E_dep=rec0["E"], note_ct=note_a1.eRec, tree=priv, rng=rng)
+       E_dep=rec0["E"], note_ct=note_a1.eRec, tree=priv)
    t_a1 = rand_scalar(rng)
    eEnc_a1 = elgamal_encrypt(M_rec, pk_recv, t_a1)
    fold_a1 = deposit_fold_a1_witness(
@@ -2183,7 +2289,7 @@ Merkle membership.
    try:
        bad = deposit_fold_witness(
            m_rec=m_rec, k=k_other, sk_dep=rec0["sk"], salt=salt_rec,
-           E_dep=rec0["E"], note_ct=note_a1.eRec, tree=priv, rng=rng)
+           E_dep=rec0["E"], note_ct=note_a1.eRec, tree=priv)
        print(f"wrong mailbox key: BUILT (must not happen!) leaf={bad.leaf}")
    except DepositFoldRefused as exc:
        print(f"wrong mailbox key: REFUSED on relation {exc.relation}")
@@ -2192,11 +2298,11 @@ Merkle membership.
    #+RESULTS:
    : A1 fold witness built: 31 signals, relations asserted
    :   public face v    = 100
-   :   public nullifier = 0x9392b6ed8eccc69e40...
+   :   public nullifier = 0x1c454e5d6eec110e7c...
    : wrong mailbox key: REFUSED on relation 3
    #+LATEX: }
 
-   The circuit is 3,306,390 constraints at depth 20.  =DepositFoldA1Verifier=
+   The circuit is 3,309,327 constraints on a 32-level path.  =DepositFoldA1Verifier=
    verifies a real proof on chain (=test/DepositFoldA1Verifier.t.sol=), and
    =test/NotesE2E.t.sol= spends an A1 note through the fold inside the full
    lifecycle.  The dev setup is not a ceremony.
@@ -2252,7 +2358,8 @@ Merkle membership.
    #+LATEX: {\scriptsize
    #+BEGIN_SRC solidity
    notes.spendCoupledB1(
-       proof, noteRoot, nullifier, face, recipient,
+       proof, noteRoot, identityRoot, nullifier, face, recipient,
+       issuanceCommitment,              // the mint commitment the spend opened
        issuer,                          // public issuer address
        eDepForIss,                      // (R_f, C_f) encrypting M_Carol
        b1Proof,                         // verifyDepositorBinding (incl. P_dep)
@@ -2312,8 +2419,8 @@ Merkle membership.
 
    #+RESULTS:
    : B1 depositor binding from Carol: verifies = True
-   :   eDepForIss = ElGamal(M_carol under pk_iss)  R = (96696702..., 90677832...)
-   :   P_dep      = (35039973...,  3997672...)  (blinded; membership binds it)
+   :   eDepForIss = ElGamal(M_carol under pk_iss)  R = (62881448..., 51371453...)
+   :   P_dep      = (87656785..., 92071539...)  (blinded; membership binds it)
    #+LATEX: }
 
    The issuer alone -- reading =eDepForIss= from the =SpentCoupledB1= event --
@@ -2341,7 +2448,7 @@ Merkle membership.
 
    #+RESULTS:
    : issuer-unilateral receipt: VALID
-   :   names depositor (71013803..., 88215258...) == M_carol
+   :   names depositor (87291686...,  3992517...) == M_carol
    : substituted eDepForIss verifies = False  (collusion-substitution rejected)
    #+LATEX: }
 
@@ -2350,12 +2457,14 @@ Merkle membership.
    In all three flows the chain reveals:
    - A fresh nullifier and a spent face amount.
    - The payout address.
-   - For A1/A2: the coupled ciphertext \( eIss \) and the point commitment
-     \( P_I \) (both semantically secure; for A1 \( P_I \) commits the recipient,
-     for A2 the private issuer).
-   - For B1: the issuer address and \( E_{\text{dep}\to\text{iss}} \) (IND-CPA).
-   - The on-chain =identityRoot= (a single uint256, updated on registration,
-     revealing nothing about which identities are active).
+   - For A1/A2: the re-encryption \( eEnc \) under an unpublished
+     \( pk_{\text{recv}} \) (semantically secure) and one fold proof; no
+     committed point.
+   - For B1: the issuer address, \( E_{\text{dep}\to\text{iss}} \) (IND-CPA)
+     and the perfectly hiding \( P_{\text{dep}} \).
+   - The posted identity root the spend names (one uint256 per posting,
+     revealing nothing about which identities are active, since the leaves are
+     salted).
    - /No/ plaintext Identities, /no/ link between the spend and any specific
      commitment in the tree, and /no/ link between mint and spend events.
 
@@ -2459,20 +2568,20 @@ Merkle membership.
    ----------------------------------------------------------------------
    mint_batch N=1   (B1/A1 mint)      issuer         10.0MB        2.6MB
    mint_batch N=32  (B1/A1 mint)      issuer        319.6MB        5.3MB
-   mint_batch_a2 N=1  (A2 mint)       issuer         10.5MB        3.8MB
-   mint_batch_a2 N=32 (A2 mint)       issuer       absent       absent
+   mint_batch_a2 N=1  (A2 mint)       issuer         10.5MB        4.2MB
+   mint_batch_a2 N=32 (A2 mint)       issuer        335.5MB        7.1MB
    spend            (all spends)      depositor       5.5MB        2.9MB
-   b1 membership    (B1 spend)        depositor     270.4MB        8.3MB
-   deposit_fold_a1  (A1 spend)        depositor    1861.7MB       35.2MB
-   deposit_fold_a2  (A2 spend)        depositor    1878.4MB       35.4MB
+   b1 membership    (B1 spend)        depositor     272.1MB        8.5MB
+   deposit_fold_a1  (A1 spend)        depositor    1863.4MB       36.0MB
+   deposit_fold_a2  (A2 spend)        depositor    2116.0MB       44.6MB
    #+end_example
 
    #+LATEX: }
 
    The two fold zkeys dominate.  They are the proving keys for the
-   3,306,390-constraint A1 gate and the 3,341,261-constraint A2 gate, and
+   3,309,327-constraint A1 gate and the 3,833,335-constraint A2 gate, and
    Groth16 proving keys scale with constraint count.  B1's membership key
-   is the 491,764-constraint circuit.  Everything else a wallet fetches
+   is the 494,701-constraint circuit.  Everything else a wallet fetches
    for a mint or a note opening is a few megabytes to a few hundred.
 
 ** Running every wallet prover, timed
@@ -2541,12 +2650,12 @@ Merkle membership.
    #+END_SRC
 
    #+RESULTS:
-   : mint b1 (issuer)                 1.14s
-   : mint a2 (issuer)                 1.00s
-   : spend (depositor, all)           0.73s
-   : b1 membership (depositor)       19.89s
-   : fold a1 (depositor)             15.89s
-   : fold a2 (depositor)             15.83s
+   : mint b1 (issuer)                 0.94s
+   : mint a2 (issuer)                 0.97s
+   : spend (depositor, all)           0.75s
+   : b1 membership (depositor)       19.78s
+   : fold a1 (depositor)             13.39s
+   : fold a2 (depositor)             15.09s
 
    #+LATEX: }
 
@@ -2554,8 +2663,8 @@ Merkle membership.
 
    Download = first-run fetch (zkey + witness generator); prove = wall time
    for every SNARK that party runs for one note, from the measurements above.
-   The artifact-free sigma legs (Schnorr / issuer_reenc / deposit coupling /
-   depositor binding / eEnc re-encryption / receipt vd proofs) add
+   The artifact-free sigma legs (Schnorr / issuer_reenc / depositor binding /
+   eEnc re-encryption / receipt vd proofs) add
    milliseconds and nothing to download.
 
    #+LATEX: {\scriptsize
@@ -2586,11 +2695,11 @@ Merkle membership.
    #+RESULTS:
    : party / flavor            download+store  prove (per note)
    : ----------------------------------------------------------
-   : issuer    b1/a1 (N=1)             12.7MB             1.14s
-   : issuer    a2    (N=1)             14.3MB             1.00s
-   : depositor b1                     287.1MB            20.62s
-   : depositor a1                    1905.2MB            16.62s
-   : depositor a2                    1922.2MB            16.56s
+   : issuer    b1/a1 (N=1)             12.7MB             0.94s
+   : issuer    a2    (N=1)             14.8MB             0.97s
+   : depositor b1                     289.0MB            20.53s
+   : depositor a1                    1907.8MB            14.14s
+   : depositor a2                    2169.0MB            15.84s
 
    #+LATEX: }
 
@@ -2598,14 +2707,15 @@ Merkle membership.
 
    - *Lazy, tiered artifact fetch.*  A receive-and-hold wallet needs /zero/
      SNARK artifacts.  A B1-spending wallet needs ~25 MB (=spend= +
-     =identity_membership_b1=).  The 1.9 GB fold keys are needed only to
+     =identity_membership_b1=).  The 1.9 and 2.2 GB fold keys are needed only to
      /spend an addressed note/, so fetch them in the background on first A1/A2
      receipt (the user will plausibly spend later), with hash-pinned,
      resumable downloads.  An issuer wallet sizes its mint key to its batch
      habit: 10 MB at \( N{=}1 \), ~330 MB at \( N{=}32 \).
-   - *One progress bar that matters.*  Every proof except the tie is under
-     ~2 s -- below UX-noticeable for a payment flow.  The tie's ~10-15 s is
-     the one moment to design for: prove in the background between "note
+   - *One progress bar that matters.*  Every proof except the depositor's
+     identity gate is under ~2 s -- below UX-noticeable for a payment flow.
+     That gate's ~15-20 s (a fold under rapidsnark, or B1's membership under
+     snarkjs) is the one moment to design for: prove in the background between "note
      received and verified" and "deposit", or show explicit progress at
      spend.  Proving is local and private -- nothing leaves the device --
      and never blocks the counterparty (the issuer's proof is done before
@@ -2779,18 +2889,17 @@ more that become concrete only once the redemption path exists.
   accumulator, and BUCK's =isCarrying= carrying-transfer path.  The [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][IdentityRegistry]] provides the
   issuer-attestation and recipient-verification legs.  Addressed spends
   verify one folded Groth16 proof.  B1 verifies =verifyDepositorBinding=
-  and =identity_membership_b1=.  Theorems 7 and 8 of the
+  and =identity_membership_b1=.  Theorems 7-12 of the
   [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][formal proofs]]
-  still describe the identity-keyed coupling and are not the argument for
-  this gate.  The wallet cost of the fold is in /The Prover Bill of
-  Materials/ below: about sixteen seconds and a 1.9 GB proving key per
-  addressed note, measured on this machine.
+  are the argument for these gates.  The wallet cost of the fold is in /The Prover Bill of
+  Materials/ below: fifteen to eighteen seconds and a 1.9 to 2.2 GB proving
+  key per addressed note, measured on this machine.
 
   *Why the spend carries this apparatus at all -- anonymity is the cost.*  A
   direct =transfer= reaches the same mutual-decryptability guarantee with no
   SNARK, because the bilateral =approve= names both parties at once.  The Notes
-  detour pays the mint SNARK, the recipient-key blinding, and the
-  deposit-coupling purely to buy mint <-> spend unlinkability: the issuer's
+  detour pays the mint SNARK, the recipient-key blinding, and the folded
+  gate purely to buy mint <-> spend unlinkability: the issuer's
   registered anchor lives at mint, the recipient's at spend, and they are never
   co-present, so the apparatus is what bridges them.  Public-issuer notes
   (A1/B1) keep the cheap, fully-sound path; A2 is the premium that hides the
@@ -2804,13 +2913,17 @@ use the folded gate when =depositFoldVerifier= is set.  B1 uses
 =verifyDepositorBinding= and =identity_membership_b1.circom= when that
 adapter is the membership slot.  What is actually in the tree:
 
-1. *On-chain identity root.*  =IdentityRegistry.identityRoot= is depth 20.
-   Governance posts it, and that is also how a receiving leaf is admitted:
+1. *On-chain identity root.*  Governance appoints a root authority, which
+   enrolls each registry's subtree at an aggregator slot and appoints the
+   aggregator; the aggregator alone posts roots, into a ring of 256 with
+   their times, and each consumer declares the oldest it accepts (Notes:
+   seven days).  A receiving leaf is admitted by its registry:
    =register= and =bindContract= refuse a caller-supplied leaf, and must,
    since a call that accepted any leaf would accept one pairing any
    Identity with any key.  The organisation admits the leaf to its own
-   subtree; the aggregator composes; governance posts.  The canonical
-   off-chain tree is =alberta_buck.registry.tree.IdentityMerkleTree=.
+   subtree, the aggregator composes, and a membership path is 32 levels.
+   The canonical off-chain trees are =alberta_buck.registry.tree= and
+   =merkle_service=.
 2. *B1 membership.*  =identity_membership_b1.circom= proves
    \( T = b H_{\mathrm{PEDERSEN}} \), the salted leaf, and the path.
    =IdentityMembershipB1VerifierAdapter= is the verifier, and it is the
@@ -2835,23 +2948,23 @@ adapter is the membership slot.  What is actually in the tree:
    its own ciphertexts, discloses the mint randomness instead; and the
    mailbox leaf ties that key to the named Identity with a Poseidon and a
    path.  An issuer-side receipt without it prints *UNVERIFIED RECIPIENT*.
+   An A2 receipt also checks \( C_i - T + \gamma H_{\mathrm{PEDERSEN}} \)
+   against the Identity it names.
 6. *The payload's scalars are wrapped to the mailbox key.*  A delivery must
    carry \( r' \) (the fold needs the SCALAR \( r'k \), which the point
-   \( k R \) does not give) and, for A2, the issuer's naming salt.  In the
-   clear each undoes the encryption it travels beside -- \( r' \) turns
-   \( eIss \) into plaintext, the salt turns the issuer's naming leaf into a
-   scannable one.  Both travel masked by
+   \( k R \) does not give) and, for A2, the issuer's naming salt and
+   \( T \)'s blind \( \gamma \).  In the clear each undoes something it
+   travels beside -- \( r' \) turns \( eIss \) into plaintext, the salt turns
+   the issuer's naming leaf into a scannable one, \( \gamma \) turns \( T \)
+   into \( r'\,pk_{\text{recv}} \) and so the issuer's Identity.  All travel
+   masked by
    \( \mathrm{keccak}(\mathtt{WRAP\_DOMAIN} \| \mathit{field} \| S) \), with
    \( S = r' \cdot pk_{\text{recv}} = k \cdot R \): Diffie-Hellman, so only
    the addressee unwraps, and the minter needs no round trip to wrap.  One
    mask per field, because one pad over two scalars leaks their difference.
 
 The end-to-end test spends all three flavours through those gates, with
-dev-entropy setups.  A production ceremony has not been run.  And one thing
-the architecture does not yet enforce: an A2 issuer can key its ciphertext so
-that the mint binding names one registered Identity and the recipient's key
-opens it to another, which =doc/review/notes-receiving-key.org= section 4.6
-records along with the closure.
+dev-entropy setups.  A production ceremony has not been run.
 
 Additional items tracked across the series:
 
@@ -2905,15 +3018,15 @@ Additional items tracked across the series:
    | =register= / =bindContract= | addr, =pk=, =E_addr= (ElGamal ct of \(M\) under own =pk=), =isPublicIdentity=, =identityRoot=   | \(m\), \(M\), \(sk\)                                                            |
    | =mint= (any flavor)         | =Minted(issuer, totalFace, startIndex, count, newRoot)=; =cms[]= in calldata (opaque Poseidon)  | per-leaf opening \((flavor,v,\rho,idHash,pred)\); \(eNote\), issuer payload     |
    | =mint= public (A1/B1)       | + =IssuerBound(issuer, newRoot)=; one Schnorr over =keccak(cms)=                                | --                                                                              |
-   | =mint= private (A2)         | + =IssuerReencBound(issuer, newRoot, count)=; per-leaf blinded binding \((Q,U,\hat{T},A_1..A_5)\) | \(M_{iss}, r', \beta, \gamma, sk_{iss}\); the recipient point \(M_{rec}\)      |
-   | A1/A2 spend                 | nullifier, face, recipient, \(eEnc\), one fold proof.  The event also logs =dc.P_I=, which the fold does not check | \(\rho, idHash, m, k, sk, salt\); A2 also \(r'\) and the issuer's naming salt |
+   | =mint= private (A2)         | + =IssuerReencBound(issuer, newRoot, count)=; per-leaf \(eIss\), \(T\) and the blinded binding \((Q,U,A_1..A_5)\) | \(M_{iss}, r', \beta, \gamma, sk_{iss}\); the recipient point \(M_{rec}\)      |
+   | A1/A2 spend                 | nullifier, face, recipient, the identity root, \(eEnc\), one fold proof                        | \(\rho, idHash, m, k, sk, salt\); A2 also \(r'\), \(\gamma\) and the issuer's naming salt |
    | B1 spend                    | =SpentCoupledB1(nf, face, recipient, P_{dep})=; \(eDepForIss\), the depositor-binding sigma, the membership proof | \(\rho, idHash, m_{dep}, sk_{dep}, r, b\)                                       |
    #+LATEX: }
 
    Two facts do the heavy lifting throughout.  First, =cms[]= are Poseidon
    commitments: a leaf reveals /nothing/ about \( (flavor, v, \rho, idHash,
    predicate) \) without \( \rho \).  Second, the spend nullifier
-   \( nf = \mathrm{Poseidon}_3(\rho, idHash, tag) \) is a PRF output over secret
+   \( nf = \mathrm{Poseidon}_3(\rho, idHash, 4242) \) is a PRF output over secret
    material, so it is unlinkable to any =cm= without the opening (/Proofs/,
    Theorem 10).
 
@@ -2925,9 +3038,9 @@ Additional items tracked across the series:
    a =recipient=; \( nf \) is a PRF over \( (\rho, idHash) \), so inverting it
    to a specific =cm= is pre-image resistance.  No field of a spend points back
    to a mint: the spend's \( eEnc \) is a /fresh re-encryption/ of the leaf
-   ciphertext (uniformly re-randomised; the note-binding relation deliberately
-   proves re-encryption /equivalence/, never equality with the public
-   mint-time \( eIss \)).  The only residual linkage surfaces are the two that
+   ciphertext (uniformly re-randomised; the fold deliberately proves
+   re-encryption /equivalence/, never equality with the public mint-time
+   \( eIss \), and \( T \) never appears at spend).  The only residual linkage surfaces are the two that
    /must/ be public for the ERC-20 to pay out -- =face= and =recipient= --
    mitigated by fixed denominations and relayed payouts, orthogonal to this
    document.
@@ -2963,22 +3076,25 @@ Additional items tracked across the series:
    same issuer now carries the same recoverable M_iss).
    #+end_example
 
-   The shipped binding blinds it: it publishes \( \hat{T} = r' pk_{rec} +
-   \gamma G \) for a fresh \( \gamma \).  Now \( C_i - \hat{T} = M_{iss} -
-   \gamma G \), a uniformly random offset from \( M_{iss} \) -- so
-   \( \hat{T} \) reveals nothing.  The recipient's point is likewise hidden
-   (inside the perfectly-hiding \( Q \) and the uniform \( U, \hat{T} \)), and
-   soundness is undisturbed because \( \gamma \) cancels in the verification
-   relations.  An A2 mint's on-chain footprint is, to Mallory, a vector of
-   uniformly-distributed group elements.
+   The shipped binding blinds it: it publishes \( T = r' pk_{rec} +
+   \gamma H_{\mathrm{PEDERSEN}} \) for a fresh \( \gamma \).  Now
+   \( C_i - T = M_{iss} - \gamma H_{\mathrm{PEDERSEN}} \), a uniformly random
+   offset from \( M_{iss} \) -- so \( T \) reveals nothing to anyone without
+   \( \gamma \), which only the recipient receives.  The recipient's key is
+   likewise hidden (inside the perfectly-hiding \( Q \) and the uniform
+   \( U, T \)), and soundness is undisturbed because \( \gamma \) cancels in
+   the verification relations.  The blind is on the hash-to-curve generator
+   rather than \( G \) because the fold opens \( T \) again: a blind whose
+   logarithm is known would absorb any difference of Identities.  An A2
+   mint's on-chain footprint is, to Mallory, a vector of uniformly-distributed
+   group elements.
 
-   *The spend-side sigmas reveal the spender's action, not any Identity.*  The
-   deposit-coupling and depositor-binding sigmas are HVZK; their only
-   Identity-derived public values are the blinded commitments \( P_I = M_I +
-   bH \) / \( P_{dep} = M_{dep} + bH \), perfectly hiding for uniform
-   \( b \).  The membership and note-binding Groth16 proofs are
-   zero-knowledge; their public inputs are the nullifier (PRF), \( eEnc \)
-   (uniform), and \( P \) (hiding).  =msg.sender= is visible -- exactly as the
+   *The spend-side proofs reveal the spender's action, not any Identity.*  The
+   folds are zero-knowledge; their public inputs are the nullifier (PRF),
+   \( eEnc \) (uniform), the identity root, and the depositor's own registered
+   key and credential.  B1's depositor-binding sigma is HVZK and its only
+   Identity-derived public value is \( P_{dep} = M_{dep} + bH \), perfectly
+   hiding for uniform \( b \).  =msg.sender= is visible -- exactly as the
    sender of any ERC-20 transfer is -- but no /Identity/ is.
 
 ** Why mutual decryptability holds -- the final data set
@@ -2991,18 +3107,18 @@ Additional items tracked across the series:
    | Flavor | Recipient names issuer via                                                       | Issuer names depositor via                                          |
    |--------+-----------------------------------------------------------------------------------+----------------------------------------------------------------------|
    | B1     | in-clear \(M_{iss}\) + batch Schnorr (=verifyIssuerSchnorr=)                       | =SpentCoupledB1=: decrypt \(eDepForIss\) with \(sk_{iss}\) (B1 in Code) |
-   | A1     | in-clear \(M_{iss}\) + batch Schnorr                                               | chose \(M_{rec}\) at mint (symmetric knowledge)                     |
-   | A2     | decrypt \(eIss\) under \(m_{rec}\); binding + membership prove it is the *registered* minter (A2 in Code) | chose \(M_{rec}\) at mint                  |
+   | A1     | in-clear \(M_{iss}\) + batch Schnorr                                               | chose \(M_{rec}\) at mint; the mailbox leaf ties \(pk_{recv}\) to it |
+   | A2     | decrypt \(eIss\) under \(k\); binding, key tie and membership prove it is the *registered minter* (A2 in Code) | chose \(M_{rec}\) at mint; the mailbox leaf ties \(pk_{recv}\) to it |
    #+LATEX: }
 
-   The A2 row is the subtle one.  The recipient's receipt composes three facts:
-   the mint anti-framing binding (the ciphertext re-encrypts the issuer's
+   The A2 row is the subtle one.  The recipient's receipt composes four facts:
+   the mint anti-framing binding (the ciphertext carries the issuer's
    /registered/ record), their own verifiable decryption (it opens under
-   \( m_{rec} \) to the named point), and the membership of that point in
+   \( pk_{recv} \) to the named point), the key tie
+   \( C_i - T + \gamma H_{\mathrm{PEDERSEN}} = M_I \) (the binding's Identity
+   is the one decrypted), and the membership of that point in
    \( \mathsf{rt_{id}} \).  No issuer cooperation is needed -- the receipt is
-   /unilateral/ -- and no new proof is needed at receipt time: the coupling
-   falls out of composing the mint binding with the recipient's own
-   decryption.
+   /unilateral/ -- and no new proof is needed at receipt time.
 
 ** The colluding pair, and where each escape is closed
 
@@ -3016,15 +3132,20 @@ Additional items tracked across the series:
       SNARK's per-leaf =issuerMode= signal makes a private-issuer bearer leaf
       unprovable (no B2 codepoint).
    2. /A nameable note deposited by the wrong Identity./  Closed at *spend* by
-      the coupling sigma + bound membership: the depositing account must hold
-      the Identity scalar that decrypts the verified ciphertext.
+      the fold: the depositing account's Identity and the key that reads the
+      note must be paired in one certified leaf (/Proofs/, Theorem 8).
    3. /An un-nameable note made spendable by ciphertext substitution./  Closed
-      at *spend* by the note-binding tie: the verified \( eEnc \) must be
-      keyed to the identity material committed behind /this spend's
+      at *spend* by the note tie inside the fold: the verified \( eEnc \) must
+      be keyed to the identity material committed behind /this spend's
       nullifier/ (A2: re-encrypt the committed \( eIss \); A1: share the
-      \( eNote \)'s \( M_{\text{rec}} \), the public =face= pinning the
-      plaintext) (/Proofs/, Theorem 12) -- demonstrated executably in the
-      A2 and A1 in Code counter-examples above.
+      \( eNote \)'s key, the public =face= pinning it) (/Proofs/, Theorem 8)
+      -- demonstrated executably in the A2 and A1 in Code counter-examples
+      above.
+   4. /A misnamed note: a registered puppet in place of the minter./  Closed at
+      *spend* by the key tie: the note commits the binding's \( T \) and the
+      A2 fold opens it against the recipient's own key (/Proofs/, Theorem 12)
+      -- the split mint above is refused by the delivery, the fold and the
+      receipt.
 
 #+LATEX: \clearpage
 * Security Properties and the Tests That Witness Them
@@ -3064,21 +3185,21 @@ Additional items tracked across the series:
   #+LATEX: {\scriptsize
   | Suite                                     | Count | What it demonstrates                                                                                                                                                                                 |
   |-------------------------------------------+-------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-  | =alberta_buck/test/test_unilateral_a2.py= |    11 | A2 mint binding; delivery decrypt; deposit coupling (any account); unilateral receipt names both parties; collusion un-nameable + un-spendable; sigma soundness; identity-hiding; mint unlinkability |
-  | =alberta_buck/test/test_unilateral_a1.py= |     7 | A1 mint; =idHash= binds the public issuer + Schnorr; recipient-side receipt names both; tamper rejection                                                                                             |
+  | =alberta_buck/test/test_unilateral_a2.py= |    17 | A2 mint binding; delivery decrypt; the fold from any account; unilateral receipt names both parties; collusion un-nameable + un-spendable; the split key refused three ways; identity-hiding; mint unlinkability |
+  | =alberta_buck/test/test_unilateral_a1.py= |    12 | A1 mint; =idHash= binds the public issuer + Schnorr; recipient-side receipt names both; tamper rejection                                                                                             |
   | =alberta_buck/test/test_b1_binding.py=    |    11 | B1 depositor binding; issuer-unilateral receipt names the depositor; collusion-substitution rejected; Mallory blind; unlinkability                                                                   |
-  | =alberta_buck/test/test_e2e_payload.py=   |     5 | the delivered payload SUFFICES: the shipped randomness opens the shipped ciphertexts, the shipped salt locates the issuer's naming leaf, and the mailbox key -- not the Identity scalar -- decrypts   |
+  | =alberta_buck/test/test_e2e_payload.py=   |     7 | the delivered payload SUFFICES: the shipped randomness opens the shipped ciphertexts, the shipped salt locates the issuer's naming leaf, and the mailbox key -- not the Identity scalar -- decrypts   |
   | =test/B1Binding.t.sol=                    |     6 | on-chain =verifyDepositorBinding= parity + soundness                                                                                                                                                 |
-  | =test/NotesCoupledB1.t.sol=               |     6 | end-to-end =spendCoupledB1=: the depositor-binding + bound membership path                                                                                                                           |
+  | =test/NotesCoupledB1.t.sol=               |     8 | end-to-end =spendCoupledB1=: the depositor-binding + bound membership path                                                                                                                           |
+  | =test/NotesA2Tie.t.sol=                   |     4 | the A2 mint commits \( T \): the binding and the mint proof must agree on it                                                                                                                         |
+  | =test/IdentityAccumulator.t.sol=          |    10 | the root authority, subtree enrollment, the root ring and consumer ages, public paths through the aggregator                                                                                          |
   | =test/NotesIdentityMembership.t.sol=      |     6 | the gate slots: the fold verifier cannot be cleared, and an addressed spend without it reverts before the spend SNARK                                                                                 |
   | =test/NotesE2E.t.sol=                     |    12 | the full lifecycle per flavour with EVERY verifier real (batch mint, spend, and the folded gate or the sigma-plus-membership one); double-spend reverts; per-phase gas                                |
   #+LATEX: }
 
   Build/test entry points: =make nix-test= (Forge), =make nix-test-python=
-  (wallet reference), =make nix-snark-note-binding= /
-  =nix-snark-note-binding-a1= (note-binding circuits + trusted setups +
-  vectors), =make nix-snark-e2e-fixtures= (the all-real-verifier lifecycle
-  fixtures).
+  (wallet reference), =make nix-snark-e2e-fixtures= (the all-real-verifier
+  lifecycle fixtures).
 
 #+LATEX: \clearpage
 * Cross-References
@@ -3086,8 +3207,8 @@ Additional items tracked across the series:
 - [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][alberta-buck-notes.org]] -- architectural overview of the Notes primitive
   (flavors, Merkle tree, demurrage interaction).  The other living half of
   the Notes documentation pair; this document is the worked, executable half.
-- [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] -- formal correctness arguments (Theorems 7-12; Open
-  Questions in Part IV).
+- [[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][alberta-buck-proofs.org]] -- formal correctness arguments for these gates
+  (Part IV, Theorems 7-12).
 - /alberta-buck-verifier-implementation.org/ -- SNARK toolchain engineering:
   the witness-generation root cause, rapidsnark integration, trusted setups.
 - [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][alberta-buck-ethereum.org]] -- Solidity surface, gas costs, phase-by-phase
@@ -3101,8 +3222,8 @@ Additional items tracked across the series:
   compile per pinned N).
 - =circuits/spend.circom= -- the flavor-agnostic spend (note-proof) circuit.
 - =circuits/deposit_fold_a1.circom=, =circuits/deposit_fold_a2.circom= -- the
-  addressed gate: one witness, four relations for A1 and five for A2,
-  including the note \( \leftrightarrow \) \( eEnc \) tie.
+  addressed gate: one witness, four relations for A1 and six for A2,
+  including the note \( \leftrightarrow \) \( eEnc \) tie and A2's key tie.
 - =circuits/identity_membership_b1.circom= -- B1's membership, with its blind
   proven rather than witnessed on a generator of unknown logarithm.
 - =src/Notes.sol=, =src/MintGroth16Verifier*.sol=, =src/MintVerifierAdapter.sol=,

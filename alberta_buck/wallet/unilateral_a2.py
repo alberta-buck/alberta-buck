@@ -351,8 +351,8 @@ def verify_receipt(
         return RcptResult(False, None, None, receipt.value,
                           "the binding's Identity is not the one decrypted")
 
-    # (3) Issuer identity is registered -- this is the coupling: a bogus eIss
-    #     (keyed to anything but M_rec) decrypts to a non-member here.
+    # (3) Issuer identity is registered: a bogus eIss (keyed to anything but
+    #     pk_recv) decrypts to a non-member here.
     if not tree.contains(receipt.M_I, identity_root):
         return RcptResult(False, None, None, receipt.value, "issuer M not a registered identity")
 
