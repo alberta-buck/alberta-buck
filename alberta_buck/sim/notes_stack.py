@@ -6,7 +6,7 @@ Two pieces:
 * :class:`E2EFixture` -- loads one ``alberta_buck/test/vectors/e2e/{a1,a2,
   b1}.json`` world (built by scripts/snark/gen_e2e_fixtures.sh: REAL Groth16
   proofs at every gate, REAL named identities -- the canonical Alice/Bob KYC
-  data) into wallet objects, and builds the AB-RCPT/1 receipt for either
+  data) into wallet objects, and builds the AB-RCPT/2 receipt for either
   party over it.  The fixtures are package data, so this layer works from a
   venv-installed wheel with no repo checkout.
 
@@ -167,7 +167,7 @@ class E2EFixture:
         for k, v in self.note.items():
             if k in ("eNote", "eRec", "eIss"):
                 out[k] = _ct(v)
-            elif k == "sigma_R":
+            elif k in ("sigma_R", "T"):
                 out[k] = _pt(v)
             else:
                 out[k] = int(v)
@@ -175,12 +175,34 @@ class E2EFixture:
             out["eDepForIss"] = _ct(self.raw["sigma"]["eDepForIss"])
         return out
 
+    def mailbox_binding(self):
+        """The recipient's holder-produced evidence, as a wallet object.
+
+        None for B1: a bearer note is addressed to nobody, so there is no
+        mailbox to bind.
+        """
+        b = self.raw.get("mailboxBinding")
+        if b is None:
+            return None
+        from alberta_buck.registry.tree import MembershipProof
+        from alberta_buck.wallet.recvkey import ReceivingBinding
+        return ReceivingBinding(
+            pk_recv=_pt(self.raw["parties"]["depositor"]["pkRecv"]),
+            salt=int(b["salt"]),
+            path=MembershipProof(
+                leaf=int(b["leaf"]),
+                siblings=[int(x) for x in b["siblings"]],
+                index_bits=[int(x) for x in b["indexBits"]],
+                root=int(b["root"]), leaf_index=0,
+            ),
+        )
+
     # -- receipts ------------------------------------------------------------
 
     def build_receipt(self, role: str, contracts: Dict[str, str],
                       mint: Dict[str, Any], spend: Dict[str, Any],
                       notes: Optional[List[str]] = None, rng=None):
-        """Build this world's AB-RCPT/1 :class:`ReceiptCore` from either side.
+        """Build this world's AB-RCPT/2 :class:`ReceiptCore` from either side.
 
         ``mint`` carries the Minted anchor (``txhash``, ``block``); ``spend``
         the SpentCoupled* anchor (``txhash``, ``block``, ``logindex``,
@@ -204,6 +226,35 @@ class E2EFixture:
         )
         if role == "recipient":
             kw["payee_sk"] = dep.sk
+
+        if self.flavor != "b1":
+            # The addressed legs: the mailbox key, and whichever evidence about
+            # it this side can produce.  The recipient holds k; the issuer holds
+            # the randomness it encrypted with.  Neither holds the other's, and
+            # that is what makes the receipt evidence.
+            dp = self.raw["parties"]["depositor"]
+            kw["pk_recv"] = _pt(dp["pkRecv"])
+            kw["mailbox_binding"] = self.mailbox_binding()
+            if role == "recipient":
+                kw["k_recv"] = int(dp["kRecv"])
+            else:
+                # The minter's retained randomness -- not the payload's wrapped
+                # copy, which only the mailbox holder can open.  A1's identity
+                # ciphertext is eRec (randomness r'); A2's is eIss (also r').
+                # eNote carries the value under r_note in both flavours; the
+                # identity ciphertext (A1's eRec, A2's eIss) carries r'.
+                sec = self.raw["issuerSecrets"]
+                kw["r_note"] = int(sec["rNote"])
+                kw["r_id"] = int(sec["rPrime"])
+            if self.flavor == "a2":
+                # gamma opens the binding's T and ties it to the named issuer.
+                # Each side uses its own copy: the recipient unwraps it from the
+                # delivery with k, and the issuer kept the one it drew.
+                if role == "recipient":
+                    from alberta_buck.wallet.delivery import open_a2
+                    kw["gamma"] = open_a2(np, int(dp["kRecv"])).gamma
+                else:
+                    kw["gamma"] = int(self.raw["issuerSecrets"]["gamma"])
 
         if self.flavor == "b1":
             return build_note_b1(
@@ -341,15 +392,24 @@ class NotesStack:
             1, ch.deploy("MintBatchA2N1Groth16Verifier").address))
         spend_adapter = ch.deploy("SpendVerifierAdapter",
                                   ch.deploy("SpendGroth16Verifier").address)
-        mem_adapter  = ch.deploy("IdentityMembershipG1TieVerifierAdapter")
-        bind_adapter = ch.deploy("NoteBindingVerifierAdapter")
+        # B1's membership goes through the REPAIRED circuit: its blind is
+        # proven rather than witnessed, and its generator has no known
+        # logarithm.  The G1-tie adapter it replaces let a depositor shift the
+        # blind onto another registered Identity and spend while unregistered.
+        mem_adapter  = ch.deploy("IdentityMembershipB1VerifierAdapter")
 
         self.notes = ch.deploy("Notes", self.buck.address, mint_adapter.address,
                                spend_adapter.address, gov)
         ch.send(self.notes.functions.setIdentityRegistry(self.reg.address))
         ch.send(self.notes.functions.setA2MintVerifier(a2_adapter.address))
         ch.send(self.notes.functions.setIdentityMembershipVerifier(mem_adapter.address))
-        ch.send(self.notes.functions.setNoteBindingVerifier(bind_adapter.address))
+
+        # The addressed flavours spend through the FOLDED gate: one proof
+        # carrying every relation.  The slot is not optional -- an addressed
+        # spend with it unset reverts, because there is no weaker path to fall
+        # back to.
+        fold_adapter = ch.deploy("DepositFoldVerifierAdapter", self.reg.address)
+        ch.send(self.notes.functions.setDepositFoldVerifier(fold_adapter.address))
 
         # The Notes pool is a Public-Identity Carrying contract with a REAL
         # key pair, so a private party's identity-bound approve toward it is
@@ -456,9 +516,16 @@ class NotesStack:
                     addr, rec["pk"], rec["sk"], bool(b["isPublic"]), False,
                     m=rec["m"], r=rec["r"], E=rec["E"]),
                 self.gov, f"bind {who}"))
+        # The world's aggregator root: governance appoints itself root authority
+        # and aggregator, and posts it, as a deployment's aggregator would.
         root = int(self.fx.raw["identityRoot"])
+        gov_addr = self.gov.address if hasattr(self.gov, "address") else self.gov
         out.append(self._send_from(
-            self.reg.functions.setIdentityRoot(root), self.gov, "setIdentityRoot"))
+            self.reg.functions.setRootAuthority(gov_addr), self.gov, "setRootAuthority"))
+        out.append(self._send_from(
+            self.reg.functions.setAggregator(gov_addr), self.gov, "setAggregator"))
+        out.append(self._send_from(
+            self.reg.functions.postIdentityRoot(root, b"\x00" * 32), self.gov, "postIdentityRoot"))
         assert self.reg.functions.identityRoot().call() == root
         return out
 
@@ -537,9 +604,15 @@ class NotesStack:
                                contract=self.notes)
 
     def spend(self) -> Step:
-        """Submit the fixture's REAL coupled spend as the depositor: the spend
-        Groth16 + the deposit sigma + the bound membership proof (+ the
-        note<->eEnc tie for the addressed flavors)."""
+        """Submit the fixture's REAL coupled spend as the depositor.
+
+        The shape differs by flavour, and the difference is the architecture.
+        The addressed flavours submit ONE folded proof: their two facts rest
+        on two different secrets -- the Identity and the receiving key -- so
+        no sigma can tie them, and three checks sharing a public point would
+        let a payload thief supply one of each.  B1's rest on one secret, so
+        its sigma is a genuine tie and it submits sigma plus membership.
+        """
         d = self.fx.raw
         dep = self._addr(self.fx.depositor.addr)
         self._impersonate(dep)
@@ -547,27 +620,24 @@ class NotesStack:
         proof = bytes.fromhex(d["spend"]["proofBytes"][2:])
         root, nf = int(sp["noteRoot"]), int(sp["nullifier"])
         face, rec = int(sp["face"]), self._addr(int(sp["recipient"], 16))
-        mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
         if self.fx.flavor == "b1":
             db = d["sigma"]["db"]
             b1p = (int(db["e"]), int(db["s_m"]), int(db["s_s"]), int(db["s_r"]),
                    int(db["s_b"]),
                    _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
                    _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
+            mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
             fn = self.notes.functions.spendCoupledB1(
-                proof, root, nf, face, rec, int(d["opening"]["cm"]),
+                proof, root, int(d["identityRoot"]), nf, face, rec, int(d["opening"]["cm"]),
                 self._addr(self.fx.issuer.addr),
                 _ct_tuple(d["sigma"]["eDepForIss"]), b1p, mem)
         else:
-            dc = d["sigma"]["dc"]
-            dcp = (int(dc["e"]), int(dc["s_m"]), int(dc["s_s"]), int(dc["s_b"]),
-                   _g1_tuple(dc["A2"]), _g1_tuple(dc["A3"]), _g1_tuple(dc["A4"]),
-                   _g1_tuple(dc["P_I"]))
-            nb = bytes.fromhex(d["noteBinding"]["proofBytes"][2:])
+            # The folded gate: the re-encryption and one proof, nothing else.
+            fold = bytes.fromhex(d["depositFold"]["proofBytes"][2:])
             f = (self.notes.functions.spendCoupledA1 if self.fx.flavor == "a1"
                  else self.notes.functions.spendCoupledA2)
-            fn = f(proof, root, nf, face, rec,
-                   _ct_tuple(d["sigma"]["eEnc"]), dcp, mem, nb)
+            fn = f(proof, root, int(d["identityRoot"]), nf, face, rec,
+                   _ct_tuple(d["sigma"]["eEnc"]), fold)
         return self._send_from(fn, dep, f"Notes.spendCoupled{self.fx.flavor.upper()}",
                                event=EVENT_BY_FLAVOR[self.fx.flavor],
                                contract=self.notes)

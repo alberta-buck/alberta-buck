@@ -30,7 +30,6 @@ type PyIr = (
     (BigUint, BigUint, BigUint, BigUint, BigUint),
     (PyG1, PyG1, PyG1, PyG1, PyG1, PyG1, PyG1, PyG1),
 );
-type PyDc = (BigUint, BigUint, BigUint, BigUint, PyG1, PyG1, PyG1, PyG1);
 #[allow(clippy::type_complexity)]
 type PyDb = (
     BigUint, BigUint, BigUint, BigUint, BigUint,
@@ -508,13 +507,85 @@ fn verifiable_decrypt_verify(
     .map_err(err)
 }
 
+/// The same DLEQ, its transcript bound to (account, chainid, registry) under
+/// its own tag: an Identity opening to one registry, never a receipt.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn identity_opening_prove(
+    e_ct: PyCt,
+    sk: BigUint,
+    m_point: PyG1,
+    account: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
+    t: BigUint,
+) -> PyResult<PyVd> {
+    let p = kernel::verifiable_decrypt::identity_opening_prove(
+        &wct(&e_ct)?,
+        &w(&sk)?,
+        &wg1(&m_point)?,
+        &w(&account)?,
+        &w(&chainid)?,
+        &w(&registry)?,
+        &w(&t)?,
+    )
+    .map_err(err)?;
+    Ok((big(&p.e), big(&p.s), pyg1(&p.t1), pyg1(&p.t2)))
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn identity_opening_verify(
+    e_ct: PyCt,
+    pk: PyG1,
+    m_point: PyG1,
+    proof: PyVd,
+    account: BigUint,
+    chainid: BigUint,
+    registry: BigUint,
+) -> PyResult<bool> {
+    let p = kernel::verifiable_decrypt::VdProof {
+        e: w(&proof.0)?,
+        s: w(&proof.1)?,
+        t1: wg1(&proof.2)?,
+        t2: wg1(&proof.3)?,
+    };
+    kernel::verifiable_decrypt::identity_opening_verify(
+        &wct(&e_ct)?,
+        &wg1(&pk)?,
+        &wg1(&m_point)?,
+        &p,
+        &w(&account)?,
+        &w(&chainid)?,
+        &w(&registry)?,
+    )
+    .map_err(err)
+}
+
+// ---------------------------------------------------------------------------
+// Holder-derived salts
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+fn tree_tag(tree_id: &str) -> PyResult<BigUint> {
+    Ok(big(&kernel::salt::tree_tag(tree_id).map_err(err)?))
+}
+
+#[pyfunction]
+#[pyo3(signature = (holder_secret, tree_id, association_counter=0))]
+fn derive_salt(holder_secret: BigUint, tree_id: &str, association_counter: u64) -> PyResult<BigUint> {
+    Ok(big(&kernel::salt::derive_salt(&w(&holder_secret)?, tree_id, association_counter).map_err(err)?))
+}
+
 // ---------------------------------------------------------------------------
 // A2 issuer re-encryption binding
 // ---------------------------------------------------------------------------
 
+/// The Pedersen generator: hashed to the curve, so its discrete log is
+/// unknown.  Every blind in the protocol sits on it; see the kernel's `nums`.
 #[pyfunction]
-fn h_point() -> PyG1 {
-    pyg1(&kernel::issuer_reenc::h_point())
+fn h_pedersen() -> PyG1 {
+    pyg1(&kernel::nums::h_pedersen())
 }
 
 #[pyfunction]
@@ -608,77 +679,8 @@ fn issuer_reenc_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Deposit coupling / B1 depositor binding
+// B1 depositor binding
 // ---------------------------------------------------------------------------
-
-#[pyfunction]
-#[allow(clippy::too_many_arguments)]
-fn deposit_couple_prove(
-    m_rec: BigUint,
-    sk_dep: BigUint,
-    e_dep: PyCt,
-    e_iss: PyCt,
-    account: BigUint,
-    chainid: BigUint,
-    b: BigUint,
-    k_m: BigUint,
-    k_s: BigUint,
-    k_b: BigUint,
-) -> PyResult<PyDc> {
-    let p = kernel::unilateral_a2::deposit_couple_prove(
-        &w(&m_rec)?,
-        &w(&sk_dep)?,
-        &wct(&e_dep)?,
-        &wct(&e_iss)?,
-        &w(&account)?,
-        &w(&chainid)?,
-        &w(&b)?,
-        &w(&k_m)?,
-        &w(&k_s)?,
-        &w(&k_b)?,
-    )
-    .map_err(err)?;
-    Ok((
-        big(&p.e),
-        big(&p.s_m),
-        big(&p.s_s),
-        big(&p.s_b),
-        pyg1(&p.a2),
-        pyg1(&p.a3),
-        pyg1(&p.a4),
-        pyg1(&p.p_i),
-    ))
-}
-
-#[pyfunction]
-fn deposit_couple_verify(
-    pk_dep: PyG1,
-    e_dep: PyCt,
-    e_iss: PyCt,
-    proof: PyDc,
-    account: BigUint,
-    chainid: BigUint,
-) -> PyResult<bool> {
-    let p = kernel::unilateral_a2::DepositCouplingProof {
-        e: w(&proof.0)?,
-        s_m: w(&proof.1)?,
-        s_s: w(&proof.2)?,
-        s_b: w(&proof.3)?,
-        a2: wg1(&proof.4)?,
-        a3: wg1(&proof.5)?,
-        a4: wg1(&proof.6)?,
-        p_i: wg1(&proof.7)?,
-    };
-    kernel::unilateral_a2::deposit_couple_verify(
-        &wg1(&pk_dep)?,
-        &wct(&e_dep)?,
-        &wct(&e_iss)?,
-        &p,
-        &w(&account)?,
-        &w(&chainid)?,
-    )
-    .map_err(err)
-}
 
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
@@ -813,9 +815,12 @@ fn id_hash_a1(
     ))
 }
 
+/// `id_hash_a2(eNote, eIss, T)` -- `T` is the mint binding's blinded point.
 #[pyfunction]
-fn id_hash_a2(e_note: PyCt, e_iss: PyCt) -> PyResult<BigUint> {
-    Ok(big(&kernel::notes::id_hash_a2(&wct(&e_note)?, &wct(&e_iss)?).map_err(err)?))
+fn id_hash_a2(e_note: PyCt, e_iss: PyCt, t: PyG1) -> PyResult<BigUint> {
+    Ok(big(
+        &kernel::notes::id_hash_a2(&wct(&e_note)?, &wct(&e_iss)?, &wg1(&t)?).map_err(err)?,
+    ))
 }
 
 #[pyfunction]
@@ -823,8 +828,32 @@ fn identity_leaf(m_point: PyG1) -> PyResult<BigUint> {
     Ok(big(&kernel::notes::identity_leaf(&wg1(&m_point)?).map_err(err)?))
 }
 
+/// `identity_leaf_salted(M, salt)` -- the hiding leaf of a private subtree.
+#[pyfunction]
+fn identity_leaf_salted(m_point: PyG1, salt: BigUint) -> PyResult<BigUint> {
+    Ok(big(
+        &kernel::notes::identity_leaf_salted(&wg1(&m_point)?, &w(&salt)?).map_err(err)?,
+    ))
+}
+
+/// `receiving_leaf(m_rec, k_recv, salt)` -- the hiding leaf binding an
+/// Identity to the receiving key its Notes are addressed to.  Over scalars.
+#[pyfunction]
+fn receiving_leaf(
+    m_rec: BigUint,
+    k_recv: BigUint,
+    salt: BigUint,
+) -> PyResult<BigUint> {
+    Ok(big(&kernel::notes::receiving_leaf(
+        &w(&m_rec)?,
+        &w(&k_recv)?,
+        &w(&salt)?,
+    )
+    .map_err(err)?))
+}
+
 // ---------------------------------------------------------------------------
-// buck_wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
+// buck_wallet: canonical dialect, AB-RCPT/2 envelope, receipt build /
 // verify and the unilateral flows.  Structured inputs cross as ONE JSON
 // text of named args (the vector-fixture shapes); receipt cores cross as
 // their canonical text -- see buck-wallet's `args` module.
@@ -918,6 +947,58 @@ fn issue_credential(args_json: &str) -> PyResult<String> {
     wallet::args::issue_credential_args(&parse_args(args_json)?).map_err(jerr)
 }
 
+// ---- Notes: receiving key, delivery, mailbox binding, fold witnesses ----
+
+#[pyfunction]
+fn receiving_key(args_json: &str) -> PyResult<String> {
+    wallet::args::receiving_key_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn wrap_mask(args_json: &str) -> PyResult<String> {
+    wallet::args::wrap_mask_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deliver_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::deliver_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deliver_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::deliver_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn open_a1(args_json: &str) -> PyResult<String> {
+    wallet::args::open_a1_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn open_a2(args_json: &str) -> PyResult<String> {
+    wallet::args::open_a2_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn prove_receiving_binding(args_json: &str) -> PyResult<String> {
+    wallet::args::prove_receiving_binding_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn verify_receiving_binding(args_json: &str) -> PyResult<String> {
+    wallet::args::verify_receiving_binding_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deposit_fold_a1_witness(args_json: &str) -> PyResult<String> {
+    wallet::args::deposit_fold_a1_witness_args(&parse_args(args_json)?).map_err(jerr)
+}
+
+#[pyfunction]
+fn deposit_fold_a2_witness(args_json: &str) -> PyResult<String> {
+    wallet::args::deposit_fold_a2_witness_args(&parse_args(args_json)?).map_err(jerr)
+}
+
 #[pymodule]
 fn buck_wallet(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ENVELOPE_HEADER", wallet::envelope::ENVELOPE_HEADER)?;
@@ -930,6 +1011,16 @@ fn buck_wallet(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_receipt, m)?)?;
     m.add_function(wrap_pyfunction!(build_receipt, m)?)?;
     m.add_function(wrap_pyfunction!(mint_unilateral_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(receiving_key, m)?)?;
+    m.add_function(wrap_pyfunction!(wrap_mask, m)?)?;
+    m.add_function(wrap_pyfunction!(deliver_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(deliver_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(open_a1, m)?)?;
+    m.add_function(wrap_pyfunction!(open_a2, m)?)?;
+    m.add_function(wrap_pyfunction!(prove_receiving_binding, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_receiving_binding, m)?)?;
+    m.add_function(wrap_pyfunction!(deposit_fold_a1_witness, m)?)?;
+    m.add_function(wrap_pyfunction!(deposit_fold_a2_witness, m)?)?;
     m.add_function(wrap_pyfunction!(make_receipt_a2, m)?)?;
     m.add_function(wrap_pyfunction!(verify_receipt_a2, m)?)?;
     m.add_function(wrap_pyfunction!(mint_unilateral_a1, m)?)?;
@@ -1058,8 +1149,67 @@ fn unseal_certificate(py: Python<'_>, envelope: &[u8], client_sk: BigUint) -> Py
     Ok(PyBytes::new(py, &signed.serialize()).into())
 }
 
+/// `(standing, face_band, dep_types, max_dep_rate, max_premium_rate,
+/// expires_at, scopes)`, the `InsurerEnvelope` fields in order.
+type PyEnv = (bool, u8, Vec<u8>, u32, u32, f64, Vec<BigUint>);
+
+fn face_units(v: &BigUint) -> PyResult<u128> {
+    u128::try_from(v).map_err(|_| PyValueError::new_err("face_units out of range (>= 2^128)"))
+}
+
+/// BuckCredit's issuance gate: "" if the credit is admitted, otherwise its
+/// revert reason.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn check_issuance(
+    env: PyEnv,
+    scope: BigUint,
+    face: BigUint,
+    dep_type: u8,
+    dep_rate: u32,
+    premium_rate: u32,
+    now: f64,
+) -> PyResult<String> {
+    let scopes = env.6.iter().map(w).collect::<PyResult<_>>()?;
+    let e = registry::regulator::InsurerEnvelope::new(
+        env.0,
+        env.1,
+        env.2.into_iter().collect(),
+        env.3,
+        env.4,
+        env.5,
+        scopes,
+    )
+    .map_err(jerr)?;
+    Ok(
+        match registry::regulator::check_issuance(&e, &w(&scope)?, face_units(&face)?, dep_type, dep_rate, premium_rate, now) {
+            Ok(()) => String::new(),
+            Err(r) => r.0.to_string(),
+        },
+    )
+}
+
+#[pyfunction]
+fn band_for_face(face: BigUint) -> PyResult<u8> {
+    Ok(registry::regulator::band_for_face(face_units(&face)?))
+}
+
+#[pyfunction]
+fn scope_id(name: &str) -> PyResult<BigUint> {
+    Ok(big(&registry::regulator::scope_id(name).map_err(jerr)?))
+}
+
+#[pyfunction]
+fn subtree_key(name: &str) -> PyResult<BigUint> {
+    Ok(big(&registry::regulator::subtree_key(name).map_err(jerr)?))
+}
+
 #[pymodule]
 fn buck_registry(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(check_issuance, m)?)?;
+    m.add_function(wrap_pyfunction!(band_for_face, m)?)?;
+    m.add_function(wrap_pyfunction!(scope_id, m)?)?;
+    m.add_function(wrap_pyfunction!(subtree_key, m)?)?;
     m.add_function(wrap_pyfunction!(registry_schnorr_sign, m)?)?;
     m.add_function(wrap_pyfunction!(registry_schnorr_verify, m)?)?;
     m.add_function(wrap_pyfunction!(registry_sign_certificate, m)?)?;
@@ -1081,7 +1231,8 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("FIELD_MODULUS", big(&kernel::field_modulus()))?;
     m.add("G1", pyg1(&kernel::g1_generator()))?;
     m.add("G2", pyg2(&kernel::g2_generator()))?;
-    m.add("H_POINT", pyg1(&kernel::issuer_reenc::h_point()))?;
+    m.add("H_PEDERSEN", pyg1(&kernel::nums::h_pedersen()))?;
+    m.add_function(wrap_pyfunction!(h_pedersen, m)?)?;
     m.add("NULLIFIER_TAG_B", kernel::notes::NULLIFIER_TAG_B)?;
     m.add("NULLIFIER_TAG_A", kernel::notes::NULLIFIER_TAG_A)?;
     m.add("FLAVOR_A1", kernel::notes::FLAVOR_A1)?;
@@ -1115,11 +1266,12 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chaum_pedersen_verify, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_prove, m)?)?;
     m.add_function(wrap_pyfunction!(verifiable_decrypt_verify, m)?)?;
-    m.add_function(wrap_pyfunction!(h_point, m)?)?;
+    m.add_function(wrap_pyfunction!(identity_opening_prove, m)?)?;
+    m.add_function(wrap_pyfunction!(identity_opening_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(tree_tag, m)?)?;
+    m.add_function(wrap_pyfunction!(derive_salt, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_prove, m)?)?;
     m.add_function(wrap_pyfunction!(issuer_reenc_verify, m)?)?;
-    m.add_function(wrap_pyfunction!(deposit_couple_prove, m)?)?;
-    m.add_function(wrap_pyfunction!(deposit_couple_verify, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_prove, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_verify, m)?)?;
     m.add_function(wrap_pyfunction!(note_commitment, m)?)?;
@@ -1129,5 +1281,7 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(id_hash_a1, m)?)?;
     m.add_function(wrap_pyfunction!(id_hash_a2, m)?)?;
     m.add_function(wrap_pyfunction!(identity_leaf, m)?)?;
+    m.add_function(wrap_pyfunction!(identity_leaf_salted, m)?)?;
+    m.add_function(wrap_pyfunction!(receiving_leaf, m)?)?;
     Ok(())
 }

@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
              THE ALBERTA BUCK - PUBLICATION AND DEPLOYMENT
-                                 (V0.2)
+                                  (V2)
              What is published, why it is built the way it
                           is, and what remains
 

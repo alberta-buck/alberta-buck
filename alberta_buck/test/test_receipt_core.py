@@ -1,4 +1,4 @@
-"""End-to-end tests for the AB-RCPT/1 receipt core — build, serialize,
+"""End-to-end tests for the AB-RCPT/2 receipt core — build, serialize,
 re-parse, re-verify for all receipt kinds, from BOTH Note parties' sides.
 
 Round-trip: build_* → serialize_core → canonical bytes → deserialize_core →
@@ -24,6 +24,9 @@ from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.chaum_pedersen import CPProof
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
+from alberta_buck.wallet.recvkey import receiving_key, prove_receiving_binding
+from alberta_buck.wallet.salt import derive_salt
+from alberta_buck.registry.tree import IdentityMerkleTree
 from alberta_buck.wallet.notes import (
     NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
     note_commitment, nullifier_b,
@@ -84,6 +87,14 @@ def parties(vectors):
         }
     alice = mk(vectors["alice"], 0xa11ce00000000000000000000000000000a11ce)
     bob   = mk(vectors["bob"],   0x0b0b000000000000000000000000000000000b0b)
+    # Alice's mailbox: an independent secret, and the leaf that ties it to her
+    # Identity.  A note is addressed to the key; a payer checks the leaf.
+    seed = 0xA11CE_5EED
+    alice["k_recv"], alice["pk_recv"] = receiving_key(seed)
+    salt = derive_salt(seed, "mailbox")
+    tree = IdentityMerkleTree(depth=10, private=True)
+    tree.insert_mailbox(alice["M"], alice["pk_recv"], salt)
+    alice["mbx"] = prove_receiving_binding(alice["M"], alice["pk_recv"], salt, tree)
     return alice, bob
 
 
@@ -108,12 +119,14 @@ def _mint_b1(alice, bob, rng):
 
 
 def _mint_a1(alice, bob, rng):
-    """Bob (public issuer) addresses a note to Alice's identity point."""
+    """Bob (public issuer) addresses a note to Alice's MAILBOX key."""
     sigma_R = mul(G1, rand_scalar(rng))
     sigma_s = rand_scalar(rng)
     rho     = rand_scalar(rng)
-    eNote   = elgamal_encrypt(mul(G1, FACE), alice["M"], rand_scalar(rng))
-    eRec    = elgamal_encrypt(alice["M"], alice["M"], rand_scalar(rng))
+    r_note  = rand_scalar(rng)
+    eNote   = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
+    r_rec   = rand_scalar(rng)
+    eRec    = elgamal_encrypt(alice["M"], alice["pk_recv"], r_rec)
     idh     = id_hash_a1(eNote, bob["m"], sigma_R, sigma_s)
     opening = NoteOpening(FLAVOR_A1, FACE, rho, idh, 0)
     cm      = note_commitment(opening)
@@ -122,6 +135,7 @@ def _mint_a1(alice, bob, rng):
                                   bob["addr"], CHAINID, rng=rng)
     return dict(opening=opening, cms=cms, issuer_sig=sig,
                 eNote=eNote, eRec=eRec, sigma_R=sigma_R, sigma_s=sigma_s,
+                r_note=r_note, r_id=r_rec,
                 nullifier=nullifier_b(rho, idh))
 
 
@@ -129,18 +143,21 @@ def _mint_a2(alice, bob, rng, with_binding=True):
     """Bob (PRIVATE issuer) addresses a note to Alice's identity point,
     encrypting his own registered Identity in eIss + the mint binding."""
     rho     = rand_scalar(rng)
-    eNote   = elgamal_encrypt(mul(G1, FACE), alice["M"], rand_scalar(rng))
+    r_note  = rand_scalar(rng)
+    eNote   = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
     r_prime = rand_scalar(rng)
-    eIss    = elgamal_encrypt(bob["M"], alice["M"], r_prime)
-    binding = issuer_reenc_prove(bob["sk"], r_prime, alice["M"], bob["E"],
-                                 eIss, bob["addr"], CHAINID, rng=rng) \
-              if with_binding else None
-    idh     = id_hash_a2(eNote, eIss)
+    eIss    = elgamal_encrypt(bob["M"], alice["pk_recv"], r_prime)
+    gamma   = rand_scalar(rng)
+    binding = issuer_reenc_prove(bob["sk"], r_prime, alice["pk_recv"], bob["E"],
+                                 eIss, bob["addr"], CHAINID, gamma=gamma, rng=rng)
+    idh     = id_hash_a2(eNote, eIss, binding.T)
     opening = NoteOpening(FLAVOR_A2, FACE, rho, idh, 0)
     cm      = note_commitment(opening)
     cms     = [cm]
+    # An unbound receipt still states T -- idHash commits it -- but not the proof.
     return dict(opening=opening, cms=cms, eNote=eNote, eIss=eIss,
-                binding=binding, nullifier=nullifier_b(rho, idh))
+                binding=binding if with_binding else None, T=binding.T, gamma=gamma,
+                r_note=r_note, r_id=r_prime, nullifier=nullifier_b(rho, idh))
 
 
 def _txn_kw(prefix: str) -> dict:
@@ -178,6 +195,10 @@ def _a1_core(alice, bob, role, rng):
         sigma_R=a["sigma_R"], sigma_s=a["sigma_s"],
         nullifier=a["nullifier"], face=FACE,
         role=role, payee_sk=alice["sk"],
+        pk_recv=alice["pk_recv"], mailbox_binding=alice["mbx"],
+        k_recv=(alice["k_recv"] if role == "recipient" else None),
+        r_note=(None if role == "recipient" else a["r_note"]),
+        r_id=(None if role == "recipient" else a["r_id"]),
         rng=rng, **_party_kw(alice, bob), **_txn_kw("a1"))
 
 
@@ -186,9 +207,13 @@ def _a2_core(alice, bob, role, rng, with_binding=True):
     return build_note_a2(
         issuer_E_addr=bob["E"],
         opening=a["opening"], cms=a["cms"],
-        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"],
+        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"], T=a["T"], gamma=a["gamma"],
         nullifier=a["nullifier"], face=FACE,
         role=role, payee_sk=alice["sk"], issuer_sk=bob["sk"],
+        pk_recv=alice["pk_recv"], mailbox_binding=alice["mbx"],
+        k_recv=(alice["k_recv"] if role == "recipient" else None),
+        r_note=(None if role == "recipient" else a["r_note"]),
+        r_id=(None if role == "recipient" else a["r_id"]),
         rng=rng, **_party_kw(alice, bob), **_txn_kw("a2"))
 
 
@@ -277,14 +302,22 @@ def test_bit_identical_rebuild(vectors, parties):
 
 @pytest.mark.parametrize("flavor", ["note_b1", "note_a1", "note_a2"])
 def test_both_parties_share_note_payload(vectors, parties, flavor):
-    """The Identity-M note payload and anchor are IDENTICAL from either side —
-    only the generator's self-naming proof (and role tag) differ."""
+    """The note's own material is IDENTICAL from either side.
+
+    The EVIDENCE about it is not, and for the addressed flavours it must not
+    be: the recipient proves by verifiable decryption under its mailbox key,
+    the issuer by disclosing the randomness it encrypted with, and neither can
+    produce the other's.  A leg both sides could produce is a leg any reader
+    could reproduce, which is what naming by a derivable identity scalar was.
+    """
     import json
     alice, bob = parties
     rec = _make(f"{flavor}:recipient", vectors, alice, bob)
     iss = _make(f"{flavor}:issuer",    vectors, alice, bob)
-    # The deterministic legs agree byte-for-byte...
-    assert rec.note is not None and rec.note == iss.note
+    evidence = {"vdNote", "vdRec", "vdIss", "rNote", "rId"}
+    shared = lambda d: {k: v for k, v in d.items() if k not in evidence}
+    assert rec.note is not None and shared(rec.note) == shared(iss.note)
+    assert not (set(rec.note) & set(iss.note) & evidence)
     assert rec.proof == iss.proof
     assert json.dumps(rec.txn.__dict__, sort_keys=True) == \
            json.dumps(iss.txn.__dict__, sort_keys=True)
@@ -303,7 +336,7 @@ def test_envelope_roundtrip(vectors, parties, kind):
     b = serialize_core(core)
 
     env = envelope_text(b)
-    assert env.startswith("AB-RCPT/1.")
+    assert env.startswith("AB-RCPT/2.")
     assert env.strip().endswith(".END")
     assert parse_envelope(env) == b
 
@@ -317,7 +350,7 @@ def test_parse_envelope_rejects_missing_header():
 
 def test_parse_envelope_rejects_missing_footer():
     with pytest.raises(ValueError, match="footer"):
-        parse_envelope("AB-RCPT/1.\nZm9v\n")
+        parse_envelope("AB-RCPT/2.\nZm9v\n")
 
 
 # ---- verify the vector-emitted envelopes parse and verify -------------------
@@ -378,11 +411,17 @@ def test_unicode_receipt_pins_the_canonical_dialect(vectors):
 # ---- Identity-M binding negatives -------------------------------------------
 
 def test_unaddressed_identity_cannot_claim_a2(vectors, parties):
-    """A note addressed to Alice cannot be claimed by Bob's identity: the
-    eNote/eIss legs decrypt under m_rec ONLY for the addressed identity."""
+    """A note addressed to Alice's mailbox cannot be claimed by Bob.
+
+    Bob holds his own key, not Alice's, so his verifiable decryption of the
+    note's ciphertexts does not verify under the pkRecv the note states.  The
+    check no longer rests on a derivable scalar, and it is stronger for it: an
+    identity scalar is disclosed to every counterparty, a mailbox key to none.
+    """
     alice, bob = parties
     rng = _rng(0x5eed)
     a = _mint_a2(alice, bob, rng)                  # addressed to Alice
+    bob_k, bob_pk = receiving_key(0xB0B_5EED)
     core = build_note_a2(                          # ...claimed by Bob
         chainid=CHAINID, contracts=CONTRACTS,
         issuer_addr=bob["addr"], issuer_identity=bob["identity"],
@@ -390,12 +429,13 @@ def test_unaddressed_identity_cannot_claim_a2(vectors, parties):
         payee_addr=bob["addr"], payee_identity=bob["identity"],
         payee_M=bob["M"], payee_pk=bob["pk"], payee_E_addr=bob["E"],
         opening=a["opening"], cms=a["cms"],
-        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"],
+        eNote=a["eNote"], eIss=a["eIss"], binding=a["binding"], T=a["T"], gamma=a["gamma"],
         nullifier=a["nullifier"], face=FACE,
         role="recipient", payee_sk=bob["sk"],
+        pk_recv=alice["pk_recv"], k_recv=bob_k,
         rng=rng, **_txn_kw("a2"))
     res = verify_receipt(core)
-    assert not res.ok and "eNote" in res.reason
+    assert not res.ok and "vdNote" in res.reason
 
 
 def test_tampered_idhash_preimage_rejected(vectors, parties):
@@ -410,16 +450,18 @@ def test_tampered_idhash_preimage_rejected(vectors, parties):
 
 
 def test_a1_substituted_eRec_rejected(vectors, parties):
-    """A1: substituting another identity's eRec fails the decryption leg."""
+    """A1: substituting another identity's eRec breaks the leg that names the
+    recipient -- the verifiable decryption is about a specific ciphertext, and
+    a substituted one is not the one it is about."""
     alice, bob = parties
     core = _make("note_a1:recipient", vectors, alice, bob)
     rng = _rng(0xbad)
-    bad_eRec = elgamal_encrypt(bob["M"], bob["M"], rand_scalar(rng))
+    bad_eRec = elgamal_encrypt(bob["M"], alice["pk_recv"], rand_scalar(rng))
     from alberta_buck.wallet.envelope import _ct_hex
     bad_note = dict(core.note)
     bad_note["eRec"] = _ct_hex(bad_eRec)
     res = verify_receipt(replace(core, note=bad_note))
-    assert not res.ok and "eRec" in res.reason
+    assert not res.ok and "vdRec" in res.reason
 
 
 def test_a2_unbound_receipt_is_unverified(vectors, parties):

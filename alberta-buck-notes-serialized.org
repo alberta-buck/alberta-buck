@@ -697,10 +697,9 @@ and family membership, neither of which is a secret in a bearer model.
 
 1. Mint path: add "serialize with N" option that builds =K_fam=,
    =subRoot=, =predicate_fam=.
-2. Payload schema v2: extend the bearer-note blob format to include =(i,
-   s_i, path_i_in_subRoot, subRoot)= when the note is serialized.
-3. Spend path: detect payload variant from schema version, route to the
-   appropriate verifier.
+2. Serialized payload variant: extend the bearer-note blob format to include
+   =(i, s_i, path_i_in_subRoot, subRoot)= when the note is serialized.
+3. Spend path: detect the payload variant, route to the appropriate verifier.
 
 ** Phase D: measure + promote
 

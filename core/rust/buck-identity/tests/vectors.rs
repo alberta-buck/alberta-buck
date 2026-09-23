@@ -105,15 +105,15 @@ fn sanity_curve_and_hashes() {
         hex_w("0x090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b")
     );
 
-    // H = keccak("AlbertaBuck:IssuerReenc:H") % ORDER * G1
-    let h = issuer_reenc::h_point();
+    // H_PEDERSEN = hash_to_curve("AlbertaBuck/Pedersen/H/v2"), the Python reference's point
+    let h = nums::h_pedersen();
     assert_eq!(
         h.0,
-        hex_w("0x0f03161ff2a1eed34df6d415ebfa0953650cf9dcf990a3de0d3d0391cdb49a72")
+        hex_w("0x0a348afa1b7f9d733f1859da101a77b2eb9b8cb66c00f5ffc3f8cd384de9f862")
     );
     assert_eq!(
         h.1,
-        hex_w("0x077495eb98a6c0255d2ac55185d2865871aec4ad871e1bdaf831ae58a8bb44f4")
+        hex_w("0x1e8103c6fd7743dde39c36379e3a19b80e6bc98a989c6df8786da5c9bedecd42")
     );
 
     // e(G1, G2) * e(-G1, G2) == 1
@@ -701,6 +701,37 @@ fn kernel_vectors_replay() {
     assert_eq!(vdp.t1, jg1(&vd["proof"]["T1"]));
     assert_eq!(vdp.t2, jg1(&vd["proof"]["T2"]));
 
+    // ---- the identity opening: the same relation, bound to the registry -------------
+    let io = &v["identity_opening"];
+    let op = verifiable_decrypt::identity_opening_prove(
+        &jct(&io["E"]),
+        &jw(&io["sk"]),
+        &jg1(&io["M"]),
+        &jw(&io["account"]),
+        &jw(&io["chainid"]),
+        &jw(&io["registry"]),
+        &jw(&io["t"]),
+    )
+    .unwrap();
+    assert_eq!(op.e, jw(&io["proof"]["e"]));
+    assert_eq!(op.s, jw(&io["proof"]["s"]));
+    assert_eq!(op.t1, jg1(&io["proof"]["T1"]));
+    assert_eq!(op.t2, jg1(&io["proof"]["T2"]));
+    let opens = |p: &verifiable_decrypt::VdProof| {
+        verifiable_decrypt::identity_opening_verify(
+            &jct(&io["E"]),
+            &jg1(&io["pk"]),
+            &jg1(&io["M"]),
+            p,
+            &jw(&io["account"]),
+            &jw(&io["chainid"]),
+            &jw(&io["registry"]),
+        )
+        .unwrap()
+    };
+    assert_eq!(opens(&op), io["verify"].as_bool().unwrap());
+    assert_eq!(!opens(&vdp), io["not_a_receipt_proof"].as_bool().unwrap());
+
     // ---- issuer re-encryption binding ---------------------------------------------
     let ir = &v["issuer_reenc"];
     let irp = issuer_reenc::issuer_reenc_prove(
@@ -740,40 +771,6 @@ fn kernel_vectors_replay() {
         &irp,
         &jw(&ir["issuer"]),
         &jw(&ir["chainid"]),
-    )
-    .unwrap());
-
-    // ---- deposit coupling ----------------------------------------------------------
-    let dc = &v["deposit_couple"];
-    let dcp = unilateral_a2::deposit_couple_prove(
-        &jw(&dc["m_rec"]),
-        &jw(&dc["sk_dep"]),
-        &jct(&dc["E_dep"]),
-        &jct(&dc["eIss"]),
-        &jw(&dc["account"]),
-        &jw(&dc["chainid"]),
-        &jw(&dc["b"]),
-        &jw(&dc["k_m"]),
-        &jw(&dc["k_s"]),
-        &jw(&dc["k_b"]),
-    )
-    .unwrap();
-    let pf = &dc["proof"];
-    assert_eq!(dcp.e, jw(&pf["e"]));
-    assert_eq!(dcp.s_m, jw(&pf["s_m"]));
-    assert_eq!(dcp.s_s, jw(&pf["s_s"]));
-    assert_eq!(dcp.s_b, jw(&pf["s_b"]));
-    assert_eq!(dcp.a2, jg1(&pf["A2"]));
-    assert_eq!(dcp.a3, jg1(&pf["A3"]));
-    assert_eq!(dcp.a4, jg1(&pf["A4"]));
-    assert_eq!(dcp.p_i, jg1(&pf["P_I"]));
-    assert!(unilateral_a2::deposit_couple_verify(
-        &jg1(&dc["pk_dep"]),
-        &jct(&dc["E_dep"]),
-        &jct(&dc["eIss"]),
-        &dcp,
-        &jw(&dc["account"]),
-        &jw(&dc["chainid"]),
     )
     .unwrap());
 
@@ -835,7 +832,7 @@ fn kernel_vectors_replay() {
         jw(&nt["id_hash_a1"])
     );
     assert_eq!(
-        notes::id_hash_a2(&jct(&nt["eNote"]), &jct(&nt["eIss"])).unwrap(),
+        notes::id_hash_a2(&jct(&nt["eNote"]), &jct(&nt["eIss"]), &jg1(&nt["T"])).unwrap(),
         jw(&nt["id_hash_a2"])
     );
     let op = &nt["opening"];

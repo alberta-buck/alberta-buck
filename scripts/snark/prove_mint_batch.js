@@ -50,9 +50,9 @@ const ROOT  = path.resolve(__dirname, "..", "..");
 const DEPTH = 20;
 const FIELD_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-// Mirror Notes.sol's keccak("AlbertaBuck:Notes:zero") % FIELD_R.
+// Mirror Notes.sol's keccak("AlbertaBuck/Notes/Zero/v2") % FIELD_R.
 const ZERO_VALUE = (() => {
-    const k = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck:Notes:zero"));
+    const k = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"));
     return BigInt(k) % FIELD_R;
 })();
 

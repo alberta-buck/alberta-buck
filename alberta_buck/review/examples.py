@@ -15,7 +15,7 @@ from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present, PSSignature
 from alberta_buck.wallet.elgamal import elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
-from alberta_buck.wallet.issuer_reenc import H_POINT, H_SCALAR
+from alberta_buck.review.known_log import H_KNOWN, H_KNOWN_SCALAR, untagged_identity_leaf
 from alberta_buck.registry.tree import IdentityMerkleTree
 
 
@@ -81,8 +81,8 @@ def false_identity_approval(sender=0xA, spender=0xB, chainid=1, registry=0):
 def double_opening():
     """§5b: two scalar openings of the implementation's same public commitment."""
     m1, m2, b1 = 12345, 54321, 44444
-    b2 = (b1 + (m1 - m2) * pow(H_SCALAR, -1, ORDER)) % ORDER
-    P = add(mul(G1, m1), mul(H_POINT, b1))
+    b2 = (b1 + (m1 - m2) * pow(H_KNOWN_SCALAR, -1, ORDER)) % ORDER
+    P = add(mul(G1, m1), mul(H_KNOWN, b1))
     return m1, b1, m2, b2, P
 
 
@@ -107,9 +107,9 @@ def membership_input(tree, index, M, P):
 def mismatched_membership():
     member = mul(G1, 12345)
     outsider = mul(G1, 54321)
-    P = add(outsider, mul(H_POINT, 22222))
+    P = add(outsider, mul(H_KNOWN, 22222))
     tree = IdentityMerkleTree(depth=10)
-    tree.insert_identity(member)
+    tree.insert_leaf(untagged_identity_leaf(member))
     return member, outsider, P, tree, membership_input(tree, 0, member, P)
 
 

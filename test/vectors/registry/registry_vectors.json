@@ -1,7 +1,7 @@
 {
   "seed": 41404,
   "chainid": "0x0000000000000000000000000000000000000000000000000000000000000001",
-  "aggregator_root": "0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3",
+  "aggregator_root": "0x2699f655e02eccdfba168840580854a9706a928198e73fba0ff63154e7c3f307",
   "registry": {
     "id": "test-registry",
     "address": "0x0000000000000000000000001d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d",
@@ -9,7 +9,7 @@
       "x": "0x19852d5205e523cdfd3c0899d1e5d5b8a2af51a46c23e5c84abe897d662fb724",
       "y": "0x13d6fa53646b9d2d591e018fcd328091cfa3e7f476cd124622972c9affdb296e"
     },
-    "sub_root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+    "sub_root": "0x1ee8d38d862315a0d4acbced0c9cf1fff6143bbef5e9b026fab96b3624277679",
     "identity_count": 2
   },
   "ps_issuer": {
@@ -43,7 +43,7 @@
   "sub_trees": {
     "test-registry": {
       "kind": "kyc",
-      "sub_root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+      "sub_root": "0x1ee8d38d862315a0d4acbced0c9cf1fff6143bbef5e9b026fab96b3624277679",
       "aggregator_leaf_index": 0
     }
   },
@@ -52,12 +52,12 @@
       "registry_id": "test-registry",
       "serial": 1,
       "canonical_identity_data": "{\"date_of_birth\":\"1990-01-01\",\"epoch\":42,\"family_name\":\"Test-alice\",\"given_name\":\"Alice\",\"id_number\":\"TEST-0000a1bc-0000\",\"id_type\":\"Test Identity\",\"issued_at\":\"2026-06-01T00:00:00Z\",\"issuer_id\":\"test-registry\",\"jurisdiction\":\"Alberta, Canada\"}",
-      "m": "0x17ff1ea22c0bc96fb98525b6677a9f465a0203ea9ff7b16685e6618b3c92189d",
+      "m": "0x25483a8665df7ac0d940810e84aa564fca08e04cf3816d415f0bbef1591f0d36",
       "M": {
-        "x": "0x2db89f4fd872b187a928a716b888d767a20b7daaf2dd93d04c0fc034c42d83be",
-        "y": "0x0c6ed259e17aee441e7260904f0161870fe80fc357c83d88db99a6c4e936b46f"
+        "x": "0x130c77b17ab258776c5f085dbd00436bcf2180d0fca3743df16324350cfc5dce",
+        "y": "0x0a5649ab3aa59d75bb1317bbb1529b81457054e5aa7698f0a33e594804da9702"
       },
-      "leaf": "0x1e85bbec9de395ef772e62420d3f08c88c52d11955450a54500844b230faff5e",
+      "leaf": "0x2423fc55609a237a81ed024755146f3915ced1f4e2cec81d0c19c4c7b653c725",
       "leaf_index": 0,
       "elgamal_kp": {
         "sk": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -72,8 +72,8 @@
           "y": "0x07bf5912f942880294763a14236a75d294eddc715e41cd75f639c2f23fbb7f67"
         },
         "C": {
-          "x": "0x04776dbd71bfabf522f5841470ba352b358ed49136dd4ece5c996239b5635ef9",
-          "y": "0x17a2ab8f48758179a9529511451a2e57a9f1a10115583da0b43fc58e1dc29e8b"
+          "x": "0x2ce793d655ea470f6102c1b9da6a1b24e9bb50afba29f2cc74bff68ca4f3600f",
+          "y": "0x26823c7afc66841bd9da8c25d3c7e85104af3d47290b47f8d892dc629ecb79ba"
         }
       },
       "registrant": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -84,17 +84,17 @@
           "y": "0x1da930bcccef8ad291a230b05b80b844d04fdcee319ab2da34decb05ff26b411"
         },
         "B": {
-          "x": "0x16e840b79126181da5bf5338f03803085b5d5b7e42f3d79a3eb5e30cf8f8462d",
-          "y": "0x1a0172f732cf727095589dc1a7c20b818e61fe2b285a309fcd8bb38563bb7efe"
+          "x": "0x160d6c4b0675ef53a9c7448bf23e9260d0c693a982f200fce5bb597412f62afd",
+          "y": "0x15ad6dc79a3b639b46c41b5d058ebe67fe04f34d6ceb77cec89c86b453292797"
         }
       },
       "b": "0x0708e6e77391539dace4b30e0ab7607a4cc0b4cb5758177b66192d4e68ac7ebb",
       "registration_proof": {
-        "e": "0x19b27e5d8de5b02871fa678f069a52652bea91057a580778694be9aed380a59f",
-        "s_m": "0x046fc0847345e27503974d8f0ff25bdb6c6635d14b9dfb2f59366a3a815ba00e",
-        "s_b": "0x16e62f3395222455c6c40d181ce594c07e87ce752d727a6ac388af844823ca7a",
-        "s_r": "0x28fc9857f3d2171943a067792cafa20fdb19098f0d61ceea0de2d4ec0bd01ca4",
-        "s_sk": "0x000dccee70699845c85c26501f0a7db6d843457a9bfb5628103509823a3d1e48",
+        "e": "0x0e7da9d6974993d34c80699168d8286fac2036715ff6c530a62e10eb9c4045dd",
+        "s_m": "0x23d8cbee6bdd7b5a7c5749a2fb8b82a3c92c3143486e6cc1680c511bda71269e",
+        "s_b": "0x09824cc8ff7cb5a6c18072f362e2676c6e9e31b1782dcbc73d77ec735a9c473b",
+        "s_r": "0x02673de5e8c26b8b481091d7f23965a67b54d454defb709318c5b7f32510f16b",
+        "s_sk": "0x0464b2bbb391b1d40f742cef95d508fc098f9209af044745fbecedda2de4d33e",
         "C1": {
           "x": "0x0f1afa12fee56e9d8120d03c70562024e5f4ee37becbec2d75fbdba43be42740",
           "y": "0x2ba6d90bdd8bf523468daae550042e81d4b6f25db8714b4d2b97b3e70b6e5db9"
@@ -113,12 +113,12 @@
         }
       },
       "kyc_membership": {
-        "leaf": "0x1e85bbec9de395ef772e62420d3f08c88c52d11955450a54500844b230faff5e",
-        "root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+        "leaf": "0x2423fc55609a237a81ed024755146f3915ced1f4e2cec81d0c19c4c7b653c725",
+        "root": "0x1ee8d38d862315a0d4acbced0c9cf1fff6143bbef5e9b026fab96b3624277679",
         "leaf_index": 0,
         "depth": 12,
         "siblings": [
-          "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
+          "0x219831a78226676ba8dedd67a15ed46e3af10ede563793bcda4de319fa48a80e",
           "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864",
           "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
           "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
@@ -145,20 +145,20 @@
           0,
           0
         ],
-        "M_x": "0x2db89f4fd872b187a928a716b888d767a20b7daaf2dd93d04c0fc034c42d83be",
-        "M_y": "0x0c6ed259e17aee441e7260904f0161870fe80fc357c83d88db99a6c4e936b46f"
+        "M_x": "0x130c77b17ab258776c5f085dbd00436bcf2180d0fca3743df16324350cfc5dce",
+        "M_y": "0x0a5649ab3aa59d75bb1317bbb1529b81457054e5aa7698f0a33e594804da9702"
       }
     },
     "bob": {
       "registry_id": "test-registry",
       "serial": 2,
       "canonical_identity_data": "{\"date_of_birth\":\"1990-01-01\",\"epoch\":42,\"family_name\":\"Test-bob\",\"given_name\":\"Bob\",\"id_number\":\"TEST-0000a1bc-0001\",\"id_type\":\"Test Identity\",\"issued_at\":\"2026-06-01T00:00:00Z\",\"issuer_id\":\"test-registry\",\"jurisdiction\":\"Alberta, Canada\"}",
-      "m": "0x118f7e00d6a52c580e45c0fd03c07fdd9625f97178853299b57f513e31953983",
+      "m": "0x2f5c2c1a4666f080343744deec98133391ef76d9d9671ddabbe999b88974ac14",
       "M": {
-        "x": "0x0b2169f23ca6220bb7501dd5223b2f46baa40ace00f5e697c6f8161345dee3d6",
-        "y": "0x2886c961dbf1fb7f5f252d284e8370d7de6c73a45e7c386aae6aa73fb34502b0"
+        "x": "0x13f243a5f25c89eb21cc90da43a96ec18826a8a5075d13dcaae1c3fec0fd0acf",
+        "y": "0x0f37470bb9196e477638c4abd8561dd6e0b479adcf6c2b1693a223e747ebf76f"
       },
-      "leaf": "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
+      "leaf": "0x219831a78226676ba8dedd67a15ed46e3af10ede563793bcda4de319fa48a80e",
       "leaf_index": 1,
       "elgamal_kp": {
         "sk": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -173,8 +173,8 @@
           "y": "0x15598985df1599ee7294a9763ecb0b4b48bf925f99366417166ac26a40d0ee4e"
         },
         "C": {
-          "x": "0x1461a3dd8cf24cd0af4b538cd2826f03576a34a7160cb1881552d64ef3e70bdd",
-          "y": "0x27eb749fd09faf33e437523663bdbddc0a577f73c4010eb029b3489d8f687124"
+          "x": "0x186b36969bce03e5ccbb7d272bf3e4840cbd23a4f0eb4609aa25dd3860e50235",
+          "y": "0x0583bc8537f814615dbec83f5d7fed05c74d7120eaaeb564c34d6b63dd5f6bb9"
         }
       },
       "registrant": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -185,17 +185,17 @@
           "y": "0x22b89053c97acc28e05899257064c92e8d38ef6351559c30d71a9d993137a2ec"
         },
         "B": {
-          "x": "0x0c47b4d00afedf7b97e6d2d7c0556bbf6355c76da905819a41b49598b0f28fc3",
-          "y": "0x05b0c1ed3b40a8cdb936a9bfdbb14f645ca0d2f0002d25af34a3a06a6d70435d"
+          "x": "0x1ac0bb9c570853f2b7cdcd4e0c229f98f98526e86b4d7e5c4b6b8ecdeaab822f",
+          "y": "0x05fb1d0c8c65b874958baeb276b6d7b5d7609ab904ad4a2045cca772b8f75531"
         }
       },
       "b": "0x1e9e034b1a803306711372fec43900c57b4a9828468c26774c716d992b3f2a88",
       "registration_proof": {
-        "e": "0x08ab9d7ea2eb600111eb4f14c28c0e88168915f1dc20037067540765fc3ce6ce",
-        "s_m": "0x189f5c64d9322ee14f3872d46b0d45484524a92d560c58408cbc294747d3c800",
-        "s_b": "0x04186081e84de1c9ceaafd77f2d725edfb6030396f4f8c4a794dacff0c68da86",
-        "s_r": "0x2bf082abfaf52a269758f6839fe3f8543bed068f2bb31428eb1911abea0f63cd",
-        "s_sk": "0x17a5497373f952a80feb097e9c09b19dd2077649146fc001345d7fb173856931",
+        "e": "0x0e9bb88f14b4586de7d85479e2411822b5be17e8f4ba10948a30e21ddca51da0",
+        "s_m": "0x1066ce10e60835c57f876fc7a6dd03fe28027fb153af104ffc984cd28a89a335",
+        "s_b": "0x1598f96e62baeafb36721f106fabf8910a1ed1f3b19f88eaef7ec9c772790d83",
+        "s_r": "0x26196b0d1adf94c6bfa1eda3f28a07665f508addb57d41cb5d34f235d081f6f9",
+        "s_sk": "0x21c6e87db1e6c6ddc46e1aba079f52f36bf8956efe8df059ad166dacd39a666b",
         "C1": {
           "x": "0x22e9a7ab60d640f44afb043c546799e774c69fa284e282c1ddc710803d846ae3",
           "y": "0x16e230f783d7025ee531ae05e8770bbc0af81854f60f94409882099d88f504f8"
@@ -214,12 +214,12 @@
         }
       },
       "kyc_membership": {
-        "leaf": "0x2e8c2561fdf643d0385999e4f68354f51b647cb4f5dc314428fe23cb58ec7c8a",
-        "root": "0x19d3bf95beae6b4480ed4cb34dd6346e803dbf5c7f9b280129cc0337c78696eb",
+        "leaf": "0x219831a78226676ba8dedd67a15ed46e3af10ede563793bcda4de319fa48a80e",
+        "root": "0x1ee8d38d862315a0d4acbced0c9cf1fff6143bbef5e9b026fab96b3624277679",
         "leaf_index": 1,
         "depth": 12,
         "siblings": [
-          "0x1e85bbec9de395ef772e62420d3f08c88c52d11955450a54500844b230faff5e",
+          "0x2423fc55609a237a81ed024755146f3915ced1f4e2cec81d0c19c4c7b653c725",
           "0x2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864",
           "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
           "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
@@ -246,8 +246,8 @@
           0,
           0
         ],
-        "M_x": "0x0b2169f23ca6220bb7501dd5223b2f46baa40ace00f5e697c6f8161345dee3d6",
-        "M_y": "0x2886c961dbf1fb7f5f252d284e8370d7de6c73a45e7c386aae6aa73fb34502b0"
+        "M_x": "0x13f243a5f25c89eb21cc90da43a96ec18826a8a5075d13dcaae1c3fec0fd0acf",
+        "M_y": "0x0f37470bb9196e477638c4abd8561dd6e0b479adcf6c2b1693a223e747ebf76f"
       }
     }
   }

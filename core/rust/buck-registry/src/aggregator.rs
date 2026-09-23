@@ -10,8 +10,24 @@
 //! Timestamps are explicit `f64` arguments (the Python shim passes
 //! `time.time()`); the kernel holds no clock.
 
+use std::collections::{HashMap, VecDeque};
+
 use crate::tree::{fold_path, IdentityMerkleTree, MembershipProof};
-use buck_identity::{IdError, Result, W256};
+use buck_identity::{IdError, Result, W256, ZERO_W};
+
+/// Root records the ring retains: ten days at an hourly posting, which covers
+/// the longest maximum age a consumer declares (accumulator specification,
+/// section 5).
+pub const ROOT_RING_SIZE: usize = 256;
+
+/// A posted aggregator root, with the time it was posted.  A count of
+/// postings is not a bound in time, so each consumer bounds the age instead.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RootRecord {
+    pub root: W256,
+    pub sequence: u64,
+    pub posted_at: f64,
+}
 
 /// Sub-tree kind labels (`SubTreeKind` in the Python reference).
 pub const KIND_KYC: &str = "kyc";
@@ -56,6 +72,23 @@ pub struct FullMembershipProof {
 impl FullMembershipProof {
     pub fn identity_root(&self) -> W256 {
         self.aggregator_proof.aggregator_root
+    }
+
+    /// The one path a circuit folds: the subtree path, then the aggregator's.
+    /// The leaf index is the leaf's position in that combined tree.
+    pub fn composed(&self) -> MembershipProof {
+        let (sub, agg) = (&self.sub_tree_proof, &self.aggregator_proof);
+        let mut siblings = sub.siblings.clone();
+        siblings.extend_from_slice(&agg.siblings);
+        let mut index_bits = sub.index_bits.clone();
+        index_bits.extend_from_slice(&agg.index_bits);
+        MembershipProof {
+            leaf: sub.leaf,
+            siblings,
+            index_bits,
+            root: agg.aggregator_root,
+            leaf_index: (agg.aggregator_leaf_index << sub.siblings.len()) | sub.leaf_index,
+        }
     }
 
     /// Both paths valid and consistent (sub root == aggregator leaf).
@@ -103,6 +136,9 @@ impl ComposedMembershipProof {
 pub struct CentralMerkleService {
     tree: IdentityMerkleTree,
     subs: Vec<SubTreeRecord>,
+    ring: VecDeque<RootRecord>,
+    index: HashMap<W256, RootRecord>,
+    sequence: u64,
 }
 
 impl CentralMerkleService {
@@ -111,7 +147,47 @@ impl CentralMerkleService {
         Ok(CentralMerkleService {
             tree: IdentityMerkleTree::new(depth)?,
             subs: Vec::new(),
+            ring: VecDeque::new(),
+            index: HashMap::new(),
+            sequence: 0,
         })
+    }
+
+    /// Post the current aggregator root at `timestamp`.  The posting is what a
+    /// membership proof is checked against, and its age is what a consumer
+    /// bounds.
+    pub fn post(&mut self, timestamp: f64) -> Result<RootRecord> {
+        let rec = RootRecord { root: self.identity_root()?, sequence: self.sequence, posted_at: timestamp };
+        self.sequence += 1;
+        self.ring.push_back(rec);
+        if self.ring.len() > ROOT_RING_SIZE {
+            let evicted = self.ring.pop_front().unwrap();
+            if self.index.get(&evicted.root).map(|r| r.sequence) == Some(evicted.sequence) {
+                self.index.remove(&evicted.root);
+            }
+        }
+        self.index.insert(rec.root, rec);
+        Ok(rec)
+    }
+
+    /// The record of a retained root, or `None` if never posted or evicted.
+    pub fn root_record(&self, root: &W256) -> Option<&RootRecord> {
+        self.index.get(root)
+    }
+
+    /// Whether a consumer with this maximum age accepts a proof against
+    /// `root` at `now`: a nonzero root the ring retains, no older than that.
+    pub fn accepts(&self, root: &W256, max_age: f64, now: f64) -> bool {
+        if *root == ZERO_W {
+            return false;
+        }
+        self.index.get(root).is_some_and(|r| now - r.posted_at <= max_age)
+    }
+
+    /// Age of the oldest retained record: the longest maximum age the ring
+    /// honours at the current posting rate.
+    pub fn max_retained_age(&self, now: f64) -> f64 {
+        self.ring.front().map_or(0.0, |r| now - r.posted_at)
     }
 
     /// The current aggregator root (= on-chain identityRoot).

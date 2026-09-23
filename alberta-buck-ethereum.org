@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.94)
+#+title: The Alberta Buck - Ethereum Implementation (DRAFT v2)
 #+author: Perry Kundert
 #+date: 2026-05-24 12:00:00
 #+category: Alberta Buck
@@ -148,8 +148,8 @@ The flow is:
 1. A *client* names an insurer it will accept credits from (=setCreditIssuer=), and that
    *insurer* mints a =BUCK_CREDIT= NFT for the client's asset, setting face value, depreciation
    schedule, and =premiumRate= (annual basis points of activated coverage).  A credit only lands
-   where its recipient asked for it -- see [[#unvetted-insurers][Unvetted Insurers]] for what that
-   does and, more importantly, does not protect against.
+   where its recipient asked for it, and only from an insurer whose regulator has attested it --
+   see [[#unvetted-insurers][The Insurer Gate]].
 2. There is no separate activation step, and no public =BuckCredit.activate=.  Coverage is
    activated only inside =Buck.mint=, atomically with the insurance principal that funds it --
    see [[#activation][Activation = Mint, Deactivation = Burn]].  While coverage is live the credit
@@ -167,8 +167,10 @@ The flow is:
    sender's identity under the spender's public key.  =transfer= / =transferFrom= then bilateral-
    identity-check both sides and emit =BuckTransferReceipt= carrying only ciphertext hashes.
 6. To denominate as private notes, the client calls =Notes.mint= with a Groth16 proof binding the
-   deposited =totalFace= to a batch of Poseidon commitments.  Holders later call =Notes.spend= or
-   =Notes.spendACP= with a fresh nullifier and a SNARK proving inclusion under a recent root.
+   deposited =totalFace= to a batch of Poseidon commitments.  Holders later call
+   =Notes.spendCoupledA1= / =A2= / =B1= with a fresh nullifier, a SNARK proving inclusion under a
+   recent root, and a deposit gate proving the depositor is the identity the note names, against a
+   posted identity root.
 7. =BuckBasket= is the *direct-mint orchestrator* and the value anchor.  Anyone holding a basket
    constituent (PAXG, cbBTC, XAUT, WBTC, etc., as wired by governance via =addBasketToken=) can
    call =BuckBasket.depositToken= to LP it into the corresponding TOKEN/BUCK Uniswap-V3 pool; the
@@ -218,9 +220,10 @@ allocations.  All monetary fields are in 6-decimal BUCK-equivalent units (USDC-c
 Fields group by mutability:
 
 Issuance is opt-in per (client, insurer) pair: =createCredit= reverts unless the client has
-called =setCreditIssuer(insurer, true)=.  Anyone may still /be/ an insurer -- that is the open
-question in [[#unvetted-insurers][Unvetted Insurers]] -- but nobody can put a credit in your hands
-uninvited.
+called =setCreditIssuer(insurer, true)=, and -- where the gate is configured -- unless the
+insurer's regulator has attested an envelope covering the credit ([[#unvetted-insurers][The
+Insurer Gate]]).  Nobody can put a credit in your hands uninvited, or write one beyond their
+licence.
 
 - *Immutable at mint*: =insurer= (the address allowed to update this token), =assetClass=,
   =createdAt=.
@@ -399,16 +402,25 @@ Four on-chain verifications, all reducible to BN254 precompile calls:
 2. *Schnorr-family NIZK* binding the presentation to the ElGamal ciphertext and the account
    key.  Four response scalars over one credential commitment ~C1 = m~ * A + b~ * G~ (so no
    field exposes ~m * A~ alone), Fiat-Shamir bound to the action/version domain
-   (=AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=),
+   (=AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2=),
    =((A, B), E_new, pk_new, registrant_address)=, chain ID, and registry deployment.
    Total registration 443,892 gas measured (472,630 before the presentation), paid once per
    address; =trustIssuer= additionally checks ~e(Y1, g_2) = e(G, Y)~ once per issuer.
 3. *Chaum-Pedersen NIZK at =approve=*: proves the recipient's identity ciphertext re-encrypts the
    same M registered in =E_alice= and that the sender holds the registered account key.
-   Fiat-Shamir binds the registry deployment, =msg.sender=, =spender=, and =chainid=.
-   ~29K gas per counterparty pair.
-4. *Chaum-Pedersen DLEQ at A-flavor spend* (=verifySpendCP=): proves the spender holds a single
-   =sk_dep= that opens both the note's =E_n= and the registered =E_reg=.  ~36K gas via EIP-196.
+   Fiat-Shamir binds the registry deployment, =msg.sender=, =spender=, =chainid= and the
+   =.../Approve/v2= domain word.  ~29K gas per counterparty pair.
+4. *The Notes bindings*, each a sigma over EIP-196 with its own v2 domain word: the public
+   issuer's batch Schnorr (=verifyIssuerSchnorr=), the private issuer's recipient-blinded
+   re-encryption (=verifyIssuerReenc=), and the bearer depositor's binding
+   (=verifyDepositorBinding=).  The addressed deposit gate is a folded Groth16 proof, not a sigma
+   ([[#notes][Notes]]).
+5. *Public membership* (=verifyPublicMembership=): a Poseidon path through a public subtree and
+   the aggregator, checked on chain for the [[#unvetted-insurers][insurer gate]].
+
+Every hash the protocol relies on carries a domain tag of the form =AlbertaBuck/<Area>/<Name>/v2=:
+the Fiat-Shamir transcripts end in one, the identity scalar hashes one ahead of the certified
+record, and each accumulator leaf leads with one as a field element.
 
 ** Solidity Surface
 
@@ -424,8 +436,8 @@ struct PSPubKey  { G2Point X; G2Point Y; G1Point Y1; }   // Y1 = y*G, checked at
 
 struct RegistrationProof { uint256 e, s_m, s_b, s_r, s_sk; G1Point C1, T_C, T_R, T_key; }
 struct CPProof           { uint256 e, s1, s2;   G1Point T1, T2, T3;     }
-struct SpendCPProof      { uint256 e, s;        G1Point T1, T2;         }
 struct ContractBindingProof { uint256 e, s;     G1Point T;              }
+struct SchnorrProof, IssuerReencProof, DepositorBindingProof;   // the Notes bindings
 
 function register(address issuer, G1Point pk, ElGamalCT E,
                   PSPresentation pres, RegistrationProof proof);
@@ -443,8 +455,20 @@ function setBindingAdapter(address adapter, bool approved);        // governance
 function trustIssuer(address issuer, PSPubKey ipk);                 // governance
 function verifyApprove(address sender, address spender,
                        ElGamalCT E_bob, CPProof pi) view returns (bool);
-function verifySpendCP(address spender, address recipient,
-                       ElGamalCT E_n, SpendCPProof cpProof) view returns (bool);
+function verifyIssuerSchnorr(...) / verifyIssuerReenc(...) / verifyDepositorBinding(...);
+
+// The identity accumulator (see The Identity Accumulator)
+function setRootAuthority(address next);                             // governance
+function enrollSubtree(bytes32 id, uint32 slot, uint8 depth, bool isPublic,
+                       address poster, string publication);          // root authority
+function evictSubtree(bytes32 id);                                   // root authority
+function setAggregator(address next);                                // root authority
+function postIdentityRoot(uint256 root, bytes32 leafListHash);       // aggregator
+function setMaxRootAge(bytes32 consumer, uint32 maxAge);             // governance
+function acceptsRoot(uint256 root, bytes32 consumer) view returns (bool);
+function verifyPublicMembership(bytes32 id, uint256 leaf, uint256[] subSiblings,
+                                uint256 subIndex, uint256[] aggSiblings, uint256 root)
+                                view returns (bool);
 function markApproved(address spender);                              // Buck-only
 function setBuck(address buck);                                      // governance, one-shot
 #+END_SRC
@@ -491,8 +515,30 @@ supported by the surface but not yet used in production.
 =trustedIssuers= is the only governance-controlled trust anchor.  Adding an issuer admits a new
 origin of registrable identities; removing one stops new registrations under that issuer.  Existing
 registrations are unaffected -- they were verified at registration and never re-verified.
-Epoch-based credential renewal, key revocation, and issuer rotation are described in
-[[https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal][Identity: Epoch-Based Credential Renewal]].
+Whether a registered identity is in good standing is a separate, revocable fact: membership in its
+registry's subtree of the identity accumulator, which every consumer that needs liveness proves
+against a posted root of bounded age -- see
+[[https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal][Identity: Liveness Is Membership]].
+
+** The Identity Accumulator
+   :PROPERTIES:
+   :CUSTOM_ID: accumulator
+   :END:
+
+Governance appoints a =rootAuthority= (=setRootAuthority=), which enrolls each certifying
+authority's subtrees at aggregator slots (=enrollSubtree(id, slot, depth, isPublic, poster,
+publication)=, =evictSubtree=) and appoints the =aggregator= (=setAggregator=).  The aggregator
+alone posts roots: =postIdentityRoot(root, leafListHash)= writes =identityRoot= and records the
+root and its posting time in a ring of =ROOT_RING_SIZE= = 256, evicting the oldest.  A consumer
+names itself by a v2 tag and =acceptsRoot(root, consumer)= accepts a retained root posted within
+that consumer's maximum age (=setMaxRootAge=; Notes seven days, the insurer gate one day, never
+longer than the full ring covers).  Paths are =MEMBERSHIP_PATH_DEPTH= = 32 levels: a subtree of
+12 under an aggregator of 20.  =verifyPublicMembership(id, leaf, subSiblings, subIndex,
+aggSiblings, root)= checks a public subtree's path on chain, taking the aggregator index from the
+subtree's enrolled slot rather than from the caller, and =publicIdentityLeaf(M)= is the tagged
+unsalted leaf.  Private (salted) membership is proven in zero knowledge inside the Notes gates.
+=register= and =bindContract= refuse a caller-supplied leaf: admission is the authority's
+certification, never a by-product of registration.
 
 * BUCK: ERC-20 Token
   :PROPERTIES:
@@ -1473,7 +1519,7 @@ Full design in [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Not
 (specialised at N \in {1, 2, 4, 8, 16, 32}, with the smaller sizes useful for unit tests and small
 wallet flows) produces its own =MintBatchN*Groth16Verifier.sol=.  The shipped =Notes= contract holds a single
 =mintVerifier= adapter; per-N dispatch lives inside the adapter (a single =IMintVerifier= chooses
-the right pinned verifier by =cms.length=).  Public-signals arity is 5 regardless of N:
+the right pinned verifier by =cms.length=).  The public signals are:
 
 | Signal          | Description                                                             |
 |-----------------+-------------------------------------------------------------------------|
@@ -1481,19 +1527,25 @@ the right pinned verifier by =cms.length=).  Public-signals arity is 5 regardles
 | =newRoot=       | Root after folding =cm[0..N-1]= starting at =nextLeafIndex=             |
 | =nextLeafIndex= | Live tree size the prover read from chain                               |
 | =totalFace=     | Sum of note values, range-bounded to 128 bits                           |
-| =cmBatchHash=   | =keccak256(abi.encodePacked(cm[0..N-1]))= -- ties calldata to the SNARK |
+| =cm[N]=         | The commitments themselves, so the calldata is what the proof attests   |
+| =issuerMode[N]= | Per-leaf output: PUBLIC or PRIVATE, from the committed flavour          |
+
+The private-issuer sibling =mint_batch_a2.circom= (per-N =MintBatchA2N*Groth16Verifier=, behind
+=MintVerifierA2Adapter= and =setA2MintVerifier=) replaces =issuerMode= with each leaf's =eIss=
+and the binding's =T= as outputs, recomputing ~idHash = Poseidon-10(eNote, eIss, T)~ in circuit:
+7N + 4 public signals, so each A2 leaf's re-encryption binding is pinned to the leaf it names.
 
 Per leaf, the circuit enforces a Poseidon-5 commitment opening
 ~cm_i === Poseidon(flavor_i, v_i, rho_i, idHash_i, predicate_i)~, =Num2Bits(128)= range bounds on
 =v[i]= and =totalFace= (closing field-overflow attacks), one sum check ~totalFace === sum v[i]~,
 and an N x TREE_DEPTH Poseidon-2 dual Merkle walk: =priorWalk= consumes =ZERO_VALUE= at the
 insertion slot to attest =oldRoot=, =postWalk= consumes =cm[i]= to advance =rollingRoot= to
-=newRoot=.  Both walks share prover-supplied siblings.  A keccak hash check binds =cmBatchHash=
-to the per-leaf commitments.  ~6K R1CS per leaf (~1.7K opening + ~4.3K insertion).
+=newRoot=.  Both walks share prover-supplied siblings.  About 21.8K R1CS per leaf, half of it
+the dual Merkle walk; 21,914 at N=1.
 
-Verifier bytecode sizes: 14.5 KB at N=16, 20.8 KB at N=32 -- both under the EIP-170 24 KB ceiling.
-Per-mint gas: 461K at N=1 (constant ~216K Groth16 verifier dominates), 624K at N=16
-(~39K/leaf -- the shipped sweet-spot), 1.12M at N=32.  Asymptotic per-leaf cost is ~31K.
+A batch of one mints for 513K gas end to end (=NotesE2E=, the public-issuer path with its
+Schnorr); each further leaf adds its commitment and issuer mode to the Groth16 verification and
+its calldata, tens of thousands of gas rather than a Poseidon insertion's ~800K.
 Promotion to N >= 64 needs one of the three escape hatches in
 [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]] (calldata-IC hash-pinned, sharded SSTORE2, plain SLOAD), with
 calldata-IC the natural fit for the Holochain wallet.
@@ -1501,109 +1553,111 @@ calldata-IC the natural fit for the Holochain wallet.
 The trusted setup in =scripts/snark/setup.sh= uses a fixed dev-only entropy string.  Production
 would run a multi-party ceremony per pinned N; the script is the scaffolding.
 
-** Spend Circuits (B-flavor, A-flavor V2)
+** The Spend Proof and the Deposit Gates
 
-=circuits/spend.circom= proves redemption of a single B-shape note under an on-chain Merkle root.
-Public inputs =[noteRoot, nullifier, face, recipient, chainId]=; private witness
-=(flavor, v, rho, idHash, predicate, pathElements[20], pathIndices[20])=.  Constraint groups:
-=Num2Bits(128)= on =face= and =v=, ~cm === Poseidon-5(flavor, v, rho, idHash, predicate)~,
-Tornado-style depth-20 Merkle inclusion under =noteRoot=, B-tag nullifier
-~Poseidon-3(rho, idHash, 4242)~, and value conservation ~face * 1 === v * 1~ with a quadratic
-anchor.  ~12,000 R1CS.  =SpendGroth16Verifier= takes the 5-element public-signals tuple;
-=SpendVerifierAdapter= presents the narrow =ISpendVerifier=.
+=circuits/spend.circom= is the one note proof every spend reuses.  Public inputs =[noteRoot,
+nullifier, face, recipient, chainId, flavor, issuanceCommitment]=; private witness =(flavor, v,
+rho, idHash, predicate, pathElements[20], pathIndices[20])=.  It proves
+~cm === Poseidon-5(flavor, v, rho, idHash, predicate)~ under =noteRoot=, the flavour-agnostic
+nullifier ~Poseidon-3(rho, idHash, 4242)~, ~face === v~ with both bounded to 128 bits, and that
+the public =flavor= is the committed one; for B1 it exposes the commitment as
+=issuanceCommitment= so =Notes= can authenticate the public issuer, and A1/A2 pass zero.  About
+12,000 R1CS.
 
-=circuits/spend_a.circom= V2 is the A-flavor (identity-bound) sibling.  Public inputs grow to
-=[noteRoot, nullifier, face, recipient, chainId, E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y]= (9 total).
-Adds the A-tag nullifier ~Poseidon-3(rho, idHash, 4243)~, a flavor-in-{1,2} gate, and an
-in-circuit Poseidon-8 binding gate ~Poseidon-8(E_n, issuerData) === idHash~ (~265 R1CS) that pins
-the publicly-revealed =E_n= to the leaf at mint time.  Total ~13,300 R1CS.
+The identity half of a spend is a separate gate, and its shape follows how many secrets the
+spender's two claims rest on:
 
-The cryptographic identity gate -- proving the spender holds a single =sk_dep= that opens both
-=E_n= and the registered =E_reg= -- lives in =IdentityRegistry.verifySpendCP= rather than the
-circuit.  In-circuit BN254 G1 arithmetic over the BN254 scalar field would have cost +250K R1CS
-per group operation; off-chain CP-DLEQ verified via EIP-196 precompiles costs ~36K gas instead.
-=Notes.spendACP= calls the Groth16 verifier and =verifySpendCP= atomically; both must succeed.
-The DLEQ is a 4-element Sigma proof:
+- *Addressed (A1, A2): one folded proof.*  =deposit_fold_a1.circom= (3,309,327 constraints, 43
+  public inputs) and =deposit_fold_a2.circom= (3,833,335, 42) prove over one witness that the
+  receiving secret \( k \) opens the note's ciphertext and the spend's re-encryption =eEnc=; that
+  the depositor's registered credential decrypts to the identity \( m \); that a certified leaf
+  ~Poseidon(tag_R, m, k, salt)~ has a 32-level path to =identityRoot=; and that the nullifier is
+  the one the note's =idHash= produces.  A2 adds the issuer's own membership and the key tie
+  ~T === r'k*G + gamma*H_PEDERSEN~ against the =T= its =idHash= commits.
+  =DepositFoldVerifierAdapter= derives every public input on chain, reading the depositor's key
+  and credential from the registry at =msg.sender=.
+- *Bearer (B1): a sigma and a membership proof.*  =IdentityRegistry.verifyDepositorBinding= is
+  an EIP-196 Okamoto sigma binding the payout account, =eDepForIss= (the depositor's identity
+  encrypted for the public issuer) and =P_dep = M + b*H_PEDERSEN= to one identity scalar;
+  =identity_membership_b1.circom= (494,701 constraints, 9 public inputs) proves the same
+  =P_dep= opens to a certified salted leaf on a 32-level path.  B1's two claims rest on one
+  secret, so the sigma's shared challenge is a real tie; the blind is on a generator hashed to
+  the curve, so it cannot be shifted onto another identity.
 
-#+begin_quote
-Prover picks =t in Fr=, computes ~T1 = t*G~, ~T2 = t*(R_reg - R_n)~.
-Challenge: ~e = H(R_n, R_reg, C_n, C_reg, pk_dep, T1, T2, recipient, chainid)~.
-Response:  ~s = t + e*sk_dep~.
-Proof:     =(e, s, T1, T2)= -- 4 field elements, ~36K gas to verify on-chain.
-#+end_quote
-
-The invariant the two layers together enforce: A-note loss-recovery via identity re-issuance is
-impossible by design.  =sk_rec= must be backed up like a hardware-wallet seed; loss is terminal.
-Companion documents [[https://perry.kundert.ca/range/finance/alberta-buck-notes/][Notes]] and
-[[https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/][Notes Flow]] document the wallet-side implications.
+Every setup is dev entropy.  Production runs a ceremony per circuit.  The arguments are
+[[https://perry.kundert.ca/range/finance/alberta-buck-proofs/][Proofs]] Part IV, Theorems 7-12.
 
 ** Verifier Interfaces
 
 =Notes= is decoupled from the SNARK toolchain via narrow interfaces:
 
 #+BEGIN_SRC solidity
-interface IMintVerifier {
-    function verifyMint(bytes proof, uint256 oldRoot, uint256 newRoot,
-                        uint256 nextLeafIndex, uint256 totalFace,
-                        uint256[] calldata cms) external view returns (bool);
+interface IMintVerifier {           // public-issuer batches, per-N dispatch
+    function verifyMint(bytes proof, uint256[] issuerMode, uint256 oldRoot,
+                        uint256 newRoot, uint256 nextLeafIndex, uint256 totalFace,
+                        uint256[] commitments) external view returns (bool);
+}
+interface IMintVerifierA2 {         // private-issuer batches: eIss and T per leaf
+    function verifyMint(bytes proof, uint256[4][] eIss, uint256[2][] T,
+                        uint256 oldRoot, uint256 newRoot, uint256 nextLeafIndex,
+                        uint256 totalFace, uint256[] commitments) external view returns (bool);
 }
 interface ISpendVerifier {
-    function verifySpend(bytes proof, uint256 root, uint256 nullifier,
-                         uint256 face, address recipient, uint256 chainId)
-        external view returns (bool);
+    function verifySpend(bytes proof, uint256 noteRoot, uint256 nullifier, uint256 face,
+                         address recipient, uint256 chainId, uint256 flavor,
+                         uint256 issuanceCommitment) external view returns (bool);
 }
-interface ISpendAVerifier {
-    function verifySpendA(bytes proof, uint256 root, uint256 nullifier,
-                          uint256 face, address recipient, uint256 chainId,
-                          uint256 enRx, uint256 enRy, uint256 enCx, uint256 enCy)
-        external view returns (bool);
+interface IDepositFoldVerifier {    // the addressed gates
+    function verifyFoldA1(bytes proof, uint256 nullifier, uint256 face, uint256 identityRoot,
+                          IdentityRegistry.ElGamalCT eEnc, address depositor) external returns (bool);
+    function verifyFoldA2(bytes proof, uint256 nullifier, uint256 identityRoot,
+                          IdentityRegistry.ElGamalCT eEnc, address depositor) external returns (bool);
+}
+interface IIdentityMembershipVerifier {  // B1's membership over P_dep
+    function verifyMembership(bytes proof, uint256 identityRoot, uint256 px, uint256 py)
+        external returns (bool);
 }
 #+END_SRC
 
-Stub implementations (=StubMintVerifier= / =StubSpendVerifier=) ship for unit tests that exercise
-state transitions unrelated to the SNARK.  The production =Adapter= contracts decode the proof as
-=(uint256[2], uint256[2][2], uint256[2])=, build the public-signals tuple, and forward to the
-snarkjs-generated Groth16 verifier.  =mintVerifier= is a singleton =IMintVerifier= adapter that internally dispatches by =cms.length= to
-the correct pinned =MintBatchN*Groth16Verifier=; spend verifiers are likewise singletons.  Swapping
-any of them is a single governance call.
+Stub implementations ship for unit tests that exercise state transitions unrelated to the SNARK.
+The production adapters decode the proof as =(uint256[2], uint256[2][2], uint256[2])=, build the
+public-signals tuple, and forward to the snarkjs-generated Groth16 verifier; the mint adapters
+dispatch internally by =cms.length= to the pinned per-N verifier.
 
 ** Notes Contract
 
-=src/Notes.sol= is constructed with =(buck, mintVerifier, spendVerifier, governance)=.  The
-A-flavor spend verifier and the identity registry are wired post-construction via governance
-setters (=setSpendAVerifier=, =setIdentityRegistry=); until both are set, =spendACP= reverts with
-=Notes: A-spend disabled= or =Notes: identity registry not set=.  Its state is intentionally lean
--- per-leaf insertion math now lives in the SNARK:
+=src/Notes.sol= is constructed with =(buck, mintVerifier, spendVerifier, governance)=; governance
+wires the rest: =setA2MintVerifier=, =setIdentityRegistry=, =setDepositFoldVerifier= (which
+refuses =address(0)=: the fold IS the addressed gate, so no configuration leaves a weaker one
+answering) and =setIdentityMembershipVerifier=.  Its state is intentionally lean -- per-leaf
+insertion math lives in the SNARK:
 
-- *Verifier handles*: singleton =mintVerifier= (the adapter that dispatches by batch size),
-  singletons =spendVerifier= for B-spend and =spendAVerifier= for A-spend, plus the
-  =identityRegistry= used by =spendACP= for =verifySpendCP=.  All swappable by governance.
 - *Audit / double-spend state*: =mapping(uint256 => bool) nullifiers=, =uint256 noteFaceSum=.
 - *Tree state*: =uint32 nextLeafIndex= and =uint256[ROOT_HISTORY_SIZE=30] roots= with
-  =uint8 currentRootIndex=.  =filledSubtrees=, =zeros[]=, and per-cm uniqueness checks are gone --
-  duplicate openings are economically self-punishing via the deterministic nullifier
-  (one spend nullifies every copy of the same opening; the duplicator forfeits their mint).
+  =uint8 currentRootIndex=; the constructor seeds =roots[0]= with =EMPTY_ROOT=, the root of a tree
+  whose empty leaf is the field tag of =AlbertaBuck/Notes/Zero/v2=.
+- *Records*: each public-issuer commitment's issuer, so a B1 spend can authenticate it.
 
-=mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms)= asserts =cms.length > 0=, checks
-~oldRoot == roots[currentRootIndex]~ and ~nextLeafIndex == self.nextLeafIndex~ (stale-state
-guards), field-bounds each =cms[i]= against =FIELD_R=, dispatches to =mintVerifier= (which forwards
-to the per-N pinned Groth16 verifier internally), pulls =totalFace=
-BUCK via =transferFrom(caller, this, totalFace)=, writes =newRoot= into the ring buffer at
-=(currentRootIndex + 1) % ROOT_HISTORY_SIZE=, advances =nextLeafIndex= by =cms.length=, bumps
-=noteFaceSum= by =totalFace=, and emits =Minted(issuer, totalFace, startIndex, count, newRoot)=.
-Per-leaf =Appended= events are gone; the commitments live in calldata for off-chain replayers.
+=mint= has two overloads.  The public-issuer one takes the batch Schnorr
+(=verifyIssuerSchnorr= against the caller's registered key); the private-issuer one takes one
+=A2Binding= per leaf and checks each against =verifyIssuerReenc= and against the =eIss= and =T=
+the A2 mint proof exposes for that leaf.  Both check the stale-state guards
+(~oldRoot == roots[currentRootIndex]~, ~nextLeafIndex == self.nextLeafIndex~), field-bound each
+commitment, verify the batch proof, pull =totalFace= BUCK, advance the ring and emit
+=Minted(issuer, totalFace, startIndex, count, newRoot)=; the commitments live in calldata for
+off-chain replayers.
 
-=spend(proof, root, nullifier, face, recipient)= (B-flavor) requires ~recipient != 0~,
-~face > 0~, =isAcceptedRoot(root)= (root in the recent-roots window), and ~!nullifiers[nullifier]~.
-Forwards to =spendVerifier=, marks the nullifier burned, decrements =noteFaceSum=, and calls
-=buck.transfer(recipient, face)=.  Because the Notes pool is bound under the Carrying flag,
-=buck.transfer= dispatches to the carrying path automatically -- the recipient absorbs the pool's
-average demurrage age via =buckSeconds=, preserving the SNARK's ~face === v~ invariant at the
-ERC-20 boundary.  =Spent(nullifier, face, recipient)= closes the spend.
-
-=spendACP(proof, root, nullifier, face, recipient, E_n, cpProof)= (A-flavor) is identical except
-it also calls =identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)= atomically;
-both verifications must succeed.
+There is no unbound spend.  =spendCoupledA1= and =spendCoupledA2= take =(proof, root,
+identityRoot, nullifier, face, recipient, eEnc, foldProof)=, =spendCoupledB1= takes =(proof,
+root, identityRoot, nullifier, face, recipient, issuanceCommitment, issuer, eDepForIss, b1Proof,
+membershipProof)=.  Each requires =root= in the recent-roots window, a fresh nullifier, the
+spend proof for its flavour, and ~identityRegistry.acceptsRoot(identityRoot,
+NOTES_MEMBERSHIP_CONSUMER)~, then its deposit gate; it burns the nullifier, decrements
+=noteFaceSum=, and pays with =buck.transfer(recipient, face)=.  Because the pool is bound under
+the Carrying flag, the transfer takes the carrying path: the recipient absorbs the pool's average
+demurrage age via =buckSeconds=, preserving ~face === v~ at the ERC-20 boundary.  The events
+=SpentCoupledA1=, =SpentCoupledA2= and =SpentCoupledB1= publish no identity point; B1's carries
+=eDepForIss=, which only the issuer decrypts.
 
 * End-to-End Walkthrough
   :PROPERTIES:
@@ -1751,7 +1805,6 @@ at 200 runs).  PID and oracle figures are estimates against unwritten oracle wir
 | BUCK_CREDIT.updateCredit()                     | ~80K         | ~$6        | Multiple SSTOREs (insurer pays)          |
 | IdentityRegistry.register()                    | ~444K        | ~$36       | credential proof, 3 pairings (measured)  |
 | IdentityRegistry.verifyApprove                 | ~29K         | ~$2        | CP proof, per counterparty pair          |
-| IdentityRegistry.verifySpendCP                 | ~36K         | ~$3        | CP-DLEQ via EIP-196 (A-flavor spend)     |
 | BUCK.approve() (identity)                      | ~97K         | ~$8        | 29K CP + 46K allowance + 22K SSTORE      |
 | BUCK.transfer / transferFrom                   | ~80K         | ~$6        | Identity check + receipt + 1 SSTORE/side |
 | -- reentrancy guard, per guarded call          | ~600         | --         | TSTORE/TLOAD; no storage slot            |
@@ -1762,11 +1815,12 @@ at 200 runs).  PID and oracle figures are estimates against unwritten oracle wir
 | BUCK.burn() (1 NFT)                            | ~120K        | ~$10       | Mirror of mint                           |
 | BUCK.mint() (with PID update, 4-pool basket)   | ~450K        | ~$36       | + 4 V3 TWAP reads + BUCK TWAP + PID math |
 | BUCK.mint() (PID cached, within dT)            | ~155K        | ~$12       | one SLOAD on the cache path              |
-| Notes.mint (mint_batch, N=1)                   | ~461K        | ~$37       | Groth16 verify (~216K) + insert          |
-| Notes.mint (mint_batch, N=16)                  | ~624K        | ~$50       | ~39K/leaf -- shipped sweet-spot          |
-| Notes.mint (mint_batch, N=32)                  | ~1.12M       | ~$90       | ~35K/leaf (verifier ~422K)               |
-| Notes.spend (Groth16, B-shape)                 | ~360K        | ~$29       | Groth16 verify + Carrying transfer       |
-| Notes.spendACP (Groth16 + CP-DLEQ, A-shape)    | ~410K        | ~$33       | + verifySpendCP (~36K) via EIP-196       |
+| Notes.mint (public issuer, N=1)                | ~513K        | ~$41       | Groth16 verify + batch Schnorr (measured) |
+| Notes.mint (private issuer A2, N=1)            | ~629K        | ~$50       | + re-encryption binding, eIss/T (measured) |
+| Notes.spendCoupledA1                           | ~966K        | ~$77       | spend proof + folded gate (measured)     |
+| Notes.spendCoupledA2                           | ~982K        | ~$79       | spend proof + folded gate (measured)     |
+| Notes.spendCoupledB1                           | ~910K        | ~$73       | + depositor sigma + membership (measured) |
+| BuckCredit.attestInsurer (8 predicates)        | ~8M          | ~$640      | once per review period                   |
 | BUCK_CREDIT.currentValue / BUCK_K.currentBuckK | 0            | Free       | View                                     |
 
 The PID update cost is amortised across all mints within a =dT= window (60 s default; only the
@@ -1786,40 +1840,66 @@ computing off the unchanged TWAP.  When/if Chainlink basket feeds are adopted la
 Chainlink branch of =_getBasketCost= must verify =updatedAt= is within an acceptable window
 (~1 hour) and revert if stale.
 
-** Unvetted Insurers -- the open hole
+** The Insurer Gate
    :PROPERTIES:
    :CUSTOM_ID: unvetted-insurers
    :END:
 
-*This is the one thing on this page that must close before mainnet, and it is not closed.*
-
-=createCredit= is permissionless.  Any address may issue a BUCK_CREDIT naming itself the
-insurer; there is no vetting of any kind.  =updateCredit= is gated on ~msg.sender == insurer~,
-but becoming an insurer in the first place is not gated at all.
-
-The consequence is unbacked issuance, not merely a nuisance.  A credit's =faceValue= and
-=premiumRate= are whatever its issuer says they are, and a zero-premium credit costs nothing to
-draw on -- ~poolPrincipal == 0~, so the counter-cyclical funding gate is inapplicable by design.
-So a single verified account can write itself a policy on an asset it never names, and mint
-against it:
+A credit's =faceValue= and =premiumRate= are whatever its issuer says they are, and a
+zero-premium credit costs nothing to draw on -- ~poolPrincipal == 0~, so the counter-cyclical
+funding gate is inapplicable by design.  If becoming an insurer were ungated, a single verified
+account could write itself a policy on an asset it never names, and mint against it:
 
 #+BEGIN_SRC text
 mallory issues herself a zero-premium credit, faceValue 1,000,000,000
 mint(500,000,000)   ->  principal paid   0
                         spendable        500,000,000 BUCK
-                        transferred on   totalSupply 0 -> 500,000,000
 #+END_SRC
 
-Nothing downstream catches it.  =totalCurrentValue= sums whatever credits an account holds
-without asking who issued them, and the identity layer only establishes that the /minter/ is a
-registered person -- not that the /insurer/ is good for anything.
+The recipient opt-in below cannot stop this, since the attacker is both insurer and client.  What
+stops it is the regulator.  Insurer oversight is already a periodic review of underwriting,
+reserves and reinsurance that concludes with an estimate of what the insurer may write; the gate
+makes that conclusion available to the contract, as a set of public memberships the insurer
+proves and =BuckCredit= caches.
 
-The recipient opt-in below does not close this, and cannot: the attacker is both insurer and
-client, so she accepts herself.  Only vetting the insurer closes it.  The intended shape is
-deliberately *not* a governance allowlist -- issuance stays open to anyone who can demonstrate
-they are good for the claims: on-chain solvency (a buffer held, and provably available to the
-parametric payout trigger) plus a rating.  That system is unbuilt.  Until it exists, BUCK's
-supply is bounded only by the honesty of everyone holding a registered identity.
+*The envelope.*  An insurance regulator keeps one public subtree per predicate in the
+[[#accumulator][identity accumulator]], named under its namespace (e.g. =regulator:ca-ab=):
+standing (=insurer=), a face band on a ladder of powers of ten from ten BUCK to a hundred
+million (=insurer:face:<b>=), each permitted depreciation model (=insurer:dep:<d>=), the maximum
+depreciation and premium rates in basis points (=insurer:depRate:<bp>=,
+=insurer:premium:<bp>=), the general scope (=insurer:general=), and each asset scope it permits
+(=scope:<asset path>=).  Subtree identifiers and scope identifiers are =keccak= of the
+namespaced name, so refining a scope needs no version and there is no asset taxonomy on chain.
+An insurer's leaf is the public, unsalted identity leaf: its licence is a fact it advertises.
+
+*Attestation, once per review period.*  =attestInsurer(M, opening, claim, root, paths)= takes
+the insurer's identity point, a Chaum-Pedersen opening showing the caller's registered credential
+decrypts to =M= (bound to the account, chain and registry under its own v2 tag, so no account can
+claim another's envelope), the claimed envelope, a posted root the registry accepts for the
+insurer consumer (one day old at most), and one public path per claimed predicate.  It verifies
+each path with =verifyPublicMembership= and caches the envelope with
+~expiresAt = rootPostedAt(root) + attestationPeriod~.  A new attestation withdraws every scope it
+does not repeat.  Eight predicates cost about 8M gas, once per period.
+
+*Issuance, every credit.*  =createCredit= keeps its eight-argument form, which declares the
+general scope, and gains a nine-argument form declaring a =scope=.  Either checks the credit
+against the cached envelope with a handful of storage reads, reverting with the reason:
+"insurer not in good standing", "attestation expired", "scope not attested", "face above attested
+band", "depreciation model not attested", "depreciation rate above attested maximum", "premium
+rate above attested maximum".  =updateCredit= is held to the same parameter envelope, or an
+insurer would write small and reappraise large; the scope is emitted at creation and not stored,
+so a reappraisal cannot re-check it.  =bandForFace=, =scopeId= and =scopeAttested= expose the
+arithmetic.
+
+*Configuration.*  The deployer calls =configureInsurerGate(registry, namespace, period)= once;
+it cannot be changed or removed.  A =BuckCredit= never configured issues ungated -- the economic
+simulations deploy that way -- and a deployment profile *must* configure it.  The gate's own
+suites (=InsurerGate.t.sol=, and =InsurerGateVectors.t.sol=, which replays the Python reference's
+subtrees, opening and issuance decisions byte for byte) exercise every refusal.
+
+The gate checks the consistency of the attestation chain, not its accuracy: a regulator that
+attests a bad insurer is answerable for it, off chain, exactly as it is today.  Out of scope by
+decision: what happens to an insurer's pools when it fails, which is its reinsurers' business.
 
 ** Recipient Opt-In
 
@@ -1838,8 +1918,8 @@ ERC-721 =_mint= needs no consent from the receiver.  A holder can still dispose 
 credit by transferring it away, since an unactivated credit is freely transferable, but that is
 a remedy they should never have had to reach for.
 
-It is not a substitute for vetting.  It bounds who may put a credit in your hands; it says
-nothing about whether that credit is worth anything.
+It is not a substitute for vetting.  It bounds who may put a credit in your hands; the gate
+above bounds what they may write.
 
 ** Insurer Trust
 
@@ -1855,7 +1935,7 @@ and setting a punitive =premiumRate= on new coverage.  Multi-insurer market disc
 natural check, and a rating that responds to claim behaviour is the intended mechanism.
 Time-locks on insurer updates (e.g. 7-day delay for reductions > 20 %) remain a future
 enhancement.  For the prior question -- how an insurer becomes vetted at all -- see
-[[#unvetted-insurers][Unvetted Insurers]].
+[[#unvetted-insurers][The Insurer Gate]].
 ** Reentrancy
 
 Every state-mutating entry point on =Buck= carries a transient-storage mutex; the design and the
@@ -1931,13 +2011,16 @@ flags for later study:
 
 * Status
 
-Current Foundry suite: 53 test files cover all six contracts in tree (=BuckCredit=,
+Current Foundry suite: 55 test files cover all six contracts in tree (=BuckCredit=,
 =IdentityRegistry=, =Buck=, =BuckBasket=, =BuckKControllerStatic= + =BuckKControllerDirect= +
 =BuckKController=, =Notes=) plus dedicated suites for the NFT-credit machinery
 (=BuckCreditLimit.t.sol=, =BuckCreditBacking.t.sol=, =BuckCreditReappraisal.t.sol=,
 =BuckSignedBalance.t.sol=), the reentrancy guard and delegated demurrage
-(=BuckReentrancy.t.sol=, =BuckDelegatedDemurrage.t.sol=, =GuardBench.t.sol=), the SNARK toolchain (=mint_batch.circom= at
-pinned N \in {1, 2, 4, 8, 16, 32}, =spend.circom=, =spend_a.circom= V2), and a Python reference
+(=BuckReentrancy.t.sol=, =BuckDelegatedDemurrage.t.sol=, =GuardBench.t.sol=), the identity
+accumulator and insurer gate (=IdentityAccumulator.t.sol=, =InsurerGate.t.sol=,
+=InsurerGateVectors.t.sol=), the SNARK toolchain (=mint_batch[_a2].circom= at pinned
+N \in {1, 2, 4, 8, 16, 32}, =spend.circom=, the two folded deposit gates and B1's membership,
+each with real proofs), and a Python reference
 wallet (=alberta_buck.wallet=) that emits canonical test vectors the Solidity tests load via
 =vm.readFile=.  One =BuckKControllerForkTest= requires a live mainnet RPC and is skipped offline.
 

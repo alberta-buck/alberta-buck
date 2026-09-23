@@ -12,7 +12,7 @@ from pathlib import Path
 from alberta_buck.review.examples import mismatched_membership, membership_input
 from alberta_buck.review.integration import g1tie_prove, REPO
 from alberta_buck.wallet.bn254 import G1, add, mul
-from alberta_buck.wallet.issuer_reenc import H_POINT
+from alberta_buck.review.known_log import H_KNOWN, untagged_identity_leaf
 from alberta_buck.registry.tree import IdentityMerkleTree
 
 OUT = Path(sys.argv[1])
@@ -20,9 +20,9 @@ OUT = Path(sys.argv[1])
 # --- honest control: P = M + b*H, T = b*H, M in the tree -------------------
 member = mul(G1, 12345)
 b = 22222
-P_honest = add(member, mul(H_POINT, b))
+P_honest = add(member, mul(H_KNOWN, b))
 tree = IdentityMerkleTree(depth=10)
-tree.insert_identity(member)
+tree.insert_leaf(untagged_identity_leaf(member))
 w_honest = membership_input(tree, 0, member, P_honest)
 t0 = time.time()
 res = g1tie_prove(OUT / "honest", w_honest)

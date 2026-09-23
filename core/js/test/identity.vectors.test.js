@@ -162,6 +162,27 @@ test("verifiable decryption", { skip }, () => {
     ct(r.E), pt(r.pk), pt(r.M), proof, B(r.account), B(r.chainid)));
 });
 
+test("identity opening", { skip }, () => {
+  const r = KV.identity_opening;
+  const proof = id.identityOpeningProve(
+    ct(r.E), B(r.sk), pt(r.M), B(r.account), B(r.chainid), B(r.registry), B(r.t));
+  assert.equal(proof.e, B(r.proof.e));
+  assert.equal(proof.s, B(r.proof.s));
+  assert.deepEqual(proof.T1, pt(r.proof.T1));
+  assert.deepEqual(proof.T2, pt(r.proof.T2));
+  const args = [ct(r.E), pt(r.pk), pt(r.M), proof, B(r.account), B(r.chainid)];
+  assert.equal(id.identityOpeningVerify(...args, B(r.registry)), r.verify);
+  assert.ok(!id.identityOpeningVerify(...args, B(r.registry) + 1n));
+  // Its own tag: a receipt's proof opens nothing, and the opening is no receipt.
+  const vd = KV.verifiable_decrypt.proof;
+  const vdProof = { e: B(vd.e), s: B(vd.s), T1: pt(vd.T1), T2: pt(vd.T2) };
+  assert.equal(
+    !id.identityOpeningVerify(ct(r.E), pt(r.pk), pt(r.M), vdProof, B(r.account), B(r.chainid),
+                              B(r.registry)),
+    r.not_a_receipt_proof);
+  assert.ok(!id.verifiableDecryptVerify(...args));
+});
+
 test("issuer re-encryption binding", { skip }, () => {
   const r = KV.issuer_reenc;
   const proof = id.issuerReencProve(
@@ -176,17 +197,6 @@ test("issuer re-encryption binding", { skip }, () => {
   }
   assert.ok(id.issuerReencVerify(
     pt(r.pk_iss), ct(r.E_reg), ct(r.E_iss), proof, B(r.issuer), B(r.chainid)));
-});
-
-test("deposit coupling", { skip }, () => {
-  const r = KV.deposit_couple;
-  const proof = id.depositCoupleProve(
-    B(r.m_rec), B(r.sk_dep), ct(r.E_dep), ct(r.eIss),
-    B(r.account), B(r.chainid), B(r.b), B(r.k_m), B(r.k_s), B(r.k_b));
-  for (const f of ["e", "s_m", "s_s", "s_b"]) assert.equal(proof[f], B(r.proof[f]), f);
-  for (const f of ["A2", "A3", "A4", "P_I"]) assert.deepEqual(proof[f], pt(r.proof[f]), f);
-  assert.ok(id.depositCoupleVerify(
-    pt(r.pk_dep), ct(r.E_dep), ct(r.eIss), proof, B(r.account), B(r.chainid)));
 });
 
 test("b1 depositor binding", { skip }, () => {
@@ -211,7 +221,7 @@ test("notes family + merkle", { skip }, () => {
   assert.equal(
     id.idHashA1(ct(n.eNote), B(n.m_issuer), pt(n.sigma_R), B(n.sigma_s)),
     B(n.id_hash_a1));
-  assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss)), B(n.id_hash_a2));
+  assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss), pt(n.T)), B(n.id_hash_a2));
   const op = n.opening;
   assert.equal(
     id.noteCommitment(B(op.flavor), B(op.v), B(op.rho), B(op.idHash), B(op.predicate)),

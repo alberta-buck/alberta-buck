@@ -153,7 +153,7 @@ def test_two_deposits_unlinkable(world):
 # P_dep: the membership commitment that binds M_dep to the spend's membership.
 # --------------------------------------------------------------------------- #
 
-from alberta_buck.wallet.issuer_reenc import H_POINT
+from alberta_buck.wallet.nums import H_PEDERSEN
 
 
 def test_p_dep_commits_m_dep_and_is_member(world):
@@ -167,7 +167,7 @@ def test_p_dep_commits_m_dep_and_is_member(world):
     assert b1_bind_verify(dep.pk, dep.E, issuer.pk, eDepForIss, proof,
                           DEPOSIT_ADDR, CHAINID)
     # P_dep - b*H == M_dep, and M_dep is a registered member.
-    M_dep_recovered = add(proof.P_dep, neg(mul(H_POINT, b)))
+    M_dep_recovered = add(proof.P_dep, neg(mul(H_PEDERSEN, b)))
     assert eq(M_dep_recovered, dep.M)
     assert tree.contains(dep.M)
 

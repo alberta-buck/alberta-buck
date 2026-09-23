@@ -1,7 +1,7 @@
-"""The AB-RCPT/1 receipt envelope — a deterministic, bit-identical, verifiable
+"""The AB-RCPT/2 receipt envelope — a deterministic, bit-identical, verifiable
 data record for a BUCK payment.
 
-Reference: alberta-buck-receipt.org ("The AB-RCPT/1 Envelope").
+Reference: alberta-buck-receipt.org ("The AB-RCPT/2 Envelope").
 
 Every receipt is a single canonical JSON map -- THE canonical dialect
 (identity.canonical_json: sorted keys, compact separators, raw UTF-8), the
@@ -11,7 +11,7 @@ same one the identity preimage uses.  Serialization:
     2. ``json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)``
        → canonical UTF-8 bytes.
     3. The receipt id is ``base32(sha256(canonical_bytes))`` truncated to a short handle.
-    4. The text envelope is ``AB-RCPT/1.`` followed by base64url of the bytes,
+    4. The text envelope is ``AB-RCPT/2.`` followed by base64url of the bytes,
        wrapped to the caller's width, terminated by ``.END``.
 
 Deserialize: reverse the text envelope → canonical bytes → ``json.loads``.
@@ -213,7 +213,7 @@ class ReceiptProofs:
 
 @dataclass(frozen=True)
 class ReceiptCore:
-    """The verified payload of an AB-RCPT/1 receipt.
+    """The verified payload of an AB-RCPT/2 receipt.
 
     ``payer`` is the party funds came FROM (for a Note, the issuer); ``payee``
     the party they went TO (the depositor/recipient).  ``role`` says which of
@@ -369,7 +369,8 @@ def deserialize_core(canonical_bytes: bytes) -> ReceiptCore:
 # Text envelope
 # ---------------------------------------------------------------------------
 
-ENVELOPE_HEADER = "AB-RCPT/1."
+from alberta_buck.wallet.domains import RECEIPT_ENVELOPE
+ENVELOPE_HEADER = RECEIPT_ENVELOPE + "."
 ENVELOPE_FOOTER = ".END"
 
 
@@ -383,7 +384,7 @@ def envelope_text(canonical_bytes: bytes, width: int = 64) -> str:
 
     Returns::
 
-        AB-RCPT/1.
+        AB-RCPT/2.
         <base64url of canonical_bytes, wrapped to width>
         .END
     """
@@ -399,7 +400,7 @@ def envelope_text(canonical_bytes: bytes, width: int = 64) -> str:
 def parse_envelope(text: str) -> bytes:
     """Extract canonical bytes from an envelope.
 
-    Strips everything outside ``AB-RCPT/1.`` … ``.END``, removes whitespace
+    Strips everything outside ``AB-RCPT/2.`` … ``.END``, removes whitespace
     from the base64url block, decodes.
     """
     from alberta_buck.wallet._kernel import kernel_wallet as _kw
@@ -412,7 +413,7 @@ def parse_envelope(text: str) -> bytes:
     start = text.find(ENVELOPE_HEADER)
     end = text.find(ENVELOPE_FOOTER, start + len(ENVELOPE_HEADER)) if start >= 0 else -1
     if start < 0 or end < 0:
-        raise ValueError("envelope: missing AB-RCPT/1. header or .END footer")
+        raise ValueError("envelope: missing AB-RCPT/2. header or .END footer")
     b64 = text[start + len(ENVELOPE_HEADER):end]
     b64 = "".join(b64.split())  # drop all whitespace
     # base64url → canonical bytes
@@ -492,6 +493,11 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
                         eIss:  Optional[ElGamalCiphertext] = None,
                         sigma_R=None, sigma_s: Optional[int] = None,
                         eDepForIss: Optional[ElGamalCiphertext] = None,
+                        pk_recv=None,
+                        r_note: Optional[int] = None,
+                        r_id: Optional[int] = None,
+                        binding: Optional[Dict[str, Any]] = None,
+                        T=None, gamma: Optional[int] = None,
                         ) -> Dict[str, Any]:
     """The Identity-M-bound note payload — the idHash preimage material both
     Note parties hold, per flavor:
@@ -500,13 +506,36 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
       ``id_hash_b1(m_iss, sigma_R, sigma_s)``) plus, once spent, the
       ``SpentCoupledB1`` event's ``eDepForIss`` (the depositor's Identity
       encrypted under the public issuer's registered key).
-    * A1:  ``eNote`` (value under M_rec), ``eRec`` (recipient Identity under
-      itself), ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
-    * A2:  ``eNote`` and ``eIss`` (issuer Identity under M_rec) —
-      ``id_hash_a2(eNote, eIss)``.
+    * A1:  ``eNote`` (the value), ``eRec`` (the recipient's own Identity),
+      ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
+    * A2:  ``eNote``, ``eIss`` (the issuer's Identity) and the mint binding's
+      ``T`` -- ``id_hash_a2(eNote, eIss, T)`` -- with ``gamma``, the blind
+      that opens ``T``, so a verifier can check that the Identity the binding
+      proved registered is ``C_iss - T + gamma*H``, the one the receipt names.
 
-    With the parties' identity preimages disclosed in the receipt, a verifier
-    derives ``m_iss``/``m_rec`` and re-checks every ciphertext directly.
+    The addressed flavours carry ``pk_recv``, the mailbox key their ciphertexts
+    are keyed to.  An earlier shape needed nothing of the kind, because those
+    ciphertexts were keyed to the recipient's identity POINT and any verifier
+    derived the matching scalar from the disclosed identity string -- which is
+    precisely the defect the receiving key removed: a naming that works for a
+    verifier works for a harvester.  So the receipt states the key and carries
+    evidence per role instead of a derivation that anyone can repeat:
+
+    * ``r_note`` / ``r_id`` -- the mint randomness, which only the ISSUER has.
+      Disclosing it lets any verifier recompute the ciphertexts and see what
+      they encrypt, under whose key.  It reveals nothing further: the receipt
+      already names both parties and the value, and the randomness of a spent
+      note is spent.
+    * ``vdNote`` / ``vdRec`` / ``vdIss`` -- verifiable decryptions under
+      ``pk_recv``, which only the RECIPIENT can produce.  These are
+      :func:`vd_proof_record` values and carry their own ciphertext and
+      plaintext.
+    * ``binding`` -- the holder-produced evidence that ``pk_recv`` is the
+      registered mailbox of the named Identity, as a mailbox-leaf path (see
+      :func:`alberta_buck.wallet.recvkey.prove_receiving_binding`).  An
+      issuer-side receipt needs it to name the recipient at all: the issuer can
+      show which MAILBOX it paid, and only the accumulator ties that mailbox to
+      a person.
     """
     d: Dict[str, Any] = {}
     if eNote is not None:
@@ -521,7 +550,35 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
         d["sigma_s"] = scalar_to_hex(sigma_s)
     if eDepForIss is not None:
         d["eDepForIss"] = _ct_hex(eDepForIss)
+    if pk_recv is not None:
+        d["pkRecv"] = _g1_hex(pk_recv)
+    if r_note is not None:
+        d["rNote"] = scalar_to_hex(r_note)
+    if r_id is not None:
+        d["rId"] = scalar_to_hex(r_id)
+    if binding is not None:
+        d["binding"] = binding
+    if T is not None:
+        d["T"] = _g1_hex(T)
+    if gamma is not None:
+        d["gamma"] = scalar_to_hex(gamma)
     return d
+
+
+def mailbox_binding_record(binding) -> Dict[str, Any]:
+    """Serialize a :class:`alberta_buck.wallet.recvkey.ReceivingBinding`.
+
+    ``pkRecv`` is NOT repeated here: it lives once in the note payload, so no
+    receipt can state two different keys and have a verifier pick the
+    convenient one.
+    """
+    return {
+        "salt":      scalar_to_hex(binding.salt),
+        "leaf":      scalar_to_hex(binding.path.leaf),
+        "siblings":  [scalar_to_hex(x) for x in binding.path.siblings],
+        "indexBits": list(binding.path.index_bits),
+        "root":      scalar_to_hex(binding.path.root),
+    }
 
 
 def schnorr_proof_record(issuer: int, pk_iss, h_batch: int, chainid: int,
@@ -574,6 +631,6 @@ __all__ = [
     "envelope_text", "parse_envelope", "receipt_id",
     "vd_proof_record", "cp_proof_record",
     "schnorr_proof_record", "receipts_proof_record",
-    "issuer_reenc_record", "note_payload_record",
+    "issuer_reenc_record", "note_payload_record", "mailbox_binding_record",
     "_canonical", "_g1_hex", "_ct_hex",
 ]

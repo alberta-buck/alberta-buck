@@ -1,0 +1,499 @@
+A2 key split: the mint binding and the spend proof name different issuers
+==========================================================================
+
+Follow-on to doc/review/identity-accumulator-review-grok.txt.
+Date: 2026-09-21. Branch: feature/identity-accumulator.
+
+This note records one concrete failure of the A2 anti-framing claim, the
+mitigations that actually close it, and an information-flow account of A1,
+A2, and B1. The flow is the tool for the failure. A proof is only a tie
+between two facts when the same party cannot satisfy one fact with one
+value and the other fact with another. Writing down, at each step, who can
+generate, intercept, recover, satisfy, or duplicate each artifact is how
+that question gets answered. The A2 split is the case where two proofs
+about one ciphertext were assumed to share a key, and do not.
+
+
+1. The failure
+--------------
+
+issuer_reenc proves that an A2 ciphertext eIss encrypts the minter's
+registered identity under a receiving key, and it hides that key inside
+
+    Q = pk_mint + beta*H
+
+with H the known-log generator of issuer_reenc. deposit_fold_a2 proves
+that the spender's own receiving secret k opens that same ciphertext to a
+registered identity. Nothing in either proof, in Notes.mint, in
+Notes.spendCoupledA2, or in verify_receipt requires those two keys to be
+the same point.
+
+An ElGamal ciphertext does not bind a plaintext to one key. For one
+randomness r and two registered identity points M_A and M_B,
+
+    pk_mint = pk_real + r^{-1}*(M_B - M_A)
+    eIss    = (r*G, M_A + r*pk_mint)
+            = (r*G, M_B + r*pk_real)
+
+pk_real = k*G is the recipient's mailbox, which the minter is given in
+order to address the note. The minter does not need k. Decrypting under
+the hidden mint key returns M_A. Decrypting under the recipient's k
+returns M_B.
+
+Ran against the shipped verifiers, with M_A the plaintext of the minter's
+registered account credential, M_B a second registered identity with its
+own salted leaf, and the recipient's k in a receiving leaf:
+
+    issuer_reenc_verify against the minter's credential     accepts
+        the mint proof's statement is "encrypts M_A"
+    the same proof against M_B's credential                 rejects
+    pk_mint == pk_real                                      false
+    deposit_fold_check for the recipient's k                accepts
+    deposit_fold_a2_witness, relation 5 on M_B's leaf       builds
+    the same witness pointed at M_A's leaf                  refused
+    verify_receipt against the minter's credential          VALID
+        and the issuer it names is M_B, not M_A
+
+So one ciphertext passes both proofs and names two different registered
+issuers. The receipt checker runs both checks and still returns VALID,
+because it never asks whether the point the verifiable decryption names
+is the plaintext the binding opened.
+
+What this is. The minter picks any registered identity M_B whose naming
+salt the spender will be able to use, twists the encryption key by
+r^{-1}*(M_B - M_A), and ships that salt as salt_iss. The recipient does
+the honest thing: decrypts with k, rebuilds the path, proves the fold.
+The spend succeeds. The receipt names M_B. The on-chain mint binding is
+a true statement about M_A and a key nobody is later required to use.
+
+The salt is the only extra ingredient. The minter always has it for a
+second identity of their own, so a sock-puppet issuer is enough. Naming
+an unrelated victim needs that victim's naming salt as well. The key
+twist itself needs only public points: M_A, M_B, and pk_real.
+
+What this is not. It is not a break of issuer_reenc in isolation. That
+sigma still extracts the minter's own credential plaintext and a key.
+It is not an A1 break. A1's fold proves the opened plaintext is
+m_rec*G, the same scalar as the account and the receiving leaf, so a
+twisted key fails the circuit instead of naming someone else. It is not
+a B1 break. B1's issuer is the public Schnorr identity recorded against
+the commitment, and the depositor encrypts to that issuer's registered
+account key, which is not a hidden choice.
+
+The comment on Notes.mint understates the hole it already names. It says
+a colluding pair can encrypt eIss under a throwaway key and leave the
+issuer un-nameable while the note stays spendable, and that relation 5
+was the closure. Relation 5 closes the un-nameable case. It does not
+close this one. The note stays spendable and the receipt names a
+registered issuer who is not the minter, which is a framing, not a
+silence.
+
+issuer_reenc.py lines 55-59 say the receipt closes the same gap by
+requiring that the named point equal C - T. That check is not in
+verify_receipt or in the unilateral receipt. It would also be the wrong
+equation: T is r'*pk + gamma*G, so C - T = M - gamma*G, not M.
+
+
+2. Mitigations
+--------------
+
+The chain has to reject the twisted ciphertext. A check the recipient
+may skip does not meet the collusion rule (an accepted spend must name
+the minter, not a minter-chosen substitute). The equality cannot be
+carried by issuer_reenc's H. That generator has a public discrete log,
+so a prover who wants Q to open to a different key subtracts the
+difference from beta and the sigma-side equation still holds. A
+cross-proof tie needs a commitment whose blind cannot be shifted.
+
+The sound fix is a salted hash of the encryption key, committed in the
+note and in the mint binding, and opened to k*G inside the fold.
+
+    pkHash = Poseidon(pk.x, pk.y, salt_pk)
+
+Mint. issuer_reenc gains pkHash as a public value and proves the key
+hidden in Q is the preimage. The A2 mint circuit commits that same
+pkHash in the leaf, the way it already commits eIss, and the contract
+feeds the binding's pkHash into the mint verifier the way it already
+feeds eIss. salt_pk is fresh per note and goes to the recipient with
+salt_iss. It is not published. Two notes to the same mailbox hash
+differently, so the chain learns a value it cannot link.
+
+Spend. deposit_fold_a2 proves pk = k*G and Poseidon(pk, salt_pk) =
+pkHash, with pkHash inside the idHash the note already opens. The
+twisted key has a different hash. The spender cannot swap salt_pk,
+because the hash is inside the committed note. One extra fixed-base
+multiplication is about 472k constraints. The A2 fold is 3,341,261
+against a pot22 ceiling of 4,194,304, so one more fits and two do not.
+This number is arithmetic on the recorded sizes, not a recompile.
+
+Receipt. The same opening is checked off chain: Q - beta*H equals the
+pk_recv the verifiable decryption uses, and the named issuer point is
+the plaintext of the credential the binding was verified against.
+verify_receipt today verifies the binding against the minter account's
+credential and the decryption against a separately supplied point, and
+accepts when those points differ. beta and gamma may travel in the
+receipt. A receipt already names both parties, and pk_recv is not a
+decryption key. They must not be published at mint or at spend.
+
+What the other candidates do.
+
+Off-chain check only. Ship beta and gamma, and have the wallet refuse
+a note whose Q does not open to its own pk_recv. This stops an honest
+recipient from being fooled. A colluding recipient skips it, the fold
+still accepts, and the receipt can still be built. Not sufficient.
+
+Publish pk_recv at mint. Sound, and smaller: the binding's key becomes
+a public input and the fold proves k*G equals it. It also links every
+mint addressed to that key. That is acceptable for a key used with one
+payer, and it is the wrong privacy trade for one lifelong mailbox.
+Open question 2 (one key, or one per payer) decides whether this
+candidate is even available.
+
+Re-verify the whole issuer_reenc transcript inside the fold, as a
+private witness, and bind its beta to k*G. Sound, and it does not
+publish the key. It is several variable-base multiplications inside a
+circuit that has room for one fixed-base multiplication. It does not
+fit the pot22 parameters the fold was built to.
+
+Leave the tie to the receipt. The chain would keep accepting a spend
+that names the substitute. The collusion rule is a spend-time rule.
+
+
+3. How to read the flows
+------------------------
+
+Each artifact below is marked with the five questions that decide
+whether a proof is a tie:
+
+    G   who can generate it
+    I   who can intercept it (see it without being a party to it)
+    R   who can recover a hidden value from it
+    S   who can satisfy a proof about it (produce a witness the
+        verifier accepts)
+    D   who can duplicate or replay it (use a copy in place of the
+        original, or satisfy the same statement for a different subject)
+
+"The chain" means an observer of the transaction and its events. "The
+channel" means whoever carries the off-chain note from issuer to
+recipient. The channel is chosen by the issuer and is not the chain.
+
+A fact only binds two parties when the person who can satisfy the
+proof is the person the statement is about, and a copied artifact
+fails in a new context. The A2 split is a G/S failure: the minter
+generates a ciphertext the mint proof accepts for M_A, and the
+recipient's honest k satisfies the spend proof for M_B.
+
+
+4. A2, private issuer, addressed
+--------------------------------
+
+4.1 Issuance
+
+Identity M_A = m_A*G, and the account credential E_reg = (rG, M_A + r*pk_iss).
+    G  the minter, from the certified record and a fresh account key
+    I  pk_iss and E_reg are on chain; m_A is not
+    R  sk_iss opens E_reg to M_A. A counterparty who has been shown m_A
+       on a receipt already has it. sk_iss stays in the wallet
+    S  issuer_reenc is satisfied by (sk_iss, r', pk_mint, beta, gamma).
+       The minter chooses pk_mint. Nothing checks it against Bob's key
+    D  the credential is bound to the account address. A second account
+       of the same identity is a different (sk, E_reg)
+
+Recipient mailbox pk_real = k*G.
+    G  the recipient, from the wallet seed. Not from m_rec
+    I  the minter is told pk_real on the addressing channel. The chain
+       is not
+    R  pk_real does not yield k. Trial decryption under m_rec fails
+    S  the fold is satisfied only by this k, together with the
+       recipient's salt and account key
+    D  publishing pk_real does not let anyone else read. Proving the
+       binding in the clear (prove_receiving_binding) does: it returns
+       k itself
+
+Note randomness r', r_note, rho. Chosen by the minter.
+    G  the minter
+    I  whoever receives the off-chain payload. r' and r_note are not
+       in the serialized notePayload the end-to-end fixture writes;
+       they stay in the generator's memory. A real delivery has to
+       carry them or the recipient cannot build the fold
+    R  from eIss alone, r' is a discrete log
+    S  the fold witness uses r' as the opening of eIss.R = r'*G
+    D  fresh per note. Reuse across notes is a privacy break, not a
+       soundness break
+
+eIss = (r'*G, M + r'*pk), the ciphertext at issue.
+    G  the minter. Honest: pk = pk_real and M = M_A. Attack: pk =
+       pk_mint as in section 1, and the same bytes are also an
+       encryption of M_B under pk_real
+    I  the chain. A2 mint publishes eIss as a public input of the mint
+       SNARK and of verifyIssuerReenc, tied to the committed leaf
+    R  k opens it to M_B under the attack, and to M_A under the honest
+       key. m_A opens it to neither, unless the minter chose the
+       identity point as the key, which is the bug the receiving key
+       removed
+    S  mint proof: the minter, for M_A, under whatever pk they put in Q.
+       Spend proof: the recipient, for whatever point k yields, provided
+       that point has a leaf whose salt they were given
+    D  the ciphertext can be copied. The mint SNARK binds these exact
+       bytes into the leaf. A different eIss is a different note
+
+issuer_reenc transcript, including Q, U, T.
+    G  the minter
+    I  the chain, in full. Q hides pk. T hides M, because of gamma.
+       Hiding is perfect for uniform beta and gamma only while nobody
+       is given those blinds
+    R  beta opens Q to pk_mint. gamma opens T to r'*pk_mint, and then
+       C - r'*pk_mint is M_A. The recipient is not given beta or gamma
+       today, so they cannot test pk_mint against pk_real
+    S  the on-chain verifier, against msg.sender's credential. The
+       statement is "encrypts that credential's plaintext under the key
+       in Q". It is silent on whether that key is pk_real
+    D  the transcript is bound to (issuer address, chain id, E_reg,
+       eIss). It will not verify against M_B's credential. It does not
+       need to: the spend never consults it
+
+salt_iss, the naming-association salt, and salt_pk if the mitigation
+in section 2 is adopted.
+    G  the holder of the identity whose leaf it opens. For an honest
+       note, the minter. For the attack, whoever owns M_B's leaf; the
+       minter, when M_B is their sock
+    I  the recipient, because the payload must carry it. Not the chain
+    R  the salt plus the published tree locates the leaf. It does not
+       reveal k, and it must not be the salt of the issuer's receiving
+       leaf
+    S  relation 5 is satisfied by anyone who has this salt and a
+       ciphertext their own k opens to that leaf's point. That is the
+       whole of the attacker's extra power
+    D  a salt from a different association does not open this leaf.
+       The fold refuses M_A's salt on a decryption that landed on M_B
+
+idHash = Poseidon(eNote, eIss), cm = Poseidon(A2, v, rho, idHash, pred).
+    G  the minter
+    I  cm is on chain. idHash, eNote, v, rho are not
+    R  preimage resistance. The chain cannot open cm
+    S  the mint SNARK, by the minter. The fold, by the recipient, who
+       recomputes idHash from the payload
+    D  the leaf-tie forces the binding's eIss to be the eIss inside
+       this idHash. It does not force the key inside that eIss
+
+4.2 Transmission
+
+The channel carries, or the recipient cannot spend and cannot check:
+the opening (flavor, v, rho, idHash, predicate), eNote, eIss, r_note,
+r', salt_iss, and the issuer_reenc transcript if a receipt is wanted.
+    G  the minter
+    I  the channel, and anyone the channel leaks to
+    R  k, which the channel does not get, opens eNote to v*G and eIss
+       to whichever point the key encrypts. The channel cannot decrypt.
+       The channel also cannot tell that the key is wrong
+    S  possession of the payload does not satisfy the fold. The fold
+       also needs k, the recipient's salt, and the account key
+    D  a copied payload spends once, by the first party who holds k
+       and the account. A copied payload without k spends never
+
+The recipient can detect the attack only if they are given an opening
+of Q (beta) or a committed pkHash. They are given neither today. Honest
+software decrypts, sees a registered identity, and proceeds.
+
+4.3 Spend
+
+Private witness of deposit_fold_a2:
+k, m_rec, sk_dep, salt_rec, r', salt_iss, the two Merkle paths, eNote,
+eIss.
+    G  k, m_rec, sk_dep, salt_rec: the recipient, from the seed and the
+       account. r', salt_iss, eNote, eIss: the minter, via the channel.
+       Paths: anyone, from the published tree, once they know the leaf
+    I  the witness is not published. The proof is
+    R  the proof is Groth16. It does not yield the witness
+    S  the recipient. Also anyone the recipient has given k, which is
+       what the cleartext binding proof does. A thief who stole k but
+       not the account, or the account but not k, fails relation 2 or
+       relation 3. A thief who stole the payload but not k fails
+       relation 1
+    D  public inputs are the nullifier, the identity root, eEnc, and
+       the depositor's key and credential as read from the registry.
+       A second depositor cannot replay it. The same depositor cannot
+       replay it after the nullifier is marked. eEnc is a fresh
+       re-encryption, so the proof does not reveal the mint's eIss
+
+What the spend statement actually says, and what it does not:
+    k opens eIss to M*, and M* is on a salted leaf.
+    It does not say M* is the plaintext of the minter's credential.
+    It does not say k*G is the key in Q.
+    The minter can satisfy the first by choosing the ciphertext, and
+    the recipient satisfies the second honestly. That is section 1.
+
+SpentCoupledA2 logs dc.P_I. The fold does not read dc. The logged point
+is whatever the caller supplied. It is not a commitment to M*.
+
+4.4 Receipt
+
+make_receipt decrypts eIss under k and names the result. verify_receipt
+then checks issuer_reenc against the minter account's credential, and
+checks the verifiable decryption against the decrypted point, and
+checks both points for unsalted membership.
+    G  the recipient, from k and the payload
+    I  a receipt is shown to a named auditor. It names both parties by
+       design
+    R  the auditor sees M* as k opened it, which is M_B under the attack,
+       and sees that the minter's account produced some binding. The
+       auditor is not shown that the binding's plaintext is M_A
+    S  the recipient. The minter cannot produce the verifiable
+       decryption without k
+    D  the checks do not include "M* equals the credential plaintext",
+       so a receipt that names M_B verifies against M_A's account.
+       That is the same split, one layer up
+
+The fix in the receipt is the opening of Q to the same pk the
+decryption uses, and a comparison of the two plaintexts. It is needed
+so a receipt cannot launder the split. It is not a substitute for the
+check in the fold: a colluding recipient will emit whatever receipt
+they want, and the chain is what must refuse the spend.
+
+
+5. A1, public issuer, addressed
+-------------------------------
+
+5.1 Issuance
+
+The issuer is msg.sender, a registered public identity, and a Schnorr
+over keccak(cms). The chain records publicIssuerOfCommitment[cm] =
+msg.sender. There is no hidden issuer plaintext.
+    G  the minter
+    I  the chain: the address, the Schnorr, the commitment. M_iss sits
+       inside idHash, which sits inside cm, and also in the public
+       identity record of msg.sender
+    R  the address is the issuer. No decryption
+    S  verifyIssuerSchnorr, by the holder of the issuer account key
+    D  the signature is over this batch's cms. It will not verify for
+       another batch. A later issuer cannot overwrite the stored address
+
+eNote = (r_n*G, v*G + r_n*pk_real), eRec = (r'*G, M_rec + r'*pk_real).
+idHash = Poseidon(eNote, m_iss, sigma). eRec is not inside idHash.
+    G  the minter, who is given M_rec and pk_real
+    I  neither ciphertext is a mint public input. Both travel off chain
+    R  k opens eRec to M_rec and eNote to v*G. m_rec opens neither
+    S  the A1 fold requires the opened plaintext to be m_rec*G, the same
+       scalar as the account credential and the receiving leaf, and
+       requires eNote = (v + r_n*k)*G with v public. A twisted key makes
+       k open eRec to a point that is not m_rec*G, and the witness
+       builder refuses. There is no second issuer for the twist to name
+    D  eRec can be replaced by a fresh encryption of the same M_rec under
+       the same k (the spend's eEnc). It cannot be replaced by an
+       encryption under a different key
+
+5.2 Transmission
+
+Opening, eNote, eRec, r_note, r'. No issuer salt: A1 has no relation 5.
+    G  the minter
+    I  the channel
+    R  the channel cannot decrypt without k
+    S  the channel cannot spend
+    D  same as A2. One spend, by the holder of k and the account
+
+5.3 Spend
+
+deposit_fold_a1. Same four relations as A2, no issuer leaf. v is public
+and pins eNote.
+    G  the recipient
+    I  the chain sees the nullifier, the face, the recipient address,
+       eEnc, and the proof. It does not see M_rec or pk_real
+    R  the proof does not yield k
+    S  the recipient. The issuer, holding M_rec and pk_real but not k
+       or the account, cannot
+    D  bound to the nullifier and to the depositor's registered account,
+       as in A2
+
+The A1 receipt decrypts eRec under k to M_rec and names the public
+issuer from the Schnorr identity. There is no hidden second plaintext,
+so the section 1 split has nowhere to land. The receipt still does not
+carry a proof that pk_real is the registered mailbox of M_rec. That is
+the earlier gap (the binding evidence discloses k, and no hiding proof
+exists), and it is independent of this flaw.
+
+
+6. B1, public issuer, bearer
+----------------------------
+
+6.1 Issuance
+
+Same public-issuer mint as A1. idHash = Poseidon(m_iss, sigma). No
+recipient, no eIss, no receiving key. The bearer secret is rho, chosen
+by the minter and committed inside cm.
+    G  the minter, including rho
+    I  the chain sees the issuer address and cm, not rho
+    R  rho is not recoverable from cm
+    S  whoever is later handed rho, and the minter, who kept it
+    D  the issuer address is stored against this exact cm. spendCoupledB1
+       requires publicIssuerOfCommitment[cm] == the issuer argument. A
+       second issuer cannot be substituted at spend
+
+6.2 Transmission
+
+The opening, including rho, passes hand to hand. Whoever holds it can
+race the spend. That is the bearer predicate, not a flaw in the binding.
+The issuer already holds rho. A photograph of an unsealed note is a copy.
+    G  the minter
+    I  anyone who sees the note
+    R  nothing hidden beyond rho, and rho is the note
+    S  the first spender who also has a registered identity
+    D  two copies spend once. The nullifier is a function of rho and
+       idHash
+
+6.3 Spend
+
+The depositor encrypts M_dep under the issuer's registered account key
+pk_iss, which is on chain and is not chosen by the depositor for the
+purpose of naming someone else.
+    G  the depositor, who knows M_dep, r, and pk_iss. They do not know
+       sk_iss, so r*pk_iss stays variable-base. Giving them a form that
+       factored through G would give them sk_iss
+    I  the chain sees eDepForIss and the issuer address
+    R  sk_iss, held by the issuer, opens it to M_dep. A certified record
+       that discloses m_iss does not. m_dep does not
+    S  verifyDepositorBinding is one sigma on one secret m_dep: the
+       account credential and the ciphertext and P_dep = M_dep + b*H.
+       The shared response is a real tie. identity_membership_b1 then
+       proves T = b*H_PEDERSEN, the addition precondition, and the salted
+       leaf. H_PEDERSEN has no known log, so the blind cannot be shifted
+       onto a different registered identity
+    D  the membership proof is bound to the sigma's P_dep because the
+       contract passes that point in. The spend is bound to the mint by
+       the stored issuer address. A proof built for a different issuer
+       key fails the sigma
+
+The B1 receipt is the issuer's. They decrypt with sk_iss and produce a
+verifiable decryption under pk_iss. A substituted ciphertext fails the
+sigma, so the depositor cannot make the issuer recover a different
+identity from the one the proof certified.
+
+B1 has no hidden second key on the issuer side. The issuer key is the
+account key the registry stores for the address the mint recorded. That
+is why the section 1 construction does not transfer.
+
+
+7. What the flows change about the open questions
+--------------------------------------------------
+
+The five questions in the previous note stand. Two of them get sharper.
+
+One receiving key, or one per payer. Publishing pk_recv at mint is a
+sound and cheap closure of section 1, and it links every mint addressed
+to that key. A per-payer key makes that link the pair who already share
+a channel. A lifelong key makes it a public index of one recipient's
+incoming A2 notes. The salted-hash closure keeps a lifelong key
+unlinkable, at the cost of one fixed-base multiplication and a wider
+note commitment. The choice is this trade, not a free preference.
+
+The receipt's job. A receipt that names M* without proving M* is the
+plaintext of the binding is not evidence of who paid. The opening of Q
+belongs in the receipt. It does not belong on chain. And the spend
+proof has to enforce the same equality, or a colluding recipient omits
+the opening and the chain still pays.
+
+The security argument is now blocked on this, not only on the missing
+rewrite of Theorems 7 and 8. A theorem that says an accepted A2 spend
+names the minter is false of the code as it stands. The statement to
+prove, after the salted-hash tie, is: the key the fold opens to k*G is
+the key issuer_reenc committed, so the point k decrypts to is the
+plaintext of the minter's credential.

@@ -9,26 +9,23 @@
 //! One commitment `C1 = m_tilde*A + b_tilde*G` covers both credential
 //! exponents, so no proof field reveals `m*A` on its own.  Fiat-Shamir binds
 //! chainid, the registry contract address, and domain
-//! `AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3`.
+//! `AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2`.
 //! Verified on-chain by `IdentityRegistry.register`.
 
 use ark_bn254::{G1Affine, G2Affine};
 use ark_ec::{AffineRepr, CurveGroup};
 
-use crate::keccak::keccak_raw;
 use crate::pairing::product_is_one;
 use crate::{
     fr_mod, g1_from_w, g2_from_w, w_from_fr, w_from_g1, w_lt_order, G1w, G2w, Result, Transcript,
     W256,
 };
 
-/// Full keccak word of
-/// `AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3` -- not reduced mod
-/// ORDER.
+/// Full keccak word of `FS_REGISTER` -- not reduced mod ORDER.
 /// Mirrors `alberta_buck.wallet.nizk.REGISTER_DOMAIN` and
 /// `IdentityRegistry.REGISTER_DOMAIN`.
 fn register_domain() -> W256 {
-    keccak_raw(b"AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3")
+    crate::domains::word(crate::domains::FS_REGISTER)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

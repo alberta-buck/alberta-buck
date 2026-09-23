@@ -11,7 +11,50 @@ import {IdentityRegistry} from "../../src/IdentityRegistry.sol";
 ///
 ///         register() is inherited unchanged (still requires a real credential).
 contract IdentityRegistryHarness is IdentityRegistry {
+    // ---- a flat incremental accumulator, for fixture replay only ----------
+    //
+    // A deployment never inserts a leaf through the registry: authorities
+    // admit leaves to their own subtrees and the aggregator posts the composed
+    // root.  Some fixtures replay a flat tree leaf by leaf instead; this does
+    // that, and posts each new root through the same ring a real posting uses.
+
+    /// @notice Leaves replayed so far.
+    uint32                       public  identityNextLeafIndex;
+    uint256[IDENTITY_TREE_DEPTH] internal _identityFilledSubtrees;
+
+    /// @dev The empty-subtree ladder ZERO_{d+1} = Poseidon(ZERO_d, ZERO_d),
+    ///      ZERO_0 = 0, computed on first insertion rather than carried as
+    ///      constants: insertion needs the Poseidon contract anyway, and the
+    ///      constants would push the harness past the EIP-170 size limit.
+    uint256[IDENTITY_TREE_DEPTH] internal _zeros;
+
     constructor(address _governance) IdentityRegistry(_governance) {}
+
+    /// @dev Tornado-style insertion: the new root.
+    function _insertIdentityLeaf(uint256 leaf) internal returns (uint256) {
+        uint256 index = identityNextLeafIndex;
+        if (index == 0) {
+            uint256 z = 0;
+            for (uint8 d = 0; d < IDENTITY_TREE_DEPTH; d++) {
+                _zeros[d] = z;
+                _identityFilledSubtrees[d] = z;
+                z = _hashPair(z, z);
+            }
+        }
+        require(index < (uint256(1) << IDENTITY_TREE_DEPTH), "id tree full");
+        uint256 current = leaf;
+        for (uint8 d = 0; d < IDENTITY_TREE_DEPTH; d++) {
+            if (index & 1 == 0) {
+                _identityFilledSubtrees[d] = current;
+                current = _hashPair(current, _zeros[d]);
+            } else {
+                current = _hashPair(_identityFilledSubtrees[d], current);
+            }
+            index >>= 1;
+        }
+        identityNextLeafIndex++;
+        return current;
+    }
 
     /// @dev Old 5-arg bind: deployed + unbound, then store caller-supplied
     ///      (pk, E, flags).  No credential, no registered-binder check.
@@ -58,9 +101,28 @@ contract IdentityRegistryHarness is IdentityRegistry {
         emit CarryingFlagSet(target, isCarrying_);
 
         if (identityLeaf != 0 && identityPoseidon != address(0)) {
-            uint256 newRoot = _insertIdentityLeaf(identityLeaf);
-            emit IdentityRootUpdated(identityRoot, newRoot);
-            identityRoot = newRoot;
+            _postRoot(_insertIdentityLeaf(identityLeaf), bytes32(0));
         }
+    }
+
+    /// @notice Admit one leaf that is an ASSOCIATION rather than an account
+    ///         binding -- a mailbox leaf, say, which commits an Identity and
+    ///         the receiving key its Notes are addressed to.  Such leaves have
+    ///         no address of their own, so they cannot arrive through a bind.
+    ///
+    ///         On a deployment they arrive the way every leaf does: the
+    ///         organisation admits them to its subtree and the aggregator posts
+    ///         the composed root.  The harness inserts them directly only so a
+    ///         fixture's flat tree can be replayed incrementally on chain.
+    function fixtureInsertLeaf(uint256 leaf) external {
+        require(leaf != 0, "zero leaf");
+        _postRoot(_insertIdentityLeaf(leaf), bytes32(0));
+    }
+
+    /// @notice Post a root without appointing a root authority and aggregator.
+    ///         A fixture shortcut: suites whose subject is not the accumulator
+    ///         need a live root, not the roles that post one.
+    function fixturePostRoot(uint256 root) external {
+        _postRoot(root, bytes32(0));
     }
 }

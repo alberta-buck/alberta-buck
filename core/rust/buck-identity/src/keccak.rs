@@ -37,12 +37,15 @@ pub fn keccak_scalar(words: &[W256]) -> W256 {
     )))
 }
 
-/// `m = keccak256(canonical_identity_data) mod ORDER`.
+/// `m = keccak256(IDENTITY_SCALAR || canonical_identity_data) mod ORDER`.
 ///
-/// The caller supplies the canonical UTF-8 JSON bytes (sorted keys, compact
+/// The tag keeps a person's scalar out of every other protocol's range.  The
+/// caller supplies the canonical UTF-8 JSON bytes (sorted keys, compact
 /// separators) -- canonicalization stays language-side.
 pub fn identity_scalar(canonical: &[u8]) -> W256 {
-    w_from_fr(&ark_bn254::Fr::from_be_bytes_mod_order(&keccak_raw(
-        canonical,
-    )))
+    let tag = crate::domains::IDENTITY_SCALAR;
+    let mut buf = Vec::with_capacity(tag.len() + canonical.len());
+    buf.extend_from_slice(tag);
+    buf.extend_from_slice(canonical);
+    w_from_fr(&ark_bn254::Fr::from_be_bytes_mod_order(&keccak_raw(&buf)))
 }

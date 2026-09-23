@@ -150,6 +150,30 @@ fn party(v: &Value, name: &str) -> P {
     }
 }
 
+/// The addressed-note legs a row was built with: the mailbox key, and
+/// whichever evidence the generating role could produce.
+#[allow(clippy::too_many_arguments)]
+fn legs_of<'a>(
+    row: &'a Value,
+    pk_recv: &'a (W256, W256),
+    k_recv: &'a W256,
+    r_note: &'a W256,
+    r_id: &'a W256,
+    t_note: &'a Option<W256>,
+    t_id: &'a Option<W256>,
+) -> AddressedLegs<'a> {
+    let recipient = row["role"].as_str().unwrap() == "recipient";
+    AddressedLegs {
+        pk_recv,
+        k_recv: if recipient { Some(k_recv) } else { None },
+        r_note: if recipient { None } else { Some(r_note) },
+        r_id: if recipient { None } else { Some(r_id) },
+        binding: row.get("mailboxBinding"),
+        t_note: t_note.as_ref(),
+        t_id: t_id.as_ref(),
+    }
+}
+
 fn check_outputs(core: &Value, row: &Value) {
     let blob = serialize_core(core).unwrap();
     assert_eq!(
@@ -291,6 +315,14 @@ fn receipts_replay() {
                 let mint = &row["mint"];
                 let cms: Vec<W256> = mint["cms"].as_array().unwrap().iter().map(jw).collect();
                 let t_vd = nonces.get("t_vd").map(jw);
+                let t_note = nonces.get("t_note").map(jw);
+                let t_id = nonces.get("t_id").map(jw);
+                let pk_recv = jg1(&v["parties"]["alice"]["pk_recv"]);
+                let k_recv = jw(&v["parties"]["alice"]["k_recv"]);
+                let r_note = jw(&mint["nonces"]["r_note"]);
+                let r_id = jw(&mint["nonces"]["r_rec"]);
+                let legs = legs_of(row, &pk_recv, &k_recv, &r_note, &r_id,
+                                   &t_note, &t_id);
                 build_note_a1(
                     chainid,
                     contracts,
@@ -323,6 +355,7 @@ fn receipts_replay() {
                     Some(&payee.e),
                     None,
                     t_vd.as_ref(),
+                    &legs,
                 )
                 .unwrap()
             }
@@ -334,6 +367,14 @@ fn receipts_replay() {
                 } else {
                     None
                 };
+                let t_note = nonces.get("t_note").map(jw);
+                let t_id = nonces.get("t_id").map(jw);
+                let pk_recv = jg1(&v["parties"]["alice"]["pk_recv"]);
+                let k_recv = jw(&v["parties"]["alice"]["k_recv"]);
+                let r_note = jw(&mint["nonces"]["r_note"]);
+                let r_id = jw(&mint["nonces"]["r_prime"]);
+                let legs = legs_of(row, &pk_recv, &k_recv, &r_note, &r_id,
+                                   &t_note, &t_id);
                 build_note_a2(
                     chainid,
                     contracts,
@@ -360,12 +401,15 @@ fn receipts_replay() {
                     txn["mint_txhash"].as_str().unwrap(),
                     txn["mint_block"].as_u64().unwrap(),
                     binding.as_ref(),
+                    &jg1(&mint["binding"]["T"]),
+                    Some(&jw(&mint["nonces"]["gamma"])),
                     role,
                     Some(&payee.sk),
                     Some(&payee.e),
                     Some(&payer.sk),
                     None,
                     &jw(&nonces["t_vd"]),
+                    &legs,
                 )
                 .unwrap()
             }
@@ -398,7 +442,7 @@ fn unilateral_a2_replay() {
     let minted = mint_unilateral_a2(
         &jw(&u["sk_iss"]),
         &jct(&u["E_reg"]),
-        &jg1(&u["M_rec"]),
+        &jg1(&u["pk_recv"]),
         &jw(&u["v"]),
         &jw(&u["rho"]),
         &jw(&u["issuer"]),
@@ -422,6 +466,7 @@ fn unilateral_a2_replay() {
     assert_eq!(minted.cm, jw(&m["cm"]));
     assert_eq!(minted.opening, jopening(&m["opening"]));
     assert_eq!(minted.binding, jbinding(&m["binding"]));
+    assert_eq!(minted.gamma, jw(&m["gamma"]));
 
     // The registry-tree state and the receipt.
     let leaves: Vec<W256> = u["tree"]["leaves"].as_array().unwrap().iter().map(jw).collect();
@@ -433,7 +478,8 @@ fn unilateral_a2_replay() {
     assert_eq!(tree.root().unwrap(), jw(&u["tree"]["root"]));
 
     let rcpt = make_receipt_a2(
-        &jw(&u["m_rec"]),
+        &jw(&u["k_recv"]),
+        &jg1(&u["M_rec"]),
         &minted,
         &jw(&u["issuer"]),
         &jw(&u["chainid"]),
@@ -444,11 +490,13 @@ fn unilateral_a2_replay() {
     let r = &u["receipt"];
     assert_eq!(rcpt.m_i, jg1(&r["M_I"]));
     assert_eq!(rcpt.m_rec, jg1(&r["M_rec"]));
+    assert_eq!(rcpt.pk_recv, jg1(&r["pk_recv"]));
     assert_eq!(rcpt.value, jw(&r["value"]));
     assert_eq!(rcpt.vd.e, jw(&r["vd"]["e"]));
     assert_eq!(rcpt.vd.s, jw(&r["vd"]["s"]));
     assert_eq!(rcpt.vd.t1, jg1(&r["vd"]["T1"]));
     assert_eq!(rcpt.vd.t2, jg1(&r["vd"]["T2"]));
+    assert_eq!(rcpt.gamma, jw(&r["gamma"]));
     assert_eq!(rcpt.m_i_member, r["M_I_member"].as_bool().unwrap());
     assert_eq!(rcpt.m_rec_member, r["M_rec_member"].as_bool().unwrap());
 
@@ -470,7 +518,10 @@ fn unilateral_a2_replay() {
         .iter()
         .map(jw)
         .collect();
-    let wrong_tree = IdentityMerkleTree::from_leaves(&wrong_leaves, 10).unwrap();
+    // Depth from the fixture, not a literal: the aggregator depth is a
+    // protocol parameter, and hardcoding it made this test fail when it moved.
+    let depth = u["tree"]["depth"].as_u64().unwrap() as usize;
+    let wrong_tree = IdentityMerkleTree::from_leaves(&wrong_leaves, depth).unwrap();
     assert_eq!(wrong_tree.root().unwrap(), jw(&u["wrong_root_tree"]["root"]));
     let res_bad = verify_receipt_a2(
         &rcpt,
@@ -493,6 +544,7 @@ fn unilateral_a1_replay() {
     let u = &v["unilateral_a1"];
     let minted = mint_unilateral_a1(
         &jg1(&u["M_rec"]),
+        &jg1(&u["pk_recv"]),
         &jw(&u["v"]),
         &jw(&u["rho"]),
         &jw(&u["m_issuer"]),
@@ -517,10 +569,12 @@ fn unilateral_a1_replay() {
         .iter()
         .map(jw)
         .collect();
-    let tree = IdentityMerkleTree::from_leaves(&leaves, 10).unwrap();
+    let depth = v["unilateral_a2"]["tree"]["depth"].as_u64().unwrap() as usize;
+    let tree = IdentityMerkleTree::from_leaves(&leaves, depth).unwrap();
 
     let rcpt = make_receipt_a1(
-        &jw(&u["m_rec"]),
+        &jw(&u["k_recv"]),
+        &jg1(&u["M_rec"]),
         &minted,
         &jg1(&u["M_iss"]),
         &jw(&u["issuer"]),
@@ -532,6 +586,7 @@ fn unilateral_a1_replay() {
     let r = &u["receipt"];
     assert_eq!(rcpt.m_iss, jg1(&r["M_iss"]));
     assert_eq!(rcpt.m_rec, jg1(&r["M_rec"]));
+    assert_eq!(rcpt.pk_recv, jg1(&r["pk_recv"]));
     assert_eq!(rcpt.value, jw(&r["value"]));
     assert_eq!(rcpt.vd.e, jw(&r["vd"]["e"]));
     assert_eq!(rcpt.vd.s, jw(&r["vd"]["s"]));
@@ -567,4 +622,35 @@ fn issuer_replay() {
     let mut wrong_m = cred.m;
     wrong_m[31] ^= 1;
     assert!(!verify_credential(&jg2(&i["pk_X"]), &jg2(&i["pk_Y"]), &cred.sigma, &wrong_m).unwrap());
+}
+
+/// The Notes section: the receiving key, the delivery, the mailbox binding and
+/// the folded gate's witnesses, each replayed through the JSON-args entry
+/// point a binding calls, and compared as parsed JSON with the reference.
+#[test]
+fn notes_kernel_replay() {
+    use buck_wallet::args;
+    let v = fixture();
+    let rows = v["notes"].as_array().expect("notes section");
+    assert!(rows.len() >= 11, "the notes section lost rows");
+    for row in rows {
+        let f = row["fn"].as_str().unwrap();
+        let a = &row["args"];
+        let got = match f {
+            "receiving_key" => args::receiving_key_args(a),
+            "wrap_mask" => args::wrap_mask_args(a),
+            "deliver_a1" => args::deliver_a1_args(a),
+            "deliver_a2" => args::deliver_a2_args(a),
+            "open_a1" => args::open_a1_args(a),
+            "open_a2" => args::open_a2_args(a),
+            "prove_receiving_binding" => args::prove_receiving_binding_args(a),
+            "verify_receiving_binding" => args::verify_receiving_binding_args(a),
+            "deposit_fold_a1_witness" => args::deposit_fold_a1_witness_args(a),
+            "deposit_fold_a2_witness" => args::deposit_fold_a2_witness_args(a),
+            other => panic!("unknown notes fn {other}"),
+        }
+        .unwrap_or_else(|e| panic!("{f}: {}", e.0));
+        let got: Value = serde_json::from_str(&got).unwrap();
+        assert_eq!(got, row["want"], "{f} diverges from the Python reference");
+    }
 }

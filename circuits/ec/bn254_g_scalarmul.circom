@@ -1,6 +1,6 @@
 // BN254 G-point scalar multiplication using circom-lib's EC primitives.
 //
-// Computes T = s * G where H is the NUMS generator from IdentityRegistry.
+// Computes T = s * G, G = (1, 2) the standard BN254 generator.
 // Uses precomputed stride-8 powers table (bn254_g_pows.circom).
 // Based on circom-lib's EllipticCurveScalarGeneratorMultiplicationOptimised.
 //
@@ -18,8 +18,13 @@ include "../../lib/circom-lib/circuits/ec/curve.circom";
 include "./powers/bn254_g_pows.circom";
 include "./get_bn254.circom";
 
-// NOTE: BN254_A0..B3 are already defined in bn254_h_scalarmul.circom.
-// Do NOT redefine them here.
+// BN254 curve params inherited from get_bn254.circom.  The H_PEDERSEN gadget
+// (bn254_hp_scalarmul.circom) defines its own under a BN254HP_ prefix, so both
+// files can be included by one circuit.
+function BN254_A0() { return 0; } function BN254_A1() { return 0; }
+function BN254_A2() { return 0; } function BN254_A3() { return 0; }
+function BN254_B0() { return 3; } function BN254_B1() { return 0; }
+function BN254_B2() { return 0; } function BN254_B3() { return 0; }
 
 /// Computes s * G where G = (1, 2) is the standard BN254 generator.
 /// b is a 256-bit scalar in 4-limb representation.

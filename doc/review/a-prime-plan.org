@@ -923,6 +923,14 @@ Decided 2026-09-20, after phases 1 to 5 landed. This program is a
 prerequisite for the Notes identity work, and R5 is deferred behind it
 (section [[#deferred]]).
 
+*This section is the design record.* The plan of record for implementing
+it, with the decisions taken since (salt only where membership is
+private; the epoch reinterpretation that avoids regenerating every
+vector; the insurance regulator as a periodic attestor with coarse
+bands) and the seven-interface blast radius, is
+[[file:accumulator-plan.org][the accumulator plan]] on branch
+=feature/identity-accumulator=.
+
 ** What it decides
 
 The registration presentation hides which identity registered an account.

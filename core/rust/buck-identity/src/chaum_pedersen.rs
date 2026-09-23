@@ -50,7 +50,8 @@ fn transcript(
         .w(sender)
         .w(spender)
         .w(chainid)
-        .w(registry);
+        .w(registry)
+        .w(&crate::domains::word(crate::domains::FS_APPROVE));
     t
 }
 

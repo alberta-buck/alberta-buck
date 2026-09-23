@@ -14,7 +14,7 @@ const api = wrapIdentity(require("alberta-buck-kernel/identity"));
 export default api;
 export const {
   hex, big, canonicalIdentity, randScalar,
-  ORDER, F_R, FIELD_MODULUS, G1, G2, H_POINT,
+  ORDER, F_R, FIELD_MODULUS, G1, G2, H_PEDERSEN,
   FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
   g1Add, g1Mul, g1Neg, g2Mul, pairingCheck,
   keccakScalar, identityScalar, reduceModOrder, poseidon,
@@ -24,8 +24,8 @@ export const {
   registrationProve, registrationVerify,
   chaumPedersenProve, chaumPedersenVerify,
   verifiableDecryptProve, verifiableDecryptVerify,
+  identityOpeningProve, identityOpeningVerify, treeTag, deriveSalt,
   issuerReencProve, issuerReencVerify,
-  depositCoupleProve, depositCoupleVerify,
   b1BindProve, b1BindVerify,
   noteCommitment, nullifierB, nullifierA,
   idHashB1, idHashA1, idHashA2, identityLeaf,

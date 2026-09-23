@@ -25,12 +25,11 @@ the spend-time issuer to match.  A1/A2 keep this public signal at zero.
 
 A-flavor identity binding: the spend circuit does **not** learn the
 recipient from ``id_hash`` -- it is opaque to the circuit.  The addressed
-(A1/A2) binding is enforced by the Identity-M deposit gate at spend: the
-deposit-coupling sigma plus the bound membership proof, plus the
-note<->eEnc binding SNARK (:file:`circuits/note_binding.circom` for the A2
-payload layout, :file:`circuits/note_binding_a1.circom` for A1), which
-re-derives this same nullifier in-circuit from ``(rho, id_hash)`` to tie
-the gate to the specific spent note.  Authorization keys on the recipient
+(A1/A2) binding is enforced by the folded deposit gate at spend
+(:file:`circuits/deposit_fold_a1.circom`, :file:`deposit_fold_a2.circom`),
+which carries the note<->eEnc tie as one of its relations: it re-derives this
+same nullifier in-circuit from ``(rho, id_hash)``, so the ciphertext it checks
+is the spent note's.  Authorization keys on the recipient
 *identity* ``m_rec``, not on any mint-time account key-pair, so key loss
 is recoverable by binding a new account to the same identity.  (The
 earlier account-pinned design -- an in-circuit Chaum-Pedersen equality on
@@ -165,10 +164,16 @@ def id_payload_a1(E_note: ElGamalCiphertext, m_issuer: int, sigma_R, sigma_s: in
             m_issuer, *point_to_words(sigma_R), sigma_s)
 
 
-def id_payload_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext) -> Tuple[int, ...]:
-    """A2 id-payload (addressed, private issuer): ``(E_note.R, E_note.C, E_iss.R, E_iss.C)``."""
+def id_payload_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext, T) -> Tuple[int, ...]:
+    """A2 id-payload (addressed, private issuer): ``(E_note.R, E_note.C, E_iss.R, E_iss.C, T)``.
+
+    ``T = r'*pk_recv + gamma*H`` is the mint binding's blinded point.  The spend can reach the mint
+    only through ``idHash``, so committing ``T`` is what lets the A2 fold tie the key the binding
+    proved about to the recipient's own (doc/review/notes-receiving-key.org, section 4.6).
+    """
     return (*point_to_words(E_note.R), *point_to_words(E_note.C),
-            *point_to_words(E_issuer_for_rec.R), *point_to_words(E_issuer_for_rec.C))
+            *point_to_words(E_issuer_for_rec.R), *point_to_words(E_issuer_for_rec.C),
+            *point_to_words(T))
 
 
 # ---- id_hash helpers (Poseidon of payload) --------------------------------
@@ -191,8 +196,8 @@ def id_hash_a1(E_note: ElGamalCiphertext, m_issuer: int, sigma_R, sigma_s: int) 
     return _hash_words(id_payload_a1(E_note, m_issuer, sigma_R, sigma_s))
 
 
-def id_hash_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext) -> int:
-    return _hash_words(id_payload_a2(E_note, E_issuer_for_rec))
+def id_hash_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext, T) -> int:
+    return _hash_words(id_payload_a2(E_note, E_issuer_for_rec, T))
 
 
 __all__ = [

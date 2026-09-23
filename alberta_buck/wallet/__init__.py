@@ -48,7 +48,7 @@ from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
 from alberta_buck.wallet.issuer_reenc import (
-    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify, H_POINT,
+    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify,
 )
 from alberta_buck.wallet.receipt import (
     RegisteredIdentity, Receipt, RcptResult, receipt_verify,
@@ -71,8 +71,28 @@ from alberta_buck.wallet.render import (
 from alberta_buck.wallet.issuer import (
     Issuer, IssuedCredential, present_for_registration,
 )
+from alberta_buck.wallet.salt import derive_salt, tree_tag, SALT_DOMAIN
+from alberta_buck.wallet.attributes import (
+    AttributeProof, prove_attributes, verify_attributes,
+)
+from alberta_buck.wallet.recvkey import (
+    RECV_DOMAIN, ReceivingBinding,
+    derive_receiving_secret, receiving_key, receiving_public,
+    prove_receiving_binding, verify_receiving_binding,
+)
+from alberta_buck.wallet.deposit_fold import (
+    DepositFoldRefused, DepositFoldWitness,
+    deposit_fold_witness, deposit_fold_check,
+)
 
 __all__ = [
+    "derive_salt", "tree_tag", "SALT_DOMAIN",
+    "AttributeProof", "prove_attributes", "verify_attributes",
+    "RECV_DOMAIN", "ReceivingBinding",
+    "derive_receiving_secret", "receiving_key", "receiving_public",
+    "prove_receiving_binding", "verify_receiving_binding",
+    "DepositFoldRefused", "DepositFoldWitness",
+    "deposit_fold_witness", "deposit_fold_check",
     "kernel_active", "backend",
     "G1", "G2", "ORDER", "add", "mul", "neg", "eq", "pairing", "is_inf",
     "point_to_words", "words_to_point", "scalar_to_word", "word_to_scalar",
@@ -94,7 +114,7 @@ __all__ = [
     "id_hash_a1", "id_hash_a2", "id_hash_b1",
     "SchnorrProof", "batch_commitment", "issuer_schnorr_sign", "issuer_schnorr_verify",
     "VDProof", "verifiable_decrypt_prove", "verifiable_decrypt_verify",
-    "IssuerReencProof", "issuer_reenc_prove", "issuer_reenc_verify", "H_POINT",
+    "IssuerReencProof", "issuer_reenc_prove", "issuer_reenc_verify",
     "RegisteredIdentity", "Receipt", "RcptResult", "receipt_verify",
     "ApproveReceipt", "approve_receipt_verify",
     "PartyRecord", "TxnRecord", "ReceiptCore",

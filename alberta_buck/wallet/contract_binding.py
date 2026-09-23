@@ -12,9 +12,8 @@ from alberta_buck.wallet.bn254 import (
 from alberta_buck.wallet.transcript import keccak_raw, keccak_scalar
 
 
-CONTRACT_BINDING_DOMAIN = int.from_bytes(
-    keccak_raw(b"AlbertaBuck:ContractBindingAuthorization:v1"), "big"
-)
+from alberta_buck.wallet.domains import FS_CONTRACT_BINDING, word as _word
+CONTRACT_BINDING_DOMAIN = _word(FS_CONTRACT_BINDING)
 
 
 @dataclass(frozen=True)

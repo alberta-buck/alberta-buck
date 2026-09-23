@@ -31,7 +31,12 @@ pub fn batch_commitment(cms: &[W256]) -> W256 {
 
 fn transcript(pk: &G1Affine, r: &G1Affine, h_batch: &W256, issuer: &W256, chainid: &W256) -> Transcript {
     let mut t = Transcript::new();
-    t.p(pk).p(r).w(h_batch).w(issuer).w(chainid);
+    t.p(pk)
+        .p(r)
+        .w(h_batch)
+        .w(issuer)
+        .w(chainid)
+        .w(&crate::domains::word(crate::domains::FS_ISSUER_SCHNORR));
     t
 }
 

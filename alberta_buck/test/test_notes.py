@@ -136,10 +136,12 @@ def _make_ct():
 def test_id_payload_a2_layout():
     E_note = _make_ct()
     E_iss  = _make_ct()
-    words = id_payload_a2(E_note, E_iss)
-    assert len(words) == 8
+    T      = mul(G1, 13)
+    words = id_payload_a2(E_note, E_iss, T)
+    assert len(words) == 10  # E_note(4) + E_iss(4) + T(2)
     expected = (*point_to_words(E_note.R), *point_to_words(E_note.C),
-                *point_to_words(E_iss.R),  *point_to_words(E_iss.C))
+                *point_to_words(E_iss.R),  *point_to_words(E_iss.C),
+                *point_to_words(T))
     assert words == expected
 
 
@@ -169,7 +171,7 @@ def test_id_hash_a1_a2_collapse_to_single_field_element():
     E_iss  = _make_ct()
     sigma_R = mul(G1, 3)
     h_a1 = id_hash_a1(E_note, m_issuer=5, sigma_R=sigma_R, sigma_s=9)
-    h_a2 = id_hash_a2(E_note, E_iss)
+    h_a2 = id_hash_a2(E_note, E_iss, mul(G1, 13))
     assert 0 <= h_a1 < F_R
     assert 0 <= h_a2 < F_R
     # Different payload shapes hashing the same E_note must not collide.

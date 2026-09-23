@@ -29,16 +29,19 @@
 
 pub mod b1_binding;
 pub mod chaum_pedersen;
+pub mod domains;
 pub mod elgamal;
 pub mod issuer_reenc;
 pub mod keccak;
 pub mod nizk;
+pub mod nums;
 pub mod notes;
 pub mod pairing;
 pub mod poseidon;
 pub mod ps;
+pub mod recvkey;
+pub mod salt;
 pub mod schnorr;
-pub mod unilateral_a2;
 pub mod verifiable_decrypt;
 
 use ark_bn254::{Fq, Fq2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};

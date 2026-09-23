@@ -17,7 +17,7 @@
  * already pins (CM1/CM2/CM3 in Notes.t.sol) so the on-chain mint and the
  * off-chain reference walk the same insertion order.
  *
- * The empty-leaf scalar is keccak256("AlbertaBuck:Notes:zero") % FIELD_R,
+ * The empty-leaf scalar is keccak256("AlbertaBuck/Notes/Zero/v2") % FIELD_R,
  * matching Notes.sol's constructor.
  */
 "use strict";
@@ -49,7 +49,7 @@ async function main() {
     const F        = poseidon.F;
     const H = (a, b) => BigInt(F.toString(poseidon([a, b])));
 
-    const zKeccak = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck:Notes:zero"));
+    const zKeccak = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"));
     const zeroValue = BigInt(zKeccak) % FIELD_R;
 
     const zeros = [zeroValue];

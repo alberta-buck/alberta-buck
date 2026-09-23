@@ -190,6 +190,25 @@ def test_verifiable_decrypt(kv):
     )
 
 
+def test_identity_opening(kv):
+    r = kv["identity_opening"]
+    e_ct = _ct(r["E"])
+    args = (_i(r["account"]), _i(r["chainid"]))
+    proof = bi.identity_opening_prove(e_ct, _i(r["sk"]), _pt(r["M"]), *args, _i(r["registry"]),
+                                      _i(r["t"]))
+    pf = r["proof"]
+    assert proof == (_i(pf["e"]), _i(pf["s"]), _pt(pf["T1"]), _pt(pf["T2"]))
+    pk, M = _pt(r["pk"]), _pt(r["M"])
+    assert bi.identity_opening_verify(e_ct, pk, M, proof, *args, _i(r["registry"])) == r["verify"]
+    assert not bi.identity_opening_verify(e_ct, pk, M, proof, *args, _i(r["registry"]) + 1)
+    # Its own tag: a receipt's proof opens nothing, and the opening is no receipt.
+    vd = kv["verifiable_decrypt"]["proof"]
+    vd_proof = (_i(vd["e"]), _i(vd["s"]), _pt(vd["T1"]), _pt(vd["T2"]))
+    assert (not bi.identity_opening_verify(e_ct, pk, M, vd_proof, *args, _i(r["registry"]))) \
+        == r["not_a_receipt_proof"]
+    assert not bi.verifiable_decrypt_verify(e_ct, pk, M, proof, *args)
+
+
 def test_issuer_reenc(kv):
     r = kv["issuer_reenc"]
     e_reg, e_iss = _ct(r["E_reg"]), _ct(r["E_iss"])
@@ -207,24 +226,6 @@ def test_issuer_reenc(kv):
     )
     assert bi.issuer_reenc_verify(
         _pt(r["pk_iss"]), e_reg, e_iss, proof, _i(r["issuer"]), _i(r["chainid"]),
-    )
-
-
-def test_deposit_couple(kv):
-    r = kv["deposit_couple"]
-    e_dep, e_iss = _ct(r["E_dep"]), _ct(r["eIss"])
-    proof = bi.deposit_couple_prove(
-        _i(r["m_rec"]), _i(r["sk_dep"]), e_dep, e_iss,
-        _i(r["account"]), _i(r["chainid"]),
-        _i(r["b"]), _i(r["k_m"]), _i(r["k_s"]), _i(r["k_b"]),
-    )
-    pf = r["proof"]
-    assert proof == (
-        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_s"]), _i(pf["s_b"]),
-        _pt(pf["A2"]), _pt(pf["A3"]), _pt(pf["A4"]), _pt(pf["P_I"]),
-    )
-    assert bi.deposit_couple_verify(
-        _pt(r["pk_dep"]), e_dep, e_iss, proof, _i(r["account"]), _i(r["chainid"]),
     )
 
 
@@ -255,7 +256,7 @@ def test_notes_and_merkle(kv):
     e_note, e_iss = _ct(n["eNote"]), _ct(n["eIss"])
     assert bi.id_hash_b1(_i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_b1"])
     assert bi.id_hash_a1(e_note, _i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_a1"])
-    assert bi.id_hash_a2(e_note, e_iss) == _i(n["id_hash_a2"])
+    assert bi.id_hash_a2(e_note, e_iss, _pt(n["T"])) == _i(n["id_hash_a2"])
     op = n["opening"]
     assert bi.note_commitment(
         _i(op["flavor"]), _i(op["v"]), _i(op["rho"]), _i(op["idHash"]), _i(op["predicate"]),

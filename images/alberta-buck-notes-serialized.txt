@@ -274,13 +274,80 @@ Table of Contents
 3.1 Single-note mint
 ────────────────────
 
-  <file:./images/mint-single.png>
+  ┌────
+  │ flowchart LR
+  │   subgraph off[Off-chain wallet]
+  │     flavor[flavor<br/>253 bits]
+  │     v[v<br/>128 bits]
+  │     rho[rho<br/>254 bits<br/>SECRET]
+  │     idHash[idHash<br/>253 bits]
+  │     predicate[predicate_base<br/>253 bits]
+  │     cm{{"cm = Poseidon-5()"}}
+  │     flavor --> cm
+  │     v --> cm
+  │     rho --> cm
+  │     idHash --> cm
+  │     predicate --> cm
+  │   end
+  │ 
+  │   cm -->|"N cms, ~32 B each"| batch[mint_batch_nN circuit]
+  │   batch -->|"proof 256 B<br/>+ oldRoot, newRoot,<br/>nextLeafIndex, totalFace,<br/>cm[0..N-1]"| mint[Notes.mint tx]
+  │ 
+  │   subgraph on[On-chain]
+  │     mint --> note[noteRoot advanced<br/>leaf = cm]
+  │     mint --> buckxfer["buck.transferFrom<br/>(issuer, Notes, v)"]
+  │   end
+  │ 
+  │   note -->|delivered out-of-band| holder[Bearer holder<br/>receives:<br/>flavor, v, rho, idHash,<br/>predicate_base, path_cm_in_noteRoot]
+  └────
 
 
 3.2 Serialized-note mint (N sub-notes in one leaf)
 ──────────────────────────────────────────────────
 
-  <file:./images/mint-serialized.png>
+  ┌────
+  │ flowchart LR
+  │   subgraph off[Off-chain wallet]
+  │     Kfam[K_fam<br/>254 bits<br/>DESTROYED after build]
+  │     N["N = 2^K<br/>batch size"]
+  │     subgraph prf[PRF expansion]
+  │       s0[s_0 = PRF K_fam,0]
+  │       sN[... s_N-1 = PRF K_fam,N-1]
+  │     end
+  │     Kfam --> prf
+  │     N --> prf
+  │     subroot{{"subRoot = MerkleRoot s_0..s_N-1"}}
+  │     prf --> subroot
+  │     pb[predicate_base]
+  │     pf{{"predicate_fam = Poseidon-2 pb,subRoot"}}
+  │     pb --> pf
+  │     subroot --> pf
+  │ 
+  │     flavor[flavor]
+  │     v[v]
+  │     rho[rho SECRET]
+  │     idHash[idHash]
+  │     cm{{"cm_parent = Poseidon-5()"}}
+  │     flavor --> cm
+  │     v --> cm
+  │     rho --> cm
+  │     idHash --> cm
+  │     pf --> cm
+  │   end
+  │ 
+  │   cm -->|mint_batch leaf| batch[mint_batch_nN circuit]
+  │   batch --> mint[Notes.mint tx]
+  │ 
+  │   subgraph on[On-chain]
+  │     mint --> note[noteRoot advanced<br/>leaf = cm_parent]
+  │     mint --> bitmap0[bitmap cm_parent<br/>implicit all-zero<br/>no SSTORE at mint]
+  │     mint --> buckxfer["buck.transferFrom<br/>issuer, Notes, v * N"]
+  │   end
+  │ 
+  │   subgraph recipients[Per-recipient payload N copies]
+  │     note --> pkg["(flavor, v, rho, idHash,<br/>predicate_base, subRoot,<br/>i, s_i, path_i_in_subRoot,<br/>path_cm_parent_in_noteRoot)"]
+  │   end
+  └────
 
 
 3.3 Mint-phase field origin + privacy (side-by-side)
@@ -311,13 +378,54 @@ Table of Contents
 4.1 Single-note spend
 ─────────────────────
 
-  <file:./images/spend-single.png>
+  ┌────
+  │ flowchart LR
+  │   subgraph wallet[Recipient wallet]
+  │     pkt[mint payload<br/>flavor, v, rho, idHash,<br/>predicate, path_cm_in_noteRoot]
+  │     rcp[recipient address]
+  │     ch[chainId]
+  │     nf{{"nf = Poseidon rho,idHash,4242"}}
+  │     pkt --> nf
+  │     pkt --> spc[spend.circom]
+  │     rcp --> spc
+  │     ch --> spc
+  │     nf --> spc
+  │   end
+  │ 
+  │   spc -->|"proof 256 B<br/>+ noteRoot, nf, face,<br/>recipient, chainId<br/>~416 B calldata"| tx[Notes.spend tx]
+  │ 
+  │   subgraph chain[On-chain]
+  │     tx --> guard{"nullifiers nf == false?"}
+  │     guard -->|yes| burn[nullifiers nf = true<br/>1x SSTORE ~20K]
+  │     guard -->|no| revert[REVERT double-spend]
+  │     burn --> pay["buck.transfer recipient, face"]
+  │   end
+  └────
 
 
 4.2 Serialized-note spend
 ─────────────────────────
 
-  <file:./images/spend-serialized.png>
+  ┌────
+  │ flowchart LR
+  │   subgraph wallet[Recipient wallet - sub-note i]
+  │     pkt["mint payload:<br/>flavor, v, rho, idHash,<br/>predicate_base, subRoot,<br/>i, s_i,<br/>path_i_in_subRoot,<br/>path_cm_parent_in_noteRoot"]
+  │     rcp[recipient address]
+  │     ch[chainId]
+  │     pkt --> spc[spend_serialized.circom]
+  │     rcp --> spc
+  │     ch --> spc
+  │   end
+  │ 
+  │   spc -->|"proof 256 B<br/>+ noteRoot, cm_parent, i,<br/>face, recipient, chainId<br/>~448 B calldata"| tx[Notes.spend_serialized tx]
+  │ 
+  │   subgraph chain[On-chain]
+  │     tx --> guard{"bitmap cm_parent<br/>bit i == 0?"}
+  │     guard -->|yes| burn[set bit i in<br/>bitmap cm_parent<br/>SSTORE 20K cold /<br/>2.9K warm]
+  │     guard -->|no| revert[REVERT double-spend]
+  │     burn --> pay["buck.transfer recipient, face"]
+  │   end
+  └────
 
 
 4.3 Spend-phase field origin + privacy (side-by-side)
@@ -370,13 +478,44 @@ Table of Contents
 5.1 Single-note nullifier set
 ─────────────────────────────
 
-  <file:./images/storage-single.png>
+  ┌────
+  │ mapping uint256 => bool nullifiers
+  │ 
+  │ +-----------------------+--------+
+  │ | key  nf_a uint256     | true   |
+  │ +-----------------------+--------+
+  │ | key  nf_b uint256     | true   |
+  │ +-----------------------+--------+
+  │ | key  nf_c uint256     | true   |
+  │ +-----------------------+--------+
+  │ ...
+  │ 
+  │ One slot per spent note.
+  │ 20K cold SSTORE on first write.
+  │ Unspent notes: absent / implicit false.
+  └────
 
 
 5.2 Serialized-note per-parent bitmap
 ─────────────────────────────────────
 
-  <file:./images/storage-serialized.png>
+  ┌────
+  │ mapping uint256 => uint256[N/256] bitmap
+  │ 
+  │ cm_parent_A  ->  +----------+----------+----------+----------+
+  │                  | word 0   | word 1   | word 2   | word 3   |   N=1024 sub-notes
+  │                  | 256 bits | 256 bits | 256 bits | 256 bits |   4 uint256 slots
+  │                  +----------+----------+----------+----------+
+  │ 
+  │ cm_parent_B  ->  +----------+----------+----------+----------+-- ... -+
+  │                  | word 0   | word 1   |                              |   N=65536 sub-notes
+  │                  | 256 bits | 256 bits |          ...                 |   256 uint256 slots
+  │                  +----------+----------+----------+----------+-- ... -+
+  │ 
+  │ First spend per word: 20K cold SSTORE
+  │ Subsequent bits in same word: 2.9K warm SSTORE
+  │ Amortized: ~80-500 gas per bit for dense families
+  └────
 
 
 5.3 Storage cost per note
@@ -710,11 +849,11 @@ Table of Contents
 
   1. Mint path: add "serialize with N" option that builds `K_fam',
      `subRoot', `predicate_fam'.
-  2. Payload schema v2: extend the bearer-note blob format to include
-        `(i, s_i, path_i_in_subRoot, subRoot)' when the note is
-        serialized.
-  3. Spend path: detect payload variant from schema version, route to
-     the appropriate verifier.
+  2. Serialized payload variant: extend the bearer-note blob format to
+     include `(i, s_i, path_i_in_subRoot, subRoot)' when the note is
+     serialized.
+  3. Spend path: detect the payload variant, route to the appropriate
+     verifier.
 
 
 10.4 Phase D: measure + promote

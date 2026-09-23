@@ -3,11 +3,12 @@
 Replays the certificate + registry-Schnorr sections of
 core/vectors/registry-kernel-vectors.json (emitted by the Python
 reference via alberta_buck.registry.kernel_vectors) through the
-buck_core.buck_registry binding.  Certificates cross the ABI as their
-wire bytes -- the format the Python SignedCertificate/SealedCertificate
-classes pin.  The tree/aggregator scenarios are covered by the cargo
-and JS suites (they are class-shaped and bound for JS; the Python
-reference keeps its own vector-locked implementation).
+buck_core.buck_registry binding, and the salt and issuance-gate sections
+through the free functions.  Certificates cross the ABI as their wire
+bytes -- the format the Python SignedCertificate/SealedCertificate
+classes pin.  The tree, aggregator, feature and regulator scenarios are
+covered by the cargo and JS suites (they are class-shaped and bound for
+JS; the Python reference keeps its own vector-locked implementation).
 
 Build the kernel binding first: make nix-core-build-py
 """
@@ -74,3 +75,32 @@ def test_certificate_wire_and_sealing(rv):
     assert br.unseal_certificate(env, _i(c["client_sk"])) == wire
     with pytest.raises(ValueError):
         br.unseal_certificate(env, _i(c["client_sk"]) ^ 1)
+
+
+def test_salts(rv):
+    bi = pytest.importorskip("buck_core.buck_identity")
+    s = rv["salt"]
+    for t, tag in s["tree_tags"].items():
+        assert bi.tree_tag(t) == _i(tag), t
+    for c in s["cases"]:
+        assert bi.derive_salt(_i(s["secret"]), c["tree_id"], c["counter"]) == _i(c["salt"])
+    with pytest.raises(ValueError):
+        bi.derive_salt(0, "kyc:x")
+    with pytest.raises(ValueError):
+        bi.tree_tag("")
+
+
+def test_issuance_gate(rv):
+    r = rv["regulator"]
+    e = r["envelope"]
+    env = (True, e["face_band"], e["dep_types"], e["max_dep_rate"], e["max_premium_rate"],
+           e["expires_at"], [_i(x) for x in r["scopes"]])
+    for c in r["cases"]:
+        got = br.check_issuance(env, _i(c["scope"]), int(c["face"]), c["dep_type"], c["dep_rate"],
+                                c["premium_rate"], c["now"])
+        assert got == c["want"], c
+    for face, band in r["bands"]:
+        assert br.band_for_face(int(face)) == band
+    for n, k in zip(r["predicate_names"], r["subtree_keys"]):
+        assert br.subtree_key(n) == _i(k)
+    assert br.scope_id(f"regulator:{r['jurisdiction']}:scope:asset:bicycle") in map(_i, r["scopes"])

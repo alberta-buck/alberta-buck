@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Identity - Cryptography Example (v1.0)
+#+TITLE: The Alberta Buck - Identity - Cryptography Example (v2)
 #+author: Perry Kundert
 #+date: 2026-04-10
 #+category: Alberta Buck
@@ -329,12 +329,12 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
     1. *Issuance:* A trusted issuer (trusted by the IdentityRegistry) signed
        Alice's identity scalar \( m \) with a PS signature \( \sigma \).
-       The issuer's public key was on-chain and valid at that epoch.
+       The issuer's public key was trusted on chain at that block.
 
     2. *Registration:* The IdentityRegistry verified Alice's NIZK proof --
-       binding \( \sigma' \) (rerandomized PS signature) to \( E_{\text{alice}} \)
-       (ElGamal ciphertext).  The NIZK proves the /same/ \( m \) appears in
-       both.  The transaction succeeded at block \( B_{\text{reg}} \); the
+       binding the presentation \( (A, B) \) of her PS credential to
+       \( E_{\text{alice}} \) (ElGamal ciphertext).  The NIZK proves the
+       /same/ \( m \) appears in both.  The transaction succeeded at block \( B_{\text{reg}} \); the
        NIZK was valid at that block.
 
     3. *Approve:* The BUCK contract verified Alice's Chaum-Pedersen proof --
@@ -370,7 +370,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
         BW->>ETH: Query ApproveReceipt events<br/>where spender=pool, owner=0xAlice
         ETH-->>BW: E_pool = (R', C') at block B_approve
         BW->>ETH: Query registration tx for 0xAlice
-        ETH-->>BW: sigma', E_alice, NIZK pi at block B_reg
+        ETH-->>BW: (A, B), E_alice, NIZK pi at block B_reg
         end
 
         rect rgb(255, 248, 240)
@@ -406,7 +406,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
     Ethereum transaction log is the evidence:
 
     - *Registration tx succeeded* \( \Rightarrow \) NIZK was valid
-      \( \Rightarrow \) a trusted issuer certified \( m \) at that epoch.
+      \( \Rightarrow \) an issuer trusted at that block certified \( m \).
     - *Approve tx succeeded* \( \Rightarrow \) Chaum-Pedersen was valid
       \( \Rightarrow \) \( E_{\text{pool}} \) encrypts the same \( M \) as
       \( E_{\text{alice}} \).
@@ -421,12 +421,12 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
     | Scenario                             | Why Bob is protected                                         |
     |--------------------------------------+--------------------------------------------------------------|
     | Alice used a stolen identity         | The /issuer/ certified it; Bob's contract verified           |
-    |                                      | the issuer's PS signature was valid at that epoch.           |
+    |                                      | the issuer's PS signature under a key trusted at that block. |
     |                                      | Liability falls on the issuer's KYC process.                 |
     | Alice's issuer key was later revoked | The registration tx is timestamped.  The issuer key          |
     |                                      | was trusted by the IdentityRegistry at block \( B_{\text{reg}} \). |
-    | Alice's identity epoch expired       | Epoch expiry is enforced at registration time.               |
-    |                                      | If the epoch was valid then, the proof stands.               |
+    | Alice's certification was revoked    | Revocation clears her accumulator leaf; it does not unmake   |
+    |                                      | a past registration or approval.  The proof stands.          |
     | Alice's Holochain agent is offline   | Bob needs only \( E_{\text{pool}} \) (on-chain) and          |
     |                                      | =sk_pool= (his own key).  The plaintext can be               |
     |                                      | obtained from the issuer if Alice is uncooperative.          |
@@ -442,7 +442,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
     |-------------------------------+---------------------------------------+--------------------------------|
     | \( E_{\text{pool}} \) (R',C') | Permanent (Ethereum event log)        | ApproveReceipt event         |
     | \( E_{\text{alice}} \)        | Permanent (IdentityRegistry storage)  | Until account is closed        |
-    | \( \sigma' \), NIZK \( \pi \) | Permanent (registration tx calldata)  | Archival node required         |
+    | \( (A, B) \), NIZK \( \pi \)  | Permanent (registration tx calldata)  | Archival node required         |
     | Chaum-Pedersen proof          | Permanent (approve tx calldata)       | Archival node required         |
     | =sk_pool= (Bob's secret key)  | Bob's custody                         | Standard key management        |
     | =identity_data= (plaintext)   | Holochain DHT (if agent is online)    | May require issuer             |
@@ -473,20 +473,21 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
     public blockchain data alone, without any secret keys.  That
     guarantee is airtight:
 
-    - \( \sigma'_1 \) and \( \sigma'_2 \) are /statistically/ unlinkable
-      (information-theoretic, not merely computational)
+    - the presentations \( (A_1, B_1) \) and \( (A_2, B_2) \) are uniform
+      whatever the identity (information-theoretic, not merely computational)
     - \( E_1 \) and \( E_2 \) are IND-CPA secure under independent keys
     - \( pk_1 \) and \( pk_2 \) are independent random points
 
     No algorithm, no amount of computation, can correlate Alice's
     accounts from on-chain data.
 
-    The identity scalar \( m = H(\text{identity\_data}) \) is
-    /intentionally invariant/ because it /is/ Alice's identity.  If each
+    The identity scalar \( m = H(\text{identity\_data}) \) -- keccak256
+    over the tag =AlbertaBuck/Identity/Scalar/v2= and the canonical record --
+    is /intentionally invariant/ because it /is/ Alice's identity.  If each
     account used a different \( m \), the two-channel verification would
     break: Bob couldn't verify that the =identity_data= he received
     matches what the issuer certified.  The Identity Fountain protects
-    the /credential wrapping/ (\( \sigma' \), \( pk \), \( E \)), not the
+    the /credential wrapping/ (\( (A, B) \), \( pk \), \( E \)), not the
     identity itself.
 
     Think of it as giving Alice a new disguise for each account --
@@ -621,6 +622,10 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
                         else str(v).encode() for v in args)
         h = Web3.solidity_keccak(['bytes'], [data])
         return int.from_bytes(h, 'big') % ORDER
+
+    # The identity scalar's domain tag: the same record hashed by anything else
+    # yields something else, so a person's scalar is in no other protocol's range.
+    ID_TAG = "AlbertaBuck/Identity/Scalar/v2"
 
     def pt(P, label=""):
         """Format a G_1 point for display."""
@@ -762,8 +767,8 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session abid :results output
-     # Identity scalar: m = keccak256(identity_data) mod ORDER
-     m_alice = keccak(alice_identity_data)
+     # Identity scalar: m = keccak256(ID_TAG || identity_data) mod ORDER
+     m_alice = keccak(ID_TAG, alice_identity_data)
 
      # PS signature: pick random h, compute sigma = (h, (x + m*y) * h)
      t_h     = rand()
@@ -780,10 +785,10 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    #+RESULTS:
    : Identity scalar m = H(identity_data):
-   :   m = 6446313962173165014188361468977035479170665192834402473818305319846425860127
+   :   m = 2771514422476810872940980386877798997261510519897538008727794581922898236027
    : PS signature sigma:
    :   sigma_1 = (194876..., 629808...)
-   :   sigma_2 = (359670..., 936863...)
+   :   sigma_2 = (909680..., 447485...)
 
    #+LATEX: }
 
@@ -818,7 +823,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    : PS signature verified: e(sigma_1, X + m*Y) == e(sigma_2, g_2)
    : 
    : Issuer gives Alice:
-   :   m              = 6446313962173165014188361468977035479170665192834402473818305319846425860127
+   :   m              = 2771514422476810872940980386877798997261510519897538008727794581922898236027
    :   sigma          = (sigma_1, sigma_2)  -- PS signature
    :   identity_data  = '{"date_of_birth":"1992-03-15","epoch":42...'
 
@@ -838,7 +843,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
     #+LATEX: {\scriptsize
     #+BEGIN_SRC python :session abid :results output
       # Tampered m -- what if someone changes one field in identity_data?
-      m_fake = keccak("tampered_identity_data")
+      m_fake = keccak(ID_TAG, "tampered_identity_data")
       lhs_bad = pairing(add(IPK_X, mul(IPK_Y, m_fake)), sigma[0])
       rhs_good = pairing(G2, sigma[1])
       ok = (lhs_bad == rhs_good)
@@ -880,7 +885,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
          "epoch":         42,
      }
      cred = issuer_obj.issue(alice_fields, ALICE_ADDR, rng=rand)   # seeded: the transcript reproduces
-     # Wallet computes m the same way: m = keccak256(canonical) mod ORDER
+     # Wallet computes m the same way: m = keccak256(ID_TAG || canonical) mod ORDER
      assert cred.m == identity_scalar(cred.canonical) == m_alice
      # PS verification, same pairing equation as the raw block:
      ok      = ps_verify(issuer_obj.pk_X, issuer_obj.pk_Y, cred.sigma, cred.m)
@@ -964,7 +969,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    #+RESULTS:
    : Rerandomized pair: raw PS test with m_alice -> True
    :   (a candidate test for anyone holding m: never published)
-   : Presentation A = (554544..., 429626...)  B = (622938..., 732521...)
+   : Presentation A = (554544..., 429626...)  B = (556214..., 843967...)
    : Presentation:      raw PS test with m_alice -> False
    : Presentation:      masked equation with (m_alice, b) -> True
 
@@ -1024,12 +1029,12 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    ElGamal ciphertext E_alice = (R, C):
      R = r*G    = (888939..., 711304...)
-     C = m*G+r*pk = (  8230..., 734858...)
+     C = m*G+r*pk = (334292...,  55846...)
 
    Message point M = m*G:
-     M = (739132..., 937433...)
+     M = (502436..., 889923...)
 
-   Alice decrypts: C - sk*R = (739132..., 937433...)  (matches M)
+   Alice decrypts: C - sk*R = (502436..., 889923...)  (matches M)
    #+end_example
 
    #+LATEX: }
@@ -1058,8 +1063,8 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
     #+RESULTS:
     : Eve decrypts with wrong key:
-    :   M_wrong = (452219...,  77982...)
-    :   M_real  = (739132..., 937433...)
+    :   M_wrong = (990549..., 173718...)
+    :   M_real  = (502436..., 889923...)
     :   Match: False
     :   (Completely different point -- no information about m is leaked.)
 
@@ -1083,7 +1088,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    \( T_{key} = \tilde{sk}\,G \); the shared \( \tilde m \) is what joins
    the credential to the ciphertext.  The Fiat-Shamir challenge binds the
    registrant address, the chain id, the registry address and the domain
-   =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=, so a proof
+   =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2=, so a proof
    cannot be replayed to another account, chain, registry or protocol
    version.  The wallet's =registration_prove= is the executable
    specification -- the Solidity, Rust and JavaScript verifiers are
@@ -1108,9 +1113,9 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    #+RESULTS:
    : Registration proof pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
-   :   e   = 1167746862054078205881369054665722870883503658613180445115672387539759578632
-   :   s_m = 1207819567465839872297250109885096115057131536627177472776646978059733573980
-   :   s_b = 3934063700890374532688957826652229484565895692061300361369211223870013398415
+   :   e   = 10200229377849831398463058862895386310125326660709570565200621111745915639032
+   :   s_m = 9401951493053487559381785718431180115908812524446778252875344179764755185883
+   :   s_b = 8283906936137015224805851135143136584723697294825212450496097817152055903462
    :   C1  = (752165..., 546410...)   (m~*A + b~*G -- never m~*A on its own)
 
    #+LATEX: }
@@ -1349,7 +1354,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
         "epoch":         42
     }, sort_keys=True, separators=(',', ':'))
 
-    m_bob = keccak(bob_identity_data)
+    m_bob = keccak(ID_TAG, bob_identity_data)
 
     # Bob also gets a PS signature (same issuance ceremony)
     t_h_bob    = rand()
@@ -1489,10 +1494,10 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    : Alice re-encrypts her identity for Bob:
    :   E_bob = (R', C') where:
    :     R' = r'*G     = (550025..., 305708...)
-   :     C' = M+r'*pk  = (701809..., 308467...)
+   :     C' = M+r'*pk  = (544151..., 273588...)
    : 
-   : Bob decrypts: C' - sk_bob*R' = (739132..., 937433...)
-   : Matches Alice's M:             (739132..., 937433...)
+   : Bob decrypts: C' - sk_bob*R' = (502436..., 889923...)
+   : Matches Alice's M:             (502436..., 889923...)
 
    #+LATEX: }
 
@@ -1540,9 +1545,9 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    #+RESULTS:
    : Chaum-Pedersen proof (e, s1, s2, T1, T2, T3):
-   :   e  = 19760152061181174133268171620776428857915021793359791016974955809430153285266
-   :   s1 = 19027816694018415018414729725601647850693237880448832633085064984320434557538   (= a + e*sk)
-   :   s2 = 12896613016389275445990147178333144828356344382050962542604063507793369347515   (= b + e*r')
+   :   e  = 19251208828704041191386349386691118550618987755341496292582267517772516785850
+   :   s1 = 3741148286159627806704244734234946457958404415002544516963060844931866092536   (= a + e*sk)
+   :   s2 = 20731108472805330455409911001868816179299309458904060820503057379286911627455   (= b + e*r')
 
    #+LATEX: }
 
@@ -1761,7 +1766,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
     print(f"  '{received_identity_data[:60]}...'")
 
     # Verify binding: H(identity_data) * G == M
-    m_check = keccak(received_identity_data)
+    m_check = keccak(ID_TAG, received_identity_data)
     M_check = mul(G1, m_check)
     assert eq(M_check, M_from_bob), "Identity binding FAILED"
 
@@ -1778,15 +1783,15 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
   #+RESULTS:
   #+begin_example
   Bob decrypts E_bob from on-chain ApproveReceipt event:
-    M = C' - sk_bob * R' = (739132..., 937433...)
+    M = C' - sk_bob * R' = (502436..., 889923...)
 
   Bob receives identity_data via Holochain:
     '{"date_of_birth":"1992-03-15","epoch":42,"family_name":"John...'
 
   Two-channel verification:
-    m = H(identity_data) = 6446313962173165014188361468977035479170665192834402473818305319846425860127
-    m * G = (739132..., 937433...)
-    M     = (739132..., 937433...)
+    m = H(identity_data) = 2771514422476810872940980386877798997261510519897538008727794581922898236027
+    m * G = (502436..., 889923...)
+    M     = (502436..., 889923...)
     H(identity_data) * G == M : True
 
   ==> Bob has cryptographic proof that the identity_data
@@ -1810,7 +1815,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    #+BEGIN_SRC python :session abid :results output
      # Someone tampers with the identity data in transit
      tampered = alice_identity_data.replace("Alice", "Mallory")
-     m_tampered = keccak(tampered)
+     m_tampered = keccak(ID_TAG, tampered)
      M_tampered = mul(G1, m_tampered)
 
      print(f"Tampered identity_data: ...given_name: 'Mallory'...")
@@ -1822,8 +1827,8 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
 
    #+RESULTS:
    : Tampered identity_data: ...given_name: 'Mallory'...
-   :   H(tampered) * G = (722726..., 633711...)
-   :   M (from chain)  = (739132..., 937433...)
+   :   H(tampered) * G = (953842..., 633816...)
+   :   M (from chain)  = (502436..., 889923...)
    :   Match: False
    :   (Bob rejects: the off-chain data doesn't match the on-chain point.)
 

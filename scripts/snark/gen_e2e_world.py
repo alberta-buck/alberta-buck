@@ -3,7 +3,7 @@
 Builds ONE mutually-consistent set of artifacts per flavor so that
 test/NotesE2E.t.sol can drive the full real-verifier lifecycle:
 
-    identity world -> registry binds (+ incremental identityRoot)
+    identity world -> registry binds, and the aggregator root the world posts
     wallet note    -> pinned-opening mint proof (mint_batch / mint_batch_a2)
     spend proof    -> against the replayed note tree (prove_spend.js)
     deposit sigma  -> pinned to (depositor address, chainid=1)
@@ -16,11 +16,10 @@ Subcommands:
 
 The driver is scripts/snark/gen_e2e_fixtures.sh.
 
-The note binding uses the layout-matched circuit per flavor: A2 opens
-idHash = Poseidon8(eNote, eIss) (circuits/note_binding.circom); A1's idHash
-commits (eNote, m_issuer, sigma), so its tie is through the note's own value
-ciphertext with the face public (circuits/note_binding_a1.circom,
-make_note_binding_a1_witness).  B1 is bearer -- no tie.
+The note tie is a RELATION of the folded gate, not a proof beside it: A2 opens
+idHash = Poseidon10(eNote, eIss, T) inside circuits/deposit_fold_a2.circom, and
+A1's idHash commits (eNote, m_issuer, sigma), so its tie runs through the
+note's own value ciphertext with the face public.  B1 is bearer -- no tie.
 """
 
 import argparse
@@ -32,25 +31,35 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, REPO)
 
-from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, point_to_words, rand_scalar
+from alberta_buck.wallet.bn254 import (
+    G1, ORDER, add, eq, mul, point_to_words, rand_scalar, words_to_point,
+)
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.issuer_reenc import H_POINT
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_B1, NoteOpening, note_commitment, id_hash_b1, nullifier_b,
 )
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
-from alberta_buck.wallet.unilateral_a2 import (
-    IdentityTree, mint_unilateral_a2, deposit_couple_prove, deposit_couple_verify,
-)
+from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
+from alberta_buck.registry.merkle_service import rooted_registry
 from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
-from alberta_buck.wallet.note_binding import (
-    make_note_binding_witness, make_note_binding_a1_witness,
+from alberta_buck.wallet.deposit_fold import (
+    deposit_fold_a1_witness, deposit_fold_a2_witness, deposit_fold_witness,
 )
+from alberta_buck.wallet.nums import H_PEDERSEN
+from alberta_buck.wallet.delivery import deliver_a1, deliver_a2, open_a1, open_a2
+from alberta_buck.wallet.recvkey import (
+    receiving_key, prove_receiving_binding, verify_receiving_binding,
+)
+from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
-from alberta_buck.registry.tree import identity_leaf
+from alberta_buck.registry.tree import (
+    identity_leaf, identity_leaf_salted, receiving_leaf,
+)
+
+KYC = "kyc:ca-ab-2026"
 
 CHAINID  = 1
 FACE     = 250_000000                                # 250.000000 BUCK (6 dp)
@@ -85,13 +94,26 @@ def ct(c: ElGamalCiphertext):
     return {"R": pt(c.R), "C": pt(c.C)}
 
 
+def ct_of(d):
+    """Parse a serialized ciphertext back.  The fold witness is built from the
+    PAYLOAD, not from the generator's memory, so a payload that cannot be spent
+    fails here instead of shipping as a fixture."""
+    def p(o):
+        return words_to_point(int(o["x"]), int(o["y"]))
+    return ElGamalCiphertext(p(d["R"]), p(d["C"]))
+
+
 def account(m, rng):
     """One registered Fountain account bound to identity scalar m."""
     sk = rand_scalar(rng)
     pk = mul(G1, sk)
     M = mul(G1, m)
-    E = elgamal_encrypt(M, pk, rand_scalar(rng))
-    return dict(m=m, M=M, sk=sk, pk=pk, E=E)
+    r_E = rand_scalar(rng)
+    E = elgamal_encrypt(M, pk, r_E)
+    # r_E is kept because the folded gate PROVES the credential relation
+    # E.C = (m + sk*r_E)*G rather than accepting a sigma over it, and that
+    # needs the registration randomness as a witness.
+    return dict(m=m, M=M, sk=sk, pk=pk, E=E, r_E=r_E)
 
 
 def reenc(c: ElGamalCiphertext, key_point, s):
@@ -130,39 +152,78 @@ def build_world(flavor: str):
     dep_acct = account(m_ctr, rng)               # the depositing account
     M_ctr = mul(G1, m_ctr)
 
-    # One leaf per identity, inserted in bind order (issuer, then depositor):
-    # the on-chain incremental accumulator must replay to the same root.
-    tree = IdentityTree()
-    tree.insert(issuer_acct["M"])
-    tree.insert(M_ctr)
+    # Each party holds a MAILBOX separate from its Identity.  An addressed note
+    # is keyed to the receiving key; authority stays with the Identity.  The
+    # two are different secrets, which is why the spend gate is folded rather
+    # than a sigma beside a membership proof (doc/review/notes-receiving-key.org).
+    seed_ctr = rand_scalar(rng)
+    k_ctr, pk_ctr = receiving_key(seed_ctr)
+    salt_ctr = derive_salt(seed_ctr, KYC)
+
+    seed_iss = rand_scalar(rng)
+    k_iss, pk_iss_recv = receiving_key(seed_iss)
+    # A2's issuer keeps a SECOND association -- an ordinary salted identity
+    # leaf -- whose salt it ships so the recipient can prove at spend that the
+    # Identity it decrypted is registered.  Distinct salts, so the one that
+    # names it says nothing about the one that reads its mail.
+    salt_iss_named = derive_salt(seed_iss, KYC, 1)
+
+    # The addressed recipient keeps a THIRD association: the mailbox leaf, over
+    # the two POINTS, which is the payer's and the receipt verifier's view of
+    # the same fact the gate's scalar leaf proves.  Its own salt again, so the
+    # one it hands a payer does not locate the one it spends under.
+    salt_mbx = derive_salt(seed_ctr, KYC, 1)
+
+    # Leaves in bind order, and which leaf each party contributes depends
+    # on what the flavour's gate must prove about it:
+    #   A1  issuer: unused by the gate    depositor: its receiving leaf
+    #   A2  issuer: its NAMED leaf        depositor: its receiving leaf
+    #   B1  issuer: unused by the gate    depositor: its salted identity leaf
+    # One identity registry's private subtree, under the aggregator: every path
+    # runs 32 levels, subtree then aggregator, and the world posts only the
+    # aggregator root, as a deployment's aggregator does.
+    tree = rooted_registry()
+    if flavor == "a2":
+        iss_leaf = identity_leaf_salted(issuer_acct["M"], salt_iss_named)
+    else:
+        iss_leaf = identity_leaf_salted(issuer_acct["M"], derive_salt(seed_iss, KYC, 2))
+    dep_leaf = (identity_leaf_salted(M_ctr, salt_ctr) if flavor == "b1"
+                else receiving_leaf(m_ctr, k_ctr, salt_ctr))
+    tree.insert_leaf(iss_leaf)
+    tree.insert_leaf(dep_leaf)
+    if flavor != "b1":
+        tree.insert_mailbox(M_ctr, pk_ctr, salt_mbx)
 
     binds = [
         {
             "addr": f"0x{ISSUER:040x}",
             "pk": pt(issuer_acct["pk"]), "E": ct(issuer_acct["E"]),
             "isPublic": flavor != "a2",
-            "identityLeaf": str(identity_leaf(issuer_acct["M"])),
         },
         {
             "addr": f"0x{DEPOSIT:040x}",
             "pk": pt(dep_acct["pk"]), "E": ct(dep_acct["E"]),
             "isPublic": False,
-            "identityLeaf": str(identity_leaf(M_ctr)),
         },
     ]
 
     # ---- The wallet note ----------------------------------------------------
     rho = rand_scalar(rng)
     if flavor == "a2":
-        note = mint_unilateral_a2(issuer_acct["sk"], issuer_acct["E"], M_ctr,
+        note = mint_unilateral_a2(issuer_acct["sk"], issuer_acct["E"], pk_ctr,
                                   v=FACE, rho=rho, issuer=ISSUER,
-                                  chainid=CHAINID, rng=rng)
+                                  chainid=CHAINID, salt_iss=salt_iss_named,
+                                  rng=rng)
         opening = note.opening
         eCommitted = note.eIss                   # committed in idHash
         M_named = note.M_I                       # the membership target (issuer)
         r_committed = note.r_prime
         eNote = note.eNote
-        note_payload = {"eNote": ct(eNote), "eIss": ct(eCommitted)}
+        # The delivery: what the minter hands the channel.  Every secret
+        # scalar in it -- rho, the face, r', gamma, the issuer's naming salt --
+        # is wrapped to the mailbox key, so the channel learns neither the issuer
+        # nor when the note is spent (wallet/delivery.py).
+        note_payload = deliver_a2(note, pk_ctr)
     elif flavor == "a1":
         # The in-payload (sigma_R, sigma_s) is the issuer's identity-binding
         # signature over the delivery payload (synthetic domain here, as in
@@ -170,15 +231,19 @@ def build_world(flavor: str):
         k = rand_scalar(rng)
         sigma_R = mul(G1, k)
         sigma_s = (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
-        note = mint_unilateral_a1(M_ctr, v=FACE, rho=rho, m_issuer=m_iss,
-                                  sigma_R=sigma_R, sigma_s=sigma_s, rng=rng)
+        note = mint_unilateral_a1(M_ctr, pk_ctr, v=FACE, rho=rho,
+                                  m_issuer=m_iss, sigma_R=sigma_R,
+                                  sigma_s=sigma_s, rng=rng)
         opening = note.opening
         eCommitted = note.eRec                   # the sigma's ciphertext (NOT in idHash)
         M_named = M_ctr                          # membership target (recipient)
         r_committed = note.r_prime
         eNote = note.eNote
-        note_payload = {"eNote": ct(eNote), "eRec": ct(note.eRec),
-                        "sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
+        # A1's delivery carries eNote's randomness, because the fold pins eNote
+        # against the public face, and no issuer salt: relation (2) already
+        # proves the decrypted Identity is the payout account's, so A1 asserts
+        # nothing about a third party (doc/review/notes-receiving-key.org 4.4).
+        note_payload = deliver_a1(note, pk_ctr, sigma_R, sigma_s)
     else:  # b1
         k = rand_scalar(rng)
         sigma_R = mul(G1, k)
@@ -195,27 +260,67 @@ def build_world(flavor: str):
     cm = note_commitment(opening)
     nf = nullifier_b(opening.rho, opening.id_hash)
 
-    # ---- Deposit-side proofs -------------------------------------------------
-    b = rand_scalar(rng)                          # the P blind, shared everywhere
+    # ---- Deposit-side proof ---------------------------------------------
+    #
+    # A1 and A2 spend through the FOLDED gate: one proof over one witness,
+    # replacing the coupling sigma, the P-bound membership proof and the
+    # note<->eEnc tie.  Those three shared the public point P_I, and inferring
+    # an equality across proofs that merely share a point is what review
+    # finding 5 caught -- here it would be an equality between two DIFFERENT
+    # secrets, the Identity and the receiving key, which a payload thief
+    # satisfies with one of each.  There is no P_I in this world at all.
+    #
+    # B1 keeps its sigma, because its two facts rest on ONE secret and the
+    # shared nonce is therefore a genuine tie.  What it needs instead is an
+    # honest hiding generator, so its P_dep is built on H_PEDERSEN and its
+    # membership proof is the repaired circuit.
+    b = rand_scalar(rng)
 
     if flavor in ("a1", "a2"):
-        s = rand_scalar(rng)                      # eEnc re-randomization
-        eEnc = reenc(eCommitted, M_ctr, s)
-        dc = deposit_couple_prove(m_ctr, dep_acct["sk"], dep_acct["E"], eEnc,
-                                  account=DEPOSIT, chainid=CHAINID, b=b, rng=rng)
-        assert deposit_couple_verify(dep_acct["pk"], dep_acct["E"], eEnc, dc,
-                                     account=DEPOSIT, chainid=CHAINID)
-        sigma_json = {
-            "kind": "depositCoupling",
-            "eEnc": ct(eEnc),
-            "dc": {
-                "e": str(dc.e), "s_m": str(dc.s_m), "s_s": str(dc.s_s),
-                "s_b": str(dc.s_b),
-                "A2": pt(dc.A2), "A3": pt(dc.A3), "A4": pt(dc.A4),
-                "P_I": pt(dc.P_I),
-            },
-        }
-        P_committed = dc.P_I
+        s_rand = rand_scalar(rng)                 # eEnc re-randomization
+        t_total = (note.r_prime + s_rand) % ORDER
+        eEnc = elgamal_encrypt(M_named, pk_ctr, t_total)
+
+        w = deposit_fold_witness(
+            m_rec=m_ctr, k=k_ctr, sk_dep=dep_acct["sk"], salt=salt_ctr,
+            E_dep=dep_acct["E"], note_ct=eEnc, tree=tree,
+        )
+        # Everything below comes from the payload the channel carried, the
+        # opening, and the recipient's own secrets (k, m_rec, sk_dep, its salt).
+        # Nothing comes from the minter's memory.
+        # Opened with k: the recipient is the only party that can, which is
+        # what the wrap is for.  The opened note must recompute to the very
+        # commitment the minter folded into the tree.
+        if flavor == "a1":
+            opened = open_a1(note_payload, k_ctr, m_iss)
+            assert opened.cm == note_commitment(opening), "delivery opens to another note"
+            fold_input = deposit_fold_a1_witness(
+                witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
+                e_note=opened.eNote, v=opened.opening.v, m_issuer=m_iss,
+                sigma_R=opened.sigma_R, sigma_s=opened.sigma_s,
+                r_note=opened.r_note, t=t_total,
+                r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
+                pk_dep=dep_acct["pk"], e_enc=eEnc,
+                identity_root=tree.root(),
+            )
+        else:
+            opened = open_a2(note_payload, k_ctr)
+            assert opened.cm == note_commitment(opening), "delivery opens to another note"
+            iss_path = tree.path(tree.leaves.index(
+                identity_leaf_salted(opened.M_I, opened.salt_iss)))
+            fold_input = deposit_fold_a2_witness(
+                witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
+                e_note=opened.eNote, e_iss=opened.eIss, r_prime=opened.r_prime,
+                t=t_total, r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
+                pk_dep=dep_acct["pk"], e_enc=eEnc,
+                salt_iss=opened.salt_iss, iss_path=iss_path,
+                T=opened.T, gamma=opened.gamma, identity_root=tree.root(),
+            )
+        with open(os.path.join(out_dir, "fold_input.json"), "w") as f:
+            json.dump(fold_input, f, indent=2)
+
+        sigma_json = {"kind": "depositFold", "eEnc": ct(eEnc)}
+        membership_input = None
     else:
         binding, eDepForIss = b1_bind_prove(m_ctr, dep_acct["sk"], dep_acct["E"],
                                             issuer_acct["pk"], account=DEPOSIT,
@@ -234,72 +339,41 @@ def build_world(flavor: str):
                 "A_p": pt(binding.A_p), "P_dep": pt(binding.P_dep),
             },
         }
-        P_committed = binding.P_dep
-
-    # Sanity: the committed point opens as M_named + b*H everywhere.
-    assert P_committed == add(M_named, mul(H_POINT, b))
-
-    # ---- g1tie membership input ----------------------------------------------
-    Mx, My = point_to_words(M_named)
-    T = mul(H_POINT, b)
-    Tx, Ty = point_to_words(T)
-    PIx, PIy = point_to_words(P_committed)
-    leaf_index = 0 if flavor == "a2" else 1       # issuer leaf vs counterparty leaf
-    proof_path = tree.path(leaf_index)
-    g1tie_input = {
-        "identityRoot": str(tree.root()),
-        "PI_x": [str(v) for v in to_limbs(PIx)],
-        "PI_y": [str(v) for v in to_limbs(PIy)],
-        "Mx": [str(v) for v in to_limbs(Mx)],
-        "My": [str(v) for v in to_limbs(My)],
-        "Mx_mod": str(Mx % F_R),
-        "My_mod": str(My % F_R),
-        "Tx": [str(v) for v in to_limbs(Tx)],
-        "Ty": [str(v) for v in to_limbs(Ty)],
-        "pathElements": [str(x) for x in proof_path.siblings],
-        "pathIndices": [str(x) for x in proof_path.index_bits],
-    }
-    with open(os.path.join(out_dir, "g1tie_input.json"), "w") as f:
-        json.dump(g1tie_input, f, indent=2)
-
-    # ---- note-binding input (layout-matched circuit per addressed flavor) ----
-    if flavor in ("a1", "a2"):
-        if flavor == "a2":
-            nb = make_note_binding_witness(
-                rho=opening.rho, eNote=eNote, eIssCommitted=eCommitted,
-                s=s, m_rec=m_ctr, b=b, M_I=M_named, r_iss=r_committed,
-            )
-        else:
-            # A1: the tie is through eNote itself (face public); eEnc's total
-            # randomness is the mint r' plus the deposit re-randomization s.
-            nb = make_note_binding_a1_witness(
-                rho=opening.rho, eNote=eNote, v=FACE, m_issuer=m_iss,
-                sigma_R=sigma_R, sigma_s=sigma_s, r_note=note.r_note,
-                m_rec=m_ctr, t=(note.r_prime + s) % ORDER, b=b,
-            )
-        assert int(nb["nullifier"]) == nf, "binding/spend nullifier mismatch"
-        # The builder's public eEnc / P_I must be the exact on-chain points the
-        # sigma carries (the contract derives the proof's publics from them).
-        recompose = lambda limbs: sum(int(w) << (64 * i) for i, w in enumerate(limbs))
-        assert (recompose(nb["eEncRx"]), recompose(nb["eEncRy"])) == point_to_words(eEnc.R)
-        assert (recompose(nb["eEncCx"]), recompose(nb["eEncCy"])) == point_to_words(eEnc.C)
-        assert (recompose(nb["piX"]), recompose(nb["piY"])) == point_to_words(P_committed)
-        with open(os.path.join(out_dir, "note_binding_input.json"), "w") as f:
-            json.dump(nb, f, indent=2)
+        # P_dep opens as M_dep + b*H_PEDERSEN, and the repaired membership
+        # circuit PROVES the blind rather than witnessing its point.
+        assert eq(binding.P_dep, add(M_ctr, mul(H_PEDERSEN, b)))
+        Mx, My = point_to_words(M_ctr)
+        PIx, PIy = point_to_words(binding.P_dep)
+        proof_path = tree.path(1)                 # the depositor's leaf
+        membership_input = {
+            "identityRoot": str(tree.root()),
+            "PI_x": [str(v) for v in to_limbs(PIx)],
+            "PI_y": [str(v) for v in to_limbs(PIy)],
+            "Mx": [str(v) for v in to_limbs(Mx)],
+            "My": [str(v) for v in to_limbs(My)],
+            "b": [str(v) for v in to_limbs(b)],
+            "salt": str(salt_ctr),
+            "pathElements": [str(x) for x in proof_path.siblings],
+            "pathIndices": [str(x) for x in proof_path.index_bits],
+        }
+        with open(os.path.join(out_dir, "b1_membership_input.json"), "w") as f:
+            json.dump(membership_input, f, indent=2)
 
     # ---- mint prover pin args -------------------------------------------------
     if flavor == "a2":
         en = ct_words_mod_fr(eNote)
         ei = ct_words_mod_fr(eCommitted)
+        tw = [w % F_R for w in point_to_words(note.binding.T)]
         mint_args = [
             "--name=e2e_a2", "--n=1", f"--live-leaves={FACE}",
             f"--rho=0:{opening.rho}",
             "--enote=0:" + ",".join(str(w) for w in en),
             "--eiss=0:" + ",".join(str(w) for w in ei),
+            "--t=0:" + ",".join(str(w) for w in tw),
         ]
-        # The wallet idHash must equal Poseidon8 over these words.
+        # The wallet idHash must equal Poseidon10 over these words.
         from alberta_buck.wallet.poseidon import poseidon
-        assert poseidon(en + ei) == opening.id_hash, "idHash layout mismatch"
+        assert poseidon(en + ei + tw) == opening.id_hash, "idHash layout mismatch"
     else:
         mint_args = [
             f"--name=e2e_{flavor}", "--n=1",
@@ -327,7 +401,7 @@ def build_world(flavor: str):
         # The two wallets, in full -- canonical KYC preimages, identity
         # scalars, and account keys.  TEST identities (the same published
         # Alice/Bob the canonical identity.json vectors commit), retained so
-        # the AB-RCPT/1 receipt layer can be exercised over this exact
+        # the AB-RCPT/2 receipt layer can be exercised over this exact
         # real-proof world (test_receipt_e2e.py and the executable receipt
         # document) -- the receipts' point->human bridge needs the preimages,
         # and the role-dependent self-naming proofs need the account secrets.
@@ -343,14 +417,46 @@ def build_world(flavor: str):
                 "identity": ctr_canonical, "m": str(m_ctr),
                 "M": pt(dep_acct["M"]), "pk": pt(dep_acct["pk"]),
                 "sk": str(dep_acct["sk"]), "E": ct(dep_acct["E"]),
+                # The mailbox: an independent secret, derived from the wallet
+                # seed and never from the Identity, with the salt of the leaf
+                # that binds the two.  Present so a test can show the shipped
+                # payload SUFFICES -- that the delivery plus these three
+                # secrets rebuild the gate.  For B1 the pair is unused: a
+                # bearer note is addressed to nobody.
+                "kRecv": str(k_ctr), "pkRecv": pt(pk_ctr),
+                "salt": str(salt_ctr), "saltMailbox": str(salt_mbx),
             },
         },
         # The Identity-M note payload (the idHash preimage material) that
-        # travels off chain with the note -- exactly what an AB-RCPT/1
+        # travels off chain with the note -- exactly what an AB-RCPT/2
         # receipt's `note` record conveys.  (B1's eDepForIss is spend-side
         # material and lives in sigma.eDepForIss.)
         "notePayload": note_payload,
     }
+    if flavor in ("a1", "a2"):
+        # What the MINTER retains.  It never travels: an issuer-side receipt
+        # discloses it deliberately, to a reader who is being told both parties
+        # anyway, and a payload that carried it would tell the channel.
+        world["issuerSecrets"] = {
+            "rNote": str(note.r_note),
+            "rPrime": str(note.r_prime),
+        }
+        if flavor == "a2":
+            # The binding's blind, which opens T: the recipient unwraps its own
+            # copy from the delivery, and the issuer keeps this one.
+            world["issuerSecrets"]["gamma"] = str(note.gamma)
+    if flavor != "b1":
+        # The payer's evidence, as a receipt carries it: a hash and a path over
+        # the two points, disclosing no secret.  A payer checks this BEFORE
+        # paying, which is why it cannot be the scalar leaf the spend proves.
+        mbx = prove_receiving_binding(M_ctr, pk_ctr, salt_mbx, tree)
+        world["mailboxBinding"] = {
+            "salt": str(mbx.salt), "leaf": str(mbx.path.leaf),
+            "siblings": [str(x) for x in mbx.path.siblings],
+            "indexBits": list(mbx.path.index_bits),
+            "root": str(mbx.path.root),
+        }
+        assert verify_receiving_binding(M_ctr, mbx, tree.root())
     if flavor == "a2":
         world["a2Binding"] = {
             "eIss": ct(eCommitted),
@@ -400,33 +506,43 @@ def assemble(flavor: str):
     assert int(spend["spend"]["public"]["nullifier"]) == int(world["opening"]["nullifier"]), \
         "spend/world nullifier mismatch"
 
-    # g1tie membership proof (snarkjs CLI output).
-    g1_proof = json.load(open(os.path.join(out_dir, "g1tie_proof.json")))
-    g1_public = json.load(open(os.path.join(out_dir, "g1tie_public.json")))
-    world["membership"] = {
-        "proofBytes": "0x" + "".join(
-            int(x).to_bytes(32, "big").hex() for x in [
-                g1_proof["pi_a"][0], g1_proof["pi_a"][1],
-                # pi_b EIP-197-ordered (im, re) -- the swap zkesc performs;
-                # the on-chain verifier is stock and expects it pre-swapped.
-                g1_proof["pi_b"][0][1], g1_proof["pi_b"][0][0],
-                g1_proof["pi_b"][1][1], g1_proof["pi_b"][1][0],
-                g1_proof["pi_c"][0], g1_proof["pi_c"][1],
-            ]),
-        "public": g1_public,
-    }
+    def _proof_bytes(pr):
+        """abi-packed Groth16 triple, pi_b pre-swapped to EIP-197 order.
 
-    # Note-binding proof (rapidsnark output; layout-matched circuit per flavor).
+        The on-chain verifiers are stock snarkjs exports, which expect each
+        pi_b pair in the opposite order to the one snarkjs writes -- the swap
+        its own `zkey export soliditycalldata` performs.  Doing it here keeps
+        the committed verifiers byte-for-byte as exported.
+        """
+        return "0x" + "".join(
+            int(x).to_bytes(32, "big").hex() for x in [
+                pr["pi_a"][0], pr["pi_a"][1],
+                pr["pi_b"][0][1], pr["pi_b"][0][0],
+                pr["pi_b"][1][1], pr["pi_b"][1][0],
+                pr["pi_c"][0], pr["pi_c"][1],
+            ])
+
     if flavor in ("a1", "a2"):
-        nb_proof = json.load(open(os.path.join(out_dir, "note_binding_proof.json")))
-        world["noteBinding"] = {
-            "proofBytes": "0x" + "".join(
-                int(x).to_bytes(32, "big").hex() for x in [
-                    nb_proof["pi_a"][0], nb_proof["pi_a"][1],
-                    nb_proof["pi_b"][0][1], nb_proof["pi_b"][0][0],
-                    nb_proof["pi_b"][1][1], nb_proof["pi_b"][1][0],
-                    nb_proof["pi_c"][0], nb_proof["pi_c"][1],
-                ]),
+        # ONE proof carrying every relation.  There is no membership proof and
+        # no note-binding proof beside it, because the fold subsumed both --
+        # three checks sharing the public point P_I inferred an equality
+        # between two different secrets, and one witness states it instead.
+        fold_proof = json.load(open(os.path.join(out_dir, "fold_proof.json")))
+        fold_public = json.load(open(os.path.join(out_dir, "fold_public.json")))
+        world["depositFold"] = {
+            "proofBytes": _proof_bytes(fold_proof),
+            "public": fold_public,
+        }
+    else:
+        # B1 keeps its sigma -- its two facts rest on ONE secret, so the shared
+        # nonce is a genuine tie -- and pairs it with the REPAIRED membership
+        # circuit, whose blind is proven rather than witnessed and whose
+        # generator has no known logarithm.
+        b1_proof = json.load(open(os.path.join(out_dir, "b1_membership_proof.json")))
+        b1_public = json.load(open(os.path.join(out_dir, "b1_membership_public.json")))
+        world["membership"] = {
+            "proofBytes": _proof_bytes(b1_proof),
+            "public": b1_public,
         }
 
     world["mint"] = {

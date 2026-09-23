@@ -36,6 +36,13 @@ from alberta_buck.registry.certificate import (
 )
 from alberta_buck.registry.merkle_service import CentralMerkleService, SubTreeKind
 from alberta_buck.registry.feature_authority import FeatureAuthority
+from alberta_buck.registry.regulator import (
+    InsuranceRegulator, InsurerEnvelope, IssuanceRefused, check_issuance, scope_id,
+    subtree_key, GENERAL_SCOPE,
+)
+from alberta_buck.registry.tree import AGGREGATOR_DEPTH, KYC_SUBTREE_DEPTH, identity_leaf_salted
+from alberta_buck.wallet.attributes import prove_attributes, verify_attributes
+from alberta_buck.wallet.salt import derive_salt, tree_tag
 
 
 def _seeded_rng(seed: int) -> Callable[[], int]:
@@ -293,6 +300,198 @@ def _build(seed: int) -> Dict[str, Any]:
         "has_pb": fa.has_identity(pb),
     }
 
+    # Everything below draws AFTER the sections above, so they stay put.
+    out.update(_accumulator_sections(draw))
+    return out
+
+
+DAY = 86400.0
+
+
+def _accumulator_sections(draw) -> Dict[str, Any]:
+    """Phase 5 of the accumulator plan: salts, private feature subtrees, the
+    root ring, composed paths, the insurance regulator and attribute proofs."""
+    out: Dict[str, Any] = {}
+
+    # ---- holder-derived salts ------------------------------------------------
+    secret = draw()
+    out["salt"] = {
+        "secret": _hx(secret),
+        "tree_tags": {t: _hx(tree_tag(t)) for t in ("kyc:ca-ab-2026", "feature:age-over-18")},
+        "cases": [{"tree_id": t, "counter": c, "salt": _hx(derive_salt(secret, t, c))}
+                  for t, c in (("kyc:ca-ab-2026", 0), ("kyc:ca-ab-2026", 1),
+                               ("feature:age-over-18", 0))],
+    }
+
+    # ---- a private feature subtree: salted leaves ------------------------------
+    fp = FeatureAuthority("feature:age-over-18", tree_depth=10, private=True)
+    qa, qb = mul(G1, draw()), mul(G1, draw())
+    sa = derive_salt(secret, "feature:age-over-18")
+    sb = derive_salt(draw(), "feature:age-over-18")
+    fp.attest(qa, salt=sa)
+    fp.attest(qb, salt=sb)
+    root_two = fp.sub_root
+    proof_qa = fp.membership_proof_for_identity(qa)
+    refused = {}
+    for label, call in (("no_salt", lambda: fp.attest(mul(G1, 7))),
+                        ("dup", lambda: fp.attest(qa, salt=sa))):
+        try:
+            call()
+            refused[label] = False
+        except ValueError:
+            refused[label] = True
+    revoked = fp.revoke(qa)
+    out["feature_private"] = {
+        "id": "feature:age-over-18", "depth": 10,
+        "points": [_g1(qa), _g1(qb)], "salts": [_hx(sa), _hx(sb)],
+        "leaf_a": _hx(identity_leaf_salted(qa, sa)),
+        "root_after_two": _hx(root_two),
+        "proof_a": _proof_json(proof_qa),
+        "no_salt_refused": refused["no_salt"], "dup_refused": refused["dup"],
+        "revoked_index": revoked,
+        "root_after_revoke": _hx(fp.sub_root),
+        "has_a": fp.has_identity(qa), "has_b": fp.has_identity(qb),
+    }
+
+    # ---- the root ring ------------------------------------------------------------
+    # One registry, its sub-root stepped 1, 2, ... so every posting is a
+    # distinct root.  Root r1 is re-posted once the ring is full, so evicting
+    # its first posting must keep it.
+    svc = CentralMerkleService(depth=AGGREGATOR_DEPTH)
+    svc.enroll_registry("kyc:ring", 1, timestamp=TS0)
+    posts = []
+    t = TS0
+    def post_sub(v):
+        nonlocal t
+        t += 3600.0
+        svc.update_sub_root("kyc:ring", v, timestamp=t)
+        rec = svc.post(timestamp=t)
+        posts.append({"sub_root": v, "at": t, "root": _hx(rec.root), "sequence": rec.sequence})
+        return rec.root
+    r0 = post_sub(1)
+    r1 = post_sub(2)
+    for v in range(3, CentralMerkleService.ROOT_RING_SIZE + 1):
+        post_sub(v)
+    post_sub(2)                                  # re-post r1: sequence 256, evicts r0
+    post_sub(10_000)                             # evicts the OLD posting of r1
+    now = t + 1.0
+    out["root_ring"] = {
+        "depth": AGGREGATOR_DEPTH, "sub_tree_id": "kyc:ring", "enroll_ts": TS0,
+        "posts": posts,
+        "r0_retained": svc.root_record(r0) is not None,
+        "r1_posted_at": svc.root_record(r1).posted_at,
+        "now": now,
+        "max_retained_age": svc.max_retained_age(now=now),
+        "accepts": [{"root": _hx(r), "max_age": a, "want": svc.accepts(r, max_age=a, now=now)}
+                    for r, a in ((r1, 7 * DAY), (r1, 0.5), (r0, 7 * DAY), (0, 7 * DAY))],
+    }
+
+    # ---- composed paths ------------------------------------------------------------
+    agg = CentralMerkleService(depth=AGGREGATOR_DEPTH)
+    kyc = IdentityMerkleTree(depth=KYC_SUBTREE_DEPTH, private=True)
+    neighbour = IdentityMerkleTree(depth=KYC_SUBTREE_DEPTH, private=True)
+    neighbour.insert_leaf(identity_leaf_salted(mul(G1, draw()), 5))
+    agg.enroll_registry("kyc:neighbour", neighbour.root(), timestamp=TS0)
+    holder = mul(G1, draw())
+    hsalt = derive_salt(secret, "kyc:ca-ab-2026")
+    for P in (mul(G1, draw()), holder, mul(G1, draw())):
+        kyc.insert_identity_salted(P, hsalt if P == holder else draw() % (2**200) + 1)
+    agg.enroll_registry("kyc:ca-ab-2026", kyc.root(), timestamp=TS0)
+    sub = kyc.path(1)
+    full = agg.full_proof("kyc:ca-ab-2026", sub)
+    comp = full.composed()
+    assert comp.verify() and comp.root == agg.identity_root
+    out["composed"] = {
+        "depth": AGGREGATOR_DEPTH, "sub_depth": KYC_SUBTREE_DEPTH,
+        "neighbour_leaves": [_hx(l) for l in neighbour.leaves],
+        "kyc_leaves": [_hx(l) for l in kyc.leaves],
+        "sub_proof": _proof_json(sub),
+        "composed": _proof_json(comp),
+    }
+
+    # ---- the insurance regulator ---------------------------------------------------
+    reg = InsuranceRegulator("ca-ab")
+    ins, other = mul(G1, draw()), mul(G1, draw())
+    env0 = InsurerEnvelope(standing=True, face_band=5, dep_types=frozenset({0, 1}),
+                           max_dep_rate=1000, max_premium_rate=500, expires_at=TS0 + 90 * DAY)
+    env = reg.attest(ins, env0, ["asset:bicycle"], general=True)
+    reg.attest(other, InsurerEnvelope(standing=True, face_band=3, dep_types=frozenset({2}),
+                                      max_dep_rate=300, max_premium_rate=200,
+                                      expires_at=TS0 + 90 * DAY), ["asset:car"])
+    names = reg.predicate_names(env, ["asset:bicycle"])
+    bicycle, car = scope_id(reg.scope_name("asset:bicycle")), scope_id(reg.scope_name("asset:car"))
+    cases = []
+    for scope, face, dep, dr, pr, at in (
+            (GENERAL_SCOPE, 99_999 * 10**6, 1, 1000, 500, TS0),
+            (bicycle, 80 * 10**6, 1, 500, 300, TS0),
+            (GENERAL_SCOPE, 100_000 * 10**6, 0, 0, 0, TS0),
+            (GENERAL_SCOPE, 10**6, 2, 0, 0, TS0),
+            (GENERAL_SCOPE, 10**6, 1, 1001, 0, TS0),
+            (GENERAL_SCOPE, 10**6, 1, 0, 501, TS0),
+            (car, 10**6, 0, 0, 0, TS0),
+            (GENERAL_SCOPE, 10**6, 0, 0, 0, TS0 + 90 * DAY + 1)):
+        try:
+            check_issuance(env, scope=scope, face_units=face, dep_type=dep, dep_rate=dr,
+                           premium_rate=pr, now=at)
+            want = ""
+        except IssuanceRefused as exc:
+            want = str(exc)
+        cases.append({"scope": _hx(scope), "face": str(face), "dep_type": dep, "dep_rate": dr,
+                      "premium_rate": pr, "now": at, "want": want})
+    face_proof = reg.membership_proof(ins, "insurer:face:5")
+    cleared = reg.revoke(other)
+    out["regulator"] = {
+        "jurisdiction": "ca-ab", "depth": reg.tree_depth,
+        "insurer": _g1(ins), "other": _g1(other),
+        "envelope": {"face_band": 5, "dep_types": [0, 1], "max_dep_rate": 1000,
+                     "max_premium_rate": 500, "expires_at": TS0 + 90 * DAY},
+        "scopes": sorted(_hx(x) for x in env.scopes),
+        "other_envelope": {"face_band": 3, "dep_types": [2], "max_dep_rate": 300,
+                           "max_premium_rate": 200, "expires_at": TS0 + 90 * DAY},
+        "predicate_names": names,
+        "subtree_keys": [_hx(subtree_key(n)) for n in names],
+        "face_proof": _proof_json(face_proof),
+        "cleared_other": cleared,
+        "sub_roots_after_revoke": [[n, _hx(r)] for n, r in reg.sub_roots().items()],
+        "bands": [[str(f), b] for f, b in ((0, 1), (10 * 10**6 - 1, 1), (10 * 10**6, 2),
+                                          (10**14 - 1, 8), (10**14, 9))],
+        "cases": cases,
+    }
+
+    # ---- attribute proofs ----------------------------------------------------------
+    svc2 = CentralMerkleService(depth=AGGREGATOR_DEPTH)
+    age = FeatureAuthority("feature:age-over-18", tree_depth=10)
+    person = mul(G1, draw())
+    kyc2 = IdentityMerkleTree(depth=KYC_SUBTREE_DEPTH, private=True)
+    psalt = derive_salt(secret, "kyc:ca-ab-2026", 2)
+    kyc2.insert_identity_salted(person, psalt)
+    age.attest(person)
+    svc2.enroll_registry("kyc:ca-ab-2026", kyc2.root(), timestamp=TS0)
+    svc2.enroll_feature("feature:age-over-18", age.sub_root, timestamp=TS0)
+    svc2.post(timestamp=TS0)
+    mx, my = point_to_words(person)
+    ap = prove_attributes(svc2, [("kyc:ca-ab-2026", kyc2.path(0)),
+                                 ("feature:age-over-18", age.membership_proof_for_identity(person))],
+                          mx, my)
+    out["attributes"] = {
+        "depth": AGGREGATOR_DEPTH, "posted_at": TS0,
+        "kyc_leaves": [_hx(l) for l in kyc2.leaves],
+        "age_leaves": [_hx(l) for l in age._tree.leaves],
+        "person": _g1(person),
+        "root": _hx(ap.root),
+        "verify": [
+            {"required": ["kyc:ca-ab-2026", "feature:age-over-18"], "max_age": 7 * DAY,
+             "now": TS0 + DAY,
+             "want": verify_attributes(svc2, ap, ["kyc:ca-ab-2026", "feature:age-over-18"],
+                                       max_age=7 * DAY, now=TS0 + DAY)},
+            {"required": ["feature:resident"], "max_age": 7 * DAY, "now": TS0 + DAY,
+             "want": verify_attributes(svc2, ap, ["feature:resident"], max_age=7 * DAY,
+                                       now=TS0 + DAY)},
+            {"required": ["kyc:ca-ab-2026"], "max_age": DAY, "now": TS0 + 2 * DAY,
+             "want": verify_attributes(svc2, ap, ["kyc:ca-ab-2026"], max_age=DAY,
+                                       now=TS0 + 2 * DAY)},
+        ],
+    }
     return out
 
 

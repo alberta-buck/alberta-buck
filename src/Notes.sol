@@ -7,7 +7,7 @@ import {IMintVerifier}                 from "./IMintVerifier.sol";
 import {IMintVerifierA2}               from "./IMintVerifierA2.sol";
 import {ISpendVerifier}                from "./ISpendVerifier.sol";
 import {IIdentityMembershipVerifier}   from "./IIdentityMembershipVerifier.sol";
-import {INoteBindingVerifier}          from "./INoteBindingVerifier.sol";
+import {IDepositFoldVerifier}          from "./IDepositFoldVerifier.sol";
 import {IdentityRegistry}              from "./IdentityRegistry.sol";
 import {BN254}                         from "./BN254.sol";
 
@@ -68,9 +68,9 @@ contract Notes {
     /// @notice Field element each empty leaf hashes to.  Hard-coded to match
     ///         the circuit's ZERO_VALUE() literal -- changing one without the
     ///         other breaks the in-circuit Merkle insertion.  Computed as
-    ///         `keccak256("AlbertaBuck:Notes:zero") % FIELD_R`.
+    ///         `keccak256("AlbertaBuck/Notes/Zero/v2") % FIELD_R`.
     uint256 public constant ZERO_VALUE =
-        12478158023141672556814566805819277863195393802640872128727997243357085450959;
+        460097596457234765974707969191747880107513410278794739541636231580225950866;
 
     /// @notice Empty-tree root: 20 levels of self-paired ZERO_VALUE.  The
     ///         constructor seeds `roots[0]` to this so a freshly-deployed
@@ -78,7 +78,7 @@ contract Notes {
     ///         check.  Computed off-chain from the same Poseidon-2 chain the
     ///         circuit uses; pinned literal here keeps the constructor pure.
     uint256 public constant EMPTY_ROOT =
-        6959478139657271248173638342125700921600510448444968095526832403890386862787;
+        6356158094200644324551957783828547278843291898127006657250053394249012399487;
 
     /// @notice Per-leaf issuer-mode labels, mirrored from the mint circuit's
     ///         `issuerMode` output (circuits/mint_batch.circom).  A leaf is
@@ -94,6 +94,13 @@ contract Notes {
     /// @notice Note flavor labels, mirrored from `circuits/spend.circom` and
     ///         `alberta_buck.wallet.notes`.  Each spendCoupled* entry point
     ///         passes its constant into the spend SNARK as a public input.
+    /// @notice The accumulator consumer Notes is: each spend names the identity
+    ///         root it proved against, and the registry accepts any root it
+    ///         retains within this consumer's maximum age -- a registration
+    ///         check, not a revocation check, so a generous one (7 days).
+    bytes32 public constant NOTES_MEMBERSHIP_CONSUMER =
+        keccak256("AlbertaBuck/Accumulator/Consumer/NotesMembership/v2");
+
     uint256 public constant FLAVOR_A1 = 1;
     uint256 public constant FLAVOR_A2 = 2;
     uint256 public constant FLAVOR_B1 = 3;
@@ -130,8 +137,9 @@ contract Notes {
 
     /// @notice Identity membership verifier (Phase 9 -- identity-axis).
     ///         Verifies a Groth16 proof that the counterparty identity point
-    ///         is a member of the registry-Identity accumulator under
-    ///         identityRegistry.identityRoot().  Required for the full
+    ///         is a member of the registry-Identity accumulator under the
+    ///         identity root the spend names, which the registry must accept
+    ///         for NOTES_MEMBERSHIP_CONSUMER.  Required for the full
     ///         identity-binding spend path (A1/A2 deposit coupling + B1
     ///         depositor binding).  Optional at construction; governance
     ///         wires it via setIdentityMembershipVerifier.  Coupled spends
@@ -162,29 +170,22 @@ contract Notes {
     uint256[ROOT_HISTORY_SIZE] public roots;
     uint8   public currentRootIndex;
 
-    /// @notice Note<->eEnc tie verifier (see INoteBindingVerifier; relations:
-    ///         circuits/note_binding.circom for A2 and
-    ///         circuits/note_binding_a1.circom for A1, verified by the two
-    ///         generated Groth16 verifiers behind one
-    ///         NoteBindingVerifierAdapter).  Binds the deposit-coupling
-    ///         ciphertext `eEnc` to the SPECIFIC addressed (A1/A2) note being
-    ///         spent, so a depositor cannot substitute a self-addressed
-    ///         ciphertext for the note's committed one.  This closes the two
-    ///         gaps the spend proof (which binds flavor but not eEnc) leaves open:
-    ///           * addressed-binding — "only the recipient Identity M_rec can
-    ///             spend an A1/A2 note"; and
-    ///           * A2 collusion — "an un-nameable note is un-spendable".
-    ///         Optional at construction; governance wires it via
-    ///         setNoteBindingVerifier.  Addressed coupled spends (A1/A2)
-    ///         require a non-zero verifier and a nonempty proof (fail closed);
-    ///         the setter still accepts address(0), but those spends then
-    ///         revert rather than skip.  Wired only into the addressed spends;
-    ///         B1 (bearer) needs no tie (the depositor binding names the
-    ///         depositor directly).
-    /// @dev    Appended at the END of storage so the existing slot positions
-    ///         (nullifiers, noteFaceSum, nextLeafIndex, roots, ...) that tests
-    ///         reach via `vm.store` stay unperturbed.
-    INoteBindingVerifier public noteBindingVerifier;
+    /// @notice The folded deposit gate for ADDRESSED (A1/A2) spends.
+    ///
+    ///         The addressed paths verify ONE proof carrying every relation.
+    ///         That is not a consolidation for tidiness: an addressed Note is
+    ///         keyed to the
+    ///         recipient's receiving key while its authority belongs to the
+    ///         recipient's Identity, and those are two different secrets.
+    ///         Proved side by side they say nothing about their owner, and a
+    ///         thief holding a stolen payload satisfies both halves -- the
+    ///         reading half with the stolen key, the Identity half with its
+    ///         own registered Identity.  The fold states the tie instead.
+    ///
+    ///         An addressed spend with this slot unset reverts.  There is no
+    ///         weaker path to fall back to, by construction.
+    ///         See doc/review/notes-receiving-key.org section 3.3a.
+    IDepositFoldVerifier public depositFoldVerifier;
 
     // ---- events -----------------------------------------------------------
 
@@ -194,31 +195,27 @@ contract Notes {
     event SpendVerifierUpdated(address indexed previous, address indexed next);
     event IdentityRegistryUpdated(address indexed previous, address indexed next);
     event IdentityMembershipVerifierUpdated(address indexed previous, address indexed next);
-    event NoteBindingVerifierUpdated(address indexed previous, address indexed next);
+    event DepositFoldVerifierUpdated(address indexed previous, address indexed next);
 
-    /// @notice Emitted on an identity-M-bound (unilateral) A2 deposit.  Publishes
-    ///         the committed point `P_I = (piX, piY)` that the deposit-coupling
-    ///         sigma constrained and the membership proof certified as a member of
-    ///         the registry-Identity accumulator — so an auditor can re-check the
-    ///         binding against the on-chain identityRoot.  Reveals no Identity:
-    ///         `P_I` is the perfectly-hiding blind `M_iss + b·H`.
+    /// @notice Emitted on an addressed A2 deposit.  The fold publishes no point:
+    ///         every value it constrains is either already a public input the
+    ///         adapter derived (the nullifier, the face, the identity root, the
+    ///         re-encryption, the depositor) or private by design.  An earlier
+    ///         shape logged a committed `P_I`; a log is not a constraint, and
+    ///         logging a point no relation reads invites an auditor to believe
+    ///         otherwise.
     event SpentCoupledA2(
         uint256 indexed nullifier,
         uint256 face,
-        address indexed recipient,
-        uint256 piX,
-        uint256 piY
+        address indexed recipient
     );
 
-    /// @notice Emitted on an identity-M-bound A1 deposit (addressed, public
-    ///         issuer).  Same shape as SpentCoupledA2; here `P_I = (piX, piY)`
-    ///         commits the *recipient* identity M_rec the membership certified.
+    /// @notice Emitted on an addressed A1 deposit (public issuer).  Same shape
+    ///         as SpentCoupledA2, and for the same reason.
     event SpentCoupledA1(
         uint256 indexed nullifier,
         uint256 face,
-        address indexed recipient,
-        uint256 piX,
-        uint256 piY
+        address indexed recipient
     );
 
     /// @notice Emitted on an identity-M-bound B1 deposit (bearer, public issuer):
@@ -318,8 +315,8 @@ contract Notes {
     }
 
     /// @notice Wire (or rotate) the identity registry consulted by the
-    ///         Identity-M-bound spends (deposit-coupling / depositor-binding and
-    ///         the membership root).  Passing `address(0)` disables those spends.
+    ///         Identity-M-bound spends (the folded gate's account and root, B1's
+    ///         depositor binding).  Passing `address(0)` disables those spends.
     function setIdentityRegistry(address next) external {
         require(msg.sender == governance, "not governance");
         emit IdentityRegistryUpdated(address(identityRegistry), next);
@@ -354,17 +351,16 @@ contract Notes {
         identityMembershipVerifier = IIdentityMembershipVerifier(next);
     }
 
-    /// @notice Wire (or rotate) the note<->eEnc tie verifier
-    ///         (INoteBindingVerifier) consulted by the addressed (A1/A2) spends.
-    ///         Passing `address(0)` is allowed (governance tests of the setter);
-    ///         addressed coupled spends then revert rather than skipping the
-    ///         tie.  The production verifiers are the generated
-    ///         NoteBindingGroth16Verifier (A2) and NoteBindingA1Groth16Verifier
-    ///         (A1) behind one NoteBindingVerifierAdapter.
-    function setNoteBindingVerifier(address next) external {
+    /// @notice Wire (or rotate) the folded deposit gate the addressed spends
+    ///         verify.  `address(0)` is refused: the fold IS the addressed gate,
+    ///         not an upgrade to one, so there is no configuration in which
+    ///         clearing it leaves a sound path behind.  Rotation is for a new
+    ///         verifier -- a fresh setup, or a circuit at a new depth.
+    function setDepositFoldVerifier(address next) external {
         require(msg.sender == governance, "not governance");
-        emit NoteBindingVerifierUpdated(address(noteBindingVerifier), next);
-        noteBindingVerifier = INoteBindingVerifier(next);
+        require(next != address(0), "depositFoldVerifier=0");
+        emit DepositFoldVerifierUpdated(address(depositFoldVerifier), next);
+        depositFoldVerifier = IDepositFoldVerifier(next);
     }
 
     // ---- views ------------------------------------------------------------
@@ -474,30 +470,31 @@ contract Notes {
     }
 
     /// @notice Mint a PRIVATE-issuer (A2) batch with the collusion-resistant
-    ///         per-leaf eIss leaf-tie.  Every leaf must be PRIVATE-mode
+    ///         per-leaf leaf-tie.  Every leaf must be PRIVATE-mode
     ///         (issuerMode[i] == MODE_PRIVATE); `msg.sender` must be a registered
     ///         PRIVATE Identity and supply exactly one A2 re-encryption binding
     ///         per committed leaf.  The proof is verified by the *A2* mint
     ///         circuit (mint_batch_a2), which constrains every leaf to flavor ==
-    ///         A2 and exposes each leaf's committed `eIss` as a public output; we
-    ///         pass the bindings' `eIss` as that public input, so a Groth16
-    ///         accept proves each binding's `eIss` *is* the committed leaf's --
-    ///         the leaf-tie that closes the floating-/missing-binding collusion
-    ///         sub-cases (per-batch count alone could not).
+    ///         A2 and exposes each leaf's committed `eIss` and `T` as public
+    ///         outputs; we pass the bindings' `eIss` and `proof.T` as those
+    ///         public inputs, so a Groth16 accept proves each binding answers
+    ///         for exactly the leaf it claims -- the leaf-tie that closes the
+    ///         floating-/missing-binding collusion sub-cases (per-batch count
+    ///         alone could not).
     ///
-    /// @dev    What the leaf-tie does and does NOT close.  It binds each
-    ///         committed leaf to a *verified* re-encryption of the issuer's
-    ///         registered Identity, so no leaf is left without a binding and no
-    ///         binding can float to a different leaf.  It does NOT force the
-    ///         binding's `pk_rec` to be the addressed recipient's registered key
-    ///         (verifyIssuerReenc binds `eIss` to the key committed in the
-    ///         proof's `Q`, which the issuer chooses); a colluding issuer+
-    ///         recipient can still encrypt `eIss` under a throwaway key, leaving
-    ///         the issuer un-nameable while the note stays spendable.  Closing
-    ///         that residual hole needs the eNote<->eIss recipient-key coupling
-    ///         at mint -- see alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 issuer binding at mint) ("The A2
-    ///         recipient-key coupling gap").  issuerMode here is a caller-facing
-    ///         assertion (the A2 circuit independently constrains flavor == A2).
+    /// @dev    What the leaf-tie closes here, and what the spend closes.  It
+    ///         binds each committed leaf to a *verified* re-encryption of the
+    ///         issuer's registered Identity, so no leaf is left without a
+    ///         binding and no binding can float to a different leaf.  The
+    ///         binding speaks of the key hidden in its `Q`, which the issuer
+    ///         chooses, and an ElGamal ciphertext does not bind its plaintext to
+    ///         one key.  So the leaf also commits the binding's
+    ///         `T = r'*pk + gamma*H`, and the A2 deposit fold proves `T` opens
+    ///         under the spender's own key: a note keyed so that the recipient
+    ///         reads someone other than its minter never spends
+    ///         (doc/review/notes-receiving-key.org, section 4.6).  issuerMode
+    ///         here is a caller-facing assertion (the A2 circuit independently
+    ///         constrains flavor == A2).
     function mint(
         bytes   calldata proof,
         uint256          oldRoot,
@@ -517,16 +514,20 @@ contract Notes {
                 "Notes: private-mode leaf needs private issuer");
         require(a2Bindings.length == nPrivate, "Notes: A2 binding count");
 
-        // Leaf-tie: the bindings' eIss are the A2 circuit's public inputs, so a
-        // valid proof ties each committed leaf to the binding answering for it.
+        // Leaf-tie: the bindings' eIss and T are the A2 circuit's public
+        // inputs, so a valid proof ties each committed leaf to the binding
+        // answering for it.
         uint256[4][] memory eIss = new uint256[4][](a2Bindings.length);
+        uint256[2][] memory T    = new uint256[2][](a2Bindings.length);
         for (uint256 i = 0; i < a2Bindings.length; i++) {
             eIss[i][0] = a2Bindings[i].eIss.R.X;
             eIss[i][1] = a2Bindings[i].eIss.R.Y;
             eIss[i][2] = a2Bindings[i].eIss.C.X;
             eIss[i][3] = a2Bindings[i].eIss.C.Y;
+            T[i][0]    = a2Bindings[i].proof.T.X;
+            T[i][1]    = a2Bindings[i].proof.T.Y;
         }
-        _verifyA2MintOrRevert(proof, eIss, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
+        _verifyA2MintOrRevert(proof, eIss, T, oldRoot, newRoot, nextLeafIndex_, totalFace, cms);
 
         // Each committed eIss must carry a valid re-encryption of the issuer's
         // registered Identity (soundness of the binding itself).
@@ -584,16 +585,17 @@ contract Notes {
     }
 
     /// @dev A2 mint pre-flight: the same stale-state guards as
-    ///      `_verifyMintOrRevert`, plus the per-leaf `eIss` canonical bound, then
-    ///      the A2 Groth16 check.  `eIss` is the per-leaf E_iss-for-rec the
-    ///      bindings carry; passing it as the A2 circuit's public input makes the
-    ///      verifier's accept the leaf-tie (the circuit exposes the *committed*
-    ///      leaf's eIss, so equality with what we pass is a constraint, not a
-    ///      contract-side compare).  View-only -- reverts here abort before BUCK
-    ///      moves or tree state advances.
+    ///      `_verifyMintOrRevert`, plus the per-leaf `eIss` and `T` canonical
+    ///      bounds, then the A2 Groth16 check.  `eIss` and `T` are what the
+    ///      bindings carry; passing them as the A2 circuit's public inputs makes
+    ///      the verifier's accept the leaf-tie (the circuit exposes the
+    ///      *committed* leaf's, so equality with what we pass is a constraint,
+    ///      not a contract-side compare).  View-only -- reverts here abort
+    ///      before BUCK moves or tree state advances.
     function _verifyA2MintOrRevert(
         bytes   calldata proof,
         uint256[4][] memory eIss,
+        uint256[2][] memory T,
         uint256          oldRoot,
         uint256          newRoot,
         uint32           nextLeafIndex_,
@@ -621,11 +623,12 @@ contract Notes {
             require(eIss[i][0] < FIELD_R && eIss[i][1] < FIELD_R
                  && eIss[i][2] < FIELD_R && eIss[i][3] < FIELD_R,
                     "Notes: eIss out of field");
+            require(T[i][0] < FIELD_R && T[i][1] < FIELD_R, "Notes: T out of field");
         }
 
         require(
             a2MintVerifier.verifyMint(
-                proof, eIss, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
+                proof, eIss, T, oldRoot, newRoot, uint256(nextLeafIndex_), totalFace, cms
             ),
             "Notes: bad mint proof"
         );
@@ -671,18 +674,24 @@ contract Notes {
         require(!(nPublic > 0 && nPrivate > 0), "Notes: mixed issuerMode batch");
     }
 
-    // ---- identity membership (shared by the coupled spends) ------------
+    // ---- identity membership (the B1 spend) ------------------------------
 
-    /// @dev Shared identity membership check — called by the spend paths.
-    ///      Verifies that the committed point `P_I = (px, py)` is a member of the
-    ///      registry-Identity accumulator under the current root.  The point is
-    ///      supplied by the caller (the coupled-A2 path passes the deposit-coupling
-    ///      sigma's `dc.P_I`), so the membership proof is bound to the SAME point
-    ///      the sigma decrypted `eIss` to — a colluding pair cannot answer the
-    ///      coupling with one point and the membership with another.
+    /// @dev Identity membership check — called by the BEARER (B1) spend only.
+    ///      Verifies that the committed point `P_dep = (px, py)` is a member of
+    ///      the registry-Identity accumulator under the current root.  The point
+    ///      is the one `verifyDepositorBinding`'s sigma constrained, so the two
+    ///      are bound to the same M_dep.
+    ///
+    ///      Sharing a public point between two proofs is sound HERE and nowhere
+    ///      else in this contract: B1's two facts rest on ONE secret (m_dep), so
+    ///      the sigma's shared Fiat-Shamir nonce is a genuine tie, and the blind
+    ///      is a multiple of H_PEDERSEN, whose discrete log is unknown.  The
+    ///      addressed flavours have two secrets and no such luck, which is why
+    ///      they fold.  See doc/review/notes-receiving-key.org section 4.5.
     ///
     ///      Reverts if the verifier is unset, the proof is empty or invalid,
-    ///      or the registry's identityRoot is zero (unseeded accumulator).
+    ///      or the registry does not accept `identityRoot` for this consumer:
+    ///      a root the ring no longer retains, or older than Notes' maximum age.
     ///      Coupled spend entry points also require the verifier non-zero
     ///      (cheap, before the spend SNARK); this helper fails closed too so
     ///      a future caller cannot skip by omitting that require.  The real
@@ -690,6 +699,7 @@ contract Notes {
     ///      fails closed there.
     function _verifyIdentityMembership(
         bytes memory identityMembershipProof,
+        uint256 identityRoot,
         uint256 px,
         uint256 py
     )
@@ -703,120 +713,67 @@ contract Notes {
 
         IdentityRegistry reg = identityRegistry;
         require(address(reg) != address(0), "Notes: identity registry not set");
-        uint256 root = reg.identityRoot();
-        require(root != 0, "Notes: identity root not set");
+        require(reg.acceptsRoot(identityRoot, NOTES_MEMBERSHIP_CONSUMER),
+                "Notes: identity root not accepted");
 
         require(
-            verifier.verifyMembership(identityMembershipProof, root, px, py),
+            verifier.verifyMembership(identityMembershipProof, identityRoot, px, py),
             "Notes: bad identity membership proof"
         );
-    }
-
-    /// @dev Shared note<->eEnc tie check — called by the ADDRESSED (A1/A2)
-    ///      spend path only.  A2 layout: verifies that `eEnc` (the
-    ///      deposit-coupling ciphertext) re-encrypts, under the recipient
-    ///      Identity M_rec, the ciphertext the spent note committed in its
-    ///      idHash.  A1 layout (`a1Layout` true): verifies that the spent
-    ///      note's value ciphertext eNote = (rn*G, face*G + rn*M_rec) is keyed
-    ///      to the SAME M_rec that keys `eEnc` and opens `dc.P_I` — `face`
-    ///      MUST be the spend's public face (it pins the eNote plaintext,
-    ///      making the addressed identity unique; ignored for A2).  Either way
-    ///      the deposit gate is bound to THIS note (handle: `nullifier`;
-    ///      shared point: `dc.P_I`).  See INoteBindingVerifier for both
-    ///      relations.
-    ///
-    ///      Reverts if the verifier is unset or the proof is empty or invalid.
-    ///      Addressed coupled spends also require the verifier non-zero
-    ///      (cheap, before the spend SNARK); this helper fails closed too so
-    ///      a future caller cannot skip by omitting that require.  The
-    ///      production relations are circuits/note_binding.circom and
-    ///      circuits/note_binding_a1.circom (soundness: Proofs Theorem 12).
-    function _verifyNoteBinding(
-        bytes memory noteBindingProof,
-        uint256 nullifier,
-        bool    a1Layout,
-        uint256 face,
-        IdentityRegistry.ElGamalCT calldata eEnc,
-        uint256 piX,
-        uint256 piY
-    )
-        internal
-    {
-        INoteBindingVerifier verifier = noteBindingVerifier;
-        require(address(verifier) != address(0),
-                "Notes: note binding verifier not set");
-        require(noteBindingProof.length != 0, "Notes: empty note binding");
-
-        bool ok = a1Layout
-            ? verifier.verifyNoteBindingA1(
-                noteBindingProof, nullifier, face,
-                eEnc.R.X, eEnc.R.Y, eEnc.C.X, eEnc.C.Y, piX, piY)
-            : verifier.verifyNoteBinding(
-                noteBindingProof, nullifier,
-                eEnc.R.X, eEnc.R.Y, eEnc.C.X, eEnc.C.Y, piX, piY);
-        require(ok, "Notes: bad note binding");
     }
 
     // ---- Identity-M-bound addressed spend (unilateral A1 / A2) -----------
 
     /// @dev Shared identity-M-bound deposit for the *addressed* flavors (A1, A2).
-    ///      Both close their respective naming gap with the SAME on-chain gadget:
-    ///      a deposit-coupling sigma + a membership proof bound to the single
-    ///      committed point `dc.P_I`.  The flavors differ only in what the note
-    ///      ciphertext `eEnc` encrypts (hence what `dc.P_I`'s underlying point is):
+    ///      Spending an addressed Note requires two facts about two DIFFERENT
+    ///      secrets: the receiving secret `k` that opens the note's ciphertext,
+    ///      and the Identity scalar `m_rec` the payout account is registered
+    ///      under.  Proved side by side they say nothing about their owner -- a
+    ///      thief holding a stolen payload answers the reading half with the
+    ///      stolen key and the Identity half with its own registered Identity,
+    ///      and both halves are true.  So the gate is ONE Groth16 proof over ONE
+    ///      witness, carrying every relation:
     ///
-    ///        A2:  eEnc = eIss = (r'G, M_iss + r'·M_rec)  -> dc.P_I = M_iss + b·H
-    ///             (membership of the private *issuer*; closes the A2 collusion gap)
-    ///        A1:  eEnc = eRec = (r'G, M_rec + r'·M_rec)  -> dc.P_I = M_rec + b·H
-    ///             (membership of the *recipient*; the issuer is public, named at mint)
+    ///        (1) k decrypts the note ciphertext to the point committed
+    ///        (2) the account credential decrypts under sk_dep to M_rec
+    ///        (3) a registered leaf commits the pair (m_rec, k) under the
+    ///            holder's salt -- the relation a split gate leaves out, and
+    ///            the one the thief cannot satisfy
+    ///        (4) that leaf's path folds to the posted identity root
+    ///        (5) A2 only: the decrypted ISSUER Identity is itself registered,
+    ///            under the salt the note shipped
     ///
-    ///      1. verifyDepositCoupling(msg.sender, eEnc, dc): the account is bound to
-    ///         m_rec AND `eEnc` decrypts under m_rec to the point committed
-    ///         (blinded) in `dc.P_I`.
-    ///      2. _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y): a
-    ///         Groth16 proof that `dc.P_I`'s underlying point is a registered
-    ///         Identity.  The SAME `dc.P_I` flows into both, so the membership is
-    ///         bound to exactly the point the coupling decrypted `eEnc` to -- a
-    ///         colluding pair cannot key `eEnc` to a non-member and still spend.
-    ///      3. _verifyNoteBinding(noteBindingProof, nullifier, ..., eEnc, dc.P_I):
-    ///         the note<->eEnc tie (INoteBindingVerifier) — A2: proves `eEnc`
-    ///         re-encrypts the ciphertext the SPENT note committed; A1: proves
-    ///         the spent note's eNote was addressed to the SAME M_rec keying
-    ///         `eEnc` (with the spend's `face` pinning the eNote plaintext).
-    ///         Either way the coupling is bound to THIS note, not a
-    ///         depositor-substituted one.
+    ///      `DepositFoldVerifierAdapter` derives EVERY public input on chain and
+    ///      reads the depositor's registered key and credential from the
+    ///      registry rather than accepting them, so relation (2) is necessarily
+    ///      about an account that really is registered.  There is no committed
+    ///      point `P_I` and no blind: those existed only so that a sigma and a
+    ///      separate membership SNARK could share a hidden value, which is
+    ///      review finding 5 -- an equality inferred from two proofs that merely
+    ///      share a public point.  One witness states the tie instead.
     ///
     ///      The note's commitment + nullifier are proven by the generic spend
-    ///      SNARK (cm in the pool tree, nullifier well-formed, flavor bound
-    ///      to this entry point).
+    ///      SNARK (cm in the pool tree, nullifier well-formed, flavor bound to
+    ///      this entry point); `idHash` is the private handle joining the two.
     ///
-    ///      CAVEAT.  Steps 1-2 establish that `eEnc` decrypts (under the
-    ///      depositor's authenticated m_rec) to a registered member — but NOT
-    ///      that `eEnc` is the note's committed ciphertext: the spend SNARK
-    ///      binds flavor and exposes no idHash.  Step 3 is what makes the
-    ///      addressed-binding ("only M_rec can spend") and A2-collusion
-    ///      ("un-nameable note un-spendable") guarantees hold.  Coupled spends
-    ///      require both verifiers to be wired and reject empty proofs, so
-    ///      leaving a slot unset is not a skip.  See INoteBindingVerifier and
-    ///      Proofs Theorem 12.
+    ///      See doc/review/notes-receiving-key.org section 3.3a and
+    ///      alberta_buck/wallet/deposit_fold.py, the clear-text reference the
+    ///      circuit is checked against.
     function _spendCoupled(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
-        IdentityRegistry.ElGamalCT          calldata eEnc,
-        IdentityRegistry.DepositCouplingProof calldata dc,
-        bytes   calldata membershipProof,
-        bytes   calldata noteBindingProof,
+        IdentityRegistry.ElGamalCT calldata eEnc,
+        bytes   calldata foldProof,
         uint256          flavor,
         bool             a1Layout
     ) internal {
         require(address(identityRegistry) != address(0), "Notes: identity registry not set");
-        require(address(identityMembershipVerifier) != address(0),
-                "Notes: membership verifier not set");
-        require(address(noteBindingVerifier) != address(0),
-                "Notes: note binding verifier not set");
+        require(address(depositFoldVerifier) != address(0),
+                "Notes: deposit fold verifier not set");
         require(recipient != address(0),  "Notes: zero recipient");
         require(face      > 0,            "Notes: zero face");
         require(_isAcceptedRoot(root),    "Notes: unknown root");
@@ -830,24 +787,19 @@ contract Notes {
             "Notes: bad spend proof"
         );
 
-        // Identity-M binding, half 1: the deposit-coupling sigma.
-        require(
-            identityRegistry.verifyDepositCoupling(msg.sender, eEnc, dc),
-            "Notes: bad deposit coupling"
-        );
+        require(identityRegistry.acceptsRoot(identityRoot, NOTES_MEMBERSHIP_CONSUMER),
+                "Notes: identity root not accepted");
+        require(foldProof.length != 0, "Notes: empty fold proof");
+
+        bool ok = a1Layout
+            ? depositFoldVerifier.verifyFoldA1(
+                foldProof, nullifier, face, identityRoot, eEnc, msg.sender)
+            : depositFoldVerifier.verifyFoldA2(
+                foldProof, nullifier, identityRoot, eEnc, msg.sender);
+        require(ok, "Notes: bad folded deposit gate");
 
         nullifiers[nullifier] = true;
         noteFaceSum          -= face;
-
-        // Identity-M binding, half 2: membership of dc.P_I's point, bound to the
-        // SAME dc.P_I the coupling just constrained.
-        _verifyIdentityMembership(membershipProof, dc.P_I.X, dc.P_I.Y);
-
-        // Identity-M binding, half 3: the note<->eEnc tie, binding `eEnc` to
-        // THIS note.  Empty proofs revert; the entry point required the
-        // verifier slot to be set.
-        _verifyNoteBinding(noteBindingProof, nullifier, a1Layout, face,
-                           eEnc, dc.P_I.X, dc.P_I.Y);
 
         require(
             buck.transfer(recipient, face),
@@ -855,52 +807,47 @@ contract Notes {
         );
     }
 
-    /// @notice Redeem an identity-targeted (unilateral) A2 note -- addressed,
-    ///         *private* issuer.  `eIss` encrypts the issuer's own registered
-    ///         Identity under the recipient identity point M_rec; the membership
-    ///         certifies the decrypted issuer is registered, closing the A2
-    ///         recipient-key collusion gap.  See doc/historical/alberta-buck-notes-unilateral.org.
+    /// @notice Redeem an addressed A2 note -- *private* issuer.  `eIss` is the
+    ///         spend's re-encryption, under the recipient's receiving key, of the
+    ///         issuer Identity the note committed at mint; relation (5) certifies
+    ///         that Identity is registered, so a colluding issuer cannot key the
+    ///         note to a throwaway point and leave the recipient un-nameable.
     function spendCoupledA2(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
-        IdentityRegistry.ElGamalCT          calldata eIss,
-        IdentityRegistry.DepositCouplingProof calldata dc,
-        bytes   calldata membershipProof,
-        bytes   calldata noteBindingProof
+        IdentityRegistry.ElGamalCT calldata eIss,
+        bytes   calldata foldProof
     ) external {
-        _spendCoupled(proof, root, nullifier, face, recipient, eIss, dc,
-                      membershipProof, noteBindingProof, FLAVOR_A2, false);
-        emit SpentCoupledA2(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
+        _spendCoupled(proof, root, identityRoot, nullifier, face, recipient, eIss,
+                      foldProof, FLAVOR_A2, false);
+        emit SpentCoupledA2(nullifier, face, recipient);
     }
 
-    /// @notice Redeem an identity-targeted A1 note -- addressed, *public* issuer.
-    ///         `eRec` encrypts the recipient's identity under itself, so the SAME
-    ///         deposit coupling proves the spender is the addressed identity and
-    ///         the membership certifies that recipient identity is registered.
-    ///         The issuer is public and named at mint (the batch Schnorr); the
-    ///         recipient produces a bilateral receipt off chain
-    ///         (alberta_buck.wallet.unilateral_a1).  On-chain logic mirrors
-    ///         spendCoupledA2; the committed point's meaning differs, and the
-    ///         note<->eEnc tie uses the A1-layout circuit (note_binding_a1.circom,
-    ///         with `face` public) since an A1 idHash commits (eNote, m_issuer,
-    ///         sigma) rather than a second ciphertext.
+    /// @notice Redeem an addressed A1 note -- *public* issuer, named at mint by
+    ///         the batch Schnorr.  `eRec` is the spend's re-encryption, under the
+    ///         recipient's receiving key, of the recipient's OWN Identity, so the
+    ///         fold needs no fifth relation: relation (2) already proves that
+    ///         Identity is the one the payout account is registered under.  A1
+    ///         takes the `face`-bearing layout, because an A1 idHash commits
+    ///         (eNote, m_issuer, sigma) and the public face pins eNote's
+    ///         plaintext.
     function spendCoupledA1(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
-        IdentityRegistry.ElGamalCT          calldata eRec,
-        IdentityRegistry.DepositCouplingProof calldata dc,
-        bytes   calldata membershipProof,
-        bytes   calldata noteBindingProof
+        IdentityRegistry.ElGamalCT calldata eRec,
+        bytes   calldata foldProof
     ) external {
-        _spendCoupled(proof, root, nullifier, face, recipient, eRec, dc,
-                      membershipProof, noteBindingProof, FLAVOR_A1, true);
-        emit SpentCoupledA1(nullifier, face, recipient, dc.P_I.X, dc.P_I.Y);
+        _spendCoupled(proof, root, identityRoot, nullifier, face, recipient, eRec,
+                      foldProof, FLAVOR_A1, true);
+        emit SpentCoupledA1(nullifier, face, recipient);
     }
 
     // ---- Identity-M-bound B1 spend (bearer, public issuer) ---------------
@@ -934,6 +881,7 @@ contract Notes {
     function spendCoupledB1(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
@@ -980,7 +928,7 @@ contract Notes {
 
         // Identity-M binding, half 2: membership of P_dep's point M_dep, bound to
         // the SAME P_dep the binding just constrained.
-        _verifyIdentityMembership(membershipProof, b1Proof.P_dep.X, b1Proof.P_dep.Y);
+        _verifyIdentityMembership(membershipProof, identityRoot, b1Proof.P_dep.X, b1Proof.P_dep.Y);
 
         require(
             buck.transfer(recipient, face),

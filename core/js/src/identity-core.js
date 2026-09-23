@@ -23,7 +23,7 @@ export const big = (s) => BigInt(s);
 
 /** THE canonical JSON dialect: sorted keys, compact separators, raw
  *  UTF-8 -- byte-identical to Python's canonical_json(), shared by the
- *  identity preimage (canonical_identity_data) and the AB-RCPT/1 receipt
+ *  identity preimage (canonical_identity_data) and the AB-RCPT/2 receipt
  *  core.  Values must be strings and integers (floats are not canonical).
  *  JSON.stringify emits this natively once keys are sorted. */
 export function canonicalIdentity(fields) {
@@ -76,7 +76,7 @@ export function wrapIdentity(wasm) {
       const g = wasm.g2_generator();
       return { x: [big(g[0]), big(g[1])], y: [big(g[2]), big(g[3])] };
     })(),
-    H_POINT: P(wasm.h_point()),
+    H_PEDERSEN: P(wasm.h_pedersen()),
     FLAVOR_A1: 1,
     FLAVOR_A2: 2,
     FLAVOR_B1: 3,
@@ -186,6 +186,24 @@ export function wrapIdentity(wasm) {
         [hex(proof.e), hex(proof.s), ...flatP(proof.T1), ...flatP(proof.T2)],
         hex(account), hex(chainid)),
 
+    // The same DLEQ bound to one registry under its own tag: an Identity
+    // opening an insurer presents to BuckCredit, never a receipt.
+    identityOpeningProve(E, sk, M, account, chainid, registry, t) {
+      const o = wasm.identity_opening_prove(
+        flatCT(E), hex(sk), ...flatP(M), hex(account), hex(chainid), hex(registry), hex(t));
+      return { e: big(o[0]), s: big(o[1]), T1: P(o, 2), T2: P(o, 4) };
+    },
+    identityOpeningVerify: (E, pk, M, proof, account, chainid, registry) =>
+      wasm.identity_opening_verify(
+        flatCT(E), ...flatP(pk), ...flatP(M),
+        [hex(proof.e), hex(proof.s), ...flatP(proof.T1), ...flatP(proof.T2)],
+        hex(account), hex(chainid), hex(registry)),
+
+    // ---- Holder-derived salts ------------------------------------------------
+    treeTag: (treeId) => big(wasm.tree_tag(treeId)),
+    deriveSalt: (holderSecret, treeId, counter = 0) =>
+      big(wasm.derive_salt(hex(holderSecret), treeId, BigInt(counter))),
+
     // ---- A2 issuer re-encryption binding -----------------------------------
     issuerReencProve(skIss, rPrime, pkRec, eReg, eIss, issuer, chainid,
                      beta, gamma, kR, kB, kS, kG) {
@@ -208,22 +226,7 @@ export function wrapIdentity(wasm) {
          ...flatP(proof.Q), ...flatP(proof.U), ...flatP(proof.T)],
         hex(issuer), hex(chainid)),
 
-    // ---- Deposit coupling / B1 depositor binding ----------------------------
-    depositCoupleProve(mRec, skDep, eDep, eIss, account, chainid, b, kM, kS, kB) {
-      const o = wasm.deposit_couple_prove(
-        hex(mRec), hex(skDep), flatCT(eDep), flatCT(eIss),
-        hex(account), hex(chainid), hex(b), hex(kM), hex(kS), hex(kB));
-      return {
-        e: big(o[0]), s_m: big(o[1]), s_s: big(o[2]), s_b: big(o[3]),
-        A2: P(o, 4), A3: P(o, 6), A4: P(o, 8), P_I: P(o, 10),
-      };
-    },
-    depositCoupleVerify: (pkDep, eDep, eIss, proof, account, chainid) =>
-      wasm.deposit_couple_verify(
-        ...flatP(pkDep), flatCT(eDep), flatCT(eIss),
-        [hex(proof.e), hex(proof.s_m), hex(proof.s_s), hex(proof.s_b),
-         ...flatP(proof.A2), ...flatP(proof.A3), ...flatP(proof.A4), ...flatP(proof.P_I)],
-        hex(account), hex(chainid)),
+    // ---- B1 depositor binding ---------------------------------------------------
     b1BindProve(mDep, skDep, eDep, pkIss, account, chainid, r, b, kM, kS, kR, kB) {
       const o = wasm.b1_bind_prove(
         hex(mDep), hex(skDep), flatCT(eDep), ...flatP(pkIss),
@@ -255,7 +258,13 @@ export function wrapIdentity(wasm) {
       big(wasm.id_hash_b1(hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
     idHashA1: (eNote, mIssuer, sigmaR, sigmaS) =>
       big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
-    idHashA2: (eNote, eIss) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss))),
+    idHashA2: (eNote, eIss, T) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss), flatP(T))),
     identityLeaf: (M) => big(wasm.identity_leaf(...flatP(M))),
+    // The hiding leaf of a private subtree, and the one that binds an
+    // Identity to the receiving key its Notes are addressed to.
+    identityLeafSalted: (M, salt) =>
+      big(wasm.identity_leaf_salted(...flatP(M), hex(salt))),
+    receivingLeaf: (mRec, kRecv, salt) =>
+      big(wasm.receiving_leaf(hex(mRec), hex(kRecv), hex(salt))),
   };
 }

@@ -2,7 +2,7 @@
 // core/vectors/wallet-kernel-vectors.json (emitted by the Python
 // reference via alberta_buck.wallet.wallet_kernel_vectors, nonces
 // included) through the buck-wallet wasm kernel: canonical dialect,
-// AB-RCPT/1 envelope, every receipt build, the tier-1 verifier, the
+// AB-RCPT/2 envelope, every receipt build, the tier-1 verifier, the
 // unilateral A1/A2 flows and the issuer ceremony.  The Rust and Python
 // suites assert the same file.
 //
@@ -84,7 +84,24 @@ function receiptArgs(row) {
     if (kind.startsWith("note-a2")) {
       args.eNote = mint.eNote;
       args.eIss = mint.eIss;
+      // idHash commits the binding's T either way; gamma opens it.
+      args.T = mint.binding.T;
+      args.gamma = mint.nonces.gamma;
       if (kind === "note-a2") args.binding = mint.binding;
+    }
+    if (kind.startsWith("note-a1") || kind.startsWith("note-a2")) {
+      // The addressed legs: the mailbox key, and whichever evidence the
+      // generating role could produce.  The recipient holds k; the issuer
+      // holds the randomness it encrypted with.  Neither holds the other's.
+      const alice = WV.parties[row.payee];
+      args.pk_recv = alice.pk_recv;
+      args.mailbox_binding = row.mailboxBinding ?? null;
+      if (row.role === "recipient") {
+        args.k_recv = alice.k_recv;
+      } else {
+        args.r_note = mint.nonces.r_note;
+        args.r_id = kind === "note-a1" ? mint.nonces.r_rec : mint.nonces.r_prime;
+      }
     }
   }
   return args;
@@ -123,7 +140,7 @@ test("tampered receipts reject", { skip }, () => {
 test("unilateral A2 flow", { skip }, () => {
   const u = WV.unilateral_a2;
   const minted = w.mintUnilateralA2({
-    sk_iss: u.sk_iss, E_reg: u.E_reg, M_rec: u.M_rec,
+    sk_iss: u.sk_iss, E_reg: u.E_reg, pk_recv: u.pk_recv,
     v: u.v, rho: u.rho, issuer: u.issuer, chainid: u.chainid,
     predicate: u.predicate,
     nonces: {
@@ -137,11 +154,12 @@ test("unilateral A2 flow", { skip }, () => {
 
   const tree = { depth: u.tree.depth, leaves: u.tree.leaves };
   const rcpt = w.makeReceiptA2({
-    m_rec: u.m_rec, minted, issuer: u.issuer, chainid: u.chainid,
-    tree, t_vd: u.t_vd,
+    k_recv: u.k_recv, M_rec: u.M_rec, minted,
+    issuer: u.issuer, chainid: u.chainid, tree, t_vd: u.t_vd,
   });
   assert.deepEqual(rcpt.M_I, u.receipt.M_I);
   assert.deepEqual(rcpt.M_rec, u.receipt.M_rec);
+  assert.deepEqual(rcpt.pk_recv, u.receipt.pk_recv);
   assert.deepEqual(rcpt.vd, u.receipt.vd);
   assert.equal(rcpt.M_I_member, u.receipt.M_I_member);
   assert.equal(rcpt.M_rec_member, u.receipt.M_rec_member);
@@ -166,7 +184,8 @@ test("unilateral A1 flow", { skip }, () => {
   const u = WV.unilateral_a1;
   const tree = { depth: WV.unilateral_a2.tree.depth, leaves: WV.unilateral_a2.tree.leaves };
   const minted = w.mintUnilateralA1({
-    M_rec: u.M_rec, v: u.v, rho: u.rho, m_issuer: u.m_issuer,
+    M_rec: u.M_rec, pk_recv: u.pk_recv,
+    v: u.v, rho: u.rho, m_issuer: u.m_issuer,
     sigma_R: u.sigma_R, sigma_s: u.sigma_s, predicate: u.predicate,
     nonces: { r_prime: u.r_prime, r_note: u.r_note },
   });
@@ -174,11 +193,12 @@ test("unilateral A1 flow", { skip }, () => {
     assert.deepEqual(minted[key], u.minted[key], key);
   }
   const rcpt = w.makeReceiptA1({
-    m_rec: u.m_rec, minted, M_iss: u.M_iss,
+    k_recv: u.k_recv, M_rec: u.M_rec, minted, M_iss: u.M_iss,
     issuer: u.issuer, chainid: u.chainid, tree, t_vd: u.t_vd,
   });
   assert.deepEqual(rcpt.M_iss, u.receipt.M_iss);
   assert.deepEqual(rcpt.M_rec, u.receipt.M_rec);
+  assert.deepEqual(rcpt.pk_recv, u.receipt.pk_recv);
   assert.deepEqual(rcpt.vd, u.receipt.vd);
 
   const res = w.verifyReceiptA1({
@@ -200,4 +220,15 @@ test("issuer ceremony", { skip }, () => {
   assert.deepEqual(cred.sigma_1, i.sigma_1);
   assert.deepEqual(cred.sigma_2, i.sigma_2);
   assert.deepEqual(cred.delivery, i.delivery);
+});
+
+test("notes: receiving key, delivery, binding, fold witnesses", { skip }, () => {
+  const camel = (s) => s.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
+  const name = { deposit_fold_a1_witness: "depositFoldA1Witness",
+                 deposit_fold_a2_witness: "depositFoldA2Witness" };
+  assert.ok(WV.notes.length >= 11, "the notes section lost rows");
+  for (const row of WV.notes) {
+    const f = name[row.fn] ?? camel(row.fn);
+    assert.deepEqual(w[f](row.args), row.want, `${row.fn} diverges from the Python reference`);
+  }
 });

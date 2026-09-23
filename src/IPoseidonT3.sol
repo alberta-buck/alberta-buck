@@ -6,7 +6,7 @@ pragma solidity ^0.8.20;
 ///         `poseidonContract.createCode(2)`: a single externally-callable
 ///         `poseidon(uint256[2]) pure returns (uint256)`.  The on-chain
 ///         contract is deployed from raw bytecode (no Solidity source); see
-///         `scripts/snark/poseidon_t3_code.js`.
+///         `scripts/snark/poseidon_code.js`.
 interface IPoseidonT3 {
     function poseidon(uint256[2] calldata input) external pure returns (uint256);
 }

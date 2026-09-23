@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
              THE ALBERTA BUCK - REBALANCING THE BUCKBASKET
-                                 (V1.1)
+                                  (V2)
               Waiting for the Turn: an Amortized On-Chain
                            Rebalance Director
 

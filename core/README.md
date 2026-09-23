@@ -107,7 +107,7 @@ The identity kernel's ground truth is the executable Python reference in
 - `core/js/src/identity.js` wraps the wasm kernel in the BigInt API
   (including `canonicalIdentity()` -- THE canonical JSON dialect: sorted
   keys, compact separators, raw UTF-8, string/integer values only --
-  shared by the identity preimage and the AB-RCPT/1 receipt core, and
+  shared by the identity preimage and the AB-RCPT/2 receipt core, and
   byte-identical to Python's `canonical_json()`).
 
 ## Journal schema (v1)
