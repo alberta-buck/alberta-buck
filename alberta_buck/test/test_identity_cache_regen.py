@@ -1,10 +1,8 @@
 """Identity-cache regeneration gate (Phase 3 acceptance).
 
-``test/vectors/identity-cache.json`` is an append-only accumulation across
-sim runs and code epochs (65 of its entries still carry the pre-merkle
-4-element format), so byte-comparing a fresh regeneration against the
-committed file would compare code epochs, not backends.  The invariant the
-kernel port must preserve is:
+``test/vectors/identity-cache.json`` is a local, untracked cache, so there is
+no committed copy to compare against.  The invariant the kernel port must
+preserve is:
 
 1. Regenerating the cache from scratch is BACKEND-INVARIANT: a cold run
    under ``BUCK_IDENTITY_BACKEND=py`` (the executable spec) and one under
@@ -139,6 +137,19 @@ def test_legacy_registration_proof_is_not_a_cache_hit(monkeypatch):
             7, "TestAgent", 0, issuer=None,
             rng=idmod.seeded_rng(7), chainid=31337, registry=0x1D1D,
         )
+
+
+def test_save_cache_keeps_current_schema_atomically(tmp_path, monkeypatch):
+    """A save drops retired-schema entries and leaves no temporary file."""
+    from alberta_buck.sim import identity as idmod
+
+    path = tmp_path / "identity-cache.json"
+    monkeypatch.setattr(idmod, "_CACHE_PATH", path)
+    live = idmod._cache_key(7, "TestAgent", 0, 31337, 0x1D1D)
+    stale = live.replace(f":v{idmod._CACHE_SCHEMA}:", f":v{idmod._CACHE_SCHEMA - 1}:")
+    idmod._save_cache({live: [1], stale: [2], "0000a1bc:AnonymousArbAgent:0": [3]})
+    assert json.loads(path.read_text()) == {live: [1]}
+    assert [p.name for p in tmp_path.iterdir()] == [path.name]
 
 
 @pytest.mark.skipif(anvil_missing or web3_missing,

@@ -59,6 +59,9 @@ __pycache__/
 # test/vectors/sweep-<name>/ and ARE committed)
 /test/vectors/sweep/
 
+# The sim's registration cache: deterministic, regenerated on a miss
+/test/vectors/identity-cache.json*
+
 # Coverage
 lcov.info
 *.aux

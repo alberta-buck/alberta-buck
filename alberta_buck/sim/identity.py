@@ -7,17 +7,21 @@ alberta_buck.registry.RegistryAgent, which also maintains a Poseidon Merkle
 tree of registered identities — giving the sim Merkle membership proofs for
 free as a side effect of registration.
 
-Deterministic EOA + registration-args cache (test/vectors/identity-cache.json):
-the first run with a given seed incurs the full NIZK-prove cost; subsequent
-runs hit the cache (~instant).  Cache key = (seed_hex, class_name, agent_idx).
-The cache now also stores Merkle membership data.
+Deterministic EOA + registration-args cache (test/vectors/identity-cache.json,
+local and untracked): the first run with a given seed pays the NIZK-prove cost
+(~5 ms per registration on the kernel, ~0.2 s on py_ecc); later runs hit the
+cache.  Entries are deterministic, so deleting the file costs only time.  Cache
+key = (seed, class_name, agent_idx, schema, chainid, registry); each entry also
+carries its Merkle membership data.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -43,8 +47,7 @@ _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identi
 # Schema 6 is protocol v2: the registration transcript's domain tag and the
 # identity scalar's tag both changed, so every schema-5 proof is structurally
 # valid and cryptographically stale -- it would revert `bad FS challenge`.  The
-# bump turns those entries into misses; the cache file is left as it is, since
-# it is an append-only accumulation that no test byte-compares.
+# bump turns those entries into misses, and the next save drops them.
 _CACHE_SCHEMA                   = 6
 
 # ---------------------------------------------------------------------------
@@ -79,8 +82,23 @@ def _valid_cache_entry(data: Any) -> bool:
 
 
 def _save_cache(cache: dict) -> None:
+    """Keep only current-schema entries, and replace the file atomically.
+
+    Parallel runs (sim matrix jobs) share this file: each sees either the old
+    cache or the new one, never a torn write that would load as empty.  The
+    last writer wins, and an entry it drops is only a later miss.
+    """
+    live = {k: v for k, v in cache.items() if f":v{_CACHE_SCHEMA}:" in k}
     _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _CACHE_PATH.write_text(json.dumps(cache))
+    fd, tmp = tempfile.mkstemp(dir=_CACHE_PATH.parent, prefix=_CACHE_PATH.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(live, f)
+        os.replace(tmp, _CACHE_PATH)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
 
 
 def _cache_key(seed: int, class_name: str, idx: int, chainid: int = 31337,

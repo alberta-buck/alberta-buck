@@ -434,9 +434,11 @@ Table of Contents
   in-browser registration).
 
   *Vector gates* (in addition to the acceptance list above):
-  1. Regenerating `test/vectors/identity.json' (`emit-vectors'), the
-     golden receipt texts, and `identity-cache.json' under the kernel
-     backend produces ZERO git diff; the full forge suite stays green.
+  1. Regenerating `test/vectors/identity.json' (`emit-vectors') and the
+     golden receipt texts under the kernel backend produces ZERO git
+     diff, a cold `identity-cache.json' (a local, untracked cache)
+     regenerates byte-identically under either backend, and the full
+     forge suite stays green.
   2. A new nonce-inclusive cross-language fixture,
      `core/vectors/identity-kernel-vectors.json', emitted by the py_ecc
      REFERENCE path (`BUCK_IDENTITY_BACKEND=py'), replayed
