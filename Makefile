@@ -60,9 +60,6 @@ VENV_OPTS		=
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
 .PHONY: snark snark-setup snark-fixtures snark-ptau snark-clean snark-a2 snark-a2-setup snark-a2-fixtures
-.PHONY: vectors plots images
-.PHONY: vector-lifecycle vector-equilibrium vector-arb
-.PHONY: plot-lifecycle plot-equilibrium plot-arb
 .PHONY: sim sim-build sim-run sim-test sim-plot sim-tui
 .PHONY: test-director test-director-regimes sim-run-director sim-director
 .PHONY: sim-run-policy sim-run-policy-sweep sim-plot-policy sim-policy sim-policy-sweep
@@ -269,46 +266,6 @@ doc-receipt:
 doc-proofs:
 	emacs --batch -l scripts/render-exec-doc.el alberta-buck-proofs.org
 
-
-# ── Worked-example vectors and plots ─────────────────────────────────
-#
-# `images` regenerates the scenario vectors and their plots from scratch:
-#
-#   1. Runs the three Forge tests that emit JSON snapshot vectors under
-#      test/vectors/  (lifecycle, equilibrium, arb scenario).
-#   2. Runs the matching Python plot scripts to produce PNGs under
-#      images/.
-#
-# Individual vector-* and plot-* targets are also exposed for partial
-# regeneration during iteration on a single example.
-
-VECTORS_DIR	= test/vectors
-IMAGES_DIR	= images
-
-vector-lifecycle:
-	forge test $(FORGE_OPTS) --match-test test_lifecycle -vv
-
-vector-equilibrium:
-	forge test $(FORGE_OPTS) --match-contract BuckEquilibriumScenarioTest -vv
-
-vector-arb:
-	forge test $(FORGE_OPTS) --match-contract BuckKArbScenarioTest -vv
-
-vectors:		vector-lifecycle vector-equilibrium vector-arb
-
-plot-lifecycle:
-	python -m pytest alberta_buck/test/test_lifecycle_plot.py -v -s
-
-plot-equilibrium:
-	python -m pytest alberta_buck/test/test_equilibrium_plot.py -v -s
-
-plot-arb:
-	python -m pytest alberta_buck/test/test_arb_plot.py -v -s
-
-plots:			plot-lifecycle plot-equilibrium plot-arb
-
-# One-shot: regenerate vectors then plots in the right order.
-images:			vectors plots
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────
 #
