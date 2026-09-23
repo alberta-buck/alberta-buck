@@ -404,7 +404,7 @@ There is deliberately no epoch dimension in the trees. Renewal is the
 registry continuing to include the member in the set it posts; lapse is
 clearance. This costs one subtree per registry rather than one per registry
 per epoch, which matters because the aggregator is depth
-=AGGREGATOR_DEPTH= and so holds 1024 subtrees in total.
+=AGGREGATOR_DEPTH= and so holds a fixed number of subtrees in total (2^20).
 
 A leaf that persists across postings lets an observer see how long that
 leaf has been present and correlate its disappearance with a revocation. No

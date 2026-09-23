@@ -315,8 +315,8 @@ contract Notes {
     }
 
     /// @notice Wire (or rotate) the identity registry consulted by the
-    ///         Identity-M-bound spends (deposit-coupling / depositor-binding and
-    ///         the membership root).  Passing `address(0)` disables those spends.
+    ///         Identity-M-bound spends (the folded gate's account and root, B1's
+    ///         depositor binding).  Passing `address(0)` disables those spends.
     function setIdentityRegistry(address next) external {
         require(msg.sender == governance, "not governance");
         emit IdentityRegistryUpdated(address(identityRegistry), next);

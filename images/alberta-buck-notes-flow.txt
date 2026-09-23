@@ -2917,12 +2917,12 @@ Table of Contents
   └────
 
   ┌────
-  │ mint b1 (issuer)                 0.98s
-  │ mint a2 (issuer)                 0.97s
-  │ spend (depositor, all)           0.75s
-  │ b1 membership (depositor)       19.90s
-  │ fold a1 (depositor)             13.59s
-  │ fold a2 (depositor)             15.11s
+  │ mint b1 (issuer)                 0.91s
+  │ mint a2 (issuer)                 0.93s
+  │ spend (depositor, all)           0.74s
+  │ b1 membership (depositor)       19.77s
+  │ fold a1 (depositor)             13.16s
+  │ fold a2 (depositor)             14.81s
   └────
 
 
@@ -2965,11 +2965,11 @@ Table of Contents
   ┌────
   │ party / flavor            download+store  prove (per note)
   │ ----------------------------------------------------------
-  │ issuer    b1/a1 (N=1)             12.7MB             0.98s
-  │ issuer    a2    (N=1)             14.8MB             0.97s
-  │ depositor b1                     289.0MB            20.66s
-  │ depositor a1                    1907.8MB            14.34s
-  │ depositor a2                    2169.0MB            15.87s
+  │ issuer    b1/a1 (N=1)             12.7MB             0.91s
+  │ issuer    a2    (N=1)             14.8MB             0.93s
+  │ depositor b1                     289.0MB            20.51s
+  │ depositor a1                    1907.8MB            13.90s
+  │ depositor a2                    2169.0MB            15.56s
   └────
 
 
@@ -3331,16 +3331,16 @@ Table of Contents
 17.2 The on-chain footprint of each step
 ────────────────────────────────────────
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Step                         Published on chain                                                                                                 Kept off chain (party-held)                                                               
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   `register' / `bindContract'  addr, `pk', `E_addr' (ElGamal ct of \(M\) under own `pk'), `isPublicIdentity', `identityRoot'                      \(m\), \(M\), \(sk\)                                                                      
-   `mint' (any flavor)          `Minted(issuer, totalFace, startIndex, count, newRoot)'; `cms[]' in calldata (opaque Poseidon)                     per-leaf opening \((flavor,v,\rho,idHash,pred)\); \(eNote\), issuer payload               
-   `mint' public (A1/B1)        + `IssuerBound(issuer, newRoot)'; one Schnorr over `keccak(cms)'                                                   –                                                                                         
-   `mint' private (A2)          + `IssuerReencBound(issuer, newRoot, count)'; per-leaf \(eIss\), \(T\) and the blinded binding \((Q,U,A_1..A_5)\)  \(M_{iss}, r', \beta, \gamma, sk_{iss}\); the recipient point \(M_{rec}\)                 
-   A1/A2 spend                  nullifier, face, recipient, the identity root, \(eEnc\), one fold proof                                            \(\rho, idHash, m, k, sk, salt\); A2 also \(r'\), \(\gamma\) and the issuer's naming salt 
-   B1 spend                     `SpentCoupledB1(nf, face, recipient, P_{dep})'; \(eDepForIss\), the depositor-binding sigma, the membership proof  \(\rho, idHash, m_{dep}, sk_{dep}, r, b\)                                                 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Step                         Published on chain                                                                                                                            Kept off chain (party-held)                                                               
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `register' / `bindContract'  addr, `pk', `E_addr' (ElGamal ct of \(M\) under own `pk'), `isPublicIdentity', `identityRoot'                                                 \(m\), \(M\), \(sk\)                                                                      
+   `mint' (any flavor)          `Minted(issuer, totalFace, startIndex, count, newRoot)'; `cms[]' in calldata (opaque Poseidon)                                                per-leaf opening \((flavor,v,\rho,idHash,pred)\); \(eNote\), issuer payload               
+   `mint' public (A1/B1)        + `IssuerBound(issuer, newRoot)'; one Schnorr over `keccak(cms)'                                                                              –                                                                                         
+   `mint' private (A2)          + `IssuerReencBound(issuer, newRoot, count)'; per-leaf \(eIss\), \(T\) and the blinded binding \((Q,U,A_1..A_5)\)                             \(M_{iss}, r', \beta, \gamma, sk_{iss}\); the recipient point \(M_{rec}\)                 
+   A1/A2 spend                  nullifier, face, recipient, the identity root, \(eEnc\), one fold proof                                                                       \(\rho, idHash, m, k, sk, salt\); A2 also \(r'\), \(\gamma\) and the issuer's naming salt 
+   B1 spend                     `SpentCoupledB1(nf, face, recipient, issuer, eDepForIss)'; the identity root, \(P_{dep}\), the depositor-binding sigma, the membership proof  \(\rho, idHash, m_{dep}, sk_{dep}, r, b\)                                                 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Two facts do the heavy lifting throughout.  First, `cms[]' are
   Poseidon commitments: a leaf reveals /nothing/ about \( (flavor, v,
   \rho, idHash, predicate) \) without \( \rho \).  Second, the spend

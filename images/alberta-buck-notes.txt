@@ -1418,13 +1418,13 @@ Table of Contents
 
   *Shipping consequence.* Public-issuer notes (A1, B1) skip the
   mint-side apparatus; A2 is the premium option whose extra mint binding
-  (~100K gas) is justified only when the payer needs to hide /its own/
+  (~116K gas) is justified only when the payer needs to hide /its own/
   Identity behind the mint \( \to \) spend split.  At spend, /both/
-  addressed flavours pay a ~370K-gas note-binding Groth16 (A2's
-  re-encryption tie or A1's addressed tie) – that is the price of "only
-  \( M_{\text{rec}} \) can spend", not of issuer anonymity; bearer B1
-  skips it (see /On-Chain Gas/).  (Full treatment in flow "Privacy
-  Audit" (EOA Transfer Mirror).)
+  addressed flavours pay one ~510K-gas folded Groth16 – that is the
+  price of "only \( M_{\text{rec}} \) can spend", not of issuer
+  anonymity; bearer B1 pays its sigma and membership proof instead (see
+  /On-Chain Gas/).  (Full treatment in flow "Privacy Audit" (EOA
+  Transfer Mirror).)
 
 
 7.7 Composability
