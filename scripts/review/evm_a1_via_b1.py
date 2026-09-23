@@ -132,7 +132,7 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     # Empty membership still reverts, but flavor is now the earlier check:
     # spendCoupledB1 supplies public flavor=3 against an A1 proof.
     fn_empty = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, MALLORY, int(fx.raw["opening"]["cm"]),
+        proof, root, int(fx.raw["identityRoot"]), nf, face, MALLORY, int(fx.raw["opening"]["cm"]),
         stack._addr(fx.issuer.addr),
         (g1(e_dep.R), g1(e_dep.C)), db_tuple(b1_proof),
         b"",
@@ -155,7 +155,7 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     mem = bytes.fromhex(fx.raw["membership"]["proofBytes"][2:])
     assert len(mem) > 0, "fixture membership must be nonempty"
     fn_mem = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, MALLORY, int(fx.raw["opening"]["cm"]),
+        proof, root, int(fx.raw["identityRoot"]), nf, face, MALLORY, int(fx.raw["opening"]["cm"]),
         stack._addr(fx.issuer.addr),
         (g1(e_dep.R), g1(e_dep.C)), db_tuple(b1_proof),
         mem,
@@ -265,7 +265,7 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
     ).call(), "substitution control sigma must be independently valid"
     mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
     fn_sub = stack.notes.functions.spendCoupledB1(
-        proof, root, nf, face, rec, int(d["opening"]["cm"]), fake_iss,
+        proof, root, int(d["identityRoot"]), nf, face, rec, int(d["opening"]["cm"]), fake_iss,
         (g1(sub_e.R), g1(sub_e.C)), db_tuple(sub_proof), mem,
     )
     try:

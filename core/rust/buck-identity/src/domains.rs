@@ -34,6 +34,10 @@ pub const FS_DEPOSITOR_BINDING: &[u8] =
     b"AlbertaBuck/FiatShamir/IdentityRegistry/DepositorBinding/v2";
 /// Verified off chain, by a receipt checker.
 pub const FS_VERIFIABLE_DECRYPT: &[u8] = b"AlbertaBuck/FiatShamir/Receipt/VerifiableDecrypt/v2";
+/// The on-chain opening of an account's credential to its Identity (the
+/// insurer gate), bound to the registry as well as the account and chain.
+pub const FS_IDENTITY_OPENING: &[u8] =
+    b"AlbertaBuck/FiatShamir/IdentityRegistry/IdentityOpening/v2";
 
 pub const CONTRACT_BINDING_CONTROL: &[u8] =
     b"AlbertaBuck/IdentityRegistry/ContractBindingControl/v2";
@@ -41,6 +45,12 @@ pub const CONTRACT_BINDING_CONTROL: &[u8] =
 pub const ACCUMULATOR_SALT: &[u8] = b"AlbertaBuck/Accumulator/Salt/v2";
 pub const NOTES_RECEIVING_KEY: &[u8] = b"AlbertaBuck/Notes/ReceivingKey/v2";
 pub const NOTES_PAYLOAD_WRAP: &[u8] = b"AlbertaBuck/Notes/PayloadWrap/v2";
+
+// Accumulator consumers: each declares its own maximum root age.
+pub const CONSUMER_NOTES_MEMBERSHIP: &[u8] =
+    b"AlbertaBuck/Accumulator/Consumer/NotesMembership/v2";
+pub const CONSUMER_INSURER_ATTESTATION: &[u8] =
+    b"AlbertaBuck/Accumulator/Consumer/InsurerAttestation/v2";
 
 /// Hash-to-curve domain of `H_PEDERSEN`, the hiding generator with no known
 /// logarithm (compiled into the B1 membership circuit and the A2 fold).

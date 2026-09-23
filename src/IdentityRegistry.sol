@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {BN254} from "./BN254.sol";
 import {IContractBindingAdapter} from "./IContractBindingAdapter.sol";
 import {IPoseidonT3} from "./IPoseidonT3.sol";
+import {IPoseidonT4} from "./IPoseidonT4.sol";
 
 /// @title IdentityRegistry — on-chain registry of identity-bound public keys.
 /// @notice Each Ethereum address binds to (pk, E_addr) where:
@@ -188,105 +189,43 @@ contract IdentityRegistry {
         keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/ContractBinding/v2")
     );
 
-    /// @notice Depth of the registry-Identity Merkle accumulator.
-    ///
-    /// @dev    This is the depth of the AGGREGATOR tree, not of an individual
-    ///         registry's sub-tree, and the distinction is load-bearing.
-    ///         Identity organizations each maintain their own sub-tree and
-    ///         aggregate into a single on-chain root: see
-    ///         `alberta_buck/registry/merkle_service.py`, where
-    ///         `AggregatorMembershipProof.aggregator_root` is documented as
-    ///         "the combined root (= on-chain identityRoot)" and
-    ///         `FullMembershipProof` is a sub-tree path PLUS an aggregator
-    ///         path.  Sub-trees default to depth 12
-    ///         (`IdentityMerkleTree(depth=12)`), and the committed
-    ///         cross-language vectors record exactly that split --
-    ///         `core/vectors/registry-kernel-vectors.json` has
-    ///         `aggregator.depth = 10` beside `reg_a.depth = reg_b.depth = 12`.
-    ///
-    ///         An earlier version of this comment said the constant "must
-    ///         match ... alberta_buck.registry.tree.IdentityMerkleTree",
-    ///         which reads as though the sub-tree class should be 10 and
-    ///         invites someone to "fix" the Python default.  It should not be
-    ///         changed: 12 is correct for a sub-tree and 10 is correct here.
-    ///
-    ///         CAVEAT, and it is a real gap rather than a nuance:
-    ///         circuits/identity_membership.circom proves ONE depth-10 path
-    ///         from identity_leaf(M) straight to `identityRoot`, so it cannot
-    ///         verify a composed sub-tree + aggregator proof.  The two-level
-    ///         design currently exists off-chain in Python only; nothing
-    ///         on-chain consumes a `FullMembershipProof`.  Reconciling them
-    ///         needs either a composed circuit or a flattened accumulator.
-    /// @dev TWENTY.  The accumulator specification raises it from ten because
-    ///      authorities are a population rather than a roster: clubs,
-    ///      community boards, congregations and delegated sub-regulators are
-    ///      all attribute authorities, and 2**10 = 1024 subtrees is the wrong
-    ///      order of magnitude.
-    ///
-    ///      It moves in ONE change with the end-to-end fixtures, and it has to.
-    ///      The fixtures embed proofs whose identityRoot is a PUBLIC INPUT, so
-    ///      a deeper tree invalidates the proof rather than merely the root --
-    ///      and the spend circuits are built at twenty, so a depth-ten witness
-    ///      cannot even be generated for them.  Contract, wallet, kernel and
-    ///      fixtures are therefore one atomic step.
+    /// @notice Depth of the aggregator tree, whose root is `identityRoot`.
+    /// @dev    Its leaves are subtree roots, one per enrolled subtree, at the
+    ///         slot the root authority assigned.  Twenty, because authorities
+    ///         are a population rather than a roster: clubs, community boards,
+    ///         congregations and delegated sub-regulators are all attribute
+    ///         authorities, and 2**10 = 1024 subtrees is the wrong order of
+    ///         magnitude.  Python and Rust: AGGREGATOR_DEPTH.
     uint8   public constant IDENTITY_TREE_DEPTH = 20;
 
-    /// @notice Empty-subtree roots at each depth, precomputed as
-    ///         ZERO_{d+1} = Poseidon([ZERO_d, ZERO_d]) with ZERO_0 = 0.
-    ///         Matches IdentityMerkleTree._zeros AT THE AGGREGATOR DEPTH --
-    ///         the zero ladder is depth-independent, so a depth-12 sub-tree
-    ///         shares ZERO_0..ZERO_10 and simply carries two more.
-    uint256 internal constant ZERO_0  = 0;
-    uint256 internal constant ZERO_1  = 14744269619966411208579211824598458697587494354926760081771325075741142829156;
-    uint256 internal constant ZERO_2  = 7423237065226347324353380772367382631490014989348495481811164164159255474657;
-    uint256 internal constant ZERO_3  = 11286972368698509976183087595462810875513684078608517520839298933882497716792;
-    uint256 internal constant ZERO_4  = 3607627140608796879659380071776844901612302623152076817094415224584923813162;
-    uint256 internal constant ZERO_5  = 19712377064642672829441595136074946683621277828620209496774504837737984048981;
-    uint256 internal constant ZERO_6  = 20775607673010627194014556968476266066927294572720319469184847051418138353016;
-    uint256 internal constant ZERO_7  = 3396914609616007258851405644437304192397291162432396347162513310381425243293;
-    uint256 internal constant ZERO_8  = 21551820661461729022865262380882070649935529853313286572328683688269863701601;
-    uint256 internal constant ZERO_9  = 6573136701248752079028194407151022595060682063033565181951145966236778420039;
-    uint256 internal constant ZERO_10 = 12413880268183407374852357075976609371175688755676981206018884971008854919922;
-    uint256 internal constant ZERO_11 = 14271763308400718165336499097156975241954733520325982997864342600795471836726;
-    uint256 internal constant ZERO_12 = 20066985985293572387227381049700832219069292839614107140851619262827735677018;
-    uint256 internal constant ZERO_13 = 9394776414966240069580838672673694685292165040808226440647796406499139370960;
-    uint256 internal constant ZERO_14 = 11331146992410411304059858900317123658895005918277453009197229807340014528524;
-    uint256 internal constant ZERO_15 = 15819538789928229930262697811477882737253464456578333862691129291651619515538;
-    uint256 internal constant ZERO_16 = 19217088683336594659449020493828377907203207941212636669271704950158751593251;
-    uint256 internal constant ZERO_17 = 21035245323335827719745544373081896983162834604456827698288649288827293579666;
-    uint256 internal constant ZERO_18 = 6939770416153240137322503476966641397417391950902474480970945462551409848591;
-    uint256 internal constant ZERO_19 = 10941962436777715901943463195175331263348098796018438960955633645115732864202;
-    uint256 internal constant ZERO_20 = 15019797232609675441998260052101280400536945603062888308240081994073687793470;
+    /// @notice Depth of a membership path through an identity registry: the
+    ///         registry's subtree (12) and then the aggregator (20).  Every
+    ///         level folds with the same Poseidon, so the circuits prove it as
+    ///         one path (accumulator specification, section 11.1).
+    uint8   public constant MEMBERSHIP_PATH_DEPTH = 32;
 
-    /// @notice Root of the empty tree (depth 20).  Equal to ZERO_20.
-    uint256 public constant EMPTY_IDENTITY_ROOT = ZERO_20;
+    /// @notice Root records the ring retains.  Ten days at an hourly posting,
+    ///         which covers the longest maximum age a consumer declares.
+    uint256 public constant ROOT_RING_SIZE = 256;
 
-    /// @notice Convenience: the zero-value at each depth as a Solidity array
-    ///         (can't be constant, so we return from a pure function).
-    function IDENTITY_ZEROS(uint8 d) public pure returns (uint256) {
-        if      (d == 0)  return ZERO_0;
-        else if (d == 1)  return ZERO_1;
-        else if (d == 2)  return ZERO_2;
-        else if (d == 3)  return ZERO_3;
-        else if (d == 4)  return ZERO_4;
-        else if (d == 5)  return ZERO_5;
-        else if (d == 6)  return ZERO_6;
-        else if (d == 7)  return ZERO_7;
-        else if (d == 8)  return ZERO_8;
-        else if (d == 9)  return ZERO_9;
-        else if (d == 10) return ZERO_10;
-        else if (d == 11) return ZERO_11;
-        else if (d == 12) return ZERO_12;
-        else if (d == 13) return ZERO_13;
-        else if (d == 14) return ZERO_14;
-        else if (d == 15) return ZERO_15;
-        else if (d == 16) return ZERO_16;
-        else if (d == 17) return ZERO_17;
-        else if (d == 18) return ZERO_18;
-        else if (d == 19) return ZERO_19;
-        else if (d == 20) return ZERO_20;
-        revert("IdentityRegistry: depth out of range");
-    }
+    /// @notice The maximum root age of a consumer that has not declared one.
+    uint32  public constant DEFAULT_MAX_ROOT_AGE = 7 days;
+
+    /// @notice The consumers the protocol names.  Each bounds the age of the
+    ///         roots it accepts, because tolerance for proofs in flight wants a
+    ///         long window and revocation urgency a short one.
+    bytes32 public constant CONSUMER_NOTES_MEMBERSHIP =
+        keccak256("AlbertaBuck/Accumulator/Consumer/NotesMembership/v2");
+    bytes32 public constant CONSUMER_INSURER_ATTESTATION =
+        keccak256("AlbertaBuck/Accumulator/Consumer/InsurerAttestation/v2");
+
+    /// @notice keccak("AlbertaBuck/Accumulator/Leaf/Identity/v2") mod F_R: the
+    ///         leading input of the public identity leaf Poseidon(TAG, M.x, M.y).
+    uint256 public constant LEAF_TAG_IDENTITY =
+        6089190410636387123103508027202099632965250507789735297680287822653321493477;
+
+    uint256 internal constant FIELD_R =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
     // ---- storage ------------------------------------------------------------
 
@@ -352,28 +291,60 @@ contract IdentityRegistry {
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
 
-    /// @notice Registry-Identity Merkle accumulator root.  Posted by
-    ///         governance (setIdentityRoot).  register/bind refuse a
-    ///         caller-supplied identityLeaf until a proof that the leaf
-    ///         hashes the certified identity exists (P2-A).  Consumed by
-    ///         the identity membership SNARK at Notes spend time to prove
-    ///         "the counterparty identity M is a registered identity".
-    ///         See alberta-buck-notes.org ("Mutual Decryptability", "one gadget") and alberta-buck-notes-flow.org "The Identity-M Spend Path".
+    /// @notice The most recently posted aggregator root.  A consumer checks a
+    ///         proof against any root the ring retains, within its own maximum
+    ///         age (acceptsRoot); this is only the newest of them.
     uint256                           public  identityRoot;
 
-    /// @notice Poseidon T3 hash contract for incremental Merkle tree updates.
-    ///         Set by governance via setIdentityPoseidon.  When zero, the
-    ///         incremental accumulator is disabled and identityRoot must be
-    ///         managed via governance (setIdentityRoot).
+    /// @notice Poseidon T3 contract: hashes Merkle nodes.  Set by governance.
     address                           public  identityPoseidon;
 
-    /// @notice Number of identity leaves inserted into the incremental
-    ///         accumulator.  Capped at 2**IDENTITY_TREE_DEPTH.
-    uint32                            public  identityNextLeafIndex;
+    /// @notice Poseidon T4 contract: hashes the public identity leaf
+    ///         Poseidon(TAG, M.x, M.y).  Set by governance.
+    address                           public  identityPoseidonT4;
 
-    /// @notice Tornado-style filled subtrees for the incremental accumulator.
-    ///         filledSubtrees[d] is the rightmost known node at depth d.
-    uint256[IDENTITY_TREE_DEPTH]      internal _identityFilledSubtrees;
+    /// @notice The deployment's root authority (accumulator specification,
+    ///         section 17.1): it enrolls and evicts subtrees and appoints the
+    ///         aggregator.  One address; as decentralized as whoever holds it.
+    address                           public  rootAuthority;
+
+    /// @notice The aggregator, appointed by the root authority: the only
+    ///         address that posts roots.  Accountable rather than trustless --
+    ///         each posting names the hash of the leaf list it combined.
+    address                           public  aggregator;
+
+    /// @notice One enrolled subtree.  An authority with several predicates
+    ///         enrolls each of its subtrees, under one posting key.
+    struct Subtree {
+        uint32  slot;          // its leaf in the aggregator tree
+        uint8   depth;         // its own depth
+        bool    enrolled;
+        bool    isPublic;      // public: membership provable by a plain path
+        address poster;        // the authority's posting key
+    }
+
+    /// @notice Enrolled subtrees, keyed by keccak256 of the namespaced name.
+    mapping(bytes32 => Subtree)       public  subtrees;
+
+    /// @notice slot + 1 -> the subtree enrolled there (0 when free).
+    mapping(uint32 => bytes32)        public  subtreeAtSlot;
+
+    /// @notice The root ring: the last ROOT_RING_SIZE postings, by sequence.
+    uint256[ROOT_RING_SIZE]           internal _rootRing;
+
+    /// @notice Postings so far; the next posting's sequence.
+    uint64                            public  rootSequence;
+
+    /// @notice When each retained root was (most recently) posted; 0 if never
+    ///         posted or evicted.
+    mapping(uint256 => uint64)        public  rootPostedAt;
+
+    /// @notice The sequence of each retained root's most recent posting, so
+    ///         evicting an older posting of a re-posted root keeps it.
+    mapping(uint256 => uint64)        internal _rootLatestSequence;
+
+    /// @notice Declared maximum root ages, per consumer; 0 means the default.
+    mapping(bytes32 => uint32)        internal _maxRootAge;
 
     // ---- events -------------------------------------------------------------
 
@@ -385,8 +356,18 @@ contract IdentityRegistry {
     event BuckSet(address indexed buck);
     event CarryingFlagSet(address indexed target, bool isCarrying);
     event CarryingFrozen(address indexed target);
-    event IdentityRootUpdated(uint256 indexed previous, uint256 indexed next);
+    event IdentityRootPosted(
+        uint256 indexed root, uint64 indexed sequence, uint64 postedAt, bytes32 leafListHash
+    );
     event IdentityPoseidonSet(address indexed previous, address indexed next);
+    event IdentityPoseidonT4Set(address indexed previous, address indexed next);
+    event RootAuthoritySet(address indexed previous, address indexed next);
+    event AggregatorSet(address indexed previous, address indexed next);
+    event SubtreeEnrolled(
+        bytes32 indexed id, uint32 slot, uint8 depth, bool isPublic, address poster, string publication
+    );
+    event SubtreeEvicted(bytes32 indexed id, uint32 slot);
+    event MaxRootAgeSet(bytes32 indexed consumer, uint32 maxAge);
     event BindingAdapterSet(
         address indexed adapter,
         address indexed provenance,
@@ -404,10 +385,9 @@ contract IdentityRegistry {
     constructor(address _governance) {
         require(_governance != address(0), "governance=0");
         governance = _governance;
-        // Initialize filled subtrees with empty-subtree roots.
-        for (uint8 d = 0; d < IDENTITY_TREE_DEPTH; d++) {
-            _identityFilledSubtrees[d] = IDENTITY_ZEROS(d);
-        }
+        // The insurer attests against a fresh root: the aggregator posts at
+        // least daily (accumulator specification, section 16.2).
+        _maxRootAge[CONSUMER_INSURER_ATTESTATION] = 1 days;
         emit GovernanceTransferred(address(0), _governance);
     }
 
@@ -477,68 +457,177 @@ contract IdentityRegistry {
         emit BindingAdapterSet(adapter, provenance, approved);
     }
 
-    /// @notice Post the current registry-Identity Merkle accumulator root.
-    ///         Called by governance (or an authorised aggregator contract)
-    ///         once per batch of registrations.  The new root must be non-zero.
-    ///         Emits IdentityRootUpdated so off-chain indexers can track the
-    ///         root history for membership proof generation.
-    /// @dev    Caller-supplied identityLeaf on register/bind is refused
-    ///         (unchecked identity leaf): there is no on-chain proof that a
-    ///         leaf hashes the identity encrypted in E.  Until that proof
-    ///         exists, the accumulator is governance-posted.
-    ///
-    ///         This is also how a RECEIVING leaf is admitted -- the
-    ///         Poseidon(m_rec, k, salt) leaf that binds a mailbox key to an
-    ///         Identity (registry/tree.py receiving_leaf).  It is not a second
-    ///         mechanism and must not become one: an on-chain `register` that
-    ///         accepted a caller's leaf would accept any leaf, which is the
-    ///         opposite of what the folded gate's relation (3) relies on.  The
-    ///         organisation admits the leaf to its own subtree, the aggregator
-    ///         composes the sub-roots, and governance posts the result here.
-    ///         What that leaves open is the root AUTHORITY -- who may post, and
-    ///         under what policy -- which is the accumulator plan's own phase,
-    ///         not a change to registration.
-    function setIdentityRoot(uint256 _root) external {
+    // ---- the accumulator root: authority, enrollment, posting ---------------
+    //
+    // Admission is never a registry call.  register and bindContract refuse a
+    // caller-supplied identityLeaf, permanently -- a decision, not a stopgap
+    // (accumulator specification, section 6): an on-chain register that took a
+    // caller's leaf would take ANY leaf, which is the opposite of what the
+    // folded gates' relation (3) relies on.  An authority admits a leaf to its
+    // own subtree, the aggregator composes the subtree roots, and posts the
+    // result here.  That holds for receiving and mailbox leaves too.
+
+    /// @notice Appoint the root authority.  Governance only.
+    function setRootAuthority(address next) external {
         require(msg.sender == governance, "not governance");
-        require(_root != 0,               "root=0");
-        emit IdentityRootUpdated(identityRoot, _root);
-        identityRoot = _root;
+        emit RootAuthoritySet(rootAuthority, next);
+        rootAuthority = next;
     }
 
-    /// @notice Set the Poseidon T3 contract used for incremental Merkle tree
-    ///         updates.  Governance-posted roots (setIdentityRoot) remain the
-    ///         admission path: register/bind refuse identityLeaf != 0 until a
-    ///         leaf-relationship proof exists.  Governance may clear Poseidon
-    ///         (set to 0) if unused.
+    /// @notice Appoint the aggregator.  Root authority only.
+    function setAggregator(address next) external {
+        require(msg.sender == rootAuthority, "not root authority");
+        emit AggregatorSet(aggregator, next);
+        aggregator = next;
+    }
+
+    /// @notice Enroll a subtree at an aggregator slot.  Root authority only.
+    ///         `id` is keccak256 of the subtree's namespaced name; `poster` is
+    ///         the owning authority's posting key, which signs the subtree roots
+    ///         the aggregator combines; `publication` says where the aggregator's
+    ///         leaf lists are published, so omission and forgery are provable
+    ///         (accumulator specification, sections 17.2 and 17.3).
+    function enrollSubtree(
+        bytes32 id,
+        uint32 slot,
+        uint8 depth,
+        bool isPublic,
+        address poster,
+        string calldata publication
+    ) external {
+        require(msg.sender == rootAuthority,              "not root authority");
+        require(id != bytes32(0),                         "subtree id=0");
+        require(!subtrees[id].enrolled,                   "subtree enrolled");
+        require(slot < (uint256(1) << IDENTITY_TREE_DEPTH), "slot out of range");
+        require(subtreeAtSlot[slot + 1] == bytes32(0),    "slot taken");
+        require(depth > 0 && depth <= 32,                 "bad depth");
+        require(poster != address(0),                     "poster=0");
+        subtrees[id] = Subtree(slot, depth, true, isPublic, poster);
+        subtreeAtSlot[slot + 1] = id;
+        emit SubtreeEnrolled(id, slot, depth, isPublic, poster, publication);
+    }
+
+    /// @notice Evict a subtree, freeing its slot.  Root authority only.  Its
+    ///         members' proofs age out of every consumer with the roots that
+    ///         still contain it.
+    function evictSubtree(bytes32 id) external {
+        require(msg.sender == rootAuthority, "not root authority");
+        Subtree memory t = subtrees[id];
+        require(t.enrolled, "not enrolled");
+        delete subtreeAtSlot[t.slot + 1];
+        delete subtrees[id];
+        emit SubtreeEvicted(id, t.slot);
+    }
+
+    /// @notice Post an aggregator root.  Aggregator only.  `leafListHash` is the
+    ///         hash of the canonical document listing every leaf combined, each
+    ///         with the signature that authorized it, so the aggregator cannot
+    ///         show different lists to different readers.
+    function postIdentityRoot(uint256 root, bytes32 leafListHash) external {
+        require(msg.sender == aggregator, "not aggregator");
+        _postRoot(root, leafListHash);
+    }
+
+    function _postRoot(uint256 root, bytes32 leafListHash) internal {
+        require(root != 0 && root < FIELD_R, "bad root");
+        uint64 seq = rootSequence;
+        uint256 at = seq % ROOT_RING_SIZE;
+        if (seq >= ROOT_RING_SIZE) {
+            uint256 evicted = _rootRing[at];
+            if (_rootLatestSequence[evicted] == seq - ROOT_RING_SIZE) {
+                delete rootPostedAt[evicted];
+                delete _rootLatestSequence[evicted];
+            }
+        }
+        _rootRing[at] = root;
+        rootPostedAt[root] = uint64(block.timestamp);
+        _rootLatestSequence[root] = seq;
+        rootSequence = seq + 1;
+        identityRoot = root;
+        emit IdentityRootPosted(root, seq, uint64(block.timestamp), leafListHash);
+    }
+
+    /// @notice Declare a consumer's maximum root age.  Governance only.  Refused
+    ///         when the ring is full and does not reach back that far: a window
+    ///         the ring cannot honour would be truncated silently.
+    function setMaxRootAge(bytes32 consumer, uint32 maxAge) external {
+        require(msg.sender == governance, "not governance");
+        require(maxAge > 0, "maxAge=0");
+        if (rootSequence >= ROOT_RING_SIZE) {
+            uint256 oldest = _rootRing[rootSequence % ROOT_RING_SIZE];
+            require(block.timestamp - rootPostedAt[oldest] >= maxAge,
+                    "maxAge beyond the ring");
+        }
+        _maxRootAge[consumer] = maxAge;
+        emit MaxRootAgeSet(consumer, maxAge);
+    }
+
+    /// @notice The maximum root age `consumer` accepts.
+    function maxRootAge(bytes32 consumer) public view returns (uint32) {
+        uint32 a = _maxRootAge[consumer];
+        return a == 0 ? DEFAULT_MAX_ROOT_AGE : a;
+    }
+
+    /// @notice Whether `consumer` accepts a proof against `root`: a nonzero
+    ///         root the ring retains, posted no longer ago than its maximum age.
+    function acceptsRoot(uint256 root, bytes32 consumer) external view returns (bool) {
+        if (root == 0) return false;
+        uint64 at = rootPostedAt[root];
+        return at != 0 && block.timestamp - at <= maxRootAge(consumer);
+    }
+
+    /// @notice Set the Poseidon T3 contract (Merkle nodes).  Governance only.
     function setIdentityPoseidon(address _poseidon) external {
         require(msg.sender == governance, "not governance");
         emit IdentityPoseidonSet(identityPoseidon, _poseidon);
         identityPoseidon = _poseidon;
     }
 
-    // ---- incremental accumulator --------------------------------------------
+    /// @notice Set the Poseidon T4 contract (the public leaf).  Governance only.
+    function setIdentityPoseidonT4(address _poseidon) external {
+        require(msg.sender == governance, "not governance");
+        emit IdentityPoseidonT4Set(identityPoseidonT4, _poseidon);
+        identityPoseidonT4 = _poseidon;
+    }
 
-    /// @dev Insert one identity leaf into the incremental Merkle tree and
-    ///      return the new root.  Tornado-style: uses _identityFilledSubtrees
-    ///      to track the rightmost node at each level.  The caller must ensure
-    ///      identityPoseidon is set and the tree is not full.
-    function _insertIdentityLeaf(uint256 leaf) internal returns (uint256) {
-        uint256 index = identityNextLeafIndex;
-        require(index < (uint256(1) << IDENTITY_TREE_DEPTH), "id tree full");
-        uint256 current = leaf;
-        for (uint8 d = 0; d < IDENTITY_TREE_DEPTH; d++) {
-            if (index & 1 == 0) {
-                // Left child: store current as the new filled node.
-                _identityFilledSubtrees[d] = current;
-                current = _hashPair(current, IDENTITY_ZEROS(d));
-            } else {
-                // Right child: fold with the stored left sibling.
-                current = _hashPair(_identityFilledSubtrees[d], current);
-            }
-            index >>= 1;
+    // ---- public membership (accumulator specification, section 11.2) -------
+
+    /// @notice The public identity leaf Poseidon(TAG, M.x, M.y).
+    function publicIdentityLeaf(BN254.G1Point calldata M) public view returns (uint256) {
+        address p = identityPoseidonT4;
+        require(p != address(0), "poseidon T4 not set");
+        uint256[3] memory inputs = [LEAF_TAG_IDENTITY, M.X % FIELD_R, M.Y % FIELD_R];
+        return IPoseidonT4(p).poseidon(inputs);
+    }
+
+    /// @notice Whether `leaf` is in the enrolled PUBLIC subtree `id` under
+    ///         aggregator root `root`: its subtree path, then the aggregator
+    ///         path from the subtree's enrolled slot.  The slot comes from
+    ///         enrollment, never from the caller, and it is what makes a path a
+    ///         claim about a named subtree.  Root acceptance is the consumer's.
+    function verifyPublicMembership(
+        bytes32 id,
+        uint256 leaf,
+        uint256[] calldata subSiblings,
+        uint256 subIndex,
+        uint256[] calldata aggSiblings,
+        uint256 root
+    ) external view returns (bool) {
+        Subtree memory t = subtrees[id];
+        if (!t.enrolled || !t.isPublic) return false;
+        if (subSiblings.length != t.depth || aggSiblings.length != IDENTITY_TREE_DEPTH) return false;
+        if (subIndex >= (uint256(1) << t.depth)) return false;
+        uint256 cur = _fold(leaf, subSiblings, subIndex);
+        return _fold(cur, aggSiblings, t.slot) == root;
+    }
+
+    function _fold(uint256 cur, uint256[] calldata siblings, uint256 index)
+        internal view returns (uint256)
+    {
+        for (uint256 d = 0; d < siblings.length; d++) {
+            cur = (index >> d) & 1 == 0 ? _hashPair(cur, siblings[d]) : _hashPair(siblings[d], cur);
         }
-        identityNextLeafIndex++;
-        return current;
+        return cur;
     }
 
     /// @dev Wrapper around the Poseidon T3 contract call.  Reverts if the
@@ -597,9 +686,10 @@ contract IdentityRegistry {
         _register(issuer, pk, E, pres, proof, msg.sender, 0);
     }
 
-    /// @notice Register.  identityLeaf must be 0: a caller-supplied leaf is
-    ///         not proven to hash the identity encrypted in E, so non-zero
-    ///         values revert `unchecked identity leaf`.  Leaf linking is P2-A.
+    /// @notice Register.  identityLeaf must be 0, permanently: admission is the
+    ///         certifying authority's, into its own subtree, and never a
+    ///         registry call (accumulator specification, section 6).  Nonzero
+    ///         values revert `unchecked identity leaf`.
     function register(
         address issuer,
         BN254.G1Point calldata pk,
@@ -611,8 +701,8 @@ contract IdentityRegistry {
         _register(issuer, pk, E, pres, proof, msg.sender, identityLeaf);
     }
 
-    /// @dev Shared registration logic.  identityLeaf != 0 is refused: there
-    ///      is no on-chain relation that leaf = Poseidon(M) for the M in E.
+    /// @dev Shared registration logic.  identityLeaf != 0 is refused, by
+    ///      decision: a caller's leaf is not the certifier's attestation.
     function _register(
         address issuer,
         BN254.G1Point calldata pk,

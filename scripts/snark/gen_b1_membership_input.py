@@ -20,7 +20,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from alberta_buck.registry.tree import IdentityMerkleTree, identity_leaf_salted
+from alberta_buck.registry.merkle_service import rooted_registry
+from alberta_buck.registry.tree import identity_leaf_salted
 from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
 from alberta_buck.wallet.bn254 import (
     G1, ORDER, add, eq, mul, neg, point_to_words, rand_scalar,
@@ -30,7 +31,6 @@ from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.salt import derive_salt
 
 KYC = "kyc:ca-ab-2026"
-DEPTH = 20          # the AGGREGATOR depth; see the circuit trailer
 DEPOSIT, CHAINID = 0xB0B, 1
 
 
@@ -58,7 +58,7 @@ def build(shift: bool = False):
     sk_iss = rand_scalar(rng)
     pk_iss = mul(G1, sk_iss)
 
-    tree = IdentityMerkleTree(depth=DEPTH, private=True)
+    tree = rooted_registry()          # subtree under the aggregator: 32-level paths
     tree.insert_leaf(identity_leaf_salted(M_dep, salt_dep))
     tree.insert_leaf(identity_leaf_salted(M_other, salt_other))
 

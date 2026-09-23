@@ -315,9 +315,12 @@ template DepositFoldA2(depth) {
     identityRoot === issMp.root;
 }
 
+// Both paths are 32 levels, subtree then aggregator; see deposit_fold_a1's
+// trailer.  The recipient's and the issuer's leaves may sit in different
+// registries' subtrees, and neither slot is revealed.
 component main { public [
     nullifier, identityRoot,
     eEncRx, eEncRy, eEncCx, eEncCy,
     pkDepX, pkDepY,
     eDepRx, eDepRy, eDepCx, eDepCy
-] } = DepositFoldA2(20);
+] } = DepositFoldA2(32);

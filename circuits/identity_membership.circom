@@ -89,17 +89,14 @@ template IdentityMembership(depth) {
     identityRoot === mp.root;
 }
 
-// Depth is the AGGREGATOR depth -- the tree whose root is the on-chain
-// `identityRoot` -- and it is 20, so that authorities are a population rather
-// than a roster: clubs, community boards, congregations and delegated
-// sub-regulators are all attribute authorities, and 2**10 = 1024 sub-trees is
-// the wrong order of magnitude.  Named elsewhere as:
-//   Solidity  IdentityRegistry.IDENTITY_TREE_DEPTH
-//   Rust      buck_registry::tree::AGGREGATOR_DEPTH
-//   Python    alberta_buck.registry.tree.AGGREGATOR_DEPTH
-// It is NOT the registry sub-tree depth (12, KYC_SUBTREE_DEPTH); an
-// organization's own tree is deeper and composes into this one.
+// 32 levels: the leaf's identity-registry subtree (12, KYC_SUBTREE_DEPTH) and
+// then the aggregator (20, AGGREGATOR_DEPTH), whose root is the on-chain
+// `identityRoot`.  Every level folds with the same Poseidon-2, so the two
+// paths are one path here (accumulator specification, section 11.1).  Named
+// elsewhere as:
+//   Solidity  IdentityRegistry.MEMBERSHIP_PATH_DEPTH
+//   Python    alberta_buck.registry.merkle_service.MEMBERSHIP_PATH_DEPTH
 //
 // Left as a literal on purpose: the depth is baked into the r1cs, so any
 // change here is a new circuit, and should read as one.
-component main { public [ identityRoot ] } = IdentityMembership(20);
+component main { public [ identityRoot ] } = IdentityMembership(32);

@@ -516,9 +516,16 @@ class NotesStack:
                     addr, rec["pk"], rec["sk"], bool(b["isPublic"]), False,
                     m=rec["m"], r=rec["r"], E=rec["E"]),
                 self.gov, f"bind {who}"))
+        # The world's aggregator root: governance appoints itself root authority
+        # and aggregator, and posts it, as a deployment's aggregator would.
         root = int(self.fx.raw["identityRoot"])
+        gov_addr = self.gov.address if hasattr(self.gov, "address") else self.gov
         out.append(self._send_from(
-            self.reg.functions.setIdentityRoot(root), self.gov, "setIdentityRoot"))
+            self.reg.functions.setRootAuthority(gov_addr), self.gov, "setRootAuthority"))
+        out.append(self._send_from(
+            self.reg.functions.setAggregator(gov_addr), self.gov, "setAggregator"))
+        out.append(self._send_from(
+            self.reg.functions.postIdentityRoot(root, b"\x00" * 32), self.gov, "postIdentityRoot"))
         assert self.reg.functions.identityRoot().call() == root
         return out
 
@@ -621,7 +628,7 @@ class NotesStack:
                    _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
             mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
             fn = self.notes.functions.spendCoupledB1(
-                proof, root, nf, face, rec, int(d["opening"]["cm"]),
+                proof, root, int(d["identityRoot"]), nf, face, rec, int(d["opening"]["cm"]),
                 self._addr(self.fx.issuer.addr),
                 _ct_tuple(d["sigma"]["eDepForIss"]), b1p, mem)
         else:
@@ -629,7 +636,7 @@ class NotesStack:
             fold = bytes.fromhex(d["depositFold"]["proofBytes"][2:])
             f = (self.notes.functions.spendCoupledA1 if self.fx.flavor == "a1"
                  else self.notes.functions.spendCoupledA2)
-            fn = f(proof, root, nf, face, rec,
+            fn = f(proof, root, int(d["identityRoot"]), nf, face, rec,
                    _ct_tuple(d["sigma"]["eEnc"]), fold)
         return self._send_from(fn, dep, f"Notes.spendCoupled{self.fx.flavor.upper()}",
                                event=EVENT_BY_FLAVOR[self.fx.flavor],

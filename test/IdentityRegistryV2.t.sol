@@ -151,46 +151,61 @@ contract IdentityRegistryV2Test is Test {
 
     // ---- identity root accumulator (V2) ------------------------------------
 
-    /// @notice The identity root can be set by governance from an
-    ///         off-chain-computed Merkle root (the registry's aggregator).
-    function test_governance_setsIdentityRoot() public {
+    address internal constant ROOT_AUTH = address(0xA07);
+    address internal constant AGG       = address(0xA99);
+
+    function _appointAggregator() internal {
         vm.prank(GOV);
-        reg.setIdentityRoot(expectedIdentityRoot);
-        assertEq(reg.identityRoot(), expectedIdentityRoot);
+        reg.setRootAuthority(ROOT_AUTH);
+        vm.prank(ROOT_AUTH);
+        reg.setAggregator(AGG);
     }
 
-    function test_identityRoot_onlyGovernance() public {
-        vm.expectRevert(bytes("not governance"));
-        reg.setIdentityRoot(expectedIdentityRoot);
+    /// @notice The aggregator posts the off-chain-computed aggregator root.
+    function test_aggregator_postsIdentityRoot() public {
+        _appointAggregator();
+        vm.prank(AGG);
+        reg.postIdentityRoot(expectedIdentityRoot, keccak256("leaf list"));
+        assertEq(reg.identityRoot(), expectedIdentityRoot);
+        assertEq(reg.rootSequence(), 1);
+        assertEq(reg.rootPostedAt(expectedIdentityRoot), block.timestamp);
+    }
+
+    function test_identityRoot_onlyAggregator() public {
+        _appointAggregator();
+        vm.expectRevert(bytes("not aggregator"));
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
+        vm.prank(GOV);
+        vm.expectRevert(bytes("not aggregator"));
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
     }
 
     function test_identityRoot_rejectsZero() public {
-        vm.prank(GOV);
-        vm.expectRevert(bytes("root=0"));
-        reg.setIdentityRoot(0);
+        _appointAggregator();
+        vm.prank(AGG);
+        vm.expectRevert(bytes("bad root"));
+        reg.postIdentityRoot(0, bytes32(0));
     }
 
-    /// @notice Full flow: register both parties, set the identity root,
-    ///         verify the membership proof from the vectors against the
-    ///         on-chain root using the IdentityMembershipVerifier.
+    /// @notice Full flow: register both parties, post the identity root.
     function test_fullRegistrationPlusIdentityRoot() public {
         _registerFromVectors(rjAlice, alice);
         _registerFromVectors(rjBob, bob);
 
-        // Governance posts the off-chain-computed root.
-        vm.prank(GOV);
-        reg.setIdentityRoot(expectedIdentityRoot);
+        _appointAggregator();
+        vm.prank(AGG);
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
 
         assertEq(reg.identityRoot(), expectedIdentityRoot);
         assertTrue(reg.isVerified(alice));
         assertTrue(reg.isVerified(bob));
     }
 
-    // ---- incremental accumulator (Phase B) ----------------------------------
+    // ---- admission is never a registry call ---------------------------------
 
-    function test_incrementalAccumulator_singleLeaf_refused() public {
-        // Caller-supplied identityLeaf is unconstrained: even Alice's honest
-        // Poseidon(M) leaf is refused until a leaf-relationship proof exists.
+    function test_callerLeaf_singleLeaf_refused() public {
+        // A caller-supplied identityLeaf is refused, permanently: even Alice's
+        // honest leaf, because admission is the certifier's, not the caller's.
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
@@ -199,11 +214,11 @@ contract IdentityRegistryV2Test is Test {
         uint256 aliceLeaf = _u(rjAlice, ".leaf");
         _expectUncheckedLeaf(rjAlice, alice, aliceLeaf);
         assertEq(reg.identityRoot(), 0);
-        assertEq(reg.identityNextLeafIndex(), 0);
+        assertEq(reg.rootSequence(), 0);
         assertFalse(reg.isVerified(alice));
     }
 
-    function test_incrementalAccumulator_twoLeaves_refused() public {
+    function test_callerLeaf_twoLeaves_refused() public {
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
@@ -211,31 +226,31 @@ contract IdentityRegistryV2Test is Test {
         _expectUncheckedLeaf(rjAlice, alice, _u(rjAlice, ".leaf"));
         _expectUncheckedLeaf(rjBob,   bob,   _u(rjBob, ".leaf"));
         assertEq(reg.identityRoot(), 0);
-        assertEq(reg.identityNextLeafIndex(), 0);
+        assertEq(reg.rootSequence(), 0);
     }
 
-    function test_incrementalAccumulator_governanceCanStillSet() public {
-        // Governance-set root still works even with Poseidon wired.
+    function test_aggregatorPostsWithPoseidonWired() public {
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
 
-        vm.prank(GOV);
-        reg.setIdentityRoot(expectedIdentityRoot);
+        _appointAggregator();
+        vm.prank(AGG);
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
         assertEq(reg.identityRoot(), expectedIdentityRoot);
     }
 
-    function test_incrementalAccumulator_zeroLeafSkipsUpdate() public {
+    function test_registerPostsNothing() public {
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
 
-        // Register WITHOUT a leaf (5-arg overload) — root stays 0.
+        // Register WITHOUT a leaf (5-arg overload) -- nothing is posted.
         _registerFromVectors(rjAlice, alice);
         assertEq(reg.identityRoot(), 0,
-                "5-arg register must not update identity root");
-        assertEq(reg.identityNextLeafIndex(), 0,
-                "leaf count must not advance with 5-arg register");
+                "register must not post a root");
+        assertEq(reg.rootSequence(), 0,
+                "register must not post a root");
     }
 
     // ---- helpers with leaf -------------------------------------------------

@@ -240,23 +240,21 @@ template DepositFoldA1(depth) {
     identityRoot === mp.root;
 }
 
-// The depth is the AGGREGATOR depth.  TWENTY, not ten: the accumulator
-// specification raises it because authorities are a population rather than a
-// roster -- clubs, community boards, congregations and delegated
-// sub-regulators are all attribute authorities, and 2**10 = 1024 subtrees is
-// the wrong order of magnitude.  The ten extra levels cost ten Poseidon-2
-// hashes, about 2,400 constraints against this circuit's millions.
+// The path is THIRTY-TWO levels: the leaf's identity-registry subtree (12,
+// KYC_SUBTREE_DEPTH) and then the aggregator (20, AGGREGATOR_DEPTH), whose
+// leaves are subtree roots and whose root is the posted identityRoot
+// (accumulator specification, section 11.1).  Every level folds with the same
+// Poseidon-2, so the two paths are one path here, and the subtree's slot in
+// the aggregator stays a private input -- which authority a member belongs to
+// is exactly what aggregation hides.  Python: MEMBERSHIP_PATH_DEPTH.
 //
-// It is raised HERE, in the circuits, because the depth is baked into the
-// r1cs and therefore into a trusted setup: building at ten would mean paying
-// for the ceremony twice.  The on-chain IDENTITY_TREE_DEPTH and the Python
-// and Rust AGGREGATOR_DEPTH follow when Notes.sol is rewired onto these
-// gates, since that is the change which re-folds the identity root the
-// end-to-end fixtures embed.  IdentityRegistry already carries
-// ZERO_11..ZERO_20 against that day.
+// The depth is baked into the r1cs, and so into the trusted setup.  The
+// aggregator is twenty because authorities are a population rather than a
+// roster (2**10 = 1024 subtrees is the wrong order of magnitude); the extra
+// levels cost about 240 constraints each against this circuit's millions.
 component main { public [
     nullifier, v, identityRoot,
     eEncRx, eEncRy, eEncCx, eEncCy,
     pkDepX, pkDepY,
     eDepRx, eDepRy, eDepCx, eDepCy
-] } = DepositFoldA1(20);
+] } = DepositFoldA1(32);

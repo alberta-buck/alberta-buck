@@ -23,7 +23,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from alberta_buck.registry.tree import IdentityMerkleTree
+from alberta_buck.registry.merkle_service import rooted_registry
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, rand_scalar
 from alberta_buck.wallet.deposit_fold import (
     DepositFoldRefused, deposit_fold_a1_witness, deposit_fold_witness,
@@ -35,7 +35,6 @@ from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
 
 KYC = "kyc:ca-ab-2026"
-DEPTH = 20          # the AGGREGATOR depth; see the circuit trailer
 FACE = 100 * 10**18
 
 
@@ -57,7 +56,9 @@ def build(thief: bool = False):
     E_dep = elgamal_encrypt(M_rec, pk_dep, r_E)
 
     # ---- the private identity-registry subtree ----------------------------
-    priv = IdentityMerkleTree(depth=DEPTH, private=True)
+    # The recipient's identity registry, a subtree under the aggregator: its
+    # paths run 32 levels, subtree then aggregator, as the circuit folds them.
+    priv = rooted_registry()
     priv.insert_receiving(m_rec, k_recv, salt)
 
     # ---- the public issuer, and the note ----------------------------------

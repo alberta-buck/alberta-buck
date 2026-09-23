@@ -58,6 +58,10 @@ FS_ISSUER_REENC                 = b"AlbertaBuck/FiatShamir/IdentityRegistry/Issu
 FS_DEPOSITOR_BINDING            = b"AlbertaBuck/FiatShamir/IdentityRegistry/DepositorBinding/v2"
 #: Verified off chain, by a receipt checker; no contract carries it.
 FS_VERIFIABLE_DECRYPT           = b"AlbertaBuck/FiatShamir/Receipt/VerifiableDecrypt/v2"
+#: The on-chain opening of an account's credential to its Identity, which the
+#: insurer gate checks before an attestation: the verifiable-decryption relation
+#: under its own tag, bound to the registry as well as the account and chain.
+FS_IDENTITY_OPENING             = b"AlbertaBuck/FiatShamir/IdentityRegistry/IdentityOpening/v2"
 
 # ---- authorizations that are hashes, not proofs ----------------------------
 
@@ -68,6 +72,14 @@ CONTRACT_BINDING_CONTROL        = b"AlbertaBuck/IdentityRegistry/ContractBinding
 ACCUMULATOR_SALT                = b"AlbertaBuck/Accumulator/Salt/v2"
 NOTES_RECEIVING_KEY             = b"AlbertaBuck/Notes/ReceivingKey/v2"
 NOTES_PAYLOAD_WRAP              = b"AlbertaBuck/Notes/PayloadWrap/v2"
+
+# ---- accumulator consumers --------------------------------------------------
+#
+# Each names a consumer of the posted identity root, which declares its own
+# maximum root age (accumulator specification, section 5).
+
+CONSUMER_NOTES_MEMBERSHIP       = b"AlbertaBuck/Accumulator/Consumer/NotesMembership/v2"
+CONSUMER_INSURER_ATTESTATION    = b"AlbertaBuck/Accumulator/Consumer/InsurerAttestation/v2"
 
 # ---- constants compiled into circuits -----------------------------------------
 #
@@ -112,9 +124,10 @@ __all__ = [
     "word",
     "IDENTITY_SCALAR",
     "FS_REGISTER", "FS_CONTRACT_BINDING", "FS_APPROVE", "FS_ISSUER_SCHNORR",
-    "FS_ISSUER_REENC", "FS_DEPOSITOR_BINDING", "FS_VERIFIABLE_DECRYPT",
+    "FS_ISSUER_REENC", "FS_DEPOSITOR_BINDING", "FS_VERIFIABLE_DECRYPT", "FS_IDENTITY_OPENING",
     "CONTRACT_BINDING_CONTROL",
     "ACCUMULATOR_SALT", "NOTES_RECEIVING_KEY", "NOTES_PAYLOAD_WRAP",
+    "CONSUMER_NOTES_MEMBERSHIP", "CONSUMER_INSURER_ATTESTATION",
     "PEDERSEN_H", "NOTES_ZERO",
     "LEAF_IDENTITY", "LEAF_IDENTITY_SALTED", "LEAF_RECEIVING", "LEAF_MAILBOX", "field_tag",
     "RECEIPT_ENVELOPE",

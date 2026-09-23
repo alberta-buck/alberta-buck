@@ -3,7 +3,7 @@
 Builds ONE mutually-consistent set of artifacts per flavor so that
 test/NotesE2E.t.sol can drive the full real-verifier lifecycle:
 
-    identity world -> registry binds (+ incremental identityRoot)
+    identity world -> registry binds, and the aggregator root the world posts
     wallet note    -> pinned-opening mint proof (mint_batch / mint_batch_a2)
     spend proof    -> against the replayed note tree (prove_spend.js)
     deposit sigma  -> pinned to (depositor address, chainid=1)
@@ -42,7 +42,8 @@ from alberta_buck.wallet.notes import (
 )
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
-from alberta_buck.wallet.unilateral_a2 import IdentityTree, mint_unilateral_a2
+from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
+from alberta_buck.registry.merkle_service import rooted_registry
 from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
 from alberta_buck.wallet.deposit_fold import (
     deposit_fold_a1_witness, deposit_fold_a2_witness, deposit_fold_witness,
@@ -178,7 +179,10 @@ def build_world(flavor: str):
     #   A1  issuer: unused by the gate    depositor: its receiving leaf
     #   A2  issuer: its NAMED leaf        depositor: its receiving leaf
     #   B1  issuer: unused by the gate    depositor: its salted identity leaf
-    tree = IdentityTree()
+    # One identity registry's private subtree, under the aggregator: every path
+    # runs 32 levels, subtree then aggregator, and the world posts only the
+    # aggregator root, as a deployment's aggregator does.
+    tree = rooted_registry()
     if flavor == "a2":
         iss_leaf = identity_leaf_salted(issuer_acct["M"], salt_iss_named)
     else:
@@ -195,13 +199,11 @@ def build_world(flavor: str):
             "addr": f"0x{ISSUER:040x}",
             "pk": pt(issuer_acct["pk"]), "E": ct(issuer_acct["E"]),
             "isPublic": flavor != "a2",
-            "identityLeaf": str(iss_leaf),
         },
         {
             "addr": f"0x{DEPOSIT:040x}",
             "pk": pt(dep_acct["pk"]), "E": ct(dep_acct["E"]),
             "isPublic": False,
-            "identityLeaf": str(dep_leaf),
         },
     ]
 

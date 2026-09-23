@@ -372,7 +372,10 @@ Five things the survey had left open, each of which reduces the work.
    whose four relations over one witness refuse a payload thief that a split
    gate admits.  =alberta_buck/test/test_receiving_key.py= carries thirty-one
    tests, including the theft as a test rather than a warning.
-3. *Circuits.* Done, at aggregator depth 20.  The addressed spends prove
+3. *Circuits.* Done, with 32-level membership paths: the identity registry's
+   subtree (12) and then the aggregator (20), the specification's two-level
+   statement folded as one path -- the first build folded 20 levels only, and
+   phase 4 found and corrected it.  The addressed spends prove
    membership inside one folded gate per flavour (=deposit_fold_a1=,
    =deposit_fold_a2=), which removed finding 5's three defects by
    construction rather than by repair; B1 proves it in
@@ -380,12 +383,70 @@ Five things the survey had left open, each of which reduces the work.
    generator =H_PEDERSEN=.  Each has a dev-entropy setup, a generated
    verifier and real proofs spending on chain
    ([[file:notes-receiving-key.org::#fold-built][the gates as built]]).
-   The leaf functions still take no domain tag, and that change is circuit
-   work: it moves with the v2 ceremony round
+   Since 2026-09-22 every leaf function leads with its own v2 tag, in all
+   four backends and every circuit that hashes a leaf
    ([[file:notes-receiving-key.org::#reading-plan][step C]]).
-4. *Solidity.* The root authority and policy, the permanent caller-leaf
-   refusal documented as such, and =BuckCredit='s attestation entry point
-   and per-credit check.
+4. *Solidity.* Done 2026-09-22.  The root authority and policy, the
+   permanent caller-leaf refusal documented as such, and =BuckCredit='s
+   attestation entry point and per-credit check.  The specification leaves six
+   things to the port, decided here:
+   - *Roles.*  =IdentityRegistry= gains a =rootAuthority=, appointed by
+     governance, which enrolls and evicts subtrees and appoints the
+     =aggregator=; the aggregator alone posts roots.  Governance keeps what
+     it had, and =setIdentityRoot= is gone.
+   - *Enrollment is per subtree.*  An authority with several predicates, as
+     the insurance regulator has, enrolls each of its subtrees under the
+     same posting key.  The record holds the subtree's aggregator slot, and
+     a public membership proof takes its aggregator index bits from that
+     slot, never from the caller: the slot is what makes a path a claim about
+     a named subtree.
+   - *Roots.*  A ring of 256 records, a root mapped to its posting time, and
+     a maximum age per consumer, named by a v2 tag; setting one longer than
+     the full ring covers is refused.  Spends name the identity root they
+     proved against, and =Notes= accepts any retained root within its age.
+   - *Binding the insurer to its leaf.*  No identity point is stored in the
+     clear, public or not, so the attesting account proves that its
+     registered credential opens to the =M= whose leaf it claims -- a
+     Chaum-Pedersen proof over the stored key and credential, under its own
+     Fiat-Shamir tag.  Without it any account could claim any insurer's
+     envelope.
+   - *What the envelope's rates are.*  The executable specification caches
+     a maximum depreciation rate and premium rate that no subtree attests.
+     They become subtrees like the face band, =insurer:depRate:<bp>= and
+     =insurer:premium:<bp>=, and the general scope becomes
+     =insurer:general=, since a hash of a name is never zero.  Subtree
+     identifiers are =keccak= of the namespaced name, as scopes already are.
+   - *The gate is configured once.*  Governance sets the registry, the
+     regulator's namespace and the attestation period, and cannot unset
+     them.  A =BuckCredit= never configured issues ungated: the simulations
+     and the economic suites deploy that way, and a deployment profile
+     (specification 17.5) =MUST= configure it.  The gate's own suite
+     exercises every refusal against the Python reference.
+   Two more things the port settled.  A reappraisal (=updateCredit=) is held
+   to the parameter envelope too, or an insurer writes small and updates
+   large; the scope is emitted at creation and not stored, so a reappraisal
+   cannot re-check it.  And the gates' membership paths were one level short
+   of the specification: a single 20-level path from the leaf cannot pass
+   through a subtree, so every gate now folds 32 levels, subtree (12) then
+   aggregator (20), and was set up again
+   ([[file:notes-receiving-key.org::#reading-plan][step D]]).
+
+   As built: =IdentityRegistry= is 23,166 of the 24,576 bytes a contract may
+   deploy, so the insurer's identity opening lives in =BuckCredit=, its only
+   consumer, reading the key and credential from the registry.  The
+   specification asked for public membership to be measured both ways: a path
+   through the aggregator (subtree 10 + aggregator 20) costs 913,642 gas on
+   chain, and a path against a posted subtree root alone would cost 301,179.
+   An attestation of eight predicates -- standing, band, two depreciation
+   models, both rates, the general scope and one named scope -- costs about 8M
+   gas, once per review period; storing public subtree roots (the
+   specification's =MAY=) would cut it to about a third and is left for when
+   a deployment's cadence asks for it.  Suites: =IdentityAccumulator.t.sol=
+   (roles, enrollment, the ring, consumer ages, public paths),
+   =InsurerGate.t.sol= (the gate end to end), and =InsurerGateVectors.t.sol=,
+   which replays =scripts/gen_insurer_gate_vectors.py= -- the Python
+   reference's subtrees, leaf, paths, opening and eight issuance decisions --
+   byte for byte.
 5. *Rust, bindings and JavaScript*, with regenerated vectors, as every
    identity change requires.
 6. *Documents.* The epoch reinterpretation, the accumulator sections of the

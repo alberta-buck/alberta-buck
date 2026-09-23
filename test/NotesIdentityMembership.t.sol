@@ -87,8 +87,7 @@ contract NotesIdentityMembershipTest is Test {
 
         // Seed identity root (non-zero, so the membership gate fires).
         identityRoot = 0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3;
-        vm.prank(GOV);
-        reg.setIdentityRoot(identityRoot);
+        IdentityRegistryHarness(address(reg)).fixturePostRoot(identityRoot);
 
         // Mutual decryptability fragment hack (same as Notes.t.sol).
         {
@@ -171,8 +170,8 @@ contract NotesIdentityMembershipTest is Test {
         assertEq(address(notes.depositFoldVerifier()), address(0));
         IdentityRegistry.ElGamalCT memory zct;
         vm.expectRevert(bytes("Notes: deposit fold verifier not set"));
-        notes.spendCoupledA1(hex"00", 0, 1, 100, address(this), zct, hex"00");
+        notes.spendCoupledA1(hex"00", 0, identityRoot, 1, 100, address(this), zct, hex"00");
         vm.expectRevert(bytes("Notes: deposit fold verifier not set"));
-        notes.spendCoupledA2(hex"00", 0, 1, 100, address(this), zct, hex"00");
+        notes.spendCoupledA2(hex"00", 0, identityRoot, 1, 100, address(this), zct, hex"00");
     }
 }

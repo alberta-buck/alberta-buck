@@ -29,7 +29,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from alberta_buck.registry.tree import IdentityMerkleTree, identity_leaf_salted
+from alberta_buck.registry.merkle_service import rooted_registry
+from alberta_buck.registry.tree import identity_leaf_salted
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, point_to_words, rand_scalar
 from alberta_buck.wallet.deposit_fold import (
     DepositFoldRefused, deposit_fold_a2_witness, deposit_fold_witness,
@@ -44,7 +45,6 @@ from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.unilateral_a2 import MintedA2, mint_unilateral_a2
 
 KYC = "kyc:ca-ab-2026"
-DEPTH = 20          # the AGGREGATOR depth; see the circuit trailer
 FACE = 100 * 10**18
 ISSUER, CHAINID = 0xA11CE, 1
 
@@ -100,7 +100,9 @@ def build(thief: bool = False, bogus: bool = False, split: bool = False, raw: bo
     salt_iss_mailbox = derive_salt(seed_iss, KYC)
     salt_iss_named = derive_salt(seed_iss, KYC, 1)      # the SHIPPED one
 
-    priv = IdentityMerkleTree(depth=DEPTH, private=True)
+    # The recipient's identity registry, a subtree under the aggregator: its
+    # paths run 32 levels, subtree then aggregator, as the circuit folds them.
+    priv = rooted_registry()
     priv.insert_receiving(m_rec, k_recv, salt_rec)            # the recipient
     priv.insert_receiving(m_iss, k_iss, salt_iss_mailbox)     # the issuer's mailbox
     priv.insert_leaf(identity_leaf_salted(M_iss, salt_iss_named))  # names the issuer

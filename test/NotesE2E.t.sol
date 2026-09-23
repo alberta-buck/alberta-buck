@@ -83,15 +83,18 @@ abstract contract NotesE2EBase is Test {
         payout    = _addr(".payout");
         face      = _u(".face");
 
-        // ---- IdentityRegistry with the REAL incremental accumulator ----
+        // ---- IdentityRegistry, and the root the world's aggregator posts ----
         reg = new IdentityRegistryHarness(GOV);
         vm.startPrank(GOV);
         reg.setIdentityPoseidon(PoseidonT3Bytecode.deploy());
+        reg.setRootAuthority(GOV);
+        reg.setAggregator(GOV);
         vm.stopPrank();
 
-        // Bind the two world accounts WITH their identity leaves, in fixture
-        // order; the on-chain incremental root must replay to the Python
-        // tree's root (the membership proofs were generated against it).
+        // Bind the two world accounts.  Their leaves are not a registry call:
+        // the world's identity registry admitted them to its own subtree, and
+        // the aggregator posts the composed root, which every gate's
+        // 32-level path (subtree, then aggregator) folds to.
         for (uint256 i = 0; i < 2; i++) {
             string memory k = string.concat(".binds[", vm.toString(i), "]");
             address a = _addr(string.concat(k, ".addr"));
@@ -101,20 +104,11 @@ abstract contract NotesE2EBase is Test {
                 _g1(string.concat(k, ".pk")),
                 _ct(string.concat(k, ".E")),
                 vm.parseJsonBool(vj, string.concat(k, ".isPublic")),
-                false,
-                _u(string.concat(k, ".identityLeaf"))
+                false
             );
         }
-        // The addressed flavours carry a third leaf: the recipient's mailbox
-        // association, over the two POINTS, which is what a payer and a receipt
-        // verifier check with no secret.  It binds no address, so it arrives as
-        // a leaf rather than as a binding.
-        if (!_isBearer()) {
-            IdentityRegistryHarness(address(reg)).fixtureInsertLeaf(
-                _u(".mailboxBinding.leaf"));
-        }
-        assertEq(reg.identityRoot(), _u(".identityRoot"),
-                 "on-chain incremental identityRoot must replay the fixture tree");
+        vm.prank(GOV);
+        reg.postIdentityRoot(_u(".identityRoot"), bytes32(0));
 
         // ---- Buck stack ----
         credit = new BuckCreditHarness();
@@ -286,17 +280,17 @@ abstract contract NotesE2EBase is Test {
         if (_flavorCode() != 3) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
             notes.spendCoupledB1(
-                proof, root, nf, face, payout, _u(".opening.cm"), issuer,
+                proof, root, _u(".identityRoot"), nf, face, payout, _u(".opening.cm"), issuer,
                 zct, zdb, memProof
             );
         }
         if (_flavorCode() != 1) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
-            notes.spendCoupledA1(proof, root, nf, face, payout, zct, memProof);
+            notes.spendCoupledA1(proof, root, _u(".identityRoot"), nf, face, payout, zct, memProof);
         }
         if (_flavorCode() != 2) {
             vm.expectRevert(bytes("Notes: bad spend proof"));
-            notes.spendCoupledA2(proof, root, nf, face, payout, zct, memProof);
+            notes.spendCoupledA2(proof, root, _u(".identityRoot"), nf, face, payout, zct, memProof);
         }
         vm.stopPrank();
     }
@@ -404,7 +398,7 @@ contract NotesE2E_B1 is NotesE2EBase {
         vm.prank(depositor);
         uint256 g = gasleft();
         notes.spendCoupledB1(
-            proof, root, nf, face, payout, _u(".opening.cm"), issuer,
+            proof, root, _u(".identityRoot"), nf, face, payout, _u(".opening.cm"), issuer,
             eDep, db, memProof
         );
         gasUsed = g - gasleft();
@@ -439,7 +433,7 @@ contract NotesE2E_A1 is NotesE2EBase {
         bytes memory fold = _b(".depositFold.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledA1(proof, root, nf, face, payout, eEnc, fold);
+        notes.spendCoupledA1(proof, root, _u(".identityRoot"), nf, face, payout, eEnc, fold);
         gasUsed = g - gasleft();
     }
 }
@@ -478,7 +472,7 @@ contract NotesE2E_A2 is NotesE2EBase {
         bytes memory fold = _b(".depositFold.proofBytes");
         vm.prank(depositor);
         uint256 g = gasleft();
-        notes.spendCoupledA2(proof, root, nf, face, payout, eEnc, fold);
+        notes.spendCoupledA2(proof, root, _u(".identityRoot"), nf, face, payout, eEnc, fold);
         gasUsed = g - gasleft();
     }
 }

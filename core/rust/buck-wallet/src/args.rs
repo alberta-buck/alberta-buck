@@ -762,23 +762,44 @@ pub fn open_a2_args(args: &Value) -> Result<String> {
 
 /// `{M_rec, pk_recv, salt, leaves, depth}` -> the mailbox binding a payer
 /// checks before paying: a leaf and a path, disclosing no secret.
+fn hex_leaves(v: &Value) -> Result<Vec<W256>> {
+    v.as_array()
+        .ok_or(IdError("args: leaves must be an array"))?
+        .iter()
+        .map(|x| w_from_hex(x.as_str().ok_or(IdError("args: leaf must be hex"))?))
+        .collect()
+}
+
+/// `{M_rec, pk_recv, salt, leaves, depth, aggregator?}` -> the mailbox binding.
+/// `leaves`/`depth` are the registry's subtree; with `aggregator`
+/// (`{leaves, depth, slot}`) the path continues up the aggregator from the
+/// subtree's slot, so it folds to the posted root -- the two-level statement of
+/// the accumulator specification, section 11.1.
 pub fn prove_receiving_binding_args(args: &Value) -> Result<String> {
     let m = get_g1(args, "M_rec")?;
     let pk = get_g1(args, "pk_recv")?;
     let salt = get_w(args, "salt")?;
-    let leaves = get(args, "leaves")?
-        .as_array()
-        .ok_or(IdError("args: leaves must be an array"))?
-        .iter()
-        .map(|x| w_from_hex(x.as_str().ok_or(IdError("args: leaf must be hex"))?))
-        .collect::<Result<Vec<W256>>>()?;
+    let leaves = hex_leaves(get(args, "leaves")?)?;
     let depth = get_u128(args, "depth")? as usize;
     let tree = IdentityMerkleTree::from_leaves(&leaves, depth)?;
     let leaf = buck_registry::tree::mailbox_leaf(&m, &pk, &salt)?;
-    let proof = tree
+    let mut proof = tree
         .path(tree.index_of_leaf(&leaf).map_err(|_| {
             IdError("no registered leaf commits this (Identity, receiving key) pair")
         })?)?;
+    if let Some(agg) = get_opt(args, "aggregator") {
+        let agg_leaves = hex_leaves(get(agg, "leaves")?)?;
+        let agg_tree =
+            IdentityMerkleTree::from_leaves(&agg_leaves, get_u128(agg, "depth")? as usize)?;
+        let slot = get_u128(agg, "slot")? as usize;
+        if agg_leaves.get(slot) != Some(&proof.root) {
+            return Err(IdError("the subtree's root is not at its aggregator slot"));
+        }
+        let up = agg_tree.path(slot)?;
+        proof.siblings.extend(up.siblings);
+        proof.index_bits.extend(up.index_bits);
+        proof.root = up.root;
+    }
     Ok(json!({
         "pk_recv": g1_hex(&pk),
         "salt": scalar_hex(&salt),

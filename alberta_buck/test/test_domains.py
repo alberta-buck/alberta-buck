@@ -77,3 +77,20 @@ def test_h_pedersen_in_the_registry_and_its_powers_table():
         limbs = [int(re.search(rf"powers\[0\]\[1\]\[{axis}\]\[{i}\] = (\d+);", table).group(1))
                  for i in range(4)]
         assert sum(l << (64 * i) for i, l in enumerate(limbs)) == v
+
+
+def test_solidity_carries_the_registry_tags():
+    """Every v2 tag a contract spells out is the registry's, letter for letter."""
+    sources = {p: _read(p) for p in ("src/IdentityRegistry.sol", "src/Notes.sol",
+                                     "src/BuckCredit.sol")}
+    for p, src in sources.items():
+        for tag in re.findall(r'keccak256\("(AlbertaBuck/[^"]+)"\)', src):
+            assert tag.encode() in TAGS.values(), f"{p}: {tag} is not a registry tag"
+    reg = sources["src/IdentityRegistry.sol"]
+    assert _uint(reg, "LEAF_TAG_IDENTITY") == TAG_IDENTITY
+    for p, want in (("src/IdentityRegistry.sol", domains.CONSUMER_NOTES_MEMBERSHIP),
+                    ("src/Notes.sol", domains.CONSUMER_NOTES_MEMBERSHIP),
+                    ("src/IdentityRegistry.sol", domains.CONSUMER_INSURER_ATTESTATION),
+                    ("src/BuckCredit.sol", domains.CONSUMER_INSURER_ATTESTATION),
+                    ("src/BuckCredit.sol", domains.FS_IDENTITY_OPENING)):
+        assert f'keccak256("{want.decode()}")' in sources[p], (p, want)

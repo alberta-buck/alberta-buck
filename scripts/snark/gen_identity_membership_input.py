@@ -15,11 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from alberta_buck.wallet.bn254 import G1, ORDER, mul, point_to_words
 from alberta_buck.wallet.poseidon import F_R
-from alberta_buck.registry.tree import AGGREGATOR_DEPTH, identity_leaf_salted
+from alberta_buck.registry.merkle_service import rooted_registry
+from alberta_buck.registry.tree import identity_leaf_salted
 from alberta_buck.wallet.salt import derive_salt
-from alberta_buck.wallet.unilateral_a2 import IdentityTree, identity_leaf
+from alberta_buck.wallet.unilateral_a2 import identity_leaf
 
-DEPTH = AGGREGATOR_DEPTH
 TREE_ID = "kyc:ca-ab-2026"
 
 
@@ -41,7 +41,8 @@ def build(out_dir):
     rng = _rng()
     # A PRIVATE sub-tree: leaves are hiding commitments, so the salt is a
     # witness and an unsalted leaf is refused (accumulator specification, s4).
-    tree = IdentityTree(depth=DEPTH, private=True)
+    # It sits under the aggregator, so its paths run subtree then aggregator.
+    tree = rooted_registry()
 
     # A handful of registered identities; the 4th is our target.  Each holder
     # derives its own salt from a wallet secret it never discloses, so a
@@ -62,7 +63,7 @@ def build(out_dir):
     assert proof.verify(), "reference path must verify"
     # The unsalted leaf of the same identity is NOT in the tree: that is the
     # scan the salt exists to defeat, asserted here so a regression is loud.
-    assert not tree.contains(target), \
+    assert identity_leaf(target) not in tree.leaves, \
         "the unsalted leaf of a member must not appear in a private sub-tree"
 
     Mx, My = point_to_words(target)

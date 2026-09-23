@@ -33,8 +33,11 @@ then recompute e.  ``account`` (the address whose key decrypts) and ``chainid``
 are folded into the transcript so a proof is bound to its context and cannot be
 replayed.
 
-No on-chain verifier ships today (the receipt is checked off-chain, like the
-Notes RcptVerify); a future on-chain version must mirror this transcript order.
+The receipt's proof is checked off chain.  Its on-chain sibling is the
+*identity opening* below: the same relation, proving that an account's
+registered credential decrypts to the Identity it claims, which the insurer gate
+(``BuckCredit.attestInsurer``) checks before accepting an envelope.  It binds the
+registry too and runs under its own tag, so neither proof stands in for the other.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.transcript import keccak_scalar
-from alberta_buck.wallet.domains import FS_VERIFIABLE_DECRYPT, word as _word
+from alberta_buck.wallet.domains import FS_IDENTITY_OPENING, FS_VERIFIABLE_DECRYPT, word as _word
 
 
 @dataclass(frozen=True)
@@ -121,3 +124,52 @@ def verifiable_decrypt_verify(
 
     # Check 3: Fiat-Shamir
     return proof.e == _vd_transcript(E, pk, M, proof.T1, proof.T2, account, chainid)
+
+
+# ---- the identity opening: the same relation, checked on chain ---------------
+
+def _opening_transcript(E: ElGamalCiphertext, pk, M, T1, T2,
+                        account: int, chainid: int, registry: int) -> int:
+    words = []
+    for P in (E.R, E.C, pk, M, T1, T2):
+        words.extend(point_to_words(P))
+    return keccak_scalar(*words, account, chainid, registry, _word(FS_IDENTITY_OPENING))
+
+
+def identity_opening_prove(
+    E:        ElGamalCiphertext,
+    sk:       int,
+    M,
+    account:  int,
+    chainid:  int,
+    registry: int,
+    rng=None,
+) -> VDProof:
+    """Prove that ``account``'s registered credential ``E`` decrypts to ``M``
+    under its registered key ``sk*G`` -- what ``BuckCredit.attestInsurer`` checks
+    before it accepts an envelope for ``M``.  Bound to (account, chainid,
+    registry); mirrors BuckCredit._opens transcript for transcript."""
+    pk = mul(G1, sk % ORDER)
+    t  = rand_scalar(rng)
+    T1 = mul(G1, t)
+    T2 = mul(E.R, t)
+    e  = _opening_transcript(E, pk, M, T1, T2, account, chainid, registry)
+    return VDProof(e=e, s=(t + e * (sk % ORDER)) % ORDER, T1=T1, T2=T2)
+
+
+def identity_opening_verify(
+    E:        ElGamalCiphertext,
+    pk,
+    M,
+    proof:    VDProof,
+    account:  int,
+    chainid:  int,
+    registry: int,
+) -> bool:
+    """Verify an identity opening, as BuckCredit does on chain."""
+    e, s = proof.e, proof.s
+    if not eq(mul(G1, s), add(proof.T1, mul(pk, e))):
+        return False
+    if not eq(mul(E.R, s), add(proof.T2, mul(add(E.C, neg(M)), e))):
+        return False
+    return e == _opening_transcript(E, pk, M, proof.T1, proof.T2, account, chainid, registry)

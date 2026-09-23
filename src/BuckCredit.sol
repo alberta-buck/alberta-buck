@@ -3,7 +3,11 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
+import "@openzeppelin/contracts/utils/Strings.sol";
+
 import {BuckTypes, BuckQty, toBuckQty, CreditSlice} from "./BuckTypes.sol";
+import {BN254} from "./BN254.sol";
+import {IAccumulatorRegistry} from "./IAccumulatorRegistry.sol";
 
 /// @title BuckCredit — ERC-721 Insured Asset NFT
 /// @notice Each token represents an insurer's offer of parametric insurance on a
@@ -137,14 +141,275 @@ contract BuckCredit is ERC721Enumerable {
     // --- Events ---
     event CreditIssuerSet(address indexed client, address indexed insurer, bool accepted);
     event CreditCreated(uint256 indexed tokenId, address indexed insurer,
-                        address indexed owner, uint256 faceValue);
+                        address indexed owner, uint256 faceValue, bytes32 scope);
     event CreditUpdated(uint256 indexed tokenId, address indexed insurer,
                         uint256 newFaceValue, uint32 newDepRate, uint32 newPremiumRate);
     event CreditActivated(uint256 indexed tokenId, address indexed owner,
                           uint256 additionalValue, uint256 totalActivated);
     event BuckSet(address indexed buck);
+    event InsurerGateConfigured(address indexed registry, string regulatorNamespace,
+                                uint32 attestationPeriod);
+    event InsurerAttested(address indexed insurer, uint256 indexed root, uint48 expiresAt,
+                          uint8 faceBand, uint8 depTypes, uint32 maxDepRate,
+                          uint32 maxPremiumRate, bytes32[] scopes);
 
-    constructor() ERC721("BuckCredit", "BUCK_CREDIT") {}
+    // ── The insurer gate (doc/review/accumulator-spec.org, section 12) ──
+    //
+    // An insurer may write a credit only inside the envelope its regulator
+    // attested: standing, a face band, the depreciation models, maximum
+    // depreciation and premium rates, and the scopes it may declare.  The
+    // regulator publishes the envelope as membership in public subtrees; the
+    // insurer proves it once per review period (attestInsurer), and issuance
+    // is then a storage read.  Configured once, by the deployer, and never
+    // removable.  A BuckCredit never configured issues ungated: the economic
+    // simulations deploy that way, and a deployment profile MUST configure it.
+
+    /// @notice The accumulator the regulator's subtrees are proven against.
+    IAccumulatorRegistry public insurerRegistry;
+    /// @notice The regulator's namespace, e.g. "regulator:ca-ab": every
+    ///         predicate subtree and scope is named under it.
+    string  public regulatorNamespace;
+    /// @notice How long an attestation lasts from the root it was proven on.
+    uint32  public attestationPeriod;
+    address private immutable _deployer;
+
+    /// @notice The attested envelope an insurer's issuance is checked against.
+    struct Envelope {
+        uint48 expiresAt;       // 0: never attested
+        uint8  faceBand;        // faces below 10**faceBand BUCK
+        uint8  depTypes;        // bit d: DepreciationType(d) permitted
+        uint32 maxDepRate;      // basis points per year
+        uint32 maxPremiumRate;  // basis points per year
+        uint32 epoch;           // bumped at each attestation; scopes carry it
+    }
+    mapping(address => Envelope) public envelopeOf;
+    /// @dev A scope is attested iff its epoch equals the envelope's, so a new
+    ///      attestation withdraws every scope it does not repeat.
+    mapping(address => mapping(bytes32 => uint32)) internal _scopeEpoch;
+
+    /// @notice The scope the eight-argument createCredit declares: a regulator
+    ///         grants it to a general insurer and withholds it from a scoped one.
+    bytes32 public constant GENERAL_SCOPE = bytes32(0);
+
+    /// @notice keccak("AlbertaBuck/Accumulator/Consumer/InsurerAttestation/v2").
+    bytes32 public constant INSURER_ATTESTATION_CONSUMER =
+        keccak256("AlbertaBuck/Accumulator/Consumer/InsurerAttestation/v2");
+    uint256 internal constant IDENTITY_OPENING_DOMAIN = uint256(
+        keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/IdentityOpening/v2")
+    );
+    uint8   internal constant FACE_BAND_MAX = 8;
+
+    /// @notice What the insurer claims its regulator attested.
+    struct EnvelopeClaim {
+        uint8    faceBand;
+        uint8    depTypes;
+        uint32   maxDepRate;
+        uint32   maxPremiumRate;
+        bool     general;
+        string[] scopes;        // asset paths, e.g. "asset:vehicle:car"
+    }
+
+    /// @notice One public membership path: the predicate subtree's own path
+    ///         and the aggregator path above it (the registry fixes that
+    ///         path's index from the subtree's enrolled slot).
+    struct Path {
+        uint256[] sub;
+        uint256   subIndex;
+        uint256[] agg;
+    }
+
+    /// @notice A Chaum-Pedersen proof that the attesting account's registered
+    ///         credential decrypts, under its registered key, to M.
+    struct IdentityOpening {
+        uint256       e;
+        uint256       s;
+        BN254.G1Point T1;
+        BN254.G1Point T2;
+    }
+
+    constructor() ERC721("BuckCredit", "BUCK_CREDIT") {
+        _deployer = msg.sender;
+    }
+
+    /// @notice Configure the insurer gate.  Once, by the deployer.
+    function configureInsurerGate(
+        address registry,
+        string calldata namespace_,
+        uint32 period
+    ) external {
+        require(msg.sender == _deployer, "BuckCredit: not deployer");
+        require(address(insurerRegistry) == address(0), "BuckCredit: gate configured");
+        require(registry != address(0) && bytes(namespace_).length != 0 && period != 0,
+                "BuckCredit: bad gate");
+        insurerRegistry = IAccumulatorRegistry(registry);
+        regulatorNamespace = namespace_;
+        attestationPeriod = period;
+        emit InsurerGateConfigured(registry, namespace_, period);
+    }
+
+    // ── Attestation ─────────────────────────────────────────────────
+
+    /// @notice Prove, once per review period, the envelope the regulator
+    ///         attested for msg.sender.  `M` is the insurer's Identity; the
+    ///         opening shows its registered credential decrypts to M, so no
+    ///         account can claim another's envelope.  `paths` proves M's public
+    ///         leaf in each predicate subtree against `root`, in this order:
+    ///         standing, face band, each permitted depreciation type
+    ///         (ascending), maximum depreciation rate, maximum premium rate,
+    ///         the general scope if claimed, then each scope.
+    function attestInsurer(
+        BN254.G1Point calldata M,
+        IdentityOpening calldata opening,
+        EnvelopeClaim calldata claim,
+        uint256 root,
+        Path[] calldata paths
+    ) external {
+        IAccumulatorRegistry reg = insurerRegistry;
+        require(address(reg) != address(0), "BuckCredit: gate not configured");
+        require(reg.acceptsRoot(root, INSURER_ATTESTATION_CONSUMER),
+                "BuckCredit: root not accepted");
+        require(claim.faceBand >= 1 && claim.faceBand <= FACE_BAND_MAX, "BuckCredit: bad face band");
+        require(claim.depTypes != 0 && claim.depTypes < 8, "BuckCredit: bad depreciation types");
+        require(_opens(reg, M, opening), "BuckCredit: identity opening fails");
+
+        uint256 leaf = reg.publicIdentityLeaf(M);
+        uint256 k = 0;
+        _claim(reg, leaf, root, paths[k++], "insurer");
+        _claim(reg, leaf, root, paths[k++],
+               string.concat("insurer:face:", Strings.toString(claim.faceBand)));
+        for (uint8 d = 0; d < 3; d++) {
+            if ((claim.depTypes >> d) & 1 == 1) {
+                _claim(reg, leaf, root, paths[k++],
+                       string.concat("insurer:dep:", Strings.toString(d)));
+            }
+        }
+        _claim(reg, leaf, root, paths[k++],
+               string.concat("insurer:depRate:", Strings.toString(claim.maxDepRate)));
+        _claim(reg, leaf, root, paths[k++],
+               string.concat("insurer:premium:", Strings.toString(claim.maxPremiumRate)));
+
+        Envelope storage env = envelopeOf[msg.sender];
+        uint32 epoch = env.epoch + 1;
+        bytes32[] memory scopes = new bytes32[](claim.scopes.length + (claim.general ? 1 : 0));
+        uint256 n = 0;
+        if (claim.general) {
+            _claim(reg, leaf, root, paths[k++], "insurer:general");
+            _scopeEpoch[msg.sender][GENERAL_SCOPE] = epoch;
+            scopes[n++] = GENERAL_SCOPE;
+        }
+        for (uint256 i = 0; i < claim.scopes.length; i++) {
+            bytes32 id = scopeId(claim.scopes[i]);
+            require(reg.verifyPublicMembership(
+                        id, leaf, paths[k].sub, paths[k].subIndex, paths[k].agg, root),
+                    "BuckCredit: scope not attested");
+            k++;
+            _scopeEpoch[msg.sender][id] = epoch;
+            scopes[n++] = id;
+        }
+        require(k == paths.length, "BuckCredit: extra paths");
+
+        uint48 expiresAt = uint48(reg.rootPostedAt(root)) + attestationPeriod;
+        envelopeOf[msg.sender] = Envelope(expiresAt, claim.faceBand, claim.depTypes,
+                                          claim.maxDepRate, claim.maxPremiumRate, epoch);
+        emit InsurerAttested(msg.sender, root, expiresAt, claim.faceBand, claim.depTypes,
+                             claim.maxDepRate, claim.maxPremiumRate, scopes);
+    }
+
+    /// @notice The identifier of a scope under this gate's regulator: keccak
+    ///         of "<namespace>:scope:<asset path>".  A name, not a code, so
+    ///         refinement needs no version and no taxonomy on chain.
+    function scopeId(string calldata assetPath) public view returns (bytes32) {
+        return keccak256(bytes(string.concat(regulatorNamespace, ":scope:", assetPath)));
+    }
+
+    /// @notice Whether `scope` is in the insurer's current envelope.
+    function scopeAttested(address insurer, bytes32 scope) external view returns (bool) {
+        uint32 epoch = envelopeOf[insurer].epoch;
+        return epoch != 0 && _scopeEpoch[insurer][scope] == epoch;
+    }
+
+    function _claim(
+        IAccumulatorRegistry reg,
+        uint256 leaf,
+        uint256 root,
+        Path calldata p,
+        string memory predicate
+    ) internal view {
+        bytes32 id = keccak256(bytes(string.concat(regulatorNamespace, ":", predicate)));
+        require(reg.verifyPublicMembership(id, leaf, p.sub, p.subIndex, p.agg, root),
+                string.concat("BuckCredit: not attested: ", predicate));
+    }
+
+    /// @dev pk = s*G and C - M = s*R, one s: the registered credential opens
+    ///      to M under the registered key.  The transcript binds the account,
+    ///      the chain and the registry, under its own v2 tag.
+    function _opens(
+        IAccumulatorRegistry reg,
+        BN254.G1Point calldata M,
+        IdentityOpening calldata op
+    ) internal view returns (bool) {
+        if (!reg.isVerified(msg.sender)) return false;
+        if (op.e >= BN254.R || op.s >= BN254.R) return false;
+        BN254.G1Point memory pk = reg.pkOf(msg.sender);
+        IAccumulatorRegistry.Ciphertext memory E = reg.ciphertextOf(msg.sender);
+        if (!BN254.eq(BN254.mul(BN254.g1(), op.s), BN254.add(op.T1, BN254.mul(pk, op.e)))) {
+            return false;
+        }
+        BN254.G1Point memory X = BN254.add(E.C, BN254.neg(M));
+        if (!BN254.eq(BN254.mul(E.R, op.s), BN254.add(op.T2, BN254.mul(X, op.e)))) {
+            return false;
+        }
+        BN254.G1Point[] memory pts = new BN254.G1Point[](6);
+        pts[0] = E.R;
+        pts[1] = E.C;
+        pts[2] = pk;
+        pts[3] = M;
+        pts[4] = op.T1;
+        pts[5] = op.T2;
+        uint256[] memory scl = new uint256[](4);
+        scl[0] = uint256(uint160(msg.sender));
+        scl[1] = block.chainid;
+        scl[2] = uint256(uint160(address(reg)));
+        scl[3] = IDENTITY_OPENING_DOMAIN;
+        return op.e == BN254.fsChallenge(pts, scl);
+    }
+
+    // ── Issuance against the envelope ───────────────────────────────
+
+    /// @notice The smallest band admitting `face` (BuckCredit units, six
+    ///         decimals), or FACE_BAND_MAX + 1 above the whole ladder.
+    function bandForFace(uint256 face) public pure returns (uint8) {
+        uint256 ceiling = 10 ** 7;              // band 1: below 10 BUCK
+        for (uint8 b = 1; b <= FACE_BAND_MAX; b++) {
+            if (face < ceiling) return b;
+            ceiling *= 10;
+        }
+        return FACE_BAND_MAX + 1;
+    }
+
+    /// @dev The gate, as alberta_buck/registry/regulator.py check_issuance
+    ///      specifies it, with its reasons as revert strings.  `scoped` is
+    ///      false on reappraisal: the scope is emitted at creation, not stored.
+    function _requireEnvelope(
+        bool scoped,
+        bytes32 scope,
+        uint256 face,
+        DepreciationType depType,
+        uint32 depRate,
+        uint32 premiumRate
+    ) internal view {
+        if (address(insurerRegistry) == address(0)) return;
+        Envelope memory env = envelopeOf[msg.sender];
+        require(env.expiresAt != 0, "insurer not in good standing");
+        require(block.timestamp <= env.expiresAt, "attestation expired");
+        if (scoped) {
+            require(_scopeEpoch[msg.sender][scope] == env.epoch, "scope not attested");
+        }
+        require(bandForFace(face) <= env.faceBand, "face above attested band");
+        require((env.depTypes >> uint8(depType)) & 1 == 1, "depreciation model not attested");
+        require(depRate <= env.maxDepRate, "depreciation rate above attested maximum");
+        require(premiumRate <= env.maxPremiumRate, "premium rate above attested maximum");
+    }
 
     /// @notice One-shot wiring of the Buck contract permitted to call
     ///         activateFromBuck / deactivateFromBuck.  Callable by anyone
@@ -207,7 +472,8 @@ contract BuckCredit is ERC721Enumerable {
                 "BuckCredit: insurer not accepted by client");
     }
 
-    /// @notice Insurer creates a new BUCK_CREDIT NFT for a client.
+    /// @notice Insurer creates a new BUCK_CREDIT NFT for a client, declaring
+    ///         the general scope.
     /// @dev faceValue / depreciationFloor are accepted as uint256 for ABI
     ///      ergonomics but must fit in BuckTypes.MAX_BALANCE (uint80 cap)
     ///      since they are stored alongside the BUCK supply.
@@ -221,8 +487,42 @@ contract BuckCredit is ERC721Enumerable {
         uint48 depStartAt,
         uint32 premiumRate
     ) external returns (uint256) {
+        return _createCredit(client, assetClass, faceValue, depreciationFloor, depType,
+                             depRate, depStartAt, premiumRate, GENERAL_SCOPE);
+    }
+
+    /// @notice Insurer creates a new BUCK_CREDIT NFT for a client, declaring
+    ///         `scope` -- the insurer's public claim about what the asset is,
+    ///         which its envelope must cover.  A false claim is evidence.
+    function createCredit(
+        address client,
+        uint8 assetClass,
+        uint256 faceValue,
+        uint256 depreciationFloor,
+        DepreciationType depType,
+        uint32 depRate,
+        uint48 depStartAt,
+        uint32 premiumRate,
+        bytes32 scope
+    ) external returns (uint256) {
+        return _createCredit(client, assetClass, faceValue, depreciationFloor, depType,
+                             depRate, depStartAt, premiumRate, scope);
+    }
+
+    function _createCredit(
+        address client,
+        uint8 assetClass,
+        uint256 faceValue,
+        uint256 depreciationFloor,
+        DepreciationType depType,
+        uint32 depRate,
+        uint48 depStartAt,
+        uint32 premiumRate,
+        bytes32 scope
+    ) internal returns (uint256) {
         _requireAccepted(client);
         require(depreciationFloor <= faceValue, "floor > face");
+        _requireEnvelope(true, scope, faceValue, depType, depRate, premiumRate);
 
         uint256 tokenId = _nextTokenId++;
         _mint(client, tokenId);
@@ -242,7 +542,7 @@ contract BuckCredit is ERC721Enumerable {
             lastActivatedAt: 0
         });
 
-        emit CreditCreated(tokenId, msg.sender, client, faceValue);
+        emit CreditCreated(tokenId, msg.sender, client, faceValue, scope);
         return tokenId;
     }
 
@@ -533,6 +833,9 @@ contract BuckCredit is ERC721Enumerable {
         // disqualified from ever backing BUCK again.
         require(newFaceValue >= c.activatedValue.asUint(),
                 "BuckCredit: face below activated coverage");
+        // A reappraisal stays inside the envelope too, or an insurer writes
+        // small and updates large.
+        _requireEnvelope(false, bytes32(0), newFaceValue, newDepType, newDepRate, newPremiumRate);
 
         BuckQty newFace = toBuckQty(newFaceValue);  // bound-check up front
 

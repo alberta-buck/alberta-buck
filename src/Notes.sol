@@ -94,6 +94,13 @@ contract Notes {
     /// @notice Note flavor labels, mirrored from `circuits/spend.circom` and
     ///         `alberta_buck.wallet.notes`.  Each spendCoupled* entry point
     ///         passes its constant into the spend SNARK as a public input.
+    /// @notice The accumulator consumer Notes is: each spend names the identity
+    ///         root it proved against, and the registry accepts any root it
+    ///         retains within this consumer's maximum age -- a registration
+    ///         check, not a revocation check, so a generous one (7 days).
+    bytes32 public constant NOTES_MEMBERSHIP_CONSUMER =
+        keccak256("AlbertaBuck/Accumulator/Consumer/NotesMembership/v2");
+
     uint256 public constant FLAVOR_A1 = 1;
     uint256 public constant FLAVOR_A2 = 2;
     uint256 public constant FLAVOR_B1 = 3;
@@ -130,8 +137,9 @@ contract Notes {
 
     /// @notice Identity membership verifier (Phase 9 -- identity-axis).
     ///         Verifies a Groth16 proof that the counterparty identity point
-    ///         is a member of the registry-Identity accumulator under
-    ///         identityRegistry.identityRoot().  Required for the full
+    ///         is a member of the registry-Identity accumulator under the
+    ///         identity root the spend names, which the registry must accept
+    ///         for NOTES_MEMBERSHIP_CONSUMER.  Required for the full
     ///         identity-binding spend path (A1/A2 deposit coupling + B1
     ///         depositor binding).  Optional at construction; governance
     ///         wires it via setIdentityMembershipVerifier.  Coupled spends
@@ -682,7 +690,8 @@ contract Notes {
     ///      they fold.  See doc/review/notes-receiving-key.org section 4.5.
     ///
     ///      Reverts if the verifier is unset, the proof is empty or invalid,
-    ///      or the registry's identityRoot is zero (unseeded accumulator).
+    ///      or the registry does not accept `identityRoot` for this consumer:
+    ///      a root the ring no longer retains, or older than Notes' maximum age.
     ///      Coupled spend entry points also require the verifier non-zero
     ///      (cheap, before the spend SNARK); this helper fails closed too so
     ///      a future caller cannot skip by omitting that require.  The real
@@ -690,6 +699,7 @@ contract Notes {
     ///      fails closed there.
     function _verifyIdentityMembership(
         bytes memory identityMembershipProof,
+        uint256 identityRoot,
         uint256 px,
         uint256 py
     )
@@ -703,11 +713,11 @@ contract Notes {
 
         IdentityRegistry reg = identityRegistry;
         require(address(reg) != address(0), "Notes: identity registry not set");
-        uint256 root = reg.identityRoot();
-        require(root != 0, "Notes: identity root not set");
+        require(reg.acceptsRoot(identityRoot, NOTES_MEMBERSHIP_CONSUMER),
+                "Notes: identity root not accepted");
 
         require(
-            verifier.verifyMembership(identityMembershipProof, root, px, py),
+            verifier.verifyMembership(identityMembershipProof, identityRoot, px, py),
             "Notes: bad identity membership proof"
         );
     }
@@ -752,6 +762,7 @@ contract Notes {
     function _spendCoupled(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
@@ -776,15 +787,15 @@ contract Notes {
             "Notes: bad spend proof"
         );
 
-        uint256 root_ = identityRegistry.identityRoot();
-        require(root_ != 0, "Notes: identity root not set");
+        require(identityRegistry.acceptsRoot(identityRoot, NOTES_MEMBERSHIP_CONSUMER),
+                "Notes: identity root not accepted");
         require(foldProof.length != 0, "Notes: empty fold proof");
 
         bool ok = a1Layout
             ? depositFoldVerifier.verifyFoldA1(
-                foldProof, nullifier, face, root_, eEnc, msg.sender)
+                foldProof, nullifier, face, identityRoot, eEnc, msg.sender)
             : depositFoldVerifier.verifyFoldA2(
-                foldProof, nullifier, root_, eEnc, msg.sender);
+                foldProof, nullifier, identityRoot, eEnc, msg.sender);
         require(ok, "Notes: bad folded deposit gate");
 
         nullifiers[nullifier] = true;
@@ -804,13 +815,14 @@ contract Notes {
     function spendCoupledA2(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
         IdentityRegistry.ElGamalCT calldata eIss,
         bytes   calldata foldProof
     ) external {
-        _spendCoupled(proof, root, nullifier, face, recipient, eIss,
+        _spendCoupled(proof, root, identityRoot, nullifier, face, recipient, eIss,
                       foldProof, FLAVOR_A2, false);
         emit SpentCoupledA2(nullifier, face, recipient);
     }
@@ -826,13 +838,14 @@ contract Notes {
     function spendCoupledA1(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
         IdentityRegistry.ElGamalCT calldata eRec,
         bytes   calldata foldProof
     ) external {
-        _spendCoupled(proof, root, nullifier, face, recipient, eRec,
+        _spendCoupled(proof, root, identityRoot, nullifier, face, recipient, eRec,
                       foldProof, FLAVOR_A1, true);
         emit SpentCoupledA1(nullifier, face, recipient);
     }
@@ -868,6 +881,7 @@ contract Notes {
     function spendCoupledB1(
         bytes   calldata proof,
         uint256          root,
+        uint256          identityRoot,
         uint256          nullifier,
         uint256          face,
         address          recipient,
@@ -914,7 +928,7 @@ contract Notes {
 
         // Identity-M binding, half 2: membership of P_dep's point M_dep, bound to
         // the SAME P_dep the binding just constrained.
-        _verifyIdentityMembership(membershipProof, b1Proof.P_dep.X, b1Proof.P_dep.Y);
+        _verifyIdentityMembership(membershipProof, identityRoot, b1Proof.P_dep.X, b1Proof.P_dep.Y);
 
         require(
             buck.transfer(recipient, face),

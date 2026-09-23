@@ -675,8 +675,9 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
     from alberta_buck.wallet.recvkey import wrap_mask
     from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
     from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
+    from alberta_buck.registry.merkle_service import rooted_registry
     from alberta_buck.registry.tree import (
-        AGGREGATOR_DEPTH, identity_leaf_salted, mailbox_leaf, receiving_leaf,
+        AGGREGATOR_DEPTH, KYC_SUBTREE_DEPTH, identity_leaf_salted, mailbox_leaf, receiving_leaf,
     )
 
     rows: List[Dict[str, Any]] = []
@@ -736,15 +737,18 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
          "M_I": _g1(o2.M_I), "r_prime": _hx(o2.r_prime), "salt_iss": _hx(o2.salt_iss),
          "T": _g1(o2.T), "gamma": _hx(o2.gamma)})
 
-    # One subtree holding the recipient's three associations' worth of leaves:
-    # the gate's (scalars), the payer's (points), and the A2 issuer's naming leaf.
+    # One registry subtree holding the recipient's three associations' worth of
+    # leaves -- the gate's (scalars), the payer's (points), and the A2 issuer's
+    # naming leaf -- under an aggregator, so every path runs 32 levels.
     salt_rec, salt_mbx = draw() % F_R or 1, draw() % F_R or 1
-    tree = IdentityMerkleTree(depth=AGGREGATOR_DEPTH, private=True)
+    tree = rooted_registry()
     for leaf in (receiving_leaf(alice["m"], k_a, salt_rec),
                  mailbox_leaf(alice["M"], pk_a, salt_mbx),
                  identity_leaf_salted(bob["M"], salt_iss)):
         tree.insert_leaf(leaf)
     root = tree.root()
+    aggregator = {"leaves": [_hx(x) for x in tree.service._tree.leaves], "depth": AGGREGATOR_DEPTH,
+                  "slot": tree.service.get_sub_tree(tree.sub_tree_id).aggregator_leaf_index}
 
     # the mailbox binding: a payer's check, with no secret
     b = prove_receiving_binding(alice["M"], pk_a, salt_mbx, tree)
@@ -752,7 +756,8 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
                "path": {"leaf": _hx(b.path.leaf), **path(b.path), "root": _hx(b.path.root)}}
     row("prove_receiving_binding",
         {"M_rec": _g1(alice["M"]), "pk_recv": _g1(pk_a), "salt": _hx(salt_mbx),
-         "leaves": [_hx(x) for x in tree.leaves], "depth": AGGREGATOR_DEPTH}, binding)
+         "leaves": [_hx(x) for x in tree.leaves], "depth": KYC_SUBTREE_DEPTH,
+         "aggregator": aggregator}, binding)
     row("verify_receiving_binding", {"M_rec": _g1(alice["M"]), "binding": binding, "root": _hx(root)},
         True)
 

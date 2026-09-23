@@ -40,7 +40,7 @@ from alberta_buck.wallet.transcript import keccak_raw
 
 __all__ = [
     "DepreciationType", "FACE_BAND_MAX", "BUCK_DECIMALS",
-    "band_ceiling", "band_for_face", "scope_id",
+    "band_ceiling", "band_for_face", "scope_id", "subtree_key", "GENERAL_SCOPE",
     "InsurerEnvelope", "IssuanceRefused", "check_issuance",
     "InsuranceRegulator",
 ]
@@ -105,8 +105,15 @@ def scope_id(name: str) -> int:
 
 
 #: The scope an unscoped, general insurer declares.  A regulator grants it to
-#: an insurer it does not wish to restrict and withholds it from one it does.
+#: an insurer it does not wish to restrict and withholds it from one it does,
+#: by membership in its "insurer:general" subtree.
 GENERAL_SCOPE = 0
+
+
+def subtree_key(name: str) -> int:
+    """The on-chain key of a subtree: keccak of its namespaced name, as
+    ``IdentityRegistry.enrollSubtree`` and the insurer gate compute it."""
+    return scope_id(name)
 
 
 @dataclass(frozen=True)
@@ -208,17 +215,22 @@ class InsuranceRegulator:
         return t
 
     def attest(self, M, env: InsurerEnvelope,
-               scope_names: Optional[List[str]] = None) -> InsurerEnvelope:
+               scope_names: Optional[List[str]] = None,
+               general: bool = False) -> InsurerEnvelope:
         """Attest an insurer's envelope for this review period.
 
         Inserts the insurer into the subtree for each predicate the envelope
         asserts.  Membership in a fine scope does not imply the coarse one, so
         a regulator intending an insurer to write both attests both.
+        ``general`` grants the general scope, which the eight-argument
+        ``createCredit`` declares; a scoped insurer is attested without it.
         """
         names = list(scope_names or [])
         scopes = frozenset(scope_id(self.scope_name(n)) for n in names)
+        if general:
+            scopes = scopes | {GENERAL_SCOPE}
         if env.scopes and env.scopes != scopes:
-            raise ValueError("env.scopes must match scope_names, or be empty")
+            raise ValueError("env.scopes must match scope_names and general, or be empty")
         env = InsurerEnvelope(
             standing=env.standing, face_band=env.face_band,
             dep_types=frozenset(env.dep_types), max_dep_rate=env.max_dep_rate,
@@ -280,14 +292,30 @@ class InsuranceRegulator:
         x, y = point_to_words(M)
         return (x, y)
 
+    def predicate_names(self, env: InsurerEnvelope, scope_names: List[str]) -> List[str]:
+        """The namespaced subtree names an attestation proves membership in, in
+        the order ``BuckCredit.attestInsurer`` takes their paths.  On chain a
+        subtree is keyed by ``subtree_key`` of its name."""
+        return [self.subtree_id(sfx) for sfx in self._suffixes(env, scope_names)]
+
     @staticmethod
     def _suffixes(env: InsurerEnvelope, scope_names: List[str]) -> List[str]:
+        """Each predicate the envelope asserts, as a subtree suffix, in the
+        gate's claim order: standing, face band, each depreciation type
+        (ascending), the maximum depreciation and premium rates, the general
+        scope if granted, then each named scope.  The rates are subtrees like
+        the band -- a value the chain can check only if the regulator attested
+        it by membership."""
         out: List[str] = []
         if env.standing:
             out.append("insurer")
         out.append(f"insurer:face:{env.face_band}")
         for d in sorted(env.dep_types):
             out.append(f"insurer:dep:{d}")
+        out.append(f"insurer:depRate:{env.max_dep_rate}")
+        out.append(f"insurer:premium:{env.max_premium_rate}")
+        if GENERAL_SCOPE in env.scopes:
+            out.append("insurer:general")
         for n in scope_names:
             out.append(f"scope:{n}")
         return out

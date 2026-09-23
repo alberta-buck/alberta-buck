@@ -154,4 +154,5 @@ template IdentityMembershipB1(depth) {
     identityRoot === mp.root;
 }
 
-component main { public [ identityRoot, PI_x, PI_y ] } = IdentityMembershipB1(20);
+// 32 levels, subtree then aggregator; see deposit_fold_a1's trailer.
+component main { public [ identityRoot, PI_x, PI_y ] } = IdentityMembershipB1(32);

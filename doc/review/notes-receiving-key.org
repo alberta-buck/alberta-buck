@@ -1002,9 +1002,18 @@ Done 2026-09-22.*
     fold (3,306,423) and the A2 fold.  The legacy mint and spend keys are
     untouched (=DO_LEGACY=0=); nothing in them changed.
 
-*D. Accumulator phase 4 (Solidity).*  The root authority and policy, and
-=BuckCredit='s attestation entry point with its per-credit check
-([[file:accumulator-plan.org][the plan]], phase 4).
+*D. Accumulator phase 4 (Solidity).  Done 2026-09-22.*  The root authority
+and policy, and =BuckCredit='s attestation entry point with its per-credit
+check ([[file:accumulator-plan.org][the plan]], phase 4, which records the
+decisions and the measurements).  One finding reopened step C: every gate
+proved a single 20-level path from its leaf to =identityRoot=, which only a
+leaf sitting directly in the aggregator satisfies, while the specification's
+statement (section 11.1) is a subtree path and then an aggregator path.  The
+two are one path of 32 levels (12 + 20), since every level folds with the
+same Poseidon, so the fix was the depth: both folds, B1 and the specimen at
+32, the wallet proving through =RootedSubtree= (a subtree seen from the
+posted root), and one more setup of the three gates -- the A1 fold
+3,309,327 constraints, the A2 fold 3,833,335, B1 494,701.
 
 *E. Accumulator phase 5.*  The regulator, attribute and aggregator services in
 Rust and JavaScript, with their vectors.
@@ -1066,9 +1075,10 @@ Traps worth naming, because each cost a run or an hour:
   =.so= writes the old code's receipts under the new code's hashes.  Run
   =make nix-core-build= first, then confirm =BUCK_IDENTITY_BACKEND=py= emits
   the same bytes.
-- *Some Forge vectors have no make target.*  =scripts/gen_b1_binding_vectors.py=
-  and =python -m alberta_buck.registry.vectors= write =test/vectors/b1_binding.json=
-  and =test/vectors/registry/=; a generator or leaf change needs both rerun.
+- *Some Forge vectors come from generators of their own.*  The B1 binding,
+  the registry's accumulator vectors and the insurer gate:
+  =make nix-venv-forge-identity-vectors= reruns all three, and a generator,
+  tag or leaf change needs it.
 - *One more argument to =MintVerifierA2Adapter.verifyMint= overflowed the
   stack.*  The public-signal assembly moved to a helper taking the four
   scalars as one =uint256[4]=.

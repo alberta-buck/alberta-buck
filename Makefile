@@ -324,6 +324,20 @@ golden-receipts:  # requires nix-
 	python -m alberta_buck.wallet.cli render-golden
 
 
+# ── Forge vectors from the Python identity reference ─────────────────
+#
+# Three vector sets have generators of their own and are read only by Forge:
+# the B1 depositor binding, the registry's accumulator vectors, and the insurer
+# gate.  A leaf, tag or transcript change needs all three rerun:
+#
+#   make nix-venv-forge-identity-vectors
+.PHONY: forge-identity-vectors
+forge-identity-vectors:
+	python scripts/gen_b1_binding_vectors.py
+	python -m alberta_buck.registry.vectors --output test/vectors/registry/
+	python scripts/gen_insurer_gate_vectors.py
+
+
 # ── SNARK circuits + trusted setup ───────────────────────────────────
 #
 # The BUCK Notes mint/spend circuits (circuits/*.circom) compile to per-N
