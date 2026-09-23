@@ -511,7 +511,7 @@ Table of Contents
   │     FQ12_one, # G_T identity (pairing-product checks)
   │ )
   │ 
-  │ assert backend() == "kernel", "worked example must run the production kernel"
+  │ assert backend() == "kernel", "must run the production kernel: evaluate in the repo venv"
   │ 
   │ _seed = random.Random(0xAB1DE7A1)   # ONE deterministic transcript
   │ 

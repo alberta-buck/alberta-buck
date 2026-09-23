@@ -1692,7 +1692,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
        IdentityTree, mint_unilateral_a2, make_receipt, verify_receipt,
    )
 
-   assert backend() == "kernel", "witnesses must run the production kernel"
+   assert backend() == "kernel", "must run the production kernel: evaluate in the repo venv"
    print(f"wallet crypto backend    = {backend()} (buck_core.buck_identity)")
 
    _seed = random.Random(0xACC0)                # one deterministic transcript

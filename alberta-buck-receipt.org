@@ -507,7 +507,7 @@ VERIFICATION
    from alberta_buck.wallet.verify_receipt import verify_receipt
    from alberta_buck.wallet.render import render_receipt, TextDriver
 
-   assert backend() == "kernel", "receipts must verify on the production kernel"
+   assert backend() == "kernel", "must run the production kernel: evaluate in the repo venv"
    print(f"wallet crypto backend: {backend()} (buck_core.buck_identity)")
 
    _seed = random.Random(0xAB12C97)          # ONE deterministic transcript
@@ -630,7 +630,7 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.mint  tx 0xde477941efb6bd3d19..  block 40  gas 671,997  (0.106s on anvil)
+   : Notes.mint  tx 0xde477941efb6bd3d19..  block 40  gas 671,997  (0.107s on anvil)
    :   proof was generated offline by the issuer in 0.963s (Groth16, mint_batch_a2 N=1)
    :   escrowed: pool balance = 250.000000 BUCK
 
@@ -712,7 +712,7 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.spendCoupledA2  tx 0x1d62ecb8d852019294..  block 41  gas 881,116  (0.118s on anvil)
+   : Notes.spendCoupledA2  tx 0x1d62ecb8d852019294..  block 41  gas 881,116  (0.111s on anvil)
    :   proofs offline: spend 0.759s + folded gate 15.01s
    :   nullifier burned: True
    :   paid out: depositor balance = 249.999999 BUCK
