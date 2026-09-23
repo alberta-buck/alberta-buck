@@ -230,7 +230,7 @@ test-python:
 #     must be allowed explicitly (org-safe-remote-resources).
 #   - "PDF file produced with errors" is the usual LaTeX cross-reference
 #     noise; check the page count if in doubt.
-
+.PHONY: doc-identity-example doc-flow doc-paper doc-receipt doc-proofs docs
 DOC_RENDER_EVAL	= (progn							\
 		    (require (quote ox-ascii)) (require (quote ox-latex))	\
 		    (setq org-ascii-charset (quote utf-8))			\
@@ -269,6 +269,8 @@ doc-receipt:
 
 doc-proofs:
 	emacs --batch -l scripts/render-exec-doc.el alberta-buck-proofs.org
+
+docs: doc-proofs doc-receipt doc-paper doc-flow doc-identity-example
 
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────
