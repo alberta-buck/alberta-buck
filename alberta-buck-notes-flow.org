@@ -1637,7 +1637,7 @@ Merkle membership.
    from alberta_buck.registry.tree import identity_leaf_salted, receiving_leaf
    from alberta_buck.registry.merkle_service import rooted_registry
 
-   assert backend() == "kernel", "transcript must run the production kernel"
+   assert backend() == "kernel", "must run the production kernel: evaluate in the repo venv"
    print(f"wallet crypto backend     = {backend()} (buck_core.buck_identity)")
 
    _seed = random.Random(0xA1BE27AB0CC)     # ONE deterministic transcript
@@ -2650,12 +2650,12 @@ Merkle membership.
    #+END_SRC
 
    #+RESULTS:
-   : mint b1 (issuer)                 0.96s
-   : mint a2 (issuer)                 0.96s
-   : spend (depositor, all)           0.74s
-   : b1 membership (depositor)       19.82s
-   : fold a1 (depositor)             14.98s
-   : fold a2 (depositor)             16.94s
+   : mint b1 (issuer)                 1.04s
+   : mint a2 (issuer)                 0.97s
+   : spend (depositor, all)           0.75s
+   : b1 membership (depositor)       20.80s
+   : fold a1 (depositor)             15.30s
+   : fold a2 (depositor)             17.39s
 
    #+LATEX: }
 
@@ -2695,11 +2695,11 @@ Merkle membership.
    #+RESULTS:
    : party / flavor            download+store  prove (per note)
    : ----------------------------------------------------------
-   : issuer    b1/a1 (N=1)             12.7MB             0.96s
-   : issuer    a2    (N=1)             14.8MB             0.96s
-   : depositor b1                     289.0MB            20.56s
-   : depositor a1                    1907.8MB            15.72s
-   : depositor a2                    2169.0MB            17.67s
+   : issuer    b1/a1 (N=1)             12.7MB             1.04s
+   : issuer    a2    (N=1)             14.8MB             0.97s
+   : depositor b1                     289.0MB            21.55s
+   : depositor a1                    1907.8MB            16.05s
+   : depositor a2                    2169.0MB            18.14s
 
    #+LATEX: }
 
