@@ -83,7 +83,8 @@ Table of Contents
 .. 3. mint(N) and burn(N)
 ..... 1. The Per-Credit Inversion
 ..... 2. Releasing: the Deposit Comes Back
-..... 3. Underwater Is a State, Not a Failure
+..... 3. The Funding-Factor Reserve, and Its Precedents
+..... 4. Underwater Is a State, Not a Failure
 .. 4. Identity-Bound approve()
 .. 5. transfer() and transferFrom()
 ..... 1. Reentrancy Guard
@@ -479,7 +480,7 @@ Table of Contents
 
 [Activation = Mint] See section 3.3
 
-[Underwater Is a State, Not a Failure] See section 5.3.3
+[Underwater Is a State, Not a Failure] See section 5.3.4
 
 
 4 IdentityRegistry: On-Chain Trust Anchor
@@ -1016,7 +1017,8 @@ Table of Contents
      static controller (gate disabled), ~1.0 at parity, and rises above
      1.0 when BUCK is undervalued, so it bites hardest on bootstrapping
      *insured* credit from a thin reserve while the market already
-     signals too much BUCK.
+     signals too much BUCK.  Its schedule and its precedents are in [The
+     Funding-Factor Reserve].
   6. `_accrueJubilee()', crystallise `insurancePool' and `msg.sender',
      debit `poolPrincipal' from the sender's signed raw (`_subBalance'
      is signed-aware – the raw goes negative if the sender had no
@@ -1075,7 +1077,77 @@ Table of Contents
   can size required limits and refunds before submitting.
 
 
-5.3.3 Underwater Is a State, Not a Failure
+[The Funding-Factor Reserve] See section 5.3.3
+
+
+5.3.3 The Funding-Factor Reserve, and Its Precedents
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Step 5 above asks a minter to already hold `poolPrincipal *
+  fundingFactor' before a mint succeeds, where the controller's factor
+  is counter-cyclical in BUCK's deviation from the basket:
+
+  ┌────
+  │ factor = max(0, 1 + 10 * (basket - BUCK) / basket)
+  └────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   BUCK price (basket = 1.00)  Factor  Reserve, as a share of the principal this mint pays 
+  ─────────────────────────────────────────────────────────────────────────────────────────
+                         1.10     0.0  none – BUCK is scarce, issuance is welcome          
+                         1.05     0.5  half                                                
+                         1.00     1.0  the whole principal                                 
+                         0.95     1.5  one and a half times                                
+                         0.90     2.0  twice                                               
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The reserve is a check, not a deposit.  It is measured on the
+  pre-activation `balanceOf' – held BUCK plus unused credit from earlier
+  activations – and nothing locks it afterwards.  A first-time minter
+  has no unused credit, so it must acquire BUCK first, and that purchase
+  is demand for BUCK sized to the insurance it is about to buy, largest
+  when the market already says there is too much BUCK.  A zero-premium
+  credit pays no principal and so needs no reserve, which is how the
+  supply is seeded.  Treating the reserve as permanently set aside is a
+  strategy, not a rule, and a poor one: in the equilibrium simulations,
+  borrowers that never released it starved their own later issuance
+  until supply froze, and borrowers that let it go as their positions
+  retired kept the loop closed (`alberta_buck/sim/EQUILIBRIUM.md').
+
+  The mechanism is old; only its trigger is new.
+
+  • *Initial margin.* Opening a leveraged position requires posting cash
+    as a fraction of the notional, and exchanges raise that fraction in
+    stressed markets – a counter-cyclical brake on credit expansion.
+    The factor rises the same way when BUCK trades below the basket, but
+    it moves with the market price rather than by an exchange's
+    decision.
+  • *Reserve requirements.* Central banks have required commercial banks
+    to hold a fraction of deposits in reserve, raising it to tighten
+    credit creation and lowering it to loosen.  The reserve here applies
+    the same lever to the individual minter rather than to an
+    institution.
+  • *Gesell's stamp scrip.* /Freigeld/ required monthly stamps, bought
+    in the same currency, to keep a note valid, which made the currency
+    its own continuous source of demand.  BUCK's demurrage is Gesell's
+    direct heir; the reserve is its issuance-side cousin, demand that
+    arises from the act of creating credit.
+  • *Friendly-society buy-ins.* Mutual-aid societies, and the
+    cooperative banks descended from them, required new members to pay
+    in before drawing benefits.  A minter is by construction a
+    contributor to the mutual insurance pool – the principal it pays in
+    – and the reserve is sized to that contribution.
+  • *Tax-driven demand.* The chartalist account holds that a currency is
+    valued because taxes must be paid in it.  The reserve is a
+    structural sink of the same kind: whoever wants BUCK credit must
+    first hold BUCK, in proportion to the system's monetary stress.
+  • *Token pre-sales.* Young networks gate participation on
+    pre-purchased tokens.  The reserve aligns new entrants the same way
+    without a one-shot sale, and the entry price is never paid away: it
+    stays in the holder's balance.
+
+
+5.3.4 Underwater Is a State, Not a Failure
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The burn-side solvency check: after refund and deactivation, the
@@ -1786,9 +1858,11 @@ Table of Contents
   Two canary tests in `test/BuckKController.t.sol' guard this direction
   (`test_sign_convention_inflation_contracts_credit' and
   `test_sign_convention_deflation_expands_credit'); any sign flip in the
-  controller surface fails them within one PID cycle.  See
-  `alberta-buck-ethereum-example.org' for the bootstrap, equilibrium,
-  and arbitrage examples that exercise the loop end-to-end.
+  controller surface fails them within one PID cycle.
+  `BuckEquilibriumScenarioTest' and `BuckKArbScenarioTest' exercise the
+  loop end to end on chain, and the closed-loop simulations of
+  `alberta_buck/sim/' exercise it against historical prices
+  (`alberta_buck/sim/EQUILIBRIUM.md').
 
 
 [ezpwd::pid]
@@ -2326,7 +2400,7 @@ Table of Contents
 
 [Insurer Updates] See section 3.5
 
-[underwater] See section 5.3.3
+[underwater] See section 5.3.4
 
 
 10 Gas Cost Snapshot
@@ -2520,7 +2594,7 @@ Table of Contents
 
 [Insurer Updates] See section 3.5
 
-[underwater] See section 5.3.3
+[underwater] See section 5.3.4
 
 [The Insurer Gate] See section 11.2
 

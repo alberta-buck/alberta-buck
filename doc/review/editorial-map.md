@@ -28,7 +28,7 @@ document build targets when retiring a paper.
 |---|---|---|
 | `alberta-buck-notes.org` | Main paper for architecture; Notes Flow for implementation | Extensive overlap with both, including repeated invariants and obsolete status claims. Preserve the design history in `doc/historical/`. |
 | `alberta-buck-ethereum-direct.org` | Ethereum reference and Basket introduction | Older implementation plan largely superseded by the contract reference; distinguish original redemption policy from later pro-rata variants. |
-| `alberta-buck-ethereum-example.org` | Routing/simulation guide | Unfinished opening, obsolete lifecycle and inconsistent numerical arbitrage example. Keep useful scenario commands after checking them. |
+| `alberta-buck-ethereum-example.org` | Retired 2026-09-23 | Unfinished opening, obsolete lifecycle and inconsistent numerical arbitrage example.  Its funding-factor precedents moved to `alberta-buck-ethereum.org` ("The Funding-Factor Reserve"); the scenario commands live in the Makefile's `vector-*` / `plot-*` targets. |
 | `alberta-buck-demurrage.org` | Ethereum reference | Describes old `_demurrage`/OZ state and supply treatment, inconsistent with later signed-balance/buck-seconds implementation. Preserve as an old design rather than a competing living specification. |
 | `alberta-buck-platform.org` | Concise developer architecture reference under `doc/` | Useful architecture buried in a chronological phase log; package and port status superseded by later work. Archive the log. |
 | `alberta-buck-deployment.org` | Concise development/release reference under `doc/` | A release diary, not a monetary-system paper. Preserve build lessons; treat published versions as dated records unless independently checked. Archive the diary. |

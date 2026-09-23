@@ -272,8 +272,7 @@ doc-proofs:
 
 # ── Worked-example vectors and plots ─────────────────────────────────
 #
-# `images` regenerates every artifact referenced by
-# alberta-buck-ethereum-example.org from scratch:
+# `images` regenerates the scenario vectors and their plots from scratch:
 #
 #   1. Runs the three Forge tests that emit JSON snapshot vectors under
 #      test/vectors/  (lifecycle, equilibrium, arb scenario).

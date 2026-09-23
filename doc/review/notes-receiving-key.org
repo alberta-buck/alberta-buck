@@ -1032,8 +1032,9 @@ the paper's Security section (with the key tie as a theorem and a witness),
 the identity paper (the accumulator, liveness as membership) and the Ethereum
 paper (the insurer gate, the Notes surface) describe the code.  Re-executing
 found three transcripts that had drifted from the wallet API; each runs again.
-=alberta-buck-ethereum-example= is not re-rendered here: its figures are
-another session's work in progress.
+=alberta-buck-ethereum-example= was retired rather than re-rendered: its
+concepts were covered elsewhere, and its funding-factor precedents moved into
+=alberta-buck-ethereum.org=.
 
 Then merge.  Real ceremonies precede any deployment and are not part of this
 branch.
