@@ -1022,11 +1022,18 @@ tag, so each check =BuckCredit.attestInsurer= makes now has a Rust and a
 JavaScript twin: the subtree keys, the composed path, the opening, the band
 ladder and every refusal reason.
 
-*F. Documents, last, because they describe everything above and re-execute
-once.*  Every =alberta-buck*.org= paper at v2; the accumulator sections the
-plan's phase 6 names; and =alberta-buck-proofs.org= Part IV rewritten for the
-folded gates.  The security argument can only be stated after C: until the A2
-tie lands, its naming clause is false of the code.
+*F. Documents.  Done 2026-09-23.*  Every versioned =alberta-buck*.org= title
+reads v2, and the protocol's tags are named as the code names them.
+=alberta-buck-proofs.org= Part IV states the gates as built -- mint addressing
+to a receiving key, the folded gate's six relations, B1's two openings on a
+hash-to-curve generator, and the A2 key tie as Theorem 12 -- and the paper is
+now executable (=make nix-venv-doc-proofs=).  The Notes papers, the receipt,
+the paper's Security section (with the key tie as a theorem and a witness),
+the identity paper (the accumulator, liveness as membership) and the Ethereum
+paper (the insurer gate, the Notes surface) describe the code.  Re-executing
+found three transcripts that had drifted from the wallet API; each runs again.
+=alberta-buck-ethereum-example= is not re-rendered here: its figures are
+another session's work in progress.
 
 Then merge.  Real ceremonies precede any deployment and are not part of this
 branch.

@@ -468,9 +468,13 @@ Five things the survey had left open, each of which reduces the work.
    (32) replay them, and the reference re-emits them byte for byte.  Porting
    found one defect in the reference: =attest_batch= passed each evidence hash
    where the salt goes.  Fixed.
-6. *Documents.* The epoch reinterpretation, the accumulator sections of the
-   identity and Notes papers, and the insurer path in the credit
-   documentation.
+6. *Documents.* Done 2026-09-23.  =alberta-buck-identity.org= reads =epoch=
+   as the epoch of first certification and liveness as membership, and gains
+   the accumulator: subtrees, salted and public leaves, the aggregator and its
+   posted ring, consumer ages, holder attribute proofs, and the regulator's
+   public subtrees.  The Notes papers prove along 32-level paths against a
+   posted root.  =alberta-buck-ethereum.org= documents the accumulator
+   surface and replaces its "open hole" with the insurer gate as built.
 
 Acceptance: a party holding every certified identity finds no private tree
 it can scan; a holder proves each of its own memberships and a revoked
