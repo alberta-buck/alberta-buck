@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Ethereum Implementation (DRAFT v0.94)
+#+title: The Alberta Buck - Ethereum Implementation (DRAFT v2)
 #+author: Perry Kundert
 #+date: 2026-05-24 12:00:00
 #+category: Alberta Buck
@@ -399,7 +399,7 @@ Four on-chain verifications, all reducible to BN254 precompile calls:
 2. *Schnorr-family NIZK* binding the presentation to the ElGamal ciphertext and the account
    key.  Four response scalars over one credential commitment ~C1 = m~ * A + b~ * G~ (so no
    field exposes ~m * A~ alone), Fiat-Shamir bound to the action/version domain
-   (=AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=),
+   (=AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2=),
    =((A, B), E_new, pk_new, registrant_address)=, chain ID, and registry deployment.
    Total registration 443,892 gas measured (472,630 before the presentation), paid once per
    address; =trustIssuer= additionally checks ~e(Y1, g_2) = e(G, Y)~ once per issuer.

@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Notes Flow (v1.2)
+#+TITLE: The Alberta Buck - Notes Flow (v2)
 #+SUBTITLE: How One BUCK Transfer Becomes N Unlinkable Notes
 #+author: Perry Kundert
 #+date: 2026-06-10
@@ -2371,7 +2371,7 @@ Merkle membership.
   should pin their hashes against the published release.  Verification costs
   a wallet /nothing/ to distribute: the verifiers are contracts already on
   chain.  And note the asymmetry that matters for UX: *receipts need no SNARK
-  at all* -- both parties' AB-RCPT/1 slips ([[https://perry.kundert.ca/range/finance/alberta-buck-receipt][Receipt]]) are sigma proofs and
+  at all* -- both parties' AB-RCPT/2 slips ([[https://perry.kundert.ca/range/finance/alberta-buck-receipt][Receipt]]) are sigma proofs and
   decryptions, milliseconds of wallet math -- the SNARKs are paid only at
   mint and spend, once per note.
 

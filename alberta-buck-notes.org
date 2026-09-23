@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Notes (v1.2)
+#+TITLE: The Alberta Buck - Notes (v2)
 #+SUBTITLE: Private Bearer Instruments on an Identity-Aware Demurrage Currency
 #+author: Perry Kundert
 #+date: 2026-06-04
@@ -2502,7 +2502,7 @@ than an aftermarket wrapper. ([[https://perry.kundert.ca/images/alberta-buck-not
 
 ** Components Already Present
 
-   The following are unchanged from Identity v1 and are used directly:
+   The following are unchanged from the identity layer and are used directly:
 
    1. *Pointcheval-Sanders issuer signature* \( \sigma \) on the
       Identity scalar \( m \).  Re-randomization continues to serve

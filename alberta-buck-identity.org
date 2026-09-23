@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Identity and Receipts (v1.1)
+#+title: The Alberta Buck - Identity and Receipts (v2)
 #+author: Perry Kundert
 #+date: 2026-04-08
 #+category: Alberta Buck
@@ -264,7 +264,7 @@ secret key and an archival node -- without any counterparty's cooperation.
      // Real entry point: register(issuer, pk, E, presentation, proof).  The
      // registrant is msg.sender (NOT a passed address) -- it, the chain, the
      // registry deployment, and the action/version domain
-     // (AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3) are folded into
+     // (AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2) are folded into
      // the proof's Fiat-Shamir challenge, so a proof cannot be replayed across
      // addresses, chains, registries or protocol versions.  A compatibility
      // overload accepts identityLeaf only when it is zero; callers cannot

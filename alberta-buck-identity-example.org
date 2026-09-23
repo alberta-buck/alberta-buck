@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Identity - Cryptography Example (v1.0)
+#+TITLE: The Alberta Buck - Identity - Cryptography Example (v2)
 #+author: Perry Kundert
 #+date: 2026-04-10
 #+category: Alberta Buck
@@ -1083,7 +1083,7 @@ independent review. ([[https://perry.kundert.ca/images/alberta-buck-identity-exa
    \( T_{key} = \tilde{sk}\,G \); the shared \( \tilde m \) is what joins
    the credential to the ciphertext.  The Fiat-Shamir challenge binds the
    registrant address, the chain id, the registry address and the domain
-   =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3=, so a proof
+   =AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2=, so a proof
    cannot be replayed to another account, chain, registry or protocol
    version.  The wallet's =registration_prove= is the executable
    specification -- the Solidity, Rust and JavaScript verifiers are

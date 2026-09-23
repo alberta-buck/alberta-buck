@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Formal Correctness Proofs (v1.0)
+#+TITLE: The Alberta Buck - Formal Correctness Proofs (v2)
 #+SUBTITLE: Rerandomization, Re-Encryption, and Notes Spend Predicates
 #+author: Perry Kundert
 #+date: 2026-04-22
@@ -327,7 +327,7 @@ that branch is not a production release. ([[https://perry.kundert.ca/images/albe
    *Registration proof.*  Witness \( (m, b, r, sk) \); nonces
    \( (m_t, b_t, r_t, sk_t) \) uniform in \( \mathbb{Z}_q \); context
    \( \mathrm{ctx} = (\text{registrant}, \text{chainid}, \text{registry}, \mathrm{DOMAIN}) \)
-   with \( \mathrm{DOMAIN} = \mathrm{keccak}(\texttt{AlbertaBuck/FiatShamir/IdentityRegistry/Register/v3}) \):
+   with \( \mathrm{DOMAIN} = \mathrm{keccak}(\texttt{AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2}) \):
 
    \begin{align*}
    C_1 &= m_t A + b_t G,  & T_C &= m_t G + r_t\,pk, & T_R &= r_t G, & T_{key} &= sk_t\,G, \\
@@ -2288,8 +2288,8 @@ is why this Part is worth reading before it is rewritten.
 [fn:ps] Pointcheval, D. and Sanders, O.  "Short Randomizable Signatures."
 CT-RSA 2016, LNCS 9610, pp. 111-126.  The single-message scheme is
 proved EUF-CMA under that paper's Assumption 1, an interactive
-LRSW-style assumption in type-3 bilinear groups (v1.0 of this
-document attributed it to q-SDH; that was wrong).  Section 6.1
+LRSW-style assumption in type-3 bilinear groups (an earlier edition of
+this document attributed it to q-SDH; that was wrong).  Section 6.1
 (signatures on committed messages) publishes \( y G \) in \( G_1 \)
 as the A' key does and proves security under the stronger
 Assumption 2.  Pointcheval, D. and Sanders, O.  "Reassessing Security

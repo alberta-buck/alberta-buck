@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Printable Receipt (v1.0)
+#+TITLE: The Alberta Buck - Printable Receipt (v2)
 #+SUBTITLE: A Plain-Text, Independently Re-Verifiable Record of an Identity-Bound BUCK Payment
 #+author: Perry Kundert
 #+date: 2026-05-29
@@ -17,7 +17,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: The end-user artifact of the Alberta Buck identity layer is a literal printable receipt -- shaped like a cash-register / card-machine slip -- that names the plain-text Identity of both parties to a payment, states the transaction details, and carries everything required to independently re-verify its integrity by re-scanning its own text payload.  This document specifies that artifact: the point->human bridge (the canonical_identity_data preimage of each party's identity point), the two-tier verification model (offline proof-algebra + chain-anchored), the AB-RCPT/1 envelope serialization, the per-scenario payloads for the five receipt kinds (EOA from a public or private counterparty; B1, A1, A2 Notes) -- the Note kinds producible by EITHER party, issuer or depositor, from the Identity-M note payload both hold -- the 80mm/203dpi/576px ESC/POS plain-text layout, the verification procedure, and the wallet UX and storage required to gather the data and format/print the slip.
+#+description: The end-user artifact of the Alberta Buck identity layer is a literal printable receipt -- shaped like a cash-register / card-machine slip -- that names the plain-text Identity of both parties to a payment, states the transaction details, and carries everything required to independently re-verify its integrity by re-scanning its own text payload.  This document specifies that artifact: the point->human bridge (the canonical_identity_data preimage of each party's identity point), the two-tier verification model (offline proof-algebra + chain-anchored), the AB-RCPT/2 envelope serialization, the per-scenario payloads for the five receipt kinds (EOA from a public or private counterparty; B1, A1, A2 Notes) -- the Note kinds producible by EITHER party, issuer or depositor, from the Identity-M note payload both hold -- the 80mm/203dpi/576px ESC/POS plain-text layout, the verification procedure, and the wallet UX and storage required to gather the data and format/print the slip.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-receipt
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -148,10 +148,10 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   print a /false/ one.
   #+end_property
 
-* The AB-RCPT/1 Envelope
+* The AB-RCPT/2 Envelope
 
   The verified *core* is a deterministic map, serialized canonically (CBOR), and
-  printed as =AB-RCPT/1.= followed by base64url of the bytes, wrapped to the
+  printed as =AB-RCPT/2.= followed by base64url of the bytes, wrapped to the
   print width.  (Text-only by decision -- no QR; the payload is literally
   plain-text, re-typable and OCR-able, and survives a scanner-less verifier.)
   The receipt id is =base32(sha256(core))= truncated to a short handle.  The
@@ -398,7 +398,7 @@ VERIFICATION
 
   =albertabuck verify [-|FILE] [--rpc URL]=:
 
-  1. *Parse.*  Strip to =AB-RCPT/1.= ... =.END=, base64url-decode, decode the
+  1. *Parse.*  Strip to =AB-RCPT/2.= ... =.END=, base64url-decode, decode the
      canonical bytes to the core map; reject unknown =v= / =type= / =role=.
   2. *Tier 1 (always).*  For =payer= and =payee=: recompute \( M' =
      \mathrm{keccak}(\texttt{identity}) \cdot G \) and require \( M' = M \).

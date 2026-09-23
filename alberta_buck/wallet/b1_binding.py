@@ -10,8 +10,9 @@ issuer -- who is public -- without revealing it to Mallory.
 The construction is the mirror image of :mod:`alberta_buck.wallet.unilateral_a2`,
 with the roles swapped:
 
-  A2 (recipient names issuer):  issuer encrypts M_I under the recipient identity
-                                point M_rec; the *recipient* decrypts with m_rec.
+  A2 (recipient names issuer):  issuer encrypts M_I under the recipient's
+                                receiving key pk_recv; the *recipient* decrypts
+                                with its receiving secret k.
   B1 (issuer names depositor):  depositor encrypts M_dep under the issuer's public
                                 key pk_iss; the *issuer* decrypts with sk_iss.
 
@@ -45,8 +46,9 @@ With a known one, a depositor holding any registered identity scalar ``m'``
 makes the membership half speak about ``m'`` while this sigma speaks about its
 own ``m_dep`` -- and an unregistered depositor spends.  So ``P_dep`` is built on
 :data:`alberta_buck.wallet.nums.H_PEDERSEN`, hashed to the curve rather than
-multiplied out of ``G``.  The masking generator in :mod:`issuer_reenc` is a
-different object with a weaker requirement, and keeps its known log.
+multiplied out of ``G``.  :mod:`issuer_reenc` blinds on the same generator,
+because the A2 fold opens its ``T`` again at spend and a known log would let a
+minter pay any difference of Identities in the blind.
 """
 
 from __future__ import annotations

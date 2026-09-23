@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Platform Architecture (DRAFT v0.1)
+#+title: The Alberta Buck - Platform Architecture (DRAFT v2)
 #+author: Perry Kundert
 #+date: 2026-07-03 12:00:00
 #+category: Alberta Buck
@@ -339,7 +339,7 @@ Chaum-Pedersen approve, issuer Schnorr batch binding, verifiable
 decryption, A2 issuer re-encryption binding, deposit coupling,
 B1 depositor binding, note commitments / nullifiers / id-hashes /
 =identity_leaf=.  NOT kernel: canonical-JSON identity serialization, the
-AB-RCPT/1 envelope, receipt build/verify orchestration, rendering, the
+AB-RCPT/2 envelope, receipt build/verify orchestration, rendering, the
 Merkle tree container (Python/JS keep those; the tree's Poseidon calls
 hit the kernel), and Groth16 SNARK proving (stays snarkjs/rapidsnark).
 
@@ -633,7 +633,7 @@ over arbitrary 32-byte messages, ElGamal seal/unseal), the central
 aggregator (enroll/update, full + AND-composed membership proofs), the
 feature authority.  =buck-wallet= -- THE canonical JSON dialect (an
 explicit dialect-enforcing writer: ints of any size pass through as
-their exact tokens, floats rejected), the AB-RCPT/1 envelope, tier-1
+their exact tokens, floats rejected), the AB-RCPT/2 envelope, tier-1
 receipt verification (reason-for-reason with =verify_receipt.py=), all
 five receipt-core builders from both generating sides, the
 public-issuer/approve verifiers, the unilateral A1/A2 flows, the

@@ -413,8 +413,8 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_b1_common)
 
     # -- note-a1: identity-targeted (unilateral A1).  Bob, the public issuer,
-    # addresses the note to Alice's identity POINT M_rec: eNote encrypts the
-    # face under M_rec, eRec the recipient identity under itself, and
+    # addresses the note to Alice's receiving key pk_recv: eNote encrypts the
+    # face under it, eRec encrypts her identity point M_rec under it, and
     # idHash = id_hash_a1(eNote, m_iss, sigma) binds both parties into the leaf.
     a1m_r_note  = rand_scalar(rng)
     a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a1m_r_note)

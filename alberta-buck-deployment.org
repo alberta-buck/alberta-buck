@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Publication and Deployment (v0.2)
+#+title: The Alberta Buck - Publication and Deployment (v2)
 #+SUBTITLE: What is published, why it is built the way it is, and what remains
 #+author: Perry Kundert
 #+date: 2026-07-26 12:00:00
