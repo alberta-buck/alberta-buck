@@ -942,7 +942,7 @@ contract MintVerifierTest is Test {
     // burn a leaf seat without backing it with a real note.  Whether to
     // permit that is a policy decision; the present circuit + contract
     // permit it because the SNARK still proves the leaves are well-formed
-    // commitments (Poseidon-5 openings) and the totalFace == sum(v_i)
+    // commitments (Poseidon-6 openings) and the totalFace == sum(v_i)
     // binding still holds when sum(v_i) == 0.
     function test_mint_zeroFace_acceptedAndAdvancesTree() public {
         Fx memory fx = _loadFx("build/snark/mint_batch_n1/fixtures/zero_face.json");

@@ -76,6 +76,7 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 include "./ec/bn254_g_scalarmul.circom";
 include "./ec/get_bn254.circom";
 include "./leaf_tags.circom";
+include "./note_tags.circom";
 
 template MerkleProofFold(depth) {
     signal input  leaf;
@@ -125,11 +126,9 @@ template DepositFoldA1(depth) {
 
     // ===== PRIVATE ===========================================================
     signal input rho;                       // note randomness
-    signal input idHash;                    // Poseidon8(eNote, mIss, sigR, sigS)
+    signal input idHash;                    // Poseidon6(T_ID, eNote, mIss)
     signal input eNote[4];                  // eNote coords (mod F_R)
     signal input mIss;                      // public issuer identity word
-    signal input sigR[2];                   // issuer Schnorr nonce coords
-    signal input sigS;                      // issuer Schnorr response word
     signal input rn[4];                     // eNote randomness
     signal input m_rec[4];                  // the Identity scalar
     signal input k_recv[4];                 // the RECEIVING secret
@@ -145,17 +144,16 @@ template DepositFoldA1(depth) {
 
     // ===== (0) the nullifier and the note's idHash ============================
     component nf = Poseidon(3);
-    nf.inputs[0] <== rho;
-    nf.inputs[1] <== idHash;
-    nf.inputs[2] <== 4242;
+    nf.inputs[0] <== NOTE_TAG_NULLIFIER();
+    nf.inputs[1] <== rho;
+    nf.inputs[2] <== idHash;
     nullifier === nf.out;
 
-    component idH = Poseidon(8);
-    idH.inputs[0] <== eNote[0];  idH.inputs[1] <== eNote[1];
-    idH.inputs[2] <== eNote[2];  idH.inputs[3] <== eNote[3];
-    idH.inputs[4] <== mIss;
-    idH.inputs[5] <== sigR[0];   idH.inputs[6] <== sigR[1];
-    idH.inputs[7] <== sigS;
+    component idH = Poseidon(6);
+    idH.inputs[0] <== NOTE_TAG_ID_HASH();
+    idH.inputs[1] <== eNote[0];  idH.inputs[2] <== eNote[1];
+    idH.inputs[3] <== eNote[2];  idH.inputs[4] <== eNote[3];
+    idH.inputs[5] <== mIss;
     idHash === idH.out;
 
     // ===== native-field scalar arithmetic ====================================

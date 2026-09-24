@@ -10,6 +10,8 @@
                                2026-09-24
 
 
+<https://perry.kundert.ca/images/dominion-logo.png>
+
 Buy a coffee with a card and at least four businesses learn about it:
 the coffee shop, its payment processor, the card network and your
 bank. Each keeps the record, and several build products to sell from
@@ -35,7 +37,12 @@ We follow one payment. Bob owes Carol 100 BUCK. Mallory, who has no
 special access, watches everything public. We will build the payment one
 layer at a time, and every step below is running code: each fragment
 executes against a live local Ethereum chain, and its output is printed
-beneath it.[2]
+beneath it.[2] ([PDF], [Text])
+
+
+[PDF] <https://perry.kundert.ca/images/alberta-buck-privacy.pdf>
+
+[Text] <https://perry.kundert.ca/images/alberta-buck-privacy.txt>
 
 
 The cast, and how to read this
@@ -642,10 +649,10 @@ B1.1. Bob buys a note
   │     toCipherHash     0x4bdd..672e
   │ 
   │ Aspen Mutual's batch; only Aspen Mutual and each holder know the values:
-  │   note 0    20.00 BUCK  commitment 0xd32f2b1bcdb7..
-  │   note 1   250.00 BUCK  commitment 0xb2c38935d8db..
-  │   note 2   100.00 BUCK  commitment 0x17bd0e4c3281..  <- Bob's
-  │   note 3    60.00 BUCK  commitment 0x217f5188acf4..
+  │   note 0    20.00 BUCK  commitment 0x2f490a892e5a..
+  │   note 1   250.00 BUCK  commitment 0x18d95ff603b5..
+  │   note 2   100.00 BUCK  commitment 0x12f17f131e50..  <- Bob's
+  │   note 3    60.00 BUCK  commitment 0x1d362b2fc8b4..
   └────
 
   <file:images/privacy/cards/bearer-note.png>
@@ -675,13 +682,13 @@ B1.2. The credit union mints the batch
 
   ┌────
   │ Notes.mint  from 0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │   tx 0x9dd8..14bb  block 57  gas 645,995
+  │   tx 0x07d0..11f1  block 57  gas 645,959
   │   proof              256 bytes (Groth16 proof)
   │   oldRoot            0xe0d753..b6cd7f
-  │   newRoot            0x1f7b88..e2097b
+  │   newRoot            0x1c024f..66f7bb
   │   nextLeafIndex_     0
   │   totalFace          430.000000 BUCK
-  │   cms                [0xd32f2b..10fd5c, 0xb2c389..5ad52b, 0x17bd0e..f91a0d, 0x217f51..6045e6]
+  │   cms                [0x2f490a..5d4330, 0x18d95f..2013f1, 0x12f17f..330ef7, 0x1d362b..f90710]
   │   issuerMode         [1, 1, 1, 1]
   │   issuerSig          issuer signature
   │   emits Transfer
@@ -696,15 +703,15 @@ B1.2. The credit union mints the batch
   │     toCipherHash     0x9de4..f456
   │   emits Minted
   │     issuer           0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │     newRoot          0x1f7b88..e2097b
+  │     newRoot          0x1c024f..66f7bb
   │     totalFace        430.000000 BUCK
   │     startIndex       0
   │     count            4
   │   emits IssuerBound
   │     issuer           0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │     newRoot          0x1f7b88..e2097b
+  │     newRoot          0x1c024f..66f7bb
   │ 
-  │ the batch proof was made in advance in 2.2s
+  │ the batch proof was made in advance in 2.0s
   └────
 
   <file:images/privacy/b2.png>
@@ -723,7 +730,7 @@ B1.3. Bob hands Carol the note
   promptly. The addressed notes below close that gap.
 
   ┌────
-  │ from alberta_buck.wallet.notes import note_commitment, nullifier_b
+  │ from alberta_buck.wallet.notes import note_commitment, nullifier
   │ note = b1.opening                               # what Bob handed over
   │ cm = note_commitment(note)
   │ print(f"bearer code  {cards.bearer_code(note.rho)}")
@@ -731,11 +738,11 @@ B1.3. Bob hands Carol the note
   │ print(f"the chain names its issuer as Aspen Mutual: "
   │       f"{chain.notes.functions.publicIssuerOfCommitment(cm).call() == A['aspen'].address}")
   │ print(f"not yet cashed:                             "
-  │       f"{not chain.notes.functions.nullifiers(nullifier_b(note.rho, note.id_hash)).call()}")
+  │       f"{not chain.notes.functions.nullifiers(nullifier(note.rho, note.id_hash)).call()}")
   └────
 
   ┌────
-  │ bearer code  C6CI-XBNU-63FR-2DIP-YHRM-6XZ4-TXJK-UJIP-E6NI-U3MU-N7ZP-GWYZ-7BAA
+  │ bearer code  ESGA-NODE-2YUM-IEOE-Q3P5-JBSZ-KQ6V-JUBX-P2FA-YL4X-TYU7-TZX6-QWQQ
   │ rebuilds a commitment Aspen Mutual minted:  True
   │ the chain names its issuer as Aspen Mutual: True
   │ not yet cashed:                             True
@@ -808,14 +815,14 @@ B1.5. The pool checks everything and pays
 
   ┌────
   │ Notes.spendCoupledB1  from 0xf269..4F43   [reader: Carol's everyday account]
-  │   tx 0x009b..c177  block 58  gas 763,115
+  │   tx 0x21d4..a17d  block 58  gas 763,103
   │   proof              256 bytes (Groth16 proof)
-  │   root               0x1f7b88..e2097b
+  │   root               0x1c024f..66f7bb
   │   identityRoot       0x2243cb..b184cb
-  │   nullifier          0x11b361..ad6724
+  │   nullifier          0x288b62..956480
   │   face               100.000000 BUCK
   │   recipient          0xf269..4F43   [reader: Carol's everyday account]
-  │   issuanceCommitment 0x17bd0e..f91a0d
+  │   issuanceCommitment 0x12f17f..330ef7
   │   issuer             0x74c4..CBD7 Aspen Mutual Credit Union (public)
   │   eDepForIss         ciphertext
   │   b1Proof            depositor binding proof
@@ -831,7 +838,7 @@ B1.5. The pool checks everything and pays
   │     fromCipherHash   0xef94..ed27
   │     toCipherHash     0xc1ab..7dec
   │   emits SpentCoupledB1
-  │     nullifier        0x11b361..ad6724
+  │     nullifier        0x288b62..956480
   │     recipient        0xf269..4F43   [reader: Carol's everyday account]
   │     issuer           0x74c4..CBD7 Aspen Mutual Credit Union (public)
   │     face             100.000000 BUCK
@@ -864,7 +871,7 @@ B1.6. The credit union knows who cashed its note
   │                  ALBERTA  BUCK                  
   │          P A Y M E N T   R E C E I P T          
   │ ------------------------------------------------
-  │   Receipt  qaojill5yavg
+  │   Receipt  qtwexs6zf2rn
   │ ------------------------------------------------
   │ FROM (payer - you) (PUBLIC IDENTITY)
   │  Aspen Mutual Credit Union
@@ -885,12 +892,12 @@ B1.6. The credit union knows who cashed its note
   │  Chain                      1
   │  Block                     58
   │  Log                        2
-  │  Tx      0x009b182a4ad0..e843da2cc177
-  │  Mint    0x9dd877dff05e..b69abd9a14bb
+  │  Tx      0x21d4f0d10cab..2620f911a17d
+  │  Mint    0x07d028b289a1..34b593f611f1
   │ ------------------------------------------------
   │ VERIFICATION
   │  status @ issue: VALID
-  │  receipt  qaojill5yavg
+  │  receipt  qtwexs6zf2rn
   │ ------------------------------------------------
   │         a record, not a bearer instrument       
   │         github.com/pjkundert/alberta-buck
@@ -945,14 +952,10 @@ A1.2. The credit union seals the draft
   ┌────
   │ from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
   │ from alberta_buck.wallet.delivery import deliver_a1, open_a1
-  │ from alberta_buck.wallet.bn254 import words_to_point
   │ a1 = world.notes["a1"]
-  │ s = a1.raw["sigma"]                             # the issuer material the note carries
-  │ sig_R = words_to_point(int(s["sigma_R"]["x"]), int(s["sigma_R"]["y"]))
   │ draft = mint_unilateral_a1(carol.M, carol.pk_recv, v=100 * U, rho=a1.opening.rho,
-  │                            m_issuer=P["aspen"].m, sigma_R=sig_R, sigma_s=int(s["sigma_s"]),
-  │                            rng=world.replay("a1", "mint"))
-  │ package = deliver_a1(draft, carol.pk_recv, sig_R, int(s["sigma_s"]))
+  │                            m_issuer=P["aspen"].m, rng=world.replay("a1", "mint"))
+  │ package = deliver_a1(draft, carol.pk_recv)
   │ print(f"the draft the proofs were made over: {draft.cm == a1.cm}")
   │ card(cards.delivery(package, "a1", "Carol", "Aspen Mutual"), "a1-delivery")
   └────
@@ -983,13 +986,13 @@ A1.3. Bob pays; the credit union mints
 
   ┌────
   │ Notes.mint  from 0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │   tx 0x6316..5051  block 60  gas 593,727
+  │   tx 0x13bc..b516  block 60  gas 593,703
   │   proof              256 bytes (Groth16 proof)
-  │   oldRoot            0x1f7b88..e2097b
-  │   newRoot            0x2d1166..0348ec
+  │   oldRoot            0x1c024f..66f7bb
+  │   newRoot            0x38972d..6a0653
   │   nextLeafIndex_     4
   │   totalFace          335.000000 BUCK
-  │   cms                [0x84f4f5..bbb2d2, 0x1058c1..1521ee, 0x1515a3..7bd44f, 0x2a43f5..a3dc90]
+  │   cms                [0x1390ff..71ab25, 0x291607..cd7717, 0x258535..cf2bc2, 0x1662cc..d128fe]
   │   issuerMode         [1, 1, 1, 1]
   │   issuerSig          issuer signature
   │   emits Transfer
@@ -1004,13 +1007,13 @@ A1.3. Bob pays; the credit union mints
   │     toCipherHash     0x9de4..f456
   │   emits Minted
   │     issuer           0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │     newRoot          0x2d1166..0348ec
+  │     newRoot          0x38972d..6a0653
   │     totalFace        335.000000 BUCK
   │     startIndex       4
   │     count            4
   │   emits IssuerBound
   │     issuer           0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │     newRoot          0x2d1166..0348ec
+  │     newRoot          0x38972d..6a0653
   └────
 
   <file:images/privacy/a3.png>
@@ -1094,11 +1097,11 @@ A1.6. Cashed, with no handle on the note
 
   ┌────
   │ Notes.spendCoupledA1  from 0xf269..4F43   [reader: Carol's everyday account]
-  │   tx 0xdafc..67fd  block 61  gas 874,865
+  │   tx 0x86d7..8321  block 61  gas 874,877
   │   proof              256 bytes (Groth16 proof)
-  │   root               0x2d1166..0348ec
+  │   root               0x38972d..6a0653
   │   identityRoot       0x2243cb..b184cb
-  │   nullifier          0x2700d4..c35317
+  │   nullifier          0xb96a4f..c9cd6c
   │   face               100.000000 BUCK
   │   recipient          0xf269..4F43   [reader: Carol's everyday account]
   │   eRec               ciphertext
@@ -1114,7 +1117,7 @@ A1.6. Cashed, with no handle on the note
   │     fromCipherHash   0xef94..ed27
   │     toCipherHash     0xc1ab..7dec
   │   emits SpentCoupledA1
-  │     nullifier        0x2700d4..c35317
+  │     nullifier        0xb96a4f..c9cd6c
   │     recipient        0xf269..4F43   [reader: Carol's everyday account]
   │     face             100.000000 BUCK
   └────
@@ -1154,8 +1157,8 @@ A2.1. Bob seals his identity inside the note
 
   ┌────
   │ the cheque the proofs were made over: True
-  │ Bob's identity, sealed for Carol:     R 0x226..3cf  C 0x181..cab
-  │ key tie T:                            (0x2db..9c8, 0x1a4..3f3)
+  │ Bob's identity, sealed for Carol:     R 0x661..bd2  C 0x137..ace
+  │ key tie T:                            (0x289..871, 0xc69..3db)
   └────
 
 
@@ -1198,13 +1201,13 @@ A2.3. Bob mints
 
   ┌────
   │ Notes.mint  from 0x01f9..564d   [reader: Bob's everyday account]
-  │   tx 0x38c9..5505  block 63  gas 567,437
+  │   tx 0x8836..6955  block 63  gas 567,449
   │   proof              256 bytes (Groth16 proof)
-  │   oldRoot            0x2d1166..0348ec
-  │   newRoot            0x2ed813..19216c
+  │   oldRoot            0x38972d..6a0653
+  │   newRoot            0x26db54..8e68b0
   │   nextLeafIndex_     8
   │   totalFace          100.000000 BUCK
-  │   cms                [0x227357..13f372]
+  │   cms                [0x1e9640..c0241c]
   │   issuerMode         [2]
   │   a2Bindings         1 x issuer binding
   │   emits Transfer
@@ -1219,13 +1222,13 @@ A2.3. Bob mints
   │     toCipherHash     0xf47c..115d
   │   emits Minted
   │     issuer           0x01f9..564d   [reader: Bob's everyday account]
-  │     newRoot          0x2ed813..19216c
+  │     newRoot          0x26db54..8e68b0
   │     totalFace        100.000000 BUCK
   │     startIndex       8
   │     count            1
   │   emits IssuerReencBound
   │     issuer           0x01f9..564d   [reader: Bob's everyday account]
-  │     newRoot          0x2ed813..19216c
+  │     newRoot          0x26db54..8e68b0
   │     count            1
   └────
 
@@ -1307,11 +1310,11 @@ A2.6. Cashed into her savings
 
   ┌────
   │ Notes.spendCoupledA2  from 0x11c3..947F   [reader: Carol's savings account]
-  │   tx 0x6679..184d  block 64  gas 886,048
+  │   tx 0xba82..fda4  block 64  gas 886,060
   │   proof              256 bytes (Groth16 proof)
-  │   root               0x2ed813..19216c
+  │   root               0x26db54..8e68b0
   │   identityRoot       0x2243cb..b184cb
-  │   nullifier          0x1e1647..dfbd66
+  │   nullifier          0x2debcd..9984b0
   │   face               100.000000 BUCK
   │   recipient          0x11c3..947F   [reader: Carol's savings account]
   │   eIss               ciphertext
@@ -1327,7 +1330,7 @@ A2.6. Cashed into her savings
   │     fromCipherHash   0xa914..a7af
   │     toCipherHash     0x9b1e..6a82
   │   emits SpentCoupledA2
-  │     nullifier        0x1e1647..dfbd66
+  │     nullifier        0x2debcd..9984b0
   │     recipient        0x11c3..947F   [reader: Carol's savings account]
   │     face             100.000000 BUCK
   │ 
@@ -1362,7 +1365,7 @@ A2.7. Two receipts, one payment
   │                  ALBERTA  BUCK                                         ALBERTA  BUCK
   │          P A Y M E N T   R E C E I P T                         P A Y M E N T   R E C E I P T
   │ ------------------------------------------------      ------------------------------------------------
-  │   Receipt  w2cjknq4gvrh                                 Receipt  4t6oq656meeo
+  │   Receipt  okrxtssonrka                                 Receipt  i6nr27ezzu7v
   │ ------------------------------------------------      ------------------------------------------------
   │ FROM (payer) (PRIVATE IDENTITY)                       FROM (payer - you) (PRIVATE IDENTITY)
   │  Bob Tremblay                                          Bob Tremblay
@@ -1383,12 +1386,12 @@ A2.7. Two receipts, one payment
   │  Chain                      1                          Chain                      1
   │  Block                     64                          Block                     64
   │  Log                        2                          Log                        2
-  │  Tx      0x6679c10c8690..f6a4bf2e184d                  Tx      0x6679c10c8690..f6a4bf2e184d
-  │  Mint    0x38c93258befe..ac9d0b1f5505                  Mint    0x38c93258befe..ac9d0b1f5505
+  │  Tx      0xba82b328f4bc..40aba205fda4                  Tx      0xba82b328f4bc..40aba205fda4
+  │  Mint    0x8836c2c14b87..a1e2ff976955                  Mint    0x8836c2c14b87..a1e2ff976955
   │ ------------------------------------------------      ------------------------------------------------
   │ VERIFICATION                                          VERIFICATION
   │  status @ issue: VALID                                 status @ issue: VALID
-  │  receipt  w2cjknq4gvrh                                 receipt  4t6oq656meeo
+  │  receipt  okrxtssonrka                                 receipt  i6nr27ezzu7v
   │ ------------------------------------------------      ------------------------------------------------
   │         a record, not a bearer instrument                     a record, not a bearer instrument
   │         github.com/pjkundert/alberta-buck                     github.com/pjkundert/alberta-buck
@@ -1419,7 +1422,7 @@ R1. Carol discloses one receipt
   └────
 
   ┌────
-  │ receipt w2cjknq4gvrh: VALID, 100.00 BUCK, 11,587 bytes
+  │ receipt okrxtssonrka: VALID, 100.00 BUCK, 11,587 bytes
   └────
 
 

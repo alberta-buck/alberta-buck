@@ -491,7 +491,6 @@ def issuer_reenc_record(proof) -> Dict[str, Any]:
 def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
                         eRec:  Optional[ElGamalCiphertext] = None,
                         eIss:  Optional[ElGamalCiphertext] = None,
-                        sigma_R=None, sigma_s: Optional[int] = None,
                         eDepForIss: Optional[ElGamalCiphertext] = None,
                         pk_recv=None,
                         r_note: Optional[int] = None,
@@ -502,12 +501,12 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
     """The Identity-M-bound note payload — the idHash preimage material both
     Note parties hold, per flavor:
 
-    * B1:  ``sigma_R``/``sigma_s`` (the issuer-signature words of
-      ``id_hash_b1(m_iss, sigma_R, sigma_s)``) plus, once spent, the
-      ``SpentCoupledB1`` event's ``eDepForIss`` (the depositor's Identity
-      encrypted under the public issuer's registered key).
-    * A1:  ``eNote`` (the value), ``eRec`` (the recipient's own Identity),
-      ``sigma_R``/``sigma_s`` — ``id_hash_a1(eNote, m_iss, sigma)``.
+    * B1:  nothing beyond the issuer's scalar, which ``id_hash_b1(m_iss)`` takes
+      from the disclosed issuer record; once spent, the ``SpentCoupledB1``
+      event's ``eDepForIss`` (the depositor's Identity encrypted under the
+      public issuer's registered key).
+    * A1:  ``eNote`` (the value) and ``eRec`` (the recipient's own Identity) --
+      ``id_hash_a1(eNote, m_iss)``.
     * A2:  ``eNote``, ``eIss`` (the issuer's Identity) and the mint binding's
       ``T`` -- ``id_hash_a2(eNote, eIss, T)`` -- with ``gamma``, the blind
       that opens ``T``, so a verifier can check that the Identity the binding
@@ -544,10 +543,6 @@ def note_payload_record(eNote: Optional[ElGamalCiphertext] = None,
         d["eRec"] = _ct_hex(eRec)
     if eIss is not None:
         d["eIss"] = _ct_hex(eIss)
-    if sigma_R is not None:
-        d["sigma_R"] = _g1_hex(sigma_R)
-    if sigma_s is not None:
-        d["sigma_s"] = scalar_to_hex(sigma_s)
     if eDepForIss is not None:
         d["eDepForIss"] = _ct_hex(eDepForIss)
     if pk_recv is not None:

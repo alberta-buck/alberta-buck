@@ -181,8 +181,8 @@ Table of Contents
   5. *Adversarial-prover soundness* – even if Alice runs a maliciously
      patched EVM and an arbitrarily hostile witness generator, the
      honest validators executing the deployed `Notes.sol' and
-     `MintGroth16Verifier.sol' reject every batch that does not satisfy
-     the mint relation.  The on-chain truth is what governs.
+     `MintBatchN*Groth16Verifier.sol' reject every batch that does not
+     satisfy the mint relation.  The on-chain truth is what governs.
 
   The one structural caveat (the pinned-N dispatch set under
   `mint_batch.circom') is addressed at the end and cross-referenced into
@@ -213,7 +213,7 @@ Table of Contents
     at mint.
   • *The honest EVM* – every Ethereum validator running stock client
     software.  This is the only EVM whose verdict matters.  It executes
-    the deployed `Notes.sol', `MintGroth16Verifier.sol',
+    the deployed `Notes.sol', `MintBatchN*Groth16Verifier.sol',
     `MintVerifierAdapter.sol', and `Buck.sol' bytecode.
   • *Alice's hostile EVM (Eve-EVM)* – a fictional entity Alice can run
     locally.  She may patch any contract logic she wants, run any
@@ -274,8 +274,13 @@ Table of Contents
 
   ┌────
   │ opening_i = ( flavor_i, v_i, rho_i, idHash_i, predicate_i )
-  │ cm_i      = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
+  │ cm_i      = Poseidon6( T_CM, flavor_i, v_i, rho_i, idHash_i, predicate_i )
   └────
+  `T_CM' is a fixed domain tag,
+  `keccak("AlbertaBuck/Notes/Commitment/v2") mod r', not part of the
+  opening: it makes the commitment its own function, disjoint from every
+  other Poseidon hash in the protocol.
+
   • `flavor_i' – which note variant (A1 identified cheque, A2 private
     cheque, B1 bearer cheque); see [Notes] for the menu.
   • `v_i' – the face value in BUCK base units (18-decimal scaled
@@ -289,7 +294,7 @@ Table of Contents
   • `predicate_i' – a domain-separating tag for any optional spending
     condition (escrow, time-lock, etc.).  Zero in the simplest case.
 
-  The Poseidon-5 hash gives the commitment two cryptographic properties
+  The Poseidon hash gives the commitment two cryptographic properties
   that make the whole flow work:
 
   • *Hiding*.  Without `rho_i', the commitment leaks no information
@@ -346,7 +351,7 @@ Table of Contents
   For `i = 0..15' (six live, ten dummies) her wallet computes
 
   ┌────
-  │ cm_i = Poseidon5( flavor_i, v_i, rho_i, idHash_i, predicate_i )
+  │ cm_i = Poseidon6( T_CM, flavor_i, v_i, rho_i, idHash_i, predicate_i )
   └────
   This is pure off-chain Poseidon arithmetic in
   `alberta_buck.wallet.notes'.  Sixteen `uint256' field elements drop
@@ -411,9 +416,9 @@ Table of Contents
 
   *In-circuit constraints*:
 
-  1. *Per-leaf opening.* For each `i', `cm[i] === Poseidon5(flavor[i],
-     v[i], rho[i], idHash[i], predicate[i])'.  N Poseidon-5 evaluations,
-     N equality constraints.
+  1. *Per-leaf opening.* For each `i', `cm[i] === Poseidon6(T_CM,
+     flavor[i], v[i], rho[i], idHash[i], predicate[i])'.  N Poseidon-6
+     evaluations, N equality constraints.
   2. *Range bounds.* Each `v[i]' and `totalFace' passes through
       `Num2Bits(128)'.
   3. *Sum conservation.* `sum(v[0..N-1]) === totalFace'.
@@ -432,10 +437,10 @@ Table of Contents
      bearer note unmintable – see the Decryptability companion, /Why B2
      is impossible/).
 
-  Constraint counts work out to roughly *21,800 R1CS per leaf* (opening
+  Constraint counts work out to roughly *21,900 R1CS per leaf* (opening
   + range-bound + dual Merkle walk: one path consumed to attest
   `oldRoot', one to advance `newRoot'); the shipped pinned-N set
-  measures 21,914 R1CS at N=1, 348,705 at N=16, and 697,281 at N=32.
+  measures 22,052 R1CS at N=1, 350,913 at N=16, and 701,697 at N=32.
   The doubling per pin holds linearly through the projected sizes (N=128
   ~2.8M R1CS, N=1024 ~22M).  At N=16 the 2^19 PTAU and ~6 s prover wall
   on a dev laptop are comfortable; at N=128 it is
@@ -568,8 +573,8 @@ Table of Contents
   harmless, but because they are /economically self-punishing/: if Alice
   submits the same opening twice (whether across two batches or twice in
   one), she pays `totalFace' on each occurrence, the leaves land at
-  distinct tree indices, but the spend nullifier `Poseidon3(rho, idHash,
-  4242)' is /deterministic in the opening/.  After the first spend
+  distinct tree indices, but the spend nullifier `Poseidon3(T_NF, rho,
+  idHash)' is /deterministic in the opening/.  After the first spend
   nullifies `cm', the second copy is unspendable forever.  Net result:
   Alice burns BUCK she could have kept.  The chain's job is value
   conservation, not saving Alice from a buggy `rho' RNG.
@@ -610,11 +615,11 @@ Table of Contents
   Bob receives his artifact for the 1,000-BUCK note.  Without trusting
   Alice and without any help from an indexer, he runs:
 
-  1. *Recompute and check.* Bob computes `cm_check = Poseidon5(flavor,
-     1000e18, rho, idHash, predicate)' and asserts `cm_check == cm'.  If
-     this fails, Alice lied about the opening; Bob discards the artifact
-     and demands a real one.  (Binding of Poseidon makes substitution
-     impossible.)
+  1. *Recompute and check.* Bob computes `cm_check = Poseidon6(T_CM,
+     flavor, 1000e18, rho, idHash, predicate)' and asserts `cm_check ==
+     cm'.  If this fails, Alice lied about the opening; Bob discards the
+     artifact and demands a real one.  (Binding of Poseidon makes
+     substitution impossible.)
   2. *Look up the mint transaction.* Bob reads `T_mint' on-chain, parses
      the call data into `(proofBytes, oldRoot, newRoot, nextLeafIndex,
      totalFace, cms[])' and reads `msg.sender' from the transaction
@@ -635,10 +640,11 @@ Table of Contents
      verifier accepted – which means `sum(v[0..N-1]) === totalFace'
      holds in the witness.  Bob does not need to re-verify the proof;
      the EVM already did.  But if he wants belt-and-suspenders, he can
-     re-run `MintGroth16Verifier.verify(proofBytes, [issuerMode[0..N),
-     oldRoot, newRoot, nextLeafIndex, totalFace, cm[0..N)])' locally
-     against the same on-chain bytecode, assembling the public-signal
-     vector from the calldata exactly as the contract does.
+     re-run `MintVerifierAdapter.verifyMint(proofBytes,
+     issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace,
+     cm[0..N))' locally against the same on-chain bytecode, assembling
+     the public-signal vector from the calldata exactly as the contract
+     does.
 
   After (1)-(5) Bob knows:
 
@@ -666,17 +672,17 @@ Table of Contents
 
   Alice runs whatever software she wants on her laptop.  She can fork
   the snarkjs witness generator, patch the circom compiler, run Anvil
-  with a malicious `MintGroth16Verifier' that always accepts.  None of
-  it matters, because the truth on the public chain is determined by
-  what /the honest validators/ run.  Three pillars prop up the soundness
+  with a malicious mint verifier that always accepts.  None of it
+  matters, because the truth on the public chain is determined by what
+  /the honest validators/ run.  Three pillars prop up the soundness
   story:
 
 
 6.1 Pillar 1: The On-Chain Verifier Is Fixed Code
 ─────────────────────────────────────────────────
 
-  `MintGroth16Verifier.sol' (one per pinned N) was emitted from the
-  Groth16 verification key produced by the trusted setup (production
+  `MintBatchN*Groth16Verifier.sol' (one per pinned N) was emitted from
+  the Groth16 verification key produced by the trusted setup (production
   ceremony pending; dev-only entropy in `scripts/snark/setup.sh' today).
   Its bytecode is deployed once and immutable.  Validators run whatever
   bytecode sits at that address; Alice cannot tamper with it without
@@ -688,7 +694,7 @@ Table of Contents
   `(flavor[i], v[i], rho[i], idHash[i], predicate[i],
   pathSiblings[i][*])_i' such that:
 
-  • `cm[i] = Poseidon5(flavor[i], v[i], rho[i], idHash[i],
+  • `cm[i] = Poseidon6(T_CM, flavor[i], v[i], rho[i], idHash[i],
     predicate[i])' for all `i'
   • each `v[i]' and `totalFace' fit in 128 bits and `sum(v[i]) =
     totalFace'
@@ -848,13 +854,13 @@ Table of Contents
     `[K..K+15]'.  *Yes* – `Minted' announces `startIndex' and `count',
     and `cms[]' is in calldata.
   • /Which/ commitment is worth /how much/.  *No* – each is a fresh
-    `Poseidon5' output hidden by an independent `rho_i'.  Without a
+    `Poseidon6' output hidden by an independent `rho_i'.  Without a
     `rho_i', distinguishing the 1,000-BUCK hash from the 25-BUCK hash
     (or from a 0-BUCK dummy) is computationally equivalent to inverting
     Poseidon on a uniform field element, modelled here as a random
     oracle.
   • /Which entries are live notes and which are dummies.* *No* – the
-    padding leaves are constructed with the same Poseidon-5 shape and a
+    padding leaves are constructed with the same Poseidon-6 shape and a
     fresh `rho'; nothing about them is chain-distinguishable from a live
     `cm' with a small `v'.
   • /Who/ holds each live note.  *No* – `idHash_i' is also inside the
@@ -949,7 +955,7 @@ Table of Contents
   /Replay of the same opening across batches/ is structurally allowed
   but economically self-punishing: Alice escrows `totalFace' again, the
   duplicate commitment lands at a fresh leaf index, and the
-  deterministic nullifier `Poseidon3(rho, idHash, 4242)' means the first
+  deterministic nullifier `Poseidon3(T_NF, rho, idHash)' means the first
   spend nullifies every copy.  Alice pays twice for a spend-once
   outcome.
 
@@ -957,13 +963,13 @@ Table of Contents
 8.4 Cross-Chain or Cross-Deployment Replay
 ──────────────────────────────────────────
 
-  The `MintGroth16Verifier' verification key is fixed by the
-  trusted-setup ceremony for that deployment.  A proof generated against
-  the dev-key in `scripts/snark/setup.sh' will not verify against a
-  production-key contract on mainnet, and vice versa.  Public inputs are
-  also sealed into the proof: a proof valid on Sepolia for
-  `totalFace=1200' cannot be reused on mainnet because the on-chain
-  verifier address (and key) differ.
+  The mint verifiers' verification keys are fixed by the trusted-setup
+  ceremony for that deployment.  A proof generated against the dev-key
+  in `scripts/snark/setup.sh' will not verify against a production-key
+  contract on mainnet, and vice versa.  Public inputs are also sealed
+  into the proof: a proof valid on Sepolia for `totalFace=1200' cannot
+  be reused on mainnet because the on-chain verifier address (and key)
+  differ.
 
   The only cross-context vulnerability would be a /chain-id collision/
   on identical verification keys, which the production setup ceremony
@@ -1063,11 +1069,11 @@ Table of Contents
      IdentityRegistry on the same chain (a single `eth_call').
   4. He locates his `cm' in `cms[]' at `leafIndex - nextLeafIndex' and
      asserts equality.
-  5. He recomputes `Poseidon5(flavor, v, rho, idHash, predicate) == cm'
-     from the opening.
-  6. (Optional.)  He re-runs `MintGroth16Verifier.verify(proofBytes,
-        [issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace,
-        cm[0..N)])' against the per-N verifier keyed by `cms.length',
+  5. He recomputes `Poseidon6(T_CM, flavor, v, rho, idHash, predicate)
+     == cm' from the opening.
+  6. (Optional.)  He re-runs `MintVerifierAdapter.verifyMint(proofBytes,
+        issuerMode[0..N), oldRoot, newRoot, nextLeafIndex, totalFace,
+        cm[0..N))' against the per-N verifier keyed by `cms.length',
         assembling the public-signal vector from the calldata exactly as
         the contract does, convincing himself the EVM did its job.
 
@@ -1157,9 +1163,10 @@ Table of Contents
   │ }
   └────
   He has independently confirmed that `cm_0' is in `Notes.commitments[]'
-  at index `K' and that `Poseidon5(opening)' reproduces it.  The opening
-  has been sitting in his wallet for weeks, months, or years – addressed
-  A-notes are cryptographically safe for indefinite holding ([Notes]).
+  at index `K' and that `Poseidon6(T_CM, opening)' reproduces it.  The
+  opening has been sitting in his wallet for weeks, months, or years –
+  addressed A-notes are cryptographically safe for indefinite holding
+  ([Notes]).
 
 
 [Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
@@ -1201,16 +1208,17 @@ Table of Contents
 ──────────────────────────────────
 
   The shipped `spend.circom' derives the nullifier as a Poseidon-3 hash
-  of the witness `rho', the witness `idHash' bound at mint, and a
-  constant tag:
+  of a fixed tag, the witness `rho', and the witness `idHash' bound at
+  mint:
 
-  \[ nf \;=\; \mathrm{Poseidon}_3\!\bigl(\rho_0,\; \mathrm{idHash}_0,\;
-    4242\bigr).  \]
+  \[ nf \;=\; \mathrm{Poseidon}_3\!\bigl(T_{NF},\; \rho_0,\;
+    \mathrm{idHash}_0\bigr).  \]
 
-  The tag (4242) is a fixed nonzero field constant that domain-separates
-  nullifier preimages from the Poseidon-5 commitment preimages, so a
-  structural collision between a nullifier and a commitment is
-  impossible.  Three properties follow:
+  The tag \( T_{NF} \) is `keccak("AlbertaBuck/Notes/Nullifier/v2") mod
+  r'.  It domain-separates nullifier preimages from every other Poseidon
+  hash in the protocol, the commitment included, so a structural
+  collision between a nullifier and a commitment is impossible.  Three
+  properties follow:
 
   • *Deterministic.* The same `(rho, idHash)' always yields the same
     `nf'.  So Bob can only spend `cm_0' once; a second attempt
@@ -1255,7 +1263,7 @@ Table of Contents
   │ public  chainId;          # replay-domain separation
   │ 
   │ private flavor, v, rho,
-  │         idHash, predicate;        # the Poseidon-5 opening
+  │         idHash, predicate;        # the note opening
   │ private pathElements[depth];      # depth-20 sibling hashes
   │ private pathIndices[depth];       # left/right bit per level
   └────
@@ -1265,13 +1273,13 @@ Table of Contents
      witness `v' pass through `Num2Bits(128)', then `face === v'.  This
      closes the field-overflow gap: `v' cannot wrap around `r' to claim
      more than its in-range share.
-  2. *Opening binds.* `cm = Poseidon5(flavor, v, rho, idHash,
+  2. *Opening binds.* `cm = Poseidon6(T_CM, flavor, v, rho, idHash,
       predicate)'.
   3. *Merkle membership.* `MerkleProof(20)' walks (`cm', `pathElements',
      `pathIndices') up the tree using `Switcher' + `Poseidon(2)' per
      level and asserts the climb reaches `noteRoot'.
-  4. *Nullifier derivation.* `nullifier === Poseidon3(rho, idHash,
-      4242)'.
+  4. *Nullifier derivation.* `nullifier === Poseidon3(T_NF, rho,
+      idHash)'.
   5. *Public-input ghost binding.* `recipient' and `chainId' each appear
      in a trivial `x*x' row.  This is the minimal anchor needed for
      circom not to optimise out unreferenced public signals; once
@@ -1285,12 +1293,13 @@ Table of Contents
   This `spend.circom' note proof is /flavor-agnostic/: A1, A2, and B1
   all use the same circuit and the same on-chain
   `spendVerifier.verifySpend' check for the cm-membership + nullifier
-  discharge (nullifier tag 4242).  Bob's wallet serializes the Groth16
-  proof into the standard `(uint256[2], uint256[2][2], uint256[2])' ABI
-  tuple (256 bytes).  The flavor-specific /identity/ material – the
-  re-encryption `eEnc' and the fold proof (A1/A2), or `eDepForIss', the
-  depositor-binding proof and its membership proof (B1) – is assembled
-  separately and submitted alongside the note proof in Step 4.
+  discharge (one nullifier derivation).  Bob's wallet serializes the
+  Groth16 proof into the standard `(uint256[2], uint256[2][2],
+  uint256[2])' ABI tuple (256 bytes).  The flavor-specific /identity/
+  material – the re-encryption `eEnc' and the fold proof (A1/A2), or
+  `eDepForIss', the depositor-binding proof and its membership proof
+  (B1) – is assembled separately and submitted alongside the note proof
+  in Step 4.
 
 
 11.5 Step 4: Submit `Notes.spendCoupledA2' On Chain
@@ -1355,20 +1364,20 @@ Table of Contents
      prevention).  c. The note proof is valid against
      `SpendGroth16Verifier' via the `SpendVerifierAdapter', which packs
      `[root, nullifier, face, recipient, chainid]' into the
-     public-signal vector.  By soundness Bob holds a Poseidon-5 opening
-     of a `cm' under `root', with `nullifier = Poseidon3(rho, idHash,
-     4242)'.  d. `identityRoot' is accepted: the registry still holds it
-     in its ring of 256 postings, and it was posted within the seven
-     days Notes declares.  That age is how long a holder cleared from
-     its registry can still spend.  e. `verifyFoldA2' succeeds.  One
-     proof shows that \( k \) opens `eEnc', that `msg.sender''s
-     registered credential opens to the same \( m_{\text{rec}} \) the
-     receiving leaf commits beside \( k \), that the decrypted issuer
-     Identity is registered under the shipped salt, that the note's
-     committed \( T \) opens against \( k \), and that the nullifier is
-     the one this note's \( idHash \) produces.  The adapter derives the
-     public inputs, including the account read from the registry.  There
-     is no committed point in the statement, and the event logs none.
+     public-signal vector.  By soundness Bob holds an opening of a `cm'
+     under `root', with `nullifier = Poseidon3(T_NF, rho, idHash)'.
+     d. `identityRoot' is accepted: the registry still holds it in its
+     ring of 256 postings, and it was posted within the seven days Notes
+     declares.  That age is how long a holder cleared from its registry
+     can still spend.  e. `verifyFoldA2' succeeds.  One proof shows that
+     \( k \) opens `eEnc', that `msg.sender''s registered credential
+     opens to the same \( m_{\text{rec}} \) the receiving leaf commits
+     beside \( k \), that the decrypted issuer Identity is registered
+     under the shipped salt, that the note's committed \( T \) opens
+     against \( k \), and that the nullifier is the one this note's \(
+     idHash \) produces.  The adapter derives the public inputs,
+     including the account read from the registry.  There is no
+     committed point in the statement, and the event logs none.
 
   If any of (a)-(e) reverts, the whole transaction reverts: no BUCK
   moves, the nullifier bit is never set, `noteFaceSum' is unchanged.
@@ -1511,8 +1520,8 @@ Table of Contents
   a random Mallory – redeem `cm_0'?  Three protections apply, the third
   being the folded deposit gate:
 
-  1. *Opening secrecy.* `spend.circom' requires the full Poseidon-5
-     opening `(flavor, v, rho, idHash, predicate)' as a private witness.
+  1. *Opening secrecy.* `spend.circom' requires the full note opening
+     `(flavor, v, rho, idHash, predicate)' as a private witness.
      Without `rho_0' and `idHash_0' the circuit is unsatisfiable, so no
      one without the opening can produce a valid nullifier or proof.
      For Alice's secrets, this is the load- bearing protection on
@@ -1554,7 +1563,7 @@ Table of Contents
   `spendCoupledB1' calls `verifyDepositorBinding' (the depositor
   re-encrypts its own \( M_{\text{dep}} \) under the public issuer's
   key, coupled to its payout account) plus a membership proof of \(
-  M_{\text{dep}} \).  Knowledge of the Poseidon-5 opening is still the
+  M_{\text{dep}} \).  Knowledge of the note opening is still the
   /bearer/ authorisation – if two parties hold copies of the same B1
   opening (a paper note photographed and forwarded), whichever submits
   first wins, the intended civil-trust semantics of bearer cash – but
@@ -1771,7 +1780,7 @@ Table of Contents
   │     proof,                            // Groth16: note opening + noteRoot membership
   │     noteRoot,
   │     identityRoot,                     // the posted root the fold proves against
-  │     nullifier,                        // Poseidon(rho, idHash, 4242)
+  │     nullifier,                        // Poseidon(T_NF, rho, idHash)
   │     face,                             // 1000e18
   │     recipient,                        // Bob's payout address
   │     eIss,                             // eEnc: the fresh re-encryption under pk_recv
@@ -1786,7 +1795,7 @@ Table of Contents
      deployment invariant rather than a configuration; an addressed
      spend without it reverts here, before anything else is checked.
   2. Standard note spend: `noteRoot' accepted, `nullifier' fresh, the
-     Poseidon-5 opening proof verifies (`spendVerifier.verifySpend').
+     note opening proof verifies (`spendVerifier.verifySpend').
   3. `identityRoot' is accepted for the Notes consumer: retained in the
      registry's ring and posted within seven days.
   4. The folded gate: `verifyFoldA2(foldProof, nullifier, identityRoot,
@@ -1985,14 +1994,14 @@ Table of Contents
   │ assert note.salt_iss == salt_iss
   │ print(f"minted A2 note: v = {note.opening.v}")
   │ print(f"  cm     = {hex(note.cm)[:20]}...       (the only on-chain artifact)")
-  │ print(f"  idHash = {hex(note.idHash)[:20]}...   (Poseidon10(eNote, eIss, T))")
+  │ print(f"  idHash = {hex(note.idHash)[:20]}...   (Poseidon11(T_ID, eNote, eIss, T))")
   │ print(f"  eIss   = ElGamal(M_I under pk_recv)  R = {pt(note.eIss.R)}")
   └────
 
   ┌────
   │ minted A2 note: v = 1000
-  │   cm     = 0xe61242769fe57dca10...       (the only on-chain artifact)
-  │   idHash = 0xf22f5585ad9a988d15...   (Poseidon10(eNote, eIss, T))
+  │   cm     = 0xdfb168e9bc18175305...       (the only on-chain artifact)
+  │   idHash = 0x1d41ad0b39ccfc02fa...   (Poseidon11(T_ID, eNote, eIss, T))
   │   eIss   = ElGamal(M_I under pk_recv)  R = (49017840..., 29504036...)
   └────
 
@@ -2101,12 +2110,12 @@ Table of Contents
 
   ┌────
   │ A2 fold witness built: 34 signals, relations asserted
-  │   public nullifier = 0x15373dec2a263756e1...
+  │   public nullifier = 0x13bfa2e1a4b72873ff...
   │   eEnc.R limb0     = 5454261353227722156  (fresh re-encryption)
   │ wrong issuer salt: REFUSED (the shipped issuer salt does not open the issuer's leaf)
   └────
 
-  Proving this witness is the heavyweight step – 3,833,335 constraints
+  Proving this witness is the heavyweight step – 3,833,338 constraints
   along 32-level paths – and it runs in the build pipeline
   (`scripts/snark/setup_deposit_fold_a2.sh') rather than in this
   session.  The setups are dev entropy.
@@ -2468,11 +2477,11 @@ Table of Contents
 ──────────────────────────────────────────────────
 
   A1 is A2 with the issuer in the clear.  \( idHash \) commits \(
-  (eNote, m_{\text{issuer}}, \sigma) \) instead of a second ciphertext.
-  `eRec' encrypts the plaintext \( M_{\text{rec}} \) under \(
-  pk_{\text{recv}} \), not under \( M_{\text{rec}} \): the Identity is
-  what the note names, and the mailbox key is what opens it.  The spend
-  gate is `deposit_fold_a1', the same four relations as A2 without the
+  (eNote, m_{\text{issuer}}) \) instead of a second ciphertext.  `eRec'
+  encrypts the plaintext \( M_{\text{rec}} \) under \( pk_{\text{recv}}
+  \), not under \( M_{\text{rec}} \): the Identity is what the note
+  names, and the mailbox key is what opens it.  The spend gate is
+  `deposit_fold_a1', the same four relations as A2 without the
   issuer-membership relation, because the plaintext of `eRec' is the
   recipient's own Identity, which the receiving leaf already commits.
   The face \( v \) is a public input of that proof.  (The batch Schnorr
@@ -2485,14 +2494,10 @@ Table of Contents
   │ )
   │ from alberta_buck.wallet.deposit_fold import deposit_fold_a1_witness
   │ 
-  │ k_sig = rand_scalar(rng)
-  │ sigma_R, sigma_s = mul(G1, k_sig), (k_sig + rand_scalar(rng) * rand_scalar(rng)) % ORDER
-  │ 
   │ note_a1 = mint_unilateral_a1(M_rec, pk_recv, v=100, rho=rand_scalar(rng),
-  │                              m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
-  │                              rng=rng)
+  │                              m_issuer=m_iss, rng=rng)
   │ print(f"minted A1 note: v = {note_a1.opening.v}")
-  │ print(f"  idHash = Poseidon8(eNote, m_issuer, sigma)  = {hex(note_a1.idHash)[:20]}...")
+  │ print(f"  idHash = Poseidon6(T_ID, eNote, m_issuer)   = {hex(note_a1.idHash)[:20]}...")
   │ print(f"  eRec   = ElGamal(M_rec under pk_recv)       R = {pt(note_a1.eRec.R)}")
   │ print(f"  identity scalar opens eRec: "
   │       f"{eq(elgamal_decrypt(note_a1.eRec, m_rec), M_rec)}")
@@ -2509,8 +2514,8 @@ Table of Contents
 
   ┌────
   │ minted A1 note: v = 100
-  │   idHash = Poseidon8(eNote, m_issuer, sigma)  = 0x15db44b7e86fcdef0c...
-  │   eRec   = ElGamal(M_rec under pk_recv)       R = (92561594..., 14543584...)
+  │   idHash = Poseidon6(T_ID, eNote, m_issuer)   = 0x911c1e6a2194d467e9...
+  │   eRec   = ElGamal(M_rec under pk_recv)       R = (21561397..., 33803650...)
   │   identity scalar opens eRec: False
   │   receiving secret opens eRec: True
   │ A1 receipt: VALID -- issuer public, decryption under pk_recv
@@ -2534,7 +2539,7 @@ Table of Contents
   │ fold_a1 = deposit_fold_a1_witness(
   │     witness=w_a1, rho=note_a1.opening.rho, id_hash=note_a1.idHash,
   │     e_note=note_a1.eNote, v=note_a1.opening.v, m_issuer=m_iss,
-  │     sigma_R=sigma_R, sigma_s=sigma_s, r_note=note_a1.r_note,
+  │     r_note=note_a1.r_note,
   │     t=t_a1, r_E=rec0["r"], e_dep=rec0["E"], pk_dep=rec0["pk"],
   │     e_enc=eEnc_a1, identity_root=priv.root())
   │ print(f"A1 fold witness built: {len(fold_a1)} signals, relations asserted")
@@ -2552,13 +2557,13 @@ Table of Contents
   └────
 
   ┌────
-  │ A1 fold witness built: 31 signals, relations asserted
+  │ A1 fold witness built: 29 signals, relations asserted
   │   public face v    = 100
-  │   public nullifier = 0x1c454e5d6eec110e7c...
+  │   public nullifier = 0x2803ab97dcb757fc45...
   │ wrong mailbox key: REFUSED on relation 3
   └────
 
-  The circuit is 3,309,327 constraints on a 32-level path.
+  The circuit is 3,309,276 constraints on a 32-level path.
   `DepositFoldA1Verifier' verifies a real proof on chain
   (`test/DepositFoldA1Verifier.t.sol'), and `test/NotesE2E.t.sol' spends
   an A1 note through the fold inside the full lifecycle.  The dev setup
@@ -2677,8 +2682,8 @@ Table of Contents
 
   ┌────
   │ B1 depositor binding from Carol: verifies = True
-  │   eDepForIss = ElGamal(M_carol under pk_iss)  R = (62881448..., 51371453...)
-  │   P_dep      = (87656785..., 92071539...)  (blinded; membership binds it)
+  │   eDepForIss = ElGamal(M_carol under pk_iss)  R = (87291686...,  3992517...)
+  │   P_dep      = (81747299..., 99754363...)  (blinded; membership binds it)
   └────
 
   The issuer alone – reading `eDepForIss' from the `SpentCoupledB1'
@@ -2705,7 +2710,7 @@ Table of Contents
 
   ┌────
   │ issuer-unilateral receipt: VALID
-  │   names depositor (87291686...,  3992517...) == M_carol
+  │   names depositor (53868701..., 76614019...) == M_carol
   │ substituted eDepForIss verifies = False  (collusion-substitution rejected)
   └────
 
@@ -2833,18 +2838,18 @@ Table of Contents
   ┌────
   │ circuit                            consumer         zkey  witness gen
   │ ----------------------------------------------------------------------
-  │ mint_batch N=1   (B1/A1 mint)      issuer         10.0MB        2.6MB
-  │ mint_batch N=32  (B1/A1 mint)      issuer        319.6MB        5.3MB
-  │ mint_batch_a2 N=1  (A2 mint)       issuer         10.5MB        4.2MB
-  │ mint_batch_a2 N=32 (A2 mint)       issuer        335.5MB        7.1MB
-  │ spend            (all spends)      depositor       5.5MB        2.9MB
+  │ mint_batch N=1   (B1/A1 mint)      issuer         10.1MB        2.8MB
+  │ mint_batch N=32  (B1/A1 mint)      issuer        321.1MB        5.5MB
+  │ mint_batch_a2 N=1  (A2 mint)       issuer         10.6MB        4.3MB
+  │ mint_batch_a2 N=32 (A2 mint)       issuer        337.0MB        7.2MB
+  │ spend            (all spends)      depositor       5.5MB        3.1MB
   │ b1 membership    (B1 spend)        depositor     272.1MB        8.5MB
-  │ deposit_fold_a1  (A1 spend)        depositor    1863.4MB       36.0MB
-  │ deposit_fold_a2  (A2 spend)        depositor    2116.0MB       44.6MB
+  │ deposit_fold_a1  (A1 spend)        depositor    1863.3MB       35.6MB
+  │ deposit_fold_a2  (A2 spend)        depositor    2116.0MB       44.4MB
   └────
 
   The two fold zkeys dominate.  They are the proving keys for the
-  3,309,327-constraint A1 gate and the 3,833,335-constraint A2 gate, and
+  3,309,276-constraint A1 gate and the 3,833,338-constraint A2 gate, and
   Groth16 proving keys scale with constraint count.  B1's membership key
   is the 494,701-constraint circuit.  Everything else a wallet fetches
   for a mint or a note opening is a few megabytes to a few hundred.
@@ -2917,12 +2922,12 @@ Table of Contents
   └────
 
   ┌────
-  │ mint b1 (issuer)                 1.10s
-  │ mint a2 (issuer)                 1.00s
-  │ spend (depositor, all)           0.96s
-  │ b1 membership (depositor)       19.98s
-  │ fold a1 (depositor)             15.34s
-  │ fold a2 (depositor)             17.13s
+  │ mint b1 (issuer)                 0.95s
+  │ mint a2 (issuer)                 0.97s
+  │ spend (depositor, all)           0.75s
+  │ b1 membership (depositor)       19.75s
+  │ fold a1 (depositor)             12.99s
+  │ fold a2 (depositor)             14.70s
   └────
 
 
@@ -2965,11 +2970,11 @@ Table of Contents
   ┌────
   │ party / flavor            download+store  prove (per note)
   │ ----------------------------------------------------------
-  │ issuer    b1/a1 (N=1)             12.7MB             1.10s
-  │ issuer    a2    (N=1)             14.8MB             1.00s
-  │ depositor b1                     289.0MB            20.94s
-  │ depositor a1                    1907.8MB            16.30s
-  │ depositor a2                    2169.0MB            18.09s
+  │ issuer    b1/a1 (N=1)             12.9MB             0.95s
+  │ issuer    a2    (N=1)             14.9MB             0.97s
+  │ depositor b1                     289.2MB            20.50s
+  │ depositor a1                    1907.6MB            13.74s
+  │ depositor a2                    2169.0MB            15.45s
   └────
 
 
@@ -3344,9 +3349,9 @@ Table of Contents
   Two facts do the heavy lifting throughout.  First, `cms[]' are
   Poseidon commitments: a leaf reveals /nothing/ about \( (flavor, v,
   \rho, idHash, predicate) \) without \( \rho \).  Second, the spend
-  nullifier \( nf = \mathrm{Poseidon}_3(\rho, idHash, 4242) \) is a PRF
-  output over secret material, so it is unlinkable to any `cm' without
-  the opening (/Proofs/, Theorem 10).
+  nullifier \( nf = \mathrm{Poseidon}_3(T_{NF}, \rho, idHash) \) is a
+  PRF output over secret material, so it is unlinkable to any `cm'
+  without the opening (/Proofs/, Theorem 10).
 
 
 17.3 Why bulk-tracing and third-party privacy hold
@@ -3571,7 +3576,7 @@ Table of Contents
   • `circuits/identity_membership_b1.circom' – B1's membership, with its
     blind proven rather than witnessed on a generator of unknown
     logarithm.
-  • `src/Notes.sol', `src/MintGroth16Verifier*.sol',
+  • `src/Notes.sol', `src/MintBatchN*Groth16Verifier.sol',
     `src/MintVerifierAdapter.sol', `src/SpendGroth16Verifier.sol',
     `src/SpendVerifierAdapter.sol', `src/DepositFoldA1Verifier.sol',
     `src/DepositFoldA2Verifier.sol',

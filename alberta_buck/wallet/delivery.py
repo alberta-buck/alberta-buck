@@ -93,8 +93,6 @@ class OpenedA1:
     cm:                         int
     eNote:                      ElGamalCiphertext
     eRec:                       ElGamalCiphertext
-    sigma_R:                    Tuple
-    sigma_s:                    int
     r_note:                     int
 
 
@@ -121,14 +119,12 @@ def _wrapped(S, **fields: int) -> Dict[str, str]:
     return {f"{name}Wrapped": str(wrap_scalar(val, S, name.encode())) for name, val in fields.items()}
 
 
-def deliver_a1(minted, pk_recv, sigma_R, sigma_s: int) -> Dict[str, Any]:
+def deliver_a1(minted, pk_recv) -> Dict[str, Any]:
     """The delivery for an A1 note, from what the minter holds.
 
     Args:
         minted: The :class:`alberta_buck.wallet.unilateral_a1.MintedA1`.
         pk_recv: The recipient's mailbox key the note was minted to.
-        sigma_R, sigma_s: The issuer's signature ``idHash`` commits, in the clear: it is a
-            signature by a PUBLIC issuer, and verifying it needs nothing secret.
 
     ``eRec``'s randomness does not travel: the recipient opens ``eRec`` with ``k``, and only an
     issuer-side receipt needs ``r'``, which the issuer keeps.
@@ -140,8 +136,6 @@ def deliver_a1(minted, pk_recv, sigma_R, sigma_s: int) -> Dict[str, Any]:
         "predicate":            str(o.predicate),
         "eNote":                _ct(minted.eNote),
         "eRec":                 _ct(minted.eRec),
-        "sigma_R":              _pt(sigma_R),
-        "sigma_s":              str(sigma_s),
         **_wrapped(S, rho=o.rho, v=o.v, rNote=minted.r_note),
     }
 
@@ -203,15 +197,13 @@ def open_a1(delivery: Dict[str, Any], k: int, m_issuer: int) -> OpenedA1:
         raise DeliveryRefused("not an A1 delivery")
     eNote                       = _ct_of(delivery["eNote"])
     eRec                        = _ct_of(delivery["eRec"])
-    sigma_R                     = _pt_of(delivery["sigma_R"])
-    sigma_s                     = int(delivery["sigma_s"])
     S                           = mailbox_shared_recipient(k, eNote.R)
     u                           = _unwrap(delivery, S, "rho", "v", "rNote")
     _check_value(eNote, k, u["v"], u["rNote"])
-    idh                         = id_hash_a1(eNote, m_issuer, sigma_R, sigma_s)
+    idh                         = id_hash_a1(eNote, m_issuer)
     opening                     = NoteOpening(FLAVOR_A1, u["v"], u["rho"], idh, int(delivery["predicate"]))
     return OpenedA1(opening=opening, cm=note_commitment(opening), eNote=eNote, eRec=eRec,
-                    sigma_R=sigma_R, sigma_s=sigma_s, r_note=u["rNote"])
+                    r_note=u["rNote"])
 
 
 def open_a2(delivery: Dict[str, Any], k: int) -> OpenedA2:

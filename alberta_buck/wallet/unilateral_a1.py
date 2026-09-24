@@ -60,10 +60,8 @@ class MintedA1:
 
     ``eNote`` encrypts the note value ``v`` and ``eRec`` the recipient Identity,
     both to the recipient's receiving key ``pk_recv``.  ``idHash`` commits to
-    ``(eNote, m_issuer, sigma_R, sigma_s)`` via Poseidon8 (matching
-    ``id_hash_a1``), binding the note to the issuer identity it names.  The pair
-    ``(sigma_R, sigma_s)`` is opaque issuer material: no circuit, contract or verifier
-    checks it.  What authenticates a public issuer is the batch Schnorr its account
+    ``(eNote, m_issuer)`` (``id_hash_a1``), binding the note to the issuer identity
+    it names; what authenticates the public issuer is the batch Schnorr its account
     signs at mint, which covers this note's commitment.  ``eRec`` goes on chain
     (as the leaf-tie public output); the full ``opening`` + ``eNote`` + ``eRec``
     travel to the recipient off chain.
@@ -83,8 +81,6 @@ def mint_unilateral_a1(
     v:       int,
     rho:     int,
     m_issuer: int,                # issuer's registered identity scalar
-    sigma_R,                      # opaque issuer material (unchecked; see MintedA1)
-    sigma_s: int,                 # opaque issuer material (unchecked; see MintedA1)
     r_prime: Optional[int] = None,
     predicate: int = 0,
     rng=None,
@@ -106,8 +102,7 @@ def mint_unilateral_a1(
     minting: that is what assures it the mailbox belongs to the Identity it
     means to pay.  Nothing is needed from the recipient at payment time.
 
-    ``idHash`` commits to ``(eNote, m_issuer, sigma_R, sigma_s)`` via Poseidon8,
-    binding the note to the public issuer.
+    ``idHash`` commits to ``(eNote, m_issuer)``, binding the note to the public issuer.
     """
     from alberta_buck.wallet.notes import id_hash_a1
 
@@ -122,7 +117,7 @@ def mint_unilateral_a1(
     # m_rec -- which every counterparty does -- reads nothing.
     eRec = elgamal_encrypt(M_rec, pk_recv, r_prime)
 
-    idHash = id_hash_a1(eNote, m_issuer, sigma_R, sigma_s)
+    idHash = id_hash_a1(eNote, m_issuer)
     opening = NoteOpening(FLAVOR_A1, v, rho, idHash, predicate)
     cm = note_commitment(opening)
     return MintedA1(eNote=eNote, eRec=eRec, idHash=idHash, cm=cm,

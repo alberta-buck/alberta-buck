@@ -59,14 +59,6 @@ class Account:
         self.E = elgamal_encrypt(self.M, self.pk, rand_scalar(rng))
 
 
-def _mock_schnorr(rng):
-    """Return (sigma_R, sigma_s) for a synthetic Schnorr signature."""
-    k = rand_scalar(rng)
-    sigma_R = mul(G1, k)
-    sigma_s = (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
-    return sigma_R, sigma_s
-
-
 @pytest.fixture
 def world():
     rng = _seeded_rng()
@@ -75,7 +67,6 @@ def world():
     issuer = Account(m_iss, rng)        # public issuer, named at mint
     rec0 = Account(m_rec, rng)
     rec1 = Account(m_rec, rng)          # same identity, second account
-    sigma_R, sigma_s = _mock_schnorr(rng)
 
     # The receiving key belongs to the IDENTITY, not to an account: every
     # account bound to m_rec spends, and one mailbox key opens the mail.
@@ -100,8 +91,7 @@ def world():
     return dict(rng=rng, m_iss=m_iss, m_rec=m_rec, M_rec=rec0.M,
                 k_rec=k_rec, pk_recv=pk_recv, salt_rec=salt_rec,
                 seed_rec=seed_rec, priv=priv,
-                issuer=issuer, rec0=rec0, rec1=rec1, tree=tree,
-                sigma_R=sigma_R, sigma_s=sigma_s)
+                issuer=issuer, rec0=rec0, rec1=rec1, tree=tree)
 
 
 def _mint(world, v=1, **kw):
@@ -109,7 +99,6 @@ def _mint(world, v=1, **kw):
     return mint_unilateral_a1(world["M_rec"], world["pk_recv"], v=v,
                               rho=rand_scalar(world["rng"]),
                               m_issuer=world["m_iss"],
-                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"], **kw)
 
 
@@ -183,7 +172,6 @@ def test_a_rotated_receiving_key_still_spends(world):
     note = mint_unilateral_a1(world["M_rec"], pk2, v=7,
                               rho=rand_scalar(world["rng"]),
                               m_issuer=world["m_iss"],
-                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=world["rng"])
     w = deposit_fold_witness(
         m_rec=world["m_rec"], k=k2, sk_dep=world["rec0"].sk, salt=salt2,
@@ -280,7 +268,6 @@ def test_unregistered_recipient_receipt_invalid(world):
     k_u, pk_u = receiving_key(seed_u)
     note = mint_unilateral_a1(M_unreg, pk_u, v=1, rho=rand_scalar(rng),
                               m_issuer=world["m_iss"],
-                              sigma_R=world["sigma_R"], sigma_s=world["sigma_s"],
                               rng=rng)
     receipt = make_receipt_a1(k_u, M_unreg, note, issuer.M, ISSUER_ADDR, CHAINID,
                               tree, rng=rng)

@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 /// @title IMintVerifierA2 -- private-issuer (A2) mint-circuit verifier surface.
 /// @notice The A2 mint circuit (circuits/mint_batch_a2.circom) is the
 ///         private-issuer variant of mint_batch: every leaf is constrained to
-///         flavor == A2, the committed idHash opens to Poseidon-10(eNote, eIss,
+///         flavor == A2, the committed idHash opens to Poseidon-11(T_ID, eNote, eIss,
 ///         T), and each leaf's E_iss-for-rec ciphertext and its binding's T are
 ///         exposed as PUBLIC OUTPUTS.  Notes.mint passes the eIss and T carried
 ///         by each A2 binding as those public inputs, so a Groth16 accept *is*

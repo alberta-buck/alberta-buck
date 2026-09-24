@@ -389,14 +389,14 @@ snark-ptau:
 	  printf "  Type 'delete-ptau' to proceed: "; read ans; \
 	  if [ "$$ans" != "delete-ptau" ]; then echo "  aborted -- nothing removed"; exit 1; fi; \
 	fi
-	rm -rf build/snark/ptau build/snark/mint build/snark/spend $(SNARK_DIRS)
+	rm -rf build/snark/ptau build/snark/spend $(SNARK_DIRS)
 	$(SNARK_PATH) MINT_BATCH_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
 snark-clean:
 	rm -rf $(SNARK_DIRS) $(SNARK_A2_DIRS)
 
 # Private-issuer A2 mint family (circuits/mint_batch_a2.circom).  Reuses the
-# mint_batch ptau (DO_LEGACY=0 DO_MINT_BATCH=0), so this only runs phase-2 for
+# mint_batch ptau (DO_SPEND=0 DO_MINT_BATCH=0), so this only runs phase-2 for
 # the A2 per-N circuits + their fixtures -- the existing public/bearer verifiers
 # stay byte-for-byte as deployed.
 snark-a2:	snark-a2-setup snark-a2-fixtures
@@ -404,7 +404,7 @@ snark-a2:	snark-a2-setup snark-a2-fixtures
 
 snark-a2-setup:
 	rm -rf $(SNARK_A2_DIRS)
-	$(SNARK_PATH) DO_LEGACY=0 DO_MINT_BATCH=0 MINT_BATCH_A2_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
+	$(SNARK_PATH) DO_SPEND=0 DO_MINT_BATCH=0 MINT_BATCH_A2_PINS="$(SNARK_PINS)" bash scripts/snark/setup.sh
 
 snark-a2-fixtures:
 	$(SNARK_PATH) bash scripts/snark/gen_mint_fixtures_a2.sh

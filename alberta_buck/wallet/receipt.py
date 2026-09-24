@@ -22,11 +22,11 @@ Both verifiers share :class:`RegisteredIdentity` (the registry read) and
 For the Notes :class:`Receipt`, the chain has four links, each checkable
 against public chain state::
 
-    (a) OPENING   cm = Poseidon5(flavor, v, rho, idHash, predicate)
+    (a) OPENING   cm = Poseidon6(T_CM, flavor, v, rho, idHash, predicate)
     (b) MINTED    cm appears in the mint tx calldata cms[]
     (c) ISSUER    the public issuer's registered key signed keccak256(cms[]),
                   so every leaf in the batch is bound to their Identity M_iss
-    (d) PAID      nullifier = Poseidon3(rho, idHash, tag) was burned in a
+    (d) PAID      nullifier = Poseidon3(T_NF, rho, idHash) was burned in a
                   Spent* event delivering `face` to `recipient`
 
 This module covers the **public-issuer flavors (A1, B1)** -- the Phase 1
@@ -53,12 +53,9 @@ from typing import Mapping, Optional, Tuple
 
 from alberta_buck.wallet.notes import (
     NoteOpening,
-    FLAVOR_A1,
     FLAVOR_A2,
-    FLAVOR_B1,
     note_commitment,
-    nullifier_a,
-    nullifier_b,
+    nullifier,
 )
 from alberta_buck.wallet.schnorr import (
     SchnorrProof,
@@ -124,14 +121,8 @@ class RcptResult:
 
 
 def _nullifier_for(opening: NoteOpening) -> int:
-    """Deterministic nullifier of an opening, dispatched on flavor tag.
-
-    A-flavor (A1/A2) uses tag 4243, B-flavor (B1) uses tag 4242 -- the same
-    domain separation the spend circuits enforce.
-    """
-    if opening.flavor in (FLAVOR_A1, FLAVOR_A2):
-        return nullifier_a(opening.rho, opening.id_hash)
-    return nullifier_b(opening.rho, opening.id_hash)
+    """The opening's spent marker: one derivation for every flavour, as the spend circuit's."""
+    return nullifier(opening.rho, opening.id_hash)
 
 
 def receipt_verify(

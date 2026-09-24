@@ -23,7 +23,7 @@ from alberta_buck.wallet.bn254 import G1, eq, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.elgamal import elgamal_encrypt
 from alberta_buck.wallet.envelope import deserialize_core, serialize_core
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.notes import note_commitment, nullifier_b
+from alberta_buck.wallet.notes import note_commitment, nullifier
 from alberta_buck.wallet.recvkey import receiving_key, verify_receiving_binding
 from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.wallet.verify_receipt import verify_receipt
@@ -78,7 +78,7 @@ def test_note_commitments_and_nullifiers(world):
     for note in world.notes.values():
         assert [note_commitment(o) for o in note.batch] == note.cms
         assert note_commitment(note.opening) == note.cm
-        assert nullifier_b(note.opening.rho, note.opening.id_hash) == note.nullifier
+        assert nullifier(note.opening.rho, note.opening.id_hash) == note.nullifier
         assert note.face == 100 * world.unit
     b1, a1, a2 = (world.notes[f] for f in ("b1", "a1", "a2"))
     assert (b1.raw["leafIndex"], a1.raw["leafIndex"], a2.raw["leafIndex"]) == (2, 6, 8)
@@ -97,11 +97,8 @@ def test_replayed_draws_rebuild_the_proven_notes(world):
                                                      salt_iss=P["bob"].salts["naming"], rng=world.replay("a2", "mint"))
     assert m2.cm == a2.cm
     a1                          = world.notes["a1"]
-    s                           = a1.raw["sigma"]
-    sigma_R                     = words_to_point(int(s["sigma_R"]["x"]), int(s["sigma_R"]["y"]))
     m1                          = mint_unilateral_a1(P["carol"].M, P["carol"].pk_recv, v=a1.face, rho=a1.opening.rho,
-                                                     m_issuer=P["aspen"].m, sigma_R=sigma_R, sigma_s=int(s["sigma_s"]),
-                                                     rng=world.replay("a1", "mint"))
+                                                     m_issuer=P["aspen"].m, rng=world.replay("a1", "mint"))
     assert m1.cm == a1.cm
     b1                          = world.notes["b1"]
     rng                         = world.replay("b1", "depositorBinding")

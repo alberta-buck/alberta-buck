@@ -29,7 +29,7 @@ from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.registry.tree import IdentityMerkleTree
 from alberta_buck.wallet.notes import (
     NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
-    note_commitment, nullifier_b,
+    note_commitment, nullifier,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.build_receipt import (
@@ -103,10 +103,8 @@ def parties(vectors):
 def _mint_b1(alice, bob, rng):
     """Bob (public issuer) mints a bearer note; at spend Alice published
     eDepForIss (her Identity under Bob's registered key) in SpentCoupledB1."""
-    sigma_R = mul(G1, rand_scalar(rng))
-    sigma_s = rand_scalar(rng)
     rho     = rand_scalar(rng)
-    idh     = id_hash_b1(bob["m"], sigma_R, sigma_s)
+    idh     = id_hash_b1(bob["m"])
     opening = NoteOpening(FLAVOR_B1, FACE, rho, idh, 0)
     cm      = note_commitment(opening)
     cms     = [rand_scalar(rng) % F_R, cm]
@@ -114,29 +112,26 @@ def _mint_b1(alice, bob, rng):
                                   bob["addr"], CHAINID, rng=rng)
     eDep    = elgamal_encrypt(alice["M"], bob["pk"], rand_scalar(rng))
     return dict(opening=opening, cms=cms, issuer_sig=sig,
-                sigma_R=sigma_R, sigma_s=sigma_s,
-                nullifier=nullifier_b(rho, idh), eDepForIss=eDep)
+                nullifier=nullifier(rho, idh), eDepForIss=eDep)
 
 
 def _mint_a1(alice, bob, rng):
     """Bob (public issuer) addresses a note to Alice's MAILBOX key."""
-    sigma_R = mul(G1, rand_scalar(rng))
-    sigma_s = rand_scalar(rng)
     rho     = rand_scalar(rng)
     r_note  = rand_scalar(rng)
     eNote   = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
     r_rec   = rand_scalar(rng)
     eRec    = elgamal_encrypt(alice["M"], alice["pk_recv"], r_rec)
-    idh     = id_hash_a1(eNote, bob["m"], sigma_R, sigma_s)
+    idh     = id_hash_a1(eNote, bob["m"])
     opening = NoteOpening(FLAVOR_A1, FACE, rho, idh, 0)
     cm      = note_commitment(opening)
     cms     = [cm, rand_scalar(rng) % F_R]
     sig     = issuer_schnorr_sign(bob["sk"], batch_commitment(cms),
                                   bob["addr"], CHAINID, rng=rng)
     return dict(opening=opening, cms=cms, issuer_sig=sig,
-                eNote=eNote, eRec=eRec, sigma_R=sigma_R, sigma_s=sigma_s,
+                eNote=eNote, eRec=eRec,
                 r_note=r_note, r_id=r_rec,
-                nullifier=nullifier_b(rho, idh))
+                nullifier=nullifier(rho, idh))
 
 
 def _mint_a2(alice, bob, rng, with_binding=True):
@@ -157,7 +152,7 @@ def _mint_a2(alice, bob, rng, with_binding=True):
     # An unbound receipt still states T -- idHash commits it -- but not the proof.
     return dict(opening=opening, cms=cms, eNote=eNote, eIss=eIss,
                 binding=binding if with_binding else None, T=binding.T, gamma=gamma,
-                r_note=r_note, r_id=r_prime, nullifier=nullifier_b(rho, idh))
+                r_note=r_note, r_id=r_prime, nullifier=nullifier(rho, idh))
 
 
 def _txn_kw(prefix: str) -> dict:
@@ -180,7 +175,6 @@ def _b1_core(alice, bob, role, rng):
     a = _mint_b1(alice, bob, rng)
     return build_note_b1(
         opening=a["opening"], cms=a["cms"], issuer_sig=a["issuer_sig"],
-        sigma_R=a["sigma_R"], sigma_s=a["sigma_s"],
         nullifier=a["nullifier"], face=FACE,
         eDepForIss=a["eDepForIss"],
         role=role, payee_sk=alice["sk"], issuer_sk=bob["sk"],
@@ -192,7 +186,6 @@ def _a1_core(alice, bob, role, rng):
     return build_note_a1(
         opening=a["opening"], cms=a["cms"], issuer_sig=a["issuer_sig"],
         eNote=a["eNote"], eRec=a["eRec"],
-        sigma_R=a["sigma_R"], sigma_s=a["sigma_s"],
         nullifier=a["nullifier"], face=FACE,
         role=role, payee_sk=alice["sk"],
         pk_recv=alice["pk_recv"], mailbox_binding=alice["mbx"],
@@ -439,13 +432,16 @@ def test_unaddressed_identity_cannot_claim_a2(vectors, parties):
 
 
 def test_tampered_idhash_preimage_rejected(vectors, parties):
-    """B1: a different issuer-signature word breaks the idHash recomputation —
-    the named issuer is bound INTO the leaf."""
+    """B1: naming a different issuer -- a consistent record and point -- breaks the
+    idHash recomputation, because the named issuer is bound INTO the leaf."""
+    import json
+    from alberta_buck.wallet.envelope import _g1_hex
+    from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
     alice, bob = parties
     core = _make("note_b1:recipient", vectors, alice, bob)
-    bad_note = dict(core.note)
-    bad_note["sigma_s"] = hex((int(bad_note["sigma_s"], 16) + 1) % ORDER)
-    res = verify_receipt(replace(core, note=bad_note))
+    other = canonical_identity_data(dict(json.loads(core.payer.identity), family_name="Other"))
+    payer = replace(core.payer, identity=other, M=_g1_hex(mul(G1, identity_scalar(other))))
+    res = verify_receipt(replace(core, payer=payer))
     assert not res.ok and "id_hash_b1" in res.reason
 
 

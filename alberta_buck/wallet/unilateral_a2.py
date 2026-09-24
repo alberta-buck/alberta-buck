@@ -73,7 +73,7 @@ from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.transcript import keccak_scalar
 from alberta_buck.wallet.notes import (
-    FLAVOR_A2, NoteOpening, note_commitment, nullifier_a,
+    FLAVOR_A2, NoteOpening, note_commitment,
 )
 from alberta_buck.wallet.issuer_reenc import (
     IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify,
@@ -146,7 +146,7 @@ class MintedA2:
 
     ``eNote`` encrypts the note value ``v`` and ``eIss`` the issuer identity
     ``M_I``, both to the recipient's receiving key ``pk_recv``.  Both are committed in ``idHash``
-    with the binding's ``T`` (Poseidon10, matching ``mint_batch_a2.circom``).  ``eIss``/``binding``
+    with the binding's ``T`` (tagged Poseidon-11, matching ``mint_batch_a2.circom``).  ``eIss``/``binding``
     go on chain (the binding anchors anti-framing at mint); the full ``opening`` + ``eNote`` +
     ``eIss`` + ``gamma`` travel to the recipient off chain.
     """
@@ -190,7 +190,7 @@ class MintedA2:
 
 
 def a2_id_hash(eNote: ElGamalCiphertext, eIss: ElGamalCiphertext, T) -> int:
-    """``idHash = Poseidon10(eNote, eIss, T)`` -- 10 field elements reduced mod F_R.
+    """``idHash = Poseidon11(T_ID, eNote, eIss, T)`` -- the tag and 10 words reduced mod F_R.
 
     Matches the on-chain layout in ``mint_batch_a2.circom`` and
     :func:`alberta_buck.wallet.notes.id_hash_a2`.  The fold opens ``idHash`` to tie

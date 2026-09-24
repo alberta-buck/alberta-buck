@@ -6,7 +6,7 @@ The EOA builders are the *payee's* operation (the recipient assembles the
 receipt, generating proofs with their account secret).  The Note builders are
 *either* party's operation: the Identity-M architecture gives the issuer and
 the recipient the same note payload — the idHash preimage material
-(``eNote``/``eRec``/``eIss``/``sigma``) created at mint and delivered with the
+(``eNote``/``eRec``/``eIss``) created at mint and delivered with the
 note, plus the spend-side ``SpentCoupled*`` event data — and the receipt
 discloses both identity preimages, from which any verifier derives the
 identity scalars ``m_iss``/``m_rec`` and re-checks the note-leg ciphertexts
@@ -20,9 +20,8 @@ directly.  ``role`` selects the generating side:
   bearer is unknown until spend — the issuer names the depositor by verifiably
   decrypting the ``SpentCoupledB1`` event's ``eDepForIss`` (``vd_payee``).
 
-All three flavors use the unified spend nullifier ``Poseidon3(rho, idHash,
-4242)`` (the shipped spend.circom derives the 4242 tag for every flavor) and
-anchor to the ``SpentCoupledB1`` / ``SpentCoupledA1`` / ``SpentCoupledA2``
+All three flavors use the one spend nullifier ``Poseidon([T_NF, rho, idHash])``
+(:func:`alberta_buck.wallet.notes.nullifier`, the spend circuit's) and anchor to the ``SpentCoupledB1`` / ``SpentCoupledA1`` / ``SpentCoupledA2``
 events.
 
 The resulting :class:`ReceiptCore` is self-contained: serializing it and
@@ -313,11 +312,9 @@ def build_note_b1(
     issuer_addr: int, issuer_identity: str, issuer_M, issuer_pk,
     # Payee (the depositor who cashed the note)
     payee_addr: int, payee_identity: str, payee_M, payee_pk,
-    # Note data: the opening, mint batch, batch Schnorr, and the Identity-M
-    # idHash preimage tail (sigma_R, sigma_s of id_hash_b1)
+    # Note data: the opening, mint batch and batch Schnorr (idHash = id_hash_b1(m_iss))
     opening: NoteOpening, cms, issuer_sig: SchnorrProof,
-    sigma_R, sigma_s: int,
-    # Transaction anchor (SpentCoupledB1; unified 4242 nullifier)
+    # Transaction anchor (SpentCoupledB1)
     nullifier: int, face: int,
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,
@@ -339,7 +336,7 @@ def build_note_b1(
     party's side.
 
     Issuer naming (both roles, deterministic): ``opening.id_hash`` recomputes
-    as ``id_hash_b1(m_iss, sigma_R, sigma_s)`` with ``m_iss`` derived from the
+    as ``id_hash_b1(m_iss)`` with ``m_iss`` derived from the
     disclosed issuer identity preimage — the issuer is bound INTO the leaf —
     and the batch Schnorr binds the registered issuer key over keccak(cms).
 
@@ -362,7 +359,6 @@ def build_note_b1(
             "opening": _args_opening(opening),
             "cms": [scalar_to_hex(c) for c in cms],
             "issuer_sig": _args_schnorr(issuer_sig),
-            "sigma_R": _g1_hex(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
             "eDepForIss": _ct_hex(eDepForIss) if eDepForIss is not None else None,
             "nullifier": scalar_to_hex(nullifier), "face": scalar_to_hex(face),
             "txn": {"value": value, "block_time": block_time, "txhash": txhash,
@@ -374,8 +370,7 @@ def build_note_b1(
     rng = _replay([t_vd])
 
     rec_proof = receipts_proof_record(opening, cms, issuer_sig, nullifier, face)
-    payload = note_payload_record(sigma_R=sigma_R, sigma_s=sigma_s,
-                                  eDepForIss=eDepForIss)
+    payload = note_payload_record(eDepForIss=eDepForIss)
 
     payee_vd_rec = None
     vd_payee_rec = None
@@ -420,11 +415,10 @@ def build_note_a1(
     # Payee (the addressed recipient identity M_rec)
     payee_addr: int, payee_identity: str, payee_M, payee_pk,
     # Note data: the opening, mint batch, batch Schnorr, and the Identity-M
-    # idHash preimage (eNote + sigma) plus the spend-side eRec
+    # idHash preimage (eNote) plus the spend-side eRec
     opening: NoteOpening, cms, issuer_sig: SchnorrProof,
     eNote: ElGamalCiphertext, eRec: ElGamalCiphertext,
-    sigma_R, sigma_s: int,
-    # Transaction anchor (SpentCoupledA1; unified 4242 nullifier)
+    # Transaction anchor (SpentCoupledA1)
     nullifier: int, face: int,
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,
@@ -449,7 +443,7 @@ def build_note_a1(
 
     Both namings are deterministic from the payload + disclosed preimages:
     The issuer's naming is deterministic: ``opening.id_hash`` recomputes as
-    ``id_hash_a1(eNote, m_iss, sigma_R, sigma_s)``, with the batch Schnorr over
+    ``id_hash_a1(eNote, m_iss)``, with the batch Schnorr over
     keccak(cms).  The recipient's is not, and must not be: the note's
     ciphertexts are keyed to ``pk_recv``, so a verifier cannot open them and a
     harvester cannot either.  Each side instead proves what it can -- the
@@ -478,7 +472,6 @@ def build_note_a1(
             "cms": [scalar_to_hex(c) for c in cms],
             "issuer_sig": _args_schnorr(issuer_sig),
             "eNote": _ct_hex(eNote), "eRec": _ct_hex(eRec),
-            "sigma_R": _g1_hex(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
             "pk_recv": _g1_hex(pk_recv),
             "k_recv": (scalar_to_hex(k_recv) if k_recv is not None else None),
             "r_note": (scalar_to_hex(r_note) if r_note is not None else None),
@@ -503,7 +496,6 @@ def build_note_a1(
                       M_id=payee_M, payee_addr=payee_addr, chainid=chainid,
                       rng=rng)
     payload = note_payload_record(eNote=eNote, eRec=eRec,
-                                  sigma_R=sigma_R, sigma_s=sigma_s,
                                   pk_recv=legs["pk_recv"],
                                   r_note=legs.get("r_note"), r_id=legs.get("r_id"),
                                   binding=legs.get("binding"))
@@ -549,7 +541,7 @@ def build_note_a2(
     # Note data: the opening + mint batch and the Identity-M idHash preimage
     opening: NoteOpening, cms,
     eNote: ElGamalCiphertext, eIss: ElGamalCiphertext,
-    # Transaction anchor (SpentCoupledA2; unified 4242 nullifier)
+    # Transaction anchor (SpentCoupledA2)
     nullifier: int, face: int,
     value: int, block_time: int,
     txhash: str, block: int, logindex: int,

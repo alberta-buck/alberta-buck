@@ -2,16 +2,15 @@
 //! `alberta_buck/wallet/notes.py` (and `identity_leaf` from
 //! `alberta_buck/registry/tree.py`).
 //!
-//! `cm = Poseidon([flavor, v, rho, id_hash, predicate])`;
-//! `nf = Poseidon([rho, id_hash, tag])` with tags 4242 (B) / 4243 (A,
-//! reserved); id-hashes are Poseidon over the per-flavor payload word
-//! layouts, each word reduced mod F_R exactly as circom signals are.
+//! Each hash is a Poseidon led by its v2 domain tag, `keccak(tag) mod F_R`:
+//! `cm = Poseidon([T_CM, flavor, v, rho, id_hash, predicate])`;
+//! `nf = Poseidon([T_NF, rho, id_hash])`, one nullifier for every flavour;
+//! `id_hash = Poseidon([T_ID, *payload])` over the per-flavour word layouts,
+//! each word reduced mod F_R exactly as circom signals are.
 
+use crate::domains::{field_tag, NOTES_COMMITMENT, NOTES_ID_HASH, NOTES_NULLIFIER};
 use crate::poseidon::poseidon;
 use crate::{w_is_zero, w_lt_order, G1w, IdError, Result, W256};
-
-pub const NULLIFIER_TAG_B: u64 = 4242;
-pub const NULLIFIER_TAG_A: u64 = 4243;
 
 pub const FLAVOR_A1: u64 = 1;
 pub const FLAVOR_A2: u64 = 2;
@@ -44,7 +43,7 @@ fn check_scalar_nonzero(w: &W256) -> Result<()> {
     Ok(())
 }
 
-/// `cm = Poseidon([flavor, v, rho, id_hash, predicate])` with the
+/// `cm = Poseidon([T_CM, flavor, v, rho, id_hash, predicate])` with the
 /// `NoteOpening` range checks.
 pub fn note_commitment(
     flavor: u64,
@@ -63,59 +62,43 @@ pub fn note_commitment(
     check_rho(rho)?;
     check_field(id_hash, "id_hash must lie in [0, F_R)")?;
     check_field(predicate, "predicate must lie in [0, F_R)")?;
-    poseidon(&[w_from_u64(flavor), *v, *rho, *id_hash, *predicate])
+    poseidon(&[field_tag(NOTES_COMMITMENT), w_from_u64(flavor), *v, *rho, *id_hash, *predicate])
 }
 
-/// B-spend nullifier: `Poseidon([rho, id_hash, 4242])`.
-pub fn nullifier_b(rho: &W256, id_hash: &W256) -> Result<W256> {
+/// The spent marker, for every flavour: `Poseidon([T_NF, rho, id_hash])`.
+pub fn nullifier(rho: &W256, id_hash: &W256) -> Result<W256> {
     check_rho(rho)?;
     check_field(id_hash, "id_hash must lie in [0, F_R)")?;
-    poseidon(&[*rho, *id_hash, w_from_u64(NULLIFIER_TAG_B)])
+    poseidon(&[field_tag(NOTES_NULLIFIER), *rho, *id_hash])
 }
 
-/// RESERVED A-tag nullifier: `Poseidon([rho, id_hash, 4243])`.
-pub fn nullifier_a(rho: &W256, id_hash: &W256) -> Result<W256> {
-    check_rho(rho)?;
-    check_field(id_hash, "id_hash must lie in [0, F_R)")?;
-    poseidon(&[*rho, *id_hash, w_from_u64(NULLIFIER_TAG_A)])
-}
-
-/// B1 id-hash: `Poseidon([m_issuer, sigma_R.x, sigma_R.y, sigma_s])`.
-pub fn id_hash_b1(m_issuer: &W256, sigma_r: &G1w, sigma_s: &W256) -> Result<W256> {
+/// B1 id-hash: `Poseidon([T_ID, m_issuer])`.
+pub fn id_hash_b1(m_issuer: &W256) -> Result<W256> {
     check_scalar_nonzero(m_issuer)?;
-    check_scalar_nonzero(sigma_s)?;
-    poseidon(&[*m_issuer, sigma_r.0, sigma_r.1, *sigma_s])
+    poseidon(&[field_tag(NOTES_ID_HASH), *m_issuer])
 }
 
-/// A1 id-hash: `Poseidon([E_note.R, E_note.C, m_issuer, sigma_R, sigma_s])`
-/// (9 words).
-pub fn id_hash_a1(
-    e_note: &(G1w, G1w),
-    m_issuer: &W256,
-    sigma_r: &G1w,
-    sigma_s: &W256,
-) -> Result<W256> {
+/// A1 id-hash: `Poseidon([T_ID, E_note.R, E_note.C, m_issuer])`.
+pub fn id_hash_a1(e_note: &(G1w, G1w), m_issuer: &W256) -> Result<W256> {
     check_scalar_nonzero(m_issuer)?;
-    check_scalar_nonzero(sigma_s)?;
     poseidon(&[
+        field_tag(NOTES_ID_HASH),
         e_note.0 .0,
         e_note.0 .1,
         e_note.1 .0,
         e_note.1 .1,
         *m_issuer,
-        sigma_r.0,
-        sigma_r.1,
-        *sigma_s,
     ])
 }
 
-/// A2 id-hash: `Poseidon([E_note.R, E_note.C, E_iss.R, E_iss.C, T])` (10 words).
+/// A2 id-hash: `Poseidon([T_ID, E_note.R, E_note.C, E_iss.R, E_iss.C, T])`.
 ///
 /// `T = r'*pk_recv + gamma*H` is the mint binding's blinded point.  The spend
 /// reaches the mint only through `idHash`, so committing `T` is what lets the
 /// A2 fold tie the binding's key to the recipient's own.
 pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w), t: &G1w) -> Result<W256> {
     poseidon(&[
+        field_tag(NOTES_ID_HASH),
         e_note.0 .0,
         e_note.0 .1,
         e_note.1 .0,

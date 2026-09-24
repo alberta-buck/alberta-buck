@@ -39,7 +39,7 @@ from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
 from alberta_buck.wallet.b1_binding import b1_bind_prove
 from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.notes import (
-    FLAVOR_B1, NoteOpening, note_commitment, nullifier_a, nullifier_b,
+    FLAVOR_B1, NoteOpening, note_commitment, nullifier,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.unilateral_a2 import IdentityTree
@@ -374,9 +374,7 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
 
     # ---- notes family ------------------------------------------------------------
     rho = draw()
-    sigma_R = mul(G1, draw())
-    sigma_s = draw()
-    idh_b1 = id_hash_b1(m_i, sigma_R, sigma_s)
+    idh_b1 = id_hash_b1(m_i)
     # Addressed ciphertexts are keyed to a MAILBOX key, never to an identity
     # point; these rows only pin the hashes, but they keep the protocol's shape.
     pk_mailbox = mul(G1, draw())
@@ -386,19 +384,17 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     # T = r'*pk + gamma*H, the binding's point idHash_a2 commits.  gamma is derived
     # rather than drawn, so the stream after this section is unchanged.
     T_a2 = add(mul(pk_mailbox, r_iss), mul(H_PEDERSEN, (r_iss + 1) % ORDER))
-    idh_a1 = id_hash_a1(eNote, m_i, sigma_R, sigma_s)
+    idh_a1 = id_hash_a1(eNote, m_i)
     idh_a2 = id_hash_a2(eNote, eIss, T_a2)
     opening = NoteOpening(flavor=FLAVOR_B1, v=250, rho=rho, id_hash=idh_b1, predicate=0)
     out["notes"] = {
         "m_issuer": scalar_to_hex(m_i),
-        "sigma_R": _g1(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
         "eNote": _ct(eNote), "eIss": _ct(eIss), "T": _g1(T_a2),
         "id_hash_b1": _hx(idh_b1), "id_hash_a1": _hx(idh_a1), "id_hash_a2": _hx(idh_a2),
         "opening": {"flavor": _hx(FLAVOR_B1), "v": _hx(250), "rho": scalar_to_hex(rho),
                     "idHash": _hx(idh_b1), "predicate": _hx(0)},
         "cm": _hx(note_commitment(opening)),
-        "nullifier_b": _hx(nullifier_b(rho, idh_b1)),
-        "nullifier_a": _hx(nullifier_a(rho, idh_b1)),
+        "nullifier": _hx(nullifier(rho, idh_b1)),
         "identity_leaf_M": _g1(M_rec),
         "identity_leaf": _hx(identity_leaf(M_rec)),
     }

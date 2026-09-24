@@ -376,7 +376,7 @@ fn golden_identity_fixture() {
     let rcpt_h_batch = schnorr::batch_commitment(&rcpt_cms);
     assert_eq!(rcpt_h_batch, jw(&rc["hBatch"]));
     assert_eq!(
-        notes::nullifier_b(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
+        notes::nullifier(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
         jw(&rc["nullifier"])
     );
     let rsig = schnorr::SchnorrProof {
@@ -818,17 +818,11 @@ fn kernel_vectors_replay() {
     // ---- notes family -------------------------------------------------------------
     let nt = &v["notes"];
     assert_eq!(
-        notes::id_hash_b1(&jw(&nt["m_issuer"]), &jg1(&nt["sigma_R"]), &jw(&nt["sigma_s"])).unwrap(),
+        notes::id_hash_b1(&jw(&nt["m_issuer"])).unwrap(),
         jw(&nt["id_hash_b1"])
     );
     assert_eq!(
-        notes::id_hash_a1(
-            &jct(&nt["eNote"]),
-            &jw(&nt["m_issuer"]),
-            &jg1(&nt["sigma_R"]),
-            &jw(&nt["sigma_s"])
-        )
-        .unwrap(),
+        notes::id_hash_a1(&jct(&nt["eNote"]), &jw(&nt["m_issuer"])).unwrap(),
         jw(&nt["id_hash_a1"])
     );
     assert_eq!(
@@ -850,12 +844,8 @@ fn kernel_vectors_replay() {
         jw(&nt["cm"])
     );
     assert_eq!(
-        notes::nullifier_b(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
-        jw(&nt["nullifier_b"])
-    );
-    assert_eq!(
-        notes::nullifier_a(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
-        jw(&nt["nullifier_a"])
+        notes::nullifier(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
+        jw(&nt["nullifier"])
     );
     assert_eq!(
         notes::identity_leaf(&jg1(&nt["identity_leaf_M"])).unwrap(),

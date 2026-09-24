@@ -76,8 +76,6 @@ function receiptArgs(row) {
     args.face = mint.opening.v;
     if (kind === "note-b1" || kind === "note-a1") {
       args.issuer_sig = mint.issuer_sig;
-      args.sigma_R = mint.sigma_R;
-      args.sigma_s = mint.sigma_s;
     }
     if (kind === "note-b1") args.eDepForIss = mint.eDepForIss;
     if (kind === "note-a1") { args.eNote = mint.eNote; args.eRec = mint.eRec; }
@@ -186,7 +184,7 @@ test("unilateral A1 flow", { skip }, () => {
   const minted = w.mintUnilateralA1({
     M_rec: u.M_rec, pk_recv: u.pk_recv,
     v: u.v, rho: u.rho, m_issuer: u.m_issuer,
-    sigma_R: u.sigma_R, sigma_s: u.sigma_s, predicate: u.predicate,
+    predicate: u.predicate,
     nonces: { r_prime: u.r_prime, r_note: u.r_note },
   });
   for (const key of ["eNote", "eRec", "idHash", "cm", "opening"]) {

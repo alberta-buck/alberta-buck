@@ -17,8 +17,8 @@ Subcommands:
 The driver is scripts/snark/gen_e2e_fixtures.sh.
 
 The note tie is a RELATION of the folded gate, not a proof beside it: A2 opens
-idHash = Poseidon10(eNote, eIss, T) inside circuits/deposit_fold_a2.circom, and
-A1's idHash commits (eNote, m_issuer, sigma), so its tie runs through the
+idHash = Poseidon11(T_ID, eNote, eIss, T) inside circuits/deposit_fold_a2.circom, and
+A1's idHash commits (eNote, m_issuer), so its tie runs through the
 note's own value ciphertext with the face public.  B1 is bearer -- no tie.
 """
 
@@ -38,7 +38,7 @@ from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.notes import (
-    FLAVOR_A1, FLAVOR_B1, NoteOpening, note_commitment, id_hash_b1, nullifier_b,
+    FLAVOR_A1, FLAVOR_B1, NoteOpening, note_commitment, id_hash_b1, nullifier,
 )
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
@@ -225,17 +225,9 @@ def build_world(flavor: str):
         # nor when the note is spent (wallet/delivery.py).
         note_payload = deliver_a2(note, pk_ctr)
     elif flavor == "a1":
-        # The in-payload (sigma_R, sigma_s) is the issuer's identity-binding
-        # signature over the delivery payload (synthetic domain here, as in
-        # test_unilateral_a1).
-        k = rand_scalar(rng)
-        sigma_R = mul(G1, k)
-        sigma_s = (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
-        note = mint_unilateral_a1(M_ctr, pk_ctr, v=FACE, rho=rho,
-                                  m_issuer=m_iss, sigma_R=sigma_R,
-                                  sigma_s=sigma_s, rng=rng)
+        note = mint_unilateral_a1(M_ctr, pk_ctr, v=FACE, rho=rho, m_issuer=m_iss, rng=rng)
         opening = note.opening
-        eCommitted = note.eRec                   # the sigma's ciphertext (NOT in idHash)
+        eCommitted = note.eRec                   # the recipient ciphertext (NOT in idHash)
         M_named = M_ctr                          # membership target (recipient)
         r_committed = note.r_prime
         eNote = note.eNote
@@ -243,22 +235,19 @@ def build_world(flavor: str):
         # against the public face, and no issuer salt: relation (2) already
         # proves the decrypted Identity is the payout account's, so A1 asserts
         # nothing about a third party (doc/review/notes-receiving-key.org 4.4).
-        note_payload = deliver_a1(note, pk_ctr, sigma_R, sigma_s)
+        note_payload = deliver_a1(note, pk_ctr)
     else:  # b1
-        k = rand_scalar(rng)
-        sigma_R = mul(G1, k)
-        sigma_s = (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
-        idh = id_hash_b1(m_iss, sigma_R, sigma_s)
+        idh = id_hash_b1(m_iss)
         opening = NoteOpening(FLAVOR_B1, FACE, rho, idh, 0)
         note = None
         eCommitted = None
         M_named = M_ctr                          # membership target (depositor)
         r_committed = None
         eNote = None
-        note_payload = {"sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
+        note_payload = {}                        # a bearer note carries its opening only
 
     cm = note_commitment(opening)
-    nf = nullifier_b(opening.rho, opening.id_hash)
+    nf = nullifier(opening.rho, opening.id_hash)
 
     # ---- Deposit-side proof ---------------------------------------------
     #
@@ -297,7 +286,6 @@ def build_world(flavor: str):
             fold_input = deposit_fold_a1_witness(
                 witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
                 e_note=opened.eNote, v=opened.opening.v, m_issuer=m_iss,
-                sigma_R=opened.sigma_R, sigma_s=opened.sigma_s,
                 r_note=opened.r_note, t=t_total,
                 r_E=dep_acct["r_E"], e_dep=dep_acct["E"],
                 pk_dep=dep_acct["pk"], e_enc=eEnc,
@@ -371,9 +359,10 @@ def build_world(flavor: str):
             "--eiss=0:" + ",".join(str(w) for w in ei),
             "--t=0:" + ",".join(str(w) for w in tw),
         ]
-        # The wallet idHash must equal Poseidon10 over these words.
+        # The wallet idHash must equal the tagged Poseidon-11 over these words.
+        from alberta_buck.wallet.notes import TAG_ID_HASH
         from alberta_buck.wallet.poseidon import poseidon
-        assert poseidon(en + ei + tw) == opening.id_hash, "idHash layout mismatch"
+        assert poseidon([TAG_ID_HASH] + en + ei + tw) == opening.id_hash, "idHash layout mismatch"
     else:
         mint_args = [
             f"--name=e2e_{flavor}", "--n=1",

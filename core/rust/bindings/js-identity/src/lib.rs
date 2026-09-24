@@ -946,40 +946,22 @@ pub fn note_commitment(
 }
 
 #[wasm_bindgen]
-pub fn nullifier_b(rho: &str, id_hash: &str) -> Result<String, JsError> {
-    Ok(hx(&kernel::notes::nullifier_b(&w(rho)?, &w(id_hash)?).map_err(err)?))
+pub fn nullifier(rho: &str, id_hash: &str) -> Result<String, JsError> {
+    Ok(hx(&kernel::notes::nullifier(&w(rho)?, &w(id_hash)?).map_err(err)?))
 }
 
 #[wasm_bindgen]
-pub fn nullifier_a(rho: &str, id_hash: &str) -> Result<String, JsError> {
-    Ok(hx(&kernel::notes::nullifier_a(&w(rho)?, &w(id_hash)?).map_err(err)?))
+pub fn id_hash_b1(m_issuer: &str) -> Result<String, JsError> {
+    Ok(hx(&kernel::notes::id_hash_b1(&w(m_issuer)?).map_err(err)?))
 }
 
 #[wasm_bindgen]
-pub fn id_hash_b1(m_issuer: &str, sig_rx: &str, sig_ry: &str, sigma_s: &str) -> Result<String, JsError> {
-    Ok(hx(&kernel::notes::id_hash_b1(&w(m_issuer)?, &g1(sig_rx, sig_ry)?, &w(sigma_s)?)
-        .map_err(err)?))
-}
-
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn id_hash_a1(
-    e_note: Vec<String>,
-    m_issuer: &str,
-    sig_rx: &str,
-    sig_ry: &str,
-    sigma_s: &str,
-) -> Result<String, JsError> {
+pub fn id_hash_a1(e_note: Vec<String>, m_issuer: &str) -> Result<String, JsError> {
     if e_note.len() != 4 {
         return Err(JsError::new("e_note needs 4 words"));
     }
-    Ok(hx(&kernel::notes::id_hash_a1(
-        &ct(&e_note[0], &e_note[1], &e_note[2], &e_note[3])?,
-        &w(m_issuer)?,
-        &g1(sig_rx, sig_ry)?,
-        &w(sigma_s)?,
-    )
-    .map_err(err)?))
+    Ok(hx(&kernel::notes::id_hash_a1(&ct(&e_note[0], &e_note[1], &e_note[2], &e_note[3])?, &w(m_issuer)?)
+        .map_err(err)?))
 }
 
 /// `id_hash_a2(eNote, eIss, T)` -- `T` is the mint binding's blinded point.

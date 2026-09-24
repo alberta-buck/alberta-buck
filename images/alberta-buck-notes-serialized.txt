@@ -138,10 +138,11 @@ Table of Contents
 2.1 Single Note (status quo)
 ────────────────────────────
 
-  Each commitment is an independent Poseidon-5 opening of five fields:
+  Each commitment is an independent, tagged Poseidon opening of five
+  fields:
 
   ┌────
-  │ cm = Poseidon-5(flavor, v, rho, idHash, predicate)
+  │ cm = Poseidon-6(T_CM, flavor, v, rho, idHash, predicate)
   └────
 
 
@@ -150,7 +151,7 @@ Table of Contents
   spend, the holder reveals:
 
   ┌────
-  │ nf = Poseidon(rho, idHash, 4242)
+  │ nf = Poseidon(T_NF, rho, idHash)
   └────
 
 
@@ -179,10 +180,10 @@ Table of Contents
      where `predicate_base' is whatever policy field a single-note B1
      would use.
 
-     The parent commitment is then the /ordinary/ Poseidon-5:
+     The parent commitment is then the /ordinary/ note commitment:
 
      ┌────
-     │ cm_parent = Poseidon-5(flavor, v, rho, idHash, predicate_fam)
+     │ cm_parent = Poseidon-6(T_CM, flavor, v, rho, idHash, predicate_fam)
      └────
 
 
@@ -231,10 +232,10 @@ Table of Contents
 2.2.2 Mint-circuit reuse
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  Because `cm_parent' is an ordinary Poseidon-5 output, the mint-batch
-  circuit (`circuits/mint_batch.circom') treats serialized and single B1
-  leaves identically.  Only the /wallet's/ pre-mint preparation differs:
-  a single B1 computes `predicate = predicate_base', while a serialized
+  Because `cm_parent' is an ordinary commitment, the mint-batch circuit
+  (`circuits/mint_batch.circom') treats serialized and single B1 leaves
+  identically.  Only the /wallet's/ pre-mint preparation differs: a
+  single B1 computes `predicate = predicate_base', while a serialized
   family computes `predicate = Poseidon-2(predicate_base, subRoot)'
   after building the sub-tree.  No new pinned-N variants, no new trusted
   setup, no new verifier bytecode.
@@ -282,7 +283,7 @@ Table of Contents
   │     rho[rho<br/>254 bits<br/>SECRET]
   │     idHash[idHash<br/>253 bits]
   │     predicate[predicate_base<br/>253 bits]
-  │     cm{{"cm = Poseidon-5()"}}
+  │     cm{{"cm = Poseidon-6(T_CM, ...)"}}
   │     flavor --> cm
   │     v --> cm
   │     rho --> cm
@@ -327,7 +328,7 @@ Table of Contents
   │     v[v]
   │     rho[rho SECRET]
   │     idHash[idHash]
-  │     cm{{"cm_parent = Poseidon-5()"}}
+  │     cm{{"cm_parent = Poseidon-6(T_CM, ...)"}}
   │     flavor --> cm
   │     v --> cm
   │     rho --> cm
@@ -365,7 +366,7 @@ Table of Contents
    `s_i'               absent       present     `PRF(K_fam, i)'            in-circuit only                        private (bound via `subRoot')  
    `subRoot'           absent       present     Merkle(`s_0..s_{N-1}')     in-circuit only (via `predicate_fam')  private                        
    `predicate_fam'     absent       present     `Poseidon-2(pb, subRoot)'  in-circuit only                        private                        
-   `cm' / `cm_parent'  present      present     Poseidon-5 of above        public leaf in `noteRoot'              public on spend (serialized)   
+   `cm' / `cm_parent'  present      present     Poseidon-6 of above        public leaf in `noteRoot'              public on spend (serialized)   
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -384,7 +385,7 @@ Table of Contents
   │     pkt[mint payload<br/>flavor, v, rho, idHash,<br/>predicate, path_cm_in_noteRoot]
   │     rcp[recipient address]
   │     ch[chainId]
-  │     nf{{"nf = Poseidon rho,idHash,4242"}}
+  │     nf{{"nf = Poseidon T_NF,rho,idHash"}}
   │     pkt --> nf
   │     pkt --> spc[spend.circom]
   │     rcp --> spc
@@ -549,7 +550,7 @@ Table of Contents
    `flavor, v, rho, idHash, predicate'  mint        commitment opening            Poseidon preimage (2^128 work)              in-circuit, never on-chain          
    `K_fam'                              mint only   PRF seed for `s_i'            n/a (destroyed post-build)                  never exposed                       
    `s_i'                                mint+spend  sub-note serial               PRF + subRoot binding (2^128)               private witness at spend            
-   `subRoot'                            mint        commits `s_0..s_{N-1}'        Poseidon-5 cm binding                       private witness at spend            
+   `subRoot'                            mint        commits `s_0..s_{N-1}'        Poseidon-6 cm binding                       private witness at spend            
    `cm / cm_parent'                     mint+spend  `noteRoot' leaf               `noteRoot' Merkle bind                      PUBLIC (linkability for serialized) 
    `i'                                  spend       bit index in family           `subRoot' Merkle bind                       PUBLIC (position-in-family reveal)  
    `nf'                                 spend       single-note double-spend key  Poseidon of `rho,idHash' (collision 2^128)  unlinkable (pseudorandom)           

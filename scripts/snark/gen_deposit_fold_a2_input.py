@@ -37,7 +37,7 @@ from alberta_buck.wallet.deposit_fold import (
 )
 from alberta_buck.wallet.elgamal import elgamal_encrypt
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove, issuer_reenc_verify
-from alberta_buck.wallet.notes import FLAVOR_A2, NoteOpening, id_hash_a2, note_commitment
+from alberta_buck.wallet.notes import FLAVOR_A2, NoteOpening, id_hash_a2, note_commitment, nullifier
 from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.recvkey import receiving_key
@@ -160,14 +160,16 @@ def build(thief: bool = False, bogus: bool = False, split: bool = False, raw: bo
             "a bogus eIss decrypts to a non-member, which is what (5) catches")
     iss_path = priv.path(priv.leaves.index(iss_leaf))
 
-    T = note.binding.T
+    T, id_hash = note.binding.T, note.idHash
     if raw:
-        # Step around the builder's key-tie check: hand it the T that WOULD
-        # satisfy it, then put back the one the minter committed.  idHash and the
-        # nullifier are the note's own; only the circuit's tie is left to refuse.
+        # Step around the builder's checks: hand it the T that WOULD satisfy the
+        # key tie, and the idHash that T gives, then put back what the minter
+        # committed.  T, idHash and the nullifier are the note's own; only the
+        # circuit's tie is left to refuse.
         T = add(mul(G1, note.r_prime * spender["k"] % ORDER), mul(H_PEDERSEN, note.gamma))
+        id_hash = id_hash_a2(note.eNote, note.eIss, T)
     witness = deposit_fold_a2_witness(
-        witness=w, rho=rho, id_hash=note.idHash, e_note=note.eNote,
+        witness=w, rho=rho, id_hash=id_hash, e_note=note.eNote,
         e_iss=note.eIss, r_prime=note.r_prime, t=t, r_E=spender["r_E"],
         e_dep=spender["E_dep"], pk_dep=spender["pk_dep"], e_enc=eEnc,
         salt_iss=note.salt_iss, iss_path=iss_path, T=T, gamma=note.gamma,
@@ -176,6 +178,8 @@ def build(thief: bool = False, bogus: bool = False, split: bool = False, raw: bo
     if raw:
         Tx, Ty = point_to_words(note.binding.T)
         witness["T"] = [str(Tx % F_R), str(Ty % F_R)]
+        witness["idHash"] = str(note.idHash % F_R)
+        witness["nullifier"] = str(nullifier(rho, note.idHash))
     return witness
 
 

@@ -3,15 +3,16 @@ pragma circom 2.1.4;
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
+include "./note_tags.circom";
 
 // Spend circuit -- Phase 7 spend shape for BUCK Notes.
 //
-// Proves that the prover holds a Poseidon-5 opening of *some* commitment
+// Proves that the prover holds a Poseidon-6 opening of *some* commitment
 // included in the on-chain Merkle accumulator under a recent root, and that
 // the public `face` matches the witness `v` and the public `nullifier` is
 // the prescribed Poseidon-3 derivation from the witness.
 //
-// Flavor is a PUBLIC input equal to the committed Poseidon-5 word.  Each
+// Flavor is a PUBLIC input equal to the committed flavor word.  Each
 // Notes.spendCoupled* entry point supplies its mode as a constant
 // (A1=1, A2=2, B1=3), so an A-flavor opening cannot verify through the
 // B1 path even with a well-formed membership proof.  The bearer/B-spend
@@ -27,15 +28,15 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // Constraints:
 //   (R)   face in [0, 2^128) and v in [0, 2^128); face == v
 //   (F)   flavor in {1,2,3} (A1/A2/B1); the same signal is public and
-//         the first Poseidon-5 word, so entry-point mode === committed flavor
+//         the committed flavor word, so entry-point mode === committed flavor
 //   (P)   predicate === 0 (no supported spend predicates yet)
-//   (C)   cm = Poseidon([flavor, v, rho, idHash, predicate])
+//   (C)   cm = Poseidon([T_CM, flavor, v, rho, idHash, predicate])
 //   (I)   issuanceCommitment = cm for B1, else 0.  Notes records each
 //         public-mint cm under the authenticated mint issuer, so the B1 spend
 //         can bind its caller-supplied issuer to this exact committed note.
 //   (M)   walking (cm, siblings, indices) up `depth` Poseidon-2 hashes
 //         yields noteRoot
-//   (N)   nullifier = Poseidon([rho, idHash, NULLIFIER_TAG])
+//   (N)   nullifier = Poseidon([T_NF, rho, idHash])
 //   (B)   ghost binding for recipient and chainId so they appear in at
 //         least one R1CS row; Groth16's IC[] commitment then makes them
 //         non-malleable from the mempool's perspective
@@ -93,7 +94,7 @@ template Spend(depth) {
     vRange.in    <== v;
     face === v;
 
-    // (F) flavor in {1,2,3}.  Public `flavor` is also the Poseidon-5 word,
+    // (F) flavor in {1,2,3}.  Public `flavor` is also the committed word,
     //     so Notes.spendCoupledB1(3) cannot verify an A1/A2 opening.
     signal flavorPair;
     flavorPair <== (flavor - 1) * (flavor - 2);
@@ -104,12 +105,13 @@ template Spend(depth) {
     predicate === 0;
 
     // (C) Recompute the leaf commitment from the witness opening.
-    component cm = Poseidon(5);
-    cm.inputs[0] <== flavor;
-    cm.inputs[1] <== v;
-    cm.inputs[2] <== rho;
-    cm.inputs[3] <== idHash;
-    cm.inputs[4] <== predicate;
+    component cm = Poseidon(6);
+    cm.inputs[0] <== NOTE_TAG_COMMITMENT();
+    cm.inputs[1] <== flavor;
+    cm.inputs[2] <== v;
+    cm.inputs[3] <== rho;
+    cm.inputs[4] <== idHash;
+    cm.inputs[5] <== predicate;
 
     // (I) Reveal the exact mint-authenticated commitment only for the bearer
     //     flavor.  The flavor constraint above makes b1Selector exactly 0 for
@@ -130,17 +132,16 @@ template Spend(depth) {
     }
     mp.root === noteRoot;
 
-    // (N) Nullifier = Poseidon-3 of (rho, idHash, tag).  rho is the bearer
+    // (N) Nullifier = Poseidon-3 of (tag, rho, idHash).  rho is the bearer
     //     unforgeability secret -- without it the contract has no way to
     //     check that the spender actually holds the note opening, since
     //     idHash and predicate are derivable from the recipient's identity.
-    //     The constant tag keeps nullifier preimages disjoint from the
-    //     Poseidon-5 commitment preimages so a rho/idHash collision between
-    //     a commitment and a nullifier is structurally impossible.
+    //     The leading tag keeps nullifier preimages disjoint from every other
+    //     Poseidon-3 in the protocol.
     component nf = Poseidon(3);
-    nf.inputs[0] <== rho;
-    nf.inputs[1] <== idHash;
-    nf.inputs[2] <== 4242;
+    nf.inputs[0] <== NOTE_TAG_NULLIFIER();
+    nf.inputs[1] <== rho;
+    nf.inputs[2] <== idHash;
     nullifier === nf.out;
 
     // (B) Ghost-bind recipient and chainId so they participate in R1CS

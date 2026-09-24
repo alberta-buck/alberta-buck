@@ -3,6 +3,7 @@ pragma circom 2.1.4;
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
+include "./note_tags.circom";
 
 // A2 mint-batch circuit -- the private-issuer (addressed, encrypted-Identity)
 // variant of mint_batch.circom.  It is used *only* by Notes.mint's private-mode
@@ -10,7 +11,7 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // pay nothing for the A2 machinery.
 //
 // Difference from mint_batch: every leaf is constrained to flavor == A2, the
-// committed idHash is opened to Poseidon-10(eNote, eIss, T) (mirroring
+// committed idHash is opened to Poseidon-11(T_ID, eNote, eIss, T) (mirroring
 // alberta_buck.wallet.notes.id_hash_a2), and each leaf's E_iss-for-rec
 // ciphertext eIss = (R.x, R.y, C.x, C.y) and its binding's T = (x, y) are
 // exposed as PUBLIC OUTPUTS.  Notes.mint field-matches each exposed pair
@@ -103,35 +104,37 @@ template MintBatchA2(N, DEPTH) {
     signal input TW[N][2];        // the binding's T words (exposed via T)
     signal input siblings[N][DEPTH];
 
-    // (O) Poseidon-5 commitment opening per leaf.
+    // (O) Tagged Poseidon-6 commitment opening per leaf.
     component cmH[N];
     for (var i = 0; i < N; i++) {
-        cmH[i] = Poseidon(5);
-        cmH[i].inputs[0] <== flavor[i];
-        cmH[i].inputs[1] <== v[i];
-        cmH[i].inputs[2] <== rho[i];
-        cmH[i].inputs[3] <== idHash[i];
-        cmH[i].inputs[4] <== predicate[i];
+        cmH[i] = Poseidon(6);
+        cmH[i].inputs[0] <== NOTE_TAG_COMMITMENT();
+        cmH[i].inputs[1] <== flavor[i];
+        cmH[i].inputs[2] <== v[i];
+        cmH[i].inputs[3] <== rho[i];
+        cmH[i].inputs[4] <== idHash[i];
+        cmH[i].inputs[5] <== predicate[i];
         cm[i] === cmH[i].out;
     }
 
-    // (A2) flavor === A2, and idHash opens to Poseidon-10(eNote, eIss, T).
+    // (A2) flavor === A2, and idHash opens to Poseidon-11(T_ID, eNote, eIss, T).
     //      Expose eIss and T; eNote stays private.
     component idH[N];
     for (var i = 0; i < N; i++) {
         flavor[i] === 2;            // FLAVOR_A2 (mirror wallet/Notes labels)
 
-        idH[i] = Poseidon(10);
-        idH[i].inputs[0] <== eNote[i][0];
-        idH[i].inputs[1] <== eNote[i][1];
-        idH[i].inputs[2] <== eNote[i][2];
-        idH[i].inputs[3] <== eNote[i][3];
-        idH[i].inputs[4] <== eIssW[i][0];
-        idH[i].inputs[5] <== eIssW[i][1];
-        idH[i].inputs[6] <== eIssW[i][2];
-        idH[i].inputs[7] <== eIssW[i][3];
-        idH[i].inputs[8] <== TW[i][0];
-        idH[i].inputs[9] <== TW[i][1];
+        idH[i] = Poseidon(11);
+        idH[i].inputs[0] <== NOTE_TAG_ID_HASH();
+        idH[i].inputs[1] <== eNote[i][0];
+        idH[i].inputs[2] <== eNote[i][1];
+        idH[i].inputs[3] <== eNote[i][2];
+        idH[i].inputs[4] <== eNote[i][3];
+        idH[i].inputs[5] <== eIssW[i][0];
+        idH[i].inputs[6] <== eIssW[i][1];
+        idH[i].inputs[7] <== eIssW[i][2];
+        idH[i].inputs[8] <== eIssW[i][3];
+        idH[i].inputs[9] <== TW[i][0];
+        idH[i].inputs[10] <== TW[i][1];
         idHash[i] === idH[i].out;
 
         eIss[i][0] <== eIssW[i][0];

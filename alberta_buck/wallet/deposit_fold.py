@@ -260,8 +260,6 @@ def deposit_fold_a1_witness(
     e_note:   ElGamalCiphertext,    # the note's value ciphertext
     v:        int,                  # the note face (public at spend)
     m_issuer: int,
-    sigma_R,
-    sigma_s:  int,
     r_note:   int,                  # eNote's randomness (travels in the payload)
     t:        int,                  # eEnc's total randomness (r' + s)
     r_E:      int,                  # the account's registration randomness
@@ -279,8 +277,8 @@ def deposit_fold_a1_witness(
         AssertionError: naming the relation whose arithmetic does not close.
     """
     from alberta_buck.wallet.bn254 import point_to_words
-    from alberta_buck.wallet.notes import NULLIFIER_TAG_B
-    from alberta_buck.wallet.poseidon import F_R, poseidon
+    from alberta_buck.wallet.notes import id_hash_a1, nullifier
+    from alberta_buck.wallet.poseidon import F_R
 
     m_rec, k, sk_dep = witness.m_rec, witness.k, witness.sk_dep
     t %= ORDER
@@ -293,6 +291,7 @@ def deposit_fold_a1_witness(
     cd_val = (m_rec + sk_dep * r_E) % ORDER       # E_dep.C = cd*G
 
     # -- the note tie -------------------------------------------------------
+    assert id_hash == id_hash_a1(e_note, m_issuer), "idHash != id_hash_a1(eNote, m_issuer)"
     assert eq(e_note.R, mul(G1, r_note)), "eNote.R != rn*G"
     assert eq(e_note.C, mul(G1, u_val)), "eNote.C != u*G (u = v + rn*k)"
     # -- (1) k decrypts the spend's ciphertext to M_rec ---------------------
@@ -309,7 +308,7 @@ def deposit_fold_a1_witness(
     assert witness.root == identity_root, \
         "the witness root is not the posted identity root"
 
-    nullifier = poseidon([rho, id_hash, NULLIFIER_TAG_B]) % F_R
+    nf = nullifier(rho, id_hash)
 
     def _w(P):
         x, y = point_to_words(P)
@@ -323,10 +322,9 @@ def deposit_fold_a1_witness(
 
     nRx, nRy = point_to_words(e_note.R)
     nCx, nCy = point_to_words(e_note.C)
-    sigRx, sigRy = point_to_words(sigma_R)
 
     return {
-        "nullifier": str(nullifier),
+        "nullifier": str(nf),
         "v": str(v),
         "identityRoot": str(identity_root),
         "eEncRx": [str(x) for x in eEncRx], "eEncRy": [str(x) for x in eEncRy],
@@ -338,8 +336,6 @@ def deposit_fold_a1_witness(
         "idHash": str(id_hash % F_R),
         "eNote": [str(nRx % F_R), str(nRy % F_R), str(nCx % F_R), str(nCy % F_R)],
         "mIss": str(m_issuer % F_R),
-        "sigR": [str(sigRx % F_R), str(sigRy % F_R)],
-        "sigS": str(sigma_s % F_R),
         "rn": [str(x) for x in _limbs(r_note)],
         "m_rec": [str(x) for x in _limbs(m_rec)],
         "k_recv": [str(x) for x in _limbs(k)],
@@ -402,7 +398,7 @@ def deposit_fold_a2_witness(
     """
     from alberta_buck.registry.tree import identity_leaf_salted
     from alberta_buck.wallet.bn254 import point_to_words
-    from alberta_buck.wallet.notes import NULLIFIER_TAG_B
+    from alberta_buck.wallet.notes import id_hash_a2, nullifier
     from alberta_buck.wallet.poseidon import F_R, poseidon
 
     m_rec, k, sk_dep = witness.m_rec, witness.k, witness.sk_dep
@@ -446,8 +442,10 @@ def deposit_fold_a2_witness(
         "the shipped issuer salt does not open the issuer's leaf"
     assert iss_path.verify() and iss_path.root == identity_root, \
         "the issuer's path does not fold to the posted root"
+    # -- the note tie: idHash opens to the ciphertexts and T ----------------
+    assert id_hash == id_hash_a2(e_note, e_iss, T), "idHash != id_hash_a2(eNote, eIss, T)"
 
-    nullifier = poseidon([rho, id_hash, NULLIFIER_TAG_B]) % F_R
+    nf = nullifier(rho, id_hash)
 
     def _w(P):
         x, y = point_to_words(P)
@@ -467,7 +465,7 @@ def deposit_fold_a2_witness(
     Tx, Ty = point_to_words(T)
 
     return {
-        "nullifier": str(nullifier),
+        "nullifier": str(nf),
         "identityRoot": str(identity_root),
         "eEncRx": [str(x) for x in eEncRx], "eEncRy": [str(x) for x in eEncRy],
         "eEncCx": [str(x) for x in eEncCx], "eEncCy": [str(x) for x in eEncCy],

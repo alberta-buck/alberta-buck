@@ -91,7 +91,6 @@ fn opening_json(o: &NoteOpening) -> Result<Value> {
 
 /// The delivery for an A1 note.  `eRec`'s randomness does not travel: the
 /// recipient opens `eRec` with `k`, and only an issuer-side receipt needs it.
-#[allow(clippy::too_many_arguments)]
 pub fn deliver_a1(
     e_note: &Ctw,
     e_rec: &Ctw,
@@ -100,8 +99,6 @@ pub fn deliver_a1(
     predicate: &W256,
     r_note: &W256,
     pk_recv: &G1w,
-    sigma_r: &G1w,
-    sigma_s: &W256,
 ) -> Result<Value> {
     let s = mailbox_shared_minter(r_note, pk_recv)?;
     let mut d = Map::new();
@@ -109,8 +106,6 @@ pub fn deliver_a1(
     d.insert("predicate".into(), Value::String(dec_w(predicate)));
     d.insert("eNote".into(), ct_dec(e_note));
     d.insert("eRec".into(), ct_dec(e_rec));
-    d.insert("sigma_R".into(), pt_dec(sigma_r));
-    d.insert("sigma_s".into(), Value::String(dec_w(sigma_s)));
     wrapped(&mut d, &s, &[("rho", rho), ("v", v), ("rNote", r_note)]);
     Ok(Value::Object(d))
 }
@@ -164,8 +159,6 @@ pub fn open_a1(d: &Value, k: &W256, m_issuer: &W256) -> Result<Value> {
     }
     let e_note = get_ct_dec(d, "eNote")?;
     let e_rec = get_ct_dec(d, "eRec")?;
-    let sigma_r = get_g1_dec(d, "sigma_R")?;
-    let sigma_s = get_dec_w(d, "sigma_s")?;
     let s = mailbox_shared_recipient(k, &e_note.0)?;
     let rho = unwrap(d, &s, "rho")?;
     let v = unwrap(d, &s, "v")?;
@@ -175,15 +168,13 @@ pub fn open_a1(d: &Value, k: &W256, m_issuer: &W256) -> Result<Value> {
         flavor: FLAVOR_A1,
         v,
         rho,
-        id_hash: id_hash_a1(&e_note, m_issuer, &sigma_r, &sigma_s)?,
+        id_hash: id_hash_a1(&e_note, m_issuer)?,
         predicate: get_dec_w(d, "predicate")?,
     };
     Ok(json!({
         "opening": opening_json(&opening)?,
         "eNote": ct_hex(&e_note),
         "eRec": ct_hex(&e_rec),
-        "sigma_R": pt_hex(&sigma_r),
-        "sigma_s": hex_w(&sigma_s),
         "r_note": hex_w(&r_note),
     }))
 }

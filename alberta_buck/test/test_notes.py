@@ -1,10 +1,10 @@
-"""Unit tests for alberta_buck.wallet.notes (Phase 7+ corrected design).
+"""Unit tests for alberta_buck.wallet.notes.
 
-Verifies that the wallet's note_commitment and nullifier_{a,b} agree with
-the shipped spend.circom and the planned spend_a.circom: Poseidon-5
-commitment, Poseidon-3 nullifier with domain-separating tags 4242 (B) /
-4243 (A).  The Poseidon implementation itself is checked against
-circomlibjs vectors in test_poseidon.py.
+The wallet's note_commitment, nullifier and id_hash_* agree with the shipped
+circuits: each a Poseidon led by its v2 domain tag (keccak(tag) mod F_R from
+alberta_buck.wallet.domains), so the commitment, the spent marker and the
+identity hash are three distinct functions.  The Poseidon implementation itself
+is checked against circomlibjs vectors in test_poseidon.py.
 """
 
 from __future__ import annotations
@@ -14,12 +14,13 @@ import pytest
 from alberta_buck.wallet import (
     G1, ORDER, mul, F_R, poseidon,
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1, NoteOpening,
-    NULLIFIER_TAG_A, NULLIFIER_TAG_B,
-    note_commitment, nullifier_a, nullifier_b,
+    TAG_COMMITMENT, TAG_ID_HASH, TAG_NULLIFIER,
+    note_commitment, nullifier,
     id_payload_a1, id_payload_a2, id_payload_b1,
     id_hash_a1, id_hash_a2, id_hash_b1,
     elgamal_encrypt, identity_keygen,
 )
+from alberta_buck.wallet import domains
 from alberta_buck.wallet.bn254 import point_to_words
 
 
@@ -56,10 +57,17 @@ def _opening(rho_offset: int = 0, v: int = 1_000_000_000_000_000_000,
     )
 
 
-def test_commitment_matches_poseidon5_directly():
-    """note_commitment IS Poseidon([flavor, v, rho, id_hash, predicate])."""
+def test_note_tags_are_the_registry_tags():
+    assert TAG_COMMITMENT == domains.field_tag(domains.NOTES_COMMITMENT)
+    assert TAG_NULLIFIER == domains.field_tag(domains.NOTES_NULLIFIER)
+    assert TAG_ID_HASH == domains.field_tag(domains.NOTES_ID_HASH)
+    assert len({TAG_COMMITMENT, TAG_NULLIFIER, TAG_ID_HASH}) == 3
+
+
+def test_commitment_matches_tagged_poseidon6_directly():
+    """note_commitment IS Poseidon([T_CM, flavor, v, rho, id_hash, predicate])."""
     o = _opening()
-    assert note_commitment(o) == poseidon([o.flavor, o.v, o.rho, o.id_hash, o.predicate])
+    assert note_commitment(o) == poseidon([TAG_COMMITMENT, o.flavor, o.v, o.rho, o.id_hash, o.predicate])
 
 
 def test_commitment_is_deterministic():
@@ -82,48 +90,27 @@ def test_commitment_changes_with_each_field():
 
 # --- nullifier exact match + domain separation ----------------------------
 
-def test_nullifier_b_matches_poseidon3_with_tag_4242():
+def test_nullifier_matches_tagged_poseidon3():
     rho, idh = 0xC0FFEE, 0xBEEF
-    assert nullifier_b(rho, idh) == poseidon([rho, idh, NULLIFIER_TAG_B])
-    assert NULLIFIER_TAG_B == 4242
-
-
-def test_nullifier_a_matches_poseidon3_with_tag_4243():
-    rho, idh = 0xC0FFEE, 0xBEEF
-    assert nullifier_a(rho, idh) == poseidon([rho, idh, NULLIFIER_TAG_A])
-    assert NULLIFIER_TAG_A == 4243
-
-
-def test_nullifier_a_and_b_disjoint_for_same_inputs():
-    """Different tag => different hash, so cross-flavor replay is impossible."""
-    rho, idh = 0xC0FFEE, 0xBEEF
-    assert nullifier_a(rho, idh) != nullifier_b(rho, idh)
+    assert nullifier(rho, idh) == poseidon([TAG_NULLIFIER, rho, idh])
 
 
 def test_nullifier_changes_with_id_hash():
-    rho = 0xC0FFEE
-    assert nullifier_a(rho, 1) != nullifier_a(rho, 2)
-    assert nullifier_b(rho, 1) != nullifier_b(rho, 2)
+    assert nullifier(0xC0FFEE, 1) != nullifier(0xC0FFEE, 2)
 
 
 def test_nullifier_changes_with_rho():
-    idh = 0xBEEF
-    assert nullifier_a(1, idh) != nullifier_a(2, idh)
-    assert nullifier_b(1, idh) != nullifier_b(2, idh)
+    assert nullifier(1, 0xBEEF) != nullifier(2, 0xBEEF)
 
 
 def test_nullifier_rejects_zero_rho():
     with pytest.raises(ValueError):
-        nullifier_a(0, 1)
-    with pytest.raises(ValueError):
-        nullifier_b(0, 1)
+        nullifier(0, 1)
 
 
 def test_nullifier_rejects_id_hash_outside_field():
     with pytest.raises(ValueError):
-        nullifier_a(1, F_R)
-    with pytest.raises(ValueError):
-        nullifier_b(1, F_R)
+        nullifier(1, F_R)
 
 
 # --- id_payload helpers (canonical word layout) ---------------------------
@@ -146,31 +133,28 @@ def test_id_payload_a2_layout():
 
 
 def test_id_payload_a1_layout():
-    E_note  = _make_ct()
-    sigma_R = mul(G1, 3)
-    words   = id_payload_a1(E_note, m_issuer=5, sigma_R=sigma_R, sigma_s=9)
-    assert len(words) == 8  # E_note(4) + m_iss(1) + sigma_R(2) + sigma_s(1)
+    E_note = _make_ct()
+    words  = id_payload_a1(E_note, m_issuer=5)
+    assert words == (*point_to_words(E_note.R), *point_to_words(E_note.C), 5)
 
 
 def test_id_payload_b1_layout():
-    sigma_R = mul(G1, 3)
-    words   = id_payload_b1(m_issuer=5, sigma_R=sigma_R, sigma_s=9)
-    assert len(words) == 4  # m_iss(1) + sigma_R(2) + sigma_s(1)
+    assert id_payload_b1(m_issuer=5) == (5,)
+    with pytest.raises(ValueError):
+        id_payload_b1(m_issuer=0)
 
 
 # --- id_hash helpers ------------------------------------------------------
 
 def test_id_hash_b1_collapses_to_single_field_element():
-    sigma_R = mul(G1, 3)
-    h = id_hash_b1(m_issuer=5, sigma_R=sigma_R, sigma_s=9)
+    h = id_hash_b1(m_issuer=5)
     assert 0 <= h < F_R
 
 
 def test_id_hash_a1_a2_collapse_to_single_field_element():
     E_note = _make_ct()
     E_iss  = _make_ct()
-    sigma_R = mul(G1, 3)
-    h_a1 = id_hash_a1(E_note, m_issuer=5, sigma_R=sigma_R, sigma_s=9)
+    h_a1 = id_hash_a1(E_note, m_issuer=5)
     h_a2 = id_hash_a2(E_note, E_iss, mul(G1, 13))
     assert 0 <= h_a1 < F_R
     assert 0 <= h_a2 < F_R
@@ -179,18 +163,20 @@ def test_id_hash_a1_a2_collapse_to_single_field_element():
 
 
 def test_id_hash_b1_deterministic_in_inputs():
-    sigma_R = mul(G1, 3)
-    a = id_hash_b1(m_issuer=5, sigma_R=sigma_R, sigma_s=9)
-    b = id_hash_b1(m_issuer=5, sigma_R=sigma_R, sigma_s=9)
-    assert a == b
-    # Single-field change perturbs the hash.
-    c = id_hash_b1(m_issuer=6, sigma_R=sigma_R, sigma_s=9)
-    assert a != c
+    assert id_hash_b1(m_issuer=5) == id_hash_b1(m_issuer=5)
+    assert id_hash_b1(m_issuer=5) != id_hash_b1(m_issuer=6)
 
 
-def test_id_hash_matches_poseidon_of_payload_words():
-    """The id_hash helpers ARE Poseidon over the canonical payload words mod F_R."""
-    sigma_R = mul(G1, 3)
-    pay = id_payload_b1(m_issuer=5, sigma_R=sigma_R, sigma_s=9)
-    assert id_hash_b1(m_issuer=5, sigma_R=sigma_R, sigma_s=9) == \
-           poseidon([w % F_R for w in pay])
+def test_id_hash_matches_tagged_poseidon_of_payload_words():
+    """The id_hash helpers ARE Poseidon over [T_ID, *payload words mod F_R]."""
+    E_note = _make_ct()
+    assert id_hash_b1(m_issuer=5) == poseidon([TAG_ID_HASH, 5])
+    pay = id_payload_a1(E_note, m_issuer=5)
+    assert id_hash_a1(E_note, m_issuer=5) == poseidon([TAG_ID_HASH] + [w % F_R for w in pay])
+
+
+def test_the_three_note_hashes_are_distinct_functions():
+    """Same-arity inputs never collide across uses: the leading tags differ."""
+    words = [1, 2, 3, 4, 5]
+    assert poseidon([TAG_COMMITMENT] + words) != poseidon([TAG_ID_HASH] + words)
+    assert nullifier(1, 2) != poseidon([TAG_ID_HASH, 1, 2])

@@ -231,7 +231,7 @@ class PrivacyWorld:
             issuer=party(note.issuer), depositor=party(note.payout),
             payout=self.accounts[note.payout].addr, opening=note.opening, cms=note.cms,
             nullifier=note.nullifier, issuer_sig=sig, binding=binding,
-            note=d["bearer"] if flavor == "b1" else d["delivery"],
+            note={} if flavor == "b1" else d["delivery"],
             timings=note.timings, raw=raw)
 
     def mailbox_binding(self):

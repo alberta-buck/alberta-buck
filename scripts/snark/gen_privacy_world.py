@@ -48,7 +48,9 @@ from alberta_buck.sim.cast import ASPEN, BOB, CAROL, CHAINID, KYC, UNIT
 from alberta_buck.wallet.bn254 import G1, ORDER, add, eq, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.elgamal import elgamal_encrypt
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.notes import FLAVOR_A1, FLAVOR_B1, NoteOpening, id_hash_b1, note_commitment, nullifier_b
+from alberta_buck.wallet.notes import (
+    FLAVOR_A1, FLAVOR_B1, TAG_ID_HASH, NoteOpening, id_hash_b1, note_commitment, nullifier,
+)
 from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
@@ -174,22 +176,11 @@ def build_world():
         return {"e": str(sig.e), "s": str(sig.s), "R": pt(sig.R),
                 "hBatch": str(batch_commitment(cms))}
 
-    def fresh_sigma():
-        """The in-note issuer pair (sigma_R, sigma_s).  No verifier reads it and no message is
-        defined for it yet; like the e2e worlds, fill it at random.  The batch Schnorr is what
-        authenticates a public issuer on chain."""
-        k = rand_scalar(rng)
-        return mul(G1, k), (k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
-
     # ---- B1: Aspen Mutual's bearer notes -------------------------------------------------------
-    b1_batch, b1_bearer = [], None
-    for i, face in enumerate(B1_BATCH):
-        sigma_R, sigma_s        = fresh_sigma()
+    b1_batch = []
+    for face in B1_BATCH:
         rho                     = rand_scalar(rng)
-        opening                 = NoteOpening(FLAVOR_B1, face * UNIT, rho, id_hash_b1(aspen["m"], sigma_R, sigma_s), 0)
-        b1_batch.append(opening)
-        if i == MINE:
-            b1_bearer = {"sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
+        b1_batch.append(NoteOpening(FLAVOR_B1, face * UNIT, rho, id_hash_b1(aspen["m"]), 0))
     b1_cms = [note_commitment(o) for o in b1_batch]
     all_cms += b1_cms
     b1_note = b1_batch[MINE]
@@ -220,9 +211,8 @@ def build_world():
         "flavor": FLAVOR_B1, "issuer": "aspen", "payout": "carol",
         "firstLeaf": 0, "index": MINE, "leafIndex": MINE,
         "batch": [opening_json(o) for o in b1_batch], "cms": [str(c) for c in b1_cms],
-        "bearer": b1_bearer,
         "issuerSchnorr": schnorr(b1_cms, accts["aspen"]),
-        "nullifier": str(nullifier_b(b1_note.rho, b1_note.id_hash)),
+        "nullifier": str(nullifier(b1_note.rho, b1_note.id_hash)),
         "depositor": {
             "eDepForIss": ct(eDepForIss),
             "db": {
@@ -240,32 +230,29 @@ def build_world():
     # ---- A1: Aspen Mutual's drafts, one payable to Carol ---------------------------------------
     a1_batch, a1_minted = [], None
     for i, face in enumerate(A1_BATCH):
-        sigma_R, sigma_s        = fresh_sigma()
         rho                     = rand_scalar(rng)
         if i == MINE:
             tape                = Tape(rng)
             minted              = mint_unilateral_a1(carol["M"], carol["pkRecv"], v=face * UNIT, rho=rho,
-                                                     m_issuer=aspen["m"], sigma_R=sigma_R, sigma_s=sigma_s,
-                                                     rng=tape)
-            a1_minted, a1_sigma, a1_tape = minted, (sigma_R, sigma_s), tape
+                                                     m_issuer=aspen["m"], rng=tape)
+            a1_minted, a1_tape  = minted, tape
         else:
             # Another customer's payee: a fictional Identity and mailbox.
             M_x, pk_x           = mul(G1, rand_scalar(rng)), mul(G1, rand_scalar(rng))
             minted              = mint_unilateral_a1(M_x, pk_x, v=face * UNIT, rho=rho, m_issuer=aspen["m"],
-                                                     sigma_R=sigma_R, sigma_s=sigma_s, rng=rng)
+                                                     rng=rng)
         a1_batch.append(minted.opening)
     a1_cms = [note_commitment(o) for o in a1_batch]
     all_cms += a1_cms
-    a1_delivery                 = deliver_a1(a1_minted, carol["pkRecv"], *a1_sigma)
+    a1_delivery                 = deliver_a1(a1_minted, carol["pkRecv"])
     a1_fold, a1_eEnc, a1_s      = fold_input("a1", a1_delivery, carol, accts["carol"], tree, aspen["m"],
                                              rng)
     notes["a1"] = {
         "flavor": FLAVOR_A1, "issuer": "aspen", "payout": "carol",
         "firstLeaf": len(b1_cms), "index": MINE, "leafIndex": len(b1_cms) + MINE,
         "batch": [opening_json(o) for o in a1_batch], "cms": [str(c) for c in a1_cms],
-        "sigma": {"sigma_R": pt(a1_sigma[0]), "sigma_s": str(a1_sigma[1])},
         "issuerSchnorr": schnorr(a1_cms, accts["aspen"]),
-        "nullifier": str(nullifier_b(a1_minted.opening.rho, a1_minted.opening.id_hash)),
+        "nullifier": str(nullifier(a1_minted.opening.rho, a1_minted.opening.id_hash)),
         "delivery": a1_delivery,
         "issuerSecrets": {"rNote": str(a1_minted.r_note), "rPrime": str(a1_minted.r_prime)},
         "eEnc": ct(a1_eEnc), "s": str(a1_s),
@@ -286,14 +273,14 @@ def build_world():
                                              None, rng)
     en, ei                      = ct_words_mod_fr(a2_minted.eNote), ct_words_mod_fr(a2_minted.eIss)
     tw                          = [w % F_R for w in point_to_words(a2_minted.binding.T)]
-    assert poseidon(en + ei + tw) == a2_minted.opening.id_hash, "idHash layout mismatch"
+    assert poseidon([TAG_ID_HASH] + en + ei + tw) == a2_minted.opening.id_hash, "idHash layout mismatch"
     bd = a2_minted.binding
     notes["a2"] = {
         "flavor": a2_minted.opening.flavor, "issuer": "bob", "payout": "carolSavings",
         "firstLeaf": len(b1_cms) + len(a1_cms), "index": 0,
         "leafIndex": len(b1_cms) + len(a1_cms),
         "batch": [opening_json(a2_minted.opening)], "cms": [str(c) for c in a2_cms],
-        "nullifier": str(nullifier_b(a2_minted.opening.rho, a2_minted.opening.id_hash)),
+        "nullifier": str(nullifier(a2_minted.opening.rho, a2_minted.opening.id_hash)),
         "delivery": a2_delivery,
         "a2Binding": {
             "eIss": ct(a2_minted.eIss),
@@ -389,7 +376,7 @@ def fold_input(flavor, delivery, carol, dep, tree, m_issuer, rng):
         fold = deposit_fold_a1_witness(
             witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
             e_note=opened.eNote, v=opened.opening.v, m_issuer=m_issuer,
-            sigma_R=opened.sigma_R, sigma_s=opened.sigma_s, r_note=opened.r_note, t=t_total,
+            r_note=opened.r_note, t=t_total,
             r_E=dep["r_E"], e_dep=dep["E"], pk_dep=dep["pk"], e_enc=eEnc,
             identity_root=tree.root())
     else:

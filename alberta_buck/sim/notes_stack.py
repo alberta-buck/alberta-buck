@@ -116,7 +116,7 @@ class E2EFixture:
     nullifier: int
     issuer_sig: Optional[SchnorrProof]        # B1/A1 batch Schnorr
     binding:    Optional[IssuerReencProof]    # A2 mint binding
-    note:      Dict[str, Any]                 # raw notePayload (eNote/eRec/eIss/sigma)
+    note:      Dict[str, Any]                 # raw notePayload (eNote/eRec/eIss/T)
     timings:   Dict[str, float]
     raw:       Dict[str, Any]                 # the full fixture JSON
 
@@ -167,7 +167,7 @@ class E2EFixture:
         for k, v in self.note.items():
             if k in ("eNote", "eRec", "eIss"):
                 out[k] = _ct(v)
-            elif k in ("sigma_R", "T"):
+            elif k == "T":
                 out[k] = _pt(v)
             else:
                 out[k] = int(v)
@@ -259,7 +259,6 @@ class E2EFixture:
         if self.flavor == "b1":
             return build_note_b1(
                 issuer_sig=self.issuer_sig,
-                sigma_R=_pt(np["sigma_R"]), sigma_s=int(np["sigma_s"]),
                 eDepForIss=_ct(self.raw["sigma"]["eDepForIss"]),
                 issuer_sk=iss.sk if role == "issuer" else None,
                 **kw)
@@ -267,7 +266,6 @@ class E2EFixture:
             return build_note_a1(
                 issuer_sig=self.issuer_sig,
                 eNote=_ct(np["eNote"]), eRec=_ct(np["eRec"]),
-                sigma_R=_pt(np["sigma_R"]), sigma_s=int(np["sigma_s"]),
                 **kw)
         return build_note_a2(
             issuer_E_addr=iss.E,
