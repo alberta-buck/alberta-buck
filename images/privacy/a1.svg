@@ -7,11 +7,11 @@
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
     <dc:date>2026-09-24</dc:date>
-    <dc:description>Carol → Bob: identity + receiving public key + evidence of their association | Bob: Carol's identity record; Carol's receiving key; Certified mailbox path | Mallory: Protected conversation; No mailbox association; No receiving secret | Carol: Seed + receiving secret; Public receiving key; Mailbox salt + path | BOB'S WALLET | Recomputes the mailbox leaf and checks its path against an accepted root. | The payer learns this association, not the separate secret spend-leaf opening.</dc:description>
+    <dc:description>Carol → Bob: her receiving key and the registry's evidence that it is hers | Bob: Carol's identity record; Carol's receiving key; Certified mailbox path | Mallory: Protected conversation; No mailbox link; No receiving secret | Carol: Seed + receiving secret; Public receiving key; Mailbox salt + path | BOB'S WALLET | Recomputes the mailbox entry; checks its path against the published root. | Bob learns this association, not the one Carol spends with.</dc:description>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
-      <dc:title>Matplotlib v3.10.5, https://matplotlib.org/</dc:title>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
      </cc:Agent>
     </dc:creator>
     <dc:rights>
@@ -46,7 +46,7 @@ Q 5.76 119.52 5.76 115.2
 L 5.76 29.52 
 Q 5.76 25.2 10.08 25.2 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 15.12 46.08 
@@ -59,7 +59,7 @@ Q 10.8 66.24 10.8 61.92
 L 10.8 50.4 
 Q 10.8 46.08 15.12 46.08 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 15.12 68.4 
@@ -72,7 +72,7 @@ Q 10.8 88.56 10.8 84.24
 L 10.8 72.72 
 Q 10.8 68.4 15.12 68.4 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_5">
     <path d="M 15.12 90.72 
@@ -85,7 +85,7 @@ Q 10.8 110.88 10.8 106.56
 L 10.8 95.04 
 Q 10.8 90.72 15.12 90.72 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_6">
     <path d="M 306.72 25.2 
@@ -98,7 +98,7 @@ Q 302.4 119.52 302.4 115.2
 L 302.4 29.52 
 Q 302.4 25.2 306.72 25.2 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #fff7eb; stroke: #cad7dc; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #fff7eb; stroke: #cad7dc; stroke-linejoin: miter"/>
    </g>
    <g id="patch_7">
     <path d="M 311.76 68.4 
@@ -111,7 +111,7 @@ Q 307.44 88.56 307.44 84.24
 L 307.44 72.72 
 Q 307.44 68.4 311.76 68.4 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_8">
     <path d="M 311.76 90.72 
@@ -124,7 +124,7 @@ Q 307.44 110.88 307.44 106.56
 L 307.44 95.04 
 Q 307.44 90.72 311.76 90.72 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_9">
     <path d="M 603.36 25.2 
@@ -137,7 +137,7 @@ Q 599.04 119.52 599.04 115.2
 L 599.04 29.52 
 Q 599.04 25.2 603.36 25.2 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
    </g>
    <g id="patch_10">
     <path d="M 608.4 68.4 
@@ -150,7 +150,7 @@ Q 604.08 88.56 604.08 84.24
 L 604.08 72.72 
 Q 604.08 68.4 608.4 68.4 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_11">
     <path d="M 608.4 90.72 
@@ -163,17 +163,17 @@ Q 604.08 110.88 604.08 106.56
 L 604.08 95.04 
 Q 604.08 90.72 608.4 90.72 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_12">
     <path d="M 834.642609 133.92 
 Q 432.000615 133.92 30.756163 133.92 
-" clip-path="url(#pbfec821c57)" style="fill: none; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
+" clip-path="url(#p3734d13d49)" style="fill: none; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
     <path d="M 35.556163 136.32 
 L 30.756163 133.92 
 L 35.556163 131.52 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #006c67; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
+" clip-path="url(#p3734d13d49)" style="fill: #006c67; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
    </g>
    <g id="patch_13">
     <path d="M 10.08 149.04 
@@ -186,112 +186,112 @@ Q 5.76 183.6 5.76 179.28
 L 5.76 153.36 
 Q 5.76 149.04 10.08 149.04 
 z
-" clip-path="url(#pbfec821c57)" style="fill: #edf1f5; stroke: #c9d2db; stroke-linejoin: miter"/>
+" clip-path="url(#p3734d13d49)" style="fill: #edf1f5; stroke: #c9d2db; stroke-linejoin: miter"/>
    </g>
    <g id="line2d_1">
     <path d="M 196.56 154.8 
 L 196.56 177.84 
-" clip-path="url(#pbfec821c57)" style="fill: none; stroke: #c9d2db; stroke-linecap: square"/>
+" clip-path="url(#p3734d13d49)" style="fill: none; stroke: #c9d2db; stroke-linecap: square"/>
    </g>
    <g id="text_1">
-    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="8.64" y="16.486875" transform="rotate(-0 8.64 16.486875)">BOB</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="8.64" y="16.195781" transform="rotate(-0 8.64 16.195781)">BOB</text>
    </g>
    <g id="text_2">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="14.4" y="40.03125" transform="rotate(-0 14.4 40.03125)">VERIFIES THE ADDRESSEE</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="14.4" y="39.837187" transform="rotate(-0 14.4 39.837187)">VERIFIES THE PAYEE</text>
    </g>
    <g id="text_3">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="60.130938" transform="rotate(-0 21.6 60.130938)">↳</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="59.856016" transform="rotate(-0 21.6 59.856016)">↳</text>
    </g>
    <g id="text_4">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="59.992969" transform="rotate(-0 33.84 59.992969)">Carol's identity record</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="59.726777" transform="rotate(-0 33.84 59.726777)">Carol's identity record</text>
    </g>
    <g id="text_5">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="82.450938" transform="rotate(-0 21.6 82.450938)">+</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="82.176016" transform="rotate(-0 21.6 82.176016)">+</text>
    </g>
    <g id="text_6">
-    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="82.248516" transform="rotate(-0 33.84 82.248516)">Carol's receiving key</text>
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="82.046777" transform="rotate(-0 33.84 82.046777)">Carol's receiving key</text>
    </g>
    <g id="text_7">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="104.770938" transform="rotate(-0 21.6 104.770938)">✓</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="104.496016" transform="rotate(-0 21.6 104.496016)">✓</text>
    </g>
    <g id="text_8">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="104.632969" transform="rotate(-0 33.84 104.632969)">Certified mailbox path</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="104.366777" transform="rotate(-0 33.84 104.366777)">Certified mailbox path</text>
    </g>
    <g id="text_9">
-    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="305.28" y="16.486875" transform="rotate(-0 305.28 16.486875)">MALLORY</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="305.28" y="16.195781" transform="rotate(-0 305.28 16.195781)">MALLORY</text>
    </g>
    <g id="text_10">
-    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="419.04" y="14.693281" transform="rotate(-0 419.04 14.693281)">OUTSIDE OBSERVER</text>
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="419.04" y="14.507305" transform="rotate(-0 419.04 14.507305)">OUTSIDE OBSERVER</text>
    </g>
    <g id="text_11">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="311.04" y="40.03125" transform="rotate(-0 311.04 40.03125)">CANNOT READ THE EXCHANGE</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="311.04" y="39.837187" transform="rotate(-0 311.04 39.837187)">CANNOT READ THE EXCHANGE</text>
    </g>
    <g id="text_12">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="60.130938" transform="rotate(-0 318.24 60.130938)">·</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="59.856016" transform="rotate(-0 318.24 59.856016)">·</text>
    </g>
    <g id="text_13">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="59.992969" transform="rotate(-0 330.48 59.992969)">Protected conversation</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="59.726777" transform="rotate(-0 330.48 59.726777)">Protected conversation</text>
    </g>
    <g id="text_14">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="82.450938" transform="rotate(-0 318.24 82.450938)">×</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="82.176016" transform="rotate(-0 318.24 82.176016)">×</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="82.312969" transform="rotate(-0 330.48 82.312969)">No mailbox association</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="82.046777" transform="rotate(-0 330.48 82.046777)">No mailbox link</text>
    </g>
    <g id="text_16">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="104.770938" transform="rotate(-0 318.24 104.770938)">×</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="104.496016" transform="rotate(-0 318.24 104.496016)">×</text>
    </g>
    <g id="text_17">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="104.632969" transform="rotate(-0 330.48 104.632969)">No receiving secret</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="104.366777" transform="rotate(-0 330.48 104.366777)">No receiving secret</text>
    </g>
    <g id="text_18">
-    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="601.92" y="16.486875" transform="rotate(-0 601.92 16.486875)">CAROL</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="601.92" y="16.195781" transform="rotate(-0 601.92 16.195781)">CAROL</text>
    </g>
    <g id="text_19">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="607.68" y="40.03125" transform="rotate(-0 607.68 40.03125)">PROVIDES A CERTIFIED LOCK</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="607.68" y="39.837187" transform="rotate(-0 607.68 39.837187)">LENDS A LOCK</text>
    </g>
    <g id="text_20">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="60.130938" transform="rotate(-0 614.88 60.130938)">·</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="59.856016" transform="rotate(-0 614.88 59.856016)">·</text>
    </g>
    <g id="text_21">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="627.12" y="59.992969" transform="rotate(-0 627.12 59.992969)">Seed + receiving secret</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="627.12" y="59.726777" transform="rotate(-0 627.12 59.726777)">Seed + receiving secret</text>
    </g>
    <g id="text_22">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="82.450938" transform="rotate(-0 614.88 82.450938)">+</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="82.176016" transform="rotate(-0 614.88 82.176016)">+</text>
    </g>
    <g id="text_23">
-    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="82.248516" transform="rotate(-0 627.12 82.248516)">Public receiving key</text>
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="82.046777" transform="rotate(-0 627.12 82.046777)">Public receiving key</text>
    </g>
    <g id="text_24">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="104.770938" transform="rotate(-0 614.88 104.770938)">+</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="104.496016" transform="rotate(-0 614.88 104.496016)">+</text>
    </g>
    <g id="text_25">
-    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="104.632969" transform="rotate(-0 627.12 104.632969)">Mailbox salt + path</text>
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="104.366777" transform="rotate(-0 627.12 104.366777)">Mailbox salt + path</text>
    </g>
    <g id="text_26">
     <g id="patch_14">
-     <path d="M 165.462969 141.934688 
-L 698.537031 141.934688 
-L 698.537031 124.465313 
-L 165.462969 124.465313 
+     <path d="M 176.702344 142.160547 
+L 687.297656 142.160547 
+L 687.297656 124.239453 
+L 176.702344 124.239453 
 z
 " style="fill: #ffffff"/>
     </g>
-    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #162c3b" x="432" y="137.063125" transform="rotate(-0 432 137.063125)">Carol → Bob: identity + receiving public key + evidence of their association</text>
+    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #162c3b" x="432" y="136.837266" transform="rotate(-0 432 136.837266)">Carol → Bob: her receiving key and the registry's evidence that it is hers</text>
    </g>
    <g id="text_27">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="17.28" y="169.63125" transform="rotate(-0 17.28 169.63125)">BOB'S WALLET</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="17.28" y="169.437188" transform="rotate(-0 17.28 169.437188)">BOB'S WALLET</text>
    </g>
    <g id="text_28">
-    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="208.08" y="163.841094" transform="rotate(-0 208.08 163.841094)">Recomputes the mailbox leaf and checks its path against an accepted root.</text>
+    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="208.08" y="163.607168" transform="rotate(-0 208.08 163.607168)">Recomputes the mailbox entry; checks its path against the published root.</text>
    </g>
    <g id="text_29">
-    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="208.08" y="178.241094" transform="rotate(-0 208.08 178.241094)">The payer learns this association, not the separate secret spend-leaf opening.</text>
+    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="208.08" y="178.007168" transform="rotate(-0 208.08 178.007168)">Bob learns this association, not the one Carol spends with.</text>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="pbfec821c57">
+  <clipPath id="p3734d13d49">
    <rect x="0" y="0" width="864" height="187.2"/>
   </clipPath>
  </defs>

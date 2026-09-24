@@ -133,6 +133,11 @@ class Note:
     def delivery(self) -> Optional[Dict[str, Any]]:
         return self.raw.get("delivery")
 
+    @property
+    def e_enc(self) -> Optional[ElGamalCiphertext]:
+        """An addressed spend's fresh envelope: the named identity, re-sealed to the mailbox."""
+        return _ct(self.raw["eEnc"]) if "eEnc" in self.raw else None
+
 
 class PrivacyWorld:
     """The privacy fixture world as wallet objects."""
@@ -392,10 +397,32 @@ class PrivacyChain(NotesStack):
     def transfer(self, sender: Acct, to: str, amount: int) -> Step:
         self._impersonate(sender.address)
         return self._send_from(self.buck.functions.transfer(to, amount), sender.address,
-                               f"{sender.label} transfers")
+                               f"{sender.label} transfers", event="Transfer",
+                               contract=self.buck)
 
     def balance(self, address: str) -> int:
         return self.buck.functions.balanceOf(address).call()
+
+    # -- receipts -------------------------------------------------------------------------------
+
+    def eoa_receipt(self, env: IdentityEnvelope, payee: Acct, step: Step, value: int, rng=None):
+        """The payee's AB-RCPT/2 receipt for a direct payment: names the payer through the
+        payer's approve envelope, which only the payee can open."""
+        from alberta_buck.wallet.build_receipt import build_eoa_priv
+        payer = env.sender
+        people = self.world.people
+        return build_eoa_priv(
+            self.world.chainid, self.contracts,
+            payer.addr, people[payer.owner].identity, payer.M, payer.pk, payer.E,
+            env.E, env.proof,
+            payee.addr, people[payee.owner].identity, payee.M, payee.pk, payee.sk, payee.E,
+            value=value, block_time=step.timestamp, txhash=step.txhash, block=step.block,
+            logindex=step.logindex, rng=rng or self.rng)
+
+    def note_receipt(self, flavor: str, role: str, mint: Step, spend: Step, rng=None):
+        """Either party's AB-RCPT/2 receipt for a note: ``recipient`` or ``issuer``."""
+        return self.world.fixture(flavor).build_receipt(
+            role, self.contracts, rng=rng or self.rng, **self.anchors(mint, spend))
 
     # -- notes ----------------------------------------------------------------------------------
 

@@ -7,11 +7,11 @@
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
     <dc:date>2026-09-24</dc:date>
-    <dc:description>Notes validates A1, consumes the marker and executes the payout | Bob: Known opening → marker; Completed spend located; Private payment receipt | Mallory: 100 → payout account; Time + proofs + marker; No mint handle supplied | Carol: All gates accepted; 100 BUCK credited; Receipt + chain anchor | NOTES / BUCK | Checks roots, freshness, flavour, face, payout, note proof and folded proof. | A1 omits B1's issuance commitment; participants can still recognise their note.</dc:description>
+    <dc:description>Notes validates the draft, consumes the marker and pays Carol | Bob: The draft he paid for; Cashed, by Carol; Receipt, if he wants | Mallory: 100 → an account; Time + proofs + marker; No note, no issuer | Carol: All checks passed; 100 BUCK credited; Receipt + chain anchor | NOTES / BUCK | Checks roots, standing, face, payout, note proof and folded proof. | No note handle: which of Aspen's four drafts is not on the chain.</dc:description>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
-      <dc:title>Matplotlib v3.10.5, https://matplotlib.org/</dc:title>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
      </cc:Agent>
     </dc:creator>
     <dc:rights>
@@ -46,7 +46,7 @@ Q 5.76 119.52 5.76 115.2
 L 5.76 29.52 
 Q 5.76 25.2 10.08 25.2 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 15.12 68.4 
@@ -59,7 +59,7 @@ Q 10.8 88.56 10.8 84.24
 L 10.8 72.72 
 Q 10.8 68.4 15.12 68.4 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 15.12 90.72 
@@ -72,7 +72,7 @@ Q 10.8 110.88 10.8 106.56
 L 10.8 95.04 
 Q 10.8 90.72 15.12 90.72 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_5">
     <path d="M 306.72 25.2 
@@ -85,7 +85,7 @@ Q 302.4 119.52 302.4 115.2
 L 302.4 29.52 
 Q 302.4 25.2 306.72 25.2 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #fff7eb; stroke: #cad7dc; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #fff7eb; stroke: #cad7dc; stroke-linejoin: miter"/>
    </g>
    <g id="patch_6">
     <path d="M 311.76 90.72 
@@ -98,7 +98,7 @@ Q 307.44 110.88 307.44 106.56
 L 307.44 95.04 
 Q 307.44 90.72 311.76 90.72 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_7">
     <path d="M 603.36 25.2 
@@ -111,7 +111,7 @@ Q 599.04 119.52 599.04 115.2
 L 599.04 29.52 
 Q 599.04 25.2 603.36 25.2 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
    </g>
    <g id="patch_8">
     <path d="M 608.4 46.08 
@@ -124,7 +124,7 @@ Q 604.08 66.24 604.08 61.92
 L 604.08 50.4 
 Q 604.08 46.08 608.4 46.08 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_9">
     <path d="M 608.4 68.4 
@@ -137,7 +137,7 @@ Q 604.08 88.56 604.08 84.24
 L 604.08 72.72 
 Q 604.08 68.4 608.4 68.4 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_10">
     <path d="M 608.4 90.72 
@@ -150,17 +150,17 @@ Q 604.08 110.88 604.08 106.56
 L 604.08 95.04 
 Q 604.08 90.72 608.4 90.72 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_11">
     <path d="M 845.28 152.076094 
 Q 845.28 136.797541 845.28 122.916531 
-" clip-path="url(#p92c2b16b26)" style="fill: none; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
+" clip-path="url(#p3042a2e06c)" style="fill: none; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
     <path d="M 842.88 127.716531 
 L 845.28 122.916531 
 L 847.68 127.716531 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #006c67; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #006c67; stroke: #006c67; stroke-width: 1.25; stroke-linecap: round"/>
    </g>
    <g id="patch_12">
     <path d="M 10.08 149.04 
@@ -173,112 +173,112 @@ Q 5.76 183.6 5.76 179.28
 L 5.76 153.36 
 Q 5.76 149.04 10.08 149.04 
 z
-" clip-path="url(#p92c2b16b26)" style="fill: #edf1f5; stroke: #c9d2db; stroke-linejoin: miter"/>
+" clip-path="url(#p3042a2e06c)" style="fill: #edf1f5; stroke: #c9d2db; stroke-linejoin: miter"/>
    </g>
    <g id="line2d_1">
     <path d="M 196.56 154.8 
 L 196.56 177.84 
-" clip-path="url(#p92c2b16b26)" style="fill: none; stroke: #c9d2db; stroke-linecap: square"/>
+" clip-path="url(#p3042a2e06c)" style="fill: none; stroke: #c9d2db; stroke-linecap: square"/>
    </g>
    <g id="text_1">
-    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="8.64" y="16.486875" transform="rotate(-0 8.64 16.486875)">BOB</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="8.64" y="16.195781" transform="rotate(-0 8.64 16.195781)">BOB</text>
    </g>
    <g id="text_2">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="14.4" y="40.03125" transform="rotate(-0 14.4 40.03125)">CAN RECOGNISE HIS PAYMENT</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="14.4" y="39.837187" transform="rotate(-0 14.4 39.837187)">CAN RECOGNISE IT</text>
    </g>
    <g id="text_3">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="60.130938" transform="rotate(-0 21.6 60.130938)">·</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="59.856016" transform="rotate(-0 21.6 59.856016)">·</text>
    </g>
    <g id="text_4">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="33.84" y="59.992969" transform="rotate(-0 33.84 59.992969)">Known opening → marker</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="33.84" y="59.726777" transform="rotate(-0 33.84 59.726777)">The draft he paid for</text>
    </g>
    <g id="text_5">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="82.450938" transform="rotate(-0 21.6 82.450938)">✓</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="82.176016" transform="rotate(-0 21.6 82.176016)">✓</text>
    </g>
    <g id="text_6">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="82.312969" transform="rotate(-0 33.84 82.312969)">Completed spend located</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="82.046777" transform="rotate(-0 33.84 82.046777)">Cashed, by Carol</text>
    </g>
    <g id="text_7">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="104.770938" transform="rotate(-0 21.6 104.770938)">+</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="104.496016" transform="rotate(-0 21.6 104.496016)">+</text>
    </g>
    <g id="text_8">
-    <text style="font-weight: 700; font-size: 16.075065px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="104.45292" transform="rotate(-0 33.84 104.45292)">Private payment receipt</text>
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="104.366777" transform="rotate(-0 33.84 104.366777)">Receipt, if he wants</text>
    </g>
    <g id="text_9">
-    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="305.28" y="16.486875" transform="rotate(-0 305.28 16.486875)">MALLORY</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="305.28" y="16.195781" transform="rotate(-0 305.28 16.195781)">MALLORY</text>
    </g>
    <g id="text_10">
-    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="419.04" y="14.693281" transform="rotate(-0 419.04 14.693281)">OUTSIDE OBSERVER</text>
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="419.04" y="14.507305" transform="rotate(-0 419.04 14.507305)">OUTSIDE OBSERVER</text>
    </g>
    <g id="text_11">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="311.04" y="40.03125" transform="rotate(-0 311.04 40.03125)">READS A POOL PAYOUT</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="311.04" y="39.837187" transform="rotate(-0 311.04 39.837187)">SEES A POOL PAYOUT</text>
    </g>
    <g id="text_12">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="60.130938" transform="rotate(-0 318.24 60.130938)">·</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="59.856016" transform="rotate(-0 318.24 59.856016)">·</text>
    </g>
    <g id="text_13">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="59.992969" transform="rotate(-0 330.48 59.992969)">100 → payout account</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="59.726133" transform="rotate(-0 330.48 59.726133)">100 → an account</text>
    </g>
    <g id="text_14">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="82.450938" transform="rotate(-0 318.24 82.450938)">·</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="82.176016" transform="rotate(-0 318.24 82.176016)">·</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="82.312969" transform="rotate(-0 330.48 82.312969)">Time + proofs + marker</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="82.046777" transform="rotate(-0 330.48 82.046777)">Time + proofs + marker</text>
    </g>
    <g id="text_16">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="104.770938" transform="rotate(-0 318.24 104.770938)">×</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="104.496016" transform="rotate(-0 318.24 104.496016)">×</text>
    </g>
    <g id="text_17">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="104.632969" transform="rotate(-0 330.48 104.632969)">No mint handle supplied</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="104.366777" transform="rotate(-0 330.48 104.366777)">No note, no issuer</text>
    </g>
    <g id="text_18">
-    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="601.92" y="16.486875" transform="rotate(-0 601.92 16.486875)">CAROL</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="601.92" y="16.195781" transform="rotate(-0 601.92 16.195781)">CAROL</text>
    </g>
    <g id="text_19">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="607.68" y="40.03125" transform="rotate(-0 607.68 40.03125)">RECEIVES; RETAINS EVIDENCE</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="607.68" y="39.837187" transform="rotate(-0 607.68 39.837187)">PAID; KEEPS EVIDENCE</text>
    </g>
    <g id="text_20">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="60.130938" transform="rotate(-0 614.88 60.130938)">✓</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="59.856016" transform="rotate(-0 614.88 59.856016)">✓</text>
    </g>
    <g id="text_21">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="59.992969" transform="rotate(-0 627.12 59.992969)">All gates accepted</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="59.726777" transform="rotate(-0 627.12 59.726777)">All checks passed</text>
    </g>
    <g id="text_22">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="82.450938" transform="rotate(-0 614.88 82.450938)">✓</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="82.176016" transform="rotate(-0 614.88 82.176016)">✓</text>
    </g>
    <g id="text_23">
-    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="82.312969" transform="rotate(-0 627.12 82.312969)">100 BUCK credited</text>
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="82.046777" transform="rotate(-0 627.12 82.046777)">100 BUCK credited</text>
    </g>
    <g id="text_24">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="104.770938" transform="rotate(-0 614.88 104.770938)">+</text>
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="104.496016" transform="rotate(-0 614.88 104.496016)">+</text>
    </g>
    <g id="text_25">
-    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="104.632969" transform="rotate(-0 627.12 104.632969)">Receipt + chain anchor</text>
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="627.12" y="104.366777" transform="rotate(-0 627.12 104.366777)">Receipt + chain anchor</text>
    </g>
    <g id="text_26">
     <g id="patch_13">
-     <path d="M 194.300781 141.934688 
-L 669.699219 141.934688 
-L 669.699219 124.465313 
-L 194.300781 124.465313 
+     <path d="M 207.928906 142.160547 
+L 656.071094 142.160547 
+L 656.071094 124.239453 
+L 207.928906 124.239453 
 z
 " style="fill: #ffffff"/>
     </g>
-    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #162c3b" x="432" y="137.063125" transform="rotate(-0 432 137.063125)">Notes validates A1, consumes the marker and executes the payout</text>
+    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #162c3b" x="432" y="136.837266" transform="rotate(-0 432 136.837266)">Notes validates the draft, consumes the marker and pays Carol</text>
    </g>
    <g id="text_27">
-    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="17.28" y="169.63125" transform="rotate(-0 17.28 169.63125)">NOTES / BUCK</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="17.28" y="169.437188" transform="rotate(-0 17.28 169.437188)">NOTES / BUCK</text>
    </g>
    <g id="text_28">
-    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="208.08" y="163.841094" transform="rotate(-0 208.08 163.841094)">Checks roots, freshness, flavour, face, payout, note proof and folded proof.</text>
+    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="208.08" y="163.607168" transform="rotate(-0 208.08 163.607168)">Checks roots, standing, face, payout, note proof and folded proof.</text>
    </g>
    <g id="text_29">
-    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="208.08" y="178.241094" transform="rotate(-0 208.08 178.241094)">A1 omits B1's issuance commitment; participants can still recognise their note.</text>
+    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="208.08" y="178.007168" transform="rotate(-0 208.08 178.007168)">No note handle: which of Aspen's four drafts is not on the chain.</text>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="p92c2b16b26">
+  <clipPath id="p3042a2e06c">
    <rect x="0" y="0" width="864" height="187.2"/>
   </clipPath>
  </defs>

@@ -111,8 +111,10 @@ class Card:
                 ax.plot([20, 1180], [y - 23, y - 23], color="#e4ebee", linewidth=0.8)
             face, color = _STYLE[f.protection]
             box(18, y - 15, 212, 30, face, face)
-            ax.text(124, y, _fit(f.badge("→"), 30), fontsize=11.5, color=color,
-                    fontweight="bold", ha="center", va="center", family="DejaVu Sans")
+            badge = _fit(f.badge("→"), 28)
+            ax.text(124, y, badge, fontsize=min(11.5, 11.5 * 19 / max(len(badge), 1)),
+                    color=color, fontweight="bold", ha="center", va="center",
+                    family="DejaVu Sans")
             ax.text(244, y, _fit(f.label, 26), fontsize=14, color=INK, fontweight="bold",
                     va="center", family="DejaVu Sans")
             ax.text(510, y, _fit(f.value, 33), fontsize=12.5, color=INK, va="center",
@@ -166,19 +168,19 @@ def bearer_code(rho: int) -> str:
 
 # ---- builders -----------------------------------------------------------------------------------
 
-def identity_record(fields: dict, holder: str, issuer: str = "Alberta's issuer") -> Card:
+def identity_record(fields: dict, holder: str, issuer: str = "issuer") -> Card:
     """The core record: M's preimage, fixed at first certification."""
     c = Card("CORE IDENTITY RECORD", f"held by {holder}",
              note="Fixed at first certification: the identity point M is its hash, for life.")
     for k, v in fields.items():
-        c.add(Field(k, str(v), "private", f"{holder}, {issuer}", "certified at enrolment"))
+        c.add(Field(k, str(v), "private", f"{holder} + {issuer}", "certified at enrolment"))
     return c
 
 
 def credential(cred, holder: str, issuer_name: str = "Alberta's issuer") -> Card:
     return Card("CREDENTIAL", f"issued to {holder}",
                 note="The raw signature never leaves the wallet; only masked presentations do.").add(
-        Field("identity scalar m", short_int(cred.m), "private", f"{holder}, issuer",
+        Field("identity scalar m", short_int(cred.m), "private", f"{holder} + issuer",
               "hash of the core record"),
         Field("signature", f"({short_point(cred.sigma.sigma_1)}, ..)", "secret", holder,
               f"{issuer_name}'s PS signature on m"),

@@ -154,7 +154,8 @@ class Observer:
             if typ.endswith("[]"):
                 return f"{len(v)} x {what}"
             if struct == "G1Point":
-                return f"{what} ({_short_int(v[0])}, {_short_int(v[1])})"
+                x, y = list(v.values()) if isinstance(v, dict) else v
+                return f"{what} ({_short_int(x)}, {_short_int(y)})"
             return what
         if typ == "bytes":
             return f"{len(v)} bytes" + (" (Groth16 proof)" if len(v) == 256 else "")

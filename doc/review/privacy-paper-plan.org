@@ -82,9 +82,9 @@ staff.  This file is the resume document: decisions, phases, status.
 | P1    | Privacy fixture world: builder, real proofs, Makefile target          | done   |
 | P2    | PrivacyChain on NotesStack; observer; tests                           | done   |
 | P3    | cards.py (payload anatomy, text + PNG), with tests                    | done   |
-| P4    | Paper rewrite: story, code per step, results                          | open   |
-| P5    | figures.json rewrite, re-render figures                               | open   |
-| P6    | Makefile doc-privacy (executable), docs target; render; commit        | open   |
+| P4    | Paper rewrite: story, code per step, results                          | done   |
+| P5    | figures.json: B1/A1 via Aspen Mutual; re-render                       | done   |
+| P6    | Makefile doc-privacy (executable), docs target; render; commit        | done   |
 | P7    | Particulars certificates (decision 7): module, tag, spec 8.4         | done   |
 
 * Findings
@@ -117,6 +117,15 @@ money to his everyday account, the payer in every flow, by one public transfer t
 as a visible link.  Carol has everyday and savings accounts.  No fee-payer designation: its
 acceptance emits DemurragePayerSet(account, payer), a public link; amounts display to the cent,
 where demurrage over the demonstration's minutes does not show.
+
+* Rendering
+
+- =make nix-venv-doc-privacy=: ~20 s, 29 pages, deterministic (two renders byte-identical).
+  Cards regenerate into =images/privacy/cards/= as the paper runs.
+- Footnotes are page-bottom footnotes (the draft's endnotes package is gone, at the author's
+  request).  Prose is ASCII; math symbols go in LaTeX math.  Receipts keep UTF-8 (names need
+  it); pdflatex with UTF-8 input renders their em dash and Latin accents.  Scripts beyond
+  Latin in a receipt would need a Unicode engine (lualatex + fontspec): an open question.
 
 * Notes
 
