@@ -796,6 +796,7 @@ traceable to their maker. Mallory can see that one of Aspen Mutual's notes was c
 account. Bob is nowhere in it.[fn:b1-link] Only coincidence connects him: an earlier 100 BUCK
 payment from his account to the credit union, and a 100 BUCK note cashed later. Among a credit
 union's thousands of members that says little; in a demonstration with one, it says a lot.
+Standard amounts blur it further, as the last section explains.
 
 #+LATEX: {\scriptsize
 #+BEGIN_SRC python
@@ -1497,6 +1498,10 @@ A few boundaries keep the claim honest:
   Notes accept an identity root up to seven days old.
 - *Behaviour leaks.* An unusual amount, a quiet pool, cashing the moment a note is minted, or
   paying gas from a linked account can suggest a connection the cryptography does not make.
+- *Habits help.* Standard amounts, like banknote denominations, make one note look like many.
+  An addressed note is safe to hold, so cashing it days later separates the cashing from the
+  minting. A bearer note is safer cashed promptly, so its cover is a busy issuer and a common
+  denomination.
 - *Keys matter.* Lose the seed and you lose the receiving key; leak it and old deliveries sealed
   to it can be read. A weakness in the underlying cryptography, or a compromised wallet, is
   outside these promises.

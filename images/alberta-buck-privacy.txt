@@ -798,7 +798,8 @@ B1.5. The pool checks everything and pays
   nowhere in it.[5] Only coincidence connects him: an earlier 100 BUCK
   payment from his account to the credit union, and a 100 BUCK note
   cashed later. Among a credit union's thousands of members that says
-  little; in a demonstration with one, it says a lot.
+  little; in a demonstration with one, it says a lot.  Standard amounts
+  blur it further, as the last section explains.
 
   ┌────
   │ b1_spend = chain.spend_note(b1)
@@ -1484,6 +1485,11 @@ What Mallory can join
   • *Behaviour leaks.* An unusual amount, a quiet pool, cashing the
     moment a note is minted, or paying gas from a linked account can
     suggest a connection the cryptography does not make.
+  • *Habits help.* Standard amounts, like banknote denominations, make
+    one note look like many.  An addressed note is safe to hold, so
+    cashing it days later separates the cashing from the minting. A
+    bearer note is safer cashed promptly, so its cover is a busy issuer
+    and a common denomination.
   • *Keys matter.* Lose the seed and you lose the receiving key; leak it
     and old deliveries sealed to it can be read. A weakness in the
     underlying cryptography, or a compromised wallet, is outside these
