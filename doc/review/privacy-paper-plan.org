@@ -85,7 +85,7 @@ staff.  This file is the resume document: decisions, phases, status.
 | P4    | Paper rewrite: story, code per step, results                          | open   |
 | P5    | figures.json rewrite, re-render figures                               | open   |
 | P6    | Makefile doc-privacy (executable), docs target; render; commit        | open   |
-| P7    | Particulars certificates (decision 7): module, tag, spec section      | open   |
+| P7    | Particulars certificates (decision 7): module, tag, spec 8.4         | done   |
 
 * Findings
 

@@ -467,6 +467,39 @@ knowledge, so the receiving authority never learns which prior leaf was
 cleared, would enforce it cryptographically; it conflicts with admission
 needing no proof ([[#admission]]) and is left to a later version.
 
+** 8.4 The core record and particulars certificates
+
+The certified record is M's preimage, so a field that can change cannot live
+in it: editing the record re-derives M, and every registration, receiving leaf,
+addressed Note and receipt made under the old M names a different point. The
+record is therefore a /core record/, fixed at first certification, and it
+=SHOULD= hold only facts that never change: the registry, a person number the
+registry never reuses (not a document number), the date of birth, the name at
+first certification, and the epoch of first certification. Test records whose
+fields read as document particulars are read this way; no vector changes.
+
+Free-form details that change -- a current legal name, a street address, a
+phone number, a photo, this year's licence number -- are /particulars/, held in
+a certificate the registry signs over M (=registry/particulars.py=):
+
+1. each particular is committed on its own, =keccak(IDENTITY_PARTICULAR_FIELD
+   || salt || name || value)= with a fresh 32-byte salt per field per version;
+2. the registry signs =keccak(IDENTITY_PARTICULARS || registry || M || version
+   || issued_at || sorted (name, commitment))= with its registry key;
+3. the holder keeps values and salts and discloses any subset; a verifier
+   checks the signature over the M it already trusts (from an approve, a
+   receipt or a verifiable decryption) and each disclosed value against its
+   commitment. An undisclosed commitment reveals nothing.
+
+A change is a new version. M, the registrations that encrypt it, the leaves
+that commit it, the Notes addressed to it and the receipts that name it are
+untouched, so nothing issued before the change stops working. A superseded
+version stays a true statement about its own date, which is what a receipt of
+that date should carry; whether a version is current is a question for the
+registry or a consumer's maximum age, as for every other standing. Categorical
+facts (a region, an age band) remain subtree memberships (8.3), because a
+membership proof shows the category without showing the certificate.
+
 * 9 Publication and witness updates
 :PROPERTIES:
 :CUSTOM_ID: publication

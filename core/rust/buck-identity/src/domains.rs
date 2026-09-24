@@ -22,6 +22,10 @@ pub fn word(tag: &[u8]) -> W256 {
 
 /// `m = keccak(IDENTITY_SCALAR || canonical record) mod ORDER`.
 pub const IDENTITY_SCALAR: &[u8] = b"AlbertaBuck/Identity/Scalar/v2";
+/// A registry's signature over an identity's current particulars, and each
+/// particular's own salted commitment (`alberta_buck/registry/particulars.py`).
+pub const IDENTITY_PARTICULARS: &[u8] = b"AlbertaBuck/Identity/Particulars/v2";
+pub const IDENTITY_PARTICULAR_FIELD: &[u8] = b"AlbertaBuck/Identity/ParticularField/v2";
 
 pub const FS_REGISTER: &[u8] = b"AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2";
 pub const FS_CONTRACT_BINDING: &[u8] =

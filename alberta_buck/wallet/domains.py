@@ -47,6 +47,12 @@ def word(tag: bytes) -> int:
 #: the system that maps a person into the group, and so the one most worth
 #: keeping out of any other protocol's range.
 IDENTITY_SCALAR                 = b"AlbertaBuck/Identity/Scalar/v2"
+#: A registry's signature over an identity's CURRENT particulars (name, address,
+#: photo...) hashes this ahead of M, the version and the field digests; each field
+#: is committed on its own under IDENTITY_PARTICULAR_FIELD with its own salt, so a
+#: holder can disclose one field without the others (registry/particulars.py).
+IDENTITY_PARTICULARS            = b"AlbertaBuck/Identity/Particulars/v2"
+IDENTITY_PARTICULAR_FIELD       = b"AlbertaBuck/Identity/ParticularField/v2"
 
 # ---- Fiat-Shamir transcripts, named by the contract that verifies them ------
 
@@ -122,7 +128,7 @@ RECEIPT_ENVELOPE                = "AB-RCPT/2"
 
 __all__ = [
     "word",
-    "IDENTITY_SCALAR",
+    "IDENTITY_SCALAR", "IDENTITY_PARTICULARS", "IDENTITY_PARTICULAR_FIELD",
     "FS_REGISTER", "FS_CONTRACT_BINDING", "FS_APPROVE", "FS_ISSUER_SCHNORR",
     "FS_ISSUER_REENC", "FS_DEPOSITOR_BINDING", "FS_VERIFIABLE_DECRYPT", "FS_IDENTITY_OPENING",
     "CONTRACT_BINDING_CONTROL",
