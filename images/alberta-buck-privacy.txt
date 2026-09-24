@@ -1,0 +1,870 @@
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                       THE ALBERTA BUCK — PRIVACY
+            A payment between citizens, seen from the middle
+
+                             Perry Kundert
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+                               2026-09-24
+
+
+A citizen should be able to prove who they are without wearing a name
+tag on every purchase. A counterparty should be able to keep an honest
+receipt.  A court should be able to examine evidence. These are
+compatible ambitions.
+
+Bob wants to pay Carol 100 BUCK. Mallory wants to watch. We will build
+the payment one layer at a time, beginning before either citizen has an
+account.
+
+Ethereum is an open ledger. Its addresses, transactions and token
+movements are observable. The privacy question is which observations can
+be joined: an account to a person, two accounts to one owner, or a
+payment into a pool to a payment out. Like a VPN or onion router, Notes
+introduce separation between endpoints. Here the separation comes from
+funded commitments and proofs, rather than a chain of packet relays. The
+result sought is /pseudonymity and compartmentalisation/: a public
+business account, private savings and everyday spending need not
+advertise their common owner or all their relationships. Encryption is a
+door. Privacy also needs walls.
+
+This paper describes the current v2 design and prototype, not an
+operating Alberta government service. Its credential privacy argument
+awaits independent review, and its development proof setups require
+production ceremonies before deployment. The illustrations assume honest
+certification, sound cryptography and wallets that retain their
+secrets.[1]
+
+
+How to read the pictures
+════════════════════════
+
+  Bob stays left, Carol right, Mallory in the middle. The lower strip
+  names the /separate/ issuer, wallet checker or blockchain contract
+  doing the work; Mallory is never the verifier merely because she
+  occupies the middle column.
+
+  Each picture carries forward the relevant contents of the last. A
+  /plus/ adds material, a /lock/ marks encrypted contents, an /opening
+  arrow/ exposes contents to their intended reader, and a /check/ marks
+  a completed check.  An arrow crossing Mallory's column gives her a
+  view of the traffic, not a decryption key. Her column says what she
+  can actually read or do.
+
+  We need only a few objects:
+
+  • A *record* contains the name and other certified particulars. Its
+    fixed encoding produces an identity fingerprint, called *M* in the
+    pictures.  A fingerprint lets a wallet check a record; it does not
+    spell out a name.
+  • A *credential* is the issuer's signature on that identity. Its
+    private original stays in the wallet; a *presentation* proves
+    possession without publishing the original.
+  • An *envelope* is encrypted data. A *proof* lets a checker verify a
+    particular fact about its contents without opening it.
+  • A *commitment* is a sealed description with a short public
+    fingerprint.  Its *opening* supplies the hidden contents and
+    randomness. A *spent marker* records redemption once, without
+    normally identifying the commitment.
+  • A *membership root* is a published summary of certified records. A
+    *path* connects one record to that summary; a private membership
+    proof can establish the connection while hiding the record and path.
+
+  The three Notes stories are alternatives for the same payment, not
+  conversions of B1 into A1 into A2. We give the 100-BUCK note a place
+  in a 500-BUCK batch so that minting does not announce its individual
+  value.  Earlier disclosures are never erased by changing note style.
+
+
+First, give the person a credential
+═══════════════════════════════════
+
+I1. Alberta's issuer meets Bob; separately, it meets Carol
+──────────────────────────────────────────────────────────
+
+  Each applicant provides the evidence the issuer requires. The issuer
+  checks it and prepares a consistently encoded identity record. Bob and
+  the issuer know Bob's record. Carol's enrollment is a separate
+  conversation.
+
+  Mallory may notice an appointment or a network connection. A protected
+  enrollment channel keeps the submitted documents out of that
+  observation.  Cryptography preserves the issuer's statement; the
+  quality of the original identity check remains the issuer's
+  responsibility.
+
+  <file:images/privacy/i1.png>
+
+
+I2. The issuer returns a signed credential
+──────────────────────────────────────────
+
+  The issuer fingerprints the canonical record and signs it. Each
+  citizen receives the record and credential through protected delivery,
+  and checks the signature against the issuer's recognised public
+  key. The issuer keeps its own issuance evidence. The raw credential is
+  not published on Ethereum.
+
+  This is certification, not an account password. The issuer already
+  knows the identity it certified. The objective is to avoid giving it a
+  new test for recognising every future account carrying that identity.
+
+  <file:images/privacy/i2.png>
+
+
+I3. The citizen makes the keys
+──────────────────────────────
+
+  At enrollment, each wallet derives an independent *receiving secret*
+  from its owner's secret seed, using a dedicated key-derivation
+  domain. Only the public receiving key is available to payers. The seed
+  restores the private key; an identity record cannot. A photocopy of
+  your identification should not open your mail.
+
+  Enrollment also certifies the identity-to-mailbox association in
+  salted commitments. One supports later private spending proofs; a
+  separate one lets a payer check the public receiving key. Different
+  salts keep the two records from being trivially matched. The seed and
+  receiving secret stay with the citizen. Authorities know the
+  associations they certify; public observers see hiding records and
+  their published root.[2]
+
+  <file:images/privacy/i3.png>
+
+
+I4. The wallet packages a fresh account
+───────────────────────────────────────
+
+  An externally owned account, or *EOA*, has an Ethereum signing
+  key. BUCK adds a separate identity encryption key for that
+  account. Neither is the Notes receiving secret.[3]
+
+  Bob's wallet encrypts his identity fingerprint under his new identity
+  key.  It adds a freshly masked credential presentation and a proof:
+  /this is a certified identity, this envelope contains that identity,
+  and I hold the corresponding identity key/. Bob's EOA signs the
+  registration transaction.  Carol does the same. The credential's
+  original signature stays private.
+
+  <file:images/privacy/i4.png>
+
+
+I5. The registry checks the package, without opening it
+───────────────────────────────────────────────────────
+
+  The registry checks the issuer, proof and key ownership, including the
+  specific account, chain, registry and action to which the proof
+  belongs.  It stores the account's public identity key, ciphertext and
+  issuer. The transaction history retains the presentation and proof.
+
+  Bob can repeat this locally with fresh keys and randomness. The
+  design's credential presentation gives Mallory no identity-equality
+  test between accounts, even if she later learns Bob's record. Funding
+  links, reused addresses and network observations are separate
+  clues. Fresh cryptography does not make an old public connection
+  disappear.
+
+  <file:images/privacy/i5.png>
+
+
+Now, pay between two EOA accounts
+═════════════════════════════════
+
+  Here Bob and Carol use private-identity accounts. They first establish
+  identity evidence in both directions, then Bob authorises the payment.
+  The chain will see the payment between their addresses. The envelopes
+  protect the identities inside that visible relationship.
+
+
+E1. Bob addresses an identity envelope to Carol
+───────────────────────────────────────────────
+
+  Bob reads Carol's registered public identity key and makes a fresh
+  encryption of his own fingerprint for her. He adds a proof that its
+  contents match his registered identity, and calls BUCK's
+  identity-bearing `approve'.
+
+  For this direct `transfer' example, the spending allowance is
+  *zero*. This creates the identity evidence without giving Carol
+  permission to withdraw Bob's funds. A nonzero allowance would
+  additionally authorise delegated spending up to that amount. Identity
+  disclosure and authority to move money are distinct jobs, even when an
+  API can do both.
+
+  <file:images/privacy/e1.png>
+
+
+E2. The contract verifies the envelope's provenance
+───────────────────────────────────────────────────
+
+  The checker uses Bob's existing registry record, not a replacement
+  supplied by the request. It verifies possession of Bob's identity key
+  and that the new encryption carries the same identity under Carol's
+  key.
+
+  BUCK records a fingerprint of the checked envelope. The envelope and
+  proof remain available in the transaction's public input data. Mallory
+  can copy them, but cannot replace Bob's identity with another person's
+  and preserve the proof. Carol now has something worth opening.
+
+  <file:images/privacy/e2.png>
+
+
+E3. Carol opens the envelope and checks the name
+────────────────────────────────────────────────
+
+  Carol decrypts with her account's private identity key. Out comes
+  Bob's fingerprint, *M_B*. Bob separately delivers his canonical
+  identity record over an authenticated, encrypted data channel. Carol
+  fingerprints that record and compares it with the decrypted point.
+
+  The proof answers /is this the identity bound to Bob's account?/ The
+  record answers /whose identity is it?/ Both must agree. Ethereum
+  cannot itself ensure that a human-readable record was delivered. The
+  wallet checks delivery before accepting the relationship. Holochain is
+  the companion papers' proposed data channel; the diagram does not
+  assume a deployed hApp.
+
+  <file:images/privacy/e3.png>
+
+
+E4. Carol returns the same assurance
+────────────────────────────────────
+
+  Carol encrypts her identity for Bob, supplies the corresponding proof
+  and establishes the reverse receipt fragment, again with allowance
+  zero. She sends her record privately; Bob opens the envelope and
+  checks the match.
+
+  The construction now contains two checked directions. Each citizen has
+  received a certified identity record. Mallory has observed two
+  approvals between addresses. No payment has happened yet. Recognising
+  someone is not the same as paying them.
+
+  <file:images/privacy/e4.png>
+
+
+E5. Bob signs the payment; the contract executes it
+───────────────────────────────────────────────────
+
+  Bob's EOA signs `transfer(Carol, 100)'. BUCK checks the registered
+  endpoints, both identity directions and available funds, then executes
+  the transfer and emits its receipt references. The wallets retain the
+  identity records, proofs and confirmed payment reference together.
+
+  Mallory sees the two addresses, 100 BUCK and the time. Learning who
+  owns either address elsewhere can identify this activity. The gain
+  here is confidential identity binding. The next gain is separating the
+  payment's two ends.[4]
+
+  <file:images/privacy/e5.png>
+
+
+The Notes pool is also a participant
+════════════════════════════════════
+
+N1. Establish the pool relationship
+───────────────────────────────────
+
+  Notes hold BUCK in a contract and pay it out when the required proofs
+  pass.  The BUCK transfers into and out of that pool retain the
+  ordinary identity rules. A private Bob identifies himself to the pool
+  before funding it; private Carol does so before receiving its
+  payout. They use the same envelope-and-proof procedure just
+  illustrated.
+
+  The pool operator holds the identity key bound to the pool and can
+  decrypt these approvals. It can associate identities with direct pool
+  activity.  This is an institutional privacy boundary, not an invisible
+  intermediary.  A1 and A2 still avoid publishing an exact
+  note-to-redemption link; the operator's records and timing clues must
+  be considered separately.[5]
+
+  <file:images/privacy/n1.png>
+
+
+B1: a bearer note from a public issuer
+══════════════════════════════════════
+
+  Bob writes the note; he is now the /note issuer/. Alberta remains the
+  /identity issuer/. These are different roles.
+
+  For B1 and A1, Bob uses a publicly identified note-issuing contract
+  under his control: his “note desk.” This matches the current
+  public-issuer contract-binding interface; ordinary EOA registration
+  does not itself switch on a public-identity flag.[6]
+
+
+B1.1. Bob prepares a bearer opening
+───────────────────────────────────
+
+  Bob chooses the 100-BUCK face value and a fresh random opening
+  secret. He packages the note's B1 style, value and public-issuer
+  material into a commitment. His registered identity key authenticates
+  the batch.
+
+  There is no recipient lock yet. Whoever obtains the complete bearer
+  opening can seek redemption, provided they meet the identity
+  requirements.  Bob's published identity lets a future holder know who
+  wrote it.
+
+  <file:images/privacy/b1.png>
+
+
+B1.2. Funding turns the draft into a note
+─────────────────────────────────────────
+
+  Bob's desk submits the commitments, issuer signature and batch-mint
+  proof.  The proof establishes that the committed values add to 500
+  BUCK and that the commitments extend the current note tree
+  correctly. The contract checks the public-issuer mode and signature,
+  and pulls the funding.
+
+  Funding and insertion succeed together or revert together. Mallory
+  sees the issuer, total, batch size and commitments. She does not
+  receive the individual openings. A convincing picture of a note would
+  not establish any of these facts.
+
+  <file:images/privacy/b2.png>
+
+
+B1.3. Carol receives and inspects the bearer package
+────────────────────────────────────────────────────
+
+  Bob hands Carol the opening and mint reference, physically or through
+  protected delivery. Her wallet reconstructs the commitment,
+  authenticates the mint and issuer, and checks whether its spent marker
+  has appeared.
+
+  Here interception is theft-enabling: Mallory with a copied opening and
+  an eligible account can race Carol. Bob can retain a copy too. The
+  check says /unspent now/, not /reserved for Carol/. Bearer delivery is
+  convenient precisely because possession carries authority; copies
+  inherit it.
+
+  <file:images/privacy/b3.png>
+
+
+B1.4. Carol adds an envelope identifying the depositor
+──────────────────────────────────────────────────────
+
+  Carol derives the spent marker from her opening and prepares a
+  note-spend proof. She also encrypts her own identity for Bob's
+  registered issuer key.  A binding proof ties that envelope to the
+  identity in her payout account; a membership proof establishes current
+  certification of that same identity.
+
+  Those checks share a properly blinded identity commitment. Mallory
+  cannot substitute a convenient certified person in one check and a
+  different person in the other. Carol's separate approval to the pool
+  from N1 is also in place before payout.
+
+  <file:images/privacy/b4.png>
+
+
+B1.5. The contract checks the layers and pays
+─────────────────────────────────────────────
+
+  Notes verifies that this is a funded /B1/ note, that its marker is
+  unused, that the named issuer is the original issuer, and that Carol's
+  identity binding and sufficiently recent membership proof pass. It
+  records the marker and pays 100 BUCK atomically. A second redemption
+  fails.
+
+  The current B1 interface supplies the *exact issuance commitment*
+  publicly to authenticate the issuer. Mallory can therefore link this
+  redemption to its mint. Carol's private identity remains encrypted,
+  but the mint-to-payout edge does not. This distinction is essential to
+  the comparison.[7]
+
+  <file:images/privacy/b5.png>
+
+
+B1.6. Bob opens the depositor's envelope
+────────────────────────────────────────
+
+  Bob reads the spend event and decrypts Carol's identity point. A
+  verifiable decryption proof lets him substantiate what it contains
+  without handing over his private key. A separately delivered canonical
+  record, or an authorised match against issuer records, supplies the
+  human name.
+
+  Until that record is available, he has a certified point, not a
+  complete named receipt. The evidence concerns Bob and the final
+  depositor. B1 may have passed through other hands; those handoffs are
+  not magically written into its blockchain history.
+
+  <file:images/privacy/b6.png>
+
+
+A1: address the note to Carol
+═════════════════════════════
+
+  A1 adds a recipient. Bob remains publicly identified, but a copied
+  note package is no longer a bearer authorisation. Carol can redeem
+  through a registered account of her identity without giving Bob its
+  address in advance. Her mailbox and her payout account do different
+  jobs.
+
+
+A1.1. Carol supplies a certified public receiving key
+─────────────────────────────────────────────────────
+
+  Carol sends Bob her identity record, public receiving key and evidence
+  of their certified association. Bob checks the mailbox commitment's
+  salt and path against an authenticated, acceptable root before paying.
+
+  This is a private disclosure to Bob. It lets him recognise that
+  mailbox association, so it belongs in his confidential records. Its
+  salt differs from the hidden spending association's salt. Neither the
+  receiving secret nor Carol's seed travels. A public key is the lock
+  she lends him, not the key that opens it.
+
+  <file:images/privacy/a1.png>
+
+
+A1.2. Bob adds Carol's lock
+───────────────────────────
+
+  Bob encrypts the value for Carol's receiving key. The note's committed
+  identity payload combines that encrypted value with his public issuer
+  material. The delivery also carries an encryption of Carol's identity
+  for her own mailbox.
+
+  The opening secret, value and value-encryption randomness travel as
+  separately masked fields in the delivery blob. Bob can construct the
+  masks from his fresh encryption randomness and Carol's public
+  key. Carol can reconstruct them with her private receiving secret. A
+  courier can do neither.
+
+  <file:images/privacy/a2.png>
+
+
+A1.3. Mint, then deliver the funded package
+───────────────────────────────────────────
+
+  The same batch funding checks run, this time for addressed notes from
+  a public issuer. Once the mint is confirmed, Bob supplies Carol with
+  the delivery blob, issuer evidence and mint reference.
+
+  Mallory sees 500 BUCK enter the pool and may intercept the blob. The
+  wrapped opening prevents her from computing this note's spent marker
+  or reading its value from that package. Endpoint and traffic
+  observations remain possible. Transport privacy still has work to do.
+
+  <file:images/privacy/a3.png>
+
+
+A1.4. Carol takes the package apart
+───────────────────────────────────
+
+  Her receiving secret opens the masked fields. Her wallet checks that
+  the value ciphertext contains 100, that the supplied randomness fits,
+  and that the recovered opening reconstructs a commitment in the
+  authenticated mint.  It checks Bob's public-issuer evidence and the
+  spent status too.
+
+  Each wrapper has now served its purpose: delivery protection becomes
+  private witness material in Carol's wallet. A wrong key or altered
+  field fails the relevant consistency checks. Bob's retained opening
+  still cannot satisfy Carol's identity-and-mailbox spending
+  requirement.
+
+  <file:images/privacy/a4.png>
+
+
+A1.5. Prove that the pieces belong to one citizen
+─────────────────────────────────────────────────
+
+  Carol chooses her submitting account and prepares two proofs: one for
+  the funded note and one /folded/ proof joining the identity
+  conditions. The latter checks that her receiving secret opens this
+  note, her account holds the matching identity, and a certified hidden
+  leaf binds that identity to that receiving secret. A1 also checks the
+  encrypted value against the public payout amount.
+
+  The proofs share the note's spent marker. Showing “I have a key”
+  beside “I have an identity” would not be enough. The checked
+  association makes them belong to the same citizen.[8]
+
+  <file:images/privacy/a5.png>
+
+
+A1.6. Redeem without publishing the mint handle
+───────────────────────────────────────────────
+
+  Notes checks both proofs, their roots, the A1 style, face, payout
+  address and unused marker. BUCK's pool-to-recipient identity checks
+  also apply.  The operation consumes the marker and pays 100; any
+  failure reverts the state changes.
+
+  A1 supplies no exact issuance commitment at spend. Mallory sees the
+  payout account, amount and time, with no explicit mint handle to join.
+  Bob and Carol can still derive the marker from their retained opening
+  and recognise this payment. Privacy from a stranger need not mean
+  amnesia for the participants.
+
+  <file:images/privacy/a6.png>
+
+
+A2: put Bob's identity inside the envelope too
+══════════════════════════════════════════════
+
+  A2 keeps the addressed protection and makes the note issuer's identity
+  private. Read this as an alternative using an appropriately separate
+  private account. Publishing Bob's name in the B1 story did not become
+  reversible when we turned the page.
+
+
+A2.1. Add a private issuer envelope and a key tie
+─────────────────────────────────────────────────
+
+  Bob uses Carol's already verified mailbox key. Alongside the encrypted
+  value, he encrypts /his own identity/ for that mailbox. An
+  issuer-binding proof connects this envelope to his registered account
+  while hiding the receiving key.
+
+  He also adds a blinded *key tie*, labelled *T*. The note commits to T
+  together with its ciphertexts. Later this ties the key used in the
+  issuer proof to the key Carol actually holds. Without it, an honest
+  recipient could be tricked into naming the wrong certified identity.
+
+  <file:images/privacy/p1.png>
+
+
+A2.2. Seal the tools needed to open and prove it
+────────────────────────────────────────────────
+
+  Carol needs more than ciphertexts. Her eventual proof needs the
+  opening secret, value, issuer-encryption randomness, Bob's separate
+  naming salt and the secret that opens T. Bob wraps each field with a
+  distinct mask derived from the value envelope's shared encryption
+  material.
+
+  That protects the construction's seams. Sending the issuer randomness
+  or T's opening in the clear would reveal Bob through another
+  route. Sending the naming salt openly would help test his
+  membership. The outer package must protect its inner tools as
+  carefully as its apparent message.
+
+  <file:images/privacy/p2.png>
+
+
+A2.3. The mint verifies Bob's claim and escrows the batch
+─────────────────────────────────────────────────────────
+
+  Notes checks value conservation, insertion into the current note tree,
+  the private-issuer mode and Bob's issuer-binding proof. The mint proof
+  also ties the checked ciphertexts and T to the committed
+  notes. Funding and insertion remain atomic.
+
+  Mallory sees Bob's minting /address/, 500 BUCK, commitments, encrypted
+  issuer material and blinded proofs. A2 conceals the issuer's identity
+  inside those objects; it does not conceal which address submitted
+  them.  Anyone who already knows that address belongs to Bob keeps that
+  knowledge.
+
+  <file:images/privacy/p3.png>
+
+
+A2.4. Carol unwraps, decrypts and cross-checks
+──────────────────────────────────────────────
+
+  Bob delivers the blob with the full mint evidence and his identity
+  record over protected communication. Carol unwraps it with her
+  receiving secret, checks the value and opening, and reconstructs the
+  funded commitment.
+
+  She decrypts Bob's point, compares his canonical record, and checks T
+  against her actual receiving key. Bob's naming salt lets her locate
+  and prove his separate certified naming association. It exposes that
+  association to Carol; it does not give her Bob's receiving secret or
+  his other salts. The distinction is deliberate and worth preserving in
+  backups.
+
+  <file:images/privacy/p4.png>
+
+
+A2.5. Join the extra checks into the spend proof
+────────────────────────────────────────────────
+
+  Carol builds the addressed fold with her account identity, receiving
+  secret and certified association. A2 adds two checks: the decrypted
+  issuer is a member of the accepted identity tree, and T opens using
+  /Carol's own/ receiving key.
+
+  The first prevents a spendable note that names an uncertified invented
+  point. The second prevents one that names a different certified
+  person.  “Someone certified” and “the person who wrote this note” are
+  different claims. The proof needs both, and binds them to the same
+  note marker.
+
+  <file:images/privacy/p5.png>
+
+
+A2.6. Rewrap for the public spend; then execute
+───────────────────────────────────────────────
+
+  Carol produces a /fresh/ encryption of the same issuer identity for
+  her mailbox. Her proof checks its relationship to the original
+  note. Publishing the original mint envelope again would hand Mallory
+  an exact match.
+
+  Notes verifies the funded note, unused marker, correct style, accepted
+  roots and complete folded statement, then pays Carol atomically. The
+  original envelope, T and private paths remain inside the proof's
+  hidden inputs. Mallory sees 100 BUCK leave for an address, together
+  with fresh ciphertext and proofs. She still has timing and amount
+  clues, not a newly published exact mint handle.
+
+  <file:images/privacy/p6.png>
+
+
+A2.7. Keep a useful receipt
+───────────────────────────
+
+  Both parties retain their identity records, note opening, relevant
+  proofs and confirmed chain references. Bob's evidence comes from his
+  mint randomness and Carol's certified mailbox association. Carol can
+  prove what she decrypted without disclosing her receiving secret; her
+  receipt also checks the issuer binding and T.
+
+  A receipt reader learns the disclosed names and this payment's links.
+  They do not thereby receive either citizen's credential or wallet
+  keys.  The current full-record receipt carries more identity data than
+  its short printed label suggests; encoding it as a blob is not
+  encryption. Keep it as deliberately as any other private financial
+  record.[9]
+
+  <file:images/privacy/p7.png>
+
+
+Private commerce, usable evidence
+═════════════════════════════════
+
+R1. Disclose the relevant record
+────────────────────────────────
+
+  A dispute can start with an ordinary citizen producing a receipt. An
+  auditor or investigator acting under the applicable legal process can
+  seek relevant records from a participant or another holder of the
+  evidence.  Here Carol supplies a selected receipt and decryption
+  proof. She need not give away her seed or receiving secret to
+  establish what that envelope said.
+
+  This is a design for evidence held by people who actually took part.
+  Institutions also hold their direct relationships, as N1
+  showed. Privacy does not depend on pretending those records do not
+  exist.
+
+  <file:images/privacy/r1.png>
+
+
+R2. Check the record; let people judge the case
+───────────────────────────────────────────────
+
+  The reviewer first checks internal consistency: names match identity
+  fingerprints, proofs fit their envelopes, and the note opening matches
+  the claimed payment. Then authenticated chain records establish that
+  the registration, mint and successful spend actually occurred. A
+  plausible offline packet alone does not prove a payment happened.
+
+  Bob can examine the same evidence and offer context or contest its
+  use.  Certification quality, compromised keys and human intent remain
+  questions for investigation and adjudication. A signature is evidence
+  of key use, not a verdict. Good cryptography gives civil governance
+  better facts to work with while leaving citizens room to conduct
+  ordinary private commerce.
+
+  <file:images/privacy/r2.png>
+
+
+What Mallory can join
+═════════════════════
+
+  The practical gain is choice over relationships, not an invisible
+  ledger.  This table concerns a stranger with chain access and no
+  participant secrets.  Public identity records and outside knowledge
+  can add to her view.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Payment     Public connection                                                      Identity disclosure                                              Who can recognise the note?                                                 
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Direct EOA  Exact sending and receiving addresses; amount                          Private names in bilateral envelopes                             Participants; anyone with an address-to-name link can attach it             
+   B1          Exact mint commitment at redemption; public issuer; payout and amount  Issuer public; depositor encrypted for issuer                    Public observers link mint and spend; opening holders can also recognise it 
+   A1          Public mint and payout records; no exact mint handle at spend          Issuer public; recipient privately bound                         Opening holders; outsiders retain timing and value clues                    
+   A2          Public mint and payout records; fresh ciphertext at spend              Both identities concealed from an otherwise uninformed outsider  Opening holders; outsiders retain timing and value clues                    
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  An individual can use A2 to move value between accounts of their own
+  identity. It removes the direct address-to-address transfer edge that
+  an ordinary transfer would publish. Reusing an address still links
+  activity on that address. A distinctive amount, a sparse pool,
+  immediate redemption, common gas funding or observable delivery can
+  suggest links across accounts.  Cryptographic independence is useful;
+  operational independence must accompany it.
+
+  Five boundaries make the positive claim precise:
+
+  • *Counterparties know their own dealings.* A note issuer retains its
+    openings and can recognise their eventual spends. Disclosure of a
+    receipt shares some of those links. It is not a general view into
+    the other citizen's accounts.
+  • *Certification is a public responsibility.* An issuer knows its
+    clients and can issue credentials; a dishonest issuer can falsely
+    certify or duplicate an identity. Hiding presentations limit
+    recognition of honest holders' registrations, not the issuer's power
+    to lie.
+  • *Current standing is a governed fact.* Membership authorities can
+    remove an association; accepted older roots provide a bounded
+    transition window.  Notes currently accepts retained roots up to
+    seven days old. This affects eligibility without publishing all the
+    holder's accounts. Ordinary EOA transfer checks do not themselves
+    impose this fresh-membership test.
+  • *Intermediaries have a view.* Pool operators, custodial wallets and
+    data services can accumulate their direct observations. Their
+    security and retention practices matter. Notes does not promise that
+    one compromised institution can never disclose many customers.
+  • *Secrets require recovery and care.* The seed restores the receiving
+    key; the identity record does not. A leaked long-lived receiving
+    secret exposes addressed material available under that key,
+    including old deliveries.  A new account alone does not replace
+    it. Complete wallet compromise and future breaks of the underlying
+    cryptography remain outside these promises.
+
+  The useful arrangement is modest: let strangers verify that the rules
+  were followed, let citizens recognise and document their own dealings,
+  and let public institutions examine evidence through accountable
+  processes. Buying a bicycle should not require publishing the rest of
+  your life.
+
+
+Sources and reading notes
+═════════════════════════
+
+  This account was checked against checkout `2183f41' on 2026-09-24. It
+  follows the review reading plan, including the receiving-key
+  architecture and accumulator specification, rather than treating older
+  summaries as current security guarantees. The full source trail is
+  deliberately kept here so the citizen's explanation need not carry the
+  algebra.
+
+
+Illustration sources
+────────────────────
+
+  The 32 narrow illustrations are generated from [the figure
+  descriptions] by [render_privacy_figures.py]. Rebuild the PNGs and
+  editable SVGs in `images/privacy/' with:
+
+  ┌────
+  │ python3 scripts/render_privacy_figures.py
+  └────
+
+  Org and PDF use the PNGs at full text width; the text and symbols
+  remain legible without colour. Each illustration has an alternative
+  description and the surrounding step explains its contents.
+
+  Render the paper with `make doc-alberta-buck-privacy' in the normal
+  Emacs/LaTeX environment. This document contains no executable protocol
+  transcript and does not regenerate circuit artifacts.
+
+
+[the figure descriptions] <file:doc/privacy/figures.json>
+
+[render_privacy_figures.py] <file:scripts/render_privacy_figures.py>
+
+
+
+Footnotes
+─────────
+
+[1] [Proofs: review status] (<file:alberta-buck-proofs.org::*Review
+Status and Remaining Work for Part I>); [Review index]
+(<file:doc/review/README.md>); [Receiving-key reading plan]
+(<file:doc/review/notes-receiving-key.org::*8 Reading plan: coming
+back to this cold>).  The later implementation notes supersede some
+earlier status paragraphs.  The underlying signature reference is
+Pointcheval and Sanders, [Short Randomizable Signatures]
+(<https://eprint.iacr.org/2015/525>). It is not an independent
+validation of this project's masked presentation or composition.
+
+[2] [Identity] (<file:alberta-buck-identity.org>), [Identity Example]
+(<file:alberta-buck-identity-example.org>), and [Accumulator
+specification] (<file:doc/review/accumulator-spec.org>), especially
+the distinct receiving and mailbox leaves. The wallet derives the
+receiving secret and salts from its seed in [recvkey.py]
+(<file:alberta_buck/wallet/recvkey.py>) and [salt.py]
+(<file:alberta_buck/wallet/salt.py>). The identity record is frozen at
+first certification; mutable standing and attributes are separate
+memberships.  The diagrams specify the required certified association
+and wallet-only key custody. They do not invent an enrollment wire
+protocol: the secret-preserving issuer-side certification of the
+hidden spending commitment still needs a fully specified and validated
+ceremony. The local tree insertion helpers are not themselves that
+ceremony.
+
+[3] Ethereum's official descriptions of [accounts]
+(<https://ethereum.org/developers/docs/accounts/>) and [transactions]
+(<https://ethereum.org/developers/docs/transactions/>) distinguish
+key-controlled EOAs from code-controlled contract accounts and
+describe signed transaction authorisation. BUCK's identity and Notes
+keys are additional application-level keys.
+
+[4] [Buck.sol] (<file:src/Buck.sol>), the two `approve' overloads and
+`_identityCheckedTransfer'; [IdentityRegistry.sol]
+(<file:src/IdentityRegistry.sol>), `_verifyCredential' and
+`_verifyApprove'. The identity proof binds the registered keys and
+identity relationship; the Ethereum transaction signs the actual call
+and allowance. A verified proof is not a grant of unlimited spending
+authority. Failed transactions can still expose their submitted data
+and consume transaction fees.
+
+[5] [Notes: the pool account] (<file:alberta-buck-notes.org::*The Pool
+is a Regular Account>), and [Buck.sol] (<file:src/Buck.sol>)'s
+identity guards. Public-identity endpoints can use the public
+fallback; private endpoints must supply their directional identity
+approval. The pool operator's approval-decryption capability is
+distinct from Carol's independent receiving secret.
+
+[6] [IdentityRegistry.sol] (<file:src/IdentityRegistry.sol>),
+`bindContract', target authorisation and `_storeBinding'; [Notes.sol]
+(<file:src/Notes.sol>), public `mint' overload and
+`verifyIssuerSchnorr'. This example uses a controlled public contract,
+not an unimplemented “make this EOA public” operation.
+
+[7] [Notes.sol] (<file:src/Notes.sol>), `spendCoupledB1', checks
+`publicIssuerOfCommitment[issuanceCommitment]'. The explicit
+commitment is also an input to the spend proof. Broad “no
+mint-to-spend link in any flavour” passages in the Notes papers do not
+describe this B1 interface.  [Serialized Notes]
+(<file:alberta-buck-notes-serialized.org>) was reviewed as a separate
+research proposal; its family-linked sub-notes are not used here.  The
+[editorial review] (<file:doc/review/editorial-map.md>) records
+unresolved conservation and disclosure issues in that proposal.
+
+[8] [Notes Flow: current spend paths]
+(<file:alberta-buck-notes-flow.org::*The Identity-M Spend Path (A1,
+A2, B1)>), [Receiving-key architecture]
+(<file:doc/review/notes-receiving-key.org>), [delivery.py]
+(<file:alberta_buck/wallet/delivery.py>), [A1 folded gate]
+(<file:circuits/deposit_fold_a1.circom>) and [A2 folded gate]
+(<file:circuits/deposit_fold_a2.circom>). The current A1 fold binds
+the committed /value/ ciphertext, not a claim that its auxiliary
+delivery identity ciphertext is independently part of `idHash'.
+Addressed folds authenticate `msg.sender'; the note-spend proof binds
+the chosen payout address. Here Carol submits and receives into the
+same account. The contract also permits an authenticated holder to
+choose a different payout, subject to BUCK's endpoint rules; it does
+not prove the submitter owns every possible payout account. B1 instead
+binds the depositor identity to its payout account.
+
+[9] [Receipts] (<file:alberta-buck-receipt.org>), particularly the
+point-to-name bridge, evidence-bearing addressed receipt legs and the
+two verification tiers; [receipt.py]
+(<file:alberta_buck/wallet/receipt.py>). A full identity record
+discloses its derived identity scalar to its reader. The receiving
+secret was separated from that scalar precisely to prevent a receipt
+from becoming a mailbox key. Availability of canonical identity data
+remains a separate obligation from the chain's identity-point proofs.

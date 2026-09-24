@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="864pt" height="187.2pt" viewBox="0 0 864 187.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-24</dc:date>
+    <dc:description>A2 replaces public Bob with an envelope only Carol's mailbox can open | Bob: Carol's certified mailbox; Value + Bob's identity; Issuer binding + tie T | Mallory: Minting address B; Bob's identity envelope; No clear issuer identity | Carol: Receiving public key; Certified association; Receiving secret private | BOB'S WALLET | Proves encrypted issuer identity equals the one in his registered account. | Adds a hidden key tie T; the note commits to it as well as the ciphertexts.</dc:description>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.5, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+    <dc:rights>
+     <cc:Agent>
+      <dc:title>Copyright 2026 Perry Kundert. All rights reserved.</dc:title>
+     </cc:Agent>
+    </dc:rights>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 187.2 
+L 864 187.2 
+L 864 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 10.08 25.2 
+L 260.64 25.2 
+Q 264.96 25.2 264.96 29.52 
+L 264.96 115.2 
+Q 264.96 119.52 260.64 119.52 
+L 10.08 119.52 
+Q 5.76 119.52 5.76 115.2 
+L 5.76 29.52 
+Q 5.76 25.2 10.08 25.2 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 15.12 68.4 
+L 255.6 68.4 
+Q 259.92 68.4 259.92 72.72 
+L 259.92 84.24 
+Q 259.92 88.56 255.6 88.56 
+L 15.12 88.56 
+Q 10.8 88.56 10.8 84.24 
+L 10.8 72.72 
+Q 10.8 68.4 15.12 68.4 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 17.64 74.88 
+C 17.64 73.639263 18.057498 72.448074 18.799857 71.57074 
+C 19.542216 70.693407 20.550145 70.2 21.6 70.2 
+C 22.649855 70.2 23.657784 70.693407 24.400143 71.57074 
+C 25.142502 72.448074 25.56 73.639263 25.56 74.88 
+" clip-path="url(#pfcd87e844e)" style="fill: none; stroke: #006c67; stroke-width: 1.25; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 16.56 74.88 
+L 26.64 74.88 
+L 26.64 83.52 
+L 16.56 83.52 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #006c67; stroke: #006c67; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 15.12 90.72 
+L 255.6 90.72 
+Q 259.92 90.72 259.92 95.04 
+L 259.92 106.56 
+Q 259.92 110.88 255.6 110.88 
+L 15.12 110.88 
+Q 10.8 110.88 10.8 106.56 
+L 10.8 95.04 
+Q 10.8 90.72 15.12 90.72 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 306.72 25.2 
+L 557.28 25.2 
+Q 561.6 25.2 561.6 29.52 
+L 561.6 115.2 
+Q 561.6 119.52 557.28 119.52 
+L 306.72 119.52 
+Q 302.4 119.52 302.4 115.2 
+L 302.4 29.52 
+Q 302.4 25.2 306.72 25.2 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #fff7eb; stroke: #cad7dc; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 311.76 68.4 
+L 552.24 68.4 
+Q 556.56 68.4 556.56 72.72 
+L 556.56 84.24 
+Q 556.56 88.56 552.24 88.56 
+L 311.76 88.56 
+Q 307.44 88.56 307.44 84.24 
+L 307.44 72.72 
+Q 307.44 68.4 311.76 68.4 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 314.28 74.88 
+C 314.28 73.639263 314.697498 72.448074 315.439857 71.57074 
+C 316.182216 70.693407 317.190145 70.2 318.24 70.2 
+C 319.289855 70.2 320.297784 70.693407 321.040143 71.57074 
+C 321.782502 72.448074 322.2 73.639263 322.2 74.88 
+" clip-path="url(#pfcd87e844e)" style="fill: none; stroke: #9a520c; stroke-width: 1.25; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 313.2 74.88 
+L 323.28 74.88 
+L 323.28 83.52 
+L 313.2 83.52 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #9a520c; stroke: #9a520c; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 311.76 90.72 
+L 552.24 90.72 
+Q 556.56 90.72 556.56 95.04 
+L 556.56 106.56 
+Q 556.56 110.88 552.24 110.88 
+L 311.76 110.88 
+Q 307.44 110.88 307.44 106.56 
+L 307.44 95.04 
+Q 307.44 90.72 311.76 90.72 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #ffffff; stroke: #dae5e5; stroke-width: 0.7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 603.36 25.2 
+L 853.92 25.2 
+Q 858.24 25.2 858.24 29.52 
+L 858.24 115.2 
+Q 858.24 119.52 853.92 119.52 
+L 603.36 119.52 
+Q 599.04 119.52 599.04 115.2 
+L 599.04 29.52 
+Q 599.04 25.2 603.36 25.2 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #eef6f5; stroke: #cad7dc; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 10.08 149.04 
+L 853.92 149.04 
+Q 858.24 149.04 858.24 153.36 
+L 858.24 179.28 
+Q 858.24 183.6 853.92 183.6 
+L 10.08 183.6 
+Q 5.76 183.6 5.76 179.28 
+L 5.76 153.36 
+Q 5.76 149.04 10.08 149.04 
+z
+" clip-path="url(#pfcd87e844e)" style="fill: #edf1f5; stroke: #c9d2db; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 196.56 154.8 
+L 196.56 177.84 
+" clip-path="url(#pfcd87e844e)" style="fill: none; stroke: #c9d2db; stroke-linecap: square"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="8.64" y="16.486875" transform="rotate(-0 8.64 16.486875)">BOB</text>
+   </g>
+   <g id="text_2">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="14.4" y="40.03125" transform="rotate(-0 14.4 40.03125)">BUILDS A PRIVATE-ISSUER NOTE</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="60.130938" transform="rotate(-0 21.6 60.130938)">·</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="33.84" y="59.992969" transform="rotate(-0 33.84 59.992969)">Carol's certified mailbox</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="82.312969" transform="rotate(-0 33.84 82.312969)">Value + Bob's identity</text>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="21.6" y="104.770938" transform="rotate(-0 21.6 104.770938)">+</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="33.84" y="104.568516" transform="rotate(-0 33.84 104.568516)">Issuer binding + tie T</text>
+   </g>
+   <g id="text_8">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="305.28" y="16.486875" transform="rotate(-0 305.28 16.486875)">MALLORY</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="419.04" y="14.693281" transform="rotate(-0 419.04 14.693281)">OUTSIDE OBSERVER</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9a520c" x="311.04" y="40.03125" transform="rotate(-0 311.04 40.03125)">SEES A PRIVATE ACCOUNT</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="60.130938" transform="rotate(-0 318.24 60.130938)">·</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="330.48" y="59.992969" transform="rotate(-0 330.48 59.992969)">Minting address B</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="82.312969" transform="rotate(-0 330.48 82.312969)">Bob's identity envelope</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #9a520c" x="318.24" y="104.770938" transform="rotate(-0 318.24 104.770938)">×</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="330.48" y="104.632969" transform="rotate(-0 330.48 104.632969)">No clear issuer identity</text>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="601.92" y="16.486875" transform="rotate(-0 601.92 16.486875)">CAROL</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #006c67" x="607.68" y="40.03125" transform="rotate(-0 607.68 40.03125)">PROVIDES THE SAME MAILBOX</text>
+   </g>
+   <g id="text_18">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="60.130938" transform="rotate(-0 614.88 60.130938)">·</text>
+   </g>
+   <g id="text_19">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="627.12" y="59.992969" transform="rotate(-0 627.12 59.992969)">Receiving public key</text>
+   </g>
+   <g id="text_20">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="82.450938" transform="rotate(-0 614.88 82.450938)">·</text>
+   </g>
+   <g id="text_21">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="627.12" y="82.312969" transform="rotate(-0 627.12 82.312969)">Certified association</text>
+   </g>
+   <g id="text_22">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #006c67" x="614.88" y="104.770938" transform="rotate(-0 614.88 104.770938)">·</text>
+   </g>
+   <g id="text_23">
+    <text style="font-size: 16.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="627.12" y="104.632969" transform="rotate(-0 627.12 104.632969)">Receiving secret private</text>
+   </g>
+   <g id="text_24">
+    <g id="patch_14">
+     <path d="M 180.28 141.934688 
+L 683.72 141.934688 
+L 683.72 124.465313 
+L 180.28 124.465313 
+z
+" style="fill: #ffffff"/>
+    </g>
+    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #162c3b" x="432" y="137.063125" transform="rotate(-0 432 137.063125)">A2 replaces public Bob with an envelope only Carol's mailbox can open</text>
+   </g>
+   <g id="text_25">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="17.28" y="169.63125" transform="rotate(-0 17.28 169.63125)">BOB'S WALLET</text>
+   </g>
+   <g id="text_26">
+    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #162c3b" x="208.08" y="163.841094" transform="rotate(-0 208.08 163.841094)">Proves encrypted issuer identity equals the one in his registered account.</text>
+   </g>
+   <g id="text_27">
+    <text style="font-size: 14.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596c79" x="208.08" y="178.241094" transform="rotate(-0 208.08 178.241094)">Adds a hidden key tie T; the note commits to it as well as the ciphertexts.</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pfcd87e844e">
+   <rect x="0" y="0" width="864" height="187.2"/>
+  </clipPath>
+ </defs>
+</svg>
