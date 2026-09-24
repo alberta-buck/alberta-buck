@@ -303,7 +303,7 @@ class NotesStack:
     """
 
     def __init__(self, anvil, fixture: E2EFixture, rng=None,
-                 block_time: Optional[int] = None):
+                 block_time: Optional[int] = None, issuer=None):
         from alberta_buck.sim.chain import Chain
         self.anvil = anvil
         self.fx = fixture
@@ -320,6 +320,9 @@ class NotesStack:
         self.steps: List[Step] = []
         assert self.w3.eth.chain_id == fixture.chainid, \
             "anvil must run the fixture's chain id (Anvil(chain_id=1))"
+        # The trusted credential issuer: a wallet.issuer.Issuer, or None for a
+        # private one generated at deploy (the fixture worlds' default).
+        self._issuer = issuer
         self._deploy()
 
     # -- plumbing -------------------------------------------------------------
@@ -386,6 +389,7 @@ class NotesStack:
         # The REAL Groth16 verifier stack.
         mint_adapter = ch.deploy("MintVerifierAdapter", gov)
         a2_adapter   = ch.deploy("MintVerifierA2Adapter", gov)
+        self.mint_adapter, self.a2_adapter = mint_adapter, a2_adapter
         ch.send(mint_adapter.functions.registerVerifier(
             1, ch.deploy("MintBatchN1Groth16Verifier").address))
         ch.send(a2_adapter.functions.registerVerifier(
@@ -424,8 +428,12 @@ class NotesStack:
             "(uint256,uint256),(uint256,uint256)),"
             "(uint256,uint256,(uint256,uint256)),"
             "bool,bool)")
-        self._iss_kp = ps_keygen(rng=self.rng)
-        self._iss_addr = self._addr(0xAA)
+        if self._issuer is None:
+            self._iss_kp = ps_keygen(rng=self.rng)
+            self._iss_addr = self._addr(0xAA)
+        else:
+            self._iss_kp = self._issuer.keypair
+            self._iss_addr = self._addr(self._issuer.issuer_addr)
         self.pool_m = rand_scalar(self.rng)
         self.pool_r = rand_scalar(self.rng)
         self.pool_E = elgamal_encrypt(mul(G1, self.pool_m), self.pool_pk, self.pool_r)

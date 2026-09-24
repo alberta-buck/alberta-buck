@@ -485,6 +485,16 @@ snark-e2e-fixtures:
 snark-e2e-clean:
 	rm -rf build/snark/e2e alberta_buck/test/vectors/e2e
 
+# The privacy paper's world: one chain, one identity tree, Aspen Mutual's B1
+# and A1 batches and Bob's A2 cheque, REAL proofs at every gate, consumed by
+# alberta-buck-privacy.org (see scripts/snark/gen_privacy_world.py).
+snark-privacy-fixtures:
+	rm -rf build/snark/privacy
+	$(SNARK_PATH) bash scripts/snark/gen_privacy_fixtures.sh
+
+snark-privacy-clean:
+	rm -rf build/snark/privacy alberta_buck/test/vectors/privacy
+
 # BN254 G-generator stride-8 powers table for the fixed-base multiplications.
 # The circom-lib EC library lacks a precomputed power table for BN254's
 # generator G=(1,2); without it the optimised scalar multiplication silently
