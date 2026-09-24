@@ -61,8 +61,10 @@ class MintedA1:
     ``eNote`` encrypts the note value ``v`` and ``eRec`` the recipient Identity,
     both to the recipient's receiving key ``pk_recv``.  ``idHash`` commits to
     ``(eNote, m_issuer, sigma_R, sigma_s)`` via Poseidon8 (matching
-    ``id_hash_a1``), binding the note
-    to the public issuer's identity and Schnorr signature.  ``eRec`` goes on chain
+    ``id_hash_a1``), binding the note to the issuer identity it names.  The pair
+    ``(sigma_R, sigma_s)`` is opaque issuer material: no circuit, contract or verifier
+    checks it.  What authenticates a public issuer is the batch Schnorr its account
+    signs at mint, which covers this note's commitment.  ``eRec`` goes on chain
     (as the leaf-tie public output); the full ``opening`` + ``eNote`` + ``eRec``
     travel to the recipient off chain.
     """
@@ -81,8 +83,8 @@ def mint_unilateral_a1(
     v:       int,
     rho:     int,
     m_issuer: int,                # issuer's registered identity scalar
-    sigma_R,                      # issuer's Schnorr signature nonce
-    sigma_s: int,                 # issuer's Schnorr signature response
+    sigma_R,                      # opaque issuer material (unchecked; see MintedA1)
+    sigma_s: int,                 # opaque issuer material (unchecked; see MintedA1)
     r_prime: Optional[int] = None,
     predicate: int = 0,
     rng=None,

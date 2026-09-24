@@ -92,6 +92,14 @@ staff.  This file is the resume document: decisions, phases, status.
 - The in-note issuer pair =(sigma_R, sigma_s)= hashed into B1 and A1 idHash has no defined
   message and no verifier; every fixture fills it at random.  The batch Schnorr, checked on
   chain, is what authenticates a public issuer.  The paper claims only the latter.
+  Decision (author, 2026-09-24): defining it would be redundant with the batch Schnorr, so it
+  stays opaque; the docstrings now say so.
+- A public issuer that names ANOTHER public identity in its notes: a wallet that takes the
+  issuer from the minting account refuses the note (the rebuilt commitment is not in the
+  batch); a receipt verifies VALID, because a public account's identity is pinned by
+  off-chain attestation (isPublicIdentity), not on chain.  Not a protocol hole -- the fraud is
+  self-attributed on chain -- so no change; verify_receipt's comment says what the batch
+  signature does and does not establish.
 - =Issuer.revoke='s docstring still describes epoch-based renewal, superseded by accumulator
   spec 8 (validity is live-set membership).
 - test_receipt_e2e's live test skips A1/A2 receipt checks with a stale comment; the offline

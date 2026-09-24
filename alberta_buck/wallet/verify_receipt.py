@@ -366,7 +366,12 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
             if err is not None:
                 return RcptResult(False, None, None, f"{t}: {err}")
 
-        # (c) Issuer binding over the batch / leaf.
+        # (c) Issuer binding over the batch / leaf.  For B1/A1 the batch Schnorr proves the
+        #     payer ACCOUNT minted this note, under its registered key.  That the account is the
+        #     public identity the receipt names rests on the account's off-chain public
+        #     attestation (IdentityRegistry.isPublicIdentity), which a reader confirms; a public
+        #     issuer that names another identity in its notes is refused by any wallet that takes
+        #     the issuer from the minting account, and is self-attributed on chain.
         if t in ("note-b1", "note-a1"):
             sig = rp.get("issuer_sig")
             if sig is None:
