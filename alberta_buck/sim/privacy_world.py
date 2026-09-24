@@ -36,8 +36,8 @@ from alberta_buck.wallet.ps import PSPresentation
 from alberta_buck.sim.notes_stack import ACCOUNT_STUB, NotesStack, Step, _ct_tuple, _g1_tuple, _xy
 from alberta_buck.sim.observer import Observer
 
-WORLD = Path(__file__).resolve().parents[1] / "test" / "vectors" / "privacy" / "world.json"
-FLAVORS = {"b1": 3, "a1": 1, "a2": 2}
+WORLD                           = Path(__file__).resolve().parents[1] / "test" / "vectors" / "privacy" / "world.json"
+FLAVORS                         = {"b1": 3, "a1": 1, "a2": 2}
 
 
 def _pt(d):
@@ -57,40 +57,40 @@ def replay(values):
 @dataclass(frozen=True)
 class Person:
     """One member of the cast: a core record and, for a citizen, the wallet's secrets."""
-    name:     str
-    identity: str                   # the canonical core record: M's preimage
-    fields:   Dict[str, Any]
-    m:        int
-    M:        Any
-    seed:     Optional[int] = None  # the wallet seed: receiving key and salts derive from it
-    k:        Optional[int] = None  # receiving secret
-    pk_recv:  Any = None            # receiving (mailbox) public key
-    salts:    Dict[str, int] = field(default_factory=dict)
+    name:                       str
+    identity:                   str                   # the canonical core record: M's preimage
+    fields:                     Dict[str, Any]
+    m:                          int
+    M:                          Any
+    seed:                       Optional[int] = None  # the wallet seed: receiving key and salts derive from it
+    k:                          Optional[int] = None  # receiving secret
+    pk_recv:                    Any = None            # receiving (mailbox) public key
+    salts:                      Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class Acct:
     """One registered account: an Ethereum address and its identity key pair."""
-    label:     str
-    owner:     str
-    addr:      int
-    address:   str                  # checksummed
-    sk:        int                  # identity secret key (BN254)
-    pk:        Any
-    r:         int                  # the registration ciphertext's randomness
-    E:         ElGamalCiphertext    # Enc(M, pk; r): the account's registered identity envelope
-    m:         int
-    M:         Any
-    is_public: bool
-    kind:      str                  # "eoa" | "contract"
-    eth_key:   Optional[str] = None
+    label:                      str
+    owner:                      str
+    addr:                       int
+    address:                    str                # checksummed
+    sk:                         int                # identity secret key (BN254)
+    pk:                         Any
+    r:                          int                # the registration ciphertext's randomness
+    E:                          ElGamalCiphertext  # Enc(M, pk; r): the account's registered identity envelope
+    m:                          int
+    M:                          Any
+    is_public:                  bool
+    kind:                       str                # "eoa" | "contract"
+    eth_key:                    Optional[str] = None
 
 
 @dataclass
 class Note:
     """One note of the world, with its batch and its pre-generated proofs."""
-    flavor: str
-    raw:    Dict[str, Any]
+    flavor:                     str
+    raw:                        Dict[str, Any]
 
     @property
     def batch(self) -> List[NoteOpening]:
@@ -185,14 +185,14 @@ class PrivacyWorld:
         pair, encrypting the same M.  Nothing about it matches the owner's other accounts."""
         from eth_account import Account
         from web3 import Web3
-        person = self.people[owner]
-        eth = Account.from_key(rand_scalar(rng).to_bytes(32, "big"))
-        sk, r = rand_scalar(rng), rand_scalar(rng)
-        pk = mul(G1, sk)
-        acct = Acct(label=label, owner=owner, addr=int(eth.address, 16),
-                    address=Web3.to_checksum_address(eth.address), sk=sk, pk=pk, r=r,
-                    E=elgamal_encrypt(person.M, pk, r), m=person.m, M=person.M,
-                    is_public=False, kind="eoa", eth_key=eth.key.hex())
+        person                  = self.people[owner]
+        eth                     = Account.from_key(rand_scalar(rng).to_bytes(32, "big"))
+        sk, r                   = rand_scalar(rng), rand_scalar(rng)
+        pk                      = mul(G1, sk)
+        acct                    = Acct(label=label, owner=owner, addr=int(eth.address, 16),
+                                       address=Web3.to_checksum_address(eth.address), sk=sk, pk=pk, r=r,
+                                       E=elgamal_encrypt(person.M, pk, r), m=person.m, M=person.M,
+                                       is_public=False, kind="eoa", eth_key=eth.key.hex())
         self.accounts[label] = acct
         return acct
 
@@ -201,28 +201,27 @@ class PrivacyWorld:
         from alberta_buck.sim.notes_stack import E2EFixture, Party
         from alberta_buck.wallet.issuer_reenc import IssuerReencProof
         from alberta_buck.wallet.schnorr import SchnorrProof
-        note = self.notes[flavor]
-        d = note.raw
+        note                    = self.notes[flavor]
+        d                       = note.raw
 
         def party(label):
             a = self.accounts[label]
-            return Party(addr=a.addr, identity=self.people[a.owner].identity, m=a.m, M=a.M,
-                         pk=a.pk, sk=a.sk, E=a.E)
+            return Party(addr=a.addr, identity=self.people[a.owner].identity, m=a.m, M=a.M, pk=a.pk, sk=a.sk, E=a.E)
 
-        carol = self.people["carol"]
-        raw = {"parties": {"depositor": {"pkRecv": self.raw["people"]["carol"]["pkRecv"],
-                                         "kRecv": str(carol.k)}},
-               "mailboxBinding": self.raw["mailboxBinding"]}
+        carol                   = self.people["carol"]
+        raw                     = {"parties": {"depositor": {"pkRecv": self.raw["people"]["carol"]["pkRecv"],
+                                                             "kRecv": str(carol.k)}},
+                                   "mailboxBinding": self.raw["mailboxBinding"]}
         sig = binding = None
         if "issuerSchnorr" in d:
-            s = d["issuerSchnorr"]
-            sig = SchnorrProof(e=int(s["e"]), s=int(s["s"]), R=_pt(s["R"]))
+            s                   = d["issuerSchnorr"]
+            sig                 = SchnorrProof(e=int(s["e"]), s=int(s["s"]), R=_pt(s["R"]))
         if "a2Binding" in d:
-            b = d["a2Binding"]["proof"]
-            binding = IssuerReencProof(
-                e=int(b["e"]), s_r=int(b["s_r"]), s_b=int(b["s_b"]), s_s=int(b["s_s"]),
-                s_g=int(b["s_g"]), A1=_pt(b["A1"]), A2=_pt(b["A2"]), A3=_pt(b["A3"]),
-                A4=_pt(b["A4"]), A5=_pt(b["A5"]), Q=_pt(b["Q"]), U=_pt(b["U"]), T=_pt(b["T"]))
+            b                   = d["a2Binding"]["proof"]
+            binding             = IssuerReencProof(
+                            e=int(b["e"]), s_r=int(b["s_r"]), s_b=int(b["s_b"]), s_s=int(b["s_s"]),
+                            s_g=int(b["s_g"]), A1=_pt(b["A1"]), A2=_pt(b["A2"]), A3=_pt(b["A3"]),
+                            A4=_pt(b["A4"]), A5=_pt(b["A5"]), Q=_pt(b["Q"]), U=_pt(b["U"]), T=_pt(b["T"]))
         if "issuerSecrets" in d:
             raw["issuerSecrets"] = d["issuerSecrets"]
         if flavor == "b1":
@@ -251,20 +250,20 @@ class PrivacyWorld:
 @dataclass(frozen=True)
 class RegistrationPackage:
     """What a wallet sends to IdentityRegistry.register: nothing in it names the holder."""
-    account:      Acct
-    presentation: PSPresentation    # the masked credential
-    proof:        RegistrationProof
-    pk:           Any               # the account's identity public key
-    E:            ElGamalCiphertext # Enc(M, pk; r): the identity envelope the registry stores
+    account:                    Acct
+    presentation:               PSPresentation     # the masked credential
+    proof:                      RegistrationProof
+    pk:                         Any                # the account's identity public key
+    E:                          ElGamalCiphertext  # Enc(M, pk; r): the identity envelope the registry stores
 
 
 @dataclass(frozen=True)
 class IdentityEnvelope:
     """An identity-bound approve's payload: the sender's M, encrypted for one counterparty."""
-    sender:  Acct
-    target:  str                    # the counterparty's address
-    E:       ElGamalCiphertext      # Enc(M_sender, pk_target; r')
-    proof:   CPProof                # "same identity as my registration, and I hold its key"
+    sender:                     Acct
+    target:                     str                # the counterparty's address
+    E:                          ElGamalCiphertext  # Enc(M_sender, pk_target; r')
+    proof:                      CPProof            # "same identity as my registration, and I hold its key"
 
 
 class _ChainOf:
@@ -276,11 +275,9 @@ class _ChainOf:
 class PrivacyChain(NotesStack):
     """The Notes stack on anvil, trusting Alberta's issuer, driven by the story."""
 
-    def __init__(self, anvil, world: PrivacyWorld, issuer, rng=None,
-                 block_time: Optional[int] = None):
+    def __init__(self, anvil, world: PrivacyWorld, issuer, rng=None, block_time: Optional[int] = None):
         self.world = world
-        super().__init__(anvil, _ChainOf(world.chainid), rng=rng, block_time=block_time,
-                         issuer=issuer)
+        super().__init__(anvil, _ChainOf(world.chainid), rng=rng, block_time=block_time, issuer=issuer)
         self.issuer = issuer
         # Aspen Mutual mints batches of four.
         self.chain.send(self.mint_adapter.functions.registerVerifier(
@@ -304,11 +301,11 @@ class PrivacyChain(NotesStack):
     def registration_package(self, acct: Acct, cred: IssuedCredential, rng=None) -> RegistrationPackage:
         """The wallet's side of registration: mask the credential, prove the envelope holds the
         certified identity, and bind the proof to this account, chain and registry."""
-        rng = rng or self.rng
-        pres, _a, b = present_for_registration(cred, rng=rng)
-        proof = registration_prove(pres, b, cred.m, acct.r, acct.pk, acct.E, acct.addr, acct.sk,
-                                   chainid=self.world.chainid, rng=rng,
-                                   registry=int(self.reg.address, 16))
+        rng                     = rng or self.rng
+        pres, _a, b             = present_for_registration(cred, rng=rng)
+        proof                   = registration_prove(pres, b, cred.m, acct.r, acct.pk, acct.E, acct.addr, acct.sk,
+                                                     chainid=self.world.chainid, rng=rng,
+                                                     registry=int(self.reg.address, 16))
         return RegistrationPackage(acct, pres, proof, acct.pk, acct.E)
 
     def register(self, pkg: RegistrationPackage) -> Step:
@@ -355,24 +352,21 @@ class PrivacyChain(NotesStack):
         """Grant insured credit and mint BUCK against it (how every account gets its money)."""
         gov = self.gov.address if hasattr(self.gov, "address") else self.gov
         self._impersonate(acct.address)
-        self._send_from(self.credit.functions.setCreditIssuer(gov, True), acct.address,
-                        f"{acct.label} accepts insurer")
-        fn = self.credit.functions.createCredit(acct.address, 0, 10 * amount, 10 * amount, 0, 0, 0, 0)
-        token = fn.call()
+        self._send_from(self.credit.functions.setCreditIssuer(gov, True), acct.address, f"{acct.label} accepts insurer")
+        fn                      = self.credit.functions.createCredit(acct.address, 0, 10 * amount, 10 * amount, 0, 0, 0, 0)
+        token                   = fn.call()
         self._send_from(fn, self.gov, f"credit for {acct.label}")
-        self._send_from(self.credit.functions.forceActivate(token, 10 * amount), acct.address,
-                        f"{acct.label} activates credit")
-        return self._send_from(self.buck.functions.mint(amount), acct.address,
-                               f"{acct.label} mints BUCK")
+        self._send_from(self.credit.functions.forceActivate(token, 10 * amount), acct.address, f"{acct.label} activates credit")
+        return self._send_from(self.buck.functions.mint(amount), acct.address, f"{acct.label} mints BUCK")
 
     def envelope(self, sender: Acct, target: str, target_pk, rng=None) -> IdentityEnvelope:
         """Encrypt the sender's identity for one counterparty and prove it is the registered one."""
-        rng = rng or self.rng
-        r_prime = rand_scalar(rng)
-        E_for = elgamal_encrypt(sender.M, target_pk, r_prime)
-        cp = chaum_pedersen_prove(sender.E, E_for, sender.pk, target_pk, sender.sk, r_prime,
-                                  sender.addr, int(target, 16), self.world.chainid, rng=rng,
-                                  registry=int(self.reg.address, 16))
+        rng                     = rng or self.rng
+        r_prime                 = rand_scalar(rng)
+        E_for                   = elgamal_encrypt(sender.M, target_pk, r_prime)
+        cp                      = chaum_pedersen_prove(sender.E, E_for, sender.pk, target_pk, sender.sk, r_prime,
+                                                       sender.addr, int(target, 16), self.world.chainid, rng=rng,
+                                                       registry=int(self.reg.address, 16))
         return IdentityEnvelope(sender, target, E_for, cp)
 
     def approve(self, env: IdentityEnvelope, amount: int = 0) -> Step:
@@ -409,8 +403,8 @@ class PrivacyChain(NotesStack):
         """The payee's AB-RCPT/2 receipt for a direct payment: names the payer through the
         payer's approve envelope, which only the payee can open."""
         from alberta_buck.wallet.build_receipt import build_eoa_priv
-        payer = env.sender
-        people = self.world.people
+        payer                   = env.sender
+        people                  = self.world.people
         return build_eoa_priv(
             self.world.chainid, self.contracts,
             payer.addr, people[payer.owner].identity, payer.M, payer.pk, payer.E,
@@ -421,19 +415,18 @@ class PrivacyChain(NotesStack):
 
     def note_receipt(self, flavor: str, role: str, mint: Step, spend: Step, rng=None):
         """Either party's AB-RCPT/2 receipt for a note: ``recipient`` or ``issuer``."""
-        return self.world.fixture(flavor).build_receipt(
-            role, self.contracts, rng=rng or self.rng, **self.anchors(mint, spend))
+        return self.world.fixture(flavor).build_receipt(role, self.contracts, rng=rng or self.rng, **self.anchors(mint, spend))
 
     # -- notes ----------------------------------------------------------------------------------
 
     def mint_note(self, note: Note) -> Step:
         """Submit a batch mint with its pre-generated Groth16 proof, as its issuer."""
-        d = note.raw
-        issuer = self.world.accounts[note.issuer]
+        d                       = note.raw
+        issuer                  = self.world.accounts[note.issuer]
         self._impersonate(issuer.address)
-        m = d["mint"]["public"]
-        args = (bytes.fromhex(d["mint"]["proofBytes"][2:]), int(m["oldRoot"]), int(m["newRoot"]),
-                int(m["nextLeafIndex"]), int(m["totalFace"]), [int(c) for c in m["cm"]])
+        m                       = d["mint"]["public"]
+        args                    = (bytes.fromhex(d["mint"]["proofBytes"][2:]), int(m["oldRoot"]), int(m["newRoot"]),
+                                   int(m["nextLeafIndex"]), int(m["totalFace"]), [int(c) for c in m["cm"]])
         if note.flavor == "a2":
             fn = self.notes.get_function_by_signature(
                 "mint(bytes,uint256,uint256,uint32,uint256,uint256[],uint256[],"
@@ -441,48 +434,46 @@ class PrivacyChain(NotesStack):
                 "(uint256,uint256,uint256,uint256,uint256,"
                 "(uint256,uint256),(uint256,uint256),(uint256,uint256),(uint256,uint256),"
                 "(uint256,uint256),(uint256,uint256),(uint256,uint256),(uint256,uint256)))[])")
-            b, p = d["a2Binding"], d["a2Binding"]["proof"]
-            binding = (_ct_tuple(b["eIss"]),
-                       (int(p["e"]), int(p["s_r"]), int(p["s_b"]), int(p["s_s"]), int(p["s_g"]),
-                        _g1_tuple(p["A1"]), _g1_tuple(p["A2"]), _g1_tuple(p["A3"]),
-                        _g1_tuple(p["A4"]), _g1_tuple(p["A5"]), _g1_tuple(p["Q"]),
-                        _g1_tuple(p["U"]), _g1_tuple(p["T"])))
+            b, p                = d["a2Binding"], d["a2Binding"]["proof"]
+            binding             = (_ct_tuple(b["eIss"]),
+                                   (int(p["e"]), int(p["s_r"]), int(p["s_b"]), int(p["s_s"]), int(p["s_g"]),
+                                    _g1_tuple(p["A1"]), _g1_tuple(p["A2"]), _g1_tuple(p["A3"]),
+                                    _g1_tuple(p["A4"]), _g1_tuple(p["A5"]), _g1_tuple(p["Q"]),
+                                    _g1_tuple(p["U"]), _g1_tuple(p["T"])))
             call = fn(*args, [2], [binding])
         else:
             fn = self.notes.get_function_by_signature(
                 "mint(bytes,uint256,uint256,uint32,uint256,uint256[],uint256[],"
                 "(uint256,uint256,(uint256,uint256)))")
-            s = d["issuerSchnorr"]
-            call = fn(*args, [1] * len(note.cms), (int(s["e"]), int(s["s"]), _g1_tuple(s["R"])))
-        return self._send_from(call, issuer.address, f"Notes.mint {note.flavor}", event="Minted",
-                               contract=self.notes)
+            s                   = d["issuerSchnorr"]
+            call                = fn(*args, [1] * len(note.cms), (int(s["e"]), int(s["s"]), _g1_tuple(s["R"])))
+        return self._send_from(call, issuer.address, f"Notes.mint {note.flavor}", event="Minted", contract=self.notes)
 
     def spend_note(self, note: Note) -> Step:
         """Submit the note's spend with its pre-generated proofs, as the depositing account."""
-        d = note.raw
-        dep = self.world.accounts[note.payout]
+        d                       = note.raw
+        dep                     = self.world.accounts[note.payout]
         self._impersonate(dep.address)
-        sp = d["spend"]["public"]
-        proof = bytes.fromhex(d["spend"]["proofBytes"][2:])
-        root, nf = int(sp["noteRoot"]), int(sp["nullifier"])
-        face, rec = int(sp["face"]), self._addr(int(sp["recipient"], 16))
-        gate = bytes.fromhex(d["gate"]["proofBytes"][2:])
+        sp                      = d["spend"]["public"]
+        proof                   = bytes.fromhex(d["spend"]["proofBytes"][2:])
+        root, nf                = int(sp["noteRoot"]), int(sp["nullifier"])
+        face, rec               = int(sp["face"]), self._addr(int(sp["recipient"], 16))
+        gate                    = bytes.fromhex(d["gate"]["proofBytes"][2:])
         if note.flavor == "b1":
-            db = d["depositor"]["db"]
-            b1p = (int(db["e"]), int(db["s_m"]), int(db["s_s"]), int(db["s_r"]), int(db["s_b"]),
-                   _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
-                   _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
+            db                  = d["depositor"]["db"]
+            b1p                 = (int(db["e"]), int(db["s_m"]), int(db["s_s"]), int(db["s_r"]), int(db["s_b"]),
+                                   _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
+                                   _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
             fn = self.notes.functions.spendCoupledB1(
                 proof, root, self.world.identity_root, nf, face, rec, note.cm,
                 self.world.accounts[note.issuer].address,
                 _ct_tuple(d["depositor"]["eDepForIss"]), b1p, gate)
         else:
-            f = (self.notes.functions.spendCoupledA1 if note.flavor == "a1"
-                 else self.notes.functions.spendCoupledA2)
-            fn = f(proof, root, self.world.identity_root, nf, face, rec, _ct_tuple(d["eEnc"]), gate)
+            f                   = (self.notes.functions.spendCoupledA1 if note.flavor == "a1"
+                                   else self.notes.functions.spendCoupledA2)
+            fn                  = f(proof, root, self.world.identity_root, nf, face, rec, _ct_tuple(d["eEnc"]), gate)
         event = {"b1": "SpentCoupledB1", "a1": "SpentCoupledA1", "a2": "SpentCoupledA2"}[note.flavor]
-        return self._send_from(fn, dep.address, f"Notes.spend {note.flavor}", event=event,
-                               contract=self.notes)
+        return self._send_from(fn, dep.address, f"Notes.spend {note.flavor}", event=event, contract=self.notes)
 
 
 __all__ = ["Acct", "IdentityEnvelope", "Note", "Person", "PrivacyChain", "PrivacyWorld",

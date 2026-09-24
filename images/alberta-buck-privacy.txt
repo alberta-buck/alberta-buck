@@ -675,7 +675,7 @@ B1.2. The credit union mints the batch
 
   ┌────
   │ Notes.mint  from 0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │   tx 0xda9b..d0f3  block 57  gas 645,983
+  │   tx 0x9dd8..14bb  block 57  gas 645,995
   │   proof              256 bytes (Groth16 proof)
   │   oldRoot            0xe0d753..b6cd7f
   │   newRoot            0x1f7b88..e2097b
@@ -864,7 +864,7 @@ B1.6. The credit union knows who cashed its note
   │                  ALBERTA  BUCK                  
   │          P A Y M E N T   R E C E I P T          
   │ ------------------------------------------------
-  │   Receipt  ww2swrbjb46z
+  │   Receipt  qaojill5yavg
   │ ------------------------------------------------
   │ FROM (payer - you) (PUBLIC IDENTITY)
   │  Aspen Mutual Credit Union
@@ -886,11 +886,11 @@ B1.6. The credit union knows who cashed its note
   │  Block                     58
   │  Log                        2
   │  Tx      0x009b182a4ad0..e843da2cc177
-  │  Mint    0xda9b6b21933f..1b8ea034d0f3
+  │  Mint    0x9dd877dff05e..b69abd9a14bb
   │ ------------------------------------------------
   │ VERIFICATION
   │  status @ issue: VALID
-  │  receipt  ww2swrbjb46z
+  │  receipt  qaojill5yavg
   │ ------------------------------------------------
   │         a record, not a bearer instrument       
   │         github.com/pjkundert/alberta-buck
@@ -983,7 +983,7 @@ A1.3. Bob pays; the credit union mints
 
   ┌────
   │ Notes.mint  from 0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  │   tx 0xd9f8..dab2  block 60  gas 593,715
+  │   tx 0x6316..5051  block 60  gas 593,727
   │   proof              256 bytes (Groth16 proof)
   │   oldRoot            0x1f7b88..e2097b
   │   newRoot            0x2d1166..0348ec

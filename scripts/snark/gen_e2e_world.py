@@ -494,8 +494,11 @@ def assemble(flavor: str):
     if flavor != "a2":
         cms = [int(c) for c in mint["public"]["cm"]]
         h_batch = batch_commitment(cms)
+        # Seeded apart from the world's stream, so a regenerated fixture reproduces exactly.
+        sign_state = random.Random(SEEDS[flavor] + 1)
         sig = issuer_schnorr_sign(int(world["parties"]["issuer"]["sk"]), h_batch,
-                                  int(world["issuer"], 16), CHAINID)
+                                  int(world["issuer"], 16), CHAINID,
+                                  rng=lambda: sign_state.getrandbits(256))
         world["issuerSchnorr"] = {
             "e": str(sig.e), "s": str(sig.s), "R": pt(sig.R),
             "hBatch": str(h_batch),

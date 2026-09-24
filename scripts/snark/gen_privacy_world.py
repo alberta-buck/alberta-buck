@@ -35,8 +35,8 @@ import os
 import random
 import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+SCRIPT_DIR                      = os.path.dirname(os.path.abspath(__file__))
+REPO                            = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, REPO)
 sys.path.insert(0, SCRIPT_DIR)
 
@@ -48,40 +48,32 @@ from alberta_buck.sim.cast import ASPEN, BOB, CAROL, CHAINID, KYC, UNIT
 from alberta_buck.wallet.bn254 import G1, ORDER, add, eq, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.elgamal import elgamal_encrypt
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.notes import (
-    FLAVOR_A1, FLAVOR_B1, NoteOpening, id_hash_b1, note_commitment, nullifier_b,
-)
+from alberta_buck.wallet.notes import FLAVOR_A1, FLAVOR_B1, NoteOpening, id_hash_b1, note_commitment, nullifier_b
 from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
 from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
 from alberta_buck.wallet.b1_binding import b1_bind_prove, b1_bind_verify
-from alberta_buck.wallet.deposit_fold import (
-    deposit_fold_a1_witness, deposit_fold_a2_witness, deposit_fold_witness,
-)
+from alberta_buck.wallet.deposit_fold import deposit_fold_a1_witness, deposit_fold_a2_witness, deposit_fold_witness
 from alberta_buck.wallet.delivery import deliver_a1, deliver_a2, open_a1, open_a2
 from alberta_buck.wallet.nums import H_PEDERSEN
-from alberta_buck.wallet.recvkey import (
-    prove_receiving_binding, receiving_key, verify_receiving_binding,
-)
+from alberta_buck.wallet.recvkey import prove_receiving_binding, receiving_key, verify_receiving_binding
 from alberta_buck.wallet.salt import derive_salt
 from alberta_buck.registry.merkle_service import rooted_registry
-from alberta_buck.registry.tree import (
-    identity_leaf_salted, mailbox_leaf, receiving_leaf,
-)
+from alberta_buck.registry.tree import identity_leaf_salted, mailbox_leaf, receiving_leaf
 
-SEED       = 0xB0BCA201
-OUT_DIR    = os.path.join(REPO, "build", "snark", "privacy")
-VEC_DIR    = os.path.join(REPO, "alberta_buck", "test", "vectors", "privacy")
-SUBTREE    = "registry:kyc"
+SEED                            = 0xB0BCA201
+OUT_DIR                         = os.path.join(REPO, "build", "snark", "privacy")
+VEC_DIR                         = os.path.join(REPO, "alberta_buck", "test", "vectors", "privacy")
+SUBTREE                         = "registry:kyc"
 
 # Salt counters: one association per purpose, never sharing a salt.
-RECEIVING, MAILBOX, NAMING = 0, 1, 2
+RECEIVING, MAILBOX, NAMING      = 0, 1, 2
 
 # Aspen Mutual's two batches: four notes each, the story's note third.
-B1_BATCH   = [20, 250, 100, 60]
-A1_BATCH   = [75, 120, 100, 40]
-MINE       = 2
+B1_BATCH                        = [20, 250, 100, 60]
+A1_BATCH                        = [75, 120, 100, 40]
+MINE                            = 2
 
 
 class Tape:
@@ -120,15 +112,15 @@ def acct_json(owner, addr, acct, is_public, kind, eth_key=None):
 
 
 def build_world():
-    state = random.Random(SEED)
-    rng = lambda: state.getrandbits(256)
+    state                       = random.Random(SEED)
+    rng                         = lambda: state.getrandbits(256)
     os.makedirs(OUT_DIR, exist_ok=True)
 
     # ---- People: core records, identity scalars, wallet seeds ----------------------------------
     people = {}
     for name, fields in (("bob", BOB), ("carol", CAROL), ("aspen", ASPEN)):
-        canonical = canonical_identity_data(fields)
-        m = identity_scalar(canonical)
+        canonical               = canonical_identity_data(fields)
+        m                       = identity_scalar(canonical)
         people[name] = {"identity": canonical, "m": m, "M": mul(G1, m)}
     for name in ("bob", "carol"):
         p = people[name]
@@ -150,8 +142,8 @@ def build_world():
                           ethKey=None, kind="contract", isPublic=True)
 
     # ---- The identity tree: every association a gate proves ------------------------------------
-    tree = rooted_registry(SUBTREE)
-    leaves = []
+    tree                        = rooted_registry(SUBTREE)
+    leaves                      = []
 
     def enrol(owner, kind, leaf):
         tree.insert_leaf(leaf)
@@ -168,11 +160,17 @@ def build_world():
     mbx = prove_receiving_binding(carol["M"], carol["pkRecv"], carol["salts"]["mailbox"], tree)
     assert verify_receiving_binding(carol["M"], mbx, identity_root)
 
-    notes = {}
-    all_cms = []
+    notes                       = {}
+    all_cms                     = []
+
+    # The batch signatures draw from their own stream, so the world reproduces exactly without
+    # moving any draw the notes and proofs were built from.
+    sign_state                  = random.Random(SEED + 1)
+    sign_rng                    = lambda: sign_state.getrandbits(256)
 
     def schnorr(cms, issuer_acct):
-        sig = issuer_schnorr_sign(issuer_acct["sk"], batch_commitment(cms), issuer_acct["addr"], CHAINID)
+        sig = issuer_schnorr_sign(issuer_acct["sk"], batch_commitment(cms), issuer_acct["addr"], CHAINID,
+                                  rng=sign_rng)
         return {"e": str(sig.e), "s": str(sig.s), "R": pt(sig.R),
                 "hBatch": str(batch_commitment(cms))}
 
@@ -186,9 +184,9 @@ def build_world():
     # ---- B1: Aspen Mutual's bearer notes -------------------------------------------------------
     b1_batch, b1_bearer = [], None
     for i, face in enumerate(B1_BATCH):
-        sigma_R, sigma_s = fresh_sigma()
-        rho = rand_scalar(rng)
-        opening = NoteOpening(FLAVOR_B1, face * UNIT, rho, id_hash_b1(aspen["m"], sigma_R, sigma_s), 0)
+        sigma_R, sigma_s        = fresh_sigma()
+        rho                     = rand_scalar(rng)
+        opening                 = NoteOpening(FLAVOR_B1, face * UNIT, rho, id_hash_b1(aspen["m"], sigma_R, sigma_s), 0)
         b1_batch.append(opening)
         if i == MINE:
             b1_bearer = {"sigma_R": pt(sigma_R), "sigma_s": str(sigma_s)}
@@ -197,27 +195,27 @@ def build_world():
     b1_note = b1_batch[MINE]
 
     # Carol cashes it: her depositor binding names her to Aspen Mutual only.
-    tape = Tape(rng)
-    b = rand_scalar(tape)
-    binding, eDepForIss = b1_bind_prove(carol["m"], accts["carol"]["sk"], accts["carol"]["E"],
-                                        accts["aspen"]["pk"], account=accts["carol"]["addr"],
-                                        chainid=CHAINID, b=b, rng=tape)
+    tape                        = Tape(rng)
+    b                           = rand_scalar(tape)
+    binding, eDepForIss         = b1_bind_prove(carol["m"], accts["carol"]["sk"], accts["carol"]["E"],
+                                                accts["aspen"]["pk"], account=accts["carol"]["addr"],
+                                                chainid=CHAINID, b=b, rng=tape)
     assert b1_bind_verify(accts["carol"]["pk"], accts["carol"]["E"], accts["aspen"]["pk"],
                           eDepForIss, binding, account=accts["carol"]["addr"], chainid=CHAINID)
     assert eq(binding.P_dep, add(carol["M"], mul(H_PEDERSEN, b)))
-    named_idx = tree.index_of_leaf(identity_leaf_salted(carol["M"], carol["salts"]["naming"]))
-    path = tree.path(named_idx)
-    Mx, My = point_to_words(carol["M"])
-    PIx, PIy = point_to_words(binding.P_dep)
-    b1_membership_input = {
-        "identityRoot": str(identity_root),
-        "PI_x": [str(v) for v in to_limbs(PIx)], "PI_y": [str(v) for v in to_limbs(PIy)],
-        "Mx": [str(v) for v in to_limbs(Mx)], "My": [str(v) for v in to_limbs(My)],
-        "b": [str(v) for v in to_limbs(b)],
-        "salt": str(carol["salts"]["naming"]),
-        "pathElements": [str(x) for x in path.siblings],
-        "pathIndices": [str(x) for x in path.index_bits],
-    }
+    named_idx                   = tree.index_of_leaf(identity_leaf_salted(carol["M"], carol["salts"]["naming"]))
+    path                        = tree.path(named_idx)
+    Mx, My                      = point_to_words(carol["M"])
+    PIx, PIy                    = point_to_words(binding.P_dep)
+    b1_membership_input         = {
+                "identityRoot": str(identity_root),
+                "PI_x": [str(v) for v in to_limbs(PIx)], "PI_y": [str(v) for v in to_limbs(PIy)],
+                "Mx": [str(v) for v in to_limbs(Mx)], "My": [str(v) for v in to_limbs(My)],
+                "b": [str(v) for v in to_limbs(b)],
+                "salt": str(carol["salts"]["naming"]),
+                "pathElements": [str(x) for x in path.siblings],
+                "pathIndices": [str(x) for x in path.index_bits],
+            }
     notes["b1"] = {
         "flavor": FLAVOR_B1, "issuer": "aspen", "payout": "carol",
         "firstLeaf": 0, "index": MINE, "leafIndex": MINE,
@@ -242,25 +240,25 @@ def build_world():
     # ---- A1: Aspen Mutual's drafts, one payable to Carol ---------------------------------------
     a1_batch, a1_minted = [], None
     for i, face in enumerate(A1_BATCH):
-        sigma_R, sigma_s = fresh_sigma()
-        rho = rand_scalar(rng)
+        sigma_R, sigma_s        = fresh_sigma()
+        rho                     = rand_scalar(rng)
         if i == MINE:
-            tape = Tape(rng)
-            minted = mint_unilateral_a1(carol["M"], carol["pkRecv"], v=face * UNIT, rho=rho,
-                                        m_issuer=aspen["m"], sigma_R=sigma_R, sigma_s=sigma_s,
-                                        rng=tape)
+            tape                = Tape(rng)
+            minted              = mint_unilateral_a1(carol["M"], carol["pkRecv"], v=face * UNIT, rho=rho,
+                                                     m_issuer=aspen["m"], sigma_R=sigma_R, sigma_s=sigma_s,
+                                                     rng=tape)
             a1_minted, a1_sigma, a1_tape = minted, (sigma_R, sigma_s), tape
         else:
             # Another customer's payee: a fictional Identity and mailbox.
-            M_x, pk_x = mul(G1, rand_scalar(rng)), mul(G1, rand_scalar(rng))
-            minted = mint_unilateral_a1(M_x, pk_x, v=face * UNIT, rho=rho, m_issuer=aspen["m"],
-                                        sigma_R=sigma_R, sigma_s=sigma_s, rng=rng)
+            M_x, pk_x           = mul(G1, rand_scalar(rng)), mul(G1, rand_scalar(rng))
+            minted              = mint_unilateral_a1(M_x, pk_x, v=face * UNIT, rho=rho, m_issuer=aspen["m"],
+                                                     sigma_R=sigma_R, sigma_s=sigma_s, rng=rng)
         a1_batch.append(minted.opening)
     a1_cms = [note_commitment(o) for o in a1_batch]
     all_cms += a1_cms
-    a1_delivery = deliver_a1(a1_minted, carol["pkRecv"], *a1_sigma)
-    a1_fold, a1_eEnc, a1_s = fold_input("a1", a1_delivery, carol, accts["carol"], tree, aspen["m"],
-                                        rng)
+    a1_delivery                 = deliver_a1(a1_minted, carol["pkRecv"], *a1_sigma)
+    a1_fold, a1_eEnc, a1_s      = fold_input("a1", a1_delivery, carol, accts["carol"], tree, aspen["m"],
+                                             rng)
     notes["a1"] = {
         "flavor": FLAVOR_A1, "issuer": "aspen", "payout": "carol",
         "firstLeaf": len(b1_cms), "index": MINE, "leafIndex": len(b1_cms) + MINE,
@@ -276,18 +274,18 @@ def build_world():
     write(os.path.join(OUT_DIR, "a1_fold_input.json"), a1_fold)
 
     # ---- A2: Bob's private cheque --------------------------------------------------------------
-    tape = Tape(rng)
-    rho = rand_scalar(rng)
-    a2_minted = mint_unilateral_a2(accts["bob"]["sk"], accts["bob"]["E"], carol["pkRecv"],
-                                   v=100 * UNIT, rho=rho, issuer=accts["bob"]["addr"],
-                                   chainid=CHAINID, salt_iss=bob["salts"]["naming"], rng=tape)
+    tape                        = Tape(rng)
+    rho                         = rand_scalar(rng)
+    a2_minted                   = mint_unilateral_a2(accts["bob"]["sk"], accts["bob"]["E"], carol["pkRecv"],
+                                                     v=100 * UNIT, rho=rho, issuer=accts["bob"]["addr"],
+                                                     chainid=CHAINID, salt_iss=bob["salts"]["naming"], rng=tape)
     a2_cms = [note_commitment(a2_minted.opening)]
     all_cms += a2_cms
-    a2_delivery = deliver_a2(a2_minted, carol["pkRecv"])
-    a2_fold, a2_eEnc, a2_s = fold_input("a2", a2_delivery, carol, accts["carolSavings"], tree,
-                                        None, rng)
-    en, ei = ct_words_mod_fr(a2_minted.eNote), ct_words_mod_fr(a2_minted.eIss)
-    tw = [w % F_R for w in point_to_words(a2_minted.binding.T)]
+    a2_delivery                 = deliver_a2(a2_minted, carol["pkRecv"])
+    a2_fold, a2_eEnc, a2_s      = fold_input("a2", a2_delivery, carol, accts["carolSavings"], tree,
+                                             None, rng)
+    en, ei                      = ct_words_mod_fr(a2_minted.eNote), ct_words_mod_fr(a2_minted.eIss)
+    tw                          = [w % F_R for w in point_to_words(a2_minted.binding.T)]
     assert poseidon(en + ei + tw) == a2_minted.opening.id_hash, "idHash layout mismatch"
     bd = a2_minted.binding
     notes["a2"] = {
@@ -378,15 +376,15 @@ def fold_input(flavor, delivery, carol, dep, tree, m_issuer, rng):
     ciphertext she was delivered, so t = r' + s with r' unwrapped from the delivery."""
     s = rand_scalar(rng)
     if flavor == "a1":
-        opened = open_a1(delivery, carol["k"], m_issuer)
-        M_named, t_total = carol["M"], s
+        opened                  = open_a1(delivery, carol["k"], m_issuer)
+        M_named, t_total        = carol["M"], s
     else:
-        opened = open_a2(delivery, carol["k"])
-        M_named, t_total = opened.M_I, (opened.r_prime + s) % ORDER
-    eEnc = elgamal_encrypt(M_named, carol["pkRecv"], t_total)
-    w = deposit_fold_witness(m_rec=carol["m"], k=carol["k"], sk_dep=dep["sk"],
-                             salt=carol["salts"]["receiving"], E_dep=dep["E"], note_ct=eEnc,
-                             tree=tree)
+        opened                  = open_a2(delivery, carol["k"])
+        M_named, t_total        = opened.M_I, (opened.r_prime + s) % ORDER
+    eEnc                        = elgamal_encrypt(M_named, carol["pkRecv"], t_total)
+    w                           = deposit_fold_witness(m_rec=carol["m"], k=carol["k"], sk_dep=dep["sk"],
+                                                       salt=carol["salts"]["receiving"], E_dep=dep["E"], note_ct=eEnc,
+                                                       tree=tree)
     if flavor == "a1":
         fold = deposit_fold_a1_witness(
             witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
@@ -395,13 +393,13 @@ def fold_input(flavor, delivery, carol, dep, tree, m_issuer, rng):
             r_E=dep["r_E"], e_dep=dep["E"], pk_dep=dep["pk"], e_enc=eEnc,
             identity_root=tree.root())
     else:
-        iss_path = tree.path(tree.index_of_leaf(identity_leaf_salted(opened.M_I, opened.salt_iss)))
-        fold = deposit_fold_a2_witness(
-            witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
-            e_note=opened.eNote, e_iss=opened.eIss, r_prime=opened.r_prime, t=t_total,
-            r_E=dep["r_E"], e_dep=dep["E"], pk_dep=dep["pk"], e_enc=eEnc,
-            salt_iss=opened.salt_iss, iss_path=iss_path, T=opened.T, gamma=opened.gamma,
-            identity_root=tree.root())
+        iss_path                = tree.path(tree.index_of_leaf(identity_leaf_salted(opened.M_I, opened.salt_iss)))
+        fold                    = deposit_fold_a2_witness(
+                               witness=w, rho=opened.opening.rho, id_hash=opened.opening.id_hash,
+                               e_note=opened.eNote, e_iss=opened.eIss, r_prime=opened.r_prime, t=t_total,
+                               r_E=dep["r_E"], e_dep=dep["E"], pk_dep=dep["pk"], e_enc=eEnc,
+                               salt_iss=opened.salt_iss, iss_path=iss_path, T=opened.T, gamma=opened.gamma,
+                               identity_root=tree.root())
     return fold, eEnc, s
 
 
@@ -424,14 +422,14 @@ def proof_bytes(pr):
 def assemble():
     world = json.load(open(os.path.join(OUT_DIR, "world.json")))
     os.makedirs(VEC_DIR, exist_ok=True)
-    timings = {}
-    tpath = os.path.join(OUT_DIR, "timings.json")
+    timings                     = {}
+    tpath                       = os.path.join(OUT_DIR, "timings.json")
     if os.path.exists(tpath):
         timings = json.load(open(tpath))
     for flavor, n in world["notes"].items():
-        nd = "mint_batch_a2_n1" if flavor == "a2" else f"mint_batch_n{len(n['batch'])}"
-        mint = json.load(open(os.path.join(REPO, "build", "snark", nd, "fixtures",
-                                           f"privacy_{flavor}.json")))
+        nd                      = "mint_batch_a2_n1" if flavor == "a2" else f"mint_batch_n{len(n['batch'])}"
+        mint                    = json.load(open(os.path.join(REPO, "build", "snark", nd, "fixtures",
+                                                              f"privacy_{flavor}.json")))
         assert mint["public"]["cm"] == n["cms"], f"{flavor}: prover and wallet disagree on cms"
         n["mint"] = {"proofBytes": mint["proofBytes"], "public": mint["public"]}
         spend = json.load(open(os.path.join(REPO, "build", "snark", "spend", "fixtures",
@@ -439,12 +437,12 @@ def assemble():
         assert spend["spend"]["public"]["nullifier"] == n["nullifier"], f"{flavor}: nullifier"
         n["spend"] = spend["spend"]
         if flavor == "b1":
-            pr = json.load(open(os.path.join(OUT_DIR, "b1_membership_proof.json")))
-            pub = json.load(open(os.path.join(OUT_DIR, "b1_membership_public.json")))
+            pr                  = json.load(open(os.path.join(OUT_DIR, "b1_membership_proof.json")))
+            pub                 = json.load(open(os.path.join(OUT_DIR, "b1_membership_public.json")))
             n["gate"] = {"kind": "b1Membership", "proofBytes": proof_bytes(pr), "public": pub}
         else:
-            pr = json.load(open(os.path.join(OUT_DIR, f"{flavor}_fold_proof.json")))
-            pub = json.load(open(os.path.join(OUT_DIR, f"{flavor}_fold_public.json")))
+            pr                  = json.load(open(os.path.join(OUT_DIR, f"{flavor}_fold_proof.json")))
+            pub                 = json.load(open(os.path.join(OUT_DIR, f"{flavor}_fold_public.json")))
             n["gate"] = {"kind": "depositFold", "proofBytes": proof_bytes(pr), "public": pub}
         if flavor in timings:
             n["timings"] = timings[flavor]

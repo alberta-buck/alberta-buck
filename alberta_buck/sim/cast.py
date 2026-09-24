@@ -50,10 +50,10 @@ ASPEN = {
 }
 
 # The identity registry's private subtree, and the chain every proof binds.
-KYC      = "kyc:ca-ab-2026"
-CHAINID  = 1
+KYC                             = "kyc:ca-ab-2026"
+CHAINID                         = 1
 
 # BUCK carries 6 decimals.
-UNIT     = 1_000_000
+UNIT                            = 1_000_000
 
 __all__ = ["BOB", "CAROL", "ASPEN", "KYC", "CHAINID", "UNIT"]

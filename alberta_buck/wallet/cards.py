@@ -40,11 +40,11 @@ _STYLE = {
 
 @dataclass(frozen=True)
 class Field:
-    label:      str
-    value:      str
-    protection: str                  # one of PROTECTIONS
-    who:        str = ""             # the reader (sealed), holder (secret) or parties (private)
-    source:     str = ""             # where the value came from, or what it proves
+    label:                      str
+    value:                      str
+    protection:                 str       # one of PROTECTIONS
+    who:                        str = ""  # the reader (sealed), holder (secret) or parties (private)
+    source:                     str = ""  # where the value came from, or what it proves
 
     def badge(self, arrow: str = "->") -> str:
         p = self.protection.upper()
@@ -57,10 +57,10 @@ class Field:
 
 @dataclass
 class Card:
-    title:  str
-    holder: str = ""                 # who holds or built the payload
-    fields: List[Field] = field(default_factory=list)
-    note:   str = ""
+    title:                      str
+    holder:                     str = ""  # who holds or built the payload
+    fields:                     List[Field] = field(default_factory=list)
+    note:                       str = ""
 
     def add(self, *fields: Field) -> "Card":
         self.fields.extend(fields)
@@ -69,11 +69,11 @@ class Card:
     # -- drivers ----------------------------------------------------------------------------------
 
     def text(self, width: int = 100) -> str:
-        head = f"{self.title}" + (f"  ({self.holder})" if self.holder else "")
-        out = [head, "-" * min(width, max(len(head), 40))]
-        bw = max([len(f.badge()) for f in self.fields] + [6])
-        lw = max([len(f.label) for f in self.fields] + [5])
-        vw = max([len(f.value) for f in self.fields] + [5])
+        head                    = f"{self.title}" + (f"  ({self.holder})" if self.holder else "")
+        out                     = [head, "-" * min(width, max(len(head), 40))]
+        bw                      = max([len(f.badge()) for f in self.fields] + [6])
+        lw                      = max([len(f.label) for f in self.fields] + [5])
+        vw                      = max([len(f.value) for f in self.fields] + [5])
         for f in self.fields:
             line = f"[{f.badge():<{bw}}] {f.label:<{lw}}  {f.value:<{vw}}"
             if f.source:
@@ -89,9 +89,9 @@ class Card:
         import matplotlib.pyplot as plt
         from matplotlib.patches import FancyBboxPatch
 
-        rows = len(self.fields)
-        H = 70 + 46 * rows + (34 if self.note else 12)
-        fig, ax = plt.subplots(figsize=(12, 12 * H / 1200), dpi=dpi)
+        rows                    = len(self.fields)
+        H                       = 70 + 46 * rows + (34 if self.note else 12)
+        fig, ax                 = plt.subplots(figsize=(12, 12 * H / 1200), dpi=dpi)
         fig.subplots_adjust(0, 0, 1, 1)
         ax.set(xlim=(0, 1200), ylim=(H, 0))
         ax.axis("off")
@@ -189,10 +189,10 @@ def credential(cred, holder: str, issuer_name: str = "Alberta's issuer") -> Card
 
 
 def particulars(p, holder: str, disclosed: Iterable[str] = ()) -> Card:
-    disclosed = set(disclosed)
-    cert = p.certificate
-    c = Card(f"PARTICULARS v{cert.version}", f"held by {holder}",
-             note="Signed over M.  A change is a new version; M and everything bound to it stay.")
+    disclosed                   = set(disclosed)
+    cert                        = p.certificate
+    c                           = Card(f"PARTICULARS v{cert.version}", f"held by {holder}",
+                                       note="Signed over M.  A change is a new version; M and everything bound to it stay.")
     for name in sorted(p.values):
         if name in disclosed:
             c.add(Field(name, p.values[name], "public", "", "disclosed; opens its commitment"))
@@ -246,8 +246,8 @@ def delivery(d: dict, flavor: str, recipient: str, issuer: str) -> Card:
              note="Only the recipient's receiving secret opens the sealed fields.")
     from alberta_buck.wallet.bn254 import words_to_point
     from alberta_buck.wallet.elgamal import ElGamalCiphertext
-    pt = lambda o: words_to_point(int(o["x"]), int(o["y"]))
-    ct = lambda o: ElGamalCiphertext(pt(o["R"]), pt(o["C"]))
+    pt                          = lambda o: words_to_point(int(o["x"]), int(o["y"]))
+    ct                          = lambda o: ElGamalCiphertext(pt(o["R"]), pt(o["C"]))
     c.add(Field("value ciphertext", short_ct(ct(d["eNote"])), "sealed", recipient,
                 "Enc(value, recipient's mailbox)"))
     if "eIss" in d:

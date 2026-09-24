@@ -19,18 +19,18 @@ def test_badges_name_the_reader():
 
 
 def test_delivery_card_seals_every_wrapped_field(world):
-    d = world.notes["a2"].delivery
-    card = cards.delivery(d, "a2", "Carol", "Bob")
-    wrapped = [k for k in d if k.endswith("Wrapped")]
-    sealed = [f for f in card.fields if f.protection == "sealed"]
+    d                           = world.notes["a2"].delivery
+    card                        = cards.delivery(d, "a2", "Carol", "Bob")
+    wrapped                     = [k for k in d if k.endswith("Wrapped")]
+    sealed                      = [f for f in card.fields if f.protection == "sealed"]
     assert len(sealed) == len(wrapped) + 2          # plus the two ciphertexts
     assert all(f.protection in cards.PROTECTIONS for f in card.fields)
     assert "SEALED -> Carol" in card.text()
 
 
 def test_bearer_note_card_and_png(world, tmp_path):
-    b1 = world.notes["b1"]
-    card = cards.bearer_note(b1.opening, b1.cm, "Aspen Mutual Credit Union", "Bob")
+    b1                          = world.notes["b1"]
+    card                        = cards.bearer_note(b1.opening, b1.cm, "Aspen Mutual Credit Union", "Bob")
     assert "100.00 BUCK" in card.text()
     assert cards.bearer_code(b1.opening.rho).count("-") >= 10
     out = card.png(str(tmp_path / "note.png"))

@@ -52,22 +52,22 @@ def field_digest(name: str, value: str, salt: int) -> int:
 @dataclass(frozen=True)
 class ParticularsCertificate:
     """What the registry signs.  Carries no value, only commitments."""
-    registry_id: str
-    M:           Tuple
-    version:     int
-    issued_at:   str                   # ISO-8601 UTC
-    digests:     Dict[str, int]        # particular name -> field_digest
-    signature:   RegistrySchnorrProof
+    registry_id:                str
+    M:                          Tuple
+    version:                    int
+    issued_at:                  str             # ISO-8601 UTC
+    digests:                    Dict[str, int]  # particular name -> field_digest
+    signature:                  RegistrySchnorrProof
 
     def message(self) -> bytes:
         return _message(self.registry_id, self.M, self.version, self.issued_at, self.digests)
 
 
 def _message(registry_id, M, version, issued_at, digests) -> bytes:
-    Mx, My = point_to_words(M)
-    body = [IDENTITY_PARTICULARS, _lp(registry_id.encode()),
-            Mx.to_bytes(32, "big"), My.to_bytes(32, "big"),
-            struct.pack(">Q", version), _lp(issued_at.encode())]
+    Mx, My                      = point_to_words(M)
+    body                        = [IDENTITY_PARTICULARS, _lp(registry_id.encode()),
+                                   Mx.to_bytes(32, "big"), My.to_bytes(32, "big"),
+                                   struct.pack(">Q", version), _lp(issued_at.encode())]
     for name in sorted(digests):
         body += [_lp(name.encode()), digests[name].to_bytes(32, "big")]
     return keccak_raw(b"".join(body))
@@ -76,26 +76,26 @@ def _message(registry_id, M, version, issued_at, digests) -> bytes:
 @dataclass(frozen=True)
 class Particulars:
     """What the holder keeps: the certificate, the values and their salts."""
-    certificate: ParticularsCertificate
-    values:      Dict[str, str]
-    salts:       Dict[str, int]
+    certificate:                ParticularsCertificate
+    values:                     Dict[str, str]
+    salts:                      Dict[str, int]
 
 
 @dataclass(frozen=True)
 class Disclosure:
     """What the holder shows: the certificate and a chosen subset of its fields."""
-    certificate: ParticularsCertificate
-    fields:      Dict[str, Tuple[str, int]]   # name -> (value, salt)
+    certificate:                ParticularsCertificate
+    fields:                     Dict[str, Tuple[str, int]]  # name -> (value, salt)
 
 
 def issue_particulars(kp: RegistryKeyPair, registry_id: str, M, version: int,
                       issued_at: str, values: Mapping[str, str], rng=None) -> Particulars:
     """The registry's side: commit each particular, sign the commitments over M."""
-    salts = {name: rand_scalar(rng) for name in sorted(values)}
-    digests = {name: field_digest(name, values[name], salts[name]) for name in sorted(values)}
-    sig = registry_schnorr_sign(kp.sk, _message(registry_id, M, version, issued_at, digests),
-                                registry_id, rng=rng)
-    cert = ParticularsCertificate(registry_id, M, version, issued_at, digests, sig)
+    salts                       = {name: rand_scalar(rng) for name in sorted(values)}
+    digests                     = {name: field_digest(name, values[name], salts[name]) for name in sorted(values)}
+    message                     = _message(registry_id, M, version, issued_at, digests)
+    sig                         = registry_schnorr_sign(kp.sk, message, registry_id, rng=rng)
+    cert                        = ParticularsCertificate(registry_id, M, version, issued_at, digests, sig)
     return Particulars(cert, dict(values), salts)
 
 

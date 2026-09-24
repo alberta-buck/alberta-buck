@@ -159,13 +159,6 @@ def test_anvil_lifecycle_and_receipts():
                 core = fixture.build_receipt(role, stack.contracts,
                                              rng=rng, **anchors)
                 res = verify_receipt(deserialize_core(serialize_core(core)))
-                if flavor in ("a1", "a2"):
-                    # The AB-RCPT addressed legs still decrypt with an
-                    # identity-derived scalar, which addressed notes no longer
-                    # answer to.  See test_fixture_receipt_verifies for what
-                    # the rework is.  The ON-CHAIN half above is the part this
-                    # test exists for, and it passed.
-                    continue
                 assert res.ok and res.reason == "VALID", \
                     f"{flavor}/{role}: {res.reason}"
 

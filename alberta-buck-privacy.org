@@ -671,7 +671,7 @@ print(f"\nthe batch proof was made in advance in {b1.timings['mint_prove_s']:.1f
 #+RESULTS:
 #+begin_example
 Notes.mint  from 0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  tx 0xda9b..d0f3  block 57  gas 645,983
+  tx 0x9dd8..14bb  block 57  gas 645,995
   proof              256 bytes (Groth16 proof)
   oldRoot            0xe0d753..b6cd7f
   newRoot            0x1f7b88..e2097b
@@ -865,7 +865,7 @@ Aspen Mutual's key opens it to Carol's M: True
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  ww2swrbjb46z
+  Receipt  qaojill5yavg
 ------------------------------------------------
 FROM (payer - you) (PUBLIC IDENTITY)
  Aspen Mutual Credit Union
@@ -887,11 +887,11 @@ TRANSACTION
  Block                     58
  Log                        2
  Tx      0x009b182a4ad0..e843da2cc177
- Mint    0xda9b6b21933f..1b8ea034d0f3
+ Mint    0x9dd877dff05e..b69abd9a14bb
 ------------------------------------------------
 VERIFICATION
  status @ issue: VALID
- receipt  ww2swrbjb46z
+ receipt  qaojill5yavg
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck
@@ -983,7 +983,7 @@ print(chain.observe(a1_mint).render())
 #+RESULTS:
 #+begin_example
 Notes.mint  from 0x74c4..CBD7 Aspen Mutual Credit Union (public)
-  tx 0xd9f8..dab2  block 60  gas 593,715
+  tx 0x6316..5051  block 60  gas 593,727
   proof              256 bytes (Groth16 proof)
   oldRoot            0x1f7b88..e2097b
   newRoot            0x2d1166..0348ec

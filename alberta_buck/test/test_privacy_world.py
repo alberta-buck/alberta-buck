@@ -58,8 +58,8 @@ def test_identity_root_rebuilds_from_wallet_secrets(world):
     """The posted root is nothing but the citizens' own associations, each with its own salt."""
     tree = rooted_registry("registry:kyc")
     for name in ("bob", "carol"):
-        p = world.people[name]
-        k, pk = receiving_key(p.seed)
+        p                       = world.people[name]
+        k, pk                   = receiving_key(p.seed)
         assert k == p.k and eq(pk, p.pk_recv)
         for purpose, counter in (("receiving", 0), ("mailbox", 1), ("naming", 2)):
             assert p.salts[purpose] == derive_salt(p.seed, world.kyc, counter)
@@ -90,24 +90,24 @@ def test_replayed_draws_rebuild_the_proven_notes(world):
     from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
     from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
     from alberta_buck.wallet.bn254 import words_to_point
-    A, P = world.accounts, world.people
-    a2 = world.notes["a2"]
-    m2 = mint_unilateral_a2(A["bob"].sk, A["bob"].E, P["carol"].pk_recv, v=a2.face,
-                            rho=a2.opening.rho, issuer=A["bob"].addr, chainid=world.chainid,
-                            salt_iss=P["bob"].salts["naming"], rng=world.replay("a2", "mint"))
+    A, P                        = world.accounts, world.people
+    a2                          = world.notes["a2"]
+    m2                          = mint_unilateral_a2(A["bob"].sk, A["bob"].E, P["carol"].pk_recv, v=a2.face,
+                                                     rho=a2.opening.rho, issuer=A["bob"].addr, chainid=world.chainid,
+                                                     salt_iss=P["bob"].salts["naming"], rng=world.replay("a2", "mint"))
     assert m2.cm == a2.cm
-    a1 = world.notes["a1"]
-    s = a1.raw["sigma"]
-    sigma_R = words_to_point(int(s["sigma_R"]["x"]), int(s["sigma_R"]["y"]))
-    m1 = mint_unilateral_a1(P["carol"].M, P["carol"].pk_recv, v=a1.face, rho=a1.opening.rho,
-                            m_issuer=P["aspen"].m, sigma_R=sigma_R, sigma_s=int(s["sigma_s"]),
-                            rng=world.replay("a1", "mint"))
+    a1                          = world.notes["a1"]
+    s                           = a1.raw["sigma"]
+    sigma_R                     = words_to_point(int(s["sigma_R"]["x"]), int(s["sigma_R"]["y"]))
+    m1                          = mint_unilateral_a1(P["carol"].M, P["carol"].pk_recv, v=a1.face, rho=a1.opening.rho,
+                                                     m_issuer=P["aspen"].m, sigma_R=sigma_R, sigma_s=int(s["sigma_s"]),
+                                                     rng=world.replay("a1", "mint"))
     assert m1.cm == a1.cm
-    b1 = world.notes["b1"]
-    rng = world.replay("b1", "depositorBinding")
-    b = rand_scalar(rng)
-    _binding, eDep = b1_bind_prove(P["carol"].m, A["carol"].sk, A["carol"].E, A["aspen"].pk,
-                                   account=A["carol"].addr, chainid=world.chainid, b=b, rng=rng)
+    b1                          = world.notes["b1"]
+    rng                         = world.replay("b1", "depositorBinding")
+    b                           = rand_scalar(rng)
+    _binding, eDep              = b1_bind_prove(P["carol"].m, A["carol"].sk, A["carol"].E, A["aspen"].pk,
+                                                account=A["carol"].addr, chainid=world.chainid, b=b, rng=rng)
     want = b1.raw["depositor"]["eDepForIss"]["C"]
     assert point_to_words(eDep.C) == (int(want["x"]), int(want["y"]))
 
@@ -115,13 +115,13 @@ def test_replayed_draws_rebuild_the_proven_notes(world):
 @pytest.mark.parametrize("flavor", ["b1", "a1", "a2"])
 @pytest.mark.parametrize("role", ["recipient", "issuer"])
 def test_receipts_verify(world, flavor, role):
-    fx = world.fixture(flavor)
-    anchors = {"mint": {"txhash": "0x" + "11" * 32, "block": 100},
-               "spend": {"txhash": "0x" + "22" * 32, "block": 101, "logindex": 3,
-                         "timestamp": 1780000000}}
-    contracts = {"registry": "0x" + "aa" * 20, "buck": "0x" + "bb" * 20, "notes": "0x" + "cc" * 20}
-    core = fx.build_receipt(role, contracts, rng=_rng(), **anchors)
-    res = verify_receipt(deserialize_core(serialize_core(core)))
+    fx                          = world.fixture(flavor)
+    anchors                     = {"mint": {"txhash": "0x" + "11" * 32, "block": 100},
+                                   "spend": {"txhash": "0x" + "22" * 32, "block": 101, "logindex": 3,
+                                             "timestamp": 1780000000}}
+    contracts                   = {"registry": "0x" + "aa" * 20, "buck": "0x" + "bb" * 20, "notes": "0x" + "cc" * 20}
+    core                        = fx.build_receipt(role, contracts, rng=_rng(), **anchors)
+    res                         = verify_receipt(deserialize_core(serialize_core(core)))
     assert res.ok and res.reason == "VALID", f"{flavor}/{role}: {res.reason}"
     assert res.value == 100 * world.unit
 
@@ -142,14 +142,13 @@ def test_the_story_runs_on_chain(world):
     from alberta_buck.sim.privacy_world import PrivacyChain
     from alberta_buck.wallet.issuer import Issuer
 
-    rng = _rng(0x5701)
-    A, U = world.accounts, world.unit
+    rng                         = _rng(0x5701)
+    A, U                        = world.accounts, world.unit
     with Anvil(chain_id=1, auto_impersonate=True) as anvil:
-        alberta = Issuer.setup("alberta-identity", 0xA1BE27A0000000000000000000000000000000A1,
-                               rng=rng)
-        chain = PrivacyChain(anvil, world, alberta, rng=rng)
-        creds = {who: alberta.issue(f, applicant_addr=0, rng=rng)
-                 for who, f in (("bob", BOB), ("carol", CAROL), ("aspen", ASPEN))}
+        alberta                 = Issuer.setup("alberta-identity", 0xA1BE27A0000000000000000000000000000000A1, rng=rng)
+        chain                   = PrivacyChain(anvil, world, alberta, rng=rng)
+        creds                   = {who: alberta.issue(f, applicant_addr=0, rng=rng)
+                                   for who, f in (("bob", BOB), ("carol", CAROL), ("aspen", ASPEN))}
         for label in ("bob", "carol", "carolSavings"):
             chain.register(chain.registration_package(A[label], creds[A[label].owner], rng))
         chain.bind_public(A["aspen"])

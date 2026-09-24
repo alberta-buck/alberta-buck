@@ -41,23 +41,23 @@ _STRUCT_NAMES = {
 @dataclass(frozen=True)
 class Label:
     """A reader's annotation for an address."""
-    name:   str
-    public: bool = False        # True: Mallory can learn this herself
+    name:                       str
+    public:                     bool = False  # True: Mallory can learn this herself
 
 
 @dataclass
 class Observation:
     """One transaction as the chain shows it."""
-    txhash:   str
-    block:    int
-    time:     int
-    sender:   str
-    contract: str
-    function: str
-    args:     List[Tuple[str, str]]
-    events:   List[Tuple[str, List[Tuple[str, str]]]]
-    gas:      int
-    status:   int
+    txhash:                     str
+    block:                      int
+    time:                       int
+    sender:                     str
+    contract:                   str
+    function:                   str
+    args:                       List[Tuple[str, str]]
+    events:                     List[Tuple[str, List[Tuple[str, str]]]]
+    gas:                        int
+    status:                     int
 
     def render(self, width: int = 96) -> str:
         """A compact text rendering: header, arguments, then events."""
@@ -80,8 +80,7 @@ AMOUNT_FIELDS = {"amount", "value", "face", "totalFace"}
 class Observer:
     """Decodes transactions against a set of known contracts."""
 
-    def __init__(self, w3, contracts: Dict[str, Any],
-                 labels: Optional[Dict[str, Label]] = None, decimals: int = 6):
+    def __init__(self, w3, contracts: Dict[str, Any], labels: Optional[Dict[str, Label]] = None, decimals: int = 6):
         self.w3 = w3
         self.decimals = decimals
         self.contracts = contracts          # name -> web3 contract
@@ -111,28 +110,28 @@ class Observer:
         return f"{_short_hex(a)}   [reader: {lab.name}]"
 
     def observe(self, txhash) -> Observation:
-        tx = self.w3.eth.get_transaction(txhash)
-        rcpt = self.w3.eth.get_transaction_receipt(txhash)
-        blk = self.w3.eth.get_block(rcpt["blockNumber"])
-        target = (tx["to"] or "").lower()
-        cname, contract = self._by_addr.get(target, (_short_hex(target), None))
-        fname, args = "(unknown)", []
+        tx                      = self.w3.eth.get_transaction(txhash)
+        rcpt                    = self.w3.eth.get_transaction_receipt(txhash)
+        blk                     = self.w3.eth.get_block(rcpt["blockNumber"])
+        target                  = (tx["to"] or "").lower()
+        cname, contract         = self._by_addr.get(target, (_short_hex(target), None))
+        fname, args             = "(unknown)", []
         if contract is not None:
-            fn, params = contract.decode_function_input(tx["input"])
-            fname = fn.fn_name
-            abi = {i["name"]: i for i in fn.abi["inputs"]}
-            args = [(k, self._value(v, abi.get(k))) for k, v in params.items()]
+            fn, params          = contract.decode_function_input(tx["input"])
+            fname               = fn.fn_name
+            abi                 = {i["name"]: i for i in fn.abi["inputs"]}
+            args                = [(k, self._value(v, abi.get(k))) for k, v in params.items()]
         events = []
         for log in rcpt["logs"]:
-            t0 = log["topics"][0].hex().removeprefix("0x") if log["topics"] else ""
-            hit = self._events.get(t0)
+            t0                  = log["topics"][0].hex().removeprefix("0x") if log["topics"] else ""
+            hit                 = self._events.get(t0)
             if hit is None:
                 events.append(("(unknown event)", []))
                 continue
-            c, ev = hit
-            decoded = getattr(c.events, ev)().process_log(log)
-            abi = next(i for i in c.abi if i.get("type") == "event" and i["name"] == ev)
-            spec = {i["name"]: i for i in abi["inputs"]}
+            c, ev               = hit
+            decoded             = getattr(c.events, ev)().process_log(log)
+            abi                 = next(i for i in c.abi if i.get("type") == "event" and i["name"] == ev)
+            spec                = {i["name"]: i for i in abi["inputs"]}
             events.append((ev, [(k, self._value(v, spec.get(k))) for k, v in decoded["args"].items()]))
         return Observation(
             txhash=rcpt["transactionHash"].to_0x_hex(), block=rcpt["blockNumber"],
@@ -144,9 +143,9 @@ class Observer:
     # -- value summaries ---------------------------------------------------------------------------
 
     def _value(self, v, abi: Optional[dict]) -> str:
-        typ = (abi or {}).get("type", "")
-        internal = (abi or {}).get("internalType", "")
-        struct = internal.split(".")[-1].removeprefix("struct ").strip("[]") if "struct" in internal else ""
+        typ                     = (abi or {}).get("type", "")
+        internal                = (abi or {}).get("internalType", "")
+        struct                  = internal.split(".")[-1].removeprefix("struct ").strip("[]") if "struct" in internal else ""
         if typ == "address":
             return self.addr(v)
         if typ.startswith("tuple"):
