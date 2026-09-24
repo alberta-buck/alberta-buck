@@ -1489,7 +1489,10 @@ What Mallory can join
     one note look like many.  An addressed note is safe to hold, so
     cashing it days later separates the cashing from the minting. A
     bearer note is safer cashed promptly, so its cover is a busy issuer
-    and a common denomination.
+    and a common denomination. These are the habits of any privacy pool,
+    mixers included. The difference is who can use this one: every
+    depositor is a certified person, named to the counterparty and, for
+    a bearer note, to its issuer.
   • *Keys matter.* Lose the seed and you lose the receiving key; leak it
     and old deliveries sealed to it can be read. A weakness in the
     underlying cryptography, or a compromised wallet, is outside these
