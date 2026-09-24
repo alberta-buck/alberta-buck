@@ -175,6 +175,22 @@ class PrivacyWorld:
         """The recorded draws of one wallet operation, as an rng."""
         return replay(self.raw["notes"][flavor]["draws"][what])
 
+    def new_account(self, owner: str, label: str, rng) -> Acct:
+        """A fresh account for an existing identity: a new Ethereum key and a new identity key
+        pair, encrypting the same M.  Nothing about it matches the owner's other accounts."""
+        from eth_account import Account
+        from web3 import Web3
+        person = self.people[owner]
+        eth = Account.from_key(rand_scalar(rng).to_bytes(32, "big"))
+        sk, r = rand_scalar(rng), rand_scalar(rng)
+        pk = mul(G1, sk)
+        acct = Acct(label=label, owner=owner, addr=int(eth.address, 16),
+                    address=Web3.to_checksum_address(eth.address), sk=sk, pk=pk, r=r,
+                    E=elgamal_encrypt(person.M, pk, r), m=person.m, M=person.M,
+                    is_public=False, kind="eoa", eth_key=eth.key.hex())
+        self.accounts[label] = acct
+        return acct
+
     def fixture(self, flavor: str):
         """One note as an :class:`E2EFixture`, so the AB-RCPT/2 receipt builders apply as-is."""
         from alberta_buck.sim.notes_stack import E2EFixture, Party

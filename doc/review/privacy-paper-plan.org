@@ -81,7 +81,7 @@ staff.  This file is the resume document: decisions, phases, status.
 |-------+-----------------------------------------------------------------------+--------|
 | P1    | Privacy fixture world: builder, real proofs, Makefile target          | done   |
 | P2    | PrivacyChain on NotesStack; observer; tests                           | done   |
-| P3    | cards.py (payload anatomy, text + PNG), with tests                    | open   |
+| P3    | cards.py (payload anatomy, text + PNG), with tests                    | done   |
 | P4    | Paper rewrite: story, code per step, results                          | open   |
 | P5    | figures.json rewrite, re-render figures                               | open   |
 | P6    | Makefile doc-privacy (executable), docs target; render; commit        | open   |
@@ -108,6 +108,15 @@ staff.  This file is the resume document: decisions, phases, status.
 - =alberta_buck/sim/cast.py=, =privacy_world.py= (PrivacyWorld, PrivacyChain, fixture()
   adapter for receipts), =observer.py=; NotesStack takes an external issuer (default path's
   draws unchanged).  The whole story runs on anvil in ~2 s.
+
+* Accounts (author, 2026-09-24)
+
+Credit and demurrage are out of scope, but a couple of accounts per person is normal under BUCK
+and simple to show: Bob's credit account (funded by credit, outside this paper) moves spending
+money to his everyday account, the payer in every flow, by one public transfer the paper names
+as a visible link.  Carol has everyday and savings accounts.  No fee-payer designation: its
+acceptance emits DemurragePayerSet(account, payer), a public link; amounts display to the cent,
+where demurrage over the demonstration's minutes does not show.
 
 * Notes
 
