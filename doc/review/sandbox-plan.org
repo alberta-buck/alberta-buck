@@ -1,0 +1,144 @@
+#+TITLE: The Alberta Buck sandbox: implementation plan
+#+DATE: 2026-09-25
+#+OPTIONS: toc:nil num:nil ^:nil
+
+Phase G2 of doc/review/public-plan.org: a browser app in which a newcomer issues and registers
+identities, insures simulated assets into credit, keeps wallets and moves BUCK -- in a private
+world running in their own tab, in minutes, with nothing to install but a browser.
+
+* Scope
+
+*v1:* the world bar and four tools -- Issuer, Wallet, Credit, Observer -- over one Tevm world in
+one page.  Every key, credential and balance is simulated and says so.
+
+*Not v1 (later, in order of value):* AB-RCPT/2 receipts in the Wallet; one world shared by
+several tabs (a =SharedWorker= holding the chain); connecting to the Python sim server's shared,
+agent-driven world; Notes from fixture proofs; the insurer gate (=configureInsurerGate=,
+=attestInsurer=); revocation.
+
+* Architecture
+
+- *Where.*  =core/js/sandbox/=: =index.html=, =styles.css=, =src/app.js= (the controller:
+  =SandboxApp=, chain logic only, no DOM -- the =BuckWorldApp= pattern), =src/ui/*.js= (one module
+  per tool, presentation only), =src/main.js= (boot and wiring).  esbuild bundles it into
+  =core/js/sandbox/dist/= (gitignored) beside the web wasm and the contract bundle.
+- *Chain.*  =tevmSession()= -- a Tevm =MemoryClient= in the page.  =buildBuckWorld= deploys
+  =IdentityRegistry=, =BuckCredit=, =BuckKControllerDirect= and =Buck= from the published
+  =alberta-buck-contracts= bundle in =core/js/node_modules= (no Foundry needed to build the
+  sandbox); the identity/wallet/registry kernels are the web wasm (=make core-build-wasm-web=).
+- *Accounts and keys.*  Every actor is a viem local account generated in the page and funded with
+  gas from dev account 0 (=fundAccount=).  The issuer's PS keys live in the Issuer tool; each
+  wallet's identity key (ElGamal =sk=) lives in its wallet.  One "acting as" selector per tool.
+- *Persistence.*  After every action the app saves ={chain: tevmDumpState(), app: {issuer,
+  credentials, wallets, credits, labels, journal tail}}= to IndexedDB, and restores it at load.
+  *Export* writes the same object as a JSON file (BigInts as decimal strings); *Import* reads it;
+  *Reset* deploys a fresh world.
+- *UI.*  Vanilla ES modules and one stylesheet, as the existing demos: no framework to learn or
+  upgrade.  Labels on every control, keyboard reachable, numbers formatted as BUCK with six
+  decimals, addresses shortened with the full value on hover and copy.
+
+* Core additions (=core/js/src=, tested with =node --test= on =tevmSession=)
+
+The sandbox needs the ceremony in its two real halves, and credit with a separate insurer.
+Existing functions keep their behaviour, composed from the new ones.
+
+- =issueCredential(issuer, fields, {rng})= :: the issuer's half: canonical record -> m -> PS
+  signature; returns ={fields, canonical, m, sigma}=, a credential card.
+- =registerWallet(world, account, credential, {rng})= :: the holder's half: presentation,
+  identity key and ElGamal, registration proof, =register=; returns the handle =onboard= returns.
+- =onboard(...)= :: unchanged, now =registerWallet(issueCredential(...))=.
+- =insureAsset(world, insurer, holder, terms)= :: the holder accepts the insurer
+  (=setCreditIssuer=), the insurer calls =createCredit=; returns the token id.
+- =activateCredit(world, holder, amount)= :: =Buck.mint(amount)= against the holder's credit.
+- =createCredit(...)= :: unchanged, now =insureAsset= + =activateCredit=.
+- =creditView(world, tokenId)= :: holder, insurer, class, face, floor, depreciation, premium,
+  =currentValue=.
+- =loadWallet(wasm)= (=wallet-web.js=) :: the browser loader for =wrapWallet=, sharing the
+  identity wasm module.
+- =observe(world, fromBlock)= (=observer.js=) :: decoded transactions and events since a block,
+  each field marked public or opaque.
+
+These ride in =alberta-buck-core= 0.2.1 when the sandbox ships.
+
+* The tools
+
+** World bar (always visible)
+
+Shows the block, the simulated date and day number, BUCK_K (=kctrl.buckK=), total BUCK supply
+and the wallet count.  Actions: +1 hour, +1 day, +30 days (=advanceTime=), Export, Import,
+Reset.  A journal drawer lists every transaction with its outcome and gas (the existing
+=JournalWriter=).
+
+** Issuer (the registry and its KYC desk)
+
+- The issuer is created and trusted with the world (=trustIssuer=, by governance).
+- A form for the core record: given and family name at first certification, date of birth, a
+  registry person number (generated), and the certification date.
+- *Issue* -> a credential card (the fields, the identity scalar's commitment, the signature):
+  shown, listed, downloadable as JSON, and offered to a wallet directly.
+- Says what the chain learns at issuance: nothing -- issuance is off-chain.
+
+** Wallet (a citizen)
+
+- *Create* a wallet (label -> fresh account, funded with gas).
+- *Import a credential* (from the Issuer's list, or pasted JSON) and *Register*
+  (=registerWallet=): the identity is proved on chain without revealing who it is.
+- Shows: address, registered or not, balance, signed balance (credit drawn), credit limit,
+  demurrage owing (=feeOwing=).
+- *Introduce* two wallets (=identityApprove= both ways -- the handshake private payments need),
+  then *Send* BUCK (=transfer=).  Each step names what it discloses and to whom.
+
+** Credit (an insurer)
+
+- The insurer is a sandbox account, "Sandbox Mutual".
+- A form: the holder (a registered wallet), an asset class, face value, floor, depreciation
+  (none, linear, declining balance) and rate, premium rate.  Asset classes are sandbox labels over
+  =BuckCredit='s opaque =uint8=, each with a sensible default: home (linear, slow), vehicle
+  (declining, 15 %/yr), equipment (declining), farmland and gold (none).
+- *Insure* -> a BuckCredit NFT (=insureAsset=); *Activate* an amount -> the holder mints BUCK
+  (=activateCredit=).
+- A table of credits with their depreciated value (=currentValue=), which moves as the clock does.
+
+** Observer (Mallory)
+
+- Every transaction since the world began, decoded (=observe=): block, from, to (by contract
+  name), function, arguments, events.
+- Identity material shows as what it is on chain -- curve points and proofs, not names -- with a
+  one-line note on what each field would take to open.  The privacy argument, made visible.
+
+* Build, run, test
+
+- =make sandbox-build=: web wasm, then an esbuild bundle of =sandbox/src/main.js= into
+  =sandbox/dist/= with the wasm and =alberta-buck-contracts='s =contracts.json= copied beside it.
+- =make sandbox=: build, then serve =sandbox/dist= on =http://localhost:8000= and print the URL.
+- =make sandbox-test=, part of =core-test-js=:
+  1. the core additions, each on =tevmSession=, including a =tevmDumpState= / =tevmLoadState=
+     round trip that restores balances, credits and the clock;
+  2. the whole story through =SandboxApp= with no DOM: issue two credentials, register two
+     wallets, insure an asset, activate credit, introduce, send, advance 30 days (demurrage
+     accrues, the credit depreciates), the observer's rows, export then import to an equal world;
+  3. the shipped bundle under a DOM stub, as =test/demo.bundle.test.js= does for buckworld.
+
+* Milestones
+
+- *S1* :: the core additions, =wallet-web.js= and =observer.js=, with tests.  /Accepted when/
+  the new node tests pass and the existing JS suite is unchanged.
+- *S2* :: =SandboxApp= and persistence (IndexedDB; export, import, reset).  /Accepted when/ the
+  whole-story test passes with no DOM.
+- *S3* :: the world bar, Issuer and Wallet UIs.  /Accepted when/ a person can issue, register,
+  introduce and send by hand in a browser.
+- *S4* :: the Credit and Observer UIs.  /Accepted when/ a person can insure, activate and watch
+  depreciation, and the observer decodes every transaction.
+- *S5* :: the =make sandbox*= targets, the bundle test, =docs/SANDBOX.org=, screenshots.
+  /Accepted when/ a fresh clone runs =make sandbox= and the story end to end.
+- *S6* :: a hosted build (a GitHub Pages workflow), once the repository is public.  /Accepted
+  when/ the README links a live sandbox.
+
+* Risks to settle early (in S1)
+
+- *Tevm state round trip.*  =tevmLoadState= must restore the block number and timestamp as well as
+  accounts and storage; if it does not, the app records the clock and replays it on load.
+- *Registration cost in a tab.*  One registration proof plus a 3M-gas =register= in Tevm; measure,
+  and show progress if it passes a second.
+- *BigInt in storage.*  Every persisted and exported value is a decimal string; one codec,
+  tested by the export/import round trip.

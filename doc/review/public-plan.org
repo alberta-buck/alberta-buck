@@ -60,7 +60,9 @@ Four tools, one per role in the system, over a shared world bar:
 |               |           | the privacy story made visible                                      |
 
 Wallets are separate browser identities of one world, so a visitor plays issuer, insurer and two
-citizens side by side (tabs of one page share the world; =BroadcastChannel= keeps them in step).
+citizens side by side.  v1 keeps the world in one page (the four tools are tabs of it); sharing it
+across browser tabs needs a =SharedWorker= to hold the chain, and comes later.  The implementation
+plan is =doc/review/sandbox-plan.org=.
 
 *Later, not in v1:* a "connect to a shared world" switch pointing the same UI at the sim server
 (needs address discovery, =eth_getLogs= and a time op on the server), so agents supply an economy
@@ -109,7 +111,10 @@ scripted rather than hand-typed and hand-edited, so it re-records when the comma
    is tracked; the Grynvault, pairing-free PRE and umbral PDFs are in history (removed later);
    =doc/Panoptic-carry.pdf= is on =feature/carry-convexity=.  REUSE.toml itself says these must go.
    Removing them from history means a rewrite, or redistribution permission.
-2. *History.*  ~261 MB is reachable from master, mostly re-rendered PDFs/PNGs and the old
+2. *History.*  *Decided (author, 2026-09-25): option (a), a =git filter-repo= rewrite, scheduled
+   after =feature/carry-convexity= merges into master* (that branch carries the Panoptic PDF and
+   would otherwise reintroduce it).  ~261 MB is reachable from master, mostly re-rendered PDFs/PNGs
+   and the old
    =identity-cache.json=.  Options: (a) =git filter-repo= the paths above and the bulk (commit ids
    change from the earliest affected commit, including those the 0.2.0 bundles record in
    =compiler.json=); (b) publish a fresh repository from today's tree, keeping this one private as
@@ -131,10 +136,21 @@ closing README's SNARK section; branch protection on =master= once public.
 | Phase | Work                                                                          | Status |
 |-------+-------------------------------------------------------------------------------+--------|
 | G0    | Branch =feature/public= (worktree =../alberta-buck-public=); this plan          | done   |
-| G1    | Hygiene (list above); fix =identity-proofs.html=                                | open   |
-| G2    | Sandbox v1: world bar, issuer, wallet, insurer/credit, observer; web wallet     | open   |
-|       | loader; persistence; Playwright end-to-end test; =make sandbox=                 |        |
+| G1    | Hygiene (list above); fix =identity-proofs.html=                                | done   |
+| G2    | Sandbox v1 (doc/review/sandbox-plan.org): world bar, issuer, wallet, credit,    | open   |
+|       | observer; persistence; headless story test; =make sandbox=                      |        |
 | G3    | README.org front door + =docs/{INSTALL,SANDBOX,DEVELOP}.org=                    | open   |
 | G4    | Demo recording (scripted cast, agg GIF) + sandbox screenshots                 | open   |
-| G5    | The author's decisions 1-5 executed; SECURITY.md; go public; Pages; protection  | open   |
+| G5    | Decisions 1, 3-5; SECURITY.md; history rewrite (after carry-convexity); public  | open   |
 | G6    | Shared world: sim-server bridge, then Notes from fixtures, the insurer gate     | later  |
+
+* G1 hygiene, done (2026-09-25)
+
+=.claude/= and =CLAUDE.md= in the repository =.gitignore=; the clone URL in README.org and
+REUSE.toml's download location now =alberta-buck/alberta-buck=; README's garbled SNARK sentence
+repaired; =scripts/snark/gen_{bn254_g_pows,g1tie_input}.py= find the repository from their own
+path; =alberta_buck/sim/sweep.py= records repository-relative paths and the committed sweep
+summaries were rewritten to match; the venv paths in =doc/review/= made generic;
+=identity-proofs.html= loads again (its second =const registry= removed: registration and the
+handshake bind the same registry).  Deferred to G3: the stale =README.txt= / =README.pdf=, which
+re-render from the new README; =CARRY-CONVEXITY.org='s =~/Downloads= path, owned by that branch.
