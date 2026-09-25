@@ -1,6 +1,6 @@
 [
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-baseline/eq-baseline-5yr-s41404.json",
+  "path": "test/vectors/sweep-baseline/eq-baseline-5yr-s41404.json",
   "name": "baseline-5yr-s41404",
   "seed": 41404,
   "frames": 183,
@@ -27,7 +27,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-baseline/eq-baseline-5yr-s7.json",
+  "path": "test/vectors/sweep-baseline/eq-baseline-5yr-s7.json",
   "name": "baseline-5yr-s7",
   "seed": 7,
   "frames": 183,
@@ -54,7 +54,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-baseline/eq-baseline-5yr-s1337.json",
+  "path": "test/vectors/sweep-baseline/eq-baseline-5yr-s1337.json",
   "name": "baseline-5yr-s1337",
   "seed": 1337,
   "frames": 183,
@@ -81,7 +81,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-baseline/eq-baseline-5yr-s2025.json",
+  "path": "test/vectors/sweep-baseline/eq-baseline-5yr-s2025.json",
   "name": "baseline-5yr-s2025",
   "seed": 2025,
   "frames": 183,
@@ -108,7 +108,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-baseline/eq-baseline-5yr-s99.json",
+  "path": "test/vectors/sweep-baseline/eq-baseline-5yr-s99.json",
   "name": "baseline-5yr-s99",
   "seed": 99,
   "frames": 183,

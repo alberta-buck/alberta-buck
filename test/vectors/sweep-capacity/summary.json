@@ -1,6 +1,6 @@
 [
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-capacity/eq-baseline-capacity-s99.json",
+  "path": "test/vectors/sweep-capacity/eq-baseline-capacity-s99.json",
   "name": "baseline-capacity-s99",
   "seed": 99,
   "frames": 183,

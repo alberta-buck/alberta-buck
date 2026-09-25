@@ -164,7 +164,6 @@
       const EB = step("E_for_bob = (r'*G, M + r'*pk_bob)",
         () => wasm.elgamal_encrypt(...M, ...pkB, hex(rP)));
       const spender = "0x" + "b0b".padStart(40, "0");
-      const registry = "0x0";
       const cp = step("Chaum-Pedersen proof (IdentityRegistry.verifyApprove calldata)",
         () => wasm.chaum_pedersen_prove(E, EB, ...pk, ...pkB, hex(sk), hex(rP),
                                         registrant, spender, "0x1",

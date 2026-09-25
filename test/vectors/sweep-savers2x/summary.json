@@ -1,6 +1,6 @@
 [
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-savers2x/eq-baseline-savers2x-s1337.json",
+  "path": "test/vectors/sweep-savers2x/eq-baseline-savers2x-s1337.json",
   "name": "baseline-savers2x-s1337",
   "seed": 1337,
   "frames": 183,
@@ -27,7 +27,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-savers2x/eq-baseline-savers2x-s2025.json",
+  "path": "test/vectors/sweep-savers2x/eq-baseline-savers2x-s2025.json",
   "name": "baseline-savers2x-s2025",
   "seed": 2025,
   "frames": 183,
@@ -54,7 +54,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-savers2x/eq-baseline-savers2x-s99.json",
+  "path": "test/vectors/sweep-savers2x/eq-baseline-savers2x-s99.json",
   "name": "baseline-savers2x-s99",
   "seed": 99,
   "frames": 183,

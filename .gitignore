@@ -86,3 +86,7 @@ alberta_buck/sim/prices/hist-manifest-*.json
 /core/contracts/python/build/
 /core/python/build/
 /dist/
+
+# Claude Code session state and its instructions file (per checkout, never published)
+.claude/
+CLAUDE.md

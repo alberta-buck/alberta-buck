@@ -37,7 +37,7 @@ Design document: [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/
 ** Setup
 
 #+BEGIN_SRC bash
-  git clone git@github.com:pjkundert/alberta-buck.git
+  git clone git@github.com:alberta-buck/alberta-buck.git
   cd alberta-buck
   make nix-install          # Install Solidity dependencies (OpenZeppelin, Chainlink, Uniswap)
 #+END_SRC
@@ -130,9 +130,9 @@ setup is sound as long as /at least one/ participant destroyed their secret:
    verifiers.  Publish the ceremony transcript and each contributor's attestation
    so the 1-of-\( n \) honest assumption is auditable.
 
-See the Makefile =SNARK circuits + trusted setup= section and
-alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") for the "Required Mint SNARK Signal" (issuer binding at mint).
-the circuit-level details.
+See the Makefile =SNARK circuits + trusted setup= section for the circuit-level details, and
+alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") for the "Required Mint SNARK Signal"
+(issuer binding at mint).
 
 ** RPC Configuration
 
