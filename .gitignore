@@ -48,6 +48,9 @@ node_modules/
 /core/js/demo/app.js
 /core/js/demo/eqapp.js
 /core/js/sandbox/dist/
+# Renders of README.org: GitHub renders the Org itself; make doc-README writes them locally.
+/README.txt
+/README.pdf
 
 # Python
 __pycache__/
