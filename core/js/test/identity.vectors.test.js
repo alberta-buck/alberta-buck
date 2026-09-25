@@ -87,7 +87,13 @@ test("ps sign / verify / rerandomize", { skip }, () => {
     const rr = id.psRerandomize(sig, B(r.rerand_t));
     assert.deepEqual(rr.sigma_1, pt(r.rerand_sigma_1));
     assert.deepEqual(rr.sigma_2, pt(r.rerand_sigma_2));
+    const pres = id.psPresent(sig, pt(p.pk_Y1), B(r.present_a), B(r.present_b));
+    assert.deepEqual(pres.A, pt(r.present_A));
+    assert.deepEqual(pres.B, pt(r.present_B));
+    // the presentation is NOT a signature on m
+    assert.ok(!id.psVerify(g2(p.pk_X), g2(p.pk_Y), { sigma_1: pres.A, sigma_2: pres.B }, B(r.m)));
   }
+  assert.ok(id.psKeyConsistent(g2(p.pk_Y), pt(p.pk_Y1)));
 });
 
 test("schnorr batch binding", { skip }, () => {
@@ -105,25 +111,34 @@ test("schnorr batch binding", { skip }, () => {
 test("registration NIZK", { skip }, () => {
   const r = KV.registration;
   const sig = { sigma_1: pt(r.sigma_1), sigma_2: pt(r.sigma_2) };
+  const pres = id.psPresent(sig, pt(r.Y1), B(r.a), B(r.b));
+  assert.deepEqual(pres, { A: pt(r.A), B: pt(r.B) });
   const proof = id.registrationProve(
-    sig, B(r.m), B(r.r), pt(r.pk), ct(r.E), B(r.registrant), B(r.m_tilde), B(r.r_tilde));
+    pres, B(r.b), B(r.m), B(r.r), pt(r.pk), ct(r.E), B(r.registrant), B(r.sk), B(r.chainid),
+    B(r.registry), B(r.m_tilde), B(r.b_tilde), B(r.r_tilde), B(r.sk_tilde));
   assert.equal(proof.e, B(r.proof.e));
   assert.equal(proof.s_m, B(r.proof.s_m));
+  assert.equal(proof.s_b, B(r.proof.s_b));
   assert.equal(proof.s_r, B(r.proof.s_r));
-  assert.deepEqual(proof.A_ps, pt(r.proof.A_ps));
+  assert.equal(proof.s_sk, B(r.proof.s_sk));
+  assert.deepEqual(proof.C1, pt(r.proof.C1));
   assert.deepEqual(proof.T_C, pt(r.proof.T_C));
   assert.deepEqual(proof.T_R, pt(r.proof.T_R));
+  assert.deepEqual(proof.T_key, pt(r.proof.T_key));
   assert.ok(id.registrationVerify(
-    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof, B(r.registrant)));
+    pres, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
+    B(r.registrant), B(r.chainid), B(r.registry)));
   assert.ok(!id.registrationVerify(
-    sig, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof, B(r.registrant) + 1n));
+    pres, ct(r.E), pt(r.pk), g2(KV.ps.pk_X), g2(KV.ps.pk_Y), proof,
+    B(r.registrant) + 1n, B(r.chainid), B(r.registry)));
 });
 
 test("chaum-pedersen approve", { skip }, () => {
   const c = KV.chaum_pedersen;
   const proof = id.chaumPedersenProve(
     ct(c.E_a), ct(c.E_b), pt(c.pk_a), pt(c.pk_b), B(c.sk_a), B(c.r_prime),
-    B(c.sender), B(c.spender), B(c.chainid), B(c.k1), B(c.k2));
+    B(c.sender), B(c.spender), B(c.chainid), B(c.registry),
+    B(c.k1), B(c.k2));
   assert.equal(proof.e, B(c.proof.e));
   assert.equal(proof.s1, B(c.proof.s1));
   assert.equal(proof.s2, B(c.proof.s2));
@@ -132,7 +147,7 @@ test("chaum-pedersen approve", { skip }, () => {
   assert.deepEqual(proof.T3, pt(c.proof.T3));
   assert.ok(id.chaumPedersenVerify(
     ct(c.E_a), ct(c.E_b), pt(c.pk_a), pt(c.pk_b), proof,
-    B(c.sender), B(c.spender), B(c.chainid)));
+    B(c.sender), B(c.spender), B(c.chainid), B(c.registry)));
 });
 
 test("verifiable decryption", { skip }, () => {
@@ -145,6 +160,27 @@ test("verifiable decryption", { skip }, () => {
   assert.deepEqual(proof.T2, pt(r.proof.T2));
   assert.ok(id.verifiableDecryptVerify(
     ct(r.E), pt(r.pk), pt(r.M), proof, B(r.account), B(r.chainid)));
+});
+
+test("identity opening", { skip }, () => {
+  const r = KV.identity_opening;
+  const proof = id.identityOpeningProve(
+    ct(r.E), B(r.sk), pt(r.M), B(r.account), B(r.chainid), B(r.registry), B(r.t));
+  assert.equal(proof.e, B(r.proof.e));
+  assert.equal(proof.s, B(r.proof.s));
+  assert.deepEqual(proof.T1, pt(r.proof.T1));
+  assert.deepEqual(proof.T2, pt(r.proof.T2));
+  const args = [ct(r.E), pt(r.pk), pt(r.M), proof, B(r.account), B(r.chainid)];
+  assert.equal(id.identityOpeningVerify(...args, B(r.registry)), r.verify);
+  assert.ok(!id.identityOpeningVerify(...args, B(r.registry) + 1n));
+  // Its own tag: a receipt's proof opens nothing, and the opening is no receipt.
+  const vd = KV.verifiable_decrypt.proof;
+  const vdProof = { e: B(vd.e), s: B(vd.s), T1: pt(vd.T1), T2: pt(vd.T2) };
+  assert.equal(
+    !id.identityOpeningVerify(ct(r.E), pt(r.pk), pt(r.M), vdProof, B(r.account), B(r.chainid),
+                              B(r.registry)),
+    r.not_a_receipt_proof);
+  assert.ok(!id.verifiableDecryptVerify(...args));
 });
 
 test("issuer re-encryption binding", { skip }, () => {
@@ -161,17 +197,6 @@ test("issuer re-encryption binding", { skip }, () => {
   }
   assert.ok(id.issuerReencVerify(
     pt(r.pk_iss), ct(r.E_reg), ct(r.E_iss), proof, B(r.issuer), B(r.chainid)));
-});
-
-test("deposit coupling", { skip }, () => {
-  const r = KV.deposit_couple;
-  const proof = id.depositCoupleProve(
-    B(r.m_rec), B(r.sk_dep), ct(r.E_dep), ct(r.eIss),
-    B(r.account), B(r.chainid), B(r.b), B(r.k_m), B(r.k_s), B(r.k_b));
-  for (const f of ["e", "s_m", "s_s", "s_b"]) assert.equal(proof[f], B(r.proof[f]), f);
-  for (const f of ["A2", "A3", "A4", "P_I"]) assert.deepEqual(proof[f], pt(r.proof[f]), f);
-  assert.ok(id.depositCoupleVerify(
-    pt(r.pk_dep), ct(r.E_dep), ct(r.eIss), proof, B(r.account), B(r.chainid)));
 });
 
 test("b1 depositor binding", { skip }, () => {
@@ -192,17 +217,14 @@ test("b1 depositor binding", { skip }, () => {
 
 test("notes family + merkle", { skip }, () => {
   const n = KV.notes;
-  assert.equal(id.idHashB1(B(n.m_issuer), pt(n.sigma_R), B(n.sigma_s)), B(n.id_hash_b1));
-  assert.equal(
-    id.idHashA1(ct(n.eNote), B(n.m_issuer), pt(n.sigma_R), B(n.sigma_s)),
-    B(n.id_hash_a1));
-  assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss)), B(n.id_hash_a2));
+  assert.equal(id.idHashB1(B(n.m_issuer)), B(n.id_hash_b1));
+  assert.equal(id.idHashA1(ct(n.eNote), B(n.m_issuer)), B(n.id_hash_a1));
+  assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss), pt(n.T)), B(n.id_hash_a2));
   const op = n.opening;
   assert.equal(
     id.noteCommitment(B(op.flavor), B(op.v), B(op.rho), B(op.idHash), B(op.predicate)),
     B(n.cm));
-  assert.equal(id.nullifierB(B(op.rho), B(op.idHash)), B(n.nullifier_b));
-  assert.equal(id.nullifierA(B(op.rho), B(op.idHash)), B(n.nullifier_a));
+  assert.equal(id.nullifier(B(op.rho), B(op.idHash)), B(n.nullifier));
   assert.equal(id.identityLeaf(pt(n.identity_leaf_M)), B(n.identity_leaf));
 
   // merkle: fold the recorded leaves to the recorded root, verify the path
@@ -234,6 +256,7 @@ test("notes family + merkle", { skip }, () => {
 
 test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip }, () => {
   const chainid = B(IV.chainid);
+  const registry = B(IV.registry);
   const issX = g2(IV.issuer.pk_X);
   const issY = g2(IV.issuer.pk_Y);
 
@@ -248,18 +271,19 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
     // recorded-randomness encryption replay
     assert.deepEqual(
       id.elgamalEncrypt(pt(p.M), pt(p.elgamal_kp.pk), B(p.r)), ct(p.ciphertext));
-    // PS + registration verify
-    const sigR = { sigma_1: pt(p.ps_sig_rerand.sigma_1), sigma_2: pt(p.ps_sig_rerand.sigma_2) };
+    // raw credential verifies; the published presentation does not (A')
     assert.ok(id.psVerify(issX, issY,
       { sigma_1: pt(p.ps_sig_raw.sigma_1), sigma_2: pt(p.ps_sig_raw.sigma_2) }, m));
-    assert.ok(id.psVerify(issX, issY, sigR, m));
+    const pres = { A: pt(p.ps_presentation.A), B: pt(p.ps_presentation.B) };
+    assert.ok(!id.psVerify(issX, issY, { sigma_1: pres.A, sigma_2: pres.B }, m));
     const pf = p.registration_proof;
     const proof = {
-      e: B(pf.e), s_m: B(pf.s_m), s_r: B(pf.s_r),
-      A_ps: pt(pf.A_ps), T_C: pt(pf.T_C), T_R: pt(pf.T_R),
+      e: B(pf.e), s_m: B(pf.s_m), s_b: B(pf.s_b), s_r: B(pf.s_r), s_sk: B(pf.s_sk),
+      C1: pt(pf.C1), T_C: pt(pf.T_C), T_R: pt(pf.T_R), T_key: pt(pf.T_key),
     };
     assert.ok(id.registrationVerify(
-      sigR, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof, B(p.registrant)));
+      pres, ct(p.ciphertext), pt(p.elgamal_kp.pk), issX, issY, proof,
+      B(p.registrant), chainid, registry));
   }
 
   // unicode canonical-dialect pin: raw UTF-8 (accents + CJK + sorted keys)
@@ -284,7 +308,8 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
   assert.ok(id.chaumPedersenVerify(
     ct(ap.E_alice), ct(ap.E_for_bob),
     pt(IV.alice.elgamal_kp.pk), pt(IV.bob.elgamal_kp.pk),
-    cpp, B(ap.sender), B(ap.spender), chainid));
+    cpp, B(ap.sender), B(ap.spender), chainid,
+    B(ap.registry)));
 
   // issuer schnorr (hBatch stored raw: what the chain computes and signs)
   const is = IV.issuer_schnorr;
@@ -303,7 +328,7 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
   assert.ok(rc.cms.map(B).includes(cm));
   const rcptHBatch = id.batchCommitment(rc.cms.map(B));
   assert.equal(rcptHBatch, B(rc.hBatch));
-  assert.equal(id.nullifierB(B(op.rho), B(op.idHash)), B(rc.nullifier));
+  assert.equal(id.nullifier(B(op.rho), B(op.idHash)), B(rc.nullifier));
   assert.ok(id.issuerSchnorrVerify(
     pt(rc.issuer_pk),
     { e: B(rc.issuer_sig.e), s: B(rc.issuer_sig.s), R: pt(rc.issuer_sig.R) },

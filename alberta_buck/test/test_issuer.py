@@ -18,7 +18,7 @@ from alberta_buck.wallet import (
     identity_scalar, canonical_identity_data,
     ps_verify,
     registration_prove, registration_verify,
-    Issuer, IssuedCredential, rerandomize_for_registration,
+    Issuer, IssuedCredential, present_for_registration,
 )
 from alberta_buck.wallet.bn254 import rand_scalar
 
@@ -187,7 +187,7 @@ def test_credential_issued_by_one_does_not_verify_under_other():
 # --- End-to-end: issuance -> wallet rerandomization -> registration NIZK --------
 
 def test_end_to_end_issuance_through_registration_nizk():
-    """Whole pipeline: issuer signs -> wallet rerandomizes + ElGamal-encrypts ->
+    """Whole pipeline: issuer signs -> wallet presents (A') + ElGamal-encrypts ->
     proves -> verifier accepts."""
     rng = seeded_rng(50)
     issuer = Issuer.setup("atb-financial-ca", ATB_ADDR, rng=rng)
@@ -196,21 +196,21 @@ def test_end_to_end_issuance_through_registration_nizk():
     cred = issuer.issue(ALICE_FIELDS, ALICE_ADDR,
                         applicant_pk=applicant_kp.pk, rng=rng)
 
-    # Wallet receives, decrypts to confirm M, and rerandomizes sigma.
+    # Wallet receives, decrypts to confirm M, and presents sigma in hiding form.
     M_recv = elgamal_decrypt(cred.delivery, applicant_kp.sk)
     assert eq(M_recv, mul(G1, cred.m))
 
-    sigma_p, _ = rerandomize_for_registration(cred, rng=rng)
+    pres, _, b = present_for_registration(cred, rng=rng)
 
     # Wallet picks fresh randomness for its own on-chain ciphertext.
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, cred.m), applicant_kp.pk, r)
 
     proof = registration_prove(
-        sigma_p, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, rng=rng,
+        pres, b, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, applicant_kp.sk, rng=rng,
     )
     assert registration_verify(
-        sigma_p, E, applicant_kp.pk, issuer.pk_X, issuer.pk_Y, proof, ALICE_ADDR,
+        pres, E, applicant_kp.pk, issuer.pk_X, issuer.pk_Y, proof, ALICE_ADDR,
     )
 
 
@@ -221,13 +221,13 @@ def test_end_to_end_with_wrong_issuer_keypair_fails():
     rotated  = Issuer.setup("atb-financial-ca", ATB_ADDR, rng=rng)
     applicant_kp = identity_keygen(rng=rng)
     cred = real.issue(ALICE_FIELDS, ALICE_ADDR, applicant_pk=applicant_kp.pk, rng=rng)
-    sigma_p, _ = rerandomize_for_registration(cred, rng=rng)
+    pres, _, b = present_for_registration(cred, rng=rng)
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, cred.m), applicant_kp.pk, r)
     proof = registration_prove(
-        sigma_p, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, rng=rng,
+        pres, b, cred.m, r, applicant_kp.pk, E, ALICE_ADDR, applicant_kp.sk, rng=rng,
     )
     # Verifier checks against the rotated key -> should fail.
     assert not registration_verify(
-        sigma_p, E, applicant_kp.pk, rotated.pk_X, rotated.pk_Y, proof, ALICE_ADDR,
+        pres, E, applicant_kp.pk, rotated.pk_X, rotated.pk_Y, proof, ALICE_ADDR,
     )

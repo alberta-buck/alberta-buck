@@ -43,10 +43,8 @@ SPDX-License-Identifier = "GPL-3.0-or-later"
 # -or-later is safe on either reading.)
 [[annotations]]
 path = [
-  "src/MintGroth16Verifier.sol",
   "src/SpendGroth16Verifier.sol",
   "src/RegressVerifier.sol",
-  "src/TestVerifier.sol",
   "src/MintBatchN*Groth16Verifier.sol",
   "src/MintBatchA2N*Groth16Verifier.sol",
   "src/NoteBinding*Groth16Verifier.sol",

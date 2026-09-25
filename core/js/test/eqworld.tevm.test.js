@@ -67,7 +67,9 @@ test("eqworld: the minimal equilibrium world deploys and runs on tevm", { skip }
   const me = session.account.address;
 
   // --- the proven BUCK identity + Direct stack ------------------------
-  const world = await buildBuckWorld(session, loadArtifact, { identity: id.default });
+  const world = await buildBuckWorld(session, loadArtifact,
+    { identity: id.default, registryArtifact: "IdentityRegistryHarness",
+      creditArtifact: "BuckCreditHarness" });
   const { reg, credit, kctrl, buck } = world;
   const bind = (addr, carrying, tag) =>
     session.send(reg, "bindContract", [addr, G, BIND_E, true, carrying], { tag });

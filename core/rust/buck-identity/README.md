@@ -2,10 +2,18 @@
 
 The Alberta Buck identity kernel: BN254 curve arithmetic, keccak
 Fiat-Shamir transcripts, Poseidon, and the sigma protocols the BUCK
-identity layer is built from -- Pointcheval-Sanders credentials, ElGamal,
-the registration NIZK, Chaum-Pedersen approve, issuer Schnorr batch
-binding, verifiable decryption, the A2 issuer re-encryption binding, and the
-note commitment / nullifier / id-hash family.
+identity layer is built from -- Pointcheval-Sanders credentials and the A'
+hiding registration presentation, ElGamal, the registration NIZK,
+Chaum-Pedersen approve, issuer Schnorr batch binding, verifiable decryption,
+the A2 issuer re-encryption binding and the B1 depositor binding, the Notes
+receiving key, holder-derived salts, and the note commitment / nullifier /
+id-hash family.
+
+Protocol v2: every tag is `AlbertaBuck/<Area>/<Name>/v2`, all listed in
+`domains`.  A Fiat-Shamir transcript carries its tag's keccak word at a
+fixed position; an accumulator leaf or note hash leads with that word
+reduced mod r.  `nums::h_pedersen` is the one hiding generator, hashed to
+the curve so that no one knows its discrete log.
 
 The executable specification is the py_ecc-backed Python reference in
 `alberta_buck/wallet`.  This crate matches it bit-for-bit, proven by the
@@ -22,7 +30,7 @@ pinned random streams behind the committed fixtures reproducible.
 
 ```toml
 [dependencies]
-alberta-buck-identity = "0.1"
+alberta-buck-identity = "0.2"
 ```
 
 The distribution is prefixed, the import is not: `use buck_identity::...`.
@@ -50,7 +58,7 @@ compares.
 
 ## Status
 
-0.1.0, prototype.  Unaudited cryptographic software.  It has been checked
+0.2.0, prototype.  Unaudited cryptographic software.  It has been checked
 for agreement with a reference implementation, which is not the same thing
 as having been checked for security.
 

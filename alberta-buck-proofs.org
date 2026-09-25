@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Formal Correctness Proofs (v1.0)
+#+TITLE: The Alberta Buck - Formal Correctness Proofs (v2)
 #+SUBTITLE: Rerandomization, Re-Encryption, and Notes Spend Predicates
 #+author: Perry Kundert
 #+date: 2026-04-22
@@ -17,7 +17,7 @@
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: Formal correctness proofs for the cryptographic transformations at the heart of Alberta Buck's identity system and BUCK Notes pool: Pointcheval-Sanders signature rerandomization (completeness and statistical unlinkability), Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model), and the BUCK Notes spend predicates under the Identity-M model (mint addressing + anti-framing; deposit-coupling and depositor-binding soundness; the flavor-agnostic nullifier and double-spend prevention; mutual decryptability and transaction-graph privacy).  Every Notes spend Identity-binds /both/ counterparties -- the issuer at mint, the depositor at spend -- via an EIP-196 sigma plus a registry-membership proof bound to the same committed point, so an un-nameable counterparty is un-spendable.  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the identity results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the EOA/contract <-> Identity binding on which every downstream protocol (approve, transfer, Notes spend, guardian authorization) depends.
+#+description: Formal correctness proofs for the cryptographic transformations at the heart of Alberta Buck's identity system and BUCK Notes pool: Pointcheval-Sanders credentials (rerandomization completeness, the fresh-signature lemma, and the A' hiding presentation: masked completeness, perfect hiding, and the registration NIZK's zero-knowledge, special soundness and composition; registration unforgeability from PS-CM; issuer-blindness of the registration transcript), Chaum-Pedersen re-encryption (completeness, special soundness, honest-verifier zero-knowledge, and NIZK via Fiat-Shamir in the random oracle model), and the BUCK Notes spend predicates (mint addressing to a receiving key + anti-framing; the folded deposit gate that ties the reading key to the spender's Identity; depositor-binding soundness; the flavor-agnostic nullifier and double-spend prevention; mutual decryptability and transaction-graph privacy; the A2 key tie that makes the named issuer the minter).  Every Notes spend Identity-binds /both/ counterparties -- the issuer at mint, the depositor at spend -- against a posted two-level accumulator root, so an un-nameable counterparty is un-spendable.  Each theorem is accompanied by a compact py_ecc sanity check on BN254.  The end-to-end correctness corollary chains the identity results together: an accepted Chaum-Pedersen proof against a registry-stored ElGamal ciphertext implies the re-encrypted ciphertext encrypts the same issuer-certified identity -- the EOA/contract <-> Identity binding on which every downstream protocol (approve, transfer, Notes spend, guardian authorization) depends.
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 #+LATEX_HEADER: \usepackage{draftwatermark}
@@ -39,8 +39,9 @@
 
 #+BEGIN_ABSTRACT
 The Alberta Buck identity system ([[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]], [[http://perry.kundert.ca/range/finance/alberta-buck-identity-example][Examples]]) rests on
-two cryptographic transformations: the /Identity Fountain/ rerandomizes
-a Pointcheval-Sanders signature to produce an unlinkable credential,
+two cryptographic transformations: the /Identity Fountain/ blinds a
+Pointcheval-Sanders credential into a hiding presentation \( (A, B) \)
+that no holder of the identity, the issuer included, can test,
 and the =approve= handshake re-encrypts the credential's ElGamal
 ciphertext under the counterparty's public key with a Chaum-Pedersen
 proof of equality.  Everything downstream -- bilateral transfers, the
@@ -51,10 +52,28 @@ primitives.
 This document states and proves the correctness properties that the
 rest of the series relies on:
 - *Theorem 1*: rerandomization preserves PS signature validity
-  (completeness).
-- *Theorem 2*: a uniform random rerandomization scalar yields a
-  signature statistically identical to a fresh one, independent of
-  the original (unlinkability).
+  (completeness; a wallet-internal step).
+- *Lemma 2*: a uniform random rerandomization scalar yields a
+  signature distributed as a fresh one on the same message.  It
+  does not hide the message: a rerandomized pair is a candidate
+  test for anyone holding \( m \), so the wallet never publishes one.
+- *Theorem 1'*: the published presentation
+  \( (A, B) = (a \sigma_1,\ a \sigma_2 + b Y_1) \) satisfies the masked
+  verifier equation (completeness).
+- *Theorem 2'*: for fresh uniform \( (a, b) \) the triple
+  \( (A, B, P) \) that the registration transcript reveals is
+  independent of \( m \) up to \( 1/q \) (perfect hiding).
+- *Theorems R-HVZK, R-sound, R-comp*: the registration NIZK is
+  honest-verifier zero-knowledge given \( P \), specially sound
+  (extracting a plain PS signature), and composes the credential,
+  ciphertext and key relations on one \( m \).
+- *Theorem R-unforge*: registration forgery -- by a party with no
+  credential, or with every registration of the target and its
+  identity scalar in hand -- reduces to PS unforgeability in the
+  committed-message key form, in the random-oracle model.
+- *Theorem R-blind*: the registration transcript gives even the
+  issuer, holding its own key and every certified identity, no
+  advantage beyond DDH in telling which identity registered.
 - *Theorem 3*: an honest Chaum-Pedersen prover always verifies
   (completeness).
 - *Theorem 4*: from two accepting transcripts with distinct
@@ -66,20 +85,20 @@ rest of the series relies on:
   implies that the re-encrypted ciphertext carries the same
   issuer-certified identity point \( M = m \cdot G \) as the
   registered credential (end-to-end re-encryption correctness).
-- *Theorem 7*: at mint the issuer addresses the recipient /Identity/
-  point \( M_{\text{rec}} \) (not an account); the ciphertext decrypts
-  under \( m_{\text{rec}} \) to the intended point, a mint-binding forces
-  it over the issuer's /own/ registered Identity (anti-framing), and the
-  issuer never learns \( m_{\text{rec}} \).
-- *Theorem 8* (deposit-coupling soundness, A1/A2): an accepted addressed
-  spend proves the depositing account is bound to the registered Identity
-  scalar \( m_{\text{rec}} \) AND the note ciphertext decrypts under it to a
-  registered member -- account-agnostic (recovery, not finality, on key
-  loss) and collusion-closed.
+- *Theorem 7*: at mint the issuer addresses the recipient's /receiving
+  key/ \( pk_{\text{recv}} = kG \), independent of its Identity; the
+  ciphertexts decrypt under \( k \) to the intended points, a mint binding
+  forces them over the issuer's /own/ registered Identity (anti-framing),
+  and the issuer learns neither \( k \) nor \( m_{\text{rec}} \).
+- *Theorem 8* (the folded deposit gate, A1/A2): one proof over one witness
+  shows the spender reads the note, that its account decrypts to the
+  Identity \( m_{\text{rec}} \), and that a certified accumulator leaf
+  pairs \( m_{\text{rec}} \) with the reading key -- so a thief holding a
+  stolen payload cannot spend, and (A2) the decrypted issuer is registered.
 - *Theorem 9* (depositor-binding soundness, B1): an accepted bearer spend
   proves the depositor's Identity \( M_{\text{dep}} \) is registered AND
   encrypted for the public issuer, who alone names it; a bogus
-  \( M_{\text{dep}} \) is a non-member and reverts.
+  \( M_{\text{dep}} \) has no certified leaf and reverts.
 - *Theorem 10*: the flavor-agnostic nullifier
   \( nf = \mathrm{Poseidon}_3(\rho, idHash, \mathrm{tag}) \) deterministically
   prevents double-spend and, as a PRF over the secret opening, hides the
@@ -89,25 +108,25 @@ rest of the series relies on:
   counterparties name the other as a /registered/ Identity, /enforced/ by
   the membership half (an un-nameable counterparty is un-spendable) -- while
   no third party names either or links mint to spend.
-- *Theorem 12* (note-binding tie, A1/A2): the ciphertext a depositor
-  supplies at spend is provably keyed to /the spent note's/ committed
-  identity material -- A2: a re-encryption, under the authenticated
-  recipient Identity, of the ciphertext the note committed at mint; A1: an
-  encryption keyed to the same recipient Identity the note's value
-  ciphertext was addressed to, the spend's public face pinning the
-  plaintext.  This pins Theorems 8 and 11 to the specific note: a stolen
-  opening cannot be redeemed with a self-addressed substitute, and an
-  un-nameable A2 note stays un-spendable even against active ciphertext
-  substitution.
+- *Theorem 12* (the A2 key tie): the issuer Identity an accepted A2
+  deposit certifies is the minter's own, not a registered sock puppet the
+  same ciphertext also opens to under the recipient's key -- because the
+  note commits the mint binding's blinded \( T \) and the fold opens it,
+  so re-aiming the key needs a discrete logarithm to \( H_{\text{PED}} \).
 
 Every theorem is accompanied by an executable =py_ecc= sanity check on
-BN254.  The proofs assume only the q-SDH assumption (for PS signature
-unforgeability), the discrete logarithm assumption on
+BN254.  The proofs assume PS unforgeability in the committed-message
+key form (Pointcheval--Sanders 2016, Section 6.1), the discrete
+logarithm and decisional Diffie--Hellman assumptions on
 \( \text{alt\_bn128}\ G_1 \), the random oracle model (for the
 Fiat-Shamir transform and Poseidon hashing), and knowledge soundness
-of the underlying SNARK proof system (for Theorems 8-9 and 12) -- all
-standard assumptions that Ethereum's security or any zk-SNARK rollup
-already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-proofs.txt][Text]])
+of the underlying SNARK proof system (for Theorems 8-9 and 12), with
+\( H_{\text{PED}} \) hashed to the curve so that no one knows its
+logarithm.  The
+presentation results (Theorems 1', 2', R-HVZK, R-sound, R-comp)
+describe the A' registration implemented on branch =feature/a-prime=;
+they are stated with proofs here but await independent review, and
+that branch is not a production release. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-proofs.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
@@ -126,14 +145,30 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    | \( e : G_1 \times G_2 \to G_T \)              | Bilinear, non-degenerate pairing (type-3)                                                                                                                                                                                                                               |
    | \( O \)                                       | Point at infinity (group identity)                                                                                                                                                                                                                                      |
    | \( \mathbb{Z}_q^\ast \)                       | Non-zero scalars mod \( q \)                                                                                                                                                                                                                                            |
-   | \( (x, y) / (X, Y) \)                         | Issuer secret / public key: \( X = x g_2,\ Y = y g_2 \)                                                                                                                                                                                                                 |
-   | \( m \in \mathbb{Z}_q \)                      | Identity scalar: \( m = H(\text{identity\_data}) \bmod q \) [fn::Read-capability secret: decrypts ciphertexts under \( M = mG \), verifies receipts.  Disclosed to counterparties by design; insufficient for registration or spend authorization without \( \sigma \)] |
+   | \( (x, y) / (X, Y, Y_1) \)                    | Issuer secret / public key: \( X = x g_2,\ Y = y g_2,\ Y_1 = y G \); the registry checks \( e(Y_1, g_2) = e(G, Y) \) at trust time                                                                                                                                      |
+   | \( m \in \mathbb{Z}_q \)                      | Identity scalar: \( m = \mathrm{keccak}(\tau_{\text{ID}} \Vert \text{identity\_data}) \bmod q \) [fn::Disclosed to counterparties by design, so nothing is encrypted under \( M = mG \); insufficient for registration or spend authorization.  \( \tau_{\text{ID}} \) = =AlbertaBuck/Identity/Scalar/v2=] |
    | \( M = m \cdot G \in G_1 \)                   | Identity point: the value every ElGamal ciphertext encrypts [fn::Public (recoverable from \( m \)); the KYC-registered anchor]                                                                                                                                          |
-   | \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \) | PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [fn::Write-capability secret: authorizes account registration.  Held only by the Identity owner; never disclosed to counterparties]                                                                         |
+   | \( \sigma = (\sigma_1, \sigma_2) \in G_1^2 \) | PS signature: \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \)   [fn::Write-capability secret: authorizes account registration.  Held only by the Identity owner; never disclosed to counterparties and never published: the holder publishes the presentation \( (A, B) \)] |
    | \( (sk, pk) \)                                | Identity key pair on \( G_1 \): \( pk = sk \cdot G \)                                                                                                                                                                                                                   |
    | \( E = (R, C) \in G_1^2 \)                    | ElGamal ciphertext: \( R = r G,\ C = M + r \cdot pk \)                                                                                                                                                                                                                  |
-   | \( H(\cdot) \)                                | Cryptographic hash modelled as a random oracle (Fiat-Shamir)                                                                                                                                                                                                            |
+   | \( H(\cdot) \)                                | Cryptographic hash modelled as a random oracle (Fiat-Shamir); every transcript ends in its protocol's v2 domain word \( \mathrm{keccak}(\tau) \)                                                                                                                     |
+   | \( H_{\text{PED}} \in G_1 \)                  | Pedersen generator hashed to the curve under =AlbertaBuck/Pedersen/H/v2=: no one knows \( \log_G H_{\text{PED}} \).  Part IV writes it \( H \)                                                                                                                      |
+   | \( (k, pk_{\text{recv}}) \)                     | Receiving secret and key, \( pk_{\text{recv}} = kG \): what addressed notes are encrypted to, derived from wallet seed material and independent of \( m \)                                                                                                            |
+   | \( a, b \in \mathbb{Z}_q^\ast \)              | Presentation scalars, fresh per account: \( a \) rerandomizes, \( b \) blinds on the \( Y \) base                                                                                                                                                                       |
+   | \( (A, B) \in G_1^2 \)                        | The published presentation \( A = a \sigma_1,\ B = a \sigma_2 + b Y_1 = (x + m y) A + b Y_1 \)                                                                                                                                                                          |
+   | \( P = m A + b G \)                           | The one credential-side point derivable from a registration transcript; \( B = x A + y P \)                                                                                                                                                                             |
+   | \( m_t, b_t, r_t, sk_t \)                     | Registration NIZK nonces; \( C_1 = m_t A + b_t G,\ T_C,\ T_R,\ T_{key} \) its commitments; \( s_m, s_b, s_r, s_{sk} \) its responses                                                                                                                                    |
    #+LATEX: }
+
+   Response convention: Part I-bis (Theorems R-*) writes responses as
+   \( s = w_t + e w \), matching the wallet and the Solidity verifier;
+   Part II writes the Chaum-Pedersen responses as \( s = k - e w \).
+   The two are equivalent up to the sign of \( e \) in the verification
+   equations.  Part IV reuses \( b \) and \( H \) with their own
+   meanings (B1's blind, and \( H_{\text{PED}} \)); the presentation's
+   \( b \) and \( P \) are local to Part I.  Where
+   \( e \) appears as a Fiat-Shamir challenge it is a scalar; as
+   \( e(\cdot, \cdot) \) it is the pairing.
 
    All group operations in this document are written additively.  BN254
    has cofactor 1 on \( G_1 \), so every non-identity \( P \in G_1 \)
@@ -141,30 +176,54 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 
 ** Hardness Assumptions
 
-   Four standard assumptions underpin the theorems in this document.
-   None is specific to Alberta Buck -- each one is already required by
-   Ethereum's own security model or by any pairing-based / zk-SNARK
-   construction built on the =ecPairing= precompile.
+   Five assumptions underpin the theorems in this document.  Four are
+   already required by Ethereum's own security model or by any
+   pairing-based / zk-SNARK construction built on the =ecPairing=
+   precompile; the PS assumption is specific to the credential
+   scheme and, since the issuer key now includes \( y G \), it is
+   the committed-message form of that assumption.
 
    1. *Discrete Logarithm (DLog) on \( G_1 \)*: given \( P, Q \in G_1 \),
       finding \( \alpha \in \mathbb{Z}_q \) with \( Q = \alpha P \) is
       infeasible.  Protects ElGamal IND-CPA security, Schnorr
-      unforgeability, and Chaum-Pedersen soundness.
+      unforgeability, and Chaum-Pedersen soundness, and keeps
+      \( \log_G H_{\text{PED}} \) unknown, which Part IV's commitments
+      rest on.
 
-   2. *q-Strong Diffie-Hellman (q-SDH)*: the PS signature scheme is
-      existentially unforgeable under chosen-message attack (EUF-CMA)
-      assuming q-SDH[fn:ps].  We use this only as a *stated* assumption
-      about the PS primitive; none of our proofs below reduce to it
-      directly.
+   2. *Decisional Diffie-Hellman (DDH) on \( G_1 \)*: distinguishing
+      \( (G, \alpha G, \beta G, \alpha\beta G) \) from a random tuple is
+      infeasible.  Protects ElGamal plaintext hiding, which is the
+      only computational lock left on a registration after Theorem
+      2' (the issuer-blindness theorem of the main paper and the
+      long-horizon section below).
 
-   3. *Random Oracle Model (ROM)*: the Fiat-Shamir transform is applied
+   3. *PS unforgeability, committed-message key form (PS-CM)*: the
+      Pointcheval-Sanders single-message scheme is EUF-CMA when the
+      public key also exposes \( Y_1 = y G \) in \( G_1 \).  Section
+      6.1 of their 2016 paper[fn:ps] publishes exactly
+      \( (G, Y_1;\ g_2, X, Y) \) and lets the signer sign commitments
+      \( t G + m Y_1 \), which the user unblinds to
+      \( (h, (x + m y) h) \); a plain-message signing oracle is the
+      special case \( t = 0 \), so an adversary against our scheme is
+      weaker than the Section 6.1 adversary, whose scheme is proved
+      EUF-CMA under that paper's Assumption 2, an interactive
+      assumption in type-3 groups.  Theorem R-unforge reduces
+      registration forgery to it directly.  The issuer keeps the
+      signature base \( h \) with unknown discrete logarithm, which
+      =ps_sign= does by sampling it.  Nothing in this document depends
+      on q-SDH.
+
+   4. *Random Oracle Model (ROM)*: the Fiat-Shamir transform is applied
       to sigma protocols whose security is proved in the ROM, with the
       hash function \( H \) modelled as a random oracle bound to all
       public inputs and context (caller address, chain id, etc.).
-      Poseidon (commitment hash and nullifier PRF) is also modelled
-      as a random oracle for the BUCK Notes proofs in Part IV.
+      Poseidon (commitment hash, accumulator leaves and nullifier PRF)
+      and the hash-to-curve that derives \( H_{\text{PED}} \) are also
+      modelled as random oracles for the BUCK Notes proofs in Part IV.
+      Each transcript's domain word keeps the oracles of different
+      protocols apart.
 
-   4. *Knowledge soundness of the underlying zk-SNARK proof system*
+   5. *Knowledge soundness of the underlying zk-SNARK proof system*
       (Part IV only): the SNARK system used for BUCK Notes spend
       circuits (Groth16, PLONK, or any knowledge-sound construction
       over BN254) admits a polynomial-time witness extractor on
@@ -172,16 +231,62 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
       depending on the chosen scheme's trusted setup or universal
       setup.
 
-   The rerandomization proofs (Part I) are /unconditional/: Theorem 1
-   follows from bilinearity alone, and Theorem 2 is information-theoretic.
-   The Chaum-Pedersen proofs (Part II) are interactive-sigma-protocol
-   facts; the NIZK corollary (Part II, end) invokes the ROM.  Part IV
-   (Notes spend predicates) additionally invokes assumption (4) --
+   In Part I, Theorems 1 and 1' follow from bilinearity alone, Lemma 2
+   and Theorem 2' are information-theoretic, and Theorem R-HVZK is a
+   perfect simulation (the NIZK invokes the ROM); Theorem R-sound's
+   extractor is unconditional; Theorem R-unforge is computational
+   (PS-CM, ROM) and Theorem R-blind is computational (DDH, ROM).  No
+   assumption is made about the issuer beyond honest issuance: it
+   holds \( (x, y) \) and can sign at will, so unforgeability is
+   stated against every party except the issuer, and issuer-blindness
+   against the issuer.  The Chaum-Pedersen
+   proofs (Part II) are interactive-sigma-protocol facts; the NIZK
+   corollary (Part II, end) invokes the ROM.  Part IV (Notes spend
+   predicates) additionally invokes assumption (5) --
    knowledge soundness of the underlying SNARK system -- to lift the
    sigma-protocol guarantees of Theorems 4-5 into the SNARK setting.
 
 #+LATEX: \clearpage
-* Part I: Pointcheval-Sanders Signature Rerandomization
+* Part I: Pointcheval-Sanders Credentials and the Hiding Presentation
+
+** Status and Scope of This Part
+
+   The registration presentation proved here (the "A'" design) is
+   implemented on branch =feature/a-prime= across the Python executable
+   specification (=alberta_buck/wallet/ps.py=, =nizk.py=), the Solidity
+   verifier (=src/IdentityRegistry.sol=: =trustIssuer=,
+   =_verifyCredential=, =_fsRegister=, =_checkPresentation=), the Rust
+   kernel (=core/rust/buck-identity/src/{ps,nizk}.rs=) with its PyO3 and
+   wasm bindings, and the JavaScript wrapper
+   (=core/js/src/identity-core.js=), all checked against one set of
+   vectors.  This part is the security argument for it, written in full
+   so that an independent reviewer can confirm or refute each step; the
+   review itself has not happened, and until it has every result below is
+   a claim of that branch, not a property of the system.  Section
+   [[#review-status]] lists what the reviewer is asked to check and what
+   would strengthen the argument further.
+
+   What is claimed.  A holder of a PS credential on an identity scalar
+   \( m \) registers an account by publishing a blinded pair \( (A, B) \)
+   and a Schnorr-family proof.  The pair and the proof together reveal
+   nothing about \( m \) beyond what the account's ElGamal ciphertext
+   reveals: unconditionally on the credential side (Theorems 2', R-HVZK)
+   and under DDH on the ciphertext side (Theorem R-blind).  An accepting
+   registration implies possession of a credential on the encrypted
+   \( m \), and neither a party who has seen any number of the holder's
+   registrations nor one who has learned \( m \) can produce one:
+   registration forgery reduces to PS unforgeability in the
+   committed-message key form, in the random-oracle model, with the usual
+   forking loss (Theorems R-sound, R-unforge).  Fresh randomness per
+   registration is security critical (Proposition R-fresh).
+
+   What is not covered here: the identity-derived A1/A2 Note receiving
+   keys and the issuance, policy and accumulator metadata of the review's
+   findings R5 and R6; duplicate issuance by a corrupt issuer and the
+   optional holder secret; wallet-side leakage (RNG quality, side
+   channels, backup formats that might export \( \sigma \), any of which
+   reintroduces credential harvesting); and post-quantum security, for
+   which see the long-horizon section.
 
 ** The Construction
 
@@ -193,13 +298,106 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    e(\sigma_1,\; X + m \cdot Y) \;=\; e(\sigma_2,\; g_2).
    \]
 
-   The issuer produces \( \sigma \) by choosing a fresh \( h \in G_1 \setminus \{O\} \)
-   and setting \( \sigma_1 = h,\ \sigma_2 = (x + m y) h \).
-   /Rerandomization/ is the operation
+   *Keys and issuance.*  The issuer holds \( (x, y) \) and publishes
 
    \[
-   \sigma' \;=\; (t \cdot \sigma_1,\; t \cdot \sigma_2) \qquad t \in \mathbb{Z}_q^\ast.
+   X = x \cdot g_2, \qquad Y = y \cdot g_2, \qquad Y_1 = y \cdot G .
    \]
+
+   The registry accepts a key only if \( Y_1 \neq O \) and
+   \( e(Y_1, g_2) = e(G, Y) \) (=trustIssuer=).  Issuance is the plain
+   scheme's: on \( m \) the issuer samples \( h = t \cdot G \) for uniform
+   nonzero \( t \) it does not disclose and returns
+   \( \sigma = (h,\ (x + m y) h) \).  The credential never leaves the
+   wallet.  /Rerandomization/,
+   \( \sigma' = (t \cdot \sigma_1,\; t \cdot \sigma_2) \) for
+   \( t \in \mathbb{Z}_q^\ast \), is a wallet-internal step.
+
+   *Presentation.*  For each account the wallet samples independent
+   uniform nonzero \( a, b, sk, r \) and publishes
+
+   \[
+   A = a \cdot \sigma_1, \qquad
+   B = a \cdot \sigma_2 + b \cdot Y_1 = (x + m y) \cdot A + b \cdot Y_1, \qquad
+   pk = sk \cdot G, \qquad
+   E = (R, C) = (r G,\ m G + r\,pk),
+   \]
+
+   and discards \( a, b \) after proving.  Write \( P = m A + b G \); then
+   \( B = x A + y P \).  \( P \) is the one credential-side value a
+   verifier can derive from the transcript, and the results below are
+   stated in terms of it.
+
+   *Registration proof.*  Witness \( (m, b, r, sk) \); nonces
+   \( (m_t, b_t, r_t, sk_t) \) uniform in \( \mathbb{Z}_q \); context
+   \( \mathrm{ctx} = (\text{registrant}, \text{chainid}, \text{registry}, \mathrm{DOMAIN}) \)
+   with \( \mathrm{DOMAIN} = \mathrm{keccak}(\texttt{AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2}) \):
+
+   \begin{align*}
+   C_1 &= m_t A + b_t G,  & T_C &= m_t G + r_t\,pk, & T_R &= r_t G, & T_{key} &= sk_t\,G, \\
+   e &= H(A, B, R, C, pk, C_1, T_C, T_R, T_{key}, \mathrm{ctx}) \bmod q, \\
+   s_m &= m_t + e m, & s_b &= b_t + e b, & s_r &= r_t + e r, & s_{sk} &= sk_t + e\,sk.
+   \end{align*}
+
+   Published: \( (A, B),\ pk,\ E,\ (e, s_m, s_b, s_r, s_{sk}, C_1, T_C, T_R, T_{key}) \),
+   plus the issuer's address, which selects the key.  Credential-based
+   contract binding uses the identical proof with the target contract as
+   registrant.
+
+   *Verifier.*
+
+   \begin{align*}
+   \text{(g)}\quad  & A, B, pk, R \neq O;\ \text{all points on the curve};\
+                      e, s_m, s_b, s_r, s_{sk} < q;\ \text{registrant unregistered};\ \text{issuer trusted} \\
+   \text{(fs)}\quad & e = H(A, B, R, C, pk, C_1, T_C, T_R, T_{key}, \mathrm{ctx}) \bmod q \\
+   \text{(b)}\quad  & s_m G + s_r\,pk = e C + T_C \\
+   \text{(c)}\quad  & s_r G = e R + T_R \\
+   \text{(k)}\quad  & s_{sk} G = T_{key} + e\,pk \\
+   \text{(a')}\quad & e(s_m A + s_b G - C_1,\; Y)\cdot e(e A,\; X)\cdot e(-e B,\; g_2) = 1
+   \end{align*}
+
+   One commitment \( C_1 \) carries both credential exponents; the nonce
+   \( m_t \) is shared between \( C_1 \) and \( T_C \), and \( r_t \)
+   between \( T_C \) and \( T_R \).
+
+** Security Definitions
+
+   Three games.  Advantage is \( |\Pr[\text{guess} = \beta] - 1/2| \)
+   for the distinguishing games and the success probability for the
+   forgery game.
+
+   *Presentation hiding (HIDE).*  The adversary chooses the issuer key
+   \( (x, y) \) -- it may /be/ the issuer -- two scalars \( m_0, m_1 \)
+   and valid credentials \( \sigma^0, \sigma^1 \) on them.  The challenger
+   samples uniform nonzero \( a, b \) and a bit \( \beta \) and returns
+   \( (A, B) = (a \sigma^\beta_1,\ a \sigma^\beta_2 + b Y_1) \) together
+   with \( P = m_\beta A + b G \).  The adversary guesses \( \beta \).
+   Returning \( P \) makes the game at least as strong as anything the
+   real transcript reveals (Theorem R-HVZK's remark).
+
+   *Registration unforgeability (RU).*  The challenger samples
+   \( (x, y) \) and publishes \( (X, Y, Y_1) \).  The adversary has a
+   random oracle and two oracles: \( \mathsf{Sign}(m) \) returns a
+   credential on \( m \) of its choice, and the set of queried messages
+   is \( Q \); \( \mathsf{Present}(m, \mathrm{ctx}) \), for /any/
+   \( m \) including ones not in \( Q \), returns a complete honest
+   registration transcript \( (pk, E, A, B, \pi) \) of \( m \) with
+   fresh \( (a, b, sk, r) \) and the given context, and the adversary is
+   also given \( m \) itself.  This models a party who has seen the
+   target's registrations and has learned the target's identity scalar,
+   as every counterparty does.  The adversary wins if it outputs an
+   accepting transcript whose extracted witness (Theorem R-sound) has
+   \( m^\ast \notin Q \); \( m^\ast \) may well be a message it obtained
+   presentations of, since only credentials count as queries.  One game
+   therefore covers both "no credential on the encrypted identity"
+   (soundness) and the review's R3 (harvesting).
+
+   *Issuer-blindness (IB).*  The adversary is the issuer: it holds
+   \( (x, y) \) and chooses two certified identities \( m_0, m_1 \) with
+   their credentials.  The challenger registers one at random with fresh
+   \( (a, b, sk, r) \) and honest randomness and returns the full public
+   transcript \( (pk, E, A, B, \pi) \) with a context of the adversary's
+   choice.  Many registrations are handled by a hybrid over them.
 
 ** Theorem 1 (Completeness of Rerandomization)
 
@@ -221,19 +419,55 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 
    Non-degeneracy: \( G_1 \) has prime order \( q \), so \( t \sigma_1 = O \)
    iff \( t \equiv 0 \pmod q \) or \( \sigma_1 = O \).  Both are excluded
-   by hypothesis (\( t \in \mathbb{Z}_q^\ast \) and \( \sigma_1 \neq O \) by
-   PS validity).  Therefore \( \sigma'_1 \neq O \) and the pair satisfies
-   the full PS validity predicate.  \( \blacksquare \)
+   by hypothesis.  \( \blacksquare \)
 
-   *Implementation guard.*  The registration contract MUST enforce
-   \( \sigma'_1 \neq O \).  Without this check, a prover can submit
-   \( \sigma' = (O, O) \) (obtainable by picking \( t = 0 \)); the
-   pairing equation then reduces to \( 1 = 1 \) in \( G_T \) /for every/
-   \( m \), allowing a fabricated credential to pass registration.
-   Theorem 1's completeness argument explicitly depends on \( t \neq 0 \);
-   the contract's guard is the runtime witness of this hypothesis.
+   *Scope.*  The wallet uses this step to re-issue the credential to
+   itself; nothing produced by it is published.  The published object
+   is the presentation, whose completeness is Theorem 1'.
 
-** Theorem 2 (Statistical Unlinkability)
+** Theorem 1' (Completeness of the Masked Verifier)
+
+   *Statement.*  For every valid credential, every
+   \( a, b \in \mathbb{Z}_q^\ast \) and every \( sk, r \), the honest
+   transcript is accepted; in particular the presentation satisfies
+
+   \[
+   e(B,\; g_2) \;=\; e(A,\; X) \cdot e(m A + b G,\; Y),
+   \]
+
+   equivalently \( B = x A + y P \).
+
+   *Proof.*  Split \( B \):
+
+   \begin{align*}
+   e(a \sigma_2,\; g_2)
+     &= e(\sigma_2,\; g_2)^a
+      = e(\sigma_1,\; X + m Y)^a
+      = e(A,\; X + m Y)
+      = e(A,\; X) \cdot e(m A,\; Y),                  \\
+   e(b Y_1,\; g_2)
+     &= e(b y G,\; g_2)
+      = e(b G,\; g_2)^{y}
+      = e(b G,\; Y).
+   \end{align*}
+
+   Multiplying, \( e(B, g_2) = e(A, X) \cdot e(m A + b G, Y) \).  Then
+   \( s_m A + s_b G - C_1 = e (m A + b G) = e P \), so (a') is
+   \( [e(P, Y)\, e(A, X) / e(B, g_2)]^{e} = 1 \); (b), (c), (k) are the
+   Schnorr identities; and \( A \neq O \) since \( \sigma_1 \neq O \) and
+   \( a \neq 0 \).  \( \blacksquare \)
+
+   *Implementation guard.*  With \( A = O \) the masked equation reads
+   \( e(B, g_2) = e(b G, Y) \), which \( B = b Y_1 \) satisfies /for
+   every/ \( m \): the credential term vanishes and the relation says
+   nothing about the identity.  The registration contract MUST reject
+   \( A = O \) (and \( B = O \)).  This is the same degenerate case that
+   the earlier published form met as \( \sigma'_1 = O \) (from
+   \( t = 0 \)); under the presentation it is \( a = 0 \).  Theorem 1'
+   depends on \( a \neq 0 \); the contract's guard is the runtime witness
+   of that hypothesis, and it is security critical rather than hygienic.
+
+** Lemma 2 (Fresh-Signature Distribution for a Fixed Message)
 
    *Statement.*  Let \( \sigma \) be any fixed valid PS signature on \( m \).
    If \( t \) is sampled uniformly from \( \mathbb{Z}_q^\ast \), then the
@@ -244,39 +478,347 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 
    *Proof.*  Since \( G_1 \) is cyclic of prime order \( q \) and
    \( \sigma_1 \neq O \), the map
+   \( \varphi_\sigma : \mathbb{Z}_q^\ast \to G_1 \setminus \{O\},\ t \mapsto t \sigma_1 \)
+   is a bijection.  Hence \( \sigma'_1 \) is uniform on
+   \( G_1 \setminus \{O\} \) regardless of \( \sigma_1 \).  Given
+   \( \sigma'_1 = h' \), the second component is forced:
+   \( \sigma'_2 = (x + m y) h' \), exactly what a fresh
+   \( \text{PS.Sign} \) with random \( h' \) would output.
+   \( \blacksquare \)
+
+   *What this lemma does not say.*  The rerandomized pair is a valid
+   signature on \( m \): any party holding a candidate \( m_i \) decides
+   whether \( e(\sigma'_1, X + m_i Y) = e(\sigma'_2, g_2) \).  The issuer
+   holds every \( m \) it has certified, and every counterparty learns
+   \( m \) by design, so a /published/ rerandomized pair is a candidate
+   test on the identity, not an unlinkable credential (review finding
+   R1 in =doc/review/identity-findings-2.org=).  The lemma is a
+   statement about the wallet's internal step; the privacy property of
+   the published object is Theorem 2'.  Earlier versions of this
+   document called this result "statistical unlinkability" and drew the
+   issuer-blindness of the identity layer from it; that reading is
+   withdrawn.
+
+** Theorem 2' (Perfect Hiding of the Presentation)
+
+   *Statement.*  Every adversary in HIDE, computationally unbounded and
+   holding the issuer key, has advantage at most \( 1/q \).  More
+   precisely: for a fixed credential on \( m \) and independent uniform
+   \( a, b \in \mathbb{Z}_q^\ast \), the distribution of \( (A, B, P) \) is
+   within statistical distance \( 1/q \) of
+   \( (U_1,\ x U_1 + y U_2,\ U_2) \), where \( U_1 \) is uniform on
+   \( G_1 \setminus \{O\} \), \( U_2 \) is uniform on \( G_1 \), and the
+   two are independent; this reference distribution does not depend on
+   \( m \).
+
+   *Proof.*  Fix \( \beta \).  \( A = a \sigma^\beta_1 \) is uniform on
+   \( G_1 \setminus \{O\} \) by the bijection of Lemma 2.  Conditioned
+   on \( A \), the map \( b \mapsto m_\beta A + b G \) is a bijection
+   \( \mathbb{Z}_q \to G_1 \), so for \( b \) uniform on
+   \( \mathbb{Z}_q^\ast \) the point \( P \) is uniform on
+   \( G_1 \setminus \{m_\beta A\} \), independent of \( A \).  By
+   Theorem 1', \( B = x A + y P \) is a function of \( (A, P) \).  The
+   distributions for \( \beta = 0 \) and \( \beta = 1 \) therefore differ
+   only in which single point \( P \) avoids, at statistical distance at
+   most \( 1/q \), and nothing else the challenger outputs depends on
+   \( \beta \).  \( \blacksquare \)
+
+   *Remarks.*  (i) The adversary knows \( x, y \): the result is
+   unconditional and holds against the issuer.  (ii) Allowing
+   \( b = 0 \) would make the distribution exactly independent of
+   \( m \), but \( b = 0 \) publishes a rerandomized signature, which
+   Lemma 2's remark shows is testable; excluding it costs \( 1/q \).
+   (iii) For every candidate \( m_i \) the point \( P - m_i A \) is a
+   well-formed \( b_i G \), so no candidate is distinguished by any
+   relation among public values.  (iv) Whatever the registration
+   transcript reveals about \( m \) beyond \( (A, B, P) \) is what the
+   ElGamal ciphertext \( (pk, R, C) \) reveals (Theorem R-HVZK), which is
+   the plaintext-checking problem under DDH (Theorem R-blind).
+
+** Theorem R-HVZK (Zero-Knowledge of the Registration Transcript)
+
+   *Statement.*  Given \( (A, B, P, pk, R, C, \mathrm{ctx}) \) and a
+   challenge \( e \), the simulator draws \( s_m, s_b, s_r, s_{sk} \)
+   uniform on \( \mathbb{Z}_q \) and sets
 
    \[
-   \varphi_\sigma : \mathbb{Z}_q^\ast \to G_1 \setminus \{O\}, \qquad t \mapsto t \sigma_1
+   C_1 = s_m A + s_b G - e P, \quad
+   T_C = s_m G + s_r\,pk - e C, \quad
+   T_R = s_r G - e R, \quad
+   T_{key} = s_{sk} G - e\,pk.
    \]
 
-   is a bijection (it is the restriction to non-zero scalars of the
-   group isomorphism \( \mathbb{Z}_q \to \langle \sigma_1 \rangle = G_1 \)).
-   Hence \( \sigma'_1 \) is uniform on \( G_1 \setminus \{O\} \) regardless
-   of the specific \( \sigma_1 \) we started with.
+   The simulated transcript is distributed identically to an honest
+   transcript with the same challenge.  In the random-oracle model the
+   NIZK is zero-knowledge: the simulator programs \( H \) at the
+   transcript to \( e \), aborting if that input was queried before,
+   which happens with probability at most \( q_H / q \) over the
+   adversary's \( q_H \) oracle queries because \( C_1 \) is uniform and
+   fresh.
 
-   Given \( \sigma'_1 = h' \), the second component is forced:
-   \( \sigma'_2 = t \sigma_2 = t (x + m y) \sigma_1 = (x + m y) (t \sigma_1) = (x + m y) h' \).
-   That is exactly what a fresh \( \text{PS.Sign} \) with random \( h' \)
-   would output.
+   *Proof.*  In an honest transcript with fixed witness and challenge,
+   each response is a uniform nonce plus a constant, so the four
+   responses are uniform and independent, and the four commitments are
+   the unique points satisfying the verification equations for those
+   responses.  The simulator samples responses from the same
+   distribution and solves the same equations.  \( \blacksquare \)
 
-   So the joint distribution of \( \sigma' \) matches the fresh-signature
-   distribution, and the map \( \sigma \mapsto \sigma' \) destroys all
-   information about \( \sigma \) beyond the fact that both sign the same
-   \( m \).  This is /statistical/ (information-theoretic) unlinkability,
-   not merely computational.  \( \blacksquare \)
+   *Remark (what the simulator needs, and what the old proof leaked).*
+   The simulator needs \( P \), which is public:
+   \( P = e^{-1}(s_m A + s_b G - C_1) \).  The transcript is therefore a
+   deterministic function of \( (A, B, P, pk, E, \mathrm{ctx}) \) and
+   simulator randomness, and Theorem 2' says \( (A, B, P) \) is
+   independent of \( m \).  The pre-A' proof published a separate
+   commitment \( A_{ps} = m_t A \) with the response \( s_m \), from which
+   any observer computes \( m A = e^{-1}(s_m A - A_{ps}) \), a candidate
+   test on \( m \) needing neither the second signature point nor any
+   issuer key (review finding R2).  Folding \( b_t G \) into the same
+   commitment is what removes the test.
 
-   *Remark.*  The argument uses only that \( G_1 \) has prime order; no
-   cryptographic assumption is invoked.  A cofactor \( > 1 \) would leak
-   subgroup membership of \( \sigma_1 \); the prime-order property of
-   BN254 \( G_1 \) is therefore load-bearing.
+** Theorem R-sound (Special Soundness)
+
+   *Statement.*  From two accepting transcripts with the same
+   \( (A, B, pk, R, C, C_1, T_C, T_R, T_{key}, \mathrm{ctx}) \) and
+   challenges \( e \neq e' \), one computes
+
+   \[
+   m^\ast = \frac{s_m - s'_m}{e - e'}, \quad
+   b^\ast = \frac{s_b - s'_b}{e - e'}, \quad
+   r^\ast = \frac{s_r - s'_r}{e - e'}, \quad
+   sk^\ast = \frac{s_{sk} - s'_{sk}}{e - e'}
+   \]
+
+   such that \( pk = sk^\ast G \), \( (R, C) = (r^\ast G,\ m^\ast G + r^\ast pk) \),
+   and \( e(A,\; X + m^\ast Y) = e(B - b^\ast Y_1,\; g_2) \).  Hence
+   \( (A,\ B - b^\ast Y_1) \) is a plain PS signature on the \( m^\ast \)
+   encrypted in \( E \), under a key whose secret is \( sk^\ast \).
+
+   *Proof.*  Dividing the two instances of (a') and raising to the power
+   \( (e - e')^{-1} \):
+   \( e(m^\ast A + b^\ast G, Y)\, e(A, X) = e(B, g_2) \), i.e.
+   \( e(A, X + m^\ast Y)\, e(b^\ast G, Y) = e(B, g_2) \).  Since
+   \( Y_1 = y G \) (enforced at =trustIssuer=),
+   \( e(b^\ast G, Y) = e(b^\ast Y_1, g_2) \), which rearranges to the
+   stated equation; \( A \neq O \) by (g).  Relations (b), (c), (k)
+   extract \( r^\ast, sk^\ast \) and the same \( m^\ast \) exactly as in
+   Theorem 4 of Part II.  \( \blacksquare \)
+
+   This is the only place \( Y_1 \) enters the argument; the verifier
+   never multiplies by it.
+
+** Theorem R-comp (Composition of the Credential, Ciphertext and Key Relations)
+
+   *Statement.*  Relations (a'), (b), (c), (k) under one challenge form
+   a sigma protocol for the conjunction
+
+   \[
+   \exists\, (m, b, r, sk):\quad
+   B = xA + y(mA + bG),\quad
+   (R, C) = (rG,\ mG + r\,pk),\quad
+   pk = sk\,G,
+   \]
+
+   with special soundness and honest-verifier zero-knowledge.  In
+   particular an accepting registration proves that the /same/ \( m \)
+   is certified by the presentation and encrypted in \( E \), and that
+   the registrant holds \( sk \) for \( pk \).
+
+   *Proof.*  AND-composition of sigma protocols under a common
+   challenge preserves both properties.  The shared nonce \( m_t \)
+   makes the \( m \) extracted from (a') and from (b) the same scalar
+   \( (s_m - s'_m)/(e - e') \); the shared \( r_t \) does the same for
+   \( r \) between (b) and (c).  The simulator of Theorem R-HVZK already
+   simulates all four commitments from the same responses.
+   \( \blacksquare \)
+
+** Theorem R-unforge (Registration Unforgeability, from PS-CM)
+
+   *Statement.*  Let \( \mathcal{A} \) be an adversary in RU making
+   \( q_H \) random-oracle queries and \( q_P \) presentation queries,
+   whose accepting output has extracted \( m^\ast \notin Q \) with
+   probability \( \varepsilon \).  There is a PS-CM forger
+   \( \mathcal{B} \) with success probability at least
+   \( \varepsilon^2 / q_H - (q_P + q_H + 1)/q \), up to the forking
+   lemma's constants.
+
+   *Proof.*  \( \mathcal{B} \) receives the PS-CM public key
+   \( (X, Y, Y_1) \) and a signing oracle \( \mathcal{S} \), and forwards
+   the key to \( \mathcal{A} \).
+
+   /Sign queries./  Forwarded to \( \mathcal{S} \); \( \mathcal{B} \)
+   records \( Q \).
+
+   /Presentation queries./  \( \mathcal{B} \) must answer
+   \( \mathsf{Present}(m, \mathrm{ctx}) \) for identities it holds no
+   credential on.  It queries \( \mathcal{S} \) once, on a message
+   \( m_d \) chosen uniformly at random, obtaining
+   \( \sigma_d = (h_d,\ (x + m_d y) h_d) \).  For each query it samples
+   fresh \( a, b, sk, r \) and sets
+
+   \[
+   A = a h_d, \quad
+   B = a \sigma_{d,2} + b Y_1 = x A + y (m_d A + b G), \quad
+   P := m_d A + b G, \quad
+   pk = sk G, \quad
+   E = (r G,\ m G + r\,pk),
+   \]
+
+   using the real \( m \), which the adversary holds anyway, and
+   simulates \( \pi \) with the simulator of Theorem R-HVZK, programming
+   \( H \) at the transcript.
+
+   /Forgery./  When \( \mathcal{A} \) outputs an accepting transcript
+   whose challenge was the \( i \)-th oracle query, \( \mathcal{B} \)
+   rewinds \( \mathcal{A} \) to that query with a fresh answer (the
+   forking lemma[fn:forklemma]); with probability about
+   \( \varepsilon^2 / q_H \) it obtains a second accepting transcript
+   with the same commitments and a different challenge, extracts
+   \( (m^\ast, b^\ast) \) by Theorem R-sound, and outputs
+   \( (m^\ast,\ (A^\ast,\ B^\ast - b^\ast Y_1)) \).
+
+   /Indistinguishability of the simulation./  In a real
+   \( \mathsf{Present} \) answer, \( A \) is uniform nonzero, \( P \) is
+   uniform on \( G_1 \setminus \{m A\} \), and \( B = x A + y P \).  In
+   the simulation \( A \) is again uniform nonzero (a rerandomization of
+   \( h_d \)), \( P \) is uniform on \( G_1 \setminus \{m_d A\} \), and
+   \( B = x A + y P \).  The two differ by at most \( 1/q \) per query
+   (Theorem 2').  The ciphertext is formed identically.  The proof is
+   simulated, which by Theorem R-HVZK is exact given
+   \( (A, B, P, pk, E, \mathrm{ctx}) \) up to the programming abort.  The
+   relation "\( P = m A + b G \) for the \( m \) inside \( E \)" is not
+   checkable by anyone without \( b \), since every \( m \) admits some
+   \( b \).  So nothing in \( \mathcal{A} \)'s view distinguishes the
+   simulated world from the real one beyond \( q_P/q + q_H/q \).
+
+   /Validity of the forgery./  By Theorem R-sound the pair verifies as a
+   PS signature on \( m^\ast \).  \( \mathcal{A} \) wins only if
+   \( m^\ast \notin Q \).  The one message \( \mathcal{B} \) queried that
+   \( \mathcal{A} \) does not see is \( m_d \); since
+   \( \mathcal{A} \)'s view is independent of \( m_d \) up to the
+   statistical distance above, \( \Pr[m^\ast = m_d] \le (1 + q_P)/q \).
+   Hence the output is a forgery on a message never queried to
+   \( \mathcal{S} \).  \( \blacksquare \)
+
+   *What this closes.*  A party that has learned \( m \) from a receipt
+   and holds every registration of the target (review finding R3); a
+   party that copies a registration to another address or chain
+   (\( \mathrm{ctx} \) is in the transcript, and a fresh proof needs
+   \( sk \) and \( b \) anyway); and a party with no credential at all.
+   Identity disclosure therefore stops conferring registration authority
+   under an honest issuer.  The observation that stripping \( B \) needs
+   \( b Y_1 = y (b G) \) from \( b G \) and \( Y_1 \), a CDH instance,
+   remains true but is not load-bearing.
+
+   *What it does not close.*  The issuer, who can sign.  Two credentials
+   on the same identity issued to different people are a
+   certification-policy problem, not a cryptographic one.
+
+** Theorem R-blind (Issuer-Blindness of the Registration Transcript)
+
+   *Statement.*  Every PPT adversary in IB has advantage at most
+   \( \mathrm{Adv}_{\mathrm{DDH}} + 1/q + q_H/q \) per registration.
+   This is the credential lock the main paper's issuer-blindness theorem
+   needs; its plaintext lock is the DDH term.
+
+   *Proof (hybrids).*  \( H_0 \): the real game with bit \( \beta \).
+   \( H_1 \): replace \( \pi \) by the simulated proof from
+   \( (A, B, P, pk, E, \mathrm{ctx}) \); identical up to the programming
+   abort (Theorem R-HVZK).  \( H_2 \): replace \( (A, B, P) \) by
+   \( (U_1,\ x U_1 + y U_2,\ U_2) \) with \( U_1 \) uniform nonzero and
+   \( U_2 \) uniform, at statistical distance at most \( 1/q \)
+   (Theorem 2'), computable by the challenger since the adversary
+   supplied \( (x, y) \).  In \( H_2 \) the only object that depends on
+   \( \beta \) is \( E = (r G,\ m_\beta G + r\,pk) \) with
+   \( pk = sk\,G \) for secret \( sk, r \): the ElGamal encryption of a
+   known plaintext under a fresh key, whose indistinguishability is the
+   plaintext-checking problem, i.e. deciding whether
+   \( (G, pk, R, C - m_\beta G) \) is a DDH tuple.  \( \blacksquare \)
+
+   *Scope.*  The theorem is about the registration transcript.  It says
+   nothing about the issuer's address (which identifies the anonymity
+   set), about timing or gas, or about identity-derived Note keys.
+
+** Proposition R-fresh (Randomness Reuse Is a Break)
+
+   Each of the following is an explicit break if the wallet reuses a
+   value:
+
+   - \( b \) reused across two registrations of one identity:
+     \( P_1 - P_2 = m (A_1 - A_2) \), so a holder of a candidate
+     \( m_i \) tests \( P_1 - P_2 - m_i (A_1 - A_2) = O \).  Links the
+     accounts and identifies the identity (sanity check, step 8).
+   - \( a \) reused with the same credential: \( A_1 = A_2 \); links the
+     accounts.
+   - \( m_t \) reused across two proofs: \( s_m - s'_m = (e - e') m \)
+     reveals \( m \) to everyone.
+   - \( b_t \) reused: reveals \( b \), after which \( B - b Y_1 \) is a
+     verifiable signature on \( m \), i.e. the credential is published.
+   - \( r_t \) or \( sk_t \) reused: reveal \( r \) (hence \( M \) from
+     \( C - r\,pk \)) and \( sk \).
+
+   The wallet draws all six from the platform CSPRNG (=rand_scalar=).
+   Deriving the four nonces deterministically from the witness and the
+   transcript, in the style of RFC 6979, would remove the RNG from the
+   trusted base for \( m_t, b_t, r_t, sk_t \); \( a \) and \( b \) must
+   still be fresh per registration.
+
+** What the Verifier Checks, and Why
+
+   Each item is present in =src/IdentityRegistry.sol= with the revert
+   string given.
+
+   - \( A \neq O \) (=A=O=; critical).  With \( A = O \) the term
+     \( e(eA, X) \) vanishes and (a') reduces to
+     \( e(s_b G - C_1, Y) = e(eB, g_2) \), which \( B = b Y_1 \),
+     \( C_1 = b_t G \) satisfy for every \( m \): a registration with no
+     credential.  Reachable by choosing \( a = 0 \).
+   - \( B \neq O \) (=B=O=; defensive).  \( B = O \) means
+     \( x A = -y P \); producing such a pair needs \( x/y \).  Rejected
+     so that no degenerate encoding is accepted.
+   - \( pk \neq O \) (=pk=O=; critical).  Relation (k) is vacuous at
+     \( pk = O \): no account-key ownership.
+   - \( R \neq O \) (=R=O=; critical).  \( r = 0 \) makes \( C = m G \),
+     publishing the identity point.
+   - Canonical scalars (=bad scalar=).  Two encodings of one proof would
+     otherwise be accepted; hygiene, since \( \mathrm{ctx} \) already
+     prevents replay.
+   - On-curve and subgroup.  \( G_1 \) has prime order on BN254, so
+     on-curve suffices for \( G_1 \) inputs; the pairing precompile
+     rejects \( G_2 \) points outside the subgroup, and \( X, Y \) are
+     governance-set.
+   - \( Y_1 \) consistency at =trustIssuer= (=Y1=O=, =Y1 inconsistent=).
+     Theorem R-sound's last step needs \( Y_1 = y G \).  A wrong
+     \( Y_1 \) cannot help a forger, because the verifier never
+     multiplies by \( Y_1 \); it would only make honest presentations
+     fail, which the check prevents.
+   - Fiat-Shamir coverage (=bad FS challenge=).  The transcript hashes
+     every public point of the statement, all four commitments, the
+     registrant, the chain id, the registry address and the versioned
+     domain.  The issuer address is /not/ hashed: the proof is bound to
+     the issuer's key through equation (a') itself, so it cannot verify
+     under a different key, and two issuers publishing the same key are
+     indistinguishable by construction.
+   - Registrant \( = \) =msg.sender= (or the target contract for
+     binding).  The proof is useless to any other address.
+   - Nonzero caller-supplied accumulator leaves are rejected
+     (=unchecked identity leaf=); see the accumulator note in Part IV.
+   - Storage, not calldata, for later use of \( E \) and \( pk \).
+     Downstream proofs (approve, spend) read the registered values.
 
 ** Sanity Check (py_ecc on BN254)
+
+   The block keeps \( m, x, y, X, Y, G_1, G_2 \) and =rand= defined for
+   the later blocks.  It samples \( h \) as a known multiple of \( G \)
+   so that step 3 can exhibit the second opening of Theorem 2'; a real
+   issuer never reveals that logarithm.  Step 7 uses SHA-256 as a
+   stand-in random oracle; the point is only that the simulated
+   challenge is not the hash of the simulated commitments.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session proofs :results output
      import secrets, hashlib
      from py_ecc.bn128 import bn128_curve as bc
-     from py_ecc.bn128 import pairing
+     from py_ecc.bn128 import pairing, FQ12
 
      ORDER = bc.curve_order
      G1, G2 = bc.G1, bc.G2
@@ -285,65 +827,145 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      def rand():
          return secrets.randbelow(ORDER - 1) + 1
 
-     # Issuer key pair
+     # Issuer key pair: (X, Y) in G2 as before, plus the G1 image Y1 = y G
      x, y = rand(), rand()
      X, Y = multiply(G2, x), multiply(G2, y)
+     Y1 = multiply(G1, y)
 
-     # Alice's identity and PS signature sigma = (h, (x + m y) h)
+     # Alice's identity and PS credential sigma = (h, (x + m y) h).  This check
+     # knows log_G h (it samples h as a multiple of G) and uses it only for the
+     # perfect-hiding witness in step 3; a real issuer keeps that log secret.
      m = int(hashlib.sha256(b"Alice Johnson | Alberta | AIC-2026").hexdigest(), 16) % ORDER
-     h = multiply(G1, rand())
+     log_h = rand()
+     h = multiply(G1, log_h)
      sigma = (h, multiply(h, (x + m * y) % ORDER))
 
-     # Rerandomize with t != 0
+     def present(sigma, a, b):                 # (A, B) = (a sigma_1, a sigma_2 + b Y1)
+         return (multiply(sigma[0], a), add(multiply(sigma[1], a), multiply(Y1, b)))
+
+     def masked_verify(A, B, m, b):            # Theorem 1': e(B, g2) == e(A, X) e(mA + bG, Y)
+         P = add(multiply(A, m), multiply(G1, b))
+         return pairing(G2, B) == pairing(X, A) * pairing(Y, P)
+
+     def raw_verify(S1, S2, m):                # the pre-A' candidate test: e(S1, X + mY) == e(S2, g2)
+         return pairing(add(X, multiply(Y, m)), S1) == pairing(G2, S2)
+
+     # --- 1. Theorem 1': the honest presentation satisfies the masked equation ---
+     a, b = rand(), rand()
+     A, B = present(sigma, a, b)
+     assert not eq(A, bc.Z1) and not eq(B, bc.Z1)
+     assert masked_verify(A, B, m, b), "Theorem 1' FAILED"
+     print("Theorem 1' (masked completeness):    PASS")
+
+     # --- 2. Lemma 2 and R1: the raw test identifies t*sigma but not (A, B) ---
      t = rand()
      sigma_p = (multiply(sigma[0], t), multiply(sigma[1], t))
+     assert raw_verify(sigma_p[0], sigma_p[1], m), "Lemma 2: rerandomized pair must verify"
+     assert not raw_verify(A, B, m), "R1: the presentation must NOT verify as a signature on m"
+     print("Lemma 2 + R1 (raw candidate test):   PASS  (t*sigma identified; (A, B) not)")
 
-     # --- Theorem 1: completeness ---
-     lhs = pairing(add(X, multiply(Y, m)), sigma_p[0])
-     rhs = pairing(G2, sigma_p[1])
-     assert lhs == rhs, "Theorem 1 FAILED: rerandomized signature does not verify"
-     assert not eq(sigma_p[0], bc.Z1), "Theorem 1 guard: sigma'_1 == O"
-     print("Theorem 1 (completeness):            PASS")
+     # --- 3. Theorem 2': another identity m' opens the SAME (A, B, P) ---
+     m_prime = rand()
+     log_A = (a * log_h) % ORDER
+     b_prime = (b + (m - m_prime) * log_A) % ORDER
+     P = add(multiply(A, m), multiply(G1, b))
+     assert eq(P, add(multiply(A, m_prime), multiply(G1, b_prime))), "Theorem 2': P differs"
+     assert masked_verify(A, B, m_prime, b_prime), "Theorem 2': (A, B) must verify for m' too"
+     print("Theorem 2' (perfect hiding):         PASS  (same (A, B, P) opens to m and m')")
 
-     # --- Theorem 2: fresh rerandomization looks like a fresh signing ---
-     # Two independent rerandomizations should be indistinguishable from two
-     # independent fresh signings.  We check both give valid signatures on m
-     # whose sigma_1 components are independent uniform-looking elements.
-     t2 = rand()
-     sigma_p2 = (multiply(sigma[0], t2), multiply(sigma[1], t2))
-     assert not eq(sigma_p[0], sigma_p2[0]), "distinct rerandomizations collide"
-     lhs2 = pairing(add(X, multiply(Y, m)), sigma_p2[0])
-     rhs2 = pairing(G2, sigma_p2[1])
-     assert lhs2 == rhs2
-     print("Theorem 2 (unlinkability):           PASS  (two rerandomizations both verify, distinct)")
+     # --- 4. Theorem R-sound: two transcripts sharing C1 extract (m*, b*) ---
+     m_t, b_t = rand(), rand()
+     C1 = add(multiply(A, m_t), multiply(G1, b_t))
+     e1, e2 = rand(), rand()
+     s_m1, s_b1 = (m_t + e1 * m) % ORDER, (b_t + e1 * b) % ORDER
+     s_m2, s_b2 = (m_t + e2 * m) % ORDER, (b_t + e2 * b) % ORDER
+     inv = pow((e1 - e2) % ORDER, -1, ORDER)
+     m_star, b_star = ((s_m1 - s_m2) * inv) % ORDER, ((s_b1 - s_b2) * inv) % ORDER
+     assert m_star == m and b_star == b
+     assert raw_verify(A, add(B, neg(multiply(Y1, b_star))), m_star), "R-sound: not a PS signature"
+     print("Theorem R-sound (extraction):        PASS  ((A, B - b* Y1) is a PS signature on m*)")
 
-     # --- Theorem 1 guard: the trivial signature (t = 0) is degenerate ---
-     zero_sig = (bc.Z1, bc.Z1)
-     lhs0 = pairing(add(X, multiply(Y, m)), zero_sig[0])   # pairing with O -> 1_GT
-     rhs0 = pairing(G2, zero_sig[1])                       # pairing with O -> 1_GT
-     # The pairing equation holds for ANY m -- this is why the guard matters
-     assert lhs0 == rhs0
-     # But the registration contract rejects it because sigma'_1 == O:
-     rejected = eq(zero_sig[0], bc.Z1)
-     assert rejected
-     print("Theorem 1 guard (sigma'_1 != O):     PASS  (trivial signature rejected by guard)")
+     # --- 5. The guard: with A = O the masked equation holds for EVERY m ---
+     A0, B0 = bc.Z1, multiply(Y1, b)          # what a = 0 would publish
+     assert masked_verify(A0, B0, m, b) and masked_verify(A0, B0, m_prime, b)
+     assert eq(A0, bc.Z1)                     # ... which is why the contract rejects A = O
+     print("Guard (A != O):                      PASS  (A = O verifies for every m; rejected)")
+
+     # --- 6. Theorem R-HVZK: the simulator needs only (A, B, P) and e ---
+     e_s, s_m_s, s_b_s = rand(), rand(), rand()
+     C1_s = add(add(multiply(A, s_m_s), multiply(G1, s_b_s)), neg(multiply(P, e_s)))
+     lhs = add(add(multiply(A, s_m_s), multiply(G1, s_b_s)), neg(C1_s))     # == e_s * P
+     prod = pairing(Y, lhs) * pairing(X, multiply(A, e_s)) * pairing(G2, neg(multiply(B, e_s)))
+     assert prod == FQ12.one(), "R-HVZK: simulated transcript must verify"
+     print("Theorem R-HVZK (simulator):          PASS  (accepting transcript from (A, B, P) alone)")
+
+     # --- 7. Theorem R-unforge's simulation: a transcript for E(m) built from a
+     #        credential on an UNRELATED m_d passes every algebraic check for its
+     #        chosen challenge; only the hash check tells it apart, and that is
+     #        what the reduction programs in the random-oracle model ---
+     m_d = rand()                                                 # the dummy message
+     sigma_d = (h, multiply(h, (x + m_d * y) % ORDER))            # a credential on m_d, not m
+     a_s, b_s, sk_s, r_s = rand(), rand(), rand(), rand()
+     A_s, B_s = present(sigma_d, a_s, b_s)                        # (A, B) from sigma_d
+     P_s = add(multiply(A_s, m_d), multiply(G1, b_s))             # P := m_d*A + b*G
+     pk_s = multiply(G1, sk_s)
+     R_s, C_s = multiply(G1, r_s), add(multiply(G1, m), multiply(pk_s, r_s))   # E encrypts the TARGET m
+     e_x, s_m_x, s_b_x, s_r_x, s_sk_x = rand(), rand(), rand(), rand(), rand()
+     C1_x  = add(add(multiply(A_s, s_m_x), multiply(G1, s_b_x)), neg(multiply(P_s, e_x)))
+     T_C_x = add(add(multiply(G1, s_m_x), multiply(pk_s, s_r_x)), neg(multiply(C_s, e_x)))
+     T_R_x = add(multiply(G1, s_r_x), neg(multiply(R_s, e_x)))
+     T_k_x = add(multiply(G1, s_sk_x), neg(multiply(pk_s, e_x)))
+     ok_b = eq(add(multiply(G1, s_m_x), multiply(pk_s, s_r_x)), add(multiply(C_s, e_x), T_C_x))
+     ok_c = eq(multiply(G1, s_r_x), add(multiply(R_s, e_x), T_R_x))
+     ok_k = eq(multiply(G1, s_sk_x), add(T_k_x, multiply(pk_s, e_x)))
+     lhs_x = add(add(multiply(A_s, s_m_x), multiply(G1, s_b_x)), neg(C1_x))
+     ok_a = (pairing(Y, lhs_x) * pairing(X, multiply(A_s, e_x))
+             * pairing(G2, neg(multiply(B_s, e_x)))) == FQ12.one()
+     assert ok_b and ok_c and ok_k and ok_a
+     hash_matches = (int(hashlib.sha256(repr((A_s, B_s, R_s, C_s, pk_s, C1_x, T_C_x, T_R_x, T_k_x)).encode()).hexdigest(), 16) % ORDER) == e_x
+     assert not hash_matches                                     # the FS check is the only failing check
+     print("Theorem R-unforge (simulation):      PASS  (transcript from a credential on m_d != m passes (a'),(b),(c),(k); only the hash differs)")
+
+     # --- 8. Proposition R-fresh: reusing b across two presentations identifies m ---
+     a1, a2 = rand(), rand()
+     A1, B1 = present(sigma, a1, b)                               # same b as step 1
+     A2, B2 = present(sigma, a2, b)
+     P1 = add(multiply(A1, m), multiply(G1, b))
+     P2 = add(multiply(A2, m), multiply(G1, b))
+     D_P, D_A = add(P1, neg(P2)), add(A1, neg(A2))
+     hits = [cand for cand in (m, m_prime, m_d) if eq(add(D_P, neg(multiply(D_A, cand))), bc.Z1)]
+     assert hits == [m]
+     print("Proposition R-fresh (b reused):      PASS  (P1 - P2 = m*(A1 - A2) singles out the true m among 3 candidates)")
    #+END_SRC
 
    #+RESULTS:
-   : Theorem 1 (completeness):            PASS
-   : Theorem 2 (unlinkability):           PASS  (two rerandomizations both verify, distinct)
-   : Theorem 1 guard (sigma'_1 != O):     PASS  (trivial signature rejected by guard)
+   : Theorem 1' (masked completeness):    PASS
+   : Lemma 2 + R1 (raw candidate test):   PASS  (t*sigma identified; (A, B) not)
+   : Theorem 2' (perfect hiding):         PASS  (same (A, B, P) opens to m and m')
+   : Theorem R-sound (extraction):        PASS  ((A, B - b* Y1) is a PS signature on m*)
+   : Guard (A != O):                      PASS  (A = O verifies for every m; rejected)
+   : Theorem R-HVZK (simulator):          PASS  (accepting transcript from (A, B, P) alone)
+   : Theorem R-unforge (simulation):      PASS  (transcript from a credential on m_d != m passes (a'),(b),(c),(k); only the hash differs)
+   : Proposition R-fresh (b reused):      PASS  (P1 - P2 = m*(A1 - A2) singles out the true m among 3 candidates)
 
    #+LATEX: }
 
-   *How to read the output:* Three PASS lines.  The first confirms
-   Theorem 1's pairing identity on a random rerandomization.  The
-   second confirms two fresh rerandomizations are distinct and both
-   verify (a minimal demonstration of the unlinkable-yet-valid
-   property).  The third demonstrates /why/ the \( \sigma'_1 \neq O \)
-   check is mandatory: the pairing equation is trivially satisfied by
-   \( (O, O) \) for any \( m \), so only the explicit guard prevents
-   this degenerate signature from passing.
+   *How to read the output:* Eight PASS lines.  (1) Theorem 1' on an
+   honest presentation.  (2) The R1 witness: the raw PS test identifies
+   a rerandomized pair from \( m \) alone and fails on the presentation.
+   (3) Theorem 2' made concrete: a second identity \( m' \) with blinding
+   \( b' = b + (m - m')\log_G A \) opens the /same/ \( (A, B, P) \) and
+   passes the masked equation.  (4) Two transcripts sharing \( C_1 \)
+   extract \( (m^\ast, b^\ast) \) and \( (A, B - b^\ast Y_1) \) verifies
+   as a plain PS signature (Theorem R-sound).  (5) The \( A \neq O \)
+   guard: the masked equation holds for every \( m \) at \( A = O \).
+   (6) The Theorem R-HVZK simulator, from \( (A, B, P) \) and a challenge
+   alone.  (7) Theorem R-unforge's simulation: from a credential on an
+   unrelated \( m_d \), a transcript whose ciphertext encrypts the target
+   \( m \) passes every algebraic check for its chosen challenge; only
+   the hash check tells it apart, which is exactly what the reduction
+   programs in the random-oracle model.  (8) Proposition R-fresh: a
+   reused \( b \) singles out the true \( m \) among candidates.
 
 #+LATEX: \clearpage
 * Part II: Chaum-Pedersen Re-Encryption Correctness
@@ -399,8 +1021,10 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    *Challenge.*
 
    \[
-   e = H\!\left(G,\; pk_{\text{alice}},\; pk_{\text{bob}},\; R_a, C_a, R_b, C_b,\; T_1, T_2, T_3,\; \texttt{msg.sender},\; \texttt{spender},\; \texttt{chainid}\right).
+   e = H\!\left(R_a, C_a, R_b, C_b,\; pk_{\text{alice}},\; pk_{\text{bob}},\; T_1, T_2, T_3,\; \texttt{msg.sender},\; \texttt{spender},\; \texttt{chainid},\; \texttt{registry},\; \mathrm{keccak}(\tau_{\text{approve}})\right),
    \]
+
+   with \( \tau_{\text{approve}} \) = =AlbertaBuck/FiatShamir/IdentityRegistry/Approve/v2=.
 
    *Respond.*  \( s_1 = k_1 - e \cdot sk_{\text{alice}} \pmod q,\qquad s_2 = k_2 - e \cdot r_b \pmod q \).
 
@@ -687,22 +1311,23 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    proved above:
 
    #+begin_example
-   KYC ceremony:   issuer signs m     -->  sigma on m                 (q-SDH)
-   Fountain:       rerandomize sigma  -->  sigma' on same m           (Theorem 1, 2)
-   Registration:   PS + NIZK check    -->  E_alice bound to same m    (PS verify + NIZK soundness)
+   KYC ceremony:   issuer signs m     -->  sigma on m                 (PS-CM unforgeability)
+   Fountain:       present sigma      -->  (A, B) hiding m            (Theorems 1', 2')
+   Registration:   masked-PS NIZK     -->  E_alice bound to same m    (Theorems R-sound, R-comp)
    approve(Bob):   Alice re-encrypts  -->  E_bob                      (Theorem 3)
                    Chaum-Pedersen     -->  verified on chain          (Theorems 3, 4, 5)
    Decryption:     Bob computes M     -->  M = C_b - sk_bob * R_b     (ElGamal correctness)
-   Two-channel:    Bob receives       -->  H(identity_data) * G == M  (hash commitment)
+   Two-channel:    Bob receives       -->  m(identity_data) * G == M  (tagged hash commitment)
    #+end_example
 
 ** Theorem 6 (End-to-End Re-Encryption Correctness)
 
    *Statement.*  Suppose the BUCK contract:
    1. holds a registered credential \( E_{\text{alice}} = (R_a, C_a) \)
-      together with \( pk_{\text{alice}} \) and a PS signature
-      \( \sigma' \) that verified at registration time against a
-      trusted issuer public key \( (X, Y) \);
+      together with \( pk_{\text{alice}} \), accepted at registration
+      time with a presentation \( (A, B) \) and a registration NIZK
+      that verified against a trusted issuer public key
+      \( (X, Y, Y_1) \);
    2. accepts a Chaum-Pedersen proof \( \pi \) supplied by
       \( \texttt{msg.sender} = \) Alice, with spender \( pk_{\text{bob}} \)
       and submitted ciphertext \( E_{\text{bob}} = (R_b, C_b) \).
@@ -712,16 +1337,17 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    \[
    C_a - sk_{\text{alice}} \cdot R_a \;=\; M \;=\; C_b - sk_{\text{bob}} \cdot R_b,
    \]
-   and the scalar \( m \) is the issuer-certified identity scalar
-   covered by \( \sigma' \).
+   and the scalar \( m \) is an identity scalar the issuer certified.
 
-   *Proof sketch.*  The registration check evaluates
-   \( e(\sigma'_1, X + m Y) = e(\sigma'_2, g_2) \) together with a
-   NIZK that binds the same \( m \) to \( E_{\text{alice}} \) (so
-   \( C_a - sk_{\text{alice}} R_a = m \cdot G \)); existential
-   unforgeability of PS under q-SDH ensures \( m \) is the scalar the
-   issuer signed.  The contract reads \( E_{\text{alice}} \) from
-   storage, not calldata, so the value is frozen.
+   *Proof sketch.*  By Theorems R-sound and R-comp, an accepting
+   registration yields (through the forking lemma) a single witness
+   \( (m, b, r, sk) \) with \( C_a - sk_{\text{alice}} R_a = m \cdot G \)
+   and \( (A, B - b Y_1) \) a plain PS signature on \( m \) under
+   \( (X, Y) \); PS-CM unforgeability ensures \( m \) is a scalar
+   the issuer signed.  The verifier never sees \( m \): it checks the
+   masked equation (a'), not a signature against a visible message.
+   The contract reads \( E_{\text{alice}} \) from storage, not
+   calldata, so the value is frozen.
 
    Theorem 4 (special soundness) plus the forking lemma reduction to
    DLog gives: from any adversary producing an accepting \( \pi \)
@@ -739,7 +1365,7 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 
    - *=approve= / =transfer= / =transferFrom= (Identity):*  Bob decrypts
      \( E_{\text{bob}} \) and obtains \( M \); combined with off-chain
-     =identity_data= delivery and the check \( H(\text{identity\_data}) \cdot G = M \),
+     =identity_data= delivery and the check \( \mathrm{keccak}(\tau_{\text{ID}} \Vert \text{identity\_data}) \cdot G = M \),
      he learns Alice's real identity with cryptographic assurance.  A BUCK
      =transfer= / =transferFrom= is gated on this =approve= handshake against
      /both/ parties' registered records, so a value move carries an account
@@ -747,18 +1373,17 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      bilateral mutual decryptability formalised in the EOA mirror below.
 
    - *Notes spend predicates (Part IV):*  The same re-encryption / decryption
-     algebra underlies the Identity-M BUCK Notes.  At mint the issuer addresses
-     the recipient /Identity point/ \( M_{\text{rec}} \) and a mint-binding
-     forces the ciphertext over the issuer's /own/ registered \( M_{\text{iss}} \)
-     (Theorem 7); at spend the deposit-coupling sigma is the Chaum-Pedersen
-     statement of this Part, lifted inside a SNARK -- so Theorem 4's special
-     soundness lifts directly and binds the depositing account to the registered
-     Identity scalar \( m_{\text{rec}} \), with the note ciphertext decrypting to
-     a /registered/ member (Theorem 8); the bearer B1 path instead binds the
+     algebra underlies BUCK Notes.  At mint the issuer addresses the recipient's
+     receiving key and a mint binding forces the ciphertext over the issuer's
+     /own/ registered \( M_{\text{iss}} \) (Theorem 7).  At spend, relation (3)
+     of the folded gate is this Part's statement -- the depositing account's
+     registered credential decrypts to the Identity \( m_{\text{rec}} \) -- and
+     the gate ties that Identity to the reading key through a certified
+     accumulator leaf (Theorem 8); the bearer B1 path instead binds the
      depositor's /own/ Identity \( M_{\text{dep}} \) for the public issuer
-     (Theorem 9).  Unlike the earlier account-pinned design, the binding is to
-     the /Identity/, not a mint-time keypair -- /recovery, not finality/ on key
-     loss -- yet identity laundering through the note pool remains infeasible.
+     (Theorem 9).  The binding is to the /Identity/, not a mint-time keypair --
+     /recovery, not finality/ on key loss -- yet identity laundering through
+     the note pool remains infeasible.
 
    - *Identity Guardians (=approveFor=, recovery, cosigning):*  The Schnorr
      proof of knowledge of \( sk \) is a one-statement specialization of the
@@ -842,543 +1467,519 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
 #+LATEX: \clearpage
 * Part IV: BUCK Notes Spend Predicates (A1, A2, B1)
 
+This Part proves what an accepted Notes spend establishes about the Identities on either side of
+it.  An addressed note (A1, A2) is encrypted to the recipient's /receiving key/, which is
+independent of its Identity, and its deposit is ONE folded Groth16 proof over one witness.  A
+bearer note (B1) is spent with a sigma protocol and a membership proof that share one committed
+point.  The clear-text reference for the folds is =alberta_buck/wallet/deposit_fold.py=; the
+architecture, and the attack each relation refuses, are in
+[[file:doc/review/notes-receiving-key.org][the receiving-key architecture]].
+
 ** Setup
 
    *Pool.*  =noteTree=, a depth-20 Poseidon tree of leaves
-   \( cm = \mathrm{Poseidon}_5(\mathrm{flavor}, v, \rho, \mathrm{idHash}, \mathrm{predicate}) \)
-   (\( \mathrm{idHash} \) digests the per-flavor identity payload); a =nullifiers=
-   set; a 30-deep ring of recent roots.  Mint is the batch rollup of
-   /alberta-buck-notes-rollup-mint/ -- a Groth16 proof of incremental insertion of
-   \( N \) fresh leaves with in-circuit range checks (\( v_i, \texttt{totalFace} \in
-   [0,2^{128}) \)) and value conservation (\( \sum_i v_i = \texttt{totalFace} \));
-   the contract pins =oldRoot= / =nextLeafIndex= and pulls =totalFace= BUCK.
-   Demurrage is orthogonal.
+   \( cm = \mathrm{Poseidon}_6(T_{CM}, \mathrm{flavor}, v, \rho, \mathrm{idHash}, \mathrm{predicate}) \)
+   (\( \mathrm{idHash} \) digests the per-flavor identity payload), whose empty leaf is the field
+   tag of =AlbertaBuck/Notes/Zero/v2=; a =nullifiers= set; a 30-deep ring of recent roots.  Mint
+   is the batch rollup of /alberta-buck-notes-rollup-mint/ -- a Groth16 proof of incremental
+   insertion of \( N \) fresh leaves with in-circuit range checks
+   (\( v_i, \texttt{totalFace} \in [0,2^{128}) \)) and value conservation
+   (\( \sum_i v_i = \texttt{totalFace} \)); the contract pins =oldRoot= / =nextLeafIndex= and
+   pulls =totalFace= BUCK.  Demurrage is orthogonal.
 
-   *Identity accumulator.*  IdentityRegistry maintains a /second/ Poseidon tree
-   whose leaves are registered Identity points
-   \( \ell(M) = \mathrm{Poseidon}(M.x, M.y) \), with root \( \mathsf{rt_{id}} \)
-   on chain (updated per =register= / =bindContract=, commit-before-use).
-   Membership of \( M \) is the statement "\( M \) is a genuine KYC-registered
-   Identity" -- the load-bearing addition over the earlier account-pinned spend,
-   and the half that makes a colluding counterparty /un-spendable/ rather than
-   merely un-nameable.
+   *Identity accumulator.*  Membership is a path through two trees.  Each authority keeps
+   subtrees: an identity registry's are private, of depth 12, with salted leaves; an institution's
+   are public, with unsalted ones.  The aggregator's tree, of depth 20, has subtree roots for
+   leaves, and its root \( \mathsf{rt_{id}} \) is posted on chain into a ring of 256 records, each
+   with its posting time.  A consumer declares the oldest root it accepts -- Notes, seven days --
+   and a spend names the root it proved against.  Every level folds with the same Poseidon, so a
+   membership proof is one path of 32 levels.  Each leaf function leads with its own v2 field tag
+   \( \tau \):
+   \[
+     \ell_R(m, k, s) = \mathrm{Poseidon}(\tau_R, m, k, s), \quad
+     \ell_S(M, s) = \mathrm{Poseidon}(\tau_S, M.x, M.y, s), \quad
+     \ell(M) = \mathrm{Poseidon}(\tau_I, M.x, M.y).
+   \]
+   \( \ell_R \), the receiving leaf, pairs an Identity with a receiving key; \( \ell_S \) is the
+   salted identity leaf; \( \ell \) the public one.  A salt derives from a wallet secret, never
+   from \( m \), so a party holding every certified identity scalar and a whole published subtree
+   decides no membership (Poseidon as a random oracle).  =register= refuses a caller-supplied
+   leaf: admission is the authority's certification, not a by-product of the hiding presentation,
+   whose leaf would otherwise reveal \( M \) to whoever computed it.
 
    *Identity primitives (recap, Parts I-III).*  A registered account is
-   \( (\text{addr},\ pk = sk\,G,\ E_{\text{addr}} = (rG,\ M + r\,pk)) \): an
-   ElGamal encryption of its issuer-certified Identity point \( M = mG \) under
-   its own key (PS-signed at registration).  The Identity Fountain re-issues
-   unlimited fresh accounts \( (sk_i, pk_i, E_{\text{addr},i}) \) on the /same/
-   \( M \).
+   \( (\text{addr},\ pk = sk\,G,\ E_{\text{addr}} = (rG,\ M + r\,pk)) \): an ElGamal encryption
+   of its issuer-certified Identity point \( M = mG \) under its own key.  The Identity Fountain
+   issues unlimited fresh accounts \( (sk_i, pk_i, E_{\text{addr},i}) \) on the /same/ \( M \).
 
-   *Note addressing (mint).*  The issuer addresses the recipient /Identity/
-   \( M_{\text{rec}} = m_{\text{rec}} G \), not an account, through a single
-   ciphertext the recipient's identity scalar \( m_{\text{rec}} \) decrypts (and
-   that scalar is shared by every Fountain account of the recipient):
+   *Receiving key.*  The recipient holds a receiving secret \( k \), derived from wallet seed
+   material and independent of \( m \), with \( pk_{\text{recv}} = kG \); its registry certifies
+   \( \ell_R(m_{\text{rec}}, k, s) \).  The identity scalar is disclosed to every counterparty by
+   design (Part II), so nothing is encrypted under \( M \): a key everyone you pay learns cannot
+   also read your mail.
+
+   *Note addressing (mint).*
    \[
-     \text{A2: } eIss = (r'G,\ M_{\text{iss}} + r' M_{\text{rec}}), \qquad
-     \text{A1: } eRec = (r'G,\ M_{\text{rec}} + r' M_{\text{rec}}).
+     \text{A1: } eNote = (r_nG,\ vG + r_n\,pk_{\text{recv}}),\quad
+                 eRec = (r'G,\ M_{\text{rec}} + r'\,pk_{\text{recv}});
    \]
-   A2 hides the issuer (recovered only by the recipient); A1 names it in the clear
-   (\( m_{\text{iss}} \) plus a Schnorr \( \sigma_{\text{iss}} \) over the batch
-   \( \mathrm{keccak}(\texttt{cms}) \)).  B1 is bearer -- no recipient ciphertext
-   at mint, the public issuer signs the batch -- and the depositor encrypts /its
-   own/ Identity for the issuer at spend (below).  A mint-binding (a Schnorr for
-   public issuers, a recipient-blinded re-encryption proof for A2) forces the
-   ciphertext over the issuer's /own/ registered Identity, so no victim can be
-   framed (Theorem 7).
+   \[
+     \text{A2: } eNote = (r_nG,\ vG + r_n\,pk_{\text{recv}}),\quad
+                 eIss = (R_i, C_i) = (r'G,\ M_{\text{iss}} + r'\,pk_{\text{recv}}).
+   \]
+   A1's issuer is public: it signs the batch with a Schnorr proof checked at mint, and
+   \( \mathrm{idHash} = \mathrm{Poseidon}_6(T_{ID}, eNote, m_{\text{iss}}) \).
+   A2's issuer is private: a recipient-blinded re-encryption binding (=verifyIssuerReenc=)
+   publishes \( Q = pk_{\text{recv}} + \beta H,\ U = r'H,\ T = r'\,pk_{\text{recv}} + \gamma H \),
+   and \( \mathrm{idHash} = \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss, T) \); \( \gamma \) reaches the
+   recipient wrapped in the delivery.  B1 is bearer: no recipient at mint, the public issuer signs
+   the batch, and the depositor encrypts its /own/ Identity for the issuer at spend (Theorem 9).
+   Throughout this Part \( H = H_{\text{PED}} \).
 
-   *Nullifier.*  Flavor-agnostic, over the note proof's opening with a domain tag:
-   \( nf = \mathrm{Poseidon}_3(\rho,\ \mathrm{idHash},\ \mathrm{tag}) \).
+   *Nullifier.*  Flavor-agnostic: \( nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ \mathrm{idHash}) \).
+   Each note hash leads with its own v2 domain word (\( T_{CM}, T_{ID}, T_{NF} \)), so no two of
+   them, and none of them and any other Poseidon in the protocol, share a preimage.
+
+   *Transcripts.*  Every sigma protocol's Fiat-Shamir challenge ends in its own v2 domain word,
+   so no accepting transcript of one protocol is an accepting transcript of another.
 
 ** Theorem 7 (Mint Addressing and Anti-Framing)
 
-   *Statement.*  Let the recipient have Identity \( M_{\text{rec}} = m_{\text{rec}} G \)
-   and the issuer a registered credential \( E^{\text{reg}}_{\text{iss}} \) decrypting
-   (under \( sk_{\text{iss}} \)) to its certified \( M_{\text{iss}} \).  For fresh
-   \( r' \):
+   *Statement.*  Let the recipient hold \( (m_{\text{rec}}, k) \) and the issuer a registered
+   credential \( E^{\text{reg}}_{\text{iss}} = (R_{\text{reg}}, C_{\text{reg}}) \) decrypting
+   under \( sk_{\text{iss}} \) to its certified \( M_{\text{iss}} \).  For fresh
+   \( r_n, r' \):
 
-   1. *(Decryptability.)* \( eIss = (r'G,\ M_{\text{iss}} + r' M_{\text{rec}}) \)
-      decrypts under \( m_{\text{rec}} \) to \( M_{\text{iss}} \), and
-      \( eRec = (r'G,\ M_{\text{rec}} + r' M_{\text{rec}}) \) decrypts to
-      \( M_{\text{rec}} \) -- so /any/ Fountain account of the recipient can open it.
-   2. *(Anti-framing.)* An accepted mint-binding -- =verifyIssuerSchnorr= (public
-      issuer) or the recipient-blinded re-encryption =verifyIssuerReenc= (A2) --
-      forces the encrypted point to be the issuer's /own/ registered
-      \( M_{\text{iss}} \), read from \( E^{\text{reg}}_{\text{iss}} \) at
-      =msg.sender=.  No victim's Identity can be substituted.
-   3. *(Issuer ignorance + unlinkability.)* The issuer knows only the public point
-      \( M_{\text{rec}} \) (revealed off chain), never \( m_{\text{rec}} \); fresh
-      \( r' \) makes two mints to the same recipient IND-CPA-indistinguishable.
+   1. *(Decryptability.)*  \( k \) decrypts \( eNote \) to \( vG \), \( eRec \) to
+      \( M_{\text{rec}} \), and \( eIss \) to \( M_{\text{iss}} \) -- from whichever account the
+      recipient uses.
+   2. *(Anti-framing.)*  An accepted mint binding forces the encrypted point to be the issuer's
+      /own/ registered Identity: =verifyIssuerSchnorr= for a public issuer; for A2,
+      =verifyIssuerReenc= forces \( eIss = (r'G,\ M_{\text{iss}} + r'\,pk_Q) \) with
+      \( M_{\text{iss}} \) the plaintext of \( E^{\text{reg}}_{\text{iss}} \) at =msg.sender= and
+      \( pk_Q = Q - \beta H \).
+   3. *(Issuer ignorance, unlinkability.)*  The issuer learns \( pk_{\text{recv}} \), and
+      \( M_{\text{rec}} \) off chain, but neither \( k \) nor \( m_{\text{rec}} \).
+      \( Q, U, T \) are uniform, and two mints to one recipient are indistinguishable under DDH.
 
-   *Proof.*  (1) ElGamal correctness with public key \( M_{\text{rec}} = m_{\text{rec}}G \):
-   \( C - m_{\text{rec}} R = M + r' M_{\text{rec}} - m_{\text{rec}} r' G = M \), since
-   \( m_{\text{rec}} G = M_{\text{rec}} \).  (2) =verifyIssuerSchnorr= is EUF-CMA
-   (Theorem 9 citation); =verifyIssuerReenc= is a recipient-blinded Okamoto sigma
-   whose special soundness (Theorem 4 shape) extracts \( (sk_{\text{iss}}, r') \)
-   binding the ciphertext to \( E^{\text{reg}}_{\text{iss}} \)'s plaintext -- a
-   substituted point breaks it.  (3) The encryption manipulates group elements only;
-   recovering \( M_{\text{rec}} \) or \( m_{\text{rec}} \) is ElGamal IND-CPA / DLog.
+   *Proof.*  (1) ElGamal correctness under \( pk_{\text{recv}} = kG \):
+   \( C - kR = P + r'kG - kr'G = P \).  (2) Schnorr EUF-CMA for the public binding.  For A2,
+   special soundness of the five-relation Okamoto sigma extracts
+   \( (r', \beta, sk_{\text{iss}}, \gamma) \) with
+   \[
+     \text{L1: } R_i = r'G,\quad
+     \text{L2: } U = r'H,\quad
+     \text{L3: } T = r'Q - \beta U + \gamma H,\quad
+     \text{L4: } pk_{\text{iss}} = sk_{\text{iss}}G,\quad
+     \text{L5: } C_{\text{reg}} + T - C_i = sk_{\text{iss}} R_{\text{reg}} + \gamma H.
+   \]
+   L2 and L3 give \( T = r'\,pk_Q + \gamma H \); L5 then gives
+   \( C_i = (C_{\text{reg}} - sk_{\text{iss}} R_{\text{reg}}) + r'\,pk_Q = M_{\text{iss}} + r'\,pk_Q \).
+   (3) The issuer handles group elements only; \( \beta \) and \( \gamma \) are one-time pads on
+   \( Q \) and \( T \), \( U \) is uniform for uniform \( r' \), and distinguishing two mints is
+   IND-CPA.  \( \blacksquare \)
+
+   *Remark (which key).*  (2) binds \( eIss \) to \( pk_Q \), a key the minter chose, and not
+   necessarily to \( pk_{\text{recv}} \).  An ElGamal ciphertext does not commit to its key, so
+   the same bytes can open under \( k \) to a different registered Identity.  Theorem 12 closes
+   this at spend.
+
+** Theorem 8 (Folded Deposit Gate -- A1, A2)
+
+   Spending an addressed note needs two facts about two DIFFERENT secrets: "I can read this note"
+   (\( k \)) and "I am this registered Identity" (\( m_{\text{rec}} \)).  Proved side by side they
+   say nothing about their owner -- a thief holding a stolen payload answers the first with the
+   stolen \( k \) and the second with its own Identity, and both are true.  So the gate is one
+   proof over one witness, and the tie is a relation.
+
+   *Statement.*  Suppose =Notes= accepts an addressed spend (=spendCoupledA1= /
+   =spendCoupledA2=): the spend proof (\( cm \) under =noteRoot=, \( nf \) well formed, flavor
+   bound to the entry point); \( \mathsf{rt_{id}} \) accepted for the Notes consumer; and the fold
+   proof, whose public inputs the adapter derives on chain -- \( nf \), (A1) the face \( v \),
+   \( \mathsf{rt_{id}} \), the supplied \( eEnc = (R_e, C_e) \), and the depositor's
+   \( pk_{\text{dep}} \) and \( E_{\text{dep}} = (R_d, C_d) \), read from the registry at
+   =msg.sender=.  Under SNARK knowledge soundness and Poseidon collision resistance there is an
+   extractor producing a witness with:
+
+   0. *(Same note.)*  \( nf = \mathrm{Poseidon}_3(T_{NF}, \rho, \mathrm{idHash}) \) for the
+      \( (\rho, \mathrm{idHash}) \) the spend proof opened, and \( \mathrm{idHash} \) opens to the
+      flavor's payload: A1 \( (eNote, m_{\text{iss}}) \); A2 \( (eNote, eIss, T) \).
+   1. *(Reading.)*  A1: \( eNote = (r_nG,\ (v + r_nk)G) \).  A2:
+      \( eIss = (r'G,\ M_I + (r'k)G) \) for a point \( M_I \).
+   2. *(The spend's ciphertext.)*  A1: \( eEnc = (tG,\ (m_{\text{rec}} + tk)G) \).  A2:
+      \( eEnc = (tG,\ M_I + (tk)G) \).
+   3. *(Account.)*  \( pk_{\text{dep}} = sk_{\text{dep}}G \), \( R_d = r_EG \),
+      \( C_d = (m_{\text{rec}} + sk_{\text{dep}} r_E)G \): the depositing account's registered
+      credential decrypts to \( M_{\text{rec}} = m_{\text{rec}}G \).
+   4. *(Tie.)*  \( \ell_R(m_{\text{rec}}, k, s) \) has a 32-level path to \( \mathsf{rt_{id}} \).
+   5. *(A2: issuer registered.)*  \( \ell_S(M_I, s_{\text{iss}}) \) has a 32-level path to the
+      same \( \mathsf{rt_{id}} \).
+   6. *(A2: key tie.)*  \( T = (r'k)G + \gamma H \).
+
+   *Proof.*  Knowledge soundness extracts the witness, and each clause is a constraint.  The fold
+   and the spend proof share only \( nf \), and Poseidon collision resistance makes the fold's
+   \( (\rho, \mathrm{idHash}) \) the spend's.  The clauses are joined by signal identity rather
+   than by inference across proofs: one \( m_{\text{rec}} \) signal enters (3) and the leaf of
+   (4), and one \( k \) enters (1), (2), (4) and (6).  Every witnessed limb is range-checked.  A1
+   folds its point sums into scalar sums and adds no points; A2's three additions each assert
+   distinct \( x \)-coordinates, the precondition of the incomplete addition formula.
    \( \blacksquare \)
-
-   *Remark (no re-randomization needed).*  The earlier account-pinned design
-   re-randomised the recipient's /account/ credential, binding the note to one
-   keypair.  Identity-M addresses the recipient /point/ instead, so the note is
-   redeemable by any account on that Identity -- /recovery, not finality/ on key
-   loss (Theorem 8).
-
-** Theorem 8 (Deposit-Coupling Soundness -- A1, A2)
-
-   *Statement.*  Suppose the contract accepts an addressed spend
-   (=spendCoupledA1= / =spendCoupledA2=): the note proof, the deposit-coupling
-   sigma =verifyDepositCoupling(depositor, eEnc, dc)=, and the membership proof of
-   =dc.P_I=.  Then under SNARK knowledge-soundness, special soundness of the
-   Okamoto sigma (Theorem 4 shape), DLog on \( G_1 \), and the ROM, there is an
-   extractor producing \( (m_{\text{rec}}, sk_{\text{dep}}, b) \) and a Merkle path
-   such that, with the depositor's registered \( E_{\text{dep}} = (R_d, C_d) \) and
-   key \( pk_{\text{dep}} \):
-
-   1. \( cm \) lies under =noteRoot=; \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ tag) \).
-   2. *(Account bound to the Identity.)* \( pk_{\text{dep}} = sk_{\text{dep}} G \)
-      and \( C_d = m_{\text{rec}} G + sk_{\text{dep}} R_d \): the depositing account
-      decrypts to \( M_{\text{rec}} = m_{\text{rec}} G \), its registered,
-      PS-certified Identity (Theorem 6).
-   3. *(Decryption to the committed point.)* \( eEnc \) decrypts under
-      \( m_{\text{rec}} \) to \( M^\ast \), with \( dc.P_I = M^\ast + b H \).
-   4. *(Registered.)* \( \ell(M^\ast) \in \mathsf{rt_{id}} \).
-
-   Here \( M^\ast = M_{\text{iss}} \) (A2: the recovered private issuer) or
-   \( M^\ast = M_{\text{rec}} \) (A1: the recipient itself).
-
-   *Proof.*  Two accepting sigma transcripts sharing commitments extract
-   \( (m_{\text{rec}}, sk_{\text{dep}}, b) \) satisfying relations E4/E2/E3
-   (Theorem 4).  SNARK extraction gives the Merkle path and the membership witness.
-   The contract feeds =dc.P_I= -- not prover-supplied bytes -- as the membership
-   public input, so (3) and (4) concern the /same/ point.  \( \blacksquare \)
 
    *Implications.*
 
-   - *Recovery, not finality.*  The spend is keyed to the /Identity scalar/
-     \( m_{\text{rec}} \), not a mint-time keypair.  Any registered Fountain account
-     bound to \( m_{\text{rec}} \) deposits; loss of one account key is recovered by
-     re-registering a fresh account on the same \( M_{\text{rec}} \) -- the opposite
-     of the earlier account-pinned A-spend.
-   - *Collusion closed (A2).*  If a colluding issuer keys \( eIss \) to a throwaway
-     point, \( M^\ast \) is a non-member: no membership proof exists (4 fails) and
-     the deposit /reverts/.  No spendable-but-unnameable note can be created.
-     (Clause (3) concerns the \( eEnc \) /supplied at spend/; Theorem 12 ties that
-     \( eEnc \) to the ciphertext the spent note committed, closing the
-     substitute-\( eEnc \) escape.)
-   - *Issuer cannot self-redeem.*  The issuer holds \( M_{\text{rec}} \) but not
-     \( m_{\text{rec}} \); it cannot satisfy (2) for any account it controls --
-     unless it /is/ the recipient (self-wormhole).
-   - *No third-party leakage.*  E2/E3 are HVZK (Theorem 5): \( m_{\text{rec}} \),
-     \( M_{\text{rec}} \), and \( M^\ast \) (blinded in \( dc.P_I = M^\ast + bH \))
-     never appear on chain.
+   - *Only the addressed Identity spends.*  A thief holding a stolen payload has \( \rho \), the
+     openings and \( k \), and satisfies (3) only with its own account, whose Identity is
+     \( m' \neq m_{\text{rec}} \).  Clause (4) then needs \( \ell_R(m', k, \cdot) \) certified,
+     and no authority certified that pair.  Nor can it bring its own certified pair
+     \( (m', k') \), because the committed payload pins \( k \): in A1, \( eNote \) and the public
+     \( v \) fix both \( r_n \) and \( r_nk \); in A2, \( T \) fixes \( (r'k)G \) up to
+     \( \gamma H \), and moving to \( k' \) needs \( r'(k - k')G = \delta H \) for a known
+     \( \delta \), a discrete logarithm.
+   - *Recovery, not finality.*  Any registered account of \( M_{\text{rec}} \) deposits (clause
+     3), and \( k \) is recovered from the wallet seed.  Losing an account key loses no note.
+   - *Collusion closed (A2).*  An issuer that keys \( eIss \) to a throwaway point leaves the
+     recipient decrypting an \( M_I \) with no certified leaf; (5) has no witness and the deposit
+     reverts.  No spendable-but-unnameable A2 note exists.
+   - *The issuer cannot self-redeem.*  It knows \( pk_{\text{recv}} \) and \( M_{\text{rec}} \),
+     not \( k \) or \( m_{\text{rec}} \), and (4) needs both -- unless it /is/ the recipient.
+   - *Revocation latency is the consumer's age.*  A holder cleared from its subtree proves against
+     no root posted after the clearance, and Notes accepts a root for seven days; that age is the
+     protocol's statement of how long a revoked holder can still spend.
+   - *No third-party leakage.*  No public input names an Identity: \( eEnc \) is a fresh
+     encryption under \( pk_{\text{recv}} \), which is never public; the account's key and
+     credential were public already; no leaf, subtree slot or path is revealed.  \( eEnc \) is a
+     re-encryption of the note's ciphertext, not the ciphertext itself, so the spend presents
+     nothing the mint published.
 
 ** Theorem 9 (Depositor-Binding Soundness -- B1)
 
-   *Statement.*  Suppose the contract accepts a bearer spend (=spendCoupledB1=):
-   the note proof, =verifyDepositorBinding(depositor, issuer, eDepForIss, pi)=, and
-   the membership proof of \( pi.P_{\text{dep}} \).  Then under the same assumptions
-   plus Schnorr EUF-CMA[fn:schnorr], an extractor produces
-   \( (m_{\text{dep}}, sk_{\text{dep}}, r, b) \) such that:
+   B1 needs no fold.  Its two facts -- "my payout account is bound to this Identity" and "this
+   ciphertext encrypts that Identity for the issuer" -- rest on ONE secret, \( m_{\text{dep}} \),
+   so the sigma's shared Fiat-Shamir nonce is a genuine tie.
 
-   1. \( cm = \mathrm{Poseidon}_5(B1, v, \rho, idHash, \cdot) \) lies under
-      =noteRoot=, and the prover knows \( \rho \) (the bearer authorization).
-   2. *(Account bound to the Identity.)* \( pk_{\text{dep}} = sk_{\text{dep}} G \),
-      \( C_d = m_{\text{dep}} G + sk_{\text{dep}} R_d \).
-   3. *(Encrypted for the issuer.)* \( eDepForIss = (rG,\ m_{\text{dep}} G +
-      r\,pk_{\text{iss}}) \) -- the depositor's \( M_{\text{dep}} \) under the public
-      issuer's key, the /same/ \( m_{\text{dep}} \) as (2).
-   4. *(Committed and registered.)* \( P_{\text{dep}} = m_{\text{dep}} G + bH \) and
-      \( \ell(M_{\text{dep}}) \in \mathsf{rt_{id}} \).
-   5. The public issuer is named by \( m_{\text{iss}} \) plus an EUF-CMA Schnorr over
-      the batch.
+   *Statement.*  Suppose =Notes= accepts a bearer spend (=spendCoupledB1=): the spend proof,
+   =verifyDepositorBinding(depositor, issuer, eDepForIss, pi)=, \( \mathsf{rt_{id}} \) accepted,
+   and the =identity_membership_b1= proof over \( pi.P_{\text{dep}} \).  Under SNARK knowledge
+   soundness, special soundness of the Okamoto sigma, Schnorr EUF-CMA[fn:schnorr], and DLog with
+   \( H \) hashed to the curve, extractors produce \( (m_{\text{dep}}, sk_{\text{dep}}, r, b) \)
+   from the sigma and \( (M, b', s) \) with a path from the SNARK such that:
 
-   *Proof.*  The five-relation Okamoto sigma extracts \( (m_{\text{dep}},
-   sk_{\text{dep}}, r, b) \) (Theorem 4); the single response for \( m_{\text{dep}} \)
-   couples (2), (3), (4) to one Identity; the contract feeds \( P_{\text{dep}} \) to
-   the membership verifier, so (4)'s clauses are the same point.  Schnorr EUF-CMA
-   gives (5).  \( \blacksquare \)
+   1. \( cm = \mathrm{Poseidon}_6(T_{CM}, B1, v, \rho, \mathrm{idHash}, \cdot) \) lies under =noteRoot=,
+      and the prover knows \( \rho \) (the bearer authorization).
+   2. *(Account.)*  \( pk_{\text{dep}} = sk_{\text{dep}}G \),
+      \( C_d = m_{\text{dep}}G + sk_{\text{dep}}R_d \).
+   3. *(Encrypted for the issuer.)*
+      \( eDepForIss = (rG,\ m_{\text{dep}}G + r\,pk_{\text{iss}}) \), the same
+      \( m_{\text{dep}} \) as (2).
+   4. *(Committed.)*  \( P_{\text{dep}} = m_{\text{dep}}G + bH = M + b'H \).
+   5. *(Registered.)*  \( \ell_S(M, s) \) has a 32-level path to \( \mathsf{rt_{id}} \), and
+      \( M = M_{\text{dep}} \).
+   6. The public issuer is named by \( m_{\text{iss}} \) and an EUF-CMA Schnorr over the batch.
+
+   *Proof.*  The sigma's single response for \( m_{\text{dep}} \) couples (2), (3) and the first
+   opening of (4) to one Identity (Theorem 4 shape).  The circuit computes \( b'H \) from \( b' \)
+   rather than accepting it, and the contract feeds the same \( P_{\text{dep}} \) to both
+   verifiers.  Equating the two openings gives \( M - M_{\text{dep}} = (b - b')H \).  A reduction
+   that issued or extracted (Theorem R-sound) every registered scalar knows \( \log_G M \), so
+   \( M \neq M_{\text{dep}} \) yields \( \log_G H \), which no one knows: \( H \) is hashed to the
+   curve.  Schnorr EUF-CMA gives (6).  \( \blacksquare \)
 
    *Implications.*
 
-   - *The public issuer names the bearer depositor.*  From the =SpentCoupledB1=
-     event the issuer decrypts \( eDepForIss \) with \( sk_{\text{iss}} \) to recover
-     \( M_{\text{dep}} \) -- collusion-resistantly (a substituted ciphertext breaks
-     (3)) and privately from third parties (IND-CPA).
-   - *Collusion closed.*  A bogus \( M_{\text{dep}} \) is a non-member: (4) fails and
-     the deposit reverts.  No one cashes a B1 note un-nameably.
-   - *Bearer race is civil-trust.*  Whoever publishes \( \rho \) first wins; the
-     issuer who chose \( \rho \) can race but is identified at the moment of theft.
-     The cryptography places no prior restraint -- the legal system does, exactly as
-     for a paper cashier's cheque.
+   - *The public issuer names the bearer depositor.*  From the =SpentCoupledB1= event the issuer
+     decrypts \( eDepForIss \) under \( sk_{\text{iss}} \) to \( M_{\text{dep}} \) --
+     collusion-resistantly, since a substituted ciphertext breaks (3), and privately from third
+     parties (IND-CPA).
+   - *Collusion closed.*  A bogus \( M_{\text{dep}} \) has no certified leaf: (5) fails and the
+     deposit reverts.  No one cashes a B1 note un-nameably.
+   - *Why the generator must have no known logarithm.*  With \( H = hG \) for a public \( h \), a
+     depositor holding any registered scalar \( m' \) -- which counterparties hold by design --
+     sets \( b' = b + (m_{\text{dep}} - m')/h \), and the membership proof speaks of \( m' \)
+     while the sigma speaks of its own unregistered \( m_{\text{dep}} \).  Hashing \( H \) to the
+     curve leaves no \( h \) to shift by.
+   - *Bearer race is civil-trust.*  Whoever publishes \( \rho \) first wins; the issuer who chose
+     \( \rho \) can race but is identified at the moment of theft.  The cryptography places no
+     prior restraint -- the legal system does, exactly as for a paper cashier's cheque.
 
 ** Theorem 10 (Nullifier and Double-Spend Prevention)
 
-   The nullifier is flavor-agnostic, \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\
-   \mathrm{tag}) \), over the note proof's opening (\( idHash \) digests the identity
-   payload; the tag separates A- from B-shape so one =nullifiers= set serves both).
+   The nullifier is flavor-agnostic,
+   \( nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ \mathrm{idHash}) \), over the spend proof's opening
+   (\( \mathrm{idHash} \) digests the identity payload), so one =nullifiers= set serves every
+   flavor.
 
-   1. *(Determinism / double-spend.)* \( nf \) is a deterministic function of
-      \( (\rho, idHash) \); two accepting spends of the same \( cm \) yield the same
-      \( nf \), and the contract's \( nf \notin \texttt{nullifiers} \) check rejects
-      the second.
-   2. *(Third-party unlinkability.)* Modelling Poseidon as a random oracle, \( nf \)
-      is a PRF over the secret opening; without \( (\rho, idHash) \) -- \( \rho \) a
-      uniform \( q \)-element -- inverting \( nf \) to its \( cm \) is pre-image
-      resistance.  So /no party lacking the opening/ (in particular Mallory) links a
-      spend to its mint.  The two counterparties who hold the opening already know
-      the note exists; the nullifier protects the transaction /graph/ from outside
-      observers -- exactly what bulk-trace resistance requires.
+   1. *(Determinism / double-spend.)*  \( nf \) is a deterministic function of
+      \( (\rho, \mathrm{idHash}) \); two accepting spends of the same \( cm \) yield the same
+      \( nf \), and the contract's \( nf \notin \texttt{nullifiers} \) check rejects the second.
+   2. *(Third-party unlinkability.)*  Modelling Poseidon as a random oracle, \( nf \) is a PRF
+      over the secret opening; without \( (\rho, \mathrm{idHash}) \) -- \( \rho \) a uniform
+      \( q \)-element -- inverting \( nf \) to its \( cm \) is pre-image resistance.  So /no party
+      lacking the opening/ links a spend to its mint.  The two counterparties who hold the
+      opening already know the note exists; the nullifier protects the transaction /graph/ from
+      outside observers -- exactly what bulk-trace resistance requires.
 
    *Proof.*  (1) is syntactic; (2) is the standard RO/PRF pre-image argument.
    \( \blacksquare \)
 
 ** Theorem 11 (Mutual Decryptability and Transaction-Graph Privacy)
 
-   *Statement.*  For every accepted spend, /both/ counterparties can name the other
-   as a /registered/ Identity, while no third party can name either or link the mint
-   to the spend.
+   *Statement.*  For every accepted spend, /both/ counterparties can name the other as a
+   /registered/ Identity, while no third party can name either or link the mint to the spend.
 
    *Recipient names the issuer.*
-   - /A1 (public)/: the note carries \( m_{\text{iss}} \) + an EUF-CMA Schnorr; the
-     recipient reads \( M_{\text{iss}} \) directly.
-   - /A2 (private)/: the recipient decrypts \( eIss \) under \( m_{\text{rec}} \) to
-     \( M_{\text{iss}} \) (Theorem 7.1), and Theorem 8's membership certifies it is
-     registered; anti-framing (Theorem 7.2) forces it to be the true minter, and the
-     note-binding tie (Theorem 12) forces the spend's verified ciphertext to be the
-     one /this note/ committed.  This is the close of the recipient-key collusion
-     gap -- an issuer cannot produce a /spendable/ note the recipient cannot /name/.
+   - /A1 (public)/: the note carries \( m_{\text{iss}} \) and an EUF-CMA Schnorr; the recipient
+     reads \( M_{\text{iss}} \) directly.
+   - /A2 (private)/: the recipient decrypts \( eIss \) under \( k \) to \( M_{\text{iss}} \)
+     (Theorem 7.1).  Theorem 8(5) certifies it registered, and Theorem 12 makes it the minter's
+     own -- the name is right, not merely registered.
 
    *Issuer names the depositor.*
-   - /A1, A2 (addressed)/: the issuer chose \( M_{\text{rec}} \) at mint -- it holds
-     the symmetric knowledge by construction.
-   - /B1 (bearer)/: the issuer decrypts the \( eDepForIss \) in =SpentCoupledB1=
-     under \( sk_{\text{iss}} \) to \( M_{\text{dep}} \) (Theorem 9), certified
-     registered by membership.
+   - /A1, A2 (addressed)/: the issuer chose \( pk_{\text{recv}} \) and knows
+     \( M_{\text{rec}} \).  The mailbox leaf
+     \( \mathrm{Poseidon}(\tau_M, M_{\text{rec}}, pk_{\text{recv}}, s') \), checked against a
+     posted root before paying, tells it the key belongs to that Identity, and Theorem 8(3)-(4)
+     make that Identity's accounts the only ones that spend.
+   - /B1 (bearer)/: the issuer decrypts \( eDepForIss \) from =SpentCoupledB1= under
+     \( sk_{\text{iss}} \) to \( M_{\text{dep}} \) (Theorem 9), certified registered.
 
    Both directions resolve to a registered Identity point and -- via the off-chain
    identity_data path (Theorem 6) -- the real-world KYC identity.  This is the BUCK
-   mutual-decryptability invariant, preserved across the pool detour and /enforced/:
-   the membership half makes an un-nameable counterparty /un-spendable/, so the
-   invariant holds even against a colluding pair, not merely an honest one.
+   mutual-decryptability invariant, preserved across the pool detour and /enforced/: the
+   membership relations make an un-nameable counterparty /un-spendable/, so the invariant holds
+   against a colluding pair, not merely an honest one.
 
-   *Privacy corollary (what Mallory cannot do).*  The chain shows an opaque \( cm \),
-   a fresh \( nf \), a public \( (face, recipient) \), and the deposit ciphertexts
-   (\( eIss / eRec / eDepForIss \) and the blinded commitment \( P \)) -- all IND-CPA
-   or perfectly hiding.  Lacking any counterparty secret, Mallory learns: no Identity
-   (third-party non-disclosure), no \( cm \leftrightarrow nf \) link (Theorem 10 --
-   transaction-graph privacy), and no link between two notes to the same recipient
-   (Theorem 7.3).  Bilateral disclosure between the two parties is preserved; bulk
-   harvest is defeated.  \( \blacksquare \)
+   *Privacy corollary (what Mallory cannot do).*  The chain shows an opaque \( cm \), a fresh
+   \( nf \), a public \( (face, recipient) \), and ciphertexts and commitments that are IND-CPA or
+   uniform: \( eIss \), \( Q, U, T \) at mint; \( eEnc \), \( eDepForIss \) and the perfectly
+   hiding \( P_{\text{dep}} \) at spend.  The published subtrees' leaves are salted.  Lacking any
+   counterparty secret, Mallory learns no Identity, no \( cm \leftrightarrow nf \) link
+   (Theorem 10), and no link between two notes to one recipient (Theorem 7.3).  Bilateral
+   disclosure between the two parties is preserved; bulk harvest is defeated.  \( \blacksquare \)
 
-** Theorem 12 (Note-Binding Re-Encryption Tie -- A1, A2)
+** Theorem 12 (The Key Tie -- A2 Naming)
 
-   Theorems 8 and 11 reason about /the ciphertext the depositor supplies at
-   spend/ (\( eEnc \)).  On their own they leave one degree of freedom: nothing
-   yet forces that \( eEnc \) to be /about the note being spent/.  A depositor
-   holding a stolen opening could attach its /own/ self-addressed \( eEnc \)
-   (defeating addressed binding), and an A2 coalition could attach a /nameable/
-   substitute for an un-nameable committed \( eIss \) (re-opening the collusion
-   gap).  The note-binding relations (=circuits/note_binding.circom= for the
-   A2 payload layout, =circuits/note_binding_a1.circom= for A1; both verified
-   behind =INoteBindingVerifier= in the addressed spends) close both.
+   Theorem 7's remark leaves one freedom: \( eIss \) is bound to the minter's own Identity under a
+   key \( pk_Q \) the minter chose.  A minter holding the recipient's \( pk_{\text{recv}} \) and a
+   registered sock puppet \( M_B \) sets
+   \( pk_Q = pk_{\text{recv}} + r'^{-1}(M_B - M_{\text{iss}}) \); then
+   \( eIss = (r'G,\ M_{\text{iss}} + r'\,pk_Q) = (r'G,\ M_B + r'\,pk_{\text{recv}}) \).  L1-L5
+   hold, the recipient decrypts a registered \( M_B \), (5) holds, and an honest recipient would
+   name the puppet.  Relation (6) is what refuses it.
 
-   *Statement.*  Suppose the contract accepts an addressed spend with the
-   note-binding verifier active: in addition to the note proof, the
-   deposit-coupling sigma, and the membership proof (Theorem 8), the Groth16
-   binding proof verifies with public inputs /derived on chain/ from the
-   caller's nullifier \( nf \), the supplied \( eEnc = (R_e, C_e) \), and the
-   sigma's committed point \( dc.P_I \) (the adapter decomposes the six point
-   coordinates into 64-bit limbs; the proof bytes carry only the Groth16
-   triple).  Then under Groth16 knowledge-soundness, the ROM (Poseidon), and
-   the independence of the NUMS point \( H \) (no known \( \log_G H \)), an
-   extractor produces \( (\rho,\ idHash,\ eNote,\ eIss_0,\ s,\ r,\ m_{\text{rec}},\
-   b,\ M_I) \) such that:
+   *Statement.*  Suppose an A2 note was minted under an accepted =verifyIssuerReenc= (Theorem
+   7.2) and deposited under an accepted fold (Theorem 8).  Then under DLog, with \( H \) hashed to
+   the curve, the Identity the fold certifies is the minter's: \( M_I = M_{\text{iss}} \).  A
+   receipt that checks
+   \[ M_{\text{named}} = C_i - T + \gamma H \]
+   names the same point.
 
-   1. *(Same note.)*  \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ \mathrm{tag}) \)
-      -- the very nullifier this spend consumed -- and
-      \( idHash = \mathrm{Poseidon}_8(eNote,\ eIss_0) \) -- the identity payload
-      the spent note committed at mint.
-   2. *(Re-encryption equivalence.)*  With \( eIss_0 = (R_0, C_0) \):
-      \( R_e = R_0 + sG \) and \( C_e = C_0 + (s \cdot m_{\text{rec}})G \) --
-      the supplied \( eEnc \) is a re-randomisation of the /committed/
-      ciphertext under \( M_{\text{rec}} = m_{\text{rec}}G \), carrying the same
-      plaintext.
-   3. *(ElGamal structure.)*  \( R_0 = rG \) and
-      \( C_0 = M_I + (r \cdot m_{\text{rec}})G \): the committed ciphertext
-      decrypts under \( m_{\text{rec}} \) to \( M_I \).
-   4. *(Committed point.)*  \( P_I = M_I + bH \) -- the same blinded point the
-      coupling sigma opened and the membership proof certified.
-
-   *Proof.*  Constraints (1) are the two Poseidon openings; (2)-(4) are
-   fixed-base scalar-multiplication relations checked in-circuit over 4-limb
-   \( \mathbb{F}_q \) arithmetic; knowledge-soundness extracts the witnesses.
-   The sigma's extractor (Theorem 8) independently gives
-   \( (m'_{\text{rec}}, sk_{\text{dep}}, b') \) with \( eEnc \) decrypting under
-   \( m'_{\text{rec}} \) to \( M^\ast \) and \( P_I = M^\ast + b'H \).  Since
-   re-encryption preserves the plaintext, clause (2)+(3) give
-   \( eEnc \) decrypting under \( m_{\text{rec}} \) to \( M_I \); equating the
-   two openings of \( P_I \), \( M_I + bH = M^\ast + b'H \).  If
-   \( (M_I, b) \neq (M^\ast, b') \) this yields \( \log_G H \), contradicting
-   the NUMS assumption.  Hence \( M_I = M^\ast \) and the SNARK's decrypted
-   point /is/ the point the sigma authenticated and the membership certified.
-   \( \blacksquare \)
-
-   *Statement (A1 layout).*  An A1 note's \( idHash \) commits
-   \( (eNote,\ m_{\text{issuer}},\ \sigma) \) -- the public-issuer payload, no
-   second ciphertext -- so the A1 spends verify the sibling relation
-   (=circuits/note_binding_a1.circom=) with one additional /public/ input: the
-   note face \( v \), which the contract sets to the spend's =face= (itself
-   bound to the note's committed value by the spend SNARK over the same
-   nullifier).  The extractor produces
-   \( (\rho,\ idHash,\ eNote,\ m_{\text{issuer}},\ \sigma,\ r_n,\ t,\
-   m_{\text{rec}},\ b) \) such that:
-
-   1. *(Same note.)*  \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ \mathrm{tag}) \)
-      and \( idHash = \mathrm{Poseidon}_8(eNote,\ m_{\text{issuer}},\
-      \sigma_R,\ \sigma_s) \) -- the A1 payload the spent note committed.
-   2. *(Addressed eNote.)*  \( eNote = (r_nG,\ vG + (r_n m_{\text{rec}})G) \):
-      the note's own value ciphertext is a well-formed ElGamal encryption of
-      \( vG \) under \( M_{\text{rec}} = m_{\text{rec}}G \).
-   3. *(Keyed eEnc.)*  \( R_e = tG \) and
-      \( C_e = M_{\text{rec}} + (t \cdot m_{\text{rec}})G \): the supplied
-      \( eEnc \) is a fresh encryption of \( M_{\text{rec}} \) under itself --
-      exactly a re-randomisation of the note's delivered \( eRec \).
-   4. *(Committed point.)*  \( P_I = M_{\text{rec}} + bH \) -- the same
-      blinded point the coupling sigma opened and the membership certified.
-
-   *Proof (A1).*  Extraction and the NUMS argument run as above, equating the
-   SNARK's \( M_{\text{rec}} \) with the point the sigma authenticated and the
-   membership certified.  /Uniqueness/ of the addressed identity is where the
-   public face does the work: ElGamal is not key-committing, and the opening
-   (including \( r_n \)) travels to the spender, so a relation with a /free/
-   plaintext \( V \) could be re-keyed to any \( m' \) by absorbing the
-   difference (\( V' = C_n - (r_n m')G \)).  Pinning the plaintext to
-   \( vG \) with \( v \) public removes that freedom: clause (2) forces
-   \( m_{\text{rec}} = (\log_G C_n - v)\, r_n^{-1} \) with
-   \( r_n = \log_G R_n \neq 0 \), both determined by the committed
-   \( eNote \) (clause (1), Poseidon binding) and the spend-verified
-   \( v \).  A holder of a stolen A1 opening whose identity
-   \( m' \neq m_{\text{rec}} \) has no satisfying witness.
+   *Proof.*  Theorem 7's extractor gives \( R_i = r'G \), \( T = r'\,pk_Q + \gamma H \) and
+   \( C_i = M_{\text{iss}} + r'\,pk_Q \).  Theorem 8's gives, over the same committed
+   \( (eIss, T) \) (clause 0), the same \( r' \) -- discrete logarithms in a prime-order group
+   are unique -- with \( C_i = M_I + r'kG \) and \( T = r'kG + \gamma_m H \).  Subtracting,
+   \( M_{\text{iss}} - M_I = r'(kG - pk_Q) = (\gamma - \gamma_m)H \).  Both points are
+   registered, so a reduction that issued or extracted every registered scalar knows both
+   logarithms, and \( M_I \neq M_{\text{iss}} \) yields \( \log_G H \).  Hence
+   \( M_I = M_{\text{iss}} \), then \( \gamma_m = \gamma \) and \( pk_Q = kG \), and
+   \( C_i - T + \gamma H = M_{\text{iss}} + r'\,pk_Q - r'\,pk_Q = M_{\text{iss}} \).
    \( \blacksquare \)
 
    *Implications.*
 
-   - *Addressed binding enforced.*  Clause (2) forces the spend's \( eEnc \) to
-     re-encrypt the committed \( eIss_0 \) under the /same/
-     \( m_{\text{rec}} \) the coupling sigma authenticated (E2: the depositing
-     account's registered Identity scalar).  An account holding a stolen A1/A2
-     opening cannot redeem with a self-addressed \( eEnc \): its own
-     \( m \neq m_{\text{rec}} \) cannot satisfy (2) and (3) for the committed
-     ciphertext.  Only the addressed Identity spends -- from any of its
-     Fountain accounts.  (For A1, clauses (2)-(4) of the A1 statement play
-     the same role, the public face pinning the addressed identity.)
-   - *A2 collusion closed against substitution.*  Theorem 8's "collusion
-     closed" implication assumed the verified \( eEnc \) was about the spent
-     note; Theorem 12 makes that an extractable fact.  A coalition minting an
-     un-nameable \( eIss \) (keyed to a throwaway point) can no longer attach a
-     nameable substitute: the binding forces \( M_I \) to be the committed
-     ciphertext's decryption, the membership then has no satisfying witness,
-     and the deposit reverts.  Un-nameable \( \Rightarrow \) un-spendable, now
-     against /active substitution/, not merely honest provers.
-   - *Unlinkability preserved.*  The relation is re-encryption /equivalence/,
-     not equality: requiring the literal mint-time \( eIss \) (a public input
-     of =Notes.mint=) would link spend to mint and destroy A2 anonymity.  The
-     supplied \( eEnc \) is a fresh uniform re-randomisation (IND-CPA), the
-     nullifier is a PRF output (Theorem 10), and \( P_I \) is perfectly hiding
-     -- the spend's public footprint gains no new linkage surface.
-   - *Grounding.*  Theorem 8 clause (3) and Theorem 11's A2 naming clause are
-     stated over the supplied \( eEnc \); Theorem 12 is the bridge that makes
-     them statements about /the spent note's/ committed ciphertext.
+   - *The split is refused where it matters.*  At spend, by the fold, because the chain cannot
+     look anything up there: \( cm \) and \( \mathrm{idHash} \) are hidden and the nullifier
+     reveals nothing, so the only channel from mint to spend is \( \mathrm{idHash} \), which is
+     why it commits \( T \).  A receipt repeats the check off chain with the \( \gamma \) the
+     delivery carried.
+   - *Why the blind is on \( H \).*  Blinded on \( G \), (6) binds nothing: \( \gamma \) absorbs
+     any difference of Identities.  A prime-order group has no rearrangement that repairs a
+     known-logarithm blind.
+   - *Whose Identity, and whether registered, are separate facts.*  Relation (5) says the
+     decrypted point is REGISTERED; the tie says it is the MINTER'S.  Registration cannot supply
+     the second, since =register= deliberately refuses a caller-supplied leaf and so ties no
+     credential's plaintext to any accumulator leaf.  Both relations are needed.
 
 ** Sanity Check (py_ecc on BN254)
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session proofs :results output
-     # Reuse ORDER, G1, multiply, add, neg, eq, rand, hashlib, m, sk_alice,
-     # pk_alice from Parts I-II.  Issuer = Alice (m_iss = m, account key
-     # (sk_alice, pk_alice)); Bob is the recipient, identity scalar m_rec.
-     def dec(R, C, sk): return add(C, neg(multiply(R, sk)))      # ElGamal decrypt
-     def leaf(M):       return (M[0].n, M[1].n)                  # registry-tree leaf
+     # Reuse ORDER, G1, multiply, add, neg, eq, rand, hashlib and m from Parts I-II.
+     # Alice (m_iss = m) mints to Bob, whose receiving secret k is independent of
+     # his identity scalar m_rec.  H and the leaf functions are the protocol's own.
+     from alberta_buck.wallet.nums import H_PEDERSEN as H
+     from alberta_buck.wallet.poseidon import poseidon
+     from alberta_buck.wallet.elgamal import ElGamalCiphertext
+     from alberta_buck.wallet.notes import TAG_NULLIFIER, id_hash_a2, nullifier
+     from alberta_buck.registry.tree import receiving_leaf, identity_leaf_salted
 
-     m_iss = m;        M_iss = multiply(G1, m_iss)               # Alice's Identity
+     def enc(P, pk, r): return (multiply(G1, r), add(P, multiply(pk, r)))
+     def dec(R, C, sk): return add(C, neg(multiply(R, sk)))
+     def sub(P, Q):     return add(P, neg(Q))
+     def ok(what):      print(f"{what + ':':<58} PASS")
+
+     m_iss = m;  M_iss = multiply(G1, m_iss)
      m_rec = int(hashlib.sha256(b"Bob | Alberta | AIC-2026").hexdigest(), 16) % ORDER
-     M_rec = multiply(G1, m_rec)                                 # Bob's Identity (addressed)
-     H = multiply(G1, int(hashlib.sha256(b"AlbertaBuck:H").hexdigest(), 16) % ORDER)
-     registered = {leaf(M_iss), leaf(M_rec)}                     # both KYC-registered
+     M_rec = multiply(G1, m_rec)
+     k = rand(); pk_recv = multiply(G1, k)                    # Bob's mailbox
+     s_rec, s_iss = rand(), rand()                            # wallet-derived salts
+     certified = {receiving_leaf(m_rec, k, s_rec),            # Bob: (m_rec, k)
+                  identity_leaf_salted(M_iss, s_iss)}         # Alice's naming leaf
 
-     # --- Theorem 7: addressing decrypts to the intended point under m_rec ---
-     rp = rand()
-     eIss = (multiply(G1, rp), add(M_iss, multiply(M_rec, rp)))  # Enc(M_iss, M_rec)
-     eRec = (multiply(G1, rp), add(M_rec, multiply(M_rec, rp)))  # Enc(M_rec, M_rec)
-     assert eq(dec(*eIss, m_rec), M_iss) and eq(dec(*eRec, m_rec), M_rec)
-     print("Theorem 7  (addressing decrypts under m_rec):         PASS")
+     # --- Theorem 7: k opens every addressed ciphertext ---
+     v, rn, rp, gamma = 25, rand(), rand(), rand()
+     eNote, eIss = enc(multiply(G1, v), pk_recv, rn), enc(M_iss, pk_recv, rp)
+     T = add(multiply(pk_recv, rp), multiply(H, gamma))       # the binding's T
+     assert eq(dec(*eNote, k), multiply(G1, v)) and eq(dec(*eIss, k), M_iss)
+     ok("Theorem 7  (k decrypts eNote and eIss)")
 
-     # --- Theorem 8: deposit coupling recovers a registered member ---
-     Mstar = dec(*eIss, m_rec)                                   # recipient -> issuer
-     b = rand(); P_I = add(Mstar, multiply(H, b))                # blinded commitment
-     assert eq(add(P_I, neg(multiply(H, b))), Mstar)             # P_I - bH == Mstar
-     assert leaf(Mstar) in registered                            # membership
-     print("Theorem 8  (coupling -> registered member):           PASS")
+     # --- Theorem 8: a thief with the stolen k and its own Identity fails (4) ---
+     m_thief = rand()
+     assert receiving_leaf(m_rec, k, s_rec) in certified
+     assert receiving_leaf(m_thief, k, s_rec) not in certified
+     ok("Theorem 8  (stolen k, thief's Identity: no certified leaf)")
 
-     # --- Theorem 8 negative: issuer cannot self-redeem (lacks m_rec) ---
-     assert not eq(dec(*eIss, m_iss), M_iss)
-     print("Theorem 8  (issuer cannot redeem own note):           PASS")
+     # --- Theorem 8(5): a note keyed to a throwaway point names no one ---
+     eIss_bad = enc(multiply(G1, rand()), pk_recv, rp)
+     assert identity_leaf_salted(dec(*eIss_bad, k), s_iss) not in certified
+     ok("Theorem 8  (A2 throwaway issuer: (5) has no witness)")
 
-     # --- Theorem 8 collusion: bogus eIss decrypts to a NON-member ---
-     M_bogus = multiply(G1, rand())
-     eIss_bad = (multiply(G1, rp), add(M_iss, multiply(M_bogus, rp)))
-     assert leaf(dec(*eIss_bad, m_rec)) not in registered        # -> reverts
-     print("Theorem 8  (collusion bogus eIss un-spendable):       PASS")
+     # --- Theorem 9: with a known-log generator P_dep opens to anyone ---
+     h = rand(); Hk = multiply(G1, h); b = rand()
+     m_other = rand()                                        # a disclosed scalar
+     P_dep = add(multiply(G1, m_rec), multiply(Hk, b))
+     b_shift = (b + (m_rec - m_other) * pow(h, -1, ORDER)) % ORDER
+     assert eq(P_dep, add(multiply(G1, m_other), multiply(Hk, b_shift)))
+     ok("Theorem 9  (known-log H: the shift works, so H is hashed)")
 
-     # --- Theorem 10: flavor-agnostic nullifier; deterministic ---
-     def H3(*f): return int(hashlib.sha256("|".join(map(str, f)).encode()).hexdigest(), 16) % ORDER
-     rho = rand(); idHash = H3(eIss[0][0].n, eIss[0][1].n, eIss[1][0].n, eIss[1][1].n)
-     assert H3(rho, idHash, 4243) == H3(rho, idHash, 4243)       # double-spend caught
-     print("Theorem 10 (nullifier determinism):                   PASS")
+     # --- Theorem 10: one flavor-agnostic nullifier, deterministic ---
+     rho = rand()
+     idHash = id_hash_a2(ElGamalCiphertext(*eNote), ElGamalCiphertext(*eIss), T)
+     assert nullifier(rho, idHash) == nullifier(rho, idHash) == poseidon([TAG_NULLIFIER, rho, idHash])
+     ok("Theorem 10 (nullifier determinism)")
 
-     # --- Theorem 11: B1 issuer names depositor; both members ---
-     m_dep = m_rec; M_dep = M_rec
-     rd = rand(); eDep = (multiply(G1, rd), add(M_dep, multiply(pk_alice, rd)))
-     assert eq(dec(*eDep, sk_alice), M_dep)                      # issuer -> depositor
-     assert leaf(M_iss) in registered and leaf(M_dep) in registered
-     print("Theorem 11 (mutual decryptability, both members):     PASS")
+     # --- Theorem 11: B1's issuer names the depositor ---
+     sk_iss = rand(); pk_iss = multiply(G1, sk_iss); rd = rand()
+     assert eq(dec(*enc(M_rec, pk_iss, rd), sk_iss), M_rec)
+     ok("Theorem 11 (B1 issuer decrypts the depositor)")
+
+     # --- Theorem 12: the key split, and the tie that refuses it ---
+     M_B = multiply(G1, rand())                               # the minter's sock puppet
+     pk_Q = add(pk_recv, multiply(sub(M_B, M_iss), pow(rp, -1, ORDER)))
+     eIss_split = enc(M_iss, pk_Q, rp)                        # L1-L5 hold under pk_Q
+     assert eq(dec(*eIss_split, k), M_B)                      # ...Bob's k opens the puppet
+     T_split = add(multiply(pk_Q, rp), multiply(H, gamma))
+     tie = add(multiply(G1, rp * k % ORDER), multiply(H, gamma))
+     assert eq(sub(T_split, tie), sub(M_B, M_iss))            # (6) needs M_B - M_iss = delta*H
+     ok("Theorem 12 (split: the tie needs a log to H)")
+
+     assert eq(T, tie) and eq(add(sub(eIss[1], T), multiply(H, gamma)), M_iss)
+     ok("Theorem 12 (honest: tie holds, C_i - T + gamma*H = M_iss)")
    #+END_SRC
 
    #+RESULTS:
-   : Theorem 7  (addressing decrypts under m_rec):         PASS
-   : Theorem 8  (coupling -> registered member):           PASS
-   : Theorem 8  (issuer cannot redeem own note):           PASS
-   : Theorem 8  (collusion bogus eIss un-spendable):       PASS
-   : Theorem 10 (nullifier determinism):                   PASS
-   : Theorem 11 (mutual decryptability, both members):     PASS
+   : Theorem 7  (k decrypts eNote and eIss):                    PASS
+   : Theorem 8  (stolen k, thief's Identity: no certified leaf): PASS
+   : Theorem 8  (A2 throwaway issuer: (5) has no witness):      PASS
+   : Theorem 9  (known-log H: the shift works, so H is hashed): PASS
+   : Theorem 10 (nullifier determinism):                        PASS
+   : Theorem 11 (B1 issuer decrypts the depositor):             PASS
+   : Theorem 12 (split: the tie needs a log to H):              PASS
+   : Theorem 12 (honest: tie holds, C_i - T + gamma*H = M_iss): PASS
 
    #+LATEX: }
 
-   *How to read.*  Theorem 7: the note ciphertext decrypts under the recipient's
-   identity scalar \( m_{\text{rec}} \) to the intended point (issuer for A2,
-   recipient for A1).  Theorem 8: the deposit coupling recovers \( M^\ast \), which
-   is a registered member; the issuer (lacking \( m_{\text{rec}} \)) cannot
-   self-redeem, and a colluding /bogus/ ciphertext recovers a non-member -- so the
-   spend reverts (no key-loss-terminal failure: any account on \( M_{\text{rec}} \)
-   works).  Theorem 10: one flavor-agnostic nullifier, deterministic, so a replay is
-   caught.  Theorem 11: the issuer decrypts the deposit ciphertext to the
-   depositor's Identity, and both parties' points are registered -- mutual
-   decryptability, both ends KYC-bound.
+   *How to read.*  Theorem 7: the receiving secret, not the identity scalar, opens the note.
+   Theorem 8: the stolen key does not help a thief whose own Identity was never paired with it,
+   and a note keyed to a throwaway point decrypts to an Identity no one certified.  Theorem 9:
+   with a generator whose logarithm is known, the committed point opens to any disclosed
+   Identity, which is why \( H \) is hashed to the curve.  Theorem 10: one deterministic
+   nullifier.  Theorem 11: the bearer issuer names its depositor.  Theorem 12: the split mint
+   decrypts under Bob's key to the puppet, and the tie then demands exactly
+   \( M_B - M_{\text{iss}} \) as a multiple of \( H \) -- a discrete logarithm -- while an honest
+   mint satisfies it and the receipt's check recovers the minter.
 
-** Worked Example: An Identity-M Spend End to End
+** Worked Example: An A2 Spend End to End
 
-   Theorems 7-11 in one A2 transfer -- Alice issues privately to Bob, who deposits
-   from a Fountain account no one could have pinned at mint.  Executable reference:
-   =alberta_buck/wallet/unilateral_a2.py= with =test_unilateral_a2.py= (11) +
-   =UnilateralA2.t.sol= (7) + =NotesCoupledA2.t.sol= (8).  The relation trace:
+   Theorems 7-12 in one A2 transfer: Alice issues privately to Bob, who deposits from an account
+   no one could have pinned at mint.  Executable reference: =alberta_buck/wallet/unilateral_a2.py=,
+   =delivery.py= and =deposit_fold.py=, with =test_unilateral_a2.py=, =test_delivery.py= and
+   =test_receiving_key.py=, and on chain =NotesA2Tie.t.sol= and =NotesE2E.t.sol=.  The relation
+   trace:
 
-   1. *Register* (Part III).  Alice and Bob each hold a PS-certified Identity
-      \( (m, M) \) and registered accounts \( E_{\text{addr}} = (rG,\ M + r\,pk) \);
-      both \( M \)'s are leaves of \( \mathsf{rt_{id}} \).
-   2. *Mint* (Theorem 7).  Alice reads Bob's identity point \( M_{\text{rec}} \)
-      (off chain) and commits \( eIss = (r'G,\ M_{\text{iss}} + r' M_{\text{rec}}) \)
-      with a recipient-blinded re-encryption binding (anti-framing); the leaf
-      \( cm = \mathrm{Poseidon}_5(A2,\ v,\ \rho,\ \mathrm{Poseidon}(eIss),\ 0) \) is
-      folded into =noteTree=.
-   3. *Deliver + verify* (Theorem 11).  Bob decrypts \( eIss \) under
-      \( m_{\text{rec}} \) to \( M_{\text{iss}} \) and checks
-      \( \ell(M_{\text{iss}}) \in \mathsf{rt_{id}} \) /before/ accepting the note.
-   4. *Deposit* (Theorems 8, 10).  From /any/ account bound to \( m_{\text{rec}} \),
-      Bob submits =spendCoupledA2=: the note proof (\( cm \) under =noteRoot=,
-      \( nf = \mathrm{Poseidon}_3(\rho, idHash, \mathrm{tag}) \)); the coupling sigma
-      (account \( \leftrightarrow m_{\text{rec}} \); \( eIss \) decrypts to
-      \( dc.P_I = M_{\text{iss}} + bH \)); and the membership of \( dc.P_I \).  The
-      pool pays =face= BUCK and =SpentCoupledA2= publishes the blinded \( P_I \).
-   5. *Receipt* (Theorem 11).  From \( m_{\text{rec}} \) alone Bob produces a
-      plaintext, third-party-checkable receipt naming both parties (himself
-      \( M_{\text{rec}} \), the issuer \( M_{\text{iss}} \)); the issuer chose
-      \( M_{\text{rec}} \) at mint, so the disclosure is mutual.
+   1. *Register* (Parts I-III).  Alice and Bob each hold a PS-certified Identity \( (m, M) \) and
+      registered accounts.  Bob's registry certifies \( \ell_R(m_{\text{rec}}, k, s) \), his
+      Identity paired with his receiving key; Alice's certifies a naming leaf
+      \( \ell_S(M_{\text{iss}}, s_{\text{iss}}) \).
+   2. *Mint* (Theorem 7).  Alice learns \( M_{\text{rec}} \) and \( pk_{\text{recv}} \) off chain
+      and checks the mailbox leaf, then mints \( eNote \) and \( eIss \) with the binding
+      \( (Q, U, T) \).  The leaf
+      \( cm = \mathrm{Poseidon}_6(T_{CM},\ A2,\ v,\ \rho,\ \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss, T),\ 0) \)
+      is folded into =noteTree=.
+   3. *Deliver and check* (Theorems 11, 12).  The payload -- \( \rho \), \( r' \), \( \gamma \),
+      \( s_{\text{iss}} \) and the openings -- travels wrapped to \( pk_{\text{recv}} \).  Bob
+      decrypts \( eIss \) under \( k \) to \( M_{\text{iss}} \), checks
+      \( C_i - T + \gamma H = M_{\text{iss}} \), and rebuilds the path to
+      \( \ell_S(M_{\text{iss}}, s_{\text{iss}}) \) from the published subtree before accepting the
+      note.
+   4. *Deposit* (Theorems 8, 10, 12).  From any registered account, Bob submits =spendCoupledA2=
+      naming a posted \( \mathsf{rt_{id}} \): the spend proof (\( cm \) under =noteRoot=, \( nf \))
+      and one fold proof over the six relations.  The pool pays =face= BUCK.
+   5. *Receipt* (Theorem 11).  Bob's receipt names himself and Alice, and the check of step 3 makes
+      the naming the minter's.
 
-   No on-chain value reveals an Identity; mint and spend are unlinkable to Mallory
-   (Theorem 10); and a bogus \( eIss \) would have failed step 3 and reverted at
-   step 4 (Theorem 8).
+   No on-chain value reveals an Identity; mint and spend are unlinkable to Mallory (Theorem 10);
+   a throwaway \( eIss \) fails step 3 and would revert at step 4 (Theorem 8(5)); and a split
+   \( eIss \) fails the tie at step 4 (Theorem 12).
 
-** Mint-Circuit Status: Phase 7-bis Closure of the Earlier Open Questions
+** Mint-Circuit Obligations
 
-   An earlier draft of this document (v0.4) flagged three open
-   correctness obligations against the Phase-6 placeholder mint
-   circuit (=circuits/mint.circom=).  The Phase 7-bis batch-mint
-   pivot (=circuits/mint_batch.circom=, deployed as per-N pinned
-   variants =mint_batch_n${N}.circom=; see
-   [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]]) closes all three at the
-   mint layer.  This section records the closure for the proof
-   record so a reader cross-checking the prior draft can see which
-   obligations are now discharged in the circuit vs. deferred to the
-   spend circuit.
+   Three correctness obligations fall on the mint circuit rather than the spend.  The batch mint
+   (=circuits/mint_batch.circom=, deployed as per-N pinned variants =mint_batch_n${N}.circom=; see
+   [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]]) discharges them.
 
-*** Closure 1 (Field-Overflow / Value-Conservation Range Check) -- /Discharged in circuit/
+*** Obligation 1 (Field-Overflow / Value-Conservation Range Check) -- /Discharged in circuit/
 
-    The Phase-6 draft's value-conservation constraint
-    \( \sum_{i=1}^{N} v_i \;===\; \texttt{totalFace} \) is an
-    equation in \( \mathbb{F}_r \) with \( r \approx 2^{254} \) and
-    therefore admits integer-overflow witnesses unless each \( v_i \)
-    is bounded.  =mint_batch.circom= now applies =Num2Bits(128)= to
-    every \( v_i \) and to =totalFace= (constraint family /(R)/ in
-    the circuit source).  With \( N \leq 2^{20} \) (the tree-depth
-    cap) and 128-bit per-leaf face, the integer sum cannot overflow:
-    \( N \cdot 2^{128} \leq 2^{148} \ll 2^{254} = r \).  No spend
-    circuit can be tricked into releasing more BUCK than was escrowed
-    by an integer-vs-field-arithmetic mismatch on the mint side.
+    Value conservation \( \sum_{i=1}^{N} v_i \;===\; \texttt{totalFace} \) is an equation in
+    \( \mathbb{F}_r \) with \( r \approx 2^{254} \) and therefore admits integer-overflow
+    witnesses unless each \( v_i \) is bounded.  =mint_batch.circom= applies =Num2Bits(128)= to
+    every \( v_i \) and to =totalFace= (constraint family /(R)/ in the circuit source).  With
+    \( N \leq 2^{20} \) (the tree-depth cap) and 128-bit per-leaf face, the integer sum cannot
+    overflow: \( N \cdot 2^{128} \leq 2^{148} \ll 2^{254} = r \).  No spend can release more BUCK
+    than was escrowed through an integer-versus-field mismatch on the mint side.
 
-*** Closure 2 (Single =transferFrom= \(\leftrightarrow\) \( N \) Commitments) -- /Discharged by SNARK binding/
+*** Obligation 2 (Single =transferFrom= \(\leftrightarrow\) \( N \) Commitments) -- /Discharged by SNARK binding/
 
-    Phase 7-bis makes the =totalFace= public input of the mint
-    SNARK both (i) the value passed to =buck.transferFrom= and
-    (ii) the value the circuit forces to equal \( \sum_i v_i \).
-    The single =Transfer= event of size =totalFace= is therefore
-    cryptographically bound to the Groth16 proof's public inputs --
-    which include the entire =cms[]= array on the per-N pinned
-    verifiers (see [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]], "Calldata
-    delivery").  No separate batch-identifier storage slot is needed
-    for soundness; on-chain analytics that want a transfer \(\leftrightarrow\) batch
-    correspondence can recover it from the =Minted= event's =cms=
-    parameter and the simultaneous =Transfer=.
+    The =totalFace= public input of the mint SNARK is both (i) the value passed to
+    =buck.transferFrom= and (ii) the value the circuit forces to equal \( \sum_i v_i \).  The
+    single =Transfer= event of size =totalFace= is therefore bound to the Groth16 proof's public
+    inputs -- which include the entire =cms[]= array on the per-N pinned verifiers (see
+    [[https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf][alberta-buck-notes-rollup-mint.org]], "Calldata delivery").  No batch-identifier storage slot is
+    needed for soundness; analytics that want a transfer \(\leftrightarrow\) batch correspondence
+    recover it from the =Minted= event's =cms= and the simultaneous =Transfer=.
 
-*** Closure 3 (Spend-Circuit Trio) -- /Mint half discharged; nullifier + spend-side value conservation deferred to =spend.circom=/
+*** Obligation 3 (Membership, Nullifier, Value) -- /Split between mint and spend/
 
-    The earlier draft's three coupled obligations -- Merkle
-    membership, nullifier determinism, and value conservation -- now
-    split cleanly between the two circuits:
+    1. *Merkle membership (mint side).*  =mint_batch= performs an in-circuit dual Merkle walk per
+       leaf (constraint family /(M)/ in the circuit source): the empty-seat walk constrains every
+       witness sibling against the rolling prior root, and the filled-seat walk advances the
+       rolling root with \( cm_i \) inserted.  After all \( N \) leaves the final rolling root is
+       constrained to equal the public =newRoot=, which the contract accepts into its root ring;
+       spends prove inclusion against any root in that window.
+    2. *Nullifier determinism (spend side).*  =circuits/spend.circom=, the one note proof every
+       spend reuses, recomputes \( nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ \mathrm{idHash}) \) from
+       the committed opening (Theorem 10); the folds recompute it too, which is how they are
+       joined to the spend.
+    3. *Value conservation (spend side).*  The spend circuit outputs =faceReleased= equal to the
+       committed \( v \), the same 128-bit-bounded quantity range-checked at mint.  The mint-side
+       range check (Obligation 1) is load-bearing here: a spend circuit that trusts \( v \)
+       without re-bounding it relies on the mint circuit having done so.
 
-    1. *Merkle membership (mint side).*  =mint_batch= performs an
-       in-circuit dual Merkle walk per leaf (constraint family /(M)/
-       in the circuit source): the empty-seat walk constrains every
-       witness sibling against the rolling prior root, and the
-       filled-seat walk advances the rolling root with \( cm_i \)
-       inserted.  After all \( N \) leaves the final rolling root
-       is constrained to equal the public =newRoot=.  The contract
-       accepts =newRoot= into its root-history ring buffer; spend
-       circuits prove inclusion against any root in that window.
-       The Phase-2 flat =commitments[]= array is /gone/.
-
-    2. *Nullifier determinism (spend side).*  The spend circuit
-       recomputes the flavor-agnostic
-       \( nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ \mathrm{tag}) \) from the
-       committed opening (Theorem 10); closure belongs to
-       =circuits/spend.circom=, the one note proof every coupled spend reuses.
-
-    3. *Value conservation (spend side).*  The spend circuit must
-       still output =faceReleased= equal to the committed \( v \)
-       in the opening, with \( v \) the same 128-bit-bounded
-       quantity range-checked at mint.  The mint-side range check
-       (Closure 1) remains load-bearing here: a spend circuit that
-       trusts \( v \) without re-bounding it relies on the mint
-       circuit having already done so.
-
-    The mint-circuit layout is now /frozen/ at
-    \( \mathrm{Poseidon}_5(\mathrm{flavor},\, v,\, \rho,\,
-    \mathrm{idHash},\, \mathrm{predicate}) \) over BN254 with
-    tree depth 20; spend-circuit design no longer ratifies the
-    mint-circuit layout because the layout is published and pinned
-    by the per-N verifiers already deployed.
+    The leaf layout is
+    \( \mathrm{Poseidon}_6(T_{CM},\, \mathrm{flavor},\, v,\, \rho,\, \mathrm{idHash},\, \mathrm{predicate}) \)
+    over BN254 at tree depth 20, pinned by the per-N verifiers.  The A2 mint additionally exposes
+    each leaf's \( eIss \) and \( T \) and recomputes
+    \( \mathrm{idHash} = \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss, T) \) in circuit, so the binding
+    =Notes.mint= checks is the one the note commits: \( 7N + 4 \) public signals per batch.
 
 #+LATEX: \clearpage
 * Security Assumptions Summary
@@ -1386,40 +1987,58 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
   #+LATEX: {\scriptsize
   | Theorem                             | Primitive    | Assumption needed                       | Conditional on crypto?       |
   |-------------------------------------+--------------+-----------------------------------------+------------------------------|
-  | Theorem 1 (PS completeness)         | PS           | bilinearity of \( e \)                  | *no* (unconditional)         |
-  | Theorem 2 (PS unlinkability)        | PS           | prime-order \( G_1 \), uniform \( t \)  | *no* (information-theoretic) |
+  | Theorem 1 (PS completeness, wallet-internal) | PS  | bilinearity of \( e \)                  | *no* (unconditional)         |
+  | Theorem 1' (masked completeness)    | PS + \( Y_1 \) | bilinearity of \( e \); \( A \neq O \) | *no* (unconditional)         |
+  | Lemma 2 (fresh-signature distribution) | PS        | prime-order \( G_1 \), uniform \( t \)  | *no*; hides nothing about \( m \) |
+  | Theorem 2' (presentation hiding)    | PS + \( Y_1 \) | prime-order \( G_1 \), uniform \( a, b \) | *no* (statistical, \( 1/q \)) |
+  | Theorem R-HVZK (registration ZK)    | masked PS + FS | uniform nonces; ROM for NIZK          | ROM                          |
+  | Theorem R-sound (special soundness) | masked PS    | none for extractor                      | *no* (unconditional)         |
+  | Theorem R-comp (composition)        | masked PS + CP | shared nonces                          | as R-HVZK, R-sound           |
+  | Theorem R-unforge (registration unforgeability) | masked PS + FS | PS-CM (PS 2016 Sec. 6.1, Assumption 2), ROM, forking lemma | PS-CM, ROM |
+  | Theorem R-blind (issuer-blindness of registration) | masked PS + ElGamal | Theorems 2', R-HVZK; DDH on \( G_1 \) | DDH, ROM |
   | Theorem 3 (CP completeness)         | CP           | group axioms                            | *no* (unconditional)         |
   | Theorem 4 (CP special soundness)    | CP           | none for extractor; DLog for            | DLog (only for reduction)    |
   |                                     |              | cheating-prover reduction               |                              |
   | Theorem 5 (CP HVZK)                 | CP           | uniform \( k_1, k_2 \)                  | *no* (perfect simulation)    |
   | NIZK corollary                      | CP + FS      | ROM                                     | ROM                          |
-  | Theorem 6 (end-to-end)              | PS + CP      | q-SDH (PS unforgeability), DLog, ROM    | yes                          |
+  | Theorem 6 (end-to-end)              | masked PS + CP | PS-CM (PS unforgeability), DLog, ROM  | yes                          |
   | Transfer mutual-decryptability (cor.) | ElGamal + CP | ElGamal correctness; Theorem 6        | DLog, ROM                    |
   | Theorem 7 (mint addressing + anti-framing) | ElGamal + Okamoto | group axioms; Schnorr/Okamoto soundness | yes (binding only) |
-  | Theorem 8 (deposit-coupling soundness) | Okamoto-in-SNARK + membership | SNARK knowledge soundness, DLog, ROM | yes              |
+  | Theorem 8 (folded deposit gate)     | one SNARK over one witness | SNARK knowledge soundness; Poseidon CR; DLog (A2 key pin) | yes |
   | Theorem 9 (depositor-binding soundness) | Okamoto + membership | SNARK knowledge soundness,         | yes                          |
-  |                                     | + Schnorr    | Schnorr EUF-CMA (DLog + ROM)            |                              |
+  |                                     | + Schnorr    | Schnorr EUF-CMA; DLog with \( H_{\text{PED}} \) hashed to the curve |          |
   | Theorem 10 (nullifier + graph privacy) | Poseidon-PRF | ROM (Poseidon pre-image)             | ROM                          |
   | Theorem 11 (mutual decryptability)  | ElGamal      | ElGamal correctness; Schnorr EUF-CMA    | DLog, ROM                    |
+  | Theorem 12 (A2 key tie)             | Okamoto + SNARK | Theorems 7, 8; DLog with \( H_{\text{PED}} \) hashed to the curve | yes          |
   #+LATEX: }
 
-  Every assumption on the "yes" rows is already load-bearing for
-  Ethereum itself (ECDSA on secp256k1 assumes DLog; every pairing-based
-  SNARK verifier on L1 uses the same ROM reductions; every existing
-  BLS-based rollup assumes q-SDH-class primitives).  Alberta Buck
-  introduces /no novel/ cryptographic assumption.
+  DLog, DDH, the ROM and SNARK knowledge soundness are already
+  load-bearing for Ethereum itself (ECDSA on secp256k1 assumes DLog;
+  every pairing-based SNARK verifier on L1 uses the same ROM
+  reductions).  PS-CM is not: it is the credential scheme's own
+  assumption, in the committed-message key form that publishing
+  \( Y_1 \) requires, and adopting it is a decision recorded in the A'
+  plan.  The earlier statement that Alberta Buck introduces no novel
+  cryptographic assumption is withdrawn.
 
 #+LATEX: \clearpage
 * Implementation Notes
 
 ** What the Contract Must Enforce
 
-   The theorems assume a well-formed verifier.  Three conditions on
+   The theorems assume a well-formed verifier.  Four conditions on
    the on-chain code are load-bearing:
 
-   1. *Registration: \( \sigma'_1 \neq O \).*  Required by Theorem 1's
-      non-degeneracy argument.  A missing check admits the trivial
-      signature attack (see Identity doc, Attack 9 / Link 1).
+   1. *Registration: the guards of Part I.*  \( A \neq O \) is
+      critical (at \( A = O \) the masked equation holds for every
+      \( m \): the trivial presentation attack, the Identity doc's
+      Attack 9 / Link 1 with \( a = 0 \) in place of \( t = 0 \));
+      \( pk \neq O \) and \( R \neq O \) are critical (no key
+      ownership; \( C = mG \) published); \( B \neq O \) is
+      defensive; the \( Y_1 \) consistency check at =trustIssuer=
+      is what Theorem R-sound's extraction needs.  Part I's
+      "What the Verifier Checks, and Why" gives each with its revert
+      string.
 
    2. *Registration: \( G_2 \) subgroup check.*  The =ecPairing=
       precompile (post-EIP-197) validates that \( X, Y \) lie in the
@@ -1434,19 +2053,36 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
       issuer-certified \( m \).  If Alice supplies \( E_{\text{alice}} \)
       via calldata the binding is severed and Theorem 6 does not apply.
 
+   4. *Notes: every fold input derived on chain.*  Theorem 8's clause
+      (3) is about a registered account only because the adapter reads
+      \( pk_{\text{dep}} \) and \( E_{\text{dep}} \) from the registry at
+      =msg.sender= and derives \( nf \), the face and \( eEnc \)'s limbs
+      itself; the identity root must be one the registry accepts for the
+      Notes consumer; and the B1 membership proof must receive the same
+      \( P_{\text{dep}} \) the sigma verified.  A caller-supplied copy of
+      any of them severs the clause it feeds.
+
 ** What the Prover Must Enforce
 
-   - *Uniform randomness for \( t, k_1, k_2, r_b \).*  Theorems 2 and
-     5 depend on uniform distributions.  A biased RNG converts
-     statistical unlinkability into a detectable correlation and
-     converts perfect HVZK into approximate HVZK with an adversarial
-     advantage proportional to the bias.
+   - *Uniform, fresh randomness for \( a, b, m_t, b_t, r_t, sk_t, k_1, k_2, r_b \).*
+     Theorems 2', R-HVZK and 5 depend on uniform distributions, and
+     Theorem 2' additionally on \( b \) never being reused across
+     accounts.  Proposition R-fresh lists the explicit breaks for each
+     reused value; RFC 6979-style derivation of the four proof nonces
+     is the recommended hardening.  A biased RNG converts the hiding
+     into a detectable correlation and converts perfect HVZK into
+     approximate HVZK with an adversarial advantage proportional to
+     the bias.
+   - *Never publish \( \sigma \) or a rerandomization of it.*  Lemma 2's
+     remark: any such pair is a candidate test on \( m \).  Backups,
+     receipts and demos must carry the presentation or nothing.
 
    - *Fiat-Shamir domain separation.*  The hash input must include
-     all public inputs and context (\( \texttt{msg.sender}, \texttt{spender}, \texttt{chainid} \)).
+     all public inputs and context (\( \texttt{msg.sender}, \texttt{spender}, \texttt{chainid},
+     \texttt{registry} \)) and end in the protocol's v2 domain word.
      Omitting any one opens a cross-context replay path; the forking
      lemma reduction is unaffected, but the NIZK is no longer bound
-     to the intended transaction.
+     to the intended transaction, or to the intended protocol.
 
 ** Scope Not Covered Here
 
@@ -1460,9 +2096,10 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
      next step.
 
    - /Circuit soundness/ of the BUCK Notes spend: Part IV proves that the
-     deposit-coupling sigma (A1/A2), the depositor-binding sigma (B1), and the
-     committed-point membership proof imply the desired guarantees /assuming/
-     knowledge soundness of the underlying SNARK system.
+     folded deposit gates (A1/A2), the depositor-binding sigma (B1) and its
+     membership proof imply the desired guarantees /assuming/ knowledge
+     soundness of the underlying SNARK system, and that each circuit carries
+     the relations its clear-text reference states.
      Soundness of the /proof system itself/ (Groth16 / PLONK / STARK)
      depends on the chosen proof system's trusted setup (if any) and
      circuit correctness; this is orthogonal to the contents of this
@@ -1484,8 +2121,10 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    layer (a compelled or breached issuer cannot map its issued identities
    to chain accounts), and the third-party non-disclosure of A2 Notes --
    is /computational/, reducing to DDH (hence DLog) on \( \mathbb{G}_1 \).
-   Only Theorem 2 (PS rerandomization unlinkability) is
-   information-theoretic and survives unconditionally.  This asymmetry has
+   Only Theorem 2' (the hiding of the presentation) is
+   information-theoretic and survives unconditionally; the pre-A'
+   published pair was candidate-testable classically, by anyone
+   holding \( m \), with no break at all.  This asymmetry has
    a sharp consequence against a powerful, patient adversary (a state or
    military actor with archival access).
 
@@ -1502,18 +2141,17 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    relevant quantum computer running Shor against \( \mathbb{G}_1 \) --
    collapses that DDH decision into a cheap test, retroactively
    de-anonymising /all past/ identity and A2-Note traffic from the
-   harvested \( \{M_i\} \) plus the archived chain.  The PS layer's
-   statistical unlinkability is unaffected, but PS unlinkability does not
-   hide the \( M \leftrightarrow E_{\text{addr}} \) relation; only the
-   ElGamal layer does, and only computationally.
+   harvested \( \{M_i\} \) plus the archived chain.  The presentation's
+   hiding is unaffected, but it does not hide the
+   \( M \leftrightarrow E_{\text{addr}} \) relation; only the ElGamal
+   layer does, and only computationally.
 
    Two points are worth recording for the threat model:
 
-   1. *Epoch expiry does not bound it.*  Epoch-based credential renewal
-      (Identity doc) limits the value of breaking a /single/ credential's
-      pairing equation, but the harvest target here is the persistent
-      \( M \leftrightarrow E_{\text{addr}} \) link, which a quantum DLog
-      break recovers wholesale, expired or not.
+   1. *Revocation does not bound it.*  Clearing a holder from its registry's
+      subtree ends its liveness, but the harvest target here is the
+      persistent \( M \leftrightarrow E_{\text{addr}} \) link, which a quantum
+      DLog break recovers wholesale, revoked or not.
 
    2. *The migration is encryption-layer, not pairing-layer.*  The
       BLS12-381 path (EIP-2537, "alt_bn128 Security Horizon" in the
@@ -1532,11 +2170,104 @@ already requires. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PD
    whose compromise hands an adversary the full plaintext set
    \( \{M_i\} \).
 
+#+LATEX: \clearpage
+* Review Status and Remaining Work for Part I
+:PROPERTIES:
+:CUSTOM_ID: review-status
+:END:
+
+  Part I is implemented and argued but not independently reviewed.  This
+  section is the reviewer's brief and the list of what would strengthen
+  the argument; it is kept in this document so that the proofs and the
+  obligations on them travel together.
+
+** What the Reviewer Is Asked to Check
+
+   In the order that matters.
+
+   1. *The assumption.*  Confirm that the key form \( (G, Y_1;\ g_2, X, Y) \)
+      with plain signing is the Section 6.1 scheme of Pointcheval and
+      Sanders (2016) with \( t = 0 \), and that its EUF-CMA proof under
+      that paper's Assumption 2 applies; say whether a non-interactive
+      assumption from the 2018 reassessment covers it.
+   2. *Theorem 2'.*  The bijection argument and the \( 1/q \)
+      accounting; that returning \( P \) to the HIDE adversary makes the
+      game at least as strong as the real transcript.
+   3. *Theorem R-HVZK.*  That the four verification equations determine
+      the four commitments from the responses, and the programming-abort
+      bound.
+   4. *Theorem R-sound.*  The division step; that \( Y_1 = y G \) is the
+      only place \( Y_1 \) enters; the shared-nonce composition
+      (Theorem R-comp).
+   5. *Theorem R-unforge.*  The load-bearing reduction.  The simulation
+      of presentations from a signature on an unrelated message, the
+      statistical-distance accounting, the treatment of \( m_d \), and
+      the forking-lemma application (which query index is forked; that
+      the commitments are fixed before the challenge).
+   6. *Theorem R-blind.*  The hybrid order and that the final hybrid is
+      exactly ElGamal plaintext-checking under a fresh key.
+   7. *Code against specification.*  =_verifyCredential= (guards,
+      canonical scalars, revert strings), =_fsRegister= (word order and
+      count against =nizk.py=), =_checkPresentation= (the three pairs,
+      the negations, the \( -eB \) term), =trustIssuer= (\( Y_1 \neq O \)
+      and the consistency pairing).  The presence of the \( pk \neq O \),
+      \( R \neq O \) and nonzero-leaf rejections in the Solidity path was
+      confirmed while writing Part I; the reviewer should confirm it
+      again against the commit under review.
+   8. *Ports.*  =core/rust/buck-identity/src/nizk.rs= and
+      =core/js/src/identity-core.js= against =nizk.py=; the kernel is
+      what wallets run.  Vectors: =test/vectors/identity.json= and
+      =core/vectors/identity-kernel-vectors.json=, both schema 2.
+   9. *Tests.*  =make nix-test= (Foundry: the rejection tests in
+      =test/IdentityRegistry.t.sol= for zero \( A \), zero \( B \), a
+      tampered \( s_b \), a swapped presentation, a zero and an
+      inconsistent \( Y_1 \), and "presentation is not a signature");
+      =alberta_buck/test/review/test_wallet_failures.py= tests 01, 02,
+      10, 11, 12 on both backends; =make nix-core-test-rust=,
+      =nix-core-test-py=, =nix-core-test-js=; the two-sided witness in
+      =alberta-buck-identity-example.org=
+      (=make nix-venv-doc-identity-example=).
+   10. *Randomness.*  =alberta_buck/wallet/bn254.py:rand_scalar= and the
+       JS and wasm samplers, against Proposition R-fresh.
+   11. *The papers.*  That the conditional phrasing in this Part, in
+       =alberta-buck-paper.org= (issuer-blindness, non-frameability, the
+       read/write separation) and in =alberta-buck-identity.org= matches
+       what Part I proves and no more.
+
+** What Would Strengthen the Argument
+
+   - *Independent review* of items 1--6 by a cryptographer who did not
+     write them; this is the gate on any production registration.
+   - *A settled assumption.*  Item 1 decides whether Part I rests on an
+     interactive assumption (PS 2016, Assumption 2) or a non-interactive
+     one (PS 2018); the summary table should then name it.
+   - *Deterministic nonces.*  RFC 6979-style derivation of
+     \( m_t, b_t, r_t, sk_t \) from the witness and the transcript
+     removes the RNG from the trusted base for the proof; \( a \) and
+     \( b \) remain fresh per registration.  A wallet change with new
+     vectors.
+   - *Tighter or mechanized checks.*  The sanity block exercises each
+     step algebraically on random instances; a proof assistant or a
+     symbolic check of the reduction would replace "on random instances"
+     by "for all".
+   - *The two open findings.*  R5 (identity-derived Note receiving keys)
+     and R6 (issuance, policy and accumulator metadata) are outside
+     Part I and remain to be designed; nothing in Part I is made worse
+     or better by them.
+
 * Footnotes
 
 [fn:ps] Pointcheval, D. and Sanders, O.  "Short Randomizable Signatures."
-CT-RSA 2016, LNCS 9610, pp. 111-126.  Theorem 4.2 establishes EUF-CMA
-security under the q-SDH assumption in bilinear groups.
+CT-RSA 2016, LNCS 9610, pp. 111-126.  The single-message scheme is
+proved EUF-CMA under that paper's Assumption 1, an interactive
+LRSW-style assumption in type-3 bilinear groups (an earlier edition of
+this document attributed it to q-SDH; that was wrong).  Section 6.1
+(signatures on committed messages) publishes \( y G \) in \( G_1 \)
+as the A' key does and proves security under the stronger
+Assumption 2.  Pointcheval, D. and Sanders, O.  "Reassessing Security
+of Randomizable Signatures."  CT-RSA 2018, gives non-interactive
+q-type formulations for modified variants; whether the key form used
+here is covered by one of them is part of the phase-6 review.
 
 [fn:forklemma] Pointcheval, D. and Stern, J.  "Security Arguments for
 Digital Signatures and Blind Signatures."  Journal of Cryptology 13(3),

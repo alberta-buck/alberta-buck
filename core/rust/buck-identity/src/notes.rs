@@ -2,16 +2,15 @@
 //! `alberta_buck/wallet/notes.py` (and `identity_leaf` from
 //! `alberta_buck/registry/tree.py`).
 //!
-//! `cm = Poseidon([flavor, v, rho, id_hash, predicate])`;
-//! `nf = Poseidon([rho, id_hash, tag])` with tags 4242 (B) / 4243 (A,
-//! reserved); id-hashes are Poseidon over the per-flavor payload word
-//! layouts, each word reduced mod F_R exactly as circom signals are.
+//! Each hash is a Poseidon led by its v2 domain tag, `keccak(tag) mod F_R`:
+//! `cm = Poseidon([T_CM, flavor, v, rho, id_hash, predicate])`;
+//! `nf = Poseidon([T_NF, rho, id_hash])`, one nullifier for every flavour;
+//! `id_hash = Poseidon([T_ID, *payload])` over the per-flavour word layouts,
+//! each word reduced mod F_R exactly as circom signals are.
 
+use crate::domains::{field_tag, NOTES_COMMITMENT, NOTES_ID_HASH, NOTES_NULLIFIER};
 use crate::poseidon::poseidon;
 use crate::{w_is_zero, w_lt_order, G1w, IdError, Result, W256};
-
-pub const NULLIFIER_TAG_B: u64 = 4242;
-pub const NULLIFIER_TAG_A: u64 = 4243;
 
 pub const FLAVOR_A1: u64 = 1;
 pub const FLAVOR_A2: u64 = 2;
@@ -44,7 +43,7 @@ fn check_scalar_nonzero(w: &W256) -> Result<()> {
     Ok(())
 }
 
-/// `cm = Poseidon([flavor, v, rho, id_hash, predicate])` with the
+/// `cm = Poseidon([T_CM, flavor, v, rho, id_hash, predicate])` with the
 /// `NoteOpening` range checks.
 pub fn note_commitment(
     flavor: u64,
@@ -63,55 +62,43 @@ pub fn note_commitment(
     check_rho(rho)?;
     check_field(id_hash, "id_hash must lie in [0, F_R)")?;
     check_field(predicate, "predicate must lie in [0, F_R)")?;
-    poseidon(&[w_from_u64(flavor), *v, *rho, *id_hash, *predicate])
+    poseidon(&[field_tag(NOTES_COMMITMENT), w_from_u64(flavor), *v, *rho, *id_hash, *predicate])
 }
 
-/// B-spend nullifier: `Poseidon([rho, id_hash, 4242])`.
-pub fn nullifier_b(rho: &W256, id_hash: &W256) -> Result<W256> {
+/// The spent marker, for every flavour: `Poseidon([T_NF, rho, id_hash])`.
+pub fn nullifier(rho: &W256, id_hash: &W256) -> Result<W256> {
     check_rho(rho)?;
     check_field(id_hash, "id_hash must lie in [0, F_R)")?;
-    poseidon(&[*rho, *id_hash, w_from_u64(NULLIFIER_TAG_B)])
+    poseidon(&[field_tag(NOTES_NULLIFIER), *rho, *id_hash])
 }
 
-/// RESERVED A-tag nullifier: `Poseidon([rho, id_hash, 4243])`.
-pub fn nullifier_a(rho: &W256, id_hash: &W256) -> Result<W256> {
-    check_rho(rho)?;
-    check_field(id_hash, "id_hash must lie in [0, F_R)")?;
-    poseidon(&[*rho, *id_hash, w_from_u64(NULLIFIER_TAG_A)])
-}
-
-/// B1 id-hash: `Poseidon([m_issuer, sigma_R.x, sigma_R.y, sigma_s])`.
-pub fn id_hash_b1(m_issuer: &W256, sigma_r: &G1w, sigma_s: &W256) -> Result<W256> {
+/// B1 id-hash: `Poseidon([T_ID, m_issuer])`.
+pub fn id_hash_b1(m_issuer: &W256) -> Result<W256> {
     check_scalar_nonzero(m_issuer)?;
-    check_scalar_nonzero(sigma_s)?;
-    poseidon(&[*m_issuer, sigma_r.0, sigma_r.1, *sigma_s])
+    poseidon(&[field_tag(NOTES_ID_HASH), *m_issuer])
 }
 
-/// A1 id-hash: `Poseidon([E_note.R, E_note.C, m_issuer, sigma_R, sigma_s])`
-/// (9 words).
-pub fn id_hash_a1(
-    e_note: &(G1w, G1w),
-    m_issuer: &W256,
-    sigma_r: &G1w,
-    sigma_s: &W256,
-) -> Result<W256> {
+/// A1 id-hash: `Poseidon([T_ID, E_note.R, E_note.C, m_issuer])`.
+pub fn id_hash_a1(e_note: &(G1w, G1w), m_issuer: &W256) -> Result<W256> {
     check_scalar_nonzero(m_issuer)?;
-    check_scalar_nonzero(sigma_s)?;
     poseidon(&[
+        field_tag(NOTES_ID_HASH),
         e_note.0 .0,
         e_note.0 .1,
         e_note.1 .0,
         e_note.1 .1,
         *m_issuer,
-        sigma_r.0,
-        sigma_r.1,
-        *sigma_s,
     ])
 }
 
-/// A2 id-hash: `Poseidon([E_note.R, E_note.C, E_iss.R, E_iss.C])` (8 words).
-pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w)) -> Result<W256> {
+/// A2 id-hash: `Poseidon([T_ID, E_note.R, E_note.C, E_iss.R, E_iss.C, T])`.
+///
+/// `T = r'*pk_recv + gamma*H` is the mint binding's blinded point.  The spend
+/// reaches the mint only through `idHash`, so committing `T` is what lets the
+/// A2 fold tie the binding's key to the recipient's own.
+pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w), t: &G1w) -> Result<W256> {
     poseidon(&[
+        field_tag(NOTES_ID_HASH),
         e_note.0 .0,
         e_note.0 .1,
         e_note.1 .0,
@@ -120,11 +107,105 @@ pub fn id_hash_a2(e_note: &(G1w, G1w), e_iss: &(G1w, G1w)) -> Result<W256> {
         e_iss.0 .1,
         e_iss.1 .0,
         e_iss.1 .1,
+        t.0,
+        t.1,
     ])
 }
 
-/// Identity Merkle leaf: `Poseidon([M.x, M.y])` -- matches
-/// `circuits/identity_membership.circom` and `registry/tree.py`.
+/// The leaf kinds' leading Poseidon inputs, `keccak(tag) mod F_R`.  Without
+/// them a salted identity leaf and a receiving leaf were both three-input
+/// Poseidons, and one value could be a leaf of either kind.
+fn leaf_tag(tag: &[u8]) -> W256 {
+    crate::domains::field_tag(tag)
+}
+
+/// Identity Merkle leaf: `Poseidon([TAG, M.x, M.y])` -- mirrors
+/// `registry/tree.py`.
 pub fn identity_leaf(m_point: &G1w) -> Result<W256> {
-    poseidon(&[m_point.0, m_point.1])
+    poseidon(&[leaf_tag(crate::domains::LEAF_IDENTITY), m_point.0, m_point.1])
+}
+
+/// Hiding leaf of a PRIVATE subtree: `Poseidon([TAG, M.x, M.y, salt])`.
+///
+/// Membership in a private subtree is a fact about a person who did not
+/// publish it, so the leaf must not be a deterministic function of the
+/// identity: a registry holding every scalar it ever certified would
+/// otherwise decide membership at will.  `salt` MUST lie in `[1, F_R)`;
+/// zero is refused because it makes the leaf deterministic.
+///
+/// Mirrors `alberta_buck/registry/tree.py::identity_leaf_salted`.
+pub fn identity_leaf_salted(m_point: &G1w, salt: &W256) -> Result<W256> {
+    if !salt_in_range(salt) {
+        return Err(IdError(
+            "salt must be in [1, F_R); 0 makes the leaf deterministic",
+        ));
+    }
+    poseidon(&[leaf_tag(crate::domains::LEAF_IDENTITY_SALTED), m_point.0, m_point.1, *salt])
+}
+
+/// Hiding leaf of a private IDENTITY-REGISTRY subtree, binding the pair:
+/// `Poseidon([TAG, m_rec, k_recv, salt])`.
+///
+/// Addressed Notes are keyed to the receiving key `k*G` rather than to the
+/// identity point, because an identity scalar is a read capability the
+/// design discloses to every counterparty and so cannot also be a
+/// decryption key.  That separation obliges the spend to prove the mailbox
+/// belongs to the Identity, and this leaf is where the binding lives --
+/// committed, never published, because a public binding would deanonymise
+/// the recipient at spend.
+///
+/// It commits the SCALARS where its two siblings commit coordinates, and
+/// that difference is principled.  The siblings are computed by authorities
+/// holding identity points; this leaf exists to be proven in zero knowledge
+/// by a holder that has the scalars.  Committing points would cost the
+/// circuit two fixed-base multiplications -- 943,792 constraints -- to
+/// re-derive preimages the prover already holds.  BN254's G1 group order
+/// equals the Poseidon field, so a scalar is a field element outright.
+///
+/// Mirrors `alberta_buck/registry/tree.py::receiving_leaf`.
+pub fn receiving_leaf(m_rec: &W256, k_recv: &W256, salt: &W256) -> Result<W256> {
+    for v in [m_rec, k_recv, salt] {
+        if !salt_in_range(v) {
+            return Err(IdError(
+                "receiving_leaf inputs must each lie in [1, F_R)",
+            ));
+        }
+    }
+    poseidon(&[leaf_tag(crate::domains::LEAF_RECEIVING), *m_rec, *k_recv, *salt])
+}
+
+/// `mailbox_leaf(M, pk_recv, salt) = Poseidon([TAG, M.x, M.y, pk.x, pk.y, salt])`
+/// -- the PAYER's view of the association `receiving_leaf` commits.
+///
+/// Two leaves for one fact, because it has two consumers holding different
+/// things.  The spend proves the association in zero knowledge and the prover
+/// holds the scalars, so `receiving_leaf` commits them and costs one Poseidon.
+/// A payer must check the association BEFORE paying and holds no secret at all
+/// -- only the two points, which it needs anyway -- so its leaf commits the
+/// POINTS and checking it is a hash and a path.  Distinct associations carry
+/// distinct salts, so the salt a holder hands a payer does not locate the leaf
+/// its spend proves under.
+pub fn mailbox_leaf(m_point: &G1w, pk_recv: &G1w, salt: &W256) -> Result<W256> {
+    if !salt_in_range(salt) {
+        return Err(IdError(
+            "salt must be in [1, F_R); 0 makes the leaf deterministic",
+        ));
+    }
+    poseidon(&[
+        leaf_tag(crate::domains::LEAF_MAILBOX),
+        m_point.0,
+        m_point.1,
+        pk_recv.0,
+        pk_recv.1,
+        *salt,
+    ])
+}
+
+/// `salt` is a field element in `[1, F_R)`.  Poseidon reduces its inputs
+/// mod `F_R`, so an out-of-range salt would alias onto an in-range one;
+/// refusing it here keeps the Python and Rust leaves byte-identical.
+fn salt_in_range(salt: &W256) -> bool {
+    use ark_ff::Zero;
+    let s = crate::fr_mod(salt);
+    !s.is_zero() && crate::w_from_fr(&s) == *salt
 }

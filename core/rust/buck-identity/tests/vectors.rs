@@ -105,15 +105,15 @@ fn sanity_curve_and_hashes() {
         hex_w("0x090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b")
     );
 
-    // H = keccak("AlbertaBuck:IssuerReenc:H") % ORDER * G1
-    let h = issuer_reenc::h_point();
+    // H_PEDERSEN = hash_to_curve("AlbertaBuck/Pedersen/H/v2"), the Python reference's point
+    let h = nums::h_pedersen();
     assert_eq!(
         h.0,
-        hex_w("0x0f03161ff2a1eed34df6d415ebfa0953650cf9dcf990a3de0d3d0391cdb49a72")
+        hex_w("0x0a348afa1b7f9d733f1859da101a77b2eb9b8cb66c00f5ffc3f8cd384de9f862")
     );
     assert_eq!(
         h.1,
-        hex_w("0x077495eb98a6c0255d2ac55185d2865871aec4ad871e1bdaf831ae58a8bb44f4")
+        hex_w("0x1e8103c6fd7743dde39c36379e3a19b80e6bc98a989c6df8786da5c9bedecd42")
     );
 
     // e(G1, G2) * e(-G1, G2) == 1
@@ -196,11 +196,13 @@ mod num_dec {
 #[test]
 fn golden_identity_fixture() {
     let v = fixture();
-    assert_eq!(v["$schema_version"], 1);
+    assert_eq!(v["$schema_version"], 2);
     let chainid = jw(&v["chainid"]);
+    let registry = jw(&v["registry"]);
 
     let iss_x = jg2(&v["issuer"]["pk_X"]);
     let iss_y = jg2(&v["issuer"]["pk_Y"]);
+    assert!(ps::ps_key_consistent(&iss_y, &jg1(&v["issuer"]["pk_Y1"])).unwrap(), "issuer Y1");
 
     for who in ["alice", "bob"] {
         let p = &v[who];
@@ -223,15 +225,23 @@ fn golden_identity_fixture() {
             "{who} ciphertext"
         );
 
-        // PS signatures (raw + rerandomized) verify under the issuer key
-        for sig in ["ps_sig_raw", "ps_sig_rerand"] {
-            let s1 = jg1(&p[sig]["sigma_1"]);
-            let s2 = jg1(&p[sig]["sigma_2"]);
-            assert!(
-                ps::ps_verify(&iss_x, &iss_y, &s1, &s2, &m).unwrap(),
-                "{who} {sig}"
-            );
+        // The RAW credential verifies under the issuer key ...
+        {
+            let s1 = jg1(&p["ps_sig_raw"]["sigma_1"]);
+            let s2 = jg1(&p["ps_sig_raw"]["sigma_2"]);
+            assert!(ps::ps_verify(&iss_x, &iss_y, &s1, &s2, &m).unwrap(), "{who} raw");
         }
+        // ... and the PUBLISHED presentation (A, B) does not: it is not a
+        // signature on m (review finding R1 closed).
+        let pres = (jg1(&p["ps_presentation"]["A"]), jg1(&p["ps_presentation"]["B"]));
+        assert!(!ps::ps_verify(&iss_x, &iss_y, &pres.0, &pres.1, &m).unwrap(), "{who} presentation");
+        assert_eq!(
+            ps::ps_present(
+                &jg1(&p["ps_sig_raw"]["sigma_1"]), &jg1(&p["ps_sig_raw"]["sigma_2"]),
+                &jg1(&v["issuer"]["pk_Y1"]), &jw(&p["a"]), &jw(&p["b"])
+            ).unwrap(),
+            pres, "{who} presentation replay"
+        );
         // ... and not for a different message
         let m_bad = jw(&v[if who == "alice" { "bob" } else { "alice" }]["m"]);
         let s1 = jg1(&p["ps_sig_raw"]["sigma_1"]);
@@ -243,23 +253,24 @@ fn golden_identity_fixture() {
         let proof = nizk::RegistrationProof {
             e: jw(&pf["e"]),
             s_m: jw(&pf["s_m"]),
+            s_b: jw(&pf["s_b"]),
             s_r: jw(&pf["s_r"]),
-            a_ps: jg1(&pf["A_ps"]),
+            s_sk: jw(&pf["s_sk"]),
+            c1: jg1(&pf["C1"]),
             t_c: jg1(&pf["T_C"]),
             t_r: jg1(&pf["T_R"]),
+            t_key: jg1(&pf["T_key"]),
         };
-        let sig_p = (
-            jg1(&p["ps_sig_rerand"]["sigma_1"]),
-            jg1(&p["ps_sig_rerand"]["sigma_2"]),
-        );
         assert!(nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &registrant
+            &pres.0, &pres.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &registrant, &chainid, &registry
         )
         .unwrap());
         let mut wrong = registrant;
         wrong[31] ^= 1;
         assert!(!nizk::registration_verify(
-            &sig_p.0, &sig_p.1, &e_ct, &pk, &iss_x, &iss_y, &proof, &wrong
+            &pres.0, &pres.1, &e_ct, &pk, &iss_x, &iss_y, &proof,
+            &wrong, &chainid, &registry
         )
         .unwrap());
     }
@@ -304,12 +315,14 @@ fn golden_identity_fixture() {
         t3: jg1(&cp["T3"]),
     };
     assert!(chaum_pedersen::chaum_pedersen_verify(
-        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender, &chainid
+        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &sender, &spender,
+        &chainid, &jw(&ap["registry"])
     )
     .unwrap());
     // swapped sender/spender must fail
     assert!(!chaum_pedersen::chaum_pedersen_verify(
-        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender, &chainid
+        &e_alice, &e_for_bob, &pk_a, &pk_b, &cp_proof, &spender, &sender,
+        &chainid, &jw(&ap["registry"])
     )
     .unwrap());
 
@@ -363,7 +376,7 @@ fn golden_identity_fixture() {
     let rcpt_h_batch = schnorr::batch_commitment(&rcpt_cms);
     assert_eq!(rcpt_h_batch, jw(&rc["hBatch"]));
     assert_eq!(
-        notes::nullifier_b(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
+        notes::nullifier(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
         jw(&rc["nullifier"])
     );
     let rsig = schnorr::SchnorrProof {
@@ -436,8 +449,8 @@ fn golden_identity_fixture() {
     )
     .unwrap());
     // tampered E_iss must fail
-    let (r_i, mut c_i) = jct(&ir["E_iss"]);
-    c_i = jg1(&v["alice"]["M"]);
+    let (r_i, _) = jct(&ir["E_iss"]);
+    let c_i = jg1(&v["alice"]["M"]);
     assert!(!issuer_reenc::issuer_reenc_verify(
         &jg1(&ir["pk_iss"]),
         &jct(&ir["E_reg"]),
@@ -467,10 +480,8 @@ fn kernel_fixture() -> serde_json::Value {
 #[test]
 fn kernel_vectors_replay() {
     let v = kernel_fixture();
-    assert_eq!(v["$schema_version"], 1);
+    assert_eq!(v["$schema_version"], 2);
     assert_eq!(v["backend"], "py", "vectors must come from the py reference");
-    let chainid = jw(&v["schnorr"]["chainid"]);
-
     // ---- g1 / g2 ops ----------------------------------------------------
     for row in v["g1_ops"].as_array().unwrap() {
         let a = jg1(&row["A"]);
@@ -555,7 +566,13 @@ fn kernel_vectors_replay() {
         let rr = ps::ps_rerandomize(&sig.0, &sig.1, &jw(&row["rerand_t"])).unwrap();
         assert_eq!(rr.0, jg1(&row["rerand_sigma_1"]));
         assert_eq!(rr.1, jg1(&row["rerand_sigma_2"]));
+        let pres = ps::ps_present(&sig.0, &sig.1, &jg1(&ps_v["pk_Y1"]),
+                                  &jw(&row["present_a"]), &jw(&row["present_b"])).unwrap();
+        assert_eq!(pres.0, jg1(&row["present_A"]));
+        assert_eq!(pres.1, jg1(&row["present_B"]));
+        assert!(!ps::ps_verify(&jg2(&ps_v["pk_X"]), &jg2(&ps_v["pk_Y"]), &pres.0, &pres.1, &m).unwrap());
     }
+    assert!(ps::ps_key_consistent(&jg2(&ps_v["pk_Y"]), &jg1(&ps_v["pk_Y1"])).unwrap());
 
     // ---- schnorr -----------------------------------------------------------------
     let sc = &v["schnorr"];
@@ -584,33 +601,51 @@ fn kernel_vectors_replay() {
 
     // ---- registration NIZK -------------------------------------------------
     let rg = &v["registration"];
+    let pres = ps::ps_present(
+        &jg1(&rg["sigma_1"]), &jg1(&rg["sigma_2"]), &jg1(&rg["Y1"]),
+        &jw(&rg["a"]), &jw(&rg["b"]),
+    )
+    .unwrap();
+    assert_eq!(pres.0, jg1(&rg["A"]));
+    assert_eq!(pres.1, jg1(&rg["B"]));
     let proof = nizk::registration_prove(
-        &jg1(&rg["sigma_1"]),
-        &jg1(&rg["sigma_2"]),
+        &pres.0,
+        &pres.1,
+        &jw(&rg["b"]),
         &jw(&rg["m"]),
         &jw(&rg["r"]),
         &jg1(&rg["pk"]),
         &jct(&rg["E"]),
         &jw(&rg["registrant"]),
+        &jw(&rg["sk"]),
+        &jw(&rg["chainid"]),
+        &jw(&rg["registry"]),
         &jw(&rg["m_tilde"]),
+        &jw(&rg["b_tilde"]),
         &jw(&rg["r_tilde"]),
+        &jw(&rg["sk_tilde"]),
     )
     .unwrap();
     assert_eq!(proof.e, jw(&rg["proof"]["e"]));
     assert_eq!(proof.s_m, jw(&rg["proof"]["s_m"]));
+    assert_eq!(proof.s_b, jw(&rg["proof"]["s_b"]));
     assert_eq!(proof.s_r, jw(&rg["proof"]["s_r"]));
-    assert_eq!(proof.a_ps, jg1(&rg["proof"]["A_ps"]));
+    assert_eq!(proof.s_sk, jw(&rg["proof"]["s_sk"]));
+    assert_eq!(proof.c1, jg1(&rg["proof"]["C1"]));
     assert_eq!(proof.t_c, jg1(&rg["proof"]["T_C"]));
     assert_eq!(proof.t_r, jg1(&rg["proof"]["T_R"]));
+    assert_eq!(proof.t_key, jg1(&rg["proof"]["T_key"]));
     assert!(nizk::registration_verify(
-        &jg1(&rg["sigma_1"]),
-        &jg1(&rg["sigma_2"]),
+        &pres.0,
+        &pres.1,
         &jct(&rg["E"]),
         &jg1(&rg["pk"]),
         &jg2(&v["ps"]["pk_X"]),
         &jg2(&v["ps"]["pk_Y"]),
         &proof,
         &jw(&rg["registrant"]),
+        &jw(&rg["chainid"]),
+        &jw(&rg["registry"]),
     )
     .unwrap());
 
@@ -626,6 +661,7 @@ fn kernel_vectors_replay() {
         &jw(&cp["sender"]),
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
+        &jw(&cp["registry"]),
         &jw(&cp["k1"]),
         &jw(&cp["k2"]),
     )
@@ -645,6 +681,7 @@ fn kernel_vectors_replay() {
         &jw(&cp["sender"]),
         &jw(&cp["spender"]),
         &jw(&cp["chainid"]),
+        &jw(&cp["registry"]),
     )
     .unwrap());
 
@@ -663,6 +700,37 @@ fn kernel_vectors_replay() {
     assert_eq!(vdp.s, jw(&vd["proof"]["s"]));
     assert_eq!(vdp.t1, jg1(&vd["proof"]["T1"]));
     assert_eq!(vdp.t2, jg1(&vd["proof"]["T2"]));
+
+    // ---- the identity opening: the same relation, bound to the registry -------------
+    let io = &v["identity_opening"];
+    let op = verifiable_decrypt::identity_opening_prove(
+        &jct(&io["E"]),
+        &jw(&io["sk"]),
+        &jg1(&io["M"]),
+        &jw(&io["account"]),
+        &jw(&io["chainid"]),
+        &jw(&io["registry"]),
+        &jw(&io["t"]),
+    )
+    .unwrap();
+    assert_eq!(op.e, jw(&io["proof"]["e"]));
+    assert_eq!(op.s, jw(&io["proof"]["s"]));
+    assert_eq!(op.t1, jg1(&io["proof"]["T1"]));
+    assert_eq!(op.t2, jg1(&io["proof"]["T2"]));
+    let opens = |p: &verifiable_decrypt::VdProof| {
+        verifiable_decrypt::identity_opening_verify(
+            &jct(&io["E"]),
+            &jg1(&io["pk"]),
+            &jg1(&io["M"]),
+            p,
+            &jw(&io["account"]),
+            &jw(&io["chainid"]),
+            &jw(&io["registry"]),
+        )
+        .unwrap()
+    };
+    assert_eq!(opens(&op), io["verify"].as_bool().unwrap());
+    assert_eq!(!opens(&vdp), io["not_a_receipt_proof"].as_bool().unwrap());
 
     // ---- issuer re-encryption binding ---------------------------------------------
     let ir = &v["issuer_reenc"];
@@ -703,40 +771,6 @@ fn kernel_vectors_replay() {
         &irp,
         &jw(&ir["issuer"]),
         &jw(&ir["chainid"]),
-    )
-    .unwrap());
-
-    // ---- deposit coupling ----------------------------------------------------------
-    let dc = &v["deposit_couple"];
-    let dcp = unilateral_a2::deposit_couple_prove(
-        &jw(&dc["m_rec"]),
-        &jw(&dc["sk_dep"]),
-        &jct(&dc["E_dep"]),
-        &jct(&dc["eIss"]),
-        &jw(&dc["account"]),
-        &jw(&dc["chainid"]),
-        &jw(&dc["b"]),
-        &jw(&dc["k_m"]),
-        &jw(&dc["k_s"]),
-        &jw(&dc["k_b"]),
-    )
-    .unwrap();
-    let pf = &dc["proof"];
-    assert_eq!(dcp.e, jw(&pf["e"]));
-    assert_eq!(dcp.s_m, jw(&pf["s_m"]));
-    assert_eq!(dcp.s_s, jw(&pf["s_s"]));
-    assert_eq!(dcp.s_b, jw(&pf["s_b"]));
-    assert_eq!(dcp.a2, jg1(&pf["A2"]));
-    assert_eq!(dcp.a3, jg1(&pf["A3"]));
-    assert_eq!(dcp.a4, jg1(&pf["A4"]));
-    assert_eq!(dcp.p_i, jg1(&pf["P_I"]));
-    assert!(unilateral_a2::deposit_couple_verify(
-        &jg1(&dc["pk_dep"]),
-        &jct(&dc["E_dep"]),
-        &jct(&dc["eIss"]),
-        &dcp,
-        &jw(&dc["account"]),
-        &jw(&dc["chainid"]),
     )
     .unwrap());
 
@@ -784,21 +818,15 @@ fn kernel_vectors_replay() {
     // ---- notes family -------------------------------------------------------------
     let nt = &v["notes"];
     assert_eq!(
-        notes::id_hash_b1(&jw(&nt["m_issuer"]), &jg1(&nt["sigma_R"]), &jw(&nt["sigma_s"])).unwrap(),
+        notes::id_hash_b1(&jw(&nt["m_issuer"])).unwrap(),
         jw(&nt["id_hash_b1"])
     );
     assert_eq!(
-        notes::id_hash_a1(
-            &jct(&nt["eNote"]),
-            &jw(&nt["m_issuer"]),
-            &jg1(&nt["sigma_R"]),
-            &jw(&nt["sigma_s"])
-        )
-        .unwrap(),
+        notes::id_hash_a1(&jct(&nt["eNote"]), &jw(&nt["m_issuer"])).unwrap(),
         jw(&nt["id_hash_a1"])
     );
     assert_eq!(
-        notes::id_hash_a2(&jct(&nt["eNote"]), &jct(&nt["eIss"])).unwrap(),
+        notes::id_hash_a2(&jct(&nt["eNote"]), &jct(&nt["eIss"]), &jg1(&nt["T"])).unwrap(),
         jw(&nt["id_hash_a2"])
     );
     let op = &nt["opening"];
@@ -816,12 +844,8 @@ fn kernel_vectors_replay() {
         jw(&nt["cm"])
     );
     assert_eq!(
-        notes::nullifier_b(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
-        jw(&nt["nullifier_b"])
-    );
-    assert_eq!(
-        notes::nullifier_a(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
-        jw(&nt["nullifier_a"])
+        notes::nullifier(&jw(&op["rho"]), &jw(&op["idHash"])).unwrap(),
+        jw(&nt["nullifier"])
     );
     assert_eq!(
         notes::identity_leaf(&jg1(&nt["identity_leaf_M"])).unwrap(),

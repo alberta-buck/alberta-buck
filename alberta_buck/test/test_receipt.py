@@ -7,7 +7,7 @@ and soundness/non-frameability (tampered opening, wrong/non-public issuer,
 forged batch binding, mismatched nullifier or face all reject), plus the A2
 private-issuer refusal that awaits Phase 2.
 
-See alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (receipts as verifiable proofs / AB-RCPT/1 "proof chain").
+See alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (receipts as verifiable proofs / AB-RCPT/2 "proof chain").
 """
 
 from __future__ import annotations
@@ -210,6 +210,7 @@ def _approve_receipt(vectors) -> ApproveReceipt:
         sender=_h(r["sender"]),
         spender=_h(r["spender"]),
         chainid=_h(r["chainid"]),
+        registry_addr=_h(r["registry"]),
         E_for_spender=_ct(r["E_for_spender"]),
         cp_proof=CPProof(
             e=_h(cp["e"]), s1=_h(cp["s1"]), s2=_h(cp["s2"]),

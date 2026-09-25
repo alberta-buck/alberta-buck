@@ -1,10 +1,10 @@
-//! The AB-RCPT/1 receipt envelope -- mirrors
+//! The AB-RCPT/2 receipt envelope -- mirrors
 //! `alberta_buck/wallet/envelope.py` byte-for-byte.
 //!
 //! A receipt core is a single canonical JSON map (THE dialect); its
 //! serialization IS the receipt.  The receipt id is
 //! `base32(sha256(canonical_bytes))` truncated; the printable envelope is
-//! `AB-RCPT/1.` + wrapped base64url + `.END`.
+//! `AB-RCPT/2.` + wrapped base64url + `.END`.
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::canonical::canonical_json_value;
 use crate::{IdError, Result};
 
-pub const ENVELOPE_HEADER: &str = "AB-RCPT/1.";
+pub const ENVELOPE_HEADER: &str = "AB-RCPT/2.";
 pub const ENVELOPE_FOOTER: &str = ".END";
 
 /// Canonical JSON bytes of a receipt core.
@@ -70,12 +70,12 @@ pub fn parse_envelope(text: &str) -> Result<Vec<u8>> {
     let text = text.replace("\r\n", "\n");
     let start = text
         .find(ENVELOPE_HEADER)
-        .ok_or(IdError("envelope: missing AB-RCPT/1. header or .END footer"))?;
+        .ok_or(IdError("envelope: missing AB-RCPT/2. header or .END footer"))?;
     let after = start + ENVELOPE_HEADER.len();
     let end = text[after..]
         .find(ENVELOPE_FOOTER)
         .map(|i| after + i)
-        .ok_or(IdError("envelope: missing AB-RCPT/1. header or .END footer"))?;
+        .ok_or(IdError("envelope: missing AB-RCPT/2. header or .END footer"))?;
     let b64: String = text[after..end].chars().filter(|c| !c.is_whitespace()).collect();
     base64url_decode(&b64)
 }

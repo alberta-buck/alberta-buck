@@ -47,7 +47,9 @@ contract StubSpendVerifier is ISpendVerifier {
         uint256          /*nullifier*/,
         uint256          /*face*/,
         address          /*recipient*/,
-        uint256          /*chainId*/
+        uint256          /*chainId*/,
+        uint256          /*flavor*/,
+        uint256          /*issuanceCommitment*/
     ) external view returns (bool) {
         return enabled;
     }

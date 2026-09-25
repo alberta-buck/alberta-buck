@@ -78,12 +78,34 @@ jobs:
           // publish a core that installs the previous kernel beside it.
           const pin = core.dependencies["alberta-buck-kernel"];
           if (pin !== tag) errs.push(`core depends on alberta-buck-kernel ${pin}, expected ${tag}`);
+          // core also pins alberta-buck-contracts exactly.  Its patch floats,
+          // but its major.minor must be this release's: a v0.2 kernel's
+          // transcripts do not verify against v0.1 contracts.
+          const cpin = core.dependencies["alberta-buck-contracts"];
+          const mm = v => v.split(".").slice(0, 2).join(".");
+          if (mm(cpin) !== mm(tag))
+            errs.push(`core depends on alberta-buck-contracts ${cpin}, not ${mm(tag)}.x`);
           if (errs.length) {
             console.error("::error::version mismatch:\n  " + errs.join("\n  "));
             process.exit(1);
           }
           console.log(`kernel, core and the kernel pin all at ${tag}`);
           EOF
+
+      - name: The pinned contracts are already on npm
+        # No job here publishes alberta-buck-contracts: it is the Solidity
+        # bundle (make contracts-dist), published by hand from core/contracts.
+        # Publishing core against a pin npm cannot serve would leave
+        # `npm i alberta-buck-core` failing for everyone, so check first.
+        working-directory: core/js
+        run: |
+          set -euo pipefail
+          pin=$(node -p 'require("./package.json").dependencies["alberta-buck-contracts"]')
+          if ! npm view "alberta-buck-contracts@$pin" version >/dev/null 2>&1; then
+            echo "::error::alberta-buck-contracts@$pin is not on npm; publish core/contracts first" >&2
+            exit 1
+          fi
+          echo "alberta-buck-contracts@$pin is available"
 
       - name: Build both wasm targets
         run: make core-build-wasm core-build-wasm-web

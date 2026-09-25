@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
@@ -16,23 +17,24 @@ contract MockBuckTie {
     function transfer(address, uint256) external pure returns (bool) { return true; }
 }
 
-/// @notice Phase 2c: the A2 eIss leaf-tie, end to end against the *real*
-///         mint_batch_a2 verifier.  Notes.mint passes each binding's eIss as the
-///         A2 circuit's public input, so a Groth16 accept proves the binding's
-///         eIss IS the committed leaf's -- closing the floating-/duplicate-
+/// @notice The A2 leaf-tie, end to end against the *real* mint_batch_a2
+///         verifier.  Notes.mint passes each binding's eIss and T as the A2
+///         circuit's public inputs, so a Groth16 accept proves the binding
+///         answers for the committed leaf -- closing the floating-/duplicate-
 ///         binding collusion sub-cases that per-batch count alone could not.
 ///
-///         The `tie` fixture pins leaf 0's eIss to the canonical issuer_reenc
-///         binding (test/vectors/identity.json), so a real binding drives the
-///         full path.  The `tie_dup` fixture commits a *distinct* second leaf;
-///         minting it with a duplicated binding (the count-only attack) now
-///         fails the leaf-tie.
+///         The `tie` fixture pins leaf 0's eIss and T to the canonical
+///         issuer_reenc binding (test/vectors/identity.json), so a real binding
+///         drives the full path.  The `tie_dup` fixture commits a *distinct*
+///         second leaf; minting it with a duplicated binding (the count-only
+///         attack) fails the leaf-tie.
 ///
 ///         NOTE on scope: the leaf-tie binds each committed leaf to a verified
-///         re-encryption of the issuer's registered Identity.  It does NOT force
-///         the binding's pk_rec to be the addressed recipient's key (see
-///         alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant", A2 recipient-key coupling / note-binding tie) and notes-flow.org (A2 flows)
-///         gap"); that residual collusion hole is out of scope here.
+///         re-encryption of the issuer's registered Identity, under the key
+///         hidden in the binding's Q.  That the key is the recipient's is the
+///         spend's to prove: the leaf commits T, and the A2 deposit fold opens
+///         it under the spender's own key (doc/review/notes-receiving-key.org,
+///         section 4.6; exercised in the fold's own tests).
 contract NotesA2TieTest is Test {
     address constant GOV = address(0xB0);
 
@@ -45,7 +47,7 @@ contract NotesA2TieTest is Test {
     function setUp() public {
         vm.chainId(1);                       // issuer_reenc transcript chainid = 1
         vj  = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         issuer = address(uint160(_u(".issuer_reenc.issuer")));
         vm.etch(issuer, hex"60006000fd");
@@ -172,6 +174,23 @@ contract NotesA2TieTest is Test {
         Notes.A2Binding[] memory bindings = new Notes.A2Binding[](1);
         bindings[0] = _binding();
         bindings[0].eIss.C.X ^= 1;       // perturb eIss -> no longer the committed leaf's
+        uint256[] memory mode = _privMode(1);
+
+        vm.prank(issuer);
+        vm.expectRevert(bytes("Notes: bad mint proof"));
+        notes.mint(fx.proof, fx.oldRoot, fx.newRoot, uint32(fx.nextLeafIndex),
+                   fx.totalFace, fx.cms, mode, bindings);
+    }
+
+    /// @notice A binding whose T is not the one the leaf committed fails the
+    ///         leaf-tie: the T the spend will open must be the T the binding
+    ///         proved about.
+    function test_a2Tie_otherT_reverts() public {
+        Fx memory fx = _loadFx("build/snark/mint_batch_a2_n1/fixtures/tie.json");
+
+        Notes.A2Binding[] memory bindings = new Notes.A2Binding[](1);
+        bindings[0] = _binding();
+        bindings[0].proof.T.X ^= 1;      // perturb T -> no longer the committed leaf's
         uint256[] memory mode = _privMode(1);
 
         vm.prank(issuer);

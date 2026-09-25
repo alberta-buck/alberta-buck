@@ -34,7 +34,8 @@ from buck_core import Web3Session, Expect, load_artifact
 `buck_core.buck_math`, `buck_core.buck_identity`, `buck_core.buck_wallet`
 and `buck_core.buck_registry` are shims that delegate to
 [`alberta-buck-kernel`](https://pypi.org/project/alberta-buck-kernel/) when
-it is installed. This package is deliberately a pure-Python wheel: keeping
+it is installed (`pip install alberta-buck-core[kernel]` brings it along,
+where a wheel exists). This package is deliberately a pure-Python wheel: keeping
 the binaries out means depending on the session API does not drag a
 per-platform wheel matrix behind it.
 
@@ -43,7 +44,7 @@ the extension, so a freshly rebuilt kernel takes effect immediately.
 
 ## Status
 
-0.1.0, prototype. Unaudited software for a monetary system, published so
+0.2.0, prototype. Unaudited software for a monetary system, published so
 the simulation and identity work can be reproduced and built on.
 
 ## Licence

@@ -4,16 +4,20 @@ Public:  identityRoot, PI_x[4], PI_y[4]  (4-limb F_q)
 Private: Mx[4], My[4], Mx_mod, My_mod, Tx[4], Ty[4], Merkle path
 
 The circuit verifies: M in identityRoot AND P_I = M + T (via EllipticCurveAddOptimised).
-The deposit coupling sigma separately proves T = b*H.
+The deposit coupling sigma separately proved T = b*H.
+
+Preserved review evidence (finding 5), not a protocol path: H is the retired
+known-log generator and the leaf is the untagged Poseidon(M.x, M.y), both from
+alberta_buck.review.known_log, so the committed fixture reproduces unchanged.
 """
 
 import json, random, sys
 
 sys.path.insert(0, '/Users/perry/src/alberta-buck')
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, point_to_words, rand_scalar
-from alberta_buck.wallet.issuer_reenc import H_POINT
+from alberta_buck.review.known_log import H_KNOWN as H_POINT, untagged_identity_leaf
 from alberta_buck.wallet.poseidon import F_R
-from alberta_buck.registry.tree import IdentityMerkleTree, identity_leaf
+from alberta_buck.registry.tree import IdentityMerkleTree
 
 
 def to_limbs(val, n=4, bits=64):
@@ -41,7 +45,7 @@ def main():
 
     # Merkle tree
     tree = IdentityMerkleTree(depth=10)
-    tree.insert_identity(M)
+    tree.insert_leaf(untagged_identity_leaf(M))
     identity_root = tree.root()
     proof = tree.path(0)
 
@@ -49,7 +53,7 @@ def main():
     assert P_I == add(M, T), "P_I != M + T"
     assert T == mul(H_POINT, b), "T != b*H"
     assert proof.verify(), "Merkle proof failed"
-    assert identity_leaf(M) == proof.leaf, "leaf mismatch"
+    assert untagged_identity_leaf(M) == proof.leaf, "leaf mismatch"
 
     witness = {
         "identityRoot": str(identity_root),

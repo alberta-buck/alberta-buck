@@ -1,7 +1,7 @@
 [package]
 # Published as alberta-buck-wallet; imported as buck_wallet.
 name = "alberta-buck-wallet"
-description = "Alberta Buck wallet kernel: canonical identity JSON, the AB-RCPT/1 envelope, receipt build/verify and the Notes flows matching the alberta_buck.wallet reference bit-for-bit"
+description = "Alberta Buck wallet kernel: canonical identity JSON, the AB-RCPT/2 envelope, receipt build/verify and the Notes flows matching the alberta_buck.wallet reference bit-for-bit"
 keywords = ["wallet", "receipt", "privacy", "ethereum", "stablecoin"]
 categories = ["cryptography::cryptocurrencies", "finance"]
 version.workspace = true
@@ -15,8 +15,8 @@ name = "buck_wallet"
 
 [dependencies]
 # Keyed to the import names; path AND version, as crates.io requires.
-buck_identity = { package = "alberta-buck-identity", path = "../buck-identity", version = "0.1" }
-buck_registry = { package = "alberta-buck-registry", path = "../buck-registry", version = "0.1" }
+buck_identity = { package = "alberta-buck-identity", path = "../buck-identity", version = "0.2" }
+buck_registry = { package = "alberta-buck-registry", path = "../buck-registry", version = "0.2" }
 # arbitrary_precision keeps integer tokens as their exact text, so the
 # canonical writer can enforce the dialect (ints of any size, no floats)
 # without ever routing a value through f64.

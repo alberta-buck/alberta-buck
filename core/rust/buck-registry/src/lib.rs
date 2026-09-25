@@ -4,8 +4,11 @@
 //! Merkle accumulator of registered identity points (`tree`), the
 //! registry-signed / ElGamal-sealed identity certificate family
 //! (`certificate`), the central sub-root aggregator whose root is the
-//! on-chain `identityRoot` (`aggregator`), and the feature-authority
-//! attestation tree (`feature`).
+//! on-chain `identityRoot` (`aggregator`, with its ring of posted roots and
+//! the composed subtree-then-aggregator paths the circuits fold), the
+//! feature-authority attestation tree, private or public (`feature`), the
+//! insurance regulator and its issuance gate (`regulator`), and the holder's
+//! attribute proofs (`attributes`).
 //!
 //! The executable specification is the Python reference in
 //! `alberta_buck/registry`; this crate matches it bit-for-bit, proven by
@@ -23,8 +26,10 @@
 //! `alberta_buck.wallet.unilateral_a2`'s import of `registry.tree`.
 
 pub mod aggregator;
+pub mod attributes;
 pub mod certificate;
 pub mod feature;
+pub mod regulator;
 pub mod tree;
 
 pub use buck_identity::{G1w, IdError, Result, W256, ZERO_W};

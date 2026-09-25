@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254}                       from "../src/BN254.sol";
 import {IdentityRegistry}            from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck}                        from "../src/Buck.sol";
 import {BuckCredit}                  from "../src/BuckCredit.sol";
 import {BuckCreditHarness}                  from "./harness/BuckCreditHarness.sol";
@@ -44,6 +45,8 @@ contract MintVerifierTest is Test {
     address internal constant GOV    = address(0xA0);
     address internal constant ISSUER = address(0x1551E1);
     address internal constant POOL   = address(0xBA51C);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     // Gated-only mint: alice is a bound PUBLIC issuer with a known key, so the
     // batch mints carry a valid issuer Schnorr over keccak256(cms).
@@ -67,7 +70,12 @@ contract MintVerifierTest is Test {
         vm.chainId(1);
 
         string memory ij = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "test/harness/IdentityRegistryHarness.sol:IdentityRegistryHarness",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer(ij);
         alice = address(uint160(vm.parseJsonUint(ij, ".alice.registrant")));
         bob   = address(uint160(vm.parseJsonUint(ij, ".bob.registrant")));
@@ -175,6 +183,7 @@ contract MintVerifierTest is Test {
         ipk.Y.X[1] = _u(j, ".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(j, ".issuer.pk_Y.y[0]");
         ipk.Y.Y[1] = _u(j, ".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(j, ".issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, ipk);
     }
@@ -182,17 +191,20 @@ contract MintVerifierTest is Test {
     function _registerFrom(string memory j, string memory who, address acct) internal {
         BN254.G1Point memory pk = _g1(j, string.concat(".", who, ".elgamal_kp.pk"));
         IdentityRegistry.ElGamalCT memory E = _ct(j, string.concat(".", who, ".ciphertext"));
-        IdentityRegistry.PSSig memory sigma;
-        sigma.sigma_1 = _g1(j, string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        sigma.sigma_2 = _g1(j, string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+        IdentityRegistry.PSPresentation memory sigma;
+        sigma.A = _g1(j, string.concat(".", who, ".ps_presentation.A"));
+        sigma.B = _g1(j, string.concat(".", who, ".ps_presentation.B"));
         IdentityRegistry.RegistrationProof memory p;
         string memory base = string.concat(".", who, ".registration_proof");
         p.e    = _u(j, string.concat(base, ".e"));
         p.s_m  = _u(j, string.concat(base, ".s_m"));
         p.s_r  = _u(j, string.concat(base, ".s_r"));
-        p.A_ps = _g1(j, string.concat(base, ".A_ps"));
+        p.s_sk = _u(j, string.concat(base, ".s_sk"));
+        p.s_b = _u(j, string.concat(base, ".s_b"));
+        p.C1 = _g1(j, string.concat(base, ".C1"));
         p.T_C  = _g1(j, string.concat(base, ".T_C"));
         p.T_R  = _g1(j, string.concat(base, ".T_R"));
+        p.T_key = _g1(j, string.concat(base, ".T_key"));
         vm.prank(acct);
         reg.register(ISSUER, pk, E, sigma, p);
     }
@@ -930,7 +942,7 @@ contract MintVerifierTest is Test {
     // burn a leaf seat without backing it with a real note.  Whether to
     // permit that is a policy decision; the present circuit + contract
     // permit it because the SNARK still proves the leaves are well-formed
-    // commitments (Poseidon-5 openings) and the totalFace == sum(v_i)
+    // commitments (Poseidon-6 openings) and the totalFace == sum(v_i)
     // binding still holds when sum(v_i) == 0.
     function test_mint_zeroFace_acceptedAndAdvancesTree() public {
         Fx memory fx = _loadFx("build/snark/mint_batch_n1/fixtures/zero_face.json");

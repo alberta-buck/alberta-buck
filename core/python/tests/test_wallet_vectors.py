@@ -3,7 +3,7 @@
 Replays core/vectors/wallet-kernel-vectors.json (emitted by the Python
 reference via alberta_buck.wallet.wallet_kernel_vectors, nonces
 included) through the buck_core.buck_wallet binding: the canonical JSON
-dialect, the AB-RCPT/1 envelope, every receipt build (JSON-args ABI),
+dialect, the AB-RCPT/2 envelope, every receipt build (JSON-args ABI),
 the tier-1 verifier, the unilateral A1/A2 flows and the issuer
 ceremony.  The Rust and JS suites assert the same file.
 
@@ -79,8 +79,6 @@ def _receipt_args(wv, row):
         args["face"] = mint["opening"]["v"]
         if kind in ("note-b1", "note-a1"):
             args["issuer_sig"] = mint["issuer_sig"]
-            args["sigma_R"] = mint["sigma_R"]
-            args["sigma_s"] = mint["sigma_s"]
         if kind == "note-b1":
             args["eDepForIss"] = mint["eDepForIss"]
         if kind == "note-a1":
@@ -89,8 +87,24 @@ def _receipt_args(wv, row):
         if kind.startswith("note-a2"):
             args["eNote"] = mint["eNote"]
             args["eIss"] = mint["eIss"]
+            # idHash commits the binding's T either way; gamma opens it.
+            args["T"] = mint["binding"]["T"]
+            args["gamma"] = mint["nonces"]["gamma"]
             if kind == "note-a2":
                 args["binding"] = mint["binding"]
+        if kind.startswith("note-a1") or kind.startswith("note-a2"):
+            # The addressed legs: the mailbox key, and whichever evidence the
+            # generating role could produce.  The recipient holds k; the issuer
+            # holds the randomness it encrypted with.
+            alice = wv["parties"][row["payee"]]
+            args["pk_recv"] = alice["pk_recv"]
+            args["mailbox_binding"] = row.get("mailboxBinding")
+            if row["role"] == "recipient":
+                args["k_recv"] = alice["k_recv"]
+            else:
+                args["r_note"] = mint["nonces"]["r_note"]
+                args["r_id"] = mint["nonces"][
+                    "r_rec" if kind == "note-a1" else "r_prime"]
     return args
 
 
@@ -125,7 +139,7 @@ def test_tampered(wv):
 def test_unilateral_a2(wv):
     u = wv["unilateral_a2"]
     mint_args = {
-        "sk_iss": u["sk_iss"], "E_reg": u["E_reg"], "M_rec": u["M_rec"],
+        "sk_iss": u["sk_iss"], "E_reg": u["E_reg"], "pk_recv": u["pk_recv"],
         "v": u["v"], "rho": u["rho"], "issuer": u["issuer"],
         "chainid": u["chainid"], "predicate": u["predicate"],
         "nonces": {k: u[k] for k in
@@ -137,13 +151,15 @@ def test_unilateral_a2(wv):
         assert minted[key] == u["minted"][key], key
 
     rcpt = json.loads(bw.make_receipt_a2(json.dumps({
-        "m_rec": u["m_rec"], "minted": minted, "issuer": u["issuer"],
+        "k_recv": u["k_recv"], "M_rec": u["M_rec"],
+        "minted": minted, "issuer": u["issuer"],
         "chainid": u["chainid"], "tree": {"depth": u["tree"]["depth"],
                                           "leaves": u["tree"]["leaves"]},
         "t_vd": u["t_vd"],
     })))
     assert rcpt["M_I"] == u["receipt"]["M_I"]
     assert rcpt["M_rec"] == u["receipt"]["M_rec"]
+    assert rcpt["pk_recv"] == u["receipt"]["pk_recv"]
     assert rcpt["vd"] == u["receipt"]["vd"]
     assert rcpt["M_I_member"] == u["receipt"]["M_I_member"]
     assert rcpt["M_rec_member"] == u["receipt"]["M_rec_member"]
@@ -170,21 +186,23 @@ def test_unilateral_a1(wv):
     tree = {"depth": wv["unilateral_a2"]["tree"]["depth"],
             "leaves": wv["unilateral_a2"]["tree"]["leaves"]}
     minted = json.loads(bw.mint_unilateral_a1(json.dumps({
-        "M_rec": u["M_rec"], "v": u["v"], "rho": u["rho"],
-        "m_issuer": u["m_issuer"], "sigma_R": u["sigma_R"],
-        "sigma_s": u["sigma_s"], "predicate": u["predicate"],
+        "M_rec": u["M_rec"], "pk_recv": u["pk_recv"],
+        "v": u["v"], "rho": u["rho"],
+        "m_issuer": u["m_issuer"], "predicate": u["predicate"],
         "nonces": {"r_prime": u["r_prime"], "r_note": u["r_note"]},
     })))
     for key in ("eNote", "eRec", "idHash", "cm", "opening"):
         assert minted[key] == u["minted"][key], key
 
     rcpt = json.loads(bw.make_receipt_a1(json.dumps({
-        "m_rec": u["m_rec"], "minted": minted, "M_iss": u["M_iss"],
+        "k_recv": u["k_recv"], "M_rec": u["M_rec"],
+        "minted": minted, "M_iss": u["M_iss"],
         "issuer": u["issuer"], "chainid": u["chainid"], "tree": tree,
         "t_vd": u["t_vd"],
     })))
     assert rcpt["M_iss"] == u["receipt"]["M_iss"]
     assert rcpt["M_rec"] == u["receipt"]["M_rec"]
+    assert rcpt["pk_recv"] == u["receipt"]["pk_recv"]
     assert rcpt["vd"] == u["receipt"]["vd"]
 
     res = json.loads(bw.verify_receipt_a1(json.dumps({
@@ -208,3 +226,13 @@ def test_issuer(wv):
     assert cred["sigma_1"] == i["sigma_1"]
     assert cred["sigma_2"] == i["sigma_2"]
     assert cred["delivery"] == i["delivery"]
+
+
+def test_notes_kernel_replay(wv):
+    """The Notes section -- receiving key, delivery, mailbox binding, fold witnesses -- through the
+    kernel's JSON-args entry points, compared as parsed JSON with the Python reference."""
+    rows = wv["notes"]
+    assert len(rows) >= 11, "the notes section lost rows"
+    for row in rows:
+        got = json.loads(getattr(bw, row["fn"])(json.dumps(row["args"])))
+        assert got == row["want"], f"{row['fn']} diverges from the Python reference"

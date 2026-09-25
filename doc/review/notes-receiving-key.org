@@ -1,0 +1,1129 @@
+#+TITLE: Notes: independent receiving keys, architecture of record
+#+DATE: 2026-09-20
+#+OPTIONS: toc:3 num:t
+#+PROPERTY: header-args :eval never-export
+
+* 1 Purpose and status
+:PROPERTIES:
+:CUSTOM_ID: purpose
+:END:
+
+This is the architecture for review finding R5: addressed Notes are encrypted
+to the recipient's identity point, so the identity scalar is the decryption
+key, and every party that legitimately holds it can read that recipient's
+note traffic. The finding was deferred behind the accumulator; this document
+records the approach, the prototype that establishes it, and what it costs.
+
+Status: implemented across four backends, with all three spend gates built,
+set up under dev entropy, and verifying on chain; =Notes.sol= verifies the
+folded gate and nothing else, and the superseded verifiers are deleted rather
+than deprecated.  Receipts name by evidence, never by a derivation anyone can
+repeat, and A2's naming is non-frameable: the mint binding's =T= is committed
+in =idHash= and the fold ties it to the spender's own key ([[#split][section
+4.6]], closed 2026-09-22).  The reading plan ([[#reading-plan]]) has what
+remains before the merge.
+
+Implemented on 2026-09-20, with =alberta_buck/test/test_receiving_key.py=
+carrying twenty-six conformance tests:
+
+- =wallet/recvkey.py=: the receiving key, derived from wallet seed material
+  and not from the identity, with rotation indexed by the same counter the
+  accumulator's salt uses; and the holder-produced binding evidence of
+  [[#architecture][section 3.5]].
+- =registry/tree.py=: =receiving_leaf=, the third leaf function, committing
+  =(M, pk_recv, salt)=; and =insert_receiving=, the admission.
+- =wallet/deposit_fold.py=: the folded gate of [[#fold][section 3.3a]] -- one
+  witness, four relations, the payload theft refused on relation (3) -- as
+  the reference the circuit is checked against.
+
+Still to come, and deliberately together: the A1 and A2 payload
+substitution, =make_receipt=, the circuits, and the one regeneration they
+share ([[#sequencing]]).
+
+The prototypes remain as the standalone argument:
+=scripts/review/receiving_key_proto.py= (eleven checks),
+=deposit_gate_split.py= (nine) and =deposit_gate_folded.py= (three).
+
+Dependency: the salted accumulator leaf of
+[[file:accumulator-spec.org][the accumulator specification]], because the
+binding between a receiving key and an identity must be hidden, and that leaf
+is where it hides.
+
+* 2 Why the current design cannot be patched
+:PROPERTIES:
+:CUSTOM_ID: contradiction
+:END:
+
+The system's read/write separation makes the identity scalar a *read
+capability*, disclosed to every counterparty by design: Bob learns Alice's
+scalar when she pays him. The note layer then used that same scalar as a
+*decryption key*. Those two roles are incompatible. A value handed to
+everyone you transact with cannot also be what decrypts your future traffic,
+because disclosure is then retroactive and prospective at once.
+
+No treatment of the ciphertext repairs this. If the identity scalar is the
+private key, whoever holds it decrypts, and the design discloses it on
+purpose. The key has to move off the identity.
+
+** 2.1 The precise defect, which is sharper than the general one
+
+An A1 note encrypts the recipient's identity point *under the recipient's
+identity point*:
+
+#+begin_example
+eRec = (r'G, M_rec + r'*M_rec) = (r'G, m_rec*(G + R))
+#+end_example
+
+That is not a Diffie-Hellman instance at all. The message and the key share
+one secret, so the usual hardness collapses: a candidate scalar is tested
+with a single multiplication, =C == m_i*(G + R)=, needing no proof, no key
+and no issuer secret. The prototype's first check does exactly that and
+identifies the recipient out of nine candidates.
+
+Encrypt the same plaintext under a key independent of the identity and the
+residual test is plaintext-checking under an independent key, which is a
+decisional Diffie-Hellman decision and infeasible. That is the same lock the
+registration layer already relies on.
+
+* 3 The architecture
+:PROPERTIES:
+:CUSTOM_ID: architecture
+:END:
+
+** 3.1 Notes are addressed to a receiving key
+
+The recipient holds an independent receiving secret =k= with =pk_recv = k*G=.
+A payer addresses a note by encrypting under =pk_recv= instead of under
+=M_rec=. The plaintexts do not change:
+
+#+begin_example
+A1   eNote = (r_n*G, v*G      + r_n*pk_recv)     was r_n*M_rec
+     eRec  = (r'*G,  M_rec    + r'*pk_recv)      was r'*M_rec
+A2   eNote = (r_n*G, v*G      + r_n*pk_recv)
+     eIss  = (r'*G,  M_iss    + r'*pk_recv)
+#+end_example
+
+Unilateral addressing survives: the payer needs =pk_recv=, learned out of
+band through the same channel that carries =M_rec= today, and needs nothing
+from the recipient at payment time.
+
+** 3.2 The binding is inside the accumulator leaf, not published
+
+A note addressed to a key of the payer's choosing would break mutual
+decryptability and the receipt, so the receiving key must be bound to the
+identity. That binding =MUST NOT= be public: a spend proving against a public
+binding would reveal the recipient's registered key and deanonymise them to
+everyone, which is worse than the problem being solved.
+
+The leaf therefore commits both -- and it turns out to need committing
+*twice*, because the fact has two consumers that hold different things:
+
+#+begin_example
+receiving_leaf(m_rec, k, salt)       = Poseidon(TAG_R, m_rec, k, salt)
+mailbox_leaf(M_rec, pk_recv, salt')  = Poseidon(TAG_M, M.x, M.y, pk.x, pk.y, salt')
+#+end_example
+
+The SPEND proves the association in zero knowledge and the prover holds the
+scalars, so its leaf commits them: committing the points there would oblige
+the circuit to re-derive both, at 471,896 constraints apiece
+([[#fold-built][why scalars]]). A PAYER must check the association BEFORE
+paying and holds no secret at all -- only the two points, which it needs
+anyway -- so for that consumer a scalar leaf is unopenable, and its leaf
+commits the points. Distinct associations carry distinct salts, so the two do
+not link.
+
+Neither leaf is public: both are salted, and the prototype confirms the
+scalar one stays unscannable against a party holding every certified
+identity, the whole published subtree, and =pk_recv= itself.
+
+** 3.3 The note-binding relation keeps its shape
+
+The note-binding circuits avoid variable-base scalar multiplication by
+witnessing the product of the randomness and the recipient's scalar and
+computing it as a fixed-base multiple of =G=. Under the substitution the
+witness becomes =r*k= instead of =r*m_rec= and the shape is identical:
+
+#+begin_example
+R = r*G           C = M + (r*k)*G
+#+end_example
+
+For that relation this is a substitution of which scalar the recipient proves
+knowledge of, not a redesign, and the prototype checks it for both the
+identity and the value ciphertext. Constraint counts should be close to
+unchanged, which =MUST= be measured rather than assumed.
+
+** 3.3a The deposit gate does NOT keep its shape, and must be folded
+:PROPERTIES:
+:CUSTOM_ID: fold
+:END:
+
+=deposit_couple_prove= uses one witness =m_rec= for two jobs: it decrypts the
+note's ciphertext, and it is the identity inside the deposit account's
+registered credential. The Fiat-Shamir nonce shared across those two relations
+is not an implementation detail. It /is/ the statement "the account cashing
+this note belongs to the person the note was addressed to".
+
+Separating the two jobs deletes that statement. =deposit_gate_split.py=
+demonstrates the consequence: a thief holding a stolen payload proves the
+reading half with the stolen =k= and the identity half with its /own/
+registered identity, both halves are true, and nothing says they belong
+together. The note becomes spendable by the wrong person. The sigma also
+accepts any receiving key at all, because "P commits whatever this scalar
+decrypts to" is satisfied by every scalar.
+
+This is finding 5 in a new place: an equality inferred from two proofs that
+share a public point. The remedy is the same. One witness, one circuit, and
+the tie stated rather than assumed:
+
+#+begin_example
+(1) k decrypts the note ciphertext to the point committed in P
+(2) the account credential decrypts under sk to the identity M
+(3) a registered leaf commits the pair (M, k*G) under the holder's salt
+(4) that leaf's path folds to a posted root
+#+end_example
+
+Relation (3) is the step that used to be free, because the two scalars were
+the same value. =deposit_gate_folded.py= builds this witness, refuses the
+thief on relation (3), and shows a rotated receiving key spending under an
+unlinkable leaf.
+
+*Consequence for sequencing.* The receiving-key change and the finding-5 fold
+are the same piece of circuit work, not two adjacent ones. Both replace a
+public-point equality with a shared private witness, both need the
+accumulator leaf, and both land in one trusted setup together with the
+aggregator depth raise.
+
+** 3.4 Rotation and succession
+
+A new receiving key is a new leaf with a fresh salt and the old leaf cleared:
+the re-association mechanism the accumulator already specifies. Two leaves for
+one identity with different keys do not link.
+
+** 3.5 The payer's assurance is a holder-produced proof
+
+For a receipt to name a person, the payer needs the identity, which it learns
+bilaterally as today, and assurance that =pk_recv= belongs to it. That
+assurance is holder-produced and the receipt captures it at payment time --
+but it is a *hash and a path*, not a proof, and the difference matters.
+
+Against the scalar leaf the payer had three ways forward and all three were
+worse: take =k= from the holder, which hands over the mailbox in both
+directions in time; take a Groth16 proof of the leaf's preimage, which costs
+a fixed-base multiplication, a ceremony and a pairing verifier inside every
+receipt checker; or go without, and address notes to unverified keys. The
+mailbox leaf of [[#architecture][3.2]] costs one Poseidon and one path, and
+=verify_receiving_binding= needs no secret at all.
+
+Which side needs it, and which does not, is worth stating because it is not
+symmetric. A RECIPIENT-generated receipt does not: its verifiable decryption
+under =pk_recv= plus its own self-naming already tie the receipt to the party
+controlling that Identity's account. An ISSUER-generated one does: the issuer
+cannot open the note's ciphertexts at all -- that capability was the defect --
+so without the binding it names the MAILBOX it paid and the receipt is stamped
+=UNVERIFIED RECIPIENT=.
+
+** 3.6 B1 needs no change in kind
+
+B1 encrypts its depositor evidence under the issuer's *registered account
+key* (=elgamal_encrypt(M_dep, pk_iss, r)=), not under an identity scalar, so
+knowing a certified record does not decrypt it. B1 was right all along and
+A1 and A2 are the deviation. A design whose odd case turns out to be the
+correct one usually already contains its own answer.
+
+* 4 Blast radius
+:PROPERTIES:
+:CUSTOM_ID: blast-radius
+:END:
+
+| Location | Change |
+|----------+--------|
+| =wallet/unilateral_a1.py= lines 99, 102 | the encryption key argument: =M_rec= becomes =pk_recv= |
+| =wallet/unilateral_a2.py= lines 182, 185 | the same, twice |
+| =wallet/b1_binding.py= | none; it already uses a registered account key |
+| The receiving key itself | generation, seed-derived recovery, and its place in the wallet's key material |
+| =registry/tree.py= | a leaf variant committing the receiving key alongside the identity |
+| =circuits/note_binding.circom=, =note_binding_a1.circom= | the witnessed product becomes =r*k=; one private input renamed, the relation unchanged |
+| the deposit gate | folded into one circuit carrying relations (1) to (4) of section 3.3a; this is the finding-5 fold, not an addition to it |
+| =wallet/unilateral_a2.py= =deposit_couple_prove= | gains the receiving secret as a witness and loses the shared nonce as the tie |
+| =circuits/spend.circom= | unchanged: it never sees the identity |
+| The registry | registration of a receiving key bound to the identity, and its rotation |
+| Receipts | capture of the binding proof, additive |
+| Vectors and fixtures | the A1 and A2 note vectors, the Notes end-to-end fixtures, and the mint fixtures pinned to them |
+
+Four wallet call sites carry the defect. That is the whole of it on the
+addressing side, which is the strongest argument that the architecture is
+right: a defect that takes four arguments to fix was a mistake about which
+key to use, not a mistake about structure.
+
+** 4.1 Why the payload substitution cannot land alone
+:PROPERTIES:
+:CUSTOM_ID: sequencing
+:END:
+
+Surveyed against the source on 2026-09-20, after the architecture's own
+surface was implemented. Two facts constrain the order, and neither was
+visible from the design.
+
+*The mint is ported four times, and the vectors are asserted current.* The
+A1 payload is built in Rust as well as Python --
+=core/rust/buck-wallet/src/flows.rs= computes
+=elgamal_encrypt(m_rec_pt, m_rec_pt, r_prime)= for =eRec=, with both
+bindings and =core/js/src/wallet-core.js= on top of it. And
+=test_wallet_vectors_current= asserts that freshly built vectors equal
+=core/vectors/wallet-kernel-vectors.json= byte for byte. So changing the
+Python mint alone does not leave a passing suite with a documented gap: it
+leaves either a stale committed vector or a Rust kernel computing a
+different note. The substitution is a four-backend change with one
+regeneration, which is the shape every identity change in this repository
+has.
+
+That regeneration is the expensive one, and the plan already records paying
+for it twice as the mistake to avoid: the Notes end-to-end fixtures embed an
+identity root, so regenerating them runs the note-binding prover over a
+2.4M-constraint circuit. The aggregator depth raise, the finding-5 repairs,
+the folded gate and this substitution all force it. They go together or they
+go three times. How much of that is a /trusted setup/ rather than a re-prove
+turned out to be less than assumed; see [[#circuit-cost]].
+
+*A1 gains an argument; A2 gains none.* The earlier reading of "four call
+sites, the encryption key argument and nothing else" holds for A2 and not
+for A1, and the difference is worth stating because it sets which signatures
+move:
+
+| Function | Change | Why |
+|----------+--------+-----|
+| =mint_unilateral_a2= | rename only | =M_rec= appears three times and every one is the key role: =eNote=, =eIss=, and the =issuer_reenc= anti-framing slot. Nothing else reads it, so the parameter becomes =pk_recv= and no signature moves. |
+| =mint_unilateral_a1= | one new argument | =eRec= encrypts =M_rec= /under/ =M_rec=: the identity is the plaintext as well as the key. Only the key becomes =pk_recv=, so the mint needs both points. |
+| =make_receipt=, =make_receipt_a1= | signature changes | each derives the recipient's identity from the secret it decrypts with, and those are now two values. |
+| =verify_receipt=, =verify_receipt_a1= | additive | the verifiable decryption is checked under =pk_recv=, so the receipt carries it, plus the binding of [[#architecture][3.5]]. |
+
+Carrying =pk_recv= in a plaintext receipt costs nothing: the receipt already
+names both parties, and the key alone decides no addressing, which is the
+=receiving_key_proto= check that hands the adversary =pk_recv= and watches it
+find nothing.
+
+** 4.2 What the circuits actually cost, measured
+:PROPERTIES:
+:CUSTOM_ID: circuit-cost
+:END:
+
+Measured on 2026-09-20 against the deployed build, because the plan had
+assumed the note-binding substitution forces a rebuild and it does not.
+
+*A2's note-binding circuit does not change at all.* It never multiplies by
+the recipient's scalar at a variable base -- it witnesses the products
+=sm = s*k=, =rm = r*k= and checks them fixed-base -- so substituting the
+receiving secret for the identity scalar renames a private input and leaves
+the arithmetic alone. Compiled both ways, the =r1cs= is byte-identical, and
+identical to the one the deployed proving key was generated from:
+
+#+begin_example
+750a1f46...eca9b   circuits/note_binding.circom, before the rename
+750a1f46...eca9b   circuits/note_binding.circom, after
+750a1f46...eca9b   build/snark/note_binding/note_binding.r1cs (deployed)
+#+end_example
+
+So the 3.3 GB proving key, the verification key and
+=NoteBindingVerifier.sol= all survive untouched. A receiving-key witness
+proves against them in 5.2 seconds and verifies: =WITNESS IS CORRECT= over
+2,416,748 constraints, then =OK!=. No trusted setup, no verifier
+redeployment, no ceremony.
+
+One wrinkle worth recording, because it looks like a contradiction and is
+not: the =circom= C++ witness calculator embeds input signal /names/, so it
+refuses a renamed input with =Signal not found= even though the =r1cs= is
+identical. Recompiling the calculator is minutes; it is not a setup.
+
+*A1's does change, and needs a fresh setup.* A1 carries both facts in one
+ciphertext, so its circuit needs both scalars: the identity as a /base
+multiple/ (=M_rec = m_rec*G= in the =eEnc= and =P_I= relations) and the
+receiving secret as a /product factor/ (=u = v + rn*k=, =tm = t*k=). That
+adds a private input, so the =r1cs= differs and the proving key must be
+regenerated:
+
+| Circuit | =r1cs= | Setup |
+|---------+--------+-------|
+| =note_binding.circom= (A2) | byte-identical | none |
+| =note_binding_a1.circom= | =371041e7= vs deployed =02f70e06=, 2,859,018 constraints | required |
+
+The same asymmetry as the mint, from the same cause: A1 names and keys in
+one object, A2 only keys. Where that asymmetry appears, A1 pays.
+
+In the end neither setup was needed and both circuits are retired: the fold
+absorbed the note tie as one of its relations, so =note_binding.circom= and
+=note_binding_a1.circom= left the tree with the rest of the superseded surface
+([[#reading-plan][landing 1]]). The measurement above is kept because it is
+what established that the substitution was cheap and the /gate/ was the
+expensive part -- which is why the fold was built rather than the substitution
+shipped alone.
+
+*What this cost in the end.* Nothing, for A2's note binding -- and the A1
+sibling was never set up, because the fold absorbed it. The end-to-end world
+regenerates through the gates themselves, and the generator now builds its
+witness from the serialized payload, which turned a fixture that proved a
+spend nobody could perform into one that proves the delivery sufficient.
+
+** 4.3 The folded gate, built and measured
+:PROPERTIES:
+:CUSTOM_ID: fold-built
+:END:
+
+=circuits/deposit_fold_a1.circom=, with
+=alberta_buck/wallet/deposit_fold.py= as its clear-text reference and
+=scripts/snark/gen_deposit_fold_a1_input.py= as its witness builder.
+
+*The three finding-5 defects are absent by construction rather than patched.*
+That is the fold's dividend, and it is worth stating precisely because the
+plan had them down as three separate repairs:
+
+| Defect | How folding removes it |
+|--------+------------------------|
+| The witnessed tie point =T= | =P_I= existed only so a sigma and a membership SNARK could share a hidden value. One proof needs no shared point, so there is no =P_I=, no blind, and no =ScalarMulH= |
+| Unchecked 64-bit limbs | Every witnessed limb array is consumed by =ScalarMulG=, which range-checks each limb with =Num2Bits(64)=. The intermediate products are native signals, so no limb of theirs exists to alias |
+| Incomplete addition | Sums of points become sums of SCALARS before multiplication -- =eEnc.C = (m_rec + t*k)*G= rather than =m_rec*G + (t*k)*G= -- so the circuit performs no curve addition at all |
+
+*The constraint budget forced a better leaf.* Built over point coordinates
+the gate is 4,247,066 constraints, against a =pot22= ceiling of 4,194,304 --
+a miss of 52,762, or 1.3%. The two fixed-base multiplications that re-derive
+=M_rec= and =pk_recv= from scalars the prover already holds cost 943,792 of
+that, 22% of the circuit, purely to reach the leaf. Committing the scalars
+instead brings it to *3,303,970*, inside the ceiling with 890,334 to spare --
+enough for the aggregator depth raise, which costs about 2,400.
+
+That change is in the specification as v0.7, and it binds more tightly than
+what it replaced: the circuit now hashes the very signals its other relations
+consume, so the identity in the credential relation and the identity in the
+leaf are the /same signal/ rather than two values joined by a derivation
+whose output limbs the gadget does not range-check.
+
+| Circuit | Constraints | Setup |
+|---------+-------------+-------|
+| =note_binding.circom= (A2) | 2,416,748 | none -- r1cs unchanged |
+| =note_binding_a1.circom= | 2,859,018 | required |
+| =deposit_fold_a1.circom= | 3,303,970 | required, fits =pot22= |
+| =deposit_fold_a2.circom= | 3,336,421 | required, fits =pot22= |
+
+*Validated at the witness level, which needs no ceremony.* Two independently
+written implementations of the same relations -- the circom and the Python
+reference -- agree on an honest witness, for both gates:
+=WITNESS IS CORRECT= across all 3,303,970 constraints for A1, and across all
+3,336,421 for A2.
+
+And the relations are enforced /in the circuit/, not merely in the reference.
+Tampering with one private signal of an otherwise honest witness makes the
+C++ calculator abort at a named constraint:
+
+| Tamper | Refused at | Which relation |
+|--------+------------+----------------|
+| =salt= alone | =identityRoot === mp.root= | (4): the leaf moved, so the path stops folding to the posted root |
+| =m_rec= alone | =wV.out === mV.out + tk= | (1): the Identity IS the point =k= decrypts the note to |
+
+The second is the fold's argument made concrete. One =m_rec= signal carries
+the decryption relation, the credential relation and the leaf, so a single
+tamper breaks all three at once. That is what "state the tie instead of
+inferring it" buys: there is no seam between the two secrets for a thief to
+work in, because there are no longer two proofs to put a seam between.
+
+*The A2 sibling is written too*, =circuits/deposit_fold_a2.circom=, and its
+extra relation is cheap: 3,336,421 constraints against A1's 3,303,970, under
+1% more. Both carry seven fixed-base multiplications; A2's fifth relation, its
+two curve additions and its limb range checks are all small beside one of
+those. Where A1 avoids curve addition by construction, A2 cannot -- its
+plaintext is an arbitrary point -- so it instead ENFORCES the incomplete
+gadget's precondition, asserting at each addition that the two x-coordinates
+differ, which excludes the doubling and the negation case together. Comparing
+them reduced mod the native field is sufficient, since equal true coordinates
+would be congruent.
+
+*What the gates have.* A dev-entropy setup each, a generated Solidity
+verifier, an adapter that derives every public input on chain, and the
+=Notes.sol= call path -- the only addressed call path there is. What they do
+not have is a ceremony.
+
+** 4.4 Why only A2 ships issuer witness material
+:PROPERTIES:
+:CUSTOM_ID: payload
+:END:
+
+Settled 2026-09-21. The rule turns out to be one line, and it decides all
+three flavours at once:
+
+#+begin_quote
+A note ships witness material about a party *other than the prover* exactly
+when its spend proof must assert something about that party. Only A2 must.
+#+end_quote
+
+| Flavour | Who must be proven registered | Who makes the proof | Witness shipped |
+|---------+-------------------------------+---------------------+-----------------|
+| A1 | the recipient | the recipient | none -- it holds its own salt |
+| A2 | the recipient /and the issuer/ | the recipient | the issuer's salt |
+| B1 | the depositor | the depositor | none -- it holds its own salt |
+
+A1 and B1 prove membership of the prover's *own* Identity, so the prover has
+its own salt and nothing needs to travel. A2 is the exception because its
+ciphertext decrypts to the ISSUER's Identity, and the recipient must show that
+point is registered -- otherwise a colluding issuer keys the note to a
+throwaway and leaves the recipient holding garbage no receipt can name. That
+is a claim about a third party, so the third party must supply the witness.
+
+*What travels, and what does not.* Only the salt. Paths go stale as the
+subtree grows; salts do not. The recipient rebuilds the path from the
+published subtree at spend time, which is what publishing private subtrees in
+full was for ([[file:accumulator-spec.org::#publication][specification section
+9]]).
+
+*Which salt.* Not the issuer's receiving-leaf salt -- that leaf commits the
+issuer's mailbox key, and opening it would hand every recipient the issuer's
+reading key. It is the salt of a SECOND association of the same Identity, an
+ordinary =identity_leaf_salted=. Distinct associations carry distinct salts
+([[file:accumulator-spec.org::#renewal][section 8.3]]), so the one that names
+the issuer says nothing about the one that reads its mail. The mechanism
+already existed; A2 is simply its first consumer.
+
+*Where the hiding generator survives, and where it does not.* Neither fold
+instantiates =ScalarMulH=: folding removed the shared hidden point that
+needed a blind. So =H= remains in exactly two places, and they have opposite
+requirements. Inside =issuer_reenc= it blinds within ONE sigma, where the
+extractor recovers both openings and a known discrete log costs nothing --
+which is what that module's source comment says, and for that use it is
+right. Across B1's sigma and its membership proof it carries an equality
+between two proofs, and there a known log is fatal. So the hash-to-curve
+generator is needed for B1's =P_dep= and nothing else; the A2 mint binding
+can keep the generator it has.
+
+*Would A1 or B1 gain from shipping more issuer data?* No, and in both
+directions the answer is instructive.
+
+- *It cannot reduce the proving cost.* Every fixed-base multiplication in
+  either fold pins one of the /prover's own/ secrets -- its randomness, its
+  receiving key, its account key, its identity. Public data about a
+  counterparty cannot discharge a constraint whose job is to pin a witness the
+  counterparty does not hold.
+- *For A1 it would add nothing and cost staleness.* A1's issuer is public by
+  the flavour's definition, so it belongs in a public subtree with an unsalted
+  leaf, and any party that knows the issuer's Identity computes that leaf
+  itself. A shipped path would only go stale.
+- *For B1 it would be a privacy loss for no gain.* The fact B1 needs -- the
+  depositor is registered -- travels as a /proof/ in the spend transaction,
+  which the issuer reads off chain and verifies with no witness at all. That
+  is already the cheapest possible form. Shipping the depositor's salt instead
+  would let the issuer locate and watch the depositor's leaf, which is strictly
+  worse.
+- *And B1 cannot be helped by issuer key material at all*, for a reason worth
+  recording because it looks like an optimisation waiting to happen. B1's
+  depositor forms =E_dep_for_iss = (rG, M_dep + r*pk_iss)=. To factor
+  =r*pk_iss= through =G= -- which is what makes A1 and A2 cheap -- the
+  depositor would need =sk_iss=. Any construction that gives it that hands the
+  depositor the key which is supposed to make the issuer the only reader. B1's
+  one variable-base product is irreducible, and that is a third reason not to
+  fold B1.
+
+So the three payloads are each minimal for their own privacy and proving
+requirements, and the differences are not incidental: they track exactly which
+party is private and which party is proving.
+
+** 4.5 What each flavour must prove, side by side
+:PROPERTIES:
+:CUSTOM_ID: flavours
+:END:
+
+The three flavours are not three variations on one gate. They differ along
+axes that turn out to be mostly consequences of two root facts, and this
+table is the compressed form of everything sections 3 and 4 establish.
+
+#+ATTR_LATEX: :font \scriptsize
+| | A1 addressed, public issuer | A2 addressed, private issuer | B1 bearer, public issuer |
+|---+-----------------------------+------------------------------+--------------------------|
+| Spend authority | the Identity named at mint | the Identity named at mint | knowledge of \( \rho \) |
+| Whose secret opens the payload | recipient's \( k \) | recipient's \( k \) | *issuer's* \( sk_{iss} \) |
+| Who produces the naming evidence | recipient | recipient | *issuer*, off chain |
+| Two facts, how many secrets | *two* (\( m_{rec}, k \)) | *two* (\( m_{rec}, k \)) | *one* (\( m_{dep} \)) |
+| Tie mechanism | leaf relation, in-circuit | leaf relation, in-circuit | shared FS nonce, sound once \( \log_G H \) unknown |
+| Note-to-spend tie needed | yes | yes | *no* -- evidence is fresh at spend |
+| Decrypted plaintext | \( M_{rec} = m_{rec}G \) | \( M_I \), arbitrary point | \( M_{dep} = m_{dep}G \) |
+| Curve addition needed | *no* -- scalar sums suffice | *yes* | no |
+| Encryption product factors through \( G \) | yes (\( r_n k \)) | yes (\( r' k \)) | *no* -- would need \( sk_{iss} \) |
+| Whose membership is proven | the recipient's own | *the issuer's* | the depositor's own |
+| Issuer witness shipped | none | the issuer's salt | none |
+| Gate | folded circuit | folded circuit, +1 relation | sigma + membership circuit |
+| Constraints (depth 20) | 3,306,390 | 3,341,261 | 491,764 |
+
+*The four asymmetries, and where each comes from.*
+
+1. *One secret or two.* A1 and A2 must prove two facts resting on two
+   DIFFERENT secrets -- the Identity scalar and the receiving key -- so no
+   shared nonce ties them and no choice of generator repairs it. The tie has
+   to become a relation, which is why they fold. B1's two facts rest on ONE
+   secret, so its sigma's shared nonce is a genuine tie and it needs no fold.
+   This is the deep one, and it decides the shape of each gate.
+2. *Whether the product factors through \( G \).* A1 and A2 are proven by the
+   RECIPIENT, which holds both the randomness and the receiving secret, so
+   every ElGamal product collapses to a multiple of \( G \) and stays
+   fixed-base. B1's depositor encrypts TO the issuer: it holds \( r \) but not
+   \( sk_{iss} \), so \( r \cdot pk_{iss} \) is irreducibly variable-base.
+   Any construction that made it fixed-base would hand the depositor the key
+   that makes the issuer the only reader. A third reason not to fold B1.
+3. *Whether the plaintext is a known multiple of \( G \).* A1 decrypts to the
+   recipient's own Identity, so its point sums fold into scalar sums and it
+   performs no curve addition at all -- which is how it escapes finding 5's
+   incomplete-addition defect by construction. A2 decrypts to an arbitrary
+   point and cannot, so it must ENFORCE the gadget's precondition instead.
+4. *Whose membership is proven.* A1 and B1 prove the prover's own, so the
+   prover holds its own salt. A2 alone proves a third party's, which is the
+   whole of [[#payload][the payload rule]].
+
+*What the three payloads therefore carry.* Each is minimal for its own
+privacy and proving requirements, and the differences are not incidental:
+they track exactly which party is private and which party is proving. A1
+carries its issuer in the clear because that issuer is public; A2 carries a
+salt because its issuer is private and must still be provably registered; B1
+carries neither, because the fact it needs travels as a proof the issuer
+verifies with no witness at all.
+
+** 4.6 The A2 key split, and why the tie must be committed
+:PROPERTIES:
+:CUSTOM_ID: split
+:END:
+
+Found and confirmed 2026-09-21, by reproduction against the shipped verifiers.
+It is the one place where the payload rule of [[#payload][4.4]] was satisfied
+and the architecture still admitted a framing.
+
+*The failure.* An ElGamal ciphertext does not bind its plaintext to one key.
+For one randomness \( r \) and two registered Identities \( M_A, M_B \), a
+minter holding the recipient's mailbox key \( pk_{real} = kG \) sets
+
+#+begin_example
+pk_mint = pk_real + r^{-1}*(M_B - M_A)
+eIss    = (r*G, M_A + r*pk_mint)
+        = (r*G, M_B + r*pk_real)
+#+end_example
+
+The same bytes are an encryption of \( M_A \) under the key the mint binding
+hides in \( Q \), and of \( M_B \) under the key the recipient actually holds.
+=issuer_reenc= is a true statement about the minter's own credential. The fold
+is a true statement about a registered Identity. Neither says the two keys are
+the same point, and nothing in =Notes.mint=, =spendCoupledA2= or
+=verify_receipt= asks:
+
+| Check | Result |
+|-------+--------|
+| =pk_mint == pk_real= | false |
+| =issuer_reenc_verify= against the minter's credential | accepts |
+| the same proof against \( M_B \)'s credential | rejects |
+| \( k \) decrypts =eIss= to \( M_B \) | yes |
+| =deposit_fold_check= for the recipient's \( k \) | accepts |
+| =deposit_fold_a2_witness=, relation (5) on \( M_B \)'s leaf | builds |
+| the same witness aimed at \( M_A \)'s leaf | refused |
+
+*Why it is worse than a collusion.* The recipient does the honest thing --
+decrypts, sees a registered Identity, rebuilds the path, proves the fold -- and
+the receipt names \( M_B \). An honest party produces the false receipt, and
+nothing it is given lets it notice: \( \beta \) and \( \gamma \), the blinds
+that would open \( Q \) and \( T \), never travel. The minter needs only a
+sock-puppet Identity of its own, whose naming salt it already has.
+
+Relation (5) is not the hole. It closes the /un-nameable/ case -- a note keyed
+to a throwaway point. This is the /misnamed/ case, and registration does not
+help: =IdentityRegistry.register= deliberately refuses a caller-supplied leaf,
+so a credential's plaintext is not tied to any accumulator leaf. The tie says
+WHOSE Identity; relation (5) says REGISTERED. Both are needed.
+
+*One promise already in the source, wrong three ways.* =issuer_reenc.py= says
+the gap is closed in the receipt by requiring \( M_{named} = C_i - T \). That
+check is not implemented; it is in the wrong layer, because an accepted spend
+must name the minter whether or not a receipt is ever built; and the equation
+is wrong -- \( T = r'pk + \gamma G \), so \( C_i - T = M - \gamma G \). A
+receipt verifier cannot compute the binding's plaintext at all unless
+\( \gamma \) travels.
+
+*The fact that decides every candidate fix.* At spend the chain cannot look
+anything up. =cm= and =idHash= are hidden inside the spend proof and the
+nullifier reveals nothing, so the ONLY channel from mint to spend is =idHash=.
+A tie the chain enforces at spend must therefore be committed in =idHash= --
+which means =mint_batch_a2.circom='s =Poseidon(8)(eNote, eIss)= changes, and
+with it six generated A2 verifiers. That is true of every candidate, and it
+corrects the cost accounting: publishing \( pk_{recv} \) at mint is not the
+cheap option, because binding it to the spend needs the same widening and it
+links every mint to one mailbox as well.
+
+*The closure, decided 2026-09-21: one lifelong mailbox, so commit \( T \).*
+Blind the mint binding's \( T \) on a generator with no known logarithm and
+have the fold open it:
+
+- =issuer_reenc= L3/L5 replace \( \gamma G \) with \( \gamma H_{PEDERSEN} \).
+  A generator swap in the sigma and in its Solidity mirror -- no new witness,
+  no new public input, and =IdentityRegistry= already carries =H_PED_X/Y=.
+  Blinding on \( G \) cannot be repaired by rearrangement: in a prime-order
+  group a known-log blind binds nothing at all.
+- =idHash_a2= commits \( T \).
+- =deposit_fold_a2= adds =ScalarMulHP(gamma)= and one guarded addition,
+  checking \( T = rm \cdot G + \gamma H_{PED} \). Since \( rm = r'k \) is
+  already enforced natively against the \( k \) in the leaf, this forces
+  \( r'(pk_Q - pk_{recv}) = (\gamma - \gamma_m) H_{PED} \), so an attacker
+  needs \( M_B - M_A = \delta H_{PED} \) for a \( \delta \) it knows: a
+  discrete log. The same assumption B1's \( P_{dep} \) already rests on.
+- Cost: *3,341,261 + 471,896 = 3,813,157*, inside =pot22= with 381,147 to
+  spare. Six small A2 mint setups (~6K R1CS per leaf), one 3.8M fold setup.
+  As built, with the leaf tags and the ten-word =idHash=: 3,827,527.
+- =verify_receipt= then checks \( M_{named} = C_i - T + \gamma H_{PED} \),
+  which is the corrected form of the promise above. \( \gamma \) travels in the
+  payload and in the receipt, never on chain.
+
+A =pkHash= commitment was considered and is not constructible on the mint side:
+a sigma cannot prove a Poseidon preimage, and the mint cannot move into a SNARK
+because both \( r' pk_{recv} \) and \( sk_{iss} R_{reg} \) are variable-base --
+which is why that binding is a sigma in the first place. A mint-time closure
+(the recipient ships a hiding mailbox commitment and the sigma ties \( Q \) to
+it) is sound and touches no circuit the gate already has, but it fixes one
+commitment per payer, so the chain could group a payer's notes to one
+recipient. With a lifelong mailbox that is the wrong trade; it would be the
+right one under a key per payer, which is why [[#open][open question 2]] and
+this closure are ONE decision rather than two.
+
+* 5 What it costs
+:PROPERTIES:
+:CUSTOM_ID: cost
+:END:
+
+*Recoverability changes from the certified record to the wallet seed.* Today,
+losing a wallet is not losing notes, because the identity scalar can be
+recomputed from the record and the identity scalar is the key. That property
+and the harvesting vulnerability are one fact seen twice: a decryption key
+recoverable from a disclosed record is a decryption key everyone holding the
+record already has. One cannot be kept without the other, and this
+specification chooses privacy.
+
+The mitigation available is the guardian mechanism the papers already
+contemplate: wrap a copy of the note payload to a guardian key, or to a
+threshold of them, which restores recovery without restoring universal
+readability because a guardian key is not the identity.
+
+*What is not lost:* unilateral addressing, the receipt and mutual
+decryptability results, membership proofs, and the circuits' structure.
+
+* 6 The prototype
+:PROPERTIES:
+:CUSTOM_ID: prototype
+:END:
+
+=scripts/review/receiving_key_proto.py=, run with
+=PYTHONPATH=.:core/python=. Eleven checks, all passing on 2026-09-20:
+
+| Check | Result |
+|-------+--------|
+| Today: one scalar multiplication per candidate identifies the recipient | 1 hit of 9 candidates |
+| Fixed: the identity-key test finds nothing | 0 hits |
+| Fixed: the only handle left is a DDH instance | honest witness exhibited |
+| The recipient still decrypts, with the receiving secret | yes |
+| A2: the recipient recovers the issuer identity | yes |
+| A2: the candidate-pair test finds nothing | 0 hits |
+| The circuit relation stays fixed-base for the identity ciphertext | yes |
+| The circuit relation stays fixed-base for the value ciphertext | yes |
+| Identity and receiving key commit in one salted leaf | path verifies |
+| The leaf is unscannable given every identity, the tree, and the key | 0 hits |
+| Rotation yields an unlinkable leaf | yes |
+
+=scripts/review/deposit_gate_split.py=, nine checks: the split sigma is
+complete, a wrong identity or account key is refused, any receiving key is
+accepted because the tie has left the sigma, and a thief with its own identity
+and a stolen key passes.
+
+=scripts/review/deposit_gate_folded.py=, three checks: the folded witness
+exists for the honest spender, the thief is refused on the leaf relation, and a
+rotated receiving key spends under an unlinkable leaf.
+
+All three scripts also run inside =alberta-buck-notes-flow.org=, section /The
+Receiving Key/, as executable blocks with their output in the document.
+
+* 7 Implementation plan
+:PROPERTIES:
+:CUSTOM_ID: plan
+:END:
+
+Prototype in =alberta-buck-notes-flow.org= before touching production code.
+That document is executable: its A2, A1 and B1 cycles run as one seeded
+Python session under =make nix-venv-doc-flow=, and those cycles are exactly
+the surface that changes. The A' work established the pattern, where making
+the document run first caught the properties that mattered.
+
+=alberta-buck-notes-serialized.org= is out of scope: serialization is B1-only
+by its own applicability table, and B1 does not address notes to identities.
+
+1. Add the receiving key to the wallet: generation, seed-derived recovery,
+   and its registration bound to the identity.
+2. Substitute the encryption key at the four call sites; keep the old form
+   behind a flag only if the vectors need a transition.
+3. Regenerate the A1 and A2 wallet vectors, then the Notes end-to-end
+   fixtures, then the mint fixtures pinned to them.
+4. Extend the leaf to commit the receiving key, with the accumulator's
+   conformance tests extended to it.
+5. Substitute the witnessed product in the note-binding circuits, and
+   measure the constraint count against the current one.
+6. Rebuild the circuits as one matched set, together with the finding-5
+   repairs and the aggregator depth raise, which are already sequenced
+   together for the same reason.
+7. Rewrite the flow document's cycles, and the addressing passages of
+   =alberta-buck-notes.org=.
+
+* 8 Reading plan: coming back to this cold
+:PROPERTIES:
+:CUSTOM_ID: reading-plan
+:END:
+
+Read in this order.  Each step exists because skipping it leads somewhere
+wrong, and the note says where.
+
+1. *This document, sections 2 and 3.* The contradiction and the four parts
+   of the architecture.  Without section 3.3a you will believe the change is
+   a substitution and design a split deposit gate that a payload thief walks
+   through.
+2. *=scripts/review/receiving_key_proto.py=*, then =deposit_gate_split.py=,
+   then =deposit_gate_folded.py=.  Run them; 11, 9 and 3 checks.  They are
+   the fastest way to reload what is true, and the split one shows the trap
+   as a passing test rather than a warning.
+3. *=alberta-buck-notes-flow.org=, section /The Receiving Key/.*  The same
+   three arguments as executable blocks with their output, in the document's
+   voice.  Its A2, A1 and B1 cycles above it are the mechanics the change
+   does /not/ alter.
+4. *=doc/review/accumulator-spec.org=, sections 3, 4, 7 and 8.3.*  The
+   salted leaf, the private and public tree classes, salt derivation, and
+   re-association.  The receiving key's binding lives in that leaf, and
+   rotation is that re-association; do not invent a second mechanism.
+5. *=doc/review/accumulator-plan.org=, phases and the blast radius.*  Phase
+   2 is done in Python, phase 3 has the salted leaf in the native membership
+   circuit, and everything else in the circuit list is gathered into one
+   rebuild.
+6. *=alberta-buck-notes.org=*, the flavor axes, the A2 gadget, /A-Flavors
+   (Addressed)/ and /Identity-Pinning and Recovery/.  The normative
+   statements the code must match.
+7. *=alberta-buck-proofs.org=, Part I.*  Not because it changes, but because
+   the reasoning style there -- state the game, prove the theorem, say what
+   is not covered -- is what this architecture still owes.  Part IV's Theorems
+   7 and 8 DO change: they state encryption under the identity point and
+   soundness of a coupling sigma that no longer exists.
+8. *Section 4.6 of this document, then
+   =doc/review/identity-accumulator-review-grok.txt= and =-grok-2.txt=.*  The
+   two reviews that produced the current list; every claim in them was
+   confirmed against the source on 2026-09-21, and grok-2's A2 split was
+   confirmed by reproduction.  Read 4.6 first: the reviews propose closures
+   whose costs were mis-stated, and 4.6 records which one survives and why.
+
+Then, to implement.  The work divides into three landings by what each one
+costs: the first needs no circuit, the second no ceremony, the third two.
+
+*Done, with a verifier behind it.*
+
+1. *The receiving key*: =wallet/recvkey.py=, modelled on =wallet/salt.py= --
+   derived from seed material, never from the identity, rotation indexed by
+   the salt's own counter, plus the holder-produced binding evidence.
+2. *The leaf*: =receiving_leaf= over the SCALARS in =registry/tree.py=, the
+   specification's third leaf function ([[#fold-built][why scalars]]).
+3. *The payload substitution*, across Python, the Rust kernel, both bindings
+   and the JavaScript, with the wallet vectors regenerated -- one landing,
+   for the reason [[#sequencing]] gives.
+4. *The note-binding witnesses*: A2's =r1cs= is byte-identical under the
+   substitution and needed no setup; A1's gained an input
+   ([[#circuit-cost]]).
+5. *The three gates*, each with a dev-entropy setup, a Solidity verifier and
+   a real proof verifying on chain:
+
+   | Circuit | Constraints | Public | Verifier |
+   |---------+-------------+--------+----------|
+   | =identity_membership_b1= | 491,764 | 9 | =IdentityMembershipB1Verifier= |
+   | =deposit_fold_a1= | 3,306,390 | 43 | =DepositFoldA1Verifier= |
+   | =deposit_fold_a2= | 3,341,261 | 42 | =DepositFoldA2Verifier= |
+
+   Each Forge test walks EVERY public input and requires it to break the
+   proof, because binding them together is the whole reason the A-gates are
+   one proof rather than two.
+6. *B1's generator*: =wallet/nums.py= =H_PEDERSEN=, hashed to the curve, and
+   the repaired membership circuit that uses it.
+
+*Landing 1, done 2026-09-21: the folded gate is the ONLY addressed gate.*
+
+7. *=Notes.sol=*.  =_spendCoupled= verifies one folded proof and nothing else.
+   =setDepositFoldVerifier= refuses =address(0)=; an addressed spend with the
+   slot unset reverts before the spend SNARK.  =spendCoupledA1/A2= lost the
+   coupling sigma and the membership argument from their signatures, so the
+   addressed calldata is the re-encryption and one proof, and the events lost
+   the committed point they used to log without constraining.
+8. *Deleted, not deprecated*: =IdentityRegistry.verifyDepositCoupling= and its
+   struct; =INoteBindingVerifier= with its adapter, stub and two generated
+   verifiers; =IdentityMembershipG1TieVerifier= and its adapter, which fit the
+   B1 membership slot and were still depth 10;
+   =IdentityMembershipVerifier= (the depth-10 point-leaf circuit's verifier);
+   the three suites that tested the fallback; and the two unilateral vector
+   generators, which existed to pin a primitive that is gone -- which is a
+   better answer to their depth-10 staleness than regenerating them.
+9. *The payload carries what a spend needs.*  A2 ships \( r' \) and the
+   issuer's naming salt; A1 ships =eNote='s randomness.  =gen_e2e_world.py=
+   now builds the fold witness FROM the serialized payload, so a delivery that
+   cannot be spent fails at generation instead of shipping as a fixture, and
+   =alberta_buck/test/test_e2e_payload.py= pins that the shipped scalars open
+   the shipped ciphertexts and locate the leaves.
+10. *Receiving-leaf admission is not a =register= change* -- the reclassified
+    item.  =register= refuses a caller-supplied leaf and must: a call that
+    accepted any leaf would accept one pairing any Identity with any key, which
+    is exactly what relation (3) relies on being impossible.  The organisation
+    admits the leaf to its subtree, the aggregator composes, governance posts.
+    What is open is the root AUTHORITY, which is the accumulator plan's own
+    phase.
+
+*Landing 2, done 2026-09-21: the receipt layer, and the payload, off the
+identity scalar.*
+
+11. *The addressed receipt legs.*  =verify_receipt= and its Rust twin no longer
+    derive the payee's identity scalar and decrypt with it -- a naming
+    procedure available to anyone who had ever been shown a receipt, which is
+    the harvesting defect stated as a feature.  Each side now proves what only
+    it can: the recipient by verifiable decryption under =pkRecv=, the issuer
+    by disclosing the mint randomness for any verifier to re-encrypt with.
+    Neither can produce the other's evidence, which is what makes a receipt
+    evidence of a payment rather than of a computation any reader could
+    repeat.  The four skipped AB-RCPT tests now run.
+12. *The binding stops disclosing the mailbox*, and needs no circuit to do it.
+    =prove_receiving_binding= returns =(pk_recv, salt, path)= over the fourth
+    leaf function, =mailbox_leaf=, which commits the same association over the
+    two POINTS -- so a payer checks it with a Poseidon and a path, before
+    paying, holding no secret ([[#architecture][3.2]], [[#architecture][3.5]],
+    specification v0.9).  The circuit-and-ceremony alternative was costed and
+    rejected: it buys nothing a fifth Poseidon input does not.
+13. *The payload's scalars are wrapped to the mailbox key.*  Landing 1 made
+    the delivery explicit, which exposed what shipping it in the clear costs:
+    =r'= turns =eIss= into plaintext for anyone holding the payload
+    (\( M = C - r' pk_{recv} \)), and =salt_iss= turns the issuer's naming
+    leaf into a scannable one.  Both now travel masked by
+    \( \mathrm{keccak}(\mathtt{WRAP\_DOMAIN} \| S) \) with
+    \( S = r' \cdot pk_{recv} = k \cdot R \) -- Diffie-Hellman, so the only
+    party that can unwrap is the party the note is addressed to, and the
+    minter needs no round trip to wrap.  The same DDH that keeps the
+    ciphertexts shut keeps the mask unguessable.  One mask per FIELD, keyed by
+    a label: a single pad over two scalars would let an observer subtract the
+    blobs and learn \( r' - salt_{iss} \), which is not either secret but is a
+    pad reused, and a label costs one hash.
+14. *Regenerated*: the three e2e fixtures, the wallet kernel vectors (Python
+    reference, Rust replay, byte-identical), and the golden receipt renders.
+15. *Four-backend since step B*: payload assembly was Python-only when this
+    landed -- the Rust kernel minted the ciphertexts but packaged no delivery.
+    Step B ported =wrap_mask= and the delivery to =buck-wallet=, pinned by the
+    wallet kernel vectors.
+
+*What remains before this branch merges into =feature/paper-editing=.*
+Decided 2026-09-22: the protocol and its papers are *v2*, and every hash the
+protocol relies on carries a v2 domain tag.  Nothing is deployed, so no
+earlier version needs to stay verifiable.  The remaining work is sequenced so
+each trusted setup runs once and each vector regenerates as few times as
+possible.
+
+The v2 tag convention:
+
+- Every tag reads =AlbertaBuck/<Area>/<Name>/v2=: slash-separated, version
+  last, one protocol version rather than a revision count per primitive.
+- A Fiat-Shamir transcript contains exactly one domain word,
+  =uint256(keccak256(tag))=, as its FINAL word -- the position the
+  registration transcript already uses, so =BN254.fsChallenge= and
+  =keccak_scalar= need no change.
+- Derived keys, masks, salts and generators hash the tag as bytes ahead of
+  their payload.
+- Poseidon commitments (accumulator leaves, the Notes tree) take a leading
+  field-element tag, =keccak(tag) mod F_R=.  These are baked into circuits, so
+  they move in step C.
+- Wire formats carry the version in their header: =AB-RCPT/2=.
+
+*A. v2 tags that need no trusted setup.*
+16. Rename =Register/v3=, =ContractBinding{Authorization,Control}:v1=,
+    =Accumulator/Salt/v1=, =Notes/{ReceivingKey,PayloadWrap}/v1= and the test
+    vectors' wallet-seed tag to the convention.
+17. Tag the five transcripts that carry NONE today -- the issuer batch
+    Schnorr, verifiable decryption, the approve Chaum-Pedersen, the A2 mint
+    binding and the B1 depositor binding.  Each hashes points, an account and
+    a chain id, and nothing that names the protocol, so a transcript of one
+    is structurally a candidate transcript of another.
+18. Tag the identity scalar: =m = keccak(tag || canonical record)=.  It is the
+    one hash in the system that maps a PERSON into the group, and it is the
+    one most worth keeping out of any other protocol's range.
+19. =AB-RCPT/1= becomes =AB-RCPT/2=: landing 2 changed the envelope's
+    addressed legs incompatibly.
+20. Regenerate every vector, the simulator's identity cache, the e2e
+    fixtures and the =NotesA2Tie= mint fixture, all by re-proving against the
+    existing keys.
+
+*B. Notes in the Rust/JS kernel.  Done 2026-09-22.*
+21. The delivery became a wallet function rather than a fixture-generator
+    detail: =wallet/delivery.py= (=deliver_a1/a2=, =open_a1/a2=) is the
+    reference, and =buck-wallet= mirrors it with the receiving-key derivation,
+    the payload wrap, the mailbox binding and both fold witness builders --
+    exposed through PyO3 and wasm, and replayed by all three backends from one
+    =notes= section of the wallet kernel vectors, eleven rows including both
+    circuit witnesses.  Opening a delivery refuses, with a reason, one that
+    another mailbox's key or corrupted randomness would otherwise surface only
+    as a proof that will not build.
+    One design change came with it: *the face and =rho= travel wrapped too.*
+    =rho= with =idHash= IS the nullifier, so in the clear the channel would
+    learn when the note is spent; the face would be readable while the note is
+    in flight.  Every wrapped field now draws its mask from one shared point,
+    =S = r_note * pk_recv = k * eNote.R=, which both flavours carry.
+22. The deposit-coupling sigma is gone from every backend -- Python, Rust,
+    both bindings, the JavaScript wrapper and three vector tests -- together
+    with the one kernel-vector row that still keyed a note to an identity
+    point.  The review scripts keep their own inline sigma as attack evidence.
+
+*C. The ceremony round: close the A2 split, and the v2 tags inside circuits.
+Done 2026-09-22.*
+23. The A2 closure of [[#split][4.6]], as specified.  =issuer_reenc= blinds
+    =Q=, =U= and =T= on \( H_{PEDERSEN} \) in all four backends and in
+    =verifyIssuerReenc=, and =H_POINT= is gone from every protocol path; the
+    review evidence keeps its own copy (=alberta_buck/review/known_log.py=),
+    because a known logarithm is what it demonstrates.  =idHash_a2= commits
+    =T= (ten words); =mint_batch_a2= exposes =T= beside =eIss= and =Notes.mint=
+    passes the binding's, so the A2 mint verifiers take 7N+4 public signals.
+    The A2 fold adds relation (6), \( T = rm \cdot G + \gamma H_{PED} \), at
+    *3,827,527* constraints.  The delivery carries =T= in the clear and
+    =gamma= wrapped, and =open_a2= refuses a =T= that does not open under the
+    recipient's =k=.  Both receipt verifiers -- the envelope and the
+    unilateral -- check \( M_{named} = C_i - T + \gamma H_{PED} \).
+    The split is refused three times over, and each is a test: by the
+    delivery, by the fold's witness builder, and -- with the builder's check
+    stepped around -- by the circuit itself, which fails the witness at the
+    tie (=setup_deposit_fold.sh= now runs every attack witness before any
+    setup, and stops there under =WITNESS_ONLY=1=).
+24. The four leaf functions lead with their own tag, =keccak(tag) mod F_R=,
+    in Python, Rust and all four circuits that hash a leaf; the literals live
+    once, in =circuits/leaf_tags.circom=.  The g1tie evidence keeps its
+    untagged leaf.
+25. =H_PEDERSEN= is derived under =AlbertaBuck/Pedersen/H/v2= and the Notes
+    zero under =AlbertaBuck/Notes/Zero/v2=; =test_domains.py= pins every
+    compiled-in literal -- the leaf tags, the zero and empty root in fourteen
+    mint circuits and =Notes.sol=, and =H_PEDERSEN= in the registry and its
+    powers table -- against the registry.
+26. Setups, all dev entropy: twelve batch-mint circuits, B1 (491,797), the A1
+    fold (3,306,423) and the A2 fold.  The legacy mint and spend keys are
+    untouched (=DO_LEGACY=0=); nothing in them changed.
+
+*D. Accumulator phase 4 (Solidity).  Done 2026-09-22.*  The root authority
+and policy, and =BuckCredit='s attestation entry point with its per-credit
+check ([[file:accumulator-plan.org][the plan]], phase 4, which records the
+decisions and the measurements).  One finding reopened step C: every gate
+proved a single 20-level path from its leaf to =identityRoot=, which only a
+leaf sitting directly in the aggregator satisfies, while the specification's
+statement (section 11.1) is a subtree path and then an aggregator path.  The
+two are one path of 32 levels (12 + 20), since every level folds with the
+same Poseidon, so the fix was the depth: both folds, B1 and the specimen at
+32, the wallet proving through =RootedSubtree= (a subtree seen from the
+posted root), and one more setup of the three gates -- the A1 fold
+3,309,327 constraints, the A2 fold 3,833,335, B1 494,701.
+
+*E. Accumulator phase 5.  Done 2026-09-22.*  The regulator, attribute and
+aggregator services in Rust, PyO3 and wasm, with seven new kernel-vector
+sections appended after every existing draw ([[file:accumulator-plan.org][the
+plan]], phase 5).  The identity opening joins the identity kernel under its own
+tag, so each check =BuckCredit.attestInsurer= makes now has a Rust and a
+JavaScript twin: the subtree keys, the composed path, the opening, the band
+ladder and every refusal reason.
+
+*F. Documents.  Done 2026-09-23.*  Every versioned =alberta-buck*.org= title
+reads v2, and the protocol's tags are named as the code names them.
+=alberta-buck-proofs.org= Part IV states the gates as built -- mint addressing
+to a receiving key, the folded gate's six relations, B1's two openings on a
+hash-to-curve generator, and the A2 key tie as Theorem 12 -- and the paper is
+now executable (=make nix-venv-doc-proofs=).  The Notes papers, the receipt,
+the paper's Security section (with the key tie as a theorem and a witness),
+the identity paper (the accumulator, liveness as membership) and the Ethereum
+paper (the insurer gate, the Notes surface) describe the code.  Re-executing
+found three transcripts that had drifted from the wallet API; each runs again.
+=alberta-buck-ethereum-example= was retired rather than re-rendered: its
+concepts were covered elsewhere, and its funding-factor precedents moved into
+=alberta-buck-ethereum.org=.
+
+Then merge.  Real ceremonies precede any deployment and are not part of this
+branch.
+
+Traps worth naming, because each cost a run or an hour:
+
+*Design.*
+
+- The coupling sigma's shared nonce is load-bearing.  It looks like an
+  optimisation.  It is only a genuine tie when both jobs use the SAME secret,
+  which is true for B1 and false for A1 and A2 ([[#flavours]]).
+- =IdentityTree= in =wallet/unilateral_a2.py= subclasses the registry tree
+  and overrides =contains= to take a /point/, not a leaf.  Passing a leaf
+  fails obscurely.
+
+*Circuits and setups.*
+
+- *Depth is baked into the r1cs, so it is baked into the ceremony.*  Build at
+  the target depth or pay for the setup twice.  This was written into the A1
+  fold's own trailer and then walked past, costing B1 a redundant setup.
+- *=--O2= is required, not an optimisation.*  Without it circom leaves the
+  linear constraints in -- B1 goes 491,764 to over 1.2M and snarkjs refuses
+  outright.  It must also match the flags the witness was validated under.
+- *The folds need =NODE_OPTIONS=--max-old-space-size=16384=.*  Without it
+  snarkjs dies on the ~870 MB r1cs AND LEAVES A 700-BYTE ZKEY that the
+  contribute step would accept.  The setup script now refuses a phase-2 key
+  under 100 MB.
+- *Never edit a shell script while a run of it is in flight.*  Bash reads
+  lazily by byte offset and can resume mid-line.
+- *=snarkjs r1cs info= OOMs on a large r1cs.*  Parse the header instead:
+  section type 1 holds =fieldSize=, the prime, then =nWires=, =nPubOut=,
+  =nPubIn=, =nPrvIn= as u32, =nLabels= as u64, =nConstraints= as u32.
+- *A =ScalarMulG= costs about 471,896 constraints.*  It is the only real lever
+  on circuit size; hashes and Merkle paths are noise beside it.
+- The BN254 modulus helpers are =BN254_MOD_Q0..Q3=; the curve-parameter
+  helpers live in =bn254_g_scalarmul.circom=, and the =H_PEDERSEN= gadget
+  carries its own under a =BN254HP_= prefix so both can be included.
+- =build/= is gitignored.  The 4 GB of proving keys are local-only; the
+  durable artifacts are the committed verifiers and vectors.
+- *An attack the builder refuses has not been shown refused by the circuit.*
+  The Python witness builder asserts every relation first, so a missing
+  constraint is invisible through it.  =--split-raw= steps around the
+  builder's check and must fail in the witness calculator; do the same for
+  any new relation.
+
+*Vectors.*
+
+- *Rebuild the kernel before emitting =identity.json=.*  =emit-vectors=
+  dispatches receipt building to whichever kernel is installed, so a stale
+  =.so= writes the old code's receipts under the new code's hashes.  Run
+  =make nix-core-build= first, then confirm =BUCK_IDENTITY_BACKEND=py= emits
+  the same bytes.
+- *Some Forge vectors come from generators of their own.*  The B1 binding,
+  the registry's accumulator vectors and the insurer gate:
+  =make nix-venv-forge-identity-vectors= reruns all three, and a generator,
+  tag or leaf change needs it.
+- *One more argument to =MintVerifierA2Adapter.verifyMint= overflowed the
+  stack.*  The public-signal assembly moved to a helper taking the four
+  scalars as one =uint256[4]=.
+
+*The setups are DEV ENTROPY and every script says so.  They are not
+ceremonies, and nothing built on them should reach a deployment.*
+
+* 9 Open questions
+:PROPERTIES:
+:CUSTOM_ID: open
+:END:
+
+1. *Trial decryption cost.* The recipient scans candidate notes by trial
+   decryption, as it does today with the identity scalar. Unchanged in order,
+   but worth measuring at realistic note volumes.
+2. *One receiving key or one per payer.* DECIDED 2026-09-21: one lifelong
+   mailbox. It is simplest, and because the key is used as an encryption key
+   rather than published per note, it does not link a recipient's notes under
+   DDH. A key per counterparty would bound the damage of a leaked receiving
+   secret, and would also have made the cheaper A2 closure available
+   ([[#split][4.6]]); choosing one key is what makes the committed \( T \)
+   tie the required closure rather than one option among several. Stealth
+   addressing, which derives a fresh key per note, adds little here for its
+   complexity, since the address is exchanged bilaterally rather than
+   published. What the decision does leave standing is question 3: a leaked
+   mailbox key is a lifelong read, so guardian wrapping and rotation hygiene
+   carry more weight than they would have under per-payer keys.
+3. *Guardian wrapping.* Whether recovery wrapping is part of the note payload
+   or a wallet-side convention, and who the guardians are.
+4. *The A1 value ciphertext.* =eNote= encrypts the value under the recipient
+   key. Whether the face should remain derivable by the recipient alone, given
+   the spend publishes it anyway, is a simplification worth considering while
+   the payload is being changed.
+5. *A written security argument*, which this document does not contain and
+   which the architecture owes in the form Part I of
+   =alberta-buck-proofs.org= owes for the registration presentation.

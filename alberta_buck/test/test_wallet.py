@@ -13,7 +13,7 @@ import pytest
 from alberta_buck.wallet import (
     G1, ORDER, add, mul, neg, eq, is_inf,
     canonical_identity_data, identity_scalar,
-    PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_verify, ps_rerandomize,
+    PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_verify, ps_rerandomize, ps_present,
     IdentityKeyPair, ElGamalCiphertext, identity_keygen, elgamal_encrypt, elgamal_decrypt,
     RegistrationProof, registration_prove, registration_verify,
     CPProof, chaum_pedersen_prove, chaum_pedersen_verify,
@@ -124,14 +124,14 @@ def _full_registration_setup(seed: int, identity_fields=ALICE):
     issuer = ps_keygen(rng=rng)
     m = identity_scalar(identity_fields)
     sigma = ps_sign(issuer, m, rng=rng)
-    sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+    pres, _, b = ps_present(sigma, issuer.pk_Y1, rng=rng)
     kp = identity_keygen(rng=rng)
     r = rand_scalar(rng)
     M = mul(G1, m)
     E = elgamal_encrypt(M, kp.pk, r)
     registrant = 0xa11ce00000000000000000000000000000a11ce
-    proof = registration_prove(sigma_p, m, r, kp.pk, E, registrant, rng=rng)
-    return issuer, sigma_p, kp, E, proof, registrant
+    proof = registration_prove(pres, b, m, r, kp.pk, E, registrant, kp.sk, rng=rng)
+    return issuer, pres, kp, E, proof, registrant
 
 
 def test_registration_proof_valid():
@@ -145,11 +145,26 @@ def test_registration_proof_rejects_wrong_registrant():
     assert not registration_verify(sigma_p, E, kp.pk, issuer.pk_X, issuer.pk_Y, proof, other)
 
 
+def test_registration_proof_rejects_wrong_chainid():
+    issuer, sigma_p, kp, E, proof, registrant = _full_registration_setup(seed=14)
+    assert not registration_verify(
+        sigma_p, E, kp.pk, issuer.pk_X, issuer.pk_Y, proof, registrant, chainid=2,
+    )
+
+
+def test_registration_proof_rejects_infinity_pk():
+    issuer, sigma_p, kp, E, proof, registrant = _full_registration_setup(seed=15)
+    from alberta_buck.wallet.bn254 import Z1
+    assert not registration_verify(
+        sigma_p, E, Z1, issuer.pk_X, issuer.pk_Y, proof, registrant,
+    )
+
+
 def test_registration_proof_rejects_tampered_e():
     issuer, sigma_p, kp, E, proof, registrant = _full_registration_setup(seed=12)
     bad = RegistrationProof(
-        e=(proof.e + 1) % ORDER, s_m=proof.s_m, s_r=proof.s_r,
-        A_ps=proof.A_ps, T_C=proof.T_C, T_R=proof.T_R,
+        e=(proof.e + 1) % ORDER, s_m=proof.s_m, s_b=proof.s_b, s_r=proof.s_r,
+        s_sk=proof.s_sk, C1=proof.C1, T_C=proof.T_C, T_R=proof.T_R, T_key=proof.T_key,
     )
     assert not registration_verify(sigma_p, E, kp.pk, issuer.pk_X, issuer.pk_Y, bad, registrant)
 
@@ -160,7 +175,7 @@ def test_registration_proof_rejects_mismatched_elgamal_m():
     issuer = ps_keygen(rng=rng)
     m_real = identity_scalar(ALICE)
     sigma = ps_sign(issuer, m_real, rng=rng)
-    sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+    sigma_p, _, b = ps_present(sigma, issuer.pk_Y1, rng=rng)
     kp = identity_keygen(rng=rng)
 
     # Encrypt a *different* m
@@ -173,7 +188,7 @@ def test_registration_proof_rejects_mismatched_elgamal_m():
     # Try to prove the real-m PS signature binds to the fake-m ciphertext.
     # The honest prover would reject; if the prover lies and uses (m_real, r_fake),
     # the ElGamal C check fails because C_fake encodes m_fake, not m_real.
-    proof = registration_prove(sigma_p, m_real, r_fake, kp.pk, E_fake, registrant, rng=rng)
+    proof = registration_prove(sigma_p, b, m_real, r_fake, kp.pk, E_fake, registrant, kp.sk, rng=rng)
     assert not registration_verify(
         sigma_p, E_fake, kp.pk, issuer.pk_X, issuer.pk_Y, proof, registrant
     )
@@ -281,8 +296,9 @@ def test_chaum_pedersen_rejects_wrong_M():
         alice_kp.sk, r_bad,
         0xa11ce, 0xb0b, 1, rng=rng,
     )
-    # Even with a "valid" prover transcript over the bad ciphertext, Check 2
-    # fails because C_bad - C_a doesn't reflect the same underlying M.
+    # Even with a "valid" prover transcript over the bad ciphertext, Check 3
+    # (difference relation) fails because C_bad - C_a does not reflect the
+    # same underlying M.
     assert not chaum_pedersen_verify(
         E_a, E_bad, alice_kp.pk, bob_kp.pk, proof,
         0xa11ce, 0xb0b, 1,

@@ -1,4 +1,4 @@
-"""Nonce-inclusive cross-language kernel vectors.
+"""Cross-language kernel vectors.
 
 Emits ``core/vectors/identity-kernel-vectors.json`` from the pure-Python
 py_ecc REFERENCE path -- the executable spec -- so the Rust (`cargo`),
@@ -28,16 +28,18 @@ from alberta_buck.wallet.poseidon import F_R, poseidon
 from alberta_buck.wallet.transcript import keccak_scalar
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.elgamal import elgamal_encrypt, elgamal_decrypt
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_verify, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_verify, ps_rerandomize, ps_present
 from alberta_buck.wallet.schnorr import batch_commitment, issuer_schnorr_sign
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.nizk import registration_prove
-from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
+from alberta_buck.wallet.verifiable_decrypt import (
+    identity_opening_prove, identity_opening_verify, verifiable_decrypt_prove,
+)
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
-from alberta_buck.wallet.unilateral_a2 import deposit_couple_prove
 from alberta_buck.wallet.b1_binding import b1_bind_prove
+from alberta_buck.wallet.nums import H_PEDERSEN
 from alberta_buck.wallet.notes import (
-    FLAVOR_B1, NoteOpening, note_commitment, nullifier_a, nullifier_b,
+    FLAVOR_B1, NoteOpening, note_commitment, nullifier,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.unilateral_a2 import IdentityTree
@@ -47,6 +49,9 @@ from alberta_buck.registry.tree import identity_leaf
 def _seeded_rng(seed: int) -> Callable[[], int]:
     rnd = random.Random(seed)
     return lambda: rnd.getrandbits(256)
+
+
+from alberta_buck.wallet.ps import PSSignature as PSSignatureLike  # noqa: E402
 
 
 def _replay(vals: List[int]) -> Callable[[], int]:
@@ -95,9 +100,10 @@ def build_kernel_vectors(seed: int = 0x1DE47B0CA) -> Dict[str, Any]:
 def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     rng = _seeded_rng(seed)
     draw = lambda: rand_scalar(rng)
+    registry = int("1d" * 20, 16)
 
     out: Dict[str, Any] = {
-        "$schema_version": 1,
+        "$schema_version": 2,   # A': ps.pk_Y1/present_*, registration Y1/a/b/A/B/b_tilde, proof s_b/C1
         "backend": "py",
         "seed": _hx(seed),
         "ORDER": _hx(ORDER),
@@ -194,7 +200,7 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     kp = ps_keygen(rng=_replay([draw(), draw()]))
     out["ps"] = {
         "sk_x": scalar_to_hex(kp.sk_x), "sk_y": scalar_to_hex(kp.sk_y),
-        "pk_X": _g2(kp.pk_X), "pk_Y": _g2(kp.pk_Y),
+        "pk_X": _g2(kp.pk_X), "pk_Y": _g2(kp.pk_Y), "pk_Y1": _g1(kp.pk_Y1),
         "signs": [],
     }
     for _ in range(2):
@@ -203,11 +209,17 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
         assert ps_verify(kp.pk_X, kp.pk_Y, sig, m)
         t2 = draw()
         rr, _t = ps_rerandomize(sig, rng=_replay([t2]))
+        a, b = draw(), draw()
+        pres, _, _ = ps_present(sig, kp.pk_Y1, a=a, b=b)
+        # The presentation is NOT a signature on m (review finding R1 closed).
+        assert not ps_verify(kp.pk_X, kp.pk_Y, PSSignatureLike(pres.A, pres.B), m)
         out["ps"]["signs"].append({
             "m": scalar_to_hex(m), "t": scalar_to_hex(t),
             "sigma_1": _g1(sig.sigma_1), "sigma_2": _g1(sig.sigma_2),
             "rerand_t": scalar_to_hex(t2),
             "rerand_sigma_1": _g1(rr.sigma_1), "rerand_sigma_2": _g1(rr.sigma_2),
+            "present_a": scalar_to_hex(a), "present_b": scalar_to_hex(b),
+            "present_A": _g1(pres.A), "present_B": _g1(pres.B),
         })
 
     # ---- schnorr ---------------------------------------------------------------
@@ -232,22 +244,36 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     E = elgamal_encrypt(M, pk_e, r)
     t = draw()
     sigma = ps_sign(kp, m, rng=_replay([t]))
-    t_re = draw()
-    sigma_p, _ = ps_rerandomize(sigma, rng=_replay([t_re]))
+    a, b = draw(), draw()
+    pres, _, _ = ps_present(sigma, kp.pk_Y1, a=a, b=b)
     registrant = 0xA11CE % (1 << 160)
-    m_tilde, r_tilde = draw(), draw()
-    proof = registration_prove(sigma_p, m, r, pk_e, E, registrant,
-                               rng=_replay([m_tilde, r_tilde]))
+    m_tilde, b_tilde, r_tilde, sk_tilde = draw(), draw(), draw(), draw()
+    proof = registration_prove(
+        pres, b, m, r, pk_e, E, registrant, sk_e, chainid,
+        rng=_replay([m_tilde, b_tilde, r_tilde, sk_tilde]), registry=registry,
+    )
+    from alberta_buck.wallet.nizk import registration_verify
+    assert registration_verify(pres, E, pk_e, kp.pk_X, kp.pk_Y, proof, registrant,
+                               chainid, registry)
     out["registration"] = {
         "m": scalar_to_hex(m), "r": scalar_to_hex(r),
+        "sk": scalar_to_hex(sk_e),
         "pk": _g1(pk_e), "E": _ct(E),
-        "sigma_1": _g1(sigma_p.sigma_1), "sigma_2": _g1(sigma_p.sigma_2),
-        "registrant": _hx(registrant),
-        "m_tilde": scalar_to_hex(m_tilde), "r_tilde": scalar_to_hex(r_tilde),
+        "sigma_1": _g1(sigma.sigma_1), "sigma_2": _g1(sigma.sigma_2),
+        "Y1": _g1(kp.pk_Y1),
+        "a": scalar_to_hex(a), "b": scalar_to_hex(b),
+        "A": _g1(pres.A), "B": _g1(pres.B),
+        "registrant": _hx(registrant), "chainid": _hx(chainid),
+        "registry": _hx(registry),
+        "m_tilde": scalar_to_hex(m_tilde), "b_tilde": scalar_to_hex(b_tilde),
+        "r_tilde": scalar_to_hex(r_tilde), "sk_tilde": scalar_to_hex(sk_tilde),
         "proof": {
             "e": scalar_to_hex(proof.e), "s_m": scalar_to_hex(proof.s_m),
-            "s_r": scalar_to_hex(proof.s_r), "A_ps": _g1(proof.A_ps),
+            "s_b": scalar_to_hex(proof.s_b),
+            "s_r": scalar_to_hex(proof.s_r), "s_sk": scalar_to_hex(proof.s_sk),
+            "C1": _g1(proof.C1),
             "T_C": _g1(proof.T_C), "T_R": _g1(proof.T_R),
+            "T_key": _g1(proof.T_key),
         },
     }
 
@@ -259,11 +285,13 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
     sender, spender = registrant, 0x0B0B % (1 << 160)
     k1, k2 = draw(), draw()
     cp = chaum_pedersen_prove(E, E_b, pk_e, pk_b, sk_e, r_prime,
-                              sender, spender, chainid, rng=_replay([k1, k2]))
+                              sender, spender, chainid, rng=_replay([k1, k2]),
+                              registry=registry)
     out["chaum_pedersen"] = {
         "E_a": _ct(E), "E_b": _ct(E_b), "pk_a": _g1(pk_e), "pk_b": _g1(pk_b),
         "sk_a": scalar_to_hex(sk_e), "r_prime": scalar_to_hex(r_prime),
         "sender": _hx(sender), "spender": _hx(spender), "chainid": _hx(chainid),
+        "registry": _hx(registry),
         "k1": scalar_to_hex(k1), "k2": scalar_to_hex(k2),
         "proof": {
             "e": scalar_to_hex(cp.e), "s1": scalar_to_hex(cp.s1),
@@ -315,32 +343,12 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
         },
     }
 
-    # ---- deposit coupling ---------------------------------------------------------
-    # Deposit account bound to identity m_rec: E_dep = (r_d*G, M_rec + r_d*pk_dep).
+    # ---- a registered deposit account, for the B1 depositor binding -----------------
     m_rec, sk_dep, r_d = draw(), draw(), draw()
     M_rec = mul(G1, m_rec)
     pk_dep = mul(G1, sk_dep)
     E_dep = elgamal_encrypt(M_rec, pk_dep, r_d)
-    # The note's eIss decrypting under m_rec.
-    rp2 = draw()
-    eIss = elgamal_encrypt(M_iss, M_rec, rp2)
     account = 0xDE9051 % (1 << 160)
-    b, k_m, k_s2, k_b2 = draw(), draw(), draw(), draw()
-    dc = deposit_couple_prove(m_rec, sk_dep, E_dep, eIss, account, chainid,
-                              rng=_replay([k_m, k_s2, k_b2]), b=b)
-    out["deposit_couple"] = {
-        "m_rec": scalar_to_hex(m_rec), "sk_dep": scalar_to_hex(sk_dep),
-        "pk_dep": _g1(pk_dep), "E_dep": _ct(E_dep), "eIss": _ct(eIss),
-        "account": _hx(account), "chainid": _hx(chainid),
-        "b": scalar_to_hex(b), "k_m": scalar_to_hex(k_m),
-        "k_s": scalar_to_hex(k_s2), "k_b": scalar_to_hex(k_b2),
-        "proof": {
-            "e": scalar_to_hex(dc.e), "s_m": scalar_to_hex(dc.s_m),
-            "s_s": scalar_to_hex(dc.s_s), "s_b": scalar_to_hex(dc.s_b),
-            "A2": _g1(dc.A2), "A3": _g1(dc.A3), "A4": _g1(dc.A4),
-            "P_I": _g1(dc.P_I),
-        },
-    }
 
     # ---- b1 depositor binding ---------------------------------------------------
     r_f, b_f, k_m3, k_s3, k_r3, k_b3 = (draw() for _ in range(6))
@@ -366,23 +374,27 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
 
     # ---- notes family ------------------------------------------------------------
     rho = draw()
-    sigma_R = mul(G1, draw())
-    sigma_s = draw()
-    idh_b1 = id_hash_b1(m_i, sigma_R, sigma_s)
-    eNote = elgamal_encrypt(mul(G1, 250), M_rec, draw())
-    idh_a1 = id_hash_a1(eNote, m_i, sigma_R, sigma_s)
-    idh_a2 = id_hash_a2(eNote, eIss)
+    idh_b1 = id_hash_b1(m_i)
+    # Addressed ciphertexts are keyed to a MAILBOX key, never to an identity
+    # point; these rows only pin the hashes, but they keep the protocol's shape.
+    pk_mailbox = mul(G1, draw())
+    eNote = elgamal_encrypt(mul(G1, 250), pk_mailbox, draw())
+    r_iss = draw()
+    eIss = elgamal_encrypt(M_iss, pk_mailbox, r_iss)
+    # T = r'*pk + gamma*H, the binding's point idHash_a2 commits.  gamma is derived
+    # rather than drawn, so the stream after this section is unchanged.
+    T_a2 = add(mul(pk_mailbox, r_iss), mul(H_PEDERSEN, (r_iss + 1) % ORDER))
+    idh_a1 = id_hash_a1(eNote, m_i)
+    idh_a2 = id_hash_a2(eNote, eIss, T_a2)
     opening = NoteOpening(flavor=FLAVOR_B1, v=250, rho=rho, id_hash=idh_b1, predicate=0)
     out["notes"] = {
         "m_issuer": scalar_to_hex(m_i),
-        "sigma_R": _g1(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
-        "eNote": _ct(eNote), "eIss": _ct(eIss),
+        "eNote": _ct(eNote), "eIss": _ct(eIss), "T": _g1(T_a2),
         "id_hash_b1": _hx(idh_b1), "id_hash_a1": _hx(idh_a1), "id_hash_a2": _hx(idh_a2),
         "opening": {"flavor": _hx(FLAVOR_B1), "v": _hx(250), "rho": scalar_to_hex(rho),
                     "idHash": _hx(idh_b1), "predicate": _hx(0)},
         "cm": _hx(note_commitment(opening)),
-        "nullifier_b": _hx(nullifier_b(rho, idh_b1)),
-        "nullifier_a": _hx(nullifier_a(rho, idh_b1)),
+        "nullifier": _hx(nullifier(rho, idh_b1)),
         "identity_leaf_M": _g1(M_rec),
         "identity_leaf": _hx(identity_leaf(M_rec)),
     }
@@ -400,6 +412,23 @@ def _build_kernel_vectors(seed: int) -> Dict[str, Any]:
         "path_index": 2,
         "siblings": [_hx(s) for s in pf.siblings],
         "index_bits": pf.index_bits,
+    }
+
+    # ---- the identity opening (drawn last: the sections above stay put) -----------
+    # The verifiable-decryption relation, bound to the registry too, under its own
+    # tag: what BuckCredit.attestInsurer checks.
+    registry = 0x00000000000000000000000000000000000ACC5E
+    t_op = draw()
+    op = identity_opening_prove(E_b, sk_b, M, spender, chainid, registry, rng=_replay([t_op]))
+    out["identity_opening"] = {
+        "E": _ct(E_b), "sk": scalar_to_hex(sk_b), "pk": _g1(pk_b), "M": _g1(M),
+        "account": _hx(spender), "chainid": _hx(chainid), "registry": _hx(registry),
+        "t": scalar_to_hex(t_op),
+        "proof": {"e": scalar_to_hex(op.e), "s": scalar_to_hex(op.s),
+                  "T1": _g1(op.T1), "T2": _g1(op.T2)},
+        "verify": identity_opening_verify(E_b, pk_b, M, op, spender, chainid, registry),
+        "not_a_receipt_proof": not identity_opening_verify(E_b, pk_b, M, vd, spender, chainid,
+                                                           registry),
     }
 
     return out

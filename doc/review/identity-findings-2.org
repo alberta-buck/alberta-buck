@@ -1,0 +1,1092 @@
+#+TITLE: Identity issuer-view privacy: remaining findings and mitigation investigation
+#+DATE: 2026-09-19
+#+OPTIONS: toc:3 num:t
+#+PROPERTY: header-args :eval never-export
+
+* Scope, status and conclusions
+:PROPERTIES:
+:CUSTOM_ID: scope
+:END:
+
+Protocol baseline: =feature/paper-editing= at
+=75104a8147f675c1ec90d41a24d914cbb213c74c=. This document supersedes
+=identity-findings-2.md=, first drafted on 2026-09-16. It refines the
+2026-09-19 review and the subsequent review-prototype investigation.
+
+This is a focused follow-up to findings 1, 2 and 6 of
+[[file:identity-findings.md][Identity claims: evidence and consequences]], not a complete cryptographic
+audit or a claim that all other findings have been resolved. The original
+review contains historical status statements that predate the merged repairs;
+use the source baseline and evidence labels here for this investigation.
+
+*Confirmed:* the current registration transcript lets an Identity Issuer
+identify a known identity and associate it with a registered account. The
+issuer can then follow activity publicly linked to that account. This is not
+an algorithm for recovering arbitrary unknown identity records, decrypting
+every ciphertext, or reconstructing every hidden Note mint-to-spend edge.
+
+There are several separate problems:
+
+| ID | Remaining problem | Evidence and boundary |
+|----+-------------------+-----------------------|
+| R1 | Public PS signatures test known identities | Current wallet and Solidity registration reproduced |
+| R2 | Registration proof fields independently test known identities | Public fields from mined registrations reproduced; no issuer key needed |
+| R3 | Public credential plus disclosed identity authorizes fresh registrations | Current Solidity accepted a synthetic attacker registration |
+| R4 | Proposed additive-blinding prototype leaks identity and a reusable credential through its proof | Algebra and executable prototype counterexample; not production code |
+| R5 | A1/A2 identity-derived encryption keys are known to the Identity Issuer | Ciphertext equations reproduced; public ABI inspected; no complete Note-spend execution in this review |
+| R6 | Issuance logs, policy metadata and accumulator designs can expose additional links | Source-established exposure or conditional design risk, as distinguished below |
+
+No production mitigation is implemented by this document. In particular, the
+previous draft's claim that the existing additive-blinding prototype was a
+small, verified fix is withdrawn. Blinding the signature pair alone is not
+enough: its proof must not reveal the hidden message or remove the blinding.
+
+Revision (2026-09-19, later): the reproduction recipes below were re-executed
+independently (the mined-calldata recipe on a local Anvil, the prototype
+counterexample, and a new probe); the native kernel was rebuilt and the review
+suite passes on both backends; the system's pre-launch status was recorded;
+and a single-commitment presentation candidate that avoids the structural
+R2/R4 leak while mapping to the EVM pairing precompile was added as
+Pathway A' with its adversarial battery. It is a candidate for review, not a
+repair, and it changes the issuer-key form.
+
+*Implementation status (2026-09-20):* Pathway A' is implemented on branch
+=feature/a-prime= across the four backends (Python executable specification
+=99abb00=, Solidity =7190c37=, Rust kernel with the PyO3 and wasm bindings
+and the JavaScript wrapper =d0ed54d=, simulation and end to end =c825104=)
+with regenerated vectors (=identity.json= schema 2, kernel vectors schema
+2), the Fiat--Shamir domain =.../Register/v3=, and review tests 1 and 2
+inverted in the same commit as the wallet change. The plan of record with
+the refined specification, the per-document revision catalogues and the
+measured gas is [[file:a-prime-plan.org][the A' plan]]. Implemented is not
+reviewed: the hiding and soundness arguments remain sketches until the
+plan's phase 6 closes, and the branch is not merged to a production path.
+
+*Development status:* there are no production on-chain registrations. Every
+statement below about permanent calldata is therefore a launch gate on the
+registration presentation, not a migration problem for existing accounts.
+Local and test deployments are disposable.
+
+The intended target remains *certified identity without general surveillance*:
+counterparties obtain verifiable evidence of their own relationship, while an
+Identity Issuer or past counterparty cannot identify unrelated accounts just
+by comparing public transcripts with known identity data.
+
+* Roles, assumptions and public information
+
+** Distinguish the two kinds of issuer
+
+- *Identity Issuer*: the KYC authority signing an identity credential.
+- *Identity holder*: the person whose certified record the wallet holds.
+- *Account*: an Ethereum address and its account encryption/control key.
+- *Counterparty*: a party intentionally given identity data for a relationship.
+- *Note issuer*: the payer/minter of a Note, not necessarily the Identity Issuer.
+- *Observer*: a reader of chain calldata, events, state and public metadata.
+
+The core attacks require only an honest-but-curious Identity Issuer: it may
+issue honest credentials and later inspect the chain. It need not bias keys,
+collude with a counterparty, intercept a receipt or compromise a wallet.
+A previous counterparty with an exact candidate record can perform the public
+tests too. An observer without candidate records has a different capability.
+
+** Notation and assumptions
+
+All scalars are modulo the prime group order =q=. =G= generates BN254 G1;
+=G2= denotes the G2 generator. Lower-case =e= is the Fiat--Shamir challenge;
+=pairing= denotes the bilinear map. Scalar multiplication is additive notation.
+
+#+begin_example
+m = keccak256(canonical_identity_data) mod q
+M = m*G
+issuer secret = (x, y)
+issuer public key = (X, Y) = (x*G2, y*G2)
+#+end_example
+
+Candidate tests identify a scalar/record equivalence class, not necessarily a
+unique human or issuance event. Distinct records are assumed to have distinct
+scalars; normal issuer keys have ~y != 0~; signature first points are nonzero.
+Several credentials on the same =m= cannot be distinguished by these tests.
+The proof-only attacks below assume ~e != 0~; zero challenges are negligible
+under honest Fiat--Shamir generation and do not invalidate the other attacks.
+
+Knowing a high-entropy record is different from guessing an unknown hash.
+The Identity Issuer already knows the canonical record and hence =m=; the
+hash's preimage resistance is no obstacle to testing that known value.
+
+** Objects and capabilities
+
+| Object | Visibility/capability |
+|--------+-----------------------|
+| Identity record and =m= | Known to issuer, holder and disclosed-to counterparties |
+| ~M = m*G~ | Identity point; known to anyone knowing =m= |
+| Credential =sigma= | Initially issued privately; a reusable rerandomization is currently published |
+| =sk_a= | Independent account secret, not derived from =m= |
+| ~pk_a = sk_a*G~ | Public registered account key |
+| ~E_a = (r_a*G, m*G + r_a*pk_a)~ | Public account ciphertext |
+| Registration signature and proof | Public transaction calldata, even if not retained in storage |
+| Counterparty approval ciphertext | Public ciphertext under the counterparty's independent account key |
+| A1/A2 identity-addressed ciphertext | Uses =m_rec*G= as encryption key; =m_rec= is not holder-exclusive |
+| Receipt | Off-chain evidence; deliberately reveals designated identities when disclosed |
+| Optional holder secret =u= | A possible future certified secret, not a current requirement or settled design |
+
+The intended read/write separation is between disclosed identity information
+and a retained authorization capability. A private credential could supply
+that capability; a new certified =u= is not the only possible construction.
+
+* What the current protocol establishes
+
+** Issuance and account registration
+
+[[file:../../alberta_buck/wallet/ps.py][PS signing]] issues the single-message credential
+
+#+begin_example
+sigma = (h, (x + m*y)*h), h != O
+#+end_example
+
+For a new account, the wallet chooses fresh independent nonzero randomness:
+
+#+begin_example
+A = t*sigma_1
+B = t*sigma_2 = (x + m*y)*A
+pk_a = sk_a*G
+E_a = (R_a, C_a) = (r_a*G, m*G + r_a*pk_a)
+#+end_example
+
+The [[file:../../alberta_buck/wallet/nizk.py][registration prover]] and [[file:../../src/IdentityRegistry.sol][registry verifier]] join these relations:
+
+#+begin_example
+(A, B) is a valid issuer signature on m
+C_a = m*G + r_a*pk_a
+R_a = r_a*G
+pk_a = sk_a*G
+#+end_example
+
+The last relation now proves control of the advertised account key. The
+transcript binds the registrant, chain, registry address and internal domain
+=AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2=.
+
+The call publishes =issuer, pk_a, E_a, (A,B), proof=. For ordinary registration
+the identified address is =msg.sender=. Credential-based contract binding
+uses the target specified by its API, not an assumption that the transaction
+sender must be the subject. Operator/adaptor provenance links require separate
+interpretation; this review does not attribute every contract to a natural
+person simply because a binder appears in calldata.
+
+** Counterparty identity confirmation
+
+Alice encrypts her registered identity for Bob:
+
+#+begin_example
+E_A_to_B = (R_b, C_b) = (r_b*G, M_A + r_b*pk_B)
+#+end_example
+
+The repaired [[file:../../alberta_buck/wallet/chaum_pedersen.py][approval proof]] establishes with shared witnesses:
+
+#+begin_example
+pk_A = sk_A*G
+R_b = r_b*G
+C_A - sk_A*R_A = C_b - r_b*pk_B
+#+end_example
+
+The registry supplies Alice's stored source ciphertext/key. Context includes
+registry, parties and chain. Bob decrypts =C_b - sk_B*R_b= and checks that
+the privately delivered canonical identity record hashes to the resulting
+point. This is a meaningful certified-identity consistency check.
+
+It does not establish issuer-view unlinkability: Alice's public registration
+may already identify her account. Nor does it establish that only the
+originally enrolled person could register that identity, because R3 remains.
+
+For independently generated account keys, these ciphertexts in isolation
+retain the intended ElGamal confidentiality under the relevant G1 DDH
+assumption. Knowing =m= does not reveal =sk_A= or =sk_B=. Do not extend that
+statement to A1/A2 keys deliberately derived from =m=, or to the privacy of
+the complete transcript. Absence of a PS field in an approval dataclass is
+not a cryptographic proof of approval-transcript privacy.
+
+** Repairs already present, not solutions to the findings below
+
+The merged PRs added fail-closed proof handling, account-key knowledge,
+corrected approval relations, Note flavor/public-issuer binding, and narrowly
+audited contract-binding authorization/provenance checks. Nonzero unchecked
+caller-supplied identity leaves are rejected. These changes address different
+soundness and authorization defects.
+
+They neither hide the registration credential nor change identity-addressed
+Note encryption into encryption under holder-exclusive keys. Domain tags
+remain useful context separation, not a defense against candidate matching.
+No approval nonce is needed to explain or repair the attacks in this document.
+
+* R1: a public signature identifies a known identity
+:PROPERTIES:
+:CUSTOM_ID: r1-signature
+:END:
+
+*Status:* reproduced with current wallet verification and public calldata
+from accepted local Solidity registrations.
+
+An Identity Issuer retains =(x,y)= and its issued records. For each registration
+and candidate =m_i= it evaluates:
+
+#+begin_example
+B == (x + m_i*y)*A
+#+end_example
+
+The correct candidate matches. With ~A != O~ and ~y != 0~, two distinct
+scalars cannot both match. Per candidate this needs a G1 multiplication and
+comparison; =x + m_i*y= may be precomputed. No wallet key, original =h=,
+rerandomization scalar =t= or ciphertext decryption is needed.
+
+The public-key variant, available to anyone knowing a candidate record, is:
+
+#+begin_example
+pairing(A, X + m_i*Y) == pairing(B, G2)
+#+end_example
+
+This is ordinary signature verification, not a failure of the PS signature's
+unforgeability. Longer identity hashes and repeated rerandomization do not
+remove the predicate.
+
+** Precisely what rerandomization hides
+
+For a fixed =m=, multiplying both signature points by uniform nonzero =t=
+produces the distribution of a fresh signature on that same =m=. It hides
+which original signing randomness produced this presentation. It does not
+make signatures on different known messages indistinguishable.
+
+[[file:../../alberta-buck-proofs.org][Theorem 2]] is valid with that fixed-message qualification. The broader
+issuer-blindness wording in [[file:../../alberta-buck-paper.org][the paper]] is not supported by this theorem.
+An unbounded observer should not be included in claims about hidden identity
+messages: discrete-log and other computational assumptions remain necessary.
+
+** Consequence and limit
+
+The issuer can map a registration address to its known identity and repeat
+that process for fresh accounts. Later public sender/recipient/event linkage
+extends that label to activity involving those addresses. This is not, on its
+own, a recovery of every hidden Note opening or mint-to-spend edge, nor proof
+that the real person intended each operation attributed to the account.
+
+* R2: the registration proof supplies an independent identity test
+:PROPERTIES:
+:CUSTOM_ID: r2-proof
+:END:
+
+*Status:* reproduced using the proof fields decoded from the same accepted
+Solidity transactions. This was missing from the initial follow-up review.
+
+The current prover publishes:
+
+#+begin_example
+A_ps = m_tilde*A
+s_m = m_tilde + e*m
+#+end_example
+
+An observer therefore tests candidate =m_i= using only public =A, A_ps, s_m, e=:
+
+#+begin_example
+s_m*A == A_ps + (e*m_i)*A
+#+end_example
+
+For ~e != 0~ it can equivalently recover the point
+~m*A = e^(-1)*(s_m*A - A_ps)~. Recovering the scalar =m= from that point is
+not necessary to compare known candidates. Neither issuer key nor =B= is
+needed. This is especially relevant when evaluating proposed repairs.
+
+Removing or blinding only the second signature point leaves this predicate
+intact. The transcript must be redesigned as a complete hiding presentation
+joined to account encryption; individually exposed linear proof components
+cannot simply be assumed safe because they are called Schnorr commitments.
+
+This is a concrete leakage result, not a claim that an arbitrary Schnorr
+proof is insecure. The published statement and all proof fields determine
+what is hidden. Calling a component zero knowledge cannot make a separately
+revealed, candidate-testable function of its witness private.
+
+* R3: identity disclosure enables credential harvesting
+:PROPERTIES:
+:CUSTOM_ID: r3-harvesting
+:END:
+
+*Status:* current Solidity accepted a fresh synthetic attacker registration.
+
+An attacker who receives Alice's canonical record knows =m=. It takes =(A,B)=
+from her public registration, rerandomizes it, chooses its own account secret
+and encryption randomness, and creates:
+
+#+begin_example
+pk_att = sk_att*G
+E_att = (r_att*G, m*G + r_att*pk_att)
+sigma_att = rerandomize(A, B)
+proof_att = prove(sigma_att, m, r_att, sk_att, attacker_address, context)
+#+end_example
+
+It knows every witness the verifier requires. No victim account key, original
+private credential or issuer signing secret is required. This is a fresh
+proof for the attacker address, not replay of Alice's address-bound proof.
+New nonces or additional context fields would not remove this capability.
+
+The result is unauthorized creation of an account carrying the certified
+identity. It is not by itself a demonstration of theft from an existing
+account or redemption of a Note: those require the relevant authorization,
+opening and spend witnesses. The issuer's independent ability to issue a
+duplicate credential is a separate enrollment-trust problem.
+
+Mitigation must leave some unforgeable registration capability unavailable to
+a receipt holder. A hidden, nonextractable credential presentation is one
+route; a certified holder secret is another design ingredient. Merely proving
+control of a newly chosen account key is insufficient.
+
+* R4: the existing blinding prototype is not a repair
+:PROPERTIES:
+:CUSTOM_ID: r4-prototype
+:END:
+
+*Status:* the review-only [[file:../../scripts/review/issuer_linking_demo.py][issuer-linking demonstration]], Part B, is a
+counterexample to a proposed partial repair, not a production implementation.
+The reproduction below checks both identity matching and credential recovery.
+
+The prototype changes the public pair to:
+
+#+begin_example
+A = t*sigma_1
+B_blind = (x + m*y + b)*A
+#+end_example
+
+The pair alone can conceal =m= with appropriate independent blinding. However,
+the prototype exposes both of these separate commitments and responses
+(its code names the blinding scalar =t= and its commitment =A_t=):
+
+#+begin_example
+A_ps = m_tilde*A       s_m = m_tilde + e*m
+A_b  = b_tilde*A       s_b = b_tilde + e*b
+#+end_example
+
+** Identity matching survives
+
+R2 applies unchanged. Testing only the old signature predicates against
+=B_blind= and observing zero matches does not test the full transcript.
+
+** Public proof fields undo the blinding
+
+For ~e != 0~, any observer computes:
+
+#+begin_example
+bA = e^(-1)*(s_b*A - A_b)
+B_plain = B_blind - bA = (x + m*y)*A
+#+end_example
+
+The pair =(A,B_plain)= is a reusable ordinary signature. The observer does
+not need =b=, =m=, an issuer key or the holder's original signature to recover
+it. Once the observer knows =m=, R3 applies again. It can also make a new
+showing accepted by the prototype verifier using this recovered signature.
+
+The original demonstration's naive harvester re-blinded =B_blind= directly
+and failed. That establishes only failure of that particular strategy; it
+does not consider recovery of =bA= from the accompanying proof.
+
+** Conclusions withdrawn from the earlier draft
+
+- The prototype does not remove findings 1 and 2.
+- The complete transcript is not shown to hide =m= merely because its pair
+  of signature points does.
+- The quoted +96 calldata bytes and three-pairing check describe this flawed
+  construction, not the cost of a secure mitigation. No repaired cost is
+  established here; pairing-term merging alone is not a privacy repair.
+- Counting fields in an approval object establishes no general absence of
+  other identity predicates.
+
+The source prototype is retained as review evidence. Its optimistic printed
+messages must be read with these counterexamples, not as security assertions.
+
+The leak is structural: any presentation that publishes a separate G1
+commitment =k*A= with a public scalar response for a hidden exponent reveals
+that exponent's multiple of =A= up to the challenge, whatever the blinding
+scalar is called. A repair must either commit in the target group, which the
+EVM pairing precompile cannot consume, or fold the hidden message and the
+blinding into one commitment; see Pathway A'.
+
+* R5: identity-addressed Note keys permit additional tests
+:PROPERTIES:
+:CUSTOM_ID: r5-note-keys
+:END:
+
+*Status:* the following equations were reproduced with the wallet's ElGamal
+implementation, and the [[file:../../src/Notes.sol][Notes ABI]] was inspected. This review did not execute a
+complete A1/A2 spend with membership and Note-binding circuits. Claims here
+apply when the stated ciphertext is public; they are not a claim that all
+current Note proof paths were exercised.
+
+This issue survives a repair to registration privacy. The Identity Issuer and
+record recipients know =m_rec=, so encryption to ~M_rec = m_rec*G~ is not
+encryption under a secret held exclusively by the recipient.
+
+** A1: direct recipient test
+
+[[file:../../alberta_buck/wallet/unilateral_a1.py][A1 minting]] creates:
+
+#+begin_example
+eRec = (R, C)
+R = r*G
+C = M_rec + r*M_rec = m_rec*(G + R)
+#+end_example
+
+=spendCoupledA1= takes =eRec= in public calldata. An observer with candidate
+records tests ~C == m_i*(G + R)~. This needs no signature, proof or issuer
+key. For honestly generated ~R != -G~, distinct scalar candidates cannot
+both match. The degenerate ~R = -G, C = O~ case does not give a unique match;
+it is negligible with honest randomness and must be considered separately
+in any future ciphertext-validation specification.
+
+Thus the public spend can identify the recipient even if registration is
+later made issuer-unlinkable. This alone does not establish its mint origin.
+
+** A2: decryption and candidate-pair testing
+
+[[file:../../alberta_buck/wallet/unilateral_a2.py][A2 minting]] creates:
+
+#+begin_example
+eIss = (R, C) = (r*G, M_noteIssuer + r*M_rec)
+C - m_rec*R = M_noteIssuer
+#+end_example
+
+For known candidate sender/recipient lists, test:
+
+#+begin_example
+C == m_sender*G + m_recipient*R
+#+end_example
+
+A matching pair identifies those candidate roles; arbitrary candidate-pair
+uniqueness is not guaranteed as a mathematical identity, although the tested
+synthetic example had one match. If only the recipient's =m= is known, the
+observer can decrypt an issuer point but may not know which real-world person
+it denotes. Knowing only an unknown recipient's public identity point does
+not supply its scalar. A KYC issuer covering only one participant must not be
+credited with records it does not possess.
+
+=spendCoupledA2= exposes =eIss= in calldata. Where a mint path also publishes
+the same ciphertext, byte equality is additional public linkage and must be
+audited for that path. This review does not assume every mint API does so.
+
+** B1 and ordinary approvals are different
+
+B1's depositor evidence is encrypted under the Note issuer's registered
+account key, not automatically its identity scalar. Knowing the KYC record
+does not imply knowing that independent account secret. R1/R2 can still
+label visible registered accounts. The current B1 interface also deliberately
+exposes an issuance-commitment handle to bind the spend to its public issuer;
+that is distinct from recovering hidden A1/A2 links.
+
+** Mitigation direction and API impact
+
+For privacy from parties knowing identity data, use independently generated
+receiving keys and prove their association with the certified recipient.
+The proof must prevent key substitution and false evidence; simply accepting
+any claimed recipient key is not enough.
+
+Options include authenticated interactive key exchange, privately delivered
+prekeys, or a reviewed credential-bound key discovery mechanism. A static
+public per-person key or directory lookup can introduce its own linkage.
+
+This changes the convenient unilateral API where a payer needs only the
+recipient's identity point. Specify key availability, offline recipients,
+rotation/recovery and delivery failures explicitly. Addressing, ciphertext
+binding, spend proofs and receipt verification may all change; new circuit
+artifacts/keys are needed if their statements change. Registration-only PS
+work does not automatically require larger A1/A2/B1 circuits, but neither
+does it resolve these Note-specific problems.
+
+* R6: metadata, enrollment and accumulator boundaries
+:PROPERTIES:
+:CUSTOM_ID: r6-metadata
+:END:
+
+** Issuance logs: source-established operational link
+
+[[file:../../alberta_buck/wallet/issuer.py][The reference issuer]] logs =applicant_addr= alongside the canonical record
+and =m= and uses that address for simulated revocation. If that address is a
+later public account, the issuer already has a direct link. This observation
+does not prove a production enrollment service operates the same way, or that
+it identifies every fresh account. Define which enrollment identifiers may
+be associated with subsequent accounts before making an address-blind claim.
+
+** Issuer/policy metadata: conditional anonymity-set reduction
+
+Common issuer keys and broad eligibility/epoch groups are necessary if the
+issuer/key/policy are public. Per-person keys, serials or unique expiry values
+can label a credential independently of signature hiding. Timing, networking,
+funding and small anonymity sets need explicit assumptions. These are
+additional risks, not prerequisites for the already-reproduced algebraic tests.
+
+** Accumulator admission: separate certification from linkage
+
+Current registration rejects nonzero unchecked =identityLeaf= values. That
+fail-closed behavior must be preserved until admission proves the leaf's
+relationship to the certified identity.
+
+A public deterministic leaf =Poseidon(M)= permits a known-identity test. If
+that leaf is published beside a registration or transaction, it can identify
+that association. If only a population of leaves is published, it may reveal
+membership without identifying which anonymous member made a transaction.
+A root alone is not generally an individual-leaf lookup predicate. The
+earlier blanket treatment of all roots/leaves as equivalent should not be used.
+
+Randomized certified commitments and hidden membership/opening proofs are
+possible alternatives. Admission authority, binding/hiding assumptions,
+witness updates, accepted historical roots and revocation require an explicit
+specification. This does not settle the separate membership-join/circuit
+defects in finding 5 of the original review.
+
+* Reproduction and evidence
+:PROPERTIES:
+:CUSTOM_ID: reproduction
+:END:
+
+Run from the repository root. Use only synthetic identities and ephemeral
+local chains. These commands do not contact a production deployment. Review
+tests named after failures may *pass because the failure is reproduced*.
+
+** Existing wallet checks
+
+#+begin_src sh
+nix develop -c env PYTHONPATH=.:core/python python -m pytest -q \
+  'alberta_buck/test/review/test_wallet_failures.py::test_01_published_signature_tests_identity_and_issuer_can_link[py]' \
+  'alberta_buck/test/review/test_wallet_failures.py::test_02_public_credential_and_disclosed_record_register_attacker[py]'
+#+end_src
+
+In the 2026-09-19 review these two Python cases passed. The native
+registration case initially failed with a stale installed extension (eight
+arguments where the current binding takes ten); that ABI error was not a
+rejection of the attack. After =make nix-core-build-py= the full review file
+passed 27 of 27 cases on both backends, so the native and Python paths agree
+that tests 1 and 2 reproduce the attacks. No complete test suite or
+replacement protocol audit is claimed here.
+
+** Current Solidity: registration matching, harvesting and Note equations
+
+Evidence at =75104a8=. The recipe below publishes the rerandomized pair and
+reads =A_ps= from the proof; on =feature/a-prime= neither exists (the wallet
+publishes =(A, B)= and the proof carries =C1= and =s_b=), so run it from a
+checkout of that commit. The branch's executable counterpart is the review
+suite: tests 1 and 2 of =alberta_buck/test/review/test_wallet_failures.py=
+now assert that the published pair fails the raw PS relation for the true
+identity and that the harvested registration is rejected, and
+=presentation_point= in =nizk.py= exhibits the only derivable point.
+
+Build the current registry, then run the named shell block below. It generates
+full-width synthetic identity scalars and fresh keys, submits four accepted
+registrations, fetches their mined calldata, and scans only those public fields.
+Alice registers twice; a fourth candidate has no registered account. It then
+submits an attacker registration using a harvested signature, followed by
+separate wallet-level A1/A2 equation checks.
+
+#+begin_src sh
+nix develop -c forge build src/IdentityRegistry.sol --offline --skip test --skip script
+#+end_src
+
+#+name: reproduce-current-registration
+#+begin_src sh
+nix develop -c env PYTHONPATH=.:core/python BUCK_IDENTITY_BACKEND=py python -u - <<'PY'
+from alberta_buck.sim.anvil import Anvil
+from alberta_buck.sim.chain import Chain
+from alberta_buck.wallet.bn254 import (
+    G1, ORDER, add, mul, eq, point_to_words, words_to_point, rand_scalar,
+)
+from alberta_buck.wallet.identity import identity_scalar
+from alberta_buck.wallet.ps import PSSignature, ps_keygen, ps_sign, ps_rerandomize, ps_verify
+from alberta_buck.wallet.elgamal import elgamal_encrypt
+from alberta_buck.wallet.nizk import registration_prove
+
+def g2(P):
+    return tuple(tuple(int(c) for c in coordinate.coeffs) for coordinate in P)
+
+def point(p):
+    return words_to_point(p['X'], p['Y'])
+
+g1 = point_to_words
+records = {name: identity_scalar({'name': name, 'purpose': 'SYNTHETIC REVIEW'})
+           for name in ('Alice', 'Bob', 'Carol', 'Unregistered decoy')}
+issuer = ps_keygen()
+credentials = {name: ps_sign(issuer, m) for name, m in records.items()}
+
+with Anvil(chain_id=1) as anvil:
+    w3 = anvil.w3
+    accounts = w3.eth.accounts
+    chain = Chain(w3, accounts[0])
+    registry = chain.deploy('IdentityRegistry', accounts[0])
+    chain.send(registry.functions.trustIssuer(
+        accounts[9], (g2(issuer.pk_X), g2(issuer.pk_Y))))
+
+    def register(credential, m, address):
+        signature, _ = ps_rerandomize(credential)
+        sk, r = rand_scalar(), rand_scalar()
+        pk = mul(G1, sk)
+        E = elgamal_encrypt(mul(G1, m), pk, r)
+        pf = registration_prove(signature, m, r, pk, E, int(address, 16), sk,
+                                chainid=1, registry=int(registry.address, 16))
+        return chain.send(registry.functions.register(
+            accounts[9], g1(pk), (g1(E.R), g1(E.C)),
+            (g1(signature.sigma_1), g1(signature.sigma_2)),
+            (pf.e, pf.s_m, pf.s_r, pf.s_sk, g1(pf.A_ps),
+             g1(pf.T_C), g1(pf.T_R), g1(pf.T_key))), sender=address)
+
+    for index, expected in enumerate(('Alice', 'Bob', 'Alice', 'Carol'), 1):
+        receipt = register(credentials[expected], records[expected], accounts[index])
+        tx = w3.eth.get_transaction(receipt['transactionHash'])
+        _, public = registry.decode_function_input(tx['input'])
+        A = point(public['sigma']['sigma_1'])
+        B = point(public['sigma']['sigma_2'])
+        pf = public['proof']
+        assert pf['e'] != 0
+        by_signature = [name for name, m in records.items()
+                        if eq(B, mul(A, (issuer.sk_x + m*issuer.sk_y) % ORDER))]
+        by_proof = [name for name, m in records.items()
+                    if eq(mul(A, pf['s_m']),
+                          add(point(pf['A_ps']), mul(A, (pf['e']*m) % ORDER)))]
+        assert by_signature == by_proof == [expected]
+        print('Mined registration:', index, by_signature, by_proof)
+        if index == 1:
+            published_alice = PSSignature(A, B)
+
+    assert ps_verify(issuer.pk_X, issuer.pk_Y, published_alice, records['Alice'])
+    assert not ps_verify(issuer.pk_X, issuer.pk_Y, published_alice, records['Bob'])
+    # register() uses this public credential and chosen sk/r, not issuer secrets.
+    receipt = register(published_alice, records['Alice'], accounts[5])
+    assert receipt['status'] == 1
+    print('Harvested credential: fresh attacker registration accepted')
+
+# These are ciphertext checks, NOT full Note-spend/circuit executions.
+a1 = elgamal_encrypt(mul(G1, records['Bob']), mul(G1, records['Bob']), rand_scalar())
+assert not eq(add(G1, a1.R), None)
+hits = [name for name, m in records.items() if eq(a1.C, mul(add(G1, a1.R), m))]
+assert hits == ['Bob']
+print('A1 recipient:', hits)
+a2 = elgamal_encrypt(mul(G1, records['Alice']), mul(G1, records['Bob']), rand_scalar())
+pairs = [(s, r) for s, sm in records.items() for r, rm in records.items()
+         if eq(a2.C, add(mul(G1, sm), mul(a2.R, rm)))]
+assert pairs == [('Alice', 'Bob')]
+print('A2 candidate pairs:', pairs)
+PY
+#+end_src
+
+This named recipe was executed during the 2026-09-19 document revision: all
+four registrations were identified and the harvested-credential registration
+was accepted. Both ciphertext examples had their expected matches. The
+recipe keeps those checks in the document rather than relying on a disposable
+temporary script.
+
+** Counterexample to the existing blinded-show prototype
+
+Evidence at =75104a8=: =issuer_linking_demo.py= now stops on a post-A'
+checkout with a pointer to that commit (=--force= overrides), because the
+pre-A' wallet API it drives no longer exists on the branch.
+
+The existing demo creates four identities, eight ordinary registrations and
+four blinded prototype presentations. It reports that raw signature scans
+miss the blinded pairs. Run it with these additional checks: the first scan
+uses =A_ps=; the second recovers the plain signature from =A_t=; the final
+check creates a fresh accepted prototype presentation from that credential.
+
+#+name: reproduce-prototype-counterexample
+#+begin_src sh
+nix develop -c env PYTHONPATH=.:core/python BUCK_IDENTITY_BACKEND=py python -u - <<'PY'
+import runpy
+d = runpy.run_path('scripts/review/issuer_linking_demo.py')
+from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, neg, eq
+from alberta_buck.wallet.ps import PSSignature, ps_verify
+from alberta_buck.wallet.elgamal import elgamal_encrypt
+
+count = 0
+for registration in d['bregs']:
+    signature, proof = registration['sigma'], registration['proof']
+    A, e = signature.sigma_1, proof['e']
+    s_m, _, _, s_t = proof['s']
+    assert e != 0
+    matches = [i for i, m in enumerate(d['kyc'])
+               if eq(mul(A, s_m), add(proof['A_ps'], mul(A, (e*m) % ORDER)))]
+    assert matches == [registration['truth']]
+    # No private t, original credential or issuer key enters this recovery.
+    tA = mul(add(mul(A, s_t), neg(proof['A_t'])), pow(e, -1, ORDER))
+    recovered = PSSignature(A, add(signature.sigma_2, neg(tA)))
+    m = d['kyc'][matches[0]]
+    assert ps_verify(d['issuer'].pk_X, d['issuer'].pk_Y, recovered, m)
+    count += 1
+
+print('Proof-only identifications and recovered credentials:', count, '/', len(d['bregs']))
+sk, r, t = d['R'](), d['R'](), d['R']()
+pk = mul(G1, sk)
+E = elgamal_encrypt(mul(G1, m), pk, r)
+sig, pf = d['blinded_show'](recovered, m, r, pk, E, 0xBAD, sk, t, d['R'])
+assert d['blinded_verify'](sig, E, pk, d['issuer'].pk_X, d['issuer'].pk_Y, pf, 0xBAD)
+print('Recovered credential creates an accepted fresh prototype showing')
+PY
+#+end_src
+
+The additional checks were executed on 2026-09-19: 4/4 identities matched,
+4/4 ordinary credentials were recovered, and a fresh attacker showing was
+accepted. These are also the expected results when rerunning the block.
+This is a wallet-level prototype check, not deployment of a replacement
+Solidity verifier. The demo's deterministic randomness is for synthetic
+review only.
+
+** R2 on the production proof and the single-commitment candidate
+
+The [[file:../../scripts/review/hiding_presentation_probe.py][probe]] first runs the R2 predicate against transcripts produced by the
+production prover with no signature second point and no issuer key, then
+builds the Pathway A' candidate and runs this document's complete battery
+against it: raw-pair scans with the secret and public keys, the R2 proof-field
+scan, candidate-adapted relation and issuer-strip tests, plain-signature
+extraction, harvesting, cross-account comparison and context binding.
+
+#+name: reproduce-single-commitment-candidate
+#+begin_src sh
+nix develop -c env PYTHONPATH=.:core/python BUCK_IDENTITY_BACKEND=py \
+  python -u scripts/review/hiding_presentation_probe.py
+#+end_src
+
+The probe is likewise evidence at =75104a8= and stops on a post-A' checkout.
+On the branch its battery is carried by the review suite (tests 01, 02, 10,
+11 and 12 of =test_wallet_failures.py=, on both backends) against the
+wallet's real prover and verifier, and by the Foundry rejection tests in
+=test/IdentityRegistry.t.sol=.
+
+Executed on 2026-09-19: R2 identified 4 of 4 production transcripts from proof
+fields alone; for the candidate, honest showings verified, the wrong registrant
+was rejected, every candidate scan found 0 matches, the candidate-adapted
+checks held for every candidate (uninformative), extraction without =y= failed,
+the harvester was rejected, the legitimate holder was accepted, and two
+showings of one credential shared no point. These are wallet-level checks on a
+synthetic prototype, not a reviewed protocol or a deployed verifier.
+
+* Mitigation pathways, not a selected implementation
+:PROPERTIES:
+:CUSTOM_ID: mitigation-pathways
+:END:
+
+** A: complete PS anonymous presentation, joined to account encryption
+
+Pointcheval--Sanders distinguish rerandomizing a signature from anonymously
+proving possession. Their Section 6.2 uses two fresh masks; in additive notation:
+
+#+begin_example
+A = a*sigma_1
+B = a*(sigma_2 + b*sigma_1) = (x + m*y + b)*A
+#+end_example
+
+It accompanies this pair with a zero-knowledge proof of the hidden message
+and blinding value in the pairing relation. The published pair's distribution
+alone is not the proof's security argument. See
+[[https://eprint.iacr.org/2015/525][Pointcheval and Sanders, Short Randomizable Signatures, Section 6.2]].
+
+For BUCK, the same hidden =m= must also appear in the ElGamal/account-key
+relations. A reviewed joined proof must replace R2/R4's separately exposed
+message/blinding multiples; copying their commitments is not the standard
+presentation. Correct binding and hiding must be argued for the entire
+transcript, including Fiat--Shamir derivation and auxiliary inputs.
+
+This pathway can retain the one-message PS credential concept. R1--R3 do not
+by themselves require changing issuance to multiple attributes, introducing
+=u=, adding an accumulator or using a general-purpose SNARK. Pre-launch, no
+credential's reusable presentation is public in production, so no fresh
+credential authority is required; see the launch gate below.
+
+Evaluate how a secure presentation maps to available Ethereum precompiles.
+Do not infer a deployable G1-only transcript or gas cost from the abstract
+pairing equation. Measure encoding, commitments, transcript hashing, subgroup
+and infinity handling, verifier work and cross-backend consistency.
+
+The textbook showing commits in the target group: the prover's commitment is
+=pairing(A, Y)^m_tilde * pairing(A, G2)^b_tilde=, one G_T element mixing both
+hidden exponents. The EVM pairing precompile only decides whether a product of
+pairings equals one; it cannot take a prover-supplied G_T element as input. A
+direct port therefore has to supply commitments as G1 points, and separate G1
+commitments are exactly R2/R4. This is the concrete obstacle for any
+precompile-based deployment of Pathway A.
+
+** A': single-commitment presentation mappable to the pairing precompile
+
+*Status:* candidate with an executable adversarial battery
+([[file:../../scripts/review/hiding_presentation_probe.py][probe]]), implemented on =feature/a-prime= (2026-09-20,
+see the implementation status above); not reviewed, not merged to a
+production path. The refined specification, including the =Y1=
+consistency check at =trustIssuer= and the =A = O= guard's role, is in
+[[file:a-prime-plan.org][the A' plan]].
+
+Place the blinding on the =Y= base instead of the =G2= base, using a G1 image
+=Y1 = y*G= of the issuer's second secret, published alongside =(X, Y)=:
+
+#+begin_example
+A  = a*sigma_1
+B  = (x + m*y)*A + b*Y1                   # uniform given A for uniform b
+statement:  pairing(B, G2) = pairing(A, X) * pairing(m*A + b*G, Y)
+commitment: C1 = m_tilde*A + b_tilde*G    # ONE G1 point for both hidden exponents
+responses:  s_m = m_tilde + e*m,  s_b = b_tilde + e*b
+verifier:   pairing(s_m*A + s_b*G - C1, Y) * pairing(e*A, X) * pairing(-e*B, G2) == 1
+            plus the unchanged ElGamal (b), (c) and account-key (k) checks,
+            with the same m_tilde joining C1 and T_C
+#+end_example
+
+Why R2/R4 do not apply: the only point derivable from the proof fields is
+=P = e^(-1)*(s_m*A + s_b*G - C1) = m*A + b*G=, which is uniform and the same
+for every candidate =m_i= (each candidate implies its own =b_i*G = P - m_i*A=).
+The verification relation then holds for every candidate, so it discriminates
+nothing; stripping =B= needs =b*Y1 = y*(b*G)=, a CDH instance; and a harvester
+who learns =m= cannot answer for a blinding it does not know. The triple
+=(A, B, P)= is distributed as =(uniform, x*A + y*P, uniform)= independently of
+=m=, and the rest of the transcript is Schnorr-simulatable given =P=.
+
+Battery results (2026-09-19, four synthetic identities):
+
+| Check | Result |
+|-------+--------|
+| Honest showings verify; wrong registrant rejected | yes; yes |
+| R1 secret-key and public-key pair scans | 0 matches |
+| R2 proof-field scan with =C1= in the role of =A_ps= | 0 matches |
+| Candidate-adapted relation; issuer strip with =y= | hold for every candidate (uninformative) |
+| Plain-signature extraction without =y= | fails |
+| Harvester knowing =m= re-blinds the public pair | rejected |
+| Legitimate holder registers a further account | accepted |
+| Two showings of one credential share a point | no |
+
+Cost relative to today's verifier: =C1= replaces =A_ps= at the same size, one
+extra scalar =s_b= in calldata, one extra G1 multiplication, and a pairing
+product of three pairs where today's has four. The issuer key gains one G1
+point. Measured on the branch with an in-process EVM (one issuer, two
+honest registrations):
+
+| Operation | =75104a8= | A' | Change |
+|-----------+-----------+----+--------|
+| =register= (5-argument overload) | 472,630 | 443,892 | -28,738 |
+| =register= calldata | 740 B | 772 B | +32 B |
+| =trustIssuer= | 227,278 | 394,115 | +166,837 once per issuer |
+
+What this changes and does not settle:
+
+- Publishing =Y1 = y*G= moves the issuer key to the committed-message form of
+  Pointcheval--Sanders Section 6.1, whose unforgeability rests on the stronger
+  assumption used there rather than the plain scheme's. The issuer must keep
+  =h= with unknown discrete log, as =ps_sign= already does. Adopt this
+  deliberately, with a written argument.
+- The privacy argument above is a sketch, not a proof. Fiat--Shamir
+  derivation, encodings, subgroup/infinity handling and composition with the
+  ElGamal side need the review this document demands elsewhere.
+- It leaves R5 (identity-derived Note keys) and R6 (metadata, enrollment logs,
+  accumulator admission) untouched, and does not by itself decide the
+  holder-secret question of Pathway C.
+- Ported under the four-backend rule with the =.../Register/v3= domain and
+  regenerated vectors on =feature/a-prime=; tests 1 and 2 were inverted in
+  the commit that changed the wallet's published transcript.
+
+** B: hidden membership in certified randomized commitments
+
+An issuer-authorized accumulator can admit randomized credential commitments.
+A joined proof demonstrates membership, knowledge of the opening and
+consistency with the account ciphertext/key, without exposing a reusable
+signature or deterministic person tag.
+
+This may avoid a credential-signature verification inside each registration
+circuit. It adds certified admission, root governance, witness availability,
+revocation/history rules and potentially new proving/setup infrastructure.
+Randomization must genuinely hide the identity, commitment binding must hold,
+and independent proofs must not use mismatched witnesses. It is an alternative
+architecture, not an established minimum repair.
+
+** C: optional holder-bound credentials
+
+A wallet-generated secret can be certified as an additional hidden attribute:
+
+#+begin_example
+credential = Sign_issuer(m, u, policy)
+#+end_example
+
+It may support a clearer holder-authorization/recovery design, provided a
+registration proves knowledge of the certified =u= and does not publish a
+credential reusable with a substituted =u=. Blind issuance or certified
+commitments may keep =u= unknown to the issuer and counterparties.
+
+An undisclosed credential with a sound nonextractable showing can already
+block the specific R3 harvester under an honest issuer; a new =u= is therefore
+optional for that threat. Conversely, =u= does not automatically stop an
+issuer signing a second credential for the same identity with a different
+secret. Protection against malicious duplicate enrollment needs additional
+trust, policy or independently enforced enrollment constraints.
+
+Define loss, recovery, delegation, rotation and intentional sharing separately.
+The issuer knows identity data by design; a receipt must not include reusable
+credential material or holder secrets.
+
+** D: independent Note evidence keys and scoped receipts
+
+R5 requires its own key-distribution and proof design. Keep evidence encrypted
+to the actual payment parties under authenticated independent keys. A pool or
+infrastructure operator should receive only the eligibility/payment proofs
+its role requires, unless identity disclosure to that operator is intentional.
+
+Bind receipts to payment, amount, roles, chain/contract context and authenticated
+issuance/redemption evidence. Retain encrypted archives and the openings needed
+to verify a designated transaction, separately from reusable authorization
+secrets. Salt public receipt commitments when predictable identity data would
+otherwise permit testing. Availability, historical context and permanent
+retention are operational guarantees, not consequences of proof soundness.
+
+A recipient can always publish identity information it legitimately learns.
+The target is that this disclosure opens the designated transaction without
+providing an account-creation capability or a predicate for unrelated accounts.
+
+** Non-solutions and costs
+
+More rerandomization, longer hashes, new account addresses, new nonces, extra
+domain fields, or omitting signatures from storage while keeping calldata do
+not remove R1/R2. A blinding value known to the observer, an exposed =bA=, or
+a proof exposing =mA= does not repair the full presentation. Changing the
+registry implementation or proxy pattern does not erase historical calldata.
+
+No reviewed gas/proving-size delta is established. Pathway A' supplies a
+first measurable candidate at the wallet level; treat its figures as a
+benchmark input, not a deployment cost. Compare candidate protocols
+only after their statements, encodings and threat models are fixed. Measure
+issuance, wallet/WASM proving, registration gas/calldata/storage, Note circuit
+changes where needed, witness maintenance, revocation and recovery costs.
+
+* Security requirements and acceptance plan
+
+** Define the experiments first
+
+For two holders with identical disclosed eligibility/policy information, give
+the adversary the Identity Issuer's keys, issuance records and permitted
+issuance transcripts, plus the complete public registration/transaction view.
+Its ability to identify a challenge presentation should be no better than the
+specified negligible advantage, subject to explicit metadata exclusions.
+
+Distinguish honest-but-curious issuance, actively tagging issuance, malicious
+duplicate certification, prior counterparties, infrastructure operators and
+compromised wallets. Do not make an issuer-secret adversary's authenticity
+game trivially impossible by also requiring it to be unable to issue credentials.
+Privacy and enrollment authorization are different security goals.
+
+Receipts intentionally opening the challenge transaction cannot be included
+while still requiring that transaction to remain anonymous. Define selective
+opening: which receipts may be disclosed, what they reveal, and which other
+accounts must remain unlinkable. Timing/eligibility exclusions must be stated,
+not silently attributed to cryptography.
+
+** Minimum joined registration statement
+
+#+begin_example
+exists (m, credential, sk_a, r_a, presentation_randomness, optional_policy_witness):
+    credential is valid under an accepted issuer/policy
+    holder possesses the credential (and certified u, if that design uses u)
+    pk_a = sk_a*G
+    E_a = (r_a*G, m*G + r_a*pk_a)
+    context authorizes this registrant, chain, registry and protocol version
+#+end_example
+
+The public transcript must also hide the relevant witnesses against the
+defined observer. Sound equations alone do not supply this property.
+
+** Tests and proof obligations
+
+- [ ] Reproduce R1--R5 on the current paths before changing them.
+- [ ] Test the *whole* new transcript, not only the modified signature pair:
+  raw-signature scans, R2-style response/commitment scans, and extraction of
+  blinding multiples or reusable credentials.
+- [ ] Give the harvester all public data and disclosed records; a fresh
+  registration without the retained authorization capability must fail.
+- [ ] Test multiple accounts per identity, multiple credentials on one =m=,
+  fresh encryption keys, noncanonical scalars/points and degenerate inputs.
+- [ ] Reject proofs spliced from different credential, ciphertext, account-key,
+  receiving-key and membership witnesses.
+- [ ] Test domain/context replay, issuer/policy substitution and version handling.
+- [ ] Cover A1/A2 candidate ciphertext tests after changing receiving-key design;
+  separately preserve B1's intended public-issuer semantics.
+- [ ] Test certified accumulator admission, historical roots, witness recovery
+  and public metadata for the selected architecture.
+- [ ] Check receipt disclosure does not release unrelated decryption or
+  registration authority; test authenticated anchoring and offline verification.
+- [ ] Run honest issuance, repeated registration, counterparty confirmation,
+  recovery/renewal and applicable full Note lifecycle controls.
+- [ ] Establish Python, Rust, JavaScript/WASM and Solidity accept/reject parity;
+  rebuild matched circuit/verifier artifacts when circuit statements change.
+- [ ] Obtain a security argument and independent cryptographic review. Failed
+  dictionary attacks and passing examples are not proofs of unlinkability.
+
+** Suggested sequence
+
+1. Correct claims and label the current prototype as insufficient. Preserve
+   existing soundness/authorization repairs and adversarial evidence.
+2. Specify the smallest complete hidden-presentation design; separately decide
+   whether holder secrets, accumulator changes and malicious-issuer resistance
+   are requirements. Do not infer these choices from R1 alone.
+3. Specify independent Note receiving keys and their delivery/proof lifecycle
+   before promising issuer privacy for A1/A2.
+4. Implement a synthetic executable specification and hostile full-transcript
+   tests, then have the construction reviewed.
+5. Port the reviewed relation across backends, benchmark it, and fix the
+   credential/proof version and domain before the first production
+   registration.
+
+* Launch gate, compatibility and unresolved choices
+
+The system is pre-launch: no production on-chain registrations exist, so there
+are no legacy accounts to migrate and no conversion ceremony is needed. What
+the permanence of calldata implies instead is a launch gate: the registration
+presentation must be repaired before any credential is presented on a public
+chain, because a registry upgrade, new verifier or new ciphertext randomness
+cannot make an already-published transcript private, and an already-exposed
+reusable credential would remain authorization material unless the acceptance
+policy excluded it. Local and test deployments are disposable and carry none
+of these obligations.
+
+The gate's technical precondition, a registration presentation that a
+holder of the identity cannot test, is implemented on =feature/a-prime=;
+what still stands between the branch and a launch is the written security
+argument and independent review the A' plan schedules as phase 6, and the
+R5 and R6 decisions below, which A' does not touch.
+
+Should any credential nevertheless be presented publicly under the current
+transcript before the repair ships, the contingency is a new accepted
+key/credential epoch or another reviewed re-enrollment rule that authenticates
+the holder independently of already-public capabilities and publishes no
+old-account/new-account link. Treat this as a contingency, not a plan.
+
+Credential/proof version changes must be distinguished from ordinary
+API-compatible registry upgrades. Nothing in these attacks establishes a need
+for existing Notes to fail merely because an IdentityRegistry implementation
+is updated behind a stable interface. Specify verification and Note
+redemption behavior across credential/proof versions explicitly, alongside any
+intentionally new credential policy or proof domain.
+
+Open decisions include the threat model for duplicate issuance/tagging,
+credential loss and recovery, unilateral/offline receiving-key discovery,
+revocation without stable person tags, witness-service privacy, acceptable
+metadata leakage and which old Notes/accounts can retain which guarantees.
+These are not settled by the prototype or by this review.
+
+* Sources and interim claim
+
+- [[file:identity-findings.md][Original identity findings]]: historical findings and broader review scope.
+- [[file:mitigation-implementation-guide.md][Mitigation implementation guide]]: sequencing; P2-A remains design-gated.
+- [[file:../../alberta_buck/wallet/ps.py][PS operations]] and [[file:../../alberta_buck/wallet/nizk.py][registration transcript]]: R1--R3.
+- [[file:../../src/IdentityRegistry.sol][IdentityRegistry]]: public inputs, acceptance checks and corrected approval relations.
+- [[file:../../alberta_buck/test/review/test_wallet_failures.py][Wallet review tests]] and [[file:../../alberta_buck/review/examples.py][synthetic witnesses]]: current attacks and repaired-test history.
+- [[file:../../scripts/review/issuer_linking_demo.py][Existing showing prototype]]: R4, not a verified repair.
+- [[file:../../scripts/review/hiding_presentation_probe.py][Single-commitment probe]]: R2 on the production proof; Pathway A' candidate battery, not a verified repair.
+- [[file:../../alberta_buck/wallet/unilateral_a1.py][A1]], [[file:../../alberta_buck/wallet/unilateral_a2.py][A2]] and [[file:../../src/Notes.sol][Notes]]: R5 ciphertexts and public spend inputs.
+- [[file:../../alberta_buck/wallet/issuer.py][Reference issuer]] and [[file:../../alberta_buck/wallet/identity.py][canonical identity hashing]]: issuance visibility.
+- [[file:../../alberta-buck-proofs.org][Formal rerandomization theorem]] and [[file:../../alberta-buck-paper.org][paper claims]]: fixed-message versus identity-message unlinkability.
+- [[https://eprint.iacr.org/2015/525][Pointcheval--Sanders, Short Randomizable Signatures]]: separate signature and anonymous-showing constructions.
+
+#+begin_quote
+The current system verifies consistency between an issuer-certified identity,
+an account ciphertext and account-key control, and supports encrypted
+counterparty confirmation. Its public registration transcript remains
+candidate-testable by parties knowing identity records, and exposes reusable
+credentials enabling unauthorized fresh registration after identity
+disclosure. Identity-derived A1/A2 receiving keys create additional disclosure
+paths. Issuer-view unlinkability requires a reviewed, fully hiding credential
+presentation and a separate treatment of Note keys and metadata; the existing
+blinding prototype does not establish that guarantee. A single-commitment
+candidate compatible with the pairing precompile passes this review's
+adversarial checks but is unreviewed and unadopted. The system is pre-launch,
+so the repair is a launch gate rather than a migration.
+#+end_quote

@@ -139,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("path", help="path to JSON file with identity fields")
     pi.set_defaults(func=_cmd_identity)
 
-    pv = sub.add_parser("verify", help="verify an AB-RCPT/1 receipt envelope")
+    pv = sub.add_parser("verify", help="verify an AB-RCPT/2 receipt envelope")
     pv.add_argument("file", nargs="?", default="-",
                     help="envelope file (default: stdin)")
     pv.set_defaults(func=_cmd_verify)
@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
                            help="(re)generate alberta_buck/test/vectors/receipt-*.golden.txt")
     prg.set_defaults(func=_cmd_render_golden)
 
-    pr = sub.add_parser("receipt", help="render an AB-RCPT/1 envelope as a receipt")
+    pr = sub.add_parser("receipt", help="render an AB-RCPT/2 envelope as a receipt")
     pr.add_argument("file", nargs="?", default="-",
                     help="envelope file (default: stdin)")
     pr.add_argument("--width", type=int, default=48,

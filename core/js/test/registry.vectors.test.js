@@ -3,8 +3,10 @@
 // reference via alberta_buck.registry.kernel_vectors) through the
 // buck-registry wasm kernel -- the identity Merkle tree and central
 // aggregator as stateful wasm CLASSES, the certificate family as its
-// wire bytes.  The Rust suite asserts the same file (the class-shaped
-// tree/aggregator are deliberately not Python-bound: the Python
+// wire bytes; then the accumulator services -- salts, private feature
+// subtrees, the root ring, composed paths, the insurance regulator and its
+// issuance gate, attribute proofs.  The Rust suite asserts the same file
+// (the class-shaped services are deliberately not Python-bound: the Python
 // reference keeps its own vector-locked implementation).
 //
 // Build the kernel first:  make nix-core-build-wasm
@@ -15,8 +17,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 let w = null;
+let id = null;
 try {
   w = await import("../src/wallet.js");
+  id = await import("../src/identity.js");
 } catch {
   // wasm not built; tests below skip
 }
@@ -129,4 +133,117 @@ test("central aggregator scenario (class)", { skip }, () => {
   assert.equal(aggB.sub_root, a.agg_proof_b.sub_root);
   assert.equal(aggB.aggregator_root, a.agg_proof_b.aggregator_root);
   assert.equal(aggB.aggregator_leaf_index, a.agg_proof_b.leaf_index);
+});
+
+test("holder-derived salts", { skip }, () => {
+  const s = RV.salt;
+  for (const [t, tag] of Object.entries(s.tree_tags)) assert.equal(id.treeTag(t), BigInt(tag), t);
+  for (const c of s.cases) {
+    assert.equal(id.deriveSalt(BigInt(s.secret), c.tree_id, c.counter), BigInt(c.salt));
+  }
+  assert.throws(() => id.deriveSalt(0n, "kyc:x", 0));
+  assert.throws(() => id.treeTag(""));
+});
+
+const refused = (fn) => {
+  try {
+    fn();
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+test("private feature subtree (class)", { skip }, () => {
+  const f = RV.feature_private;
+  const [qa, qb] = f.points;
+  const [sa, sb] = f.salts;
+  const fa = new w.registry.FeatureAuthority(f.id, f.depth, true);
+  assert.equal(JSON.parse(fa.attest(qa.x, qa.y, sa, 0)).leaf, f.leaf_a);
+  fa.attest(qb.x, qb.y, sb, 0);
+  assert.equal(fa.sub_root(), f.root_after_two);
+  assert.deepEqual(JSON.parse(fa.membership_proof_for_identity(qa.x, qa.y)), f.proof_a);
+  const seven = id.g1Mul(id.G1, 7n);
+  assert.equal(refused(() => fa.attest(id.hex(seven.x), id.hex(seven.y), undefined, 0)),
+               f.no_salt_refused);
+  assert.equal(refused(() => fa.attest(qa.x, qa.y, sa, 0)), f.dup_refused);
+  assert.equal(fa.revoke(qa.x, qa.y), f.revoked_index);
+  assert.equal(fa.sub_root(), f.root_after_revoke);
+  assert.equal(fa.has_identity(qa.x, qa.y), f.has_a);
+  assert.equal(fa.has_identity(qb.x, qb.y), f.has_b);
+  // A public subtree refuses a salt.
+  const pub = new w.registry.FeatureAuthority("feature:x", 4, false);
+  assert.throws(() => pub.attest(qa.x, qa.y, sa, 0));
+});
+
+test("root ring (class)", { skip }, () => {
+  const r = RV.root_ring;
+  const svc = new w.registry.Aggregator(r.depth);
+  svc.enroll(r.sub_tree_id, "kyc", "0x1", r.enroll_ts);
+  for (const p of r.posts) {
+    svc.update_sub_root(r.sub_tree_id, "0x" + p.sub_root.toString(16), p.at);
+    const rec = JSON.parse(svc.post(p.at));
+    assert.equal(rec.root, p.root);
+    assert.equal(rec.sequence, p.sequence);
+  }
+  const [r0, r1] = [r.posts[0].root, r.posts[1].root];
+  assert.equal(svc.root_record(r0) !== undefined, r.r0_retained);
+  assert.equal(JSON.parse(svc.root_record(r1)).posted_at, r.r1_posted_at);
+  assert.equal(svc.max_retained_age(r.now), r.max_retained_age);
+  for (const a of r.accepts) assert.equal(svc.accepts(a.root, a.max_age, r.now), a.want);
+});
+
+test("composed path (class)", { skip }, () => {
+  const c = RV.composed;
+  const svc = new w.registry.Aggregator(c.depth);
+  svc.enroll("kyc:neighbour", "kyc",
+             w.registry.MerkleTree.from_leaves(c.neighbour_leaves, c.sub_depth).root(), 0);
+  const kyc = w.registry.MerkleTree.from_leaves(c.kyc_leaves, c.sub_depth);
+  svc.enroll("kyc:ca-ab-2026", "kyc", kyc.root(), 0);
+  const sub = kyc.path(1);
+  assert.deepEqual(JSON.parse(sub), c.sub_proof);
+  const comp = JSON.parse(svc.composed_path("kyc:ca-ab-2026", sub));
+  assert.deepEqual(comp, c.composed);
+  assert.equal(comp.root, svc.identity_root());
+});
+
+test("insurance regulator + issuance gate (class)", { skip }, () => {
+  const r = RV.regulator;
+  const reg = new w.registry.Regulator(r.jurisdiction, r.depth);
+  const env = JSON.parse(reg.attest(
+    r.insurer.x, r.insurer.y, JSON.stringify(r.envelope), ["asset:bicycle"], true));
+  reg.attest(r.other.x, r.other.y, JSON.stringify(r.other_envelope), ["asset:car"], false);
+  assert.deepEqual(env.scopes, r.scopes);
+  const names = reg.predicate_names(JSON.stringify(env), ["asset:bicycle"]);
+  assert.deepEqual(names, r.predicate_names);
+  names.forEach((n, i) => assert.equal(w.registry.subtreeKey(n), r.subtree_keys[i]));
+  assert.deepEqual(
+    JSON.parse(reg.membership_proof(r.insurer.x, r.insurer.y, "insurer:face:5")), r.face_proof);
+  assert.equal(reg.revoke(r.other.x, r.other.y), r.cleared_other);
+  assert.deepEqual(JSON.parse(reg.sub_roots()), r.sub_roots_after_revoke);
+  for (const [f, b] of r.bands) assert.equal(w.registry.bandForFace(f), b, f);
+  for (const c of r.cases) {
+    assert.equal(
+      w.registry.checkIssuance(env, c.scope, c.face, c.dep_type, c.dep_rate, c.premium_rate, c.now),
+      c.want);
+  }
+  assert.ok(env.scopes.includes(w.registry.scopeId(reg.scope_name("asset:bicycle"))));
+});
+
+test("attribute proofs (class)", { skip }, () => {
+  const a = RV.attributes;
+  const kyc = w.registry.MerkleTree.from_leaves(a.kyc_leaves, 12);
+  const age = w.registry.MerkleTree.from_leaves(a.age_leaves, 10);
+  const svc = new w.registry.Aggregator(a.depth);
+  svc.enroll("kyc:ca-ab-2026", "kyc", kyc.root(), 0);
+  svc.enroll("feature:age-over-18", "feature", age.root(), 0);
+  svc.post(a.posted_at);
+  const claims = [["kyc:ca-ab-2026", JSON.parse(kyc.path(0))],
+                  ["feature:age-over-18", JSON.parse(age.path(0))]];
+  const ap = svc.prove_attributes(JSON.stringify(claims), a.person.x, a.person.y);
+  assert.equal(JSON.parse(ap).root, a.root);
+  for (const c of a.verify) {
+    assert.equal(svc.verify_attributes(ap, c.required, c.max_age, c.now), c.want);
+  }
+  assert.throws(() => svc.verify_attributes(ap, [], 1, 0));
 });

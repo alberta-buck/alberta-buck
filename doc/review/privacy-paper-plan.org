@@ -1,0 +1,144 @@
+#+TITLE: Privacy paper: plan of record
+#+DATE: 2026-09-24
+#+OPTIONS: toc:nil num:nil ^:nil
+
+Rewrite of =alberta-buck-privacy.org= (first draft 843222d) into an executable, story-led walk through
+identity issuance, EOA payments and the three Notes flavours, for prospective users and government
+staff.  This file is the resume document: decisions, phases, status.
+
+* Direction (from the author, 2026-09-24)
+
+- Audience: citizens and public servants, sharp but not cryptographers.  Story-like, PG-brief,
+  positive: privacy, security, liberty, rule of law, lawful access to evidence.
+- Motivate with the problems: payment processors and data brokers harvest nearly every citizen
+  payment and its metadata; issued identities leak (IDScan.net, September 2026: 153M+ US and
+  Canadian driver's licences, ~1.1M Canadian, scans with photos, exfiltrated for over a year and
+  sold on the "Nexus" dark-web service); criminals buy privacy while ordinary citizens are watched
+  from every direction.
+- B1's public issuer is normally a bank or credit union.  The draft's "Bob's public note desk"
+  wrongly made Bob public.
+- Before each flow figure: an executable code fragment showing the data gathered in that phase,
+  where each value comes from, and the artifact it produces, with a visualisation where it helps
+  (rendered note, receipt, proof inputs/outputs).  Add library helpers where the code would
+  otherwise bury the concept.
+- Refine the payload renderings (notes, deliveries, envelopes, receipts) while here.
+
+* Decisions
+
+1. *Cast.*  Bob (private citizen, payer), Carol (private citizen, payee), Mallory (outside
+   observer), Alberta's identity issuer, and *Aspen Mutual Credit Union* (fictional; a public
+   identity; Bob's financial institution).
+2. *Four ways to pay Carol 100 BUCK*, each suited to a situation:
+   - EOA transfer: two people who have exchanged accounts.  Visible edge, private names.
+   - B1: Bob buys a credit-union bearer note ("cash") and hands it over.  Chain shows Aspen
+     Mutual minting and later a pseudonymous account cashing one of its notes; Bob never appears.
+     The credit union learns who cashed it (depositor envelope), as a bank does.
+   - A1: Aspen Mutual draft payable to Carol (addressed; interception-proof; no mint handle at
+     spend).  Bob still never appears on chain.
+   - A2: Bob writes his own private cheque; only Carol learns who wrote it.
+   Bob pays the credit union by an ordinary identity-checked EOA transfer (he is its customer).
+3. *Executable, fixture-backed.*  Python, one org-babel session, live anvil (as the receipt paper).
+   Sigma proofs, envelopes, deliveries and registrations are produced live; the Groth16 proofs
+   (mint, spend, folds, B1 membership) come from pre-generated *privacy fixture worlds* built from
+   the same inputs by the fixture pipeline, with their prover wall times.
+4. *Privacy fixture worlds* (=alberta_buck/test/vectors/privacy/{b1,a1,a2}.json=): the e2e world
+   builder gains a cast parameter.  Issuers: Aspen Mutual (b1, a1, public), Bob (a2, private).
+   Depositor: Carol.  Accounts derive from Ethereum keys (no vanity addresses).  Each party's
+   account secrets are stored so the paper registers the same keys through EOA =register=.
+   The existing e2e worlds stay byte-identical.
+5. *Library helpers.*
+   - =alberta_buck/sim/observer.py=: decode a transaction and its logs into what an outside
+     observer sees (Mallory's column, from the actual calldata and events).
+   - =alberta_buck/wallet/cards.py=: payload "anatomy" cards.  Each field carries its source and
+     its protection: public, sealed-for-<reader>, holder-secret, proven.  Text and PNG drivers.
+     Cards for identity record, credential, registration package, approve envelope, bearer note,
+     addressed delivery, spend package; receipts keep =render.py=.
+   - NotesStack: fixture set selection, stored party secrets, EOA register / identity-approve /
+     transfer with real proofs, public-issuer binding.
+6. *Figures.*  Keep =scripts/render_privacy_figures.py= and its style; rewrite =figures.json= for
+   the new cast and story.
+7. *Mutable particulars (author's question, 2026-09-24).*  Settled so far (accumulator spec 8):
+   the record's =epoch= is first certification and M is stable for life; validity is live-set
+   membership; categorical mutable facts (region, age band) re-associate into per-value subtrees
+   under fresh salts.  Missing: a schema for the record itself, whose test instances carry a
+   document number, issue date and current names, and a home for free-form mutable details
+   (legal name, street address, phone, photo) that per-value subtrees cannot hold.  Decision:
+   - The *core record* (M's preimage) holds only facts fixed at first certification: registry,
+     a registry person number never reused, date of birth, name at first certification, epoch of
+     first certification.  Existing test records are read this way; no vector churn.
+   - *Particulars certificates*: versioned, registry-signed statements over M of the current
+     free-form details, each field committed with its own salt (SD-JWT style), so the holder
+     discloses only the fields a counterparty needs.  An update issues a new version; M, the
+     registration, receiving leaves, issued notes and past receipts are untouched.  A superseded
+     version remains a true historical statement, which is what a receipt of that date wants.
+   - Implementation now: =alberta_buck/registry/particulars.py= (issue, disclose, verify) with a
+     v2 domain tag and a card; the spec gains a section.  Later: carrying a disclosed particulars
+     subset in AB-RCPT receipts (additive).
+
+* Phases
+
+| Phase | Work                                                                  | Status |
+|-------+-----------------------------------------------------------------------+--------|
+| P1    | Privacy fixture world: builder, real proofs, Makefile target          | done   |
+| P2    | PrivacyChain on NotesStack; observer; tests                           | done   |
+| P3    | cards.py (payload anatomy, text + PNG), with tests                    | done   |
+| P4    | Paper rewrite: story, code per step, results                          | done   |
+| P5    | figures.json: B1/A1 via Aspen Mutual; re-render                       | done   |
+| P6    | Makefile doc-privacy (executable), docs target; render; commit        | done   |
+| P7    | Particulars certificates (decision 7): module, tag, spec 8.4         | done   |
+
+* Findings
+
+- The in-note issuer pair =(sigma_R, sigma_s)= hashed into B1 and A1 idHash has no defined
+  message and no verifier; every fixture fills it at random.  The batch Schnorr, checked on
+  chain, is what authenticates a public issuer.  The paper claims only the latter.
+  Decision (author, 2026-09-24): defining it would be redundant with the batch Schnorr.  Since
+  the SNARK setups are still development setups, the pair is removed from both idHashes rather
+  than kept opaque (doc/review/notes-hash-tidy-plan.org).
+- A public issuer that names ANOTHER public identity in its notes: a wallet that takes the
+  issuer from the minting account refuses the note (the rebuilt commitment is not in the
+  batch); a receipt verifies VALID, because a public account's identity is pinned by
+  off-chain attestation (isPublicIdentity), not on chain.  Not a protocol hole -- the fraud is
+  self-attributed on chain -- so no change; verify_receipt's comment says what the batch
+  signature does and does not establish.
+- =Issuer.revoke='s docstring still describes epoch-based renewal, superseded by accumulator
+  spec 8 (validity is live-set membership).
+- test_receipt_e2e's live test skips A1/A2 receipt checks with a stale comment; the offline
+  test and test_privacy_world verify all three flavours, both roles.
+
+* Built (P1, P2)
+
+- One unified world, not three: one chain, one identity tree (Bob's receiving and naming
+  leaves; Carol's receiving, mailbox and naming leaves, each its own salt), one note tree with
+  Aspen Mutual's batches of four (leaves 0-3, 4-7; the story's notes at 2 and 6) and Bob's A2
+  cheque (leaf 8).  Carol cashes B1 and A1 into her everyday account and A2 into savings.
+- =scripts/snark/gen_privacy_world.py= + =gen_privacy_fixtures.sh= (=make
+  nix-snark-privacy-fixtures=, ~70 s); =prove_spend.js= takes an optional leaves file.
+- =alberta_buck/sim/cast.py=, =privacy_world.py= (PrivacyWorld, PrivacyChain, fixture()
+  adapter for receipts), =observer.py=; NotesStack takes an external issuer (default path's
+  draws unchanged).  The whole story runs on anvil in ~2 s.
+
+* Accounts (author, 2026-09-24)
+
+Credit and demurrage are out of scope, but a couple of accounts per person is normal under BUCK
+and simple to show: Bob's credit account (funded by credit, outside this paper) moves spending
+money to his everyday account, the payer in every flow, by one public transfer the paper names
+as a visible link.  Carol has everyday and savings accounts.  No fee-payer designation: its
+acceptance emits DemurragePayerSet(account, payer), a public link; amounts display to the cent,
+where demurrage over the demonstration's minutes does not show.
+
+* Rendering
+
+- =make nix-venv-doc-privacy=: ~20 s, 29 pages, deterministic (two renders byte-identical).
+  Cards regenerate into =images/privacy/cards/= as the paper runs.
+- Footnotes are page-bottom footnotes (the draft's endnotes package is gone, at the author's
+  request).  Prose is ASCII; math symbols go in LaTeX math.  Receipts keep UTF-8 (names need
+  it); pdflatex with UTF-8 input renders their em dash and Latin accents.  Scripts beyond
+  Latin in a receipt would need a Unicode engine (lualatex + fontspec): an open question.
+
+* Notes
+
+- Proof keys are local (=build/snark/*=); fixture regeneration is =make nix-snark-privacy-fixtures=.
+- Render: =make nix-venv-doc-privacy=.  The venv is built once and editable (fa54588).
+- Commit by explicit path; the other session's files (truthstake PNGs, rebalancing vectors,
+  matrix images) stay unstaged.

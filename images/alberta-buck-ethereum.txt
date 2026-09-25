@@ -1,6 +1,6 @@
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                THE ALBERTA BUCK - ETHEREUM IMPLEMENTATION
-                             (DRAFT V0.94)
+                               (DRAFT V2)
 
                              Perry Kundert
            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -75,6 +75,7 @@ Table of Contents
 .. 2. Solidity Surface
 .. 3. Public-Identity Contracts
 .. 4. Issuer Trust
+.. 5. The Identity Accumulator
 5. BUCK: ERC-20 Token
 .. 1. Storage Layout
 .. 2. Signed Balances and `balanceOf'
@@ -82,7 +83,8 @@ Table of Contents
 .. 3. mint(N) and burn(N)
 ..... 1. The Per-Credit Inversion
 ..... 2. Releasing: the Deposit Comes Back
-..... 3. Underwater Is a State, Not a Failure
+..... 3. The Funding-Factor Reserve, and Its Precedents
+..... 4. Underwater Is a State, Not a Failure
 .. 4. Identity-Bound approve()
 .. 5. transfer() and transferFrom()
 ..... 1. Reentrancy Guard
@@ -99,17 +101,11 @@ Table of Contents
 .. 7. Known Gaps
 .. 8. Dynamic Issuance: Why BuckBasket Needs BUCK_K
 7. BUCK_K: Value Stabilization Controller
-.. 1. Static Variant
-.. 2. Direct Variant (USD-Free)
-.. 3. External-Basket Variant
-..... 1. External Basket and BUCK Price Oracles
-..... 2. Priming and `dS' Compensation (shared with the Direct Variant)
-..... 3. `dT', `dTMax', and Pokability (shared with the Direct Variant)
-..... 4. Future: Amortizing PID Work via a State Machine
-..... 5. Tuning (shared with the Direct Variant)
+.. 1. The Loop
+.. 2. Three Controllers
 8. Notes: Privacy-Preserving Denomination
 .. 1. Mint Circuit (Batch, In-Circuit Merkle Insertion)
-.. 2. Spend Circuits (B-flavor, A-flavor V2)
+.. 2. The Spend Proof and the Deposit Gates
 .. 3. Verifier Interfaces
 .. 4. Notes Contract
 9. End-to-End Walkthrough
@@ -122,7 +118,7 @@ Table of Contents
 10. Gas Cost Snapshot
 11. Security Considerations
 .. 1. Oracle Manipulation
-.. 2. Unvetted Insurers – the open hole
+.. 2. The Insurer Gate
 .. 3. Recipient Opt-In
 .. 4. Insurer Trust
 .. 5. Reentrancy
@@ -172,18 +168,19 @@ Table of Contents
      (`setCreditIssuer'), and that *insurer* mints a `BUCK_CREDIT' NFT
      for the client's asset, setting face value, depreciation schedule,
      and `premiumRate' (annual basis points of activated coverage).  A
-     credit only lands where its recipient asked for it – see [Unvetted
-     Insurers] for what that does and, more importantly, does not
-     protect against.
+     credit only lands where its recipient asked for it, and only from
+     an insurer whose regulator has attested it – see [The Insurer
+     Gate].
   2. There is no separate activation step, and no public
      `BuckCredit.activate'.  Coverage is activated only inside
      `Buck.mint', atomically with the insurance principal that funds it
      – see [Activation = Mint, Deactivation = Burn].  While coverage is
      live the credit cannot change hands.
   3. Before touching BUCK, the client `registers' with
-     `IdentityRegistry', posting a rerandomized PS credential and
-     ElGamal-encrypted identity point.  The registry verifies both via
-     BN254 pairings (~235K gas, paid once per address).
+     `IdentityRegistry', posting a blinded presentation `(A, B)' of its
+     PS credential, an ElGamal-encrypted identity point and a proof
+     tying the two to the account key.  The registry verifies the proof
+     via BN254 pairings (443,892 gas measured, paid once per address).
   4. `BUCK.mint(amount[, tokenIds])' draws coverage cheapest-first
      across the client's NFTs, activates it, and debits the
      mutual-insurance pool principal – 10x the annual premium on the
@@ -198,9 +195,10 @@ Table of Contents
      hashes.
   6. To denominate as private notes, the client calls `Notes.mint' with
      a Groth16 proof binding the deposited `totalFace' to a batch of
-     Poseidon commitments.  Holders later call `Notes.spend' or
-     `Notes.spendACP' with a fresh nullifier and a SNARK proving
-     inclusion under a recent root.
+     Poseidon commitments.  Holders later call `Notes.spendCoupledA1' /
+     `A2' / `B1' with a fresh nullifier, a SNARK proving inclusion under
+     a recent root, and a deposit gate proving the depositor is the
+     identity the note names, against a posted identity root.
   7. `BuckBasket' is the *direct-mint orchestrator* and the value
      anchor.  Anyone holding a basket constituent (PAXG, cbBTC, XAUT,
      WBTC, etc., as wired by governance via `addBasketToken') can call
@@ -237,7 +235,7 @@ Table of Contents
      P/I spike.
 
 
-[Unvetted Insurers] See section 11.2
+[The Insurer Gate] See section 11.2
 
 [Activation = Mint, Deactivation = Burn] See section 3.3
 
@@ -276,9 +274,11 @@ Table of Contents
   Fields group by mutability:
 
   Issuance is opt-in per (client, insurer) pair: `createCredit' reverts
-  unless the client has called `setCreditIssuer(insurer, true)'.  Anyone
-  may still /be/ an insurer – that is the open question in [Unvetted
-  Insurers] – but nobody can put a credit in your hands uninvited.
+  unless the client has called `setCreditIssuer(insurer, true)', and –
+  where the gate is configured – unless the insurer's regulator has
+  attested an envelope covering the credit ([The Insurer Gate]).  Nobody
+  can put a credit in your hands uninvited, or write one beyond their
+  licence.
 
   • *Immutable at mint*: `insurer' (the address allowed to update this
     token), `assetClass', `createdAt'.
@@ -296,7 +296,7 @@ Table of Contents
   `CreditActivated' – record every state change.
 
 
-[Unvetted Insurers] See section 11.2
+[The Insurer Gate] See section 11.2
 
 [Insurer Updates] See section 3.5
 
@@ -474,7 +474,7 @@ Table of Contents
 
 [Activation = Mint] See section 3.3
 
-[Underwater Is a State, Not a Failure] See section 5.3.3
+[Underwater Is a State, Not a Failure] See section 5.3.4
 
 
 4 IdentityRegistry: On-Chain Trust Anchor
@@ -509,22 +509,50 @@ Table of Contents
 4.1 Cryptographic Surface
 ─────────────────────────
 
-  Three on-chain verifications, all reducible to BN254 precompile calls:
+  Four on-chain verifications, all reducible to BN254 precompile calls:
 
-  1. *PS signature at registration*: `e(sigma'_1, X + m * Y) =
-     e(sigma'_2, g_2)', with `m' reconstructed linearly via the binding
-     NIZK in step 2.  ~147K gas.
-  2. *Schnorr-family NIZK* binding the rerandomized PS signature to the
-     ElGamal ciphertext.  Three response scalars, Fiat-Shamir bound to
-     `(sigma', E_new, pk_new, registrant_address)'.  ~30K gas on top of
-     step 1.  Total registration ~235K, paid once per address.
+  1. *PS credential presentation at registration*: the holder publishes
+     `(A, B) = (a * sigma_1, a * sigma_2 + b * Y1)' for fresh `a, b',
+     with `Y1 = y * G' the issuer's G1 key component, and the registry
+     checks the masked relation `e(B, g_2) = e(A, X) * e(m * A + b * G,
+     Y)' through the proof in step 2 – one three-pair pairing product.
+     The published pair is uniform whatever the identity, so no holder
+     of `m' (the issuer included) can test it; a rerandomized signature,
+     which an earlier design published, would be a valid signature on
+     `m' and testable by anyone holding it.
+  2. *Schnorr-family NIZK* binding the presentation to the ElGamal
+     ciphertext and the account key.  Four response scalars over one
+     credential commitment `C1 = m' * A + b~ * G~ (so no field exposes
+     `m * A' alone), Fiat-Shamir bound to the action/version domain
+     (`AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2'), `((A, B),
+     E_new, pk_new, registrant_address)', chain ID, and registry
+     deployment.  Total registration 443,892 gas measured (472,630
+     before the presentation), paid once per address; `trustIssuer'
+     additionally checks `e(Y1, g_2) = e(G, Y)' once per issuer.
   3. *Chaum-Pedersen NIZK at `approve'*: proves the recipient's identity
-     ciphertext re-encrypts the same M registered in `E_alice'.
-     Fiat-Shamir binds `msg.sender', `spender', and `chainid'.  ~29K gas
-     per counterparty pair.
-  4. *Chaum-Pedersen DLEQ at A-flavor spend* (`verifySpendCP'): proves
-     the spender holds a single `sk_dep' that opens both the note's
-     `E_n' and the registered `E_reg'.  ~36K gas via EIP-196.
+     ciphertext re-encrypts the same M registered in `E_alice' and that
+     the sender holds the registered account key.  Fiat-Shamir binds the
+     registry deployment, `msg.sender', `spender', `chainid' and the
+     `.../Approve/v2' domain word.  ~29K gas per counterparty pair.
+  4. *The Notes bindings*, each a sigma over EIP-196 with its own v2
+     domain word: the public issuer's batch Schnorr
+     (`verifyIssuerSchnorr'), the private issuer's recipient-blinded
+     re-encryption (`verifyIssuerReenc'), and the bearer depositor's
+     binding (`verifyDepositorBinding').  The addressed deposit gate is
+     a folded Groth16 proof, not a sigma ([Notes]).
+  5. *Public membership* (`verifyPublicMembership'): a Poseidon path
+     through a public subtree and the aggregator, checked on chain for
+     the [insurer gate].
+
+  Every hash the protocol relies on carries a domain tag of the form
+  `AlbertaBuck/<Area>/<Name>/v2': the Fiat-Shamir transcripts end in
+  one, the identity scalar hashes one ahead of the certified record, and
+  each accumulator leaf leads with one as a field element.
+
+
+[Notes] See section 8
+
+[insurer gate] See section 11.2
 
 
 4.2 Solidity Surface
@@ -537,22 +565,44 @@ Table of Contents
   │ struct G2Point  { uint256[2] X; uint256[2] Y; }
   │ 
   │ struct ElGamalCT { G1Point R; G1Point C; }      // (R, C) = (r*G, r*pk + M)
-  │ struct PSSig     { G1Point sigma_1; G1Point sigma_2; }
-  │ struct PSPubKey  { G2Point X; G2Point Y; }
+  │ struct PSPresentation { G1Point A; G1Point B; }   // (a*sigma_1, a*sigma_2 + b*Y1)
+  │ struct PSPubKey  { G2Point X; G2Point Y; G1Point Y1; }   // Y1 = y*G, checked at trustIssuer
   │ 
-  │ struct RegistrationProof { uint256 e, s_m, s_r; G1Point A_ps, T_C, T_R; }
+  │ struct RegistrationProof { uint256 e, s_m, s_b, s_r, s_sk; G1Point C1, T_C, T_R, T_key; }
   │ struct CPProof           { uint256 e, s1, s2;   G1Point T1, T2, T3;     }
-  │ struct SpendCPProof      { uint256 e, s;        G1Point T1, T2;         }
+  │ struct ContractBindingProof { uint256 e, s;     G1Point T;              }
+  │ struct SchnorrProof, IssuerReencProof, DepositorBindingProof;   // the Notes bindings
   │ 
   │ function register(address issuer, G1Point pk, ElGamalCT E,
-  │                   PSSig sigma, RegistrationProof proof);
+  │                   PSPresentation pres, RegistrationProof proof);
+  │ function authorizeContractBinding(address binder, G1Point pk, ElGamalCT E,
+  │                                   bool isPublicIdentity_, bool isCarrying_);
   │ function bindContract(address target, G1Point pk, ElGamalCT E,
   │                       bool isPublicIdentity_, bool isCarrying);
+  │ function bindContract(address target, address issuer, G1Point pk, ElGamalCT E,
+  │                       PSPresentation pres, RegistrationProof credential,
+  │                       ContractBindingProof holderAuthorization,
+  │                       bool isPublicIdentity_, bool isCarrying);
+  │ function bindContractFromAdapter(address target, address operator,
+  │                                  bool isPublicIdentity_, bool isCarrying);
+  │ function setBindingAdapter(address adapter, bool approved);        // governance
   │ function trustIssuer(address issuer, PSPubKey ipk);                 // governance
   │ function verifyApprove(address sender, address spender,
   │                        ElGamalCT E_bob, CPProof pi) view returns (bool);
-  │ function verifySpendCP(address spender, address recipient,
-  │                        ElGamalCT E_n, SpendCPProof cpProof) view returns (bool);
+  │ function verifyIssuerSchnorr(...) / verifyIssuerReenc(...) / verifyDepositorBinding(...);
+  │ 
+  │ // The identity accumulator (see The Identity Accumulator)
+  │ function setRootAuthority(address next);                             // governance
+  │ function enrollSubtree(bytes32 id, uint32 slot, uint8 depth, bool isPublic,
+  │                        address poster, string publication);          // root authority
+  │ function evictSubtree(bytes32 id);                                   // root authority
+  │ function setAggregator(address next);                                // root authority
+  │ function postIdentityRoot(uint256 root, bytes32 leafListHash);       // aggregator
+  │ function setMaxRootAge(bytes32 consumer, uint32 maxAge);             // governance
+  │ function acceptsRoot(uint256 root, bytes32 consumer) view returns (bool);
+  │ function verifyPublicMembership(bytes32 id, uint256 leaf, uint256[] subSiblings,
+  │                                 uint256 subIndex, uint256[] aggSiblings, uint256 root)
+  │                                 view returns (bool);
   │ function markApproved(address spender);                              // Buck-only
   │ function setBuck(address buck);                                      // governance, one-shot
   └────
@@ -560,13 +610,27 @@ Table of Contents
   A few non-obvious points:
 
   • `verifyApprove' reads `E_alice' from registry storage so the caller
-    cannot substitute a fake credential.
-  • `bindContract' is permissioned by deployment pattern, not
-    governance: any caller may bind any yet-unbound deployed contract.
-    The intended discipline is operator OPSEC – either the operator is
-    the deployer and uses `BuckAwareDeployer.deployAndBind' for atomic
-    deploy+bind, or the operator races to bind a pre-existing contract
-    before anyone else.  Once bound, immutable.
+    cannot substitute a fake credential.  Its transcript binds the
+    verifying registry address, so a proof prepared for a different
+    registry deployment is rejected.  Here "registry" means
+    `address(this)' while the proof is verified: for a Diamond facet
+    that is the stable Diamond proxy, not the replaceable facet
+    implementation.  Replacing a facet therefore does not invalidate
+    proofs.  Moving the registry to a different proxy requires
+    unsubmitted registration/approve proofs to be regenerated (and
+    registry state to be migrated), but does not alter already minted
+    Notes or their receipts; those artifacts do not contain either
+    proof.
+  • `bindContract' requires both certification and target control.  The
+    compact overload copies a registered caller's exact stored identity
+    after the target authorizes the full binder/identity/ policy tuple.
+    The credential overload verifies PS certification plus holder
+    authorization; target authorization remains mandatory on that path.
+    Contracts with known provenance use a governance-approved,
+    contract-specific adapter.  The adapter proves canonical provenance
+    and authority, while the registry copies the named operator's stored
+    identity rather than accepting adapter-supplied keys.  The first
+    authorized binding is immutable.
   • `markApproved' (called by Buck inside `approve') freezes the
     spender's `isCarrying' flag the first time anyone successfully
     approves them, so the carrying flavor a sender consents to cannot be
@@ -580,9 +644,10 @@ Table of Contents
 
   DeFi infrastructure – AMM pools, vaults, oracles, the Notes pool –
   can't generate Chaum-Pedersen proofs at `approve' time because the
-  contract has no private key.  Such contracts bind via
-  `bindContract(target, pk, E, isPublicIdentity_=true,
-  isCarrying=true)'.  Counterparties of a Public-Identity contract still
+  contract has no private key.  Such contracts authorize and bind a
+  certified operator identity, or use an approved adapter with audited
+  provenance and authority semantics, with `isPublicIdentity_=true,
+  isCarrying=true'.  Counterparties of a Public-Identity contract still
   call the identity-bound `approve' (the always-CP rule applies
   regardless of spender flavor), but the receipt-fragment check on the
   contract side is satisfied by the deterministic `_identityHash' rather
@@ -600,13 +665,40 @@ Table of Contents
   Adding an issuer admits a new origin of registrable identities;
   removing one stops new registrations under that issuer.  Existing
   registrations are unaffected – they were verified at registration and
-  never re-verified.  Epoch-based credential renewal, key revocation,
-  and issuer rotation are described in [Identity: Epoch-Based Credential
-  Renewal].
+  never re-verified.  Whether a registered identity is in good standing
+  is a separate, revocable fact: membership in its registry's subtree of
+  the identity accumulator, which every consumer that needs liveness
+  proves against a posted root of bounded age – see [Identity: Liveness
+  Is Membership].
 
 
-[Identity: Epoch-Based Credential Renewal]
+[Identity: Liveness Is Membership]
 <https://perry.kundert.ca/range/finance/alberta-buck-identity/#epoch-based-renewal>
+
+
+4.5 The Identity Accumulator
+────────────────────────────
+
+  Governance appoints a `rootAuthority' (`setRootAuthority'), which
+  enrolls each certifying authority's subtrees at aggregator slots
+  (`enrollSubtree(id, slot, depth, isPublic, poster, publication)',
+  `evictSubtree') and appoints the `aggregator' (`setAggregator').  The
+  aggregator alone posts roots: `postIdentityRoot(root, leafListHash)'
+  writes `identityRoot' and records the root and its posting time in a
+  ring of `ROOT_RING_SIZE' = 256, evicting the oldest.  A consumer names
+  itself by a v2 tag and `acceptsRoot(root, consumer)' accepts a
+  retained root posted within that consumer's maximum age
+  (`setMaxRootAge'; Notes seven days, the insurer gate one day, never
+  longer than the full ring covers).  Paths are `MEMBERSHIP_PATH_DEPTH'
+  = 32 levels: a subtree of 12 under an aggregator of 20.
+  `verifyPublicMembership(id, leaf, subSiblings, subIndex, aggSiblings,
+  root)' checks a public subtree's path on chain, taking the aggregator
+  index from the subtree's enrolled slot rather than from the caller,
+  and `publicIdentityLeaf(M)' is the tagged unsalted leaf.  Private
+  (salted) membership is proven in zero knowledge inside the Notes
+  gates.  `register' and `bindContract' refuse a caller-supplied leaf:
+  admission is the authority's certification, never a by-product of
+  registration.
 
 
 5 BUCK: ERC-20 Token
@@ -919,7 +1011,8 @@ Table of Contents
      static controller (gate disabled), ~1.0 at parity, and rises above
      1.0 when BUCK is undervalued, so it bites hardest on bootstrapping
      *insured* credit from a thin reserve while the market already
-     signals too much BUCK.
+     signals too much BUCK.  Its schedule and its precedents are in [The
+     Funding-Factor Reserve].
   6. `_accrueJubilee()', crystallise `insurancePool' and `msg.sender',
      debit `poolPrincipal' from the sender's signed raw (`_subBalance'
      is signed-aware – the raw goes negative if the sender had no
@@ -978,7 +1071,77 @@ Table of Contents
   can size required limits and refunds before submitting.
 
 
-5.3.3 Underwater Is a State, Not a Failure
+[The Funding-Factor Reserve] See section 5.3.3
+
+
+5.3.3 The Funding-Factor Reserve, and Its Precedents
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  Step 5 above asks a minter to already hold `poolPrincipal *
+  fundingFactor' before a mint succeeds, where the controller's factor
+  is counter-cyclical in BUCK's deviation from the basket:
+
+  ┌────
+  │ factor = max(0, 1 + 10 * (basket - BUCK) / basket)
+  └────
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   BUCK price (basket = 1.00)  Factor  Reserve, as a share of the principal this mint pays 
+  ─────────────────────────────────────────────────────────────────────────────────────────
+                         1.10     0.0  none – BUCK is scarce, issuance is welcome          
+                         1.05     0.5  half                                                
+                         1.00     1.0  the whole principal                                 
+                         0.95     1.5  one and a half times                                
+                         0.90     2.0  twice                                               
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The reserve is a check, not a deposit.  It is measured on the
+  pre-activation `balanceOf' – held BUCK plus unused credit from earlier
+  activations – and nothing locks it afterwards.  A first-time minter
+  has no unused credit, so it must acquire BUCK first, and that purchase
+  is demand for BUCK sized to the insurance it is about to buy, largest
+  when the market already says there is too much BUCK.  A zero-premium
+  credit pays no principal and so needs no reserve, which is how the
+  supply is seeded.  Treating the reserve as permanently set aside is a
+  strategy, not a rule, and a poor one: in the equilibrium simulations,
+  borrowers that never released it starved their own later issuance
+  until supply froze, and borrowers that let it go as their positions
+  retired kept the loop closed (`alberta_buck/sim/EQUILIBRIUM.md').
+
+  The mechanism is old; only its trigger is new.
+
+  • *Initial margin.* Opening a leveraged position requires posting cash
+    as a fraction of the notional, and exchanges raise that fraction in
+    stressed markets – a counter-cyclical brake on credit expansion.
+    The factor rises the same way when BUCK trades below the basket, but
+    it moves with the market price rather than by an exchange's
+    decision.
+  • *Reserve requirements.* Central banks have required commercial banks
+    to hold a fraction of deposits in reserve, raising it to tighten
+    credit creation and lowering it to loosen.  The reserve here applies
+    the same lever to the individual minter rather than to an
+    institution.
+  • *Gesell's stamp scrip.* /Freigeld/ required monthly stamps, bought
+    in the same currency, to keep a note valid, which made the currency
+    its own continuous source of demand.  BUCK's demurrage is Gesell's
+    direct heir; the reserve is its issuance-side cousin, demand that
+    arises from the act of creating credit.
+  • *Friendly-society buy-ins.* Mutual-aid societies, and the
+    cooperative banks descended from them, required new members to pay
+    in before drawing benefits.  A minter is by construction a
+    contributor to the mutual insurance pool – the principal it pays in
+    – and the reserve is sized to that contribution.
+  • *Tax-driven demand.* The chartalist account holds that a currency is
+    valued because taxes must be paid in it.  The reserve is a
+    structural sink of the same kind: whoever wants BUCK credit must
+    first hold BUCK, in proportion to the system's monetary stress.
+  • *Token pre-sales.* Young networks gate participation on
+    pre-purchased tokens.  The reserve aligns new entrants the same way
+    without a one-shot sale, and the entry price is never paid away: it
+    stays in the holder's balance.
+
+
+5.3.4 Underwater Is a State, Not a Failure
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The burn-side solvency check: after refund and deactivation, the
@@ -1574,263 +1737,109 @@ Table of Contents
 7 BUCK_K: Value Stabilization Controller
 ════════════════════════════════════════
 
-  `BUCK_K' supplies the credit-limit multiplier `BUCK.mint' reads to
-  size against `totalCurrentValue'.  The `IBuckK' interface is three
-  functions – `currentBuckK() external view returns (uint256)',
-  `compute() external returns (uint256)', and `fundingFactor() external
-  view returns (uint256)' (counter-cyclical insurance scalar) – so
-  `BUCK' is invariant to which implementation is wired in.  `BUCK.mint'
-  and `BUCK.burn' both call `compute()' so user activity drives the
-  controller and amortises any PID work; the function is otherwise
-  permissionless, keepers and individual users can poke it directly
-  during quiet stretches.  Three implementations ship today:
-  `BuckKControllerStatic' (governance-set constant),
-  `BuckKControllerDirect' (USD-free PID against `BuckBasket'), and
-  `BuckKController' (PID against an external four-pool USDT/USDC basket
-  of Uniswap-V3 TWAPs).  The PID mechanics – prime cycle, `dS'
-  correction, `dT' / `dTMax', anti-windup, `fundingFactor()' – live in a
-  shared `BuckKControllerBase' abstract contract; each concrete variant
-  only overrides `_readReferences() returns (int256 buckValue, int256
-  basketValue)' to wire its specific price sources.
+  `BUCK_K' is the loan-to-value cap on insured credit: a holder's credit
+  limit is its activated credit value times `BUCK_K'.  Lowering it
+  contracts every holder's borrowing capacity at once; raising it
+  expands it.  The controller's job is to move that one number so that
+  BUCK holds its value against the commodity basket, and it is
+  deliberately slow: `BUCK_K' is a structural lever that glides over
+  months, while private demand – arbitrageurs, the basket, holders
+  managing their own positions – does the fast stabilization.
+
+  `Buck' sees every controller through the three-function `IBuckK'
+  interface: `currentBuckK()', `compute()' (run a cycle if one is due,
+  and return `BUCK_K'), and `fundingFactor()' (the counter-cyclical mint
+  reserve of [The Funding-Factor Reserve]).  `Buck.mint' and `Buck.burn'
+  call `compute()', so user activity drives the controller and pays for
+  its work; the function is also permissionless, so a keeper can advance
+  it through quiet stretches.
 
 
-7.1 Static Variant
-──────────────────
+[The Funding-Factor Reserve] See section 5.3.3
 
-  `BuckKControllerStatic' holds one `uint256 buckK' (18 decimals, `1e18'
-  = neutral).  Functions: `currentBuckK()', `compute()' (returns the
-  stored value, non-view to match the IBuckK signature),
-  `setBuckK(uint256)' (governance-only), `transferGovernance(address)'.
-  This is the simpler choice for early deployments where no BUCK price
-  oracle exists yet, exercising the identity, demurrage, and Notes
-  layers while `BUCK_K' is held constant.
+7.1 The Loop
+────────────
 
+  The error is the BUCK-side reference minus the basket-side reference,
+  and every shipped gain is positive:
 
-7.2 Direct Variant (USD-Free)
-─────────────────────────────
+  • *BUCK below the basket* (inflation): the error is negative and
+    `BUCK_K' falls.  Credit contracts, holders running near their limit
+    burn, supply shrinks, and BUCK recovers toward the basket.
+  • *BUCK above the basket* (deflation): the error is positive and
+    `BUCK_K' rises.  Credit expands, holders can mint and sell into the
+    premium, supply grows, and BUCK gives back value.
 
-  `BuckKControllerDirect' is the embodiment used in tandem with
-  `BuckBasket'.  It has no external stablecoin intermediary; BUCK
-  measures itself against a basket of TOKEN/BUCK Uniswap-V3 pools that
-  `BuckBasket' owns and prices.
+  Sign-convention canary tests in each PID controller's suite fail
+  within one cycle if a gain is ever negated.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   PID Term          Source                                           Meaning                                          
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   Setpoint          `UNIT' (= `1e18', constant by definition)        One BUCK should buy one basket bundle            
-   Process Variable  `BuckBasket.basketValueInBuck()'                 sum_i (basketAmount_i * pool_price_in_BUCK_i)    
-   Error             `buckValue - basketValue' = `1.0 - basketValue'  Positive: BUCK overvalued; negative: undervalued 
-   Output (BUCK_K)   `1e18 + (P*Kp + I*Ki + D*Kd)/1e18'               Credit-limit multiplier (1.0 = neutral)          
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The output is a neutral value plus proportional, integral and
+  derivative trims, clamped to governance-set rails.  At a rail the
+  integrator may only move back toward the interior, so a railed
+  controller does not wind up.  The rails matter economically as well as
+  numerically: maximum system leverage is `1 / (1 - BUCK_K)', so 1.0 is
+  the infinite-leverage boundary, and an upper rail below it keeps a
+  railed controller solvent and makes "pinned" distinguishable from
+  "settled".  The closed-loop simulations run an integral-dominant loop
+  (an integral time of about ninety days) around a neutral 0.75 with
+  rails (0, 0.95).
 
-  The sign convention is identical to the External-Basket variant below
-  (all shipped gains are positive), but the error semantics are inverted
-  relative to a "BUCK price in USDT" reading:
+  Cycles are paced.  `dT' is the minimum interval between cycles –
+  within it `compute()' is a single cached read, so the mints of one
+  window share one cycle's gas – and `dTMax' treats a long silence as a
+  single bounded step rather than integrating a day of stale error at
+  once.  Price references read from pools are time-weighted averages,
+  which is the controller's resistance to single-block manipulation: a
+  flash-loan spike that moves spot to half its value leaves the TWAP
+  unmoved.
 
-  • `basketValue > 1.0' (one BUCK now buys *less* than one basket – BUCK
-    undervalued / inflation): `error < 0' ⇒ `BUCK_K' /decreases/ ⇒
-    credit contracts ⇒ supply shrinks ⇒ BUCK recovers value vs. the
-    basket.
-  • `basketValue < 1.0' (one BUCK now buys *more* than one basket – BUCK
-    overvalued / deflation): `error > 0' ⇒ `BUCK_K' /increases/ ⇒ credit
-    expands ⇒ supply grows ⇒ BUCK gives back value to the basket.
-
-  `basket' is wired one-shot from governance via `setBasket(address)'
-  (immutable thereafter); deploying a new `BuckBasket' requires a new
-  controller.  `reprime() external' is callable *only* by the registered
-  `BuckBasket'; `BuckBasket.addBasketToken' invokes it after every
-  constituent addition so the dilution discontinuity in
-  `basketValueInBuck' – a new constituent's `basketAmount * spotPrice'
-  contribution appears in a single block – doesn't manifest as a
-  one-cycle P/I spike.  `_reprime()' recaptures `P' against the new
-  process state and re-derives `I' so the next no-error cycle reproduces
-  the current `buckK'.
-
-  Cold-pool / pre-basket behaviour: `_readReferences' returns `(UNIT,
-  UNIT)' until `setBasket' fires, so the controller returns the priming
-  `buckK' and runs no PID math.  Once the basket is wired and
-  observations exist, the loop is identical to the External-Basket
-  variant – only the PV source differs.
+  Governance tunes the loop without stepping its output.  `retune'
+  changes the gains and re-derives the integrator so the next cycle
+  reproduces the current `BUCK_K' (bumpless transfer); `setRails' moves
+  the rails and clamps the live value into them; `setDT' and `setDTMax'
+  set the pacing.
 
 
-7.3 External-Basket Variant
-───────────────────────────
+7.2 Three Controllers
+─────────────────────
 
-  `BuckKController' is the original Uniswap-V3-basket variant.  It reads
-  `BUCK' and a multi-token basket from separate Uniswap-V3 pools
-  (typically priced in USDT/USDC) and treats their difference as the
-  error term; it predates `BuckBasket' and remains in tree for
-  deployments where the basket-of-pools approach is preferred over (or
-  runs in parallel with) the direct embodiment.  It follows the
-  [ezpwd::pid] controller layout, ported to 18-decimal Solidity
-  fixed-point.
+  The PID machinery – state, pacing, rails, anti-windup, the funding
+  factor and the governance surface – lives in the abstract
+  `BuckKControllerBase'.  A concrete controller supplies only its two
+  references.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   PID Term          Source                              Meaning                                          
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────
-   Process Variable  BUCK/USDT Uniswap V3 TWAP           What a BUCK actually trades for                  
-   Setpoint          Commodity-basket TWAP sum           What a BUCK should be worth                      
-   Error             Process - Setpoint                  Positive: BUCK overvalued; negative: undervalued 
-   Output (BUCK_K)   `1e18 + (P*Kp + I*Ki + D*Kd)/1e18'  Credit-limit multiplier (1.0 = neutral)          
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Controller               BUCK side                  Basket side                                       Role                             
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   `BuckKControllerStatic'  –                          –                                                 a governance-set constant        
+   `BuckKControllerDirect'  1 BUCK, by definition      `BuckBasket.basketValueInBuck()' over TOKEN/BUCK  the USD-free controller          
+   `BuckKController'        BUCK/USDx Uniswap V3 TWAP  Chainlink feeds and V3 commodity-pool TWAPs       the USD-intermediated controller 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Sign convention (all shipped gains are *positive*):
-
-  • *BUCK below basket (inflation)*: `error < 0' -> `BUCK_K'
-    /decreases/.  Credit contracts; holders running near their limit
-    must burn BUCK to stay compliant; supply shrinks; BUCK price
-    recovers toward basket from below.
-
-  • *BUCK above basket (deflation)*: `error > 0' -> `BUCK_K'
-    /increases/.  Credit expands; holders can mint additional BUCK
-    against their NFTs and sell it into the pool at the premium; supply
-    grows; BUCK price recovers toward basket from above.
-
-  Two canary tests in `test/BuckKController.t.sol' guard this direction
-  (`test_sign_convention_inflation_contracts_credit' and
-  `test_sign_convention_deflation_expands_credit'); any sign flip in the
-  controller surface fails them within one PID cycle.  See
-  `alberta-buck-ethereum-example.org' for the bootstrap, equilibrium,
-  and arbitrage examples that exercise the loop end-to-end.
-
-
-[ezpwd::pid]
-<https://github.com/pjkundert/ezpwd-reed-solomon/blob/master/c%2B%2B/ezpwd/pid>
-
-7.3.1 External Basket and BUCK Price Oracles
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-
-  The External-Basket controller reads basket components from two
-  parallel sources, both summed into the basket cost: a Chainlink-feed
-  array (`BasketComponent { feed, weight, feedDecimals }', used in tests
-  against mock aggregators) and a Uniswap-V3-pool array (`BasketPool {
-  pool, baseToken, quoteToken, weight, baseDecimals, quoteDecimals,
-  twapInterval }').  `addBasketComponent' and `addBasketPool' are
-  governance-only.  The shipped target basket is V3-pool-sourced:
-
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Pool          Base        Quote  Weight 
-  ─────────────────────────────────────────
-   XAUT / USDT   XAUT (6d)   USDT   25 %   
-   PAXG / USDC   PAXG (18d)  USDC   25 %   
-   cbBTC / USDC  cbBTC (8d)  USDC   25 %   
-   WBTC / USDT   WBTC (8d)   USDT   25 %   
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  Two gold tokens and two BTC tokens, paired against two stablecoins,
-  gives the basket resilience against any single asset-token or
-  basis-currency freeze.  `setBuckPriceOracle(pool, buckToken,
-  quoteToken, quoteDecimals, twapInterval)' configures the BUCK price
-  oracle (typically BUCK/USDT).
-
-  Pool reads route through `UniswapV3OracleLib' (`src/lib/') – a
-  0.8-compatible port of the `OracleLibrary' /=TickMath= /=FullMath=
-  helpers we need.  The vendored `lib/v3-periphery' `OracleLibrary' is
-  pinned to `<0.8.0' and can't be imported directly under 0.8.20+.  When
-  a pool's `twapInterval > 0' the controller calls `consult(pool,
-  secondsAgo)' for the time-weighted mean tick; when zero it reads
-  `slot0().tick' directly (test-only).
-
-
-7.3.2 Priming and `dS' Compensation (shared with the Direct Variant)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-
-  The first `compute()' after deployment captures references and returns
-  the cached `buckK' without running PID math:
-
-  ┌────
-  │ prime cycle:  P = current_error;  lastBasketCost = current_basket;  primed = true;
-  │               return buckK
-  └────
-
-  This avoids the spurious first-cycle derivative spike that arose from
-  `P_prev = 0' (default storage) combined with a non-zero initial error.
-  All subsequent cycles compute
-
-  ┌────
-  │ dS = basketCost - lastBasketCost
-  │ D  = (error - P_prev - dS) * UNIT / dt
-  └────
-
-  where `dS' captures setpoint movement (gold spike, governance basket
-  re-weight, oracle update).  Subtracting `dS' from `(error - P_prev)'
-  strips out target movement so derivative reflects only BUCK's drift
-  relative to its (moving) target.  Without `dS', a basket-side jump
-  would otherwise fire `Kd * basketJump / dt' as if BUCK had moved,
-  slamming `BUCK_K' toward a rail.
-
-
-7.3.3 `dT', `dTMax', and Pokability (shared with the Direct Variant)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-
-  Three time constants govern when and how aggressively the controller
-  responds:
-
-  • *`dT' (minimum cycle interval)*: `compute()' short-circuits if `now
-    - lastUpdate < dT' and returns cached `buckK' as a one-SLOAD
-    operation.  This is the amortisation knob – multiple mints in a
-    single `dT' window share one PID cycle's gas cost.  60 s is
-    reasonable for a chain with ~12 s blocks (one PID cycle per ~5
-    blocks).
-  • *`dTMax' (long-gap clamp)*: when `now - lastUpdate > dTMax', the
-    cycle integrates as if only `dTMax' seconds had passed.  Real
-    `lastUpdate' still advances to `now', so subsequent cycles measure
-    forward correctly.  Default `type(uint256).max' (no clamp);
-    governance opts in via `setDTMax'.  Typical value 1 h: a 24-h
-    silence then integrates as one 1-h step rather than slamming the
-    integral with 24 h of accumulated error.
-  • *Pokability*: `compute()' is permissionless and
-    side-effect-only-when-due.  In normal operation `Buck.mint' /
-    `Buck.burn' drive it; in long quiet stretches a keeper can poke it
-    directly to keep the integral fresh, or rely on `dTMax' to bound the
-    eventual catch-up step.
-
-  The TWAP window itself (currently 600 s on every pool) is the
-  manipulation-resistance knob.  A flash-loan-shape attack that drives
-  BUCK to $0.50 in one block and unwinds the next leaves spot collapsed
-  but TWAP unmoved – the test suite verifies that during such an attack
-  the TWAP read sits at ~$1.000002 while spot reads $0.500.
-
-
-7.3.4 Future: Amortizing PID Work via a State Machine
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-
-  Today's `compute()' reads all five pools and runs the full P/I/D math
-  in a single call.  At ~5 V3 pool reads + a few mults this is cheap
-  (~300-500 K gas including a state write).  If a richer PID grew
-  expensive enough that mint-time amortization became painful, the cycle
-  work could be split into a state machine over multiple calls – each
-  transfer advancing one micro-step of (read pool i, accumulate,
-  finalize).  The tradeoff is that pool reads stretch over real time and
-  so the basket sample becomes incoherent unless every input is itself
-  TWAP'd over a window covering the state-machine duration; today's
-  full-cycle compute wins for that reason.  Revisit when oracle reads
-  grow or the basket expands materially.
-
-
-7.3.5 Tuning (shared with the Direct Variant)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
-
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Gain  Effect of increasing                   Risk                           
-  ─────────────────────────────────────────────────────────────────────────────
-   Kp    Faster response to deviations          Oscillation, over-correction   
-   Ki    Eliminates steady-state error          Integral windup, slow recovery 
-   Kd    Damps oscillation, anticipates trends  Noise amplification            
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  Initial gains should be conservative (high Kd relative to Kp, low Ki).
-  `dT' acts as a coarse damper, `dTMax' as a backstop.  Priming and `dS'
-  compensation make non-zero `Kd' safe at small `dT': pre-priming, every
-  fresh deploy with `Kd > 0' had a permanent derivative contribution
-  because `P_prev' was stuck at 0 – post-priming, `P_prev' captures the
-  actual initial error and the derivative dies off as soon as the system
-  reaches a new equilibrium.
-
-  A future enhancement is on-chain gain scheduling: maintain a rolling
-  variance of the error signal and rotate between conservative and
-  responsive gain sets at regime boundaries.  This maps to the
-  `ezpwd::pid::reset()' hot-swap pattern in the C++ reference.
+  • *Static.* Holds one value that governance sets, and reports a
+    funding factor of zero (the reserve gate disabled).  It lets the
+    identity, demurrage and Notes layers run where no price reference
+    exists yet.
+  • *Direct.* Pairs with `BuckBasket': the setpoint is one BUCK, and the
+    process is what the basket's constituents are worth in BUCK in their
+    own TOKEN/BUCK pools, with no stablecoin in between.  The loop runs
+    in parts per million with gains scaled so the output lands directly
+    in `BUCK_K' units, around a governance-set neutral `buckK0' (itself
+    adjustable bumplessly with `setBuckK0').  Because the setpoint never
+    moves, the derivative acts on the error itself.  The basket is wired
+    once (`setBasket'), and `BuckBasket' calls `reprime()' after adding
+    a constituent, so the one-block jump that dilution causes is not
+    read as an error.
+  • *External-Basket.* The original controller: BUCK's price and the
+    basket's cost, both in USD, from separate pools and feeds (the
+    target basket is XAUT/USDT, PAXG/USDC, cbBTC/USDC and WBTC/USDT, a
+    quarter each – two golds and two bitcoins against two stablecoins,
+    so no single token or stablecoin freeze breaks it).  Its output is
+    1.0 plus the trims.  It is primed at deployment so the first cycle
+    at parity reproduces the deployed value, and its derivative
+    subtracts the basket's own movement, so a gold spike is not mistaken
+    for BUCK moving.  Pool reads go through `UniswapV3OracleLib', a
+    0.8-compatible port of the V3 oracle helpers.
 
 
 8 Notes: Privacy-Preserving Denomination
@@ -1860,34 +1869,43 @@ Table of Contents
   its own `MintBatchN*Groth16Verifier.sol'.  The shipped `Notes'
   contract holds a single `mintVerifier' adapter; per-N dispatch lives
   inside the adapter (a single `IMintVerifier' chooses the right pinned
-  verifier by `cms.length').  Public-signals arity is 5 regardless of N:
+  verifier by `cms.length').  The public signals are:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Signal           Description                                                            
-  ─────────────────────────────────────────────────────────────────────────────────────────
-   `oldRoot'        Live note Merkle root the prover read from chain                       
-   `newRoot'        Root after folding `cm[0..N-1]' starting at `nextLeafIndex'            
-   `nextLeafIndex'  Live tree size the prover read from chain                              
-   `totalFace'      Sum of note values, range-bounded to 128 bits                          
-   `cmBatchHash'    `keccak256(abi.encodePacked(cm[0..N-1]))' – ties calldata to the SNARK 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Signal           Description                                                           
+  ────────────────────────────────────────────────────────────────────────────────────────
+   `oldRoot'        Live note Merkle root the prover read from chain                      
+   `newRoot'        Root after folding `cm[0..N-1]' starting at `nextLeafIndex'           
+   `nextLeafIndex'  Live tree size the prover read from chain                             
+   `totalFace'      Sum of note values, range-bounded to 128 bits                         
+   `cm[N]'          The commitments themselves, so the calldata is what the proof attests 
+   `issuerMode[N]'  Per-leaf output: PUBLIC or PRIVATE, from the committed flavour        
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Per leaf, the circuit enforces a Poseidon-5 commitment opening `cm_i
-  === Poseidon(flavor_i, v_i, rho_i, idHash_i, predicate_i)',
-  `Num2Bits(128)' range bounds on `v[i]' and `totalFace' (closing
-  field-overflow attacks), one sum check `totalFace === sum v[i]', and
-  an N x TREE_DEPTH Poseidon-2 dual Merkle walk: `priorWalk' consumes
-  `ZERO_VALUE' at the insertion slot to attest `oldRoot', `postWalk'
-  consumes `cm[i]' to advance `rollingRoot' to `newRoot'.  Both walks
-  share prover-supplied siblings.  A keccak hash check binds
-  `cmBatchHash' to the per-leaf commitments.  ~6K R1CS per leaf (~1.7K
-  opening + ~4.3K insertion).
+  The private-issuer sibling `mint_batch_a2.circom' (per-N
+  `MintBatchA2N*Groth16Verifier', behind `MintVerifierA2Adapter' and
+  `setA2MintVerifier') replaces `issuerMode' with each leaf's `eIss' and
+  the binding's `T' as outputs, recomputing `idHash = Poseidon-11(T_ID,
+  eNote, eIss, T)' in circuit: 7N + 4 public signals, so each A2 leaf's
+  re-encryption binding is pinned to the leaf it names.  `T_CM', `T_ID'
+  and `T_NF' are the note hashes' v2 domain tags
+  (`circuits/note_tags.circom').
 
-  Verifier bytecode sizes: 14.5 KB at N=16, 20.8 KB at N=32 – both under
-  the EIP-170 24 KB ceiling.  Per-mint gas: 461K at N=1 (constant ~216K
-  Groth16 verifier dominates), 624K at N=16 (~39K/leaf – the shipped
-  sweet-spot), 1.12M at N=32.  Asymptotic per-leaf cost is ~31K.
-  Promotion to N >= 64 needs one of the three escape hatches in
+  Per leaf, the circuit enforces a tagged Poseidon-6 commitment opening
+  `cm_i === Poseidon(T_CM, flavor_i, v_i, rho_i, idHash_i,
+  predicate_i)', `Num2Bits(128)' range bounds on `v[i]' and `totalFace'
+  (closing field-overflow attacks), one sum check `totalFace === sum
+  v[i]', and an N x TREE_DEPTH Poseidon-2 dual Merkle walk: `priorWalk'
+  consumes `ZERO_VALUE' at the insertion slot to attest `oldRoot',
+  `postWalk' consumes `cm[i]' to advance `rollingRoot' to `newRoot'.
+  Both walks share prover-supplied siblings.  About 21.9K R1CS per leaf,
+  half of it the dual Merkle walk; 22,052 at N=1.
+
+  A batch of one mints for 513K gas end to end (`NotesE2E', the
+  public-issuer path with its Schnorr); each further leaf adds its
+  commitment and issuer mode to the Groth16 verification and its
+  calldata, tens of thousands of gas rather than a Poseidon insertion's
+  ~800K.  Promotion to N >= 64 needs one of the three escape hatches in
   [alberta-buck-notes-rollup-mint.org] (calldata-IC hash-pinned, sharded
   SSTORE2, plain SLOAD), with calldata-IC the natural fit for the
   Holochain wallet.
@@ -1901,54 +1919,52 @@ Table of Contents
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
-8.2 Spend Circuits (B-flavor, A-flavor V2)
-──────────────────────────────────────────
+8.2 The Spend Proof and the Deposit Gates
+─────────────────────────────────────────
 
-  `circuits/spend.circom' proves redemption of a single B-shape note
-  under an on-chain Merkle root.  Public inputs `[noteRoot, nullifier,
-  face, recipient, chainId]'; private witness `(flavor, v, rho, idHash,
-  predicate, pathElements[20], pathIndices[20])'.  Constraint groups:
-  `Num2Bits(128)' on `face' and `v', `cm === Poseidon-5(flavor, v, rho,
-  idHash, predicate)', Tornado-style depth-20 Merkle inclusion under
-  `noteRoot', B-tag nullifier `Poseidon-3(rho, idHash, 4242)', and value
-  conservation `face * 1 === v * 1' with a quadratic anchor.  ~12,000
-  R1CS.  `SpendGroth16Verifier' takes the 5-element public-signals
-  tuple; `SpendVerifierAdapter' presents the narrow `ISpendVerifier'.
+  `circuits/spend.circom' is the one note proof every spend reuses.
+  Public inputs `[noteRoot, nullifier, face, recipient, chainId, flavor,
+  issuanceCommitment]'; private witness `(flavor, v, rho, idHash,
+  predicate, pathElements[20], pathIndices[20])'.  It proves `cm ===
+  Poseidon-6(T_CM, flavor, v, rho, idHash, predicate)' under `noteRoot',
+  the flavour-agnostic nullifier `Poseidon-3(T_NF, rho, idHash)', `face
+  === v' with both bounded to 128 bits, and that the public `flavor' is
+  the committed one; for B1 it exposes the commitment as
+  `issuanceCommitment' so `Notes' can authenticate the public issuer,
+  and A1/A2 pass zero.  About 12,000 R1CS.
 
-  `circuits/spend_a.circom' V2 is the A-flavor (identity-bound) sibling.
-  Public inputs grow to `[noteRoot, nullifier, face, recipient, chainId,
-  E_n.R.x, E_n.R.y, E_n.C.x, E_n.C.y]' (9 total).  Adds the A-tag
-  nullifier `Poseidon-3(rho, idHash, 4243)', a flavor-in-{1,2} gate, and
-  an in-circuit Poseidon-8 binding gate `Poseidon-8(E_n, issuerData) ===
-  idHash' (~265 R1CS) that pins the publicly-revealed `E_n' to the leaf
-  at mint time.  Total ~13,300 R1CS.
+  The identity half of a spend is a separate gate, and its shape follows
+  how many secrets the spender's two claims rest on:
 
-  The cryptographic identity gate – proving the spender holds a single
-  `sk_dep' that opens both `E_n' and the registered `E_reg' – lives in
-  `IdentityRegistry.verifySpendCP' rather than the circuit.  In-circuit
-  BN254 G1 arithmetic over the BN254 scalar field would have cost +250K
-  R1CS per group operation; off-chain CP-DLEQ verified via EIP-196
-  precompiles costs ~36K gas instead.  `Notes.spendACP' calls the
-  Groth16 verifier and `verifySpendCP' atomically; both must succeed.
-  The DLEQ is a 4-element Sigma proof:
+  • *Addressed (A1, A2): one folded proof.* `deposit_fold_a1.circom'
+    (3,309,276 constraints, 43 public inputs) and
+    `deposit_fold_a2.circom' (3,833,338, 42) prove over one witness that
+    the receiving secret \( k \) opens the note's ciphertext and the
+    spend's re-encryption `eEnc'; that the depositor's registered
+    credential decrypts to the identity \( m \); that a certified leaf
+    `Poseidon(tag_R, m, k, salt)' has a 32-level path to `identityRoot';
+    and that the nullifier is the one the note's `idHash' produces.  A2
+    adds the issuer's own membership and the key tie `T === r'k*G +
+    gamma*H_PEDERSEN' against the `T' its `idHash' commits.
+    `DepositFoldVerifierAdapter' derives every public input on chain,
+    reading the depositor's key and credential from the registry at
+    `msg.sender'.
+  • *Bearer (B1): a sigma and a membership proof.*
+    `IdentityRegistry.verifyDepositorBinding' is an EIP-196 Okamoto
+    sigma binding the payout account, `eDepForIss' (the depositor's
+    identity encrypted for the public issuer) and `P_dep = M +
+    b*H_PEDERSEN' to one identity scalar;
+    `identity_membership_b1.circom' (494,701 constraints, 9 public
+    inputs) proves the same `P_dep' opens to a certified salted leaf on
+    a 32-level path.  B1's two claims rest on one secret, so the sigma's
+    shared challenge is a real tie; the blind is on a generator hashed
+    to the curve, so it cannot be shifted onto another identity.
 
-        Prover picks `t in Fr', computes `T1 = t*G', `T2 =
-        t*(R_reg - R_n)'.  Challenge: `e = H(R_n, R_reg, C_n,
-        C_reg, pk_dep, T1, T2, recipient, chainid)'.  Response: `s
-        = t + e*sk_dep'.  Proof: `(e, s, T1, T2)' – 4 field
-        elements, ~36K gas to verify on-chain.
-
-  The invariant the two layers together enforce: A-note loss-recovery
-  via identity re-issuance is impossible by design.  `sk_rec' must be
-  backed up like a hardware-wallet seed; loss is terminal.  Companion
-  documents [Notes] and [Notes Flow] document the wallet-side
-  implications.
+  Every setup is dev entropy.  Production runs a ceremony per circuit.
+  The arguments are [Proofs] Part IV, Theorems 7-12.
 
 
-[Notes] <https://perry.kundert.ca/range/finance/alberta-buck-notes/>
-
-[Notes Flow]
-<https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/>
+[Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
 8.3 Verifier Interfaces
@@ -1957,87 +1973,88 @@ Table of Contents
   `Notes' is decoupled from the SNARK toolchain via narrow interfaces:
 
   ┌────
-  │ interface IMintVerifier {
-  │     function verifyMint(bytes proof, uint256 oldRoot, uint256 newRoot,
-  │                         uint256 nextLeafIndex, uint256 totalFace,
-  │                         uint256[] calldata cms) external view returns (bool);
+  │ interface IMintVerifier {           // public-issuer batches, per-N dispatch
+  │     function verifyMint(bytes proof, uint256[] issuerMode, uint256 oldRoot,
+  │                         uint256 newRoot, uint256 nextLeafIndex, uint256 totalFace,
+  │                         uint256[] commitments) external view returns (bool);
+  │ }
+  │ interface IMintVerifierA2 {         // private-issuer batches: eIss and T per leaf
+  │     function verifyMint(bytes proof, uint256[4][] eIss, uint256[2][] T,
+  │                         uint256 oldRoot, uint256 newRoot, uint256 nextLeafIndex,
+  │                         uint256 totalFace, uint256[] commitments) external view returns (bool);
   │ }
   │ interface ISpendVerifier {
-  │     function verifySpend(bytes proof, uint256 root, uint256 nullifier,
-  │                          uint256 face, address recipient, uint256 chainId)
-  │         external view returns (bool);
+  │     function verifySpend(bytes proof, uint256 noteRoot, uint256 nullifier, uint256 face,
+  │                          address recipient, uint256 chainId, uint256 flavor,
+  │                          uint256 issuanceCommitment) external view returns (bool);
   │ }
-  │ interface ISpendAVerifier {
-  │     function verifySpendA(bytes proof, uint256 root, uint256 nullifier,
-  │                           uint256 face, address recipient, uint256 chainId,
-  │                           uint256 enRx, uint256 enRy, uint256 enCx, uint256 enCy)
-  │         external view returns (bool);
+  │ interface IDepositFoldVerifier {    // the addressed gates
+  │     function verifyFoldA1(bytes proof, uint256 nullifier, uint256 face, uint256 identityRoot,
+  │                           IdentityRegistry.ElGamalCT eEnc, address depositor) external returns (bool);
+  │     function verifyFoldA2(bytes proof, uint256 nullifier, uint256 identityRoot,
+  │                           IdentityRegistry.ElGamalCT eEnc, address depositor) external returns (bool);
+  │ }
+  │ interface IIdentityMembershipVerifier {  // B1's membership over P_dep
+  │     function verifyMembership(bytes proof, uint256 identityRoot, uint256 px, uint256 py)
+  │         external returns (bool);
   │ }
   └────
 
-  Stub implementations (`StubMintVerifier' / `StubSpendVerifier') ship
-  for unit tests that exercise state transitions unrelated to the SNARK.
-  The production `Adapter' contracts decode the proof as `(uint256[2],
-  uint256[2][2], uint256[2])', build the public-signals tuple, and
-  forward to the snarkjs-generated Groth16 verifier.  `mintVerifier' is
-  a singleton `IMintVerifier' adapter that internally dispatches by
-  `cms.length' to the correct pinned `MintBatchN*Groth16Verifier'; spend
-  verifiers are likewise singletons.  Swapping any of them is a single
-  governance call.
+  Stub implementations ship for unit tests that exercise state
+  transitions unrelated to the SNARK.  The production adapters decode
+  the proof as `(uint256[2], uint256[2][2], uint256[2])', build the
+  public-signals tuple, and forward to the snarkjs-generated Groth16
+  verifier; the mint adapters dispatch internally by `cms.length' to the
+  pinned per-N verifier.
 
 
 8.4 Notes Contract
 ──────────────────
 
   `src/Notes.sol' is constructed with `(buck, mintVerifier,
-  spendVerifier, governance)'.  The A-flavor spend verifier and the
-  identity registry are wired post-construction via governance setters
-  (`setSpendAVerifier', `setIdentityRegistry'); until both are set,
-  `spendACP' reverts with `Notes: A-spend disabled' or `Notes: identity
-  registry not set'.  Its state is intentionally lean – per-leaf
-  insertion math now lives in the SNARK:
+  spendVerifier, governance)'; governance wires the rest:
+  `setA2MintVerifier', `setIdentityRegistry', `setDepositFoldVerifier'
+  (which refuses `address(0)': the fold IS the addressed gate, so no
+  configuration leaves a weaker one answering) and
+  `setIdentityMembershipVerifier'.  Its state is intentionally lean –
+  per-leaf insertion math lives in the SNARK:
 
-  • *Verifier handles*: singleton `mintVerifier' (the adapter that
-    dispatches by batch size), singletons `spendVerifier' for B-spend
-    and `spendAVerifier' for A-spend, plus the `identityRegistry' used
-    by `spendACP' for `verifySpendCP'.  All swappable by governance.
   • *Audit / double-spend state*: `mapping(uint256 => bool) nullifiers',
      `uint256 noteFaceSum'.
   • *Tree state*: `uint32 nextLeafIndex' and
-    `uint256[ROOT_HISTORY_SIZE=30] roots' with `uint8 currentRootIndex'.
-    `filledSubtrees', `zeros[]', and per-cm uniqueness checks are gone –
-    duplicate openings are economically self-punishing via the
-    deterministic nullifier (one spend nullifies every copy of the same
-    opening; the duplicator forfeits their mint).
+    `uint256[ROOT_HISTORY_SIZE=30] roots' with `uint8 currentRootIndex';
+    the constructor seeds `roots[0]' with `EMPTY_ROOT', the root of a
+    tree whose empty leaf is the field tag of
+    `AlbertaBuck/Notes/Zero/v2'.
+  • *Records*: each public-issuer commitment's issuer, so a B1 spend can
+     authenticate it.
 
-  `mint(proof, oldRoot, newRoot, nextLeafIndex, totalFace, cms)' asserts
-  `cms.length > 0', checks `oldRoot == roots[currentRootIndex]' and
-  `nextLeafIndex == self.nextLeafIndex' (stale-state guards),
-  field-bounds each `cms[i]' against `FIELD_R', dispatches to
-  `mintVerifier' (which forwards to the per-N pinned Groth16 verifier
-  internally), pulls `totalFace' BUCK via `transferFrom(caller, this,
-  totalFace)', writes `newRoot' into the ring buffer at
-  `(currentRootIndex + 1) % ROOT_HISTORY_SIZE', advances `nextLeafIndex'
-  by `cms.length', bumps `noteFaceSum' by `totalFace', and emits
-  `Minted(issuer, totalFace, startIndex, count, newRoot)'.  Per-leaf
-  `Appended' events are gone; the commitments live in calldata for
-  off-chain replayers.
+  `mint' has two overloads.  The public-issuer one takes the batch
+  Schnorr (`verifyIssuerSchnorr' against the caller's registered key);
+  the private-issuer one takes one `A2Binding' per leaf and checks each
+  against `verifyIssuerReenc' and against the `eIss' and `T' the A2 mint
+  proof exposes for that leaf.  Both check the stale-state guards
+  (`oldRoot == roots[currentRootIndex]', `nextLeafIndex ==
+  self.nextLeafIndex'), field-bound each commitment, verify the batch
+  proof, pull `totalFace' BUCK, advance the ring and emit
+  `Minted(issuer, totalFace, startIndex, count, newRoot)'; the
+  commitments live in calldata for off-chain replayers.
 
-  `spend(proof, root, nullifier, face, recipient)' (B-flavor) requires
-  `recipient != 0', `face > 0', `isAcceptedRoot(root)' (root in the
-  recent-roots window), and `!nullifiers[nullifier]'.  Forwards to
-  `spendVerifier', marks the nullifier burned, decrements `noteFaceSum',
-  and calls `buck.transfer(recipient, face)'.  Because the Notes pool is
-  bound under the Carrying flag, `buck.transfer' dispatches to the
-  carrying path automatically – the recipient absorbs the pool's average
-  demurrage age via `buckSeconds', preserving the SNARK's `face === v'
-  invariant at the ERC-20 boundary.  `Spent(nullifier, face, recipient)'
-  closes the spend.
-
-  `spendACP(proof, root, nullifier, face, recipient, E_n, cpProof)'
-  (A-flavor) is identical except it also calls
-  `identityRegistry.verifySpendCP(msg.sender, recipient, E_n, cpProof)'
-  atomically; both verifications must succeed.
+  There is no unbound spend.  `spendCoupledA1' and `spendCoupledA2' take
+  `(proof, root, identityRoot, nullifier, face, recipient, eEnc,
+  foldProof)', `spendCoupledB1' takes `(proof, root, identityRoot,
+  nullifier, face, recipient, issuanceCommitment, issuer, eDepForIss,
+  b1Proof, membershipProof)'.  Each requires `root' in the recent-roots
+  window, a fresh nullifier, the spend proof for its flavour, and
+  `identityRegistry.acceptsRoot(identityRoot,
+  NOTES_MEMBERSHIP_CONSUMER)', then its deposit gate; it burns the
+  nullifier, decrements `noteFaceSum', and pays with
+  `buck.transfer(recipient, face)'.  Because the pool is bound under the
+  Carrying flag, the transfer takes the carrying path: the recipient
+  absorbs the pool's average demurrage age via `buckSeconds', preserving
+  `face === v' at the ERC-20 boundary.  The events `SpentCoupledA1',
+  `SpentCoupledA2' and `SpentCoupledB1' publish no identity point; B1's
+  carries `eDepForIss', which only the issuer decrypts.
 
 
 9 End-to-End Walkthrough
@@ -2067,15 +2084,15 @@ Table of Contents
 ────────────────────────────────────────────
 
   Alice obtains a PS-signed credential off-chain from a trusted issuer
-  (the Alberta government, ATB Financial, etc.), rerandomizes it,
-  generates a fresh ElGamal key pair, encrypts her identity point `M =
-  m·G' under her public key, and produces the Schnorr-family NIZK
-  binding the rerandomized sigma to the ciphertext.
-  `IdentityRegistry.register(issuer, pk, E, sigma', proof)' verifies
-  both via BN254 precompiles in about 235K gas.  After this call
-  `isVerified[alice] = true' and Alice can touch BUCK.  She repeats
-  steps 2-3 for every Ethereum account she controls; the issuer never
-  sees those accounts.
+  (the Alberta government, ATB Financial, etc.), blinds it into a
+  presentation `(A, B)', generates a fresh ElGamal key pair, encrypts
+  her identity point `M = m·G' under her public key, and produces the
+  Schnorr-family NIZK binding the presentation to the ciphertext and the
+  key.  `IdentityRegistry.register(issuer, pk, E, (A, B), proof)'
+  verifies the proof via BN254 precompiles in 443,892 gas (measured).
+  After this call `isVerified[alice] = true' and Alice can touch BUCK.
+  She repeats steps 2-3 for every Ethereum account she controls; the
+  issuer never sees those accounts.
 
 
 9.2 Step 1: Mint
@@ -2194,7 +2211,7 @@ Table of Contents
      from each batch's calldata.
   2. `snarkjs groth16 fullProve' against `spend.wasm' /
      `spend_final.zkey' produces a proof binding `[currentRoot,
-     Poseidon-3(rho, idHash, 4242), 100e6, recipient, 1]' to the
+     Poseidon-3(T_NF, rho, idHash), 100e6, recipient, 1]' to the
      witness.
   3. `Notes.spend(proofBytes, currentRoot, nullifier, 100e6, recipient)'
      – the contract checks the root window, rejects a previously-seen
@@ -2223,7 +2240,7 @@ Table of Contents
 
 [Insurer Updates] See section 3.5
 
-[underwater] See section 5.3.3
+[underwater] See section 5.3.4
 
 
 10 Gas Cost Snapshot
@@ -2233,30 +2250,30 @@ Table of Contents
   cancun, via-IR, optimizer at 200 runs).  PID and oracle figures are
   estimates against unwritten oracle wiring.
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Operation                                       Gas (approx)  At 30 gwei  Notes                                    
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   BUCK_CREDIT.updateCredit()                      ~80K          ~$6         Multiple SSTOREs (insurer pays)          
-   IdentityRegistry.register()                     ~235K         ~$19        PS pairing + NIZK (one-time)             
-   IdentityRegistry.verifyApprove                  ~29K          ~$2         CP proof, per counterparty pair          
-   IdentityRegistry.verifySpendCP                  ~36K          ~$3         CP-DLEQ via EIP-196 (A-flavor spend)     
-   BUCK.approve() (identity)                       ~97K          ~$8         29K CP + 46K allowance + 22K SSTORE      
-   BUCK.transfer / transferFrom                    ~80K          ~$6         Identity check + receipt + 1 SSTORE/side 
-   – reentrancy guard, per guarded call            ~600          –           TSTORE/TLOAD; no storage slot            
-   – credit scan, sender holding 10 credits        ~28K          ~$2         Live creditLimit; 6K with none held      
-   – demurrage routed to a designated payer        ~900          –           Warm payer slot; 0 if not delegated      
-   BUCK.mint() (static BUCK_K, 1 NFT)              ~150K         ~$12        NFT walk + allocator + Jubilee accrual   
-   BUCK.mint() (static BUCK_K, 2-NFT spillover)    ~210K         ~$17        + second NFT crystallise                 
-   BUCK.burn() (1 NFT)                             ~120K         ~$10        Mirror of mint                           
-   BUCK.mint() (with PID update, 4-pool basket)    ~450K         ~$36        + 4 V3 TWAP reads + BUCK TWAP + PID math 
-   BUCK.mint() (PID cached, within dT)             ~155K         ~$12        one SLOAD on the cache path              
-   Notes.mint (mint_batch, N=1)                    ~461K         ~$37        Groth16 verify (~216K) + insert          
-   Notes.mint (mint_batch, N=16)                   ~624K         ~$50        ~39K/leaf – shipped sweet-spot           
-   Notes.mint (mint_batch, N=32)                   ~1.12M        ~$90        ~35K/leaf (verifier ~422K)               
-   Notes.spend (Groth16, B-shape)                  ~360K         ~$29        Groth16 verify + Carrying transfer       
-   Notes.spendACP (Groth16 + CP-DLEQ, A-shape)     ~410K         ~$33        + verifySpendCP (~36K) via EIP-196       
-   BUCK_CREDIT.currentValue / BUCK_K.currentBuckK  0             Free        View                                     
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Operation                                       Gas (approx)  At 30 gwei  Notes                                      
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   BUCK_CREDIT.updateCredit()                      ~80K          ~$6         Multiple SSTOREs (insurer pays)            
+   IdentityRegistry.register()                     ~444K         ~$36        credential proof, 3 pairings (measured)    
+   IdentityRegistry.verifyApprove                  ~29K          ~$2         CP proof, per counterparty pair            
+   BUCK.approve() (identity)                       ~97K          ~$8         29K CP + 46K allowance + 22K SSTORE        
+   BUCK.transfer / transferFrom                    ~80K          ~$6         Identity check + receipt + 1 SSTORE/side   
+   – reentrancy guard, per guarded call            ~600          –           TSTORE/TLOAD; no storage slot              
+   – credit scan, sender holding 10 credits        ~28K          ~$2         Live creditLimit; 6K with none held        
+   – demurrage routed to a designated payer        ~900          –           Warm payer slot; 0 if not delegated        
+   BUCK.mint() (static BUCK_K, 1 NFT)              ~150K         ~$12        NFT walk + allocator + Jubilee accrual     
+   BUCK.mint() (static BUCK_K, 2-NFT spillover)    ~210K         ~$17        + second NFT crystallise                   
+   BUCK.burn() (1 NFT)                             ~120K         ~$10        Mirror of mint                             
+   BUCK.mint() (with PID update, 4-pool basket)    ~450K         ~$36        + 4 V3 TWAP reads + BUCK TWAP + PID math   
+   BUCK.mint() (PID cached, within dT)             ~155K         ~$12        one SLOAD on the cache path                
+   Notes.mint (public issuer, N=1)                 ~513K         ~$41        Groth16 verify + batch Schnorr (measured)  
+   Notes.mint (private issuer A2, N=1)             ~629K         ~$50        + re-encryption binding, eIss/T (measured) 
+   Notes.spendCoupledA1                            ~964K         ~$77        spend proof + folded gate (measured)       
+   Notes.spendCoupledA2                            ~982K         ~$79        spend proof + folded gate (measured)       
+   Notes.spendCoupledB1                            ~906K         ~$72        + depositor sigma + membership (measured)  
+   BuckCredit.attestInsurer (8 predicates)         ~8M           ~$640       once per review period                     
+   BUCK_CREDIT.currentValue / BUCK_K.currentBuckK  0             Free        View                                       
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   The PID update cost is amortised across all mints within a `dT' window
   (60 s default; only the first mint after each window pays the
@@ -2283,44 +2300,84 @@ Table of Contents
   acceptable window (~1 hour) and revert if stale.
 
 
-11.2 Unvetted Insurers – the open hole
-──────────────────────────────────────
+11.2 The Insurer Gate
+─────────────────────
 
-  *This is the one thing on this page that must close before mainnet,
-   and it is not closed.*
-
-  `createCredit' is permissionless.  Any address may issue a BUCK_CREDIT
-  naming itself the insurer; there is no vetting of any kind.
-  `updateCredit' is gated on `msg.sender == insurer', but becoming an
-  insurer in the first place is not gated at all.
-
-  The consequence is unbacked issuance, not merely a nuisance.  A
-  credit's `faceValue' and `premiumRate' are whatever its issuer says
+  A credit's `faceValue' and `premiumRate' are whatever its issuer says
   they are, and a zero-premium credit costs nothing to draw on –
   `poolPrincipal == 0', so the counter-cyclical funding gate is
-  inapplicable by design.  So a single verified account can write itself
-  a policy on an asset it never names, and mint against it:
+  inapplicable by design.  If becoming an insurer were ungated, a single
+  verified account could write itself a policy on an asset it never
+  names, and mint against it:
 
   ┌────
   │ mallory issues herself a zero-premium credit, faceValue 1,000,000,000
   │ mint(500,000,000)   ->  principal paid   0
   │                         spendable        500,000,000 BUCK
-  │                         transferred on   totalSupply 0 -> 500,000,000
   └────
 
-  Nothing downstream catches it.  `totalCurrentValue' sums whatever
-  credits an account holds without asking who issued them, and the
-  identity layer only establishes that the /minter/ is a registered
-  person – not that the /insurer/ is good for anything.
+  The recipient opt-in below cannot stop this, since the attacker is
+  both insurer and client.  What stops it is the regulator.  Insurer
+  oversight is already a periodic review of underwriting, reserves and
+  reinsurance that concludes with an estimate of what the insurer may
+  write; the gate makes that conclusion available to the contract, as a
+  set of public memberships the insurer proves and `BuckCredit' caches.
 
-  The recipient opt-in below does not close this, and cannot: the
-  attacker is both insurer and client, so she accepts herself.  Only
-  vetting the insurer closes it.  The intended shape is deliberately
-  *not* a governance allowlist – issuance stays open to anyone who can
-  demonstrate they are good for the claims: on-chain solvency (a buffer
-  held, and provably available to the parametric payout trigger) plus a
-  rating.  That system is unbuilt.  Until it exists, BUCK's supply is
-  bounded only by the honesty of everyone holding a registered identity.
+  *The envelope.* An insurance regulator keeps one public subtree per
+  predicate in the [identity accumulator], named under its namespace
+  (e.g. `regulator:ca-ab'): standing (`insurer'), a face band on a
+  ladder of powers of ten from ten BUCK to a hundred million
+  (`insurer:face:<b>'), each permitted depreciation model
+  (`insurer:dep:<d>'), the maximum depreciation and premium rates in
+  basis points (`insurer:depRate:<bp>', `insurer:premium:<bp>'), the
+  general scope (`insurer:general'), and each asset scope it permits
+  (`scope:<asset path>').  Subtree identifiers and scope identifiers are
+  `keccak' of the namespaced name, so refining a scope needs no version
+  and there is no asset taxonomy on chain.  An insurer's leaf is the
+  public, unsalted identity leaf: its licence is a fact it advertises.
+
+  *Attestation, once per review period.* `attestInsurer(M, opening,
+  claim, root, paths)' takes the insurer's identity point, a
+  Chaum-Pedersen opening showing the caller's registered credential
+  decrypts to `M' (bound to the account, chain and registry under its
+  own v2 tag, so no account can claim another's envelope), the claimed
+  envelope, a posted root the registry accepts for the insurer consumer
+  (one day old at most), and one public path per claimed predicate.  It
+  verifies each path with `verifyPublicMembership' and caches the
+  envelope with `expiresAt = rootPostedAt(root) + attestationPeriod'.  A
+  new attestation withdraws every scope it does not repeat.  Eight
+  predicates cost about 8M gas, once per period.
+
+  *Issuance, every credit.* `createCredit' keeps its eight-argument
+  form, which declares the general scope, and gains a nine-argument form
+  declaring a `scope'.  Either checks the credit against the cached
+  envelope with a handful of storage reads, reverting with the reason:
+  "insurer not in good standing", "attestation expired", "scope not
+  attested", "face above attested band", "depreciation model not
+  attested", "depreciation rate above attested maximum", "premium rate
+  above attested maximum".  `updateCredit' is held to the same parameter
+  envelope, or an insurer would write small and reappraise large; the
+  scope is emitted at creation and not stored, so a reappraisal cannot
+  re-check it.  `bandForFace', `scopeId' and `scopeAttested' expose the
+  arithmetic.
+
+  *Configuration.* The deployer calls `configureInsurerGate(registry,
+  namespace, period)' once; it cannot be changed or removed.  A
+  `BuckCredit' never configured issues ungated – the economic
+  simulations deploy that way – and a deployment profile *must*
+  configure it.  The gate's own suites (`InsurerGate.t.sol', and
+  `InsurerGateVectors.t.sol', which replays the Python reference's
+  subtrees, opening and issuance decisions byte for byte) exercise every
+  refusal.
+
+  The gate checks the consistency of the attestation chain, not its
+  accuracy: a regulator that attests a bad insurer is answerable for it,
+  off chain, exactly as it is today.  Out of scope by decision: what
+  happens to an insurer's pools when it fails, which is its reinsurers'
+  business.
+
+
+[identity accumulator] See section 4.5
 
 
 11.3 Recipient Opt-In
@@ -2347,8 +2404,7 @@ Table of Contents
   should never have had to reach for.
 
   It is not a substitute for vetting.  It bounds who may put a credit in
-  your hands; it says nothing about whether that credit is worth
-  anything.
+  your hands; the gate above bounds what they may write.
 
 
 [read live] See section 5.2.1
@@ -2372,15 +2428,15 @@ Table of Contents
   and a rating that responds to claim behaviour is the intended
   mechanism.  Time-locks on insurer updates (e.g. 7-day delay for
   reductions > 20 %) remain a future enhancement.  For the prior
-  question – how an insurer becomes vetted at all – see [Unvetted
-  Insurers].
+  question – how an insurer becomes vetted at all – see [The Insurer
+  Gate].
 
 
 [Insurer Updates] See section 3.5
 
-[underwater] See section 5.3.3
+[underwater] See section 5.3.4
 
-[Unvetted Insurers] See section 11.2
+[The Insurer Gate] See section 11.2
 
 
 11.5 Reentrancy
@@ -2495,16 +2551,19 @@ Table of Contents
 13 Status
 ═════════
 
-  Current Foundry suite: 53 test files cover all six contracts in tree
+  Current Foundry suite: 55 test files cover all six contracts in tree
   (`BuckCredit', `IdentityRegistry', `Buck', `BuckBasket',
   `BuckKControllerStatic' + `BuckKControllerDirect' + `BuckKController',
   `Notes') plus dedicated suites for the NFT-credit machinery
   (`BuckCreditLimit.t.sol', `BuckCreditBacking.t.sol',
   `BuckCreditReappraisal.t.sol', `BuckSignedBalance.t.sol'), the
   reentrancy guard and delegated demurrage (`BuckReentrancy.t.sol',
-  `BuckDelegatedDemurrage.t.sol', `GuardBench.t.sol'), the SNARK
-  toolchain (`mint_batch.circom' at pinned N ∈ {1, 2, 4, 8, 16, 32},
-  `spend.circom', `spend_a.circom' V2), and a Python reference wallet
+  `BuckDelegatedDemurrage.t.sol', `GuardBench.t.sol'), the identity
+  accumulator and insurer gate (`IdentityAccumulator.t.sol',
+  `InsurerGate.t.sol', `InsurerGateVectors.t.sol'), the SNARK toolchain
+  (`mint_batch[_a2].circom' at pinned N ∈ {1, 2, 4, 8, 16, 32},
+  `spend.circom', the two folded deposit gates and B1's membership, each
+  with real proofs), and a Python reference wallet
   (`alberta_buck.wallet') that emits canonical test vectors the Solidity
   tests load via `vm.readFile'.  One `BuckKControllerForkTest' requires
   a live mainnet RPC and is skipped offline.
@@ -2515,8 +2574,8 @@ Table of Contents
     shared PID mechanics (priming, `dS' compensation, `dT', `dTMax',
     anti-windup, integral convergence, `fundingFactor') against a
     synthetic `_readReferences' override.
-  • `BuckKControllerStaticTest' – governance-set constant, `setBuckK'
-    guards, `fundingFactor' always-`UNIT'.
+  • `BuckKControllerStaticTest' – governance-set constant and `setBuckK'
+    guards.
   • `BuckKControllerDirectTest' – the USD-free direct embodiment wired
     to a mock basket source; `reprime' access control,
     dilution-discontinuity absorption, sign-convention canaries on the
@@ -2540,14 +2599,6 @@ Table of Contents
     correctness across overweight/underweight pools, "sell high / buy
     low" redemption invariants, shortfall-cover greedy swap, and the
     `reprime' callback into `BuckKControllerDirect'.
-  • `BuckEquilibriumScenarioTest' – multi-month closed-loop scenario;
-    ticks `BuckBasket.depositToken' / `redeem' and `Buck.mint' / `burn'
-    across simulated price drift to exercise `fundingFactor' and the
-    `buckK' response in concert.
-  • `BuckKArbScenarioTest' – driven-arbitrageur scenario
-    (`BuckKArbScenarioTest', 2-year horizon) that exercises the
-    External-Basket PID against an Alice agent who trades around the PID
-    equilibrium; emits `arb-scenario.json' for the Python visualizer.
 
   The Python simulation harness in `alberta_buck/sim/' externally drives
   an anvil instance with the deployed contracts (see `make sim*' targets

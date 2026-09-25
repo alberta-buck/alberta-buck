@@ -3,6 +3,7 @@ pragma circom 2.1.4;
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
+include "./note_tags.circom";
 include "../node_modules/circomlib/circuits/comparators.circom";
 
 // Mint-batch circuit -- Phase 7-bis pivot for BUCK Notes.
@@ -19,7 +20,7 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 //          siblings[N][TREE_DEPTH]
 //
 // Constraints (per leaf i):
-//   (O) cm[i] = Poseidon-5(flavor[i], v[i], rho[i], idHash[i], predicate[i])
+//   (O) cm[i] = Poseidon-6(T_CM, flavor[i], v[i], rho[i], idHash[i], predicate[i])
 //   (R) v[i] in [0, 2^128); totalFace == sum_i v[i] (with totalFace also <2^128)
 //   (P) flavor[i] in {A1=1, A2=2, B1=3}, and issuerMode[i] is the deterministic
 //       flavor->mode projection (A2 -> PRIVATE=2, else PUBLIC=1).  issuerMode is
@@ -52,13 +53,13 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 // ---- ZERO_VALUE ------------------------------------------------------------
 //
 // Mirrored from src/Notes.sol:
-//   ZERO_VALUE = uint256(keccak256("AlbertaBuck:Notes:zero")) % FIELD_R
+//   ZERO_VALUE = uint256(keccak256("AlbertaBuck/Notes/Zero/v2")) % FIELD_R
 // We harden the constant by computing it in the wallet and asserting on-chain
 // equality, but the circuit needs the literal here.  Recompute with:
-//   node -e 'console.log((BigInt(require("ethers").keccak256(require("ethers").toUtf8Bytes("AlbertaBuck:Notes:zero"))) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n).toString())'
-// -> 12478158023141672556814566805819277863195393802640872128727997243357085450959
+//   node -e 'console.log((BigInt(require("ethers").keccak256(require("ethers").toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"))) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n).toString())'
+// -> 460097596457234765974707969191747880107513410278794739541636231580225950866
 function ZERO_VALUE() {
-    return 12478158023141672556814566805819277863195393802640872128727997243357085450959;
+    return 460097596457234765974707969191747880107513410278794739541636231580225950866;
 }
 
 // One Tornado-style insertion step at a single tree level.  Given the rolling
@@ -134,15 +135,16 @@ template MintBatch(N, DEPTH) {
     signal input predicate[N];
     signal input siblings[N][DEPTH];
 
-    // (O) Poseidon-5 commitment opening per leaf.
+    // (O) Tagged Poseidon-6 commitment opening per leaf.
     component cmH[N];
     for (var i = 0; i < N; i++) {
-        cmH[i] = Poseidon(5);
-        cmH[i].inputs[0] <== flavor[i];
-        cmH[i].inputs[1] <== v[i];
-        cmH[i].inputs[2] <== rho[i];
-        cmH[i].inputs[3] <== idHash[i];
-        cmH[i].inputs[4] <== predicate[i];
+        cmH[i] = Poseidon(6);
+        cmH[i].inputs[0] <== NOTE_TAG_COMMITMENT();
+        cmH[i].inputs[1] <== flavor[i];
+        cmH[i].inputs[2] <== v[i];
+        cmH[i].inputs[3] <== rho[i];
+        cmH[i].inputs[4] <== idHash[i];
+        cmH[i].inputs[5] <== predicate[i];
         cm[i] === cmH[i].out;
     }
 

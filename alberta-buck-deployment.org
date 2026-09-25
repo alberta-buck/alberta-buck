@@ -6,7 +6,7 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Publication and Deployment (v0.2)
+#+title: The Alberta Buck - Publication and Deployment (v2)
 #+SUBTITLE: What is published, why it is built the way it is, and what remains
 #+author: Perry Kundert
 #+date: 2026-07-26 12:00:00
@@ -63,7 +63,7 @@ project outside this checkout:
 | =alberta-buck-registry=  | crates.io |   0.1.0 | CAL-1.0          |
 | =alberta-buck-wallet=    | crates.io |   0.1.0 | CAL-1.0          |
 | =alberta-buck-kernel=    | npm       |   0.1.1 | CAL-1.0          |
-| =alberta-buck-core=      | npm       |   0.1.1 | CAL-1.0          |
+| =alberta-buck-core=      | npm       |   0.1.2 | CAL-1.0          |
 | =alberta-buck-contracts= | npm       |   0.1.0 | GPL-3.0-or-later |
 | =alberta-buck-contracts= | PyPI      |   0.1.0 | GPL-3.0-or-later |
 | =alberta-buck-core=      | PyPI      |   0.1.0 | CAL-1.0          |
@@ -84,6 +84,20 @@ trusted publishing, no stored tokens), =LICENSE= / =core/LICENSE= /
 =github.com/alberta-buck/alberta-buck= (private), and all three release
 workflows have run green -- every PyPI row above was published with no
 human holding a token.
+
+*Next: 0.2.0, the v2 roll* (2026-09-25; the tree is at 0.2.0, nothing is
+published yet).  Protocol v2 changes every tag, transcript and note hash, so
+it is a minor bump everywhere, math included (lockstep).  Release in
+dependency order:
+
+1. =alberta-buck-contracts= to npm, by hand (=make contracts-dist=, then
+   =npm publish= in =core/contracts=); then bump =core/js='s contracts pin
+   to 0.2.0 and regenerate its lock (=npm install --package-lock-only=).
+   Until then the pin stays at 0.1.0 so =npm ci= works, and
+   =release-npm.yml= refuses a =js-v0.2.0= tag.
+2. =py-contracts-v0.2.0=, =py-kernel-v0.2.0=, then =py-core-v0.2.0= (core
+   pins both at =>=0.2.0,<0.3=).
+3. =rs-v0.2.0= and =js-v0.2.0=.
 
 * The architecture, and why
 
@@ -651,8 +665,11 @@ mechanism declared rather than improvised.  =requires-python= is >= 3.11,
 the floor of =alberta-buck-core=.
 
 Remaining before the tag: a dynamic version from =alberta_buck/version.py=,
-and the =py-sim-v*= job in =release-pypi.yml= (pending publisher
-=alberta-buck=, environment =pypi-sim=).
+the =py-sim-v*= job in =release-pypi.yml= (pending publisher
+=alberta-buck=, environment =pypi-sim=), and the package's own metadata --
+its wheel builds and installs, but carries no README (the repository's is
+org, which PyPI does not render), no project URLs, and a summary written
+before identity, Notes and receipts joined it.
 
 *** An unseeded global RNG cost two full-suite runs
 

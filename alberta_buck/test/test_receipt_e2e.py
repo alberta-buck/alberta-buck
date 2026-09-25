@@ -1,4 +1,4 @@
-"""Both-party AB-RCPT/1 receipts over the REAL-proof e2e worlds.
+"""Both-party AB-RCPT/2 receipts over the REAL-proof e2e worlds.
 
 Two layers:
 
@@ -58,6 +58,18 @@ def fx(request):
 
 @pytest.mark.parametrize("role", ROLES)
 def test_fixture_receipt_verifies(fx, role):
+    """The AB-RCPT/2 receipt over the real-proof world.
+
+    The addressed flavours no longer name the recipient by decrypting with a
+    derived identity scalar, because that procedure was available to anyone who
+    had ever been shown a receipt -- the harvesting defect, stated as a feature.
+    Each side now proves what only it can: the recipient by verifiable
+    decryption under ``pk_recv``, the issuer by disclosing the mint randomness,
+    with the mailbox leaf tying that key to the named Identity.
+
+    B1 was never affected: its evidence is encrypted to the ISSUER's account
+    key, which the issuer holds, so nothing about it was ever identity-derived.
+    """
     core = fx.build_receipt(role, CONTRACTS, rng=_rng(), **ANCHORS)
     b = serialize_core(core)
     core2 = deserialize_core(parse_envelope(envelope_text(b)))
@@ -69,22 +81,44 @@ def test_fixture_receipt_verifies(fx, role):
 
 
 def test_both_parties_share_note_payload(fx):
-    """The deterministic legs are identical from either side; only the
-    generator's self-naming differs."""
+    """The note's own material is identical from either side.
+
+    What differs is the EVIDENCE, and for the addressed flavours it must: the
+    recipient proves by verifiable decryption under its mailbox key, the issuer
+    by disclosing the randomness it encrypted with, and neither can produce the
+    other's.  An earlier shape had both sides carry the same legs, because both
+    sides could run the same derivation -- which is precisely what made the
+    naming reproducible by anyone holding a receipt.
+    """
     rec = fx.build_receipt("recipient", CONTRACTS, rng=_rng(1), **ANCHORS)
     iss = fx.build_receipt("issuer", CONTRACTS, rng=_rng(2), **ANCHORS)
-    assert rec.note == iss.note
     assert rec.proof == iss.proof
+
+    evidence = {"vdNote", "vdRec", "vdIss", "rNote", "rId"}
+    shared = lambda d: {k: v for k, v in d.items() if k not in evidence}
+    assert shared(rec.note) == shared(iss.note)
+
+    if fx.flavor == "b1":
+        assert set(rec.note) == set(iss.note)         # no addressed legs at all
+    else:
+        assert evidence & set(rec.note) and evidence & set(iss.note)
+        assert not (set(rec.note) & set(iss.note) & evidence), \
+            "neither side can produce the other's evidence"
     assert rec.issuer_binding == iss.issuer_binding
     assert (rec.role, iss.role) == ("recipient", "issuer")
 
 
 def test_fixture_carries_prover_timings(fx):
+    """One deposit-gate number now, not three.
+
+    The addressed flavours prove their whole gate in one shot -- the coupling
+    sigma, the membership proof and the note-binding tie folded into a single
+    statement -- so there is no separate membership or note-binding time left
+    to report.  B1's is its membership proof beside its sigma.
+    """
     t = fx.timings
-    assert t["mint_prove_s"] > 0 and t["spend_prove_s"] > 0 \
-        and t["membership_prove_s"] > 0
-    if fx.flavor in ("a1", "a2"):
-        assert t["note_binding_prove_s"] > 0
+    assert t["mint_prove_s"] > 0 and t["spend_prove_s"] > 0
+    assert t["deposit_gate_prove_s"] > 0
 
 
 # ---- live EVM: the anvil lifecycle, receipts anchored to real txs ----------

@@ -9,7 +9,7 @@
 //!   * [`depreciation`] -- BuckCredit `_depreciate` / `currentValue`
 //!   * [`demurrage`]    -- Buck `_feeOwing` / `_carryingTransfer`
 //!   * [`pid`]          -- BuckKControllerDirect rescaled-ppm PID +
-//!                         fundingFactor + bumpless governance algebra
+//!     fundingFactor + bumpless governance algebra
 //!   * [`wide`]         -- full-width mulDiv (OZ Math.mulDiv semantics)
 //!
 //! Rules of the crate: integer math only -- no floats, ever; `no_std`

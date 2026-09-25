@@ -5,7 +5,7 @@ exercise the IdentityRegistry verifier paths against the Python reference:
 
 * PS keypair (issuer)
 * Identity records (Alice, Bob): canonical_data, m, ElGamal keypair, ciphertext
-* PS signatures (raw and rerandomized)
+* PS signatures (raw) and the published A' presentations (A, B)
 * Registration NIZK proofs (with negative variants the Solidity tests should reject)
 * Chaum-Pedersen re-encryption proof (Alice -> Bob)
 
@@ -26,17 +26,22 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.poseidon import F_R
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.elgamal import identity_keygen, elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
-    nullifier_b, id_hash_a1, id_hash_a2, id_hash_b1,
+    nullifier, id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
 from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
+from alberta_buck.wallet.recvkey import (
+    receiving_key, prove_receiving_binding,
+)
+from alberta_buck.wallet.salt import derive_salt
+from alberta_buck.registry.tree import IdentityMerkleTree
 from alberta_buck.wallet.envelope import (
     serialize_core, envelope_text, receipt_id,
 )
@@ -76,6 +81,20 @@ def _seeded_rng(seed: int):
     return lambda: rnd.getrandbits(256)
 
 
+def _fork_rng(seed: int):
+    """A second seeded stream for the draws A' added (the presentation
+    blinding b and its nonce b_tilde).  The main stream's draw POSITIONS are
+    pinned by committed SNARK fixtures (the a2b section feeds
+    test/NotesA2Tie.t.sol), so new draws must not be inserted into it."""
+    rnd = random.Random((seed << 8) ^ 0xA9)
+    return lambda: rnd.getrandbits(256)
+
+
+def _replay(vals):
+    it = iter(vals)
+    return lambda: next(it)
+
+
 ALICE_FIELDS = {
     "given_name":    "Alice",
     "family_name":   "Johnson",
@@ -110,6 +129,7 @@ BOB_ADDR   = 0x0b0b000000000000000000000000000000000b0b
 # Fiat-Shamir transcript.
 SPEND_RECIPIENT = BOB_ADDR
 CHAINID    = 1
+REGISTRY_ADDR = int("1d" * 20, 16)
 
 # Public-issuer Schnorr binding (Notes mutual-decryptability, Phase 1).  A
 # distinct address so the Solidity parity test can bind it as an
@@ -142,24 +162,36 @@ class _Party:
     m: int
     M: Any
     sigma: Any
-    sigma_p: Any
+    pres: Any
+    a: int
+    b: int
     kp: Any
     r: int
     E: Any
     proof: RegistrationProof
 
 
-def _build_party(rng, issuer, fields, addr) -> _Party:
+def _build_party(rng, fork, issuer, fields, addr) -> _Party:
     canonical = canonical_identity_data(fields)
     m = identity_scalar(canonical)
+    # Main-stream draws, in the exact positions the pre-A' emitter used:
+    # sign (1), the presentation scalar a (formerly the rerandomization t),
+    # keygen (1), r (1), then the three nonces m_t, r_t, sk_t.  The A'
+    # additions (b, b_t) come from the fork so nothing downstream moves.
     sigma = ps_sign(issuer, m, rng=rng)
-    sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+    a = rand_scalar(rng)
     kp = identity_keygen(rng=rng)
     r = rand_scalar(rng)
+    m_t, r_t, sk_t = rand_scalar(rng), rand_scalar(rng), rand_scalar(rng)
+    b, b_t = rand_scalar(fork), rand_scalar(fork)
     M = mul(G1, m)
     E = elgamal_encrypt(M, kp.pk, r)
-    proof = registration_prove(sigma_p, m, r, kp.pk, E, addr, rng=rng)
-    return _Party(fields, addr, canonical, m, M, sigma, sigma_p, kp, r, E, proof)
+    pres, _, _ = ps_present(sigma, issuer.pk_Y1, a=a, b=b)
+    proof = registration_prove(
+        pres, b, m, r, kp.pk, E, addr, kp.sk, CHAINID,
+        rng=_replay([m_t, b_t, r_t, sk_t]), registry=REGISTRY_ADDR,
+    )
+    return _Party(fields, addr, canonical, m, M, sigma, pres, a, b, kp, r, E, proof)
 
 
 def _party_to_json(p: _Party) -> Dict[str, Any]:
@@ -169,18 +201,23 @@ def _party_to_json(p: _Party) -> Dict[str, Any]:
         "m": scalar_to_hex(p.m),
         "M": _g1(p.M),
         "ps_sig_raw":    {"sigma_1": _g1(p.sigma.sigma_1),   "sigma_2": _g1(p.sigma.sigma_2)},
-        "ps_sig_rerand": {"sigma_1": _g1(p.sigma_p.sigma_1), "sigma_2": _g1(p.sigma_p.sigma_2)},
+        "ps_presentation": {"A": _g1(p.pres.A), "B": _g1(p.pres.B)},
+        "a":             scalar_to_hex(p.a),
+        "b":             scalar_to_hex(p.b),
         "elgamal_kp":    {"sk": scalar_to_hex(p.kp.sk), "pk": _g1(p.kp.pk)},
         "r":             scalar_to_hex(p.r),
         "ciphertext":    {"R": _g1(p.E.R), "C": _g1(p.E.C)},
         "registrant":    scalar_to_hex(p.addr),
         "registration_proof": {
-            "e":    scalar_to_hex(p.proof.e),
-            "s_m":  scalar_to_hex(p.proof.s_m),
-            "s_r":  scalar_to_hex(p.proof.s_r),
-            "A_ps": _g1(p.proof.A_ps),
-            "T_C":  _g1(p.proof.T_C),
-            "T_R":  _g1(p.proof.T_R),
+            "e":     scalar_to_hex(p.proof.e),
+            "s_m":   scalar_to_hex(p.proof.s_m),
+            "s_b":   scalar_to_hex(p.proof.s_b),
+            "s_r":   scalar_to_hex(p.proof.s_r),
+            "s_sk":  scalar_to_hex(p.proof.s_sk),
+            "C1":    _g1(p.proof.C1),
+            "T_C":   _g1(p.proof.T_C),
+            "T_R":   _g1(p.proof.T_R),
+            "T_key": _g1(p.proof.T_key),
         },
     }
 
@@ -188,10 +225,11 @@ def _party_to_json(p: _Party) -> Dict[str, Any]:
 def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     """Deterministic vector set keyed by `seed`."""
     rng = _seeded_rng(seed)
+    fork = _fork_rng(seed)
 
     issuer = ps_keygen(rng=rng)
-    alice  = _build_party(rng, issuer, ALICE_FIELDS, ALICE_ADDR)
-    bob    = _build_party(rng, issuer, BOB_FIELDS,   BOB_ADDR)
+    alice  = _build_party(rng, fork, issuer, ALICE_FIELDS, ALICE_ADDR)
+    bob    = _build_party(rng, fork, issuer, BOB_FIELDS,   BOB_ADDR)
 
     # Approve flow: Alice re-encrypts her M for Bob.
     r_prime = rand_scalar(rng)
@@ -199,8 +237,8 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     cp = chaum_pedersen_prove(
         alice.E, E_for_bob, alice.kp.pk, bob.kp.pk,
         alice.kp.sk, r_prime,
-        ALICE_ADDR, BOB_ADDR, CHAINID,
-        rng=rng,
+        ALICE_ADDR, BOB_ADDR, CHAINID, rng=rng,
+        registry=REGISTRY_ADDR,
     )
 
     # Stream-preservation: the legacy Phase-8 A-spend vectors (spend_cp +
@@ -235,15 +273,16 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # (pk_iss = _pk[bob] = bob.kp.pk), so the same record that registers Bob
     # authenticates the batch binding.
     #
-    # The B1 idHash commits to Bob's identity material via id_hash_b1; the
-    # per-leaf signature (sigma) is representative only -- Phase 1 binds the
-    # issuer through the *batch* Schnorr over keccak(cms), not the per-leaf
-    # sig (see alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" -- B1 uses batch Schnorr for the issuer binding).
+    # The B1 idHash commits to Bob's identity scalar via id_hash_b1; the batch
+    # Schnorr over keccak(cms) authenticates him as the issuer.  The two draws
+    # that once made a per-leaf signature pair stay RESERVED: the a2b section
+    # below is pinned by committed SNARK fixtures, and every draw before it
+    # must keep its place.
     rcpt_face    = 250
     rcpt_rho     = rand_scalar(rng)
-    rcpt_sigma_R = mul(G1, rand_scalar(rng))
-    rcpt_sigma_s = rand_scalar(rng)
-    rcpt_idHash  = id_hash_b1(bob.m, rcpt_sigma_R, rcpt_sigma_s)
+    rand_scalar(rng)
+    rand_scalar(rng)
+    rcpt_idHash  = id_hash_b1(bob.m)
     rcpt_opening = NoteOpening(
         flavor=FLAVOR_B1, v=rcpt_face, rho=rcpt_rho,
         id_hash=rcpt_idHash, predicate=0,
@@ -253,7 +292,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     rcpt_cms     = [rand_scalar(rng) % F_R, rcpt_cm, rand_scalar(rng) % F_R]
     rcpt_hBatch  = batch_commitment(rcpt_cms)
     rcpt_sig     = issuer_schnorr_sign(bob.kp.sk, rcpt_hBatch, BOB_ADDR, CHAINID, rng=rng)
-    rcpt_nf      = nullifier_b(rcpt_rho, rcpt_idHash)
+    rcpt_nf      = nullifier(rcpt_rho, rcpt_idHash)
 
     # ---- EOA approve receipt (decryptability Phase 1, verifiable decryption) --
     #
@@ -271,7 +310,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         "notes":    "0x" + "70" * 20,
     }
 
-    # Stream-preservation: the original (account-key) AB-RCPT/1 cores were
+    # Stream-preservation: the original (account-key) AB-RCPT/2 cores were
     # built here and consumed exactly 17 scalars (five payee-vd nonces, the
     # A1 cms/sig draws, and the A2 r/gamma/binding draws).  The Identity-M
     # receipt cores are now built AFTER the issuer_reenc (a2b) section below,
@@ -296,7 +335,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         BOB_ADDR, CHAINID, rng=rng,
     )
 
-    # ---- AB-RCPT/1 Identity-M receipt cores ---------------------------------
+    # ---- AB-RCPT/2 Identity-M receipt cores ---------------------------------
     #
     # The receipt envelopes for all five kinds, plus the issuer-side ("I paid
     # X") variants of the three Note flavors -- both Note parties hold the
@@ -307,6 +346,19 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # depositor.  Bit-identical property: same inputs, same canonical bytes,
     # deterministic receipt_id.  Built after the pinned a2b section, so the
     # draws here are free to evolve.
+
+    # Alice's MAILBOX key, and the accumulator leaf that ties it to her
+    # Identity.  Derived from a fixed seed rather than the rng stream, so it
+    # adds no draw and perturbs nothing: the addressed ciphertexts are keyed to
+    # this, never to her Identity point, and a payer checks the tie with a
+    # Poseidon and a path.
+    alice_seed = 0xA11CE_5EED
+    alice_k, alice_pk_recv = receiving_key(alice_seed)
+    alice_mbx_salt = derive_salt(alice_seed, "mailbox")
+    _mbx_tree = IdentityMerkleTree(depth=10, private=True)
+    _mbx_tree.insert_mailbox(alice.M, alice_pk_recv, alice_mbx_salt)
+    alice_mbx = prove_receiving_binding(alice.M, alice_pk_recv,
+                                        alice_mbx_salt, _mbx_tree)
 
     RCPT_TIME = 1779999000
 
@@ -336,7 +388,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     )
 
     # -- note-b1: the `receipt` vector above IS the Identity-M B1 note (its
-    # idHash = id_hash_b1(bob.m, rcpt_sigma_R, rcpt_sigma_s) binds Bob into
+    # idHash = id_hash_b1(bob.m) binds Bob into
     # the leaf).  At spend, Alice (the depositor) published eDepForIss -- her
     # Identity re-encrypted under Bob's registered public-issuer key -- in the
     # SpentCoupledB1 event; Bob alone decrypts it to name her.
@@ -349,7 +401,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=rcpt_opening, cms=rcpt_cms, issuer_sig=rcpt_sig,
-        sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
         nullifier=rcpt_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
         txhash="0x" + "b1" * 32, block=1234599, logindex=1,
@@ -362,19 +413,21 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_b1_common)
 
     # -- note-a1: identity-targeted (unilateral A1).  Bob, the public issuer,
-    # addresses the note to Alice's identity POINT M_rec: eNote encrypts the
-    # face under M_rec, eRec the recipient identity under itself, and
-    # idHash = id_hash_a1(eNote, m_iss, sigma) binds both parties into the leaf.
-    a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice.M, rand_scalar(rng))
-    a1m_eRec    = elgamal_encrypt(alice.M, alice.M, rand_scalar(rng))
-    a1m_idHash  = id_hash_a1(a1m_eNote, bob.m, rcpt_sigma_R, rcpt_sigma_s)
+    # addresses the note to Alice's receiving key pk_recv: eNote encrypts the
+    # face under it, eRec encrypts her identity point M_rec under it, and
+    # idHash = id_hash_a1(eNote, m_iss) binds both parties into the leaf.
+    a1m_r_note  = rand_scalar(rng)
+    a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a1m_r_note)
+    a1m_r_rec   = rand_scalar(rng)
+    a1m_eRec    = elgamal_encrypt(alice.M, alice_pk_recv, a1m_r_rec)
+    a1m_idHash  = id_hash_a1(a1m_eNote, bob.m)
     a1m_opening = NoteOpening(flavor=FLAVOR_A1, v=rcpt_face, rho=rcpt_rho,
                               id_hash=a1m_idHash, predicate=0)
     a1m_cm      = note_commitment(a1m_opening)
     a1m_cms     = [rand_scalar(rng) % F_R, a1m_cm, rand_scalar(rng) % F_R]
     a1m_sig     = issuer_schnorr_sign(bob.kp.sk, batch_commitment(a1m_cms),
                                       BOB_ADDR, CHAINID, rng=rng)
-    a1m_nf      = nullifier_b(rcpt_rho, a1m_idHash)
+    a1m_nf      = nullifier(rcpt_rho, a1m_idHash)
 
     _a1_common = dict(
         chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
@@ -384,34 +437,41 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=a1m_opening, cms=a1m_cms, issuer_sig=a1m_sig,
         eNote=a1m_eNote, eRec=a1m_eRec,
-        sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
+        pk_recv=alice_pk_recv, mailbox_binding=alice_mbx,
         nullifier=a1m_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
         txhash="0x" + "a1" * 32, block=1234599, logindex=1,
         mint_txhash="0x" + "aa" * 32, mint_block=1234500,
     )
     note_a1_core = build_note_a1(
-        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_a1_common)
-    note_a1_iss_core = build_note_a1(role="issuer", rng=rng, **_a1_common)
+        role="recipient", payee_sk=alice.kp.sk, k_recv=alice_k, rng=rng,
+        **_a1_common)
+    note_a1_iss_core = build_note_a1(
+        role="issuer", r_note=a1m_r_note, r_id=a1m_r_rec, rng=rng, **_a1_common)
 
     # -- note-a2: identity-targeted (unilateral A2).  Bob, the PRIVATE issuer,
     # encrypts his own registered Identity under Alice's identity point
     # (eIss) and the face under the same point (eNote); the blinded
     # re-encryption binding (verified at mint by Notes' A2 overload) makes the
     # recovered issuer provably the registered minter.
-    a2m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice.M, rand_scalar(rng))
+    a2m_r_note  = rand_scalar(rng)
+    a2m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a2m_r_note)
     a2m_r_prime = rand_scalar(rng)
-    a2m_eIss    = elgamal_encrypt(bob.M, alice.M, a2m_r_prime)
+    a2m_eIss    = elgamal_encrypt(bob.M, alice_pk_recv, a2m_r_prime)
+    # beta then gamma, drawn here in the order the prover would draw them, so
+    # the stream is unchanged; gamma is kept because the receipt opens T with it.
+    a2m_beta    = rand_scalar(rng)
+    a2m_gamma   = rand_scalar(rng)
     a2m_binding = issuer_reenc_prove(
-        bob.kp.sk, a2m_r_prime, alice.M, bob.E, a2m_eIss,
-        BOB_ADDR, CHAINID, rng=rng,
+        bob.kp.sk, a2m_r_prime, alice_pk_recv, bob.E, a2m_eIss,
+        BOB_ADDR, CHAINID, beta=a2m_beta, gamma=a2m_gamma, rng=rng,
     )
-    a2m_idHash  = id_hash_a2(a2m_eNote, a2m_eIss)
+    a2m_idHash  = id_hash_a2(a2m_eNote, a2m_eIss, a2m_binding.T)
     a2m_opening = NoteOpening(flavor=FLAVOR_A2, v=rcpt_face, rho=rcpt_rho,
                               id_hash=a2m_idHash, predicate=0)
     a2m_cm      = note_commitment(a2m_opening)
     a2m_cms     = [rand_scalar(rng) % F_R, a2m_cm, rand_scalar(rng) % F_R]
-    a2m_nf      = nullifier_b(rcpt_rho, a2m_idHash)
+    a2m_nf      = nullifier(rcpt_rho, a2m_idHash)
 
     _a2_common = dict(
         chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
@@ -420,16 +480,19 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=a2m_opening, cms=a2m_cms,
-        eNote=a2m_eNote, eIss=a2m_eIss, binding=a2m_binding,
+        eNote=a2m_eNote, eIss=a2m_eIss, binding=a2m_binding, gamma=a2m_gamma,
+        pk_recv=alice_pk_recv, mailbox_binding=alice_mbx,
         nullifier=a2m_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
         txhash="0x" + "a2" * 32, block=1234599, logindex=1,
         mint_txhash="0x" + "aa" * 32, mint_block=1234500,
     )
     note_a2_core = build_note_a2(
-        role="recipient", payee_sk=alice.kp.sk, rng=rng, **_a2_common)
+        role="recipient", payee_sk=alice.kp.sk, k_recv=alice_k, rng=rng,
+        **_a2_common)
     note_a2_iss_core = build_note_a2(
-        role="issuer", issuer_sk=bob.kp.sk, rng=rng, **_a2_common)
+        role="issuer", issuer_sk=bob.kp.sk, r_note=a2m_r_note,
+        r_id=a2m_r_prime, rng=rng, **_a2_common)
 
     # -- eoa-pub-unicode: the canonical-dialect torture split.  A payer whose
     # identity exercises the raw-UTF-8 canonical dialect (Latin accents +
@@ -476,15 +539,17 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         }
 
     return {
-        "$schema_version": 1,
+        "$schema_version": 2,
         "seed":    f"0x{seed:064x}",
         "ORDER":   f"0x{ORDER:064x}",
         "chainid": scalar_to_hex(CHAINID),
+        "registry": scalar_to_hex(REGISTRY_ADDR),
         "issuer": {
             "sk_x": scalar_to_hex(issuer.sk_x),
             "sk_y": scalar_to_hex(issuer.sk_y),
             "pk_X": _g2(issuer.pk_X),
             "pk_Y": _g2(issuer.pk_Y),
+            "pk_Y1": _g1(issuer.pk_Y1),
         },
         "alice": _party_to_json(alice),
         "bob":   _party_to_json(bob),
@@ -500,6 +565,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "sender":   scalar_to_hex(ALICE_ADDR),
             "spender":  scalar_to_hex(BOB_ADDR),
             "chainid":  scalar_to_hex(CHAINID),
+            "registry": scalar_to_hex(REGISTRY_ADDR),
             "E_alice":   {"R": _g1(alice.E.R),  "C": _g1(alice.E.C)},
             "E_for_bob": {"R": _g1(E_for_bob.R), "C": _g1(E_for_bob.C)},
             "r_prime":  scalar_to_hex(r_prime),
@@ -553,6 +619,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
             "sender":        scalar_to_hex(ALICE_ADDR),   # named counterparty (payer)
             "spender":       scalar_to_hex(BOB_ADDR),     # recipient assembling it
             "chainid":       scalar_to_hex(CHAINID),
+            "registry":      scalar_to_hex(REGISTRY_ADDR),
             "sender_pk":     _g1(alice.kp.pk),            # registry _pk[sender]
             "sender_E_addr": {"R": _g1(alice.E.R), "C": _g1(alice.E.C)},  # _E_addr[sender]
             "spender_pk":    _g1(bob.kp.pk),              # registry _pk[spender]

@@ -39,6 +39,7 @@ Accumulator".
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -48,7 +49,14 @@ from alberta_buck.registry.tree import (
     identity_leaf,
     EMPTY_LEAF,
     AGGREGATOR_DEPTH,
+    KYC_SUBTREE_DEPTH,
 )
+
+#: A membership path runs from a leaf up its identity-registry subtree and on
+#: up the aggregator: the two paths concatenated.  Every level folds with the
+#: same Poseidon, so the circuits and the on-chain verifier treat it as ONE
+#: path of this depth (accumulator specification, section 11.1).
+MEMBERSHIP_PATH_DEPTH: int = KYC_SUBTREE_DEPTH + AGGREGATOR_DEPTH
 from alberta_buck.wallet.poseidon import poseidon
 
 
@@ -157,6 +165,21 @@ class FullMembershipProof:
             return False
         return self.sub_tree_proof.root == self.aggregator_proof.sub_root
 
+    def composed(self) -> MembershipProof:
+        """The one path a circuit folds: the subtree path, then the aggregator's.
+
+        The leaf index is the leaf's position in that combined tree, the
+        aggregator slot above the subtree index.
+        """
+        sub, agg = self.sub_tree_proof, self.aggregator_proof
+        return MembershipProof(
+            leaf=sub.leaf,
+            siblings=list(sub.siblings) + list(agg.siblings),
+            index_bits=list(sub.index_bits) + list(agg.index_bits),
+            root=agg.aggregator_root,
+            leaf_index=(agg.aggregator_leaf_index << len(sub.siblings)) | sub.leaf_index,
+        )
+
 
 @dataclass(frozen=True)
 class ComposedMembershipProof:
@@ -193,6 +216,25 @@ class ComposedMembershipProof:
 # Central Merkle Service
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class RootRecord:
+    """A posted aggregator root, with the time it was posted.
+
+    Accumulator specification, section 5.  A count of postings is not a bound
+    in time: with periodic attestation an authority may post monthly, so a
+    ring of thirty postings could be years.  Each record therefore carries its
+    timestamp, and each consumer enforces its own maximum age.
+
+    Attributes:
+        root: The aggregator root (= the on-chain identityRoot) as posted.
+        sequence: Monotonic posting sequence, from 0.
+        posted_at: POSIX timestamp of the posting.
+    """
+    root: int
+    sequence: int
+    posted_at: float
+
+
 class CentralMerkleService:
     """Aggregates sub-roots from registries and feature authorities into a single
     on-chain root.
@@ -209,6 +251,9 @@ class CentralMerkleService:
     def __init__(self, depth: int = AGGREGATOR_DEPTH) -> None:
         self._tree = IdentityMerkleTree(depth=depth)
         self._sub_trees: Dict[str, SubTreeRecord] = {}
+        self._root_ring: List[RootRecord] = []
+        self._root_index: Dict[int, RootRecord] = {}
+        self._root_sequence: int = 0
 
     # -- properties ----------------------------------------------------------
 
@@ -216,6 +261,65 @@ class CentralMerkleService:
     def identity_root(self) -> int:
         """The current aggregator root (= on-chain identityRoot)."""
         return self._tree.root()
+
+    # -- posted roots --------------------------------------------------------
+
+    #: Storage only, once the bound is an age: ten days at an hourly posting,
+    #: which covers the longest maximum age any consumer declares.
+    ROOT_RING_SIZE: int = 256
+
+    def post(self, timestamp: Optional[float] = None) -> RootRecord:
+        """Post the current aggregator root, recording when.
+
+        Authorities push sub-roots; the aggregator posts.  The posting is what
+        a membership proof is checked against, and its age is what a consumer
+        bounds.
+        """
+        ts = time.time() if timestamp is None else timestamp
+        rec = RootRecord(root=self.identity_root,
+                         sequence=self._root_sequence,
+                         posted_at=ts)
+        self._root_sequence += 1
+        self._root_ring.append(rec)
+        if len(self._root_ring) > self.ROOT_RING_SIZE:
+            evicted = self._root_ring.pop(0)
+            if self._root_index.get(evicted.root) is evicted:
+                del self._root_index[evicted.root]
+        self._root_index[rec.root] = rec
+        return rec
+
+    def root_record(self, root: int) -> Optional[RootRecord]:
+        """The record for a retained root, or None if never posted or evicted."""
+        return self._root_index.get(root)
+
+    def accepts(self, root: int, max_age: float,
+                now: Optional[float] = None) -> bool:
+        """Whether a consumer with this maximum age accepts a proof against `root`.
+
+        Rejects the zero root, a root never posted or evicted from the ring,
+        and a root older than the consumer's bound.  A consumer for which
+        revocation is the point of the check declares a short maximum age; one
+        that merely asks whether a counterparty is registered declares a
+        generous one, since an authority that batches late would otherwise
+        fail honest members.
+        """
+        if root == 0:
+            return False
+        rec = self._root_index.get(root)
+        if rec is None:
+            return False
+        ts = time.time() if now is None else now
+        return (ts - rec.posted_at) <= max_age
+
+    def max_retained_age(self, now: Optional[float] = None) -> float:
+        """Age of the oldest retained record: the longest maximum age the ring
+        can honour at the current posting rate.  A consumer declaring more than
+        this has its window silently truncated, which the caller MUST refuse
+        rather than allow."""
+        if not self._root_ring:
+            return 0.0
+        ts = time.time() if now is None else now
+        return ts - self._root_ring[0].posted_at
 
     @property
     def sub_tree_count(self) -> int:
@@ -434,7 +538,102 @@ class CentralMerkleService:
                 f"identity_root={self.identity_root:#x})")
 
 
+class RootedSubtree:
+    """One enrolled subtree, seen from the aggregator root it is posted under.
+
+    This is the tree a holder proves membership against.  Its ``path`` is the
+    composed path of :meth:`FullMembershipProof.composed` and its ``root`` is
+    the aggregator root, so wallet code written against a single tree -- the
+    folded gates, the mailbox binding -- proves the specification's two-level
+    statement unchanged.  Leaves are the subtree's; insert them there, then
+    :meth:`sync` to push the new subtree root into the aggregator.
+    """
+
+    def __init__(self, service: "CentralMerkleService", sub_tree_id: str,
+                 subtree: IdentityMerkleTree) -> None:
+        if service.get_sub_tree(sub_tree_id) is None:
+            raise KeyError(f"unknown sub-tree: {sub_tree_id}")
+        self.service = service
+        self.sub_tree_id = sub_tree_id
+        self.subtree = subtree
+
+    @property
+    def leaves(self) -> List[int]:
+        return self.subtree.leaves
+
+    @property
+    def depth(self) -> int:
+        return self.subtree.depth + self.service._tree.depth
+
+    def sync(self, timestamp: Optional[float] = None) -> int:
+        """Push the subtree's current root into the aggregator; the new root."""
+        return self.service.update_sub_root(self.sub_tree_id, self.subtree.root(), timestamp)
+
+    # Admission, each followed by a sync, so the view stands in for a private
+    # tree wherever wallet code or a generator builds one.
+    def insert_leaf(self, leaf: int) -> int:
+        idx = self.subtree.insert_leaf(leaf)
+        self.sync()
+        return idx
+
+    def insert_receiving(self, m_rec: int, k_recv: int, salt: int) -> int:
+        idx = self.subtree.insert_receiving(m_rec, k_recv, salt)
+        self.sync()
+        return idx
+
+    def insert_identity_salted(self, M, salt: int) -> int:
+        idx = self.subtree.insert_identity_salted(M, salt)
+        self.sync()
+        return idx
+
+    def insert_mailbox(self, M, pk_recv, salt: int) -> int:
+        idx = self.subtree.insert_mailbox(M, pk_recv, salt)
+        self.sync()
+        return idx
+
+    def root(self) -> int:
+        return self.service.identity_root
+
+    def contains(self, leaf: int) -> bool:
+        return self.subtree.contains(leaf)
+
+    def index_of_leaf(self, leaf: int) -> int:
+        return self.subtree.index_of_leaf(leaf)
+
+    def path(self, index: int) -> MembershipProof:
+        """The composed path of the subtree leaf at ``index``.
+
+        Raises:
+            ValueError: if the subtree has changed since its root was last
+                synced, so the path would not fold to the aggregator root.
+        """
+        sub = self.subtree.path(index)
+        if self.service.get_sub_tree(self.sub_tree_id).sub_root != sub.root:
+            raise ValueError("the subtree's current root is not in the aggregator; sync first")
+        return self.service.full_proof(self.sub_tree_id, sub).composed()
+
+
+def rooted_registry(sub_tree_id: str = "registry:kyc", neighbours: int = 1) -> RootedSubtree:
+    """A private identity-registry subtree enrolled in a fresh aggregator.
+
+    For generators and tests.  ``neighbours`` other registries, each holding one
+    leaf, are enrolled first, so the subtree's slot is not the aggregator's
+    first and a path that ignored the slot would not fold.
+    """
+    service = CentralMerkleService()
+    for i in range(neighbours):
+        other = IdentityMerkleTree(depth=KYC_SUBTREE_DEPTH, private=True)
+        other.insert_leaf(0x5EED0000 + i + 1)
+        service.enroll_registry(f"registry:neighbour:{i}", other.root())
+    subtree = IdentityMerkleTree(depth=KYC_SUBTREE_DEPTH, private=True)
+    service.enroll_registry(sub_tree_id, subtree.root())
+    return RootedSubtree(service, sub_tree_id, subtree)
+
+
 __all__ = [
+    "MEMBERSHIP_PATH_DEPTH",
+    "RootedSubtree",
+    "rooted_registry",
     "CentralMerkleService",
     "SubTreeKind",
     "SubTreeRecord",

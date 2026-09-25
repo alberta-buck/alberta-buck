@@ -23,7 +23,7 @@ export const big = (s) => BigInt(s);
 
 /** THE canonical JSON dialect: sorted keys, compact separators, raw
  *  UTF-8 -- byte-identical to Python's canonical_json(), shared by the
- *  identity preimage (canonical_identity_data) and the AB-RCPT/1 receipt
+ *  identity preimage (canonical_identity_data) and the AB-RCPT/2 receipt
  *  core.  Values must be strings and integers (floats are not canonical).
  *  JSON.stringify emits this natively once keys are sorted. */
 export function canonicalIdentity(fields) {
@@ -76,7 +76,7 @@ export function wrapIdentity(wasm) {
       const g = wasm.g2_generator();
       return { x: [big(g[0]), big(g[1])], y: [big(g[2]), big(g[3])] };
     })(),
-    H_POINT: P(wasm.h_point()),
+    H_PEDERSEN: P(wasm.h_pedersen()),
     FLAVOR_A1: 1,
     FLAVOR_A2: 2,
     FLAVOR_B1: 3,
@@ -112,6 +112,15 @@ export function wrapIdentity(wasm) {
       const r = wasm.ps_rerandomize(...flatP(sig.sigma_1), ...flatP(sig.sigma_2), hex(t));
       return { sigma_1: P(r, 0), sigma_2: P(r, 2) };
     },
+    /** The A' hiding presentation (A, B) = (a*sigma_1, a*sigma_2 + b*Y1); b is
+     *  the registration NIZK witness.  Both scalars must be fresh per use. */
+    psPresent(sig, Y1, a, b) {
+      const r = wasm.ps_present(...flatP(sig.sigma_1), ...flatP(sig.sigma_2),
+        ...flatP(Y1), hex(a), hex(b));
+      return { A: P(r, 0), B: P(r, 2) };
+    },
+    /** e(Y1, g2) == e(G, Y): the issuer's G1 key image matches its G2 key. */
+    psKeyConsistent: (pkY, Y1) => wasm.ps_key_consistent(flatG2(pkY), ...flatP(Y1)),
 
     // ---- Schnorr batch binding ---------------------------------------------
     /** Raw UNREDUCED keccak word (what the Schnorr transcript signs). */
@@ -128,38 +137,42 @@ export function wrapIdentity(wasm) {
         hex(hBatch), hex(issuer), hex(chainid)),
 
     // ---- Registration NIZK -------------------------------------------------
-    registrationProve(sig, m, r, pk, E, registrant, mTilde, rTilde) {
+    registrationProve(pres, blind, m, r, pk, E, registrant, sk, chainid, registry,
+                      mTilde, bTilde, rTilde, skTilde) {
       const o = wasm.registration_prove(
-        [...flatP(sig.sigma_1), ...flatP(sig.sigma_2)],
-        hex(m), hex(r), ...flatP(pk), flatCT(E),
-        hex(registrant), hex(mTilde), hex(rTilde));
-      return { e: big(o[0]), s_m: big(o[1]), s_r: big(o[2]),
-               A_ps: P(o, 3), T_C: P(o, 5), T_R: P(o, 7) };
+        [...flatP(pres.A), ...flatP(pres.B)],
+        hex(blind), hex(m), hex(r), ...flatP(pk), flatCT(E),
+        hex(registrant), hex(sk), hex(chainid), hex(registry),
+        hex(mTilde), hex(bTilde), hex(rTilde), hex(skTilde));
+      return { e: big(o[0]), s_m: big(o[1]), s_b: big(o[2]), s_r: big(o[3]), s_sk: big(o[4]),
+               C1: P(o, 5), T_C: P(o, 7), T_R: P(o, 9), T_key: P(o, 11) };
     },
-    registrationVerify: (sig, E, pk, issuerX, issuerY, proof, registrant) =>
+    registrationVerify: (pres, E, pk, issuerX, issuerY, proof, registrant, chainid, registry) =>
       wasm.registration_verify(
-        [...flatP(sig.sigma_1), ...flatP(sig.sigma_2)],
+        [...flatP(pres.A), ...flatP(pres.B)],
         flatCT(E), ...flatP(pk), flatG2(issuerX), flatG2(issuerY),
-        [hex(proof.e), hex(proof.s_m), hex(proof.s_r),
-         ...flatP(proof.A_ps), ...flatP(proof.T_C), ...flatP(proof.T_R)],
-        hex(registrant)),
+        [hex(proof.e), hex(proof.s_m), hex(proof.s_b), hex(proof.s_r), hex(proof.s_sk),
+         ...flatP(proof.C1), ...flatP(proof.T_C), ...flatP(proof.T_R),
+         ...flatP(proof.T_key)],
+        hex(registrant), hex(chainid), hex(registry)),
 
     // ---- Chaum-Pedersen approve --------------------------------------------
     chaumPedersenProve(eAlice, eBob, pkA, pkB, skA, rPrime,
-                       sender, spender, chainid, k1, k2) {
+                       sender, spender, chainid, registry, k1, k2) {
       const o = wasm.chaum_pedersen_prove(
         flatCT(eAlice), flatCT(eBob), ...flatP(pkA), ...flatP(pkB),
         hex(skA), hex(rPrime), hex(sender), hex(spender), hex(chainid),
-        hex(k1), hex(k2));
+        hex(registry), hex(k1), hex(k2));
       return { e: big(o[0]), s1: big(o[1]), s2: big(o[2]),
                T1: P(o, 3), T2: P(o, 5), T3: P(o, 7) };
     },
-    chaumPedersenVerify: (eAlice, eBob, pkA, pkB, proof, sender, spender, chainid) =>
+    chaumPedersenVerify: (eAlice, eBob, pkA, pkB, proof, sender, spender,
+                           chainid, registry) =>
       wasm.chaum_pedersen_verify(
         flatCT(eAlice), flatCT(eBob), ...flatP(pkA), ...flatP(pkB),
         [hex(proof.e), hex(proof.s1), hex(proof.s2),
          ...flatP(proof.T1), ...flatP(proof.T2), ...flatP(proof.T3)],
-        hex(sender), hex(spender), hex(chainid)),
+        hex(sender), hex(spender), hex(chainid), hex(registry)),
 
     // ---- Verifiable decryption ---------------------------------------------
     verifiableDecryptProve(E, sk, M, account, chainid, t) {
@@ -172,6 +185,24 @@ export function wrapIdentity(wasm) {
         flatCT(E), ...flatP(pk), ...flatP(M),
         [hex(proof.e), hex(proof.s), ...flatP(proof.T1), ...flatP(proof.T2)],
         hex(account), hex(chainid)),
+
+    // The same DLEQ bound to one registry under its own tag: an Identity
+    // opening an insurer presents to BuckCredit, never a receipt.
+    identityOpeningProve(E, sk, M, account, chainid, registry, t) {
+      const o = wasm.identity_opening_prove(
+        flatCT(E), hex(sk), ...flatP(M), hex(account), hex(chainid), hex(registry), hex(t));
+      return { e: big(o[0]), s: big(o[1]), T1: P(o, 2), T2: P(o, 4) };
+    },
+    identityOpeningVerify: (E, pk, M, proof, account, chainid, registry) =>
+      wasm.identity_opening_verify(
+        flatCT(E), ...flatP(pk), ...flatP(M),
+        [hex(proof.e), hex(proof.s), ...flatP(proof.T1), ...flatP(proof.T2)],
+        hex(account), hex(chainid), hex(registry)),
+
+    // ---- Holder-derived salts ------------------------------------------------
+    treeTag: (treeId) => big(wasm.tree_tag(treeId)),
+    deriveSalt: (holderSecret, treeId, counter = 0) =>
+      big(wasm.derive_salt(hex(holderSecret), treeId, BigInt(counter))),
 
     // ---- A2 issuer re-encryption binding -----------------------------------
     issuerReencProve(skIss, rPrime, pkRec, eReg, eIss, issuer, chainid,
@@ -195,22 +226,7 @@ export function wrapIdentity(wasm) {
          ...flatP(proof.Q), ...flatP(proof.U), ...flatP(proof.T)],
         hex(issuer), hex(chainid)),
 
-    // ---- Deposit coupling / B1 depositor binding ----------------------------
-    depositCoupleProve(mRec, skDep, eDep, eIss, account, chainid, b, kM, kS, kB) {
-      const o = wasm.deposit_couple_prove(
-        hex(mRec), hex(skDep), flatCT(eDep), flatCT(eIss),
-        hex(account), hex(chainid), hex(b), hex(kM), hex(kS), hex(kB));
-      return {
-        e: big(o[0]), s_m: big(o[1]), s_s: big(o[2]), s_b: big(o[3]),
-        A2: P(o, 4), A3: P(o, 6), A4: P(o, 8), P_I: P(o, 10),
-      };
-    },
-    depositCoupleVerify: (pkDep, eDep, eIss, proof, account, chainid) =>
-      wasm.deposit_couple_verify(
-        ...flatP(pkDep), flatCT(eDep), flatCT(eIss),
-        [hex(proof.e), hex(proof.s_m), hex(proof.s_s), hex(proof.s_b),
-         ...flatP(proof.A2), ...flatP(proof.A3), ...flatP(proof.A4), ...flatP(proof.P_I)],
-        hex(account), hex(chainid)),
+    // ---- B1 depositor binding ---------------------------------------------------
     b1BindProve(mDep, skDep, eDep, pkIss, account, chainid, r, b, kM, kS, kR, kB) {
       const o = wasm.b1_bind_prove(
         hex(mDep), hex(skDep), flatCT(eDep), ...flatP(pkIss),
@@ -236,13 +252,16 @@ export function wrapIdentity(wasm) {
     // ---- Notes family --------------------------------------------------------
     noteCommitment: (flavor, v, rho, idHash, predicate) =>
       big(wasm.note_commitment(Number(flavor), hex(v), hex(rho), hex(idHash), hex(predicate))),
-    nullifierB: (rho, idHash) => big(wasm.nullifier_b(hex(rho), hex(idHash))),
-    nullifierA: (rho, idHash) => big(wasm.nullifier_a(hex(rho), hex(idHash))),
-    idHashB1: (mIssuer, sigmaR, sigmaS) =>
-      big(wasm.id_hash_b1(hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
-    idHashA1: (eNote, mIssuer, sigmaR, sigmaS) =>
-      big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
-    idHashA2: (eNote, eIss) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss))),
+    nullifier: (rho, idHash) => big(wasm.nullifier(hex(rho), hex(idHash))),
+    idHashB1: (mIssuer) => big(wasm.id_hash_b1(hex(mIssuer))),
+    idHashA1: (eNote, mIssuer) => big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer))),
+    idHashA2: (eNote, eIss, T) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss), flatP(T))),
     identityLeaf: (M) => big(wasm.identity_leaf(...flatP(M))),
+    // The hiding leaf of a private subtree, and the one that binds an
+    // Identity to the receiving key its Notes are addressed to.
+    identityLeafSalted: (M, salt) =>
+      big(wasm.identity_leaf_salted(...flatP(M), hex(salt))),
+    receivingLeaf: (mRec, kRecv, salt) =>
+      big(wasm.receiving_leaf(hex(mRec), hex(kRecv), hex(salt))),
   };
 }

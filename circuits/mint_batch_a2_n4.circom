@@ -3,6 +3,7 @@ pragma circom 2.1.4;
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/switcher.circom";
+include "./note_tags.circom";
 
 // A2 mint-batch circuit -- the private-issuer (addressed, encrypted-Identity)
 // variant of mint_batch.circom.  It is used *only* by Notes.mint's private-mode
@@ -10,26 +11,33 @@ include "../node_modules/circomlib/circuits/switcher.circom";
 // pay nothing for the A2 machinery.
 //
 // Difference from mint_batch: every leaf is constrained to flavor == A2, the
-// committed idHash is opened to Poseidon-8(eNote, eIss) (the V2 A2 id_hash
-// layout, mirroring spend_a.circom and alberta_buck.wallet.notes.id_hash_a2),
-// and each leaf's E_iss-for-rec ciphertext eIss = (R.x, R.y, C.x, C.y) is
-// exposed as a PUBLIC OUTPUT.  Notes.mint field-matches each exposed eIss
-// against the eIss in the leaf's recipient-blinded re-encryption binding, so a
-// binding cannot float to a different leaf -- the collusion-resistant A2 tie
-// (alberta-buck-notes.org, "The Non-Deniable-Receipt Invariant" -- the Required Mint SNARK Signal for issuer binding at mint; note <-> eEnc tie).
+// committed idHash is opened to Poseidon-11(T_ID, eNote, eIss, T) (mirroring
+// alberta_buck.wallet.notes.id_hash_a2), and each leaf's E_iss-for-rec
+// ciphertext eIss = (R.x, R.y, C.x, C.y) and its binding's T = (x, y) are
+// exposed as PUBLIC OUTPUTS.  Notes.mint field-matches each exposed pair
+// against the leaf's recipient-blinded re-encryption binding, so a binding
+// cannot float to a different leaf (alberta-buck-notes.org, "The
+// Non-Deniable-Receipt Invariant").
 //
-// The note ciphertext eNote stays a PRIVATE witness: it is the value the A-spend
+// Why T.  The binding proves eIss carries the minter's registered Identity to
+// the key hidden in its Q -- but an ElGamal ciphertext does not bind its
+// plaintext to one key, so that key need not be the recipient's.  The spend can
+// reach the mint only through idHash, so idHash commits T = r'*pk + gamma*H,
+// and the A2 fold proves T opens under the spender's own key
+// (doc/review/notes-receiving-key.org, section 4.6).
+//
+// The note ciphertext eNote stays a PRIVATE witness: it is the value the spend
 // later reveals, so keeping it out of the mint proof preserves mint<->spend
-// unlinkability.  Exposing eIss is not a new disclosure -- the A2 binding
-// already carries eIss on chain at mint today.
+// unlinkability.  Exposing eIss and T is not a new disclosure -- the A2 binding
+// carries both on chain at mint.
 //
-// Public:  eIss[N][4] (outputs), oldRoot, newRoot, nextLeafIndex, totalFace, cm[N]
+// Public:  eIss[N][4], T[N][2] (outputs), oldRoot, newRoot, nextLeafIndex, totalFace, cm[N]
 // Private: flavor[N], v[N], rho[N], idHash[N], predicate[N],
-//          eNote[N][4], eIssW[N][4], siblings[N][TREE_DEPTH]
+//          eNote[N][4], eIssW[N][4], TW[N][2], siblings[N][TREE_DEPTH]
 
 // ---- ZERO_VALUE (mirrored from src/Notes.sol; see mint_batch.circom) -------
 function ZERO_VALUE() {
-    return 12478158023141672556814566805819277863195393802640872128727997243357085450959;
+    return 460097596457234765974707969191747880107513410278794739541636231580225950866;
 }
 
 // One Tornado-style insertion step at a single tree level.
@@ -80,8 +88,10 @@ template MintBatchA2(N, DEPTH) {
     signal input cm[N];
 
     // ---- public outputs ----
-    // Per-leaf E_iss-for-rec ciphertext (R.x, R.y, C.x, C.y).
+    // Per-leaf E_iss-for-rec ciphertext (R.x, R.y, C.x, C.y), and the
+    // binding's T (x, y).
     signal output eIss[N][4];
+    signal output T[N][2];
 
     // ---- private witness ----
     signal input flavor[N];
@@ -91,41 +101,48 @@ template MintBatchA2(N, DEPTH) {
     signal input predicate[N];
     signal input eNote[N][4];     // note ciphertext (R.x,R.y,C.x,C.y) -- PRIVATE
     signal input eIssW[N][4];     // E_iss-for-rec words (exposed via eIss)
+    signal input TW[N][2];        // the binding's T words (exposed via T)
     signal input siblings[N][DEPTH];
 
-    // (O) Poseidon-5 commitment opening per leaf.
+    // (O) Tagged Poseidon-6 commitment opening per leaf.
     component cmH[N];
     for (var i = 0; i < N; i++) {
-        cmH[i] = Poseidon(5);
-        cmH[i].inputs[0] <== flavor[i];
-        cmH[i].inputs[1] <== v[i];
-        cmH[i].inputs[2] <== rho[i];
-        cmH[i].inputs[3] <== idHash[i];
-        cmH[i].inputs[4] <== predicate[i];
+        cmH[i] = Poseidon(6);
+        cmH[i].inputs[0] <== NOTE_TAG_COMMITMENT();
+        cmH[i].inputs[1] <== flavor[i];
+        cmH[i].inputs[2] <== v[i];
+        cmH[i].inputs[3] <== rho[i];
+        cmH[i].inputs[4] <== idHash[i];
+        cmH[i].inputs[5] <== predicate[i];
         cm[i] === cmH[i].out;
     }
 
-    // (A2) flavor === A2, and idHash opens to Poseidon-8(eNote, eIss).  Expose
-    //      eIss; eNote stays private.
+    // (A2) flavor === A2, and idHash opens to Poseidon-11(T_ID, eNote, eIss, T).
+    //      Expose eIss and T; eNote stays private.
     component idH[N];
     for (var i = 0; i < N; i++) {
         flavor[i] === 2;            // FLAVOR_A2 (mirror wallet/Notes labels)
 
-        idH[i] = Poseidon(8);
-        idH[i].inputs[0] <== eNote[i][0];
-        idH[i].inputs[1] <== eNote[i][1];
-        idH[i].inputs[2] <== eNote[i][2];
-        idH[i].inputs[3] <== eNote[i][3];
-        idH[i].inputs[4] <== eIssW[i][0];
-        idH[i].inputs[5] <== eIssW[i][1];
-        idH[i].inputs[6] <== eIssW[i][2];
-        idH[i].inputs[7] <== eIssW[i][3];
+        idH[i] = Poseidon(11);
+        idH[i].inputs[0] <== NOTE_TAG_ID_HASH();
+        idH[i].inputs[1] <== eNote[i][0];
+        idH[i].inputs[2] <== eNote[i][1];
+        idH[i].inputs[3] <== eNote[i][2];
+        idH[i].inputs[4] <== eNote[i][3];
+        idH[i].inputs[5] <== eIssW[i][0];
+        idH[i].inputs[6] <== eIssW[i][1];
+        idH[i].inputs[7] <== eIssW[i][2];
+        idH[i].inputs[8] <== eIssW[i][3];
+        idH[i].inputs[9] <== TW[i][0];
+        idH[i].inputs[10] <== TW[i][1];
         idHash[i] === idH[i].out;
 
         eIss[i][0] <== eIssW[i][0];
         eIss[i][1] <== eIssW[i][1];
         eIss[i][2] <== eIssW[i][2];
         eIss[i][3] <== eIssW[i][3];
+        T[i][0] <== TW[i][0];
+        T[i][1] <== TW[i][1];
     }
 
     // (R) Range-bound totalFace and each v[i] to 128 bits.

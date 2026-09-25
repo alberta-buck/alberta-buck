@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import "../src/BN254.sol";
 import "../src/BuckCredit.sol";
 import "../src/Buck.sol";
 import "../src/BuckKController.sol";
@@ -37,7 +36,7 @@ contract Deploy is Script {
             3600,       // dT: 1 hour minimum between PID updates
             0.50e18,    // buckKMin: 50% floor
             0.95e18,    // buckKMax: 95% ceiling
-            1.0e18,     // buckK: initial value (neutral)
+            0.95e18,    // buckK: initial value (at the configured ceiling)
             address(0), // buckUsdcPool: not yet deployed
             1800,       // twapInterval: 30 minutes
             governance
@@ -55,6 +54,7 @@ contract Deploy is Script {
             address(buckCredit), address(buckK), address(identity), insurancePool
         );
         console.log("Buck deployed at:", address(buck));
+        identity.setBuck(address(buck));
 
         // 5. Deploy Notes (Phase 7-bis: stub mint verifier; production will
         //    deploy MintVerifierAdapter + per-N MintBatchN${N}Groth16Verifier
@@ -71,27 +71,14 @@ contract Deploy is Script {
             governance
         );
         console.log("Notes deployed at:", address(notes));
+        notes.setIdentityRegistry(address(identity));
 
-        // Bind a Public Identity to the Notes pool address.  The pool is a
-        // BUCK-aware contract operated by governance; its plaintext identity m
-        // is publicly disclosed off-chain (no cryptographic privacy of who
-        // operates the pool), and approve receipts are decryptable by the
-        // governance-held sk for subpoena response.
-        //
-        // TODO(production): replace placeholder (pk, E) below with operator-
-        // generated values from the alberta_buck.wallet ElGamal keypair tool.
-        // The (pk, E) pair has the same shape as an EOA self-registration
-        // record; the operator publishes m_notes alongside the binding.
-        BN254.G1Point memory pk_notes_placeholder = BN254.g1();
-        IdentityRegistry.ElGamalCT memory E_notes_placeholder =
-            IdentityRegistry.ElGamalCT({ R: BN254.g1(), C: BN254.g1() });
-        identity.bindContract(
-            address(notes),
-            pk_notes_placeholder,
-            E_notes_placeholder,
-            true, // isPublicIdentity
-            true  // isCarrying -- Notes pool deploys carried-age BUCK to spenders
-        );
+        // Identity certification is intentionally a second transaction: its
+        // registration proof must be generated after the registry and Notes
+        // addresses are known. Run BindNotesIdentity.s.sol with the issuer's
+        // target-bound credential; Deploy itself never substitutes placeholder
+        // curve points or silently creates an uncertified service identity.
+        console.log("Notes identity binding pending; run BindNotesIdentity.s.sol");
 
         vm.stopBroadcast();
     }

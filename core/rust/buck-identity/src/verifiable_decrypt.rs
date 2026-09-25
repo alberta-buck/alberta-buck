@@ -28,7 +28,8 @@ fn transcript(
     chainid: &W256,
 ) -> Transcript {
     let mut t = Transcript::new();
-    t.p(e_r).p(e_c).p(pk).p(m).p(t1).p(t2).w(account).w(chainid);
+    t.p(e_r).p(e_c).p(pk).p(m).p(t1).p(t2).w(account).w(chainid)
+        .w(&crate::domains::word(crate::domains::FS_VERIFIABLE_DECRYPT));
     t
 }
 
@@ -93,5 +94,78 @@ pub fn verifiable_decrypt_verify(
     }
     // Check 3: Fiat-Shamir
     let e_check = transcript(&er, &ec, &pk, &m, &t1, &t2, account, chainid).e();
+    Ok(w_from_fr(&e_check) == proof.e)
+}
+
+// ---- the identity opening: the same relation, checked on chain -------------
+
+#[allow(clippy::too_many_arguments)]
+fn opening_transcript(
+    e_r: &G1Affine,
+    e_c: &G1Affine,
+    pk: &G1Affine,
+    m: &G1Affine,
+    t1: &G1Affine,
+    t2: &G1Affine,
+    account: &W256,
+    chainid: &W256,
+    registry: &W256,
+) -> Transcript {
+    let mut t = Transcript::new();
+    t.p(e_r).p(e_c).p(pk).p(m).p(t1).p(t2).w(account).w(chainid).w(registry)
+        .w(&crate::domains::word(crate::domains::FS_IDENTITY_OPENING));
+    t
+}
+
+/// Prove that `account`'s registered credential `E` decrypts to `M` under its
+/// registered key -- what `BuckCredit.attestInsurer` checks before accepting an
+/// envelope for `M`.  Bound to (account, chainid, registry); nonce `t` is the
+/// caller's.
+#[allow(clippy::too_many_arguments)]
+pub fn identity_opening_prove(
+    e_ct: &(G1w, G1w),
+    sk: &W256,
+    m_point: &G1w,
+    account: &W256,
+    chainid: &W256,
+    registry: &W256,
+    t: &W256,
+) -> Result<VdProof> {
+    let er = g1_from_w(&e_ct.0)?;
+    let ec = g1_from_w(&e_ct.1)?;
+    let m = g1_from_w(m_point)?;
+    let sk = fr_mod(sk);
+    let t = fr_mod(t);
+    let pk = (G1Affine::generator() * sk).into_affine();
+    let t1 = (G1Affine::generator() * t).into_affine();
+    let t2 = (er * t).into_affine();
+    let e = opening_transcript(&er, &ec, &pk, &m, &t1, &t2, account, chainid, registry).e();
+    Ok(VdProof { e: w_from_fr(&e), s: w_from_fr(&(t + e * sk)), t1: w_from_g1(&t1), t2: w_from_g1(&t2) })
+}
+
+/// Verify an identity opening, as `BuckCredit` does on chain.
+#[allow(clippy::too_many_arguments)]
+pub fn identity_opening_verify(
+    e_ct: &(G1w, G1w),
+    pk: &G1w,
+    m_point: &G1w,
+    proof: &VdProof,
+    account: &W256,
+    chainid: &W256,
+    registry: &W256,
+) -> Result<bool> {
+    let er = g1_from_w(&e_ct.0)?;
+    let ec = g1_from_w(&e_ct.1)?;
+    let pk = g1_from_w(pk)?;
+    let m = g1_from_w(m_point)?;
+    let t1 = g1_from_w(&proof.t1)?;
+    let t2 = g1_from_w(&proof.t2)?;
+    let e = fr_mod(&proof.e);
+    let s = fr_mod(&proof.s);
+    let x2: G1Projective = G1Projective::from(ec) - m;
+    if G1Affine::generator() * s != pk * e + t1 || er * s != x2 * e + t2 {
+        return Ok(false);
+    }
+    let e_check = opening_transcript(&er, &ec, &pk, &m, &t1, &t2, account, chainid, registry).e();
     Ok(w_from_fr(&e_check) == proof.e)
 }

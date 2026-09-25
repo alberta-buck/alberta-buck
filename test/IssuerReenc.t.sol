@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 
 /// @notice Cross-artifact parity for the A2 issuer re-encryption binding: the
@@ -21,7 +22,7 @@ contract IssuerReencVectorTest is Test {
     function setUp() public {
         vm.chainId(1);                          // wallet transcripts use chainid = 1
         vj  = vm.readFile("test/vectors/identity.json");
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         // The A2 issuer is a registered *private* Identity (isPublicIdentity =
         // false); verifyIssuerReenc reads its (pk, E_addr) from storage.

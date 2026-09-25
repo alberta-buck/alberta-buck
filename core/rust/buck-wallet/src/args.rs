@@ -20,7 +20,18 @@ use crate::flows::*;
 use crate::issuer::issue_credential;
 use crate::jsonv::{as_ct, as_g1, get, get_ct, get_g1, get_opt, get_str, get_u128, get_w};
 use crate::verify::verify_receipt;
-use crate::{scalar_hex, Ctw, G1w, IdError, NoteOpening, Result, W256};
+use crate::{scalar_hex, w_from_hex, Ctw, G1w, IdError, NoteOpening, Result, W256};
+
+/// An optional hex-string scalar: absent or JSON null both yield None, so a
+/// caller may pass every key and leave the ones its role does not use unset.
+fn opt_w(v: &Value, key: &str) -> Result<Option<W256>> {
+    match get_opt(v, key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(x) => Ok(Some(crate::w_from_hex(x.as_str().ok_or(IdError(
+            "args: expected a hex string",
+        ))?)?)),
+    }
+}
 
 fn opening_from(v: &Value) -> Result<NoteOpening> {
     let flavor_w = get_w(v, "flavor")?;
@@ -239,8 +250,6 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         &opening,
                         &cms,
                         &schnorr_from(get(args, "issuer_sig")?)?,
-                        &get_g1(args, "sigma_R")?,
-                        &get_w(args, "sigma_s")?,
                         &nullifier,
                         &face,
                         value,
@@ -266,6 +275,22 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         ))?)?),
                         None => None,
                     };
+                    let pk_recv = get_g1(args, "pk_recv")?;
+                    let k_recv = opt_w(args, "k_recv")?;
+                    let r_note = opt_w(args, "r_note")?;
+                    let r_id = opt_w(args, "r_id")?;
+                    let t_note = opt_w(nonces, "t_note")?;
+                    let t_id = opt_w(nonces, "t_id")?;
+                    let mbx = get_opt(args, "mailbox_binding").cloned();
+                    let legs = AddressedLegs {
+                        pk_recv: &pk_recv,
+                        k_recv: k_recv.as_ref(),
+                        r_note: r_note.as_ref(),
+                        r_id: r_id.as_ref(),
+                        binding: mbx.as_ref(),
+                        t_note: t_note.as_ref(),
+                        t_id: t_id.as_ref(),
+                    };
                     build_note_a1(
                         chainid,
                         contracts,
@@ -282,8 +307,6 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         &schnorr_from(get(args, "issuer_sig")?)?,
                         &get_ct(args, "eNote")?,
                         &get_ct(args, "eRec")?,
-                        &get_g1(args, "sigma_R")?,
-                        &get_w(args, "sigma_s")?,
                         &nullifier,
                         &face,
                         value,
@@ -298,12 +321,30 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         payee.e_addr.as_ref(),
                         notes_ref,
                         t_vd.as_ref(),
+                        &legs,
                     )?
                 }
                 _ => {
                     let binding = match get_opt(args, "binding") {
                         Some(b) => Some(binding_from(b)?),
                         None => None,
+                    };
+                    let pk_recv = get_g1(args, "pk_recv")?;
+                    let k_recv = opt_w(args, "k_recv")?;
+                    let r_note = opt_w(args, "r_note")?;
+                    let r_id = opt_w(args, "r_id")?;
+                    let t_note = opt_w(nonces, "t_note")?;
+                    let t_id = opt_w(nonces, "t_id")?;
+                    let mbx = get_opt(args, "mailbox_binding").cloned();
+                    let gamma = opt_w(args, "gamma")?;
+                    let legs = AddressedLegs {
+                        pk_recv: &pk_recv,
+                        k_recv: k_recv.as_ref(),
+                        r_note: r_note.as_ref(),
+                        r_id: r_id.as_ref(),
+                        binding: mbx.as_ref(),
+                        t_note: t_note.as_ref(),
+                        t_id: t_id.as_ref(),
                     };
                     build_note_a2(
                         chainid,
@@ -334,12 +375,15 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         mint_txhash,
                         mint_block,
                         binding.as_ref(),
+                        &get_g1(args, "T")?,
+                        gamma.as_ref(),
                         role,
                         payee.sk.as_ref(),
                         payee.e_addr.as_ref(),
                         payer.sk.as_ref(),
                         notes_ref,
                         &get_w(nonces, "t_vd")?,
+                        &legs,
                     )?
                 }
                 // unreachable: the outer match covers exactly these kinds
@@ -347,7 +391,7 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
         }
         _ => return Err(IdError("args: unknown receipt kind")),
     };
-    Ok(crate::canonical::canonical_json_value(&core)?)
+    crate::canonical::canonical_json_value(&core)
 }
 
 /// Tier-1 verify from canonical receipt text; returns the RcptResult as
@@ -371,7 +415,7 @@ pub fn mint_unilateral_a2_args(args: &Value) -> Result<String> {
     let minted = mint_unilateral_a2(
         &get_w(args, "sk_iss")?,
         &get_ct(args, "E_reg")?,
-        &get_g1(args, "M_rec")?,
+        &get_g1(args, "pk_recv")?,
         &get_w(args, "v")?,
         &get_w(args, "rho")?,
         &get_w(args, "issuer")?,
@@ -396,6 +440,7 @@ pub fn mint_unilateral_a2_args(args: &Value) -> Result<String> {
         "binding": issuer_reenc_record(&minted.binding),
         "r_prime": scalar_hex(&minted.r_prime),
         "r_note": scalar_hex(&minted.r_note),
+        "gamma": scalar_hex(&minted.gamma),
     })
     .to_string())
 }
@@ -415,10 +460,12 @@ pub fn make_receipt_a2_args(args: &Value) -> Result<String> {
         binding: binding_from(get(minted_v, "binding")?)?,
         r_prime: [0u8; 32],
         r_note: [0u8; 32],
+        gamma: get_w(minted_v, "gamma")?,
     };
     let tree = tree_from(get(args, "tree")?)?;
     let rcpt = make_receipt_a2(
-        &get_w(args, "m_rec")?,
+        &get_w(args, "k_recv")?,
+        &get_g1(args, "M_rec")?,
         &minted,
         &get_w(args, "issuer")?,
         &get_w(args, "chainid")?,
@@ -428,10 +475,12 @@ pub fn make_receipt_a2_args(args: &Value) -> Result<String> {
     Ok(json!({
         "M_I": g1_hex(&rcpt.m_i),
         "M_rec": g1_hex(&rcpt.m_rec),
+        "pk_recv": g1_hex(&rcpt.pk_recv),
         "value": scalar_hex(&rcpt.value),
         "eIss": ct_hex(&rcpt.e_iss),
         "vd": vd_json(&rcpt.vd),
         "binding": issuer_reenc_record(&rcpt.binding),
+        "gamma": scalar_hex(&rcpt.gamma),
         "issuer": scalar_hex(&rcpt.issuer),
         "chainid": scalar_hex(&rcpt.chainid),
         "M_I_member": rcpt.m_i_member,
@@ -446,6 +495,7 @@ pub fn verify_receipt_a2_args(args: &Value) -> Result<String> {
     let rcpt = UnilateralReceipt {
         m_i: get_g1(r, "M_I")?,
         m_rec: get_g1(r, "M_rec")?,
+        pk_recv: get_g1(r, "pk_recv")?,
         value: get_w(r, "value")?,
         e_iss: get_ct(r, "eIss")?,
         vd: buck_identity::verifiable_decrypt::VdProof {
@@ -455,6 +505,7 @@ pub fn verify_receipt_a2_args(args: &Value) -> Result<String> {
             t2: get_g1(get(r, "vd")?, "T2")?,
         },
         binding: binding_from(get(r, "binding")?)?,
+        gamma: get_w(r, "gamma")?,
         issuer: get_w(r, "issuer")?,
         chainid: get_w(r, "chainid")?,
         m_i_member: false,
@@ -483,11 +534,10 @@ pub fn mint_unilateral_a1_args(args: &Value) -> Result<String> {
     let n = get(args, "nonces")?;
     let minted = mint_unilateral_a1(
         &get_g1(args, "M_rec")?,
+        &get_g1(args, "pk_recv")?,
         &get_w(args, "v")?,
         &get_w(args, "rho")?,
         &get_w(args, "m_issuer")?,
-        &get_g1(args, "sigma_R")?,
-        &get_w(args, "sigma_s")?,
         &get_w(args, "predicate")?,
         &get_w(n, "r_prime")?,
         &get_w(n, "r_note")?,
@@ -518,7 +568,8 @@ pub fn make_receipt_a1_args(args: &Value) -> Result<String> {
     };
     let tree = tree_from(get(args, "tree")?)?;
     let rcpt = make_receipt_a1(
-        &get_w(args, "m_rec")?,
+        &get_w(args, "k_recv")?,
+        &get_g1(args, "M_rec")?,
         &minted,
         &get_g1(args, "M_iss")?,
         &get_w(args, "issuer")?,
@@ -529,6 +580,7 @@ pub fn make_receipt_a1_args(args: &Value) -> Result<String> {
     Ok(json!({
         "M_iss": g1_hex(&rcpt.m_iss),
         "M_rec": g1_hex(&rcpt.m_rec),
+        "pk_recv": g1_hex(&rcpt.pk_recv),
         "value": scalar_hex(&rcpt.value),
         "eRec": ct_hex(&rcpt.e_rec),
         "vd": vd_json(&rcpt.vd),
@@ -546,6 +598,7 @@ pub fn verify_receipt_a1_args(args: &Value) -> Result<String> {
     let rcpt = A1Receipt {
         m_iss: get_g1(r, "M_iss")?,
         m_rec: get_g1(r, "M_rec")?,
+        pk_recv: get_g1(r, "pk_recv")?,
         value: get_w(r, "value")?,
         e_rec: get_ct(r, "eRec")?,
         vd: buck_identity::verifiable_decrypt::VdProof {
@@ -612,4 +665,220 @@ pub fn issue_credential_args(args: &Value) -> Result<String> {
         out.insert("delivery".into(), ct_hex(&ct));
     }
     Ok(Value::Object(out).to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Notes: the receiving key, the delivery, the mailbox binding, and the folded
+// gate's circuit witnesses.  Arguments and results are hex, as everywhere in
+// this ABI; the delivery and the witness are DOCUMENTS and keep their own
+// decimal convention (see `delivery` and `deposit_fold`).
+// ---------------------------------------------------------------------------
+
+fn path_from(v: &Value) -> Result<(Vec<W256>, Vec<u8>)> {
+    let sib = get(v, "siblings")?
+        .as_array()
+        .ok_or(IdError("args: path.siblings must be an array"))?
+        .iter()
+        .map(|x| w_from_hex(x.as_str().ok_or(IdError("args: sibling must be hex"))?))
+        .collect::<Result<Vec<W256>>>()?;
+    let bits = get(v, "indexBits")?
+        .as_array()
+        .ok_or(IdError("args: path.indexBits must be an array"))?
+        .iter()
+        .map(|b| b.as_u64().map(|x| x as u8).ok_or(IdError("args: index bit must be 0 or 1")))
+        .collect::<Result<Vec<u8>>>()?;
+    Ok((sib, bits))
+}
+
+/// `{seed, rotation}` -> `{k, pk_recv}`: the mailbox, from wallet seed material.
+pub fn receiving_key_args(args: &Value) -> Result<String> {
+    let rotation = get_u128(args, "rotation")? as u64;
+    let k = buck_identity::recvkey::derive_receiving_secret(&get_w(args, "seed")?, rotation)?;
+    let pk = buck_identity::recvkey::receiving_public(&k)?;
+    Ok(json!({"k": scalar_hex(&k), "pk_recv": g1_hex(&pk)}).to_string())
+}
+
+/// `{shared, label}` -> the one-time mask of one delivery field.
+pub fn wrap_mask_args(args: &Value) -> Result<String> {
+    let label = get_str(args, "label")?;
+    let m = buck_identity::recvkey::wrap_mask(&get_g1(args, "shared")?, label.as_bytes());
+    Ok(Value::String(scalar_hex(&m)).to_string())
+}
+
+/// The minter's A1 delivery (a decimal document).
+pub fn deliver_a1_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::deliver_a1(
+        &get_ct(args, "eNote")?,
+        &get_ct(args, "eRec")?,
+        &get_w(args, "v")?,
+        &get_w(args, "rho")?,
+        &get_w(args, "predicate")?,
+        &get_w(args, "r_note")?,
+        &get_g1(args, "pk_recv")?,
+    )?
+    .to_string())
+}
+
+/// The minter's A2 delivery (a decimal document).
+pub fn deliver_a2_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::deliver_a2(
+        &get_ct(args, "eNote")?,
+        &get_ct(args, "eIss")?,
+        &get_g1(args, "T")?,
+        &get_w(args, "v")?,
+        &get_w(args, "rho")?,
+        &get_w(args, "predicate")?,
+        &get_w(args, "r_note")?,
+        &get_w(args, "r_prime")?,
+        &get_w(args, "salt_iss")?,
+        &get_w(args, "gamma")?,
+        &get_g1(args, "pk_recv")?,
+    )?
+    .to_string())
+}
+
+/// `{delivery, k, m_issuer}` -> the opened A1 note.
+pub fn open_a1_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::open_a1(
+        get(args, "delivery")?,
+        &get_w(args, "k")?,
+        &get_w(args, "m_issuer")?,
+    )?
+    .to_string())
+}
+
+/// `{delivery, k}` -> the opened A2 note.
+pub fn open_a2_args(args: &Value) -> Result<String> {
+    Ok(crate::delivery::open_a2(get(args, "delivery")?, &get_w(args, "k")?)?.to_string())
+}
+
+/// `{M_rec, pk_recv, salt, leaves, depth}` -> the mailbox binding a payer
+/// checks before paying: a leaf and a path, disclosing no secret.
+fn hex_leaves(v: &Value) -> Result<Vec<W256>> {
+    v.as_array()
+        .ok_or(IdError("args: leaves must be an array"))?
+        .iter()
+        .map(|x| w_from_hex(x.as_str().ok_or(IdError("args: leaf must be hex"))?))
+        .collect()
+}
+
+/// `{M_rec, pk_recv, salt, leaves, depth, aggregator?}` -> the mailbox binding.
+/// `leaves`/`depth` are the registry's subtree; with `aggregator`
+/// (`{leaves, depth, slot}`) the path continues up the aggregator from the
+/// subtree's slot, so it folds to the posted root -- the two-level statement of
+/// the accumulator specification, section 11.1.
+pub fn prove_receiving_binding_args(args: &Value) -> Result<String> {
+    let m = get_g1(args, "M_rec")?;
+    let pk = get_g1(args, "pk_recv")?;
+    let salt = get_w(args, "salt")?;
+    let leaves = hex_leaves(get(args, "leaves")?)?;
+    let depth = get_u128(args, "depth")? as usize;
+    let tree = IdentityMerkleTree::from_leaves(&leaves, depth)?;
+    let leaf = buck_registry::tree::mailbox_leaf(&m, &pk, &salt)?;
+    let mut proof = tree
+        .path(tree.index_of_leaf(&leaf).map_err(|_| {
+            IdError("no registered leaf commits this (Identity, receiving key) pair")
+        })?)?;
+    if let Some(agg) = get_opt(args, "aggregator") {
+        let agg_leaves = hex_leaves(get(agg, "leaves")?)?;
+        let agg_tree =
+            IdentityMerkleTree::from_leaves(&agg_leaves, get_u128(agg, "depth")? as usize)?;
+        let slot = get_u128(agg, "slot")? as usize;
+        if agg_leaves.get(slot) != Some(&proof.root) {
+            return Err(IdError("the subtree's root is not at its aggregator slot"));
+        }
+        let up = agg_tree.path(slot)?;
+        proof.siblings.extend(up.siblings);
+        proof.index_bits.extend(up.index_bits);
+        proof.root = up.root;
+    }
+    Ok(json!({
+        "pk_recv": g1_hex(&pk),
+        "salt": scalar_hex(&salt),
+        "path": {
+            "leaf": scalar_hex(&proof.leaf),
+            "siblings": proof.siblings.iter().map(scalar_hex).collect::<Vec<_>>(),
+            "indexBits": proof.index_bits,
+            "root": scalar_hex(&proof.root),
+        },
+    })
+    .to_string())
+}
+
+/// `{M_rec, binding, root}` -> `true` iff the binding's leaf commits the pair
+/// and its path folds to `root`.  Needs no secret: a payer runs it before
+/// paying.
+pub fn verify_receiving_binding_args(args: &Value) -> Result<String> {
+    let m = get_g1(args, "M_rec")?;
+    let b = get(args, "binding")?;
+    let leaf = buck_registry::tree::mailbox_leaf(&m, &get_g1(b, "pk_recv")?, &get_w(b, "salt")?)?;
+    let p = get(b, "path")?;
+    let (sib, bits) = path_from(p)?;
+    let ok = get_w(p, "leaf")? == leaf
+        && buck_registry::tree::fold_path(&leaf, &sib, &bits)? == get_w(args, "root")?;
+    Ok(json!(ok).to_string())
+}
+
+fn fold_witness_args(
+    args: &Value,
+    f: impl FnOnce(&crate::deposit_fold::FoldCommon) -> Result<Value>,
+) -> Result<String> {
+    let (sib, bits) = path_from(get(args, "path")?)?;
+    let (m_rec, k, sk_dep, salt) = (
+        get_w(args, "m_rec")?,
+        get_w(args, "k")?,
+        get_w(args, "sk_dep")?,
+        get_w(args, "salt")?,
+    );
+    let (t, r_e, rho, id_hash, root) = (
+        get_w(args, "t")?,
+        get_w(args, "r_E")?,
+        get_w(args, "rho")?,
+        get_w(args, "idHash")?,
+        get_w(args, "identityRoot")?,
+    );
+    let (e_dep, pk_dep, e_enc) = (get_ct(args, "E_dep")?, get_g1(args, "pk_dep")?, get_ct(args, "eEnc")?);
+    let common = crate::deposit_fold::FoldCommon {
+        m_rec: &m_rec,
+        k: &k,
+        sk_dep: &sk_dep,
+        salt: &salt,
+        path: crate::deposit_fold::Path { siblings: &sib, index_bits: &bits },
+        t: &t,
+        r_e: &r_e,
+        e_dep: &e_dep,
+        pk_dep: &pk_dep,
+        e_enc: &e_enc,
+        rho: &rho,
+        id_hash: &id_hash,
+        identity_root: &root,
+    };
+    Ok(f(&common)?.to_string())
+}
+
+/// The A1 folded gate's circuit witness (a decimal document for the prover).
+pub fn deposit_fold_a1_witness_args(args: &Value) -> Result<String> {
+    let (e_note, v, m_iss) = (get_ct(args, "eNote")?, get_w(args, "v")?, get_w(args, "m_issuer")?);
+    let r_note = get_w(args, "r_note")?;
+    fold_witness_args(args, |c| crate::deposit_fold::deposit_fold_a1_witness(c, &e_note, &v, &m_iss, &r_note))
+}
+
+/// The A2 folded gate's circuit witness (a decimal document for the prover).
+pub fn deposit_fold_a2_witness_args(args: &Value) -> Result<String> {
+    let (e_note, e_iss) = (get_ct(args, "eNote")?, get_ct(args, "eIss")?);
+    let (r_prime, salt_iss) = (get_w(args, "r_prime")?, get_w(args, "salt_iss")?);
+    let (isib, ibits) = path_from(get(args, "issPath")?)?;
+    let (t, gamma) = (get_g1(args, "T")?, get_w(args, "gamma")?);
+    fold_witness_args(args, |c| {
+        crate::deposit_fold::deposit_fold_a2_witness(
+            c,
+            &e_note,
+            &e_iss,
+            &r_prime,
+            &salt_iss,
+            crate::deposit_fold::Path { siblings: &isib, index_bits: &ibits },
+            &t,
+            &gamma,
+        )
+    })
 }

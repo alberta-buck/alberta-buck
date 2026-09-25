@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Notes} from "../src/Notes.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BN254} from "../src/BN254.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
@@ -31,7 +32,7 @@ contract NotesIssuerBindingTest is Test {
     uint256 constant K  = 0x2222222222222222222222222222222222222222222222222222222222222222;
 
     function setUp() public {
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         StubMintVerifier  mintStub  = new StubMintVerifier(GOV);   // accepts any proof
         StubSpendVerifier spendStub = new StubSpendVerifier(GOV);
         MockBuck          buck      = new MockBuck();
@@ -72,10 +73,11 @@ contract NotesIssuerBindingTest is Test {
         BN254.G1Point[] memory pts = new BN254.G1Point[](2);
         pts[0] = pk;
         pts[1] = R;
-        uint256[] memory scl = new uint256[](3);
+        uint256[] memory scl = new uint256[](4);
         scl[0] = uint256(hBatch);
         scl[1] = uint256(uint160(iss));
         scl[2] = block.chainid;
+        scl[3] = uint256(keccak256("AlbertaBuck/FiatShamir/IdentityRegistry/IssuerSchnorr/v2"));
         uint256 e = BN254.fsChallenge(pts, scl);
         uint256 s = addmod(k, mulmod(e, sk, BN254.R), BN254.R);
         sig = IdentityRegistry.SchnorrProof(e, s, R);
@@ -90,6 +92,21 @@ contract NotesIssuerBindingTest is Test {
         vm.prank(issuer);
         notes.mint(hex"00", oldRoot, 12345, 0, 0, cms, _mode(), sig);
         assertEq(notes.nextLeafIndex(), 1, "bound mint must append the leaf");
+        assertEq(notes.publicIssuerOfCommitment(cms[0]), issuer,
+                 "mint attribution must bind the exact commitment");
+    }
+
+    function test_publicIssuer_duplicateCommitment_reverts() public {
+        uint256[] memory cms = _cms();
+        IdentityRegistry.SchnorrProof memory sig = _sign(SK, K, cms, issuer);
+        uint256 firstRoot = notes.noteRoot();
+        vm.prank(issuer);
+        notes.mint(hex"00", firstRoot, 12345, 0, 0, cms, _mode(), sig);
+
+        uint256 oldRoot = notes.noteRoot();
+        vm.prank(issuer);
+        vm.expectRevert("Notes: duplicate public commitment");
+        notes.mint(hex"00", oldRoot, 12346, 1, 0, cms, _mode(), sig);
     }
 
     function test_publicIssuer_badBinding_reverts() public {
