@@ -90,6 +90,12 @@ setup_circuit() {
     snarkjs zkesv "$ZKEYF" "$VERIFIER"
     sed -i.bak "s/contract Groth16Verifier/contract ${CONTRACT_NAME}/" "$VERIFIER"
     rm -f "$VERIFIER.bak"
+    # EIP-170: snarkjs unrolls ~166 bytes of code per public input, so a
+    # verifier past ~140 inputs cannot deploy where the 24,576-byte limit
+    # holds.  Those are rewritten to walk a code-resident IC table, the stock
+    # original kept for test/VerifierTable.t.sol; the rest stay stock.
+    python3 "$ROOT/scripts/snark/table_verifier.py" --over 128 \
+        --reference "$ROOT/test/reference/${CONTRACT_NAME}Stock.sol" "$VERIFIER"
     echo "wrote $VERIFIER"
 }
 

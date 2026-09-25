@@ -47,6 +47,7 @@ path = [
   "src/RegressVerifier.sol",
   "src/MintBatchN*Groth16Verifier.sol",
   "src/MintBatchA2N*Groth16Verifier.sol",
+  "test/reference/*Groth16VerifierStock.sol",
   "src/NoteBinding*Groth16Verifier.sol",
   "src/IdentityMembership*Verifier.sol",
 ]
