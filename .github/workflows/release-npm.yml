@@ -154,11 +154,6 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: npm >= 11.5.1 (OIDC support)
-        run: |
-          npm install -g npm@latest
-          npm --version
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -238,6 +233,15 @@ jobs:
             test/registry.vectors.test.js \
             test/identity.web.test.js \
             test/journal.test.js
+
+      # Upgrade npm only now, for OIDC (>= 11.5.1).  Everything above ran on the
+      # runner's npm 10, as it does in the flake: npm 11+ `npm ci` refuses this
+      # lockfile, because @evmts/zevm@0.0.0 (via tevm) declares optional platform
+      # packages that do not exist on the registry, so no lockfile can list them.
+      - name: npm >= 11.5.1 (OIDC support)
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Publish alberta-buck-kernel
         working-directory: core/js
