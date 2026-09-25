@@ -9,7 +9,13 @@ crypto:
 - `builders` / `receipt` -- the per-kind receipt builders and the
   public-issuer / approve verifiers
 - `flows` -- the unilateral identity-targeted Note flows A1/A2
+- `delivery` -- what an addressed note carries from minter to recipient,
+  wrapped to the recipient's receiving key
+- `deposit_fold` -- the witnesses for the folded deposit gates
+  (`deposit_fold_a1/a2.circom`)
 - `issuer` -- the credential-issuer ceremony
+- `args` -- the named JSON-argument surface the Python and JavaScript
+  bindings call through
 
 The executable specification is the Python reference in
 `alberta_buck/wallet`.  This crate matches it bit-for-bit -- canonical bytes,
@@ -25,7 +31,7 @@ reference draws them.
 
 ```toml
 [dependencies]
-alberta-buck-wallet = "0.1"
+alberta-buck-wallet = "0.2"
 ```
 
 The distribution is prefixed, the import is not: `use buck_wallet::...`.
@@ -50,7 +56,7 @@ parsed receipt.  For worked usage of the builders and the Note flows, read
 
 ## Status
 
-0.1.0, prototype.  Unaudited software that builds and verifies the
+0.2.0, prototype.  Unaudited software that builds and verifies the
 instruments people would hold value in.  Treat accordingly.
 
 ## Licence

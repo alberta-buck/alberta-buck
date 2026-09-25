@@ -173,7 +173,7 @@ pub struct AddressedLegs<'a> {
 
 /// Returns `(r_note, r_id, vd_note, vd_id)` for the payload record: the first
 /// two set on the issuer side, the last two on the recipient side.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn note_legs(
     role: &str,
     flavor: &str,
@@ -206,7 +206,7 @@ fn note_legs(
             ));
         };
         let _ = flavor;
-        Ok((Some(rn.clone()), Some(ri.clone()), None, None))
+        Ok((Some(*rn), Some(*ri), None, None))
     }
 }
 

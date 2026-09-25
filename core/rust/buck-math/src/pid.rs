@@ -41,6 +41,8 @@ pub struct DirectPid {
 impl DirectPid {
     /// Mirror of the BuckKControllerDirect constructor: feed-forward from
     /// the initial K, integrator primed to 0 (parity), refs at ppm parity.
+    /// Its arguments are the constructor's, one for one.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(kp: i128, ki: i128, kd: i128, dt: u64,
                k_min: u128, k_max: u128, buck_k: u128, now: u64) -> DirectPid {
         assert!(k_min <= buck_k && buck_k <= k_max, "buckK out of bounds");

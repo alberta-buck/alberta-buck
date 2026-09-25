@@ -391,7 +391,7 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
         }
         _ => return Err(IdError("args: unknown receipt kind")),
     };
-    Ok(crate::canonical::canonical_json_value(&core)?)
+    crate::canonical::canonical_json_value(&core)
 }
 
 /// Tier-1 verify from canonical receipt text; returns the RcptResult as

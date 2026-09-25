@@ -47,6 +47,14 @@
 #
 # alberta-buck (P5) joins this workflow as its phase lands; see
 # alberta-buck-deployment.org.
+#
+# ── Release order at a major.minor bump ───────────────────────────────
+#
+# core pins contracts and the kernel extra at its own major.minor
+# (>=0.2.0,<0.3), so push the tags in dependency order and let each
+# publish before the next: py-contracts-v*, py-kernel-v*, py-core-v*.
+# The core job's smoke test installs its wheel from PyPI's view of those
+# pins, so it fails rather than publishing a core nobody can install.
 
 name: Release PyPI
 
@@ -118,7 +126,7 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       # The release gate: the artifact we publish must be the artifact the
-      # suite exercises.  529 tests, no forked network needed.
+      # suite exercises.  The whole forge suite; no forked network needed.
       - name: Test
         run: make test
 

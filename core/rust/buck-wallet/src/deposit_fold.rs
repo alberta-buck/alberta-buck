@@ -195,7 +195,6 @@ pub fn deposit_fold_a1_witness(
 /// at each addition: the two x-coordinates must differ, which excludes the
 /// doubling and the negation together.  Relation (5): that Identity is itself
 /// registered, under the salt of the issuer's naming association.
-#[allow(clippy::too_many_arguments)]
 /// `t` is the mint binding's `T`, which `idHash` commits, and `gamma` its blind:
 /// the key tie `T = rm*G + gamma*H` says the binding's key is the spender's own.
 #[allow(clippy::too_many_arguments)]

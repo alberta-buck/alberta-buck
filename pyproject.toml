@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name			= "alberta-buck"
-version			= "0.1.0"
+version			= "0.2.0"
 description		= "Alberta Buck commodity-basket stablecoin: oracle tools, historical analysis, and PID simulation"
 # 3.11 is the floor of alberta-buck-core, which is a hard dependency below.
 requires-python		= ">=3.11"
@@ -31,7 +31,7 @@ dependencies = [
     # session/journal/artifacts, and the contract artifacts it depends on.
     # buck_contracts is never imported here directly -- it arrives through
     # core, which is what calls it.
-    "alberta-buck-core	>=0.1.0",
+    "alberta-buck-core	>=0.2.0,<0.3",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +43,7 @@ dependencies = [
 # Wheels exist for macOS arm64/x86_64 and manylinux_2_28 x86_64/aarch64;
 # elsewhere this extra simply has nothing to install, which is why it must
 # never become a hard dependency.
-kernel = ["alberta-buck-core[kernel]>=0.1.0"]
+kernel = ["alberta-buck-core[kernel]>=0.2.0,<0.3"]
 
 # pyrevm: the in-process EVM backend (~7000x per-tx vs anvil).  An extra
 # rather than a dependency because it has no wheel for every target we

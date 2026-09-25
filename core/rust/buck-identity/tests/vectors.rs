@@ -449,8 +449,8 @@ fn golden_identity_fixture() {
     )
     .unwrap());
     // tampered E_iss must fail
-    let (r_i, mut c_i) = jct(&ir["E_iss"]);
-    c_i = jg1(&v["alice"]["M"]);
+    let (r_i, _) = jct(&ir["E_iss"]);
+    let c_i = jg1(&v["alice"]["M"]);
     assert!(!issuer_reenc::issuer_reenc_verify(
         &jg1(&ir["pk_iss"]),
         &jct(&ir["E_reg"]),

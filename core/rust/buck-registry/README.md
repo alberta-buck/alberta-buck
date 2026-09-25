@@ -10,6 +10,9 @@ infrastructure:
 - `aggregator` -- the central sub-root aggregator whose root is the on-chain
   `identityRoot`
 - `feature` -- the feature-authority attestation tree
+- `attributes` -- holder-produced attribute proofs over salted subtrees
+- `regulator` -- the insurance regulator's periodic attestation, whose
+  public subtrees gate credit
 
 The executable specification is the Python reference in
 `alberta_buck/registry`.  This crate matches it bit-for-bit, proven by
@@ -31,7 +34,7 @@ graph.
 
 ```toml
 [dependencies]
-alberta-buck-registry = "0.1"
+alberta-buck-registry = "0.2"
 ```
 
 The distribution is prefixed, the import is not: `use buck_registry::...`.
@@ -42,7 +45,7 @@ the feature tree, each checked against the golden vectors.
 
 ## Status
 
-0.1.0, prototype.  Unaudited software carrying the identity accumulator of a
+0.2.0, prototype.  Unaudited software carrying the identity accumulator of a
 monetary system.
 
 ## Licence

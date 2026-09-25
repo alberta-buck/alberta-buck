@@ -19,7 +19,7 @@ reverts, in every profile.
 
 ```toml
 [dependencies]
-alberta-buck-math = "0.1"
+alberta-buck-math = "0.2"
 ```
 
 The distribution is prefixed, the import is not:
@@ -48,7 +48,7 @@ funding factor and bumpless retune algebra), and `wide` (OpenZeppelin
 
 ## Status
 
-0.1.0, prototype.  This is unaudited software implementing the arithmetic of
+0.2.0, prototype.  This is unaudited software implementing the arithmetic of
 a monetary system.  Read it, test it, simulate with it; do not put other
 people's money behind it yet.
 

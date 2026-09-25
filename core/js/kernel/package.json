@@ -1,6 +1,6 @@
 {
   "name": "alberta-buck-kernel",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Alberta Buck monetary and identity kernels as WebAssembly: integer money arithmetic bit-identical to the Solidity contracts, and the BN254 identity/wallet cryptography, for Node and the browser",
   "license": "CAL-1.0",
   "author": "Perry Kundert <perry@dominionrnd.com>",

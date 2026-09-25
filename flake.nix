@@ -66,6 +66,9 @@
           # nowhere else.
           rustc
           cargo
+          # clippy from the same nixpkgs as rustc: a profile clippy of another
+          # version reads this rustc's crate metadata as incompatible (E0514).
+          clippy
           # wasm32-unknown-unknown links with lld; nixpkgs rustc ships the
           # target's std but not a linker for it, and cargo fails with
           # "linker `lld` not found" without this.

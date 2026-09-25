@@ -1577,14 +1577,19 @@ venv-%:			$(VENV_STAMP)
 	@echo; echo "*** Running in $(VENV) VirtualEnv: make $*"
 	@bash --init-file "$(VENV)/bin/activate" -ic "make $*"
 
-$(VENV_STAMP):		pyproject.toml core/python/pyproject.toml
+# The three local distributions install editable in ONE resolver pass: at a
+# version not yet on PyPI (a minor bump in flight), the root's pin on core and
+# core's pin on contracts can only be met by the checkout's own copies.
+$(VENV_STAMP):		pyproject.toml core/python/pyproject.toml core/contracts/python/pyproject.toml
 	@[[ "$(PYTHON_V)" =~ "^venv" ]] && ( echo -e "\n\n!!! $(VENV) Cannot start a venv within a venv"; false ) || true
 	@echo; echo "*** Building $(VENV) VirtualEnv..."
 	@( [ -d "$(VENV)" ] || ( $(PYTHON) -m venv $(VENV_OPTS) "$(VENV)" \
 		&& sed -i -e '1s:^:. $$HOME/.bashrc\n:' "$(VENV)/bin/activate" ) ) \
 	    && source "$(VENV)/bin/activate" \
-	    && python -m pip install --no-user --upgrade -e "$(BUCK_PYTHON)[tests,dev]" \
-	    && python -m pip install --no-user -e "$(BUCK_PYTHON)/core/python" \
+	    && python -m pip install --no-user --upgrade \
+		-e "$(BUCK_PYTHON)/core/contracts/python" \
+		-e "$(BUCK_PYTHON)/core/python" \
+		-e "$(BUCK_PYTHON)[tests,dev]" \
 	    && touch "$@"
 
 venv-activate:
