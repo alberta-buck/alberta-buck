@@ -2282,6 +2282,11 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
         self.hypo_mortgage = self.mortgage
         self.hypo_cash = 0
+        # The counterfactual insures the same asset at the same rate, and pays
+        # the premium as it falls due: a cost.  The BUCK path instead deposits
+        # ten years' premium with the insurance pool, which invests it to earn
+        # the premiums and returns it when the insurance is dropped.
+        self.hypo_premium = 0
         # BUCK-path savings: the receipt this debtor holds in the BuckBasket,
         # and the USDC principal it put in.  The counterfactual has no
         # equivalent because every dollar of its income is owed to the bank.
@@ -2292,12 +2297,13 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self._last_month_day = start - self.MONTH
         self.deploys = 0
         self.throttled = 0
-        # Cost telemetry (par-valued, 6-dec dollars): what the BUCK path
-        # actually pays vs the counterfactual -- insurance principal
-        # surrendered at mint, and the par-value lost (or gained, negative)
-        # crossing the pool in either direction.  unwound/unwind_loss
-        # isolate the voluntary-buyback leg (so passive Jubilee melt can be
-        # distinguished from the agent's own purchases).
+        # Cost telemetry (par-valued, 6-dec dollars): the insurance deposits
+        # made at mint (premium_paid: the pool holds them, and returns them
+        # when the insurance is dropped -- an asset, counted in nw as
+        # `deposit`), and the par-value lost (or gained, negative) crossing
+        # the pool in either direction.  unwound/unwind_loss isolate the
+        # voluntary-buyback leg (so passive Jubilee melt can be distinguished
+        # from the agent's own purchases).
         self.premium_paid = 0
         self.trade_loss = 0
         self.unwound = 0
@@ -2412,7 +2418,15 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 basket = dep[0]
             except Exception:
                 basket = self._basket_in
-        nw = cash + held + basket - self.mortgage - drawn + jub
+        # The insurance deposits are this debtor's capital, held by the pool
+        # and returned when the insurance is dropped: an asset at par.
+        deposit = 0
+        try:
+            for tid in self._token_ids:
+                deposit += d.buck.functions.mintsPrincipal(tid).call()
+        except Exception:
+            deposit = self.premium_paid
+        nw = cash + held + basket + deposit - self.mortgage - drawn + jub
         return {"idx": self.idx, "theta": round(self.theta, 2),
                 "pattern": self.pattern, "nw": nw,
                 "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
@@ -2421,6 +2435,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 "jub": jub, "deploys": self.deploys,
                 "throttled": self.throttled,
                 "premium_paid": self.premium_paid,
+                "deposit": deposit,
+                "hypo_premium": self.hypo_premium,
                 "trade_loss": self.trade_loss,
                 "unwound": self.unwound,
                 "unwind_loss": self.unwind_loss,
@@ -2543,9 +2559,14 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             return
         drawn = max(0, -signed)
 
-        # 1. Income + mandatory mortgage service, both ledgers.
+        # 1. Income + mandatory mortgage service, both ledgers; the
+        #    counterfactual also pays its insurance premium, due monthly.
         inc = self._income(d, months, day)
         self.hypo_cash += inc
+        hprem = min(self._face0 * self.premium_rate // 10_000 * months // 12,
+                    self.hypo_cash)
+        self.hypo_cash -= hprem
+        self.hypo_premium += hprem
         due = min(self.payment * months, self.mortgage)
         self.mortgage -= self._pay_bank(d, due)
         hdue = min(self.payment * months, self.hypo_mortgage)
