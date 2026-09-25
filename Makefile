@@ -1536,7 +1536,7 @@ sandbox-artifacts:	sandbox-deps $(SANDBOX_ADAPTER)
 	node core/js/bin/bundle-artifacts.mjs sandbox
 
 sandbox-build:	sandbox-artifacts core-build-wasm-web
-	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm \
+	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm --minify \
 		--platform=browser --outfile=sandbox/dist/app.js \
 		--alias:buffer=buffer \
 		--alias:fs=./demo/src/shims/fs-empty.js \

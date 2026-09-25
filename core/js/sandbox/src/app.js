@@ -58,10 +58,10 @@ export const INSURER_LABEL = "Sandbox Mutual";
  * Asset classes: sandbox labels over BuckCredit's opaque uint8, each with a
  * sensible default schedule and premium.  depRate is basis points a year (of
  * the part above the floor, for LINEAR); floorBp is the floor as basis points
- * of face; premiumRate is basis points of insured value a year, paid up front
- * as ten years' worth into the insurance pool when credit is activated
- * (Buck.POOL_ROI_INV: the pool's assumed 10 % return funds it in perpetuity),
- * so it must stay under 1,000.
+ * of face; premiumRate is basis points of insured value a year.  Activating
+ * credit deposits ten years' worth with the insurance pool, which invests it
+ * (Buck.POOL_ROI_INV: an assumed 10 % return) to earn the premiums and returns
+ * it when the insurance is dropped; so the rate must stay under 1,000.
  */
 export const ASSET_CLASSES = [
   { code: 1, key: "home", label: "Home", depType: DEPRECIATION.LINEAR, depRate: 250, floorBp: 3_000,

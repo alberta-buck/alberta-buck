@@ -100,11 +100,11 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     assert.match(why, /exceeds spendable/);
     await ok(carol.locator("button", { hasText: "Open trading" }), /Trading open/);
     await carol.locator("input[aria-label='USDC to spend']").fill("500");
-    await ok(carol.locator("button", { hasText: "Buy BUCK" }), /^Bought 49\d\.\d\d BUCK\.$/);
+    await ok(carol.locator("button", { hasText: "Buy BUCK" }), /^Bought 49\d\.\d\d BUCKs\.$/);
     const [paid2] = await pay();
     assert.equal(paid2, true);
     const bob = page.locator("[data-wallet=W2]");
-    assert.match(await bob.textContent(), /BUCK held\s*100\.00\s*BUCK/);
+    assert.match(await bob.textContent(), /BUCKs held\s*100\.00\s*BUCKs/);
 
     // Credit: Sandbox Mutual insures Carol's home at the class defaults.
     await page.click("#tab-credit");
@@ -114,11 +114,11 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     await page.fill("#panel-credit input[data-key='credit:amount']", "50000");
     const buyFirst = page.locator("#panel-credit .quote button", { hasText: "first" });
     await buyFirst.waitFor({ timeout: 30_000 });
-    assert.match(await page.textContent("#panel-credit .quote"), /Premium\s*1,81\d\.\d\d/);
-    await ok(buyFirst, /^Bought [\d,.]+ BUCK for [\d,.]+ USDC\.$/);
+    assert.match(await page.textContent("#panel-credit .quote"), /Premium deposit\s*1,81\d\.\d\d/);
+    await ok(buyFirst, /^Bought [\d,.]+ BUCKs for [\d,.]+ USDC\.$/);
     const activate = page.locator("#panel-credit .quote button", { hasText: "Activate" });
     await activate.waitFor({ timeout: 30_000 });
-    await ok(activate, /premium 1,81\d\.\d\d BUCK paid into the insurance pool/);
+    await ok(activate, /1,81\d\.\d\d BUCKs of premium deposited with the insurance pool/);
     const worth = async () => (await page.locator("#panel-credit td[data-col=activated-now]").textContent()).trim();
     const was = await worth();
     await ok(page.locator("button", { hasText: "+30 days" }), /Thirty days passed/);

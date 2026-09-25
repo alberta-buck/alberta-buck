@@ -1,6 +1,6 @@
 // The Wallets: each an account with its own keys, kept in this tab.  A wallet
 // registers with a credential, introduces itself to the wallets it pays,
-// sends BUCK, and trades BUCK for USDC in the pool -- each step saying what it
+// sends BUCKs, and trades BUCKs for USDC in the pool -- each step saying what it
 // discloses, and to whom.
 
 import { addr, field, fill, h, money, parseAmount, preserving } from "./dom.js";
@@ -47,11 +47,11 @@ function walletCard(ctx, view, w) {
     : h("span", { class: "chip warn" }, "not registered");
 
   const balances = h("dl", { class: "kv" },
-    h("dt", {}, "BUCK held"), h("dd", {}, money(held, "BUCK")),
+    h("dt", {}, "BUCKs held"), h("dd", {}, money(held, "BUCK")),
     drawn ? h("dt", {}, "Credit drawn") : null, drawn ? h("dd", {}, money(drawn, "BUCK")) : null,
-    h("dt", { title: "Held BUCK plus unused credit" }, "Spendable"), h("dd", {}, money(w.balance, "BUCK")),
+    h("dt", { title: "Held BUCKs plus unused credit" }, "Spendable"), h("dd", {}, money(w.balance, "BUCK")),
     h("dt", {}, "Credit limit"), h("dd", {}, money(w.creditLimit, "BUCK")),
-    h("dt", { title: "Demurrage accrues on held BUCK; it is settled at the next transfer" },
+    h("dt", { title: "Demurrage accrues on held BUCKs; it is settled at the next transfer" },
       "Demurrage owing"), h("dd", {}, money(w.feeOwing, "BUCK", 6)),
     h("dt", {}, "USDC"), h("dd", {}, money(w.usdc, "USDC")),
     h("dt", {}, "ETH (gas)"), h("dd", {}, `${(Number(w.eth) / 1e18).toFixed(3)}`),
@@ -74,7 +74,7 @@ function walletCard(ctx, view, w) {
         "Not who the holder is.")));
   } else {
     // Pay.
-    const amt = h("input", { "data-key": key("pay"), inputmode: "decimal", placeholder: "BUCK",
+    const amt = h("input", { "data-key": key("pay"), inputmode: "decimal", placeholder: "BUCKs",
                              "aria-label": "amount to pay" });
     const to = h("select", { "data-key": key("to"), "aria-label": "pay to" },
       others.map((o) => h("option", { value: o.id }, `${o.id} ${o.label}`)));
@@ -116,30 +116,30 @@ function walletCard(ctx, view, w) {
             () => "Trading open."),
         }, "Open trading"),
         discloses("this wallet's identity to the BUCK/USDC pool's operator (who must be able to say ",
-          "who traded), and Permit2 approvals so the router can move its BUCK and USDC to the pool.")));
+          "who traded), and Permit2 approvals so the router can move its BUCKs and USDC to the pool.")));
     } else {
       const usdc = h("input", { "data-key": key("buy"), inputmode: "decimal", placeholder: "USDC",
                                 "aria-label": "USDC to spend" });
-      const buck = h("input", { "data-key": key("sell"), inputmode: "decimal", placeholder: "BUCK",
-                                "aria-label": "BUCK to sell" });
+      const buck = h("input", { "data-key": key("sell"), inputmode: "decimal", placeholder: "BUCKs",
+                                "aria-label": "BUCKs to sell" });
       steps.push(h("div", { class: "step" },
         h("h3", {}, "Market"),
         h("div", { class: "row" }, usdc, h("button", {
           type: "button",
-          onclick: () => act(`Buying BUCK for ${w.label}`,
+          onclick: () => act(`Buying BUCKs for ${w.label}`,
             () => app.buy(w.id, { usdc: parseAmount(usdc.value, "USDC") }), (r) => {
               usdc.value = "";
-              return `Bought ${(Number(r.received) / 1e6).toFixed(2)} BUCK.`;
+              return `Bought ${(Number(r.received) / 1e6).toFixed(2)} BUCKs.`;
             }),
-        }, "Buy BUCK")),
+        }, "Buy BUCKs")),
         h("div", { class: "row" }, buck, h("button", {
           type: "button",
-          onclick: () => act(`Selling BUCK for ${w.label}`,
-            () => app.sell(w.id, parseAmount(buck.value, "BUCK")), (r) => {
+          onclick: () => act(`Selling BUCKs for ${w.label}`,
+            () => app.sell(w.id, parseAmount(buck.value, "BUCKs")), (r) => {
               buck.value = "";
               return `Sold for ${(Number(r.received) / 1e6).toFixed(2)} USDC.`;
             }),
-        }, "Sell BUCK")),
+        }, "Sell BUCKs")),
         discloses("the amounts, the price and this address, to everyone.")));
     }
   }

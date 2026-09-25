@@ -1,8 +1,9 @@
 // Credit: Sandbox Mutual insures simulated assets.  An insured asset becomes
 // a BuckCredit NFT held by its owner; the owner activates credit against it,
-// paying the premium up front into the insurance pool -- which the funding
-// gate lets through only once the owner already holds that much.  The
-// credits' depreciated values move as the clock does.
+// depositing ten years' premium with the insurance pool, which invests it to
+// earn the premiums and returns it when the insurance is dropped -- a deposit
+// the funding gate lets through only once the owner already holds as much.
+// The credits' depreciated values move as the clock does.
 
 import { ASSET_CLASSES } from "../app.js";
 import { amount, field, fill, h, money, parseAmount, preserving } from "./dom.js";
@@ -30,8 +31,8 @@ export function mountCredit(ctx) {
   const holder = h("select", { "data-key": "credit:holder", "aria-label": "holder" });
   const cls = h("select", { "aria-label": "asset class" },
     ASSET_CLASSES.map((c) => h("option", { value: c.key }, c.label)));
-  const face = h("input", { inputmode: "decimal", placeholder: "BUCK", value: "400000" });
-  const floor = h("input", { inputmode: "decimal", placeholder: "BUCK" });
+  const face = h("input", { inputmode: "decimal", placeholder: "BUCKs", value: "400000" });
+  const floor = h("input", { inputmode: "decimal", placeholder: "BUCKs" });
   const dep = h("select", { "aria-label": "depreciation" },
     DEP_NAMES.map((n, i) => h("option", { value: String(i) }, n)));
   const rate = h("input", { inputmode: "decimal", placeholder: "% a year" });
@@ -75,19 +76,20 @@ export function mountCredit(ctx) {
     h("p", { class: "hint" }, "Sandbox Mutual appraises a simulated asset and issues a BuckCredit ",
       "NFT to its owner, on a depreciation schedule and a premium.  Nothing is activated yet."),
     field("Owner", holder),
-    h("div", { class: "row" }, field("Asset", cls), field("Value (BUCK)", face)),
+    h("div", { class: "row" }, field("Asset", cls), field("Value (BUCKs)", face)),
     note,
-    h("div", { class: "row" }, field("Floor (BUCK)", floor), field("Depreciation", dep),
+    h("div", { class: "row" }, field("Floor (BUCKs)", floor), field("Depreciation", dep),
       field("Rate, % a year", rate)),
     field("Premium, % of insured value a year", premium,
-      "Paid up front: ten years' worth, into the insurance pool, when credit is activated."),
+      "Not spent: activating credit deposits ten years' worth with the insurance pool, which " +
+      "invests it to earn the premiums and returns it when the insurance is dropped."),
     h("button", { type: "submit", class: "primary" }, "Insure"),
     h("p", { class: "discloses" }, h("b", {}, "Discloses: "), "the owner's address, the insurer, ",
       "the asset class, its value, schedule and premium, to everyone.  Not whose asset it is."));
 
   // ---- activate -----------------------------------------------------------
   const who = h("select", { "data-key": "credit:who", "aria-label": "wallet" });
-  const amt = h("input", { "data-key": "credit:amount", inputmode: "decimal", placeholder: "BUCK",
+  const amt = h("input", { "data-key": "credit:amount", inputmode: "decimal", placeholder: "BUCKs",
                            value: "50000" });
   const quote = h("div", { class: "quote", "aria-live": "polite" });
   let seq = 0;
@@ -107,24 +109,25 @@ export function mountCredit(ctx) {
       h("dl", { class: "kv" },
         h("dt", { title: "Face value activated on the credits drawn" }, "Coverage"),
         h("dd", {}, money(q.coverage, "BUCK")),
-        h("dt", { title: "Ten years of premium, paid now into the insurance pool" }, "Premium"),
+        h("dt", { title: "Ten years of premium, deposited with the insurance pool; returned when the " +
+                               "insurance is dropped" }, "Premium deposit"),
         h("dd", {}, money(q.principal, "BUCK")),
-        h("dt", { title: "The premium times the funding factor" }, "Must already hold"),
+        h("dt", { title: "The deposit times the funding factor" }, "Must already hold"),
         h("dd", {}, money(q.required, "BUCK")),
-        h("dt", { title: "Held BUCK plus unused credit" }, "Holds"), h("dd", {}, money(q.balance, "BUCK")),
+        h("dt", { title: "Held BUCKs plus unused credit" }, "Holds"), h("dd", {}, money(q.balance, "BUCK")),
         h("dt", {}, "Shortfall"), h("dd", { class: q.shortfall ? "bad" : "good" }, money(q.shortfall, "BUCK"))),
       q.shortfall === 0n
         ? h("button", {
           type: "button", class: "primary",
           onclick: () => act("Activating credit", () => app.activate(who.value, parseAmount(amt.value)),
-            (m) => `Activated: premium ${amount(m.premium)} BUCK paid into the insurance pool.`),
+            (m) => `Activated: ${amount(m.premium)} BUCKs of premium deposited with the insurance pool.`),
         }, "Activate")
         : w?.trading
           ? h("button", {
             type: "button", class: "primary",
-            onclick: () => act(`Buying ${amount(q.buy)} BUCK`, () => app.buy(who.value, { buck: q.buy }),
-              (r) => `Bought ${amount(r.received)} BUCK for ${amount(r.paid)} USDC.`),
-          }, `Buy ${amount(q.buy)} BUCK first`)
+            onclick: () => act(`Buying ${amount(q.buy)} BUCKs`, () => app.buy(who.value, { buck: q.buy }),
+              (r) => `Bought ${amount(r.received)} BUCKs for ${amount(r.paid)} USDC.`),
+          }, `Buy ${amount(q.buy)} BUCKs first`)
           : h("p", { class: "hint" }, "Buying the shortfall needs trading open: see Wallets."));
   };
   who.addEventListener("change", requote);
@@ -134,17 +137,17 @@ export function mountCredit(ctx) {
   const activate = h("div", { class: "card form" },
     h("h2", {}, "Activate credit"),
     h("p", { class: "hint" }, "The owner draws on their insured value: BUCK_K of it becomes credit ",
-      "they can spend.  The premium is due now, and the funding gate lets it through only once the ",
-      "owner already holds that much."),
-    h("div", { class: "row" }, field("Wallet", who), field("Amount (BUCK)", amt)),
+      "they can spend.  Its premium deposit goes to the insurance pool now, and the funding gate ",
+      "lets that through only once the owner already holds as much."),
+    h("div", { class: "row" }, field("Wallet", who), field("Amount (BUCKs)", amt)),
     quote,
     h("p", { class: "discloses" }, h("b", {}, "Discloses: "), "the amount, the coverage and the ",
       "premium, to everyone."));
 
   fill(panel,
     h("p", { class: "intro" }, "Money issued against insured real assets: an insurer vouches for ",
-      "an asset's value and how it wears; its owner can then spend part of that value as BUCK, ",
-      "paying the premium up front into a mutual insurance pool."),
+      "an asset's value and how it wears; its owner can then spend part of that value as BUCKs, ",
+      "depositing the premium with a mutual insurance pool that invests it to pay for the cover."),
     h("div", { class: "cols" }, h("div", { class: "form" }, insure, activate),
       h("div", {}, h("h2", {}, "Credits"),
         h("p", { class: "hint" }, "Values depreciate on their schedules as the clock moves; try +30 days."),
@@ -169,7 +172,7 @@ export function renderCredit(ctx, view) {
         h("td", {}, h("b", {}, ASSET_CLASSES.find((a) => a.key === c.className)?.label ?? c.className),
           ` #${c.tokenId}`, h("div", { class: "sub" }, label(c.wallet))),
         h("td", { class: "r" }, money(c.face, "BUCK", 0)),
-        h("td", { title: c.depType ? `floor ${amount(c.floor, 0)} BUCK` : "" }, schedule(c)),
+        h("td", { title: c.depType ? `floor ${amount(c.floor, 0)} BUCKs` : "" }, schedule(c)),
         h("td", { class: "r" }, `${pct(c.premiumRate)}/yr`),
         h("td", { class: "r" }, money(c.activated, "BUCK", 0)),
         h("td", { class: "r", "data-col": "worth", title: "The whole asset, depreciated to today" },

@@ -1,0 +1,186 @@
+#+TITLE: Developing Alberta Buck
+#+OPTIONS: toc:nil num:nil ^:nil
+
+Building and testing everything in this repository.  Set up first
+([[file:INSTALL.org][INSTALL.org]]); every command below is a Make target, run inside the Nix flake
+as =make nix-<target>= (or bare, inside =nix develop=).  The Makefile is the recipe book: each
+target carries a comment saying what it does and why.
+
+* The contracts
+
+The Solidity sources are in =src/=, their Foundry tests in =test/=.
+
+#+BEGIN_SRC sh
+make nix-install          # the pinned Foundry dependencies, into lib/ (once)
+make nix-build            # compile
+make nix-test             # every test (the SNARK suites run when their fixtures exist)
+make nix-snapshot         # gas report
+make nix-fmt              # format the Solidity
+#+END_SRC
+
+In =nix develop=, Foundry directly: =forge test --match-contract BuckTest=,
+=forge test --match-test test_mint=.  Uniswap's own contracts are not compiled here: their
+artifacts come from Uniswap's npm packages (=scripts/stage-uniswap.mjs=), and the Universal Router
+and Permit2 are vendored builds in =alberta_buck/sim/artifacts/=.
+
+Deploy to a local chain with =make nix-anvil= in one terminal and =make nix-deploy-local= in
+another (=scripts/deploy/Deploy.s.sol=).  Publishing and real deployments follow the release book,
+[[file:../alberta-buck-deployment.org][alberta-buck-deployment.org]].
+
+* The kernels
+
+=core/= holds the cryptographic and monetary kernels in Rust (=core/rust=), with bindings for Python
+(=core/python=, =core/python-kernel=) and WebAssembly (=core/js/kernel=), and the JavaScript
+platform (=core/js=).  All of them answer to shared test vectors in =core/vectors/=, so the Rust,
+JavaScript and Python paths stay bit-identical to the Python reference in =alberta_buck/=.
+
+#+BEGIN_SRC sh
+make nix-core-js-deps         # npm ci in core/js (once)
+make nix-core-build           # the Python extension and the Node wasm
+make nix-core-build-wasm-web  # the browser wasm
+make nix-core-test            # Rust, Python and JavaScript suites, and the vector checks
+#+END_SRC
+
+The JavaScript suite (=core/js/test=) includes the sandbox's browser test, which drives the built
+page in the flake's headless Chromium; build the page first with =make nix-sandbox-build=.
+
+* Python
+
+The Python reference (=alberta_buck/=: wallet, identity, registry, receipts, the simulations) runs
+in the repository's venv, which =make nix-venv-<target>= builds on first use.
+
+#+BEGIN_SRC sh
+make nix-venv-test-python     # alberta_buck/test
+make nix-venv                 # a shell in the venv
+#+END_SRC
+
+* The sandbox and the demos
+
+#+BEGIN_SRC sh
+make nix-sandbox              # build, then serve http://localhost:8000/ (SANDBOX_PORT to change)
+make nix-sandbox-screenshots  # regenerate images/sandbox/
+make nix-core-demo-buckworld  # the earlier demos; serve core/js/demo and open buckworld.html
+make nix-core-demo-eqworld    #   or eqworld.html (the BUCK_K control loop, live)
+#+END_SRC
+
+The sandbox is described in [[file:SANDBOX.org][SANDBOX.org]]; its design and history in
+[[file:review/sandbox-plan.org][review/sandbox-plan.org]].
+
+* Simulations
+
+=alberta_buck/sim= runs economies of agents against the real contracts, on anvil or in-process
+(=--backend pyrevm=), driven by TOML experiments in =alberta_buck/sim/experiments/=.  A few entry
+points (see the Makefile's simulation sections for the rest):
+
+#+BEGIN_SRC sh
+make nix-venv-sim             # the routing simulation, with its plot
+make nix-venv-sim-equilibrium # the BUCK_K equilibrium loop
+make nix-venv-sim-debtors     # optimal-control mortgage debtors
+make nix-venv-sim-server      # a live server of simulated worlds (WebSocket and JSON-RPC)
+#+END_SRC
+
+* The papers
+
+The papers (=alberta-buck-*.org=) render to =images/<name>.{txt,pdf}= with Emacs and LaTeX:
+
+#+BEGIN_SRC sh
+make nix-doc-alberta-buck-notes     # a plain paper
+make nix-venv-doc-privacy           # an executable paper: its code blocks re-run first
+#+END_SRC
+
+Six papers are executable -- their Python blocks form one session whose results are regenerated
+top to bottom -- and need the venv: =doc-flow=, =doc-paper=, =doc-receipt=, =doc-proofs=,
+=doc-identity-example= and =doc-privacy=.
+
+* SNARK circuits and trusted setup
+
+The Notes circuits (=circuits/*.circom=, including =lib/circom-lib= -- fetch it with
+=git submodule update --init=) compile to Groth16 verifiers in =src/=, one per pinned batch size
+(=MintBatchN*=, =MintBatchA2N*=) plus =Spend=, the deposit folds and identity membership.  A setup
+has two phases, and they differ enormously in cost:
+
+1. *Powers of Tau* (=build/snark/ptau/pot*.ptau=) -- the universal, circuit-independent reference
+   string.  The slow part (hours); it depends only on the domain size, so a circuit edit that does
+   not cross a power of two reuses it.
+2. *Per-circuit zkey and Solidity verifier* -- regenerated on every circuit change, in minutes.
+
+#+BEGIN_SRC sh
+make nix-snark            # phase 2 and the test fixtures: the usual circuit-change path
+make nix-snark-setup      # phase 2 only: zkeys and verifiers
+make nix-snark-fixtures   # the fixtures the Foundry tests load
+make nix-snark-ptau       # phase 1 from scratch (hours)
+make nix-snark-clean      # drop the per-N build directories
+#+END_SRC
+
+=make snark SNARK_PINS="1 2 4 8 16"= overrides the batch sizes.  Verifiers above 128 public inputs
+are rewritten table-driven to fit EIP-170's contract size limit;
+[[file:snark-regeneration.org][snark-regeneration.org]] has the details and the rest of the
+regeneration procedure.
+
+** A development setup, not a production one
+
+Every setup here uses fixed, public entropy (=scripts/snark/setup.sh= contributes
+=alberta-buck-dev-*=): reproducible and green in tests, and *not secure* -- the toxic waste is
+public, so anyone can forge proofs.  The published contract bundle flags these verifiers
+=trustedSetup: "development"=, deliberately, until v1.0.0.  *Never trust them with value.*
+
+A production setup needs a real multi-party ceremony, sound as long as one participant destroyed
+their secret:
+
+1. *Phase 1.*  Reuse a trustworthy universal ceremony -- the Hermez "Perpetual Powers of Tau"
+   finals (=powersOfTau28_hez_final_NN.ptau=) are the standard for BN254 -- at a size covering the
+   largest circuit, verified with =snarkjs powersoftau verify=; or run a fresh phase-1 MPC (new,
+   many independent contributions, a public randomness beacon, prepare phase 2).
+2. *Phase 2, per circuit.*  =groth16 setup= against that ptau, then several independent
+   =zkey contribute= steps from distinct parties with real entropy, a =zkey beacon=, =zkey verify=,
+   and the verification key and Solidity verifier exported.  =scripts/snark/setup.sh= shows the
+   exact command shapes.
+3. *Deploy and rotate.*  Deploy the production verifiers and register them behind governance
+   (=MintVerifierAdapter.registerVerifier=, =Notes.setMintVerifier=), and publish the ceremony
+   transcript and each contributor's attestation, so the one-honest-party assumption can be
+   audited.
+
+* Forked networks and the oracle history
+
+Two environment variables connect the tools to Ethereum; copy =.env.example= to =.env= and set them
+(the Makefile loads it):
+
+- =MAINNET_RPC_URL= -- an archive RPC endpoint (Alchemy, Infura, or your own node), used by Foundry
+  and anvil to fork mainnet state.  It can be composed from =ALCHEMY_API_TOKEN=.
+- =ETH_RPC_URL= -- where the Python tools send queries (=http://localhost:8545= for a local anvil
+  fork); it falls back to =MAINNET_RPC_URL=.
+
+#+BEGIN_SRC sh
+make nix-fork-sepolia         # anvil forking Sepolia (FORK_BLOCK=... to pin a block)
+make nix-test-fork-sepolia    # the Solidity tests against it
+make nix-fork-mainnet         # anvil forking mainnet
+#+END_SRC
+
+=alberta_buck.oracle= reads Chainlink's gold and silver feeds (XAU/USD
+=0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6=, XAG/USD =0x379589227b15F1a12195D3f2d90bBc9F31f95235=)
+for a year of daily history, the data the =BUCK_K= controller's fork tests use.
+=make nix-venv-test-python= queries the RPC directly (block by block, 10-15 minutes); with
+=make nix-fork-mainnet= running, =ETH_RPC_URL=http://localhost:8545 make nix-venv-test-python= walks
+the feed's rounds at the fork block instead, and repeat runs are served from anvil's cache.  The
+result is =alberta_buck/test/gold_silver_history.png=.
+
+* Layout
+
+| Path              | What it is                                                             |
+|-------------------+------------------------------------------------------------------------|
+| =src/=            | the contracts; =src/adapters/= the verifier and binding adapters,      |
+|                   | =src/sim_build/= simulation-only contracts                             |
+| =test/=           | Foundry tests; =test/harness/= test subclasses, =test/vectors/= shared |
+|                   | vectors                                                                |
+| =circuits/=       | the Circom circuits; =lib/circom-lib= is a submodule they include      |
+| =core/rust/=      | the kernels -- =buck-math=, =buck-identity=, =buck-registry=,          |
+|                   | =buck-wallet= -- and their Python and wasm bindings                    |
+| =core/js/=        | the JavaScript platform; =sandbox/= and =demo/= the browser apps       |
+| =core/python/=    | =buck_core=, the Python platform                                       |
+| =core/contracts/= | the published contract bundle                                          |
+| =core/vectors/=   | the cross-language conformance vectors                                 |
+| =alberta_buck/=   | the Python reference; =sim/= the simulations                           |
+| =scripts/=        | =deploy/= (Foundry deployment scripts), =snark/= (setups, provers),    |
+|                   | =review/= (evidence for the security reviews), release packaging       |
+| =doc/=            | these guides; =review/= the design reviews and plans                   |
+| =images/=         | the rendered papers and every figure                                   |

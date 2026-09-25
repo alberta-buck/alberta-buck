@@ -38,10 +38,14 @@ export function amount(v, places = 2) {
   return `${neg ? "-" : ""}${whole}${places ? "." + frac : ""}`;
 }
 
+// A BUCK is counted like a dollar: one BUCK, two BUCKs.  (USDC is a ticker.)
+const unitOf = (v, unit) => (unit === "BUCK" && v !== 1_000_000n && v !== -1_000_000n ? "BUCKs" : unit);
+
 /** An amount element: `places` shown, all six on hover. */
 export function money(v, unit, places = 2) {
-  return h("span", { class: "num", title: `${amount(v, 6)} ${unit}` },
-    `${amount(v, places)} `, h("span", { class: "unit" }, unit));
+  const u = unitOf(v, unit);
+  return h("span", { class: "num", title: `${amount(v, 6)} ${u}` },
+    `${amount(v, places)} `, h("span", { class: "unit" }, u));
 }
 
 // An error carrying a `reason` for people, as SandboxError does.

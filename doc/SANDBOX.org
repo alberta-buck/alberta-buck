@@ -3,7 +3,7 @@
 
 A private, simulated Alberta Buck world in your own browser tab.  Certify people, give them
 wallets, insure their (imaginary) homes and cars, activate credit against them, pay one another
-and trade BUCK for dollars -- then look at the chain the way a stranger would, and see what it does
+and trade BUCKs for dollars -- then look at the chain the way a stranger would, and see what it does
 and does not give away.  Nothing leaves the tab.
 
 Everything here is simulated: the identity issuer, the insurer, the dollars, the clock, and every
@@ -32,12 +32,12 @@ path.
 
 1. *Issuer*: /Fill a sample person/ and /Issue credential/, twice -- Carol and Bob.
 2. On each card, /New wallet for .../: a wallet is created and registered with the card.
-3. *Wallets*: /Introduce/ Carol's wallet to Bob's.  Try paying Bob 100 BUCK: refused, Carol has
+3. *Wallets*: /Introduce/ Carol's wallet to Bob's.  Try paying Bob 100 BUCKs: refused, Carol has
    none.
-4. /Open trading/ on Carol's wallet, then /Buy BUCK/ with 500 USDC, and pay Bob 100.
+4. /Open trading/ on Carol's wallet, then /Buy BUCKs/ with 500 USDC, and pay Bob 100.
 5. *Credit*: insure Carol's home for 400,000 and ask to activate 50,000.  The quote shows the
-   premium due now and her shortfall; /Buy ... BUCK first/, then /Activate/.
-6. /+30 days/ in the world bar: Bob's BUCK owes a little demurrage, and the home is worth a
+   premium deposit and her shortfall; /Buy ... BUCKs first/, then /Activate/.
+6. /+30 days/ in the world bar: Bob's BUCKs owe a little demurrage, and the home is worth a
    little less.
 7. *Observer*: everything that happened, as anyone can see it.  Look for a name.
 
@@ -75,11 +75,11 @@ Each wallet is an account with its own keys, starting with 10 ETH for gas and 10
 - *Pay*: the amount and both addresses are public.
 - *Open trading*, once: an introduction to the BUCK/USDC pool (whose operator must be able to say
   who traded with it) and approvals for Permit2, Uniswap's approval contract.  Then *buy* and
-  *sell* BUCK.  The pool takes BUCK straight from the wallet and pays straight back, so the
-  Uniswap router never holds BUCK and needs no identity of its own.
+  *sell* BUCKs.  The pool takes BUCKs straight from the wallet and pays straight back, so the
+  Uniswap router never holds BUCKs and needs no identity of its own.
 - *Deposit* more USDC, as a bank transfer would.
 
-Balances show BUCK held (after demurrage), credit drawn, what is spendable (held BUCK plus unused
+Balances show BUCKs held (after demurrage), credit drawn, what is spendable (held BUCKs plus unused
 credit), the credit limit and the demurrage owing.
 
 ** Credit
@@ -90,12 +90,13 @@ Sandbox Mutual insures simulated assets.  Pick an owner and an asset -- a home, 
 equipment, farmland or gold -- and its value; the depreciation schedule and the premium fill in
 from the asset class, and every one can be changed.  /Insure/ issues a BuckCredit NFT to the owner.
 
-Activating credit is where the premium bites.  It is paid *up front*: ten years' worth, into the
-mutual insurance pool, whose assumed 10 % return funds the cover for good.  At 0.35 % a year on a
-home, activating 50,000 BUCK of spendable credit costs about 1,813 BUCK now -- and the contract lets
-it through only if the owner /already/ holds that much.  So a first-time owner buys the shortfall
-in the pool; the quote offers to.  Once one credit is active, its unused credit covers the next
-one's premium.
+Activating credit is where the premium comes in, as a deposit rather than a cost: activation
+issues ten years' worth of premium to the insurance pool, which invests it -- at an assumed 10 % a
+year -- to earn the premiums, and returns it when the insurance is dropped.  At 0.35 % a year on a
+home, activating 50,000 BUCKs of spendable credit deposits about 1,813 BUCKs -- and the contract
+lets that through only if the owner /already/ holds as much.  So a first-time owner buys the
+shortfall in the pool; the quote offers to.  Once one credit is active, its unused credit covers the
+next one's deposit.
 
 [[file:../images/sandbox/credit.png]]
 
