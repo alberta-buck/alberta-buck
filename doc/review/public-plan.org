@@ -45,19 +45,19 @@ Everything is labelled SIMULATED; keys live in the browser and are for play.
 
 Four tools, one per role in the system, over a shared world bar:
 
-| tool              | who uses it       | does                                                             |
-|-------------------+-------------------+------------------------------------------------------------------|
-| World bar         | everyone          | day and clock (+1 day, +30 days), BUCK_K, reset, export/import   |
-| Identity issuer   | the registry/KYC  | a KYC form -> core record; issue a PS credential (a card to      |
-|                   |                   | download or hand over); revoke; the issuer trusted on the chain  |
-| Wallet            | a citizen         | create (Ethereum key + identity key, kept in the browser);       |
-|                   |                   | import a credential; register; balances, credit limit, demurrage |
-|                   |                   | owing; send BUCK (handshake + transfer); receipts (AB-RCPT/2)    |
-| Insurer and credit| an insurer        | insure a simulated asset (class, value, depreciation, premium)   |
-|                   |                   | -> a BuckCredit NFT and credit line; the holder mints BUCK;      |
-|                   |                   | NFTs with their depreciated value                                |
-| Observer          | anyone (Mallory)  | the chain as the public sees it: decoded transactions and events |
-|                   |                   | -- the privacy story made visible                                |
+| tool          | role      | does                                                                |
+|---------------+-----------+---------------------------------------------------------------------|
+| World bar     | everyone  | day and clock (+1 day, +30 days), BUCK_K, reset, export/import      |
+| Issuer        | registry  | a KYC form -> core record; issue a PS credential (a card to hand    |
+|               |           | over); revoke; the issuer trusted on the chain                      |
+| Wallet        | citizen   | create (Ethereum key + identity key, kept in the browser); import a |
+|               |           | credential; register; balances, credit limit, demurrage owing; send |
+|               |           | BUCK (handshake + transfer); receipts (AB-RCPT/2)                   |
+| Credit        | insurer   | insure a simulated asset (class, value, depreciation, premium) -> a |
+|               |           | BuckCredit NFT and credit line; the holder mints BUCK; the NFTs at  |
+|               |           | their depreciated value                                             |
+| Observer      | anyone    | the chain as the public sees it: decoded transactions and events -- |
+|               |           | the privacy story made visible                                      |
 
 Wallets are separate browser identities of one world, so a visitor plays issuer, insurer and two
 citizens side by side (tabs of one page share the world; =BroadcastChannel= keeps them in step).
