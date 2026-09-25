@@ -1885,19 +1885,21 @@ Table of Contents
   The private-issuer sibling `mint_batch_a2.circom' (per-N
   `MintBatchA2N*Groth16Verifier', behind `MintVerifierA2Adapter' and
   `setA2MintVerifier') replaces `issuerMode' with each leaf's `eIss' and
-  the binding's `T' as outputs, recomputing `idHash = Poseidon-10(eNote,
-  eIss, T)' in circuit: 7N + 4 public signals, so each A2 leaf's
-  re-encryption binding is pinned to the leaf it names.
+  the binding's `T' as outputs, recomputing `idHash = Poseidon-11(T_ID,
+  eNote, eIss, T)' in circuit: 7N + 4 public signals, so each A2 leaf's
+  re-encryption binding is pinned to the leaf it names.  `T_CM', `T_ID'
+  and `T_NF' are the note hashes' v2 domain tags
+  (`circuits/note_tags.circom').
 
-  Per leaf, the circuit enforces a Poseidon-5 commitment opening `cm_i
-  === Poseidon(flavor_i, v_i, rho_i, idHash_i, predicate_i)',
-  `Num2Bits(128)' range bounds on `v[i]' and `totalFace' (closing
-  field-overflow attacks), one sum check `totalFace === sum v[i]', and
-  an N x TREE_DEPTH Poseidon-2 dual Merkle walk: `priorWalk' consumes
-  `ZERO_VALUE' at the insertion slot to attest `oldRoot', `postWalk'
-  consumes `cm[i]' to advance `rollingRoot' to `newRoot'.  Both walks
-  share prover-supplied siblings.  About 21.8K R1CS per leaf, half of it
-  the dual Merkle walk; 21,914 at N=1.
+  Per leaf, the circuit enforces a tagged Poseidon-6 commitment opening
+  `cm_i === Poseidon(T_CM, flavor_i, v_i, rho_i, idHash_i,
+  predicate_i)', `Num2Bits(128)' range bounds on `v[i]' and `totalFace'
+  (closing field-overflow attacks), one sum check `totalFace === sum
+  v[i]', and an N x TREE_DEPTH Poseidon-2 dual Merkle walk: `priorWalk'
+  consumes `ZERO_VALUE' at the insertion slot to attest `oldRoot',
+  `postWalk' consumes `cm[i]' to advance `rollingRoot' to `newRoot'.
+  Both walks share prover-supplied siblings.  About 21.9K R1CS per leaf,
+  half of it the dual Merkle walk; 22,052 at N=1.
 
   A batch of one mints for 513K gas end to end (`NotesE2E', the
   public-issuer path with its Schnorr); each further leaf adds its
@@ -1924,10 +1926,10 @@ Table of Contents
   Public inputs `[noteRoot, nullifier, face, recipient, chainId, flavor,
   issuanceCommitment]'; private witness `(flavor, v, rho, idHash,
   predicate, pathElements[20], pathIndices[20])'.  It proves `cm ===
-  Poseidon-5(flavor, v, rho, idHash, predicate)' under `noteRoot', the
-  flavour-agnostic nullifier `Poseidon-3(rho, idHash, 4242)', `face ===
-  v' with both bounded to 128 bits, and that the public `flavor' is the
-  committed one; for B1 it exposes the commitment as
+  Poseidon-6(T_CM, flavor, v, rho, idHash, predicate)' under `noteRoot',
+  the flavour-agnostic nullifier `Poseidon-3(T_NF, rho, idHash)', `face
+  === v' with both bounded to 128 bits, and that the public `flavor' is
+  the committed one; for B1 it exposes the commitment as
   `issuanceCommitment' so `Notes' can authenticate the public issuer,
   and A1/A2 pass zero.  About 12,000 R1CS.
 
@@ -1935,8 +1937,8 @@ Table of Contents
   how many secrets the spender's two claims rest on:
 
   • *Addressed (A1, A2): one folded proof.* `deposit_fold_a1.circom'
-    (3,309,327 constraints, 43 public inputs) and
-    `deposit_fold_a2.circom' (3,833,335, 42) prove over one witness that
+    (3,309,276 constraints, 43 public inputs) and
+    `deposit_fold_a2.circom' (3,833,338, 42) prove over one witness that
     the receiving secret \( k \) opens the note's ciphertext and the
     spend's re-encryption `eEnc'; that the depositor's registered
     credential decrypts to the identity \( m \); that a certified leaf
@@ -2209,7 +2211,7 @@ Table of Contents
      from each batch's calldata.
   2. `snarkjs groth16 fullProve' against `spend.wasm' /
      `spend_final.zkey' produces a proof binding `[currentRoot,
-     Poseidon-3(rho, idHash, 4242), 100e6, recipient, 1]' to the
+     Poseidon-3(T_NF, rho, idHash), 100e6, recipient, 1]' to the
      witness.
   3. `Notes.spend(proofBytes, currentRoot, nullifier, 100e6, recipient)'
      – the contract checks the root window, rejects a previously-seen
@@ -2266,9 +2268,9 @@ Table of Contents
    BUCK.mint() (PID cached, within dT)             ~155K         ~$12        one SLOAD on the cache path                
    Notes.mint (public issuer, N=1)                 ~513K         ~$41        Groth16 verify + batch Schnorr (measured)  
    Notes.mint (private issuer A2, N=1)             ~629K         ~$50        + re-encryption binding, eIss/T (measured) 
-   Notes.spendCoupledA1                            ~966K         ~$77        spend proof + folded gate (measured)       
+   Notes.spendCoupledA1                            ~964K         ~$77        spend proof + folded gate (measured)       
    Notes.spendCoupledA2                            ~982K         ~$79        spend proof + folded gate (measured)       
-   Notes.spendCoupledB1                            ~910K         ~$73        + depositor sigma + membership (measured)  
+   Notes.spendCoupledB1                            ~906K         ~$72        + depositor sigma + membership (measured)  
    BuckCredit.attestInsurer (8 predicates)         ~8M           ~$640       once per review period                     
    BUCK_CREDIT.currentValue / BUCK_K.currentBuckK  0             Free        View                                       
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

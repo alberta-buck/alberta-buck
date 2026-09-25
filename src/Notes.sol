@@ -32,7 +32,7 @@ import {BN254}                         from "./BN254.sol";
 ///         A-opening cannot redeem through the B1 path.
 ///
 /// @dev    Tree shape: depth 20 (max 2^20 = ~1M notes), leaf hash is
-///         Poseidon-5(flavor, v, rho, idHash, predicate).  Internal nodes
+///         Poseidon-6(T_CM, flavor, v, rho, idHash, predicate).  Internal nodes
 ///         use Poseidon-2 over BN254's scalar field.  Empty leaves hash a
 ///         fixed `ZERO_VALUE` (a domain-separated keccak256 reduced mod r);
 ///         the mint circuit hard-codes the same constant.  The contract
@@ -395,7 +395,7 @@ contract Notes {
     ///
     /// The caller is the issuer.  They must have approved this contract for
     /// at least `totalFace` BUCK in advance.  The mint SNARK proves:
-    ///   - cms[i] = Poseidon-5 opening of the per-leaf witness;
+    ///   - cms[i] = Poseidon-6 opening of the per-leaf witness;
     ///   - sum of v_i = totalFace, each v_i in [0, 2^128);
     ///   - inserting cms[] starting at `nextLeafIndex` against `oldRoot`
     ///     produces `newRoot`.
@@ -549,7 +549,7 @@ contract Notes {
     ///      here aborts before BUCK moves or tree state advances.
     ///
     ///      The field bound matters even though the SNARK constrains each cm[i]
-    ///      via its Poseidon-5 opening: a malformed cms[] entry >= FIELD_R would
+    ///      via its Poseidon-6 opening: a malformed cms[] entry >= FIELD_R would
     ///      still pass the verifier (the public input is reduced before binding
     ///      into the IC[] term), so we bound it here for canonical off-chain
     ///      reads.

@@ -58,7 +58,7 @@ Cost vs. Conventional Mint
 Conventional 1024-note mint via 16-leaf batches:  16 * (125K + 31K * 16) =
 ~10M gas, 1024 separate Merkle leaves and nullifier slots.
 
-This construction:  ONE Merkle leaf, ONE Poseidon-5 commitment, in-circuit
+This construction:  ONE Merkle leaf, ONE note commitment, in-circuit
 mint cost equivalent to N=1 batch (~178K gas).  Per-sub-note amortized mint
 cost  ~178K / 1024 = ~174 gas.  Spend cost is unchanged from current B1
 spend (same SNARK shape, plus log2(N) extra Poseidon-2 hashes for the
@@ -157,7 +157,7 @@ def issuer_mint(N, denomination, predicate, m_iss):
     # Commit to the set via Merkle root.
     subRoot, layers = merkle_build(serials)
 
-    # Parent commitment: same Poseidon-5 layout as today's mint_batch.
+    # Parent commitment: same opening layout as today's mint_batch.
     # idHash slot now holds subRoot; predicate carries the m_iss attestation.
     cm = H_cm("B1", denomination, rho, subRoot, predicate)
 

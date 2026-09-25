@@ -17,11 +17,13 @@ the trust anchor, and a simulated issuance log standing in for the
 "issuance event published to the issuer's Holochain source chain" called
 out in the same section.
 
-Revocation follows the epoch-based renewal model from
-alberta-buck-identity.org sec "Epoch-Based Credential Renewal": the issuer
-does not invalidate the cryptographic artifact (sigma is eternal), it
-simply refuses to re-issue at the next epoch -- which is exactly what
-Issuer.revoke() simulates.
+Standing follows alberta-buck-identity.org "Liveness Is Membership" and the
+accumulator specification, section 8: a signature is a fact about the past
+and is never invalidated, and the record's epoch is the epoch of first
+certification, never bumped.  Whether a holder is still in good standing is
+membership in the registry's live-set subtree; revocation clears that leaf
+(registry/feature_authority.py FeatureAuthority.revoke).  Issuer.revoke()
+records only this issuer's own refusal to issue again.
 
 The optional `applicant_pk` parameter to issue() is a test convenience for
 modeling a confidential delivery channel; the spec assumes the (m, sigma,
@@ -84,9 +86,10 @@ class Issuer:
 
     `keypair` is the PS keypair used to sign identity scalars.
 
-    `revoked` is the set of applicant Ethereum addresses whose credentials
-    have been revoked (simulated — the protocol's actual revocation lives
-    on-chain via IdentityRegistry.revokeIssuer / off-chain epoch rotation).
+    `revoked` is the set of applicant Ethereum addresses this issuer will not
+    issue to again (simulated).  The protocol's revocation of a holder is the
+    registry clearing its live-set leaf; of an issuer, the registry's
+    revokeIssuer.
     """
     issuer_id:   str
     issuer_addr: int
@@ -164,15 +167,15 @@ class Issuer:
         )
 
     def revoke(self, applicant_addr: int) -> None:
-        """Mark an applicant as ineligible for re-issuance at the next epoch.
+        """Refuse to issue to this applicant again.
 
-        Per identity.org sec "Epoch-Based Credential Renewal", the issuer
-        does not (and cannot) invalidate already-issued PS signatures; it
-        simply refuses to provide the applicant's next-epoch credential.
-        Existing on-chain registrations remain mathematically valid until
-        their epoch expires, at which point isVerified returns false at
-        the IdentityRegistry layer.  This method records the issuer's
-        intent; the on-chain effect is the absence of a fresh issuance.
+        An issued PS signature cannot be invalidated, and a registration made
+        with it stays true: a binding is a fact about the past.  What lapses
+        is standing, which is membership in the registry's live-set subtree
+        (identity.org "Liveness Is Membership"); revoking a holder is the
+        registry clearing that leaf, after which every membership-gated check
+        (a Notes spend, an attribute proof, an insurer attestation) fails once
+        the older roots age out.  This method records only the issuer's side.
         """
         self._revoked.add(applicant_addr)
 

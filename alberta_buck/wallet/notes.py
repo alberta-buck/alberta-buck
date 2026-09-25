@@ -7,16 +7,15 @@ variant, which is the same hash the optimized circuit Poseidon computes (just
 via different but equivalent constants).  See :file:`scripts/snark/poseidon_t3_code.js`
 for the on-chain bytecode story.
 
-Wire formats::
+Wire formats, each Poseidon led by its v2 domain tag ``T = keccak(tag) mod F_R``
+(:mod:`alberta_buck.wallet.domains`)::
 
-    cm    = Poseidon([flavor, v, rho, id_hash, predicate])    # spend.circom (C)
-    nf_b  = Poseidon([rho, id_hash, 4242])                    # spend.circom (N)
-    nf_a  = Poseidon([rho, id_hash, 4243])                    # reserved; unused on chain
+    cm      = Poseidon([T_CM, flavor, v, rho, id_hash, predicate])   # spend.circom (C)
+    nf      = Poseidon([T_NF, rho, id_hash])                         # spend.circom (N)
+    id_hash = Poseidon([T_ID, *payload])                             # per flavour, below
 
-The shipped unified ``spend.circom`` derives the 4242-tagged nullifier for
-EVERY flavor; the 4243 tag is reserved in case a future flavor-split
-derivation is wanted (it would keep the namespaces disjoint for the same
-``(rho, id_hash)`` pair).
+One nullifier serves every flavour: the spend circuit derives it the same way
+for A1, A2 and B1.
 
 For B1 only, the spend circuit also exposes the recomputed note commitment as
 ``issuanceCommitment``.  ``Notes`` records that commitment under the public
@@ -36,9 +35,12 @@ earlier account-pinned design -- an in-circuit Chaum-Pedersen equality on
 the mint-time ``sk_rec``, making loss terminal -- is retired.)
 
 ``id_hash`` is the wallet's deterministic Poseidon-of-payload commitment to
-the identity material, so two notes for the same recipient/issuer hash to the
-same ``id_hash`` field element.  The ``id_hash_a1/a2/b1`` helpers compute it
-from the canonical payload word layouts produced by ``id_payload_*``.
+the identity material.  The ``id_hash_a1/a2/b1`` helpers compute it from the
+canonical payload word layouts produced by ``id_payload_*``: the public
+issuer's identity scalar for B1; the value ciphertext and that scalar for A1;
+the value and issuer ciphertexts and the key tie ``T`` for A2.  A public
+issuer is authenticated by the batch Schnorr its account signs at mint, which
+covers each exact commitment; the note carries no signature of its own.
 """
 
 from __future__ import annotations
@@ -47,13 +49,14 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from alberta_buck.wallet.bn254 import ORDER, point_to_words
+from alberta_buck.wallet.domains import NOTES_COMMITMENT, NOTES_ID_HASH, NOTES_NULLIFIER, field_tag
 from alberta_buck.wallet.elgamal import ElGamalCiphertext
 from alberta_buck.wallet.poseidon import F_R, poseidon
 
-# Domain-separation tags appearing as the third Poseidon input alongside
-# (rho, id_hash).  A single change of tag yields a fully distinct output.
-NULLIFIER_TAG_B = 4242
-NULLIFIER_TAG_A = 4243
+# The note hashes' leading Poseidon inputs (compiled into the circuits).
+TAG_COMMITMENT                  = field_tag(NOTES_COMMITMENT)
+TAG_NULLIFIER                   = field_tag(NOTES_NULLIFIER)
+TAG_ID_HASH                     = field_tag(NOTES_ID_HASH)
 
 # Flavor labels -- match the circuit's public `flavor` input.
 FLAVOR_A1 = 1
@@ -68,7 +71,7 @@ class NoteOpening:
     """The witness a wallet stores for one outstanding note.
 
     Mirrors the SNARK opening tuple ``(flavor, v, rho, id_hash, predicate)``
-    -- the five Poseidon-5 words in :file:`circuits/spend.circom` (``flavor``
+    -- the five opened words in :file:`circuits/spend.circom` (``flavor``
     is also a public input bound to the entry-point mode).  The wallet is
     responsible for computing
     ``id_hash`` from the appropriate identity material via the
@@ -97,11 +100,12 @@ class NoteOpening:
 # ---- commitment -----------------------------------------------------------
 
 def note_commitment(opening: NoteOpening) -> int:
-    """``cm = Poseidon([flavor, v, rho, id_hash, predicate])``.
+    """``cm = Poseidon([T_CM, flavor, v, rho, id_hash, predicate])``.
 
     Matches :file:`circuits/spend.circom` constraint (C) byte-for-byte.
     """
     return poseidon([
+        TAG_COMMITMENT,
         opening.flavor,
         opening.v,
         opening.rho,
@@ -112,36 +116,18 @@ def note_commitment(opening: NoteOpening) -> int:
 
 # ---- nullifiers -----------------------------------------------------------
 
-def nullifier_b(rho: int, id_hash: int) -> int:
-    """B-spend nullifier: ``Poseidon([rho, id_hash, 4242])``.
+def nullifier(rho: int, id_hash: int) -> int:
+    """The spent marker: ``Poseidon([T_NF, rho, id_hash])``, for every flavour.
 
-    Matches :file:`circuits/spend.circom` constraint (N).  For B-flavor
-    (bearer) notes the spend authorization is knowledge of ``rho``; the
-    contract simply checks that the nullifier hasn't been seen before.
+    Matches :file:`circuits/spend.circom` constraint (N) and the deposit folds'
+    re-derivation.  Knowledge of ``rho`` is what spends; the contract refuses a
+    nullifier it has seen, and identity binding is the deposit gate's.
     """
     if not (0 < rho < ORDER):
         raise ValueError("rho must be a non-zero scalar mod ORDER")
     if not (0 <= id_hash < F_R):
         raise ValueError("id_hash must lie in [0, F_R)")
-    return poseidon([rho, id_hash, NULLIFIER_TAG_B])
-
-
-def nullifier_a(rho: int, id_hash: int) -> int:
-    """RESERVED A-tag nullifier: ``Poseidon([rho, id_hash, 4243])``.
-
-    NOT used by the shipped unified :file:`circuits/spend.circom`, which
-    derives the 4242-tagged nullifier for every flavor; kept for a possible
-    future flavor-split derivation (the distinct tag would make cross-flavor
-    replay structurally impossible for the same ``(rho, id_hash)``).
-    Identity binding is **not** carried by the nullifier either way -- it is
-    enforced by the Identity-M deposit gate (coupling sigma + membership +
-    the note<->eEnc binding SNARK); see the module docstring.
-    """
-    if not (0 < rho < ORDER):
-        raise ValueError("rho must be a non-zero scalar mod ORDER")
-    if not (0 <= id_hash < F_R):
-        raise ValueError("id_hash must lie in [0, F_R)")
-    return poseidon([rho, id_hash, NULLIFIER_TAG_A])
+    return poseidon([TAG_NULLIFIER, rho, id_hash])
 
 
 # ---- id_payload word encodings --------------------------------------------
@@ -149,19 +135,18 @@ def nullifier_a(rho: int, id_hash: int) -> int:
 # would carry; id_hash_* below collapses each tuple to a single F_R element
 # via Poseidon so the circuit only sees one private signal.
 
-def id_payload_b1(m_issuer: int, sigma_R, sigma_s: int) -> Tuple[int, ...]:
-    """B1 id-payload (bearer, public issuer): ``(m_issuer, sigma_R.x, sigma_R.y, sigma_s)``."""
-    if not (0 < m_issuer < ORDER) or not (0 < sigma_s < ORDER):
-        raise ValueError("scalars must lie in [1, ORDER)")
-    return (m_issuer, *point_to_words(sigma_R), sigma_s)
+def id_payload_b1(m_issuer: int) -> Tuple[int, ...]:
+    """B1 id-payload (bearer, public issuer): ``(m_issuer,)``."""
+    if not (0 < m_issuer < ORDER):
+        raise ValueError("m_issuer must lie in [1, ORDER)")
+    return (m_issuer,)
 
 
-def id_payload_a1(E_note: ElGamalCiphertext, m_issuer: int, sigma_R, sigma_s: int) -> Tuple[int, ...]:
-    """A1 id-payload (addressed, public issuer): ``(E_note.R, E_note.C, m_issuer, sigma_R, sigma_s)``."""
-    if not (0 < m_issuer < ORDER) or not (0 < sigma_s < ORDER):
-        raise ValueError("scalars must lie in [1, ORDER)")
-    return (*point_to_words(E_note.R), *point_to_words(E_note.C),
-            m_issuer, *point_to_words(sigma_R), sigma_s)
+def id_payload_a1(E_note: ElGamalCiphertext, m_issuer: int) -> Tuple[int, ...]:
+    """A1 id-payload (addressed, public issuer): ``(E_note.R, E_note.C, m_issuer)``."""
+    if not (0 < m_issuer < ORDER):
+        raise ValueError("m_issuer must lie in [1, ORDER)")
+    return (*point_to_words(E_note.R), *point_to_words(E_note.C), m_issuer)
 
 
 def id_payload_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext, T) -> Tuple[int, ...]:
@@ -179,21 +164,21 @@ def id_payload_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext
 # ---- id_hash helpers (Poseidon of payload) --------------------------------
 
 def _hash_words(words: Tuple[int, ...]) -> int:
-    """Poseidon over the payload, with each input reduced mod F_R first.
+    """``Poseidon([T_ID, *payload])``, each payload word reduced mod F_R first.
 
     BN254 base-field coords from ``point_to_words`` may exceed F_R (the
     scalar field).  Circom signals reduce automatically; we mirror that here
     so the Python id_hash matches the in-circuit hash bit-for-bit.
     """
-    return poseidon([w % F_R for w in words])
+    return poseidon([TAG_ID_HASH] + [w % F_R for w in words])
 
 
-def id_hash_b1(m_issuer: int, sigma_R, sigma_s: int) -> int:
-    return _hash_words(id_payload_b1(m_issuer, sigma_R, sigma_s))
+def id_hash_b1(m_issuer: int) -> int:
+    return _hash_words(id_payload_b1(m_issuer))
 
 
-def id_hash_a1(E_note: ElGamalCiphertext, m_issuer: int, sigma_R, sigma_s: int) -> int:
-    return _hash_words(id_payload_a1(E_note, m_issuer, sigma_R, sigma_s))
+def id_hash_a1(E_note: ElGamalCiphertext, m_issuer: int) -> int:
+    return _hash_words(id_payload_a1(E_note, m_issuer))
 
 
 def id_hash_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext, T) -> int:
@@ -203,8 +188,8 @@ def id_hash_a2(E_note: ElGamalCiphertext, E_issuer_for_rec: ElGamalCiphertext, T
 __all__ = [
     "NoteOpening",
     "FLAVOR_A1", "FLAVOR_A2", "FLAVOR_B1",
-    "NULLIFIER_TAG_A", "NULLIFIER_TAG_B",
-    "note_commitment", "nullifier_a", "nullifier_b",
+    "TAG_COMMITMENT", "TAG_ID_HASH", "TAG_NULLIFIER",
+    "note_commitment", "nullifier",
     "id_payload_a1", "id_payload_a2", "id_payload_b1",
     "id_hash_a1", "id_hash_a2", "id_hash_b1",
 ]

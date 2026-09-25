@@ -76,6 +76,7 @@ include "./ec/bn254_hp_scalarmul.circom";
 include "./ec/get_bn254.circom";
 include "../lib/circom-lib/circuits/ec/curve.circom";
 include "./leaf_tags.circom";
+include "./note_tags.circom";
 
 template MerkleProofFoldA2(depth) {
     signal input  leaf;
@@ -132,7 +133,7 @@ template DepositFoldA2(depth) {
 
     // ===== PRIVATE ===========================================================
     signal input rho;
-    signal input idHash;                    // Poseidon10(eNote, eIss0, T)
+    signal input idHash;                    // Poseidon11(T_ID, eNote, eIss0, T)
     signal input eNote[4];                  // eNote coords (mod F_R)
     signal input eIss0[4];                  // the note's eIss coords (mod F_R)
     signal input T[2];                      // the mint binding's T (mod F_R)
@@ -163,17 +164,18 @@ template DepositFoldA2(depth) {
 
     // ===== (0) the nullifier and the note's idHash ===========================
     component nf = Poseidon(3);
-    nf.inputs[0] <== rho;
-    nf.inputs[1] <== idHash;
-    nf.inputs[2] <== 4242;
+    nf.inputs[0] <== NOTE_TAG_NULLIFIER();
+    nf.inputs[1] <== rho;
+    nf.inputs[2] <== idHash;
     nullifier === nf.out;
 
-    component idH = Poseidon(10);
-    idH.inputs[0] <== eNote[0];  idH.inputs[1] <== eNote[1];
-    idH.inputs[2] <== eNote[2];  idH.inputs[3] <== eNote[3];
-    idH.inputs[4] <== eIss0[0];  idH.inputs[5] <== eIss0[1];
-    idH.inputs[6] <== eIss0[2];  idH.inputs[7] <== eIss0[3];
-    idH.inputs[8] <== T[0];      idH.inputs[9] <== T[1];
+    component idH = Poseidon(11);
+    idH.inputs[0] <== NOTE_TAG_ID_HASH();
+    idH.inputs[1] <== eNote[0];  idH.inputs[2] <== eNote[1];
+    idH.inputs[3] <== eNote[2];  idH.inputs[4] <== eNote[3];
+    idH.inputs[5] <== eIss0[0];  idH.inputs[6] <== eIss0[1];
+    idH.inputs[7] <== eIss0[2];  idH.inputs[8] <== eIss0[3];
+    idH.inputs[9] <== T[0];      idH.inputs[10] <== T[1];
     idHash === idH.out;
 
     // ===== M_I's limbs are witnessed, so range-check them ====================

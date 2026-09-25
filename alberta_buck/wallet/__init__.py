@@ -36,8 +36,8 @@ from alberta_buck.wallet.chaum_pedersen import (
 from alberta_buck.wallet.poseidon import poseidon, F_R
 from alberta_buck.wallet.notes import (
     NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
-    NULLIFIER_TAG_A, NULLIFIER_TAG_B,
-    note_commitment, nullifier_a, nullifier_b,
+    TAG_COMMITMENT, TAG_ID_HASH, TAG_NULLIFIER,
+    note_commitment, nullifier,
     id_payload_a1, id_payload_a2, id_payload_b1,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
@@ -108,8 +108,8 @@ __all__ = [
     "CPProof", "chaum_pedersen_prove", "chaum_pedersen_verify",
     "poseidon", "F_R",
     "NoteOpening", "FLAVOR_A1", "FLAVOR_A2", "FLAVOR_B1",
-    "NULLIFIER_TAG_A", "NULLIFIER_TAG_B",
-    "note_commitment", "nullifier_a", "nullifier_b",
+    "TAG_COMMITMENT", "TAG_ID_HASH", "TAG_NULLIFIER",
+    "note_commitment", "nullifier",
     "id_payload_a1", "id_payload_a2", "id_payload_b1",
     "id_hash_a1", "id_hash_a2", "id_hash_b1",
     "SchnorrProof", "batch_commitment", "issuer_schnorr_sign", "issuer_schnorr_verify",

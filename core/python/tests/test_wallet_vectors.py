@@ -79,8 +79,6 @@ def _receipt_args(wv, row):
         args["face"] = mint["opening"]["v"]
         if kind in ("note-b1", "note-a1"):
             args["issuer_sig"] = mint["issuer_sig"]
-            args["sigma_R"] = mint["sigma_R"]
-            args["sigma_s"] = mint["sigma_s"]
         if kind == "note-b1":
             args["eDepForIss"] = mint["eDepForIss"]
         if kind == "note-a1":
@@ -190,8 +188,7 @@ def test_unilateral_a1(wv):
     minted = json.loads(bw.mint_unilateral_a1(json.dumps({
         "M_rec": u["M_rec"], "pk_recv": u["pk_recv"],
         "v": u["v"], "rho": u["rho"],
-        "m_issuer": u["m_issuer"], "sigma_R": u["sigma_R"],
-        "sigma_s": u["sigma_s"], "predicate": u["predicate"],
+        "m_issuer": u["m_issuer"], "predicate": u["predicate"],
         "nonces": {"r_prime": u["r_prime"], "r_note": u["r_note"]},
     })))
     for key in ("eNote", "eRec", "idHash", "cm", "opening"):

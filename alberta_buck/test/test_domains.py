@@ -1,10 +1,11 @@
 """The v2 tag registry, and every place a tag is compiled in as a literal.
 
 alberta_buck/wallet/domains.py is the one registry.  Circuits and contracts cannot import it, so
-they carry literals: the leaf tags in circuits/leaf_tags.circom, the Notes tree's empty leaf in
-every batch-mint circuit and in Notes.sol, and H_PEDERSEN in IdentityRegistry.sol and its powers
-table.  Each moves only with a trusted setup or a redeploy, so each is pinned here against the
-registry -- a literal that drifts fails this file, not a ceremony.
+they carry literals: the leaf tags in circuits/leaf_tags.circom, the note hash tags in
+circuits/note_tags.circom, the Notes tree's empty leaf in every batch-mint circuit and in
+Notes.sol, and H_PEDERSEN in IdentityRegistry.sol and its powers table.  Each moves only with a
+trusted setup or a redeploy, so each is pinned here against the registry -- a literal that drifts
+fails this file, not a ceremony.
 """
 
 import glob
@@ -50,6 +51,23 @@ def test_leaf_tags_circom_matches_the_registry():
         assert int(m.group(1)) == tag, fn
     assert TAG_IDENTITY == domains.field_tag(domains.LEAF_IDENTITY)
     assert len({TAG_IDENTITY, TAG_IDENTITY_SALTED, TAG_RECEIVING, TAG_MAILBOX}) == 4
+
+
+def test_note_tags_circom_matches_the_registry():
+    src = _read("circuits/note_tags.circom")
+    want = {"NOTE_TAG_COMMITMENT": domains.NOTES_COMMITMENT,
+            "NOTE_TAG_NULLIFIER": domains.NOTES_NULLIFIER,
+            "NOTE_TAG_ID_HASH": domains.NOTES_ID_HASH}
+    for fn, tag in want.items():
+        m = re.search(r"function " + fn + r"\(\)\s*\{\s*return (\d+);", src)
+        assert m, fn
+        assert int(m.group(1)) == domains.field_tag(tag), fn
+    # Every circuit that hashes a note reads its tags; none carries the old untagged constant.
+    for path in ["circuits/spend.circom", "circuits/deposit_fold_a1.circom",
+                 "circuits/deposit_fold_a2.circom", *glob.glob("circuits/mint_batch*.circom")]:
+        body = _read(path)
+        assert 'include "./note_tags.circom";' in body, path
+        assert "4242" not in body, path
 
 
 def test_notes_zero_in_every_mint_circuit_and_the_contract():

@@ -199,11 +199,10 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   }
 
   NotePayload {                 // per flavor -- the idHash preimage material
-    // B1:  "sigma_R", "sigma_s"            (id_hash_b1(m_iss, sigma))
-    //      + "eDepForIss"                  (the SpentCoupledB1 event ct)
-    // A1:  "eNote", "eRec", "sigma_R", "sigma_s"
-    //                                      (id_hash_a1(eNote, m_iss, sigma))
-    // A2:  "eNote", "eIss"                 (id_hash_a2(eNote, eIss))
+    // B1:  "eDepForIss"                    (the SpentCoupledB1 event ct;
+    //                                       idHash is id_hash_b1(m_iss))
+    // A1:  "eNote", "eRec"                 (id_hash_a1(eNote, m_iss))
+    // A2:  "eNote", "eIss", "T"            (id_hash_a2(eNote, eIss, T))
   }
   #+end_src
   #+LATEX: }
@@ -237,17 +236,17 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   For the EOA kinds the wallet owner is the *payee*; a Note receipt is
   generated from *either* side (the =role= field).  Each row names the tier-1
   re-check.  All Note flavors use the unified spend nullifier
-  \( \mathrm{Poseidon}(\rho, \texttt{idHash}, 4242) \) (the shipped
-  =spend.circom= tag) and anchor at the =Minted= and =SpentCoupled*= events.
+  \( \mathrm{Poseidon}(T_{NF}, \rho, \texttt{idHash}) \) (the shipped
+  =spend.circom= derivation) and anchor at the =Minted= and =SpentCoupled*= events.
 
   #+LATEX: {\scriptsize
-  | type     | payer           | party-naming (tier-1 re-check)                                                                                     | txn anchor                  |
-  |----------+-----------------+--------------------------------------------------------------------------------------------------------------------+-----------------------------|
-  | eoa-pub  | EOA, public     | none -- =payer.M= recomputed from public =identity=; =pk= anchors addr                                             | =Transfer(from,to,value)=   |
-  | eoa-priv | EOA, private    | approve handshake =cp_proof= + payee's =vd= of =E_for_spender=                                                     | =Transfer=                  |
-  | note-b1  | issuer, public  | =idHash= = =id_hash_b1(m_iss, sigma)= + batch Schnorr; issuer side: =vd= of =eDepForIss= names depositor           | =Minted= + =SpentCoupledB1= |
-  | note-a1  | issuer, public  | =idHash= = =id_hash_a1(eNote, m_iss, sigma)= + Schnorr; recipient: =vdNote=/=vdRec= under =pkRecv=; issuer: =rNote=/=rId= re-encrypt; + mailbox =binding= | =Minted= + =SpentCoupledA1= |
-  | note-a2  | issuer, private | =idHash= = =id_hash_a2(eNote, eIss, T)=; the same per-role legs (=vdIss= / =rId=); + =issuer_reenc= binding and \( C_{iss} - T + \gamma H = M \)  | =Minted= + =SpentCoupledA2= |
+  | type     | payer           | party-naming (tier-1 re-check)                                                                                                                     | txn anchor                  |
+  |----------+-----------------+----------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------|
+  | eoa-pub  | EOA, public     | none -- =payer.M= recomputed from public =identity=; =pk= anchors addr                                                                             | =Transfer(from,to,value)=   |
+  | eoa-priv | EOA, private    | approve handshake =cp_proof= + payee's =vd= of =E_for_spender=                                                                                     | =Transfer=                  |
+  | note-b1  | issuer, public  | =idHash= = =id_hash_b1(m_iss)= + batch Schnorr; issuer side: =vd= of =eDepForIss= names depositor                                                  | =Minted= + =SpentCoupledB1= |
+  | note-a1  | issuer, public  | =idHash= = =id_hash_a1(eNote, m_iss)= + Schnorr; recipient: =vdNote=/=vdRec= under =pkRecv=; issuer: =rNote=/=rId= re-encrypt; + mailbox =binding= | =Minted= + =SpentCoupledA1= |
+  | note-a2  | issuer, private | =idHash= = =id_hash_a2(eNote, eIss, T)=; the same per-role legs (=vdIss= / =rId=); + =issuer_reenc= binding and \( C_{iss} - T + \gamma H = M \)   | =Minted= + =SpentCoupledA2= |
   #+LATEX: }
 
 ** eoa-pub -- EOA transfer from a public counterparty
@@ -273,8 +272,8 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
    The four-link chain, now Identity-M-bound: the opening recomputes =cm=,
    =cm= is in the mint =cms[]=, the issuer is bound /into the leaf itself/
    (the verifier derives \( m_{iss} \) from the disclosed issuer preimage and
-   requires =opening.idHash= to recompute as =id_hash_b1(m_iss, sigma)= /
-   =id_hash_a1(eNote, m_iss, sigma)=) as well as over the batch (the Schnorr,
+   requires =opening.idHash= to recompute as =id_hash_b1(m_iss)= /
+   =id_hash_a1(eNote, m_iss)=) as well as over the batch (the Schnorr,
    whose Fiat-Shamir transcript folds in the issuer /account/ + chainid -- so
    the printed =acct= is provably the mint's =msg.sender=, the account whose
    BUCK funded the note), and the nullifier was burned in the
@@ -419,7 +418,7 @@ VERIFICATION
      batch Schnorr (B1/A1) or the =issuer_reenc= binding (A2) verifies against
      the embedded registry record and the printed issuer =acct=, and for A2
      \( C_{iss} - T + \gamma H_{\mathrm{PEDERSEN}} = \texttt{payer.M} \); the nullifier
-     equals \( \mathrm{Poseidon}(\rho, \texttt{idHash}, 4242) \); and
+     equals \( \mathrm{Poseidon}(T_{NF}, \rho, \texttt{idHash}) \); and
      =face= = =opening.v= = =txn.value=.  For an issuer-side B1 receipt also
      verify =vd_payee= over the event's =eDepForIss=.  Require the named
      \( M \), =value=, and addresses to match the human-readable fields the
@@ -445,7 +444,7 @@ VERIFICATION
      =issuer= address and decrypting each =eDepForIss=).
   2. *Gather* per the scenario table: a registry read (public payer), stored
      approve material (private EOA), or the stored note artifact -- the
-     =opening=, the Identity-M payload (=eNote= / =eRec= / =eIss=, =sigma=), and
+     =opening=, the Identity-M payload (=eNote= / =eRec= / =eIss= / =T=), and
      the mint reference; plus each party's =canonical_identity_data= from
      wallet storage.
   3. *Self-name*: =verifiable_decrypt= the owner's own =E_addr= (and, B1
@@ -547,7 +546,7 @@ VERIFICATION
    : flavor     a2 (addressed, PRIVATE issuer); face 250.000000 BUCK
    : issuer     Bob Smith (Corporate Registration)  acct 0x0a11ce00000000000000000000000000000a11ce
    : depositor  Alice Johnson (Alberta Identity Card)  acct 0xde9051700000000000000000000000000de90517
-   : prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.963, 'spend_prove_s': 0.759, 'deposit_gate_prove_s': 15.01}
+   : prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.956, 'spend_prove_s': 0.746, 'deposit_gate_prove_s': 14.744}
 
    #+LATEX: }
 
@@ -630,8 +629,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.mint  tx 0xde477941efb6bd3d19..  block 40  gas 671,997  (0.107s on anvil)
-   :   proof was generated offline by the issuer in 0.963s (Groth16, mint_batch_a2 N=1)
+   : Notes.mint  tx 0xf768232909f1bb1f3c..  block 40  gas 671,961  (0.116s on anvil)
+   :   proof was generated offline by the issuer in 0.956s (Groth16, mint_batch_a2 N=1)
    :   escrowed: pool balance = 250.000000 BUCK
 
    #+LATEX: }
@@ -658,7 +657,7 @@ VERIFICATION
    k_recv = int(fx.raw["parties"]["depositor"]["kRecv"])
    m_rec = fx.depositor.m
    gamma = int(fx.raw["issuerSecrets"]["gamma"])
-   print(f"idHash == Poseidon10(eNote, eIss, T): "
+   print(f"idHash == id_hash_a2(eNote, eIss, T): "
          f"{id_hash_a2(nc['eNote'], nc['eIss'], fx.binding.T) == fx.opening.id_hash}")
    print(f"Dec(eNote, k_recv) == v*G:            "
          f"{eq(elgamal_decrypt(nc['eNote'], k_recv), mul(G1, fx.opening.v))}")
@@ -678,7 +677,7 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : idHash == Poseidon10(eNote, eIss, T): True
+   : idHash == id_hash_a2(eNote, eIss, T): True
    : Dec(eNote, k_recv) == v*G:            True
    : Dec(eIss, k_recv) == issuer's M:      True
    : Dec(eIss, m_rec)  == issuer's M:      False   (the Identity is NOT a key)
@@ -712,8 +711,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.spendCoupledA2  tx 0x1d62ecb8d852019294..  block 41  gas 881,116  (0.111s on anvil)
-   :   proofs offline: spend 0.759s + folded gate 15.01s
+   : Notes.spendCoupledA2  tx 0x63bd53667874d71164..  block 41  gas 881,104  (0.115s on anvil)
+   :   proofs offline: spend 0.746s + folded gate 14.744s
    :   nullifier burned: True
    :   paid out: depositor balance = 249.999999 BUCK
 
@@ -740,8 +739,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : depositor (Alice)  receipt 5nzz7w6a5cqs  tier-1: VALID   (11,600 B payload)
-   : issuer (Bob)       receipt spw4lafo75hi  tier-1: VALID   (9,680 B payload)
+   : depositor (Alice)  receipt 574ey3drxxew  tier-1: VALID   (11,600 B payload)
+   : issuer (Bob)       receipt dwaeoczhbx6v  tier-1: VALID   (9,680 B payload)
 
    #+LATEX: }
 
@@ -762,7 +761,7 @@ VERIFICATION
 		    ALBERTA  BUCK                                         ALBERTA  BUCK
 	    P A Y M E N T   R E C E I P T                         P A Y M E N T   R E C E I P T
    ------------------------------------------------      ------------------------------------------------
-     Receipt  5nzz7w6a5cqs                                 Receipt  spw4lafo75hi
+     Receipt  574ey3drxxew                                 Receipt  dwaeoczhbx6v
    ------------------------------------------------      ------------------------------------------------
    FROM (payer) (PRIVATE IDENTITY)                       FROM (payer - you) (PRIVATE IDENTITY)
     Bob Smith                                             Bob Smith
@@ -783,12 +782,12 @@ VERIFICATION
     Chain                      1                          Chain                      1
     Block                     41                          Block                     41
     Log                        2                          Log                        2
-    Tx      0x1d62ecb8d852..f24c259a47d1                  Tx      0x1d62ecb8d852..f24c259a47d1
-    Mint    0xde477941efb6..bac00caaf0b8                  Mint    0xde477941efb6..bac00caaf0b8
+    Tx      0x63bd53667874..36340dc10718                  Tx      0x63bd53667874..36340dc10718
+    Mint    0xf768232909f1..17c9888fcd90                  Mint    0xf768232909f1..17c9888fcd90
    ------------------------------------------------      ------------------------------------------------
    VERIFICATION                                          VERIFICATION
     status @ issue: VALID                                 status @ issue: VALID
-    receipt  5nzz7w6a5cqs                                 receipt  spw4lafo75hi
+    receipt  574ey3drxxew                                 receipt  dwaeoczhbx6v
    ------------------------------------------------      ------------------------------------------------
 	   a record, not a bearer instrument                     a record, not a bearer instrument
 	   github.com/pjkundert/alberta-buck                     github.com/pjkundert/alberta-buck
@@ -861,9 +860,9 @@ VERIFICATION
    #+RESULTS:
    : flavor     mint gas  spend gas  mint prove  spend proves   receipts (dep / iss)
    : -------------------------------------------------------------------------------
-   : b1          545,938    775,115       0.93s        20.40s       VALID / VALID
-   : a1          545,962    886,997       1.02s        15.81s       VALID / VALID
-   : a2          671,997    881,116       0.96s        15.77s       VALID / VALID
+   : b1          545,962    775,091       0.91s        20.12s       VALID / VALID
+   : a1          545,974    886,997       1.04s        15.70s       VALID / VALID
+   : a2          671,961    881,104       0.96s        15.49s       VALID / VALID
 
    #+LATEX: }
 
@@ -960,7 +959,7 @@ VERIFICATION
      =UNVERIFIED ISSUER= survives only for a receipt missing its binding.  Receipts are generated by *both Note parties* (=role=):
      recipient-side and issuer-side ("I paid X") for B1/A1/A2, the B1 issuer
      naming its depositor from the =SpentCoupledB1= event's =eDepForIss=.
-     Anchors moved to the unified 4242 nullifier and the =SpentCoupled*=
+     Anchors moved to the unified nullifier and the =SpentCoupled*=
      events.
   4. *Later.*  The ESC/POS byte driver (Phase A shipped the plain-text driver;
      a port-9100 thermal driver is a new =Driver= subclass); optional QR

@@ -396,8 +396,8 @@ Table of Contents
   inserted, without requiring per-spend root-update synchronisation.
   The contract keeps no per-commitment `commitmentExists'
   duplicate-reject map – duplicate mints are economically self-punishing
-  via the deterministic nullifier \( \text{Poseidon}_3(\rho,
-  \text{idHash}, 4242) \), so the chain does not need an explicit check.
+  via the deterministic nullifier \( \text{Poseidon}_3(T_{NF}, \rho,
+  \text{idHash}) \), so the chain does not need an explicit check.
 
   The /Notes pool/ – the BUCK custody side of the design – is just the
   Notes contract's own ERC-20 balance.  No separate `poolBalance',
@@ -456,11 +456,14 @@ Table of Contents
   material – one derivation for every flavor (the shipped
   `spend.circom'):
 
-  \[ nf \;=\; \text{Poseidon}(\rho,\ idHash,\ 4242) \]
+  \[ nf \;=\; \text{Poseidon}(T_{NF},\ \rho,\ idHash) \]
 
-  The constant tag domain-separates nullifier preimages from the
-  Poseidon-5 commitment preimages, so a \( (\rho, idHash) \) collision
-  between a commitment and a nullifier is structurally impossible.
+  The leading tag \( T_{NF} = \)
+  `keccak("AlbertaBuck/Notes/Nullifier/v2") mod r' domain-separates
+  nullifier preimages from every other Poseidon preimage in the
+  protocol, the commitment's included (whose own tag is \( T_{CM} \)),
+  so a \( (\rho, idHash) \) collision between a commitment and a
+  nullifier is structurally impossible.
 
   No spend-side account key enters the hash.  Spend /authorization/ is
   layered on top of the nullifier, per flavor: for B1 (bearer),
@@ -503,7 +506,7 @@ Table of Contents
   │             proof, issuerMode, oldRoot, newRoot, nextLeafIndex, totalFace, cms)
   │   # The SNARK has proved, for some witness
   │   #   (flavor_i, v_i, rho_i, idHash_i, predHash_i, pathSiblings_i)_i:
-  │   #     - cm_i = Poseidon5(flavor_i, v_i, rho_i, idHash_i, predHash_i)
+  │   #     - cm_i = Poseidon6(T_CM, flavor_i, v_i, rho_i, idHash_i, predHash_i)
   │   #     - v_i in [0, 2^128), totalFace in [0, 2^128)  # Num2Bits(128)
   │   #     - sum(v_i) == totalFace
   │   #     - folding {cm_i} onto oldRoot at nextLeafIndex using pathSiblings_i
@@ -528,10 +531,10 @@ Table of Contents
   │   verify SNARK (spend, B-flavor / bearer shape):
   │     - face in [0, 2^128) and face == v   # Num2Bits(128) on both
   │     - flavor == B1 and predicate == 0    # entry-point policy is public
-  │     - cm = Poseidon5(flavor, v, rho, idHash, predHash)
+  │     - cm = Poseidon6(T_CM, flavor, v, rho, idHash, predHash)
   │     - issuanceCommitment == cm           # B1-only public mint handle
   │     - Merkle inclusion of cm under root  # Switcher + Poseidon(2) per level
-  │     - nullifier == Poseidon3(rho, idHash, 4242)
+  │     - nullifier == Poseidon3(T_NF, rho, idHash)
   │     - ghost-bind public signals (face, recipient, chainId) via x*x
   │   require publicIssuerOfCommitment[issuanceCommitment] == issuer
   │   nullifiers[nullifier] = true
@@ -1066,8 +1069,8 @@ Table of Contents
   re-encryption proof (`verifyIssuerReenc') binds \( eIss \) to the
   issuer's /own/ registered Identity under a key it blinds, and
   publishes \( T = r'\,pk_{\text{recv}} + \gamma H_{\text{PED}} \),
-  which the note commits: \( idHash = \mathrm{Poseidon}_{10}(eNote,
-  eIss, T) \).  At deposit the recipient proves the folded gate
+  which the note commits: \( idHash = \mathrm{Poseidon}_{11}(T_{ID},
+  eNote, eIss, T) \).  At deposit the recipient proves the folded gate
   (`deposit_fold_a2.circom'): \( k \) opens the ciphertext, the account
   credential opens to \( M_{\text{rec}} \), a leaf commits \(
   (m_{\text{rec}}, k) \) under the recipient's salt, a second leaf
@@ -1939,8 +1942,8 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Circuit                          Constraints  Public inputs  Verifier                       
   ─────────────────────────────────────────────────────────────────────────────────────────────
-   `deposit_fold_a1.circom'         3,309,327               43  `DepositFoldA1Verifier'        
-   `deposit_fold_a2.circom'         3,833,335               42  `DepositFoldA2Verifier'        
+   `deposit_fold_a1.circom'         3,309,276               43  `DepositFoldA1Verifier'        
+   `deposit_fold_a2.circom'         3,833,338               42  `DepositFoldA2Verifier'        
    `identity_membership_b1.circom'  494,701                  9  `IdentityMembershipB1Verifier' 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   A2 costs 16% more than A1.  Its fifth relation, three curve additions
@@ -2827,10 +2830,8 @@ Table of Contents
 
   The nullifier PRF is Poseidon-based and is the /same/ derivation for
   every spend shape (the shipped `spend.circom'): \( nf =
-  \text{Poseidon}(\rho, idHash, 4242) \), the constant tag separating
-  nullifier preimages from commitment preimages.  (A second tag, 4243,
-  is reserved in the wallet helpers for a future flavor-split
-  derivation; the shipped circuit does not use it.)
+  \text{Poseidon}(T_{NF}, \rho, idHash) \), the leading tag separating
+  nullifier preimages from commitment preimages.
 
   What differs per spend shape is the /authorization/ around the
   nullifier, not its derivation:
@@ -2990,8 +2991,9 @@ Table of Contents
 
   *Constraints.*
   1. `totalFace' \( = \sum v_i \) (amount conservation).
-  2. Each \( cm_i = \text{Poseidon5}(\text{flavor}_i, v_i, \rho_i,
-           \text{idHash}_i, \text{predHash}_i) \) (opening binding).
+  2. Each \( cm_i = \text{Poseidon6}(T_{CM}, \text{flavor}_i, v_i,
+           \rho_i, \text{idHash}_i, \text{predHash}_i) \) (opening
+           binding).
   3. Each \( v_i \in [0, 2^{128}) \) and `totalFace' \( \in [0, 2^{128})
            \) via `Num2Bits(128)'.
   4. Rolling Merkle insertion: threading `oldRoot' and `nextLeafIndex'
@@ -3044,21 +3046,19 @@ Table of Contents
     cannot be replayed through the bearer path.
   • *(P)* Predicate policy: `predHash' is zero; no nonzero spend
     predicate is implemented by this circuit version.
-  • *(C)* Commitment opening: \( cm = \text{Poseidon5}(\text{flavor}, v,
-    \rho, \text{idHash}, \text{predHash}) \).
+  • *(C)* Commitment opening: \( cm = \text{Poseidon6}(T_{CM},
+    \text{flavor}, v, \rho, \text{idHash}, \text{predHash}) \).
   • *(I)* Issuance attribution: `issuanceCommitment' equals (cm) for B1
     and zero for A1/A2.  This gives only the public bearer flavor an
     exact mint-to-spend handle.
   • *(M)* Merkle membership: walk `path[20]' with `Switcher' selectors
     and Poseidon-T3 at each level, asserting the result equals
     `noteRoot'.
-  • *(N)* Nullifier: \( \text{nullifier} = \text{Poseidon3}(ρ,
-    \text{idHash},
-    1) \).  The constant tag 4242 is the shared spend-nullifier
-       domain.
-    Reusing the same \((\rho,\text{idHash})\) across flavors therefore
-    deliberately collides; wallet generation uses a fresh \(\rho\) per
-    note.
+  • *(N)* Nullifier: \( \text{nullifier} = \text{Poseidon3}(T_{NF},
+    \rho, \text{idHash}) \).  The tag \( T_{NF} \) is the shared
+    spend-nullifier domain.  Reusing the same \((\rho,\text{idHash})\)
+    across flavors therefore deliberately collides; wallet generation
+    uses a fresh \(\rho\) per note.
   • *(B)* Ghost binding: `recipient' and `chainId' are constrained into
     the witness via \( x \cdot x \) so the proof cannot be replayed
     against a different recipient or chain (replay protection by
@@ -3097,22 +3097,22 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Circuit                                                             R1CS (total)  PTAU pow 
   ────────────────────────────────────────────────────────────────────────────────────────────
-   `deposit_fold_a1.circom' (the folded A1 gate, 32-level path)        3,309,327     2^{22}   
-   `deposit_fold_a2.circom' (as A1, + issuer membership and key tie)   3,833,335     2^{22}   
+   `deposit_fold_a1.circom' (the folded A1 gate, 32-level path)        3,309,276     2^{22}   
+   `deposit_fold_a2.circom' (as A1, + issuer membership and key tie)   3,833,338     2^{22}   
    `identity_membership_b1.circom' (B1's membership, 32-level path)    494,701       2^{20}   
-   `mint_batch.circom' (N=1)   M                                       21,914        2^{15}   
-   `mint_batch.circom' (batch; N=2)   M                                43,701        2^{16}   
-   `mint_batch.circom' (batch; N=4)   M                                87,273        2^{17}   
-   `mint_batch.circom' (batch; N=8)   M                                174,417       2^{18}   
-   `mint_batch.circom' (batch; N=16)  M                                348,705       2^{19}   
-   `mint_batch.circom' (batch; N=32)  M                                697,281       2^{20}   
+   `mint_batch.circom' (N=1)   M                                       22,052        2^{15}   
+   `mint_batch.circom' (batch; N=2)   M                                43,977        2^{16}   
+   `mint_batch.circom' (batch; N=4)   M                                87,825        2^{17}   
+   `mint_batch.circom' (batch; N=8)   M                                175,521       2^{18}   
+   `mint_batch.circom' (batch; N=16)  M                                350,913       2^{19}   
+   `mint_batch.circom' (batch; N=32)  M                                701,697       2^{20}   
    `mint_batch.circom' (batch; N=128) P                                ~2,800,000    2^{22}   
    `mint_batch.circom' (batch; N=1024) P                               ~22,000,000   2^{25}   
    `spend.circom' (shared flavor/issuer-bound proof; depth-20 Merkle)  ~12,000       2^{15}   
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Measured (M) via `snarkjs r1cs info build/snark/mint_batch_n${N}.r1cs'
   on the shipped pinned-N set {1, 2, 4, 8, 16, 32}; projected (P)
-  linearly from the N=16 / N=32 baseline (~21,800 R1CS per leaf, ~half
+  linearly from the N=16 / N=32 baseline (~21,900 R1CS per leaf, ~half
   of which is the dual Merkle walk that pins `oldRoot' and advances
   `newRoot' against the same witness siblings).  The PTAU power is the
   smallest 2^k ceremony whose FFT domain accommodates the circuit plus
@@ -3150,9 +3150,9 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Flavour                  `mint'   `spendCoupled*' 
   ───────────────────────────────────────────────────
-   A1 (addressed, public)   513,223  966,181         
+   A1 (addressed, public)   513,223  964,291         
    A2 (addressed, private)  629,061  981,834         
-   B1 (bearer, public)      513,223  910,260         
+   B1 (bearer, public)      513,223  906,479         
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   A1 and B1 share the public-issuer mint path (the batch Groth16 plus
   the issuer Schnorr), so their mint cost is identical; A2's mint
@@ -3165,7 +3165,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Verification phase                                     A1       A2       B1      
   ──────────────────────────────────────────────────────────────────────────────────
-   note-opening Groth16 (`spend.circom', shared)          241,262  241,279  335,084 
+   note-opening Groth16 (`spend.circom', shared)          241,262  241,279  333,193 
    folded deposit gate (`deposit_fold_a1/a2.circom')      514,845  506,837  –       
    Identity membership (`identity_membership_b1.circom')  –        –        253,120 
    depositor binding sigma (EIP-196)                      –        –        131,046 
@@ -3196,13 +3196,13 @@ Table of Contents
   anonymity, see /Why A2 Costs More/).
 
   *A1's binding needs no second ciphertext.* An A1 `idHash' commits \(
-  (eNote, m_{\text{issuer}}, \sigma) \) rather than the A2 layout's
-  second ciphertext, so the fold pins the note through its VALUE
-  ciphertext instead: `deposit_fold_a1' checks \( eNote = (r_n G, (v +
-  r_n k) G) \) with the spend's public `face' as \( v \), which makes
-  the addressed Identity unique.  That is why A1 ships eNote's
-  randomness in the payload and A2 ships the issuer's \( r' \), naming
-  salt and \( \gamma \).
+  (eNote, m_{\text{issuer}}) \) rather than the A2 layout's second
+  ciphertext, so the fold pins the note through its VALUE ciphertext
+  instead: `deposit_fold_a1' checks \( eNote = (r_n G, (v + r_n k) G) \)
+  with the spend's public `face' as \( v \), which makes the addressed
+  Identity unique.  That is why A1 ships eNote's randomness in the
+  payload and A2 ships the issuer's \( r' \), naming salt and \( \gamma
+  \).
 
 
 16.5 Common Circuit Gadgets
@@ -3210,8 +3210,8 @@ Table of Contents
 
   Shared library used by both circuits:
 
-  • Poseidon hash (T3 for Merkle pairs; T6/Poseidon5 for commitment
-    opening; T4/Poseidon3 for nullifier)
+  • Poseidon hash (T3 for Merkle pairs; T7/Poseidon6 for the tagged
+    commitment opening; T4/Poseidon3 for the tagged nullifier)
   • Tornado-style Merkle inclusion (Switcher + Poseidon at each level)
   • `Num2Bits' range proofs on field elements
 

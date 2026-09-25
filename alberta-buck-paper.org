@@ -842,11 +842,13 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    make a double-spend detectable without linking the spend to its
    note.  A note is the opening tuple; its on-chain commitment is
 
-   \[ cm = \mathrm{Poseidon}_5(\mathrm{flavor},\ v,\ \rho,\ idHash,\ \mathrm{predicate}), \]
+   \[ cm = \mathrm{Poseidon}_6(T_{CM},\ \mathrm{flavor},\ v,\ \rho,\ idHash,\ \mathrm{predicate}), \]
 
    where \( \rho \) is the note's secret randomness and \( idHash \) is a
    Poseidon hash of the flavour's /identity payload/ -- the commitment to
-   everything the note says about its parties.  Batch mints are proven
+   everything the note says about its parties.  Each note hash leads with
+   its own domain tag (\( T_{CM} \), \( T_{ID} \), \( T_{NF} \)), a fixed
+   field word that keeps it disjoint from every other hash in the protocol.  Batch mints are proven
    by a Groth16 SNARK (proofs a few hundred bytes, constant gas to
    verify; one circuit per pinned batch size \( N \)) that opens every
    commitment, range-checks the values, sums them to the public
@@ -862,9 +864,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    committed opening, and the current predicate is constrained to zero.  For
    B1 only, \(\mathrm{issuanceCommitment}=cm\); A1/A2 expose zero.  The nullifier
 
-   \[ nf = \mathrm{Poseidon}_3(\rho,\ idHash,\ 4242) \]
+   \[ nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ idHash) \]
 
-   is one derivation for every flavour (the constant keeps nullifier
+   is one derivation for every flavour (the tag keeps nullifier
    preimages distinct from commitment preimages).  Double-spends are
    rejected by set membership.  No account key enters the hash: spend
    /authorization/ is layered per flavour on top of the nullifier.
@@ -878,11 +880,11 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    which moment, defines the flavour:
 
    #+LATEX: {\scriptsize
-   | Flavour | idHash commits                                               | Issuer named...                                  | Recipient named...                                          |
-   |---------+--------------------------------------------------------------+--------------------------------------------------+-------------------------------------------------------------|
-   | A1      | \( (eNote,\ m_{\mathrm{iss}},\ \sigma_{\mathrm{Schnorr}}) \) | at mint, in the clear (batch Schnorr)            | at spend: the folded gate, to \( M_{\mathrm{rec}} \)        |
-   | A2      | \( (eNote,\ eIss,\ T) \)                                     | at spend, to recipient alone: decrypt \( eIss \) | at spend: the same gate, plus the issuer's membership       |
-   | B1      | \( (m_{\mathrm{iss}},\ \sigma_{\mathrm{Schnorr}}) \)         | at mint, in the clear                            | at spend: depositor binding \( eDepForIss \) to issuer      |
+   | Flavour | idHash commits                   | Issuer named...                                  | Recipient named...                                     |
+   |---------+----------------------------------+--------------------------------------------------+--------------------------------------------------------|
+   | A1      | \( (eNote,\ m_{\mathrm{iss}}) \) | at mint, in the clear (batch Schnorr)            | at spend: the folded gate, to \( M_{\mathrm{rec}} \)   |
+   | A2      | \( (eNote,\ eIss,\ T) \)         | at spend, to recipient alone: decrypt \( eIss \) | at spend: the same gate, plus the issuer's membership  |
+   | B1      | \( (m_{\mathrm{iss}}) \)         | at mint, in the clear                            | at spend: depositor binding \( eDepForIss \) to issuer |
    #+LATEX: }
 
    with the per-flavour ciphertexts, all ElGamal.  Addressed notes are
@@ -1139,14 +1141,14 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
   accepted for nullifier \( nf \), then except with negligible
   probability the extractor produces an opening
   \( (\rho, idHash, \ldots) \) with
-  \( nf = \mathrm{Poseidon}_3(\rho, idHash, 4242) \) -- the very
+  \( nf = \mathrm{Poseidon}_3(T_{NF}, \rho, idHash) \) -- the very
   nullifier the spend consumed -- and:
-  - *(A2 layout.)*  \( idHash = \mathrm{Poseidon}_{10}(eNote, eIss_0, T) \),
+  - *(A2 layout.)*  \( idHash = \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss_0, T) \),
     the committed \( eIss_0 \) decrypts under \( k \) to \( M_I \), the
     supplied \( eEnc \) is a re-randomisation of it under the same
     \( k \), and \( M_I \)'s salted leaf folds to the same root.
-  - *(A1 layout.)*  \( idHash = \mathrm{Poseidon}_8(eNote, m_{\mathrm{iss}},
-    \sigma) \), \( eNote = (r_n G,\ (v + r_n k)G) \) with \( v \) the
+  - *(A1 layout.)*  \( idHash = \mathrm{Poseidon}_6(T_{ID}, eNote,
+    m_{\mathrm{iss}}) \), \( eNote = (r_n G,\ (v + r_n k)G) \) with \( v \) the
     spend's public face, and \( eEnc \) is a fresh encryption of
     \( M_{\mathrm{rec}} \) under \( k \).  The public \( v \) makes
     \( k \) unique (Sec. [[#sec:construction]]); a holder of a stolen
@@ -1443,7 +1445,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    |--------------------+-------------------------------------------------------------------------------------------------------------------------|
    | Identity substrate | =IdentityRegistry=: ElGamal credentials, blinded PS presentation proofs (A'), a two-level Poseidon accumulator (salted registry subtrees under an aggregator) whose roots a root authority's aggregator posts into a ring with per-consumer maximum ages |
    | Batch mint         | =mint_batch[_a2].circom= per pinned N; issuer Schnorr (public) / blinded re-encryption binding + leaf-tie over \( eIss \) and \( T \) (private) |
-   | Spend              | =spend.circom= (shared, public flavour + B1 issuance commitment, note tree depth 20); nullifier =Poseidon3(rho, idHash, 4242)= |
+   | Spend              | =spend.circom= (shared, public flavour + B1 issuance commitment, note tree depth 20); nullifier =Poseidon3(T_NF, rho, idHash)= |
    | Deposit gates      | =deposit_fold_a1= / =deposit_fold_a2= (Groth16, addressed, 32-level membership), =verifyDepositorBinding= + =identity_membership_b1= (B1); EIP-196 |
    | Bound membership   | =identity_membership_b1.circom= (B1 only); public inputs derived from the sigma's \( P_{dep} \)                          |
    | Domain separation  | every transcript, leaf, derived key and the identity scalar carries a =AlbertaBuck/.../v2= tag                          |
@@ -1541,9 +1543,9 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+LATEX: {\scriptsize
    | Flavour                 | =mint=  | =spendCoupled*= |
    |-------------------------+---------+-----------------|
-   | A1 (addressed, public)  | 513,223 | 966,181         |
+   | A1 (addressed, public)  | 513,223 | 964,291         |
    | A2 (addressed, private) | 629,061 | 981,834         |
-   | B1 (bearer, public)     | 513,223 | 910,260         |
+   | B1 (bearer, public)     | 513,223 | 906,479         |
    #+LATEX: }
 
    Isolated per-phase verification gas:
@@ -1551,7 +1553,7 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+LATEX: {\scriptsize
    | Verification phase                  | A1      | A2      | B1      |
    |-------------------------------------+---------+---------+---------|
-   | note proof (=spend.circom=, shared) | 241,262 | 241,279 | 335,084 |
+   | note proof (=spend.circom=, shared) | 241,262 | 241,279 | 333,193 |
    | folded gate (=deposit_fold_a[12]=)  | 514,845 | 506,837 | --      |
    | bound membership (=..._b1=)         | --      | --      | 253,120 |
    | deposit sigma (EIP-196)             | --      | --      | 131,046 |
@@ -1812,14 +1814,14 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python
-   from alberta_buck.wallet.notes import id_hash_a2, nullifier_b, NULLIFIER_TAG_B
+   from alberta_buck.wallet.notes import id_hash_a2, nullifier
 
-   nf_spent = nullifier_b(note.opening.rho, note.opening.id_hash)
+   nf_spent = nullifier(note.opening.rho, note.opening.id_hash)
 
    r_bad    = rand_scalar(rng)
    eIss_sub = elgamal_encrypt(issuer["M"], pk_recv, r_bad)     # nameable substitute
    idh_sub  = id_hash_a2(note.eNote, eIss_sub, note.binding.T)
-   nf_sub   = nullifier_b(note.opening.rho, idh_sub)
+   nf_sub   = nullifier(note.opening.rho, idh_sub)
 
    print(f"spent note's nullifier      = {hex(nf_spent)[:20]}...")
    print(f"substituted-note nullifier  = {hex(nf_sub)[:20]}...")
@@ -1829,8 +1831,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+END_SRC
 
    #+RESULTS:
-   : spent note's nullifier      = 0x21e26b3b7ce73d8f92...
-   : substituted-note nullifier  = 0x8457f5e4ede24de641...
+   : spent note's nullifier      = 0x2df2ed5819b3373096...
+   : substituted-note nullifier  = 0x21d7c61b44d2216b85...
    : -> the fold recomputes the nullifier from the idHash it opens, so a
    :    substituted ciphertext cannot bind THIS spend
 
@@ -1884,11 +1886,8 @@ witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[htt
    #+BEGIN_SRC python
    from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
 
-   sg_k = rand_scalar(rng)
-   sigma_R, sigma_s = mul(G1, sg_k), (sg_k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
    note_a1 = mint_unilateral_a1(M_rec, pk_recv, v=100, rho=rand_scalar(rng),
-                                m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
-                                rng=rng)
+                                m_issuer=m_iss, rng=rng)
 
    # The relation the circuit enforces, with v PUBLIC.
    u_honest = (note_a1.opening.v + note_a1.r_note * k_recv) % ORDER

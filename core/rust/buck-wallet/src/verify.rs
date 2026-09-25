@@ -6,7 +6,7 @@
 //! every check: the point-to-human bridge `keccak(identity)*G == M` for
 //! both parties, the generating side's self-naming verifiable
 //! decryption, the type-specific naming, and the note anchor (idHash
-//! preimage, cm-in-batch, unified 4242 nullifier, face).
+//! preimage, cm-in-batch, nullifier, face).
 
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ use buck_registry::tree::mailbox_leaf;
 use buck_identity::issuer_reenc::{issuer_reenc_verify, IssuerReencProof};
 use buck_identity::keccak::identity_scalar;
 use buck_identity::notes::{
-    id_hash_a1, id_hash_a2, id_hash_b1, nullifier_b, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
+    id_hash_a1, id_hash_a2, id_hash_b1, nullifier, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
 };
 use buck_identity::schnorr::{batch_commitment, issuer_schnorr_verify, SchnorrProof};
 use buck_identity::verifiable_decrypt::{verifiable_decrypt_verify, VdProof};
@@ -379,22 +379,14 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
         // (b) Identity-M idHash preimage; (A-flavors) addressed legs.
         let mut e_iss_a2: Option<Ctw> = None;
         if t == "note-b1" {
-            let sigma_r = get_g1(np, "sigma_R")?;
-            let sigma_s = get_w(np, "sigma_s")?;
-            if id_hash_b1(&m_iss, &sigma_r, &sigma_s)? != opening.id_hash {
-                return Ok(RcptResult::fail(
-                    "note-b1: idHash != id_hash_b1(m_iss, sigma)",
-                ));
+            if id_hash_b1(&m_iss)? != opening.id_hash {
+                return Ok(RcptResult::fail("note-b1: idHash != id_hash_b1(m_iss)"));
             }
         } else if t == "note-a1" {
             let e_note = get_ct(np, "eNote")?;
             let e_rec = get_ct(np, "eRec")?;
-            let sigma_r = get_g1(np, "sigma_R")?;
-            let sigma_s = get_w(np, "sigma_s")?;
-            if id_hash_a1(&e_note, &m_iss, &sigma_r, &sigma_s)? != opening.id_hash {
-                return Ok(RcptResult::fail(
-                    "note-a1: idHash != id_hash_a1(eNote, m_iss, sigma)",
-                ));
+            if id_hash_a1(&e_note, &m_iss)? != opening.id_hash {
+                return Ok(RcptResult::fail("note-a1: idHash != id_hash_a1(eNote, m_iss)"));
             }
             if let Some(e) = check_addressed_legs(
                 "note-a1", np, role.as_str(), &e_note, &e_rec, &payee.m_pt, &opening.v,
@@ -492,10 +484,10 @@ pub fn verify_receipt(core: &Value) -> Result<RcptResult> {
             }
         }
 
-        // (d) Spend anchor: unified 4242 nullifier + the paid face.
+        // (d) Spend anchor: the nullifier + the paid face.
         let nf = get_w(rp, "nullifier")?;
         let face = get_w(rp, "face")?;
-        if nf != nullifier_b(&opening.rho, &opening.id_hash)? {
+        if nf != nullifier(&opening.rho, &opening.id_hash)? {
             return Ok(RcptResult::fail(format!("{t}: nullifier mismatch")));
         }
         if face != opening.v {

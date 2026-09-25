@@ -14,11 +14,11 @@ addressed ciphertexts are keyed to the payee's receiving key ``pkRecv``, and
 each side proves what only it can -- the recipient by verifiable decryption
 under ``pkRecv``, the issuer by disclosing the mint randomness:
 
-* note-b1:  idHash == id_hash_b1(m_iss, sigma_R, sigma_s) — the issuer is
+* note-b1:  idHash == id_hash_b1(m_iss) — the issuer is
   bound INTO the leaf; the batch Schnorr binds the registered issuer key over
   keccak(cms).  An issuer-generated receipt additionally names the depositor
   via the verifiable decryption of the SpentCoupledB1 event's eDepForIss.
-* note-a1:  idHash == id_hash_a1(eNote, m_iss, sigma_R, sigma_s); the
+* note-a1:  idHash == id_hash_a1(eNote, m_iss); the
   addressed legs open eNote to v·G and eRec to the named M_rec under pkRecv,
   and a carried mailbox binding ties pkRecv to M_rec.
 * note-a2:  idHash == id_hash_a2(eNote, eIss, T); the addressed legs open
@@ -29,8 +29,8 @@ under ``pkRecv``, the issuer by disclosing the mint randomness:
   to a sock puppet.  Without a binding the receipt still verifies but is
   stamped UNVERIFIED ISSUER.
 
-All flavors use the unified spend nullifier ``Poseidon3(rho, idHash, 4242)``
-(the shipped spend.circom tag) anchored at the ``SpentCoupled*`` event.
+All flavors use the one spend nullifier ``Poseidon([T_NF, rho, idHash])`` (the
+spend circuit's) anchored at the ``SpentCoupled*`` event.
 
 Tier 2 (chain anchoring) is out of scope — the verifier would read the
 embedded ``pk`` / ``E_addr`` and event references from a node.
@@ -51,7 +51,7 @@ from alberta_buck.wallet.chaum_pedersen import CPProof, chaum_pedersen_verify
 from alberta_buck.wallet.verifiable_decrypt import VDProof, verifiable_decrypt_verify
 from alberta_buck.wallet.schnorr import SchnorrProof, batch_commitment, issuer_schnorr_verify
 from alberta_buck.wallet.notes import (
-    NoteOpening, note_commitment, nullifier_b,
+    NoteOpening, note_commitment, nullifier,
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
     id_hash_a1, id_hash_a2, id_hash_b1,
 )
@@ -321,20 +321,14 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
         # (b) Identity-M idHash preimage: the named parties are bound INTO the
         #     leaf the spend SNARK consumed.
         if t == "note-b1":
-            sigma_R = _g1_from_hex(np["sigma_R"])
-            sigma_s = _h(np["sigma_s"])
-            if id_hash_b1(m_iss, sigma_R, sigma_s) != opening.id_hash:
-                return RcptResult(False, None, None,
-                                  "note-b1: idHash != id_hash_b1(m_iss, sigma)")
+            if id_hash_b1(m_iss) != opening.id_hash:
+                return RcptResult(False, None, None, "note-b1: idHash != id_hash_b1(m_iss)")
         elif t in ("note-a1", "note-a2"):
             eNote = _ct_from_hex(np["eNote"])
             if t == "note-a1":
                 eId = _ct_from_hex(np["eRec"])
-                sigma_R = _g1_from_hex(np["sigma_R"])
-                sigma_s = _h(np["sigma_s"])
-                if id_hash_a1(eNote, m_iss, sigma_R, sigma_s) != opening.id_hash:
-                    return RcptResult(False, None, None,
-                                      "note-a1: idHash != id_hash_a1(eNote, m_iss, sigma)")
+                if id_hash_a1(eNote, m_iss) != opening.id_hash:
+                    return RcptResult(False, None, None, "note-a1: idHash != id_hash_a1(eNote, m_iss)")
                 M_id, id_key = core.payee.M_pt, "vdRec"
             else:
                 eId = _ct_from_hex(np["eIss"])
@@ -366,7 +360,12 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
             if err is not None:
                 return RcptResult(False, None, None, f"{t}: {err}")
 
-        # (c) Issuer binding over the batch / leaf.
+        # (c) Issuer binding over the batch / leaf.  For B1/A1 the batch Schnorr proves the
+        #     payer ACCOUNT minted this note, under its registered key.  That the account is the
+        #     public identity the receipt names rests on the account's off-chain public
+        #     attestation (IdentityRegistry.isPublicIdentity), which a reader confirms; a public
+        #     issuer that names another identity in its notes is refused by any wallet that takes
+        #     the issuer from the minting account, and is self-attributed on chain.
         if t in ("note-b1", "note-a1"):
             sig = rp.get("issuer_sig")
             if sig is None:
@@ -409,10 +408,10 @@ def verify_receipt(core: ReceiptCore) -> RcptResult:
                                       "note-a2: the binding's Identity is not the named issuer")
             # else: accept; UNVERIFIED ISSUER banner set below.
 
-        # (d) Spend anchor: the unified 4242 nullifier + the paid face.
+        # (d) Spend anchor: the nullifier + the paid face.
         nf = _h(rp["nullifier"])
         face = _h(rp["face"])
-        if nf != nullifier_b(opening.rho, opening.id_hash):
+        if nf != nullifier(opening.rho, opening.id_hash):
             return RcptResult(False, None, None, f"{t}: nullifier mismatch")
         if face != opening.v:
             return RcptResult(False, None, None, f"{t}: face != note value")

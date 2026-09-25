@@ -37,7 +37,7 @@ from alberta_buck.wallet.issuer_reenc import issuer_reenc_prove
 from alberta_buck.wallet.ps import ps_keygen
 from alberta_buck.wallet.notes import (
     NoteOpening, FLAVOR_A1, FLAVOR_A2, FLAVOR_B1,
-    note_commitment, nullifier_b, id_hash_a1, id_hash_a2, id_hash_b1,
+    note_commitment, nullifier, id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.build_receipt import (
     build_eoa_pub, build_eoa_priv, build_note_b1, build_note_a1, build_note_a2,
@@ -312,9 +312,8 @@ def _build(seed: int) -> Dict[str, Any]:
     })
 
     # ---- note-b1 (both roles over ONE mint) --------------------------------
-    sigma_R_k, sigma_s, rho = draw(), draw(), draw()
-    sigma_R = mul(G1, sigma_R_k)
-    idh = id_hash_b1(bob["m"], sigma_R, sigma_s)
+    rho = draw()
+    idh = id_hash_b1(bob["m"])
     opening = NoteOpening(FLAVOR_B1, FACE, rho, idh, 0)
     cm = note_commitment(opening)
     cms = [draw() % F_R, cm]
@@ -323,23 +322,19 @@ def _build(seed: int) -> Dict[str, Any]:
                               CHAINID, rng=_replay([k_sig]))
     r_dep = draw()
     eDep = elgamal_encrypt(alice["M"], bob["pk"], r_dep)
-    nf = nullifier_b(rho, idh)
+    nf = nullifier(rho, idh)
     b1_mint = {
         "opening": _opening_json(opening), "cm": _hx(cm),
         "cms": [scalar_to_hex(c) for c in cms],
         "issuer_sig": _schnorr_json(sig),
-        "sigma_R": _g1(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
         "eDepForIss": _ct(eDep), "nullifier": scalar_to_hex(nf),
-        "nonces": {"sigma_R_k": scalar_to_hex(sigma_R_k),
-                   "sigma_s": scalar_to_hex(sigma_s),
-                   "rho": scalar_to_hex(rho), "k_sig": scalar_to_hex(k_sig),
+        "nonces": {"rho": scalar_to_hex(rho), "k_sig": scalar_to_hex(k_sig),
                    "r_dep": scalar_to_hex(r_dep)},
     }
     for role in ("recipient", "issuer"):
         t_vd = draw()
         core = build_note_b1(
             opening=opening, cms=cms, issuer_sig=sig,
-            sigma_R=sigma_R, sigma_s=sigma_s,
             nullifier=nf, face=FACE, eDepForIss=eDep,
             role=role, payee_sk=alice["sk"], issuer_sk=bob["sk"],
             txhash="0x" + "b1" * 32, rng=_replay([t_vd]),
@@ -353,32 +348,28 @@ def _build(seed: int) -> Dict[str, Any]:
         })
 
     # ---- note-a1 (both roles over ONE mint) --------------------------------
-    sigma_R_k, sigma_s, rho = draw(), draw(), draw()
-    sigma_R = mul(G1, sigma_R_k)
+    rho = draw()
     r_note, r_rec = draw(), draw()
     # Keyed to the MAILBOX, not to the Identity: encrypting an identity point
     # under itself makes message and key share one secret, and one scalar
     # multiplication per candidate identifies the recipient.
     eNote = elgamal_encrypt(mul(G1, FACE), alice["pk_recv"], r_note)
     eRec = elgamal_encrypt(alice["M"], alice["pk_recv"], r_rec)
-    idh = id_hash_a1(eNote, bob["m"], sigma_R, sigma_s)
+    idh = id_hash_a1(eNote, bob["m"])
     opening = NoteOpening(FLAVOR_A1, FACE, rho, idh, 0)
     cm = note_commitment(opening)
     cms = [cm, draw() % F_R]
     k_sig = draw()
     sig = issuer_schnorr_sign(bob["sk"], batch_commitment(cms), bob["addr"],
                               CHAINID, rng=_replay([k_sig]))
-    nf = nullifier_b(rho, idh)
+    nf = nullifier(rho, idh)
     a1_mint = {
         "opening": _opening_json(opening), "cm": _hx(cm),
         "cms": [scalar_to_hex(c) for c in cms],
         "issuer_sig": _schnorr_json(sig),
         "eNote": _ct(eNote), "eRec": _ct(eRec),
-        "sigma_R": _g1(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
         "nullifier": scalar_to_hex(nf),
-        "nonces": {"sigma_R_k": scalar_to_hex(sigma_R_k),
-                   "sigma_s": scalar_to_hex(sigma_s),
-                   "rho": scalar_to_hex(rho),
+        "nonces": {"rho": scalar_to_hex(rho),
                    "r_note": scalar_to_hex(r_note),
                    "r_rec": scalar_to_hex(r_rec),
                    "k_sig": scalar_to_hex(k_sig)},
@@ -401,7 +392,7 @@ def _build(seed: int) -> Dict[str, Any]:
             rng_role = _replay([])
         core = build_note_a1(
             opening=opening, cms=cms, issuer_sig=sig,
-            eNote=eNote, eRec=eRec, sigma_R=sigma_R, sigma_s=sigma_s,
+            eNote=eNote, eRec=eRec,
             nullifier=nf, face=FACE,
             role=role, payee_sk=alice["sk"],
             pk_recv=alice["pk_recv"],
@@ -434,7 +425,7 @@ def _build(seed: int) -> Dict[str, Any]:
     opening = NoteOpening(FLAVOR_A2, FACE, rho, idh, 0)
     cm = note_commitment(opening)
     cms = [cm]
-    nf = nullifier_b(rho, idh)
+    nf = nullifier(rho, idh)
     a2_mint = {
         "opening": _opening_json(opening), "cm": _hx(cm),
         "cms": [scalar_to_hex(c) for c in cms],
@@ -591,13 +582,10 @@ def _build(seed: int) -> Dict[str, Any]:
     }
 
     # ---- unilateral A1 flow -------------------------------------------------
-    sigma_R_k, sigma_s = draw(), draw()
-    sigma_R = mul(G1, sigma_R_k)
     rho = draw()
     r_prime, r_note = draw(), draw()
     minted1 = mint_unilateral_a1(alice["M"], alice["pk_recv"], v_note, rho,
-                                 bob["m"], sigma_R, sigma_s, r_prime=r_prime,
-                                 rng=_replay([r_note]))
+                                 bob["m"], r_prime=r_prime, rng=_replay([r_note]))
     t_vd = draw()
     rcpt1 = make_receipt_a1(alice["k_recv"], alice["M"], minted1, bob["M"],
                             bob["addr"], CHAINID, tree, rng=_replay([t_vd]))
@@ -608,7 +596,6 @@ def _build(seed: int) -> Dict[str, Any]:
         "pk_recv": _g1(alice["pk_recv"]), "k_recv": scalar_to_hex(alice["k_recv"]),
         "v": _hx(v_note), "rho": scalar_to_hex(rho),
         "m_issuer": scalar_to_hex(bob["m"]), "M_iss": _g1(bob["M"]),
-        "sigma_R": _g1(sigma_R), "sigma_s": scalar_to_hex(sigma_s),
         "issuer": _hx(bob["addr"]), "chainid": _hx(CHAINID),
         "predicate": _hx(0),
         "r_prime": scalar_to_hex(r_prime), "r_note": scalar_to_hex(r_note),
@@ -707,19 +694,17 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
         scalar_to_hex(wrap_mask(shared, b"rho")))
 
     # A1: mint, deliver, open
-    sig_k, sig_s, rho1, rp1, rn1 = draw(), draw(), draw(), draw(), draw()
-    sig_R = mul(G1, sig_k)
+    rho1, rp1, rn1 = draw(), draw(), draw()
     m1 = mint_unilateral_a1(alice["M"], pk_a, v=face, rho=rho1, m_issuer=bob["m"],
-                            sigma_R=sig_R, sigma_s=sig_s, r_prime=rp1, rng=_replay([rn1]))
-    d1 = deliver_a1(m1, pk_a, sig_R, sig_s)
+                            r_prime=rp1, rng=_replay([rn1]))
+    d1 = deliver_a1(m1, pk_a)
     row("deliver_a1", {"eNote": _ct(m1.eNote), "eRec": _ct(m1.eRec), "v": _hx(face),
                        "rho": scalar_to_hex(rho1), "predicate": _hx(0),
-                       "r_note": scalar_to_hex(m1.r_note), "pk_recv": _g1(pk_a),
-                       "sigma_R": _g1(sig_R), "sigma_s": scalar_to_hex(sig_s)}, d1)
+                       "r_note": scalar_to_hex(m1.r_note), "pk_recv": _g1(pk_a)}, d1)
     o1 = open_a1(d1, k_a, bob["m"])
     row("open_a1", {"delivery": d1, "k": scalar_to_hex(k_a), "m_issuer": scalar_to_hex(bob["m"])},
         {"opening": opening(o1.opening, o1.cm), "eNote": _ct(o1.eNote), "eRec": _ct(o1.eRec),
-         "sigma_R": _g1(o1.sigma_R), "sigma_s": _hx(o1.sigma_s), "r_note": _hx(o1.r_note)})
+         "r_note": _hx(o1.r_note)})
 
     # A2: mint (with the issuer's naming salt), deliver, open
     rho2, salt_iss = draw(), draw() % F_R or 1
@@ -780,11 +765,10 @@ def _notes_section(alice, bob, draw, rng) -> List[Dict[str, Any]]:
                               note_ct=eEnc1, tree=tree)
     row("deposit_fold_a1_witness",
         {**common(t1, eEnc1, o1), "eNote": _ct(o1.eNote), "v": _hx(face),
-         "m_issuer": scalar_to_hex(bob["m"]), "sigma_R": _g1(o1.sigma_R),
-         "sigma_s": scalar_to_hex(o1.sigma_s), "r_note": scalar_to_hex(o1.r_note)},
+         "m_issuer": scalar_to_hex(bob["m"]), "r_note": scalar_to_hex(o1.r_note)},
         deposit_fold_a1_witness(witness=w1, rho=o1.opening.rho, id_hash=o1.opening.id_hash,
-                                e_note=o1.eNote, v=face, m_issuer=bob["m"], sigma_R=o1.sigma_R,
-                                sigma_s=o1.sigma_s, r_note=o1.r_note, t=t1, r_E=r_E, e_dep=E_dep,
+                                e_note=o1.eNote, v=face, m_issuer=bob["m"],
+                                r_note=o1.r_note, t=t1, r_E=r_E, e_dep=E_dep,
                                 pk_dep=pk_dep, e_enc=eEnc1, identity_root=root))
 
     t2 = draw()

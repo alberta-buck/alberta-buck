@@ -1478,7 +1478,7 @@ architecture, and the attack each relation refuses, are in
 ** Setup
 
    *Pool.*  =noteTree=, a depth-20 Poseidon tree of leaves
-   \( cm = \mathrm{Poseidon}_5(\mathrm{flavor}, v, \rho, \mathrm{idHash}, \mathrm{predicate}) \)
+   \( cm = \mathrm{Poseidon}_6(T_{CM}, \mathrm{flavor}, v, \rho, \mathrm{idHash}, \mathrm{predicate}) \)
    (\( \mathrm{idHash} \) digests the per-flavor identity payload), whose empty leaf is the field
    tag of =AlbertaBuck/Notes/Zero/v2=; a =nullifiers= set; a 30-deep ring of recent roots.  Mint
    is the batch rollup of /alberta-buck-notes-rollup-mint/ -- a Groth16 proof of incremental
@@ -1527,16 +1527,18 @@ architecture, and the attack each relation refuses, are in
      \text{A2: } eNote = (r_nG,\ vG + r_n\,pk_{\text{recv}}),\quad
                  eIss = (R_i, C_i) = (r'G,\ M_{\text{iss}} + r'\,pk_{\text{recv}}).
    \]
-   A1's issuer is public: the note carries \( m_{\text{iss}} \) and a Schnorr \( \sigma \) over
-   the batch, and \( \mathrm{idHash} = \mathrm{Poseidon}_8(eNote, m_{\text{iss}}, \sigma) \).
+   A1's issuer is public: it signs the batch with a Schnorr proof checked at mint, and
+   \( \mathrm{idHash} = \mathrm{Poseidon}_6(T_{ID}, eNote, m_{\text{iss}}) \).
    A2's issuer is private: a recipient-blinded re-encryption binding (=verifyIssuerReenc=)
    publishes \( Q = pk_{\text{recv}} + \beta H,\ U = r'H,\ T = r'\,pk_{\text{recv}} + \gamma H \),
-   and \( \mathrm{idHash} = \mathrm{Poseidon}_{10}(eNote, eIss, T) \); \( \gamma \) reaches the
+   and \( \mathrm{idHash} = \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss, T) \); \( \gamma \) reaches the
    recipient wrapped in the delivery.  B1 is bearer: no recipient at mint, the public issuer signs
    the batch, and the depositor encrypts its /own/ Identity for the issuer at spend (Theorem 9).
    Throughout this Part \( H = H_{\text{PED}} \).
 
-   *Nullifier.*  Flavor-agnostic: \( nf = \mathrm{Poseidon}_3(\rho,\ \mathrm{idHash},\ 4242) \).
+   *Nullifier.*  Flavor-agnostic: \( nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ \mathrm{idHash}) \).
+   Each note hash leads with its own v2 domain word (\( T_{CM}, T_{ID}, T_{NF} \)), so no two of
+   them, and none of them and any other Poseidon in the protocol, share a preimage.
 
    *Transcripts.*  Every sigma protocol's Fiat-Shamir challenge ends in its own v2 domain word,
    so no accepting transcript of one protocol is an accepting transcript of another.
@@ -1599,9 +1601,9 @@ architecture, and the attack each relation refuses, are in
    =msg.sender=.  Under SNARK knowledge soundness and Poseidon collision resistance there is an
    extractor producing a witness with:
 
-   0. *(Same note.)*  \( nf = \mathrm{Poseidon}_3(\rho, \mathrm{idHash}, 4242) \) for the
+   0. *(Same note.)*  \( nf = \mathrm{Poseidon}_3(T_{NF}, \rho, \mathrm{idHash}) \) for the
       \( (\rho, \mathrm{idHash}) \) the spend proof opened, and \( \mathrm{idHash} \) opens to the
-      flavor's payload: A1 \( (eNote, m_{\text{iss}}, \sigma) \); A2 \( (eNote, eIss, T) \).
+      flavor's payload: A1 \( (eNote, m_{\text{iss}}) \); A2 \( (eNote, eIss, T) \).
    1. *(Reading.)*  A1: \( eNote = (r_nG,\ (v + r_nk)G) \).  A2:
       \( eIss = (r'G,\ M_I + (r'k)G) \) for a point \( M_I \).
    2. *(The spend's ciphertext.)*  A1: \( eEnc = (tG,\ (m_{\text{rec}} + tk)G) \).  A2:
@@ -1662,7 +1664,7 @@ architecture, and the attack each relation refuses, are in
    \( H \) hashed to the curve, extractors produce \( (m_{\text{dep}}, sk_{\text{dep}}, r, b) \)
    from the sigma and \( (M, b', s) \) with a path from the SNARK such that:
 
-   1. \( cm = \mathrm{Poseidon}_5(B1, v, \rho, \mathrm{idHash}, \cdot) \) lies under =noteRoot=,
+   1. \( cm = \mathrm{Poseidon}_6(T_{CM}, B1, v, \rho, \mathrm{idHash}, \cdot) \) lies under =noteRoot=,
       and the prover knows \( \rho \) (the bearer authorization).
    2. *(Account.)*  \( pk_{\text{dep}} = sk_{\text{dep}}G \),
       \( C_d = m_{\text{dep}}G + sk_{\text{dep}}R_d \).
@@ -1702,7 +1704,7 @@ architecture, and the attack each relation refuses, are in
 ** Theorem 10 (Nullifier and Double-Spend Prevention)
 
    The nullifier is flavor-agnostic,
-   \( nf = \mathrm{Poseidon}_3(\rho,\ \mathrm{idHash},\ 4242) \), over the spend proof's opening
+   \( nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ \mathrm{idHash}) \), over the spend proof's opening
    (\( \mathrm{idHash} \) digests the identity payload), so one =nullifiers= set serves every
    flavor.
 
@@ -1807,7 +1809,7 @@ architecture, and the attack each relation refuses, are in
      from alberta_buck.wallet.nums import H_PEDERSEN as H
      from alberta_buck.wallet.poseidon import poseidon
      from alberta_buck.wallet.elgamal import ElGamalCiphertext
-     from alberta_buck.wallet.notes import id_hash_a2
+     from alberta_buck.wallet.notes import TAG_NULLIFIER, id_hash_a2, nullifier
      from alberta_buck.registry.tree import receiving_leaf, identity_leaf_salted
 
      def enc(P, pk, r): return (multiply(G1, r), add(P, multiply(pk, r)))
@@ -1852,7 +1854,7 @@ architecture, and the attack each relation refuses, are in
      # --- Theorem 10: one flavor-agnostic nullifier, deterministic ---
      rho = rand()
      idHash = id_hash_a2(ElGamalCiphertext(*eNote), ElGamalCiphertext(*eIss), T)
-     assert poseidon([rho, idHash, 4242]) == poseidon([rho, idHash, 4242])
+     assert nullifier(rho, idHash) == nullifier(rho, idHash) == poseidon([TAG_NULLIFIER, rho, idHash])
      ok("Theorem 10 (nullifier determinism)")
 
      # --- Theorem 11: B1's issuer names the depositor ---
@@ -1911,7 +1913,7 @@ architecture, and the attack each relation refuses, are in
    2. *Mint* (Theorem 7).  Alice learns \( M_{\text{rec}} \) and \( pk_{\text{recv}} \) off chain
       and checks the mailbox leaf, then mints \( eNote \) and \( eIss \) with the binding
       \( (Q, U, T) \).  The leaf
-      \( cm = \mathrm{Poseidon}_5(A2,\ v,\ \rho,\ \mathrm{Poseidon}_{10}(eNote, eIss, T),\ 0) \)
+      \( cm = \mathrm{Poseidon}_6(T_{CM},\ A2,\ v,\ \rho,\ \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss, T),\ 0) \)
       is folded into =noteTree=.
    3. *Deliver and check* (Theorems 11, 12).  The payload -- \( \rho \), \( r' \), \( \gamma \),
       \( s_{\text{iss}} \) and the openings -- travels wrapped to \( pk_{\text{recv}} \).  Bob
@@ -1964,7 +1966,7 @@ architecture, and the attack each relation refuses, are in
        constrained to equal the public =newRoot=, which the contract accepts into its root ring;
        spends prove inclusion against any root in that window.
     2. *Nullifier determinism (spend side).*  =circuits/spend.circom=, the one note proof every
-       spend reuses, recomputes \( nf = \mathrm{Poseidon}_3(\rho,\ \mathrm{idHash},\ 4242) \) from
+       spend reuses, recomputes \( nf = \mathrm{Poseidon}_3(T_{NF},\ \rho,\ \mathrm{idHash}) \) from
        the committed opening (Theorem 10); the folds recompute it too, which is how they are
        joined to the spend.
     3. *Value conservation (spend side).*  The spend circuit outputs =faceReleased= equal to the
@@ -1973,10 +1975,10 @@ architecture, and the attack each relation refuses, are in
        without re-bounding it relies on the mint circuit having done so.
 
     The leaf layout is
-    \( \mathrm{Poseidon}_5(\mathrm{flavor},\, v,\, \rho,\, \mathrm{idHash},\, \mathrm{predicate}) \)
+    \( \mathrm{Poseidon}_6(T_{CM},\, \mathrm{flavor},\, v,\, \rho,\, \mathrm{idHash},\, \mathrm{predicate}) \)
     over BN254 at tree depth 20, pinned by the per-N verifiers.  The A2 mint additionally exposes
     each leaf's \( eIss \) and \( T \) and recomputes
-    \( \mathrm{idHash} = \mathrm{Poseidon}_{10}(eNote, eIss, T) \) in circuit, so the binding
+    \( \mathrm{idHash} = \mathrm{Poseidon}_{11}(T_{ID}, eNote, eIss, T) \) in circuit, so the binding
     =Notes.mint= checks is the one the note commits: \( 7N + 4 \) public signals per batch.
 
 #+LATEX: \clearpage

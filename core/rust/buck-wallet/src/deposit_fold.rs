@@ -20,15 +20,14 @@
 
 use serde_json::{json, Value};
 
-use buck_identity::notes::{identity_leaf_salted, receiving_leaf, NULLIFIER_TAG_B};
+use buck_identity::notes::{id_hash_a1, id_hash_a2, identity_leaf_salted, nullifier, receiving_leaf};
 use buck_identity::nums::h_pedersen;
-use buck_identity::poseidon::poseidon;
 use buck_identity::{
     fr_mod, g1_add, g1_generator, g1_mul, g1_neg, reduce_mod_order, w_from_fr,
 };
 use buck_registry::tree::fold_path;
 
-use crate::{dec_w, w_from_u64, Ctw, G1w, IdError, Result, W256};
+use crate::{dec_w, Ctw, G1w, IdError, Result, W256};
 
 /// A membership path, as a wallet rebuilds it from a published subtree.
 pub struct Path<'a> {
@@ -116,14 +115,6 @@ fn check_account_and_leaf(c: &FoldCommon, cd_why: &'static str) -> Result<W256> 
     Ok(cd)
 }
 
-fn nullifier(c: &FoldCommon) -> Result<W256> {
-    poseidon(&[
-        reduce_mod_order(c.rho),
-        reduce_mod_order(c.id_hash),
-        w_from_u64(NULLIFIER_TAG_B),
-    ])
-}
-
 fn account_json(c: &FoldCommon) -> Vec<(&'static str, Value)> {
     vec![
         ("eEncRx", limbs(&c.e_enc.0 .0)),
@@ -154,18 +145,16 @@ fn object(pairs: Vec<(&'static str, Value)>) -> Value {
 
 /// The A1 witness: `eNote` is pinned against the PUBLIC face, which is what
 /// makes the addressed Identity unique, and no curve addition is needed at all.
-#[allow(clippy::too_many_arguments)]
 pub fn deposit_fold_a1_witness(
     c: &FoldCommon,
     e_note: &Ctw,
     v: &W256,
     m_issuer: &W256,
-    sigma_r: &G1w,
-    sigma_s: &W256,
     r_note: &W256,
 ) -> Result<Value> {
     let u = addmod(v, &mulmod(r_note, c.k)); // eNote.C = u*G
     let w = addmod(c.m_rec, &mulmod(c.t, c.k)); // eEnc.C  = w*G
+    require(*c.id_hash == id_hash_a1(e_note, m_issuer)?, "idHash != id_hash_a1(eNote, m_issuer)")?;
     require(e_note.0 == g(r_note)?, "eNote.R != rn*G")?;
     require(e_note.1 == g(&u)?, "eNote.C != u*G (u = v + rn*k)")?;
     require(c.e_enc.0 == g(c.t)?, "eEnc.R != t*G")?;
@@ -174,7 +163,7 @@ pub fn deposit_fold_a1_witness(
     let (pe, pi) = path_json(&c.path);
 
     let mut pairs = vec![
-        ("nullifier", dec(&nullifier(c)?)),
+        ("nullifier", dec(&nullifier(c.rho, c.id_hash)?)),
         ("v", dec(v)),
         ("identityRoot", dec(c.identity_root)),
     ];
@@ -184,8 +173,6 @@ pub fn deposit_fold_a1_witness(
         ("idHash", dec_fr(c.id_hash)),
         ("eNote", ct4(e_note)),
         ("mIss", dec_fr(m_issuer)),
-        ("sigR", json!([dec_w(&reduce_mod_order(&sigma_r.0)), dec_w(&reduce_mod_order(&sigma_r.1))])),
-        ("sigS", dec_fr(sigma_s)),
         ("rn", limbs(&reduce_mod_order(r_note))),
         ("m_rec", limbs(&reduce_mod_order(c.m_rec))),
         ("k_recv", limbs(&reduce_mod_order(c.k))),
@@ -260,11 +247,12 @@ pub fn deposit_fold_a2_witness(
         fold_path(&iss_leaf, iss_path.siblings, iss_path.index_bits)? == *c.identity_root,
         "the shipped issuer salt does not open a leaf under the posted root",
     )?;
+    require(*c.id_hash == id_hash_a2(e_note, e_iss, t)?, "idHash != id_hash_a2(eNote, eIss, T)")?;
     let (pe, pi) = path_json(&c.path);
     let (ipe, ipi) = path_json(&iss_path);
 
     let mut pairs = vec![
-        ("nullifier", dec(&nullifier(c)?)),
+        ("nullifier", dec(&nullifier(c.rho, c.id_hash)?)),
         ("identityRoot", dec(c.identity_root)),
     ];
     pairs.extend(account_json(c));

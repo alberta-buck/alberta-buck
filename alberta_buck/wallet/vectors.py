@@ -32,7 +32,7 @@ from alberta_buck.wallet.nizk import registration_prove, RegistrationProof
 from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
 from alberta_buck.wallet.notes import (
     FLAVOR_A1, FLAVOR_A2, FLAVOR_B1, NoteOpening, note_commitment,
-    nullifier_b, id_hash_a1, id_hash_a2, id_hash_b1,
+    nullifier, id_hash_a1, id_hash_a2, id_hash_b1,
 )
 from alberta_buck.wallet.schnorr import issuer_schnorr_sign, batch_commitment
 from alberta_buck.wallet.verifiable_decrypt import verifiable_decrypt_prove
@@ -273,15 +273,16 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # (pk_iss = _pk[bob] = bob.kp.pk), so the same record that registers Bob
     # authenticates the batch binding.
     #
-    # The B1 idHash commits to Bob's identity material via id_hash_b1; the
-    # per-leaf signature (sigma) is representative only -- Phase 1 binds the
-    # issuer through the *batch* Schnorr over keccak(cms), not the per-leaf
-    # sig (see alberta-buck-notes.org "The Non-Deniable-Receipt Invariant" -- B1 uses batch Schnorr for the issuer binding).
+    # The B1 idHash commits to Bob's identity scalar via id_hash_b1; the batch
+    # Schnorr over keccak(cms) authenticates him as the issuer.  The two draws
+    # that once made a per-leaf signature pair stay RESERVED: the a2b section
+    # below is pinned by committed SNARK fixtures, and every draw before it
+    # must keep its place.
     rcpt_face    = 250
     rcpt_rho     = rand_scalar(rng)
-    rcpt_sigma_R = mul(G1, rand_scalar(rng))
-    rcpt_sigma_s = rand_scalar(rng)
-    rcpt_idHash  = id_hash_b1(bob.m, rcpt_sigma_R, rcpt_sigma_s)
+    rand_scalar(rng)
+    rand_scalar(rng)
+    rcpt_idHash  = id_hash_b1(bob.m)
     rcpt_opening = NoteOpening(
         flavor=FLAVOR_B1, v=rcpt_face, rho=rcpt_rho,
         id_hash=rcpt_idHash, predicate=0,
@@ -291,7 +292,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     rcpt_cms     = [rand_scalar(rng) % F_R, rcpt_cm, rand_scalar(rng) % F_R]
     rcpt_hBatch  = batch_commitment(rcpt_cms)
     rcpt_sig     = issuer_schnorr_sign(bob.kp.sk, rcpt_hBatch, BOB_ADDR, CHAINID, rng=rng)
-    rcpt_nf      = nullifier_b(rcpt_rho, rcpt_idHash)
+    rcpt_nf      = nullifier(rcpt_rho, rcpt_idHash)
 
     # ---- EOA approve receipt (decryptability Phase 1, verifiable decryption) --
     #
@@ -387,7 +388,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     )
 
     # -- note-b1: the `receipt` vector above IS the Identity-M B1 note (its
-    # idHash = id_hash_b1(bob.m, rcpt_sigma_R, rcpt_sigma_s) binds Bob into
+    # idHash = id_hash_b1(bob.m) binds Bob into
     # the leaf).  At spend, Alice (the depositor) published eDepForIss -- her
     # Identity re-encrypted under Bob's registered public-issuer key -- in the
     # SpentCoupledB1 event; Bob alone decrypts it to name her.
@@ -400,7 +401,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         payee_addr=ALICE_ADDR, payee_identity=alice.canonical, payee_M=alice.M,
         payee_pk=alice.kp.pk, payee_E_addr=alice.E,
         opening=rcpt_opening, cms=rcpt_cms, issuer_sig=rcpt_sig,
-        sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
         nullifier=rcpt_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
         txhash="0x" + "b1" * 32, block=1234599, logindex=1,
@@ -415,19 +415,19 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
     # -- note-a1: identity-targeted (unilateral A1).  Bob, the public issuer,
     # addresses the note to Alice's receiving key pk_recv: eNote encrypts the
     # face under it, eRec encrypts her identity point M_rec under it, and
-    # idHash = id_hash_a1(eNote, m_iss, sigma) binds both parties into the leaf.
+    # idHash = id_hash_a1(eNote, m_iss) binds both parties into the leaf.
     a1m_r_note  = rand_scalar(rng)
     a1m_eNote   = elgamal_encrypt(mul(G1, rcpt_face), alice_pk_recv, a1m_r_note)
     a1m_r_rec   = rand_scalar(rng)
     a1m_eRec    = elgamal_encrypt(alice.M, alice_pk_recv, a1m_r_rec)
-    a1m_idHash  = id_hash_a1(a1m_eNote, bob.m, rcpt_sigma_R, rcpt_sigma_s)
+    a1m_idHash  = id_hash_a1(a1m_eNote, bob.m)
     a1m_opening = NoteOpening(flavor=FLAVOR_A1, v=rcpt_face, rho=rcpt_rho,
                               id_hash=a1m_idHash, predicate=0)
     a1m_cm      = note_commitment(a1m_opening)
     a1m_cms     = [rand_scalar(rng) % F_R, a1m_cm, rand_scalar(rng) % F_R]
     a1m_sig     = issuer_schnorr_sign(bob.kp.sk, batch_commitment(a1m_cms),
                                       BOB_ADDR, CHAINID, rng=rng)
-    a1m_nf      = nullifier_b(rcpt_rho, a1m_idHash)
+    a1m_nf      = nullifier(rcpt_rho, a1m_idHash)
 
     _a1_common = dict(
         chainid=CHAINID, contracts=SIMPLE_CONTRACTS,
@@ -438,7 +438,6 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
         opening=a1m_opening, cms=a1m_cms, issuer_sig=a1m_sig,
         eNote=a1m_eNote, eRec=a1m_eRec,
         pk_recv=alice_pk_recv, mailbox_binding=alice_mbx,
-        sigma_R=rcpt_sigma_R, sigma_s=rcpt_sigma_s,
         nullifier=a1m_nf, face=rcpt_face,
         value=rcpt_face, block_time=RCPT_TIME,
         txhash="0x" + "a1" * 32, block=1234599, logindex=1,
@@ -472,7 +471,7 @@ def build_vectors(seed: int = 0xa1bc_b0ca) -> Dict[str, Any]:
                               id_hash=a2m_idHash, predicate=0)
     a2m_cm      = note_commitment(a2m_opening)
     a2m_cms     = [rand_scalar(rng) % F_R, a2m_cm, rand_scalar(rng) % F_R]
-    a2m_nf      = nullifier_b(rcpt_rho, a2m_idHash)
+    a2m_nf      = nullifier(rcpt_rho, a2m_idHash)
 
     _a2_common = dict(
         chainid=CHAINID, contracts=SIMPLE_CONTRACTS,

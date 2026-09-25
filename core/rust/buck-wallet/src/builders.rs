@@ -120,8 +120,6 @@ pub fn note_payload_record(
     e_note: Option<&Ctw>,
     e_rec: Option<&Ctw>,
     e_iss: Option<&Ctw>,
-    sigma_r: Option<&G1w>,
-    sigma_s: Option<&W256>,
     e_dep_for_iss: Option<&Ctw>,
     pk_recv: Option<&G1w>,
     r_note: Option<&W256>,
@@ -137,12 +135,6 @@ pub fn note_payload_record(
     }
     if let Some(e) = e_iss {
         d.insert("eIss".into(), ct_hex(e));
-    }
-    if let Some(r) = sigma_r {
-        d.insert("sigma_R".into(), g1_hex(r));
-    }
-    if let Some(s) = sigma_s {
-        d.insert("sigma_s".into(), Value::String(scalar_hex(s)));
     }
     if let Some(e) = e_dep_for_iss {
         d.insert("eDepForIss".into(), ct_hex(e));
@@ -528,8 +520,6 @@ pub fn build_note_b1(
     opening: &NoteOpening,
     cms: &[W256],
     issuer_sig: &SchnorrProof,
-    sigma_r: &G1w,
-    sigma_s: &W256,
     nullifier: &W256,
     face: &W256,
     value: u128,
@@ -550,18 +540,7 @@ pub fn build_note_b1(
     check_role(role)?;
 
     let rec_proof = receipts_proof_record(opening, cms, Some(issuer_sig), nullifier, face);
-    let payload = note_payload_record(
-        None,
-        None,
-        None,
-        Some(sigma_r),
-        Some(sigma_s),
-        e_dep_for_iss,
-        None,
-        None,
-        None,
-        None,
-    );
+    let payload = note_payload_record(None, None, None, e_dep_for_iss, None, None, None, None);
 
     let mut payee_vd_rec = None;
     let mut vd_payee_rec = None;
@@ -647,8 +626,6 @@ pub fn build_note_a1(
     issuer_sig: &SchnorrProof,
     e_note: &Ctw,
     e_rec: &Ctw,
-    sigma_r: &G1w,
-    sigma_s: &W256,
     nullifier: &W256,
     face: &W256,
     value: u128,
@@ -675,8 +652,6 @@ pub fn build_note_a1(
         Some(e_note),
         Some(e_rec),
         None,
-        Some(sigma_r),
-        Some(sigma_s),
         None,
         Some(legs.pk_recv),
         r_note.as_ref(),
@@ -795,8 +770,6 @@ pub fn build_note_a2(
         Some(e_note),
         None,
         Some(e_iss),
-        None,
-        None,
         None,
         Some(legs.pk_recv),
         r_note.as_ref(),

@@ -27,6 +27,6 @@ export const {
   identityOpeningProve, identityOpeningVerify, treeTag, deriveSalt,
   issuerReencProve, issuerReencVerify,
   b1BindProve, b1BindVerify,
-  noteCommitment, nullifierB, nullifierA,
+  noteCommitment, nullifier,
   idHashB1, idHashA1, idHashA2, identityLeaf,
 } = api;

@@ -276,8 +276,6 @@ pub fn mint_unilateral_a1(
     v: &W256,
     rho: &W256,
     m_issuer: &W256,
-    sigma_r: &G1w,
-    sigma_s: &W256,
     predicate: &W256,
     r_prime: &W256,
     r_note: &W256,
@@ -291,7 +289,7 @@ pub fn mint_unilateral_a1(
     // keyed to the receiving key.
     let e_rec = elgamal_encrypt(m_rec_pt, pk_recv, &r_prime)?;
 
-    let id_hash = id_hash_a1(&e_note, m_issuer, sigma_r, sigma_s)?;
+    let id_hash = id_hash_a1(&e_note, m_issuer)?;
     let opening = NoteOpening {
         flavor: FLAVOR_A1,
         v: *v,

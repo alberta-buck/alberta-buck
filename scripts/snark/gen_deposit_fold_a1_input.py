@@ -63,13 +63,9 @@ def build(thief: bool = False):
 
     # ---- the public issuer, and the note ----------------------------------
     m_iss = rand_scalar(rng)
-    sig_k = rand_scalar(rng)
-    sigma_R = mul(G1, sig_k)
-    sigma_s = (sig_k + rand_scalar(rng) * rand_scalar(rng)) % ORDER
     rho = rand_scalar(rng)
     r_prime = rand_scalar(rng)
     note = mint_unilateral_a1(M_rec, pk_recv, v=FACE, rho=rho, m_issuer=m_iss,
-                              sigma_R=sigma_R, sigma_s=sigma_s,
                               r_prime=r_prime, rng=rng)
 
     # ---- the spend: eEnc is eRec re-randomized, total randomness t ---------
@@ -101,8 +97,7 @@ def build(thief: bool = False):
     )
     return deposit_fold_a1_witness(
         witness=w, rho=rho, id_hash=note.idHash, e_note=note.eNote, v=FACE,
-        m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
-        r_note=note.r_note, t=t, r_E=spender["r_E"], e_dep=spender["E_dep"],
+        m_issuer=m_iss, r_note=note.r_note, t=t, r_E=spender["r_E"], e_dep=spender["E_dep"],
         pk_dep=spender["pk_dep"], e_enc=eEnc, identity_root=priv.root(),
     )
 

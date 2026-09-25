@@ -217,17 +217,14 @@ test("b1 depositor binding", { skip }, () => {
 
 test("notes family + merkle", { skip }, () => {
   const n = KV.notes;
-  assert.equal(id.idHashB1(B(n.m_issuer), pt(n.sigma_R), B(n.sigma_s)), B(n.id_hash_b1));
-  assert.equal(
-    id.idHashA1(ct(n.eNote), B(n.m_issuer), pt(n.sigma_R), B(n.sigma_s)),
-    B(n.id_hash_a1));
+  assert.equal(id.idHashB1(B(n.m_issuer)), B(n.id_hash_b1));
+  assert.equal(id.idHashA1(ct(n.eNote), B(n.m_issuer)), B(n.id_hash_a1));
   assert.equal(id.idHashA2(ct(n.eNote), ct(n.eIss), pt(n.T)), B(n.id_hash_a2));
   const op = n.opening;
   assert.equal(
     id.noteCommitment(B(op.flavor), B(op.v), B(op.rho), B(op.idHash), B(op.predicate)),
     B(n.cm));
-  assert.equal(id.nullifierB(B(op.rho), B(op.idHash)), B(n.nullifier_b));
-  assert.equal(id.nullifierA(B(op.rho), B(op.idHash)), B(n.nullifier_a));
+  assert.equal(id.nullifier(B(op.rho), B(op.idHash)), B(n.nullifier));
   assert.equal(id.identityLeaf(pt(n.identity_leaf_M)), B(n.identity_leaf));
 
   // merkle: fold the recorded leaves to the recorded root, verify the path
@@ -331,7 +328,7 @@ test("identity.json: parties, approve, schnorr, receipts, issuer_reenc", { skip 
   assert.ok(rc.cms.map(B).includes(cm));
   const rcptHBatch = id.batchCommitment(rc.cms.map(B));
   assert.equal(rcptHBatch, B(rc.hBatch));
-  assert.equal(id.nullifierB(B(op.rho), B(op.idHash)), B(rc.nullifier));
+  assert.equal(id.nullifier(B(op.rho), B(op.idHash)), B(rc.nullifier));
   assert.ok(id.issuerSchnorrVerify(
     pt(rc.issuer_pk),
     { e: B(rc.issuer_sig.e), s: B(rc.issuer_sig.s), R: pt(rc.issuer_sig.R) },

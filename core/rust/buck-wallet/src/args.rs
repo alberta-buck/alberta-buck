@@ -250,8 +250,6 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         &opening,
                         &cms,
                         &schnorr_from(get(args, "issuer_sig")?)?,
-                        &get_g1(args, "sigma_R")?,
-                        &get_w(args, "sigma_s")?,
                         &nullifier,
                         &face,
                         value,
@@ -309,8 +307,6 @@ pub fn build_receipt_args(args: &Value) -> Result<String> {
                         &schnorr_from(get(args, "issuer_sig")?)?,
                         &get_ct(args, "eNote")?,
                         &get_ct(args, "eRec")?,
-                        &get_g1(args, "sigma_R")?,
-                        &get_w(args, "sigma_s")?,
                         &nullifier,
                         &face,
                         value,
@@ -542,8 +538,6 @@ pub fn mint_unilateral_a1_args(args: &Value) -> Result<String> {
         &get_w(args, "v")?,
         &get_w(args, "rho")?,
         &get_w(args, "m_issuer")?,
-        &get_g1(args, "sigma_R")?,
-        &get_w(args, "sigma_s")?,
         &get_w(args, "predicate")?,
         &get_w(n, "r_prime")?,
         &get_w(n, "r_note")?,
@@ -721,8 +715,6 @@ pub fn deliver_a1_args(args: &Value) -> Result<String> {
         &get_w(args, "predicate")?,
         &get_w(args, "r_note")?,
         &get_g1(args, "pk_recv")?,
-        &get_g1(args, "sigma_R")?,
-        &get_w(args, "sigma_s")?,
     )?
     .to_string())
 }
@@ -867,10 +859,8 @@ fn fold_witness_args(
 /// The A1 folded gate's circuit witness (a decimal document for the prover).
 pub fn deposit_fold_a1_witness_args(args: &Value) -> Result<String> {
     let (e_note, v, m_iss) = (get_ct(args, "eNote")?, get_w(args, "v")?, get_w(args, "m_issuer")?);
-    let (sig_r, sig_s, r_note) = (get_g1(args, "sigma_R")?, get_w(args, "sigma_s")?, get_w(args, "r_note")?);
-    fold_witness_args(args, |c| {
-        crate::deposit_fold::deposit_fold_a1_witness(c, &e_note, &v, &m_iss, &sig_r, &sig_s, &r_note)
-    })
+    let r_note = get_w(args, "r_note")?;
+    fold_witness_args(args, |c| crate::deposit_fold::deposit_fold_a1_witness(c, &e_note, &v, &m_iss, &r_note))
 }
 
 /// The A2 folded gate's circuit witness (a decimal document for the prover).

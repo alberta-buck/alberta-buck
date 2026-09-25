@@ -174,7 +174,7 @@ with PyrevmAnvil(chain_id=1, auto_impersonate=True, timestamp=1_700_000_000) as 
         assert_unspent()
 
     # Proving the same A1 opening at public flavor=3 is unsatisfiable: the
-    # committed Poseidon-5 word would not match the minted leaf.
+    # committed flavor word would not match the minted leaf.
     w_b1 = dict(w)
     w_b1["flavor"] = 3
     try:

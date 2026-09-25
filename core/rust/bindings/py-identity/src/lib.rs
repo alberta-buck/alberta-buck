@@ -786,33 +786,18 @@ fn note_commitment(
 }
 
 #[pyfunction]
-fn nullifier_b(rho: BigUint, id_hash: BigUint) -> PyResult<BigUint> {
-    Ok(big(&kernel::notes::nullifier_b(&w(&rho)?, &w(&id_hash)?).map_err(err)?))
+fn nullifier(rho: BigUint, id_hash: BigUint) -> PyResult<BigUint> {
+    Ok(big(&kernel::notes::nullifier(&w(&rho)?, &w(&id_hash)?).map_err(err)?))
 }
 
 #[pyfunction]
-fn nullifier_a(rho: BigUint, id_hash: BigUint) -> PyResult<BigUint> {
-    Ok(big(&kernel::notes::nullifier_a(&w(&rho)?, &w(&id_hash)?).map_err(err)?))
+fn id_hash_b1(m_issuer: BigUint) -> PyResult<BigUint> {
+    Ok(big(&kernel::notes::id_hash_b1(&w(&m_issuer)?).map_err(err)?))
 }
 
 #[pyfunction]
-fn id_hash_b1(m_issuer: BigUint, sigma_r: PyG1, sigma_s: BigUint) -> PyResult<BigUint> {
-    Ok(big(
-        &kernel::notes::id_hash_b1(&w(&m_issuer)?, &wg1(&sigma_r)?, &w(&sigma_s)?).map_err(err)?,
-    ))
-}
-
-#[pyfunction]
-fn id_hash_a1(
-    e_note: PyCt,
-    m_issuer: BigUint,
-    sigma_r: PyG1,
-    sigma_s: BigUint,
-) -> PyResult<BigUint> {
-    Ok(big(
-        &kernel::notes::id_hash_a1(&wct(&e_note)?, &w(&m_issuer)?, &wg1(&sigma_r)?, &w(&sigma_s)?)
-            .map_err(err)?,
-    ))
+fn id_hash_a1(e_note: PyCt, m_issuer: BigUint) -> PyResult<BigUint> {
+    Ok(big(&kernel::notes::id_hash_a1(&wct(&e_note)?, &w(&m_issuer)?).map_err(err)?))
 }
 
 /// `id_hash_a2(eNote, eIss, T)` -- `T` is the mint binding's blinded point.
@@ -1233,8 +1218,6 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("G2", pyg2(&kernel::g2_generator()))?;
     m.add("H_PEDERSEN", pyg1(&kernel::nums::h_pedersen()))?;
     m.add_function(wrap_pyfunction!(h_pedersen, m)?)?;
-    m.add("NULLIFIER_TAG_B", kernel::notes::NULLIFIER_TAG_B)?;
-    m.add("NULLIFIER_TAG_A", kernel::notes::NULLIFIER_TAG_A)?;
     m.add("FLAVOR_A1", kernel::notes::FLAVOR_A1)?;
     m.add("FLAVOR_A2", kernel::notes::FLAVOR_A2)?;
     m.add("FLAVOR_B1", kernel::notes::FLAVOR_B1)?;
@@ -1275,8 +1258,7 @@ fn buck_identity(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(b1_bind_prove, m)?)?;
     m.add_function(wrap_pyfunction!(b1_bind_verify, m)?)?;
     m.add_function(wrap_pyfunction!(note_commitment, m)?)?;
-    m.add_function(wrap_pyfunction!(nullifier_b, m)?)?;
-    m.add_function(wrap_pyfunction!(nullifier_a, m)?)?;
+    m.add_function(wrap_pyfunction!(nullifier, m)?)?;
     m.add_function(wrap_pyfunction!(id_hash_b1, m)?)?;
     m.add_function(wrap_pyfunction!(id_hash_a1, m)?)?;
     m.add_function(wrap_pyfunction!(id_hash_a2, m)?)?;

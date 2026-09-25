@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use buck_identity::chaum_pedersen::{chaum_pedersen_verify, CpProof};
-use buck_identity::notes::{nullifier_a, nullifier_b, FLAVOR_A1, FLAVOR_A2};
+use buck_identity::notes::{nullifier, FLAVOR_A2};
 use buck_identity::schnorr::{batch_commitment, issuer_schnorr_verify, SchnorrProof};
 use buck_identity::verifiable_decrypt::{verifiable_decrypt_verify, VdProof};
 
@@ -57,14 +57,9 @@ impl RcptResult {
     }
 }
 
-/// Deterministic nullifier of an opening, dispatched on flavor tag:
-/// A-flavor uses tag 4243, B-flavor 4242.
+/// The opening's spent marker: one derivation for every flavour, as the spend circuit's.
 pub fn nullifier_for(opening: &NoteOpening) -> Result<W256> {
-    if opening.flavor == FLAVOR_A1 || opening.flavor == FLAVOR_A2 {
-        nullifier_a(&opening.rho, &opening.id_hash)
-    } else {
-        nullifier_b(&opening.rho, &opening.id_hash)
-    }
+    nullifier(&opening.rho, &opening.id_hash)
 }
 
 /// Verify a public-issuer receipt, naming the payer's registered

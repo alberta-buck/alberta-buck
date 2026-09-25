@@ -1468,17 +1468,18 @@ the right pinned verifier by =cms.length=).  The public signals are:
 | =issuerMode[N]= | Per-leaf output: PUBLIC or PRIVATE, from the committed flavour          |
 
 The private-issuer sibling =mint_batch_a2.circom= (per-N =MintBatchA2N*Groth16Verifier=, behind
-=MintVerifierA2Adapter= and =setA2MintVerifier=) replaces =issuerMode= with each leaf's =eIss=
-and the binding's =T= as outputs, recomputing ~idHash = Poseidon-10(eNote, eIss, T)~ in circuit:
+=MintVerifierA2Adapter= and =setA2MintVerifier=) replaces =issuerMode= with each leaf's =eIss= and
+the binding's =T= as outputs, recomputing ~idHash = Poseidon-11(T_ID, eNote, eIss, T)~ in circuit:
 7N + 4 public signals, so each A2 leaf's re-encryption binding is pinned to the leaf it names.
+=T_CM=, =T_ID= and =T_NF= are the note hashes' v2 domain tags (=circuits/note_tags.circom=).
 
-Per leaf, the circuit enforces a Poseidon-5 commitment opening
-~cm_i === Poseidon(flavor_i, v_i, rho_i, idHash_i, predicate_i)~, =Num2Bits(128)= range bounds on
-=v[i]= and =totalFace= (closing field-overflow attacks), one sum check ~totalFace === sum v[i]~,
-and an N x TREE_DEPTH Poseidon-2 dual Merkle walk: =priorWalk= consumes =ZERO_VALUE= at the
-insertion slot to attest =oldRoot=, =postWalk= consumes =cm[i]= to advance =rollingRoot= to
-=newRoot=.  Both walks share prover-supplied siblings.  About 21.8K R1CS per leaf, half of it
-the dual Merkle walk; 21,914 at N=1.
+Per leaf, the circuit enforces a tagged Poseidon-6 commitment opening ~cm_i === Poseidon(T_CM,
+flavor_i, v_i, rho_i, idHash_i, predicate_i)~, =Num2Bits(128)= range bounds on =v[i]= and
+=totalFace= (closing field-overflow attacks), one sum check ~totalFace === sum v[i]~, and an N x
+TREE_DEPTH Poseidon-2 dual Merkle walk: =priorWalk= consumes =ZERO_VALUE= at the insertion slot to
+attest =oldRoot=, =postWalk= consumes =cm[i]= to advance =rollingRoot= to =newRoot=.  Both walks
+share prover-supplied siblings.  About 21.9K R1CS per leaf, half of it the dual Merkle walk; 22,052
+at N=1.
 
 A batch of one mints for 513K gas end to end (=NotesE2E=, the public-issuer path with its
 Schnorr); each further leaf adds its commitment and issuer mode to the Groth16 verification and
@@ -1493,19 +1494,18 @@ would run a multi-party ceremony per pinned N; the script is the scaffolding.
 ** The Spend Proof and the Deposit Gates
 
 =circuits/spend.circom= is the one note proof every spend reuses.  Public inputs =[noteRoot,
-nullifier, face, recipient, chainId, flavor, issuanceCommitment]=; private witness =(flavor, v,
-rho, idHash, predicate, pathElements[20], pathIndices[20])=.  It proves
-~cm === Poseidon-5(flavor, v, rho, idHash, predicate)~ under =noteRoot=, the flavour-agnostic
-nullifier ~Poseidon-3(rho, idHash, 4242)~, ~face === v~ with both bounded to 128 bits, and that
-the public =flavor= is the committed one; for B1 it exposes the commitment as
-=issuanceCommitment= so =Notes= can authenticate the public issuer, and A1/A2 pass zero.  About
-12,000 R1CS.
+nullifier, face, recipient, chainId, flavor, issuanceCommitment]=; private witness =(flavor, v, rho,
+idHash, predicate, pathElements[20], pathIndices[20])=.  It proves ~cm === Poseidon-6(T_CM, flavor,
+v, rho, idHash, predicate)~ under =noteRoot=, the flavour-agnostic nullifier ~Poseidon-3(T_NF, rho,
+idHash)~, ~face === v~ with both bounded to 128 bits, and that the public =flavor= is the committed
+one; for B1 it exposes the commitment as =issuanceCommitment= so =Notes= can authenticate the public
+issuer, and A1/A2 pass zero.  About 12,000 R1CS.
 
 The identity half of a spend is a separate gate, and its shape follows how many secrets the
 spender's two claims rest on:
 
-- *Addressed (A1, A2): one folded proof.*  =deposit_fold_a1.circom= (3,309,327 constraints, 43
-  public inputs) and =deposit_fold_a2.circom= (3,833,335, 42) prove over one witness that the
+- *Addressed (A1, A2): one folded proof.*  =deposit_fold_a1.circom= (3,309,276 constraints, 43
+  public inputs) and =deposit_fold_a2.circom= (3,833,338, 42) prove over one witness that the
   receiving secret \( k \) opens the note's ciphertext and the spend's re-encryption =eEnc=; that
   the depositor's registered credential decrypts to the identity \( m \); that a certified leaf
   ~Poseidon(tag_R, m, k, salt)~ has a 32-level path to =identityRoot=; and that the nullifier is
@@ -1713,7 +1713,7 @@ opening to) redeems =cm[0]= for 100 BUCK to =recipient=:
 1. The wallet reconstructs =(pathElements[20], pathIndices[20])= for =cm[0]= by replaying the
    =Minted= event log and pulling =cms[]= from each batch's calldata.
 2. =snarkjs groth16 fullProve= against =spend.wasm= / =spend_final.zkey= produces a proof
-   binding =[currentRoot, Poseidon-3(rho, idHash, 4242), 100e6, recipient, 1]= to the witness.
+   binding =[currentRoot, Poseidon-3(T_NF, rho, idHash), 100e6, recipient, 1]= to the witness.
 3. =Notes.spend(proofBytes, currentRoot, nullifier, 100e6, recipient)= -- the contract checks
    the root window, rejects a previously-seen nullifier, runs the adapter (~360K gas total),
    marks the nullifier burned, decrements =noteFaceSum=, and calls =buck.transfer(recipient,
@@ -1754,9 +1754,9 @@ at 200 runs).  PID and oracle figures are estimates against unwritten oracle wir
 | BUCK.mint() (PID cached, within dT)            | ~155K        | ~$12       | one SLOAD on the cache path              |
 | Notes.mint (public issuer, N=1)                | ~513K        | ~$41       | Groth16 verify + batch Schnorr (measured) |
 | Notes.mint (private issuer A2, N=1)            | ~629K        | ~$50       | + re-encryption binding, eIss/T (measured) |
-| Notes.spendCoupledA1                           | ~966K        | ~$77       | spend proof + folded gate (measured)     |
+| Notes.spendCoupledA1                           | ~964K        | ~$77       | spend proof + folded gate (measured)     |
 | Notes.spendCoupledA2                           | ~982K        | ~$79       | spend proof + folded gate (measured)     |
-| Notes.spendCoupledB1                           | ~910K        | ~$73       | + depositor sigma + membership (measured) |
+| Notes.spendCoupledB1                           | ~906K        | ~$72       | + depositor sigma + membership (measured) |
 | BuckCredit.attestInsurer (8 predicates)        | ~8M          | ~$640      | once per review period                   |
 | BUCK_CREDIT.currentValue / BUCK_K.currentBuckK | 0            | Free       | View                                     |
 

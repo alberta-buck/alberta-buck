@@ -104,7 +104,7 @@ def test_the_channel_cannot_read_the_payload_it_carries():
     spent.
     """
     from alberta_buck.wallet.bn254 import add, neg
-    from alberta_buck.wallet.notes import nullifier_b
+    from alberta_buck.wallet.notes import nullifier
     w = _world("a2")
     np_ = w["notePayload"]
     eIss = _ct(np_["eIss"])
@@ -116,13 +116,13 @@ def test_the_channel_cannot_read_the_payload_it_carries():
     # What the channel has: the delivery, both public points, no k.
     assert not eq(add(eIss.C, neg(mul(pk_recv, int(np_["rPrimeWrapped"])))), M_iss), \
         "the wrapped r' must not work as the randomness"
-    assert nullifier_b(int(np_["rhoWrapped"]), idh) != nf, \
+    assert nullifier(int(np_["rhoWrapped"]), idh) != nf, \
         "the wrapped rho must not yield the nullifier"
     # And with k it does, which is the other half of the statement.
     _, k, _, _ = _recipient(w)
     opened = open_a2(np_, k)
     assert eq(add(eIss.C, neg(mul(pk_recv, opened.r_prime))), M_iss)
-    assert nullifier_b(opened.opening.rho, idh) == nf
+    assert nullifier(opened.opening.rho, idh) == nf
 
 
 def test_the_mailbox_binding_needs_no_secret():
@@ -164,7 +164,7 @@ def test_a2_payload_value_ciphertext_is_the_committed_one():
 def test_a1_payload_carries_its_own_randomness_and_no_issuer_salt():
     w = _world("a1")
     np_ = w["notePayload"]
-    assert set(np_) == {"flavor", "predicate", "eNote", "eRec", "sigma_R", "sigma_s",
+    assert set(np_) == {"flavor", "predicate", "eNote", "eRec",
                         "rhoWrapped", "vWrapped", "rNoteWrapped"}
     assert not any("salt" in k for k in np_), \
         "A1 asserts nothing about a third party, so nothing about one travels"
@@ -206,6 +206,6 @@ def test_a1_and_a2_recipient_leaf_commits_the_pair():
 
 def test_b1_ships_no_mailbox_material():
     """A bearer note is addressed to nobody, so nothing about a mailbox travels
-    with it -- its payload is the issuer's signature over the delivery."""
+    with it: it carries its opening, and nothing else."""
     np_ = _world("b1")["notePayload"]
-    assert set(np_) == {"sigma_R", "sigma_s"}
+    assert np_ == {}

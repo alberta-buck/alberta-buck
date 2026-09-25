@@ -114,9 +114,10 @@ Two switches save a lot of wasted setup:
   is refused (the thief, the throwaway key and the A2 key split, the last one
   both by the witness builder and, with the builder's check stepped around, by
   the circuit itself).  Run it before spending a setup on a changed circuit.
-- =DO_LEGACY=0= on =snark-setup= leaves the legacy =mint= and =spend=
-  circuits alone.  They change rarely, and regenerating their keys would
-  invalidate every committed proof that verifies through them for nothing.
+- =DO_SPEND=0= on =snark-setup= leaves the =spend= circuit alone (=make
+  nix-snark-spend= regenerates it by itself).  It changes rarely, and
+  regenerating its keys would invalidate every committed proof that verifies
+  through it for nothing.
 
 Full pin set (=SNARK_PINS="1 2 4 8 16 32"=, both families) is substantially
 longer — the =n32= circuits alone need =pot20= — and is only necessary if you
@@ -127,7 +128,7 @@ regeneration, =SNARK_PINS="1"= is sufficient: only N=1 feeds the e2e fixtures.
 
 #+begin_src bash
 make nix-snark-g1tie                      # only if the g1tie evidence changed
-DO_LEGACY=0 make nix-snark-setup          # the mint_batch pins
+DO_SPEND=0 make nix-snark-setup           # the mint_batch pins
 make nix-snark-fixtures
 make nix-snark-a2                         # the A2 mint pins + their fixtures
 make nix-snark-b1-membership
@@ -158,7 +159,7 @@ Read =proof.json=, and emit each =pi_b= pair as =[0][1], [0][0]= /
 =[1][1], [1][0]=.  Never patch a verifier.
 #+end_quote
 
-The swap sites, should you need a model: =prove_mint.js= (JS),
+The swap sites, should you need a model: =prove_mint_batch.js= (JS),
 =setup_g1tie.sh=, =setup_deposit_fold.sh=, =setup_b1_membership.sh= and
 =test_verifier_regression.sh= (shell-embedded python), =gen_e2e_world.py=
 (python).

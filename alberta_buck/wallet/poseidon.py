@@ -26,8 +26,7 @@ Usage::
 
     from alberta_buck.wallet.poseidon import poseidon
     h = poseidon([1, 2])               # Poseidon-T3 (2 inputs)
-    cm = poseidon([flavor, v, rho, idHash, predicate])  # Poseidon-T6
-    nf = poseidon([rho, idHash, 4242]) # Poseidon-T4
+    nf = poseidon([T_NF, rho, idHash]) # Poseidon-T4 (the notes nullifier)
 """
 
 from __future__ import annotations

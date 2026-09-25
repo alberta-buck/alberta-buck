@@ -47,6 +47,12 @@ def word(tag: bytes) -> int:
 #: the system that maps a person into the group, and so the one most worth
 #: keeping out of any other protocol's range.
 IDENTITY_SCALAR                 = b"AlbertaBuck/Identity/Scalar/v2"
+#: A registry's signature over an identity's CURRENT particulars (name, address,
+#: photo...) hashes this ahead of M, the version and the field digests; each field
+#: is committed on its own under IDENTITY_PARTICULAR_FIELD with its own salt, so a
+#: holder can disclose one field without the others (registry/particulars.py).
+IDENTITY_PARTICULARS            = b"AlbertaBuck/Identity/Particulars/v2"
+IDENTITY_PARTICULAR_FIELD       = b"AlbertaBuck/Identity/ParticularField/v2"
 
 # ---- Fiat-Shamir transcripts, named by the contract that verifies them ------
 
@@ -92,6 +98,13 @@ PEDERSEN_H                      = b"AlbertaBuck/Pedersen/H/v2"
 #: The Notes tree's empty leaf, keccak(tag) mod F_R: compiled into every
 #: batch-mint circuit and into Notes.sol.
 NOTES_ZERO                      = b"AlbertaBuck/Notes/Zero/v2"
+#: The note hashes' leading field-element tags: the commitment, the spent marker
+#: (nullifier), and the identity hash every flavour commits (one tag serves all
+#: three, whose arities differ).  Compiled into every mint circuit, the spend
+#: circuit and both deposit folds.
+NOTES_COMMITMENT                = b"AlbertaBuck/Notes/Commitment/v2"
+NOTES_NULLIFIER                 = b"AlbertaBuck/Notes/Nullifier/v2"
+NOTES_ID_HASH                   = b"AlbertaBuck/Notes/IdHash/v2"
 #: The accumulator leaf functions' leading field-element tags.  Two of the four
 #: are three-input Poseidons, so without a tag one value can be both kinds of
 #: leaf; the tag makes each leaf kind its own function.
@@ -122,13 +135,13 @@ RECEIPT_ENVELOPE                = "AB-RCPT/2"
 
 __all__ = [
     "word",
-    "IDENTITY_SCALAR",
+    "IDENTITY_SCALAR", "IDENTITY_PARTICULARS", "IDENTITY_PARTICULAR_FIELD",
     "FS_REGISTER", "FS_CONTRACT_BINDING", "FS_APPROVE", "FS_ISSUER_SCHNORR",
     "FS_ISSUER_REENC", "FS_DEPOSITOR_BINDING", "FS_VERIFIABLE_DECRYPT", "FS_IDENTITY_OPENING",
     "CONTRACT_BINDING_CONTROL",
     "ACCUMULATOR_SALT", "NOTES_RECEIVING_KEY", "NOTES_PAYLOAD_WRAP",
     "CONSUMER_NOTES_MEMBERSHIP", "CONSUMER_INSURER_ATTESTATION",
-    "PEDERSEN_H", "NOTES_ZERO",
+    "PEDERSEN_H", "NOTES_ZERO", "NOTES_COMMITMENT", "NOTES_NULLIFIER", "NOTES_ID_HASH",
     "LEAF_IDENTITY", "LEAF_IDENTITY_SALTED", "LEAF_RECEIVING", "LEAF_MAILBOX", "field_tag",
     "RECEIPT_ENVELOPE",
 ]

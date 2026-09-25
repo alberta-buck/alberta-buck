@@ -252,12 +252,9 @@ export function wrapIdentity(wasm) {
     // ---- Notes family --------------------------------------------------------
     noteCommitment: (flavor, v, rho, idHash, predicate) =>
       big(wasm.note_commitment(Number(flavor), hex(v), hex(rho), hex(idHash), hex(predicate))),
-    nullifierB: (rho, idHash) => big(wasm.nullifier_b(hex(rho), hex(idHash))),
-    nullifierA: (rho, idHash) => big(wasm.nullifier_a(hex(rho), hex(idHash))),
-    idHashB1: (mIssuer, sigmaR, sigmaS) =>
-      big(wasm.id_hash_b1(hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
-    idHashA1: (eNote, mIssuer, sigmaR, sigmaS) =>
-      big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer), ...flatP(sigmaR), hex(sigmaS))),
+    nullifier: (rho, idHash) => big(wasm.nullifier(hex(rho), hex(idHash))),
+    idHashB1: (mIssuer) => big(wasm.id_hash_b1(hex(mIssuer))),
+    idHashA1: (eNote, mIssuer) => big(wasm.id_hash_a1(flatCT(eNote), hex(mIssuer))),
     idHashA2: (eNote, eIss, T) => big(wasm.id_hash_a2(flatCT(eNote), flatCT(eIss), flatP(T))),
     identityLeaf: (M) => big(wasm.identity_leaf(...flatP(M))),
     // The hiding leaf of a private subtree, and the one that binds an

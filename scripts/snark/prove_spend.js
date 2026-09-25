@@ -20,9 +20,16 @@
  * time -- they become public inputs the Groth16 verifier checks.
  *
  * Usage:
- *   node scripts/snark/prove_spend.js <mintName> <leafIndex> <recipientHex> <chainId> [<spendName>]
+ *   node scripts/snark/prove_spend.js <mintFixture> <leafIndex> <recipientHex> <chainId> [<spendName>] [<leavesFile>]
+ *
+ * <mintFixture> is a batch-mint fixture's path relative to the repo root.
+ *
+ * With <leavesFile> (a JSON array of every note commitment in the tree, in
+ * insertion order) the tree holds earlier mints too: <leafIndex> is then the
+ * leaf's absolute index, and its opening is found in the mint fixture at its
+ * offset within that batch.
  * e.g.
- *   node scripts/snark/prove_spend.js basic 0 0x1111111111111111111111111111111111111111 1 spendA
+ *   node scripts/snark/prove_spend.js build/snark/mint_batch_n1/fixtures/e2e_a1.json 0 0x1111111111111111111111111111111111111111 1 spendA
  */
 "use strict";
 
@@ -33,7 +40,6 @@ const snarkjs             = require("snarkjs");
 const ethers              = require("ethers");
 
 const ROOT  = path.resolve(__dirname, "..", "..");
-const MINT  = path.join(ROOT, "build", "snark", "mint");
 const SPEND = path.join(ROOT, "build", "snark", "spend");
 const WASM  = path.join(SPEND, "spend_js", "spend.wasm");
 const ZKEY  = path.join(SPEND, "spend_final.zkey");
@@ -42,13 +48,16 @@ const FIX   = path.join(SPEND, "fixtures");
 
 const FIELD_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const TREE_DEPTH = 20;
-const NULLIFIER_TAG = 4242n;
+// A v2 domain tag's field word: keccak(tag) mod F_R (alberta_buck/wallet/domains.py).
+const fieldTag = (tag) => BigInt(ethers.keccak256(ethers.toUtf8Bytes(tag))) % FIELD_R;
+const T_NF = fieldTag("AlbertaBuck/Notes/Nullifier/v2");
 
-const MINT_NAME       = process.argv[2] || "basic";
+const MINT_FIXTURE    = process.argv[2];
 const LEAF_INDEX      = Number(process.argv[3] || "0");
 const RECIPIENT       = process.argv[4] || "0x1111111111111111111111111111111111111111";
 const CHAIN_ID        = BigInt(process.argv[5] || "1");
 const SPEND_NAME      = process.argv[6] || `spend_leaf${LEAF_INDEX}`;
+const LEAVES_FILE     = process.argv[7] || null;
 
 function toBig(s) {
     if (typeof s === "bigint") return s;
@@ -62,13 +71,8 @@ async function main() {
         throw new Error(`Missing spend artifacts; run scripts/snark/setup.sh first`);
     }
 
-    // MINT_NAME containing "/" is a fixture path relative to the repo root
-    // (e2e fixtures live under other circuits' build dirs); otherwise it
-    // names a fixture in the legacy build/snark/mint/fixtures dir.
-    const mintFixturePath = MINT_NAME.includes("/")
-        ? path.join(ROOT, MINT_NAME)
-        : path.join(MINT, "fixtures", `${MINT_NAME}.json`);
-    const mintFixture = JSON.parse(fs.readFileSync(mintFixturePath, "utf8"));
+    if (!MINT_FIXTURE) throw new Error("usage: prove_spend.js <mintFixture> <leafIndex> ...");
+    const mintFixture = JSON.parse(fs.readFileSync(path.join(ROOT, MINT_FIXTURE), "utf8"));
 
     const poseidon = await buildPoseidon();
     const F        = poseidon.F;
@@ -92,7 +96,12 @@ async function main() {
     // it captures siblings-at-insertion-time rather than siblings-at-the-
     // final-tree, which is what the spend SNARK's Merkle membership path
     // actually needs.
-    const cms = mintFixture.public.cm.map(toBig);
+    const cms = LEAVES_FILE
+        ? JSON.parse(fs.readFileSync(path.resolve(ROOT, LEAVES_FILE), "utf8")).map(toBig)
+        : mintFixture.public.cm.map(toBig);
+    const batchStart = cms.indexOf(toBig(mintFixture.public.cm[0]));
+    if (batchStart < 0) throw new Error("mint batch not found in the leaves file");
+    const WITNESS_INDEX = LEAF_INDEX - batchStart;
     const layers = [cms.slice()];
     for (let l = 0; l < TREE_DEPTH; l++) {
         const cur = layers[l];
@@ -137,13 +146,13 @@ async function main() {
 
     // Witness opening for the spent leaf (taken from the mint fixture).
     const w = mintFixture.witness;
-    const flavor    = toBig(w.flavor[LEAF_INDEX]);
-    const v         = toBig(w.v[LEAF_INDEX]);
-    const rho       = toBig(w.rho[LEAF_INDEX]);
-    const idHash    = toBig(w.idHash[LEAF_INDEX]);
-    const predicate = toBig(w.predicate[LEAF_INDEX]);
+    const flavor    = toBig(w.flavor[WITNESS_INDEX]);
+    const v         = toBig(w.v[WITNESS_INDEX]);
+    const rho       = toBig(w.rho[WITNESS_INDEX]);
+    const idHash    = toBig(w.idHash[WITNESS_INDEX]);
+    const predicate = toBig(w.predicate[WITNESS_INDEX]);
     const face      = v;
-    const nullifier = H3(rho, idHash, NULLIFIER_TAG);
+    const nullifier = H3(T_NF, rho, idHash);
     const issuanceCommitment = flavor === 3n ? cms[LEAF_INDEX] : 0n;
 
     const recipient = BigInt(RECIPIENT);

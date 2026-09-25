@@ -22,6 +22,10 @@ pub fn word(tag: &[u8]) -> W256 {
 
 /// `m = keccak(IDENTITY_SCALAR || canonical record) mod ORDER`.
 pub const IDENTITY_SCALAR: &[u8] = b"AlbertaBuck/Identity/Scalar/v2";
+/// A registry's signature over an identity's current particulars, and each
+/// particular's own salted commitment (`alberta_buck/registry/particulars.py`).
+pub const IDENTITY_PARTICULARS: &[u8] = b"AlbertaBuck/Identity/Particulars/v2";
+pub const IDENTITY_PARTICULAR_FIELD: &[u8] = b"AlbertaBuck/Identity/ParticularField/v2";
 
 pub const FS_REGISTER: &[u8] = b"AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2";
 pub const FS_CONTRACT_BINDING: &[u8] =
@@ -57,6 +61,11 @@ pub const CONSUMER_INSURER_ATTESTATION: &[u8] =
 pub const PEDERSEN_H: &[u8] = b"AlbertaBuck/Pedersen/H/v2";
 /// The Notes tree's empty leaf, `keccak(tag) mod F_R`.
 pub const NOTES_ZERO: &[u8] = b"AlbertaBuck/Notes/Zero/v2";
+/// The note hashes' leading field-element tags: commitment, spent marker, and
+/// the identity hash of every flavour.
+pub const NOTES_COMMITMENT: &[u8] = b"AlbertaBuck/Notes/Commitment/v2";
+pub const NOTES_NULLIFIER: &[u8] = b"AlbertaBuck/Notes/Nullifier/v2";
+pub const NOTES_ID_HASH: &[u8] = b"AlbertaBuck/Notes/IdHash/v2";
 /// The accumulator leaf functions' leading field-element tags.
 pub const LEAF_IDENTITY: &[u8] = b"AlbertaBuck/Accumulator/Leaf/Identity/v2";
 pub const LEAF_IDENTITY_SALTED: &[u8] = b"AlbertaBuck/Accumulator/Leaf/IdentitySalted/v2";

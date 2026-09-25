@@ -50,6 +50,10 @@ const ROOT  = path.resolve(__dirname, "..", "..");
 const DEPTH = 20;
 const FIELD_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
+// A v2 domain tag's field word: keccak(tag) mod F_R (alberta_buck/wallet/domains.py).
+const fieldTag = (tag) => BigInt(ethers.keccak256(ethers.toUtf8Bytes(tag))) % FIELD_R;
+const T_CM = fieldTag("AlbertaBuck/Notes/Commitment/v2");
+
 // Mirror Notes.sol's keccak("AlbertaBuck/Notes/Zero/v2") % FIELD_R.
 const ZERO_VALUE = (() => {
     const k = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"));
@@ -258,7 +262,7 @@ async function main() {
     // Compute commitments.
     const cm = [];
     for (let i = 0; i < N; i++) {
-        const digest = poseidon([flavor[i], v[i], rho[i], idHash[i], predicate[i]]);
+        const digest = poseidon([T_CM, flavor[i], v[i], rho[i], idHash[i], predicate[i]]);
         cm.push(BigInt(F.toString(digest)));
     }
 

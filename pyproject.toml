@@ -89,7 +89,8 @@ include = ["alberta_buck*"]
 # (gen_e2e_fixtures.sh) that E2EFixture / test_receipt_e2e load -- shipped so
 # the E2E Notes receipt tests run from a venv-installed wheel, not only from
 # the repo checkout.
-"alberta_buck.test" = ["vectors/*.golden.txt", "vectors/e2e/*.json"]
+"alberta_buck.test" = ["vectors/*.golden.txt", "vectors/e2e/*.json",
+                      "vectors/privacy/*.json"]
 # Vendored Bank of Canada / StatCan source series (BCPI, CPI, USD/CAD, wages)
 # consumed at runtime by alberta_buck.sim.quotes to build the historical
 # commodity & labour quote source; shipped so the module is self-contained.

@@ -10,7 +10,7 @@ from alberta_buck.wallet.bn254 import G1, add, eq, mul, neg
 from alberta_buck.wallet.delivery import (
     DeliveryRefused, deliver_a1, deliver_a2, open_a1, open_a2,
 )
-from alberta_buck.wallet.notes import nullifier_b, note_commitment
+from alberta_buck.wallet.notes import nullifier, note_commitment
 from alberta_buck.wallet.recvkey import receiving_key
 from alberta_buck.wallet.unilateral_a1 import mint_unilateral_a1
 from alberta_buck.wallet.unilateral_a2 import mint_unilateral_a2
@@ -43,15 +43,14 @@ def world():
     sk_iss = 0x51_55
     pk_iss = mul(G1, sk_iss)
     E_iss = elgamal_encrypt(mul(G1, m_iss), pk_iss, 0x77)
-    sig_k = 0x5EED
     return dict(rng=rng, k=k, pk_recv=pk_recv, m_rec=m_rec, M_rec=M_rec, m_iss=m_iss,
-                sk_iss=sk_iss, E_iss=E_iss, sigma_R=mul(G1, sig_k), sigma_s=0x5155)
+                sk_iss=sk_iss, E_iss=E_iss)
 
 
 def _a1(w):
     minted = mint_unilateral_a1(w["M_rec"], w["pk_recv"], v=FACE, rho=0xB0B0, m_issuer=w["m_iss"],
-                                sigma_R=w["sigma_R"], sigma_s=w["sigma_s"], rng=w["rng"])
-    return minted, deliver_a1(minted, w["pk_recv"], w["sigma_R"], w["sigma_s"])
+                                rng=w["rng"])
+    return minted, deliver_a1(minted, w["pk_recv"])
 
 
 def _a2(w):
@@ -84,7 +83,7 @@ def test_the_channel_learns_neither_the_face_nor_the_spend(world):
     spent.  The face would be readable while the note is in flight."""
     minted, d = _a2(world)
     assert int(d["vWrapped"]) != FACE
-    assert nullifier_b(int(d["rhoWrapped"]), minted.idHash) != nullifier_b(0xB0B0, minted.idHash)
+    assert nullifier(int(d["rhoWrapped"]), minted.idHash) != nullifier(0xB0B0, minted.idHash)
 
 
 def test_the_channel_cannot_read_the_issuer(world):

@@ -116,7 +116,7 @@ class E2EFixture:
     nullifier: int
     issuer_sig: Optional[SchnorrProof]        # B1/A1 batch Schnorr
     binding:    Optional[IssuerReencProof]    # A2 mint binding
-    note:      Dict[str, Any]                 # raw notePayload (eNote/eRec/eIss/sigma)
+    note:      Dict[str, Any]                 # raw notePayload (eNote/eRec/eIss/T)
     timings:   Dict[str, float]
     raw:       Dict[str, Any]                 # the full fixture JSON
 
@@ -167,7 +167,7 @@ class E2EFixture:
         for k, v in self.note.items():
             if k in ("eNote", "eRec", "eIss"):
                 out[k] = _ct(v)
-            elif k in ("sigma_R", "T"):
+            elif k == "T":
                 out[k] = _pt(v)
             else:
                 out[k] = int(v)
@@ -259,7 +259,6 @@ class E2EFixture:
         if self.flavor == "b1":
             return build_note_b1(
                 issuer_sig=self.issuer_sig,
-                sigma_R=_pt(np["sigma_R"]), sigma_s=int(np["sigma_s"]),
                 eDepForIss=_ct(self.raw["sigma"]["eDepForIss"]),
                 issuer_sk=iss.sk if role == "issuer" else None,
                 **kw)
@@ -267,7 +266,6 @@ class E2EFixture:
             return build_note_a1(
                 issuer_sig=self.issuer_sig,
                 eNote=_ct(np["eNote"]), eRec=_ct(np["eRec"]),
-                sigma_R=_pt(np["sigma_R"]), sigma_s=int(np["sigma_s"]),
                 **kw)
         return build_note_a2(
             issuer_E_addr=iss.E,
@@ -303,7 +301,7 @@ class NotesStack:
     """
 
     def __init__(self, anvil, fixture: E2EFixture, rng=None,
-                 block_time: Optional[int] = None):
+                 block_time: Optional[int] = None, issuer=None):
         from alberta_buck.sim.chain import Chain
         self.anvil = anvil
         self.fx = fixture
@@ -320,6 +318,9 @@ class NotesStack:
         self.steps: List[Step] = []
         assert self.w3.eth.chain_id == fixture.chainid, \
             "anvil must run the fixture's chain id (Anvil(chain_id=1))"
+        # The trusted credential issuer: a wallet.issuer.Issuer, or None for a
+        # private one generated at deploy (the fixture worlds' default).
+        self._issuer = issuer
         self._deploy()
 
     # -- plumbing -------------------------------------------------------------
@@ -386,6 +387,7 @@ class NotesStack:
         # The REAL Groth16 verifier stack.
         mint_adapter = ch.deploy("MintVerifierAdapter", gov)
         a2_adapter   = ch.deploy("MintVerifierA2Adapter", gov)
+        self.mint_adapter, self.a2_adapter = mint_adapter, a2_adapter
         ch.send(mint_adapter.functions.registerVerifier(
             1, ch.deploy("MintBatchN1Groth16Verifier").address))
         ch.send(a2_adapter.functions.registerVerifier(
@@ -424,8 +426,12 @@ class NotesStack:
             "(uint256,uint256),(uint256,uint256)),"
             "(uint256,uint256,(uint256,uint256)),"
             "bool,bool)")
-        self._iss_kp = ps_keygen(rng=self.rng)
-        self._iss_addr = self._addr(0xAA)
+        if self._issuer is None:
+            self._iss_kp = ps_keygen(rng=self.rng)
+            self._iss_addr = self._addr(0xAA)
+        else:
+            self._iss_kp = self._issuer.keypair
+            self._iss_addr = self._addr(self._issuer.issuer_addr)
         self.pool_m = rand_scalar(self.rng)
         self.pool_r = rand_scalar(self.rng)
         self.pool_E = elgamal_encrypt(mul(G1, self.pool_m), self.pool_pk, self.pool_r)

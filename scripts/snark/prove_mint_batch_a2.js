@@ -3,7 +3,7 @@
  * Generate a mint_batch_a2 (private-issuer A2) proof for an N-leaf batch and
  * emit a fixture JSON the forge tests ingest.  Mirrors prove_mint_batch.js but
  * for the A2 circuit: every leaf is flavor == A2, idHash opens to
- * Poseidon-10(eNote, eIss, T), and eIss = (R.x, R.y, C.x, C.y) and the mint
+ * Poseidon-11(T_ID, eNote, eIss, T), and eIss = (R.x, R.y, C.x, C.y) and the mint
  * binding's T = (x, y) are PUBLIC OUTPUTS (they lead publicSignals, eIss first).
  *
  * Output (build/snark/mint_batch_a2_n${N}/fixtures/<name>.json):
@@ -35,6 +35,11 @@ const ethers            = require("ethers");
 const ROOT  = path.resolve(__dirname, "..", "..");
 const DEPTH = 20;
 const FIELD_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+// A v2 domain tag's field word: keccak(tag) mod F_R (alberta_buck/wallet/domains.py).
+const fieldTag = (tag) => BigInt(ethers.keccak256(ethers.toUtf8Bytes(tag))) % FIELD_R;
+const T_CM = fieldTag("AlbertaBuck/Notes/Commitment/v2");
+const T_ID = fieldTag("AlbertaBuck/Notes/IdHash/v2");
 
 const ZERO_VALUE = (() => {
     const k = ethers.keccak256(ethers.toUtf8Bytes("AlbertaBuck/Notes/Zero/v2"));
@@ -186,12 +191,12 @@ async function main() {
         eNote[i]     = args.enote[i] ? args.enote[i].slice() : [rng(), rng(), rng(), rng()];
         eIss[i]      = args.eiss[i] ? args.eiss[i].slice() : [rng(), rng(), rng(), rng()];
         T[i]         = args.t[i] ? args.t[i].slice() : [rng(), rng()];
-        idHash[i]    = P([...eNote[i], ...eIss[i], ...T[i]]);  // Poseidon-10(eNote, eIss, T)
+        idHash[i]    = P([T_ID, ...eNote[i], ...eIss[i], ...T[i]]);  // Poseidon-11(T_ID, eNote, eIss, T)
     }
 
     const cm = [];
     for (let i = 0; i < N; i++) {
-        cm.push(P([flavor[i], v[i], rho[i], idHash[i], predicate[i]]));
+        cm.push(P([T_CM, flavor[i], v[i], rho[i], idHash[i], predicate[i]]));
     }
 
     const siblings = new Array(N);

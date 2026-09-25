@@ -254,15 +254,14 @@ def test_b1_bind(kv):
 def test_notes_and_merkle(kv):
     n = kv["notes"]
     e_note, e_iss = _ct(n["eNote"]), _ct(n["eIss"])
-    assert bi.id_hash_b1(_i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_b1"])
-    assert bi.id_hash_a1(e_note, _i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_a1"])
+    assert bi.id_hash_b1(_i(n["m_issuer"])) == _i(n["id_hash_b1"])
+    assert bi.id_hash_a1(e_note, _i(n["m_issuer"])) == _i(n["id_hash_a1"])
     assert bi.id_hash_a2(e_note, e_iss, _pt(n["T"])) == _i(n["id_hash_a2"])
     op = n["opening"]
     assert bi.note_commitment(
         _i(op["flavor"]), _i(op["v"]), _i(op["rho"]), _i(op["idHash"]), _i(op["predicate"]),
     ) == _i(n["cm"])
-    assert bi.nullifier_b(_i(op["rho"]), _i(op["idHash"])) == _i(n["nullifier_b"])
-    assert bi.nullifier_a(_i(op["rho"]), _i(op["idHash"])) == _i(n["nullifier_a"])
+    assert bi.nullifier(_i(op["rho"]), _i(op["idHash"])) == _i(n["nullifier"])
     assert bi.identity_leaf(_pt(n["identity_leaf_M"])) == _i(n["identity_leaf"])
 
     mk = kv["merkle"]
@@ -363,7 +362,7 @@ def test_identity_fixture(iv):
     assert cm == _i(rc["cm"]) and cm in [_i(c) for c in rc["cms"]]
     rcpt_h = bi.batch_commitment([_i(c) for c in rc["cms"]])
     assert rcpt_h == _i(rc["hBatch"])
-    assert bi.nullifier_b(_i(op["rho"]), _i(op["idHash"])) == _i(rc["nullifier"])
+    assert bi.nullifier(_i(op["rho"]), _i(op["idHash"])) == _i(rc["nullifier"])
     assert bi.issuer_schnorr_verify(
         _pt(rc["issuer_pk"]),
         (_i(rc["issuer_sig"]["e"]), _i(rc["issuer_sig"]["s"]), _pt(rc["issuer_sig"]["R"])),

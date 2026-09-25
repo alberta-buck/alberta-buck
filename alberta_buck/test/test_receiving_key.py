@@ -417,17 +417,14 @@ def _fold_world():
     priv = IdentityMerkleTree(depth=10, private=True)
     priv.insert_receiving(rec["m"], rec["k"], rec["salt"])
 
-    m_iss, sig_k = SCALARS[11], 0xABC_0001
-    sigma_R, sigma_s = mul(G1, sig_k), 0xABC_0002
+    m_iss = SCALARS[11]
     rho, r_prime, face = 0xF00D, 0xBEEF_0003, 4242
     note = mint_unilateral_a1(rec["M"], rec["pk_recv"], v=face, rho=rho,
-                              m_issuer=m_iss, sigma_R=sigma_R, sigma_s=sigma_s,
-                              r_prime=r_prime, rng=lambda: 0xCAFE_0004)
+                              m_issuer=m_iss, r_prime=r_prime, rng=lambda: 0xCAFE_0004)
     t = (note.r_prime + 0x5115) % ORDER
     eEnc = elgamal_encrypt(rec["M"], rec["pk_recv"], t)
     return dict(rec=rec, sk_dep=sk_dep, r_E=r_E, pk_dep=pk_dep, E_dep=E_dep,
-                priv=priv, note=note, m_iss=m_iss, sigma_R=sigma_R,
-                sigma_s=sigma_s, rho=rho, face=face, t=t, eEnc=eEnc)
+                priv=priv, note=note, m_iss=m_iss, rho=rho, face=face, t=t, eEnc=eEnc)
 
 
 def _fold_witness(w_):
@@ -440,7 +437,7 @@ def _fold_witness(w_):
     return deposit_fold_a1_witness(
         witness=w, rho=w_["rho"], id_hash=w_["note"].idHash,
         e_note=w_["note"].eNote, v=w_["face"], m_issuer=w_["m_iss"],
-        sigma_R=w_["sigma_R"], sigma_s=w_["sigma_s"], r_note=w_["note"].r_note,
+        r_note=w_["note"].r_note,
         t=w_["t"], r_E=w_["r_E"], e_dep=w_["E_dep"], pk_dep=w_["pk_dep"],
         e_enc=w_["eEnc"], identity_root=w_["priv"].root(),
     )
@@ -489,7 +486,6 @@ def test_the_circuit_witness_refuses_a_tampered_registration_nonce():
         deposit_fold_a1_witness(
             witness=w, rho=w_["rho"], id_hash=w_["note"].idHash,
             e_note=w_["note"].eNote, v=w_["face"], m_issuer=w_["m_iss"],
-            sigma_R=w_["sigma_R"], sigma_s=w_["sigma_s"],
             r_note=w_["note"].r_note, t=w_["t"],
             r_E=w_["r_E"] + 1,                 # the wrong registration nonce
             e_dep=w_["E_dep"], pk_dep=w_["pk_dep"], e_enc=w_["eEnc"],
