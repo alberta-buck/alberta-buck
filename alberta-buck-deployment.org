@@ -73,7 +73,7 @@ Remaining:
 
 | #   | artifact / step             | registry  | blocked on                    |
 |-----+-----------------------------+-----------+-------------------------------|
-| 5   | =alberta-buck=              | PyPI      | dependency hygiene            |
+| 5   | =alberta-buck=              | PyPI      | the 0.2.0 release (below)     |
 | 6   | =alberta-buck-game= + zomes | npm       | D2 -- where authority lives   |
 | 7   | repository public           | GitHub    | a deliberate decision         |
 
@@ -87,17 +87,33 @@ human holding a token.
 
 *Next: 0.2.0, the v2 roll* (2026-09-25; the tree is at 0.2.0, nothing is
 published yet).  Protocol v2 changes every tag, transcript and note hash, so
-it is a minor bump everywhere, math included (lockstep).  Release in
-dependency order:
+it is a minor bump everywhere, math included (lockstep).  0.2.0 also brings
+=alberta-buck= to PyPI (P5), and the Notes pool, its adapters, its Groth16
+verifiers and the Poseidon hashers into the contracts bundle.
 
-1. =alberta-buck-contracts= to npm, by hand (=make contracts-dist=, then
-   =npm publish= in =core/contracts=); then bump =core/js='s contracts pin
-   to 0.2.0 and regenerate its lock (=npm install --package-lock-only=).
-   Until then the pin stays at 0.1.0 so =npm ci= works, and
-   =release-npm.yml= refuses a =js-v0.2.0= tag.
-2. =py-contracts-v0.2.0=, =py-kernel-v0.2.0=, then =py-core-v0.2.0= (core
-   pins both at =>=0.2.0,<0.3=).
-3. =rs-v0.2.0= and =js-v0.2.0=.
+Those verifiers are from the *development* trusted setup, and are published
+deliberately (author, 2026-09-25): until v1.0.0 the toxic waste is public, so
+a simulation can model forged-proof attacks and the defences around them.
+The bundle says so per artifact (=trustedSetup: "development"=) and in its
+compiler record, both release workflows refuse a bundle that does not, and
+every README states it.  Every bundled contract fits EIP-170; the one
+verifier snarkjs emits too large (A2, N=32) ships table-driven
+(doc/snark-regeneration.org).
+
+Release in dependency order, each tag's workflow green before the next:
+
+1. =js-contracts-v0.2.0= and =py-contracts-v0.2.0= -- the bundle, to npm and
+   PyPI.
+2. Bump =core/js='s =alberta-buck-contracts= pin to 0.2.0, regenerate its
+   lock (=npm install --package-lock-only=), commit, push.
+3. =py-kernel-v0.2.0= (four platform wheels), then =py-core-v0.2.0=.
+4. =rs-v0.2.0= (the four crates) and =js-v0.2.0= (kernel, then core).
+5. =py-sim-v0.2.0= -- =alberta-buck=, which pins core at 0.2.
+
+Before step 1 the registries need their publishers: npm trusted publishers
+for =alberta-buck-contracts= (it exists, so it can take one), crates.io
+trusted publishers for the four crates, and a PyPI pending publisher for
+=alberta-buck= (environment =pypi-sim=).
 
 * The architecture, and why
 
@@ -664,12 +680,13 @@ because =make venv= installs =core/python= editable, which is the same
 mechanism declared rather than improvised.  =requires-python= is >= 3.11,
 the floor of =alberta-buck-core=.
 
-Remaining before the tag: a dynamic version from =alberta_buck/version.py=,
-the =py-sim-v*= job in =release-pypi.yml= (pending publisher
-=alberta-buck=, environment =pypi-sim=), and the package's own metadata --
-its wheel builds and installs, but carries no README (the repository's is
-org, which PyPI does not render), no project URLs, and a summary written
-before identity, Notes and receipts joined it.
+Ready for its first tag (2026-09-25): the =py-sim-v*= job in
+=release-pypi.yml= (pending publisher =alberta-buck=, environment
+=pypi-sim=) builds it, checks it is pure and carries its runtime data, and
+smoke-tests base and =[kernel]= installs outside any checkout before
+publishing.  Its PyPI page is =README-pypi.md= (the repository README is
+Org, which PyPI does not render).  The planned dynamic version was dropped:
+the tag gate reads =pyproject.toml=, and one version source is enough.
 
 *** An unseeded global RNG cost two full-suite runs
 

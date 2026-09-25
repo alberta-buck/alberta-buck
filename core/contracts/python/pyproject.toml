@@ -1,14 +1,14 @@
 [project]
 name = "alberta-buck-contracts"
 version = "0.2.0"
-description = "Compiled ABI and bytecode for the Alberta Buck contracts (unaudited prototype), built with a pinned compiler"
+description = "Compiled ABI and bytecode for the Alberta Buck contracts (unaudited prototype), including the Notes pool and Groth16 verifiers from a DEVELOPMENT trusted setup (forgeable until v1.0.0), built with a pinned compiler"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 authors = [
     { name = "Perry Kundert", email = "perry@dominionrnd.com" }
 ]
-keywords = ["ethereum", "solidity", "abi", "stablecoin", "artifacts"]
+keywords = ["ethereum", "solidity", "abi", "stablecoin", "artifacts", "groth16", "zk-snark"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Development Status :: 3 - Alpha",
