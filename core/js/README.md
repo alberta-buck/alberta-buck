@@ -27,6 +27,9 @@ BigInt-native wrappers around the WebAssembly kernels.
 npm install alberta-buck-core
 ```
 
+Needs npm 11 or later (Node 24 bundles it): npm 10's installer crashes on
+this package's dependency graph.
+
 ## Use
 
 ```js
