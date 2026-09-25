@@ -34,9 +34,8 @@ BUCKs accrue a flat 2%/yr linear demurrage on every BUCK in
 existence, computed at view time and never burned.  The
 accrual splits by account flavour.  Non-Carrying accounts
 (EOAs, user wallets) see =balanceOf= decline as locked fees
-grow.  Carrying accounts (AMM pools, Notes, the Jubilee fund,
-the insurance pool) keep =balanceOf= equal to their raw ERC-20
-balance and carry
+grow.  Carrying accounts (AMM pools, Notes, the Jubilee fund)
+keep =balanceOf= equal to their raw ERC-20 balance and carry
 the accrued fee out with every transfer; the recipient
 absorbs it via =_demurrage[to]=.  The split is load-bearing:
 it is what lets stock Uniswap pools, treasuries, and other
@@ -943,17 +942,12 @@ consenting to.
 
 ** Premium routing and the insurance pool
 
-A mint's pool principal is routed to =insurancePool=, which is
-Carrying by construction (=Buck._isCarrying=), whatever the
-registry says of its address.  The pool holds its members'
-premium deposits on their behalf, so like any account doing
-work for others it carries the demurrage its BUCKs accrue
-rather than paying it out of the mutual reserve: its
-=balanceOf= stays equal to its raw balance.  A refund on
-=burn= leaves the pool as a Carrying transfer, taking the
-refunded share of the pool's accrued age back to the member
-whose deposit it was; anything the pool pays out otherwise
-does the same.
+The mint =premium= computed by =_computePremium= is routed to
+=insurancePool=, a Non-Carrying account.  The insurance pool
+accrues demurrage on its holdings like any other Non-
+Carrying account; when it deploys funds it does so via
+standard Non-Carrying =transfer=.  No special handling is
+required.
 
 * References
 
