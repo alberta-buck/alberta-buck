@@ -7,7 +7,7 @@
 
 import { tevmSession } from "../../src/backends.js";
 import { loadIdentity } from "../../src/identity-web.js";
-import { artifact } from "../../artifacts/bundle.mjs";
+import { artifact } from "../../artifacts/sandbox.mjs";
 import { SandboxApp } from "./app.js";
 import { idbStore } from "./store.js";
 import { prefs } from "./ui/dom.js";

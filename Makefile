@@ -1513,9 +1513,29 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 # contract bundle; dist/ is plain static files, served over http:
 #
 #   make nix-sandbox          # build, then serve http://localhost:8000/
+#
+# A fresh clone needs no full Foundry build: the BUCK stack, MockERC20 and
+# SimLP come from the published alberta-buck-contracts (or out/, once
+# built), Uniswap's factory, pool and WETH9 from Uniswap's npm packages
+# (stage-uniswap), the Universal Router and Permit2 from their vendored
+# builds, and only the pool binding adapter -- not yet published -- is
+# compiled, on its own.  The first build also fetches the npm dependencies
+# and compiles the identity kernel to wasm (Rust): minutes, once.
 SANDBOX_DIST = core/js/sandbox/dist
-.PHONY: sandbox sandbox-build
-sandbox-build:	core-build-wasm-web core-js-artifacts
+SANDBOX_ADAPTER = out/UniswapV3BindingAdapter.sol/UniswapV3BindingAdapter.json
+.PHONY: sandbox sandbox-build sandbox-deps sandbox-artifacts
+sandbox-deps:
+	@test -d core/js/node_modules || $(MAKE) core-js-deps
+	@test -d node_modules/@uniswap/v3-core || npm ci --no-audit --no-fund --loglevel=error
+
+$(SANDBOX_ADAPTER):
+	forge build src/adapters/UniswapV3BindingAdapter.sol $(FORGE_OPTS)
+
+sandbox-artifacts:	sandbox-deps $(SANDBOX_ADAPTER)
+	@test -f out/UniswapV3Factory.sol/UniswapV3Factory.json || node scripts/stage-uniswap.mjs
+	node core/js/bin/bundle-artifacts.mjs sandbox
+
+sandbox-build:	sandbox-artifacts core-build-wasm-web
 	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm \
 		--platform=browser --outfile=sandbox/dist/app.js \
 		--alias:buffer=buffer \

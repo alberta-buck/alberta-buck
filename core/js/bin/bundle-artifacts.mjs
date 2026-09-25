@@ -4,7 +4,12 @@
 // node-only by design; buildOnePool/buildBuckWorld take an injected
 // `artifacts(name)` either way).
 //
-//   make nix-core-js-artifacts        # writes core/js/artifacts/bundle.mjs
+//   make nix-core-js-artifacts        # writes core/js/artifacts/bundle.mjs (the demos)
+//   node bin/bundle-artifacts.mjs sandbox   # writes artifacts/sandbox.mjs
+//
+// Each artifact comes from out/ when this checkout has built it, else from
+// the published alberta-buck-contracts package (nodefs.loadArtifact); the
+// Universal Router and Permit2 from their vendored builds.
 //
 // Regenerate whenever the contracts change (the bundle test compares a
 // hash against out/ and fails stale).
@@ -15,8 +20,8 @@ import { fileURLToPath } from "node:url";
 
 import { loadArtifact, vendoredArtifact } from "../src/nodefs.js";
 
-// Stage 1-3 surface: identity + BUCK stack + the V3 pool world;
-// stages 5-7 add the equilibrium world's basket + real periphery.
+// The demos.  Stage 1-3 surface: identity + BUCK stack + the V3 pool
+// world; stages 5-7 add the equilibrium world's basket + real periphery.
 export const NEEDED = [
   "MockERC20",
   "UniswapV3Factory",
@@ -31,11 +36,35 @@ export const NEEDED = [
   "WETH9",
   "BuckBasketProRata",
   "BuckBasketUniswapV3",
-  "UniswapV3BindingAdapter",   // the sandbox market: pools bound on production contracts
 ];
 
+// The sandbox: production contracts only (no test harnesses), so a fresh
+// clone needs no full Foundry build -- the BUCK stack, MockERC20 and SimLP
+// are in alberta-buck-contracts, Uniswap's factory, pool and WETH9 are
+// staged from Uniswap's npm packages, and only the pool adapter is compiled.
+export const SANDBOX = [
+  "IdentityRegistry",
+  "BuckCredit",
+  "BuckKControllerDirect",
+  "Buck",
+  "MockERC20",
+  "SimLP",
+  "UniswapV3Factory",
+  "UniswapV3Pool",
+  "UniswapV3BindingAdapter",
+  "WETH9",
+];
+
+const which = process.argv[2] ?? "demo";
+const LISTS = { demo: [NEEDED, "bundle.mjs"], sandbox: [SANDBOX, "sandbox.mjs"] };
+if (!LISTS[which]) {
+  console.error(`usage: bundle-artifacts.mjs [${Object.keys(LISTS).join("|")}]`);
+  process.exit(2);
+}
+const [names, file] = LISTS[which];
+
 const out = {};
-for (const name of NEEDED) {
+for (const name of names) {
   out[name] = loadArtifact(name);
 }
 // The Universal Router and the Permit2 it pins ship as vendored artifacts
@@ -46,7 +75,7 @@ for (const name of ["UniversalRouter", "Permit2"]) {
 
 // Into THIS package, whichever checkout the artifacts were read from
 // (ALBERTA_BUCK_REPO may name another).
-const dest = join(dirname(fileURLToPath(import.meta.url)), "..", "artifacts", "bundle.mjs");
+const dest = join(dirname(fileURLToPath(import.meta.url)), "..", "artifacts", file);
 mkdirSync(dirname(dest), { recursive: true });
 writeFileSync(
   dest,
