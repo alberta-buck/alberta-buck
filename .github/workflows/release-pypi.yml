@@ -97,7 +97,11 @@ jobs:
         with:
           node-version: '22'
 
+      # Pinned to the flake's Foundry (nix develop: forge 1.7.1).  The suite's
+      # gas-bound tests are calibrated there, and 1.8.x meters them differently.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
 
       - name: Tag matches the package version
         env:
