@@ -120,7 +120,9 @@ jobs:
           npm pack --dry-run --json > /tmp/pack.json
           node - <<'EOF'
           const fs = require("fs");
-          const files = JSON.parse(fs.readFileSync("/tmp/pack.json", "utf8"))[0].files.map(f => f.path);
+          // npm <= 11 prints an array of packs; npm 12 an object keyed by name.
+          const pack = JSON.parse(fs.readFileSync("/tmp/pack.json", "utf8"));
+          const files = (Array.isArray(pack) ? pack[0] : Object.values(pack)[0]).files.map(f => f.path);
           const errs = ["contracts.json", "compiler.json"].filter(f => !files.includes(f))
             .map(f => `the tarball is missing ${f}`);
           const bundle = JSON.parse(fs.readFileSync("contracts.json", "utf8")).contracts;
@@ -221,7 +223,8 @@ jobs:
           set -euo pipefail
           n=$(npm pack --dry-run --json -w alberta-buck-kernel |
               node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));
-                       console.log(p[0].files.filter(f=>f.path.endsWith(".wasm")).length)')
+                       const e=Array.isArray(p) ? p[0] : p["alberta-buck-kernel"];  // npm 12: keyed by name
+                       console.log(e.files.filter(f=>f.path.endsWith(".wasm")).length)')
           echo "wasm files in the kernel tarball: $n"
           [ "$n" -eq 4 ] || { echo "::error::expected 4 .wasm files, found $n" >&2; exit 1; }
 
