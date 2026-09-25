@@ -1892,14 +1892,46 @@ Note that view functions are not guarded and cannot be: read-only reentrancy aga
 =balanceOf= is a hazard for /integrations/, which must not sample a BUCK balance from inside a
 callback they do not control.  See [[#integration][Integrating with BUCK]].
 
-** Pool Solvency
+** The Insurance Pool: an Interim Stand-in
 
-=insurancePool= holds the cumulative pool principal for every outstanding mint.  Burn requires
+*Today.*  =insurancePool= is one address, fixed at construction, that receives every mint's
+premium deposit, pays every burn's refund, and is the authority that wires the basket
+(=setBasket=).  It holds the cumulative pool principal for every outstanding mint.  Burn requires
 the pool's spendable balance to cover the proportional refund; if the pool is drained out-of-band
 the burn reverts.  Today no path drains the pool: it is not a verified identity (so no
 identity-checked transfer can move BUCK out of it) and holds no NFTs (so it cannot self-burn via
-the allocator).  Adding governance-controlled disbursement requires explicit accounting of how
-the pool's invariant (~poolBalance >= sum of all outstanding mint principals~) is preserved.
+the allocator).  In the simulations it is an ordinary account, so its balance pays demurrage like
+any Non-Carrying holder's.  It stands in for the design below until insurers exist on chain.
+
+*Intended* (author, 2026-09-25).  A credit's premium deposit belongs with that credit's insurer
+-- =credits[tokenId].insurer=, the account that wrote it.  The insurer holds its credits'
+deposits in a premium pool: a hot wallet that invests the deposits to earn the premiums, and that
+it must keep funded to cover every upcoming cancellation (the refunds due when holders drop their
+insurance) and every upcoming claim payout.  The pool works on its members' behalf, so it is
+Carrying -- a contract bound through the identity registry with =isCarrying=, like any other
+account doing work for others, not a special case in =Buck= (an EOA cannot be Carrying).  =Buck=
+then takes no pool address at all:
+
+- =mint= credits each slice's pool principal to that slice's insurer, and =burn= refunds each
+  slice from its insurer; the funding gate is unchanged (it sees the total).
+- Solvency becomes per insurer: ~pool(insurer) >= sum of mintsPrincipal[tokenId]~ over the
+  insurer's credits, plus what its outstanding claims require.  A burn against an underfunded
+  insurer reverts, so an insurer that lets its hot wallet run dry traps its holders'
+  cancellations -- a condition for the insurer gate's attestation to police.
+- The basket's wiring moves to the registry's governance (=identity.governance()=).
+
+What the change touches, when the insurer implementations -- the insurance company's interface
+to the premium pool its credits fund -- are built:
+
+- =Buck=: drop the constructor parameter; route mint principals and burn refunds per slice; move
+  the =setBasket= authority; per-insurer =Transfer= events.
+- =BuckCredit= and =BuckTypes=: =CreditSlice= gains the insurer, which =batchCreditInfo= returns.
+- Deployments: =scripts/deploy/Deploy.s.sol=, =alberta_buck/sim/deploy.py= and =notes_stack.py=,
+  =core/js/src/buckworld.js= with the equilibrium world's =setBasket= and the sandbox.
+- Tests: the sixteen Foundry suites that construct =Buck=, =Buck.t.sol='s pool and =setBasket=
+  cases and the basket suites' wiring; the JavaScript market and sandbox tests that read the pool.
+- The published contract bundle: =Buck='s constructor and =batchCreditInfo= change, a new minor
+  version.
 
 * Future Directions
   :PROPERTIES:
@@ -1917,9 +1949,9 @@ flags for later study:
   ONCHAINID, programmable transfer restrictions, agent-role granularity, and lost-key recovery via
   identity verification.  This is the likely production standard if Alberta deploys BUCK under
   provincial regulation.
-- *ERC-4626 InsurancePool* -- a vault-shaped wrapping of the existing =insurancePool= address, so
-  pool deposits become standardised mutual-insurance shares with =deposit= / =shares= / yield
-  composability.  Mechanical layer on top of the current single-address pool.
+- *ERC-4626 premium pools* -- a vault shape for each insurer's premium pool (see "The Insurance
+  Pool: an Interim Stand-in"), so deposits become standardised shares with =deposit= / =shares= /
+  yield composability.
 - *L2 deployment*.  The contracts are EVM-compatible and deploy on Arbitrum, Optimism, Base, or
   Polygon with no changes.  Cross-chain BUCK via canonical bridges or LayerZero/Axelar would
   enable multi-chain liquidity while keeping a single BUCK_K oracle on the settlement layer.

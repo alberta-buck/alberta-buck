@@ -61,6 +61,11 @@ contract Buck is IERC20, IERC20Metadata {
     IBuckCredit       public immutable buckCredit;
     IBuckK            public immutable buckK;
     IdentityRegistry  public immutable identity;
+    /// @dev Interim: one address receives every mint's premium deposit, pays
+    ///      every refund and wires the basket.  Intended: each credit's
+    ///      insurer holds its credits' deposits in a Carrying premium pool,
+    ///      and this parameter goes (alberta-buck-ethereum.org, "The
+    ///      Insurance Pool: an Interim Stand-in").
     address           public immutable insurancePool;
 
     // ---- constants ---------------------------------------------------------
