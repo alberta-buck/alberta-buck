@@ -43,4 +43,26 @@ gen --name=basic --n=2
 gen --name=tie     --n=1 --eiss="0:${EISS0}" --t="0:${T0}"
 gen --name=tie_dup --n=2 --eiss="0:${EISS0}" --t="0:${T0}"
 
+# The N=32 verifier is table-rewritten for EIP-170 (scripts/snark/table_verifier.py).
+# Its proof vector, committed, is what test/VerifierTable.t.sol holds the rewrite
+# and its stock original to -- the public signals in the circuit's order.
+if [ -d "$ROOT/build/snark/mint_batch_a2_n32" ]; then
+    gen --name=table --n=32
+    python3 - "$ROOT" <<'EOF'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+f = json.loads((root / "build/snark/mint_batch_a2_n32/fixtures/table.json").read_text())
+p = f["public"]
+signals = ([w for leaf in p["eIss"] for w in leaf] + [w for leaf in p["T"] for w in leaf]
+           + [p["oldRoot"], p["newRoot"], p["nextLeafIndex"], p["totalFace"]] + p["cm"])
+assert len(signals) == 7 * f["N"] + 4
+out = root / "test/vectors/mint_batch_a2_n32/proof.json"
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({"pA": f["proof"]["pA"], "pB": f["proof"]["pB"], "pC": f["proof"]["pC"],
+                           "publicSignals": signals}, indent=1) + "\n")
+print(f"wrote {out.relative_to(root)} ({len(signals)} public signals)")
+EOF
+fi
+
 echo "all mint_batch_a2 fixtures regenerated"

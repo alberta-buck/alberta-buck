@@ -4,10 +4,10 @@
 #
 # ── Tags are per package ──────────────────────────────────────────────
 #
-#     git tag py-contracts-v0.1.0    # alberta-buck-contracts
-#     git tag py-core-v0.1.0         # alberta-buck-core
-#     git tag py-kernel-v0.1.0       # alberta-buck-kernel   (P4, not yet)
-#     git tag py-sim-v0.1.0          # alberta-buck          (P5, not yet)
+#     git tag py-contracts-v0.2.0    # alberta-buck-contracts
+#     git tag py-kernel-v0.2.0       # alberta-buck-kernel
+#     git tag py-core-v0.2.0         # alberta-buck-core
+#     git tag py-sim-v0.2.0          # alberta-buck
 #
 # One shared py-v* tag cannot work: D4 lets each package's patch version
 # float independently, so a single tag would either force all four to the
@@ -45,14 +45,15 @@
 # A pending publisher does not reserve the name; it is claimed on first
 # use, and converts to an established publisher then.
 #
-# alberta-buck (P5) joins this workflow as its phase lands; see
-# alberta-buck-deployment.org.
+# alberta-buck (P5) publishes from the sim job, under pending publisher
+# environment pypi-sim.
 #
 # ── Release order at a major.minor bump ───────────────────────────────
 #
 # core pins contracts and the kernel extra at its own major.minor
 # (>=0.2.0,<0.3), so push the tags in dependency order and let each
-# publish before the next: py-contracts-v*, py-kernel-v*, py-core-v*.
+# publish before the next: py-contracts-v*, py-kernel-v*, py-core-v*,
+# then py-sim-v* (alberta-buck pins core at the same major.minor).
 # The core job's smoke test installs its wheel from PyPI's view of those
 # pins, so it fails rather than publishing a core nobody can install.
 
@@ -153,12 +154,22 @@ jobs:
           whl = glob.glob("dist/*.whl")
           if not whl:
               print("::error::no wheel built"); sys.exit(1)
-          names = zipfile.ZipFile(whl[0]).namelist()
+          z = zipfile.ZipFile(whl[0])
+          names = z.namelist()
           need = ["buck_contracts/contracts.json", "buck_contracts/compiler.json"]
           missing = [n for n in need if n not in names]
           if missing:
               print(f"::error::wheel {whl[0]} is missing {missing}"); sys.exit(1)
-          print(f"{whl[0]}: bundle present ({len(names)} files)")
+          # Until v1.0.0 the Groth16 verifiers are from a development setup,
+          # and the bundle must say so per artifact.
+          import json
+          bundle = json.loads(z.read(need[0]))["contracts"]
+          setup = json.loads(z.read(need[1])).get("trustedSetup") or {}
+          bad = [v for v in setup.get("verifiers", []) if bundle.get(v, {}).get("trustedSetup") != "development"]
+          if setup.get("kind") != "development" or bad:
+              print(f"::error::development-setup record missing or incomplete: {bad}"); sys.exit(1)
+          print(f"{whl[0]}: bundle present ({len(bundle)} contracts, "
+                f"{len(setup['verifiers'])} verifiers flagged development)")
           EOF
 
       - name: Publish to PyPI
@@ -521,6 +532,106 @@ jobs:
 
       - name: Wheels only
         run: python3 scripts/check-kernel-wheel.py --no-sdist dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # ──────────────────────────────────────────────────────────────────────
+  # alberta-buck: the reference implementation and the simulations.  Pure
+  # Python, one py3-none-any wheel; the kernels arrive through the [kernel]
+  # extra.  Gated like core: what the wheel promises, installed outside any
+  # checkout -- that it is pure, carries the data its modules read at run
+  # time, and computes the same bytes with and without the kernel.  Its
+  # dependencies resolve from PyPI, so this job also enforces the release
+  # order: it cannot pass until core (and, for [kernel], the kernel) is
+  # published at this major.minor.
+  # ──────────────────────────────────────────────────────────────────────
+  sim:
+    name: Publish alberta-buck
+    if: startsWith(github.ref_name, 'py-sim-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-sim             # distinct per package; see the header
+      url: https://pypi.org/p/alberta-buck
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'      # the floor: requires-python >=3.11
+
+      - name: Tag matches the package version
+        env:
+          PREFIX: py-sim-v
+          PYPROJECT: pyproject.toml
+        run: |
+          python3 - <<'EOF'
+          import os, sys, tomllib
+          prefix, path = os.environ["PREFIX"], os.environ["PYPROJECT"]
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix(prefix)
+          ver = tomllib.load(open(path, "rb"))["project"]["version"]
+          if tag != ver:
+              print(f"::error::tag {prefix}{tag} does not match {path} version {ver}")
+              sys.exit(1)
+          print(f"{ver} matches the tag")
+          EOF
+
+      - name: Build the wheel and sdist
+        run: |
+          python -m pip install --quiet build twine
+          python -m build . --outdir dist/
+          twine check --strict dist/*
+
+      - name: The wheel is pure and carries its data
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/*.whl")
+          if len(whl) != 1 or not whl[0].endswith("-py3-none-any.whl"):
+              print(f"::error::expected one pure wheel, got {whl}"); sys.exit(1)
+          names = zipfile.ZipFile(whl[0]).namelist()
+          if binary := [n for n in names if n.endswith((".so", ".pyd", ".dylib"))]:
+              print(f"::error::compiled objects in the wheel: {binary}"); sys.exit(1)
+          need = {
+              "Poseidon constants":  "alberta_buck/wallet/poseidon_constants.json",
+              "price series":        "alberta_buck/sim/prices/",
+              "experiments":         "alberta_buck/sim/experiments/",
+              "quote source (US)":   "alberta_buck/sim/quotes/data/us/",
+              "fixture worlds":      "alberta_buck/test/vectors/e2e/",
+              "privacy world":       "alberta_buck/test/vectors/privacy/",
+          }
+          missing = [k for k, p in need.items() if not any(n.startswith(p) for n in names)]
+          if missing:
+              print(f"::error::the wheel lacks: {missing}"); sys.exit(1)
+          print(f"{whl[0]}: pure, {len(names)} files, runtime data present")
+          EOF
+
+      - name: Smoke test the wheel outside any checkout, with and without the kernel
+        run: |
+          for extra in "" "[kernel]"; do
+            rm -rf /tmp/smoke && python -m venv /tmp/smoke
+            /tmp/smoke/bin/pip install --quiet "$(ls dist/*.whl)$extra"
+            ( cd "$(mktemp -d)" && /tmp/smoke/bin/python - "$extra" <<'EOF'
+          import sys
+          from alberta_buck.wallet import backend, identity_scalar, ps_keygen, ps_sign, ps_verify
+          from alberta_buck.wallet.poseidon import poseidon
+          want = "kernel" if sys.argv[1] else "py"
+          if backend() != want:
+              print(f"::error::backend {backend()} with extra {sys.argv[1]!r}, expected {want}"); sys.exit(1)
+          assert poseidon([1, 2]) == 0x115cc0f5e7d690413df64c6b9662e9cf2a3617f2743245519e19607a4417189a
+          issuer = ps_keygen()
+          m = identity_scalar({"registry": "ab", "person": "0001", "birth": "1970-01-01"})
+          assert ps_verify(issuer.pk_X, issuer.pk_Y, ps_sign(issuer, m), m)
+          print(f"alberta-buck{sys.argv[1]}: backend {want}, Poseidon and a PS credential check out")
+          EOF
+            )
+          done
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -5,7 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name			= "alberta-buck"
 version			= "0.2.0"
-description		= "Alberta Buck commodity-basket stablecoin: oracle tools, historical analysis, and PID simulation"
+description		= "Alberta Buck reference implementation (protocol v2): identity credentials and accumulator, Notes, payment receipts, and agent simulations over the contracts"
+readme			= "README-pypi.md"
+keywords		= ["stablecoin", "ethereum", "zero-knowledge", "identity", "bn254", "simulation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Office/Business :: Financial",
+]
 # 3.11 is the floor of alberta-buck-core, which is a hard dependency below.
 requires-python		= ">=3.11"
 license			= "GPL-3.0-or-later"
@@ -33,6 +44,10 @@ dependencies = [
     # core, which is what calls it.
     "alberta-buck-core	>=0.2.0,<0.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alberta-buck/alberta-buck"
+"Bug Tracker" = "https://github.com/alberta-buck/alberta-buck/issues"
 
 [project.optional-dependencies]
 # The compiled kernels.  Optional BY CONSTRUCTION, not by omission:
@@ -94,7 +109,10 @@ include = ["alberta_buck*"]
 # Vendored Bank of Canada / StatCan source series (BCPI, CPI, USD/CAD, wages)
 # consumed at runtime by alberta_buck.sim.quotes to build the historical
 # commodity & labour quote source; shipped so the module is self-contained.
-"alberta_buck.sim.quotes" = ["data/*.csv"]
+"alberta_buck.sim.quotes" = ["data/*.csv", "data/us/*.csv"]
+# The simulation's own inputs: the price series basket_flow and the scenarios
+# replay, and the TOML experiments the harness runs (python -m alberta_buck.sim).
+"alberta_buck.sim" = ["prices/*.csv", "experiments/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["alberta_buck/test"]

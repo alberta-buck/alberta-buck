@@ -1,8 +1,16 @@
 # Publish the Alberta Buck JS packages to npm.
 #
-# Trigger: a js-v* tag, e.g.
+# Two tags, two jobs:
 #
-#     git tag js-v0.1.1 && git push origin js-v0.1.1
+#     git tag js-contracts-v0.2.0   # alberta-buck-contracts (the Solidity bundle)
+#     git tag js-v0.2.0             # alberta-buck-kernel + alberta-buck-core
+#
+# The contracts go first and alone.  core pins them exactly, and core's
+# lockfile can only name a version npm already serves, so the order at a
+# release is: js-contracts-v*, then bump core/js's contracts pin and
+# regenerate its lock (npm install --package-lock-only), then js-v*.  The
+# js-v* job refuses to run until that pin is at the release's major.minor
+# and installable.
 #
 # Authentication is OIDC trusted publishing -- no NPM_TOKEN anywhere.  It
 # requires a Trusted Publisher configured on npmjs.com for EACH package
@@ -26,6 +34,7 @@ on:
   push:
     tags:
       - 'js-v*'
+      - 'js-contracts-v*'
 
 concurrency:
   group: release-npm
@@ -35,8 +44,97 @@ permissions:
   contents: read
 
 jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # alberta-buck-contracts: the same bundle release-pypi.yml's contracts job
+  # ships, built the same way and gated by the same suite.  Its Groth16
+  # verifiers are from a DEVELOPMENT trusted setup until v1.0.0, and the
+  # bundle says so per artifact; the last check below refuses a tarball that
+  # does not.
+  # ──────────────────────────────────────────────────────────────────────
+  contracts:
+    name: Publish alberta-buck-contracts to npm
+    if: startsWith(github.ref_name, 'js-contracts-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # required for npm trusted publishing
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm >= 11.5.1 (OIDC support)
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Tag matches the package version
+        run: |
+          node - <<'EOF'
+          const tag = process.env.GITHUB_REF_NAME.replace(/^js-contracts-v/, "");
+          const ver = require("./core/contracts/package.json").version;
+          if (ver !== tag) {
+            console.error(`::error::tag js-contracts-v${tag} does not match core/contracts ${ver}`);
+            process.exit(1);
+          }
+          console.log(`${ver} matches the tag`);
+          EOF
+
+      # Pinned Solidity dependencies; they compile INTO our contracts.
+      - name: Install Solidity dependencies
+        run: make install
+
+      # The Uniswap artifacts the test worlds deploy come from Uniswap's own
+      # npm packages at the repository root.
+      - name: Install JS dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The artifact we publish must be the artifact the suite exercises.
+      - name: Test
+        run: make test
+
+      - name: Build and verify the contracts bundle
+        run: |
+          make contracts-dist
+          python3 scripts/contracts-dist.py --check
+
+      - name: The tarball carries the bundle and its setup warning
+        # contracts.json and compiler.json are generated, hence gitignored;
+        # the package's files list is what ships them.
+        working-directory: core/contracts
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node - <<'EOF'
+          const fs = require("fs");
+          const files = JSON.parse(fs.readFileSync("/tmp/pack.json", "utf8"))[0].files.map(f => f.path);
+          const errs = ["contracts.json", "compiler.json"].filter(f => !files.includes(f))
+            .map(f => `the tarball is missing ${f}`);
+          const bundle = JSON.parse(fs.readFileSync("contracts.json", "utf8")).contracts;
+          const setup = JSON.parse(fs.readFileSync("compiler.json", "utf8")).trustedSetup;
+          if (!setup || setup.kind !== "development") errs.push("compiler.json has no development-setup record");
+          for (const v of (setup?.verifiers ?? []))
+            if (bundle[v]?.trustedSetup !== "development") errs.push(`${v} is not flagged as a development setup`);
+          if (errs.length) { console.error("::error::" + errs.join("\n  ")); process.exit(1); }
+          console.log(`${Object.keys(bundle).length} contracts, ${setup.verifiers.length} verifiers flagged`);
+          EOF
+
+      - name: Publish alberta-buck-contracts
+        working-directory: core/contracts
+        run: npm publish
+
   publish:
     name: Publish kernel + core to npm
+    if: startsWith(github.ref_name, 'js-v')
     runs-on: ubuntu-latest
     permissions:
       contents: read

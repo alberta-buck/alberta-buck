@@ -164,6 +164,28 @@ The swap sites, should you need a model: =prove_mint_batch.js= (JS),
 =test_verifier_regression.sh= (shell-embedded python), =gen_e2e_world.py=
 (python).
 
+** The one exception: verifiers too large for EIP-170
+
+snarkjs unrolls one inlined G1 multiply-accumulate per public input, about 166
+bytes of runtime code each, so past ~140 public inputs a stock verifier exceeds
+EIP-170's 24,576-byte limit and cannot deploy wherever it holds.
+=mint_batch_a2= at N=32 has 228 (38,805 bytes stock).
+
+=setup.sh= therefore passes every exported verifier through
+=scripts/snark/table_verifier.py --over 128=.  At or under 128 public inputs it
+does nothing; over, it moves IC1..ICn into one code-resident table walked by a
+loop (19,016 bytes at N=32, ~45k more gas per verify on ~1.7M).  That is a
+mechanical rewrite of the stock output, not a patch to its logic: the
+verification key, the pairing check, the public inputs and the =pi_b= order are
+all unchanged, and so is every proof.
+
+The stock original is kept at =test/reference/<Contract>Stock.sol=, and
+=test/VerifierTable.t.sol= holds the two to identical verdicts on a real proof
+(=test/vectors/mint_batch_a2_n32/proof.json=, written by
+=gen_mint_fixtures_a2.sh=) and on every single change to it, and checks that
+every shipped verifier fits EIP-170.  The rewritten verifier, its stock
+reference and that vector are one more matched set: regenerate them together.
+
 ** History, briefly
 
 Until 2026-08 the repo ran TWO conventions: the JS provers swapped at pack
