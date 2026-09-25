@@ -612,7 +612,7 @@ balanceOf(a)    = held(a) + unusedCredit(a)                      // Non-Carrying
 balanceOf(a)    = max(0, signedRaw(a))                           // Carrying
 #+END_SRC
 
-Carrying accounts (AMM pools, Notes pool, Jubilee) hold no BuckCredit NFTs, so
+Carrying accounts (AMM pools, Notes pool, Jubilee, the insurance pool) hold no BuckCredit NFTs, so
 ~creditLimit == 0~ and the signed-balance machinery degenerates to the prior unsigned model.
 =feeOwing= and =balanceOfFees= clamp to zero on negative raw -- demurrage is a per-second
 property of *held* BUCK, not used credit.
@@ -833,12 +833,14 @@ on the face slice it would have been 1,313/yr, and the holder would have been pa
 asset no longer has.
 
 =burn(amount[, tokenIds])= mirrors the math but with the most-expensive-first default selector:
-unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
-shrinks =activatedValue= and =mintsBacked= in lockstep, debit =poolRefund= from =insurancePool=,
-credit =poolRefund= to the holder's signed raw (climbs toward zero from used credit, or further
-positive from a positive balance).  =quoteMint= and =quoteBurn= are read-only views that return
-=(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same allocator math, so
-an off-chain optimizer can size required limits and refunds before submitting.
+unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which shrinks
+=activatedValue= and =mintsBacked= in lockstep, and move =poolRefund= from =insurancePool= to the
+holder's signed raw (climbs toward zero from used credit, or further positive from a positive
+balance) as a Carrying transfer: the pool is Carrying by construction, so the refund takes its share
+of the pool's accrued age back to the holder rather than the reserve paying it.  =quoteMint= and
+=quoteBurn= are read-only views that return =(totalCoverage, poolPrincipal)= or
+=(totalUnwind, poolRefund)= for the same allocator math, so an off-chain optimizer can size
+required limits and refunds before submitting.
 
 *** The Funding-Factor Reserve, and Its Precedents
     :PROPERTIES:

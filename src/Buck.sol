@@ -378,7 +378,7 @@ contract Buck is IERC20, IERC20Metadata {
     function balanceOf(address a) public view returns (uint256) {
         AccountState storage s = _state[a];
         int256 raw = s.balance.asInt();
-        if (identity.isCarrying(a)) {
+        if (_isCarrying(a)) {
             return raw > 0 ? uint256(raw) : 0;
         }
         // Non-carrying: held + unused credit.
@@ -403,7 +403,7 @@ contract Buck is IERC20, IERC20Metadata {
         AccountState storage s = _state[a];
         int256 raw = s.balance.asInt();
         if (raw <= 0) return raw;          // credit used accrues no demurrage (clamped in _feeOwing)
-        if (identity.isCarrying(a)) return raw;
+        if (_isCarrying(a)) return raw;
         uint256 fee = _feeOwing(a, uint256(raw));
         return raw - int256(fee);
     }
@@ -559,8 +559,8 @@ contract Buck is IERC20, IERC20Metadata {
         require(account != msg.sender,                        "BUCK: self payer");
         require(identity.isVerified(account),                 "BUCK: account not verified");
         require(identity.isVerified(msg.sender),              "BUCK: payer not verified");
-        require(!identity.isCarrying(account),                "BUCK: account is Carrying");
-        require(!identity.isCarrying(msg.sender),             "BUCK: payer is Carrying");
+        require(!_isCarrying(account),                "BUCK: account is Carrying");
+        require(!_isCarrying(msg.sender),             "BUCK: payer is Carrying");
 
         // Everything accrued so far stays where it accrued.
         _accrueJubilee();
@@ -817,12 +817,12 @@ contract Buck is IERC20, IERC20Metadata {
 
         _accrueJubilee();
         if (poolRefund > 0) {
-            _crystallize(insurancePool);
             int256 poolRaw = _state[insurancePool].balance.asInt();
             require(int256(poolRefund) <= poolRaw, "BUCK: pool underfunded");
-            _subBalance(insurancePool, poolRefund);
-            _crystallize(msg.sender);
-            _addBalance(msg.sender, poolRefund);
+            // The pool is Carrying: the refund takes back the age the deposit
+            // accrued in the pool, so the holder, not the mutual reserve,
+            // bears that demurrage.
+            _carryingTransfer(insurancePool, msg.sender, poolRefund);
             // Per-side Transfer event: pool -> holder for the refund.
             emit Transfer(insurancePool, address(0), poolRefund);
         }
@@ -1236,7 +1236,7 @@ contract Buck is IERC20, IERC20Metadata {
             fromHash = _identityHash(from);
         }
 
-        if (identity.isCarrying(from)) {
+        if (_isCarrying(from)) {
             _carryingTransfer(from, to, amount);
         } else {
             _nonCarryingTransfer(from, to, amount);
@@ -1323,6 +1323,19 @@ contract Buck is IERC20, IERC20Metadata {
         }
     }
 
+    // ---- Carrying ------------------------------------------------------------
+
+    /// @dev A Carrying account's BUCK keeps its age instead of paying it: the
+    ///      demurrage it accrues travels with it to whoever receives it
+    ///      (_carryingTransfer).  That is the account the registry binds as
+    ///      Carrying -- a pool or a router working on others' behalf -- and,
+    ///      by construction, the insurance pool: it holds its members' premium
+    ///      deposits for them, so the demurrage a deposit accrues goes back
+    ///      with it on a refund rather than eroding the mutual reserve.
+    function _isCarrying(address a) internal view returns (bool) {
+        return a == insurancePool || identity.isCarrying(a);
+    }
+
     // ---- demurrage views ---------------------------------------------------
 
     function feeOwing(address a) public view returns (uint256) {
@@ -1333,7 +1346,7 @@ contract Buck is IERC20, IERC20Metadata {
 
     function balanceOfFees(address a) public view returns (uint256) {
         uint256 fee = feeOwing(a);
-        if (identity.isCarrying(a)) return fee;
+        if (_isCarrying(a)) return fee;
         int256 raw = _state[a].balance.asInt();
         if (raw <= 0) return 0;
         uint256 rawU = uint256(raw);

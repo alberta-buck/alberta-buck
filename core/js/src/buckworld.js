@@ -52,7 +52,9 @@ export const DAY = 86_400;
  * @param opts.identity the buck-identity kernel API (REQUIRED: import
  *                  from ./identity.js in node, loadIdentity() in the browser)
  * @param opts.gov      governance address    (default: deployer)
- * @param opts.poolAcct funding-pool address  (default: deployer)
+ * @param opts.poolAcct the insurance pool     (default: deployer).  Buck
+ *                  treats it as Carrying, so it cannot draw credit: give it
+ *                  an account of its own when the deployer also holds credit.
  * @param opts.params   controller overrides over DEPLOY_DEFAULTS
  * @param opts.rng      scalar drawer for the issuer PS keypair
  * @param opts.registryArtifact "IdentityRegistry" (default) or the test
