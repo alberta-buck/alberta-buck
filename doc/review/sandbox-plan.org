@@ -171,3 +171,34 @@ risks, settled:
 - *BigInt in storage.*  One codec, =codec.js=, tagged (={"$bigint": ...}=, ={"$bytes": ...}=) so a
   string that looks numeric stays a string; the test round-trips a credential card and the whole
   saved world through it.
+
+* S2, done (2026-09-25)
+
+=core/js/sandbox/src/app.js= (=SandboxApp=) and =store.js= (=idbStore=, falling back to
+=memoryStore= where storage is refused), with =test/sandbox.app.tevm.test.js=: the whole story
+with no DOM, 12 steps, about 10 s.  The shape the UI builds on:
+
+- *Actions* (queued, one at a time; each then observes, saves and notifies =onChange=):
+  =reset=, =advance=, =issue= (the core record of the privacy paper's cast: name at first
+  certification, date of birth, a random =AB-P-NNNN-NNNN= person number never reused, the chain's
+  date; =id_type=, =issuer_id=, =jurisdiction=, =epoch= stamped), =importCredential= (the same
+  card twice is one credential), =createWallet=, =register=, =introduce= (both directions,
+  skipping any already done), =send= (to a wallet or an address), =insure= (asset-class
+  defaults), =activate=, =importText=.  Reads: =view()= (everything the screens show, in one
+  queued pass), =labels()= (who is who, for the observer's "you know this" layer),
+  =credentialText=, =exportText=.
+- *Refusals* -- the protocol's (=BUCK: recipient not verified=, the handshake, a premium
+  without funding) and the sandbox's own (a missing field, an unregistered wallet) -- throw
+  =SandboxError= with a =reason= for people; the world is saved all the same.
+- *Saved world*: ={format, version, chain: snapshotTevm, app}=; the app part holds the world
+  record (issuer keys included -- simulated), credentials, wallets (private keys in the clear --
+  simulated), insurers, credits, introductions, the observer's rows (the chain keeps no history
+  across a restore) and the journal's tail.  After the story: 187 KiB, serialized in 6 ms.
+- *Import* builds the new world in a fresh session and swaps it in only once it stands; a bad
+  file leaves the current world untouched.  An unreadable stored world starts over and sets
+  =notice=.
+- *Asset classes* (=ASSET_CLASSES=): home (linear 2.5 %/yr above a 30 % land floor), vehicle
+  (declining 15 %/yr to 10 %), equipment (declining 10 %/yr to 5 %), farmland and gold (none).
+  Premiums default to 0: with no basket the controller's funding factor is 1.0, so a premium
+  credit activates only against an existing balance or unused credit, and =Buck.mint= draws the
+  cheapest credit first unless told which.
