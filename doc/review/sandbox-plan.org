@@ -301,6 +301,30 @@ will join them.
   carrying account is a question for the contracts, not the sandbox.
 - *Also*: Foundry's =script/= moved into =scripts/deploy/= (1d6b08b; =foundry.toml= names it).
 
+* S5, done (2026-09-25): from a fresh clone, the guide, the pictures
+
+- *No full Foundry build.*  The sandbox has its own artifact bundle
+  (=bundle-artifacts.mjs sandbox= -> =artifacts/sandbox.mjs=, 12 production contracts, no test
+  harnesses): the BUCK stack, =MockERC20= and =SimLP= from =alberta-buck-contracts= (or =out/=),
+  Uniswap's factory, pool and WETH9 staged from Uniswap's npm packages, the router and Permit2
+  vendored, and only =UniswapV3BindingAdapter= -- not yet published -- compiled on its own (7
+  files, one second).  =make sandbox-build= fetches or builds whichever is missing
+  (=sandbox-deps=, =sandbox-artifacts=).  Publishing the adapter in the next contracts release
+  removes the last Foundry step.
+- *A fresh clone* of =feature/public= built with =make nix-sandbox-build= in 35 s (Rust crates
+  cached; a first-ever build compiles them) and passed the browser test.  It surfaced two
+  repository problems, recorded in =public-plan.org= (decision 6): =lib/circom-lib= pins a commit
+  that exists only on the author's machine, so Foundry's automatic submodule install fails and
+  leaves the clone's submodule moved; and =foundry.lock= named four dependencies nothing
+  installs (dropped).
+- *=doc/SANDBOX.org=*: running it, a first story, each tool with its picture, what is real and what
+  simulated, the saved world, and where the code and tests are.  Guides live in =doc/= (not a new
+  =docs/= beside it).
+- *Pictures*: =make nix-sandbox-screenshots= (=core/js/sandbox/bin/screenshots.mjs=) plays the story
+  in the flake's headless Chromium and writes =images/sandbox/{issuer,wallets,credit-quote,
+  credit,observer}.png= (about 190 KB each).  =SANDBOX_PORT= picks the serving port.
+- The credits table now fits beside the forms: seven columns, the owner under the asset.
+
 *Follow-up (author, 2026-09-25):* move the other simulations (the Python sim's =deploy.py=/
 =router.py=, the JS equilibrium world) to Permit2 and an unbound router, and have the arbitrage
 agents take BUCK-in-the-middle routes by exact output -- where there is money to be made, arbs

@@ -1523,7 +1523,7 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 # and compiles the identity kernel to wasm (Rust): minutes, once.
 SANDBOX_DIST = core/js/sandbox/dist
 SANDBOX_ADAPTER = out/UniswapV3BindingAdapter.sol/UniswapV3BindingAdapter.json
-.PHONY: sandbox sandbox-build sandbox-deps sandbox-artifacts
+.PHONY: sandbox sandbox-build sandbox-deps sandbox-artifacts sandbox-screenshots
 sandbox-deps:
 	@test -d core/js/node_modules || $(MAKE) core-js-deps
 	@test -d node_modules/@uniswap/v3-core || npm ci --no-audit --no-fund --loglevel=error
@@ -1545,9 +1545,15 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 	cp core/js/sandbox/index.html core/js/sandbox/styles.css $(SANDBOX_DIST)/
 	cp core/js/kernel/web/buck_identity_bg.wasm $(SANDBOX_DIST)/wasm/
 
+SANDBOX_PORT ?= 8000
 sandbox:	sandbox-build
-	@echo "sandbox: http://localhost:8000/   (Ctrl-C stops it)"
-	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 8000
+	@echo "sandbox: http://localhost:$(SANDBOX_PORT)/   (Ctrl-C stops it)"
+	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_PORT)
+
+# The screenshots in doc/SANDBOX.org: a scripted story in headless Chromium
+# (the flake's), each tool captured into images/sandbox/.
+sandbox-screenshots:	sandbox-build
+	node core/js/sandbox/bin/screenshots.mjs images/sandbox
 
 # Stage the compiled kernels into the alberta-buck-kernel package.  The
 # identity, wallet and registry kernels are ONE cdylib with three

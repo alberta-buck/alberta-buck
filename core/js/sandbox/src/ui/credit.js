@@ -18,8 +18,8 @@ const toBp = (text, what) => {
 };
 
 function schedule(c) {
-  if (c.depType === 0) return "does not depreciate";
-  return `${DEP_NAMES[c.depType]}, ${pct(c.depRate)}/yr to ${amount(c.floor, 0)}`;
+  if (c.depType === 0) return "none";
+  return `${DEP_NAMES[c.depType]} ${pct(c.depRate)}/yr`;
 }
 
 export function mountCredit(ctx) {
@@ -163,18 +163,19 @@ export function renderCredit(ctx, view) {
   fill(ctx.credit.list, view.credits.length === 0
     ? h("p", { class: "empty" }, "No credits yet.")
     : h("div", { class: "table-wrap" }, h("table", {},
-      h("thead", {}, h("tr", {}, ["#", "Owner", "Asset", "Value", "Schedule", "Premium", "Activated",
+      h("thead", {}, h("tr", {}, ["Credit", "Value", "Depreciation", "Premium", "Activated",
         "Worth now", "Activated, now"].map((t) => h("th", { scope: "col" }, t)))),
-      h("tbody", {}, view.credits.map((c) => h("tr", {},
-        h("td", {}, `${c.tokenId}`),
-        h("td", {}, label(c.wallet)),
-        h("td", {}, ASSET_CLASSES.find((a) => a.key === c.className)?.label ?? c.className),
+      h("tbody", {}, view.credits.map((c) => h("tr", { "data-credit": String(c.tokenId) },
+        h("td", {}, h("b", {}, ASSET_CLASSES.find((a) => a.key === c.className)?.label ?? c.className),
+          ` #${c.tokenId}`, h("div", { class: "sub" }, label(c.wallet))),
         h("td", { class: "r" }, money(c.face, "BUCK", 0)),
-        h("td", {}, schedule(c)),
+        h("td", { title: c.depType ? `floor ${amount(c.floor, 0)} BUCK` : "" }, schedule(c)),
         h("td", { class: "r" }, `${pct(c.premiumRate)}/yr`),
         h("td", { class: "r" }, money(c.activated, "BUCK", 0)),
-        h("td", { class: "r", title: "The whole asset, depreciated to today" }, money(c.depreciatedFace, "BUCK", 0)),
-        h("td", { class: "r", title: "The activated part, depreciated to today" }, money(c.currentValue, "BUCK")),
+        h("td", { class: "r", "data-col": "worth", title: "The whole asset, depreciated to today" },
+          money(c.depreciatedFace, "BUCK", 0)),
+        h("td", { class: "r", "data-col": "activated-now", title: "The activated part, depreciated to today" },
+          money(c.currentValue, "BUCK")),
       ))))));
   ctx.credit.requote();
 }

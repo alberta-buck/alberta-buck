@@ -119,7 +119,7 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     const activate = page.locator("#panel-credit .quote button", { hasText: "Activate" });
     await activate.waitFor({ timeout: 30_000 });
     await ok(activate, /premium 1,81\d\.\d\d BUCK paid into the insurance pool/);
-    const worth = async () => (await page.locator("#panel-credit tbody td").nth(7).textContent()).trim();
+    const worth = async () => (await page.locator("#panel-credit td[data-col=activated-now]").textContent()).trim();
     const was = await worth();
     await ok(page.locator("button", { hasText: "+30 days" }), /Thirty days passed/);
     assert.notEqual(await worth(), was, "the home depreciated");

@@ -82,10 +82,10 @@ around the visitor; Notes (A1/A2/B1) from pre-generated fixture proofs; the insu
    =SECURITY.md=.
 6. Licences and contributing, in two lines each, linking =LICENSING.md= and =CONTRIBUTING.md=.
 
-Sub-documents under =docs/=: =INSTALL.org= (packages from the registries; nix; the venv),
-=SANDBOX.org= (the web tools and the sim server), =DEVELOP.org= (build, test, SNARK setups -- the
-present README's material, moved and corrected).  =alberta-buck-deployment.org= stays the release
-book.
+Sub-documents under =doc/= (beside the review documents, not a second =docs/=): =INSTALL.org=
+(packages from the registries; nix; the venv), =SANDBOX.org= (the web tools; written in S5),
+=DEVELOP.org= (build, test, SNARK setups -- the present README's material, moved and
+corrected).  =alberta-buck-deployment.org= stays the release book.
 
 * The demo recording
 
@@ -124,6 +124,14 @@ scripted rather than hand-typed and hand-edited, so it re-records when the comma
 4. *Branches and tags.*  31 branches on origin would go public (stale =execute-plan/*=, unmerged
    =carry-convexity=).  Choose which.
 5. *SECURITY.md* (a disclosure address) and the CLA that dual licensing requires.
+6. *=lib/circom-lib= is unfetchable* (found 2026-09-25, building the sandbox from a fresh clone):
+   the submodule pins =224c5a26=, the author's own commit adding BN254 to =circuits/ec/get.circom=
+   (23 lines on upstream =5258258=), which was never pushed, so =git submodule update --init=
+   fails for anyone else ("not our ref").  The circuits include =curve.circom= and so the patched
+   =get.circom=: dropping the patch could change them.  Options: fork =dl-solarity/circom-lib=
+   into the =alberta-buck= organization with the commit and repoint =.gitmodules= (constraints
+   unchanged); or offer the patch upstream and pin the merged commit.  (Stale =foundry.lock=
+   entries for the removed umbral and uniswap-ai experiments were dropped on =feature/public=.)
 
 *Hygiene (no decision needed):* =.claude/= and =CLAUDE.md= in the repository =.gitignore= (now
 only the global one); =pjkundert/alberta-buck= -> =alberta-buck/alberta-buck= in README.org and
@@ -138,10 +146,10 @@ closing README's SNARK section; branch protection on =master= once public.
 | G0    | Branch =feature/public= (worktree =../alberta-buck-public=); this plan          | done   |
 | G1    | Hygiene (list above); fix =identity-proofs.html=                                | done   |
 | G2    | Sandbox v1 (doc/review/sandbox-plan.org): world bar, issuer, wallet, credit,    | open   |
-|       | observer; persistence; headless story test; =make sandbox= (S1-S4 done)         |        |
-| G3    | README.org front door + =docs/{INSTALL,SANDBOX,DEVELOP}.org=                    | open   |
+|       | observer; persistence; headless story test; =make sandbox= (S1-S5 done)         |        |
+| G3    | README.org front door + =doc/{INSTALL,DEVELOP}.org= (=doc/SANDBOX.org= done)    | open   |
 | G4    | Demo recording (scripted cast, agg GIF) + sandbox screenshots                 | open   |
-| G5    | Decisions 1, 3-5; SECURITY.md; history rewrite (after carry-convexity); public  | open   |
+| G5    | Decisions 1, 3-6; SECURITY.md; history rewrite (after carry-convexity); public  | open   |
 | G6    | Shared world: sim-server bridge, then Notes from fixtures, the insurer gate     | later  |
 
 * G1 hygiene, done (2026-09-25)
