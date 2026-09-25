@@ -81,9 +81,11 @@ In place: =release-crates.yml=, =release-npm.yml= and =release-pypi.yml= (all
 trusted publishing, no stored tokens), =LICENSE= / =core/LICENSE= /
 =LICENSING.md= / =NOTICE=, a Rust toolchain and =binaryen= in the flake,
 =Cargo.lock= and =foundry.lock= committed.  The repository is pushed to
-=github.com/alberta-buck/alberta-buck= (private), and all three release
-workflows have run green -- every PyPI row above was published with no
-human holding a token.
+=github.com/alberta-buck/alberta-buck= (private).  =release-pypi.yml= has
+run green -- every PyPI row above was published with no human holding a
+token.  =release-crates.yml= and =release-npm.yml= have not run yet: the
+crates and the npm packages above went out by hand, so 0.2.0 is their
+first trusted publish.
 
 *Next: 0.2.0, the v2 roll* (2026-09-25; the tree is at 0.2.0, nothing is
 published yet).  Protocol v2 changes every tag, transcript and note hash, so
