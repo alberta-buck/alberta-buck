@@ -139,8 +139,10 @@ Reset.  A journal drawer lists every transaction with its outcome and gas (the e
   depreciation, and the observer decodes every transaction.
 - *S5* :: the =make sandbox*= targets, the bundle test, =docs/SANDBOX.org=, screenshots.
   /Accepted when/ a fresh clone runs =make sandbox= and the story end to end.
-- *S6* :: a hosted build (a GitHub Pages workflow), once the repository is public.  /Accepted
-  when/ the README links a live sandbox.
+- *S6* :: a hosted build: Cloudflare Pages (author, 2026-09-25), which needs no public repository
+  -- =.github/workflows/sandbox-pages.yml= builds, runs the browser test, and deploys =dist/= with
+  wrangler (master to production, other branches to previews).  /Accepted when/ the README links
+  a live sandbox.
 
 * Risks to settle early (in S1)
 
