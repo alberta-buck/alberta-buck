@@ -103,9 +103,11 @@ export class SandboxApp {
    * @param deps.rng        scalar drawer (tests inject; default WebCrypto)
    * @param deps.newKey     () => a private key for a new account (tests inject)
    * @param deps.journalTail how many journal entries the world keeps
+   * @param deps.onJournal  (entry) => void for every transaction as it lands
+   *                        (a page shows progress while a world deploys)
    */
   constructor({ identity, artifacts, newSession, store = null, rng, newKey,
-                journalTail = 500 }) {
+                journalTail = 500, onJournal = null }) {
     this.identity = identity;
     this.artifacts = artifacts;
     this.newSession = newSession;
@@ -113,6 +115,7 @@ export class SandboxApp {
     this.rng = rng ?? identity.randScalar;
     this.newKey = newKey ?? generatePrivateKey;
     this.journalTail = journalTail;
+    this.onJournal = onJournal;
     this.session = null;
     this.world = null;
     this.market = null;
@@ -589,7 +592,13 @@ export class SandboxApp {
   // tail), numbering on from its last entry.
   #attachJournal(session, journal) {
     const writer = new JournalWriter((line) => {
-      journal.push(JSON.parse(line));
+      const entry = JSON.parse(line);
+      journal.push(entry);
+      try {
+        this.onJournal?.(entry);
+      } catch (e) {
+        console.error("sandbox onJournal failed", e);
+      }
       const extra = journal.length - this.journalTail;
       if (extra > 0) journal.splice(0, extra);
     });

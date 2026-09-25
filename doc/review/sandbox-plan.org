@@ -124,7 +124,8 @@ Reset.  A journal drawer lists every transaction with its outcome and gas (the e
   2. the whole story through =SandboxApp= with no DOM: issue two credentials, register two
      wallets, insure an asset, activate credit, introduce, send, advance 30 days (demurrage
      accrues, the credit depreciates), the observer's rows, export then import to an equal world;
-  3. the shipped bundle under a DOM stub, as =test/demo.bundle.test.js= does for buckworld.
+  3. the built page in headless Chromium through Playwright (=test/sandbox.browser.test.js=; the
+     browser comes from the flake).
 
 * Milestones
 
@@ -249,6 +250,32 @@ will join them.
   in and out and sell through Permit2 with the router never holding BUCK; a premium refused, then
   bought and paid into the insurance pool, equal to the quote) and the whole story, now 13 steps
   with the premium path, a sale that moves the price and the observer's swaps.
+
+* S3, done (2026-09-25): the page, the world bar, the Issuer and the Wallets
+
+- *The page* (=core/js/sandbox/=): =index.html=, =styles.css= (colour tokens with a dark variant,
+  system fonts, a 16px gutter, no sideways scroll on a phone), =src/main.js= (boot: the identity
+  wasm, IndexedDB, =SandboxApp.open= with a progress screen fed by a new =onJournal= hook; one
+  =act()= for every action -- a busy line, then the result or the contract's reason; tabs with
+  arrow keys, the last one remembered; one render at a time, a change mid-render asking for
+  another) and =src/ui/=: =dom.js= (elements built with the DOM API, never =innerHTML=, so a typed
+  name is only ever text; amounts in and out; re-rendering that keeps what someone is typing),
+  =worldbar.js= (day and date, block, BUCK's pool price, BUCK_K, supply, insurance pool; +1 hour,
+  +1 day, +30 days; Export, Import, Reset; the journal drawer), =issuer.js= (the core-record form
+  and sample people; credential cards to copy, download, import, or turn into a registered wallet
+  in one click) and =wallets.js= (create; register; balances -- held, credit drawn, spendable,
+  limit, demurrage owing, USDC, ETH; pay, introduce, open trading, buy, sell, deposit -- each step
+  saying what it discloses and to whom).  Credit and Observer are placeholders until S4.
+- *Build and serve*: =make nix-sandbox-build= (esbuild -> =dist/app.js=, 4.8 MB unminified, beside
+  the 1.2 MB identity wasm) and =make nix-sandbox= (serve on =http://localhost:8000/=).
+  =bin/bundle-artifacts.mjs= now writes into its own package whichever checkout it reads.
+- *In a browser*: Playwright joins the flake -- nixpkgs' =playwright-driver= browsers, the headless
+  Chromium shell only (83 MiB), with =PLAYWRIGHT_BROWSERS_PATH= exported and =playwright-core=
+  pinned to the same 1.59.1 in core/js.  =test/sandbox.browser.test.js= drives the built page as
+  a person would: a new world boots (1.6 s headless), two people certified, a wallet each,
+  introduced, a payment refused for want of BUCK, trading opened, BUCK bought, the payment made,
+  the page reloaded to the same world, no console errors, no sideways scroll at 390px.  It
+  replaces the plan's DOM-stub bundle test; it skips outside the flake's shell or unbuilt.
 
 *Follow-up (author, 2026-09-25):* move the other simulations (the Python sim's =deploy.py=/
 =router.py=, the JS equilibrium world) to Permit2 and an unbound router, and have the arbitrage

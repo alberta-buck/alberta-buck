@@ -47,6 +47,7 @@ node_modules/
 # The bundled demo apps (make nix-core-demo-buckworld / -eqworld)
 /core/js/demo/app.js
 /core/js/demo/eqapp.js
+/core/js/sandbox/dist/
 
 # Python
 __pycache__/

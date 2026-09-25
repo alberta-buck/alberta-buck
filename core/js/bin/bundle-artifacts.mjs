@@ -11,8 +11,9 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { loadArtifact, repoRoot, vendoredArtifact } from "../src/nodefs.js";
+import { loadArtifact, vendoredArtifact } from "../src/nodefs.js";
 
 // Stage 1-3 surface: identity + BUCK stack + the V3 pool world;
 // stages 5-7 add the equilibrium world's basket + real periphery.
@@ -43,7 +44,9 @@ for (const name of ["UniversalRouter", "Permit2"]) {
   out[name] = vendoredArtifact(name);
 }
 
-const dest = join(repoRoot(), "core", "js", "artifacts", "bundle.mjs");
+// Into THIS package, whichever checkout the artifacts were read from
+// (ALBERTA_BUCK_REPO may name another).
+const dest = join(dirname(fileURLToPath(import.meta.url)), "..", "artifacts", "bundle.mjs");
 mkdirSync(dirname(dest), { recursive: true });
 writeFileSync(
   dest,

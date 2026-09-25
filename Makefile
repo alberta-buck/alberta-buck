@@ -1506,6 +1506,29 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/eqworld.html"
 
+# The sandbox (core/js/sandbox): one static page running a whole simulated
+# BUCK world in the visitor's tab -- issuer, wallets, credit, market,
+# observer (doc/review/sandbox-plan.org).  The build bundles the page with
+# viem and tevm (the demos' browser shims) beside the web wasm and the
+# contract bundle; dist/ is plain static files, served over http:
+#
+#   make nix-sandbox          # build, then serve http://localhost:8000/
+SANDBOX_DIST = core/js/sandbox/dist
+.PHONY: sandbox sandbox-build
+sandbox-build:	core-build-wasm-web core-js-artifacts
+	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm \
+		--platform=browser --outfile=sandbox/dist/app.js \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	mkdir -p $(SANDBOX_DIST)/wasm
+	cp core/js/sandbox/index.html core/js/sandbox/styles.css $(SANDBOX_DIST)/
+	cp core/js/kernel/web/buck_identity_bg.wasm $(SANDBOX_DIST)/wasm/
+
+sandbox:	sandbox-build
+	@echo "sandbox: http://localhost:8000/   (Ctrl-C stops it)"
+	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 8000
+
 # Stage the compiled kernels into the alberta-buck-kernel package.  The
 # identity, wallet and registry kernels are ONE cdylib with three
 # #[pymodule] entry points -- byte-identical files today -- so it ships once
