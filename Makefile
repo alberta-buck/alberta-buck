@@ -203,10 +203,10 @@ stop-anvil:
 # ── Deployment ───────────────────────────────────────────────────────
 
 deploy-local:
-	forge script script/Deploy.s.sol --broadcast --rpc-url http://localhost:$(ANVIL_PORT) -vvv
+	forge script scripts/deploy/Deploy.s.sol --broadcast --rpc-url http://localhost:$(ANVIL_PORT) -vvv
 
 deploy-sepolia:
-	forge script script/Deploy.s.sol --broadcast --rpc-url $(SEPOLIA_RPC_URL) --verify -vvv
+	forge script scripts/deploy/Deploy.s.sol --broadcast --rpc-url $(SEPOLIA_RPC_URL) --verify -vvv
 
 
 # ── Python Tests ────────────────────────────────────────────────────

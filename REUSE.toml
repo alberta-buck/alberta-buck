@@ -71,7 +71,7 @@ SPDX-License-Identifier = "GPL-3.0-or-later"
 path = [
   ".env.example", ".gas-snapshot", ".github/**", ".gitignore", ".gitmodules",
   "Makefile", "flake.nix", "flake.lock", "foundry.toml", "foundry.lock",
-  "package.json", "package-lock.json", "pyproject.toml", "script/**",
+  "package.json", "package-lock.json", "pyproject.toml",
   "CONTRIBUTING.md", "LICENSING.md", "NOTICE", "TRADEMARKS.md",
 ]
 precedence = "aggregate"

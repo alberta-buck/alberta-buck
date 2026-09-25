@@ -266,7 +266,7 @@ populated with historical trend data sourced from public commodity price dataset
 | =src/BuckKController.sol=    | PID value stabilization controller              |
 | =test/BuckCredit.t.sol=      | Forge tests (depreciation, activation, updates) |
 | =test/BuckKController.t.sol= | PID controller unit + mainnet fork tests        |
-| =script/Deploy.s.sol=        | Deployment script                               |
+| =scripts/deploy/=            | Deployment scripts (=forge script=)             |
 | =alberta_buck/oracle.py=     | Chainlink oracle historical price reader        |
 | =alberta_buck/test/=         | Python tests (oracle history, visualization)    |
 | =pyproject.toml=             | Python project configuration                    |

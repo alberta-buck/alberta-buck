@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import "../src/BN254.sol";
-import "../src/IdentityRegistry.sol";
-import "../src/Notes.sol";
+import "../../src/BN254.sol";
+import "../../src/IdentityRegistry.sol";
+import "../../src/Notes.sol";
 
 /// @notice Complete the post-deployment Notes identity ceremony.
 /// @dev BINDING_JSON contains only the public target-bound credential. The
