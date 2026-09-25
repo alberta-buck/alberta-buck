@@ -58,9 +58,8 @@ describe("the BUCK/USDC market through an unbound router", { skip }, () => {
       return v === 0n ? 1n : v;
     };
     session = await tevmSession();
-    insurancePool = privateKeyToAccount("0x" + "1b".repeat(32)).address;
-    world = await bw.buildBuckWorld(session, loadAnyArtifact,
-      { identity: id, rng, poolAcct: insurancePool });
+    world = await bw.buildBuckWorld(session, loadAnyArtifact, { identity: id, rng });
+    insurancePool = world.poolAcct;              // a SimLP the registry binds Carrying
     market = await mk.buildMarket(world, loadAnyArtifact, { rng });
 
     const acct = privateKeyToAccount("0x" + "0a".repeat(32));
@@ -80,6 +79,7 @@ describe("the BUCK/USDC market through an unbound router", { skip }, () => {
     assert.equal(await is("isCarrying", market.simlp.address), false);
     assert.equal(await is("isVerified", market.router.address), false);
     assert.equal(await is("isVerified", market.permit2.address), false);
+    assert.equal(await is("isCarrying", world.poolAcct), true, "the insurance pool is Carrying");
     assert.equal(await mk.buckPrice(world, market), E6, "the pool opens at $1");
     const res = await mk.poolReserves(world, market);
     assert.ok(res.buck > 999_000n * E6 && res.usdc > 999_000n * E6);

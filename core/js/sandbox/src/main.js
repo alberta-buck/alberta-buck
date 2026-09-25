@@ -19,7 +19,7 @@ import { mountObserver, renderObserver } from "./ui/observer.js";
 
 const $ = (id) => document.getElementById(id);
 const TABS = ["issuer", "wallets", "credit", "observer"];
-const FRESH_WORLD_TXS = 36;          // about how many transactions a new world takes
+const FRESH_WORLD_TXS = 40;          // about how many transactions a new world takes
 
 function say(text, kind = "") {
   const s = $("status");

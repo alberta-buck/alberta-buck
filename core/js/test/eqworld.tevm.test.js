@@ -84,7 +84,11 @@ test("eqworld: the minimal equilibrium world deploys and runs on tevm", { skip }
   const venue = await session.deploy(loadArtifact("BuckBasketUniswapV3"), [],
     { name: "BuckBasketUniswapV3", gas });
   await session.send(basket, "setVenue", [venue.address], { tag: "eq:setVenue" });
-  await session.send(buck, "setBasket", [basket.address], { tag: "eq:buck.setBasket" });
+  // The insurance pool wires the basket; the world's pool is a contract
+  // (bound Carrying) that acts through its exec().
+  await session.send(world.pool, "exec", [buck.address, encodeFunctionData({
+    abi: buck.abi, functionName: "setBasket", args: [basket.address] })],
+    { tag: "eq:buck.setBasket" });
   await session.send(kctrl, "setBasket", [basket.address], { tag: "eq:kctrl.setBasket" });
   await bind(basket.address, true, "eq:bind:basket");
   // The union ABI: facet views (basketValueInBuck) served via the shell's

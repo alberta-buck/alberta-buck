@@ -302,7 +302,9 @@ will join them.
   holder's (1,813.47 -> 1,810.49 over thirty days).  Author, 2026-09-25: the single pool is an
   interim stand-in; deposits belong with each credit's insurer, in a Carrying premium pool the
   insurer keeps funded for cancellations and payouts (alberta-buck-ethereum.org, "The Insurance
-  Pool: an Interim Stand-in").  The sandbox keeps the one pool until insurers exist on chain.
+  Pool: an Interim Stand-in").  The sandbox keeps the one pool until insurers exist on chain --
+  since 2026-09-25 a contract the world operator binds Carrying through the registry, as in every
+  test and simulation, so its deposits keep their value.
 - *Also*: Foundry's =script/= moved into =scripts/deploy/= (1d6b08b; =foundry.toml= names it).
 
 * S5, done (2026-09-25): from a fresh clone, the guide, the pictures

@@ -8,6 +8,7 @@ import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {CreditSlice} from "../src/BuckTypes.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 interface IReenterHook {
     function onActivate() external;
@@ -133,6 +134,7 @@ contract BuckReentrancyTest is Test {
         credit   = new ReenteringCredit();
         kCtrl    = new BuckKControllerStatic(1e18, GOV);
         buck     = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         attacker = new Attacker();
 
         _bind(address(attacker), false);

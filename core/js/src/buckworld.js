@@ -21,7 +21,8 @@
 // opts.rng (a () => bigint scalar drawer) to reproduce a world; the
 // default draws WebCrypto.
 
-import { parseEventLogs } from "viem";
+import { encodeFunctionData, keccak256, parseEventLogs, toBytes } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 // BN254.sol struct components are UPPERCASE X/Y at the ABI.
 const g = (p) => ({ X: p.x, Y: p.y });
@@ -44,6 +45,17 @@ export const DEPLOY_DEFAULTS = {
 
 export const DAY = 86_400;
 
+/** The world operator: a registered account that binds the world's own
+ *  infrastructure (the insurance pool) through the registry.  A fixed key of
+ *  its own, so it never collides with a caller's accounts. */
+export const WORLD_OPERATOR_KEY = keccak256(toBytes("alberta-buck: world operator"));
+export const WORLD_OPERATOR_FIELDS = {
+  given_name: "World", family_name: "Operator",
+  jurisdiction: "Alberta, Canada", id_type: "Operator",
+  id_number: "OP-0000000", date_of_birth: "1990-01-01",
+  issued_at: "2026-01-01T00:00:00Z", epoch: 42,
+};
+
 /**
  * Deploy the BUCK identity + monetary stack.
  *
@@ -52,14 +64,19 @@ export const DAY = 86_400;
  * @param opts.identity the buck-identity kernel API (REQUIRED: import
  *                  from ./identity.js in node, loadIdentity() in the browser)
  * @param opts.gov      governance address    (default: deployer)
- * @param opts.poolAcct funding-pool address  (default: deployer)
+ * @param opts.poolAcct the insurance pool (default: a SimLP contract the
+ *                  world operator binds Carrying through the registry, as
+ *                  Buck's pool is meant to be; a caller-supplied pool is the
+ *                  caller's to bind)
  * @param opts.params   controller overrides over DEPLOY_DEFAULTS
  * @param opts.rng      scalar drawer for the issuer PS keypair
  * @param opts.registryArtifact "IdentityRegistry" (default) or the test
  *                  harness for synthetic worlds
  * @param opts.creditArtifact   "BuckCredit" (default) or the test harness
  * @returns world {session, artifacts, id, reg, credit, kctrl, buck, gov,
- *                 poolAcct, issuer:{addr, skX, skY, pkX, pkY}}
+ *                 poolAcct, pool (its handle, when the world made it),
+ *                 operator (the world operator's handle, likewise),
+ *                 issuer:{addr, skX, skY, pkX, pkY}}
  */
 export async function buildBuckWorld(session, artifacts, opts = {}) {
   const id = opts.identity;
@@ -70,7 +87,6 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   }
   const gas = 15_000_000n;
   const gov = opts.gov ?? session.account.address;
-  const poolAcct = opts.poolAcct ?? session.account.address;
   const p = { ...DEPLOY_DEFAULTS, ...(opts.params ?? {}) };
   const rng = opts.rng ?? id.randScalar;
 
@@ -94,6 +110,31 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     [issuer.addr, { X: g2(issuer.pkX), Y: g2(issuer.pkY), Y1: g(issuer.pkY1) }],
     { tag: "world:trustIssuer" });
 
+  // --- the insurance pool ------------------------------------------------
+  // A contract bound Carrying through the registry, as Buck's pool is meant
+  // to be: it holds premium deposits on its members' behalf, so the
+  // demurrage they accrue travels with them instead of eroding the reserve.
+  // SimLP is a plain holder whose exec() lets the pool act for itself.  The
+  // world operator registers, the pool authorizes the exact binding, and the
+  // operator binds it.
+  let pool = null;
+  let operator = null;
+  let poolAcct = opts.poolAcct;
+  if (!poolAcct) {
+    pool = await session.deploy(artifacts("SimLP"), [], { name: "InsurancePool", gas });
+    poolAcct = pool.address;
+    const early = { session, id, reg, issuer };
+    const opAcct = privateKeyToAccount(WORLD_OPERATOR_KEY);
+    await fundAccount(early, opAcct.address);
+    operator = await onboard(early, opAcct, WORLD_OPERATOR_FIELDS, { rng });
+    const bindArgs = [g(operator.kp.pk), ct(operator.E), true, true];
+    await session.send(pool, "exec", [reg.address, encodeFunctionData({
+      abi: reg.abi, functionName: "authorizeContractBinding",
+      args: [opAcct.address, ...bindArgs] })], { tag: "world:pool.authorize" });
+    await session.send(reg, "bindContract", [pool.address, ...bindArgs],
+      { tag: "world:pool.bind", account: opAcct });
+  }
+
   // --- Direct BUCK stack -------------------------------------------------
   // Production worlds deploy BuckCredit, whose recipient opt-in gate
   // (setCreditIssuer) every holder passes through createCredit() below.
@@ -112,8 +153,8 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   await session.send(reg, "setBuck", [buck.address], { tag: "world:reg.setBuck" });
   await session.send(credit, "setBuck", [buck.address], { tag: "world:credit.setBuck" });
 
-  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, issuer,
-           names: { reg: regName, credit: creditName } };
+  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, pool, operator,
+           issuer, names: { reg: regName, credit: creditName } };
 }
 
 /**
@@ -131,6 +172,8 @@ export function worldRecord(world) {
     },
     gov: world.gov,
     poolAcct: world.poolAcct,
+    pooled: !!world.pool,
+    operator: world.operator?.account.address ?? null,
     issuer: { ...world.issuer },
   };
 }
@@ -143,6 +186,8 @@ export function attachBuckWorld(session, artifacts, record, opts = {}) {
   const at = (name, addr) => session.contractAt(artifacts(name).abi, addr);
   const a = record.addresses;
   return {
+    pool: record.pooled ? at("SimLP", record.poolAcct) : null,
+    operator: record.operator ? { account: { address: record.operator } } : null,
     session, artifacts, id,
     reg: at(record.names.reg, a.reg),
     credit: at(record.names.credit, a.credit),

@@ -291,7 +291,8 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(v.credentials.length, 0);
     assert.equal(v.status.day, 0n);
     const regs = v.observed.filter((r) => r.fn === "register");
-    assert.deepEqual(regs.map((r) => r.from), [app.session.account.address],
-      "a new world's history: only the market operator has registered");
+    assert.deepEqual(regs.map((r) => r.from),
+      [app.world.operator.account.address, app.session.account.address],
+      "a new world's history: only the world's and the market's operators have registered");
   });
 });

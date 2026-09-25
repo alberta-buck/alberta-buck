@@ -20,6 +20,7 @@ import {SpendGroth16Verifier} from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
 import {IdentityMembershipB1VerifierAdapter} from "../src/IdentityMembershipB1VerifierAdapter.sol";
 import {DepositFoldVerifierAdapter} from "../src/DepositFoldVerifierAdapter.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @title NotesE2E -- the full Note lifecycle, every verifier REAL.
 /// @notice One mutually-consistent fixture per flavor
@@ -114,6 +115,7 @@ abstract contract NotesE2EBase is Test {
         credit = new BuckCreditHarness();
         buck   = new Buck(address(credit), address(new BuckKControllerStatic(1e18, GOV)),
                           address(reg), address(0xB00C));
+        bindCarryingPool(reg, address(0xB00C));
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

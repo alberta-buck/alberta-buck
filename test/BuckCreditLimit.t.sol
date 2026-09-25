@@ -9,6 +9,7 @@ import {Buck}                   from "../src/Buck.sol";
 import {BuckCredit}             from "../src/BuckCredit.sol";
 import {BuckCreditHarness}             from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @title BuckCreditLimit.t.sol -- the live creditLimit() view, and the
 ///        transferability of the credits behind it.
@@ -37,6 +38,7 @@ contract BuckCreditLimitTest is Test {
         credit  = new BuckCreditHarness();
         kCtrl   = new BuckKControllerStatic(1e18, GOV);   // BUCK_K = 1.0
         buck    = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

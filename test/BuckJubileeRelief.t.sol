@@ -9,6 +9,7 @@ import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @title BuckJubileeRelief.t.sol -- Jubilee aging on the BuckCredit API.
 ///
@@ -62,6 +63,7 @@ contract BuckJubileeReliefTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

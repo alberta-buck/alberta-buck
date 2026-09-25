@@ -18,6 +18,7 @@ import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 import {SpendGroth16Verifier} from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @notice Integration test: identity membership verifier wired into Notes spend paths.
 ///         Exercises the Phase 9 identity-axis plumbing: governance sets the verifier,
@@ -68,6 +69,7 @@ contract NotesIdentityMembershipTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

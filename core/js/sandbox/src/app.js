@@ -35,7 +35,7 @@ import { encodeJSON, decodeJSON } from "../../src/codec.js";
 import { JournalWriter } from "../../src/journal.js";
 
 export const FORMAT = "alberta-buck-sandbox";
-export const VERSION = 2;                        // 2: the market
+export const VERSION = 3;                        // 2: the market; 3: a Carrying pool contract
 export const BUCK = 1_000_000n;                  // 6 decimals
 export const USDC = 1_000_000n;                  // 6 decimals
 
@@ -162,10 +162,8 @@ export class SandboxApp {
       const session = await this.newSession();
       const journal = [];
       this.#attachJournal(session, journal);
-      const poolKey = this.newKey();
       const world = await buildBuckWorld(session, this.artifacts,
-        { identity: this.identity, rng: this.rng,
-          poolAcct: privateKeyToAccount(poolKey).address });
+        { identity: this.identity, rng: this.rng });
       const market = await buildMarket(world, this.artifacts, { rng: this.rng });
       const head = await session.client.getBlock();
       this.session = session;
@@ -176,7 +174,7 @@ export class SandboxApp {
       this.state = {
         world: worldRecord(world),
         market: marketRecord(market),
-        insurancePool: { privateKey: poolKey, address: world.poolAcct },
+        insurancePool: { address: world.poolAcct },
         origin: head.timestamp,
         issued: [],                      // person numbers, never reused
         credentials: [],
@@ -496,6 +494,7 @@ export class SandboxApp {
     out[this.world.kctrl.address] = "BuckKControllerDirect";
     out[this.world.buck.address] = "Buck";
     out[this.world.poolAcct] = "Insurance pool";
+    if (this.world.operator) out[this.world.operator.account.address] = "World operator";
     out[this.session.account.address] = "Deployer (governance, market operator)";
     for (const [addr, c] of Object.entries(this.#known)) out[addr] = c.name;
     return out;

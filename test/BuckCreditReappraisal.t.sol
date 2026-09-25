@@ -9,6 +9,7 @@ import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @title BuckCreditReappraisal.t.sol -- reappraisal, the burn unwind, and
 ///        what happens to a position nobody closes.
@@ -38,6 +39,7 @@ contract BuckCreditReappraisalTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

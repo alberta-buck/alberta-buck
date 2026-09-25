@@ -60,6 +60,8 @@ export function knownContracts(world, extra = {}) {
     [world.kctrl.address]: { name: "BuckKControllerDirect", role: "BuckKControllerDirect",
                              abi: world.kctrl.abi },
     [world.buck.address]: { name: "Buck", role: "Buck", abi: world.buck.abi },
+    ...(world.pool ? { [world.pool.address]: { name: "Insurance pool", role: "SimLP",
+                                                abi: world.pool.abi } } : {}),
     ...extra,
   };
   const out = new Map();

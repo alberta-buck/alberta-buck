@@ -205,7 +205,7 @@ describe("the ceremonies by role", { skip }, () => {
     const arg = (r, name) => r.args.find((a) => a.name === name);
 
     assert.deepEqual(find("deploy").map((r) => r.contract),
-      ["IdentityRegistry", "BuckCredit", "BuckKControllerDirect", "Buck"]);
+      ["IdentityRegistry", "Insurance pool", "BuckCredit", "BuckKControllerDirect", "Buck"]);
     assert.ok(find("transfer ETH").length >= 3);
 
     const [reg] = find("register", (r) => r.from === chloe.account.address);

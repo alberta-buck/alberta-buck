@@ -1898,10 +1898,15 @@ callback they do not control.  See [[#integration][Integrating with BUCK]].
 premium deposit, pays every burn's refund, and is the authority that wires the basket
 (=setBasket=).  It holds the cumulative pool principal for every outstanding mint.  Burn requires
 the pool's spendable balance to cover the proportional refund; if the pool is drained out-of-band
-the burn reverts.  Today no path drains the pool: it is not a verified identity (so no
-identity-checked transfer can move BUCK out of it) and holds no NFTs (so it cannot self-burn via
-the allocator).  In the simulations it is an ordinary account, so its balance pays demurrage like
-any Non-Carrying holder's.  It stands in for the design below until insurers exist on chain.
+the burn reverts.  Every test and simulation constructs the pool as a contract bound Carrying
+through the registry -- the Foundry suites with =bindCarryingPool=, the Python and JavaScript
+worlds with a =SimLP= their operator binds -- so its deposits keep their age, and =burn=
+dispatches the refund on the registry's flag like any transfer: a Carrying pool hands the refunded
+share of its accrued age back to the holder.  (The Notes paper's fixture world, =notes_stack.py=,
+leaves its pool unbound: its credits carry no premium, so no deposit ever reaches it, and binding
+would disturb its pinned fixtures.)  A bound pool is a verified identity, so a transfer out of it
+is possible, and the simulations' =SimLP= lets anyone call its =exec=: a stand-in, not a vault.
+It stands in for the design below until insurers exist on chain.
 
 *Intended* (author, 2026-09-25).  A credit's premium deposit belongs with that credit's insurer
 -- =credits[tokenId].insurer=, the account that wrote it.  The insurer holds its credits'
