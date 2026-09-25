@@ -53,27 +53,27 @@ deleted, PyPI filenames cannot be reused, npm unpublish is a 72-hour window.
 #+LATEX: \clearpage
 * Status
 
-Published, and each verified by installing from the registry into an empty
-project outside this checkout:
+Published (0.2.0, 2026-09-25), and each verified by installing from the
+registry into an empty project outside this checkout:
 
 | artifact                 | registry  | version | licence          |
 |--------------------------+-----------+---------+------------------|
-| =alberta-buck-math=      | crates.io |   0.1.0 | CAL-1.0          |
-| =alberta-buck-identity=  | crates.io |   0.1.0 | CAL-1.0          |
-| =alberta-buck-registry=  | crates.io |   0.1.0 | CAL-1.0          |
-| =alberta-buck-wallet=    | crates.io |   0.1.0 | CAL-1.0          |
-| =alberta-buck-kernel=    | npm       |   0.1.1 | CAL-1.0          |
-| =alberta-buck-core=      | npm       |   0.1.2 | CAL-1.0          |
-| =alberta-buck-contracts= | npm       |   0.1.0 | GPL-3.0-or-later |
-| =alberta-buck-contracts= | PyPI      |   0.1.0 | GPL-3.0-or-later |
-| =alberta-buck-core=      | PyPI      |   0.1.0 | CAL-1.0          |
-| =alberta-buck-kernel=    | PyPI      |   0.1.0 | CAL-1.0          |
+| =alberta-buck-math=      | crates.io |   0.2.0 | CAL-1.0          |
+| =alberta-buck-identity=  | crates.io |   0.2.0 | CAL-1.0          |
+| =alberta-buck-registry=  | crates.io |   0.2.0 | CAL-1.0          |
+| =alberta-buck-wallet=    | crates.io |   0.2.0 | CAL-1.0          |
+| =alberta-buck-kernel=    | npm       |   0.2.0 | CAL-1.0          |
+| =alberta-buck-core=      | npm       |   0.2.0 | CAL-1.0          |
+| =alberta-buck-contracts= | npm       |   0.2.0 | GPL-3.0-or-later |
+| =alberta-buck-contracts= | PyPI      |   0.2.0 | GPL-3.0-or-later |
+| =alberta-buck-core=      | PyPI      |   0.2.0 | CAL-1.0          |
+| =alberta-buck-kernel=    | PyPI      |   0.2.0 | CAL-1.0          |
+| =alberta-buck=           | PyPI      |   0.2.0 | GPL-3.0-or-later |
 
 Remaining:
 
 | #   | artifact / step             | registry  | blocked on                    |
 |-----+-----------------------------+-----------+-------------------------------|
-| 5   | =alberta-buck=              | PyPI      | the 0.2.0 release (below)     |
 | 6   | =alberta-buck-game= + zomes | npm       | D2 -- where authority lives   |
 | 7   | repository public           | GitHub    | a deliberate decision         |
 
@@ -81,14 +81,12 @@ In place: =release-crates.yml=, =release-npm.yml= and =release-pypi.yml= (all
 trusted publishing, no stored tokens), =LICENSE= / =core/LICENSE= /
 =LICENSING.md= / =NOTICE=, a Rust toolchain and =binaryen= in the flake,
 =Cargo.lock= and =foundry.lock= committed.  The repository is pushed to
-=github.com/alberta-buck/alberta-buck= (private).  =release-pypi.yml= has
-run green -- every PyPI row above was published with no human holding a
-token.  =release-crates.yml= and =release-npm.yml= have not run yet: the
-crates and the npm packages above went out by hand, so 0.2.0 is their
-first trusted publish.
+=github.com/alberta-buck/alberta-buck= (private).  All three release
+workflows have now published with no human holding a token: 0.2.0 was the
+first trusted publish for the crates and the npm packages, whose 0.1.x went
+out by hand.
 
-*Next: 0.2.0, the v2 roll* (2026-09-25; the tree is at 0.2.0, nothing is
-published yet).  Protocol v2 changes every tag, transcript and note hash, so
+*0.2.0, the v2 roll* (released 2026-09-25).  Protocol v2 changes every tag, transcript and note hash, so
 it is a minor bump everywhere, math included (lockstep).  0.2.0 also brings
 =alberta-buck= to PyPI (P5), and the Notes pool, its adapters, its Groth16
 verifiers and the Poseidon hashers into the contracts bundle.
@@ -113,9 +111,38 @@ Release in dependency order, each tag's workflow green before the next:
 5. =py-sim-v0.2.0= -- =alberta-buck=, which pins core at 0.2.
 
 Before step 1 the registries need their publishers: npm trusted publishers
-for =alberta-buck-contracts= (it exists, so it can take one), crates.io
-trusted publishers for the four crates, and a PyPI pending publisher for
-=alberta-buck= (environment =pypi-sim=).
+for all three packages, crates.io trusted publishers for the four crates,
+and a PyPI pending publisher for =alberta-buck= (environment =pypi-sim=).
+
+*What the 0.2.0 release taught* -- read before the next one:
+
+- /Every registry's publisher is per package, and each has a trap./
+  crates.io: Settings -> Trusted Publishing on each crate, owner the
+  =alberta-buck= organization (else "No Trusted Publishing config found").
+  npm: Settings -> Trusted Publisher on each package, and since 2026-09-03 a
+  new one allows only =npm stage publish= -- tick direct =npm publish= under
+  Allowed actions, or the publish fails =E403 OIDC permission denied= after
+  the token was minted (a missing publisher is =E404=).  PyPI: a new project
+  takes a /pending/ publisher under the account (Account -> Publishing); the
+  organization's "Add existing project" only moves a project that exists, so
+  =alberta-buck= is created under the account and moved into the
+  organization afterwards.
+- /Pin Foundry in CI to the flake's./  Foundry "stable" (1.8.3) meters the
+  gas-bound tests differently and failed three that pass on 1.7.1; both
+  contracts jobs now pin v1.7.1.
+- /npm 12 and npm 11 changed two things under us./  =npm pack --json= is an
+  object keyed by package name in 12, not an array (both checks read either
+  shape).  And npm >= 11 =npm ci= refuses =core/js='s lockfile:
+  =@evmts/zevm@0.0.0= (via tevm) declares optional platform packages that do
+  not exist on the registry, so no lockfile can list them.  The =js-v= job
+  installs, builds and tests on npm 10 and upgrades only to publish.
+- /Consumers of =alberta-buck-core= on npm need npm >= 11./  npm 10's
+  installer crashes on its dependency graph (=Cannot read properties of null
+  (reading 'edgesOut')=), for 0.1.2 as for 0.2.0; Node 24 bundles npm 11.
+- /A failed tag's run is re-run, not re-tagged/ (=gh run rerun --failed=),
+  unless the workflow file itself changed: a re-run uses the tag's commit.
+  A re-pointed tag shares its name with the old run, so find the new run by
+  its commit SHA.
 
 * The architecture, and why
 
@@ -633,7 +660,7 @@ objects inside the installed =buck_kernel=.  Verified both ways: 39 passed
 against the wheel, and the preflight fails with /No module named
 'buck_kernel'/ when the kernel is absent.
 
-** P5: =alberta-buck= on PyPI
+** P5: =alberta-buck= on PyPI  [done 2026-09-25]
 
 *** The base install is pure Python, and that is the point
 
