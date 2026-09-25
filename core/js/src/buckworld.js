@@ -380,6 +380,42 @@ export async function creditView(world, tokenId) {
   };
 }
 
+/** `owner`'s credits in the order Buck.mint(amount) draws them: cheapest
+ *  premium first, ties in holding order (Buck._selectCheapest). */
+export async function cheapestFirst(world, owner) {
+  const ids = await creditsOf(world, owner);
+  const rates = await Promise.all(ids.map(async (tid) =>
+    (await world.session.call(world.credit, "creditInfo", [tid]))[2]));
+  return ids.map((tid, i) => [tid, rates[i]])
+    .sort((a, b) => a[1] - b[1])                 // stable: ties keep their order
+    .map(([tid]) => tid);
+}
+
+/**
+ * What activating `amount` would take (Buck.quoteMint), and whether the
+ * funding gate lets it through: the premium's pool principal times the
+ * controller's funding factor must already be covered by the holder's
+ * balance (held BUCK plus unused credit) before the mint.
+ *
+ * @param opts.tokenIds the credits to draw (default: as Buck.mint does)
+ * @returns {coverage (face to activate), principal (the premium, paid into
+ *          the insurance pool), factor (1e18 scale), required, balance,
+ *          shortfall, tokenIds}
+ */
+export async function quoteActivation(world, holder, amount, opts = {}) {
+  const s = world.session;
+  const addr = typeof holder === "string" ? holder : acctOf(holder).address;
+  const tokenIds = opts.tokenIds ?? await cheapestFirst(world, addr);
+  const [[coverage, principal], factor, balance] = await Promise.all([
+    s.call(world.buck, "quoteMint", [amount, tokenIds]),
+    s.call(world.kctrl, "fundingFactor"),
+    s.call(world.buck, "balanceOf", [addr]),
+  ]);
+  const required = factor > 0n && principal > 0n ? (principal * factor) / 10n ** 18n : 0n;
+  return { coverage, principal, factor, required, balance,
+           shortfall: required > balance ? required - balance : 0n, tokenIds };
+}
+
 /** The token ids of every credit `owner` holds. */
 export async function creditsOf(world, owner) {
   const s = world.session;

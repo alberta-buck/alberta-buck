@@ -533,6 +533,7 @@ SIM_ARTIFACTS   = alberta_buck/sim/artifacts
 
 ROUTING_PRICES	= $(SIM_PRICES_DIR)/paxg.csv $(SIM_PRICES_DIR)/cbbtc.csv $(SIM_PRICES_DIR)/aoil.csv
 ROUTING_ARTIFACT = $(SIM_ARTIFACTS)/UniversalRouter.json
+PERMIT2_ARTIFACT = $(SIM_ARTIFACTS)/Permit2.json
 ROUTING_VECTOR	= test/vectors/routing-sim.json
 ROUTING_IMAGE	= images/routing-sim.png
 
@@ -546,6 +547,15 @@ $(ROUTING_ARTIFACT):
 	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
 	mkdir -p $(SIM_ARTIFACTS)
 	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $@
+
+# Permit2, as the Universal Router pins it (lib/universal-router/lib/permit2:
+# solc 0.8.17, via_ir, its own foundry.toml).  BUCK moves through routers by
+# Permit2 -- the pool pulls from the holder -- so a router never holds BUCK
+# and needs no identity of its own.
+$(PERMIT2_ARTIFACT):
+	( cd lib/universal-router/lib/permit2 && forge build --skip test --skip script )
+	mkdir -p $(SIM_ARTIFACTS)
+	cp lib/universal-router/lib/permit2/out/Permit2.sol/Permit2.json $@
 
 plot-routing:	$(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s

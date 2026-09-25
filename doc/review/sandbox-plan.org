@@ -202,3 +202,55 @@ with no DOM, 12 steps, about 10 s.  The shape the UI builds on:
   Premiums default to 0: with no basket the controller's funding factor is 1.0, so a premium
   credit activates only against an existing balance or unused credit, and =Buck.mint= draws the
   cheapest credit first unless told which.
+
+* S2b, done (2026-09-25): the market and real premiums
+
+Asked for by the author: premiums paid for real, which means wallets start with dollars and buy
+BUCK in the BUCK/USDC pool -- the pools being as much a part of the BUCK world as the basket that
+will join them.
+
+- *What a premium is, on chain.*  Paid up front, not yearly: activating =net= spendable BUCK at r
+  %/yr pays =net * 10r / (100 - 10r)= into the insurance pool (=Buck.POOL_ROI_INV=: the pool's
+  assumed 10 % return funds the premium in perpetuity; returnable when the credit is repaid), and
+  =Buck.mint= refuses unless the holder already has that principal times the funding factor (1.0
+  with no basket) in held BUCK or unused credit.  So a first activation needs a deposit bought in
+  the pool; later ones are covered by the first's unused credit.  Rates stay under 10 %/yr.
+- *Routers need no identity -- by Permit2.*  BUCK's transfer gate checks only the two ends of a
+  movement, never the spender, so a router that never HOLDS BUCK needs no binding, and the
+  deployed routers BUCK must work with cannot be bound anyway.  Proven on Tevm against an unbound
+  Universal Router v2.1: buying works; selling works through Permit2 (the pool pulls from the
+  holder) and fails if the holder pre-funds the router; an EXACT-INPUT route with BUCK as an
+  intermediate hop fails whatever the payer (the router takes custody of each intermediate
+  output); an EXACT-OUTPUT route through BUCK works (intermediates pass pool to pool); BUCK first
+  or last works.  A private holder needs a one-time identity handshake with each pool it trades
+  with (=Buck._identityCheckedTransfer=: the operator of a public contract must be able to decrypt
+  its counterparties).
+- *=core/js/src/market.js=* (=buildMarket=): mock USDC; a =UniswapV3Factory=; the BUCK/USDC pool
+  (0.05 %) created and bound public+carrying by the production =UniswapV3BindingAdapter= under the
+  market operator (the deployer, registered); =SimLP= authorizing its own binding and LP-ing $1M
+  full range from a zero-premium credit; Permit2 and the Universal Router as Uniswap ships them,
+  unbound.  All production contracts but the mock USDC and =SimLP=.  Helpers: =openTrading=,
+  =tradingOpen=, =buyBuck=, =buyBuckExact=, =sellBuck= (all Permit2, the output straight to the
+  holder; amounts read from the transfer events, since a BUCK balance moves by demurrage between
+  blocks), =buckPrice=, =poolReserves=, =fiatIn=, =marketRecord= / =attachMarket=,
+  =marketContracts= (for the observer).  =buckworld.js= gains =quoteActivation= (=Buck.quoteMint=
+  times the funding factor, against the balance: the shortfall) and =cheapestFirst=.
+- *Permit2* is vendored beside the router (=alberta_buck/sim/artifacts/Permit2.json=, MIT; the
+  Makefile builds it from the source the router pins, =lib/universal-router/lib/permit2=, solc
+  0.8.17 via_ir); =nodefs.loadAnyArtifact= and the browser bundle carry both.
+- *=SandboxApp=*: every new world has the market and a separate insurance-pool account; every
+  wallet starts with 10 ETH and 10,000 USDC (=ENDOWMENT=); new actions =deposit=, =openTrading=,
+  =buy= (={usdc}= or exactly ={buck}=), =sell=, and the read =quote= (with =buy=: the shortfall
+  plus 1 %); asset classes carry premiums (home 0.35 %/yr, vehicle 3 %, equipment 1 %, farmland
+  0.2 %, gold 0.12 %); the view adds BUCK's pool price, the pool's reserves, the insurance pool's
+  balance, each wallet's USDC and whether it trades; the observer decodes the pool, router, Permit2
+  and USDC.  Saved-world format version 2.
+- *Tests*: =test/buckmarket.tevm.test.js= (the bindings; no trade before the handshake; buy exact
+  in and out and sell through Permit2 with the router never holding BUCK; a premium refused, then
+  bought and paid into the insurance pool, equal to the quote) and the whole story, now 13 steps
+  with the premium path, a sale that moves the price and the observer's swaps.
+
+*Follow-up (author, 2026-09-25):* move the other simulations (the Python sim's =deploy.py=/
+=router.py=, the JS equilibrium world) to Permit2 and an unbound router, and have the arbitrage
+agents take BUCK-in-the-middle routes by exact output -- where there is money to be made, arbs
+will quote in that form (or a quoting service can be offered).

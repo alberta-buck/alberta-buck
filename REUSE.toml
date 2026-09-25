@@ -85,6 +85,20 @@ precedence = "override"
 SPDX-FileCopyrightText = "Uniswap Labs and contributors"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
+# Vendored build artifacts of Uniswap's own contracts, compiled from the
+# sources the Makefile names (lib/universal-router, and the Permit2 it pins).
+[[annotations]]
+path = "alberta_buck/sim/artifacts/UniversalRouter.json"
+precedence = "override"
+SPDX-FileCopyrightText = "Uniswap Labs"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "alberta_buck/sim/artifacts/Permit2.json"
+precedence = "override"
+SPDX-FileCopyrightText = "2022 Uniswap Labs"
+SPDX-License-Identifier = "MIT"
+
 # --- Design documents: NOT open --------------------------------------- #
 # The .org design writing is the largest original asset here and is
 # deliberately NOT placed under the code licences.  All rights reserved,

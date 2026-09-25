@@ -3,9 +3,11 @@
 // browser-loaded dependencies and IndexedDB; this gate drives the SAME
 // class with node-loaded ones and a memory store.
 //
-// The whole story: issue two credentials, register two wallets, insure a
-// home and activate credit, introduce, send (and be refused), advance 30
-// days (demurrage accrues, the home depreciates), the observer's rows --
+// The whole story: issue two credentials, register two wallets (each
+// endowed with USDC), insure a home at a real premium -- refused until the
+// holder buys the premium's principal in the BUCK/USDC pool, then paid into
+// the insurance pool -- introduce, send (and be refused), sell BUCK, advance
+// 30 days (demurrage accrues, the home depreciates), the observer's rows --
 // then the world saved, reopened and imported, equal each time, and
 // carrying on.
 
@@ -13,7 +15,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { tevmSession } from "../src/backends.js";
-import { loadArtifact } from "../src/nodefs.js";
+import { loadAnyArtifact } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -23,13 +25,14 @@ try {
 }
 let contracts = true;
 try {
-  loadArtifact("IdentityRegistry");
+  for (const n of ["IdentityRegistry", "UniswapV3Factory", "UniswapV3BindingAdapter", "WETH9",
+                   "Permit2", "UniversalRouter"]) loadAnyArtifact(n);
 } catch {
   contracts = false;
 }
 const skip = !id
   ? "kernels not built (make nix-core-build-wasm)"
-  : !contracts ? "no contracts (make nix-build, or npm ci for alberta-buck-contracts)" : false;
+  : !contracts ? "Foundry build or vendored periphery missing (make nix-build)" : false;
 
 const BUCK = 1_000_000n;
 
@@ -50,7 +53,7 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     let keys = 0x1000n;
     deps = {
       identity: id.default ?? id,
-      artifacts: loadArtifact,
+      artifacts: loadAnyArtifact,
       newSession: () => tevmSession(),
       rng: () => {
         seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
@@ -64,13 +67,15 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     app.onChange(() => { changes += 1; });
   });
 
-  it("opens a fresh world: the stack deployed, Sandbox Mutual open, saved", async () => {
+  it("opens a fresh world: the stack and the market deployed, Sandbox Mutual open, saved", async () => {
     const v = await app.view();
     assert.equal(v.wallets.length, 0);
     assert.deepEqual(v.insurers.map((i) => i.label), ["Sandbox Mutual"]);
     assert.equal(v.status.day, 0n);
     assert.equal(v.status.buckK, 750_000_000_000_000_000n);
-    assert.equal(v.status.supply, 0n);
+    assert.equal(v.status.buckPrice, BUCK, "BUCK opens at $1");
+    assert.ok(v.status.pool.buck > 999_000n * BUCK && v.status.pool.usdc > 999_000n * BUCK);
+    assert.equal(v.status.insurancePool, 0n);
     assert.ok(v.observed.some((r) => r.fn === "deploy" && r.contract === "Buck"));
     assert.ok(v.journal.length > 0);
     assert.ok(await store.load(), "the new world is saved");
@@ -116,15 +121,34 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(w3.label, "Wallet 3");
     assert.equal(w3.verified, false);
     assert.ok(w3.eth > 0n, "every new wallet gets gas money");
+    assert.equal(w3.usdc, S.ENDOWMENT.usdc, "... and dollars");
+    assert.equal(w1.trading, false);
     assert.deepEqual(v.credentials.find((c) => c.id === chloe.id).wallets, [W1]);
   });
 
   let home;
-  it("Sandbox Mutual insures Chloé's home on the class defaults; she activates credit", async () => {
+  it("Sandbox Mutual insures Chloé's home; its premium must be held before credit activates",
+     async () => {
     home = await app.insure(W1, { assetClass: "home", face: 400_000n * BUCK });
+    const q = await app.quote(W1, 50_000n * BUCK);
+    assert.ok(q.principal > 1_800n * BUCK && q.principal < 1_820n * BUCK, "0.35 %/yr: ~3.6 % up front");
+    assert.equal(q.shortfall, q.principal, "she holds no BUCK yet");
+    await assert.rejects(app.activate(W1, 50_000n * BUCK),
+      (e) => e instanceof S.SandboxError && /insufficient mint funding/.test(e.reason));
+
+    // She buys the principal in the pool, which takes opening trading first.
+    await assert.rejects(app.buy(W1, { buck: q.buy }), /has not opened trading/);
+    await app.openTrading(W1);
+    const bought = await app.buy(W1, { buck: q.buy });
+    assert.equal(bought.received, q.buy);
+    assert.ok(bought.paid > q.buy && bought.paid < (q.buy * 101n) / 100n);
+    assert.equal((await app.quote(W1, 50_000n * BUCK)).shortfall, 0n);
+
     const minted = await app.activate(W1, 50_000n * BUCK);
-    assert.equal(minted.premium, 0n);
+    assert.equal(minted.premium, q.principal);
     const v = await app.view();
+    assert.equal(v.status.insurancePool, minted.premium, "the premium is in the insurance pool");
+    assert.equal(v.wallets[0].usdc, S.ENDOWMENT.usdc - bought.paid);
     const c = v.credits.find((x) => x.tokenId === home);
     assert.equal(c.className, "home");
     assert.equal(c.assetClass, S.assetClass("home").code);
@@ -144,23 +168,40 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
       (e) => e instanceof S.SandboxError && /identity-approve/.test(e.reason));
     await app.introduce(W1, W2);
     await app.introduce(W2, W1);                  // already done: no more transactions
+    const before = await app.view();
     await app.send(W1, W2, 1_234n * BUCK);
     await assert.rejects(app.send(W1, W3, 1n * BUCK), /recipient not verified/);
     const v = await app.view();
-    assert.equal(v.wallets[0].signedBalance, -1_234n * BUCK);
+    // The payment, give or take the seconds of accrual settled on the ~19
+    // BUCK she held (her premium purchase's change) as it went out.
+    const drop = before.wallets[0].signedBalance - v.wallets[0].signedBalance;
+    const off = drop > 1_234n * BUCK ? drop - 1_234n * BUCK : 1_234n * BUCK - drop;
+    assert.ok(off < 1_000n, `${before.wallets[0].signedBalance} -> ${v.wallets[0].signedBalance}`);
     assert.equal(v.wallets[1].balance, 1_234n * BUCK);
     assert.deepEqual(v.wallets[0].introduced, [W2]);
-    assert.equal(v.observed.filter((r) => r.fn === "approve").length, 2);
     const refused = v.journal.filter((e) => e.outcome === "revert");
-    assert.equal(refused.length, 2);
+    assert.equal(refused.length, 3, "the unfunded activation, the unintroduced and the unverified sends");
   });
 
-  it("a premium credit activates on top of existing credit", async () => {
+  it("Bob sells BUCK in the pool: the price dips", async () => {
+    const before = await app.view();
+    await app.openTrading(W2);
+    const sold = await app.sell(W2, 1_000n * BUCK);
+    assert.equal(sold.paid, 1_000n * BUCK);
+    assert.ok(sold.received > 995n * BUCK && sold.received < 1_005n * BUCK);
+    const v = await app.view();
+    assert.ok(v.status.buckPrice < before.status.buckPrice);
+    assert.equal(v.wallets[1].usdc, S.ENDOWMENT.usdc + sold.received);
+  });
+
+  it("a second credit's premium is covered by the first's unused credit", async () => {
     // Named: left to itself, Buck.mint draws the cheapest credit first (the home's).
-    const car = await app.insure(W1, { assetClass: "vehicle", face: 30_000n * BUCK,
-                                       premiumRate: 200 });
+    const car = await app.insure(W1, { assetClass: "vehicle", face: 30_000n * BUCK });
+    const q = await app.quote(W1, 10_000n * BUCK, [car]);
+    assert.equal(q.shortfall, 0n, "balance counts unused credit");
     const minted = await app.activate(W1, 10_000n * BUCK, [car]);
-    assert.ok(minted.premium > 0n, "the premium's principal goes to the pool");
+    assert.equal(minted.premium, q.principal);
+    assert.ok(minted.premium > 4_000n * BUCK, "3 %/yr: 30 % of the draw up front");
   });
 
   it("thirty days later: demurrage owing, the home depreciated", async () => {
@@ -179,8 +220,14 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(v.observed.at(-1).block, v.status.block - 1n, "the last tx; then the clock block");
     const fns = new Set(v.observed.map((r) => r.fn));
     for (const fn of ["deploy", "trustIssuer", "transfer ETH", "register", "setCreditIssuer",
-                      "createCredit", "mint", "approve", "transfer"]) {
+                      "createCredit", "mint", "approve", "transfer", "createPoolAndBind",
+                      "execute"]) {
       assert.ok(fns.has(fn), fn);
+    }
+    const swaps = v.observed.filter((r) => r.fn === "execute" && r.contract === "UniversalRouter");
+    assert.equal(swaps.length, 2);
+    for (const r of swaps) {
+      assert.ok(r.events.some((e) => e.contract === "BUCK/USDC pool" && e.name === "Swap"));
     }
     const { encodeJSON } = await import("../src/codec.js");
     const text = encodeJSON(v.observed);
@@ -190,6 +237,8 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     const labels = app.labels();
     assert.equal(labels[v.wallets[0].address], "Chloé's wallet");
     assert.equal(labels[v.insurers[0].address], "Sandbox Mutual");
+    assert.ok(Object.values(labels).includes("BUCK/USDC pool"));
+    assert.ok(Object.values(labels).includes("Insurance pool"));
     assert.ok(changes > 10, "listeners hear every action");
   });
 
@@ -241,6 +290,8 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(v.wallets.length, 0);
     assert.equal(v.credentials.length, 0);
     assert.equal(v.status.day, 0n);
-    assert.ok(!v.observed.some((r) => r.fn === "register"), "a new world's history");
+    const regs = v.observed.filter((r) => r.fn === "register");
+    assert.deepEqual(regs.map((r) => r.from), [app.session.account.address],
+      "a new world's history: only the market operator has registered");
   });
 });

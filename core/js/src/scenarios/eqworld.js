@@ -19,8 +19,9 @@
 // plus reads (spotUB / spotUsd / spotBuck / bvib / K) and a per-day
 // series recorder for the charts.
 //
-// Custody pattern: EOA holders send their own txs (private->public
-// transfers to the bound router are handshake-exempt).  CREDIT-drawing
+// Custody pattern: EOA holders send their own txs (a private holder's BUCK
+// transfer to a public contract still needs the holder's identity
+// handshake with it -- Buck._identityCheckedTransfer).  CREDIT-drawing
 // holders get a PROXY (a SimLP instance bound public+NON-carrying --
 // carrying accounts cannot draw negative), created lazily by pledge();
 // helpers dispatch on holderAddress().  Fiat legs (income, endowments)

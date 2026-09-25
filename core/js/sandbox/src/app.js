@@ -1,8 +1,10 @@
 // The sandbox CONTROLLER -- all the chain logic, none of the DOM.
 //
 // One private world in the visitor's tab: an issuer that certifies people,
-// wallets that register and pay, an insurer that turns simulated assets
-// into credit, and an observer's view of everything the chain shows.
+// wallets that register, pay and trade, an insurer that turns simulated
+// assets into credit at a real premium, a BUCK/USDC market (src/market.js:
+// production identity contracts, the unmodified Uniswap periphery, trades
+// through Permit2), and an observer's view of everything the chain shows.
 // main.js (the page) constructs it with browser-loaded dependencies; the
 // node gate (test/sandbox.app.tevm.test.js) drives the SAME class with
 // node-loaded ones.
@@ -20,17 +22,25 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import {
   buildBuckWorld, attachBuckWorld, worldRecord, issueCredential, registerWallet,
-  identityApprove, insureAsset, activateCredit, creditView, accountView,
+  identityApprove, insureAsset, activateCredit, quoteActivation, creditView, accountView,
   fundAccount, advanceTime, DEPRECIATION, DAY,
 } from "../../src/buckworld.js";
+import {
+  buildMarket, attachMarket, marketRecord, marketContracts, fiatIn, buckPrice, poolReserves,
+  openTrading, tradingOpen, buyBuck, buyBuckExact, sellBuck,
+} from "../../src/market.js";
 import { snapshotTevm, restoreTevm } from "../../src/backends.js";
 import { observe } from "../../src/observer.js";
 import { encodeJSON, decodeJSON } from "../../src/codec.js";
 import { JournalWriter } from "../../src/journal.js";
 
 export const FORMAT = "alberta-buck-sandbox";
-export const VERSION = 1;
+export const VERSION = 2;                        // 2: the market
 export const BUCK = 1_000_000n;                  // 6 decimals
+export const USDC = 1_000_000n;                  // 6 decimals
+
+/** What every new wallet starts with: gas money, and dollars to buy BUCK. */
+export const ENDOWMENT = { eth: 10n ** 19n, usdc: 10_000n * USDC };
 
 /** The issuer's standing record stamps (the privacy paper's cast, alberta_buck/sim/cast.py). */
 export const ISSUER = {
@@ -46,20 +56,25 @@ export const INSURER_LABEL = "Sandbox Mutual";
 
 /**
  * Asset classes: sandbox labels over BuckCredit's opaque uint8, each with a
- * sensible default schedule.  depRate is basis points a year (of the part
- * above the floor, for LINEAR); floorBp is the floor as basis points of face.
+ * sensible default schedule and premium.  depRate is basis points a year (of
+ * the part above the floor, for LINEAR); floorBp is the floor as basis points
+ * of face; premiumRate is basis points of insured value a year, paid up front
+ * as ten years' worth into the insurance pool when credit is activated
+ * (Buck.POOL_ROI_INV: the pool's assumed 10 % return funds it in perpetuity),
+ * so it must stay under 1,000.
  */
 export const ASSET_CLASSES = [
   { code: 1, key: "home", label: "Home", depType: DEPRECIATION.LINEAR, depRate: 250, floorBp: 3_000,
-    note: "the building wears out over 40 years; the land under it (30 %) does not" },
+    premiumRate: 35, note: "the building wears out over 40 years; the land under it (30 %) does not" },
   { code: 2, key: "vehicle", label: "Vehicle", depType: DEPRECIATION.DECLINING_BALANCE,
-    depRate: 1_500, floorBp: 1_000, note: "loses 15 % of its value a year, down to scrap (10 %)" },
+    depRate: 1_500, floorBp: 1_000, premiumRate: 300,
+    note: "loses 15 % of its value a year, down to scrap (10 %)" },
   { code: 3, key: "equipment", label: "Equipment", depType: DEPRECIATION.DECLINING_BALANCE,
-    depRate: 1_000, floorBp: 500, note: "loses 10 % of its value a year, down to 5 %" },
+    depRate: 1_000, floorBp: 500, premiumRate: 100, note: "loses 10 % of its value a year, down to 5 %" },
   { code: 4, key: "farmland", label: "Farmland", depType: DEPRECIATION.NONE, depRate: 0,
-    floorBp: 0, note: "does not wear out" },
+    floorBp: 0, premiumRate: 20, note: "does not wear out" },
   { code: 5, key: "gold", label: "Gold", depType: DEPRECIATION.NONE, depRate: 0,
-    floorBp: 0, note: "does not wear out" },
+    floorBp: 0, premiumRate: 12, note: "does not wear out; vaulted and insured" },
 ];
 
 export const assetClass = (codeOrKey) => {
@@ -100,6 +115,7 @@ export class SandboxApp {
     this.journalTail = journalTail;
     this.session = null;
     this.world = null;
+    this.market = null;
     this.state = null;
     this.notice = "";                    // e.g. why a saved world was not restored
     this.#accounts = new Map();
@@ -110,6 +126,7 @@ export class SandboxApp {
   #accounts;
   #listeners;
   #queue;
+  #known = {};                           // the market's contracts, for observe()
 
   /** Restore the stored world, or deploy a fresh one. */
   static async open(deps) {
@@ -135,20 +152,28 @@ export class SandboxApp {
 
   // ---- the world ------------------------------------------------------------
 
-  /** A fresh world: deploy, trust the issuer, open Sandbox Mutual. */
+  /** A fresh world: deploy, trust the issuer, open the market and Sandbox
+   *  Mutual. */
   reset() {
     return this.#run(async () => {
       const session = await this.newSession();
       const journal = [];
       this.#attachJournal(session, journal);
+      const poolKey = this.newKey();
       const world = await buildBuckWorld(session, this.artifacts,
-        { identity: this.identity, rng: this.rng });
+        { identity: this.identity, rng: this.rng,
+          poolAcct: privateKeyToAccount(poolKey).address });
+      const market = await buildMarket(world, this.artifacts, { rng: this.rng });
       const head = await session.client.getBlock();
       this.session = session;
       this.world = world;
+      this.market = market;
+      this.#known = marketContracts(market, this.artifacts);
       this.#accounts.clear();
       this.state = {
         world: worldRecord(world),
+        market: marketRecord(market),
+        insurancePool: { privateKey: poolKey, address: world.poolAcct },
         origin: head.timestamp,
         issued: [],                      // person numbers, never reused
         credentials: [],
@@ -244,12 +269,14 @@ export class SandboxApp {
 
   // ---- wallets --------------------------------------------------------------
 
-  /** A new wallet: a fresh account, given gas money.  Not yet registered. */
+  /** A new wallet: a fresh account with the ENDOWMENT (gas money and USDC).
+   *  Not yet registered. */
   createWallet(label) {
     return this.#act(async () => {
       const privateKey = this.newKey();
       const address = this.#account(privateKey).address;
-      await fundAccount(this.world, address);
+      await fundAccount(this.world, address, ENDOWMENT.eth);
+      await fiatIn(this.world, this.market, address, ENDOWMENT.usdc, { tag: "wallet:endow" });
       const w = { id: `W${this.state.wallets.length + 1}`, label: String(label || "").trim()
                   || `Wallet ${this.state.wallets.length + 1}`, privateKey, address,
                   credential: null, handle: null };
@@ -303,6 +330,51 @@ export class SandboxApp {
     });
   }
 
+  /** Dollars in: mint `usdc` (6 decimals) to a wallet, as a bank transfer would. */
+  deposit(walletId, usdc) {
+    return this.#act(async () => {
+      const w = this.#wallet(walletId);
+      const amount = BigInt(usdc);
+      if (amount <= 0n) throw new SandboxError("a deposit must be positive");
+      await fiatIn(this.world, this.market, w.address, amount, { tag: `deposit:${w.id}` });
+    });
+  }
+
+  /** Open trading, once per wallet: its identity handshake with the pool
+   *  (whose operator can then decrypt who traded with it, as every private
+   *  <-> public BUCK transfer requires), and its Permit2 approvals. */
+  openTrading(walletId) {
+    return this.#act(async () => {
+      const w = this.#registered(walletId);
+      await this.#refusing(() => openTrading(this.world, this.market, this.#handle(w),
+        { rng: this.rng }));
+    });
+  }
+
+  /**
+   * Buy BUCK in the pool: `{usdc}` spends exactly that much, `{buck, maxUsdc}`
+   * buys exactly that much.  Returns {paid, received}.
+   */
+  buy(walletId, order) {
+    return this.#act(async () => {
+      const w = await this.#trading(walletId);
+      const acct = this.#account(w.privateKey);
+      return this.#refusing(() => (order.buck !== undefined
+        ? buyBuckExact(this.world, this.market, acct, BigInt(order.buck),
+                       BigInt(order.maxUsdc ?? (BigInt(order.buck) * 11n) / 10n))
+        : buyBuck(this.world, this.market, acct, BigInt(order.usdc))));
+    });
+  }
+
+  /** Sell exactly `buck` BUCK for USDC in the pool.  Returns {paid, received}. */
+  sell(walletId, buck) {
+    return this.#act(async () => {
+      const w = await this.#trading(walletId);
+      return this.#refusing(() => sellBuck(this.world, this.market,
+        this.#account(w.privateKey), BigInt(buck)));
+    });
+  }
+
   // ---- credit ---------------------------------------------------------------
 
   /**
@@ -326,7 +398,7 @@ export class SandboxApp {
           floor: terms.floor ?? face * BigInt(cls.floorBp) / 10_000n,
           depType: terms.depType ?? cls.depType,
           depRate: terms.depRate ?? cls.depRate,
-          premiumRate: terms.premiumRate ?? 0,
+          premiumRate: terms.premiumRate ?? cls.premiumRate,
         }));
       this.state.credits.push({ tokenId, wallet: w.id, insurer: ins.id, assetClass: cls.key });
       return tokenId;
@@ -342,6 +414,22 @@ export class SandboxApp {
     });
   }
 
+  /**
+   * What activating `amount` would cost and whether it can go ahead now: the
+   * premium's principal, what the funding gate requires the wallet to hold
+   * first, and the shortfall -- with `buy`, the BUCK to buy to cover it (a
+   * little over, for the seconds of drift before the mint).
+   */
+  quote(walletId, amount, tokenIds) {
+    return this.#run(async () => {
+      const w = this.#registered(walletId);
+      const q = await this.#refusing(() => quoteActivation(this.world, w.address,
+        BigInt(amount), tokenIds ? { tokenIds } : {}));
+      const buy = q.shortfall === 0n ? 0n : q.shortfall + q.shortfall / 100n + BUCK;
+      return { ...q, buy };
+    });
+  }
+
   // ---- what the screens show ----------------------------------------------
 
   /** Everything the tools render, read from the chain in one pass. */
@@ -350,8 +438,10 @@ export class SandboxApp {
       const s = this.session;
       const w = this.world;
       const head = await s.client.getBlock();
-      const [buckK, supply] = await Promise.all([
+      const [buckK, supply, price, pool, insured] = await Promise.all([
         s.call(w.kctrl, "buckK"), s.call(w.buck, "totalSupply"),
+        buckPrice(w, this.market), poolReserves(w, this.market),
+        s.call(w.buck, "balanceOf", [w.poolAcct]),
       ]);
       const wallets = [];
       for (const x of this.state.wallets) {
@@ -360,6 +450,8 @@ export class SandboxApp {
           introduced: this.state.introduced.filter((k) => k.startsWith(`${x.id}>`))
             .map((k) => k.split(">")[1]),
           ...await accountView(w, x.address),
+          usdc: await s.call(this.market.usdc, "balanceOf", [x.address]),
+          trading: x.handle ? await tradingOpen(w, this.market, x.address) : false,
         });
       }
       const credits = [];
@@ -372,6 +464,7 @@ export class SandboxApp {
           block: head.number, timestamp: head.timestamp, date: isoOf(head.timestamp),
           day: (head.timestamp - this.state.origin) / BigInt(DAY),
           buckK, supply, wallets: this.state.wallets.length,
+          buckPrice: price, pool, insurancePool: insured,
         },
         issuer: { name: ISSUER.name, address: w.issuer.addr },
         credentials: this.state.credentials.map((c) => ({
@@ -399,6 +492,9 @@ export class SandboxApp {
     out[this.world.credit.address] = names.credit;
     out[this.world.kctrl.address] = "BuckKControllerDirect";
     out[this.world.buck.address] = "Buck";
+    out[this.world.poolAcct] = "Insurance pool";
+    out[this.session.account.address] = "Deployer (governance, market operator)";
+    for (const [addr, c] of Object.entries(this.#known)) out[addr] = c.name;
     return out;
   }
 
@@ -443,7 +539,7 @@ export class SandboxApp {
     const from = this.state.observedTo + 1n;
     const head = (await this.session.client.getBlock()).number;
     if (head < from) return;
-    const rows = await observe(this.world, from, { toBlock: head });
+    const rows = await observe(this.world, from, { toBlock: head, extra: this.#known });
     this.state.observed.push(...rows);
     this.state.observedTo = head;
   }
@@ -478,10 +574,13 @@ export class SandboxApp {
     if ((await session.client.getCode({ address: world.buck.address }) ?? "0x") === "0x") {
       throw new SandboxError("the saved chain holds no Buck contract");
     }
+    const market = attachMarket(session, this.artifacts, saved.app.market);
     saved.app.journal ??= [];
     this.#attachJournal(session, saved.app.journal);
     this.session = session;
     this.world = world;
+    this.market = market;
+    this.#known = marketContracts(market, this.artifacts);
     this.state = saved.app;
     this.#accounts.clear();
   }
@@ -555,6 +654,15 @@ export class SandboxApp {
   #wallet(id) {
     const w = this.state.wallets.find((x) => x.id === id);
     if (!w) throw new SandboxError(`no such wallet: ${id}`);
+    return w;
+  }
+
+  // A registered wallet that has opened trading.
+  async #trading(id) {
+    const w = this.#registered(id);
+    if (!await tradingOpen(this.world, this.market, w.address)) {
+      throw new SandboxError(`${w.label} has not opened trading yet`);
+    }
     return w;
   }
 
