@@ -277,6 +277,30 @@ will join them.
   the page reloaded to the same world, no console errors, no sideways scroll at 390px.  It
   replaces the plan's DOM-stub bundle test; it skips outside the flake's shell or unbuilt.
 
+* S4, done (2026-09-25): Credit and Observer
+
+- *Credit* (=src/ui/credit.js=): Sandbox Mutual's form -- owner, asset class (its schedule, floor
+  and premium filled in from =ASSET_CLASSES=, all editable), value, floor, depreciation and rate,
+  premium; an activation panel quoting live as the amount changes -- coverage, the premium (ten
+  years' worth, due now), what the owner must already hold, what it holds, the shortfall -- with
+  "Buy N BUCK first" (the shortfall plus 1 %, when trading is open) and then "Activate"; a table of
+  credits whose worth and activated value depreciate as the clock moves.
+- *Observer* (=src/ui/observer.js=): every transaction newest first -- block, time, sender,
+  contract and function, gas, refusals marked -- with its arguments and events; identity material
+  shown as an =opaque= chip, the first word of its value, and the note on what opening it would
+  take; BUCK and USDC amounts at six decimals, approvals of everything as "unlimited"; a filter
+  (identity, payments, credit, market, deployments; the plain Permit2 approve files under market);
+  "show what only you know" adds the sandbox's own labels to addresses (case-insensitively: Tevm
+  reports deployed addresses in lower case).  Mallory's default view holds no name, birth date or
+  person number, and the browser test asserts it.
+- *Browser test* extended: insure Carol's home, the quote's shortfall, buy it, activate (the
+  premium lands in the insurance pool), thirty days of depreciation, the observer's view with and
+  without labels.
+- *Observed*: the insurance pool is an ordinary account, so its BUCK pays demurrage like any
+  holder's (1,813.47 -> 1,810.49 over thirty days).  Whether the protocol's pool should be a
+  carrying account is a question for the contracts, not the sandbox.
+- *Also*: Foundry's =script/= moved into =scripts/deploy/= (1d6b08b; =foundry.toml= names it).
+
 *Follow-up (author, 2026-09-25):* move the other simulations (the Python sim's =deploy.py=/
 =router.py=, the JS equilibrium world) to Permit2 and an unbound router, and have the arbitrage
 agents take BUCK-in-the-middle routes by exact output -- where there is money to be made, arbs

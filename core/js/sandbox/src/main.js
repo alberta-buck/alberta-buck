@@ -10,10 +10,12 @@ import { loadIdentity } from "../../src/identity-web.js";
 import { artifact } from "../../artifacts/bundle.mjs";
 import { SandboxApp } from "./app.js";
 import { idbStore } from "./store.js";
-import { fill, h, prefs } from "./ui/dom.js";
+import { prefs } from "./ui/dom.js";
 import { mountWorldBar, renderWorldBar } from "./ui/worldbar.js";
 import { mountIssuer, renderIssuer } from "./ui/issuer.js";
 import { mountWallets, renderWallets } from "./ui/wallets.js";
+import { mountCredit, renderCredit } from "./ui/credit.js";
+import { mountObserver, renderObserver } from "./ui/observer.js";
 
 const $ = (id) => document.getElementById(id);
 const TABS = ["issuer", "wallets", "credit", "observer"];
@@ -66,10 +68,6 @@ function mountTabs() {
   selectTab(TABS.includes(saved) ? saved : "issuer");
 }
 
-function placeholder(id, title, text) {
-  fill($(id), h("p", { class: "intro" }, h("b", {}, title), " ", text));
-}
-
 async function boot() {
   const step = (text, frac) => {
     $("loading-step").textContent = text;
@@ -99,8 +97,8 @@ async function boot() {
   mountTabs();
   mountIssuer(ctx);
   mountWallets(ctx);
-  placeholder("panel-credit", "Credit.", "Insuring simulated assets and activating credit arrives here.");
-  placeholder("panel-observer", "Observer.", "The chain as anyone sees it arrives here.");
+  mountCredit(ctx);
+  mountObserver(ctx);
 
   // One render at a time; a change during a render asks for one more.
   let rendering = false;
@@ -119,6 +117,8 @@ async function boot() {
         renderWorldBar(ctx, view);
         renderIssuer(ctx, view);
         renderWallets(ctx, view);
+        renderCredit(ctx, view);
+        renderObserver(ctx, view);
       } while (again);
     } catch (e) {
       console.error("render failed", e);
