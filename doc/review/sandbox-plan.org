@@ -42,21 +42,28 @@ agent-driven world; Notes from fixture proofs; the insurer gate (=configureInsur
 The sandbox needs the ceremony in its two real halves, and credit with a separate insurer.
 Existing functions keep their behaviour, composed from the new ones.
 
-- =issueCredential(issuer, fields, {rng})= :: the issuer's half: canonical record -> m -> PS
-  signature; returns ={fields, canonical, m, sigma}=, a credential card.
-- =registerWallet(world, account, credential, {rng})= :: the holder's half: presentation,
-  identity key and ElGamal, registration proof, =register=; returns the handle =onboard= returns.
+- =issueCredential(world, fields, {rng, issuer})= :: the issuer's half: canonical record -> m ->
+  PS signature; returns ={issuer, fields, canonical, m, sigma}=, a credential card.
+- =registerWallet(world, account, credential, {rng})= :: the holder's half: checks the card
+  against the issuer key the registry publishes (=issuerKey=), then presentation, identity key
+  and ElGamal, registration proof, =register=; returns the handle =onboard= returns.
 - =onboard(...)= :: unchanged, now =registerWallet(issueCredential(...))=.
 - =insureAsset(world, insurer, holder, terms)= :: the holder accepts the insurer
   (=setCreditIssuer=), the insurer calls =createCredit=; returns the token id.
-- =activateCredit(world, holder, amount)= :: =Buck.mint(amount)= against the holder's credit.
+- =activateCredit(world, holder, amount)= :: =Buck.mint(amount)= against the holder's credit;
+  returns the =Minted= event's figures (=coverage= is face activated: a depreciating credit
+  needs a little more face than the present value asked for).
 - =createCredit(...)= :: unchanged, now =insureAsset= + =activateCredit=.
 - =creditView(world, tokenId)= :: holder, insurer, class, face, floor, depreciation, premium,
-  =currentValue=.
+  =currentValue=; also =creditsOf(world, owner)= and =accountView(world, address)=.
 - =loadWallet(wasm)= (=wallet-web.js=) :: the browser loader for =wrapWallet=, sharing the
   identity wasm module.
 - =observe(world, fromBlock)= (=observer.js=) :: decoded transactions and events since a block,
   each field marked public or opaque.
+
+- =snapshotTevm(session)= / =restoreTevm(session, snap)= (=backends.js=) and
+  =worldRecord= / =attachBuckWorld= :: the chain and the world as data, and back.
+- =codec.js= :: =encodeJSON= / =decodeJSON=: BigInts as ={"$bigint": "<decimal>"}=.
 
 These ride in =alberta-buck-core= 0.2.1 when the sandbox ships.
 
@@ -142,3 +149,25 @@ Reset.  A journal drawer lists every transaction with its outcome and gas (the e
   and show progress if it passes a second.
 - *BigInt in storage.*  Every persisted and exported value is a decimal string; one codec,
   tested by the export/import round trip.
+
+* S1, done (2026-09-25)
+
+The core additions above, in =core/js/src/{buckworld,backends,observer,codec,wallet-web}.js=,
+with =test/roles.tevm.test.js= (the ceremonies by role, the observer, the round trip) and
+=test/wallet.web.test.js=; the existing suite unchanged (68 of 68 with the demo bundles).  The
+risks, settled:
+
+- *Tevm state round trip.*  =tevmLoadState= restores accounts and storage (hex strings, JSON-safe)
+  but not the clock: the chain restarts at block 0 and its next block takes the wall-clock time,
+  which would run every contract clock backwards.  =snapshotTevm= records the head's number and
+  timestamp; =restoreTevm= presets the next timestamp, mines the height back in one =tevmMine=
+  (one block a second, 21 blocks in 0.23 s, about 300 a second), and ends on the snapshot's own
+  timestamp.  No contract reads =block.number=; the height is kept so the Observer's numbering
+  carries on.  The dump holds *no history* -- blocks, transactions, logs -- so the app keeps the
+  Observer's decoded rows in its own saved state (S2).  A world after the whole test story is
+  147 KiB of JSON.
+- *Registration cost.*  About 200 ms in Node for the proof and the =register= transaction; no
+  progress display needed unless a browser is far slower (measure in S3).
+- *BigInt in storage.*  One codec, =codec.js=, tagged (={"$bigint": ...}=, ={"$bytes": ...}=) so a
+  string that looks numeric stays a string; the test round-trips a credential card and the whole
+  saved world through it.

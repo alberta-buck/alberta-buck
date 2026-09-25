@@ -10,11 +10,18 @@
 // ElGamal -> registration NIZK) and the real Solidity verifier accepts it
 // on-chain -- the capability the in-browser demo rests on.
 //
+// Each ceremony also comes in the halves its parties perform, for tools
+// that give every role its own screen: issueCredential (the issuer,
+// off-chain) + registerWallet (the holder) = onboard; insureAsset (the
+// insurer) + activateCredit (the holder) = createCredit.
+//
 // Environment-free by injection (the artifacts(name) pattern): pass the
 // identity kernel API as opts.identity -- node code loads it from
 // ./identity.js, the browser from ./identity-web.js -- and optionally
 // opts.rng (a () => bigint scalar drawer) to reproduce a world; the
 // default draws WebCrypto.
+
+import { parseEventLogs } from "viem";
 
 // BN254.sol struct components are UPPERCASE X/Y at the ABI.
 const g = (p) => ({ X: p.x, Y: p.y });
@@ -105,30 +112,111 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   await session.send(reg, "setBuck", [buck.address], { tag: "world:reg.setBuck" });
   await session.send(credit, "setBuck", [buck.address], { tag: "world:credit.setBuck" });
 
-  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, issuer };
+  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, issuer,
+           names: { reg: regName, credit: creditName } };
 }
 
 /**
- * Register `account` with a REAL cryptographic identity: the full wallet
- * ceremony on the wasm kernel, verified on-chain by IdentityRegistry.
- *
- * @param world    from buildBuckWorld
- * @param account  a viem account (signs the register tx)
- * @param fields   identity KYC fields (issuer_id is stamped)
- * @param opts.rng scalar drawer (default WebCrypto)
- * @returns handle {account, fields, canonical, m, M, kp:{sk, pk}, E}
+ * The world as plain data -- contract addresses, roles and the issuer's
+ * keys -- for attachBuckWorld to rebuild the handles over a restored chain
+ * (see snapshotTevm / restoreTevm in backends.js).  BigInts stay BigInts:
+ * serialize with codec.js.
  */
-export async function onboard(world, account, fields, opts = {}) {
+export function worldRecord(world) {
+  return {
+    names: { ...world.names },
+    addresses: {
+      reg: world.reg.address, credit: world.credit.address,
+      kctrl: world.kctrl.address, buck: world.buck.address,
+    },
+    gov: world.gov,
+    poolAcct: world.poolAcct,
+    issuer: { ...world.issuer },
+  };
+}
+
+/** Rebuild a world's handles from worldRecord() over a chain that already
+ *  holds its contracts -- no deployment, no transactions. */
+export function attachBuckWorld(session, artifacts, record, opts = {}) {
+  const id = opts.identity;
+  if (!id) throw new Error("attachBuckWorld needs opts.identity (the buck-identity kernel API)");
+  const at = (name, addr) => session.contractAt(artifacts(name).abi, addr);
+  const a = record.addresses;
+  return {
+    session, artifacts, id,
+    reg: at(record.names.reg, a.reg),
+    credit: at(record.names.credit, a.credit),
+    kctrl: at("BuckKControllerDirect", a.kctrl),
+    buck: at("Buck", a.buck),
+    gov: record.gov, poolAcct: record.poolAcct,
+    issuer: { ...record.issuer },
+    names: { ...record.names },
+  };
+}
+
+/**
+ * The issuer's half of onboarding, off-chain: the core record's canonical
+ * form -> the identity scalar m -> the issuer's PS signature on m.  The
+ * result is a credential card to hand to the holder; the chain learns
+ * nothing at issuance.
+ *
+ * @param world       from buildBuckWorld (its issuer signs by default)
+ * @param fields      identity KYC fields (issuer_id is stamped)
+ * @param opts.issuer an issuer {addr, skX, skY} (default: world.issuer)
+ * @param opts.rng    scalar drawer (default WebCrypto)
+ * @returns credential {issuer, fields, canonical, m, sigma}
+ */
+export function issueCredential(world, fields, opts = {}) {
   const id = world.id;
   const rng = opts.rng ?? id.randScalar;
+  const issuer = opts.issuer ?? world.issuer;
   const full = { ...fields, issuer_id: fields.issuer_id ?? "atb-financial-ca" };
   const canonical = id.canonicalIdentity(full);
   const m = id.identityScalar(canonical);
+  const sigma = id.psSign(issuer.skX, issuer.skY, m, rng());
+  return { issuer: issuer.addr, fields: full, canonical, m, sigma };
+}
 
-  const sigma = id.psSign(world.issuer.skX, world.issuer.skY, m, rng());
+/** A trusted issuer's public key as the registry holds it, in kernel shapes. */
+export async function issuerKey(world, issuerAddr) {
+  const k = await world.session.call(world.reg, "trustedIssuerKey", [issuerAddr]);
+  const p = (P) => ({ x: P.X, y: P.Y });
+  const p2 = (P) => ({ x: [P.X[0], P.X[1]], y: [P.Y[0], P.Y[1]] });
+  return { pkX: p2(k.X), pkY: p2(k.Y), pkY1: p(k.Y1) };
+}
+
+/**
+ * The holder's half of onboarding: check the credential against the
+ * issuer key the registry publishes, then the full wallet ceremony on the
+ * wasm kernel -- hiding presentation, identity key, ElGamal, registration
+ * proof -- verified on-chain by IdentityRegistry.register.
+ *
+ * @param world      from buildBuckWorld
+ * @param account    a viem account (signs the register tx)
+ * @param credential from issueCredential (or a decoded card)
+ * @param opts.rng   scalar drawer (default WebCrypto)
+ * @returns handle {account, fields, canonical, m, M, kp:{sk, pk}, E, issuer}
+ */
+export async function registerWallet(world, account, credential, opts = {}) {
+  const id = world.id;
+  const rng = opts.rng ?? id.randScalar;
+  const { issuer, fields, canonical, m, sigma } = credential;
+  // The card must be self-consistent and signed by a key the chain trusts;
+  // refuse here, before any transaction, rather than as a failed proof.
+  if (id.canonicalIdentity(fields) !== canonical || id.identityScalar(canonical) !== m) {
+    throw new Error("credential does not match its own record");
+  }
+  if (!await world.session.call(world.reg, "isTrustedIssuer", [issuer])) {
+    throw new Error(`credential issuer ${issuer} is not trusted by this registry`);
+  }
+  const key = await issuerKey(world, issuer);
+  if (!id.psVerify(key.pkX, key.pkY, sigma, m)) {
+    throw new Error("credential signature does not verify under the issuer's key");
+  }
+
   // A' hiding presentation: fresh a, b per account; b is a NIZK witness.
   const [a, b] = [rng(), rng()];
-  const pres = id.psPresent(sigma, world.issuer.pkY1, a, b);
+  const pres = id.psPresent(sigma, key.pkY1, a, b);
   const sk = rng();
   const pk = id.g1Mul(id.G1, sk);
   const M = id.g1Mul(id.G1, m);
@@ -142,15 +230,29 @@ export async function onboard(world, account, fields, opts = {}) {
     rng(), rng(), rng(), rng());
 
   await world.session.send(world.reg, "register", [
-    world.issuer.addr, g(pk), ct(E),
+    issuer, g(pk), ct(E),
     { A: g(pres.A), B: g(pres.B) },
     { e: proof.e, s_m: proof.s_m, s_b: proof.s_b, s_r: proof.s_r, s_sk: proof.s_sk,
       C1: g(proof.C1), T_C: g(proof.T_C), T_R: g(proof.T_R),
       T_key: g(proof.T_key) },
-  ], { tag: `onboard:${full.given_name ?? account.address}`, gas: 3_000_000n,
+  ], { tag: `onboard:${fields.given_name ?? account.address}`, gas: 3_000_000n,
        account });
 
-  return { account, fields: full, canonical, m, M, kp: { sk, pk }, E };
+  return { account, fields, canonical, m, M, kp: { sk, pk }, E, issuer };
+}
+
+/**
+ * Register `account` with a REAL cryptographic identity: the issuer's half
+ * (issueCredential) then the holder's (registerWallet), in one call.
+ *
+ * @param world    from buildBuckWorld
+ * @param account  a viem account (signs the register tx)
+ * @param fields   identity KYC fields (issuer_id is stamped)
+ * @param opts.rng scalar drawer (default WebCrypto)
+ * @returns handle {account, fields, canonical, m, M, kp:{sk, pk}, E, issuer}
+ */
+export async function onboard(world, account, fields, opts = {}) {
+  return registerWallet(world, account, issueCredential(world, fields, opts), opts);
 }
 
 /**
@@ -183,25 +285,125 @@ export async function identityApprove(world, from, to, opts = {}) {
   return eForTo;
 }
 
+/** BuckCredit.DepreciationType, by name. */
+export const DEPRECIATION = { NONE: 0, LINEAR: 1, DECLINING_BALANCE: 2 };
+
+// A holder handle (from onboard/registerWallet) or a bare viem account.
+const acctOf = (who) => who.account ?? who;
+
+/**
+ * Insure an asset: the holder accepts the insurer (BuckCredit's recipient
+ * opt-in, skipped when already given), then the insurer issues the
+ * BuckCredit NFT.  Nothing is activated: see activateCredit.
+ *
+ * @param world   from buildBuckWorld
+ * @param insurer a viem account (default: the session's deployer)
+ * @param holder  a handle or viem account (receives the NFT)
+ * @param terms   {face, assetClass=0, floor=0n, depType=NONE, depRate=0
+ *                (basis points a year), depStartAt=now, premiumRate=0}
+ * @returns the new token id
+ */
+export async function insureAsset(world, insurer, holder, terms) {
+  const s = world.session;
+  const ins = insurer ?? s.account;
+  const h = acctOf(holder);
+  // A credit only lands where its recipient asked for it: the holder names
+  // the issuing account as one it accepts before the credit can be issued.
+  if (!await s.call(world.credit, "acceptsCreditFrom", [h.address, ins.address])) {
+    await s.send(world.credit, "setCreditIssuer", [ins.address, true],
+      { tag: "credit:accept", account: h });
+  }
+  const now = (await s.client.getBlock()).timestamp;
+  const rcpt = await s.send(world.credit, "createCredit",
+    [h.address, terms.assetClass ?? 0, terms.face,
+     terms.floor ?? 0n, terms.depType ?? DEPRECIATION.NONE, terms.depRate ?? 0,
+     terms.depStartAt ?? now, terms.premiumRate ?? 0],
+    { tag: "credit:create", account: ins });
+  const [ev] = parseEventLogs({ abi: world.credit.abi, logs: rcpt.logs,
+                                eventName: "CreditCreated" });
+  return ev.args.tokenId;
+}
+
+/**
+ * Activate `amount` of the holder's insured credit: Buck.mint, which walks
+ * the holder's credits cheapest-first (or `opts.tokenIds`).  A zero-premium
+ * credit activates headroom only; a premium pays its principal into the
+ * insurance pool from the holder's balance.
+ *
+ * @returns what the Minted event reports: {coverage (face activated -- a
+ *          depreciating credit needs a little more face than the present
+ *          value asked for), premium (paid into the pool), creditValue
+ *          (before), buckK, newLimit}
+ */
+export async function activateCredit(world, holder, amount, opts = {}) {
+  const h = acctOf(holder);
+  const args = opts.tokenIds ? [amount, opts.tokenIds] : [amount];
+  const rcpt = await world.session.send(world.buck, "mint", args,
+    { tag: "credit:activate", account: h, gas: 3_000_000n });
+  const [ev] = parseEventLogs({ abi: world.buck.abi, logs: rcpt.logs, eventName: "Minted" });
+  const a = ev.args;
+  return { coverage: a.amount, premium: a.premium, creditValue: a.creditValue,
+           buckK: a.buckKValue, newLimit: a.newLimit };
+}
+
 /**
  * Create a BuckCredit NFT for `holder` and activate its face through
  * Buck.mint (zero premium: activates credit headroom; BUCK circulates
- * when the holder draws by transferring).
+ * when the holder draws by transferring).  The deployer insures.
  */
 export async function createCredit(world, holder, face, opts = {}) {
-  const now = (await world.session.client.getBlock()).timestamp;
-  // A credit only lands where its recipient asked for it: the holder names
-  // the issuing account as one it accepts before the credit can be issued.
-  await world.session.send(world.credit, "setCreditIssuer",
-    [world.session.account.address, true],
-    { tag: "world:acceptIssuer", account: holder.account });
-  await world.session.send(world.credit, "createCredit",
-    [holder.account.address, opts.assetClass ?? 0, face,
-     opts.floor ?? 0n, opts.depType ?? 0, opts.depRate ?? 0,
-     now, opts.premiumRate ?? 0],
-    { tag: "world:createCredit" });
-  await world.session.send(world.buck, "mint", [face],
-    { tag: "world:activate", account: holder.account, gas: 3_000_000n });
+  const tokenId = await insureAsset(world, world.session.account, holder,
+    { ...opts, face });
+  await activateCredit(world, holder, face);
+  return tokenId;
+}
+
+/** One credit as its holder and insurer see it: the terms, what is
+ *  activated, and today's depreciated values. */
+export async function creditView(world, tokenId) {
+  const s = world.session;
+  const [c, holder, depreciatedFace, currentValue] = await Promise.all([
+    s.call(world.credit, "credits", [tokenId]),
+    s.call(world.credit, "ownerOf", [tokenId]),
+    s.call(world.credit, "depreciatedFaceValue", [tokenId]),
+    s.call(world.credit, "currentValue", [tokenId]),
+  ]);
+  const [insurer, assetClass, createdAt, face, floor, depType, depRate, depStartAt,
+         premiumRate, lastUpdated, activated, lastActivatedAt] = c;
+  return {
+    tokenId: BigInt(tokenId), holder, insurer, assetClass,
+    face: BigInt(face), floor: BigInt(floor), depType, depRate,
+    depStartAt: BigInt(depStartAt), premiumRate,
+    createdAt: BigInt(createdAt), lastUpdated: BigInt(lastUpdated),
+    activated: BigInt(activated), lastActivatedAt: BigInt(lastActivatedAt),
+    depreciatedFace, currentValue,
+  };
+}
+
+/** The token ids of every credit `owner` holds. */
+export async function creditsOf(world, owner) {
+  const s = world.session;
+  const n = await s.call(world.credit, "balanceOf", [owner]);
+  const ids = [];
+  for (let i = 0n; i < n; i++) {
+    ids.push(await s.call(world.credit, "tokenOfOwnerByIndex", [owner, i]));
+  }
+  return ids;
+}
+
+/** An account as its wallet shows it: registration, balances (signed:
+ *  negative is credit drawn), credit limit and demurrage owing. */
+export async function accountView(world, address) {
+  const s = world.session;
+  const [verified, balance, signedBalance, creditLimit, feeOwing, eth] = await Promise.all([
+    s.call(world.reg, "isVerified", [address]),
+    s.call(world.buck, "balanceOf", [address]),
+    s.call(world.buck, "signedBalanceOf", [address]),
+    s.call(world.buck, "creditLimit", [address]),
+    s.call(world.buck, "feeOwing", [address]),
+    s.client.getBalance({ address }),
+  ]);
+  return { address, verified, balance, signedBalance, creditLimit, feeOwing, eth };
 }
 
 /** Fund a fresh account with ETH from the deployer (plain value transfer:

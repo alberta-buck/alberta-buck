@@ -15,11 +15,19 @@ BigInt-native wrappers around the WebAssembly kernels.
   Python platform writes the same schema), and replayable for demos.
 - **Agents and worlds** -- `runDays`, whales, round-trip traders, and the
   scenario builders that stand up a pool world.
+- **A BUCK world** -- `buckworld.js` deploys the identity and monetary
+  stack and runs its ceremonies, whole (`onboard`, `createCredit`) or in
+  the halves each party performs: `issueCredential` (the issuer, off-chain)
+  and `registerWallet` (the holder); `insureAsset` (the insurer) and
+  `activateCredit` (the holder). `observer.js` decodes the chain as the
+  public sees it, identity material marked opaque. `snapshotTevm` /
+  `restoreTevm` and `codec.js` save a Tevm world as JSON and bring it back,
+  clock included.
 - **Kernel wrappers** -- `identity.js` and `wallet.js` wrap
   [`alberta-buck-kernel`](https://www.npmjs.com/package/alberta-buck-kernel)
-  in a BigInt-native API; `identity-web.js` does the same for the browser,
-  taking an explicit wasm source because bundlers break wasm-bindgen's
-  default relative fetch.
+  in a BigInt-native API; `identity-web.js` and `wallet-web.js` do the same
+  for the browser, taking an explicit wasm source because bundlers break
+  wasm-bindgen's default relative fetch.
 
 ## Install
 
@@ -46,11 +54,14 @@ const scalar = identity.reduceModOrder(12345n);
 ```
 
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
-`/journal`, `/identity`, `/wallet`, `/world`, `/v3`, and so on.
+`/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
+so on.
 
-Contract artifacts are not bundled here. A world needs the compiled
-contracts, which ship separately so that Uniswap's own artifacts come from
-Uniswap rather than from us.
+The Alberta Buck contracts come from
+[`alberta-buck-contracts`](https://www.npmjs.com/package/alberta-buck-contracts),
+a dependency: `loadArtifact` (`alberta-buck-core/nodefs`) reads it outside a
+repository checkout. Third-party contracts (Uniswap, WETH9) are not bundled;
+they come from their own packages.
 
 ## Status
 
