@@ -151,7 +151,11 @@ def _wp14_frame(d, ctr) -> dict:
     f["sh_class_txs"] = ctr.get("sh_class_txs", 0)
     f["sh_class_err"] = ctr.get("sh_class_err", "")
     gains = getattr(d, "sim_stab_gains", {}) or {}
-    for cls in getattr(d, "sim_stab_reg", ()):
+    # Deploy order (sim_stabs is a dict), not the registry set's: a set of
+    # strings iterates in a per-process hash order, which reordered these
+    # keys between runs and broke cmp as the L3 gauge on the V designs.
+    reg = getattr(d, "sim_stab_reg", ())
+    for cls in [c for c in stabs if c in reg]:
         st = stabs.get(cls)
         if st is None:
             continue
