@@ -822,6 +822,7 @@ class Snapshotter:
             # WP-14: the per-class stabilizers and the skews (only when
             # present; see _wp14_frame above).
             **_wp14_frame(d, ctr),
+            **{k: v for k, v in ctr.items() if k.startswith("wh_")},
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

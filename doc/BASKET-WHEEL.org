@@ -200,12 +200,132 @@ monetary operation (ruling 3), so the prototype can be built beside the
 stand; its quantitative verdict, like everything else, is read on the
 stand's rungs.
 
-* 8. Open
+* 8. The chassis: activities as task kinds
 
-1. The share s, per chain or adaptive.
+The design owner's question: can the work wheel be abstracted, so a
+basket is derived from the basic BuckBasket and the arbitrage -- or any
+other activity -- is added in a modular fashion?  Yes, and the codebase
+already holds the pattern: =RebalanceDirectorBase= is a policy-agnostic
+chassis (epoch clock, round-robin cursor, =poke(maxWork)=) whose policy
+arrives through two hooks, =_isStale= / =_pokeOne=.  The wheel is that
+chassis generalized from "constituents x epochs" to "tasks x clocks".
+
+** 8.1 The pieces
+
+| piece           | what it owns                                                                                  |
+|-----------------+-----------------------------------------------------------------------------------------------|
+| the chassis     | the slot table over every kind, the cursor, the per-block scan and idle memo, the re-arm, the caller's pay |
+| a task kind     | how many slots it has, whether a slot is due (a view), how to run one (bounded), what it was worth |
+| the reserve     | the gas offset: a slice of basket yield, paid as kappa of its balance per working tick          |
+| the clock       | a per-chain adapter: =block.number= on L1 and the OP stack; =ArbSys(100).arbBlockNumber()= on Arbitrum, whose =block.number= is the L1's and would idle the wheel for many of its own blocks |
+| the capabilities | what a kind may ask of the basket when the wheel is not inside it: a flash mint for the arb kind |
+
+The kinds the codebase already has, as tasks: the director's signal
+refresh (=poke=), the treasury sweep (=sweepTreasury=, which no sim
+agent calls today), the ops quadrants (=monetaryOperation=), the Fence
+re-strike (=fenceRebalance=), the controller's =compute=.  The new one:
+the consistency arbitrage, one slot per constituent.
+
+** 8.2 Scheduling: amortizing the scan, not just the work
+
+On chain the expensive part of an arb slot is deciding whether it is due
+-- three cold =slot0= reads, ~14k gas -- so an idle scan of six
+constituents is ~85k: too much for the shell's piggybacked =tick(1)=.
+So a call examines at most =maxScan= slots, the cursor moves past every
+slot examined (not only the ones run), and the block is memoized idle
+only when consecutive calls have found every slot not due.  Many small
+calls in a block share one scan; after it, each further call is one
+read.  Any basket-touching trade re-arms the wheel.
+
+** 8.3 The incentive, in the chassis
+
+A working tick pays its caller two things: each value-producing kind's
+share of what it captured (the arbitrage pays for its own calls), and
+kappa of the reserve (upkeep that captures nothing).  The reserve is the
+design owner's gas offset: a small slice of the basket's yield (and a
+fraction of the arb's value) flows in; each working tick takes kappa of
+the balance; so it BUILDS UP when ticks are under-called and PAYS OUT
+LESS when they are over-called.  At equilibrium a paid tick earns about
+funding / calls, and callers call until that equals their gas -- the
+calling rate sets itself per chain, with no gas oracle, like the arb's
+share.  An idle tick is paid nothing; a cap on the reserve returns the
+excess to depositors.  (An elapsed-time drip -- pay rho x the time since
+the last paid tick -- has the same equilibrium and pays only the first
+caller in a block; kappa-of-balance is the owner's form, and needs no
+clock.)
+
+** 8.4 Solidity: kinds as mixins over slot ranges
+
+#+BEGIN_SRC solidity
+abstract contract WorkWheel {
+    uint256 public cursor;
+    uint256 public idleBlock;          // the clock value of a block found idle
+    uint256 internal _scanned;         // consecutive slots found not due
+    uint256 internal _scanBlock;
+
+    function tick(uint256 maxWork, uint256 maxScan) external returns (uint256 work, uint256 pay);
+    function _clock() internal view virtual returns (uint256) { return block.number; }
+    function _markDirty() internal { idleBlock = 0; _scanned = 0; }
+
+    // the kind seam: the slot table is the concatenation of the kinds' ranges
+    function _slotCount() internal view virtual returns (uint256) { return 0; }
+    function _due(uint256) internal view virtual returns (bool) { return false; }
+    function _run(uint256) internal virtual returns (uint256 work, uint256 value, uint256 share);
+}
+
+/// A kind claims the range after its bases' and hands the rest to super:
+/// the C3 order of the derived contract fixes the slot layout.
+abstract contract ArbKind is WorkWheel {
+    function _slotCount() internal view virtual override returns (uint256) {
+        return super._slotCount() + _constituents();
+    }
+    function _due(uint256 s) internal view virtual override returns (bool) {
+        uint256 b = super._slotCount();
+        return s < b ? super._due(s) : _arbDue(s - b);
+    }
+    function _run(uint256 s) internal virtual override returns (uint256, uint256, uint256) {
+        uint256 b = super._slotCount();
+        return s < b ? super._run(s) : _arbRun(s - b);
+    }
+}
+
+contract ProRataWheel is WorkWheel, DirectorKind, SweepKind, ArbKind { }
+#+END_SRC
+
+Two deployments from one chassis, which is the "derive from the basic
+BuckBasket" the owner asked for:
+
+- *Inside the shell* where it fits -- =BuckBasketProRata= (~16.2 KB, ~8.4 KB
+  of headroom) derives the kinds directly; the arb kind mints and burns
+  BUCK itself and the shell's own activations call =tick(1, s)= in place
+  of =_pokeDirector()=.
+- *Beside the shell* where it does not -- the ops shell (~3.2 KB) and the
+  Fence (~1 KB) -- a =ProRataWheel= contract holding narrowly-scoped
+  capabilities: the basket's =flashMint(amount, data)= (ERC-3156's
+  shape: mint to the wheel, call back, require the principal back and
+  burn it), plus the permissionless entry points the upkeep kinds call
+  anyway.  The Monetary Diamond (WP-11) can later host the same kinds as
+  a facet.
+
+** 8.5 The Python mirror
+
+=alberta_buck/sim/work_wheel.py= (=WorkWheel=, =WheelTask=,
+=RewardReserve=, =ChainProfile=, =Clock=), =wheel_tasks.py=
+(=ConsistencyArbTask= with the closed-form cycle, =DirectorPokeTask=,
+=TreasurySweepTask=), and =basket_wheel_agent.py= (=BasketWheelAgent=,
+the caller and -- for the prototype -- the basket's hands through a
+zero-premium face, the flash mint's stand-in).  A new activity is a
+=WheelTask= subclass and a name in the agent's =tasks= knob.
+=test_work_wheel.py= pins the round-robin, the scan amortization and
+idle memo, the re-arm, the reserve's build-up and draw-down, the quote,
+and the fee band only the basket can take.
+
+* 9. Open
+
+1. The share s and kappa, per chain or adaptive.
 2. The first-swap-of-block hook (v4) as the path to the large gaps.
-3. Whether the wheel pays for the other permissionless upkeep
-   (=poke=, =monetaryOperation=, =fenceRebalance=, =compute=).
-4. Where the wheel lives: the ops shell has ~3.2 KB of headroom and the
-   Fence ~1 KB, so it is a facet of the Monetary Diamond (WP-11) or its
-   own contract.
+3. Which of the upkeep kinds the wheel takes over from the keepers, and
+   whether the reserve is funded from pool-fee yield, arb value, or both.
+4. Inside or beside: the ProRata shell has room for the kinds; the ops
+   shell and the Fence do not, so there the wheel is its own contract
+   (and later a Diamond facet).

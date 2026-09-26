@@ -28,6 +28,7 @@ import alberta_buck.sim.seeder_agent  # noqa: F401  WP-8  triggers @_register
 from alberta_buck.sim import shadow_book  # WP-13: the stand-ins' book -> observer
 import alberta_buck.sim.pusher_agent  # noqa: F401  WP-15  @_register PusherAgent, LpExitAgent
 import alberta_buck.sim.bookloader  # noqa: F401  WP-15  @_register BookLoaderAgent
+import alberta_buck.sim.basket_wheel_agent  # noqa: F401  BASKET-WHEEL  @_register BasketWheelAgent
 
 E6 = 10 ** 6
 
