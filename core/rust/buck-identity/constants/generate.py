@@ -6,8 +6,8 @@ specification.
 The constants this emits are numerically identical to circomlib's -- that is
 the point, since the Alberta Buck circuits, the Solidity verifier, the Rust
 kernel and the Python reference must all hash alike -- but they are DERIVED
-here rather than copied, so nothing of circomlib's is redistributed.  See
-NOTICE at the repository root.
+here rather than copied, so nothing of circomlib's is redistributed, and
+`make poseidon-constants-check` keeps the equality a tested fact.
 
 Generation follows the Poseidon reference (`generate_parameters_grain.sage`
 from the hadeshash distribution accompanying the paper): an 80-bit Grain

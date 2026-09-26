@@ -1538,12 +1538,52 @@ sandbox-artifacts:	sandbox-deps $(SANDBOX_ADAPTER)
 sandbox-build:	sandbox-artifacts core-build-wasm-web
 	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm --minify \
 		--platform=browser --outfile=sandbox/dist/app.js \
+		--metafile=artifacts/sandbox-meta.json \
 		--alias:buffer=buffer \
 		--alias:fs=./demo/src/shims/fs-empty.js \
 		--log-limit=8
 	mkdir -p $(SANDBOX_DIST)/wasm
 	cp core/js/sandbox/index.html core/js/sandbox/styles.css $(SANDBOX_DIST)/
 	cp core/js/kernel/web/buck_identity_bg.wasm $(SANDBOX_DIST)/wasm/
+	python3 scripts/third_party_notices.py sandbox core/js/artifacts/sandbox-meta.json \
+		> $(SANDBOX_DIST)/THIRD-PARTY-NOTICES.txt
+
+# ── Licences and third-party notices in what we publish ───────────────
+#
+# Every published package carries its own licence text, a copy of LICENSE
+# (GPL-3.0) or core/LICENSE (CAL-1.0) beside its manifest, where npm, cargo
+# and setuptools each pick it up.  The packages that build third-party code
+# into themselves -- the kernels (Rust crates) and the contracts bundle (what
+# solc compiles in) -- also carry a THIRD-PARTY-NOTICES.txt, generated from
+# Cargo.lock, lib/ and node_modules by scripts/third_party_notices.py; the
+# sandbox's is generated into its dist/ at every build (sandbox-build).  All
+# of these are committed; regenerate after a dependency changes, and the
+# check fails while any is stale.
+#
+#   make nix-third-party-notices
+#   make nix-third-party-notices-check
+GPL_PACKAGES = core/contracts core/contracts/python
+CAL_PACKAGES = core/js core/js/kernel core/python core/python-kernel \
+	       core/rust/buck-math core/rust/buck-identity core/rust/buck-registry core/rust/buck-wallet
+NOTICES = core/js/kernel:kernel-wasm core/python-kernel:kernel-native \
+	  core/contracts:contracts core/contracts/python:contracts
+
+.PHONY: third-party-notices third-party-notices-check
+third-party-notices:
+	for d in $(GPL_PACKAGES); do cp LICENSE $$d/LICENSE; done
+	for d in $(CAL_PACKAGES); do cp core/LICENSE $$d/LICENSE; done
+	for n in $(NOTICES); do \
+	  python3 scripts/third_party_notices.py $${n#*:} > $${n%%:*}/THIRD-PARTY-NOTICES.txt || exit 1; \
+	done
+
+third-party-notices-check:
+	@for d in $(GPL_PACKAGES); do cmp -s LICENSE $$d/LICENSE || { echo "$$d/LICENSE is stale"; exit 1; }; done
+	@for d in $(CAL_PACKAGES); do cmp -s core/LICENSE $$d/LICENSE || { echo "$$d/LICENSE is stale"; exit 1; }; done
+	@for n in $(NOTICES); do \
+	  python3 scripts/third_party_notices.py $${n#*:} | cmp -s - $${n%%:*}/THIRD-PARTY-NOTICES.txt \
+	    || { echo "$${n%%:*}/THIRD-PARTY-NOTICES.txt is stale: make nix-third-party-notices"; exit 1; }; \
+	done
+	@echo "licence texts and third-party notices are current"
 
 SANDBOX_PORT ?= 8000
 sandbox:	sandbox-build

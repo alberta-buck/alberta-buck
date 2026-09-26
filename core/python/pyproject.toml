@@ -11,6 +11,7 @@ version = "0.2.0"
 description = "Alberta Buck core platform (Python): the ChainSession API over anvil/testnets/pyrevm with expectation journaling, and the Foundry artifact loader"
 readme = "README.md"
 license = "CAL-1.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Perry Kundert", email = "perry@dominionrnd.com" }
 ]
@@ -33,7 +34,7 @@ Homepage = "https://github.com/alberta-buck/alberta-buck"
 "Bug Tracker" = "https://github.com/alberta-buck/alberta-buck/issues"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

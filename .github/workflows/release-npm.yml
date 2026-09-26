@@ -123,7 +123,8 @@ jobs:
           // npm <= 11 prints an array of packs; npm 12 an object keyed by name.
           const pack = JSON.parse(fs.readFileSync("/tmp/pack.json", "utf8"));
           const files = (Array.isArray(pack) ? pack[0] : Object.values(pack)[0]).files.map(f => f.path);
-          const errs = ["contracts.json", "compiler.json"].filter(f => !files.includes(f))
+          const errs = ["contracts.json", "compiler.json", "LICENSE", "THIRD-PARTY-NOTICES.txt"]
+            .filter(f => !files.includes(f))
             .map(f => `the tarball is missing ${f}`);
           const bundle = JSON.parse(fs.readFileSync("contracts.json", "utf8")).contracts;
           const setup = JSON.parse(fs.readFileSync("compiler.json", "utf8")).trustedSetup;
@@ -222,6 +223,26 @@ jobs:
                        console.log(e.files.filter(f=>f.path.endsWith(".wasm")).length)')
           echo "wasm files in the kernel tarball: $n"
           [ "$n" -eq 4 ] || { echo "::error::expected 4 .wasm files, found $n" >&2; exit 1; }
+
+      - name: The tarballs carry their licences
+        # Each package's own LICENSE, and the kernel's notices for the Rust
+        # crates linked into its wasm (scripts/third_party_notices.py).
+        working-directory: core/js
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json --workspaces --include-workspace-root | node -e '
+            const p = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const packs = Array.isArray(p) ? p : Object.values(p);          // npm 12: keyed by name
+            const need = { "alberta-buck-core": ["LICENSE"],
+                           "alberta-buck-kernel": ["LICENSE", "THIRD-PARTY-NOTICES.txt"] };
+            const errs = [];
+            for (const [name, files] of Object.entries(need)) {
+              const pack = packs.find(x => x.name === name);
+              const have = new Set((pack?.files ?? []).map(f => f.path));
+              for (const f of files) if (!have.has(f)) errs.push(`${name} lacks ${f}`);
+            }
+            if (errs.length) { console.error("::error::" + errs.join("; ")); process.exit(1); }
+            console.log("both tarballs carry their licences");'
 
       - name: Test
         working-directory: core/js

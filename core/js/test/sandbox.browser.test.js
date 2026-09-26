@@ -32,7 +32,7 @@ const skip = !existsSync(join(DIST, "app.js")) ? "sandbox not built (make nix-sa
     : false;
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
-                ".wasm": "application/wasm", ".json": "application/json" };
+                ".wasm": "application/wasm", ".json": "application/json", ".txt": "text/plain" };
 
 function serve() {
   const server = createServer(async (req, res) => {
@@ -66,6 +66,15 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.waitForSelector("#loading", { state: "hidden", timeout: 240_000 });
     t.diagnostic(`a new world booted in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+
+    // The page links its third-party notices, which the build wrote beside it.
+    const notices = page.locator("footer a", { hasText: "Third-party notices" });
+    const text = await (await page.request.get(new URL(await notices.getAttribute("href"), page.url()).href)).text();
+    assert.match(text, /^Third-party software in the Alberta Buck sandbox/);
+    for (const c of [/^viem \S+ -- MIT$/m, /^@ethereumjs\/evm \S+ -- MPL-2\.0$/m, /^ark-ff \S+ -- MIT OR Apache-2\.0$/m,
+                     /^Uniswap Permit2 \(compiled\) -- MIT$/m]) {
+      assert.match(text, c);
+    }
 
     // Click, wait for the action to settle, and return [ok?, status line].
     const act = async (locator) => {

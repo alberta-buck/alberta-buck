@@ -31,7 +31,8 @@
     "contracts.json",
     "compiler.json",
     "deployments.json",
-    "README.md"
+    "README.md",
+    "THIRD-PARTY-NOTICES.txt"
   ],
   "main": "./index.mjs",
   "types": "./index.d.ts",
