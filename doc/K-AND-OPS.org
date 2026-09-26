@@ -1,0 +1,600 @@
+#+TITLE: K and the monetary operations: what the carry-convexity branch found, and how to carry it onto master
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-26
+#+OPTIONS: ^:nil toc:2 num:t
+
+* 1. What this document is, and how to use it
+
+The =feature/carry-convexity= branch ran a two-month measurement program on
+the BUCK equilibrium-defense system: the Convertibility Undertakings and
+their weak-side ladder, the stress fee, the latent-credit facility, the
+treasury seeder, and -- the part this document is about -- the question of
+how the slow lever K and the fast monetary operations should be coupled.
+That question is now answered by measurement, and the answer is not the
+one the branch set out to implement.
+
+Meanwhile =master= has moved 191 commits ahead with the repository's
+public release and a security fix that changes APIs the simulation uses.
+The branch is 91 commits ahead of master and 191 behind.
+
+This document is the handoff.  It is written to be read by a session that
+has none of the branch's context: it states the findings, states the
+design they imply, states exactly what master changed and what that does
+to each finding, and says what to run first.  Read sections 2, 5 and 7 to
+act; read 4 to know why; read 6 before touching code.
+
+The documents of record it condenses, all on the branch:
+=CARRY-CONVEXITY.org= (the design: decisions D1-D7, D9, the model, the
+predictions), =WAVE3.org= (the work ledger: every package, every cell,
+every number with the command that made it, decisions pending 1-38),
+=ORGANIC-SCALE.org= (the organic-environment program and the phase rule),
+=ONBOARDING-D7.org= (session recovery and house rules), and
+=reports/wp-13.org= / =wp-14.org= / =wp-15.org= / =wp-16.org= (the four
+implementation packages).  Nothing here supersedes those; it selects from
+them.
+
+* 2. The answer, in one page
+
+K and the monetary operations are two controllers with two different
+jobs, and the branch's central mistake was to wire the second one's
+inventory into the first one's gains.
+
+- *The monetary operations* (the desk's quadrants, the undertakings and
+  their ladder, the facility population, the seeder) hold the PRICE
+  inside the band, now, by taking positions.  Their process variable is
+  bvib against their own edge; their output is a trade; their timescale
+  is ticks to days; their cost is carry, and their failure mode is
+  inventory that will not go away.
+- *K* holds the STOCK of credit-backed BUCK at the level at which a
+  basket bundle prices at par over months.  Its process variable is the
+  PERSISTENT component of net demand at par; its output is a
+  credit-limit multiplier; its timescale is the 90-day integral time and
+  the borrowers' own uptake lag; its failure mode is saturation.
+- *The seam between them is PERSISTENCE, not magnitude.*  A position that
+  outlives the fast actuators' willingness to hold it is escalated,
+  discretely and auditably, to a permanent supply change (the desk's Q2
+  burn / Q4 acknowledgment), and only then does K carry it.  K does not
+  read the books continuously at a gain.
+
+The branch built the continuous coupling (D4, then D7's second PID loop
+on the aggregate position) and then measured it on a 66-cell grid.  The
+grid says: the price-only controller passes every arm; every
+position-coupled design pins K at its ceiling somewhere; and at the
+gain the offline derivation recommended, an attacker who loads the
+book ends the x4 dump $3.14M ahead where it ends flat under every other
+design.  Coupling K tightly to the operations book hands an adversary a
+lever on the money supply.
+
+Optimal control and estimation are still needed, but not where the
+branch put them.  The LQR's own answer was that the optimal law is
+mostly FEEDFORWARD from the disturbance flow; its feedback gains on the
+position rail the lever.  So the estimator's job is the SPLIT -- how much
+of today's flow is persistent (K's business) and how much is transient
+(the desk's business) -- which is a two-state Kalman filter on the fused
+net flow, and is exactly the persistence test made continuous.  Every
+estimated input an adversary can manufacture must reach K only through a
+rate limit and a persistence test, never through a proportional gain.
+
+* 3. Where the work is
+
+| item                        | where                                                                                              |
+|-----------------------------+----------------------------------------------------------------------------------------------------|
+| the branch                  | =feature/carry-convexity=, pushed to =origin=; 91 commits ahead of =origin/master=, 191 behind    |
+| the design of record        | =CARRY-CONVEXITY.org= (root on the branch; =doc/= on master) -- D1-D7 and D9                        |
+| the work ledger             | =WAVE3.org= -- STATUS block, requirements, work packages, progress ledger newest first, decisions pending 1-38 |
+| the organic program         | =ORGANIC-SCALE.org= -- the scale ladder, multiplicity, "The stand before the controller", the phase rule |
+| onboarding / house rules    | =ONBOARDING-D7.org= -- session recovery, the worktree recipe, house rules 1-13, the report template  |
+| package reports             | =reports/wp-13.org= (controller), =wp-14.org= (per-class stabilizers, local skews), =wp-15.org= (grid machinery), =wp-16.org= (the offline gain derivation) |
+| the contracts built         | =src/BuckKControllerShadow.sol=, =src/ShadowObserver.sol=, =src/interfaces/IStabilizer.sol=, =BuckBasketOps.positionCap()=, =src/sim_build/SimStabilizer.sol= |
+| the grid's evidence         | =../alberta-buck-grid= (detached at 801f34f): =build/sim/star/d7-c1/summary.{md,json}= and 66 cell vectors; log =build/sim/regen/d7-c1.log= |
+| the gain derivation         | =alberta_buck/sim/kdesign.py=; =build/sim/kdesign/{gains,fit}.org=                                   |
+| the viewer                  | =alberta_buck/sim/viewer/=, served by =python -m alberta_buck.sim.viewer --port 8787=               |
+| telemetry                   | =alberta_buck/sim/TELEMETRY.md= (schema v2: every agent in the roster, per-frame acts with a =why=) |
+
+Nothing is in flight.  The last grid run (cycle 1) finished 2026-09-13
+and is judged in section 4.
+
+* 4. The findings, ranked by how much they constrain the design
+
+Each finding says what was measured, where the evidence is, and -- the
+distinction that matters most for a fresh session -- whether it is a
+MEASUREMENT of the system's structure or a measurement of today's thin
+population, which is an assumption in disguise.
+
+** F1.  The position-coupled controller rails K; the price-only controller does not (STRUCTURAL)
+
+Cycle 1: 66 two-year cells, six designs x six disruption arms x the
+capacity / tau_s / depth axes, judged by the parity gate (tail bvib
+within 1% of par, K NEVER railed in the tail, issuance and redemption
+channels alive, interventions applied).  Evidence:
+=../alberta-buck-grid/build/sim/star/d7-c1/summary.md=.
+
+| design | what it is                                          | arms passed | K tail mean, rail share of the tail        |
+|--------+-----------------------------------------------------+-------------+--------------------------------------------|
+| A      | =BuckKControllerDirect=: price only                 | 6 of 6      | 0.74-0.85, rail 0% on every arm            |
+| Vk     | V plus the measured local skews                     | 3 of 6      | 0.83-0.95, rail 0-89%                      |
+| S      | shadow units, the derived position gains            | 2 of 6      | 0.82-0.95, rail 0-100%                     |
+| V      | fill units, the derived position gains              | 2 of 6      | 0.84-0.95, rail 0-100%                     |
+| S0     | D4 as built, lambda 1 (gains tied to the price loop) | 0 of 6      | 0.950 on every arm, rail 89-100%           |
+| S0k    | D4 at the DERIVED knee, lambda 24                   | 0 of 6      | 0.950 on every arm, rail 97-100%           |
+
+33 of the 66 cells pass.  Every failure is the same failure: K pinned at
+KMAX 0.95.  The mechanism is visible in the attribution column
+(=attr_pos= 54-92%): under every shadow design the position terms supply
+most of the change in K, and on a calm arm the undertakings' book is net
+ISSUED, so the position term asks for MORE K, monotonically, until the
+rail.  A permanent bias from a transient signal.
+
+This is WP-16's authority mismatch appearing as saturation: the same
+derivation that produced these gains also said a full undertakings book
+would need K = 1.6 to drain in 127 days, against a ceiling of 0.95.
+
+** F2.  Tight coupling inverts the response to a large attack, and pays the attacker (STRUCTURAL in kind, thin-cast in size)
+
+The x4 dump arm, same file:
+
+| design | peak deviation | AUC | NAV $M | depositors realized $M | defenders realized $M | attacker $M |
+|--------+----------------+-----+--------+------------------------+-----------------------+-------------|
+| A      | +28.6%         | 178 | 37.8   | +0.67                  | +1.77                 | 0.00        |
+| V      | +33.8%         | 215 | 38.3   | +0.50                  | +1.21                 | 0.00        |
+| Vk     | +30.6%         | 236 | 37.1   | +0.27                  | +1.18                 | 0.00        |
+| S0     | -26.2%         | 535 | 32.3   | -0.36                  | +0.16                 | 0.00        |
+| S0k    | -46.1%         | 698 | 30.7   | -0.74                  | +0.05                 | *+3.14*     |
+
+Under the strongly coupled designs the excursion's SIGN flips: the dump
+that made BUCK cheap ends with BUCK dear by 26-46%, because K was driven
+to its ceiling and left there while the book unwound.  The area under the
+deviation triples or quadruples, the basket's NAV falls $5-7M, the
+depositors the program exists to protect go from +$0.67M to -$0.74M, the
+private defenders' harvest collapses from +$1.77M to +$0.05M, and at the
+derived knee the attacker walks away $3.14M ahead.
+
+Read this as the design fact it is: *any continuous, high-gain path from
+an adversary-visible inventory into the money supply is an attack
+surface.*  The book-loading attack of prediction 10 succeeds -- not
+through the market, but through the controller.
+
+** F3.  One lever can zero one integral (STRUCTURAL, algebraic)
+
+WP-16, =alberta_buck/sim/kdesign.py=, test
+=test_joint_plant_has_a_conserved_direction=.  For the reduced plant --
+price error self-regulating, aggregate position integrating, one lever,
+both integrals costed -- the combination =k_s (a Int(e) + e) + k_e s= is
+unchanged by any input (z A = z, z B = 0).  The joint LQR has no finite
+solution; the Riccati iteration diverges and its gains drift with the
+horizon.
+
+The economic content: the price integral and the facilities' inventory
+are two GAUGES ON ONE QUANTITY, the cumulative net demand for BUCK at
+par.  K moves supply; the band decides which gauge the flow lands in.
+While a facility holds price, the flow is in inventory and the price
+gauge reads nothing; when the facility is drained or absent, the same
+flow is in price and the inventory gauge is pinned at its cap.  K never
+has two independent errors to serve.
+
+Consequence, kept: K carries ONE integrator on ONE signal.  If both
+integrators exist, their contents can shift between them without moving
+K (a closed-loop eigenvalue at exactly 1, eigenvector (0, Kqi, 0, -Ki)),
+bounded in the contract only by the rails -- and the pathological case is
+two integrators pinned at opposite rails with K interior and the
+anti-windup fighting a saturation that is not real.
+
+** F4.  K is a weak, slow, asymmetric lever (THIN-CAST: re-identify before quoting)
+
+WP-16's step tests: ten 1-year cells, gains zeroed at day 120, K stepped
+at day 150; plus three loaded-book (grind) confirmation cells.
+
+| quantity                                | measured                                      |
+|-----------------------------------------+-----------------------------------------------|
+| supply flow per unit K                  | ~50k BUCK/day as a RAMP (R2 0.81); 56k loaded |
+| at full rail authority (dk_rail 0.5)    | ~25k BUCK/day                                 |
+| a 60-day $8-12M grind demands           | 130-200k BUCK/day                             |
+| draining a full $15M book at the rail   | ~600 days                                     |
+| price shift from full authority         | 0.2-0.4% of bvib                              |
+| daily price error with the loop open    | std 0.70%, lag-1 autocorrelation -0.53        |
+| a cut to K 0.55                         | -6.3M BUCK at once (borrowers' limits bind)   |
+| cuts vs rises, BUCK/day per unit K      | 55k vs 44k at depth 10; 44k vs 75k at depth 40 |
+
+Three design consequences, all of which survive re-identification even
+though the numbers will move:
+
+1. *The daily price error is noise at the day scale.*  The cast restores
+   price within the day and overshoots.  A larger proportional gain moves
+   K by that noise; a derivative term amplifies it.  This closes the
+   "faster K" direction: K cannot be made responsive by tuning.
+2. *K acts through voluntary borrowing.*  Its channel is the borrowers'
+   arrival hazard and their K-scaled limits, so a step in K yields a
+   supply ramp that compounds late.  A K move lasting a day moves supply
+   by a few thousand BUCK.
+3. *The lever is asymmetric.*  A cut can compel (a margin call, 6.3M at
+   once); a rise is an offer nobody has to take.  No single linear gain
+   describes both directions.
+
+*Why these are thin-cast numbers.*  The flow per unit K is set, in
+today's sim, by one line: a pending borrower's arrival clock advances at
+=(K / 0.75) x (1 + 5 (1 - bvib))=, capped at 3x
+(=equilibrium_agents.py=, the =endog= hazard: =arr_k_ref=, =arr_gain=,
+=arr_max=).  That is an assumed elasticity, not an economy.  The
+within-day price reversion is likewise the excursion arbs' thresholds and
+their effectively unlimited capital.  Re-identify both on the merged tree
+before any number here is quoted again -- and see F10, because master's
+insurance-pool change moves the borrower's economics directly.
+
+** F5.  The fast facilities' books are transient, not integrating (STRUCTURAL, with a thin-cast caveat)
+
+WP-16 finding 2.  On a calm arm at an engaged band the undertakings' desk
+chases the daily noise: it absorbs and unwinds at par within days (|q| >
+1000 BUCK on 12-20% of days, max 50k, 38 trades in a control cell), and a
+K step leaves the book unchanged.  The only K-dependence is a STANDING
+book of +126k BUCK per unit K -- proportional to the flow,
+self-regulating, 0.8% of the reserve.
+
+So the regime D7's position loop was designed for -- "the facility absorbs
+the flow while it holds price, so the position integrates" -- is not the
+regime a calm world is in.  Feeding a transient book to an integrator is
+what produces F1's permanent bias.  The position signal only integrates
+during an excursion, which is exactly when the lever cannot answer it.
+
+** F6.  Habituation is not the binding constraint; saturation is (STRUCTURAL)
+
+Cycle 1's habituation columns (prediction 9): where an excursion existed,
+the aggregate position returned to within 10% of zero in 18-42 days on
+the dumps, 103-104 days on the cohort step, 147 days on the book-load,
+with 0-2 sign changes -- comfortably inside the 190-day window the
+derivation's tau_s implies.  The books do come back.  What does not come
+back is K, once it is at the rail.  Any future gate on the position loop
+should test the RAIL and the bias, not the return time.
+
+** F7.  Prediction 10 holds in P&L, and the local skews make the K excursion worse (STRUCTURAL, unexplained)
+
+The book-load arm: the loader loses money under every design (-15.3 to
+-15.5, and -22.0 under S0k), so the attack does not pay directly.  But
+the K excursion per unit of loaded fraction orders:
+
+: A 0.004  <  S0 0.0003  ~  V 0.049  <  S 0.072  <  Vk 0.61  <  S0k 0.95
+
+V no worse than S, as prediction 10 expected.  But Vk -- V plus WP-14's
+measured local skews -- is an order of magnitude worse than V, and S0k
+spends the entire rail.  The local skews were supposed to be the
+differential-mode lever that keeps K out of it; on this arm they let the
+loader move K further.  Unexplained, and worth one cell to explain: the
+skew moves the facility's own edge, which may be admitting more of the
+loader's flow before the edge resists.
+
+** F8.  An unreadable NAV is a sensor fault, not saturation (STRUCTURAL; decision 9, closed)
+
+=BuckBasketOps.capacity()= sizes the desk's caps against NAV read through
+=_navBuckSafe()=, which swallows reverts to 0.  NAV is unreadable when the
+desk is disabled, when there is no depositor liquidity beyond the treasury
+(=NoValue()=), or when spot is off TWAP by more than =defaultMaxDeviationBp=
+(500 bp) inside =twapWindow= (600 s) -- the =Slippage()= guard, which trips
+on exactly the days an attack is running.  Cold pools bypass the guard
+entirely, and K's own present-value read never runs it.
+
+Policy of record: hold the LAST GOOD cap with a staleness flag; position is
+always readable (it depends on nothing external); a disabled stabilizer is
+excluded from the aggregate.  Never "pinned", never "idle".  Cycle 1's
+guard-trip arm confirms the consequence: under the fill-unit aggregation
+the guard trip produces no K kick and no rail (V and Vk pass that arm),
+while the as-built shadow designs rail through it.
+
+** F9.  Two measurement lessons that changed results, not just plumbing (STRUCTURAL)
+
+1. *Gauge the price from the pool's own quote, never from balances*
+   (decision 8, merged).  Reserve-ratio pricing made a concentrated
+   liquidity position read as a price move; the artefact's real channel was
+   the excursion arbs' ex-ante gate, which is why the fix had to touch every
+   quote primitive (13 sites) and not the three named readers.  A seeder-on
+   cell's K gap of 0.025 went from artefact to economics.  Lesson: any
+   agent's DECISION gate is a gauge, and a gauge that disagrees with the
+   venue is a finding waiting to be mis-attributed.
+2. *A defended world hides the controller's own law* (sensor damping).  The
+   monthly fit of K's law has R2 0.90 in an undefended world and 0.5-0.7
+   in a defended one, because the facilities remove the error K is
+   integrating.  This is not a defect; it is the mid-ranging structure
+   working, and it is why K's inputs must be chosen for what they measure
+   about PERSISTENCE rather than for how well they predict the next month.
+
+** F10.  What master's security work does to the findings (TRANSLATION)
+
+Detailed in section 6.  The one that touches a finding rather than a
+call site: =Buck='s insurance pool is now bound Carrying, so a mint's
+premium deposit is an ASSET that comes back with its accrued age instead
+of a sunk cost, and the debtors' counterfactual now pays its insurance
+premium fairly as it falls due.  The BUCK path is therefore cheaper
+relative to the mortgage it replaces than it was when F4 was measured, so
+credit demand at a given K should be HIGHER and the flow per unit K
+LARGER.  That narrows F4's authority gap without touching F1's bias: the
+position term's sign problem is not a matter of how strong K is.
+
+Re-identification is mandatory before quoting F4; re-judging cycle 1 is
+not, because its verdict turns on saturation and sign, not on magnitude.
+
+* 5. The design: two controllers, one seam
+
+** 5.1 The two controllers, side by side
+
+#+LATEX: {\scriptsize
+| aspect                  | K (the slow lever)                                                                 | The monetary operations (the fast actuators)                                            |
+|-------------------------+------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------|
+| goal                    | hold the STOCK of credit-backed BUCK where a bundle prices at par over months       | hold the PRICE inside the band now, and make disruption expensive                        |
+| the thing it controls   | the credit-limit multiplier: how much BUCK a pledged asset supports                | its own inventory position, taken at its own edge                                       |
+| process variable        | the PERSISTENT component of net demand for BUCK at par (one scalar)                | bvib against this actuator's own edge (eps, the ladder's tranche, x / y, the range)      |
+| inputs                  | raw bvib (decision 10); the estimated persistent flow; the escalated stock from level 2 | the price, its own inventory, its own remaining capacity, its own carry cost         |
+| output                  | K in (KMIN, KMAX), ppm per tick, integral-dominant, conditional integration at rails | trades: BUCK absorbed or issued at a priced edge                                       |
+| timescale               | tau_I = 90 days, plus the borrowers' uptake lag; the supply answers as a ramp       | ticks to days                                                                            |
+| what it damps           | the deviation that OUTLIVES the fast actuators' willingness to hold it              | the transient excursion, and the attacker's ability to move price cheaply                 |
+| what it must never see  | any signal the fast actuators can suppress; any inventory an adversary can create, at a gain | K's gains (it must never wait for the slow lever); other actuators' filtered signals |
+| its own mid-ranging lever | none needed: level 2 hands it a stock, not a book                                | the local skew kappa_i on its own edge (n positions, n levers)                            |
+| failure mode            | saturation at the rail (F1, F2); and an unexplainable K (the P-term question)       | inventory that persists: carry cost, and a wall that works against restoration            |
+| cost of being wrong     | the whole economy's credit capacity moves                                          | the basket's reserve and the depositors' P&L                                              |
+| who owns it             | governance (gains, rails, K0), monthly                                              | each actuator's own parameters, and the desk's quadrant rules                             |
+#+LATEX: }
+
+** 5.2 The seam: persistence, not magnitude
+
+The escalation path is the one the pre-2008 Federal Reserve desk used and
+the one =alberta-buck-operations.org= already specifies: repeated
+temporary operations in one direction are the signal for an outright
+one.  Concretely:
+
+1. Level 1 (the actuators) takes a position to hold price.  Its own local
+   skew unwinds its own book; the aggregate is nobody's business but its
+   own while it is transient.
+2. Level 2 asks one question: *is this flow persistent?*  Today that is a
+   dwell test (a standing book for N days); under section 5.4 it is an
+   estimator.  When the answer is yes, the position is CONVERTED to a
+   permanent supply change -- the desk's Q2 burn of absorbed BUCK, or its
+   Q4 acknowledgment of issued BUCK as permanent supply -- a discrete,
+   auditable act with a governance trail.
+3. Level 3 (K) carries the converted stock, and only that.  The book
+   leaves level 1 when it is escalated, so there is no double count and
+   nothing for an adversary to inflate: to move K, an attacker must now
+   sustain a flow long enough to pass the persistence test, which is the
+   cost the ladder and the fee are designed to charge.
+
+Cycle 1 is the measurement that chooses the discrete seam over the
+continuous one.  D4's shadow term and D7's position loop are the
+continuous coupling; at every gain tested they either do nothing (lambda
+below the knee) or rail the lever and pay the attacker (at and above it).
+
+*What remains of the position signal in K.*  Not a proportional gain.  Two
+admissible uses, both to be tested rather than assumed:
+
+- as a RATE LIMIT input: the aggregate fill can slow K's motion toward the
+  side that would deepen the fast actuators' books (a one-sided
+  conditional integration), which cannot be driven anywhere by an
+  attacker because it can only ever reduce K's motion;
+- as a SATURATION flag: when the actuators are at their bounds, the error
+  K sees is the true one, and the case for K moving is stronger.  Measure
+  it; do not schedule a gain on it (the gamma knob exists for this and
+  stayed at 0 for the same reason).
+
+** 5.3 What is retired, and what is kept
+
+| kept                                                                  | retired or demoted                                                       |
+|-----------------------------------------------------------------------+--------------------------------------------------------------------------|
+| =BuckKControllerDirect= as the controller of record (A passes 6 of 6)  | the second PID loop on the aggregate position as the intended design      |
+| the =IStabilizer= seam: position, cap, saturation, staleness           | the shadow bvib as a continuous input to K's gains (D4's lambda)          |
+| the stabilizer observer, as INSTRUMENTATION and for level 2's test     | =shadowValueInBuck= feeding =_readReferences=                            |
+| the local skews as the differential-mode lever (but see F7)            | the derived position gains and the "lambda knee" of 24                    |
+| decision 10: the funding factor and the price loop read RAW bvib       | gamma, the saturation gain schedule (measured, never adopted)             |
+| decision 9: hold the last good cap, flag stale, exclude disabled       | tau_s as a tuning target for a loop that cannot reach its own setpoint    |
+| the fill-unit aggregation (V) as the units of choice if a level ever needs the aggregate: no reference depth D in the law | the joint LQR as the source of feedback gains       |
+
+The contracts stay: =BuckKControllerShadow= with its position gains at
+zero IS =BuckKControllerDirect= (an identity asserted by forge tests), so
+the built code can carry the retired design as a switched-off alternative
+without a rewrite, and the observer remains useful as the level-2 sensor.
+
+** 5.4 Where optimal control and estimation belong
+
+The branch's offline derivation (=kdesign.py=) is worth keeping for what
+it actually established, which is not a set of gains:
+
+- *It is an identification harness.*  Step tests against a control cell
+  that shares the keyed random history, differential fits, the plant's
+  own constants.  Every number in F4 came from it, and every number in
+  F4 must be re-measured on the merged tree.  Keep and re-run it.
+- *It found the structural obstruction* (F3) rather than a tuning.
+- *Its answer about the optimal law was feedforward.*  The flow state's
+  LQR gain was large (L_d = 210 K per unit of fill per day) while its
+  position feedback gains railed the lever.  An optimal controller here
+  mostly wants to know the DISTURBANCE, not to react harder to the error.
+
+So the estimator is the piece to build, and its job is the SPLIT:
+
+: F_hat   the fused net BUCK flow at par (BUCK/day, sold positive), from the channels the chain already emits:
+:         the facilities' fills, the desk's net inventory, direct-mint net flow, borrower draws and repayments, pool reserves
+: F_p     its persistent part      (a slow state)
+: F_t     its transient part       (F_hat - F_p)
+: K       = K0 + clip(-F_p / g, rails) + Kp e + Ki Int(e)
+
+with g the supply flow per unit K, identified (F4) rather than assumed,
+and ONE integrator covering the error in g -- the internal model
+principle doing the single job it is needed for.  With the disturbance
+modelled as persistent plus transient, the steady-state Kalman filter
+reduces to an alpha-beta tracker: two exponential averages and two
+constants, which is an on-chain law.  The persistent estimate lags by the
+transient's own time constant (days to weeks) instead of the 90-day price
+integral -- that is the whole gain, and it is a gain in the SPEED OF THE
+DECISION, not in the gain of a loop.
+
+The release rule completes it: K leaves the rail when the supply still in
+the pipe (g times the uptake lag times the K excursion) equals the flow
+remaining to absorb.  That is the landing, and it is measurable: one sign
+change, no limit cycle.
+
+Three limits to state plainly, because they are what makes this different
+from a rocket landing:
+
+1. *The plant's gain is uncertain by a factor of 2 and signed.*  Cuts
+   compel, rises offer (F4).  A single linear g is wrong; the law needs
+   a per-sign g, and the cut side needs a rate limit because its
+   immediate effect is a margin call.
+2. *The disturbance can exceed the lever by 5-8x.*  During a large attack
+   the feedforward is at the rail and the facilities are doing the work.
+   The estimator earns its keep on the RELEASE, deciding how much of the
+   excursion was permanent -- which is precisely the question level 2
+   asks.
+3. *The estimator's inputs are adversary-visible.*  Every one of them is a
+   number an attacker can push.  The persistence test and the rate limit
+   are what make that unprofitable; a proportional gain on the same input
+   is what made it profitable in F2.  This constraint is not a detail of
+   implementation: it is the reason the seam is discrete.
+
+What estimation is NOT for here: inventory (measured exactly on chain --
+no filter needed), and price (deterministic once quoted from the pool's
+own state, F9).  And no quadratic program on chain: for a box-constrained
+scalar plant, explicit MPC is piecewise affine, which is a linear law plus
+rail logic -- what a cascade with anti-windup already is.
+
+* 6. Translating onto master's new basis
+
+=origin/master= at 9351961 (2026-09-26).  The security work is KI-1, the
+identity-linkage fix, plus the insurer gate and the interim insurance
+pool; the rest is the public release.  Read =SECURITY.md= and
+=doc/KNOWN-ISSUES.org= (KI-1 through KI-6) first: the repository is public
+now, so nothing may be committed that copies a third-party document, and
+findings are cited, not pasted.
+
+** 6.1 API changes that touch the simulation
+
+| what changed on master                                                                                      | what it does to our work                                                                                      |
+|-------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------|
+| =reg.bindContract(addr, BIND_PK, BIND_E, public, carrying)= -> =idmod.bind_as_operator(chain, reg, addr, public, carrying, sender=...)= | mechanical, every bind site; ours funnel through =_ProxyAgent._new_proxy= plus the new agents' own binds |
+| the sim deploys =IdentityRegistryHarness= (explicitly test-only) instead of =IdentityRegistry=; production uses the registry plus target adapters | our contracts bind through the same helper; no design impact                                     |
+| =idmod.cached_eoa_setup(seed, cls, idx, issuer_kp, rng, chain_id, registry_int)= gained the chain id and registry address (domain separation -- the KI-1 fix) | the identity cache re-keys: cached EOAs regenerate, so vectors move.  Use =vecdiff=, not =cmp=, as the L3 gauge (decision 8 already established this) |
+| =idmod.register_deployer(...)=: the certified-operator bind for BUCK-touching contracts                       | one new line in deploy; our =SimStabilizer= stand-ins need it                                                 |
+| =Buck.insurancePool= is a deployed SimLP bound CARRYING, not an EOA; =setBasket= goes through =pool.exec(...)= | our deploy wiring must adopt it; and see F10 -- it moves the borrowers' economics, hence g                     |
+| =Buck._burn= refunds the premium by =_carryingTransfer= when the pool is Carrying                             | premium deposits accrue age and return: =premium_paid= is an asset, not a cost; the debtor counterfactual now carries =hypo_premium= |
+| =BuckCredit.createCredit= requires the client's =setCreditIssuer(insurer, true)= opt-in                       | every credit-creating agent needs the opt-in first, through =exec()= for contract holders.  On our branch that is =bookloader.py=, =facility_agent.py=, =seeder_agent.py=, =undertaking_agents.py=, plus our edits in =equilibrium_agents.py= and =deploy.py= |
+| =BuckCredit= gained the insurer gate: =attestInsurer=, =scopeId=, =scopeAttested=, envelope (face band, depreciation models, max dep rate, max premium rate, expiry), scoped =createCredit= overload; enforced only when a deployment binds an insurer registry | D8 now HAS its on-chain vetting surface -- see 6.2 |
+| =pyrevm= runs on the chain id it reports; =scripts/deploy/= replaced Foundry's =script/=                       | mechanical                                                                                                    |
+| new =alberta_buck/sim/observer.py= is the PRIVACY observer ("what Mallory sees")                              | name collision in prose only.  Call ours the STABILIZER observer from now on                                   |
+| new =cast.py=, =privacy_world.py=, big changes in =notes_stack.py=, =identity.py=                              | no overlap with the controller work                                                                           |
+| design notes moved to =doc/= (=doc/CARRY-CONVEXITY.org=, =doc/REBALANCING-EQ.org=); the catalogue TOMLs' "Design of record:" lines point there | our root-level =CARRY-CONVEXITY.org=, =WAVE3.org=, =ORGANIC-SCALE.org=, =ONBOARDING-D7.org= should land in =doc/= too; this file is already there |
+
+** 6.2 The one design consequence: D8 is answerable now
+
+=CARRY-CONVEXITY.org= 9.1 records the facility's worst risk as D8: because
+credit creation was permissionless and zero-premium credit is exempt from
+the funding gate, a participant with a fictitious insured asset could
+issue free BUCK into every premium with a retirement obligation that never
+bites -- the oversupply flood, automated.  The remedy it names ("restrict
+the facility to vetted insurers' credit, or to a whitelisted set in sim
+and pilot") was a placeholder for a mainnet blocker.
+
+Master now provides the surface: an insurer must hold an attested
+envelope, proven against a regulator's accumulator, that covers the face
+band, the depreciation model and rate, the premium rate and the declared
+scope of what it is insuring, with an expiry; a false scope claim is
+evidence.  And a client must have opted in to that insurer.  The gate is
+per-deployment (unset registry = no envelope required), so the
+simulation can run either side of it deliberately.
+
+That turns 9.1 from a caveat into an experiment: run the facility's flood
+cell with the insurer registry BOUND, and measure the flood as a function
+of attested capacity rather than of an assumed whitelist.  It is the one
+place where master's security work makes a wave-3 question cheaper to
+answer than it was.
+
+** 6.3 The merge
+
+Our branch and master both changed four sim files:
+=alberta_buck/sim/{agents,deploy,direct_mint,equilibrium_agents}.py=.
+Everything else of ours is new files, or contracts master did not touch.
+
+Recommended: merge =origin/master= into the branch and, in those four
+files, take MASTER's version wholesale and re-apply our additions on top
+-- they are marked with =# WP-n= append blocks by house rule, and the
+controller wiring in =deploy.py= is a contiguous block.  Resolving hunk by
+hunk in =equilibrium_agents.py= (4,000+ lines, nine credit-creation sites)
+will silently lose one of master's opt-in calls.
+
+Then, in order: =make nix-venv-sim-build= (stages the Uniswap artifacts
+that a bare build leaves out), the pytest suites, =make nix-test= for
+forge, then one 30-day smoke per design to prove the wiring, then
+=vecdiff= one none-arm cell against its banked twin and RECORD the shift
+rather than trying to eliminate it.
+
+* 7. What to run first
+
+The phase rule of record (=ORGANIC-SCALE.org=, "The stand before the
+controller"): nothing beyond the structural check is built before the
+organic ladder's rung 2 passes its gates, and no monetary operation is
+judged at a rung whose organic gates have not passed.  Cycle 1 WAS the
+structural check, and it is done.  So:
+
+1. *Merge and make it green* (6.3).  No new findings until the tree runs.
+2. *Re-identify the plant* on the merged tree: =python -m
+   alberta_buck.sim.kdesign all=, and separately for cuts and rises, with
+   2-year step cells rather than 1-year (the ramp was still compounding
+   at day 364).  This is cheap and everything quantitative depends on it.
+   Expect g to rise (F10).
+3. *Build the stand* -- the organic population, in the order that grounds
+   K's channel first: the income channel and the external-debt retiree
+   (they set g), then the standing-facility saver, then the business with
+   payroll, then a minimal credit union and insurer.  One decision kernel
+   serves all of them: a budget-constrained comparison of carry rates
+   (demurrage, basket yield, external debt rate, BUCK credit cost, the
+   discount or premium, the funding factor) over a fixed menu (hold,
+   deposit, pledge, retire external debt, retire BUCK credit, spend).
+4. *Scale by multiplicity* (a few hundred heterogeneous agents, each
+   standing for M households, Poisson-thinned per tick), with the rung-2
+   equivalence gate first.
+5. *Then the ceiling experiment*: the perfect-measurement K -- the
+   feedforward law of 5.4 fed the sim's TRUE flows with a known g, one
+   cell per arm, per rung.  It bounds the value of every controller
+   package after it.  If it barely beats the price-only controller at a
+   rung, K is not the lever at that scale and the spend belongs on the
+   facilities and the ladder.
+6. *Then the estimator*, if and only if the ceiling beats the price-only
+   controller by more than the gates' noise.
+
+What NOT to do: do not run cycles 2 and 3 of the controller-alternatives
+plan.  They were designed to tune a coupling that cycle 1 has now ruled
+out, and their quantitative questions belong to the ladder.  And do not
+re-open "faster K" (F4).
+
+* 8. Open decisions carried forward
+
+From =WAVE3.org= "Decisions pending", with cycle 1's answers filled in.
+The numbering is the ledger's; keep it.
+
+| # | question                                        | where it stands after cycle 1                                                                     |
+|---+-------------------------------------------------+---------------------------------------------------------------------------------------------------|
+|  7 | should an explainable K carry a P term?         | closed: 2% of rail authority is what a quadratic cost wants when the cast reverts within the day; no larger P is justified |
+| 27 | the persistence horizon T_p                     | open, and now central: it is the estimator's own time constant.  180 d was assumed; the book's dwell should set it |
+| 28 | the position loop's authority                   | ANSWERED by cycle 1: option (b).  K cannot mid-range books of this size, and coupling it harder rails the lever and pays the attacker.  The drain belongs to the facilities' own unwind rules and the local skews |
+| 29 | the depth axis                                  | keep as "truth-pool depth"; real scale belongs to the ladder's rungs                               |
+| 30 | prediction 9's window                           | moot for gating: habituation passes, saturation is the constraint (F6)                             |
+| 31 | the two-integrator drift                        | moot if one integrator: keep the metric while both terms exist                                     |
+| 34 | the desk's on-chain local skew                  | open, and cheaper than it was: worth it only if the skews survive F7                               |
+| 35 | kappa per class                                 | open and now POINTED: F7 says the measured kappa made the book-loader's K excursion worse.  One cell to explain that, before any sweep |
+| 36 | the seeder's weight in the aggregate            | moot under the discrete seam; the seeder's position should not reach K at all                      |
+| 38 | the structure after WP-16                       | resolved as D9, and cycle 1 selected its third outcome: the price-only controller is the incumbent; the estimator and the discrete seam are the design |
+| -- | D8 / the facility's flood                      | reopen on master's insurer gate (6.2)                                                              |
+
+* 9. Provenance
+
+Every number in section 4 names its source.  To reproduce:
+
+: # the grid's report (from the frozen worktree, which is detached at 801f34f)
+: cd ../alberta-buck-grid && python -m alberta_buck.sim.star \
+:     alberta_buck/sim/experiments/stars/d7-c1.toml --report-only --outdir build/sim/star
+: # the gain derivation and its identification
+: python -m alberta_buck.sim.kdesign all          # fit then solve over build/sim/kdesign/
+: # the drift gauge between two vectors
+: python -m alberta_buck.sim.vecdiff A.json B.json
+: # the viewer (metrics, per-agent panes, per-agent act logs with their why)
+: python -m alberta_buck.sim.viewer --port 8787
+
+House rules that cost time when forgotten (=ONBOARDING-D7.org= has the
+full list): never bare =forge= or =python= -- use =make nix-*= and the
+repo venv; ASCII only in documents and commit messages, and no
+attribution lines; declare dependencies in =flake.nix= / =pyproject.toml=,
+never globally; a cell-running worktree needs =make nix-venv-sim-build=,
+not =make nix-build=; the ORDER of =--set= arguments is part of a cell's
+identity, because agents are numbered by insertion and the random streams
+are keyed by (seed, class, index); never commit vectors.

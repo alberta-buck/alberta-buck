@@ -22,7 +22,7 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
 
 * STATUS -- resume here
 
-- *Last updated*: 2026-09-13 (session 3, on datasim).  THE REGRESSION
+- *Last updated*: 2026-09-26 (session 4, on datasim).  THE REGRESSION
   REGENERATION IS CLOSED: the 14-arm matrix (13 PASS, the undefended
   raid FAIL as always) and the 42-cell catalogue wave 1 (42 PASS) keep
   every recorded verdict on the current tree; the response numbers of
@@ -35,18 +35,22 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   ORGANIC-SCALE.org's six decisions RESOLVED 2026-09-11 (decision 22).
   WP-15 (75d9e34), WP-16 (50e0616) and WP-14 (801f34f) DONE and merged
   2026-09-12: the grid's machinery, the gain table and the per-class
-  stabilizers with the local skews all exist.  CYCLE 1 IS IN FLIGHT:
-  66 two-year cells (designs A, S0, S0k, S, V, Vk x capacity x tau_s x
-  depth on none / dump x1 / dump x4 / cohort-step / guardtrip /
-  bookload), launched 21:05 PDT 2026-09-12 from the frozen grid
-  worktree =../alberta-buck-grid= at 801f34f, ~9 h; its vectors at
-  =build/sim/star-d7= for the viewer.  The main checkout is free for
-  edits.  Decisions pending 27-37 await the design owner, 28 (the
-  position loop's authority) with cycle 1's numbers.  Wave 4's T15 /
-  T16 / T17 are on offer to other accounts.  D9 RECORDED 2026-09-13
-  (CARRY-CONVEXITY.org): K takes ONE integrated signal; cycle 1 is
-  read as the single-versus-double integrator test; the next package
-  is the perfect-measurement K (decision 38).
+  stabilizers with the local skews all exist.  CYCLE 1 IS JUDGED
+  (2026-09-26, the ledger entry): 66 of 66 cells, no failures; 33 PASS.
+  ONLY DESIGN A (price-only Direct) PASSES ALL SIX ARMS; every
+  position-coupled design pins K at KMAX 0.95 somewhere (S0 and S0k on
+  every arm), and at the derived knee the x4 dump inverts (peak -46%,
+  AUC 4x) and THE ATTACKER ENDS +$3.14M.  Decision 28 is answered as
+  (b); D9's stage-1 third outcome fired; the continuous coupling of the
+  books into K's gains is RETIRED in favour of a discrete persistence
+  seam plus a flow estimator (=doc/K-AND-OPS.org=, the handoff of
+  record).  NOTHING IS IN FLIGHT.  The branch is 91 commits ahead of
+  =origin/master= and 191 BEHIND it: master carries the KI-1 identity
+  fix, the Carrying insurance pool and BuckCredit's insurer gate, which
+  change the sim's APIs and the borrowers' economics -- merge and
+  re-identify before quoting any quantitative number
+  (=doc/K-AND-OPS.org= section 6). Wave 4's T15 / T16 / T17 (the organic
+  stand) are the critical path by the phase rule.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
@@ -736,6 +740,103 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-26 -- CYCLE 1 JUDGED: the position loop rails K, and at the derived knee it pays the attacker (session 4, design owner + Claude, on datasim)
+
+- The run: 66 two-year cells, finished 2026-09-13 12:12 PDT, EXIT=0,
+  zero cell failures; =../alberta-buck-grid/build/sim/regen/d7-c1.log=
+  and =build/sim/star/d7-c1/summary.{md,json}= are the evidence of
+  record.  The session that launched it ended before the marker
+  appeared, so the judgement is dated 2026-09-26; the vectors are
+  untouched.  Reproduce the report with =python -m alberta_buck.sim.star
+  alberta_buck/sim/experiments/stars/d7-c1.toml --report-only --outdir
+  build/sim/star= from the frozen worktree.
+- THE GATE is the parity gate: tail bvib within 1% of par, K NEVER
+  railed in the tail, issuance / redemption channels alive, no failed
+  intervention.  33 of 66 cells PASS.  By design, over the six arms
+  (none / dump x1 / dump x4 / cohort-step / guardtrip / bookload):
+
+  | design | what it is                               | arms passed | K tail mean | rail share of the tail |
+  |--------+------------------------------------------+-------------+-------------+------------------------|
+  | A      | Direct, price only                       | 6 of 6      | 0.74-0.85   | 0% everywhere          |
+  | Vk     | V plus the measured local skews          | 3 of 6      | 0.83-0.95   | 0-89%                  |
+  | S      | shadow units, the derived position gains | 2 of 6      | 0.82-0.95   | 0-100%                 |
+  | V      | fill units, the derived position gains   | 2 of 6      | 0.84-0.95   | 0-100%                 |
+  | S0     | D4 as built, lambda 1                    | 0 of 6      | 0.950       | 89-100%                |
+  | S0k    | D4 at the derived knee, lambda 24        | 0 of 6      | 0.950       | 97-100%                |
+
+- FINDING 1: every failure is the SAME failure -- K pinned at KMAX
+  0.95.  The attribution column (=attr_pos= 54-92%) says the position
+  terms supply most of dK under every shadow design, and on a calm arm
+  the undertakings' book is net ISSUED, so the position term asks for
+  more K monotonically until the rail.  A permanent bias from a
+  transient signal (WP-16 finding 2), and the linear shadow of WP-16
+  finding 5: the derivation itself said a full book wants K = 1.6
+  against a ceiling of 0.95.
+- FINDING 2: under the x4 dump the strongly coupled designs INVERT the
+  response.  Peak deviation, AUC, basket NAV, depositor and defender
+  realized P&L, and the whale's:
+
+  | design | peak   | AUC | NAV $M | depositors $M | defenders $M | attacker $M |
+  |--------+--------+-----+--------+---------------+--------------+-------------|
+  | A      | +28.6% | 178 | 37.8   | +0.67         | +1.77        | 0.00        |
+  | V      | +33.8% | 215 | 38.3   | +0.50         | +1.21        | 0.00        |
+  | Vk     | +30.6% | 236 | 37.1   | +0.27         | +1.18        | 0.00        |
+  | S0     | -26.2% | 535 | 32.3   | -0.36         | +0.16        | 0.00        |
+  | S0k    | -46.1% | 698 | 30.7   | -0.74         | +0.05        | +3.14       |
+
+  The dump that made BUCK cheap ends with BUCK DEAR by 26-46%; the
+  deviation's area triples or quadruples; the depositors the program
+  exists to protect go from +$0.67M to -$0.74M; the private defenders'
+  harvest collapses; and the attacker walks away $3.14M ahead where it
+  ends flat under every other design.  The book-loading attack of
+  prediction 10 succeeds -- through the CONTROLLER, not the market.
+- FINDING 3: prediction 10 holds in P&L (the loader loses 15.3-15.5,
+  and 22.0 under S0k) but the K excursion per unit of loaded fraction
+  orders A 0.004 < S0 0.0003 ~ V 0.049 < S 0.072 < Vk 0.61 < S0k 0.95.
+  V no worse than S as predicted; but Vk -- V plus WP-14's MEASURED
+  local skews -- is an order of magnitude worse than V.  The
+  differential-mode lever that was supposed to keep K out of it let the
+  loader move K further.  Unexplained; decision 35 now points at it.
+- FINDING 4: R17 holds.  The guard trip produces no K kick and no rail
+  under the fill-unit aggregation (V and Vk PASS that arm, rail 0%),
+  while S0 and S0k rail through it -- decision 9's hold-last-cap policy
+  doing its job.
+- FINDING 5: prediction 9 is not the binding constraint.  Where an
+  excursion existed the aggregate position returned within 10% of zero
+  in 18-42 days on the dumps, 103-104 on the cohort step, 147 on the
+  book-load, with 0-2 sign changes -- well inside the 190-day window.
+  The books DO come back; K does not, once railed.  Future gates on any
+  position coupling should test the rail and the bias, not the return
+  time (decision 30 is moot for gating).
+- FINDING 6: the axes do not rescue the base.  On the calm arm the
+  design-S base cell rails 13% while every capacity / tau_s / depth
+  variant of the same design rails 0% -- the derived design sits on a
+  knife edge at the base knobs, in both directions of tau_s.  Read as
+  marginality, not as a tuning direction.
+- WHAT IT DECIDES: decision 28 as (b); decision 38's stage-1 third
+  outcome; D9's predictions 11 and 12 (11 is not falsified -- the drift
+  never got the chance, because the rail dominates; 12's ordering
+  A <= S0k fails outright on the dumps).  The continuous coupling of the
+  operations book into K's gains is RETIRED; the seam between the fast
+  actuators and K is the DISCRETE persistence escalation (level 2's Q2
+  burn / Q4 acknowledgment) plus, when it is built, a flow estimator
+  that makes the persistence call continuous and auditable.  Every
+  adversary-visible input reaches K through a rate limit and a
+  persistence test, never a proportional gain -- finding 2 is why.
+- PROVISIONAL, as decision 22 and ORGANIC-SCALE decision 6 require: the
+  cast is thin, and the magnitudes (peak, AUC, P&L) are this
+  population's.  What is NOT provisional is the saturation and the sign
+  inversion: they follow from the lever's authority against the book's
+  size, which the ladder will only make more extreme at higher rungs.
+- Written up for the next session as =doc/K-AND-OPS.org=: the findings,
+  the two-controller design with each side's goal / inputs / outputs,
+  where optimal control and Kalman filtering belong (the SPLIT, not the
+  gains), the translation onto master's new APIs, and what to run
+  first.  Master is 191 commits ahead with the KI-1 identity fix, the
+  Carrying insurance pool and BuckCredit's insurer gate.
+- Next: merge master, make the tree green, re-identify the plant, then
+  the organic stand (T15) by the phase rule.
 
 ** 2026-09-13 -- The stand before the controller: the phase rule (session 3, design owner + Claude, on datasim)
 
@@ -2199,7 +2300,17 @@ next.  Paste acceptance evidence here, not in chat.
    whose flow per unit K is larger.  Proposed: cycle 1 runs the
    derived gains AND the tau_s axis (x0.5 rails at a 10% fill, x2 at
    41%), reports rail days and the book's dwell, and the design owner
-   chooses with those numbers.
+   chooses with those numbers.  ANSWERED 2026-09-26 by cycle 1 as (b),
+   and more sharply than the option reads: the derived authority does
+   not merely fail to drain a book, it RAILS the lever (S0 / S0k at KMAX
+   0.95 on every arm; S and V on the dumps) and at the derived knee it
+   pays the attacker (+$3.14M on dump x4, where every other design
+   leaves it flat).  The drain belongs to the facilities' own unwind
+   rules and the local skews; K carries only what level 2 escalates to
+   it as a persistent stock.  The continuous coupling (D4's lambda,
+   D7's position loop) is retired to a switched-off alternative --
+   Kq = Kqi = Kqd = 0 IS the Direct controller, so no code is removed.
+   See =doc/K-AND-OPS.org= sections 4 and 5.
 29. *The depth axis* (from WP-16).  =deploy.target_buck_m= does not
    change D or NAV (the depositors do).  Proposed: cycle 1 keeps the
    axis as "truth-pool depth" and the ledger says so; the ORGANIC
@@ -2288,7 +2399,12 @@ next.  Paste acceptance evidence here, not in chat.
    accepted, with the stand first -- stage 1 now; stage 2 as a per-rung
    instrument on the organic ladder; stage 3 only after rung 2 passes
    its gates; stage 4 after that.  The phase rule is in STATUS; the
-   record is =ORGANIC-SCALE.org= "The stand before the controller".
+   record is =ORGANIC-SCALE.org= "The stand before the controller".  Stage 1 is DONE:
+   cycle 1 selected its third outcome (neither the single- nor the
+   double-integrator coupling beats A on the gates), so the price-only
+   controller is the incumbent, the estimator and the discrete seam are
+   the design, and stage 2 (the perfect-measurement K) rides the
+   organic ladder as a per-rung instrument.
 
 * Conventions
 

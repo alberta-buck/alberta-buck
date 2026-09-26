@@ -710,6 +710,14 @@ Deterrence replaces harvest -- and for basket investors (from -$2.7M to
 
 ** D4. K sees the shadow bvib (mid-ranging)
 
+/SUPERSEDED in its coupling, 2026-09-26 (cycle 1; see D9 and
+=doc/K-AND-OPS.org=)./  The reasoning below stands -- K must not be blind
+to what the fast actuators have absorbed -- but the CONTINUOUS path
+recorded here (K's own gains reading a reconstituted price) was measured
+and retired: at every lambda tested it either does nothing or rails the
+lever, and at the derived knee it pays the attacker.  K learns of the
+actuators' books through level 2's discrete escalation instead.
+
 /Question./  The desk absorbs a dump, bvib improves, K sees less error
 and stops tightening, the desk is stranded; under D3 the desk's book is
 unbounded on the strong side.  Sterilized or unsterilized?
@@ -835,6 +843,14 @@ their credit down.  Four rules:
    coupon from realized eps and fee-surge income), never a rebate.
 
 ** D7. K mid-ranges the level's POSITIONS; the shadow bvib and the position vector are the two alternatives to test
+
+/TESTED AND DECIDED, 2026-09-26.  The two alternatives were built (WP-13,
+WP-14), their gains derived offline (WP-16) and both run on the 66-cell
+grid; cycle 1's verdict retires the second loop on K, keeps the lever
+count argument and the local skews, and moves the coupling to a discrete
+persistence seam plus a flow estimator.  Read D9 and
+=doc/K-AND-OPS.org= after this section: what follows is the design as
+proposed, which the measurement amends./
 
 (Design owner + Claude, 2026-09-03.)
 
@@ -1330,6 +1346,37 @@ rung 2 to pass its gates, and stage 4 follows.  The record of the
 stand -- the decision kernel, the roster order, the gates, the
 progression cell -- is =ORGANIC-SCALE.org= "The stand before the
 controller"; the phase rule is in =WAVE3.org= STATUS.
+/Stage 1's result (cycle 1, judged 2026-09-26)./  The grid ran 66
+two-year cells over the six designs and six disruption arms.  Design A
+-- the price-only Direct controller -- passes all six arms; every
+position-coupled design pins K at KMAX 0.95 somewhere, and the two
+as-built shadow designs (lambda 1 and the derived knee 24) are pinned on
+every arm.  The mechanism is the bias, not the tuning: the position
+terms supply 54-92% of dK, and a calm arm's book is net ISSUED, so the
+position term asks for more K monotonically until the rail.  Under the
+x4 dump the strongly coupled designs invert the excursion's sign (peak
++28.6% under A against -26.2% and -46.1%), quadruple its area, cost the
+basket $5-7M of NAV, turn the depositors' +$0.67M into -$0.74M, collapse
+the private defenders' harvest, and -- at the derived knee -- leave the
+attacker +$3.14M where every other design leaves it flat.  Habituation
+was never the problem (18-42 days on the dumps, 0-2 sign changes); the
+rail is.
+
+So stage 1 selected its third outcome, and more than that: the
+continuous coupling is not merely second order, it is an ATTACK SURFACE.
+Any high-gain path from an adversary-visible inventory into the money
+supply can be driven.  The design of record therefore returns to the
+discrete seam this document's 4.4 and 6.4 already describe -- level 1
+holds price with positions, level 2 escalates a PERSISTENT position to a
+permanent supply change, level 3 carries only what level 2 hands it --
+with D9's estimator as the instrument that makes level 2's persistence
+call continuous, lagged by days rather than by the 90-day price
+integral, and with every estimated input entering K through a rate limit
+and a persistence test rather than a gain.  D4's lambda and D7's
+position gains survive as a switched-off alternative (Kq = Kqi = Kqd = 0
+is the Direct controller, asserted by test), and the observer survives as
+instrumentation and as level 2's sensor.  The handoff that carries this
+onto master's APIs is =doc/K-AND-OPS.org= (2026-09-26).
 
 * The resulting structure
 
@@ -1849,6 +1896,18 @@ does not price safely, it is not listed.
    disruption and earns its keep on the release.  A ceiling within the
    noise of A falsifies K as the lever for these disturbances (stage
    2's first outcome).
+*Verdicts as measured (cycle 1, 2026-09-26).*  Prediction 9 HOLDS
+(habituation 18-42 d on the dumps, 103-104 on the cohort step, 0-2 sign
+changes, under every aggregation).  Prediction 10 holds in P&L (the
+loader loses under every design) but its K-excursion clause FAILS for
+the local-skew design: A 0.004 < S0 0.0003 ~ V 0.049 < S 0.072 < Vk 0.61
+< S0k 0.95, so V is no worse than S as predicted while Vk is an order of
+magnitude worse than V.  Prediction 11 is UNTESTED in substance -- the
+rail dominated before the two integrators could drift.  Prediction 12's
+ordering FAILS at its first link: S0k is worse than A on the dumps, not
+better, so the ceiling experiment (stage 2) is what must establish
+whether K is the lever at all.  R17 HOLDS: no K kick from the guard trip
+under the fill-unit aggregation.
 
 Any of these failing changes a decision; 9.6 says which.
 
