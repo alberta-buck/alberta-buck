@@ -256,7 +256,7 @@
   price tracking, estimation error, and cumulative P&L for honest vs. adversarial
   reporters across 50 rounds:
 
-  [[file:alberta_buck/test/truthstake_simulation.png]]
+  [[file:../alberta_buck/test/truthstake_simulation.png]]
 
 * Adversarial Resilience Analysis
 
@@ -582,7 +582,7 @@
    arrive, attracted by the growing escrow honey pot.
 
    #+ATTR_LATEX: :width 1.1\textwidth :center t
-   [[file:alberta_buck/test/truthstake_honey_pot_collapse.png]]
+   [[file:../alberta_buck/test/truthstake_honey_pot_collapse.png]]
 
 *** Play-by-play
 
@@ -745,7 +745,7 @@
    | Max error        |  2.891% |
    | Rounds > 1% error |       3 |
 
-   [[file:alberta_buck/test/truthstake_s1_honest.png]]
+   [[file:../alberta_buck/test/truthstake_s1_honest.png]]
 
    The error spikes at the start (Kalman warmup: new reporters have R=1.0, low influence)
    and during the sharp price drop around round 55 (large inter-round drift exceeds Q).
@@ -802,7 +802,7 @@
    | Per round: adversary loses     |    $4.4 |           |
    | Per round: each honest earns   |    $1.1 |           |
 
-   [[file:alberta_buck/test/truthstake_s2_manipulator.png]]
+   [[file:../alberta_buck/test/truthstake_s2_manipulator.png]]
 
    Key observation: the adversary's R (0.001875) is 187x larger than an honest reporter's R
    (0.000010).  The Kalman filter gives the adversary a gain K near zero -- their
@@ -911,7 +911,7 @@
    |---------------------------------+---------+-------------------------|
    | Challenges triggered            |      27 | of 72 eligible rounds   |
 
-   [[file:alberta_buck/test/truthstake_s3_cartel.png]]
+   [[file:../alberta_buck/test/truthstake_s3_cartel.png]]
 
    The purple vertical lines mark rounds where the challenger triggered escalation.  After
    the attack begins (red dotted line at round 20), the cartel initially pulls the estimate
@@ -989,7 +989,7 @@
    | Max oracle error during burst |  8.2% | single-round spike      |
    | Error after burst recovers to | <0.5% | within 2 rounds         |
 
-   [[file:alberta_buck/test/truthstake_s4_burst.png]]
+   [[file:../alberta_buck/test/truthstake_s4_burst.png]]
 
    This is the *hardest attack to defend* against: high-reputation agents who manipulate
    briefly and then resume honest reporting.  The burst attackers gain a small net profit
@@ -1019,7 +1019,7 @@
 
 ** Summary
 
-   [[file:alberta_buck/test/truthstake_scenarios.png]]
+   [[file:../alberta_buck/test/truthstake_scenarios.png]]
 
    Four scenarios on real Gold prices demonstrate the oracle's properties:
 

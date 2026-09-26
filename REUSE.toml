@@ -112,9 +112,9 @@ SPDX-FileCopyrightText = "2026 Perry Kundert"
 SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
 
 # Renders of the .org documents (root-level .pdf/.txt, the images/ figures)
-# and the root-level design notebooks carry the same terms as their sources.
+# carry the same terms as their sources.
 [[annotations]]
-path = ["*.pdf", "*.txt", "images/**", "BASKET-REBALANCE.md", "BASKET-REDESIGN.md"]
+path = ["*.pdf", "*.txt", "images/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Perry Kundert"
 SPDX-License-Identifier = "LicenseRef-AllRightsReserved"

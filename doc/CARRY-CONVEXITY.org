@@ -235,7 +235,7 @@ catalogue-<arm>.toml --backend pyrevm= run over the real contracts.
 ** The critique
 
 Panoptic's "Yin (Carry) & Yang (Convexity) Require Each Other to Survive
-& Thrive" (X, 2026-08-27; [[./doc/Panoptic-carry.pdf][saved copy]])
+& Thrive" (X, 2026-08-27; [[https://x.com/Panoptic_xyz/status/2093081191427805570][post]])
 is the onchain transplant of the Artemis/Cole framing.  In our terms:
 
   A passive AMM LP is a carry trader -- a seller of perpetual optionality
@@ -1432,8 +1432,7 @@ is Python-side in 3f and is not a port candidate until it is a contract.
 
 - Panoptic, "Yin (Carry) & Yang (Convexity) Require Each Other to Survive
   & Thrive", X, 2026-08-27
-  (https://x.com/Panoptic_xyz/status/2093081191427805570); saved copies
-  =~/Downloads/Panoptic-carry.{pdf,html}=.
+  (https://x.com/Panoptic_xyz/status/2093081191427805570).
 - Panoptic research: "Panoptic Solves LVR"; "Reverse Gamma Scalping"; "IV
   & Put Wing Premia"; "Derivatives Solve the Uniswap Doom Loop"
   (https://panoptic.xyz/research/).
