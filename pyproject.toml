@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name			= "alberta-buck"
-version			= "0.2.0"
+version			= "0.2.1"
 description		= "Alberta Buck reference implementation (protocol v2): identity credentials and accumulator, Notes, payment receipts, and agent simulations over the contracts"
 readme			= "README-pypi.md"
 keywords		= ["stablecoin", "ethereum", "zero-knowledge", "identity", "bn254", "simulation"]

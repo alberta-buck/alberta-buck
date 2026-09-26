@@ -65,7 +65,7 @@ they come from their own packages.
 
 ## Status
 
-0.2.0, prototype. Unaudited software for a monetary system, published so the
+0.2.1, prototype. Unaudited software for a monetary system, published so the
 simulation and identity work can be reproduced and built on -- not for
 custody of anything real.
 

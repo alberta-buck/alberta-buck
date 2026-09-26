@@ -114,6 +114,17 @@ Before step 1 the registries need their publishers: npm trusted publishers
 for all three packages, crates.io trusted publishers for the four crates,
 and a PyPI pending publisher for =alberta-buck= (environment =pypi-sim=).
 
+*0.2.1, the sandbox patch* (released 2026-09-26, with =feature/public=).  Only
+what changed is released: the contracts (=Buck.burn= refunds a pool the
+registry binds Carrying by carrying transfer), =alberta-buck-core= on npm
+(the role ceremonies, observer, market and codec the browser sandbox is
+built on) and =alberta-buck= on PyPI (the Carrying insurance pool, the fair
+debtor ledger, pyrevm's chain id).  The kernel rides along at 0.2.1 because
+the =js-v= tag publishes kernel and core in lockstep; the crates, the Python
+kernel and =alberta-buck-core= on PyPI stay at 0.2.0 (unchanged; patches
+float).  Order: =js-contracts-v0.2.1= and =py-contracts-v0.2.1=, then core's
+contracts pin and lock, then =js-v0.2.1= and =py-sim-v0.2.1=.
+
 *What the 0.2.0 release taught* -- read before the next one:
 
 - /Every registry's publisher is per package, and each has a trap./
