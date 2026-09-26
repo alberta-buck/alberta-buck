@@ -338,7 +338,7 @@ T16 (multiplicity and the rung-2 gate), T17 (the four rungs).  Amended
 
 * The stand before the controller (design owner + Claude, 2026-09-13; RESOLVED)
 
-The design owner's reading, after WP-16 (=reports/wp-16.org=) and
+The design owner's reading, after WP-16 (=doc/reports/wp-16.org=) and
 =CARRY-CONVEXITY.org= D9: every quantitative controller result awaits
 the thin-cast problem; no amount of optimal control replaces a rich set
 of economic actors arbitraging against other actors whose pursuit of
@@ -429,7 +429,7 @@ schedule.  The roster table above names exactly those absences.
    authority at all); the savings rate; BUCK turnover per year; the
    annual refinancing fraction; the holding-period distribution; the
    reversion time of price deviations.  Target values are SOURCED when
-   the gate is written (=reports/wp-ladder.org= carries the table with
+   the gate is written (=doc/reports/wp-ladder.org= carries the table with
    its sources), never asserted here.
 5. *The progression.*  Five sim-years cannot carry five orders of
    magnitude organically, so the ladder's rungs are steady states at

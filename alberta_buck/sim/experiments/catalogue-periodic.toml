@@ -3,7 +3,7 @@
 # at day 365.  The defender mix and intensity are swept from outside
 # (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
 # counts); this file fixes the physics and the injection only.
-# Design of record: REBALANCING-EQ.org, "The excursion catalogue";
+# Design of record: doc/REBALANCING-EQ.org, "The excursion catalogue";
 # WP-15: WAVE3.org test-plan class 8 (resonance and limit cycles between
 # the two integrators; carry churn).  WhaleRaidAgent's period_days repeats
 # the dump every period_days with the side alternating (sell, buy, ...);

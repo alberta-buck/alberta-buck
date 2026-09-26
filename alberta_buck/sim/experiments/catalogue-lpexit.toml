@@ -3,7 +3,7 @@
 # at day 365.  The defender mix and intensity are swept from outside
 # (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
 # counts); this file fixes the physics and the injection only.
-# Design of record: REBALANCING-EQ.org, "The excursion catalogue";
+# Design of record: doc/REBALANCING-EQ.org, "The excursion catalogue";
 # WP-15: WAVE3.org test-plan class 10 (the D-dependence of design S; V
 # should be invariant).  The cast has no BuckPoolInvestorAgent, so the
 # private BUCK/USDC depth is the SimLP seed (deploy.target_buck_lp_m):
@@ -11,7 +11,7 @@
 # principal.  NB the observer's D (BuckBasketOps.shadowDepth) is the BUCK
 # in the TOKEN/BUCK basket pools; the --set variant
 # agents.LpExitAgent.venue=basket is a depositor of depth_m $M of TOKEN
-# who leaves at exit_day, which moves D itself (reports/wp-15.org).
+# who leaves at exit_day, which moves D itself (doc/reports/wp-15.org).
 name = "catalogue-lpexit"
 notes = "class 10 liquidity withdrawal: half the SimLP-seeded BUCK/USDC depth removed at day 365 (LpExitAgent, venue ub)"
 

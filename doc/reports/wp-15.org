@@ -41,7 +41,7 @@ basket pools' BUCK, not BUCK/USDC depth) and the class-6 realization
 
 * Commits (on =wp/15-grid=, newest first)
 
-- (this file) doc: reports/wp-15.org
+- (this file) doc: doc/reports/wp-15.org
 - =eba234d= sim: BookLoaderAgent defaults push_bp 800 / dev_target 0.03
   (at 150 bp the cast absorbed the loader and the ladder never loaded)
 - =a0768f9= sim: the disruption classes 5-10 as catalogue arms
@@ -65,7 +65,7 @@ New:
   to its injection.
 - =alberta_buck/sim/experiments/stars/d7-c1.toml= -- the cycle-1 star.
 - =alberta_buck/test/test_d7metrics.py= -- 15 tests.
-- =reports/wp-15.org=.
+- =doc/reports/wp-15.org=.
 
 Appended (=# WP-15= blocks at the end of the existing WP blocks; merge by
 keeping both sides):
@@ -417,7 +417,7 @@ cells 1121-1273 s (1445 s with the stronger loader).
 6. S and V run at the S0 gains until WP-16 lands, so the S and S0 cells
    of d7-c1 coincide and V's gains are in fill units at the price-loop
    numbers (roughly the same order at the default depth: cap_off =
-   target_buck_m ~ D, reports/wp-13.org finding 3).  Proposed: run the A
+   target_buck_m ~ D, doc/reports/wp-13.org finding 3).  Proposed: run the A
    and S0 cells first (the readiness table's critical path); replace the
    place-holders before the S / V cells.
 7. =habituation()='s tau_s defaults to the deploy's =tau_i_days= (90 d)

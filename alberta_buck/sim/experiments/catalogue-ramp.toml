@@ -3,7 +3,7 @@
 # at day 365.  The defender mix and intensity are swept from outside
 # (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
 # counts); this file fixes the physics and the injection only.
-# Design of record: REBALANCING-EQ.org, "The excursion catalogue";
+# Design of record: doc/REBALANCING-EQ.org, "The excursion catalogue";
 # WP-15: WAVE3.org test-plan class 6 (a growing disturbance; the internal-
 # model limit -- a ramp wants a double integrator, measure the residual).
 # The plan's uptake_shock acts through FatCreditBorrowerAgent.extra_cap and

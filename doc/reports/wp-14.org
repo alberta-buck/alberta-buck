@@ -9,7 +9,7 @@ ran, and the worktree stayed at 75d9e34 as instructed).  Specification:
 WAVE3.org WP-14 row, R16 / R17, decisions pending 9 / 11 / 13 / 17 / 18 /
 19 / 22; CARRY-CONVEXITY.org D7 ("The lever count"), "The position loop
 (D7)", 6.4 and its D7 amendment, D3, D6; ONBOARDING-D7.org's WP-14 brief
-and track T3; reports/wp-13.org and reports/wp-15.org.  No dependency
+and track T3; doc/reports/wp-13.org and doc/reports/wp-15.org.  No dependency
 added (house rule 11).  The worktree has its OWN =out/= and =cache/=
 (=make nix-build= / =make nix-test= ran here; the six third-party
 artifacts were staged with =node scripts/stage-uniswap.mjs=, which
@@ -58,7 +58,7 @@ before any seeder cell feeds K.
 
 * Commits (on =wp/14-skews=, newest first)
 
-- (this file) doc: reports/wp-14.org
+- (this file) doc: doc/reports/wp-14.org
 - =1de4104= sim: WP-14 Vk preset carries the measured kappa* (undertakings
   0.6, facility 0.1, seeder 0.1)
 - =d9ed1cd= sim: WP-14 SeederAgent publishes its cap (the budget) from
@@ -82,7 +82,7 @@ New:
   (L1).
 - =alberta_buck/test/test_skews.py= -- 16 tests: the three pure skew
   rules, the seeder's range-as-position math, the per-class booking.
-- =reports/wp-14.org=.
+- =doc/reports/wp-14.org=.
 
 Rewritten in place (my files):
 - =alberta_buck/sim/shadow_book.py= -- =class_books= (the per-class
@@ -237,7 +237,7 @@ SIM_SHADOW_LAMBDA=1 SIM_SHADOW_KQ=0.1 SIM_SHADOW_KQI=6.43004e-7= (S0);
 the V env =SIM_CONTROLLER=shadow SIM_SHADOW_MODE=v SIM_SHADOW_KQ=0.1
 SIM_SHADOW_KQI=6.43004e-7= (V0; the S0 gains in fill units, WP-15's
 place-holder); NONE = =--experiment alberta_buck/sim/experiments/catalogue-none.toml
---days 30=; the bookload line of reports/wp-15.org L2 9 (BL) =
+--days 30=; the bookload line of doc/reports/wp-15.org L2 9 (BL) =
 =--experiment alberta_buck/sim/experiments/catalogue-bookload.toml --days 60=
 OPS UT =--set scenario.agents.ExcursionArbAgent=0 --set
 scenario.agents.ExcursionCreditArbAgent=0 --set
@@ -487,7 +487,7 @@ lines (=build/sim/wp14/base/= vs =smoke1/=):
    2 / 5.
 6. At its default band the facility never draws on the calm arm in 30
    days (facv30: =fac_drawn= 0 on every frame), exactly as the
-   undertakings never trade at eps 3% / p 2 (reports/wp-13.org finding
+   undertakings never trade at eps 3% / p 2 (doc/reports/wp-13.org finding
    2); the per-class view therefore uses x = y = 0.005, the facility's
    "engaged" band, which draws from day 2.  Command: L2 4 vs 5.
 7. The =--set= ORDER is part of a cell's identity.  Agents are numbered

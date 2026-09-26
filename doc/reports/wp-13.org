@@ -71,7 +71,7 @@ of one lumped offset).
 
 - New: =alberta_buck/sim/shadow_book.py= (the stand-ins' book ->
   =setShadowOffset=, sent only on change); =alberta_buck/test/test_shadow_book.py=
-  (4 tests); =reports/wp-13.org=.
+  (4 tests); =doc/reports/wp-13.org=.
 - Rewritten in place (WP-3a's files, same paths): =src/basket/IShadowObserver.sol=
   (=observe()=, =aggregatePosition()=, =shadowValueInBuck()=,
   =shadowSaturation()=, =flags()=); =src/basket/ShadowObserver.sol=

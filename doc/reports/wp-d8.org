@@ -28,7 +28,7 @@ substitution, recommended before any fence-basket cell.
 
 * Commits (on wp/d8-slot0, newest first; from feature/carry-convexity c99a4f8)
 
-- (this file) doc: reports/wp-d8.org
+- (this file) doc: doc/reports/wp-d8.org
 - 0be11b4 sim: vecdiff (the L3 drift gauge) and buck_usd_bal beside the
   slot0 gauge
 - bf08eae sim: decision 8 -- quote BUCK/USDC from slot0 and active
@@ -54,7 +54,7 @@ New:
   A.json B.json=: |d bvib| / |d K| max and mean, then every changed frame
   field, cumulative counters (never falling in either vector: agents that
   acted differently) separated from gauges; exit 0 iff identical.
-- =reports/wp-d8.org= -- this file.
+- =doc/reports/wp-d8.org= -- this file.
 
 Modified (in place; the substitutions are two-line, formulas untouched):
 - =alberta_buck/sim/chain.py= -- =Chain.pool_state= (memo of

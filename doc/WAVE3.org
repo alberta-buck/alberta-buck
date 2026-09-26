@@ -722,7 +722,7 @@ install and login.
   from forks.  Same-machine agents use the worktree recipe.
 - =ONBOARDING-D7.org= is the reading plan and the entry map: setup,
   a three-and-a-half-hour reading order, signs and units, the house
-  rules, the report template (=reports/wp-<n>.org=), and per-package
+  rules, the report template (=doc/reports/wp-<n>.org=), and per-package
   briefs for the decision-8 branch, WP-13, WP-16, WP-14 and WP-15.
 - Roles: the integrator (the design owner's main session) records
   here, merges =--no-ff=, and runs the cycles; every other agent owns
@@ -872,7 +872,7 @@ next.  Paste acceptance evidence here, not in chat.
   finished cells through symlinked vectors in a scratch outdir (it
   runs; the unfinished cells report "(no vector)"), so the judging
   step is one command when the =.done= marker appears.
-- The design owner's review of =reports/wp-16.org=: the price integral
+- The design owner's review of =doc/reports/wp-16.org=: the price integral
   and the position loop measure the same thing and fight; two ways
   forward put (a single PID with synthesized short-horizon P / D
   inputs and larger gains; or deeper measurement of the economy's
@@ -894,7 +894,7 @@ next.  Paste acceptance evidence here, not in chat.
 ** 2026-09-12 -- WP-14 DONE and merged; CYCLE 1 LAUNCHED (session 3, subagent on =wp/14-skews=; the integrator on datasim)
 
 - Merged --no-ff as 801f34f (five branch commits, head 442fc43; the
-  report =reports/wp-14.org= is the evidence of record; one conflict in
+  report =doc/reports/wp-14.org= is the evidence of record; one conflict in
   =d7-c1.toml= resolved by keeping the derived S / S0k / V presets and
   giving Vk the derived V gains plus WP-14's measured kappas).  On the
   merged tree: =make nix-build= clean; =make nix-test= 61 suites, 627
@@ -971,7 +971,7 @@ next.  Paste acceptance evidence here, not in chat.
 ** 2026-09-12 -- WP-16 DONE and merged: the position loop's gains, and what the derivation found (session 3, subagent on =wp/16-kdesign=)
 
 - Merged --no-ff as 50e0616 (seven branch commits, head 95f5eda; the
-  report =reports/wp-16.org= and =build/sim/kdesign/gains.org= /
+  report =doc/reports/wp-16.org= and =build/sim/kdesign/gains.org= /
   =fit.org= (copied into the main checkout's build dir, with the ten
   step-test vectors and the grind set, so =python -m
   alberta_buck.sim.kdesign all= reproduces the table) are the evidence
@@ -1048,7 +1048,7 @@ next.  Paste acceptance evidence here, not in chat.
 ** 2026-09-12 -- WP-15 DONE and merged (session 3, subagent on =wp/15-grid=)
 
 - Merged --no-ff as 75d9e34 (seven branch commits, head f13fc3b; the
-  report =reports/wp-15.org= is the evidence of record).  On the merged
+  report =doc/reports/wp-15.org= is the evidence of record).  On the merged
   tree the nine sim pytest files: 183 passed; =python -m
   alberta_buck.sim.star experiments/stars/d7-c1.toml --dry-run=: 54
   cells.  Subagents were 429-killed twice (the session limit resets
@@ -1492,7 +1492,7 @@ next.  Paste acceptance evidence here, not in chat.
 
 - Merged --no-ff as b4c1b75 (branch commits facd3af contracts, 8e7818f
   wiring + telemetry, 988a330 tests, 671e298 the booking-lag fix,
-  0a14f1c the report =reports/wp-13.org=, which is the evidence of
+  0a14f1c the report =doc/reports/wp-13.org=, which is the evidence of
   record).  One conflict, =snapshot.py= (the WP-D8 and WP-13 append
   blocks at the same spot), kept both sides in order.  On the merged
   tree: =make nix-build= clean (the one pre-existing warning);
@@ -1557,7 +1557,7 @@ next.  Paste acceptance evidence here, not in chat.
 ** 2026-09-04 -- Decision-8 branch DONE and merged (session 3, subagent on =wp/d8-slot0=)
 
 - Merged --no-ff as 46c3b7d (branch commits bf08eae the fix, 0be11b4
-  =vecdiff= + =buck_usd_bal=, 4312cdc the report =reports/wp-d8.org=,
+  =vecdiff= + =buck_usd_bal=, 4312cdc the report =doc/reports/wp-d8.org=,
   which is the evidence of record; this entry is its summary).  On the
   merged tree the four wave-3 files plus =test_gauge.py=: 151 passed.
 - SCOPE WIDENED, with cause.  The brief named three readers; the

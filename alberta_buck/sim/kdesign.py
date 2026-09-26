@@ -7,7 +7,7 @@
     python -m alberta_buck.sim.kdesign all                      # fit then solve
 
 CARRY-CONVEXITY.org D7 and "The position loop (D7)"; WAVE3.org WP-16, decisions
-11 / 12 / 17 / 18 / 19; reports/wp-13.org for the controller as built.  numpy
+11 / 12 / 17 / 18 / 19; doc/reports/wp-13.org for the controller as built.  numpy
 only at runtime; scipy is an optional cross-check in the unit test.
 
 THE REDUCED PLANT (the model of record)

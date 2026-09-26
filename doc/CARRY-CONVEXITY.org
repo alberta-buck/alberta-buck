@@ -1080,7 +1080,7 @@ units, with its own gains.
 unvetted-insurer decision, referenced throughout this document; the
 number is skipped here so that reference stays unambiguous.)
 
-/Question./  WP-16 (=reports/wp-16.org=) derived D7's position-loop
+/Question./  WP-16 (=doc/reports/wp-16.org=) derived D7's position-loop
 gains and, on the way, showed that the joint plant is not
 stabilizable: one lever, two costed integrals, a conserved direction.
 The design owner's reading: the theory was that K could be moved

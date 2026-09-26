@@ -80,7 +80,7 @@ BUCK/USDC from slot0 through =alberta_buck/sim/gauge.py=; =vecdiff= is
 the drift gauge) and WP-13 (b4c1b75: the two-loop controller, the
 observer's S / V modes, the hold-last cap, and =shadow_book.py=, which
 books the Python stand-ins' inventory into the observer).  Their
-reports are =reports/wp-d8.org= and =reports/wp-13.org=; read them
+reports are =doc/reports/wp-d8.org= and =doc/reports/wp-13.org=; read them
 before the package you claim, because they name the surface you build
 on and the open questions (WAVE3.org decisions pending 14-19).
 
@@ -91,11 +91,11 @@ order:
 
 1. =git log --oneline -15 feature/carry-convexity= and =git branch
    --list 'wp/*'= (merged packages are ledger entries; unmerged =wp/*=
-   branches are in flight or abandoned -- their =reports/wp-<n>.org=
+   branches are in flight or abandoned -- their =doc/reports/wp-<n>.org=
    says which).
 2. =WAVE3.org=: the STATUS block (last updated, in flight, next), then
    the newest two or three ledger entries, then "Decisions pending".
-3. =reports/*.org= newer than the newest ledger entry: evidence the
+3. =doc/reports/*.org= newer than the newest ledger entry: evidence the
    integrator has not yet recorded.
 4. =git worktree list=; =ls build/sim/regen/ build/sim/*/done 2>/dev/null=;
    =pgrep -fa alberta_buck.sim= -- is a grid in flight?  If yes, the
@@ -108,7 +108,7 @@ order:
    not instruction: verify a file or flag it names before relying on
    it.
 6. =CARRY-CONVEXITY.org= D7 and =WAVE3.org= "The controller-alternatives
-   test plan" if the work touches K; the relevant =reports/wp-<n>.org=
+   test plan" if the work touches K; the relevant =doc/reports/wp-<n>.org=
    if it touches a merged package.
 
 Moving a session between machines: the transcript is
@@ -245,7 +245,7 @@ Total: about three and a half hours including the setup.
    =# WP-n= at the END of the existing blocks, so branches merge by
    keeping both sides.
 2. You do not edit =WAVE3.org= or =CARRY-CONVEXITY.org=.  Your evidence
-   goes in =reports/wp-<n>.org= on your branch ("The report"); the
+   goes in =doc/reports/wp-<n>.org= on your branch ("The report"); the
    integrator moves it into the ledger.
 3. ASCII only in documents and commit messages; no co-author or AI
    attribution lines; concise messages (what changed and why).
@@ -285,7 +285,7 @@ Total: about three and a half hours including the setup.
     not =make nix-build= alone, or every cell dies at deploy with
     "UniswapV3Factory is not published here".
 
-* The report (=reports/wp-<n>.org=)
+* The report (=doc/reports/wp-<n>.org=)
 
   #+TITLE: WP-<n> report -- <slug>
   * Summary (three sentences: what was built, what it showed, what is next)
@@ -308,7 +308,7 @@ entry map, and "The parallel tracks" below says which of these may run
 at the same time.  Claim by the protocol there.  Estimates are agent
 sessions of a few hours.
 
-** Decision-8 branch: quote from slot0 -- DONE (merged 46c3b7d; see reports/wp-d8.org)
+** Decision-8 branch: quote from slot0 -- DONE (merged 46c3b7d; see doc/reports/wp-d8.org)
 
 Kept below as the record of the brief.  Follow-ups are WAVE3.org
 decisions pending 14 (the TOKEN-pool reserve gauges: the same
@@ -328,7 +328,7 @@ cell) and 16 (the TUI gauge; the pre-existing lifecycle plot test).
 - Pitfall: the sim's own gauges are separate from the on-chain basket
   reads (which use the TWAP); do not touch the contracts.
 
-** WP-13: the corrected controller and observer -- DONE (merged b4c1b75; see reports/wp-13.org)
+** WP-13: the corrected controller and observer -- DONE (merged b4c1b75; see doc/reports/wp-13.org)
 
 Kept below as the description of the surface WP-14 / 15 / 16 build on.
 The env names as built: =SIM_SHADOW_MODE= (s | v), =SIM_SHADOW_KQ= /
@@ -394,7 +394,7 @@ days: engage the loop with =--set agents.UndertakingAgent.eps=0.005
   =test_kdesign.py= on a synthetic plant.
 - Units: the controller's position loop is a PID on r = 0 - s with s
   in ppm (S: q / D; V: the cost-weighted fill), and the gains share the
-  real x 1e12 convention of Kp / Ki / Kd (=reports/wp-13.org=,
+  real x 1e12 convention of Kp / Ki / Kd (=doc/reports/wp-13.org=,
   decision 19).  Emit the table in real units per mode, and note that
   s_V is roughly half s_S on the same books while the desk's empty
   book is included (decision 18).
@@ -448,11 +448,11 @@ run at once; the map says which waits.
 | T2    | WP-15 grid machinery: class TOMLs, pusher, whale period knob, BookLoaderAgent, metrics, star values axis, cycle-1 spec | experiments/catalogue-{cohort-step,ramp,guardtrip,periodic,bookload,lpexit}.toml, bookloader.py, pusher_agent.py, experiments/stars/d7-*.toml | eqmetrics.py, snapshot.py, catalogue.py, loop.py (import lines), star.py (the values axis), WhaleRaidAgent (one knob) | undertaking_agents.py / facility_agent.py / seeder_agent.py (T3's); the controller contracts | WP-13 (merged) | 1-2 | DONE (merged 75d9e34, 2026-09-12); the cycles are the integrator's |
 | T3    | WP-14 + decision 17: one sim-only stabilizer per agent class; local skews kappa_i; the seeder booked as a position | undertaking_agents.py, facility_agent.py, seeder_agent.py, shadow_book.py; ShadowObserver.sol ONLY if a registry is needed (then forge tests) | snapshot.py, deploy.py                       | equilibrium_agents.py (T4's); the controller (BuckKControllerShadow.sol)               | WP-13 (merged)                 | 1-2      | DONE (merged 801f34f, 2026-09-12); the desk's on-chain skew is decision 34 |
 | T4    | decision 14 + 16: TOKEN-pool reserve gauges to gauge.active_reserves; the TUI gauge; the lifecycle plot test | equilibrium_agents.py (the reserve reads only), rebalancer.py, director_agent.py, inspect.py, snapshot._implied, test_lifecycle_plot.py (or the vector) | gauge.py (new helpers at the end)            | the three facility agents (T3's); router.py's quote semantics (settled by decision 8)   | decision 8 (merged)            | 1        | open                         |
-| T5    | decision 15: the seeder's economics -- 3h cells with budget_m as the amount axis, min_gap_bp swept; a design note on sizing the bid against the desk's Q3 | experiments/stars/seeder-*.toml, reports/wp-3h.org, a doc note (reports/) | --                                           | seeder_agent.py (T3 owns it; T5 runs CELLS and writes the note; a code change is a request to T3) | regeneration done; T3 for the booked seeder position | 1 | waits for T3 |
+| T5    | decision 15: the seeder's economics -- 3h cells with budget_m as the amount axis, min_gap_bp swept; a design note on sizing the bid against the desk's Q3 | experiments/stars/seeder-*.toml, doc/reports/wp-3h.org, a doc note (reports/) | --                                           | seeder_agent.py (T3 owns it; T5 runs CELLS and writes the note; a code change is a request to T3) | regeneration done; T3 for the booked seeder position | 1 | waits for T3 |
 | T6    | WP-4 the directional fee: fees.py + the swap-adapter hook; the 3b grid                                            | alberta_buck/sim/fees.py, test_fees.py, the adapter hook (a new function in router.py's swap path, called from one line) | router.py (one call site), snapshot.py       | gauge.py / the reserve reads (T4's); runs its cells after the regeneration            | decision 8 (merged)            | 1-2      | open; cells wait for regeneration |
-| T7    | WP-5 measurement: the stress fee's P2 on the x4 cells                                                              | experiments/stars/stress-*.toml, reports/wp-5b.org                                        | --                                           | BuckBasketProRata.sol (the fee is merged; measure, do not change)                     | regeneration done              | 1 (cells) | waits for regeneration |
+| T7    | WP-5 measurement: the stress fee's P2 on the x4 cells                                                              | experiments/stars/stress-*.toml, doc/reports/wp-5b.org                                        | --                                           | BuckBasketProRata.sol (the fee is merged; measure, do not change)                     | regeneration done              | 1 (cells) | waits for regeneration |
 | T8    | WP-7 the perp / house (3f)                                                                                         | perp.py, test_perp.py                                                                     | WhaleRaidAgent (the via knob; coordinate with T2's period knob -- T2 lands first), loop.py, snapshot.py | -- | 3g result (the facility grid) | 2 | HOLD until 3g |
-| T9    | WP-9 replication: five seeds on the key cells; the flood with / without the facility                               | experiments/flood-*.toml, reports/wp-9.org                                                | --                                           | code                                                                                  | the D7 cycles                  | 1 (cells) | waits for the cycles |
+| T9    | WP-9 replication: five seeds on the key cells; the flood with / without the facility                               | experiments/flood-*.toml, doc/reports/wp-9.org                                                | --                                           | code                                                                                  | the D7 cycles                  | 1 (cells) | waits for the cycles |
 | T10   | WP-11 the monetary Diamond (post-wave-3)                                                                           | src/basket/* facets, Buck.sol wiring                                                      | --                                           | everything else: HOLD                                                                 | the winning K                  | 3+       | HOLD                         |
 | T11   | the regression regeneration (matrix + catalogue) and its judgement                                                 | build/sim/regen/, the ledger entry                                                        | --                                           | the datasim checkout's sim code while it runs                                          | --                             | integrator | IN FLIGHT |
 | T12   | WP-10 documents of record: the "Wave 3 results" section, findings 12+, closing the ledger                          | CARRY-CONVEXITY.org, REBALANCING-EQ.org, WAVE3.org                                        | --                                           | (the integrator only)                                                                 | everything                     | integrator | open |
@@ -460,7 +460,7 @@ run at once; the map says which waits.
 | T14   | the viewer: one HTML + script in alberta_buck/sim/viewer/ (uPlot vendored via package.json); slider, left metric panes, right class tabs with per-agent panes and the 3-nearest action log; file / websocket / JSONL sources | alberta_buck/sim/viewer/*, package.json (devDependency), server.py (serve the static files) | -- | the sim's Python agents | T13 for acts (starts on v1 data) | 2-3 | v1 BUILT on wp/14-viewer 2026-09-11, served at datasim:8787; live websocket source and the JS emitter open |
 | T15   | the organic agents: income channel + standing-facility saver; business / farmstead with payroll (port of farmer.js); external-debt retiree (port of mortgage-retiree + MonthlyIncome); minimal intermediary and insurer | household_agents.py, business_agents.py, intermediary_agents.py (new); experiments/organic-*.toml | loop.py imports, snapshot.py, catalogue.py DEFENDERS | the three facility agents (T3), equilibrium_agents.py's existing classes | -- | 5-7 | CRITICAL PATH, the integrator's account, after cycle 1 is judged (2026-09-13); order: income channel + external-debt retiree, standing-facility saver, business + payroll, credit union + insurer |
 | T16   | demography driver + the cohort layer with its equivalence gate (a cohort of N reproduces N agents within tolerance) | demography.py, cohort.py (new), test_cohort.py | experiment.py (a [demography] block), snapshot.py | the controller | T15 | 5 | next after T15 (the rung-2 equivalence gate first) |
-| T17   | the scale ladder: rungs 1-6 (ORGANIC-SCALE.org), the organic gates per rung, then the catalogue and the D7 designs re-judged rung by rung | experiments/ladder-*.toml, reports/wp-ladder.org, eqmetrics.py (organic gates, append) | -- | code outside eqmetrics | T15, T16; datasim | 4 + compute | after T16; organic gates + the stylized-facts gates (ORGANIC-SCALE.org "The stand before the controller") |
+| T17   | the scale ladder: rungs 1-6 (ORGANIC-SCALE.org), the organic gates per rung, then the catalogue and the D7 designs re-judged rung by rung | experiments/ladder-*.toml, doc/reports/wp-ladder.org, eqmetrics.py (organic gates, append) | -- | code outside eqmetrics | T15, T16; datasim | 4 + compute | after T16; organic gates + the stylized-facts gates (ORGANIC-SCALE.org "The stand before the controller") |
 
 Non-overlap in one sentence: T1 is offline Python; T2 adds new agents
 and new TOMLs; T3 edits the three facility agents; T4 edits the
@@ -488,8 +488,8 @@ block of WAVE3.org says otherwise.
    every account through =git fetch=:
 
      git checkout -b wp/<n>-<slug> feature/carry-convexity
-     printf '#+TITLE: WP-<n> report -- <slug>\n* Summary\nCLAIMED <date> by <who>; track T<k>.\n' > reports/wp-<n>.org
-     git add reports/wp-<n>.org && git commit -q -m "WP-<n>: claim" && git push -u origin wp/<n>-<slug>
+     printf '#+TITLE: WP-<n> report -- <slug>\n* Summary\nCLAIMED <date> by <who>; track T<k>.\n' > doc/reports/wp-<n>.org
+     git add doc/reports/wp-<n>.org && git commit -q -m "WP-<n>: claim" && git push -u origin wp/<n>-<slug>
 
 2. Work on that branch only; append-only in shared files; never
    commit vectors; no edits to the three documents of record.

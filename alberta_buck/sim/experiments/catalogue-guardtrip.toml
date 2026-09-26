@@ -3,7 +3,7 @@
 # at day 365.  The defender mix and intensity are swept from outside
 # (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
 # counts); this file fixes the physics and the injection only.
-# Design of record: REBALANCING-EQ.org, "The excursion catalogue";
+# Design of record: doc/REBALANCING-EQ.org, "The excursion catalogue";
 # WP-15: WAVE3.org test-plan class 7 (the sensor-fault policy of decision
 # 9; gamma's inadvertent schedule under S0).  PusherAgent (pusher_agent.py)
 # pushes one basket pool's spot push_bp past its 600 s TWAP at the day's
