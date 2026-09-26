@@ -8,7 +8,6 @@
 #+author: Perry Kundert
 #+date: 2026-07-03 12:00:00
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 22
 #+weight: 23
 #+draft: true

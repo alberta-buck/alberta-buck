@@ -2,7 +2,6 @@
 #+author: Perry Kundert
 #+date: 2026-04-22
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 
 #+EXPORT_FILE_NAME: ./doc/historical/alberta-buck-notes-rollup-mint
 #+STARTUP: org-startup-with-inline-images inlineimages

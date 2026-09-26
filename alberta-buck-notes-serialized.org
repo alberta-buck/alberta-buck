@@ -8,7 +8,6 @@
 #+author: Perry Kundert
 #+date: 2026-04-23
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes-serialized
 #+STARTUP: org-startup-with-inline-images inlineimages
