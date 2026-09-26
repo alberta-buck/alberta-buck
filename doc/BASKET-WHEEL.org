@@ -1,0 +1,211 @@
+#+TITLE: The consistency wheel: the BuckBasket closing its own arbitrage
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-26
+#+OPTIONS: ^:nil toc:2 num:t
+
+* 1. The proposal, and the rulings of record
+
+The design owner's proposal (2026-09-26): the monetary operations issue
+and absorb BUCK at a premium or discount, but none of them arbitrages --
+the system depends on arbitrageurs who know nothing of BUCK to keep its
+venues consistent.  Why should the BuckBasket not watch the BUCK/TOKEN,
+USDC/TOKEN and BUCK/USDC prices it already depends on, and close the
+gaps itself?  With a WORK WHEEL -- a bounded state machine that any
+caller advances, many calls per block amortizing the monitoring, calls
+after the block's work is done nearly free -- and an Alberta Buck agent
+that simply keeps calling the basket's tick.
+
+Rulings, the same day:
+
+1. *Every chain.*  The basket will eventually be deployed on L1 and the
+   L2s alike; the gas price on each chain sets the action margin.
+2. *No USDC position.*  Place only the USDC exposure a cycle needs to
+   close a gap; never BUILD a USDC position.
+3. *Consistency cycles only.*  The wheel absorbs arbitrage between
+   venues.  It does not trade BUCK against its basket value (bvib) --
+   that leg changes the supply and belongs to the undertakings and the
+   desk under their own rules.
+4. *Investigate* whether the arbitrage profit can pay for the gas, or
+   more, to make calling the tick worth someone's while (section 4).
+
+* 2. What the basket is today
+
+- *It is the TOKEN/BUCK liquidity.*  The venue facet
+  (=src/basket/BuckBasketUniswapV3.sol=) owns full-range positions in
+  every TOKEN/BUCK pool; a deposit is an LP add at spot with minted
+  partner BUCK.  So every move of a TOKEN's USD price opens a gap on the
+  BASKET'S OWN position, and whoever closes it takes the basket's
+  loss-versus-rebalancing (LVR; Milionis, Moallemi, Roughgarden and
+  Zhang, 2022) -- today, the sim's =AnonymousArbAgent= cycles
+  (USDC -> TOKEN -> BUCK -> USDC, and the reverse) and the excursion
+  arbs.  Pool fees are the basket's only compensation.
+- *It reads only its own pools* (slot0 or a TWAP, behind the
+  spot-vs-TWAP =Slippage()= guard).  It never reads a USDC price.
+- *The work-wheel pattern exists, at epoch cadence.*
+  =RebalanceDirectorBase.poke(maxWork)= is a permissionless epoch wheel
+  the shell advances with =poke(1)= on every deposit and redeem;
+  =BuckKController*.compute()= runs a PID cycle when its interval has
+  elapsed and is called from every mint, burn, deposit and redeem.
+  Nothing in =src/= keys work to =block.number= yet.
+
+* 3. What a consistency cycle is, and why it is safe
+
+A triangle through TOKEN_i: USDC/TOKEN_i, TOKEN_i/BUCK (the basket's
+pool) and BUCK/USDC.  When the three prices disagree by more than the
+cycle's cost, going round the triangle in the profitable direction
+closes the gap and ends with more of the asset it started with.
+
+- *No capital, no inventory.*  The opening leg can be a FLASH MINT of
+  BUCK by the basket (MakerDAO's flash-mint pattern): mint, go round,
+  burn the principal, keep the profit.  USDC exists only between two
+  swaps inside one transaction -- ruling 2 holds by construction.
+- *No supply change.*  The flash-minted BUCK is burned in the same
+  transaction; the profit is existing BUCK (or TOKEN) moved from the
+  venues to the basket.  Not a monetary operation (ruling 3).
+- *Manipulation-safe.*  The cycle checks REALIZED output against input
+  and reverts below a minimum profit.  An attacker who moves a pool
+  first only pays the basket to move it back.  Only non-cycle trades on
+  spot prices are manipulable, and the wheel makes none.
+- *It moves bvib, correctly.*  =basketValueInBuck= is a TWAP of the
+  TOKEN/BUCK pools.  Closing their gaps to the USD venues makes bvib
+  read the external valuation instead of whatever the last trade left
+  -- the same effect the external arbs have today, without their lag.
+
+* 4. Who can take which gap: the fee-recycling band
+
+A searcher going round the triangle pays three pool fees.  The basket
+pays two: on its own TOKEN/BUCK pool it is (nearly) the only LP, so the
+fee it pays comes back to it.  With the sim's tiers (TOKEN/USDC 0.30%,
+TOKEN/BUCK 0.30%, BUCK/USDC 0.05%):
+
+| gap                                    | who takes it                                                    |
+|----------------------------------------+-----------------------------------------------------------------|
+| below 0.35% + gas / size                | nobody: the cycle costs more than it earns                      |
+| 0.35% .. 0.65% + gas / size             | ONLY the basket: its fee on its own pool comes back to it       |
+| above 0.65% + gas / size + a margin     | searchers, directly, with flash swaps; they pay the basket's fee |
+| any gap the basket's own trade opens    | the basket, in the same transaction (no race)                   |
+
+That band is the wheel's natural domain, and it is why the tick needs a
+bounty: a gap in it is worth nothing to a searcher directly, so the
+only way anyone monetizes it is by calling the basket's tick.  Above
+it, a searcher always prefers the whole gap to any share of it; on
+today's Uniswap v3 pools the basket cannot stop them, and keeps only
+its fees.  Capturing the large external gaps too needs control of the
+swap path -- a Uniswap v4 hook that runs the wheel before the first
+swap of each block, or an auction for the right to go first (the
+auction-managed AMM, Adams, Moallemi, Reynolds and Robinson, 2024; CoW
+AMM's batch clearing is a cousin).  Recorded here as the upgrade path,
+not the first version.
+
+*What the sim shows today* (the banked cycle-1 none arm, design A,
+days 30-730; =../alberta-buck-grid/build/sim/star/d7-c1/none-design-A.json=):
+the residual triangle gap at the day's end has a median of 117-126 bp
+on every pool and a 90th percentile of 196-257 bp.  That is the cast's
+threshold, not the market's: =AnonymousArbAgent= wants a 60 bp net edge
+on top of ~65 bp of fees (=MARGIN_BP=, "so arb profit is visible, not
+competed to ~0").  Real searchers compete that margin toward gas, so
+the sim's cast leaves the band -- and more -- open.  A wheel prototype
+measured against this cast would overstate its take; the prototype
+must also be measured with the arb margin at its competitive level.
+
+* 5. Paying the caller: the incentive
+
+The design question is how the captured profit pays for the call, on
+every chain, without the basket needing to know the gas price.
+
+- *No cure, no pay.*  The tick pays only when a cycle executes.  Callers
+  simulate first (=eth_call=) and send only when a cycle is there, so
+  the basket never pays for an idle tick; an idle call is the caller's
+  loss.
+- *A proportional bounty: a share s of the realized profit*, paid in the
+  cycle's proceeds.  A caller calls when s x profit exceeds its own gas
+  cost, so the action margin sets ITSELF per chain -- on L1 the wheel
+  acts on large gaps, on an L2 on small ones -- with no gas-price
+  oracle and no ETH price inside the basket (ruling 1).  s trades the
+  speed of consistency (a lower threshold) against the profit kept.
+- *If a floor is wanted, reimburse at the base fee.*  A fixed part equal
+  to gas used x =block.basefee= (EIP-1559, set by the protocol, unlike
+  =tx.gasprice=, which the caller chooses and a builder-searcher can
+  inflate) plus the share.  This is MakerDAO's Liquidations 2.0 keeper
+  pay in shape -- a flat =tip= plus a proportional =chip= -- and the
+  flat part needs the gas token's price in BUCK, which the share alone
+  does not.
+- *Competition is fine.*  Callers racing for the bounty bid priority
+  fees up to (bounty - gas); that transfer is the builder's, out of the
+  bounty.  The basket's cost is fixed at s x profit.
+- *Piggybacking is what makes ticks nearly free.*  Inside another
+  transaction a tick whose block's work is done costs a storage read
+  and a return -- a few thousand gas.  A standalone tick still pays the
+  21,000-gas transaction base.  So the Alberta Buck agent should fold
+  ticks into transactions it sends anyway, and the shell's own
+  deposit / redeem / rebalance calls should advance the wheel (as they
+  already =poke= the director).  The wheel re-arms within a block when a
+  basket-touching trade lands, so a gap opened after the wheel ran is
+  not skipped until the next block.
+
+*Is the pie big enough?*  LVR on a constant-product pool accrues at
+about V sigma^2 / 8 per unit time.  On the sim's ~$31.6M of basket-owned
+TOKEN/BUCK liquidity with its implied TOKEN/BUCK volatility of 50-67%/yr
+that is ~$3.3k/day (~$1.2M/yr); the sim's volatility is inflated by its
+own noise, and at a more ordinary 20% the same pools leak ~$400/day.  A
+three-swap cycle is ~350-450k gas: on L1 at 2-20 gwei and ETH at $3,000,
+~$2-27 a cycle; on the current rollups, cents.  (Ballparks, to be
+refreshed when a deployment is costed.)  So on an L2 the band pays for
+many ticks a day; on L1 it pays for the larger gaps only -- exactly
+what the proportional bounty does without being told.  Whether the
+share also leaves a surplus to fund other keeper work (the director's
+epochs, the ops quadrants, the controller's compute) is the question
+the prototype answers: the profit is the basket's, so it can pay for
+the basket's upkeep.
+
+* 6. USDC: the minimum, never a position (ruling 2)
+
+The flash-minted cycle holds no USDC at rest.  A basket-owned BUCK/USDC
+range would save the cycle one fee leg -- 0.05% at the sim's tier -- at
+the price of a standing USDC position with its own LVR.  Not worth it
+while the BUCK/USDC pool's depth carries the cycles; the prototype
+records when depth binds (a cycle cut short by slippage), and only then
+is a minimal, transient range the question.
+
+* 7. The prototype, and what it must measure
+
+WAVE3's pattern: a Python agent over the real contracts first, Solidity
+last.  =BasketWheelAgent= acts for the basket through SimLP authority
+(as the undertakings did in WP-2), once per tick:
+
+1. For each TOKEN_i, the triangle's gap from the three pools' slot0
+   (=gauge.py=, decision 8 -- never balances).
+2. If the gap exceeds the basket's cost (its two external fee legs) plus
+   a per-chain gas cost (a scenario knob: L1 / L2 cost per cycle), go
+   round it: flash-mint BUCK (a sim stand-in: the SimLP's BUCK float,
+   restored in the same act), size to close the gap to the basket's
+   threshold, check realized profit, and book it to the basket.
+3. Pay the caller share s (booked, not paid to an actor, in the first
+   version).
+
+Measured on the catalogue's none arm and the dump arms, with the
+external arb cast (a) as today, (b) at a competitive margin, (c) halved:
+
+- the profit captured, per pool and per day, against the V sigma^2 / 8
+  estimate and against what =AnonymousArbAgent= earned in the control;
+- the residual-gap distribution (it should collapse toward the basket's
+  threshold);
+- the within-day reversion of bvib with the external arbs thinned -- the
+  thin cast's second assumption (their unlimited capital) replaced by a
+  protocol property;
+- the ticks a day each gas level buys, and the surplus after the share.
+
+The phase rule: consistency cycles change no supply and are not a
+monetary operation (ruling 3), so the prototype can be built beside the
+stand; its quantitative verdict, like everything else, is read on the
+stand's rungs.
+
+* 8. Open
+
+1. The share s, per chain or adaptive.
+2. The first-swap-of-block hook (v4) as the path to the large gaps.
+3. Whether the wheel pays for the other permissionless upkeep
+   (=poke=, =monetaryOperation=, =fenceRebalance=, =compute=).
+4. Where the wheel lives: the ops shell has ~3.2 KB of headroom and the
+   Fence ~1 KB, so it is a facet of the Monetary Diamond (WP-11) or its
+   own contract.
