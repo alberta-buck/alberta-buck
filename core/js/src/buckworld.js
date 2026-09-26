@@ -487,14 +487,19 @@ export async function accountView(world, address) {
   return { address, verified, balance, signedBalance, creditLimit, feeOwing, eth };
 }
 
-/** Fund a fresh account with ETH from the deployer (plain value transfer:
- *  works on tevm and anvil alike; new demo citizens need gas money). */
-export async function fundAccount(world, to, wei = 10n ** 19n) {
+/** Send `wei` from `account` to `to`: a plain value transfer, which works on
+ *  tevm and anvil alike.  Returns the receipt. */
+export async function sendEth(world, account, to, wei) {
   const hash = await world.session.client.sendTransaction({
-    account: world.session.account, to, value: wei,
-    gas: 21_000n, chain: null, ...world.session.txOverrides,
+    account, to, value: wei, gas: 21_000n, chain: null, ...world.session.txOverrides,
   });
-  await world.session.client.waitForTransactionReceipt({ hash });
+  return world.session.client.waitForTransactionReceipt({ hash });
+}
+
+/** Fund a fresh account with ETH from the deployer (new demo citizens need
+ *  gas money). */
+export async function fundAccount(world, to, wei = 10n ** 19n) {
+  await sendEth(world, world.session.account, to, wei);
 }
 
 /** Jump the chain clock forward and mine one block. */

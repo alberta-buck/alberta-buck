@@ -23,7 +23,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import {
   buildBuckWorld, attachBuckWorld, worldRecord, issueCredential, registerWallet,
   identityApprove, insureAsset, activateCredit, quoteActivation, creditView, accountView,
-  fundAccount, advanceTime, DEPRECIATION, DAY,
+  fundAccount, sendEth, advanceTime, DEPRECIATION, DAY,
 } from "../../src/buckworld.js";
 import {
   buildMarket, attachMarket, marketRecord, marketContracts, fiatIn, buckPrice, poolReserves,
@@ -93,6 +93,21 @@ export class SandboxError extends Error {
 }
 
 const isoOf = (ts) => new Date(Number(ts) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/**
+ * A wallet by name: its id, the label its holder gave it (if any) and the
+ * registered name (when there is one to show) -- "W1", "W1: Savings",
+ * "W1: Savings: Chloé Bélanger".  Another wallet shows a registered name only
+ * once that wallet has introduced itself.
+ */
+export const walletTitle = ({ id, label, name }) => [id, label, name].filter(Boolean).join(": ");
+
+/** What a wallet can pay in: BUCKs pass Buck's identity gate; USDC and ETH carry no identity. */
+export const ASSETS = [
+  { key: "BUCK", label: "BUCKs", decimals: 6, identity: true },
+  { key: "USDC", label: "USDC", decimals: 6, identity: false },
+  { key: "ETH", label: "ETH", decimals: 18, identity: false },
+];
 
 export class SandboxApp {
   /**
@@ -270,19 +285,19 @@ export class SandboxApp {
 
   // ---- wallets --------------------------------------------------------------
 
-  /** A new wallet: a fresh account with the ENDOWMENT (gas money and USDC).
-   *  Not yet registered. */
+  /** A new wallet: a fresh account with the ENDOWMENT (gas money and USDC),
+   *  and an optional label.  Not yet registered.  Returns {id, label, address,
+   *  credential, name, title}. */
   createWallet(label) {
     return this.#act(async () => {
       const privateKey = this.newKey();
       const address = this.#account(privateKey).address;
       await fundAccount(this.world, address, ENDOWMENT.eth);
       await fiatIn(this.world, this.market, address, ENDOWMENT.usdc, { tag: "wallet:endow" });
-      const w = { id: `W${this.state.wallets.length + 1}`, label: String(label || "").trim()
-                  || `Wallet ${this.state.wallets.length + 1}`, privateKey, address,
-                  credential: null, handle: null };
+      const w = { id: `W${this.state.wallets.length + 1}`, label: String(label ?? "").trim(),
+                  privateKey, address, credential: null, handle: null };
       this.state.wallets.push(w);
-      return w;
+      return this.#summary(w);
     });
   }
 
@@ -291,43 +306,63 @@ export class SandboxApp {
   register(walletId, credentialId) {
     return this.#act(async () => {
       const w = this.#wallet(walletId);
-      if (w.handle) throw new SandboxError(`${w.label} is already registered`);
+      if (w.handle) throw new SandboxError(`${this.#title(w)} is already registered`);
       const c = this.#credential(credentialId);
       const { account, ...handle } = await this.#refusing(() =>
         registerWallet(this.world, this.#account(w.privateKey), c.card, { rng: this.rng }));
       w.handle = handle;
       w.credential = c.id;
       c.wallets.push(w.id);
-      return w;
+      return this.#summary(w);
     });
   }
 
-  /** The identity handshake, both ways: each wallet re-encrypts its identity
-   *  for the other, which private payments between them require. */
-  introduce(aId, bId) {
+  /** An introduction, one way: `from` re-encrypts its identity for `to`
+   *  alone, so `to` can later say whom it dealt with -- and learns the
+   *  registered name.  Paying BUCKs between two private wallets takes one
+   *  each way.  Returns false when `from` had already introduced itself. */
+  introduce(fromId, toId) {
     return this.#act(async () => {
-      const a = this.#registered(aId);
-      const b = this.#registered(bId);
-      if (a.id === b.id) throw new SandboxError("a wallet does not introduce itself");
-      for (const [from, to] of [[a, b], [b, a]]) {
-        const key = `${from.id}>${to.id}`;
-        if (this.state.introduced.includes(key)) continue;
-        await this.#refusing(() => identityApprove(this.world, this.#handle(from),
-          this.#handle(to), { rng: this.rng }));
-        this.state.introduced.push(key);
-      }
+      const from = this.#registered(fromId);
+      const to = this.#registered(toId);
+      if (from.id === to.id) throw new SandboxError("a wallet does not introduce itself to itself");
+      const key = `${from.id}>${to.id}`;
+      if (this.state.introduced.includes(key)) return false;
+      await this.#refusing(() => identityApprove(this.world, this.#handle(from),
+        this.#handle(to), { rng: this.rng }));
+      this.state.introduced.push(key);
+      return true;
     });
   }
 
-  /** Pay `amount` (base units: 6 decimals) to a wallet id or an address. */
-  send(fromId, to, amount) {
+  /**
+   * Pay `amount` of `asset` (ASSETS: "BUCK" and "USDC" in 6-decimal base
+   * units, "ETH" in wei) to a wallet id or an address.  BUCKs pass Buck's
+   * identity gate -- both sides registered and, between two private wallets,
+   * introduced each way; USDC and ETH go to anyone.
+   */
+  send(fromId, to, amount, asset = "BUCK") {
     return this.#act(async () => {
       const from = this.#wallet(fromId);
       const toAddr = /^0x[0-9a-fA-F]{40}$/.test(to) ? to : this.#wallet(to).address;
-      await this.#refusing(() => this.session.send(this.world.buck, "transfer",
-        [toAddr, BigInt(amount)],
-        { account: this.#account(from.privateKey), gas: 1_000_000n,
-          tag: `pay:${from.id}->${to}` }));
+      const value = BigInt(amount);
+      if (value <= 0n) throw new SandboxError("a payment must be positive");
+      const account = this.#account(from.privateKey);
+      const tag = `pay:${from.id}->${to}${asset === "BUCK" ? "" : `:${asset}`}`;
+      await this.#refusing(() => {
+        switch (asset) {
+          case "BUCK":
+            return this.session.send(this.world.buck, "transfer", [toAddr, value],
+              { account, gas: 1_000_000n, tag });
+          case "USDC":
+            return this.session.send(this.market.usdc, "transfer", [toAddr, value],
+              { account, gas: 200_000n, tag });
+          case "ETH":
+            return sendEth(this.world, account, toAddr, value);
+          default:
+            throw new SandboxError(`there is no paying in ${asset}`);
+        }
+      });
     });
   }
 
@@ -448,8 +483,13 @@ export class SandboxApp {
       for (const x of this.state.wallets) {
         wallets.push({
           id: x.id, label: x.label, credential: x.credential, registered: !!x.handle,
+          name: this.#name(x),
+          // introduced: the wallets this one has introduced itself to (they know
+          // its name); introducedBy: those introduced to it (it knows theirs).
           introduced: this.state.introduced.filter((k) => k.startsWith(`${x.id}>`))
             .map((k) => k.split(">")[1]),
+          introducedBy: this.state.introduced.filter((k) => k.endsWith(`>${x.id}`))
+            .map((k) => k.split(">")[0]),
           ...await accountView(w, x.address),
           usdc: await s.call(this.market.usdc, "balanceOf", [x.address]),
           trading: x.handle ? await tradingOpen(w, this.market, x.address) : false,
@@ -487,7 +527,7 @@ export class SandboxApp {
   labels() {
     const out = { [this.world.issuer.addr]: ISSUER.name };
     for (const i of this.state.insurers) out[i.address] = i.label;
-    for (const x of this.state.wallets) out[x.address] = x.label;
+    for (const x of this.state.wallets) out[x.address] = this.#title(x);
     const names = this.world.names;
     out[this.world.reg.address] = names.reg;
     out[this.world.credit.address] = names.credit;
@@ -669,15 +709,32 @@ export class SandboxApp {
   async #trading(id) {
     const w = this.#registered(id);
     if (!await tradingOpen(this.world, this.market, w.address)) {
-      throw new SandboxError(`${w.label} has not opened trading yet`);
+      throw new SandboxError(`${this.#title(w)} has not opened trading yet`);
     }
     return w;
   }
 
   #registered(id) {
     const w = this.#wallet(id);
-    if (!w.handle) throw new SandboxError(`${w.label} is not registered yet`);
+    if (!w.handle) throw new SandboxError(`${this.#title(w)} is not registered yet`);
     return w;
+  }
+
+  // The registered name: the credential's given and family names.
+  #name(w) {
+    if (!w.credential) return null;
+    const f = this.#credential(w.credential).card.fields;
+    return `${f.given_name} ${f.family_name}`;
+  }
+
+  #title(w) {
+    return walletTitle({ id: w.id, label: w.label, name: this.#name(w) });
+  }
+
+  // A wallet as the actions return it: no keys.
+  #summary(w) {
+    return { id: w.id, label: w.label, address: w.address, credential: w.credential,
+             name: this.#name(w), title: this.#title(w) };
   }
 
   #credential(id) {

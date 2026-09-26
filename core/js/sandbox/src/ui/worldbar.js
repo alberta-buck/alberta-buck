@@ -3,7 +3,7 @@
 // (+1 hour, +1 day, +30 days); the world itself (export, import, reset);
 // and the journal of every transaction.
 
-import { amount, download, fill, h, money } from "./dom.js";
+import { download, fill, h, money } from "./dom.js";
 
 const HOUR = 3_600;
 const DAY = 86_400;
@@ -64,15 +64,14 @@ const stat = (k, ...v) => h("div", { class: "stat" }, h("span", { class: "k" }, 
 
 export function renderWorldBar(ctx, view) {
   const s = view.status;
-  const price = Number(s.buckPrice) / 1e6;
   fill(document.getElementById("stats"),
     stat("Day", `${s.day}`, h("span", { class: "unit" }, ` ${s.date.slice(0, 10)}`)),
     stat("Block", `${s.block}`),
-    stat("BUCK", h("span", { title: `${amount(s.buckPrice, 6)} USDC per BUCK in the BUCK/USDC pool` },
-      `$${price.toFixed(4)}`)),
+    stat("BUCK price", h("span", { title: "USDC per BUCK in the BUCK/USDC pool" },
+      money(s.buckPrice, "USDC"))),
     stat("BUCK_K", h("span", { title: "Credit per unit of insured value (the controller's output)" },
       (Number(s.buckK) / 1e18).toFixed(4))),
-    stat("Supply", money(s.supply, "BUCK", 0)),
+    stat("Supply", money(s.supply, "BUCK")),
     stat("Insurance pool", money(s.insurancePool, "BUCK")),
     stat("Wallets", `${s.wallets}`),
   );

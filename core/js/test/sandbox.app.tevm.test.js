@@ -6,8 +6,9 @@
 // The whole story: issue two credentials, register two wallets (each
 // endowed with USDC), insure a home at a real premium -- refused until the
 // holder buys the premium's principal in the BUCK/USDC pool, then paid into
-// the insurance pool -- introduce, send (and be refused), sell BUCK, advance
-// 30 days (demurrage accrues, the home depreciates), the observer's rows --
+// the insurance pool -- introduce each way, pay in BUCKs, USDC and ETH (and be
+// refused), sell BUCK, advance 30 days (demurrage accrues, the home
+// depreciates), the observer's rows --
 // then the world saved, reopened and imported, equal each time, and
 // carrying on.
 
@@ -118,8 +119,12 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(w1.registered, true);
     assert.equal(w1.verified, true);
     assert.equal(w2.credential, bob.id);
-    assert.equal(w3.label, "Wallet 3");
+    assert.equal(w3.label, "", "a label is optional");
+    assert.equal(w3.name, null);
     assert.equal(w3.verified, false);
+    assert.equal(w1.name, "Chloé Bélanger-李", "the registered name is the credential's");
+    assert.equal(S.walletTitle(w1), "W1: Chloé's wallet: Chloé Bélanger-李");
+    assert.equal(S.walletTitle(w3), "W3");
     assert.ok(w3.eth > 0n, "every new wallet gets gas money");
     assert.equal(w3.usdc, S.ENDOWMENT.usdc, "... and dollars");
     assert.equal(w1.trading, false);
@@ -163,11 +168,17 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     await assert.rejects(app.insure(W3, { assetClass: "gold", face: 1n }), /not registered yet/);
   });
 
-  it("introduced wallets pay each other; the protocol's refusals come back as reasons", async () => {
+  it("introductions go one way; BUCKs between private wallets take one each way", async () => {
     await assert.rejects(app.send(W1, W2, 1_234n * BUCK),
-      (e) => e instanceof S.SandboxError && /identity-approve/.test(e.reason));
-    await app.introduce(W1, W2);
-    await app.introduce(W2, W1);                  // already done: no more transactions
+      (e) => e instanceof S.SandboxError && /sender must identity-approve/.test(e.reason));
+    assert.equal(await app.introduce(W1, W2), true);
+    const half = await app.view();
+    assert.deepEqual([half.wallets[0].introduced, half.wallets[1].introducedBy], [[W2], [W1]]);
+    assert.deepEqual(half.wallets[1].introduced, [], "Bob has not introduced himself yet");
+    await assert.rejects(app.send(W1, W2, 1_234n * BUCK), /recipient must identity-approve sender/);
+    await app.introduce(W2, W1);
+    assert.equal(await app.introduce(W2, W1), false, "once is enough: no more transactions");
+    await assert.rejects(app.introduce(W1, W1), /itself/);
     const before = await app.view();
     await app.send(W1, W2, 1_234n * BUCK);
     await assert.rejects(app.send(W1, W3, 1n * BUCK), /recipient not verified/);
@@ -179,8 +190,25 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.ok(off < 1_000n, `${before.wallets[0].signedBalance} -> ${v.wallets[0].signedBalance}`);
     assert.equal(v.wallets[1].balance, 1_234n * BUCK);
     assert.deepEqual(v.wallets[0].introduced, [W2]);
+    assert.deepEqual(v.wallets[0].introducedBy, [W2]);
     const refused = v.journal.filter((e) => e.outcome === "revert");
-    assert.equal(refused.length, 3, "the unfunded activation, the unintroduced and the unverified sends");
+    assert.equal(refused.length, 4,
+      "the unfunded activation; the unintroduced, half-introduced and unverified sends");
+  });
+
+  it("USDC and ETH go to anyone, registered or not; BUCKs do not", async () => {
+    const before = await app.view();
+    await app.send(W1, W3, 25n * S.USDC, "USDC");
+    await app.send(W1, W3, 10n ** 17n, "ETH");
+    await app.send(W3, W1, 5n * S.USDC, "USDC");          // the stranger pays some back
+    await assert.rejects(app.send(W3, W1, 1n * BUCK), /sender not verified/);
+    await assert.rejects(app.send(W1, W3, 0n, "USDC"), /must be positive/);
+    await assert.rejects(app.send(W1, W3, 1n, "DOGE"), /no paying in DOGE/);
+    const v = await app.view();
+    assert.equal(v.wallets[0].usdc, before.wallets[0].usdc - 20n * S.USDC);
+    assert.equal(v.wallets[2].usdc, before.wallets[2].usdc + 20n * S.USDC);
+    const gained = v.wallets[2].eth - before.wallets[2].eth;
+    assert.ok(gained > 9n * 10n ** 16n && gained <= 10n ** 17n, `0.1 ETH, less W3's gas: ${gained}`);
   });
 
   it("Bob sells BUCK in the pool: the price dips", async () => {
@@ -235,7 +263,7 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
       assert.ok(!text.includes(s), `observer leaks ${s}`);
     }
     const labels = app.labels();
-    assert.equal(labels[v.wallets[0].address], "Chloé's wallet");
+    assert.equal(labels[v.wallets[0].address], "W1: Chloé's wallet: Chloé Bélanger-李");
     assert.equal(labels[v.insurers[0].address], "Sandbox Mutual");
     assert.ok(Object.values(labels).includes("BUCK/USDC pool"));
     assert.ok(Object.values(labels).includes("Insurance pool"));

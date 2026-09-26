@@ -5,7 +5,7 @@
 // the funding gate lets through only once the owner already holds as much.
 // The credits' depreciated values move as the clock does.
 
-import { ASSET_CLASSES } from "../app.js";
+import { ASSET_CLASSES, walletTitle } from "../app.js";
 import { amount, field, fill, h, money, parseAmount, preserving } from "./dom.js";
 
 const DEP_NAMES = ["none", "linear", "declining balance"];
@@ -32,7 +32,7 @@ export function mountCredit(ctx) {
   const cls = h("select", { "aria-label": "asset class" },
     ASSET_CLASSES.map((c) => h("option", { value: c.key }, c.label)));
   const face = h("input", { inputmode: "decimal", placeholder: "BUCKs", value: "400000" });
-  const floor = h("input", { inputmode: "decimal", placeholder: "BUCKs" });
+  const floor = h("input", { inputmode: "decimal", placeholder: "BUCKs", "aria-label": "floor" });
   const dep = h("select", { "aria-label": "depreciation" },
     DEP_NAMES.map((n, i) => h("option", { value: String(i) }, n)));
   const rate = h("input", { inputmode: "decimal", placeholder: "% a year" });
@@ -66,7 +66,7 @@ export function mountCredit(ctx) {
       e.preventDefault();
       await act("Insuring", () => app.insure(holder.value, {
         assetClass: cls.value, face: parseAmount(face.value, "face value"),
-        floor: floor.value.trim() ? parseAmount(floor.value, "floor") : 0n,
+        floor: floor.value.trim() ? parseAmount(floor.value, "floor", { zero: true }) : 0n,
         depType: Number(dep.value), depRate: toBp(rate.value, "depreciation"),
         premiumRate: toBp(premium.value, "premium"),
       }), (id) => `Insured: credit #${id}.`);
@@ -157,28 +157,36 @@ export function mountCredit(ctx) {
 export function renderCredit(ctx, view) {
   const registered = view.wallets.filter((w) => w.registered);
   const withCredit = registered.filter((w) => view.credits.some((c) => c.wallet === w.id));
-  const opts = (ws) => ws.map((w) => h("option", { value: w.id }, `${w.id} ${w.label}`));
+  const opts = (ws) => ws.map((w) => h("option", { value: w.id }, walletTitle(w)));
   preserving(ctx.credit.holder.parentElement.parentElement, () => {
     fill(ctx.credit.holder, opts(registered));
     fill(ctx.credit.who, opts(withCredit));
   });
-  const label = (id) => view.wallets.find((w) => w.id === id)?.label ?? id;
+  const label = (id) => {
+    const w = view.wallets.find((x) => x.id === id);
+    return w ? walletTitle(w) : id;
+  };
   fill(ctx.credit.list, view.credits.length === 0
     ? h("p", { class: "empty" }, "No credits yet.")
     : h("div", { class: "table-wrap" }, h("table", {},
-      h("thead", {}, h("tr", {}, ["Credit", "Value", "Depreciation", "Premium", "Activated",
-        "Worth now", "Activated, now"].map((t) => h("th", { scope: "col" }, t)))),
+      h("thead", {}, h("tr", {},
+        h("th", { scope: "col" }, "Credit"),
+        h("th", { scope: "col", class: "r" }, "Value", h("div", { class: "sub" }, "worth now")),
+        h("th", { scope: "col" }, "Depreciation"),
+        h("th", { scope: "col", class: "r" }, "Premium"),
+        h("th", { scope: "col", class: "r" }, "Activated", h("div", { class: "sub" }, "activated, now")))),
       h("tbody", {}, view.credits.map((c) => h("tr", { "data-credit": String(c.tokenId) },
         h("td", {}, h("b", {}, ASSET_CLASSES.find((a) => a.key === c.className)?.label ?? c.className),
           ` #${c.tokenId}`, h("div", { class: "sub" }, label(c.wallet))),
-        h("td", { class: "r" }, money(c.face, "BUCK", 0)),
-        h("td", { title: c.depType ? `floor ${amount(c.floor, 0)} BUCKs` : "" }, schedule(c)),
+        // Each amount over its value today: both right-justified, so the points line up.
+        h("td", { class: "r" }, h("div", {}, money(c.face, "BUCK")),
+          h("div", { class: "now", "data-col": "worth", title: "The whole asset, depreciated to today" },
+            money(c.depreciatedFace, "BUCK"))),
+        h("td", { title: c.depType ? `floor ${amount(c.floor)} BUCKs` : "" }, schedule(c)),
         h("td", { class: "r" }, `${pct(c.premiumRate)}/yr`),
-        h("td", { class: "r" }, money(c.activated, "BUCK", 0)),
-        h("td", { class: "r", "data-col": "worth", title: "The whole asset, depreciated to today" },
-          money(c.depreciatedFace, "BUCK", 0)),
-        h("td", { class: "r", "data-col": "activated-now", title: "The activated part, depreciated to today" },
-          money(c.currentValue, "BUCK")),
+        h("td", { class: "r" }, h("div", {}, money(c.activated, "BUCK")),
+          h("div", { class: "now", "data-col": "activated-now",
+                     title: "The activated part, depreciated to today" }, money(c.currentValue, "BUCK"))),
       ))))));
   ctx.credit.requote();
 }
