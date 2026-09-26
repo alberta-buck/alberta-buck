@@ -1,6 +1,6 @@
 version = 1
 SPDX-PackageName = "alberta-buck"
-SPDX-PackageSupplier = "Perry Kundert <perry@kundert.ca>"
+SPDX-PackageSupplier = "Perry Kundert <perry@dominionrnd.com>"
 SPDX-PackageDownloadLocation = "https://github.com/alberta-buck/alberta-buck"
 
 # Licensing is declared HERE rather than by stamping ~657 source files with
@@ -72,7 +72,7 @@ path = [
   ".env.example", ".gas-snapshot", ".github/**", ".gitignore", ".gitmodules",
   "Makefile", "flake.nix", "flake.lock", "foundry.toml", "foundry.lock",
   "package.json", "package-lock.json", "pyproject.toml",
-  "CONTRIBUTING.md", "LICENSING.md", "NOTICE", "TRADEMARKS.md",
+  "CONTRIBUTING.md", "LICENSING.md", "NOTICE", "SECURITY.md", "TRADEMARKS.md",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Perry Kundert"

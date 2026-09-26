@@ -122,7 +122,9 @@ scripted rather than hand-typed and hand-edited, so it re-records when the comma
    (since repaired).  Publish deliberately, or move them out.
 4. *Branches and tags.*  31 branches on origin would go public (stale =execute-plan/*=, unmerged
    =carry-convexity=).  Choose which.
-5. *SECURITY.md* (a disclosure address) and the CLA that dual licensing requires.
+5. *SECURITY.md* (a disclosure address) and the CLA that dual licensing requires.  *SECURITY.md
+   done (2026-09-26)*: reports to security@albertabuck.ca or GitHub's private reporting (enable it
+   once public); the known issues live in =doc/KNOWN-ISSUES.org=.  The CLA remains.
 6. *=lib/circom-lib= was unfetchable* (found 2026-09-25, building the sandbox from a fresh clone;
    *resolved the same day, no fork needed*): the submodule pinned =224c5a26=, the author's own
    unpushed commit adding BN254 branches to three templates of =circuits/ec/get.circom=.  No
