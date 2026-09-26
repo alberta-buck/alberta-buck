@@ -13,7 +13,11 @@ Uniswap's own contracts for the market.
 
 * Run it
 
-With [[https://nixos.org/download][Nix]] (flakes enabled), from a clone of this repository:
+Open [[https://sandbox.albertabuck.ca/]]: the hosted copy is the same static page, built from
+=master=, and runs entirely in your tab like a local one.
+
+To run it yourself, with [[https://nixos.org/download][Nix]] (flakes enabled), from a clone of
+this repository:
 
 #+BEGIN_SRC sh
 make nix-sandbox          # build, then serve http://localhost:8000/

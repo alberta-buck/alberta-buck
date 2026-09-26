@@ -145,8 +145,8 @@ closing README's SNARK section; branch protection on =master= once public.
 |-------+-------------------------------------------------------------------------------+--------|
 | G0    | Branch =feature/public= (worktree =../alberta-buck-public=); this plan          | done   |
 | G1    | Hygiene (list above); fix =identity-proofs.html=                                | done   |
-| G2    | Sandbox v1 (doc/review/sandbox-plan.org): world bar, issuer, wallet, credit,    | open   |
-|       | observer; persistence; headless story test; =make sandbox= (S1-S5 done)         |        |
+| G2    | Sandbox v1 (doc/review/sandbox-plan.org): world bar, issuer, wallet, credit,    | done   |
+|       | observer; persistence; headless story test; =make sandbox=; hosted (S1-S6)      |        |
 | G3    | README.org front door + =doc/{INSTALL,DEVELOP,SANDBOX}.org=                     | done   |
 | G4    | Demo recording (scripted cast, agg GIF) + sandbox screenshots                 | open   |
 | G5    | Decisions 3-5; SECURITY.md; branches to publish; make the repository public     | open   |

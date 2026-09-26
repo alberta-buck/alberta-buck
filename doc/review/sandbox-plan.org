@@ -335,3 +335,20 @@ will join them.
 =router.py=, the JS equilibrium world) to Permit2 and an unbound router, and have the arbitrage
 agents take BUCK-in-the-middle routes by exact output -- where there is money to be made, arbs
 will quote in that form (or a quoting service can be offered).
+
+* S6, done (2026-09-26): hosted on Cloudflare Pages
+
+- *Deployed* by =.github/workflows/sandbox-pages.yml=: wrangler created the project
+  =alberta-buck-sandbox= on the first run, and =feature/public= serves its preview at
+  [[https://feature-public.alberta-buck-sandbox.pages.dev/]].  The four files (page, styles,
+  2.4 MB script, 1.2 MB identity kernel served as =application/wasm=) boot a world in headless
+  Chromium from Cloudflare in 3 s, with no console errors.
+- *Home*: [[https://sandbox.albertabuck.ca/]], the project's custom domain (author,
+  2026-09-26), which serves =master='s production deployment; the README and =doc/SANDBOX.org=
+  link it.  It serves once =master= deploys and the domain is attached to the project
+  (Workers & Pages -> =alberta-buck-sandbox= -> Custom domains; Cloudflare adds the DNS record).
+- *The token that works*: an Account API token whose policy on the /entire account/ grants
+  "Pages Write".  The same permission under a zone policy is refused on
+  =/accounts/<id>/pages/projects= (code 10000); "Custom Pages" are a zone's error pages, not
+  Cloudflare Pages.  A new =pages.dev= subdomain fails TLS for a minute or so after its first
+  deploy.

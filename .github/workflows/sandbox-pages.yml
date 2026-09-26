@@ -2,11 +2,14 @@ name: sandbox-pages
 
 # The browser sandbox (core/js/sandbox), hosted on Cloudflare Pages.  The page
 # is static -- every visitor's world runs in their own tab -- so a deploy is
-# the built dist/ uploaded as it is.  master publishes the production site;
-# any other branch here gets a preview at <branch>.<project>.pages.dev.
+# the built dist/ uploaded as it is.  master publishes the production site,
+# https://sandbox.albertabuck.ca/ (the project's custom domain; also
+# alberta-buck-sandbox.pages.dev); any other branch here gets a preview at
+# <branch>.alberta-buck-sandbox.pages.dev.
 #
-# Secrets (repository settings): CLOUDFLARE_API_TOKEN, a token with the
-# "Cloudflare Pages: Edit" permission, and CLOUDFLARE_ACCOUNT_ID.  Without
+# Secrets (repository settings): CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN,
+# an Account API token whose policy on the ENTIRE ACCOUNT grants "Pages Write"
+# (the same permission under a zone policy is refused, code 10000).  Without
 # them the site is still built and tested, and the deploy is skipped.
 
 on:

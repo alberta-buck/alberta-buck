@@ -34,7 +34,8 @@ it all.
 
 A private, simulated Alberta Buck world runs in your browser tab: certify people, give them
 wallets, insure their homes, activate credit, pay one another, trade BUCKs for dollars -- then look
-at the chain the way a stranger would.  With [[https://nixos.org/download][Nix]] (flakes enabled):
+at the chain the way a stranger would.  Open [[https://sandbox.albertabuck.ca/]]; nothing leaves the
+tab.  Or run it yourself, with [[https://nixos.org/download][Nix]] (flakes enabled):
 
 #+BEGIN_SRC sh
 git clone https://github.com/alberta-buck/alberta-buck
