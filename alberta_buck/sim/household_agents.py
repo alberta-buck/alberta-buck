@@ -23,9 +23,14 @@ Two changes from the debtor follow from that:
     when K rises: the supply answers K as a flow.
   * Insurance as an OUTLAY (master fe3083f).  Before it joins, the real
     path pays the external premium as a cost, like the counterfactual.
-    Joining stops it; each mint's deposit is an asset the ledger counts at
-    par (`deposit`), and the kernel charges it only its opportunity and
-    carried age.
+    Joining stops it; each mint's deposit (ten years' premium on the
+    coverage activated) is an asset the ledger counts at par (`deposit`),
+    and the kernel charges it only its opportunity and carried age.
+  * Buck.mint's arithmetic.  mint(amount) settles a NET amount: coverage C
+    raises the limit K C and debits the deposit e C, so a BUCK drawn beyond
+    the activated headroom needs 1 / (K - e) of coverage.  (The debtor sizes
+    the mint in face units and meets "insufficient credit allocation" near
+    its last unactivated face; the retiree asks the net amount.)
 
 The ledger identity extends the debtor's by the costs only the real path
 pays in cash:
@@ -187,18 +192,18 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
 
     def _decide(self, d, ff, k, limit, drawn, unactivated, ctr) -> None:
         spendable = max(0, limit - drawn)
-        capacity = spendable + (unactivated * k // 10 ** 18) * 95 // 100
         ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
         at_renewal = self._at_renewal()
         terms = carry.RefiTerms(
             debt=self.mortgage / M6, rate=self.apr, face=self._face0 / M6,
             premium_bp=self.premium_rate, joined=self.joined,
-            payback_y=self.theta,
+            payback_y=self.theta, k=k / 1e18, headroom=spendable / M6,
+            unactivated=unactivated / M6,
             fixed_cost=0.0 if self.joined else self.switch_cost / M6,
             penalty_months=0.0 if at_renewal else self.penalty_months,
             risk=self.risk)
-        v = carry.best_refinance(terms, capacity / M6, ru / M6, rb / M6, fee)
+        v = carry.best_refinance(terms, ru / M6, rb / M6, fee)
         if not v.go:
             ctr["rtrWaits"] = ctr.get("rtrWaits", 0) + 1
             return
@@ -211,44 +216,49 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
             ctr["rtrCashWait"] = ctr.get("rtrCashWait", 0) + 1
             return
 
-        # Face to activate: the draw and its deposit, beyond what is already
-        # spendable, K-scaled (the debtor's own arithmetic, +5%).
-        need = buck + int(v.deposit * M6)
-        face = 0
-        if need > spendable and k > 0:
-            face = min(unactivated,
-                       ((need - spendable) * 10 ** 18 // k) * 105 // 100)
+        # Buck.mint takes the NET amount the new coverage settles: coverage
+        # C settles C x (1 - e), and each credit settles at most its
+        # unactivated face x (1 - e) -- ask a hair under that.
+        e_bp = self.premium_rate * carry.POOL_ROI_INV
+        amount = 0
+        if v.coverage > 0:
+            net_cap = unactivated * (10_000 - e_bp) // 10_000
+            amount = min(int(v.coverage * M6) * (10_000 - e_bp) // 10_000
+                       * 1_002 // 1_000,
+                       net_cap - net_cap // 10_000)
         # The funding gate: hold poolPrincipal x fundingFactor BEFORE the
         # mint.  Short, the household SAVES (buys BUCK) and waits a month.
-        if face >= M6 and ff:
+        if amount >= M6 and ff:
             try:
                 _, principal = d.buck.functions.quoteMint(
-                    face, self._token_ids).call()
+                    amount, self._token_ids).call()
             except Exception:
                 principal = 0
-            required = principal * ff // 10 ** 18
+            # +0.5%: the gate is strict (balance >= required) and Buck.mint
+            # runs compute() before it reads the factor, which can move it.
+            required = principal * ff // 10 ** 18 * 1_005 // 1_000
             bal = d.buck.functions.balanceOf(self.proxy.address).call()
             short = required - bal
-            if short > M6:
+            if short > 0:
                 budget = int(max(0, cash - fixed - penalty - self.cash_buffer)
                              * self.save_rate)
                 if budget > M6:
                     try:
-                        self._buy_track(d, min(short, budget))
+                        self._buy_track(d, min(short * 101 // 100 + M6, budget))
                         ctr["rtrSaved"] = ctr.get("rtrSaved", 0) + 1
                     except Exception as e:
                         ctr["rtr_save_err"] = repr(e)[:200]
                 bal = d.buck.functions.balanceOf(self.proxy.address).call()
-                if required - bal > M6:
+                if bal < required:
                     ctr["rtrGateWait"] = ctr.get("rtrGateWait", 0) + 1
                     return
 
-        if face >= M6:
+        if amount >= M6:
             try:
                 pre = d.buck.functions.signedBalanceOf(
                     self.proxy.address).call()
                 self._proxy_exec(d, d.buck.address,
-                                 d.buck.encode_abi("mint(uint256)", args=[face]))
+                                 d.buck.encode_abi("mint(uint256)", args=[amount]))
                 post = d.buck.functions.signedBalanceOf(
                     self.proxy.address).call()
                 self.premium_paid += max(0, pre - post)

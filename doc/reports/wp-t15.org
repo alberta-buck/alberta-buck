@@ -1,0 +1,101 @@
+#+TITLE: T15 report -- the external-debt retiree
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-26
+#+OPTIONS: ^:nil toc:2 num:t
+
+* Summary
+
+PENDING-SUMMARY
+
+* The role, and what it replaces
+
+=doc/ORGANIC-SCALE.org= "The stand before the controller" names the
+external-debt retiree first, beside the income channel, because it sets
+g: a real borrower refinances a USD mortgage into BUCK credit when the
+premium, the funding factor and the discount make it pay, and that
+decision over a population IS the supply flow per unit K.  The thin cast
+replaced the decision with a formula -- the =endog= debtor's arrival
+clock advancing at (K / 0.75) x (1 + 5 (1 - bvib)), capped at 3x -- and
+WP-16's g (~50k BUCK/day per unit K) was that formula's.
+
+=ExternalDebtRetireeAgent= (=alberta_buck/sim/household_agents.py=) is
+the =BuckCreditDebtorAgent='s household -- the same insured home, USD
+mortgage, income, fair ledgers (master fe3083f) and market legs, audited
+to the ledger -- with the arrival replaced by a monthly decision taken by
+the carry kernel (=alberta_buck/sim/carry.py=):
+
+- *A household from day 0.*  No arrival clock.  Until it joins it lives
+  the external life: income, the mortgage payment, and the insurance
+  premium paid as a COST, in the real ledger as in the counterfactual.
+- *The decision.*  Each month: the most it can retire (K-scaled credit
+  capacity, net of the deposit; at most half the pool's USDC), five sizes
+  valued, the best taken if its carry repays its one-time costs within
+  theta years.
+- *Partial refinancing.*  The atomic debtor converts the whole mortgage
+  or nothing, so K acted on it as a threshold (LTV <= K).  The retiree
+  retires what K lets it draw, keeps the rest external, and tops up when
+  K rises: the supply answers K as a flow.
+- *The funding gate is real.*  Short of poolPrincipal x fundingFactor it
+  saves (buys BUCK) and waits a month.
+
+* Insurance as an outlay (the design owner's instruction)
+
+Master fe3083f made the debtor ledger compare the two paths fairly: both
+insure the same asset at the same rate; the external path pays the
+premium as it falls due, a cost; the BUCK path deposits POOL_ROI_INV (10)
+years' premium on what it draws, an asset the pool returns when the
+insurance is dropped, charged only the opportunity of the capital.  The
+kernel carries that into the DECISION, so a household refinances on the
+same accounting the audit judges it by:
+
+| carry term (/yr)  | value                                        | source                                                       |
+|-------------------+----------------------------------------------+--------------------------------------------------------------|
+| interest          | + usd x rate                                 | the external interest no longer paid                         |
+| relief            | + coverage x 2%                               | =BuckCredit.jubileeRelief= accrues on the activated coverage |
+| premium           | + face x premium, until it joins              | the external premium stops once BuckCredit insures           |
+| deposit_opp       | - deposit x opportunity (the external rate)   | fe3083f: the deposit's only cost is the opportunity          |
+| deposit_age       | - deposit x 2%                                | bd792e7: a Carrying pool's refund carries its accrued age back |
+
+The deposit is Buck.sol's: e = POOL_ROI_INV x premium per unit of
+coverage, and the limit is K x the activated coverage, so a unit of
+coverage adds K - e of spendable.  Drawing B BUCK beyond the headroom
+already activated needs coverage C = (B - headroom) / (K - e) and
+deposits e C; a top-up inside existing headroom deposits nothing.  K
+therefore enters the decision twice: the capacity (what can be drawn at
+all) and the coverage per BUCK drawn (a higher K, a smaller deposit).
+| risk              | - buck x risk                                 | owing a basket-indexed unit against USD income (assumed)     |
+
+| one-time          | value                                        |
+|-------------------+----------------------------------------------|
+| execution         | buck - usd: the liability at par beyond the USD it retired |
+| fixed             | switching cost (legal, appraisal, discharge), on joining only |
+| penalty           | usd x rate x penalty_months / 12, off the renewal date |
+
+Go iff carry > 0 and theta x carry > one-time.  With every term but the
+interest zeroed this is the octl debtors' theta law.  With the whole face
+activated the deposit is ten years' premium on the face, so the BUCK
+path's insurance is the cheaper one below an opportunity rate of
+1 / POOL_ROI_INV = 10%, whatever the premium; the relief the coverage
+earns (2%/yr) offsets the carried age of the deposit many times over.
+=test_carry.py= pins the terms, the theta-law reduction, and a household
+that refinances under this accounting and would not under the old one
+(the deposit written off as a loss).
+
+* Commits
+
+PENDING-COMMITS
+
+* Files
+
+- new: =alberta_buck/sim/carry.py= (the kernel), =alberta_buck/sim/household_agents.py=
+  (the retiree; =python -m alberta_buck.sim.household_agents VECTOR= summarizes
+  a vector), =alberta_buck/test/test_carry.py=,
+  =alberta_buck/sim/experiments/organic-retiree.toml=,
+  =alberta_buck/sim/experiments/kstep-organic-retiree-{ctrl,m10,p10}.toml=
+- appended / refactored: =equilibrium_agents.py= (the debtor's steps 4-5 and
+  unwind extracted as =_carry_tail=, byte-identical), =kdesign.py= (=ksteps= /
+  =kfit= on any base experiment; the WP-16 interventions factored into
+  =k_step_interventions=, its committed TOMLs unchanged), =loop.py=
+  (registration), =test_kdesign.py= (the K-step TOMLs pinned)
+
+PENDING-EVIDENCE

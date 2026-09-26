@@ -9,18 +9,25 @@ from alberta_buck.sim import carry
 
 def terms(**kw):
     base = dict(debt=400_000.0, rate=0.055, face=900_000.0, premium_bp=35,
-                joined=False, payback_y=2.0)
+                joined=False, payback_y=2.0, k=0.75, headroom=0.0,
+                unactivated=900_000.0)
     base.update(kw)
     return carry.RefiTerms(**base)
 
 
-def test_deposit_is_pool_roi_inv_years_of_premium():
-    # Buck.sol: take = amount * BP / (BP - rate * 10); principal = take - amount
-    amount = 100_000.0
-    take = amount * 10_000 / (10_000 - 35 * carry.POOL_ROI_INV)
-    assert carry.deposit_per_buck(35) * amount == pytest.approx(take - amount)
-    assert carry.deposit_per_buck(0) == 0.0
-    assert math.isinf(carry.deposit_per_buck(1_000))
+def test_coverage_is_buck_sol_arithmetic():
+    """A unit of coverage adds K - e of spendable (the limit rises K, the
+    deposit e is debited from the same balance); a draw inside existing
+    headroom needs none."""
+    t = terms(k_margin=1.0)
+    e = carry.deposit_rate(35)
+    assert e == pytest.approx(0.035)
+    assert t.coverage_for(100_000) == pytest.approx(100_000 / (0.75 - e))
+    assert t.capacity == pytest.approx(900_000 * (0.75 - e))
+    h = terms(k_margin=1.0, headroom=60_000)
+    assert h.coverage_for(50_000) == 0
+    assert h.coverage_for(100_000) == pytest.approx(40_000 / (0.75 - e))
+    assert math.isinf(terms(k=0.03, k_margin=1.0).coverage_for(1))
 
 
 def test_pool_quote_inverts():
@@ -31,39 +38,41 @@ def test_pool_quote_inverts():
 
 
 def test_insurance_is_an_outlay_not_a_cost():
-    """master fe3083f: the BUCK path's insurance deposit is returned when the
-    insurance is dropped, so it is charged its opportunity (and the carried
-    age, net of its own relief), never its face; joining stops the external
-    premium, a real cost."""
-    t = terms()
+    """master fe3083f: the BUCK path's deposit is returned when the insurance
+    is dropped, so it is charged its opportunity and carried age, never its
+    face; joining stops the external premium, a real cost."""
+    t = terms(k_margin=1.0)
     v = carry.refinance(t, 400_000, 404_000)
-    dep = v.deposit
-    assert dep == pytest.approx(404_000 * carry.deposit_per_buck(35))
+    cov = 404_000 / (0.75 - 0.035)
+    assert v.coverage == pytest.approx(cov)
+    assert v.deposit == pytest.approx(cov * 0.035)
     assert v.parts["premium"] == pytest.approx(900_000 * 0.0035)
-    assert v.parts["deposit_opp"] == pytest.approx(-dep * 0.055)
-    assert v.parts["deposit_age"] == pytest.approx(-dep * carry.DEMURRAGE)
+    assert v.parts["relief"] == pytest.approx(cov * carry.RELIEF)
+    assert v.parts["deposit_opp"] == pytest.approx(-v.deposit * 0.055)
+    assert v.parts["deposit_age"] == pytest.approx(-v.deposit * carry.DEMURRAGE)
     # the insurance leg as a whole favours the BUCK path at a 5.5% opportunity
-    ins = (v.parts["premium"] + v.parts["deposit_opp"]
-           + v.parts["deposit_age"] + dep * carry.RELIEF)
+    ins = sum(v.parts[k] for k in ("premium", "relief", "deposit_opp", "deposit_age"))
     assert ins > 0
-    # Drawing the whole face, the BUCK path's insurance is the cheaper one
-    # below an opportunity of (1 - 10p) / POOL_ROI_INV (9.65% at 0.35%);
-    # drawing less, the deposit is smaller and the edge wider.
-    p = t.premium_bp / 1e4
-    edge = (1 - carry.POOL_ROI_INV * p) / carry.POOL_ROI_INV
 
-    def ins_at(opp, buck):
-        w = carry.refinance(terms(opp_rate=opp), buck, buck)
-        return w.parts["premium"] + w.parts["deposit_opp"]
 
-    assert ins_at(edge - 1e-4, t.face) > 0 > ins_at(edge + 1e-4, t.face)
-    assert ins_at(edge + 1e-4, t.face / 2) > 0
+def test_whole_face_insurance_breaks_even_at_one_over_pool_roi_inv():
+    """With the whole face activated the deposit is 10 years' premium on the
+    face: the external premium p F against the opportunity 10 p F x opp."""
+    edge = 1.0 / carry.POOL_ROI_INV
+    for bp in (25, 35, 50):
+        def ins(opp):
+            t = terms(premium_bp=bp, opp_rate=opp, k_margin=1.0)
+            # the draw that activates exactly the whole face
+            v = carry.refinance(t, 1.0, 900_000 * t.spend_per_cover)
+            assert v.coverage == pytest.approx(900_000)
+            return v.parts["premium"] + v.parts["deposit_opp"]
+        assert ins(edge - 1e-4) > 0 > ins(edge + 1e-4)
 
 
 def test_a_marginal_refinance_goes_only_when_the_deposit_is_an_outlay():
-    """The old accounting charged the deposit as a loss.  Pick a household
-    whose one-time costs leave it just short under that accounting: under
-    the fair one it refinances."""
+    """The old accounting charged the deposit as a loss.  A household whose
+    one-time costs leave it short under that accounting refinances under
+    the fair one."""
     t = terms(premium_bp=50, payback_y=0.6, fixed_cost=3_000.0,
               penalty_months=3.0, debt=150_000.0)
     v = carry.refinance(t, 150_000, 153_000)
@@ -96,32 +105,39 @@ def test_joined_household_saves_no_further_premium():
     assert v.parts["premium"] == 0
 
 
+def test_a_top_up_inside_headroom_makes_no_deposit():
+    v = carry.refinance(terms(joined=True, headroom=200_000), 100_000, 100_500)
+    assert v.coverage == 0 and v.deposit == 0 and v.parts["relief"] == 0
+
+
 def test_no_carry_no_go():
     v = carry.refinance(terms(rate=0.001, risk=0.05, premium_bp=0), 100_000,
                         100_000)
     assert v.carry < 0 and not v.go
 
 
-def test_partial_refinance_answers_capacity():
+def test_partial_refinance_answers_k():
     """K sets what a household can draw.  Below its debt it retires what it
-    can and keeps the rest external; more capacity, more retired -- the
-    flow that answers K."""
-    t = terms(debt=600_000.0, payback_y=3.0, fixed_cost=2_000.0)
+    can and keeps the rest external; a higher K, more retired -- the flow
+    that answers K."""
     ru = rb = 50e6
     fee = 0.003
-    small = carry.best_refinance(t, 200_000, ru, rb, fee)
-    large = carry.best_refinance(t, 400_000, ru, rb, fee)
-    full = carry.best_refinance(t, 2_000_000, ru, rb, fee)
-    assert small.go and large.go and full.go
-    assert small.usd < large.usd < full.usd
-    assert full.usd == pytest.approx(600_000)
-    # the draw and its deposit fit the capacity
-    assert small.buck + small.deposit <= 200_000
+    got = [carry.best_refinance(terms(debt=700_000.0, payback_y=3.0,
+                                      fixed_cost=2_000.0, k=k), ru, rb, fee)
+           for k in (0.55, 0.65, 0.75)]
+    assert all(v.go for v in got)
+    assert got[0].usd < got[1].usd < got[2].usd
+    assert got[2].usd < 700_000             # 900k x (0.7425 - 0.035) < 700k
+    full = carry.best_refinance(terms(debt=700_000.0, payback_y=3.0, k=0.95),
+                                ru, rb, fee)
+    assert full.usd == pytest.approx(700_000)
+    # the draw and its deposit fit the coverage available
+    assert got[0].coverage <= 900_000 * (1 + 1e-9)
 
 
 def test_depth_caps_the_sale():
-    t = terms(debt=5_000_000.0, payback_y=3.0)
-    v = carry.best_refinance(t, 1e9, 2e6, 2e6, 0.003)
+    t = terms(debt=5_000_000.0, payback_y=3.0, face=10e6, unactivated=10e6)
+    v = carry.best_refinance(t, 2e6, 2e6, 0.003)
     assert v.usd <= 0.5 * 2e6 + 1e-6
 
 
