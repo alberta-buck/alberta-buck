@@ -107,18 +107,17 @@ scripted rather than hand-typed and hand-edited, so it re-records when the comma
 
 *Blockers -- decisions for the author:*
 
-1. *Third-party documents.*  =doc/SILMARILS*= (a UBC/EternaX paper, its TeX and authors' emails)
-   is tracked; the Grynvault, pairing-free PRE and umbral PDFs are in history (removed later);
-   =doc/Panoptic-carry.pdf= is on =feature/carry-convexity=.  REUSE.toml itself says these must go.
-   Removing them from history means a rewrite, or redistribution permission.
-2. *History.*  *Decided (author, 2026-09-25): option (a), a =git filter-repo= rewrite, scheduled
-   after =feature/carry-convexity= merges into master* (that branch carries the Panoptic PDF and
-   would otherwise reintroduce it).  ~261 MB is reachable from master, mostly re-rendered PDFs/PNGs
-   and the old
-   =identity-cache.json=.  Options: (a) =git filter-repo= the paths above and the bulk (commit ids
-   change from the earliest affected commit, including those the 0.2.0 bundles record in
-   =compiler.json=); (b) publish a fresh repository from today's tree, keeping this one private as
-   the full history; (c) keep history, with permission for the third-party files.
+1. *Third-party documents.*  *Resolved (author, 2026-09-25): removed from the trees, not from
+   history.*  The SILMARILS paper and its sources (=doc/SILMARILS.pdf=, =.txt=, =-TeX.tar.gz=,
+   =doc/SILMARILS/=) leave master with =feature/public=; =doc/Panoptic-carry.pdf= left
+   =feature/carry-convexity=; the Grynvault, pairing-free PRE and umbral PDFs were already gone
+   from every branch, and REUSE.toml no longer names any of them.  The author's own
+   =doc/SILMARILS-evaluation.org= and =scripts/review/silmarils_model.py= stay.
+2. *History.*  *Decided (author, 2026-09-25): no rewrite* -- removal from the trees is sufficient;
+   the documents stay only in history.  (Measured on a mirror the same day: the third-party
+   documents are about 5 MB packed, but removing them rewrites 727 of 759 commits and all ten
+   release tags, whose ids the 0.2.0 packages record.  A fresh clone is 168 MiB; dropping deleted
+   bulk and the rendered-PDF history would bring it to about 90 MiB, should that be wanted later.)
 3. *Security findings.*  =doc/review/= publishes identity findings with exploit reproductions
    (since repaired).  Publish deliberately, or move them out.
 4. *Branches and tags.*  31 branches on origin would go public (stale =execute-plan/*=, unmerged
@@ -150,7 +149,7 @@ closing README's SNARK section; branch protection on =master= once public.
 |       | observer; persistence; headless story test; =make sandbox= (S1-S5 done)         |        |
 | G3    | README.org front door + =doc/{INSTALL,DEVELOP,SANDBOX}.org=                     | done   |
 | G4    | Demo recording (scripted cast, agg GIF) + sandbox screenshots                 | open   |
-| G5    | Decisions 1, 3-5; SECURITY.md; history rewrite (after carry-convexity); public  | open   |
+| G5    | Decisions 3-5; SECURITY.md; branches to publish; make the repository public     | open   |
 | G6    | Shared world: sim-server bridge, then Notes from fixtures, the insurer gate     | later  |
 
 * G1 hygiene, done (2026-09-25)

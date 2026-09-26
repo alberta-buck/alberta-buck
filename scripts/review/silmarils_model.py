@@ -1,6 +1,6 @@
 # Run: PYTHONPATH=. python scripts/review/silmarils_model.py  -- review evidence; see doc/review/identity-findings.md
-"""Executable model of two-party SILMARILS (doc/SILMARILS/SILMARILS.tex,
-Algorithms KeyGen/Sign/Verify, eqs. silmarils_eqs / silmarils_ver).
+"""Executable model of two-party SILMARILS (the SILMARILS paper's Algorithms
+KeyGen/Sign/Verify, eqs. silmarils_eqs / silmarils_ver).
 
 Purpose: check, by computation rather than reading, three questions raised by
 the review and by doc/SILMARILS-evaluation.org:
