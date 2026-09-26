@@ -1,5 +1,4 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in LICENSING.md.
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+TITLE: Regenerating the SNARK Artifacts
