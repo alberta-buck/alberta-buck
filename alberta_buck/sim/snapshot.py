@@ -141,6 +141,23 @@ WP14_SK_KEYS = ("sk_ut", "sk_ut_f", "sk_ut_n", "sk_fac", "sk_fac_n",
                 "sk_sd", "sk_sd_n")
 
 
+# T15: the external-debt retirees' decision counters (household_agents.py).
+# Present only when a retiree has counted something, so every other cell
+# keeps its frame shape (house rule 5).  camelCase in ctr, snake_case here.
+T15_RTR_KEYS = {"rtrRefis": "rtr_refis", "rtrTopUps": "rtr_top_ups",
+                "rtrWaits": "rtr_waits", "rtrCashWait": "rtr_cash_wait",
+                "rtrGateWait": "rtr_gate_wait", "rtrSaved": "rtr_saved",
+                "rtrThrottled": "rtr_throttled", "rtrBuckSold": "rtr_buck_sold",
+                "rtrUsdRetired": "rtr_usd_retired", "rtrWhy": "rtr_why",
+                "rtr_err": "rtr_err", "rtr_save_err": "rtr_save_err",
+                "rtr_sell_err": "rtr_sell_err"}
+
+
+def _t15_frame(ctr) -> dict:
+    return {v: (dict(ctr[k]) if isinstance(ctr[k], dict) else ctr[k])
+            for k, v in T15_RTR_KEYS.items() if k in ctr}
+
+
 def _wp14_frame(d, ctr) -> dict:
     f = {k: ctr[k] for k in WP14_SK_KEYS if k in ctr}
     stabs = getattr(d, "sim_stabs", None)
@@ -826,6 +843,7 @@ class Snapshotter:
             # WP-14: the per-class stabilizers and the skews (only when
             # present; see _wp14_frame above).
             **_wp14_frame(d, ctr),
+            **_t15_frame(ctr),
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

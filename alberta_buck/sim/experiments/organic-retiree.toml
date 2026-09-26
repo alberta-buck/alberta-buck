@@ -1,0 +1,65 @@
+# ORGANIC-SCALE.org T15, the first role: the EXTERNAL-DEBT RETIREE in place
+# of the endog debtors.  The catalogue's "none" arm (settled physics, keyed
+# rng, the portcast cast) with its 30 BuckCreditDebtorAgents -- who arrive by
+# the hazard (K / 0.75) x (1 + 5 (1 - bvib)) -- replaced by 30
+# ExternalDebtRetireeAgents drawn from the same household distributions, who
+# are households from day 0 and refinance when and as far as the carry
+# comparison says (alberta_buck/sim/carry.py).  No arrival formula remains
+# in the credit channel: T15's first gate is that g, the supply flow per
+# unit K, comes out of these decisions (doc/K-AND-OPS.org section 7).
+# Design of record: doc/ORGANIC-SCALE.org, "The stand before the controller".
+name = "organic-retiree"
+notes = "catalogue none arm; 30 external-debt retirees replace the 30 endog debtors"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 2.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
+
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 0
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+ExcursionArbAgent = 5
+ExcursionCreditArbAgent = 3
+ExternalDebtRetireeAgent = 30
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+# The household: the catalogue debtors' draws, verbatim, but the premium --
+# master fe3083f's typical home premium in place of the 0.5-1.5% chosen to
+# make the funding gate bite (the deposit, 10x, still does).
+[agents.ExternalDebtRetireeAgent]
+theta = [0.0, 3.0]          # payback years for one-time costs
+apr = [0.045, 0.065]        # the external mortgage rate
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [25, 50]       # home insurance, %/yr of the insured value
+save_rate = [0.25, 0.75]
+term_months = 60            # five-year terms
+renew_frac = [0.0, 1.0]     # a seasoned ladder of renewal dates
+penalty_months = 3.0        # prepayment penalty off renewal
+switch_k = [1.0, 3.0]       # legal, appraisal, discharge, $k
+risk = [0.0, 0.01]          # /yr for owing basket-indexed BUCK
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0
+
+# (no injection)
