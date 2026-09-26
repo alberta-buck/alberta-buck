@@ -62,7 +62,9 @@ carry the detail.
   re-executes byte-identical. Phase 6: the security argument is
   written into =alberta-buck-proofs.org= (Part I and the closing
   review section); the independent review is the only open item. The
-  branch is not merged.
+  branch was merged into =feature/paper-editing= on 2026-09-20
+  (=da3c59f=) and reached =master= with protocol v2 (=08e827b=), so A'
+  ships in every 0.2 release; it stays a candidate until the review.
 - The next program is decided and specified in section
   [[#accumulator][The certified-attribute accumulator]]: salted per-tree
   leaves, authority-side admission that stays off the registration
