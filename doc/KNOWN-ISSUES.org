@@ -10,39 +10,50 @@ resolved it.  An issue reported privately is added here when it is disclosed.
 
 | ID   | Issue                                       | Status                               |
 |------+---------------------------------------------+--------------------------------------|
-| KI-1 | An identity issuer can link registrations   | Open; a candidate repair in review   |
+| KI-1 | An identity issuer could link registrations | Mitigated in 0.2.0; review pending   |
 | KI-2 | One interim insurance pool for every credit | Open; the per-insurer design written |
 | KI-3 | The Groth16 setup is a development one      | By design until v1.0.0               |
 | KI-4 | The sandbox keeps its keys in the clear     | By design: it is a simulation        |
+| KI-5 | Incomplete licence notices in distributions | Open                                 |
 
-* KI-1: An identity issuer can link registrations
+* KI-1: An identity issuer could link registrations
 
-- Status :: Open.  A launch gate: no production registrations exist, so nothing already on chain
-  needs migrating.
+- Status :: Mitigated in 0.2.0, and believed fixed; the independent cryptographic review the fix
+  awaits is what remains.  Until it closes, treat the mitigation as a candidate.
 - Affects :: the registration presentation (=IdentityRegistry.register= and the wallet kernels that
-  build it), and the A1/A2 Notes keys derived from an identity.
+  build it), and the A1/A2 Notes receiving keys.
 
-A wallet registers by presenting a re-randomized Pointcheval-Sanders signature on its holder's
-identity, with a proof.  The public transcript lets the issuer that certified a person recognize
-that person's registration, and then follow the account's publicly linked activity.  It does not
-let anyone recover an unknown identity or decrypt the identity ciphertexts.  The review finds six
-parts to it:
+As first built, a wallet registered by presenting a re-randomized Pointcheval-Sanders signature on
+its holder's identity, with a proof, and that public transcript let the issuer that certified a
+person recognize the person's registration and follow the account.  It never let anyone recover an
+unknown identity or decrypt the identity ciphertexts.  The review found six parts to it; what the
+code does about each, on =master= and in every 0.2 release:
 
-| ID | Problem                                                                                 |
-|----+-----------------------------------------------------------------------------------------|
-| R1 | The public PS signature tests a known identity                                          |
-| R2 | The registration proof's public fields test a known identity, with no issuer key needed |
-| R3 | A public credential plus a disclosed identity authorizes a fresh registration           |
-| R4 | The additive-blinding prototype once proposed leaks through its own proof               |
-| R5 | The A1/A2 identity-derived encryption keys are known to the issuer                      |
-| R6 | Issuance logs, policy metadata and accumulator designs can expose further links         |
+| ID | Problem                                          | Now                                   |
+|----+--------------------------------------------------+---------------------------------------|
+| R1 | The public PS signature tested an identity       | Mitigated: the A' presentation        |
+| R2 | The proof's public fields tested an identity     | Mitigated: the A' presentation        |
+| R3 | A public credential and identity could register  | Mitigated: A' (Theorem R-unforge)     |
+| R4 | A proposed blinding fix leaked through its proof | Never merged; superseded by A'        |
+| R5 | A1/A2 Notes keys were derived from the identity  | Mitigated: independent receiving keys |
+| R6 | Issuance logs, policy metadata, admission        | Partly: accumulator leaves are salted |
 
-- Detail :: [[file:review/identity-findings-2.org][doc/review/identity-findings-2.org]], with the
-  reproductions.
-- Next :: Pathway A', a single-commitment presentation that avoids the R2/R4 leak and maps to the
-  EVM pairing precompile, is implemented across the four backends on =feature/a-prime=.  It is a
-  candidate, not a repair, until its review ([[file:review/a-prime-plan.org][the A' plan]],
-  phase 6) closes; it changes the issuer key's form.
+- A' :: a single-commitment registration presentation that hides the signed identity and maps to
+  the EVM pairing precompile (merged 2026-09-20).  The review's own tests now assert the attacks
+  fail: =alberta_buck/test/review/test_wallet_failures.py=, tests 1 and 2.
+- R5 :: Notes are addressed to a receiving key derived from the wallet, not the identity, bound to
+  the identity inside the salted accumulator leaf so the binding is never public (protocol v2).
+- Still to watch :: R3 stays closed only while no wallet exports the raw credential -- the
+  sandbox's /Copy card/ does, by design (KI-4).  A' rests on PS unforgeability in the
+  committed-message key form, and its fresh blinding is security-critical (test 10).  The issuer's
+  own issuance logs and policy metadata (R6) are operational, not code.  Not addressed: a
+  malicious issuer issuing duplicates, and the optional holder secret.
+- Detail :: [[file:review/identity-findings-2.org][doc/review/identity-findings-2.org]] (the
+  findings and their reproductions); [[file:review/a-prime-plan.org][the A' plan]];
+  [[file:review/notes-receiving-key.org][the receiving-key architecture]];
+  [[file:../alberta-buck-proofs.org][alberta-buck-proofs.org]], Part I (the security argument).
+- Next :: the independent review that the proofs paper's "Review Status and Remaining Work for
+  Part I" briefs -- of the argument and of the Solidity verifier -- and then this entry resolves.
 
 * KI-2: One interim insurance pool for every credit
 
@@ -89,3 +100,31 @@ the tab unless the visitor exports it.
 
 - Detail :: [[file:SANDBOX.org][doc/SANDBOX.org]].
 - Next :: nothing, for the sandbox.  A wallet for real value would keep its keys elsewhere.
+
+* KI-5: The published packages and the hosted sandbox carry incomplete licence notices
+
+- Status :: Open.  A licence-compliance gap, not a protocol one.
+- Affects :: on npm, =alberta-buck-contracts=, =-kernel= and =-core=; on PyPI,
+  =alberta-buck-contracts=, =-core= and =-kernel= (every 0.2 release); the hosted sandbox; and
+  [[file:../NOTICE][NOTICE]].
+
+- Our own licences :: of the seven packages, only =alberta-buck= on PyPI ships its licence text
+  (with NOTICE).  The other six name their licence -- CAL-1.0 or GPL-3.0-or-later -- in their
+  metadata, but carry no text.
+- The kernels' Rust dependencies :: the WebAssembly (npm) and native (PyPI) kernels statically link
+  crates under MIT or Apache-2.0 -- arkworks, =sha2=, =serde_json= and their dependencies -- whose
+  terms ask that the notices travel with every copy, binaries included.  None do.
+- The hosted sandbox :: its =app.js= bundles viem and tevm (MIT), with tevm's =@ethereumjs/evm=
+  and =@ethereumjs/util= under MPL-2.0, which asks that recipients be told where the source is; and
+  the compiled Uniswap contracts it deploys -- the v3 factory and pool (GPL-2.0-or-later, since
+  BUSL-1.1's change date), WETH9 (GPL-3.0), the Universal Router (GPL-3.0-or-later) and Permit2
+  (MIT).  The build keeps only the few licence comments marked for it (=@noble=, =@scure=,
+  =buffer=).
+- NOTICE :: lists the build-time Solidity and Rust dependencies, but not the three third-party
+  files vendored in the tree (=src/lib/UniswapV3OracleLib.sol=, the Universal Router and Permit2
+  artifacts; REUSE.toml records their licences), nor what the sandbox redistributes.
+
+- Next :: ship each package's licence text (npm =files=, setuptools =license-files=); generate
+  the kernels' third-party notices (=cargo about= or equivalent) into the wasm and wheel builds;
+  generate the sandbox's notices at build time and serve them beside =app.js=, with the Uniswap
+  contracts' licences and source links; and bring NOTICE up to date with all of it.
