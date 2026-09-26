@@ -1,6 +1,6 @@
 version = 1
 SPDX-PackageName = "alberta-buck"
-SPDX-PackageSupplier = "Perry Kundert <perry@kundert.ca>"
+SPDX-PackageSupplier = "Perry Kundert <perry@dominionrnd.com>"
 SPDX-PackageDownloadLocation = "https://github.com/alberta-buck/alberta-buck"
 
 # Licensing is declared HERE rather than by stamping ~657 source files with

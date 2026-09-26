@@ -86,7 +86,7 @@ Nothing here is legal advice.
 If you want to do something this document does not clearly permit, ask. The
 answer to good-faith requests is usually yes, and it is usually quick.
 
-Contact: Perry Kundert <perry@kundert.ca>
+Contact: Perry Kundert <perry@dominionrnd.com>
 
 ---
 
