@@ -6,297 +6,161 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 #
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: Alberta Buck -- Ethereum Smart Contracts
-#+OPTIONS: ^:nil toc:nil
+#+title: Alberta Buck
+#+OPTIONS: ^:nil toc:nil num:nil
 
-* Overview
+*Money issued against insured real assets, held steady against a basket of base commodities --
+private by default, accountable by law.*
 
-Ethereum implementation of the [[https://perry.kundert.ca/range/finance/alberta-buck/][Alberta Buck]] -- citizen-issued, wealth-backed
-liquidity for Alberta.  Three interacting smart contracts:
+The Alberta Buck (BUCK) is a digital currency its citizens issue themselves.  An insurer vouches for
+the value of a real asset -- a home, a farm, a fleet, a vault of gold -- and how it wears; its owner
+can then spend part of that insured value as BUCKs.  Ten years' premium goes to the insurance pool
+as a deposit, not a cost: the pool invests it to earn the premiums, and returns it when the
+insurance is dropped.  How much credit each unit of insured value supports (=BUCK_K=) is set by an
+on-chain controller that holds the BUCK's value to a basket of base commodities, so the currency is
+anchored to things rather than to policy.  Held BUCKs pay a small demurrage (2 % a year) into a
+Jubilee fund, so money keeps moving and old obligations melt.
 
-- *BuckCredit* (ERC-721) :: An NFT representing an insurer's offer of parametric insurance on a
-  real-world asset.  Supports deterministic depreciation (none, linear, declining balance) and
-  piecemeal client activation.
+Every account belongs to a person or institution an identity issuer has certified -- but the chain
+never learns who.  Identities travel encrypted; each party to a payment can later prove whom it
+dealt with, and no one else can.  Bearer /Notes/ let value move privately, with receipts that stand
+up without revealing the parties.
 
-- *Buck* (ERC-20) :: A fungible token minted against aggregated BuckCredit values.  Enforces
-  per-account credit limits (credit value * BUCK_K) and collects quadratically-scaled default
-  insurance premiums.
+This repository holds the whole system: the Ethereum contracts, the zero-knowledge circuits, the
+cryptographic kernels in Rust, JavaScript and Python, the simulations, and the papers that explain
+it all.
 
-- *BuckKController* :: An on-chain PID controller that computes a dynamic credit-limit multiplier
-  from commodity-basket oracle prices vs. BUCK market price, maintaining purchasing-power parity.
+* Try it
 
-Design document: [[https://perry.kundert.ca/range/finance/alberta-buck-ethereum/][The Alberta Buck -- Ethereum Implementation]]
+A private, simulated Alberta Buck world runs in your browser tab: certify people, give them
+wallets, insure their homes, activate credit, pay one another, trade BUCKs for dollars -- then look
+at the chain the way a stranger would.  Open [[https://sandbox.albertabuck.ca/]]; nothing leaves the
+tab.  Or run it yourself, with [[https://nixos.org/download][Nix]] (flakes enabled):
 
-* Getting Started
-
-** Prerequisites
-
-- [[https://nixos.org/download.html][Nix]] (with flakes enabled) -- provides Foundry, Solidity compiler, Python, Node.js
-- An Ethereum RPC endpoint for forked-network testing (Alchemy free tier, Infura, or a local node)
-
-** Setup
-
-#+BEGIN_SRC bash
-  git clone git@github.com:pjkundert/alberta-buck.git
-  cd alberta-buck
-  make nix-install          # Install Solidity dependencies (OpenZeppelin, Chainlink, Uniswap)
+#+BEGIN_SRC sh
+git clone https://github.com/alberta-buck/alberta-buck
+cd alberta-buck
+make nix-sandbox          # then open http://localhost:8000/
 #+END_SRC
 
-** Build and Test
+[[file:images/sandbox/credit-quote.png]]
 
-The =nix-%= Makefile target runs any target inside the Nix flake shell, providing Foundry (forge,
-anvil, cast), Solidity compiler, Python and Node.js -- no manual =nix develop= required:
+The tour and the details: [[file:doc/SANDBOX.org][doc/SANDBOX.org]].
 
-#+BEGIN_SRC bash
-  make nix-build                           # Compile contracts
-  make nix-test                            # All tests, verbose
-  make nix-snapshot                        # Gas usage report
-  make nix-fmt                             # Format Solidity source
-#+END_SRC
+* What is here
 
-Or enter the shell interactively for ad-hoc commands:
+| Path                 | What it is                                                               |
+|----------------------+--------------------------------------------------------------------------|
+| =src/=               | the Solidity contracts: =Buck= (the ERC-20), =BuckCredit= (insured       |
+|                      | assets, ERC-721), the =BUCK_K= controllers, =IdentityRegistry=, =Notes=, |
+|                      | the =BuckBasket=, adapters and the Groth16 verifiers                     |
+| =circuits/=          | the Circom circuits behind Notes: mint, spend, deposit folds,            |
+|                      | identity membership                                                      |
+| =core/=              | the kernels -- Rust (=core/rust=), WebAssembly and JavaScript            |
+|                      | (=core/js=), Python (=core/python=) -- and the published contract        |
+|                      | bundle (=core/contracts=)                                                |
+| =core/js/sandbox/=   | the browser sandbox; =core/js/demo/= holds the earlier demos             |
+| =alberta_buck/=      | the Python reference: wallet, identity, registry, receipts, and the      |
+|                      | simulations (=alberta_buck/sim=)                                         |
+| =test/=              | the Foundry tests and shared test vectors                                |
+| =scripts/=           | deployment scripts, the SNARK setups, release packaging                  |
+| =doc/=               | guides and design reviews                                                |
+| =alberta-buck-*.org= | the papers (below)                                                       |
 
-#+BEGIN_SRC bash
-  nix develop                              # Enter dev shell
-  forge test --match-test test_activate    # Specific test
-  forge test --match-contract BuckCredit   # All tests in a contract
-#+END_SRC
+The kernels and contracts are published at 0.2.0:
 
-** SNARK Circuits and Trusted Setup
+| Registry  | Packages                                                     |
+|-----------+--------------------------------------------------------------|
+| npm       | =alberta-buck-core=, =-kernel=, =-contracts=                 |
+| PyPI      | =alberta-buck=, =alberta-buck-core=, =-kernel=, =-contracts= |
+| crates.io | =alberta-buck-math=, =-identity=, =-registry=, =-wallet=     |
 
-The BUCK Notes mint/spend circuits (=circuits/*.circom=) compile to per-N Groth16
-verifiers (=src/MintBatchN*Groth16Verifier.sol=, dispatched on-chain by
-=cms.length=).  A Groth16 setup has two phases, and they differ enormously in
-cost:
+Installing and using them: [[file:doc/INSTALL.org][doc/INSTALL.org]].
+Building and testing everything here: [[file:doc/DEVELOP.org][doc/DEVELOP.org]].
 
-1. *Powers of Tau* (=build/snark/ptau/pot*.ptau=) -- the /universal/,
-   circuit-*independent* structured reference string.  This is the slow part
-   (the =pot15..pot20= set is multi-GB and takes ~hours to generate).  It
-   depends only on the FFT domain size, so a circuit edit that does not cross a
-   power-of-two boundary *reuses* it untouched.
-2. *Per-circuit zkey + Solidity verifier* -- embeds the R1CS / verification key.
-   Regenerated on every circuit change, in ~minutes, reusing the ptau.
+* Read
 
-So after editing a circuit you normally only regenerate phase 2:
+Each paper is an Org document in this repository, rendered to PDF in =images/=.
 
-#+BEGIN_SRC bash
-  make snark            # phase-2 verifiers + test fixtures (usual circuit-change path)
-  make snark-setup      # phase-2 only: per-N zkeys + src/MintBatchN*Verifier.sol
-  make snark-fixtures   # regenerate build/snark/.../fixtures/*.json the forge tests load
-  make snark-ptau       # phase-1: rebuild the dev Powers of Tau from scratch (~hours)
-  make snark-clean      # drop per-N build dirs (forces a clean phase-2 rebuild)
+*Start here*
+- [[file:alberta-buck-privacy.org][Privacy]]
+  ([[file:images/alberta-buck-privacy.pdf][pdf]]) -- Bob pays Carol while Mallory watches: what each
+  party learns, told as a story and executed against the real contracts.
+- [[file:alberta-buck-paper.org][Accountable Anonymity for Public Money]]
+  ([[file:images/alberta-buck-paper.pdf][pdf]]) -- the case for bearer Notes that are private and
+  yet leave evidence.
+- [[file:alberta-buck-demo.org][A Farmer's Demonstration]]
+  ([[file:images/alberta-buck-demo.pdf][pdf]]) -- one farm through the whole Alberta Buck lifespan.
 
-  make nix-test         # confirm on-chain parity (MintVerifier.t.sol et al.)
-#+END_SRC
+*The system*
+- [[file:alberta-buck-ethereum.org][Ethereum Implementation]]
+  ([[file:images/alberta-buck-ethereum.pdf][pdf]]) -- the contracts and how they fit together.
+- [[file:alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]]
+  ([[file:images/alberta-buck-demurrage.pdf][pdf]]) -- why held money pays, and where it goes.
+- [[file:alberta-buck-ethereum-basket.org][The BuckBasket]]
+  ([[file:images/alberta-buck-ethereum-basket.pdf][pdf]]) -- the commodity anchor, and why it must
+  be heavy.
+- [[file:alberta-buck-operations.org][Basket Operations]]
+  ([[file:images/alberta-buck-operations.pdf][pdf]]) -- how the basket reads its pools and moves
+  value from rich constituents to poor.
+- [[file:alberta-buck-rebalance.org][Rebalancing the BuckBasket]]
+  ([[file:images/alberta-buck-rebalance.pdf][pdf]]) -- using timing, the one thing the basket's free
+  balancing leaves unused.
+- [[file:alberta-buck-ethereum-direct.org][The Direct Embodiment]]
+  ([[file:images/alberta-buck-ethereum-direct.pdf][pdf]]) -- measuring BUCKs against its basket
+  directly, not in dollars.
 
-Each pinned batch size gets its own circuit + verifier; override the set with
-=make snark SNARK_PINS="1 2 4 8 16"=.  =make snark-ptau= auto-bootstraps a larger
-ptau if a new pin crosses into a higher power of two (=N=64= needs =pot21=,
-=N=128= needs =pot22=, ...).
+*Identity, receipts and Notes*
+- [[file:alberta-buck-identity.org][Identity and Receipts]]
+  ([[file:images/alberta-buck-identity.pdf][pdf]]) -- certified identities that travel encrypted.
+- [[file:alberta-buck-identity-example.org][Identity: a Cryptography Example]]
+  ([[file:images/alberta-buck-identity-example.pdf][pdf]]) -- where each piece of identity data
+  lives at each step, worked through.
+- [[file:alberta-buck-notes.org][Notes]]
+  ([[file:images/alberta-buck-notes.pdf][pdf]]) -- bearer value with receipts.
+- [[file:alberta-buck-notes-flow.org][Notes Flow]]
+  ([[file:images/alberta-buck-notes-flow.pdf][pdf]]) -- one mint split into six Notes, executed end
+  to end.
+- [[file:alberta-buck-notes-serialized.org][Single vs. Serialized Sub-Notes]]
+  ([[file:images/alberta-buck-notes-serialized.pdf][pdf]]) -- a design memo on amortizing a mint
+  within a single Note.
+- [[file:alberta-buck-receipt.org][The Printable Receipt]]
+  ([[file:images/alberta-buck-receipt.pdf][pdf]]) -- an 80 mm thermal-printer slip that names both
+  parties to a payment.
+- [[file:alberta-buck-proofs.org][Formal Correctness Proofs]]
+  ([[file:images/alberta-buck-proofs.pdf][pdf]]) -- why the identity transformations are sound.
 
-*** Dev setup vs. production assets
+*Engineering*
+- [[file:alberta-buck-platform.org][Platform Architecture]]
+  ([[file:images/alberta-buck-platform.pdf][pdf]]) -- the shared core behind the simulations and
+  demos.
+- [[file:alberta-buck-ethereum-routing.org][The Routing Simulation]]
+  ([[file:images/alberta-buck-ethereum-routing.pdf][pdf]]) -- the real contracts and Uniswap on
+  anvil, driven by a Python economy.
+- [[file:alberta-buck-deployment.org][Publication and Deployment]]
+  ([[file:images/alberta-buck-deployment.pdf][pdf]]) -- publishing the packages and deploying the
+  contracts: the release book.
 
-All of the above use *fixed dev-only entropy* (=scripts/snark/setup.sh=
-contributes =alberta-buck-dev-*=).  The result is a *reproducible dev setup* --
-deterministic and green in tests, but *NOT secure*: the toxic waste \( \tau \) is
-public, so anyone can forge proofs.  *Never deploy the committed dev verifiers to
-a real network.*
+* Status
 
-Generating *production* assets requires a real multi-party ceremony, where the
-setup is sound as long as /at least one/ participant destroyed their secret:
+A prototype, unaudited, and not for anything of real value.  The Groth16 verifiers behind Notes
+come from a /development/ trusted setup whose secret is public -- anyone can forge their proofs --
+and stay so until v1.0.0; that is deliberate, since it lets the simulations model attacks a
+production setup would forbid.  The papers are drafts, revised as the code is.
 
-1. *Phase 1 (Powers of Tau).*  Either reuse a trustworthy existing universal
-   ceremony -- the Hermez "Perpetual Powers of Tau" finals
-   (=powersOfTau28_hez_final_NN.ptau=) are the standard for BN254/Groth16 --
-   choosing the size whose domain \( \ge \) your largest circuit (=pot20= for
-   =N=32=) and verifying it:
-   #+BEGIN_SRC bash
-     snarkjs powersoftau verify powersOfTau28_hez_final_20.ptau
-   #+END_SRC
-   or coordinate a fresh phase-1 MPC: =powersoftau new= \(\to\) many independent
-   =powersoftau contribute= (distinct parties, real hardware entropy) \(\to\)
-   =powersoftau beacon= (a public randomness beacon) \(\to\) =powersoftau
-   prepare phase2=.  Install the verified file as
-   =build/snark/ptau/potNN_final.ptau=.
-2. *Phase 2 (per circuit).*  For each =circuit.r1cs=: =groth16 setup= against the
-   production ptau, then collect *multiple independent* =zkey contribute= from
-   distinct parties (real entropy, not the piped dev strings), apply a
-   =zkey beacon=, =zkey verify=, and export the verification key +
-   =solidityverifier=.  =scripts/snark/setup.sh= shows the exact command shapes
-   (replace the dev-entropy contributions).
-3. *Deploy + rotate.*  Deploy the production =MintBatchN*Groth16Verifier= and
-   register them via =MintVerifierAdapter.registerVerifier= /
-   =Notes.setMintVerifier= behind governance, cutting over from the dev
-   verifiers.  Publish the ceremony transcript and each contributor's attestation
-   so the 1-of-\( n \) honest assumption is auditable.
+* Licences and contributing
 
-See the Makefile =SNARK circuits + trusted setup= section and
-alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") for the "Required Mint SNARK Signal" (issuer binding at mint).
-the circuit-level details.
+Two licences, applied by layer ([[file:LICENSING.md][LICENSING.md]] is the map and the decision of
+record): =core/= (the kernels) is *CAL-1.0*, the Cryptographic Autonomy License, which requires that
+anyone given this software's functionality can have their own data and is not locked out of it by
+keys; the contracts (=src/=) and =alberta_buck/= are *GPL-3.0-or-later*. Full texts in =LICENSE= and
+=core/LICENSE=; third-party components in =NOTICE=. The papers, this one included, are not under an
+open licence.
 
-** RPC Configuration
+Contributions are welcome under a CLA ([[file:CONTRIBUTING.md][CONTRIBUTING.md]] explains why not a
+DCO).
 
-Two environment variables control how tools connect to Ethereum:
-
-- =MAINNET_RPC_URL= :: The remote archive RPC endpoint (Alchemy, Infura, or a local Reth/Geth node).
-  Used by Foundry (=forge --fork-url=) and Anvil (=--fork-url=) to access Ethereum mainnet state.
-  Also used by the Python tests when connecting directly without Anvil.
-
-- =ETH_RPC_URL= :: Where the Python tests send their queries.  Override this to
-  =http://localhost:8545= when running against a local Anvil fork.  If unset, the Python code falls
-  back to =MAINNET_RPC_URL=.
-
-When running via Anvil, both variables are in play simultaneously: Anvil reads from the remote
-(=MAINNET_RPC_URL=) and the Python tests read from Anvil (=ETH_RPC_URL=http://localhost:8545=).
-
-Copy =.env.example= to =.env= and fill in your API key:
-
-#+BEGIN_SRC bash
-  cp .env.example .env
-  # Edit .env: set MAINNET_RPC_URL to your Alchemy/Infura endpoint
-#+END_SRC
-
-The Makefile loads =.env= automatically.  The =MAINNET_RPC_URL= can also be composed from
-=ALCHEMY_API_TOKEN= if you prefer to keep just the key in your environment.
-
-** Forked Network Testing (Solidity)
-
-#+BEGIN_SRC bash
-  make nix-fork-sepolia         # Start Anvil forking Sepolia (runs in foreground)
-  make nix-test-fork-sepolia    # Run Solidity tests against forked Sepolia
-  make nix-fork-mainnet         # Fork mainnet (for DeFi integration testing)
-#+END_SRC
-
-Pin a specific block for deterministic tests:
-
-#+BEGIN_SRC bash
-  FORK_BLOCK=12345678 make nix-fork-sepolia
-#+END_SRC
-
-** Python: Oracle History and Visualization
-
-The =alberta_buck= Python module queries Chainlink price feed oracles on Ethereum mainnet to
-retrieve historical commodity prices.  This validates the on-chain data sources used by the
-BuckKController PID loop and provides visualization for analysis.
-
-*** Chainlink feeds
-
-The test reads Chainlink's [[https://docs.chain.link/data-feeds/price-feeds/addresses][AggregatorV3Interface]] price feeds for Gold (XAU/USD) and Silver
-(XAG/USD) -- the same oracle contracts used by the Solidity =BuckKControllerForkTest=:
-
-| Feed    | Mainnet Address                              |
-|---------+----------------------------------------------|
-| XAU/USD | =0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6= |
-| XAG/USD | =0x379589227b15F1a12195D3f2d90bBc9F31f95235= |
-
-*** Running directly against a remote RPC
-
-Python queries Alchemy (or Infura) directly -- no Anvil needed:
-
-#+BEGIN_SRC bash
-  make nix-test-python                         # uses MAINNET_RPC_URL from .env
-#+END_SRC
-
-Uses =get_daily_prices=: calls =latestRoundData()= at 366 estimated block numbers (one per day, ~732
-total calls across both feeds).  Takes roughly 10-15 minutes.
-
-*** Running via Anvil (cached)
-
-Anvil forks mainnet and caches Ethereum storage reads in memory.  Two terminals:
-
-#+BEGIN_SRC bash
-  # Terminal 1 -- Anvil connects to remote RPC via MAINNET_RPC_URL from .env
-  make nix-fork-mainnet
-
-  # Terminal 2 -- Python connects to Anvil on localhost
-  ETH_RPC_URL=http://localhost:8545 make nix-test-python
-#+END_SRC
-
-Uses =get_round_history=: calls =getRoundData(roundId)= walking backwards through every Chainlink
-round at the fork block.  Subsequent runs within the same Anvil session serve entirely from cache.
-
-*** Query strategies
-
-Both functions retrieve the same daily price history.  The test auto-detects Anvil and selects the
-appropriate one.
-
-=get_daily_prices= (block-based) calls =latestRoundData()= at 366 different block heights.  Fewer
-API calls, but Anvil must cache storage separately for each block, so there is little reuse across
-runs.
-
-=get_round_history= (round-based) calls =getRoundData(roundId)= at the single fork block, walking
-backwards through every Chainlink round (~8,000-9,000 per feed for a year of hourly updates).  More
-total calls, but all against one block height -- Anvil caches the storage slots once and serves
-repeated runs from memory.
-
-|                         | =get_daily_prices= | =get_round_history= |
-|-------------------------+--------------------+---------------------|
-| Calls per feed (1 year) | ~366               | ~8,000-9,000        |
-| Block heights touched   | 366 different      | 1 (fork block)      |
-| Anvil cache reuse       | Low                | High                |
-| Best for                | Direct RPC         | Anvil fork          |
-
-*** Output
-
-On completion the test writes =alberta_buck/test/gold_silver_history.png=:
-
-#+ATTR_ORG: :width 800
-[[file:alberta_buck/test/gold_silver_history.png]]
-
-*** Future commodity oracles
-
-The =alberta_buck.oracle= module is designed to support additional feeds.  The BUCK commodity basket
-will expand to include oil, natural gas, copper, beef, lumber, electricity, and labour.  For
-commodities without existing Chainlink mainnet feeds, custom oracle contracts will be deployed and
-populated with historical trend data sourced from public commodity price datasets.
-
-** Deploy (Local)
-
-#+BEGIN_SRC bash
-  make nix-anvil &              # Start local Anvil node
-  make nix-deploy-local         # Deploy all three contracts
-#+END_SRC
-
-* Project Structure
-
-| Path                         | Contents                                        |
-|------------------------------+-------------------------------------------------|
-| =src/BuckCredit.sol=         | ERC-721 insured asset NFT                       |
-| =src/Buck.sol=               | ERC-20 token with credit-limit minting          |
-| =src/BuckKController.sol=    | PID value stabilization controller              |
-| =test/BuckCredit.t.sol=      | Forge tests (depreciation, activation, updates) |
-| =test/BuckKController.t.sol= | PID controller unit + mainnet fork tests        |
-| =script/Deploy.s.sol=        | Deployment script                               |
-| =alberta_buck/oracle.py=     | Chainlink oracle historical price reader        |
-| =alberta_buck/test/=         | Python tests (oracle history, visualization)    |
-| =pyproject.toml=             | Python project configuration                    |
-| =flake.nix=                  | Nix dev environment                             |
-| =foundry.toml=               | Forge configuration and remappings              |
-
-* License
-
-Two licences, applied by layer.  =LICENSING.md= is the map and the decision of
-record; in short:
-
-- =core/= (the Rust/Python/JS kernels) -- *CAL-1.0*, the Cryptographic
-  Autonomy License.  Chosen because it restricts /architecture/ rather than
-  /purpose/: an operator must be able to hand a user their own data, and may
-  not use key custody to limit a user's control of it.
-- =src/*.sol= and =alberta_buck/= -- *GPL-3.0-or-later*.
-
-Full texts: =LICENSE= (GPL-3.0) and =core/LICENSE= (CAL-1.0).  Third-party
-components: =NOTICE=.  Contributing: =CONTRIBUTING.md= (CLA, not DCO -- the
-reasoning is in that file).
-
-** The name is not covered by those licences
-
-The Alberta Buck source code is free software under the licences above.
-*"Alberta Buck" is not part of that grant.*  Neither licence conveys trademark
-rights -- CAL-1.0 §3.1(b) withholds them expressly, and GPL-3.0 §7(e) permits
-declining to grant them.
-
-You may state that your work is derived from, based on, or compatible with
-Alberta Buck.  You may not name a fork, deployment, service or token "Alberta
-Buck", or use the name in a way implying endorsement.  See =TRADEMARKS.md=,
-which also states plainly why this is a weak mark rather than pretending
-otherwise.
+*The name is not covered by those licences.*  You may say your work is derived from, based on or
+compatible with Alberta Buck; you may not name a fork, deployment, service or token "Alberta Buck",
+or imply endorsement.  [[file:TRADEMARKS.md][TRADEMARKS.md]] says more, including why this is a weak
+mark.

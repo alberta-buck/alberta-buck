@@ -130,7 +130,7 @@ class Deployment:
     chain: Chain
     anvil: Any
     gov: str
-    pool_acct: str           # Buck.insurancePool + setBasket caller
+    pool_acct: str           # Buck.insurancePool: a Carrying SimLP (+ setBasket caller)
     issuer_addr: str
     issuer_kp: Any
     reg: Any
@@ -169,7 +169,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
            basket_impl="prorata", director_impl="pairs") -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
-    deployer, gov, pool_acct, issuer_addr = accts[0], accts[1], accts[2], accts[3]
+    deployer, gov, issuer_addr = accts[0], accts[1], accts[3]
     erc20_abi = _erc20_abi()
 
     # --- identity layer ---------------------------------------------- #
@@ -209,6 +209,14 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                           KP, KI, KD, dp.dt, KMIN, KMAX, K0, gov)
     if dp.dtmax_secs:
         chain.send(kctrl.functions.setDTMax(dp.dtmax_secs), sender=gov)
+    # The insurance pool: a contract bound Carrying through the registry, as
+    # Buck's pool is meant to be -- it holds premium deposits on its members'
+    # behalf, so the demurrage they accrue travels with them instead of
+    # eroding the reserve.  SimLP is a plain holder whose exec() lets the pool
+    # act for itself (setBasket, below).
+    pool = chain.deploy("SimLP")
+    idmod.bind_as_operator(chain, reg, pool.address, True, True, sender=deployer)
+    pool_acct = pool.address
     buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
@@ -260,7 +268,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     else:
         basket = chain.deploy("BuckBasket", *ctor)
         deposited_topic, redeemed_topic = LEGACY_DEPOSITED_TOPIC, LEGACY_REDEEMED_TOPIC
-    chain.send(buck.functions.setBasket(basket.address), sender=pool_acct)
+    chain.send(pool.functions.exec(
+        buck.address, buck.encode_abi("setBasket", args=[basket.address])), sender=deployer)
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
     idmod.bind_as_operator(chain, reg, basket.address, True, True, sender=deployer)
 

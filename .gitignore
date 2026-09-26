@@ -47,6 +47,10 @@ node_modules/
 # The bundled demo apps (make nix-core-demo-buckworld / -eqworld)
 /core/js/demo/app.js
 /core/js/demo/eqapp.js
+/core/js/sandbox/dist/
+# Renders of README.org: GitHub renders the Org itself; make doc-README writes them locally.
+/README.txt
+/README.pdf
 
 # Python
 __pycache__/
@@ -86,3 +90,7 @@ alberta_buck/sim/prices/hist-manifest-*.json
 /core/contracts/python/build/
 /core/python/build/
 /dist/
+
+# Claude Code session state and its instructions file (per checkout, never published)
+.claude/
+CLAUDE.md

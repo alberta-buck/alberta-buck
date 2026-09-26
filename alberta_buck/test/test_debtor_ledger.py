@@ -11,19 +11,26 @@ can be checked against first principles:
   2. The BUCK-path advantage must satisfy the conservation identity
 
          adv(t) = nw(t) - hypo(t)
-                = interest_saved(t) + jubilee(t)
-                  - premium_paid(t) - trade_loss(t)
+                = interest_saved(t) + jubilee(t) - trade_loss(t)
+                  + hypo_premium(t) - (premium_paid(t) - deposit(t))
 
      where interest_saved is the cumulative extra interest the hypo mortgage
      accrues over the real one, jubilee is BuckCredit's accrued relief quote
-     (the liability is valued at its close cost), premium_paid is the
-     insurance principal surrendered at each mint, and trade_loss is the
-     par-value cost of crossing the pool.  Everything on the right is
-     independently measured, so a leak anywhere breaks the identity.
+     (the liability is valued at its close cost), trade_loss is the
+     par-value cost of crossing the pool, and hypo_premium is the insurance
+     premium the counterfactual pays as a cost.  Both paths insure the same
+     asset at the same rate; the BUCK path's premium is instead a DEPOSIT
+     (premium_paid, made at each mint) that the pool invests to earn the
+     premiums and returns when the insurance is dropped, so it counts in nw
+     as an asset (deposit; equal to premium_paid until a refund).
+     Everything on the right is independently measured, so a leak anywhere
+     breaks the identity.
 
-  3. Doctrine (net of costs, BUCK is uniformly superior):
-     interest_saved(t) >= 0 and non-decreasing, the unwind only ever buys
-     below USD par, and the terminal advantage is positive.
+  3. Doctrine (net of costs, BUCK is superior): interest_saved(t) >= 0 and
+     non-decreasing, the unwind only ever buys below USD par, and the
+     terminal advantage is positive after charging the deposit its
+     opportunity cost -- the mortgage interest the deposited capital would
+     have saved had it paid the mortgage down instead.
 
   4. Jubilee melt: BuckCredit ages activated coverage (~2%/yr) and the
      quoted redeem cost of the position declines year by year -- never
@@ -53,6 +60,8 @@ M6 = 10 ** 6
 APR = 0.055
 MORTGAGE0 = 800 * 1_000 * M6
 INCOME = 260 * 1_000 * M6
+FACE0 = 900 * 1_000 * M6        # the insured value, in both paths
+PREMIUM_BP = 35                 # 0.35%/yr
 
 
 def _payment(mortgage: int, apr: float) -> int:
@@ -77,7 +86,7 @@ def _replay_ledgers(days):
     accrual is applied to whatever principal survives deploys, so it is
     reconstructed in the identity test from the frame series instead)."""
     payment = _payment(MORTGAGE0, APR)
-    hypo_m, hypo_c = MORTGAGE0, 0
+    hypo_m, hypo_c, hypo_prem = MORTGAGE0, 0, 0
     last_day, last_month = 0, -MONTH
     out = []
     for day in days:
@@ -91,12 +100,15 @@ def _replay_ledgers(days):
             last_month = day
             inc = INCOME * months // 12
             hypo_c += inc
+            hprem = min(FACE0 * PREMIUM_BP // 10_000 * months // 12, hypo_c)
+            hypo_c -= hprem
+            hypo_prem += hprem
             hdue = min(payment * months, hypo_m)
             hpaid = min(hdue, hypo_c)
             hypo_c -= hpaid
             hypo_m -= hpaid
         out.append({"hypo": hypo_c - hypo_m, "hypo_m": hypo_m,
-                    "hypo_c": hypo_c})
+                    "hypo_c": hypo_c, "hypo_prem": hypo_prem})
     return out
 
 
@@ -104,20 +116,25 @@ def _replay_ledgers(days):
                     reason="eq-eq-isolation.json not generated; "
                            "run: make nix-venv-sim-isolation")
 def test_counterfactual_ledger_exact():
-    """The agent's hypo ledger IS the closed-form amortization replica."""
+    """The agent's hypo ledger IS the closed-form amortization replica,
+    premiums included."""
     days, ags = _frames()
     replica = _replay_ledgers(days)
     for day, a, r in zip(days, ags, replica):
         assert a["hypo"] == r["hypo"], (
             f"day {day}: agent hypo {a['hypo']} != replica {r['hypo']} "
             f"(replica cash {r['hypo_c']}, mortgage {r['hypo_m']})")
+        assert a["hypo_premium"] == r["hypo_prem"], (
+            f"day {day}: agent premiums {a['hypo_premium']} != replica "
+            f"{r['hypo_prem']}")
 
 
 @pytest.mark.skipif(not DATA.exists(),
                     reason="eq-eq-isolation.json not generated; "
                            "run: make nix-venv-sim-isolation")
 def test_advantage_conservation_identity():
-    """adv(t) = interest_saved(t) - premium_paid(t) - trade_loss(t).
+    """adv(t) = interest_saved + jubilee - trade_loss + hypo_premium
+              - (premium_paid - deposit).
 
     interest_saved is reconstructed step-by-step from the frame series
     itself: between post-act frames, each mortgage first compounds by g,
@@ -135,14 +152,15 @@ def test_advantage_conservation_identity():
         acc_hypo = int(replica[i - 1]["hypo_m"] * g) - replica[i - 1]["hypo_m"]
         interest_saved += acc_hypo - acc_real
         adv = ags[i]["nw"] - ags[i]["hypo"]
-        rhs = (interest_saved + ags[i].get("jub", 0)
-               - ags[i]["premium_paid"] - ags[i]["trade_loss"])
+        rhs = (interest_saved + ags[i].get("jub", 0) - ags[i]["trade_loss"]
+               + ags[i]["hypo_premium"]
+               - (ags[i]["premium_paid"] - ags[i]["deposit"]))
         drift = abs(adv - rhs)
         worst = max(worst, drift)
         assert drift <= tol_step * (i + 1), (
             f"day {days[i]}: adv {adv/M6:,.0f} != interest_saved "
-            f"{interest_saved/M6:,.0f} - premium "
-            f"{ags[i]['premium_paid']/M6:,.0f} - trade_loss "
+            f"{interest_saved/M6:,.0f} + counterfactual premiums "
+            f"{ags[i]['hypo_premium']/M6:,.0f} - trade_loss "
             f"{ags[i]['trade_loss']/M6:,.0f} (drift ${drift/M6:,.0f})")
     print(f"\n  conservation drift, worst: ${worst/M6:,.2f}")
 
@@ -151,18 +169,23 @@ def test_advantage_conservation_identity():
                     reason="eq-eq-isolation.json not generated; "
                            "run: make nix-venv-sim-isolation")
 def test_buck_path_uniformly_superior_net_of_costs():
-    """Doctrine: net of premium + trading costs, the BUCK path never falls
-    behind the counterfactual -- interest_saved(t) >= 0 non-decreasing, the
-    costs stay tranche-sized, and the terminal advantage is positive."""
+    """Doctrine: compared fairly -- both paths insured alike, the
+    counterfactual paying its premiums as a cost, the BUCK path's deposit
+    charged its opportunity cost -- the BUCK path comes out ahead:
+    interest_saved(t) >= 0 non-decreasing, the costs stay tranche-sized,
+    and the terminal advantage is positive."""
     days, ags = _frames()
     replica = _replay_ledgers(days)
-    interest_saved, prev_saved = 0, 0
+    interest_saved, prev_saved, opportunity = 0, 0, 0
     for i in range(1, len(days)):
         gap = days[i] - days[i - 1]
         g = (1.0 + APR / 365.0) ** gap
         acc_real = int(ags[i - 1]["mortgage"] * g) - ags[i - 1]["mortgage"]
         acc_hypo = int(replica[i - 1]["hypo_m"] * g) - replica[i - 1]["hypo_m"]
         interest_saved += acc_hypo - acc_real
+        # The deposit could have paid the mortgage down instead: what it
+        # would have saved, at the mortgage rate, is its cost.
+        opportunity += int(ags[i - 1]["deposit"] * g) - ags[i - 1]["deposit"]
         assert interest_saved >= prev_saved - M6, (
             f"day {days[i]}: interest_saved regressed")
         prev_saved = interest_saved
@@ -174,21 +197,26 @@ def test_buck_path_uniformly_superior_net_of_costs():
         f"unwind bought above par: unwind_loss "
         f"${final['unwind_loss']/M6:,.0f} on ${final['unwound']/M6:,.0f} "
         f"unwound")
-    # poolPrincipal ~= premiumRate (1%) x POOL_ROI_INV (10) of gross minted:
-    # a refundable insurance-pool deposit, structurally ~10% of the retired
-    # principal (see Buck.sol _allocateMint / quoteBurn poolRefund).
-    assert final["premium_paid"] < 0.12 * MORTGAGE0, (
-        f"premium ${final['premium_paid']/M6:,.0f} exceeds the structural "
-        f"~10% pool-principal bound")
-    adv = final["nw"] - final["hypo"]
+    # poolPrincipal ~= premiumRate (0.35%) x POOL_ROI_INV (10) of gross
+    # minted: a returnable insurance-pool deposit, structurally ~3.5% of the
+    # retired principal (see Buck.sol _allocateMint / quoteBurn poolRefund).
+    assert final["premium_paid"] < 0.05 * MORTGAGE0, (
+        f"deposit ${final['premium_paid']/M6:,.0f} exceeds the structural "
+        f"~3.5% pool-principal bound")
+    adv = final["nw"] - final["hypo"] - opportunity
     assert adv > 0, (f"terminal advantage ${adv/M6:,.0f} <= 0: interest "
-                     f"saved ${interest_saved/M6:,.0f}, premium "
-                     f"${final['premium_paid']/M6:,.0f}, trade loss "
+                     f"saved ${interest_saved/M6:,.0f}, counterfactual "
+                     f"premiums ${final['hypo_premium']/M6:,.0f}, deposit "
+                     f"${final['deposit']/M6:,.0f} (opportunity cost "
+                     f"${opportunity/M6:,.0f}), trade loss "
                      f"${final['trade_loss']/M6:,.0f}")
     print(f"\n  terminal: adv ${adv/M6:,.0f}  interest_saved "
-          f"${interest_saved/M6:,.0f}  premium ${final['premium_paid']/M6:,.0f}"
-          f"  trade_loss ${final['trade_loss']/M6:,.0f}  unwound "
-          f"${final['unwound']/M6:,.0f} (loss ${final['unwind_loss']/M6:,.0f})")
+          f"${interest_saved/M6:,.0f}  jubilee ${final.get('jub', 0)/M6:,.0f}"
+          f"  counterfactual premiums ${final['hypo_premium']/M6:,.0f}"
+          f"  deposit ${final['deposit']/M6:,.0f} (opportunity cost "
+          f"${opportunity/M6:,.0f})  trade_loss ${final['trade_loss']/M6:,.0f}"
+          f"  unwound ${final['unwound']/M6:,.0f} (loss "
+          f"${final['unwind_loss']/M6:,.0f})")
 
 
 @pytest.mark.skipif(not DATA.exists(),
@@ -236,7 +264,7 @@ def test_isolation_plot():
     nw = [a["nw"] / M6 for a in ags]
     hypo = [a["hypo"] / M6 for a in ags]
     adv = [(a["nw"] - a["hypo"]) / M6 for a in ags]
-    prem = [a["premium_paid"] / M6 for a in ags]
+    hprem = [a["hypo_premium"] / M6 for a in ags]
     tl = [a["trade_loss"] / M6 for a in ags]
     jub = [a.get("jub", 0) / M6 for a in ags]
     saved, s = [0.0], 0
@@ -260,12 +288,13 @@ def test_isolation_plot():
             label="interest saved")
     ax.plot(days, jub, color="#7d3ec1", lw=1.6, ls=":",
             label="jubilee relief")
-    ax.plot(days, prem, color="#eda100", lw=1.6, ls=":",
-            label="premium paid")
+    ax.plot(days, hprem, color="#eda100", lw=1.6, ls=":",
+            label="counterfactual premiums")
     ax.plot(days, tl, color="#e34948", lw=1.6, ls=":", label="trade loss")
     ax.axhline(0, color="#0b0b0b", lw=0.8, alpha=0.3)
     ax.set_title("advantage decomposition\n"
-                 "adv = interest_saved + jubilee - premium - trade_loss")
+                 "adv = interest_saved + jubilee + counterfactual premiums"
+                 " - trade_loss")
     ax.set_xlabel("day"); ax.set_ylabel("$"); ax.grid(True, alpha=0.25)
     ax.legend(fontsize=9)
     fig.tight_layout()

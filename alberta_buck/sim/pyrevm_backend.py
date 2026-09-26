@@ -221,7 +221,10 @@ class PyrevmAnvil:
                  timestamp: Optional[int] = None):
         self.port = port or 0                       # no socket; kept for parity
         self.chain_id = chain_id or 31337
-        self.evm = pyrevm.EVM(gas_limit=gas_limit or 3_000_000_000)
+        # The EVM's block.chainid must be the chain id eth_chainId reports:
+        # identity proofs bind it (Fiat-Shamir), and pyrevm defaults to 1.
+        self.evm = pyrevm.EVM(env=pyrevm.Env(cfg=pyrevm.CfgEnv(chain_id=self.chain_id)),
+                              gas_limit=gas_limit or 3_000_000_000)
         self.block = 0
         self.ts = timestamp or GENESIS_TS
         self.nonces: dict[str, int] = {}

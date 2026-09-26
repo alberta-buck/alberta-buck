@@ -2,13 +2,13 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import "../src/BuckCredit.sol";
-import "../src/Buck.sol";
-import "../src/BuckKController.sol";
-import "../src/IdentityRegistry.sol";
-import "../src/Notes.sol";
-import "../src/StubMintVerifier.sol";
-import "../src/StubSpendVerifier.sol";
+import "../../src/BuckCredit.sol";
+import "../../src/Buck.sol";
+import "../../src/BuckKController.sol";
+import "../../src/IdentityRegistry.sol";
+import "../../src/Notes.sol";
+import "../../src/StubMintVerifier.sol";
+import "../../src/StubSpendVerifier.sol";
 
 /// @notice Deploy all core contracts to a local or test network.
 ///

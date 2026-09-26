@@ -52,3 +52,38 @@ export async function tevmSession({ accountIndex = 0, journal = null } = {}) {
     journal,
   });
 }
+
+/**
+ * A Tevm chain as data: every account's state (hex strings, JSON-safe) and
+ * the clock -- the block number and timestamp, which Tevm's own dump omits.
+ * Blocks, transactions and logs are NOT kept: a restored chain has the
+ * state and the time, not the history.
+ */
+export async function snapshotTevm(session) {
+  const { state } = await session.client.tevmDumpState();
+  const head = await session.client.getBlock();
+  return { state, block: head.number, timestamp: head.timestamp };
+}
+
+/**
+ * Load snapshotTevm() into a FRESH tevm session and put its clock back:
+ * the same block number and timestamp, so contract clocks (demurrage,
+ * depreciation, the controller's cadence) carry on where they stopped.
+ * Rebuilding the height mines empty blocks, one per second of past time,
+ * ending on the snapshot's own timestamp.
+ */
+export async function restoreTevm(session, snap) {
+  const c = session.client;
+  await c.tevmLoadState({ state: snap.state });
+  const block = Number(snap.block);
+  const ts = Number(snap.timestamp);
+  if (block > 1) {
+    await c.request({ method: "evm_setNextBlockTimestamp", params: [ts - (block - 1)] });
+    await c.tevmMine({ blockCount: block - 1, interval: 1 });
+  }
+  if (block > 0) {
+    await c.request({ method: "evm_setNextBlockTimestamp", params: [ts] });
+    await c.request({ method: "evm_mine", params: [] });
+  }
+  return session;
+}

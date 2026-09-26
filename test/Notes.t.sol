@@ -15,6 +15,7 @@ import {IMintVerifier}        from "../src/IMintVerifier.sol";
 import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
 import {GatedMint}            from "./helpers/GatedMint.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
 ///         without depending on StubMintVerifier's enabled toggle.
@@ -97,6 +98,7 @@ contract NotesTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

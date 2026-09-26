@@ -1,7 +1,7 @@
 version = 1
 SPDX-PackageName = "alberta-buck"
 SPDX-PackageSupplier = "Perry Kundert <perry@kundert.ca>"
-SPDX-PackageDownloadLocation = "https://github.com/pjkundert/alberta-buck"
+SPDX-PackageDownloadLocation = "https://github.com/alberta-buck/alberta-buck"
 
 # Licensing is declared HERE rather than by stamping ~657 source files with
 # per-file SPDX headers.  This is the REUSE Specification's supported
@@ -71,7 +71,7 @@ SPDX-License-Identifier = "GPL-3.0-or-later"
 path = [
   ".env.example", ".gas-snapshot", ".github/**", ".gitignore", ".gitmodules",
   "Makefile", "flake.nix", "flake.lock", "foundry.toml", "foundry.lock",
-  "package.json", "package-lock.json", "pyproject.toml", "script/**",
+  "package.json", "package-lock.json", "pyproject.toml",
   "CONTRIBUTING.md", "LICENSING.md", "NOTICE", "TRADEMARKS.md",
 ]
 precedence = "aggregate"
@@ -84,6 +84,20 @@ path = "src/lib/UniswapV3OracleLib.sol"
 precedence = "override"
 SPDX-FileCopyrightText = "Uniswap Labs and contributors"
 SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# Vendored build artifacts of Uniswap's own contracts, compiled from the
+# sources the Makefile names (lib/universal-router, and the Permit2 it pins).
+[[annotations]]
+path = "alberta_buck/sim/artifacts/UniversalRouter.json"
+precedence = "override"
+SPDX-FileCopyrightText = "Uniswap Labs"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "alberta_buck/sim/artifacts/Permit2.json"
+precedence = "override"
+SPDX-FileCopyrightText = "2022 Uniswap Labs"
+SPDX-License-Identifier = "MIT"
 
 # --- Design documents: NOT open --------------------------------------- #
 # The .org design writing is the largest original asset here and is
@@ -103,16 +117,6 @@ SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
 path = ["*.pdf", "*.txt", "images/**", "BASKET-REBALANCE.md", "BASKET-REDESIGN.md"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Perry Kundert"
-SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
-
-# --- Third-party reference document ------------------------------------ #
-# NOT this repository's work: a Grynvault report ("By Kode / Hudhaifah").
-# Redistribution rights are unverified -- obtain permission or remove this
-# file BEFORE making the repository public.
-[[annotations]]
-path = "Grynvault-bitcoin-finance.pdf"
-precedence = "override"
-SPDX-FileCopyrightText = "Grynvault (Kode / Hudhaifah)"
 SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
 
 # --- Data, fixtures and vectors --------------------------------------- #

@@ -27,7 +27,7 @@ disagree, re-verify before acting.
 
 ```bash
 # Python wallet + reproductions (sibling venv already has the built kernel):
-PYTHONPATH=. /Users/perry/src/alberta-buck.venv-0.1.0-nix-darwin-cpython-313/bin/python <script>
+PYTHONPATH=. ../alberta-buck.venv-<version>-nix-<platform>-cpython-313/bin/python <script>
 # Wallet review tests, both backends (py + Rust/PyO3 kernel):
 make nix-venv-... is not wired for these; run pytest directly in the venv:
   .../bin/python -m pytest alberta_buck/test/review/test_wallet_failures.py -q

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!--
+  The Alberta Buck sandbox: a private, simulated Alberta Buck world in this browser
+  tab -- an issuer that certifies people, wallets that register, pay and
+  trade, an insurer that turns simulated assets into credit, a BUCK/USDC
+  market, and the chain as an observer sees it.  Nothing leaves the tab.
+
+  Build and serve:  make nix-sandbox   (then open http://localhost:8000/)
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alberta Buck sandbox</title>
+  <meta name="description"
+        content="A private, simulated Alberta Buck world in your browser: identities, insured credit,
+                 wallets and a BUCK/USDC market.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="bar" id="worldbar" aria-label="World">
+    <div class="brand">
+      <h1>Alberta Buck <span class="thin">sandbox</span></h1>
+      <span class="badge"
+            title="Every key, credential and balance here is simulated, and lives only in this browser tab.">SIMULATED</span>
+    </div>
+    <div class="stats" id="stats" aria-live="polite"></div>
+    <div class="controls" id="controls"></div>
+  </header>
+
+  <div class="status" id="status" role="status" aria-live="polite"></div>
+  <div class="notice" id="notice" hidden></div>
+
+  <nav class="tabs" role="tablist" aria-label="Tools">
+    <button role="tab" id="tab-issuer" aria-controls="panel-issuer" data-tab="issuer">Issuer</button>
+    <button role="tab" id="tab-wallets" aria-controls="panel-wallets" data-tab="wallets">Wallets</button>
+    <button role="tab" id="tab-credit" aria-controls="panel-credit" data-tab="credit">Credit</button>
+    <button role="tab" id="tab-observer" aria-controls="panel-observer" data-tab="observer">Observer</button>
+  </nav>
+
+  <main>
+    <section role="tabpanel" id="panel-issuer" aria-labelledby="tab-issuer"></section>
+    <section role="tabpanel" id="panel-wallets" aria-labelledby="tab-wallets" hidden></section>
+    <section role="tabpanel" id="panel-credit" aria-labelledby="tab-credit" hidden></section>
+    <section role="tabpanel" id="panel-observer" aria-labelledby="tab-observer" hidden></section>
+  </main>
+
+  <aside class="journal" id="journal" hidden aria-label="Journal"></aside>
+
+  <div class="loading" id="loading">
+    <div class="loading-box">
+      <h2>Alberta Buck sandbox</h2>
+      <p id="loading-step">Loading&hellip;</p>
+      <div class="progress"><div class="progress-fill" id="loading-fill"></div></div>
+      <p class="hint">A whole Alberta Buck world runs in this tab: an Ethereum chain, the
+        identity registry, the Alberta Buck contracts and a Uniswap market.  Nothing leaves your browser.</p>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

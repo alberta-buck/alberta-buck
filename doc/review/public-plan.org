@@ -1,0 +1,164 @@
+#+TITLE: Going public: plan of record
+#+DATE: 2026-09-25
+#+OPTIONS: toc:nil num:nil ^:nil
+
+Resume document for =feature/public=: make the repository public with a front door a newcomer
+can read, and a sandbox they can use in minutes.  Decisions, phases, status.
+
+* Goal (author, 2026-09-25)
+
+- A compelling, accessible =README.org=; setup and installation in sub-documents.
+- A simulated environment that comes up quickly and is driven from a browser: issue and register
+  identities, insure simulated assets and create credit, create wallets, transact BUCK.
+- An asciinema demo of setting it up and running it.
+
+* What exists (survey, 2026-09-25)
+
+- *Browser world, no server.*  =core/js/src/buckworld.js= deploys a world into Tevm in the tab:
+  =buildBuckWorld=, =onboard= (PS credential -> presentation -> ElGamal -> =registrationProve= ->
+  =register=), =identityApprove= (the Chaum-Pedersen handshake), =createCredit= (credit issuer ->
+  =createCredit= -> =Buck.mint=), =fundAccount=, =advanceTime=.  It deploys only =IdentityRegistry=,
+  =BuckCredit=, =BuckKControllerDirect= and =Buck=, all in the published =alberta-buck-contracts=
+  bundle; the web wasm kernels are in the published =alberta-buck-kernel=.  So a sandbox can be
+  built from npm packages alone -- Node, no Rust, Foundry, Nix or Python.
+- *Demos.*  =core/js/demo/buckworld.html= (citizens, "+1000 credit line", handshake, pay, clock,
+  market) and =eqworld.html= are scripted exhibitions, not tools: no forms, no persistence.
+  =identity-proofs.html= is broken (=const registry= declared twice since d0ed54d).
+- *Kernels in the browser.*  =identity-web.js:loadIdentity= wraps the identity wasm (PS, ElGamal,
+  registration, Chaum-Pedersen, Schnorr, notes).  =wallet-core.js:wrapWallet= (receipts, Notes
+  deliveries, credential issuance, registry/regulator) has only a Node loader; the web wasm already
+  exports every =wallet_*= and =registry_*= function.
+- *Shared world.*  =alberta_buck/sim/server.py= serves per-session pyrevm worlds with agents:
+  WebSocket =frames/control/rpc= (8797) and HTTP JSON-RPC (8798); =anvilSession= can drive it.
+  No web client; no address discovery, =eth_getLogs= or time control; pyrevm lacks macOS wheels
+  past cp312.
+- *Not wired anywhere yet:* the insurer gate (=configureInsurerGate=, =attestInsurer=), asset
+  classes, premiums and depreciation in any UI; wallets with persistence; receipts in a browser;
+  Notes in a browser (proving keys are GB-scale; Python fixtures only).
+
+* Proposal: the Alberta Buck sandbox
+
+One static web app, =sandbox/= (Vite), running a private world in the visitor's own tab.  Built
+from the published npm packages, so =npm install && npm run dev= is the whole install, and the
+same build deploys to GitHub Pages as "try it in your browser" once the repository is public.
+Everything is labelled SIMULATED; keys live in the browser and are for play.
+
+Four tools, one per role in the system, over a shared world bar:
+
+| tool          | role      | does                                                                |
+|---------------+-----------+---------------------------------------------------------------------|
+| World bar     | everyone  | day and clock (+1 day, +30 days), BUCK_K, reset, export/import      |
+| Issuer        | registry  | a KYC form -> core record; issue a PS credential (a card to hand    |
+|               |           | over); revoke; the issuer trusted on the chain                      |
+| Wallet        | citizen   | create (Ethereum key + identity key, kept in the browser); import a |
+|               |           | credential; register; balances, credit limit, demurrage owing; send |
+|               |           | BUCK (handshake + transfer); receipts (AB-RCPT/2)                   |
+| Credit        | insurer   | insure a simulated asset (class, value, depreciation, premium) -> a |
+|               |           | BuckCredit NFT and credit line; the holder mints BUCK; the NFTs at  |
+|               |           | their depreciated value                                             |
+| Observer      | anyone    | the chain as the public sees it: decoded transactions and events -- |
+|               |           | the privacy story made visible                                      |
+
+Wallets are separate browser identities of one world, so a visitor plays issuer, insurer and two
+citizens side by side.  v1 keeps the world in one page (the four tools are tabs of it); sharing it
+across browser tabs needs a =SharedWorker= to hold the chain, and comes later.  The implementation
+plan is =doc/review/sandbox-plan.org=.
+
+*Later, not in v1:* a "connect to a shared world" switch pointing the same UI at the sim server
+(needs address discovery, =eth_getLogs= and a time op on the server), so agents supply an economy
+around the visitor; Notes (A1/A2/B1) from pre-generated fixture proofs; the insurer gate.
+
+* The front door
+
+=README.org= rewritten for a newcomer:
+
+1. What Alberta Buck is, in a paragraph: money issued against insured real assets and held steady
+   against a commodity basket; private by default, accountable by law.
+2. *Try it*: the sandbox (hosted link; =make sandbox= locally) and the demo recording.
+3. What is here: contracts, the kernels (Rust, Python, JavaScript), the simulations, the papers;
+   the published packages with their registries.
+4. Read: the papers in a reading order, with their PDFs.
+5. Status and safety: unaudited prototype; the Groth16 setup is a development one until v1.0.0;
+   =SECURITY.md=.
+6. Licences and contributing, in two lines each, linking =LICENSING.md= and =CONTRIBUTING.md=.
+
+Sub-documents under =doc/= (beside the review documents, not a second =docs/=): =INSTALL.org=
+(packages from the registries; nix; the venv), =SANDBOX.org= (the web tools; written in S5),
+=DEVELOP.org= (build, test, SNARK setups -- the present README's material, moved and
+corrected).  =alberta-buck-deployment.org= stays the release book.
+
+* The demo recording
+
+After =~/src/LocalWebAuthn= (asciicast v3, rendered by =agg=, GIF embedded in =README.org=), but
+scripted rather than hand-typed and hand-edited, so it re-records when the commands change:
+
+- =scripts/demo/session.sh= types each command with a short per-character delay, then runs it for
+  real: clone, =nix develop=, =make sandbox= (build, then serve and print the URL), the sim server.
+- =make demo-record= runs it under =asciinema rec --cols 100 --rows 24 --idle-time-limit 1=;
+  =make demo-render= renders =docs/demo/quickstart.gif= with =agg=.  =asciinema= and
+  =asciinema-agg= join the flake.
+- The browser half: Playwright screenshots of the four tools from the sandbox's end-to-end test,
+  embedded beside the recording.
+
+* Public-readiness (audit, 2026-09-25)
+
+*Clean:* no secrets in the tree or in any of 737 commits (tokens, keys, RPC URLs with keys;
+=.env= never committed); =foundry.lock= holds public revisions only.
+
+*Blockers -- decisions for the author:*
+
+1. *Third-party documents.*  *Resolved (author, 2026-09-25): removed from the trees, not from
+   history.*  The SILMARILS paper and its sources (=doc/SILMARILS.pdf=, =.txt=, =-TeX.tar.gz=,
+   =doc/SILMARILS/=) leave master with =feature/public=; =doc/Panoptic-carry.pdf= left
+   =feature/carry-convexity=; the Grynvault, pairing-free PRE and umbral PDFs were already gone
+   from every branch, and REUSE.toml no longer names any of them.  The author's own
+   =doc/SILMARILS-evaluation.org= and =scripts/review/silmarils_model.py= stay.
+2. *History.*  *Decided (author, 2026-09-25): no rewrite* -- removal from the trees is sufficient;
+   the documents stay only in history.  (Measured on a mirror the same day: the third-party
+   documents are about 5 MB packed, but removing them rewrites 727 of 759 commits and all ten
+   release tags, whose ids the 0.2.0 packages record.  A fresh clone is 168 MiB; dropping deleted
+   bulk and the rendered-PDF history would bring it to about 90 MiB, should that be wanted later.)
+3. *Security findings.*  =doc/review/= publishes identity findings with exploit reproductions
+   (since repaired).  Publish deliberately, or move them out.
+4. *Branches and tags.*  31 branches on origin would go public (stale =execute-plan/*=, unmerged
+   =carry-convexity=).  Choose which.
+5. *SECURITY.md* (a disclosure address) and the CLA that dual licensing requires.
+6. *=lib/circom-lib= was unfetchable* (found 2026-09-25, building the sandbox from a fresh clone;
+   *resolved the same day, no fork needed*): the submodule pinned =224c5a26=, the author's own
+   unpushed commit adding BN254 branches to three templates of =circuits/ec/get.circom=.  No
+   circuit instantiates them -- the circuits use their own =circuits/ec/get_bn254.circom=, and
+   from =curve.circom= only the point-addition templates -- and all three circuits that include
+   =circom-lib= (=identity_membership_g1tie=, =identity_membership_b1=, =deposit_fold_a2=) compile
+   to byte-identical R1CS against upstream =5258258= (the commit's parent, on =dl-solarity= master).
+   The submodule now pins =5258258=; the keys stand.  Stale =foundry.lock= entries for the removed
+   umbral and uniswap-ai experiments were dropped too.
+
+*Hygiene (no decision needed):* =.claude/= and =CLAUDE.md= in the repository =.gitignore= (now
+only the global one); =pjkundert/alberta-buck= -> =alberta-buck/alberta-buck= in README.org and
+REUSE.toml; stale =README.txt=/=README.pdf=; absolute =/Users/perry= paths in
+=test/vectors/sweep-*/summary.json=, =scripts/snark/gen_*.py=, =doc/review=; the garbled sentence
+closing README's SNARK section; branch protection on =master= once public.
+
+* Phases
+
+| Phase | Work                                                                          | Status |
+|-------+-------------------------------------------------------------------------------+--------|
+| G0    | Branch =feature/public= (worktree =../alberta-buck-public=); this plan          | done   |
+| G1    | Hygiene (list above); fix =identity-proofs.html=                                | done   |
+| G2    | Sandbox v1 (doc/review/sandbox-plan.org): world bar, issuer, wallet, credit,    | done   |
+|       | observer; persistence; headless story test; =make sandbox=; hosted (S1-S6)      |        |
+| G3    | README.org front door + =doc/{INSTALL,DEVELOP,SANDBOX}.org=                     | done   |
+| G4    | Demo recording (scripted cast, agg GIF) + sandbox screenshots                 | open   |
+| G5    | Decisions 3-5; SECURITY.md; branches to publish; make the repository public     | open   |
+| G6    | Shared world: sim-server bridge, then Notes from fixtures, the insurer gate     | later  |
+
+* G1 hygiene, done (2026-09-25)
+
+=.claude/= and =CLAUDE.md= in the repository =.gitignore=; the clone URL in README.org and
+REUSE.toml's download location now =alberta-buck/alberta-buck=; README's garbled SNARK sentence
+repaired; =scripts/snark/gen_{bn254_g_pows,g1tie_input}.py= find the repository from their own
+path; =alberta_buck/sim/sweep.py= records repository-relative paths and the committed sweep
+summaries were rewritten to match; the venv paths in =doc/review/= made generic;
+=identity-proofs.html= loads again (its second =const registry= removed: registration and the
+handshake bind the same registry).  Deferred to G3: the stale =README.txt= / =README.pdf=, since
+removed (GitHub renders the Org); =CARRY-CONVEXITY.org='s =~/Downloads= path, owned by that branch.

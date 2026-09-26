@@ -6,8 +6,9 @@ Pattern: powers[parts][256][2][4] — 32 windows × 256 precomputed points.
 powers[i][j] = j * 2^(i*STRIDE) * G
 """
 
+import os
 import sys
-sys.path.insert(0, '/Users/perry/src/alberta-buck')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from alberta_buck.wallet.bn254 import G1, mul, point_to_words, ORDER
 
 STRIDE = 8

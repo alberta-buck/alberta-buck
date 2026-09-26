@@ -14,6 +14,7 @@ import {BuckCreditHarness}            from "../harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
 import {BuckBasket}            from "../../src/basket/BuckBasket.sol";
 import {BuckBasketReceipt}     from "../../src/basket/BuckBasketReceipt.sol";
+import {bindCarryingPool} from "../harness/CarryingPool.sol";
 
 contract BBToken is ERC20 {
     uint8 immutable _dec;
@@ -90,6 +91,7 @@ contract BuckBasketTest is Test {
         );
 
         buck = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

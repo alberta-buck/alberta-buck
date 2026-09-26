@@ -13,7 +13,7 @@ alberta_buck.review.known_log, so the committed fixture reproduces unchanged.
 
 import json, random, sys
 
-sys.path.insert(0, '/Users/perry/src/alberta-buck')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from alberta_buck.wallet.bn254 import G1, ORDER, add, mul, point_to_words, rand_scalar
 from alberta_buck.review.known_log import H_KNOWN as H_POINT, untagged_identity_leaf
 from alberta_buck.wallet.poseidon import F_R

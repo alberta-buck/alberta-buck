@@ -10,6 +10,7 @@ import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @dev Plain ERC-20 stand-in for USDC.  Lives in the test file so it does not
 ///      collide with the OpenZeppelin ERC20.json artifact path.
@@ -134,6 +135,7 @@ contract UniswapV2IntegrationTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

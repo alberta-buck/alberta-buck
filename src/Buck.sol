@@ -61,6 +61,12 @@ contract Buck is IERC20, IERC20Metadata {
     IBuckCredit       public immutable buckCredit;
     IBuckK            public immutable buckK;
     IdentityRegistry  public immutable identity;
+    /// @dev Interim: one address receives every mint's premium deposit, pays
+    ///      every refund and wires the basket; deployments bind it Carrying
+    ///      through the registry.  Intended: each credit's insurer holds its
+    ///      credits' deposits in a Carrying premium pool, and this parameter
+    ///      goes (alberta-buck-ethereum.org, "The Insurance Pool: an Interim
+    ///      Stand-in").
     address           public immutable insurancePool;
 
     // ---- constants ---------------------------------------------------------
@@ -817,12 +823,19 @@ contract Buck is IERC20, IERC20Metadata {
 
         _accrueJubilee();
         if (poolRefund > 0) {
-            _crystallize(insurancePool);
             int256 poolRaw = _state[insurancePool].balance.asInt();
             require(int256(poolRefund) <= poolRaw, "BUCK: pool underfunded");
-            _subBalance(insurancePool, poolRefund);
-            _crystallize(msg.sender);
-            _addBalance(msg.sender, poolRefund);
+            // The refund leaves the pool as any transfer from it would: a
+            // Carrying pool (as the registry binds it) hands the refunded
+            // share of its accrued age back to the holder.
+            if (identity.isCarrying(insurancePool)) {
+                _carryingTransfer(insurancePool, msg.sender, poolRefund);
+            } else {
+                _crystallize(insurancePool);
+                _subBalance(insurancePool, poolRefund);
+                _crystallize(msg.sender);
+                _addBalance(msg.sender, poolRefund);
+            }
             // Per-side Transfer event: pool -> holder for the refund.
             emit Transfer(insurancePool, address(0), poolRefund);
         }

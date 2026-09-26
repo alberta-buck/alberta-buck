@@ -15,6 +15,7 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes} from "../src/Notes.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @notice End-to-end wiring of the identity-M-bound B1 deposit (bearer, public
 ///         issuer): Notes.spendCoupledB1 co-verifies the depositor-binding sigma
@@ -67,6 +68,7 @@ contract NotesCoupledB1Test is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));

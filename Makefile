@@ -203,10 +203,10 @@ stop-anvil:
 # ── Deployment ───────────────────────────────────────────────────────
 
 deploy-local:
-	forge script script/Deploy.s.sol --broadcast --rpc-url http://localhost:$(ANVIL_PORT) -vvv
+	forge script scripts/deploy/Deploy.s.sol --broadcast --rpc-url http://localhost:$(ANVIL_PORT) -vvv
 
 deploy-sepolia:
-	forge script script/Deploy.s.sol --broadcast --rpc-url $(SEPOLIA_RPC_URL) --verify -vvv
+	forge script scripts/deploy/Deploy.s.sol --broadcast --rpc-url $(SEPOLIA_RPC_URL) --verify -vvv
 
 
 # ── Python Tests ────────────────────────────────────────────────────
@@ -533,6 +533,7 @@ SIM_ARTIFACTS   = alberta_buck/sim/artifacts
 
 ROUTING_PRICES	= $(SIM_PRICES_DIR)/paxg.csv $(SIM_PRICES_DIR)/cbbtc.csv $(SIM_PRICES_DIR)/aoil.csv
 ROUTING_ARTIFACT = $(SIM_ARTIFACTS)/UniversalRouter.json
+PERMIT2_ARTIFACT = $(SIM_ARTIFACTS)/Permit2.json
 ROUTING_VECTOR	= test/vectors/routing-sim.json
 ROUTING_IMAGE	= images/routing-sim.png
 
@@ -546,6 +547,15 @@ $(ROUTING_ARTIFACT):
 	( cd lib/universal-router && FORK_URL=http://localhost forge build --skip test --skip script )
 	mkdir -p $(SIM_ARTIFACTS)
 	cp lib/universal-router/out/UniversalRouter.sol/UniversalRouter.json $@
+
+# Permit2, as the Universal Router pins it (lib/universal-router/lib/permit2:
+# solc 0.8.17, via_ir, its own foundry.toml).  BUCK moves through routers by
+# Permit2 -- the pool pulls from the holder -- so a router never holds BUCK
+# and needs no identity of its own.
+$(PERMIT2_ARTIFACT):
+	( cd lib/universal-router/lib/permit2 && forge build --skip test --skip script )
+	mkdir -p $(SIM_ARTIFACTS)
+	cp lib/universal-router/lib/permit2/out/Permit2.sol/Permit2.json $@
 
 plot-routing:	$(ROUTING_VECTOR)
 	python -m pytest $(SIM_PLOT_SCRIPT) -v -s
@@ -1495,6 +1505,55 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 		--log-limit=8
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/eqworld.html"
+
+# The sandbox (core/js/sandbox): one static page running a whole simulated
+# BUCK world in the visitor's tab -- issuer, wallets, credit, market,
+# observer (doc/review/sandbox-plan.org).  The build bundles the page with
+# viem and tevm (the demos' browser shims) beside the web wasm and the
+# contract bundle; dist/ is plain static files, served over http:
+#
+#   make nix-sandbox          # build, then serve http://localhost:8000/
+#
+# A fresh clone needs no full Foundry build: the BUCK stack, MockERC20 and
+# SimLP come from the published alberta-buck-contracts (or out/, once
+# built), Uniswap's factory, pool and WETH9 from Uniswap's npm packages
+# (stage-uniswap), the Universal Router and Permit2 from their vendored
+# builds, and only the pool binding adapter -- not yet published -- is
+# compiled, on its own.  The first build also fetches the npm dependencies
+# and compiles the identity kernel to wasm (Rust): minutes, once.
+SANDBOX_DIST = core/js/sandbox/dist
+SANDBOX_ADAPTER = out/UniswapV3BindingAdapter.sol/UniswapV3BindingAdapter.json
+.PHONY: sandbox sandbox-build sandbox-deps sandbox-artifacts sandbox-screenshots
+sandbox-deps:
+	@test -d core/js/node_modules || $(MAKE) core-js-deps
+	@test -d node_modules/@uniswap/v3-core || npm ci --no-audit --no-fund --loglevel=error
+
+$(SANDBOX_ADAPTER):
+	forge build src/adapters/UniswapV3BindingAdapter.sol $(FORGE_OPTS)
+
+sandbox-artifacts:	sandbox-deps $(SANDBOX_ADAPTER)
+	@test -f out/UniswapV3Factory.sol/UniswapV3Factory.json || node scripts/stage-uniswap.mjs
+	node core/js/bin/bundle-artifacts.mjs sandbox
+
+sandbox-build:	sandbox-artifacts core-build-wasm-web
+	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm --minify \
+		--platform=browser --outfile=sandbox/dist/app.js \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	mkdir -p $(SANDBOX_DIST)/wasm
+	cp core/js/sandbox/index.html core/js/sandbox/styles.css $(SANDBOX_DIST)/
+	cp core/js/kernel/web/buck_identity_bg.wasm $(SANDBOX_DIST)/wasm/
+
+SANDBOX_PORT ?= 8000
+sandbox:	sandbox-build
+	@echo "sandbox: http://localhost:$(SANDBOX_PORT)/   (Ctrl-C stops it)"
+	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_PORT)
+
+# The screenshots in doc/SANDBOX.org: a scripted story in headless Chromium
+# (the flake's), each tool captured into images/sandbox/.
+sandbox-screenshots:	sandbox-build
+	node core/js/sandbox/bin/screenshots.mjs images/sandbox
 
 # Stage the compiled kernels into the alberta-buck-kernel package.  The
 # identity, wallet and registry kernels are ONE cdylib with three

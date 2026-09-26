@@ -157,7 +157,7 @@ repair order (P0-0 fail-closed first) is in
 - Existing user changes: modified `test/vectors/identity-cache.json` and
   untracked simulation vectors/images. Initial status saved outside repo at
   `/private/tmp/alberta-buck-review-initial-status.txt`; do not overwrite them.
-- Python: `/Users/perry/src/alberta-buck.venv-0.1.0-nix-darwin-cpython-313/bin/python`.
+- Python: `../alberta-buck.venv-<version>-nix-<platform>-cpython-313/bin/python` (the repository venv).
   Default python lacks py_ecc; sibling environment has working kernel.
 - Foundry: `/nix/store/1283f23gxvanqigbgm94lz09bsp3qwhc-foundry-1.7.1/bin/`.
 - Real SNARK artifacts already exist in `build/snark/`.

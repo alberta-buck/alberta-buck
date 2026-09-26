@@ -19,8 +19,9 @@
 // plus reads (spotUB / spotUsd / spotBuck / bvib / K) and a per-day
 // series recorder for the charts.
 //
-// Custody pattern: EOA holders send their own txs (private->public
-// transfers to the bound router are handshake-exempt).  CREDIT-drawing
+// Custody pattern: EOA holders send their own txs (a private holder's BUCK
+// transfer to a public contract still needs the holder's identity
+// handshake with it -- Buck._identityCheckedTransfer).  CREDIT-drawing
 // holders get a PROXY (a SimLP instance bound public+NON-carrying --
 // carrying accounts cannot draw negative), created lazily by pledge();
 // helpers dispatch on holderAddress().  Fiat legs (income, endowments)
@@ -111,7 +112,15 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const venue = await session.deploy(artifacts("BuckBasketUniswapV3"), [],
     { name: "BuckBasketUniswapV3", gas });
   await session.send(basketShell, "setVenue", [venue.address], { tag: "eq:setVenue" });
-  await session.send(buck, "setBasket", [basketShell.address], { tag: "eq:buck.setBasket" });
+  // The basket is wired by the insurance pool: the world's own pool contract
+  // acts through its exec(); a caller-supplied pool must be the deployer.
+  if (world.pool) {
+    await session.send(world.pool, "exec", [buck.address, encodeFunctionData({
+      abi: buck.abi, functionName: "setBasket", args: [basketShell.address] })],
+      { tag: "eq:buck.setBasket" });
+  } else {
+    await session.send(buck, "setBasket", [basketShell.address], { tag: "eq:buck.setBasket" });
+  }
   await session.send(kctrl, "setBasket", [basketShell.address], { tag: "eq:kctrl.setBasket" });
   await bind(basketShell.address, true, "eq:bind:basket");
   const facetAbi = artifacts("BuckBasketUniswapV3").abi;

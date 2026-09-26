@@ -12,6 +12,7 @@ import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {MockBasket} from "./mocks/MockBasket.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @title Buck.t.sol — identity-bound ERC-20 mint / approve / transfer flow.
 contract BuckTest is Test {
@@ -56,6 +57,7 @@ contract BuckTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);   // BUCK_K = 1.0
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
@@ -429,6 +431,42 @@ contract BuckTest is Test {
                  "alice's debt shrinks by refund_i");
         assertEq(buck.balanceOf(POOL),    poolAfterMint - 526_315, "pool refund returned");
         assertEq(buck.mintsBacked(tid),   backedAfterMint - 10_526_316, "coverage unwound");
+    }
+
+    // The insurance pool, bound Carrying through the registry (setUp): its
+    // members' premium deposits keep their age rather than paying demurrage
+    // out of the reserve, and a refund takes that age back to the member.
+
+    function test_insurancePool_carrying_depositsKeepTheirValue() public {
+        assertTrue(reg.isCarrying(POOL), "the pool is bound Carrying");
+        _grantCredit(alice, 1000e6);                        // 50bp NFT
+        vm.prank(alice);
+        buck.mint(100e6);                                   // pool principal 5_263_158
+        vm.warp(block.timestamp + 365 days);
+
+        assertEq(buck.balanceOf(POOL), 5_263_158, "a year on, the reserve is intact");
+        uint256 carried = buck.feeOwing(POOL);
+        assertGt(carried, 0, "the deposit has aged");
+        assertEq(buck.balanceOfFees(POOL), carried, "the age is carried, not charged");
+    }
+
+    function test_burn_refundCarriesThePoolsAgeBackToTheHolder() public {
+        _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 raw     = uint256(buck.signedRawBalanceOf(POOL));   // 5_263_158
+        uint256 ageFee0 = buck.feeOwing(POOL);
+        vm.prank(alice);
+        buck.burn(10e6);                                    // refund 526_315
+
+        assertEq(buck.balanceOf(POOL), raw - 526_315, "the refund, and no demurrage, left the pool");
+        // The pool keeps the age of what it still holds; the refunded share
+        // of its age went with the refund (a non-Carrying pool keeps it all).
+        uint256 ageFee1 = buck.feeOwing(POOL);
+        assertLt(ageFee1, ageFee0, "age left with the refund");
+        assertApproxEqAbs(ageFee1, ageFee0 * (raw - 526_315) / raw, 1, "in proportion to the refund");
     }
 
     function test_burn_explicitTokenIds_unwindsChosenNFT() public {
