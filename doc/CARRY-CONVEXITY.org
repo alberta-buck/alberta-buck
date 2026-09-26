@@ -1163,10 +1163,14 @@ facts make K a slow lever by physics, not by tuning:
    yields a supply RAMP that compounds late (+8k BUCK at day 240,
    +2.15M at day 364 for +0.20).  A K move lasting a day moves supply
    by a few thousand BUCK.  No gain makes a one-day K move matter.
-3. The lever is asymmetric.  A cut to 0.55 delevered 6.3M BUCK at once
-   -- a margin call; a rise is an offer nobody has to take (cuts 55k
-   vs rises 44k BUCK per K-day at depth 10; 44k vs 75k at depth 40).
-   A linear controller of any speed does not know this.
+3. The lever is asymmetric.  A cut to 0.55 took 6.3M BUCK out of supply
+   in five days; a rise is an offer nobody has to take (cuts 55k vs
+   rises 44k BUCK per K-day at depth 10; 44k vs 75k at depth 40).  A
+   linear controller of any speed does not know this.  (Corrected
+   2026-09-26, design owner: a cut calls nothing -- it lowers the
+   limits, stops issuance in accounts under water and shrinks it
+   elsewhere; the 6.3M was the savers selling into the premium the cut
+   made, =doc/K-AND-OPS.org= F4.)
 
 Short-horizon events belong to the level-1 facilities by physics: they
 hold inventory, K does not.  What CAN be faster is not K's response
