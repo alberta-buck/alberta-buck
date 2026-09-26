@@ -13,9 +13,10 @@ how the slow lever K and the fast monetary operations should be coupled.
 That question is now answered by measurement, and the answer is not the
 one the branch set out to implement.
 
-Meanwhile =master= has moved 191 commits ahead with the repository's
+Meanwhile =master= had moved 191 commits ahead with the repository's
 public release and a security fix that changes APIs the simulation uses.
-The branch is 91 commits ahead of master and 191 behind.
+That merge is DONE (2026-09-26, 0a33970; section 6.3 records what it
+found): the branch is now 0 behind =origin/master=.
 
 This document is the handoff.  It is written to be read by a session that
 has none of the branch's context: it states the findings, states the
@@ -23,13 +24,13 @@ design they imply, states exactly what master changed and what that does
 to each finding, and says what to run first.  Read sections 2, 5 and 7 to
 act; read 4 to know why; read 6 before touching code.
 
-The documents of record it condenses, all on the branch:
+The documents of record it condenses, all in =doc/= on the branch:
 =CARRY-CONVEXITY.org= (the design: decisions D1-D7, D9, the model, the
 predictions), =WAVE3.org= (the work ledger: every package, every cell,
 every number with the command that made it, decisions pending 1-38),
 =ORGANIC-SCALE.org= (the organic-environment program and the phase rule),
 =ONBOARDING-D7.org= (session recovery and house rules), and
-=reports/wp-13.org= / =wp-14.org= / =wp-15.org= / =wp-16.org= (the four
+=doc/reports/wp-13.org= / =wp-14.org= / =wp-15.org= / =wp-16.org= (the four
 implementation packages).  Nothing here supersedes those; it selects from
 them.
 
@@ -79,13 +80,13 @@ rate limit and a persistence test, never through a proportional gain.
 
 | item                        | where                                                                                              |
 |-----------------------------+----------------------------------------------------------------------------------------------------|
-| the branch                  | =feature/carry-convexity=, pushed to =origin=; 91 commits ahead of =origin/master=, 191 behind    |
-| the design of record        | =CARRY-CONVEXITY.org= (root on the branch; =doc/= on master) -- D1-D7 and D9                        |
-| the work ledger             | =WAVE3.org= -- STATUS block, requirements, work packages, progress ledger newest first, decisions pending 1-38 |
-| the organic program         | =ORGANIC-SCALE.org= -- the scale ladder, multiplicity, "The stand before the controller", the phase rule |
-| onboarding / house rules    | =ONBOARDING-D7.org= -- session recovery, the worktree recipe, house rules 1-13, the report template  |
-| package reports             | =reports/wp-13.org= (controller), =wp-14.org= (per-class stabilizers, local skews), =wp-15.org= (grid machinery), =wp-16.org= (the offline gain derivation) |
-| the contracts built         | =src/BuckKControllerShadow.sol=, =src/ShadowObserver.sol=, =src/interfaces/IStabilizer.sol=, =BuckBasketOps.positionCap()=, =src/sim_build/SimStabilizer.sol= |
+| the branch                  | =feature/carry-convexity=; master merged in at 0a33970 (2026-09-26), 0 behind =origin/master=      |
+| the design of record        | =doc/CARRY-CONVEXITY.org= -- D1-D7 and D9                                                           |
+| the work ledger             | =doc/WAVE3.org= -- STATUS block, requirements, work packages, progress ledger newest first, decisions pending 1-38 |
+| the organic program         | =doc/ORGANIC-SCALE.org= -- the scale ladder, multiplicity, "The stand before the controller", the phase rule |
+| onboarding / house rules    | =doc/ONBOARDING-D7.org= -- session recovery, the worktree recipe, house rules 1-13, the report template |
+| package reports             | =doc/reports/wp-13.org= (controller), =wp-14.org= (per-class stabilizers, local skews), =wp-15.org= (grid machinery), =wp-16.org= (the offline gain derivation) |
+| the contracts built         | =src/BuckKControllerShadow.sol=, =src/basket/ShadowObserver.sol=, =src/basket/IStabilizer.sol=, =BuckBasketOps.positionCap()=, =src/sim_build/SimStabilizer.sol= |
 | the grid's evidence         | =../alberta-buck-grid= (detached at 801f34f): =build/sim/star/d7-c1/summary.{md,json}= and 66 cell vectors; log =build/sim/regen/d7-c1.log= |
 | the gain derivation         | =alberta_buck/sim/kdesign.py=; =build/sim/kdesign/{gains,fit}.org=                                   |
 | the viewer                  | =alberta_buck/sim/viewer/=, served by =python -m alberta_buck.sim.viewer --port 8787=               |
@@ -301,14 +302,28 @@ Detailed in section 6.  The one that touches a finding rather than a
 call site: =Buck='s insurance pool is now bound Carrying, so a mint's
 premium deposit is an ASSET that comes back with its accrued age instead
 of a sunk cost, and the debtors' counterfactual now pays its insurance
-premium fairly as it falls due.  The BUCK path is therefore cheaper
-relative to the mortgage it replaces than it was when F4 was measured, so
-credit demand at a given K should be HIGHER and the flow per unit K
-LARGER.  That narrows F4's authority gap without touching F1's bias: the
-position term's sign problem is not a matter of how strong K is.
+premium fairly as it falls due.  In an economy the BUCK path is therefore
+cheaper relative to the mortgage it replaces than it was when F4 was
+measured, so credit demand at a given K should be HIGHER and the flow
+per unit K LARGER.
 
-Re-identification is mandatory before quoting F4; re-judging cycle 1 is
-not, because its verdict turns on saturation and sign, not on magnitude.
+*Corrected after the merge (2026-09-26): the thin cast cannot show it.*
+No borrower in the sim reads the premium when it decides.  The arrival
+hazard is the same line on master (=equilibrium_agents.py=, =arr_k_ref= /
+=arr_gain= / =arr_max=: K and bvib only), and the debtors' deploy rule is
+the theta law, =gate_disc <= theta x apr=, with no premium term.  The
+catalogue casts do charge premiums (=premium_bp= 50-150), so master's
+change moves the debtors' NET WORTH (=deposit=, =hypo_premium=) but not
+one decision; g on the merged tree differs from WP-16's only by the
+identity re-keying.  So F10's prediction is itself a thin-cast finding:
+an economic change that should move g does not reach the plant, because
+the plant's elasticity is a formula.  It is one more reason the stand's
+first role is the borrower whose ARRIVAL is a carry-rate decision
+(section 7, step 3).
+
+Either way F10 does not touch F1's bias: the position term's sign problem
+is not a matter of how strong K is.  Re-judging cycle 1 is not needed,
+because its verdict turns on saturation and sign, not on magnitude.
 
 * 5. The design: two controllers, one seam
 
@@ -462,18 +477,18 @@ findings are cited, not pasted.
 
 | what changed on master                                                                                      | what it does to our work                                                                                      |
 |-------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------|
-| =reg.bindContract(addr, BIND_PK, BIND_E, public, carrying)= -> =idmod.bind_as_operator(chain, reg, addr, public, carrying, sender=...)= | mechanical, every bind site; ours funnel through =_ProxyAgent._new_proxy= plus the new agents' own binds |
+| =reg.bindContract(addr, BIND_PK, BIND_E, public, carrying)= -> =idmod.bind_as_operator(chain, reg, addr, public, carrying, sender=...)= | mechanical, and master's side of it: every bind site is in =deploy.py= / =agents.py= (=_ProxyAgent._new_proxy=), which merged clean; our new agents make no binds of their own |
 | the sim deploys =IdentityRegistryHarness= (explicitly test-only) instead of =IdentityRegistry=; production uses the registry plus target adapters | our contracts bind through the same helper; no design impact                                     |
 | =idmod.cached_eoa_setup(seed, cls, idx, issuer_kp, rng, chain_id, registry_int)= gained the chain id and registry address (domain separation -- the KI-1 fix) | the identity cache re-keys: cached EOAs regenerate, so vectors move.  Use =vecdiff=, not =cmp=, as the L3 gauge (decision 8 already established this) |
-| =idmod.register_deployer(...)=: the certified-operator bind for BUCK-touching contracts                       | one new line in deploy; our =SimStabilizer= stand-ins need it                                                 |
-| =Buck.insurancePool= is a deployed SimLP bound CARRYING, not an EOA; =setBasket= goes through =pool.exec(...)= | our deploy wiring must adopt it; and see F10 -- it moves the borrowers' economics, hence g                     |
+| =idmod.register_deployer(...)=: the certified-operator bind for BUCK-touching contracts                       | master's =deploy.py= carries it; our =SimStabilizer= stand-ins never hold or move BUCK, so they need no bind  |
+| =Buck.insurancePool= is a deployed SimLP bound CARRYING, not an EOA; =setBasket= goes through =pool.exec(...)= | master's =deploy.py= carries it and merged clean with ours; see F10 -- it moves the borrowers' net worth but, in the thin cast, not g |
 | =Buck._burn= refunds the premium by =_carryingTransfer= when the pool is Carrying                             | premium deposits accrue age and return: =premium_paid= is an asset, not a cost; the debtor counterfactual now carries =hypo_premium= |
-| =BuckCredit.createCredit= requires the client's =setCreditIssuer(insurer, true)= opt-in                       | every credit-creating agent needs the opt-in first, through =exec()= for contract holders.  On our branch that is =bookloader.py=, =facility_agent.py=, =seeder_agent.py=, =undertaking_agents.py=, plus our edits in =equilibrium_agents.py= and =deploy.py= |
+| =BuckCredit.createCredit= requires the client's =setCreditIssuer(insurer, true)= opt-in                       | NOT new: the opt-in landed 2026-08-15 (2daf45a), before the merge base, and our four credit-creating agents (=bookloader.py=, =facility_agent.py=, =seeder_agent.py=, =undertaking_agents.py=) already make it.  (This row said otherwise before the merge; checked and corrected.) |
 | =BuckCredit= gained the insurer gate: =attestInsurer=, =scopeId=, =scopeAttested=, envelope (face band, depreciation models, max dep rate, max premium rate, expiry), scoped =createCredit= overload; enforced only when a deployment binds an insurer registry | D8 now HAS its on-chain vetting surface -- see 6.2 |
 | =pyrevm= runs on the chain id it reports; =scripts/deploy/= replaced Foundry's =script/=                       | mechanical                                                                                                    |
 | new =alberta_buck/sim/observer.py= is the PRIVACY observer ("what Mallory sees")                              | name collision in prose only.  Call ours the STABILIZER observer from now on                                   |
 | new =cast.py=, =privacy_world.py=, big changes in =notes_stack.py=, =identity.py=                              | no overlap with the controller work                                                                           |
-| design notes moved to =doc/= (=doc/CARRY-CONVEXITY.org=, =doc/REBALANCING-EQ.org=); the catalogue TOMLs' "Design of record:" lines point there | our root-level =CARRY-CONVEXITY.org=, =WAVE3.org=, =ORGANIC-SCALE.org=, =ONBOARDING-D7.org= should land in =doc/= too; this file is already there |
+| design notes moved to =doc/= (=doc/CARRY-CONVEXITY.org=, =doc/REBALANCING-EQ.org=); the catalogue TOMLs' "Design of record:" lines point there | DONE in the merge: =CARRY-CONVEXITY.org= followed by rename; =WAVE3.org=, =ORGANIC-SCALE.org=, =ONBOARDING-D7.org= and =reports/= (now =doc/reports/=) moved after it; our class-arm TOMLs point at =doc/REBALANCING-EQ.org= |
 
 ** 6.2 The one design consequence: D8 is answerable now
 
@@ -499,24 +514,91 @@ of attested capacity rather than of an assumed whitelist.  It is the one
 place where master's security work makes a wave-3 question cheaper to
 answer than it was.
 
+*Ruled 2026-09-26 (design owner):* the flood question is STRUCTURAL, so
+the phase rule admits it now; and the flood is bounded -- by the rising
+cost of insurance funding as bvib inflates: the cheaper BUCK gets, the
+harder it is to accumulate the capital required to issue insurance.
+
+Checked against the contracts as merged, that bound binds an HONEST
+insurer and not yet a fictitious one:
+
+1. The funding factor, max(0, 1 + 10 (basket - BUCK) / basket), does
+   rise as BUCK cheapens -- but it gates the MINTER's pre-mint reserve,
+   scaled to the mint's insurance principal, not the insurer's capital,
+   and =Buck.mint= skips it when =poolPrincipal == 0= ("zero-cost
+   insurance => exempt").  D8's flood is exactly the zero-premium mint.
+2. The envelope bounds each POLICY (face band, depreciation model and
+   rate, maximum premium rate, scope, expiry).  It has no premium FLOOR
+   and no aggregate exposure, so an attested insurer can write
+   zero-premium policies without limit on their number.
+3. The insurer's capital -- the solvency buffer =CREDIT-IMPROVEMENT.org=
+   D8 names as the intended shape -- is the regulator's off-chain
+   judgment at attestation; nothing on chain holds or measures it.
+
+The owner's mechanism is the right bound for an insurer whose capital
+accumulates from premiums paid in BUCK: in real terms that capital grows
+more slowly the more BUCK inflates, a counter-cyclical brake on credit
+creation.  It reaches the fictitious insurer given either of two
+contract changes -- a premium floor in the envelope (every attested
+credit then has =poolPrincipal > 0= and the funding factor applies), or
+an attested aggregate capacity per insurer tied to its capital (issuance
+bounded by capital, capital by premiums).  So the cell has three sides:
+
+| side | registry | what bounds the flood                                                   | what it measures                                   |
+|------+----------+-------------------------------------------------------------------------+----------------------------------------------------|
+| a    | unbound  | nothing but theta x apr (today's mainnet blocker)                       | the baseline flood                                  |
+| b    | bound    | attestation only; zero premium admitted                                 | how much vetting alone buys                         |
+| c    | bound    | a premium floor, and a sim-side capacity per insurer that grows with the premiums it collects | the owner's mechanism: flood size and its equilibrium discount against bvib |
+
+Side c is the test of the claim: does the flood stop short of theta x
+apr because insurance capital cannot keep pace with an inflating BUCK?
+Its answer selects between the two contract changes (or both).
+
 ** 6.3 The merge
 
-Our branch and master both changed four sim files:
-=alberta_buck/sim/{agents,deploy,direct_mint,equilibrium_agents}.py=.
-Everything else of ours is new files, or contracts master did not touch.
+DONE 2026-09-26: =git merge origin/master= at 0a33970, then c0ba9e8 (the
+ledgers and reports into =doc/=) and ab1cbb9 (the kdesign step TOMLs
+regenerated).  What it actually took, against what this section
+predicted before it was tried:
 
-Recommended: merge =origin/master= into the branch and, in those four
-files, take MASTER's version wholesale and re-apply our additions on top
--- they are marked with =# WP-n= append blocks by house rule, and the
-controller wiring in =deploy.py= is a contiguous block.  Resolving hunk by
-hunk in =equilibrium_agents.py= (4,000+ lines, nine credit-creation sites)
-will silently lose one of master's opt-in calls.
+- *The textual conflicts were trivial.*  Only =.gitignore= and
+  =flake.nix= (both sides kept: our scipy / rsync / Linux
+  =LD_LIBRARY_PATH=, master's Playwright and clippy) and the root
+  =CARRY-CONVEXITY.{pdf,txt}= renders (deleted, as master did; the org
+  master followed its rename to =doc/=).  The four sim files both sides
+  changed -- =agents=, =deploy=, =direct_mint=, =equilibrium_agents= --
+  merged CLEAN; our additions and master's do not overlap.  The advice
+  once written here, to take master's version wholesale and re-apply
+  ours, would have discarded work for nothing.  =git merge-tree
+  --write-tree HEAD origin/master= previews a merge without touching the
+  tree; use it first next time.
+- *The API translation was already done.*  The opt-in predates the merge
+  base (6.1), master's =deploy.py= carries every bind and the Carrying
+  pool, and nothing of ours binds or touches the insurance pool.
+- *One test moved*: =test_step_tomls_carry_the_none_arms_physics=, because
+  the step TOMLs copy =catalogue-none.toml= verbatim and master changed
+  its Design-of-record comment.  Regenerated; comment-only.
+- *Master's version bump builds a NEW venv*:
+  =../alberta-buck.venv-0.2.1-nix-linux-cpython-313= (the 0.1.0 venv is
+  stale; the running sim server still uses it).  =lib/circom-lib= is
+  pinned at master's 5258258.
+- *A master-side defect, not ours*: =make snark-test-regression= cannot
+  regenerate on master's own tree -- =identity_membership.circom= is now
+  =IdentityMembership(32)= while the script builds its path at
+  =AGGREGATOR_DEPTH= 20 ("Not enough values for input signal
+  pathElements") -- and the script's first act is =rm -rf
+  test/vectors/regression=, which deletes a TRACKED file on failure
+  (=git checkout= it back).  A stale generated
+  =build/snark/regression/RegressVerifier.sol= makes =RegressionTest=
+  fail against master's regenerated proof; without it the Makefile skips
+  the suite, as on a fresh clone.
 
-Then, in order: =make nix-venv-sim-build= (stages the Uniswap artifacts
-that a bare build leaves out), the pytest suites, =make nix-test= for
-forge, then one 30-day smoke per design to prove the wiring, then
-=vecdiff= one none-arm cell against its banked twin and RECORD the shift
-rather than trying to eliminate it.
+Evidence on the merged tree (datasim): =make nix-venv-sim-build= clean;
+the eleven wave-3 pytest files plus master's =test_debtor_ledger.py=
+220 passed, 1 skipped; =make nix-test= 56 suites, 653 passed, 0
+failed, 1 skipped (the SNARK suites and =RegressionTest= skipped by the
+Makefile as their fixtures dictate; 36 Shadow and 8 SimStabilizer
+included).
 
 * 7. What to run first
 
@@ -526,16 +608,21 @@ organic ladder's rung 2 passes its gates, and no monetary operation is
 judged at a rung whose organic gates have not passed.  Cycle 1 WAS the
 structural check, and it is done.  So:
 
-1. *Merge and make it green* (6.3).  No new findings until the tree runs.
-2. *Re-identify the plant* on the merged tree: =python -m
-   alberta_buck.sim.kdesign all=, and separately for cuts and rises, with
-   2-year step cells rather than 1-year (the ramp was still compounding
-   at day 364).  This is cheap and everything quantitative depends on it.
-   Expect g to rise (F10).
+1. *Merge and make it green* (6.3).  DONE 2026-09-26.
+2. *Re-identify the plant* on the merged tree -- REDUCED to a harness
+   check.  In the thin cast g is the arrival formula, which master's
+   premium change cannot reach (F10, corrected), so a full re-run
+   re-measures an assumption.  Run one 2-year cut / rise pair (the ramp
+   was still compounding at day 364) to prove =kdesign= on the merged
+   tree; the identification that counts is per rung on the stand, where
+   g comes out of a decision.
 3. *Build the stand* -- the organic population, in the order that grounds
    K's channel first: the income channel and the external-debt retiree
    (they set g), then the standing-facility saver, then the business with
-   payroll, then a minimal credit union and insurer.  One decision kernel
+   payroll, then a minimal credit union and insurer.  The retiree's first
+   gate: with the =endog= arrival hazard switched OFF, the cast still
+   produces a nonzero g that answers K -- until it does, every F4 number
+   is the formula's.  One decision kernel
    serves all of them: a budget-constrained comparison of carry rates
    (demurrage, basket yield, external debt rate, BUCK credit cost, the
    discount or premium, the funding factor) over a fixed menu (hold,
@@ -551,6 +638,21 @@ structural check, and it is done.  So:
    facilities and the ladder.
 6. *Then the estimator*, if and only if the ceiling beats the price-only
    controller by more than the gates' noise.
+
+Beside the stand, on files it does not touch (the grid machine can carry
+them while T15 is built):
+
+- *The D8 flood cell* (6.2), sides a / b / c.  Structural by the design
+  owner's ruling, so the phase rule admits it now.
+- *F7 asked of the design of record*: Vk's larger K excursion was measured
+  while K read the positions, which is now retired.  What decides whether
+  the local skews stay is A plus the measured kappas on the book-loading
+  arm (two cells: A and "Ak"), not another Vk cell.
+- *Write down the level-2 rule*: under A, K already answers a Q2 burn
+  through the price it moves, so the design of record may need nothing
+  new in K's contract -- A plus a dwell rule in the desk.  Recording that
+  keeps the estimator's plumbing from being built before step 6 earns
+  it.
 
 What NOT to do: do not run cycles 2 and 3 of the controller-alternatives
 plan.  They were designed to tune a coupling that cycle 1 has now ruled
@@ -574,7 +676,7 @@ The numbering is the ledger's; keep it.
 | 35 | kappa per class                                 | open and now POINTED: F7 says the measured kappa made the book-loader's K excursion worse.  One cell to explain that, before any sweep |
 | 36 | the seeder's weight in the aggregate            | moot under the discrete seam; the seeder's position should not reach K at all                      |
 | 38 | the structure after WP-16                       | resolved as D9, and cycle 1 selected its third outcome: the price-only controller is the incumbent; the estimator and the discrete seam are the design |
-| -- | D8 / the facility's flood                      | reopen on master's insurer gate (6.2)                                                              |
+| -- | D8 / the facility's flood                      | ruled 2026-09-26: STRUCTURAL, admitted now; bounded by insurance capital as bvib inflates -- which binds honest insurers only as coded, so the three-sided cell of 6.2 decides between a premium floor and an attested capacity |
 
 * 9. Provenance
 

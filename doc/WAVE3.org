@@ -44,12 +44,19 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   (b); D9's stage-1 third outcome fired; the continuous coupling of the
   books into K's gains is RETIRED in favour of a discrete persistence
   seam plus a flow estimator (=doc/K-AND-OPS.org=, the handoff of
-  record).  NOTHING IS IN FLIGHT.  The branch is 91 commits ahead of
-  =origin/master= and 191 BEHIND it: master carries the KI-1 identity
-  fix, the Carrying insurance pool and BuckCredit's insurer gate, which
-  change the sim's APIs and the borrowers' economics -- merge and
-  re-identify before quoting any quantitative number
-  (=doc/K-AND-OPS.org= section 6). Wave 4's T15 / T16 / T17 (the organic
+  record).  MASTER IS MERGED (2026-09-26, 0a33970; the ledger entry):
+  the branch is 0 behind =origin/master=, the ledgers and reports live
+  in =doc/= (=doc/reports/=), the venv is
+  =../alberta-buck.venv-0.2.1-nix-linux-cpython-313=.  The design
+  owner's rulings of that session: merge now; everything on the branch
+  may be public; the D8 flood is STRUCTURAL (the phase rule admits it
+  now) and bounded by the cost of insurance capital as bvib inflates --
+  which, as the contracts stand, binds honest insurers only
+  (=doc/K-AND-OPS.org= 6.2, the three-sided cell).  K-AND-OPS F10 is
+  corrected: no sim borrower reads the premium, so master's Carrying
+  premium moves net worth, not g; step 2's re-identification is a
+  harness check, and T15's first gate is g from the retiree's decision
+  with the arrival hazard off.  Wave 4's T15 / T16 / T17 (the organic
   stand) are the critical path by the phase rule.
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
@@ -740,6 +747,43 @@ install and login.
 
 Newest first.  Each entry: date, who, what ran, what was found, what is
 next.  Paste acceptance evidence here, not in chat.
+
+** 2026-09-26 -- MASTER MERGED: the branch on the public-release basis (session 4, design owner + Claude, on datasim)
+
+- Merged =origin/master= (9351961) at 0a33970; c0ba9e8 moved this
+  ledger, =ORGANIC-SCALE.org=, =ONBOARDING-D7.org= and =reports/= (now
+  =doc/reports/=) into =doc/=; ab1cbb9 regenerated the kdesign step
+  TOMLs.  Textual conflicts only in =.gitignore=, =flake.nix= and the
+  root CARRY-CONVEXITY renders; the four shared sim files merged clean.
+  =doc/K-AND-OPS.org= 6.3 records what the merge took against what it
+  predicted (the opt-in and the stand-ins' binds were NOT needed).
+- Evidence: =make nix-venv-sim-build= clean; the eleven wave-3 pytest
+  files + =test_debtor_ledger.py= 220 passed, 1 skipped; =make
+  nix-test= 56 suites, 653 passed, 0 failed, 1 skipped.  Six 30-day
+  none-arm smokes, one per design (A, S = base, S0, S0k, V, Vk), exit 0
+  at =build/sim/smoke/merge/d7-c1/=.
+- The L3 gauge needs a like-for-like twin: a 30-day cell is NOT the
+  first 30 days of a 2-year cell, because the =endog= debtors draw
+  =arrive_frac= over =scenario.days= -- in the smokes all 30 arrive
+  inside the month (13 gate throttles, 9 atomic declines by day 25; the
+  banked 2-year twin has no arrival by day 25).  The revert reasons are
+  master's and the branch's alike (=insufficient mint funding= /
+  =insufficient credit allocation=, 129 / 34 over the banked two
+  years).  So the six 2-year none-arm cells are re-running on the
+  merged tree (=build/sim/merge2y/d7-c1/=, log
+  =build/sim/regen/merge2y.{log,done}=) for =vecdiff= against
+  =../alberta-buck-grid/build/sim/star/d7-c1/none-*.json=.
+- A master-side defect found on the way: =make snark-test-regression=
+  cannot regenerate on master's tree (=IdentityMembership(32)= vs the
+  script's =AGGREGATOR_DEPTH= 20), and its first act deletes the tracked
+  =test/vectors/regression/proof.json= (restored).
+- Design owner, this session: merge now; everything on the branch may
+  be public; the D8 flood is structural and bounded by the cost of
+  insurance capital as bvib inflates (checked against the contracts in
+  =doc/K-AND-OPS.org= 6.2: binds honest insurers only as coded; the
+  three-sided cell).  K-AND-OPS F10 corrected (no sim borrower reads the
+  premium).  Next: T15, the external-debt retiree, with insurance as a
+  returned outlay whose cost is opportunity (master's fe3083f doctrine).
 
 ** 2026-09-26 -- CYCLE 1 JUDGED: the position loop rails K, and at the derived knee it pays the attacker (session 4, design owner + Claude, on datasim)
 
