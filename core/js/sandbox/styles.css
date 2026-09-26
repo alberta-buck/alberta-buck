@@ -143,6 +143,8 @@ code, .num { font-family: var(--mono); font-size: .92em; }
 
 main { padding: 1rem 16px 3rem; max-width: 78rem; margin: 0 auto; }
 section > .intro { max-width: 48rem; color: var(--muted); margin-bottom: 1rem; }
+.footer { max-width: 78rem; margin: 0 auto; padding: 0 16px 2rem; color: var(--muted); font-size: .8rem; }
+.footer a { color: inherit; }
 
 .cols { display: grid; grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); gap: 1.2rem; }
 @media (max-width: 760px) { .cols { grid-template-columns: minmax(0, 1fr); } }

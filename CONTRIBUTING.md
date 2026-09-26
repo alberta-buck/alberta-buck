@@ -57,7 +57,10 @@ The CLA covers copyright only. It grants no rights in the project's name — see
 
 Do not paste code from other projects unless you are certain of its licence and
 its compatibility with the layer you are adding it to. If you vendor anything,
-add it to `NOTICE` in the same commit. Note that `core/` is CAL-1.0 and cannot
+add it to `NOTICE` in the same commit. If you add or upgrade a dependency that a
+published package or the sandbox builds in, regenerate the third-party notices
+(`make nix-third-party-notices`; `make nix-third-party-notices-check` fails while
+they are stale). Note that `core/` is CAL-1.0 and cannot
 absorb GPL-licensed code; there is already precedent for this in the repo —
 the Poseidon constants were regenerated specifically to avoid shipping GPL
 circomlib data inside a CAL crate.

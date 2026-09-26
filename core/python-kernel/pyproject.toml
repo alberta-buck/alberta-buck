@@ -6,6 +6,7 @@ readme = "README.md"
 # abi3-py311: one wheel per platform serves every CPython from 3.11 on.
 requires-python = ">=3.11"
 license = "CAL-1.0"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.txt"]
 authors = [
     { name = "Perry Kundert", email = "perry@dominionrnd.com" }
 ]
@@ -24,7 +25,7 @@ Homepage = "https://github.com/alberta-buck/alberta-buck"
 "Bug Tracker" = "https://github.com/alberta-buck/alberta-buck/issues"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

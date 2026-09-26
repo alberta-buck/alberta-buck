@@ -122,6 +122,12 @@ kernel and =alberta-buck-core= on PyPI stay at 0.2.0 (unchanged; patches
 float).  Order: =js-contracts-v0.2.1= and =py-contracts-v0.2.1=, then core's
 contracts pin and lock, then =js-v0.2.1= and =py-sim-v0.2.1=.
 
+From 0.2.2 every package carries its LICENSE, and the kernels and the contracts bundle their
+generated THIRD-PARTY-NOTICES.txt (doc/KNOWN-ISSUES.org, KI-5).  Before tagging, run
+=make nix-third-party-notices-check=: a dependency bump since the last regeneration fails it, and
+=make nix-third-party-notices= brings the notices up to date.  The release workflows refuse a
+package that lacks them.
+
 *What the 0.2.0 release taught* -- read before the next one:
 
 - /Every registry's publisher is per package, and each has a trap./

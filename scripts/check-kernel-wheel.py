@@ -93,6 +93,13 @@ def check_wheel(path: Path, expect_platform: str | None = None) -> None:
     if missing:
         fail(f"{name} is missing {missing}")
 
+    # Its own licence, and the notices of the Rust crates linked into it
+    # (license-files in pyproject.toml; scripts/third_party_notices.py).
+    licences = {m.rsplit("/", 1)[1] for m in members if ".dist-info/licenses/" in m}
+    for f in ("LICENSE", "THIRD-PARTY-NOTICES.txt"):
+        if f not in licences:
+            fail(f"{name} does not carry {f} (found {sorted(licences)})")
+
     size = sum(zipfile.ZipFile(path).getinfo(m).file_size
                for m in members if m.startswith("buck_kernel/"))
     print(f"  platform tag : {plat}")

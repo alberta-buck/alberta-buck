@@ -14,7 +14,8 @@ resolved it.  An issue reported privately is added here when it is disclosed.
 | KI-2 | One interim insurance pool for every credit | Open; the per-insurer design written |
 | KI-3 | The Groth16 setup is a development one      | By design until v1.0.0               |
 | KI-4 | The sandbox keeps its keys in the clear     | By design: it is a simulation        |
-| KI-5 | Incomplete licence notices in distributions | Open                                 |
+| KI-5 | Incomplete licence notices in distributions | Resolved on master; next release     |
+| KI-6 | Two price series have no recorded source    | Open                                 |
 
 * KI-1: An identity issuer could link registrations
 
@@ -101,30 +102,35 @@ the tab unless the visitor exports it.
 - Detail :: [[file:SANDBOX.org][doc/SANDBOX.org]].
 - Next :: nothing, for the sandbox.  A wallet for real value would keep its keys elsewhere.
 
-* KI-5: The published packages and the hosted sandbox carry incomplete licence notices
+* KI-5: The published packages and the hosted sandbox carried incomplete licence notices
 
-- Status :: Open.  A licence-compliance gap, not a protocol one.
-- Affects :: on npm, =alberta-buck-contracts=, =-kernel= and =-core=; on PyPI,
-  =alberta-buck-contracts=, =-core= and =-kernel= (every 0.2 release); the hosted sandbox; and
+- Status :: Resolved on =master= (2026-09-26), so the packages carry them from the next release,
+  and the hosted sandbox from its next deploy; the published 0.2.1 packages still lack them.
+- Affected :: on npm, =alberta-buck-contracts=, =-kernel= and =-core=; on PyPI,
+  =alberta-buck-contracts=, =-core= and =-kernel=; the hosted sandbox; and
   [[file:../NOTICE][NOTICE]].
 
-- Our own licences :: of the seven packages, only =alberta-buck= on PyPI ships its licence text
-  (with NOTICE).  The other six name their licence -- CAL-1.0 or GPL-3.0-or-later -- in their
-  metadata, but carry no text.
-- The kernels' Rust dependencies :: the WebAssembly (npm) and native (PyPI) kernels statically link
-  crates under MIT or Apache-2.0 -- arkworks, =sha2=, =serde_json= and their dependencies -- whose
-  terms ask that the notices travel with every copy, binaries included.  None do.
-- The hosted sandbox :: its =app.js= bundles viem and tevm (MIT), with tevm's =@ethereumjs/evm=
-  and =@ethereumjs/util= under MPL-2.0, which asks that recipients be told where the source is; and
-  the compiled Uniswap contracts it deploys -- the v3 factory and pool (GPL-2.0-or-later, since
-  BUSL-1.1's change date), WETH9 (GPL-3.0), the Universal Router (GPL-3.0-or-later) and Permit2
-  (MIT).  The build keeps only the few licence comments marked for it (=@noble=, =@scure=,
-  =buffer=).
-- NOTICE :: lists the build-time Solidity and Rust dependencies, but not the three third-party
-  files vendored in the tree (=src/lib/UniswapV3OracleLib.sol=, the Universal Router and Permit2
-  artifacts; REUSE.toml records their licences), nor what the sandbox redistributes.
+Six of the seven packages named their licence but carried no text; the kernels linked Rust crates,
+and the sandbox bundled JavaScript packages (MPL-2.0 among them) and Uniswap's compiled contracts,
+without their notices; NOTICE omitted the files vendored in the tree.
 
-- Next :: ship each package's licence text (npm =files=, setuptools =license-files=); generate
-  the kernels' third-party notices (=cargo about= or equivalent) into the wasm and wheel builds;
-  generate the sandbox's notices at build time and serve them beside =app.js=, with the Uniswap
-  contracts' licences and source links; and bring NOTICE up to date with all of it.
+- Fix :: every package now carries its own LICENSE, and those that build third-party code in --
+  the kernels and the contracts bundle -- a THIRD-PARTY-NOTICES.txt generated from =Cargo.lock=,
+  =lib/= and =node_modules= by =scripts/third_party_notices.py=, each component's own licence
+  files reproduced.  The sandbox generates its notices at every build and links them from the
+  page; NOTICE lists what is vendored in the tree and what each distribution redistributes.
+  =make nix-third-party-notices-check= fails while a notice is stale, and the release workflows
+  refuse a package without its licence files.
+
+* KI-6: Two vendored price series have no recorded source
+
+- Status :: Open.
+- Affects :: =alberta_buck/sim/quotes/data/AU-USD.csv= (gold, monthly from 1833) and =BTC-USD.csv=
+  (bitcoin, daily from 2010), shipped in the =alberta-buck= package.
+
+Every other vendored series names its publisher -- in its own header, or in the code that fetched
+it (see [[file:../NOTICE][NOTICE]]) -- but these two record no source, so their terms of
+redistribution are unknown.
+
+- Next :: record each series' source and its terms; replace it with a series whose terms permit
+  redistribution if they do not; or stop shipping it and fetch it at run time.

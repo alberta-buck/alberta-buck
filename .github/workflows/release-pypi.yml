@@ -162,6 +162,8 @@ jobs:
           names = z.namelist()
           need = ["buck_contracts/contracts.json", "buck_contracts/compiler.json"]
           missing = [n for n in need if n not in names]
+          licences = {n.rsplit("/", 1)[1] for n in names if ".dist-info/licenses/" in n}
+          missing += [f for f in ("LICENSE", "THIRD-PARTY-NOTICES.txt") if f not in licences]
           if missing:
               print(f"::error::wheel {whl[0]} is missing {missing}"); sys.exit(1)
           # Until v1.0.0 the Groth16 verifiers are from a development setup,
@@ -249,11 +251,13 @@ jobs:
           whl = whl[0]
           if not whl.endswith("-py3-none-any.whl"):
               print(f"::error::{whl} is not a pure wheel"); sys.exit(1)
-          binary = [n for n in zipfile.ZipFile(whl).namelist()
-                    if n.endswith((".so", ".pyd", ".dylib"))]
+          names = zipfile.ZipFile(whl).namelist()
+          binary = [n for n in names if n.endswith((".so", ".pyd", ".dylib"))]
           if binary:
               print(f"::error::{whl} carries compiled objects: {binary}"); sys.exit(1)
-          print(f"{whl}: pure")
+          if not any(n.endswith(".dist-info/licenses/LICENSE") for n in names):
+              print(f"::error::{whl} does not carry its LICENSE"); sys.exit(1)
+          print(f"{whl}: pure, with its LICENSE")
           EOF
 
       - name: Smoke test the wheel outside any checkout

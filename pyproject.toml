@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools >= 40.9.0", "wheel"]
+requires = ["setuptools >= 77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -96,7 +96,7 @@ include = ["alberta_buck*"]
 [tool.setuptools.package-data]
 # Poseidon round constants / MDS matrices (generated from the specification
 # by core/rust/buck-identity/constants/generate.py; byte-identical to
-# circomlib's values, see NOTICE) -- required at runtime by
+# circomlib's values, derived rather than copied) -- required at runtime by
 # alberta_buck.wallet.poseidon, so it must ship in wheels and sdists.
 "alberta_buck.wallet" = ["poseidon_constants.json"]
 # Generated test artifacts the installed package consumes: the golden receipt

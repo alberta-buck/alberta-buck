@@ -25,7 +25,8 @@
   "files": [
     "node",
     "web",
-    "README.md"
+    "README.md",
+    "THIRD-PARTY-NOTICES.txt"
   ],
   "//exports": "Two builds of the same kernels: node/ is CommonJS (wasm-pack --target nodejs, loaded with createRequire), web/ is ESM (--target web, awaits an explicit wasm source). The bare subpaths pick by environment; the node/ and web/ subpaths force one.",
   "exports": {
