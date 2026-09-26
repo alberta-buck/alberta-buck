@@ -197,7 +197,8 @@ where a deposit should go, and which pool best satisfies a redemption.
 
   In short: the gated policies collect 75-90% of prop's premium, at
   30-55% of its turnover, at roughly twice the mispricing depth, and
-  with the least trend-bleed.  Full tables are in `BASKET-REBALANCE.md'.
+  with the least trend-bleed.  Full tables are in
+  `doc/BASKET-REBALANCE.md'.
 
   Every policy in that table reads one signal: a constituent's share of
   basket value against its target, on one window.  The next section

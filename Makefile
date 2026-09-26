@@ -1174,7 +1174,7 @@ sim-rebalancing-eq-matrix:	sim-build
 # experiments/catalogue-<arm>.toml; mixes/scales are applied as --set
 # overrides by alberta_buck.sim.catalogue (see its docstring).  Cells
 # whose vector exists are reused (a killed grid resumes); the report is
-# build/sim/catalogue/summary.md.  Design: REBALANCING-EQ.org.
+# build/sim/catalogue/summary.md.  Design: doc/REBALANCING-EQ.org.
 #
 #   make nix-venv-sim-catalogue                      # full grid (7 x 6)
 #   make nix-venv-sim-catalogue CAT_ARMS=dump,squeeze CAT_MIXES=none,basket

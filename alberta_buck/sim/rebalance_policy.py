@@ -1,6 +1,6 @@
 """BuckBasket slow-rebalance policy model: deviation x MA-acceleration factor.
 
-Premise (BASKET-REDESIGN.md; alberta-buck-ethereum-basket.org): the BUCK basket
+Premise (doc/BASKET-REDESIGN.md; alberta-buck-ethereum-basket.org): the BUCK basket
 commodities trail the M2 money supply with per-commodity Cantillon lags --
 monetary assets (cbBTC, PAXG) reprice in months, energy and construction in
 about a year, labour and food in one to two years.  A constituent's *share* of
