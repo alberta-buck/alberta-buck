@@ -7,7 +7,6 @@
 #+AUTHOR: Perry Kundert
 #+DATE: 2026-09-24
 #+CATEGORY: Alberta Buck
-#+SERIES[]: Alberta-Buck
 #+DRAFT: false
 #+BUCKY: true
 #+DESCRIPTION: A walk, runnable end to end, from a citizen's identity credential through direct payments and B1, A1 and A2 Notes: what each party provides, what each proof establishes, what an outside observer can learn, and what remains available as evidence.
