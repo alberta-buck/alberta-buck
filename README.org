@@ -146,6 +146,10 @@ come from a /development/ trusted setup whose secret is public -- anyone can for
 and stay so until v1.0.0; that is deliberate, since it lets the simulations model attacks a
 production setup would forbid.  The papers are drafts, revised as the code is.
 
+What is known to be wrong, or deliberately not yet right, is listed in
+[[file:doc/KNOWN-ISSUES.org][doc/KNOWN-ISSUES.org]].  Report a vulnerability privately, as
+[[file:SECURITY.md][SECURITY.md]] describes, to security@albertabuck.ca.
+
 * Licences and contributing
 
 Two licences, applied by layer ([[file:LICENSING.md][LICENSING.md]] is the map and the decision of
