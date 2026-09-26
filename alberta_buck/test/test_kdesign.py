@@ -299,3 +299,26 @@ def test_step_tomls_carry_the_none_arms_physics():
     for name, c in kd.cells().items():
         p = kd.EXPERIMENTS / f"kdesign-step-{name}.toml"
         assert p.read_text() == kd.step_toml(name, c["depth_m"], c["step"])
+
+
+def test_ksteps_carry_their_base_verbatim():
+    """T15's K steps: the base experiment unchanged but for the name and the
+    days, then the open-loop hold and (off the control) the step -- and the
+    committed files are what the generator writes."""
+    base = "organic-retiree"
+    src = tomllib.loads((kd.EXPERIMENTS / f"{base}.toml").read_text())
+    for cell, st in [("ctrl", None)] + list(kd.KSTEPS.items()):
+        text = kd.kstep_toml(base, cell, st)
+        t = tomllib.loads(text)
+        assert t["name"] == f"kstep-{base}-{cell}"
+        assert t["scenario"]["days"] == 365
+        assert {k: v for k, v in t["scenario"].items() if k != "days"} == src["scenario"]
+        assert t["agents"] == src["agents"] and t["deploy"] == src["deploy"]
+        iv = t["interventions"]
+        assert iv[0] == {"day": 120, "action": "set_gains", "kp": 0.0, "ki": 0.0, "kd": 0.0}
+        assert iv[1] == {"day": 120, "action": "set_k0", "k0": 0.75}
+        if st is None:
+            assert len(iv) == 2
+        else:
+            assert iv[2]["day"] == 150 and abs(iv[2]["k0"] - (0.75 + st)) < 1e-12
+        assert (kd.EXPERIMENTS / f"kstep-{base}-{cell}.toml").read_text() == text
