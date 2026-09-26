@@ -106,16 +106,6 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Perry Kundert"
 SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
 
-# --- Third-party reference document ------------------------------------ #
-# NOT this repository's work: a Grynvault report ("By Kode / Hudhaifah").
-# Redistribution rights are unverified -- obtain permission or remove this
-# file BEFORE making the repository public.
-[[annotations]]
-path = "Grynvault-bitcoin-finance.pdf"
-precedence = "override"
-SPDX-FileCopyrightText = "Grynvault (Kode / Hudhaifah)"
-SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
-
 # --- Data, fixtures and vectors --------------------------------------- #
 # JSON and CSV carry no comment syntax, so a header is impossible; these are
 # the files a central declaration exists for.

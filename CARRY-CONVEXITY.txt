@@ -10,7 +10,7 @@
 
 We analyze the Panoptic carry/convexity critique against the BuckBasket
 and specify the wave-3 markout instrument.  We evaluate the basket's own
-side of the excursion catalogue and record six design decisions reached
+side of the excursion catalogue and record the design decisions reached
 by working each open question through one historical and one synthetic
 example.
 
@@ -51,13 +51,15 @@ Table of Contents
 .. 6. The elastic currency and the real-bills doctrine
 .. 7. Swing pricing: the exiting investor pays for the liquidity they consume
 .. 8. Reserve adequacy and the two generations of crisis model
-5. Design decisions of record (2026-09-01/02)
+5. Design decisions of record (2026-09-01/03)
 .. 1. D1. Restoration dominates; the backstop earns a fixed premium
 .. 2. D2. Single receipt class; a stress fee on duress exits
 .. 3. D3. Two issuance classes; the Convertibility Undertakings
 .. 4. D4. K sees the shadow bvib (mid-ranging)
 .. 5. D5. No USD exposure; the treasury seeds BUCK/USDC temporarily; the perp is a funding-rate lever
 .. 6. D6. Demurrage stays; poised capital is latent credit; the auto-pay-down facility
+.. 7. D7. K mid-ranges the level's POSITIONS; the shadow bvib and the position vector are the two alternatives to test
+.. 8. D9. K takes ONE integrated signal; the flow's persistence is the hidden state; the sequence from here
 6. The resulting structure
 .. 1. The laddered target zone
 .. 2. Where each flow lands, and who is the counterparty
@@ -68,12 +70,13 @@ Table of Contents
 .. 1. Symbols and conventions
 .. 2. The plant, reduced
 .. 3. The controller and the shadow term
-.. 4. The undertakings
-.. 5. The attacker's cost, before and after
-.. 6. Reserve adequacy on the weak side
-.. 7. The facility
-.. 8. The perp funding lever
-.. 9. Predictions the catalogue can falsify
+.. 4. The position loop (D7)
+.. 5. The undertakings
+.. 6. The attacker's cost, before and after
+.. 7. Reserve adequacy on the weak side
+.. 8. The facility
+.. 9. The perp funding lever
+.. 10. Predictions the catalogue can falsify
 8. The wave-3 program
 .. 1. Instrument: the markout / LVR ledger, with the basket-side columns (3a)
 .. 2. Gates for every later wave
@@ -172,7 +175,7 @@ Table of Contents
   • Section 4 gives the theory: eight results from monetary economics,
     market microstructure and control, each tied to the repo text it
     clarifies or contrasts.
-  • Section 5 records the six decisions of record.
+  • Section 5 records the decisions of record (D1-D7, D9).
   • Section 6 draws the resulting structure and its contract surface.
   • Section 7 is the model: symbols, laws, bounds, and predictions the
     catalogue can falsify.
@@ -335,8 +338,8 @@ Table of Contents
 ────────────────
 
   Panoptic's "Yin (Carry) & Yang (Convexity) Require Each Other to
-  Survive & Thrive" (X, 2026-08-27; [saved copy]) is the onchain
-  transplant of the Artemis/Cole framing.  In our terms:
+  Survive & Thrive" (X, 2026-08-27; [post]) is the onchain transplant of
+  the Artemis/Cole framing.  In our terms:
 
   A passive AMM LP is a carry trader – a seller of perpetual optionality
   who collects a fixed fee (the implied volatility) while eating adverse
@@ -349,7 +352,7 @@ Table of Contents
   stable only when both sides exist and both are PRICED.
 
 
-[saved copy] <./doc/Panoptic-carry.pdf>
+[post] <https://x.com/Panoptic_xyz/status/2093081191427805570>
 
 
 3.2 The exposure and the measured evidence
@@ -676,7 +679,7 @@ Table of Contents
   with a cliff.
 
 
-5 Design decisions of record (2026-09-01/02)
+5 Design decisions of record (2026-09-01/03)
 ════════════════════════════════════════════
 
   Six questions were open after the audit.  Each was worked through one
@@ -988,6 +991,506 @@ Table of Contents
      never a rebate.
 
 
+5.7 D7. K mid-ranges the level's POSITIONS; the shadow bvib and the position vector are the two alternatives to test
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  (Design owner + Claude, 2026-09-03.)
+
+  /Question./ As built, K is one PID on one process variable.  Several
+  fast facilities now act on that variable at higher frequency – the
+  desk's Q1/Q3, the undertakings and their ladder, the facility
+  population, the seeder – and D4 feeds their books back to K through a
+  reconstituted price.  Are the facilities themselves P, I or D
+  accumulators of K?  Is the whole a higher-level controller, and is it
+  drifting toward an estimator (Kalman) or an optimal controller (LQR /
+  MPC) that should be built explicitly?  And is the shadow bvib the
+  right coupling, or should each facility report how over- or under-sold
+  it is, with the metadata a higher controller needs to sum it?
+
+  /What is built, in control terms./ None of the facilities writes K;
+  the agents read `buckK' only for their own decisions.  Each is a
+  BANDED PROPORTIONAL ACTUATOR on bvib – a price band triggers a trade –
+  whose STATE is an inventory q_i = integral of (absorbed - issued),
+  bounded by a cap.  In flow terms that state is an integrator; in price
+  terms, while the facility is unsaturated and the book is linear, q_i /
+  D is the price error the facility removed, so it reads as a
+  proportional reconstruction of the masked error.  Saturation is a
+  constraint flag, not a PID quantity.  The one coupling to K is the
+  observer's sum, bvib + sum_i lambda_i q_i / D, read by the same PID as
+  the price, plus gamma boosting the integral increment when any
+  facility is at a bound.
+
+  Expanding that through the PID shows what the shadow term is:
+
+  e_s = e + sum_i lambda_i q_i / D K = K0 + Kp e + Ki Int(e) + Kd de/dt
+  (the price loop, unchanged)
+  ⁃ sum_i (lambda_i / D) [ Kp q_i + Ki Int(q_i) + Kd dq_i/dt ] (an
+    inventory loop per facility)
+
+  So D4 already contains P on position, I on position, and D on position
+  – which is P on FLOW, the disturbance itself measured directly,
+  i.e. feedforward.  The terms are right.  Three things about the
+  packaging are not:
+
+  1. *One scalar lambda_i locks the inventory loop's P:I:D ratio to the
+     price loop's.* The two loops have different plants.  From K to bvib
+     the process is self-regulating (the cast reverts price); from K to
+     inventory it is INTEGRATING – level control – which wants a slow,
+     P-heavy PI (Skogestad's SIMC rules for an integrating process: Kc =
+     1 / (k' tau_c), tau_I = 4 tau_c).  One lambda cannot tune both.
+     This is the missing lever.
+  2. *The units drag the reference depth D into the on-chain law.* D is
+     the pools' BUCK reserve: time-varying, and the very quantity a
+     concentrated position (the seeder's, a private LP's) distorts
+     (WAVE3.org decision 8).  Written as position over cap, the
+     controller never needs D.
+  3. *gamma and "pinned vs idle" are symptoms.* With the position loop
+     explicit, a saturated facility's position pins at its cap and the
+     price error carries the margin automatically; no switching, no
+     schedule.  An unreadable NAV is a sensor fault, not saturation
+     (WAVE3.org decision 9, closed 2026-09-03).
+
+  /Historical./ Mid-ranging / valve-position control (Shinskey; Allison
+  and Isaksson 1998; Allison and Ogawa 2003; Haugwitz, Karlsson, Velut
+  and Hagander 2005 on anti-windup in mid-ranging), already in 4.4.
+  HABITUATING CONTROL (Henson, Ogunnaike and Schwaber 1995): two inputs,
+  one output; the fast expensive input takes the transients, the slow
+  cheap one takes the steady-state load, and the cost asymmetry is
+  explicit in the objective – that asymmetry IS the carry critique
+  (Friedman 1951's carry-cost objection to the commodity-reserve
+  currency; the habituating answer is to keep the stock near zero by
+  letting the cheap lever do the persistent work).  AVERAGING LEVEL
+  CONTROL (Cheung and Luyben 1979; McDonald, McAvoy and Tits 1986):
+  inventory is a surge tank, K the outflow valve, net demand the inflow;
+  the objective is the smoothest outflow that never overflows – "K
+  glides" plus the capacity constraint – and its optimal policy is a
+  small MPC.  The INTERNAL MODEL PRINCIPLE (Francis and Wonham 1976): a
+  persistent demand shift is a step into the inventory integrator, so
+  zero steady-state inventory REQUIRES an integrator on inventory; the I
+  term on position is not optional.  Skogestad (2000, 2004) on plantwide
+  control-structure design: the levels table of 6.4 is the standard
+  regulatory / supervisory / optimization layering, and "aggregate
+  position = 0" is a self-optimizing controlled variable (hold it, and
+  carry is minimized without knowing the disturbance).  In market
+  microstructure the shadow bvib formula is the Avellaneda and Stoikov
+  (2008) reservation price, mid + inventory x risk aversion – a market
+  maker's OWN quoting variable, a level-1 object.  The monetary
+  instances: HKMA's Convertibility Undertakings are level 1 with no
+  level 3, and the aggregate balance swings accordingly; the Fed's
+  temporary-to-outright rule is level 2; sterilized intervention
+  (Jurgensen 1983) is the negative result.
+
+  /Optimal control and estimation./ The reduced plant (7.2) is linear
+  with a handful of states: price error, aggregate position, their
+  integrals, K.  With costs on price error squared, position squared
+  weighted by carry, and the change in K squared, LQR returns a linear
+  feedback on exactly the vector [e, Int(e), s, ds/dt] – "each
+  facility's signal, with metadata, summed by a higher controller" –
+  with the weights DERIVED from stated costs instead of swept, and it
+  derives the lambda knee D4 asserts.  LQR ignores constraints; MPC
+  handles them, but a QP per `compute()' is not an on-chain law.
+  Explicit MPC for a box-constrained system this small is
+  piecewise-affine (Bemporad et al. 2002): a linear law inside the
+  operating region plus rail logic – which is what a mid-ranging cascade
+  with anti-windup already is.  So: optimal control EXPLICITLY IN THE
+  DESIGN, offline in the sim (WP-16), and a fixed linear state feedback
+  with rails on-chain.  Take gain RATIOS from LQR and absolute gains
+  from stability margins, because the elasticity from K to flow is the
+  least-known parameter.  A Kalman filter is not the tool: inventory is
+  measured exactly and the observer is algebraic.  The one hidden
+  variable is the PERSISTENCE of the demand flow, which decides
+  temporary versus outright (level 2); that is a disturbance observer
+  (Chen et al. 2016) – a low-pass on the position rate with a threshold
+  and a dwell – and it is the ops doc's persistence test made explicit.
+  The price gauge is the one noisy sensor, and its fix is decision 8,
+  deterministic.  The K loop's bandwidth is bounded by its dead time
+  through credit issuance; the facilities exist to cover that window,
+  and their capacity must cover dead time x worst-case flow (7.4's
+  reserve-adequacy sum).
+
+  /Decision (design owner)./ BOTH designs are kept as alternatives, to
+  be implemented and tested on the same grid (WAVE3.org, "The
+  controller-alternatives test plan"); the missing levers are corrected
+  in both.
+
+  *The corrected controller (one implementation, two aggregation
+  modes).* K runs TWO loops on one lever, one integrator each:
+
+  K = K0 + [ Kp e + Ki Int(e) + Kd de/dt ] the price loop (Direct)
+  ⁃ [ Kq s + Kqi Int(s) + Kqd ds/dt ] the position loop
+
+  with rails and per-integrator anti-windup, s the observer's aggregate
+  position, and (Kq, Kqi, Kqd) INDEPENDENT of (Kp, Ki, Kd).  The
+  observer offers two aggregations of the same `IStabilizer' books:
+
+  • *S (shadow, D4 in its own units)*: s_S = sum_i lambda_i q_i / D,
+    dimensionless, in price units.  With (Kq, Kqi, Kqd) = (Kp, Ki, Kd)
+    the corrected controller reproduces D4 as built, term for term in
+    the interior (at a rail the anti-windup is per integrator, so the
+    identity is interior-exact and rail-approximate); with independent
+    gains it is D4 with the missing lever.
+  • *V (position vector)*: s_V = sum_i w_i q_i / cap_i, with cap_i the
+    facility's own inventory bound in BUCK and w_i a governance COST
+    WEIGHT (sum w_i = 1), so s_V is the level's cost-weighted fill in
+    [-1, 1], the same units as saturation, and D never enters the law.
+
+  Facilities do NOT declare a P, D or I type: every facility reports the
+  same physical state, and the controller derives position, its integral
+  and its rate, as it does for price.  The metadata a facility owns is
+  its cap, its saturation, and its cost weight.  `IStabilizer' gains
+  `position()' (q_i / cap_i, signed 1e18, absorbed positive),
+  `positionCap()' (cap_i in BUCK) and `stale()'; `netInventory',
+  `capacity' and `saturation' stay.  gamma is retained as an optional
+  schedule with default 0: with the position loop explicit its job is
+  done by structure, and it is measured, not assumed.  With Kq = Kqi =
+  Kqd = 0 (and gamma = 0) the controller IS `BuckKControllerDirect';
+  that identity replaces the lambda = gamma = 0 identity as the
+  regression test.  The price loop and `fundingFactor()' read the RAW
+  bvib (WAVE3.org decision 10, 2026-09-04): the position enters K only
+  through the position loop, and participants learn of the interventions
+  through K's motion, not through the mint gate.
+
+  *The lever count.* Integral action can zero at most as many controlled
+  variables as there are independent manipulated variables.  K is one
+  lever; it can zero ONE position – the aggregate s – so the controller
+  carries one position integrator, never one per facility (two
+  integrators on one lever with different residuals wind against each
+  other).  The DISTRIBUTION of inventory among the facilities (the
+  differential modes) therefore needs its own levers, and today it has
+  none: no facility skews its own band by its own inventory.  Each
+  level-1 stabilizer gets a LOCAL SKEW,
+
+  band_i(t) = band_i0 + kappa_i q_i / cap_i
+
+  the Avellaneda-Stoikov reservation-price adjustment applied to the
+  facility's own edge (the desk's Q1/Q3 thresholds, the undertakings'
+  eps on each side, the facility's x / y, the seeder's range centre): a
+  facility long inventory bids lower and offers sooner, so its own flow
+  reverts its own book.  This is where the shadow-price idea belongs –
+  one level down.  kappa_i is a per-facility P (or slow PI) on its own
+  position; K's aggregate integrator is the common mode.  Common mode to
+  K, differential modes to the local skews: n positions, n levers
+  (WP-14).
+
+  *Sensor faults.* A facility whose cap cannot be read reports its LAST
+  GOOD cap with a staleness flag; position is always readable
+  (`netInventory' depends on nothing external); saturation follows from
+  the held cap; a disabled stabilizer is excluded from the aggregate.
+  Never "pinned", never "idle" (WAVE3.org decision 9, where the
+  mechanics of an unreadable NAV are recorded).
+
+  *What is NOT done.* No on-chain MPC or QP; no Kalman filter on
+  inventory; no per-facility integrators in K; no reconstituted price as
+  K's input under V (S keeps it, as the alternative under test); no
+  fast-controller filtered signals into K (6.4 stands).
+
+  *Optimal control, as derived (WP-16, 2026-09-12).* The LQR of record
+  is LOOP-AT-A-TIME.  With one lever and both integrals costed, the
+  reduced plant has a conserved direction – k_s (a Int(e) + e) + k_e s
+  is unchanged by any input, so the price integral and the position
+  carry the same information (the impact-scaled cumulative net flow) and
+  cannot both be zeroed by K – and the joint Riccati iteration diverges.
+  Each loop's LQR on its own plant reproduces the sim's price gains
+  exactly (the anchor) and gives the position loop Kq 2.42 per unit s_S,
+  Kqi 8.1e-8/s, tau_s 127 d at the carry weight of record; the joint
+  closed loop then carries a structural eigenvalue at 1 (the two
+  integrators' contents can shift between them without moving K),
+  bounded in the sim only by the band and the rails.  A joint law would
+  need the band – a hybrid, which the cascade with anti-windup already
+  is.  Two facts of the sim shape what those gains can do: K is a weak
+  lever (~50k BUCK/day of flow per unit), so the derived position loop
+  spends its whole rail at a 21% fill of the undertakings' reserve and
+  the S0-equivalent lambda is ~24 against the 0.5-1 the D4 cells ran;
+  and the undertakings' book on a calm arm is transient, unwound at par
+  within days.  WAVE3.org decisions 27-31 carry the choices this leaves:
+  the persistence horizon, the position loop's authority, the depth
+  axis, P9's window, the two-integrator drift.  What follows from these
+  findings for the structure itself is D9 (2026-09-13).
+
+  *What decides between S and V.* The grid: the same disruptions, the
+  same facility mixes and capacities, both aggregations, gains derived
+  the same way (WP-16), judged by G1-G8 plus the habituation and
+  book-loading gates (predictions 9 and 10).  V is expected to win on
+  units (no D), on the guard-trip days, and on tuning transparency; S is
+  the incumbent and may win on simplicity if the position loop's gains
+  turn out to want the price loop's ratios anyway.  R5 is amended: K's
+  input is the observer's aggregate position in EITHER units, with its
+  own gains.
+
+
+5.8 D9. K takes ONE integrated signal; the flow's persistence is the hidden state; the sequence from here
+─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  (Design owner + Claude, 2026-09-13.  D8 is `CREDIT-IMPROVEMENT.org''s
+  unvetted-insurer decision, referenced throughout this document; the
+  number is skipped here so that reference stays unambiguous.)
+
+  /Question./ WP-16 (`reports/wp-16.org') derived D7's position-loop
+  gains and, on the way, showed that the joint plant is not
+  stabilizable: one lever, two costed integrals, a conserved direction.
+  The design owner's reading: the theory was that K could be moved
+  slowly on persistent price error (the I term on bvib) and more quickly
+  on the scale of the monetary operations the fast events required (the
+  position loop), but both inputs measure the same thing, so they fight
+  – one gaining while the other damps, by the timing of their
+  measurements and responses.  Two ways forward were put: (a) back to a
+  single PID, with the short-horizon events synthesized into its P and D
+  inputs and larger Kp / Kd so that K answers faster; (b) deeper
+  measurement of the economy – the scale and dynamics of what moves
+  bvib, not bvib alone – feeding an optimal-control law that computes
+  the K which would soft-land bvib at par if present trends continued,
+  re-planned as they do not, the way a landing rocket estimates the wind
+  from its own divergence and feeds that estimate forward.  This section
+  records what WP-16 measured, what it means in control terms, which of
+  the two ways is right and why, and the sequence of experiments that
+  decides the design from here – for each stage, what must be
+  discovered, why it matters, and the design each outcome selects.
+
+  /What WP-16 measured./ Findings 1-9 of the report; cells
+  `build/sim/kdesign/d10-{ctrl,m20,m10,m05,p05,p10,p20}',
+  `d40-{ctrl,m20,p20}' and the grind set (1-year cells, K held 0.75 from
+  day 120, the K0 step at day 150).  Every number is from the thin
+  D2-world cast and provisional under `ORGANIC-SCALE.org' decision 6.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   quantity                                     measured                                              finding 
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   supply flow per unit K                       ~50k BUCK/day, as a RAMP; 56k on a loaded book       1, grind 
+   at full rail authority (dk_rail 0.5)         ~25k BUCK/day                                            1, 5 
+   a 60-day grind of $8-12M                     130-200k BUCK/day                                    2, grind 
+   draining a full $15M book at the rail        ~600 days                                                   5 
+   price shift from full authority              0.2-0.4% of bvib                                            3 
+   daily price error, loop open                 std 0.70%, lag-1 autocorrelation -0.53                      3 
+   a cut to K 0.55                              -6.3M BUCK at once (the debtors' limits bind)               1 
+   the undertakings' book on the calm arm       transient: unwound at par within days                       2 
+   the derived position loop's rail             reached at a 21% fill of the real reserve                   5 
+   the two integrators' joint eigenvalue        exactly 1, eigenvector (0, Kqi, 0, -Ki)                     4 
+   the LQR's flow-state gain (the feedforward)  L_d = 210 K per (s / day); unrealisable as a D term         9 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  /The finding in control terms./ The design owner's reading is right,
+  and the conserved direction states it exactly.  The price integral and
+  the facilities' inventory are two GAUGES on one quantity: the
+  cumulative net demand for BUCK at the peg.  K moves supply, and the
+  band routes that supply into one gauge or the other.  While a facility
+  holds price the flow lands in inventory and the price gauge reads
+  nothing; when the facility is drained or absent the same flow lands in
+  price and the inventory gauge is pinned at its cap.  K never has two
+  independent errors to serve.  It has one error read by two
+  instruments, and which instrument is live depends on the regime.  4.4
+  already said so: "the slow controller does NOT look at the process
+  variable – it looks at the fast actuator's POSITION … Two controllers
+  on one variable without this separation oscillate or wind up."  D7's
+  corrected controller put BOTH loops on K, and WP-16 measured the
+  consequence.
+
+  The fight has a specific shape.  A facility absorbs a lump and unwinds
+  it at par within days (finding 2).  The position integrator keeps the
+  residue of that excursion; the residue holds K slightly low; the
+  standing price error that leaves is what the price integrator then
+  winds against, on its 90-day constant.  The two integrators end up
+  holding offsetting contents whose sum is the K the plant wants, and
+  the split between them drifts freely – the eigenvalue at exactly 1
+  (finding 4).  In the contract only the rails bound it, and the worst
+  case is both integrators pinned at opposite rails with K interior, the
+  per-integrator anti-windup fighting a saturation that is not real.
+
+  /Why faster K gains are not the answer (way (a))./ Three measured
+  facts make K a slow lever by physics, not by tuning:
+
+  1. The daily price error is noise on the day scale (std 0.70%, lag-1
+     -0.53): the cast restores the price inside the day and overshoots.
+     A larger Kp moves K by that noise; a Kd amplifies it.  Finding 9 is
+     the derivative form: the implied flow gain would jerk K by tenths
+     from one lumpy fill.
+  2. K acts through the borrowers' arrival hazard and their K-scaled
+     limits (`equilibrium_agents.py', the k / k_ref hazard).  A step in
+     K yields a supply RAMP that compounds late (+8k BUCK at day 240,
+     +2.15M at day 364 for +0.20).  A K move lasting a day moves supply
+     by a few thousand BUCK.  No gain makes a one-day K move matter.
+  3. The lever is asymmetric.  A cut to 0.55 delevered 6.3M BUCK at once
+     – a margin call; a rise is an offer nobody has to take (cuts 55k vs
+     rises 44k BUCK per K-day at depth 10; 44k vs 75k at depth 40).  A
+     linear controller of any speed does not know this.
+
+  Short-horizon events belong to the level-1 facilities by physics: they
+  hold inventory, K does not.  What CAN be faster is not K's response
+  but the DECISION about which part of the flow is K's business – the
+  persistent part.  Way (b) delivers exactly that, and it is a different
+  mechanism from higher gains.  Way (a)'s single-integrator half is
+  right and is kept (stage 1); its higher-gain half is not.  This also
+  settles WAVE3.org decision 7 in the direction WP-16's anchor found:
+  the 2% P term is what a quadratic cost on the instantaneous error
+  wants when the cast itself reverts within the day, and no larger P is
+  justified by any measurement in hand.
+
+  /What way (b) is, in this system's terms./ D7's paragraph "Optimal
+  control and estimation" named the one hidden variable, the PERSISTENCE
+  of the demand flow, and its tool, a disturbance observer.  WP-16 then
+  derived the law that wants it: the LQR's flow-state gain L_d = 210
+  says the optimal K is MOSTLY FEEDFORWARD from the disturbance flow,
+  and finding 9 says it was unrealisable only because the flow was taken
+  by differencing one lumpy gauge.  The missing component is an
+  ESTIMATOR that fuses every channel through which excess demand is met
+  – the facilities' fills, the desk's net inventory, direct-mint net
+  flow, debtor draws and repayments, the pools' reserves – all on chain
+  already, so the sensor is free.  With the disturbance modelled as a
+  persistent component (decay T_p) plus a transient one (decay tau_t,
+  days), the steady-state Kalman filter is an alpha-beta tracker on the
+  fused flow: two exponential averages in the contract (Kalman 1960;
+  Kalata 1984).  The persistent estimate lags by ~tau_t, not by the
+  90-day price integral.  The law:
+
+  e_s = e + lambda s the shadow error: ONE signal (S units; in V units
+  s_V / lambda_V) F_hat = the fused net flow (BUCK/day, sold positive);
+  F_p its persistent part (a slow average); F_t = F_hat - F_p K = K0 +
+  clip(-F_p / g, rails) feedforward: the K whose supply ramp cancels the
+  persistent flow
+  ⁃ Kp e_s + Ki Int(e_s) ONE PI – the price loop's – on the shadow error
+    (S0k as built)
+
+  with g the supply ramp per unit K (WP-16's F_K, identified, not
+  assumed) and the one integrator covering only the part of g we got
+  wrong – the internal model principle (4.6) doing the one job it is
+  needed for.  The landing: K leaves the rail when the supply still in
+  the pipe – g times the uptake lag tau_K times the K excursion – equals
+  the book remaining; that is the powered-descent timing of the design
+  owner's analogy (Acikmese and Ploen 2007), and P9's one-sign-change
+  test measures it.  The price loop on K is not a second loop: the price
+  term of the shadow error covers the regime in which no facility is
+  engaged, the position term the regime in which one is.  The second
+  lever is the FACILITY (its inventory and its local skew, D7); the
+  third, where it exists, the desk's outright operations.
+
+  Two limits on the analogy, of record.  The rocket knows its physics to
+  a percent and the wind is a perturbation; our g differs 2x between
+  cuts and rises and depends on the cast, and a dump is 5-8x K's
+  authority.  So during a disruption the feedforward sits at the rail,
+  the facilities absorb, and the estimator earns its keep on the
+  RELEASE.  And every number above is from the thin cast: the ratio of
+  K's authority to the disturbance scale is an assumption about how much
+  of the money supply is credit-created, and belongs on the organic
+  ladder (`ORGANIC-SCALE.org') as a headline number per rung.
+
+  /The structural conclusion./ K takes ONE integrated signal.  The
+  second lever is the facility.  The sensor is an estimator of the flow
+  and its persistence – level 2 of 6.4 made explicit: the ops doc's
+  persistence test as a filter instead of a dwell.  D7's S and V stay
+  under test as the two-integrator alternative, and cycle 1 (in flight)
+  is read as the single-versus-double integrator test it already
+  contains.  Proposed for the design owner (WAVE3.org decision 38): the
+  two-loop form of D7 becomes the alternative and one PI on the shadow
+  error the incumbent once stage 1 reads that way; the estimator follows
+  stages 2-3.
+
+  /Recommended sequence (Claude, 2026-09-13; for the design owner)./
+  Four stages, each cheaper than the next and each bounding the value of
+  the next.  For each: what must be discovered, why it matters, and the
+  design each outcome selects.
+
+  *Stage 1 – cycle 1 as the single-versus-double integrator test.*
+  Already running (WAVE3.org, d7-c1): designs A (price only), S0 and S0k
+  (ONE integrator on the shadow error, lambda 1 and the derived 24), S
+  and V (two integrators), Vk (V plus the local skews), on none / dump
+  x1 / dump x4 / cohort-step / guardtrip / bookload.
+
+  • To discover: whether the second integrator hurts.  Measurements: the
+    gates G1-G8; P9's sign changes and habituation time; the rail days;
+    and the DRIFT, the total variation of `pid_i - pid_qi' (WAVE3.org
+    decision 31; both terms are in every frame, so it is computed from
+    the vectors after the fact in `eqmetrics').
+  • Why it matters: it decides whether D7's two-loop form survives at
+    all, before any estimator is built and at no extra compute.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   stage-1 outcome                                                                    design selected                                                                                                                                                                                                                                               
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   S0k matches or beats S and V on the gates, with less drift and fewer sign changes  retire the second integrator: the controller of record is one PI on the shadow error; S and V become the two UNITS of that signal (decision 11 stands; V keeps its no-D advantage)                                                                            
+   S or V beat S0k                                                                    the derived lambda mapping is wrong, or the position P term matters at the transient scale; keep two loops but GATE the price integral by regime (I on price only while no facility is engaged) – 4.4's separation restored, a true valve-position controller 
+   neither S0k nor S / V beats A on the gates                                         K's tuning is second order on this cast; go to stage 2 to bound it before spending further                                                                                                                                                                    
+   drift large (an integrator at a rail with K interior on any arm)                   the anti-windup review of decision 31 is mandatory whichever structure wins                                                                                                                                                                                   
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  *Stage 2 – the perfect-measurement benchmark (the ceiling).* Way (b)
+  with the sim's TRUE flows fed to the controller and g known: a Python
+  controller in the harness (the shadow controller's PI plus the
+  feedforward with the release rule, its inputs read from the
+  deployment's own books and the whale's schedule rather than
+  estimated), one 2-year cell per cycle-1 arm.
+
+  • To discover: the value of K on this cast, as a ceiling: the gap
+    between the perfect-measurement K and A, and between it and S0k, on
+    the dump, grind and cohort-step arms (peak, AUC, the book's
+    BUCK-days, rail days, K's total variation, habituation time).
+  • Why it matters: it bounds every later stage.  No estimator beats a
+    controller that knows the flow; if that controller barely beats A,
+    the position loop's authority (decision 28) answers itself and the
+    program's spend moves to the facilities and the organic economy.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   stage-2 outcome                                                                       design selected                                                                                                                                                                   
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ceiling within the gates' noise of A                                                  K is not the lever for these disturbances: decision 28 (b); K keeps the structural residual only; spend on the facilities' reserves, the ladder's schedule and the organic ladder 
+   ceiling beats S0k by more than the noise on peak, AUC or BUCK-days                    the feedforward is worth building: stage 3                                                                                                                                        
+   ceiling within the noise of S0k, both well above A                                    the single integrator already captures K's value; stop at stage 1's design; identify g per rung and leave the estimator unbuilt                                                   
+   ceiling beats A only on the release (fewer sign changes, shorter dwell), not on peak  build the estimator for the release rule only; the feedforward's magnitude is the rail logic, which the PI already has                                                            
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  *Stage 3 – the estimator and the feedforward, in the sim.* The
+  alpha-beta estimator on the fused flow with the persistent / transient
+  split, the law above, g and tau_K from identification.  Contract form
+  last, and only if the sim form wins its cells.
+
+  • To discover: (i) g and tau_K separately for cuts and rises, from
+    2-year step tests (the 1-year cells showed the ramp still
+    compounding at day 364; whether it saturates or grows decides
+    whether K is a RATE lever or a GROWTH lever); (ii) the estimator's
+    lag and its false-persistence rate on the control arm (how often
+    organic noise is called persistent); (iii) the release timing
+    against the ceiling (P9's one sign change); (iv) the on-chain cost
+    (two EWMAs and a division against the tick budget).
+  • Why it matters: it is the design the design owner asked for, and its
+    gains are derived from identified constants, not swept, so its
+    transfer across the ladder's rungs is a matter of re-identification.
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   stage-3 outcome                                                     design selected                                                                                                                                                                               
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   estimator within the gates' noise of the ceiling on every arm       the contract form is two EWMAs and the law above; a WP replaces the position loop in `BuckKControllerShadow' with the feedforward, the `ShadowObserver' gaining the flow channels             
+   the persistence call lags beyond ~tau_t, or fires on organic noise  the disturbance model is wrong: label the flow by source (debtor / direct-mint / facility / pool) and estimate per channel; the K-sensitive channel is the plant, the others are disturbances 
+   g asymmetric beyond 2x                                              a piecewise law: cuts costed as impulses (the margin call), rises as a rate; never one linear gain across the sign                                                                            
+   the ramp compounds (no saturation inside 2 years)                   K is a GROWTH lever on the debtor population: the plant is population dynamics, the feedforward is -F_p / g(t), and the uptake model becomes a per-rung number on the organic ladder          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  *Stage 4 – multi-lever optimal control.* K, the desk and the
+  facilities as one allocation problem with the same estimator as
+  sensor: the transient component sized to the desk's operations, the
+  persistent to K, the differential modes to the local skews.  That
+  plant has n levers and IS stabilizable; it is habituating control
+  (Henson et al. 1995) done properly.
+
+  • To discover: the authority ratio per rung (K's flow per unit against
+    the disturbance scale) and the desk's transient share.
+  • Why it matters: by the design owner's thesis and `ORGANIC-SCALE.org'
+    decision 6 it waits for the organic economy at rung 2; built on the
+    thin cast it would be judged on numbers the cast does not have.
+  • Outcome: the allocation rule of the monetary-operations program; not
+    designed here.
+
+  /What this leaves unchanged./ The undertakings, the ladder, the stress
+  fee, the local skews, the `IStabilizer' seam (position, cap,
+  staleness; the estimator reads the same books plus the flows the
+  contracts already emit), decisions 9-11 and the organic ladder.  What
+  it changes: the two-loop form of D7 is now the alternative under test
+  rather than the incumbent, pending stage 1; the estimator is the
+  design of the next two stages; and "faster K" is closed as a
+  direction.  /Ruling (design owner, 2026-09-13)./ The analysis and the
+  sequence accepted, with THE STAND FIRST: the two numbers WP-16 rested
+  on (g as the `endog' arrival hazard; the within-day reversion as the
+  arbs' parameters) are population assumptions, so stage 1 runs now,
+  stage 2 rides the organic ladder as a per-rung instrument, stage 3
+  waits for rung 2 to pass its gates, and stage 4 follows.  The record
+  of the stand – the decision kernel, the roster order, the gates, the
+  progression cell – is `ORGANIC-SCALE.org' "The stand before the
+  controller"; the phase rule is in `WAVE3.org' STATUS.
+
+
 6 The resulting structure
 ═════════════════════════
 
@@ -1111,6 +1614,10 @@ Table of Contents
        3  months      K                                                                                the stock of credit-backed BUCK                         –                                                                      
        4  governance  eps, p, delta, phi, lambda_i, gamma, gains, rails                                time-locked parameters                                  –                                                                      
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  (D9, 2026-09-13.)  Level 2 is where D9's flow estimator lives: the
+  persistence test as a FILTER on the fused flow through every level-1
+  book, feeding K's feedforward, instead of a dwell on a standing book.
+  Level 3's K then integrates ONE signal, the shadow error.
 
 
 6.4.3 The stabilizer seam
@@ -1163,6 +1670,19 @@ Table of Contents
     The persistence escalation (level 2) is the handoff: a Q2 burn or Q4
     acknowledgment moves inventory out of level 1 and into K's stock,
     and the shadow term drops accordingly.
+
+  /Amended by D7 (2026-09-03)./ The seam stays; what K does with it
+  changes.  `IStabilizer' gains `position()' (the signed fill q_i /
+  cap_i), `positionCap()' and a `stale()' flag; the observer offers two
+  aggregations, S (D4's price units) and V (cost-weighted fill, no D);
+  the controller carries a second loop on the aggregate with its OWN
+  gains and one integrator; and each level-1 stabilizer gets a local
+  skew kappa_i on its own band, so the distribution of inventory among
+  the facilities has its own levers and K mid-ranges only the common
+  mode.  "K consumes positions and saturation, never filtered signals"
+  stands.  The third bullet above (no priority logic) stands too: the
+  local skews are not priorities, they are each facility's own inventory
+  reverting itself.
 
 
 6.4.4 The monetary Diamond
@@ -1303,7 +1823,42 @@ Table of Contents
   uses to escalate to Q2/Q4.
 
 
-7.4 The undertakings
+7.4 The position loop (D7)
+──────────────────────────
+
+  The two-loop form, with s in either the S or the V units of D7:
+
+  s_S = sum_i lambda_i I_i / D s_V = sum_i w_i I_i / cap_i e = 1 - bvib
+  dK/dt = Kp de/dt + Ki e + Kq ds/dt + Kqi s + Kqd d2s/dt2 (conditional
+  integration at the rails)
+
+  Signs are D4's: absorbed inventory (I > 0) drives K DOWN through Kq
+  and Kqi (the contraction the absorption was betting on); issued
+  inventory drives K up.  With (Kq, Kqi, Kqd) = (Kp, Ki, Kd) and s = s_S
+  this is 7.3's law exactly.  The plant from K to s is INTEGRATING: a
+  change in K moves the net flow F through creditLimit on tau_I, and the
+  active facility absorbs F while it holds price, so ds/dt ~ F / cap
+  while it is unsaturated.  The position loop is therefore LEVEL CONTROL
+  of a surge tank fed by the demand flow and drained by K, and its
+  tuning rules are the SIMC integrating-process rules: choose the loop's
+  closed-loop time constant tau_s (slower than tau_I, faster than the
+  persistence horizon), then Kq ~ 1 / (k_s tau_s) and Kqi = Kq / (4
+  tau_s), with k_s the flow per unit K per unit cap – the least-known
+  number, to be identified in the sim (WP-16) and confirmed on the grid.
+  The ds/dt term is inflow feedforward; it may be zero.
+
+  The mid-ranging claim restated for D7: with the position loop tuned,
+  the aggregate position returns to within 10% of zero inside 1.5 tau_s
+  after any excursion K can correct, with at most one sign change (no
+  limit cycle from the two integrators), and grows without bound only
+  when the deviation is structural – the level-2 signal.  The local
+  skews (kappa_i) redistribute inventory among the facilities without
+  moving K: under a differential disturbance (one facility loaded, the
+  level's aggregate near zero) K holds and the loaded facility's own
+  skew unwinds it.
+
+
+7.5 The undertakings
 ────────────────────
 
   Strong side: the basket sells 1 BUCK for (1 + eps) bundles' worth of
@@ -1362,7 +1917,7 @@ Table of Contents
   the perp's funding (3f) exist.
 
 
-7.5 The attacker's cost, before and after
+7.6 The attacker's cost, before and after
 ─────────────────────────────────────────
 
   Today (squeeze of size S in the BUCK/USDC pool): cost = slippage
@@ -1384,7 +1939,7 @@ Table of Contents
   the harvest into deterrence.
 
 
-7.6 Reserve adequacy on the weak side
+7.7 Reserve adequacy on the weak side
 ─────────────────────────────────────
 
   The weak side is the reserve-bounded flank.  With a flat edge its
@@ -1412,7 +1967,7 @@ Table of Contents
   Nothing else.
 
 
-7.7 The facility
+7.8 The facility
 ────────────────
 
   Participant i has limit L_i, drawn d_i, thresholds (x_i, y_i), and a
@@ -1429,7 +1984,7 @@ Table of Contents
   (9.1).
 
 
-7.8 The perp funding lever
+7.9 The perp funding lever
 ──────────────────────────
 
   A perpetual settled on a medianized bvib TWAP, with funding f = g(e)
@@ -1446,8 +2001,8 @@ Table of Contents
   If it does not price safely, it is not listed.
 
 
-7.9 Predictions the catalogue can falsify
-─────────────────────────────────────────
+7.10 Predictions the catalogue can falsify
+──────────────────────────────────────────
 
   1. *Band integrity.* With the strong-side undertaking at eps = 3%, p =
      2, the x4 squeeze ($40M in a day) never takes bvib below 1/(1 +
@@ -1482,6 +2037,34 @@ Table of Contents
      every cell; and the ladder cells reach a LOWER peak deviation per
      dollar of reserve spent than the flat-edge (delta = 0) cell at the
      same eps.
+
+  9. *Habituation (D7).* With the position loop tuned (WP-16), the
+     level's aggregate position |s| returns to within 10% of zero inside
+     1.5 tau_s after every disruption of classes 1, 2 and 5 that K can
+     correct, with at most one sign change (no limit cycle between the
+     two integrators), under both S and V; and under V the result is
+     unchanged by the class-10 liquidity withdrawal, where S's D-scaled
+     response shifts.
+  10. *Book-loading cost (D7).* An attacker who loads a facility's
+      inventory to move K and unwinds after the move (class 9) ends with
+      P&L <= 0 under both S and V, and K's excursion per unit of loaded
+      fraction under V is no larger than under S.
+  11. *One integrator (D9).* Under S0k the two integrators' drift (the
+      total variation of pid_i - pid_qi, decision 31) is nil by
+      construction and K shows at most one sign change per disruption of
+      classes 1, 2 and 5; under S and V the drift is non-zero on every
+      arm, grows with the number of absorb-unwind cycles, and some S or
+      V cell holds an integrator at its rail while K is interior.  If
+      S0k is not also within the gates' noise of S and V on G1-G8, the
+      position P term matters and stage 1's second outcome applies.
+  12. *The feedforward's worth (D9).* On the dump x4, grind and
+      cohort-step arms the ordering A <= S0k <= estimator <= ceiling
+      holds on peak, AUC and the book's BUCK-days; the ceiling beats S0k
+      by more than the gates' noise on BUCK-days and habituation time
+      and by little on peak, because the feedforward sits at the rail
+      during the disruption and earns its keep on the release.  A
+      ceiling within the noise of A falsifies K as the lever for these
+      disturbances (stage 2's first outcome).
 
   Any of these failing changes a decision; 9.6 says which.
 
@@ -1565,22 +2148,26 @@ Table of Contents
 8.3 The waves
 ─────────────
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   wave  axis                       cells                                                                                                                                                                                                                                                   new agents / features                                                                                                                                                                                                                metric additions                                                                                                        decides                                    
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-   3a    instrument                 existing 86 cells, re-summarized                                                                                                                                                                                                                        markout ledger; basket-side columns                                                                                                                                                                                                  carry_ratio, class toxicity, NAV/treasury/depositor deltas                                                              the numbers the rest is judged by          
-   3c    the undertakings           eps {2,3,5}% x p {1.5,2,3} x {dump, squeeze, grind-down, grind-up} x {x1, x4}; undefended AND full cast; weak-side curve {flat (delta 0), ladder (delta, phi) in {(1%,10%), (1%,25%), (2%,25%), (3%,50%)}, CPMM limit} on the dump and grind-down arms  `UndertakingAgent' (SimLP authority: unlimited zero-premium face for the strong side, a NAV-sized TOKEN book for the weak side struck as a tranche ladder, bundle legs via the basket-rotation execution path, per-leg cap = C_leg)  band integrity, undertaking books, reserve fraction rho, attacker cost per $ and average sale price vs cumulative size  D3's eps and p; the weak-side (delta, phi) 
-   3d    shadow-bvib controller     lambda_d {0, 0.25, 0.5, 1, 2} with `--basket ops' ENABLED in the loop (first time), on dump/squeeze x1/x4 and the drift-like grind arms; then lambda_c with the facility                                                                                `BuckKControllerShadow' (reads `shadowValueInBuck()'); desk enabled via `SIM_OPS_*'                                                                                                                                                  K trajectory, desk inventory return-to-zero time, rail margin, runaway-one detection                                    D4's lambda knee                           
-   3b    directional dynamic fee    {static-retune, directional-RV, directional-size} x {dump, squeeze} x {x1, x4}                                                                                                                                                                          fee schedule in the sim pool adapter                                                                                                                                                                                                 whale P&L delta, benign tracking error, one-day trough depth                                                            the tick-speed responder                   
-   3g    the facility               population {8, 32, 128} x (x, y) {(2%,2%), (3%,3%), (5%,2%)} x deposit-to-basket on/off, on squeeze/dump x1/x4                                                                                                                                          `ExcursionCreditArbAgent' promoted: deposit-to-basket leg, retire-on-discount, utilization telemetry u                                                                                                                               middle-ladder peak/AUC contribution, realized (not marked) harvest, u trajectory                                        D6's x, y; eps relative to x               
-   3f    perp funding lever         g() slope {0, 1, 3, 10} x whale-via-perp vs whale-via-spot, on squeeze x1/x4 and the accumulation phase of dump x4                                                                                                                                      `FundingHouseAgent' + a Python perp ledger settling funding on-chain in BUCK; OI cap                                                                                                                                                 attack cost by duration, transfer to the house, detector lead time and false positives, K rail margin                   whether to build the perp                  
-   3e    derivatives on satellites  D1 hedge on/off x {spike, step} x {x1.3, x1.6}                                                                                                                                                                                                          a hedge program agent with a budget and kill switch                                                                                                                                                                                  hedge cost, IL delta                                                                                                    satellite weight vs hedge                  
-   3h    seeder, seeds, floods      seeder on/off at launch; the campaign's 5 seeds on the key 3c/3d cells; the oversupply flood (rec. 4) with and without the facility                                                                                                                     `TreasurySeederAgent' (BuckPoolInvestorAgent variant); flood via BuckIssuerArbAgent / draw_mult                                                                                                                                      private-depth arrival, orientation check, flood equilibrium discount vs theta x apr                                     robustness; D8 exposure                    
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   wave  axis                              cells                                                                                                                                                                                                                                                   new agents / features                                                                                                                                                                                                                metric additions                                                                                                        decides                                       
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   3a    instrument                        existing 86 cells, re-summarized                                                                                                                                                                                                                        markout ledger; basket-side columns                                                                                                                                                                                                  carry_ratio, class toxicity, NAV/treasury/depositor deltas                                                              the numbers the rest is judged by             
+   3c    the undertakings                  eps {2,3,5}% x p {1.5,2,3} x {dump, squeeze, grind-down, grind-up} x {x1, x4}; undefended AND full cast; weak-side curve {flat (delta 0), ladder (delta, phi) in {(1%,10%), (1%,25%), (2%,25%), (3%,50%)}, CPMM limit} on the dump and grind-down arms  `UndertakingAgent' (SimLP authority: unlimited zero-premium face for the strong side, a NAV-sized TOKEN book for the weak side struck as a tranche ladder, bundle legs via the basket-rotation execution path, per-leg cap = C_leg)  band integrity, undertaking books, reserve fraction rho, attacker cost per $ and average sale price vs cumulative size  D3's eps and p; the weak-side (delta, phi)    
+   3d    shadow-bvib controller            lambda_d {0, 0.25, 0.5, 1, 2} with `--basket ops' ENABLED in the loop (first time), on dump/squeeze x1/x4 and the drift-like grind arms; then lambda_c with the facility                                                                                `BuckKControllerShadow' (reads `shadowValueInBuck()'); desk enabled via `SIM_OPS_*'                                                                                                                                                  K trajectory, desk inventory return-to-zero time, rail margin, runaway-one detection                                    D4's lambda knee                              
+   3b    directional dynamic fee           {static-retune, directional-RV, directional-size} x {dump, squeeze} x {x1, x4}                                                                                                                                                                          fee schedule in the sim pool adapter                                                                                                                                                                                                 whale P&L delta, benign tracking error, one-day trough depth                                                            the tick-speed responder                      
+   3g    the facility                      population {8, 32, 128} x (x, y) {(2%,2%), (3%,3%), (5%,2%)} x deposit-to-basket on/off, on squeeze/dump x1/x4                                                                                                                                          `ExcursionCreditArbAgent' promoted: deposit-to-basket leg, retire-on-discount, utilization telemetry u                                                                                                                               middle-ladder peak/AUC contribution, realized (not marked) harvest, u trajectory                                        D6's x, y; eps relative to x                  
+   3f    perp funding lever                g() slope {0, 1, 3, 10} x whale-via-perp vs whale-via-spot, on squeeze x1/x4 and the accumulation phase of dump x4                                                                                                                                      `FundingHouseAgent' + a Python perp ledger settling funding on-chain in BUCK; OI cap                                                                                                                                                 attack cost by duration, transfer to the house, detector lead time and false positives, K rail margin                   whether to build the perp                     
+   3e    derivatives on satellites         D1 hedge on/off x {spike, step} x {x1.3, x1.6}                                                                                                                                                                                                          a hedge program agent with a budget and kill switch                                                                                                                                                                                  hedge cost, IL delta                                                                                                    satellite weight vs hedge                     
+   3h    seeder, seeds, floods             seeder on/off at launch; the campaign's 5 seeds on the key 3c/3d cells; the oversupply flood (rec. 4) with and without the facility                                                                                                                     `TreasurySeederAgent' (BuckPoolInvestorAgent variant); flood via BuckIssuerArbAgent / draw_mult                                                                                                                                      private-depth arrival, orientation check, flood equilibrium discount vs theta x apr                                     robustness; D8 exposure                       
+   3i    the controller alternatives (D7)  the WAVE3.org test plan: 10 disruption classes x mixes x capacity x{0.25 .. 16} x designs {A, S0, S, V, Vk} x 2 depths, as a star plus two factorials (~130 cells)                                                                                      `BuckKControllerShadow' with the position loop (Kq, Kqi, Kqd) and observer modes S / V; hold-last cap; local skews kappa_i; `BookLoaderAgent'; the class TOMLs                                                                       habituation, carry BUCK-days, saturation dwell, K economy, book-loading, per-loop attribution                           S vs V; tau_s; kappa*; whether gamma survives 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Order: 3a -> 3c -> 3d -> 3b -> 3g -> 3f -> 3e/3h.  3c precedes 3d
   because the undertakings change the desk's book size, which is what
   the lambda sweep must be measured against; 3g precedes 3f because the
   middle of the ladder decides how much duration pricing is left to do.
+  Amended 2026-09-03 (D7): 3d's lambda sweep is absorbed into 3i, which
+  runs after decision 8 and BEFORE 3c's verdicts are read, because every
+  "K end" number depends on which K is in the loop.
 
 
 8.4 Implementation notes for the sim
@@ -1716,6 +2303,10 @@ Table of Contents
    the perp raises attacker cost less than its liquidation risk costs the house    D5               do not build the perp; rely on the band and the fee                  
    benign tracking error rises under the seeder or the fee                         D5, 3b           narrower seeder range; lower base fee                                
    the flood equilibrates below theta x apr with the facility on                   D6 + D8          the facility waits for insurer vetting                               
+   S0k matches S / V on the gates with less drift and fewer sign changes           D7 -> D9         one PI on the shadow error; the position loop retired                
+   the perfect-measurement K is within the gates' noise of A                       D9, dec. 28      K keeps the structural residual; spend on facilities and the ladder  
+   the estimator's persistence call fires on organic noise                         D9 stage 3       per-channel flow estimation, labelled by source                      
+   g asymmetric beyond 2x, or the supply ramp compounds without saturating         D9 stage 3       a piecewise or population-dynamics law; never one linear gain        
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -1740,10 +2331,16 @@ Table of Contents
      the physics and the x4 squeeze is the cell that decides them.
   3. *3d* – put the desk in the loop for the first time, with the shadow
      term; find lambda's knee the way the 20-day knee was found.
-  4. *3b* – the directional fee, for the one-day trough.
-  5. *3g then 3f* – the middle of the ladder, then the duration lever.
-  6. *3e, 3h* – satellites, seeds, the seeder, the flood.
-  7. *Contract work LAST*, in this order: the undertakings and
+  3a. *3i (D7) before 3c's verdicts are read* – the controller under
+     judgment changes every "K end" number; run the controller-
+     alternatives grid (WAVE3.org) on the equilibrium backdrop first.
+     3b. *D9's stage 2, the perfect-measurement K, before cycle 2* – one
+     Python cell per arm bounds the value of every controller package
+     after it, and costs less than any of them.
+  1. *3b* – the directional fee, for the one-day trough.
+  2. *3g then 3f* – the middle of the ladder, then the duration lever.
+  3. *3e, 3h* – satellites, seeds, the seeder, the flood.
+  4. *Contract work LAST*, in this order: the undertakings and
      monetary-book accounting on the ops shell; `shadowValueInBuck' and
      the `Shadow' controller; the stress fee in `_redeem'; the facility;
      a v4 hook for the winning fee policy behind the venue seam; the
@@ -1784,6 +2381,35 @@ Table of Contents
     K plus the cast force bvib back to it – what makes selling
     common-mode convexity sound.
 
+  • *the position loop*: K's second loop, on the level's aggregate
+    position s (in S or V units), with its own gains (Kq, Kqi, Kqd) and
+    one integrator (D7).
+  • *S / V*: the two aggregations of the stabilizers' books under
+    judgment – the shadow bvib in price units (D4; sum lambda_i q_i / D)
+    and the cost-weighted fill in [-1, 1] (sum w_i q_i / cap_i).
+  • *the local skew*: kappa_i q_i / cap_i added to a facility's own
+    band, so its own flow reverts its own book; the differential-mode
+    lever (D7).
+  • *habituation*: the return of the fast actuators' inventory to zero
+    as the slow lever takes over the steady-state load (Henson et al.
+    1995); measured as the time for |s| to fall within 10% of zero.
+  • *the shadow error*: e_s = e + lambda s, the one signal K integrates
+    under D9 – the price term live while no facility is engaged, the
+    position term live while one is; S0k's input as built.
+  • *the flow estimator*: the alpha-beta (steady-state Kalman) filter on
+    the fused net BUCK flow through every peg-supporting channel, split
+    into a persistent and a transient part; the sensor of D9's
+    feedforward; level 2 of 6.4 made explicit.
+  • *the perfect-measurement K*: D9's ceiling – the feedforward law run
+    with the sim's true flows and a known g; the bound no estimator can
+    beat, and the measure of whether K is the lever at all.
+  • *the uptake lag (tau_K)*: the time the supply takes to answer a K
+    move through the borrowers' hazard; with g it sets the release
+    timing (the supply still in the pipe).
+  • *the drift*: the total variation of pid_i - pid_qi, the two
+    integrators' contents shifting between them without moving K (WP-16
+    finding 4; WAVE3.org decision 31).
+
 
 12 References
 ═════════════
@@ -1821,8 +2447,7 @@ Table of Contents
 
   • Panoptic, "Yin (Carry) & Yang (Convexity) Require Each Other to
     Survive & Thrive", X, 2026-08-27
-    (<https://x.com/Panoptic_xyz/status/2093081191427805570>); saved
-    copies saved copy `doc/Panoptic-carry.pdf'.
+    (<https://x.com/Panoptic_xyz/status/2093081191427805570>).
   • Panoptic research: "Panoptic Solves LVR"; "Reverse Gamma Scalping";
     "IV & Put Wing Premia"; "Derivatives Solve the Uniswap Doom Loop"
     (<https://panoptic.xyz/research/>).
@@ -1849,8 +2474,60 @@ Table of Contents
   • Bagehot (1873), "Lombard Street".
   • Shinskey, "Process Control Systems" (valve-position / mid-ranging
     control).
+  • Henson, Ogunnaike and Schwaber (1995), "Habituating control
+    strategies for process control", AIChE Journal 41(3).
+  • Allison and Isaksson (1998), "Design and performance of mid-ranging
+    controllers", J. Process Control 8(5-6); Allison and Ogawa (2003),
+    "Design and tuning of valve position controllers with industrial
+    applications", Trans. Inst. Measurement and Control 25(1); Haugwitz,
+    Karlsson, Velut and Hagander (2005), "Anti-windup in mid-ranging
+    control", IEEE CDC-ECC.
+  • Cheung and Luyben (1979), "Liquid-level control in single tanks and
+    cascades of tanks with proportional-only and proportional-integral
+    feedback controllers", Ind. Eng. Chem. Fundamentals 18(1); McDonald,
+    McAvoy and Tits (1986), "Optimal averaging level control", AIChE
+    Journal 32(1).
+  • Francis and Wonham (1976), "The internal model principle of control
+    theory", Automatica 12(5).
+  • Skogestad (2000), "Plantwide control: the search for the
+    self-optimizing control structure", J. Process Control 10(5);
+    Skogestad (2003), "Simple analytic rules for model reduction and PID
+    controller tuning", J. Process Control 13(4); Skogestad (2004),
+    "Control structure design for complete chemical plants", Computers
+    and Chemical Engineering 28(1-2).
+  • Astrom and Hagglund (2006), "Advanced PID Control" (windup, cascade,
+    mid-ranging); Astrom and Rundqwist (1989), "Integrator windup and
+    how to avoid it", ACC.
+  • Anderson and Moore (1990), "Optimal Control: Linear Quadratic
+    Methods"; Bemporad, Morari, Dua and Pistikopoulos (2002), "The
+    explicit linear quadratic regulator for constrained systems",
+    Automatica 38(1); Rawlings, Mayne and Diehl (2017), "Model
+    Predictive Control: Theory, Computation, and Design".
+  • Chen, Yang, Guo and Li (2016), "Disturbance-observer-based control
+    and related methods – an overview", IEEE Trans. Industrial
+    Electronics 63(2).
+  • Ho and Stoll (1981), "Optimal dealer pricing under transactions and
+    return uncertainty", J. Financial Economics 9(1); Avellaneda and
+    Stoikov (2008), "High-frequency trading in a limit order book",
+    Quantitative Finance 8(3).
+  • Graham (1937), "Storage and Stability"; Keynes (1938), "The Policy
+    of Government Storage of Food-Stuffs and Raw Materials", Economic
+    Journal 48; Friedman (1951), "Commodity-Reserve Currency", Journal
+    of Political Economy 59(3).
   • SEC money-market fund reforms (2014; 2023 – mandatory liquidity
     fees).
+  • Kalman (1960), "A New Approach to Linear Filtering and Prediction
+    Problems", J. Basic Engineering 82(1); Kalata (1984), "The Tracking
+    Index: A Generalized Parameter for alpha-beta and alpha-beta-gamma
+    Target Trackers", IEEE Trans. Aerospace and Electronic Systems
+    AES-20(2) – the steady-state filter as two constants (D9).
+  • Acikmese and Ploen (2007), "Convex Programming Approach to Powered
+    Descent Guidance for Mars Landing", J. Guidance, Control, and
+    Dynamics 30(5) – the landing analogy of D9: guidance re-planned each
+    step from the estimated state; the estimate, not the gain, is what
+    makes it fast.
+  • Ljung (1999), "System Identification: Theory for the User", 2nd ed.
+    – the step tests and differential fits of WP-16 and D9's stage 3.
 
 
 12.4 History
