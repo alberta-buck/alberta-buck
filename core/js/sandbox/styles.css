@@ -73,6 +73,14 @@ h3 { font-size: .95rem; font-weight: 650; }
 p { margin: .4rem 0; }
 code, .num { font-family: var(--mono); font-size: .92em; }
 .unit { color: var(--muted); font-size: .85em; }
+/* An amount: six places, right-justified so a column's decimal points line up,
+   then its currency left-justified in a column of its own ("BUCKs" is widest). */
+.money { display: inline-flex; align-items: baseline; white-space: nowrap; }
+.money .num { font-variant-numeric: tabular-nums; }
+.money .unit { display: inline-block; width: 5ch; margin-left: .45em; text-align: left;
+               font-family: var(--mono); }
+/* A registered name: the wallet's own, and the ones introduced to it. */
+.registered-name { color: var(--good); }
 .hint { color: var(--muted); font-size: .85rem; }
 
 /* ---- the world bar ------------------------------------------------------- */
@@ -226,7 +234,9 @@ details > summary { cursor: pointer; color: var(--accent); font-size: .88rem; ma
 table { border-collapse: collapse; width: 100%; font-size: .85rem; }
 th, td { padding: .45rem .6rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
-td.r { text-align: right; }
+td.r, th.r { text-align: right; }
+th .sub { font-weight: 400; text-transform: none; letter-spacing: 0; }
+td .now { color: var(--muted); }
 tbody tr:last-child td { border-bottom: 0; }
 .quote { border: 1px dashed var(--line); border-radius: 8px; padding: .3rem .7rem .6rem; }
 .good { color: var(--good); }

@@ -1,20 +1,32 @@
 // The Wallets: each an account with its own keys, kept in this tab.  A wallet
-// registers with a credential, introduces itself to the wallets it pays,
-// sends BUCKs, and trades BUCKs for USDC in the pool -- each step saying what it
-// discloses, and to whom.
+// registers with a credential, introduces itself to the wallets it deals with,
+// pays in BUCKs, USDC or ETH, and trades BUCKs for USDC in the pool -- each
+// step saying what it discloses, and to whom.
+//
+// A wallet is "W1", or "W1: <its label>", and once registered it carries its
+// holder's registered name too.  Another wallet learns that name only when
+// this one introduces itself to it: until then its dropdowns show just the id,
+// the label and the address.
 
-import { addr, field, fill, h, money, parseAmount, preserving } from "./dom.js";
+import { ASSETS, walletTitle } from "../app.js";
+import { addr, amount, field, fill, h, money, parseAmount, preserving, shortAddr } from "./dom.js";
+
+// Another wallet as `viewer` knows it: its registered name only once it has
+// introduced itself to the viewer.
+const knownTo = (viewer) => (o) => walletTitle({
+  id: o.id, label: o.label, name: o.introduced.includes(viewer.id) ? o.name : null });
+const withAddr = (viewer) => (o) => `${knownTo(viewer)(o)} (${shortAddr(o.address)})`;
 
 export function mountWallets(ctx) {
   const { app, act } = ctx;
   const panel = document.getElementById("panel-wallets");
-  const label = h("input", { name: "label", autocomplete: "off", placeholder: "e.g. Carol's wallet" });
+  const label = h("input", { name: "label", autocomplete: "off", placeholder: "optional, e.g. Savings" });
   const create = h("form", {
     class: "card",
     onsubmit: async (e) => {
       e.preventDefault();
       const w = await act("Creating a wallet", () => app.createWallet(label.value),
-        (r) => `${r.label} created.`);
+        (r) => `${r.title} created.`);
       if (w) label.value = "";
     },
   },
@@ -27,9 +39,9 @@ export function mountWallets(ctx) {
   ctx.wallets = { list: h("div", { class: "cards" }) };
   fill(panel,
     h("p", { class: "intro" }, "A registered wallet has proved, on chain, that a trusted issuer ",
-      "certified its holder — without saying who.  Paying another private wallet takes an ",
-      "introduction first: each re-encrypts its identity for the other, so each can later say who ",
-      "it dealt with, and no one else can."),
+      "certified its holder — without saying who.  A wallet introduces itself to another by ",
+      "re-encrypting its identity for that wallet alone, which then knows its registered name; no ",
+      "one else does.  Paying BUCKs between two private wallets takes an introduction each way."),
     h("div", { class: "cols" }, h("div", { class: "form" }, create),
       h("div", {}, h("h2", {}, "Wallets"), ctx.wallets.list)));
 }
@@ -39,6 +51,9 @@ const discloses = (...text) => h("p", { class: "discloses" }, h("b", {}, "Disclo
 function walletCard(ctx, view, w) {
   const { app, act } = ctx;
   const others = view.wallets.filter((o) => o.id !== w.id);
+  const known = knownTo(w);
+  const option = withAddr(w);
+  const me = walletTitle({ id: w.id, label: w.label });
   const key = (k) => `wallet:${w.id}:${k}`;
   const held = w.signedBalance > 0n ? w.signedBalance : 0n;
   const drawn = w.signedBalance < 0n ? -w.signedBalance : 0n;
@@ -52,9 +67,9 @@ function walletCard(ctx, view, w) {
     h("dt", { title: "Held BUCKs plus unused credit" }, "Spendable"), h("dd", {}, money(w.balance, "BUCK")),
     h("dt", {}, "Credit limit"), h("dd", {}, money(w.creditLimit, "BUCK")),
     h("dt", { title: "Demurrage accrues on held BUCKs; it is settled at the next transfer" },
-      "Demurrage owing"), h("dd", {}, money(w.feeOwing, "BUCK", 6)),
+      "Demurrage owing"), h("dd", {}, money(w.feeOwing, "BUCK")),
     h("dt", {}, "USDC"), h("dd", {}, money(w.usdc, "USDC")),
-    h("dt", {}, "ETH (gas)"), h("dd", {}, `${(Number(w.eth) / 1e18).toFixed(3)}`),
+    h("dt", { title: "For gas" }, "ETH"), h("dd", {}, money(w.eth, "ETH", 18)),
   );
 
   const steps = [];
@@ -66,45 +81,66 @@ function walletCard(ctx, view, w) {
       view.credentials.length
         ? h("div", { class: "row" }, cred, h("button", {
           type: "button", class: "primary",
-          onclick: () => act(`Registering ${w.label}`, () => app.register(w.id, cred.value),
-            () => `${w.label} registered.`),
+          onclick: () => act(`Registering ${me}`, () => app.register(w.id, cred.value),
+            (r) => `${r.title} registered.`),
         }, "Register"))
         : h("p", { class: "hint" }, "Issue a credential first (Issuer)."),
       discloses("a fresh identity key, the identity encrypted to it, and proofs.  ",
         "Not who the holder is.")));
-  } else {
-    // Pay.
-    const amt = h("input", { "data-key": key("pay"), inputmode: "decimal", placeholder: "BUCKs",
-                             "aria-label": "amount to pay" });
-    const to = h("select", { "data-key": key("to"), "aria-label": "pay to" },
-      others.map((o) => h("option", { value: o.id }, `${o.id} ${o.label}`)));
-    steps.push(h("div", { class: "step" },
-      h("h3", {}, "Pay"),
-      others.length ? h("div", { class: "row" }, amt, to, h("button", {
-        type: "button", class: "primary",
-        onclick: () => act(`Paying from ${w.label}`,
-          () => app.send(w.id, to.value, parseAmount(amt.value, "amount")), () => {
-            amt.value = "";
-            return "Paid.";
-          }),
-      }, "Send")) : h("p", { class: "hint" }, "Create another wallet to pay."),
-      discloses("the amount and both addresses, to everyone.  The payee must be registered and ",
-        "introduced.")));
+  }
 
-    // Introduce.
+  // Pay: BUCKs once registered; USDC and ETH from any wallet, to any.
+  const assets = ASSETS.filter((a) => w.registered || !a.identity);
+  const amt = h("input", { "data-key": key("pay"), inputmode: "decimal", placeholder: "0.00",
+                           "aria-label": "amount to pay" });
+  // Keyed by registration, so a newly registered wallet starts on BUCKs.
+  const asset = h("select", { "data-key": key(w.registered ? "asset" : "asset:unregistered"),
+                              "aria-label": "pay in" },
+    assets.map((a) => h("option", { value: a.key }, a.label)));
+  const to = h("select", { "data-key": key("to"), "aria-label": "pay to" },
+    others.map((o) => h("option", { value: o.id }, option(o))));
+  steps.push(h("div", { class: "step" },
+    h("h3", {}, "Pay"),
+    others.length ? h("div", { class: "row" }, amt, asset, to, h("button", {
+      type: "button", class: "primary",
+      onclick: () => {
+        const a = ASSETS.find((x) => x.key === asset.value);
+        return act(`Paying from ${me}`, async () => {
+          const v = parseAmount(amt.value, "amount", { decimals: a.decimals });
+          await app.send(w.id, to.value, v, a.key);
+          return v;
+        }, (v) => {
+          amt.value = "";
+          return `Paid ${amount(v, 6, a.decimals)} ${a.key === "BUCK" && v === 1_000_000n ? "BUCK" : a.label} ` +
+            `to ${to.value}.`;
+        });
+      },
+    }, "Send")) : h("p", { class: "hint" }, "Create another wallet to pay."),
+    discloses("the amount and both addresses, to everyone.  BUCKs also carry a receipt each side ",
+      "can decrypt, so paying BUCKs between two private wallets takes an introduction each way; ",
+      "USDC and ETH carry no identity.")));
+
+  if (w.registered) {
+    // Introduce: this wallet to one it has not yet introduced itself to.
     const strangers = others.filter((o) => o.registered && !w.introduced.includes(o.id));
     const intro = h("select", { "data-key": key("intro"), "aria-label": "introduce to" },
-      strangers.map((o) => h("option", { value: o.id }, `${o.id} ${o.label}`)));
+      strangers.map((o) => h("option", { value: o.id }, option(o))));
+    const byId = (id) => known(others.find((o) => o.id === id));
+    const standing = [
+      w.introduced.length ? `Introduced to ${w.introduced.map(byId).join(", ")}.` : "",
+      w.introducedBy.length ? `Introduced by ${w.introducedBy.map(byId).join(", ")}.` : "",
+    ].filter(Boolean).join("  ");
     steps.push(h("div", { class: "step" },
       h("h3", {}, "Introduce"),
       strangers.length ? h("div", { class: "row" }, intro, h("button", {
         type: "button",
-        onclick: () => act(`Introducing ${w.label}`, () => app.introduce(w.id, intro.value),
-          () => "Introduced, both ways."),
-      }, "Introduce")) : h("p", { class: "hint" },
-        w.introduced.length ? `Introduced to ${w.introduced.join(", ")}.` : "No registered wallet to meet."),
-      discloses("each wallet's identity to the other, encrypted so only they can read it.  The ",
-        "chain sees ciphertexts and proofs.")));
+        onclick: () => act(`Introducing ${me} to ${intro.value}`, () => app.introduce(w.id, intro.value),
+          () => `Introduced ${w.id} to ${intro.value}.`),
+      }, "Introduce")) : null,
+      standing || !strangers.length
+        ? h("p", { class: "hint" }, standing || "No registered wallet to meet.") : null,
+      discloses("this wallet's identity to that wallet alone, encrypted so only it can read it: it ",
+        "learns the registered name.  The chain sees a ciphertext and a proof.")));
 
     // The market.
     if (!w.trading) {
@@ -112,7 +148,7 @@ function walletCard(ctx, view, w) {
         h("h3", {}, "Market"),
         h("button", {
           type: "button",
-          onclick: () => act(`Opening trading for ${w.label}`, () => app.openTrading(w.id),
+          onclick: () => act(`Opening trading for ${me}`, () => app.openTrading(w.id),
             () => "Trading open."),
         }, "Open trading"),
         discloses("this wallet's identity to the BUCK/USDC pool's operator (who must be able to say ",
@@ -126,18 +162,18 @@ function walletCard(ctx, view, w) {
         h("h3", {}, "Market"),
         h("div", { class: "row" }, usdc, h("button", {
           type: "button",
-          onclick: () => act(`Buying BUCKs for ${w.label}`,
+          onclick: () => act(`Buying BUCKs for ${me}`,
             () => app.buy(w.id, { usdc: parseAmount(usdc.value, "USDC") }), (r) => {
               usdc.value = "";
-              return `Bought ${(Number(r.received) / 1e6).toFixed(2)} BUCKs.`;
+              return `Bought ${amount(r.received)} BUCKs for ${amount(r.paid)} USDC.`;
             }),
         }, "Buy BUCKs")),
         h("div", { class: "row" }, buck, h("button", {
           type: "button",
-          onclick: () => act(`Selling BUCKs for ${w.label}`,
+          onclick: () => act(`Selling BUCKs for ${me}`,
             () => app.sell(w.id, parseAmount(buck.value, "BUCKs")), (r) => {
               buck.value = "";
-              return `Sold for ${(Number(r.received) / 1e6).toFixed(2)} USDC.`;
+              return `Sold ${amount(r.paid)} BUCKs for ${amount(r.received)} USDC.`;
             }),
         }, "Sell BUCKs")),
         discloses("the amounts, the price and this address, to everyone.")));
@@ -151,7 +187,7 @@ function walletCard(ctx, view, w) {
     h("summary", {}, "Deposit USDC"),
     h("div", { class: "row" }, dep, h("button", {
       type: "button",
-      onclick: () => act(`Depositing to ${w.label}`,
+      onclick: () => act(`Depositing to ${me}`,
         () => app.deposit(w.id, parseAmount(dep.value, "USDC")), () => {
           dep.value = "";
           return "Deposited.";
@@ -160,8 +196,9 @@ function walletCard(ctx, view, w) {
     h("p", { class: "hint" }, "Simulated dollars, as a bank transfer would bring them.")));
 
   return h("article", { class: "card", "data-wallet": w.id },
-    h("div", { class: "card-head" }, h("h3", {}, w.label),
-      h("span", {}, status, " ", h("span", { class: "chip" }, w.id))),
+    h("div", { class: "card-head" },
+      h("h3", {}, me, w.name ? [": ", h("span", { class: "registered-name" }, w.name)] : null),
+      status),
     h("div", { class: "sub" }, addr(w.address),
       w.credential ? ` · credential ${w.credential}` : "",
       w.trading ? " · trading" : ""),

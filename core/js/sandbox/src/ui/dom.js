@@ -29,38 +29,46 @@ export function fill(container, ...children) {
 
 const group = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-/** A 6-decimal base-unit amount as text: `places` shown, grouped. */
-export function amount(v, places = 2) {
+/** A base-unit amount as text, grouped: `places` shown (six, the sandbox's
+ *  standard) of its `decimals` (6: BUCK, USDC; 18: ETH). */
+export function amount(v, places = 6, decimals = 6) {
   const neg = v < 0n;
   const a = neg ? -v : v;
-  const whole = group((a / 1_000_000n).toString());
-  const frac = (a % 1_000_000n).toString().padStart(6, "0").slice(0, places);
+  const one = 10n ** BigInt(decimals);
+  const whole = group((a / one).toString());
+  const frac = (a % one).toString().padStart(decimals, "0").slice(0, places);
   return `${neg ? "-" : ""}${whole}${places ? "." + frac : ""}`;
 }
 
 // A BUCK is counted like a dollar: one BUCK, two BUCKs.  (USDC is a ticker.)
 const unitOf = (v, unit) => (unit === "BUCK" && v !== 1_000_000n && v !== -1_000_000n ? "BUCKs" : unit);
 
-/** An amount element: `places` shown, all six on hover. */
-export function money(v, unit, places = 2) {
+/** An amount element, to six places: the number right-justified, then its
+ *  currency in a fixed-width column, so a column of them lines up on the
+ *  decimal point.  ETH (18 decimals) shows all of them on hover. */
+export function money(v, unit, decimals = 6) {
   const u = unitOf(v, unit);
-  return h("span", { class: "num", title: `${amount(v, 6)} ${u}` },
-    `${amount(v, places)} `, h("span", { class: "unit" }, u));
+  return h("span", { class: "money", title: `${amount(v, decimals, decimals)} ${u}` },
+    h("span", { class: "num" }, amount(v, 6, decimals)), h("span", { class: "unit" }, u));
 }
 
 // An error carrying a `reason` for people, as SandboxError does.
 const refusal = (reason) => Object.assign(new Error(reason), { reason });
 
-/** A typed amount -> 6-decimal base units, or a refusal with a reason. */
-export function parseAmount(text, what = "amount") {
+/** A typed amount -> base units of `decimals` (6: BUCK, USDC; 18: ETH), or a
+ *  refusal with a reason.  `zero` admits nothing at all (a floor may be 0). */
+export function parseAmount(text, what = "amount", { decimals = 6, zero = false } = {}) {
   const t = String(text ?? "").trim().replace(/,/g, "");
-  if (!/^\d+(\.\d{1,6})?$/.test(t)) {
-    throw refusal(`${what}: a number, at most six decimals`);
+  if (!new RegExp(`^\\d+(\\.\\d{1,${decimals}})?$`).test(t)) {
+    throw refusal(`${what}: a number, at most ${decimals === 6 ? "six" : decimals} decimals`);
   }
-  const v = parseUnits(t, 6);
-  if (v <= 0n) throw refusal(`${what} must be positive`);
+  const v = parseUnits(t, decimals);
+  if (zero ? v < 0n : v <= 0n) throw refusal(`${what} must be positive`);
   return v;
 }
+
+/** An address as a dropdown shows it: 0xab2c9d. */
+export const shortAddr = (a) => a.slice(0, 8).toLowerCase();
 
 /** An address, shortened, full on hover, copied on click. */
 export function addr(a, label) {

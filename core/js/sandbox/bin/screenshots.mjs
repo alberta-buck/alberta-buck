@@ -4,8 +4,8 @@
 //
 //   make nix-sandbox-screenshots       # writes images/sandbox/*.png
 //
-// The story: certify Carol and Bob, a wallet each, introduce them; Carol
-// opens trading, buys BUCK and pays Bob; Sandbox Mutual insures her home,
+// The story: certify Carol and Bob, a wallet each, each introduced to the
+// other; Carol opens trading, buys BUCK and pays Bob; Sandbox Mutual insures her home,
 // she buys the premium's shortfall and activates 50,000 BUCK of credit;
 // thirty days pass.  Person numbers and keys are fresh on every run.
 
@@ -68,7 +68,9 @@ await shot("issuer");
 await act(page.locator("button", { hasText: "New wallet for Bob" }));
 await page.click("#tab-wallets");
 const carol = page.locator("[data-wallet=W1]");
+const bob = page.locator("[data-wallet=W2]");
 await act(carol.locator("button", { hasText: "Introduce" }));
+await act(bob.locator("button", { hasText: "Introduce" }));
 await act(carol.locator("button", { hasText: "Open trading" }));
 await carol.locator("input[aria-label='USDC to spend']").fill("500");
 await act(carol.locator("button", { hasText: "Buy BUCK" }));

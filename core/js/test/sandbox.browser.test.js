@@ -1,7 +1,9 @@
 // The sandbox page in a real browser (headless Chromium through Playwright,
 // both from the flake): the built page boots a world, and a person can
-// certify two people, give each a wallet, introduce them, be refused a
-// payment they cannot make, open trading, buy BUCK and pay; insure a home,
+// certify two people, give each a wallet, introduce each to the other (each
+// learning the other's name only then), be refused a payment they cannot
+// make, open trading, buy BUCK and pay, and pay in USDC; insure a home with
+// no floor,
 // be quoted its premium and the shortfall, buy it and activate credit; watch
 // thirty days depreciate it; find no name in the observer's view of it all
 // -- then reload and find the same world.  No console errors, no sideways
@@ -90,36 +92,49 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
 
     await page.click("#tab-wallets");
     const carol = page.locator("[data-wallet=W1]");
-    await ok(carol.locator("button", { hasText: "Introduce" }), /Introduced/);
-    const pay = async () => {
-      await carol.locator("input[aria-label='amount to pay']").fill("100");
+    const bob = page.locator("[data-wallet=W2]");
+    const payee = (w) => w.locator("select[aria-label='pay to'] option").first().textContent();
+    assert.match(await payee(carol), /^W2 \(0x[0-9a-f]{6}\)$/, "a stranger: no name");
+    await ok(carol.locator("button", { hasText: "Introduce" }), /^Introduced W1 to W2\.$/);
+    assert.match(await payee(bob), /^W1: Carol Nakamura \(0x[0-9a-f]{6}\)$/, "Bob now knows Carol");
+    assert.match(await payee(carol), /^W2 \(0x[0-9a-f]{6}\)$/, "... but not the other way");
+    await ok(bob.locator("button", { hasText: "Introduce" }), /^Introduced W2 to W1\.$/);
+    assert.match(await payee(carol), /^W2: Bob Tremblay \(0x[0-9a-f]{6}\)$/);
+    const pay = async (amount, asset = "BUCK") => {
+      await carol.locator("input[aria-label='amount to pay']").fill(amount);
+      await carol.locator("select[aria-label='pay in']").selectOption(asset);
       return act(carol.locator("button", { hasText: "Send" }));
     };
-    const [paid, why] = await pay();
+    const [paid, why] = await pay("100");
     assert.equal(paid, false, "no BUCK yet");
     assert.match(why, /exceeds spendable/);
     await ok(carol.locator("button", { hasText: "Open trading" }), /Trading open/);
     await carol.locator("input[aria-label='USDC to spend']").fill("500");
-    await ok(carol.locator("button", { hasText: "Buy BUCK" }), /^Bought 49\d\.\d\d BUCKs\.$/);
-    const [paid2] = await pay();
+    await ok(carol.locator("button", { hasText: "Buy BUCK" }),
+      /^Bought 49\d\.\d{6} BUCKs for 500\.000000 USDC\.$/);
+    const [paid2] = await pay("100");
     assert.equal(paid2, true);
-    const bob = page.locator("[data-wallet=W2]");
-    assert.match(await bob.textContent(), /BUCKs held\s*100\.00\s*BUCKs/);
+    assert.match(await bob.textContent(), /BUCKs held\s*100\.000000\s*BUCKs/);
+    const [paid3, said] = await pay("12.5", "USDC");
+    assert.equal(paid3, true);
+    assert.equal(said, "Paid 12.500000 USDC to W2.");
+    assert.match(await bob.textContent(), /USDC\s*10,012\.500000\s*USDC/);
 
     // Credit: Sandbox Mutual insures Carol's home at the class defaults.
     await page.click("#tab-credit");
     await page.selectOption("#panel-credit select[data-key='credit:holder']", "W1");
+    await page.fill("#panel-credit input[aria-label='floor']", "0");
     await ok(page.locator("#panel-credit form button", { hasText: "Insure" }), /^Insured: credit #1\.$/);
     await page.selectOption("#panel-credit select[data-key='credit:who']", "W1");
     await page.fill("#panel-credit input[data-key='credit:amount']", "50000");
     const buyFirst = page.locator("#panel-credit .quote button", { hasText: "first" });
     await buyFirst.waitFor({ timeout: 30_000 });
-    assert.match(await page.textContent("#panel-credit .quote"), /Premium deposit\s*1,81\d\.\d\d/);
+    assert.match(await page.textContent("#panel-credit .quote"), /Premium deposit\s*1,81\d\.\d{6}/);
     await ok(buyFirst, /^Bought [\d,.]+ BUCKs for [\d,.]+ USDC\.$/);
     const activate = page.locator("#panel-credit .quote button", { hasText: "Activate" });
     await activate.waitFor({ timeout: 30_000 });
-    await ok(activate, /1,81\d\.\d\d BUCKs of premium deposited with the insurance pool/);
-    const worth = async () => (await page.locator("#panel-credit td[data-col=activated-now]").textContent()).trim();
+    await ok(activate, /1,81\d\.\d{6} BUCKs of premium deposited with the insurance pool/);
+    const worth = async () => (await page.locator("#panel-credit [data-col=activated-now]").textContent()).trim();
     const was = await worth();
     await ok(page.locator("button", { hasText: "+30 days" }), /Thirty days passed/);
     assert.notEqual(await worth(), was, "the home depreciated");
@@ -134,7 +149,7 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     assert.ok(await page.locator("#panel-observer .opaque").count() > 10);
     await page.check("#observer-knows");
     const known = await page.textContent("#panel-observer .txs");
-    for (const label of ["Carol's wallet", "BUCK/USDC pool", "Permit2", "Insurance pool"]) {
+    for (const label of ["W1: Carol Nakamura", "BUCK/USDC pool", "Permit2", "Insurance pool"]) {
       assert.ok(known.includes(label), `no label ${label}`);
     }
     await page.uncheck("#observer-knows");
@@ -150,7 +165,7 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     assert.equal((await page.textContent("#stats")).replace(/\s+/g, " "), before);
     await page.click("#tab-wallets");
     assert.deepEqual(await page.locator("[data-wallet] > .card-head h3").allTextContents(),
-      ["Carol's wallet", "Bob's wallet"]);
+      ["W1: Carol Nakamura", "W2: Bob Tremblay"]);
 
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),

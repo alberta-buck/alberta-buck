@@ -3,6 +3,7 @@
 // the chain learns nothing until a wallet registers with the card, and then
 // only that some trusted issuer vouched for someone.
 
+import { walletTitle } from "../app.js";
 import { download, field, fill, h, preserving } from "./dom.js";
 
 export const SAMPLE_PEOPLE = [
@@ -83,8 +84,11 @@ export function renderIssuer(ctx, view) {
     ? h("p", { class: "empty" }, "No credentials yet.  Certify someone.")
     : view.credentials.map((c) => {
       const pick = h("select", { "data-key": `issuer:wallet:${c.id}`, "aria-label": "wallet to register" },
-        unregistered.map((w) => h("option", { value: w.id }, `${w.id} ${w.label}`)));
-      const held = c.wallets.map((id) => view.wallets.find((w) => w.id === id)?.label ?? id);
+        unregistered.map((w) => h("option", { value: w.id }, walletTitle(w))));
+      const held = c.wallets.map((id) => {
+        const w = view.wallets.find((x) => x.id === id);
+        return w ? walletTitle({ id: w.id, label: w.label }) : id;
+      });
       return h("article", { class: "card" },
         h("div", { class: "card-head" }, h("h3", {}, c.name), h("span", { class: "chip" }, c.id)),
         h("dl", { class: "kv" },
@@ -107,16 +111,15 @@ export function renderIssuer(ctx, view) {
             h("button", {
               type: "button", class: "primary",
               onclick: () => act(`Creating and registering a wallet for ${c.name}`, async () => {
-                const w = await app.createWallet(`${c.fields.given_name}'s wallet`);
-                await app.register(w.id, c.id);
-                return w;
-              }, (w) => `${w.label} registered.`),
+                const w = await app.createWallet("");
+                return app.register(w.id, c.id);
+              }, (w) => `${w.title} registered.`),
             }, `New wallet for ${c.fields.given_name}`),
             unregistered.length ? pick : null,
             unregistered.length ? h("button", {
               type: "button",
               onclick: () => act(`Registering ${pick.value}`, () => app.register(pick.value, c.id),
-                (w) => `${w.label} registered.`),
+                (w) => `${w.title} registered.`),
             }, "Register it") : null),
           h("p", { class: "discloses" }, h("b", {}, "Registering puts on chain: "),
             "a fresh key, the identity encrypted to that key, a re-randomized signature and a ",
