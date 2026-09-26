@@ -43,7 +43,8 @@ from alberta_buck.wallet.elgamal import (
     ElGamalCiphertext, IdentityKeyPair, identity_keygen, elgamal_encrypt,
 )
 from alberta_buck.wallet.ps import (
-    PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_rerandomize,
+    PSPresentation,
+    PSKeyPair, PSSignature, ps_keygen, ps_sign, ps_present,
 )
 from alberta_buck.wallet.nizk import (
     RegistrationProof, registration_prove,
@@ -135,8 +136,9 @@ class FullRegistrationRecord:
         expires_at: POSIX timestamp (0 = no expiry).
         client_kp: The client's ElGamal keypair.
         E_addr: ElGamal ciphertext of M under client_kp.pk.
-        ps_sigma_rerand: Rerandomized PS credential for on-chain registration.
-        registration_proof: NIZK binding the PS credential to E_addr.
+        ps_presentation: Hiding PS presentation (A, B) for on-chain registration.
+        ps_blind: The presentation blinding b (a witness of the NIZK; wallet-private).
+        registration_proof: NIZK binding the presentation to E_addr.
         sealed: The signed, ElGamal-encrypted certificate for off-chain delivery.
         membership_proof: Merkle tree membership proof (populated after issuance).
     """
@@ -150,7 +152,8 @@ class FullRegistrationRecord:
     expires_at: int
     client_kp: IdentityKeyPair
     E_addr: ElGamalCiphertext
-    ps_sigma_rerand: PSSignature
+    ps_presentation: PSPresentation
+    ps_blind: int
     registration_proof: RegistrationProof
     sealed: SealedCertificate
     membership_proof: Optional[MembershipProof] = None
@@ -331,6 +334,7 @@ class RegistryAgent:
         expires_at: int = 0,
         registrant_addr: int = 0,
         rng=None,
+        registry_addr: int = 0,
     ) -> FullRegistrationRecord:
         """Issue a complete identity: certificate + PS credential + registration NIZK.
 
@@ -345,6 +349,7 @@ class RegistryAgent:
             expires_at: POSIX timestamp (0 = no expiry).
             registrant_addr: Ethereum address for Fiat-Shamir binding in the NIZK.
             rng: Optional callable for deterministic randomness.
+            registry_addr: IdentityRegistry address for domain separation.
 
         Returns:
             FullRegistrationRecord with certificate, PS credential, NIZK,
@@ -374,13 +379,15 @@ class RegistryAgent:
         r_elg = rand_scalar(rng) if rng is not None else rand_scalar()
         E_addr = elgamal_encrypt(M, kp.pk, r_elg)
 
-        # PS credential: sign m with the registry's PS keypair, rerandomize.
+        # PS credential: sign m with the registry's PS keypair, then present
+        # it in hiding form (A, B) with fresh a, b; b is the NIZK witness.
         sigma_raw = ps_sign(self._ps_keypair, m, rng=rng)
-        sigma_rerand, _ = ps_rerandomize(sigma_raw, rng=rng)
+        pres, _a, b_blind = ps_present(sigma_raw, self._ps_keypair.pk_Y1, rng=rng)
 
-        # Registration NIZK: proves the PS credential and E_addr encrypt the same m.
+        # Registration NIZK: proves the presentation and E_addr encrypt the same m.
         nizk = registration_prove(
-            sigma_rerand, m, r_elg, kp.pk, E_addr, registrant_addr, rng=rng,
+            pres, b_blind, m, r_elg, kp.pk, E_addr, registrant_addr, kp.sk,
+            chainid if chainid else 1, rng=rng, registry=registry_addr,
         )
 
         # Signed certificate for off-chain verification.
@@ -406,7 +413,8 @@ class RegistryAgent:
             m=m, M=M, leaf=leaf, leaf_index=leaf_index,
             issued_at=issued_at, expires_at=expires_at,
             client_kp=kp, E_addr=E_addr,
-            ps_sigma_rerand=sigma_rerand,
+            ps_presentation=pres,
+            ps_blind=b_blind,
             registration_proof=nizk,
             sealed=sealed,
         )
@@ -419,6 +427,7 @@ class RegistryAgent:
         expires_at: int = 0,
         registrant_addrs: Optional[List[int]] = None,
         rng=None,
+        registry_addr: int = 0,
     ) -> List[FullRegistrationRecord]:
         """Issue full identities for a batch.
 
@@ -428,6 +437,7 @@ class RegistryAgent:
             expires_at: POSIX timestamp (0 = no expiry).
             registrant_addrs: Parallel list of Ethereum addresses for NIZK binding.
             rng: Optional callable for deterministic randomness.
+            registry_addr: IdentityRegistry address for domain separation.
 
         Returns:
             List of FullRegistrationRecord, one per issued identity.
@@ -437,7 +447,10 @@ class RegistryAgent:
             raise ValueError("registrant_addrs length must match identities length")
         records = []
         for (fields, kp), addr in zip(identities, addrs):
-            rec = self.issue_full_identity(fields, kp, chainid, expires_at, addr, rng)
+            rec = self.issue_full_identity(
+                fields, kp, chainid, expires_at, addr, rng,
+                registry_addr=registry_addr,
+            )
             records.append(rec)
         return records
 

@@ -1,6 +1,6 @@
 [
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-shocks/eq-retune-mid.json",
+  "path": "test/vectors/sweep-shocks/eq-retune-mid.json",
   "name": "retune-mid",
   "seed": 41404,
   "frames": 183,
@@ -27,7 +27,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-shocks/eq-shock-price.json",
+  "path": "test/vectors/sweep-shocks/eq-shock-price.json",
   "name": "shock-price",
   "seed": 41404,
   "frames": 183,
@@ -54,7 +54,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-shocks/eq-shock-uptake.json",
+  "path": "test/vectors/sweep-shocks/eq-shock-uptake.json",
   "name": "shock-uptake",
   "seed": 41404,
   "frames": 183,
@@ -81,7 +81,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-shocks/eq-shock-demand.json",
+  "path": "test/vectors/sweep-shocks/eq-shock-demand.json",
   "name": "shock-demand",
   "seed": 41404,
   "frames": 183,
@@ -108,7 +108,7 @@
   "exit": 0
  },
  {
-  "path": "/Users/perry/src/alberta-buck/test/vectors/sweep-shocks/eq-population-churn.json",
+  "path": "test/vectors/sweep-shocks/eq-population-churn.json",
   "name": "population-churn",
   "seed": 41404,
   "frames": 183,

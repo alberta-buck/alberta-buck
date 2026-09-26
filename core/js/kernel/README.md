@@ -12,7 +12,7 @@ Two independent modules ride in this package:
   JavaScript suites all replay.
 - **identity** -- BN254 curve arithmetic, Poseidon, keccak Fiat-Shamir
   transcripts, and the sigma protocols of the BUCK identity layer, together
-  with the wallet and registry kernels (canonical JSON, the AB-RCPT/1 receipt
+  with the wallet and registry kernels (canonical JSON, the AB-RCPT/2 receipt
   envelope, the Notes flows, the identity Merkle accumulator). One arkworks
   copy serves all three.
 
@@ -65,7 +65,7 @@ plan.
 
 ## Status
 
-0.1.0, prototype. Unaudited software implementing the arithmetic and
+0.2.1, prototype. Unaudited software implementing the arithmetic and
 cryptography of a monetary system. It has been checked for agreement with a
 reference implementation, which is not the same as having been checked for
 security.

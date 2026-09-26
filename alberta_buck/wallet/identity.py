@@ -1,7 +1,7 @@
 """Identity data canonicalization and the identity scalar m = H(identity_data) mod ORDER.
 
 THE canonical JSON dialect -- one dialect for every spec surface (the
-identity preimage here, the AB-RCPT/1 receipt core in envelope.py):
+identity preimage here, the AB-RCPT/2 receipt core in envelope.py):
 
     sorted keys, compact separators, raw UTF-8 (ensure_ascii=False),
     values restricted to strings and integers (floats are not canonical).
@@ -35,7 +35,10 @@ def canonical_identity_data(fields: Mapping) -> str:
 
 
 def identity_scalar(canonical_or_fields) -> int:
-    """m = keccak256(canonical_identity_data) mod ORDER.
+    """m = keccak256(IDENTITY_SCALAR || canonical_identity_data) mod ORDER.
+
+    The tag keeps a person's scalar out of every other protocol's range: the
+    same record hashed by anything else yields something else.
 
     Accepts either an already-canonicalized JSON string or a dict.
     """
@@ -43,5 +46,6 @@ def identity_scalar(canonical_or_fields) -> int:
         canonical = canonical_or_fields
     else:
         canonical = canonical_identity_data(canonical_or_fields)
-    digest = keccak_raw(canonical.encode("utf-8"))
+    from alberta_buck.wallet.domains import IDENTITY_SCALAR
+    digest = keccak_raw(IDENTITY_SCALAR + canonical.encode("utf-8"))
     return int.from_bytes(digest, "big") % ORDER

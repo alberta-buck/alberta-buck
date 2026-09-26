@@ -10,8 +10,9 @@ issuer -- who is public -- without revealing it to Mallory.
 The construction is the mirror image of :mod:`alberta_buck.wallet.unilateral_a2`,
 with the roles swapped:
 
-  A2 (recipient names issuer):  issuer encrypts M_I under the recipient identity
-                                point M_rec; the *recipient* decrypts with m_rec.
+  A2 (recipient names issuer):  issuer encrypts M_I under the recipient's
+                                receiving key pk_recv; the *recipient* decrypts
+                                with its receiving secret k.
   B1 (issuer names depositor):  depositor encrypts M_dep under the issuer's public
                                 key pk_iss; the *issuer* decrypts with sk_iss.
 
@@ -29,6 +30,25 @@ account is exactly the one encrypted for the issuer.  A companion membership pro
 of ``M_dep`` in the registry-Identity tree (the SNARK piece) makes a bogus
 ``E_dep_for_iss`` un-spendable.  The issuer then scans SpentB, decrypts with
 ``sk_iss``, and produces an *issuer-unilateral* receipt naming the depositor.
+
+WHY B1 NEEDS NO FOLD, AND WHAT IT NEEDS INSTEAD.
+
+The A-flavours had to fold their gate into one circuit because their two facts
+rest on two DIFFERENT secrets -- the Identity scalar and the receiving key --
+so no shared nonce could tie them and no choice of generator could repair it.
+B1's two facts rest on ONE secret, ``m_dep``, which is why the sigma above is a
+genuine tie and stays a sigma.
+
+What B1 does need is an honest hiding generator.  The composition of this sigma
+with the membership proof is an equality between two openings of the public
+point ``P_dep``, and that equality only holds if nobody knows ``log_G(H)``.
+With a known one, a depositor holding any registered identity scalar ``m'``
+makes the membership half speak about ``m'`` while this sigma speaks about its
+own ``m_dep`` -- and an unregistered depositor spends.  So ``P_dep`` is built on
+:data:`alberta_buck.wallet.nums.H_PEDERSEN`, hashed to the curve rather than
+multiplied out of ``G``.  :mod:`issuer_reenc` blinds on the same generator,
+because the A2 fold opens its ``T`` again at spend and a known log would let a
+minter pay any difference of Identities in the blind.
 """
 
 from __future__ import annotations
@@ -47,7 +67,8 @@ from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
 from alberta_buck.wallet.unilateral_a2 import IdentityTree, RcptResult
-from alberta_buck.wallet.issuer_reenc import H_POINT
+from alberta_buck.wallet.nums import H_PEDERSEN
+from alberta_buck.wallet.domains import FS_DEPOSITOR_BINDING, word as _word
 
 
 # ========================= Depositor binding ================================
@@ -88,6 +109,7 @@ def _db_transcript(pk_dep, E_dep: ElGamalCiphertext, pk_iss,
         words.append(y)
     words.append(account)
     words.append(chainid)
+    words.append(_word(FS_DEPOSITOR_BINDING))
     return keccak_scalar(*words)
 
 
@@ -109,7 +131,7 @@ def b1_bind_prove(
     pk_dep = mul(G1, sk_dep % ORDER)
     R_d, C_d = E_dep.R, E_dep.C
     M_dep = mul(G1, m_dep % ORDER)
-    H = H_POINT
+    H = H_PEDERSEN
 
     # Sanity: the payout account must be bound to identity m_dep.
     assert eq(C_d, add(M_dep, mul(R_d, sk_dep % ORDER))), \
@@ -156,7 +178,7 @@ def b1_bind_verify(
     R_d, C_d = E_dep.R, E_dep.C
     R_f, C_f = eDepForIss.R, eDepForIss.C
     e, s_m, s_s, s_r, s_b = proof.e, proof.s_m, proof.s_s, proof.s_r, proof.s_b
-    H = H_POINT
+    H = H_PEDERSEN
 
     # E4: s_s*G == A4 + e*pk_dep
     if not eq(mul(G1, s_s), add(proof.A4, mul(pk_dep, e))):

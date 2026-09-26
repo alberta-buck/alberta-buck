@@ -1,0 +1,109 @@
+#+TITLE: Installing Alberta Buck
+#+OPTIONS: toc:nil num:nil ^:nil
+
+Two ways in: the published packages, to build on Alberta Buck from your own project; or a clone
+of this repository, to run and change everything here.  All of it is a prototype, unaudited and
+not for anything of real value (see [[file:../README.org][README.org]], "Status").
+
+* The published packages
+
+The kernels and the contracts are published at 0.2.0, one version across every registry.
+
+| Registry  | Package                | What it is                                                |
+|-----------+------------------------+-----------------------------------------------------------|
+| npm       | =alberta-buck-core=      | the JavaScript platform: sessions over Tevm or anvil, the |
+|           |                        | Alberta Buck world, its ceremonies, agents and scenarios  |
+| npm       | =alberta-buck-kernel=    | the Rust kernels as WebAssembly, for Node and browsers    |
+| npm, PyPI | =alberta-buck-contracts= | every contract's ABI and bytecode, with its compiler      |
+| PyPI      | =alberta-buck-core=      | the Python platform: sessions, artifacts, kernel shims    |
+| PyPI      | =alberta-buck-kernel=    | the Rust kernels as a compiled Python extension           |
+| PyPI      | =alberta-buck=           | the Python reference: wallet, identity, receipts, sims    |
+| crates.io | =alberta-buck-math=      | integer money arithmetic, bit-identical to the contracts  |
+| crates.io | =alberta-buck-identity=  | the BN254 identity proofs and encryption                  |
+| crates.io | =alberta-buck-registry=  | identity accumulators, certificates, the aggregator       |
+| crates.io | =alberta-buck-wallet=    | receipts, the AB-RCPT/2 envelope, the Notes flows         |
+
+The contract bundle includes the Groth16 verifiers behind Notes, flagged
+=trustedSetup: "development"=: their setup's secret is public, so anyone can forge their proofs.
+They are published so that simulations can model attacks a production setup would forbid, and stay
+so until v1.0.0.
+
+** JavaScript
+
+#+BEGIN_SRC sh
+npm install alberta-buck-core          # needs npm 11 or later (Node 24 bundles it)
+#+END_SRC
+
+#+BEGIN_SRC js
+import { tevmSession } from "alberta-buck-core";
+import { buildBuckWorld, onboard } from "alberta-buck-core/buckworld";
+import { loadArtifact } from "alberta-buck-core/nodefs";
+import * as identity from "alberta-buck-core/identity";
+
+const session = await tevmSession();             // an EVM in this process
+const world = await buildBuckWorld(session, loadArtifact, { identity });
+#+END_SRC
+
+npm 10's installer crashes on this package's dependency graph; use npm 11.  In a browser, load the
+identity kernel with =alberta-buck-core/identity-web=, which takes an explicit wasm source.  The
+sandbox's additions -- the ceremonies by role, the BUCK/USDC market, the observer -- ship in the
+next release.
+
+** Python
+
+#+BEGIN_SRC sh
+pip install alberta-buck               # pure Python; installs everywhere
+pip install 'alberta-buck[kernel]'     # + the compiled kernels, where a wheel exists
+pip install 'alberta-buck[sim]'        # + pyrevm, plots and the sim server
+#+END_SRC
+
+The distributions are prefixed; the imports are not (=alberta_buck=, =buck_core=,
+=buck_contracts=).  The compiled kernels change nothing but speed: every function has a
+pure-Python equivalent, proven bit-identical by shared test vectors.  Wheels exist for macOS (arm64,
+x86_64) and manylinux 2.28 (x86_64, aarch64); Python 3.11 or later.
+
+** Rust
+
+#+BEGIN_SRC sh
+cargo add alberta-buck-identity        # imported as buck_identity
+#+END_SRC
+
+* A clone of this repository
+
+** With Nix (the supported path)
+
+[[https://nixos.org/download][Nix]] with flakes enabled provides everything, pinned: Foundry
+(=forge=, =anvil=, =cast=), =solc=, Node 22, Python 3.13, Rust with the =wasm32= target, =circom=,
+and a headless Chromium for the browser tests.
+
+#+BEGIN_SRC sh
+git clone https://github.com/alberta-buck/alberta-buck
+cd alberta-buck
+make nix-sandbox                       # the browser sandbox: http://localhost:8000/
+#+END_SRC
+
+Any Make target runs inside the flake as =make nix-<target>=, or enter the shell with =nix develop=.
+The first entry installs the root npm dependencies (=snarkjs=, =circomlib=, Uniswap's published
+contracts).
+
+Two further setups, each built on first use:
+
+- *Foundry dependencies* -- =make nix-install= fetches OpenZeppelin, Chainlink, Uniswap v3-core and
+  forge-std, pinned to exact tags, into =lib/=.  Needed to build and test the contracts, not for the
+  sandbox.
+- *The Python virtualenv* -- =make nix-venv-<target>= runs a target inside a venv beside the
+  checkout (=../alberta-buck.venv-<version>-...=), with this repository's three Python
+  distributions installed editable.  =make nix-venv= opens a shell in it.
+
+The Circom circuits include =lib/circom-lib=, a git submodule; fetch it with
+=git submodule update --init= before working on them.
+
+** Without Nix
+
+You need Node 22 or later (with npm 11 to install the published JavaScript packages), Python 3.11
+or later, a Rust toolchain with the =wasm32-unknown-unknown= target and =lld=, and Foundry; then
+the same Make targets without the =nix-= prefix.  The flake (=flake.nix=) is the authoritative
+list, and the only configuration we test.
+
+Next: [[file:DEVELOP.org][DEVELOP.org]] for building and testing, [[file:SANDBOX.org][SANDBOX.org]]
+for the sandbox.

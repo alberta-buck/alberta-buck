@@ -9,24 +9,31 @@ public (A1) or private (A2).  The unified Identity-axis design makes their on-ch
 under a target key" -- by a single substitution of what the note ciphertext
 encrypts:
 
-    A2:  eIss = (r'G,  M_I   + r'*M_rec)   -- the (private) issuer under M_rec
-    A1:  eRec = (r'G,  M_rec + r'*M_rec)   -- the recipient's identity under itself
+    A2:  eIss = (r'G,  M_I   + r'*pk_recv)   -- the (private) issuer, to the mailbox
+    A1:  eRec = (r'G,  M_rec + r'*pk_recv)   -- the recipient's Identity, to the mailbox
 
-Decrypting A1's ``eRec`` under the recipient's identity scalar ``m_rec`` yields
-``M_rec`` itself::
+Both are keyed to the recipient's registered *receiving key*
+``pk_recv = k*G``, never to the Identity point: an identity scalar is a read
+capability the design discloses to every counterparty, so it cannot also be a
+decryption key (:mod:`alberta_buck.wallet.recvkey`).  An addressed note
+therefore *names* an Identity and is *keyed* to that Identity's mailbox, and
+the two are different objects.
 
-    C_e - m_rec*R_e = M_rec + r'*M_rec - m_rec*(r'G) = M_rec + r'*M_rec - r'*M_rec = M_rec
+Decrypting A1's ``eRec`` under the receiving secret ``k`` yields ``M_rec``::
 
-so the *same* deposit coupling (:func:`deposit_couple_prove`/`deposit_couple_verify`,
-on chain ``verifyDepositCoupling``) proves the depositing account is bound to
-``m_rec`` and that ``eRec`` decrypts under it to the point committed (blinded) in
-``P_I = M_rec + b*H`` -- and the *same* membership proof certifies ``M_rec`` is a
-registered Identity.  The issuer is public, so it is named directly off chain (its
-registered ``M_iss`` + the batch Schnorr it signed at mint), not decrypted.
+    C_e - k*R_e = M_rec + r'*pk_recv - k*(r'G) = M_rec + r'*kG - r'*kG = M_rec
 
-The payoff mirrors A2: the recipient -- any Fountain account bound to ``m_rec`` --
-deposits while revealing no Identity, and produces a plaintext bilateral receipt
-naming both the (public) issuer and itself.
+so the *same* folded deposit gate (:mod:`alberta_buck.wallet.deposit_fold`)
+proves that ``k`` decrypts the note to the point committed in ``P``, that the
+depositing account's credential holds ``M_rec``, and -- the relation a
+single-secret design would get for free -- that a registered accumulator leaf
+commits the pair ``(M_rec, k*G)``.  The issuer is public, so it is named
+directly off chain (its registered ``M_iss`` + the batch Schnorr it signed at
+mint), not decrypted.
+
+The payoff mirrors A2: the recipient -- any Fountain account bound to
+``m_rec`` -- deposits while revealing no Identity, and produces a plaintext
+bilateral receipt naming both the (public) issuer and itself.
 """
 
 from __future__ import annotations
@@ -42,11 +49,7 @@ from alberta_buck.wallet.notes import (
 from alberta_buck.wallet.verifiable_decrypt import (
     VDProof, verifiable_decrypt_prove, verifiable_decrypt_verify,
 )
-# Reuse the A2 gadgets verbatim -- A1's spend IS the A2 coupling + membership.
-from alberta_buck.wallet.unilateral_a2 import (
-    IdentityTree, RcptResult,
-    deposit_couple_prove, deposit_couple_verify,           # noqa: F401 (re-export)
-)
+from alberta_buck.wallet.unilateral_a2 import IdentityTree, RcptResult
 
 
 # ================================ Mint ======================================
@@ -55,15 +58,16 @@ from alberta_buck.wallet.unilateral_a2 import (
 class MintedA1:
     """Everything the (public) issuer produces for one identity-targeted A1 note.
 
-    ``eNote`` encrypts the note value ``v`` under ``M_rec``; ``eRec`` encrypts the
-    recipient identity under itself.  ``idHash`` commits to ``(eNote, m_issuer,
-    sigma_R, sigma_s)`` via Poseidon8 (matching ``id_hash_a1``), binding the note
-    to the public issuer's identity and Schnorr signature.  ``eRec`` goes on chain
+    ``eNote`` encrypts the note value ``v`` and ``eRec`` the recipient Identity,
+    both to the recipient's receiving key ``pk_recv``.  ``idHash`` commits to
+    ``(eNote, m_issuer)`` (``id_hash_a1``), binding the note to the issuer identity
+    it names; what authenticates the public issuer is the batch Schnorr its account
+    signs at mint, which covers this note's commitment.  ``eRec`` goes on chain
     (as the leaf-tie public output); the full ``opening`` + ``eNote`` + ``eRec``
     travel to the recipient off chain.
     """
-    eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*M_rec)  -- note value under recipient identity
-    eRec:    ElGamalCiphertext   # (r'*G, M_rec + r'*M_rec)  -- recipient identity under itself
+    eNote:   ElGamalCiphertext   # (r_n*G, v*G + r_n*pk_recv)   -- value, to the mailbox
+    eRec:    ElGamalCiphertext   # (r'*G, M_rec + r'*pk_recv)   -- Identity named, to the mailbox
     idHash:  int
     cm:      int
     opening: NoteOpening
@@ -72,36 +76,48 @@ class MintedA1:
 
 
 def mint_unilateral_a1(
-    M_rec,                        # recipient's identity POINT (learned out of band)
+    M_rec,                        # recipient's identity POINT: the PLAINTEXT of eRec
+    pk_recv,                      # recipient's RECEIVING key: the ENCRYPTION key
     v:       int,
     rho:     int,
     m_issuer: int,                # issuer's registered identity scalar
-    sigma_R,                      # issuer's Schnorr signature nonce
-    sigma_s: int,                 # issuer's Schnorr signature response
     r_prime: Optional[int] = None,
     predicate: int = 0,
     rng=None,
 ) -> MintedA1:
-    """Public issuer mints an identity-targeted A1 note addressed to identity ``M_rec``.
+    """Public issuer mints an A1 note naming ``M_rec``, keyed to ``pk_recv``.
 
-    Encrypts the note value under ``M_rec`` (``eNote``) and the recipient's identity
-    ``M_rec`` under *itself* (``eRec``), so any Fountain account bound to ``m_rec``
-    can open and spend it via the shared deposit coupling.  ``idHash`` commits to
-    ``(eNote, m_issuer, sigma_R, sigma_s)`` via Poseidon8, binding the note to the
-    public issuer.
+    Two points, two jobs.  ``M_rec`` is the Identity the note names: it is the
+    plaintext of ``eRec``, and it is what the receipt reports and the deposit
+    gate's credential relation matches.  ``pk_recv`` is the recipient's
+    registered receiving key: it is what both ciphertexts are encrypted to, and
+    what the receiving secret ``k`` opens.  Collapsing them -- encrypting
+    ``M_rec`` under ``M_rec`` -- would leave ``C = m(G+R)``, where message and
+    key share a secret and one scalar multiplication per candidate identifies
+    the recipient from public calldata.
+
+    The payer learns ``pk_recv`` on the same out-of-band channel that carries
+    ``M_rec``, and SHOULD check the recipient's binding
+    (:func:`alberta_buck.wallet.recvkey.verify_receiving_binding`) before
+    minting: that is what assures it the mailbox belongs to the Identity it
+    means to pay.  Nothing is needed from the recipient at payment time.
+
+    ``idHash`` commits to ``(eNote, m_issuer)``, binding the note to the public issuer.
     """
     from alberta_buck.wallet.notes import id_hash_a1
 
     r_prime = rand_scalar(rng) if r_prime is None else (r_prime % ORDER)
 
-    # eNote = (r_n*G, v*G + r_n*M_rec): note value encrypted for the recipient.
+    # eNote = (r_n*G, v*G + r_n*pk_recv): the value, keyed to the mailbox.
     r_note = rand_scalar(rng)
-    eNote = elgamal_encrypt(mul(G1, v), M_rec, r_note)
+    eNote = elgamal_encrypt(mul(G1, v), pk_recv, r_note)
 
-    # eRec = (r'*G, M_rec + r'*M_rec): the recipient identity under itself.
-    eRec = elgamal_encrypt(M_rec, M_rec, r_prime)
+    # eRec = (r'*G, M_rec + r'*pk_recv): the Identity NAMED in the plaintext,
+    # keyed to the receiving key.  Only the holder of k reads it; anyone holding
+    # m_rec -- which every counterparty does -- reads nothing.
+    eRec = elgamal_encrypt(M_rec, pk_recv, r_prime)
 
-    idHash = id_hash_a1(eNote, m_issuer, sigma_R, sigma_s)
+    idHash = id_hash_a1(eNote, m_issuer)
     opening = NoteOpening(FLAVOR_A1, v, rho, idHash, predicate)
     cm = note_commitment(opening)
     return MintedA1(eNote=eNote, eRec=eRec, idHash=idHash, cm=cm,
@@ -115,17 +131,24 @@ class A1Receipt:
     """A plaintext, third-party-checkable receipt the *recipient alone* produces.
 
     Names both identities (the public ``M_iss`` and the recipient ``M_rec``) and
-    the value.  The recipient proves ``eRec`` decrypts under ``M_rec`` to ``M_rec``
-    (so the note really addressed *their* identity), and both points are members of
-    the registry-Identity tree.  The issuer is named publicly -- its ``M_iss`` is
-    the registered Identity of the (public) minter; authorship of the batch is the
-    mint Schnorr (alberta_buck.wallet.schnorr), checked at the mint-tx level.
+    the value.  The recipient proves ``eRec`` decrypts under its receiving key
+    ``pk_recv`` to ``M_rec`` -- so the note really named *their* Identity, and
+    only the holder of the receiving secret could say so -- and both points are
+    members of the registry-Identity tree.  The issuer is named publicly: its
+    ``M_iss`` is the registered Identity of the (public) minter, and authorship
+    of the batch is the mint Schnorr (alberta_buck.wallet.schnorr), checked at
+    the mint-tx level.
+
+    Carrying ``pk_recv`` in the clear costs nothing.  The receipt already names
+    both parties, and the key alone decides no addressing: testing whether some
+    other ciphertext is keyed to it, without the secret, is a DDH decision.
     """
     M_iss:        Tuple          # issuer identity (public)
-    M_rec:        Tuple          # recipient identity (= m_rec*G)
+    M_rec:        Tuple          # recipient identity (= m_rec*G), NAMED
+    pk_recv:      Tuple          # recipient receiving key (= k*G), the VD key
     value:        int
     eRec:         ElGamalCiphertext
-    vd:           VDProof        # eRec decrypts under M_rec to M_rec
+    vd:           VDProof        # eRec decrypts under pk_recv to M_rec
     issuer:       int            # issuer account (public minter)
     chainid:      int
     M_iss_member: bool
@@ -133,7 +156,8 @@ class A1Receipt:
 
 
 def make_receipt_a1(
-    m_rec:    int,
+    k_recv:   int,                # the RECEIVING secret: what decrypts eRec
+    M_rec,                        # the recipient's Identity POINT: what is named
     minted:   MintedA1,
     M_iss,                        # the public issuer's registered identity point
     issuer:   int,
@@ -141,13 +165,19 @@ def make_receipt_a1(
     tree:     IdentityTree,
     rng=None,
 ) -> A1Receipt:
-    """Recipient produces the A1 receipt unilaterally from ``m_rec`` and the note."""
-    M_rec = mul(G1, m_rec % ORDER)
+    """Recipient produces the A1 receipt unilaterally from ``k_recv`` and the note.
+
+    Takes the Identity separately from the secret it decrypts with, because
+    those are now two values.  Deriving one from the other is exactly the
+    collapse the receiving key exists to prevent, so this signature is the
+    shape of the fix rather than an inconvenience.
+    """
     eRec = minted.eRec
-    # eRec decrypts under M_rec (key = m_rec*G) to M_rec; prove it without sk.
-    vd = verifiable_decrypt_prove(eRec, m_rec, M_rec, issuer, chainid, rng=rng)
+    # eRec decrypts under pk_recv (key = k*G) to M_rec; prove it without sk.
+    vd = verifiable_decrypt_prove(eRec, k_recv, M_rec, issuer, chainid, rng=rng)
     return A1Receipt(
-        M_iss=M_iss, M_rec=M_rec, value=minted.opening.v, eRec=eRec, vd=vd,
+        M_iss=M_iss, M_rec=M_rec, pk_recv=mul(G1, k_recv % ORDER),
+        value=minted.opening.v, eRec=eRec, vd=vd,
         issuer=issuer, chainid=chainid,
         M_iss_member=tree.contains(M_iss), M_rec_member=tree.contains(M_rec),
     )
@@ -159,13 +189,14 @@ def verify_receipt_a1(
     tree:          IdentityTree,
 ) -> RcptResult:
     """Third-party verify, no secret.  VALID names (issuer M_iss, recipient M_rec,
-    value) iff ``eRec`` decrypts under ``M_rec`` to ``M_rec`` and both identities
-    are registered members."""
+    value) iff ``eRec`` decrypts under the recipient's receiving key to ``M_rec``
+    and both identities are registered members."""
     eRec = receipt.eRec
 
-    # (1) The recipient's verifiable decryption: eRec decrypts under M_rec to M_rec
-    #     -- i.e. the note was addressed to this recipient's identity.
-    if not verifiable_decrypt_verify(eRec, receipt.M_rec, receipt.M_rec, receipt.vd,
+    # (1) The recipient's verifiable decryption: eRec decrypts under pk_recv to
+    #     M_rec -- the note named this Identity, and only the holder of the
+    #     receiving secret can produce this proof.
+    if not verifiable_decrypt_verify(eRec, receipt.pk_recv, receipt.M_rec, receipt.vd,
                                      receipt.issuer, receipt.chainid):
         return RcptResult(False, None, None, receipt.value, "verifiable decryption invalid")
 
@@ -184,5 +215,4 @@ __all__ = [
     "MintedA1", "mint_unilateral_a1",
     "A1Receipt", "make_receipt_a1", "verify_receipt_a1",
     # re-exported A2 gadgets the A1 deposit reuses:
-    "deposit_couple_prove", "deposit_couple_verify",
 ]

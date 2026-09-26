@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {IIdentityMembershipVerifier} from "../src/IIdentityMembershipVerifier.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
 import {Buck} from "../src/Buck.sol";
@@ -17,6 +18,7 @@ import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 import {SpendGroth16Verifier} from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @notice Integration test: identity membership verifier wired into Notes spend paths.
 ///         Exercises the Phase 9 identity-axis plumbing: governance sets the verifier,
@@ -51,7 +53,7 @@ contract NotesIdentityMembershipTest is Test {
         vm.chainId(1);
 
         // Identity layer (simplified — bind alice/bob as PUBLIC issuers with known keys).
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         alice = 0x0411ce00000000000000000000000000000411ce;
         bob   = 0x00B0B00000000000000000000000000000000b0b;
         vm.etch(alice, hex"60006000fd");
@@ -67,6 +69,7 @@ contract NotesIdentityMembershipTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
@@ -86,8 +89,7 @@ contract NotesIdentityMembershipTest is Test {
 
         // Seed identity root (non-zero, so the membership gate fires).
         identityRoot = 0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3;
-        vm.prank(GOV);
-        reg.setIdentityRoot(identityRoot);
+        IdentityRegistryHarness(address(reg)).fixturePostRoot(identityRoot);
 
         // Mutual decryptability fragment hack (same as Notes.t.sol).
         {
@@ -144,5 +146,34 @@ contract NotesIdentityMembershipTest is Test {
         vm.prank(GOV);
         notes.setIdentityMembershipVerifier(address(0));
         assertEq(address(notes.identityMembershipVerifier()), address(0));
+    }
+
+    // ---- the folded deposit gate is not optional -------------------------
+
+    /// @notice The addressed gate cannot be cleared.  An earlier shape treated
+    ///         the fold as an upgrade over a coupling sigma, which meant a
+    ///         deployment could be configured into a gate a payload thief
+    ///         walks through.  There is no such configuration now.
+    function test_setDepositFoldVerifier_refusesZero() public {
+        vm.prank(GOV);
+        vm.expectRevert(bytes("depositFoldVerifier=0"));
+        notes.setDepositFoldVerifier(address(0));
+    }
+
+    function test_setDepositFoldVerifier_onlyGovernance() public {
+        vm.expectRevert(bytes("not governance"));
+        notes.setDepositFoldVerifier(address(this));
+    }
+
+    /// @notice With the slot unset an addressed spend reverts -- BEFORE the
+    ///         spend SNARK, so an unwired deployment cannot pay out even with a
+    ///         stub spend verifier that accepts everything.
+    function test_addressedSpend_revertsWithoutFold() public {
+        assertEq(address(notes.depositFoldVerifier()), address(0));
+        IdentityRegistry.ElGamalCT memory zct;
+        vm.expectRevert(bytes("Notes: deposit fold verifier not set"));
+        notes.spendCoupledA1(hex"00", 0, identityRoot, 1, 100, address(this), zct, hex"00");
+        vm.expectRevert(bytes("Notes: deposit fold verifier not set"));
+        notes.spendCoupledA2(hex"00", 0, identityRoot, 1, 100, address(this), zct, hex"00");
     }
 }

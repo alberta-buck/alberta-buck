@@ -1,16 +1,13 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in
 # LICENSING.md.  The code is free software; the design writing is not
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
-#
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+title: Alberta Buck Notes - Single vs. Serialized B1 Sub-Notes
 #+author: Perry Kundert
 #+date: 2026-04-23
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-notes-serialized
 #+STARTUP: org-startup-with-inline-images inlineimages
@@ -92,15 +89,15 @@ The rest of this document justifies each row.
 
 ** Single Note (status quo)
 
-Each commitment is an independent Poseidon-5 opening of five fields:
+Each commitment is an independent, tagged Poseidon opening of five fields:
 
-: cm = Poseidon-5(flavor, v, rho, idHash, predicate)
+: cm = Poseidon-6(T_CM, flavor, v, rho, idHash, predicate)
 
 At mint, =cm= is inserted at a fresh leaf of =noteRoot= (via the mint-batch
 SNARK, which may insert up to N such =cm= in one tx).  At spend, the holder
 reveals:
 
-: nf = Poseidon(rho, idHash, 4242)
+: nf = Poseidon(T_NF, rho, idHash)
 
 as a public input; the contract records =nullifiers[nf] = true= and
 transfers =v= BUCK to the recipient.  =rho= is a ~254-bit issuer-chosen
@@ -122,9 +119,9 @@ for N in {16, 256, 1024, 65536}), the issuer:
 4. Computes =predicate_fam = Poseidon-2(predicate_base, subRoot)=, where
    =predicate_base= is whatever policy field a single-note B1 would use.
 
-   The parent commitment is then the /ordinary/ Poseidon-5:
+   The parent commitment is then the /ordinary/ note commitment:
 
-   : cm_parent = Poseidon-5(flavor, v, rho, idHash, predicate_fam)
+   : cm_parent = Poseidon-6(T_CM, flavor, v, rho, idHash, predicate_fam)
 
    -- and the mint-batch circuit hashes =cm_parent= identically to any other
    B1 leaf.  See /Mint-Circuit Reuse/ below.
@@ -161,7 +158,7 @@ the on-chain =noteRoot= binding (same).
 
 *** Mint-circuit reuse
 
-Because =cm_parent= is an ordinary Poseidon-5 output, the mint-batch circuit
+Because =cm_parent= is an ordinary commitment, the mint-batch circuit
 (=circuits/mint_batch.circom=) treats serialized and single B1 leaves
 identically.  Only the /wallet's/ pre-mint preparation differs: a single B1
 computes =predicate = predicate_base=, while a serialized family computes
@@ -204,7 +201,7 @@ flowchart LR
     rho[rho<br/>254 bits<br/>SECRET]
     idHash[idHash<br/>253 bits]
     predicate[predicate_base<br/>253 bits]
-    cm{{"cm = Poseidon-5()"}}
+    cm{{"cm = Poseidon-6(T_CM, ...)"}}
     flavor --> cm
     v --> cm
     rho --> cm
@@ -250,7 +247,7 @@ flowchart LR
     v[v]
     rho[rho SECRET]
     idHash[idHash]
-    cm{{"cm_parent = Poseidon-5()"}}
+    cm{{"cm_parent = Poseidon-6(T_CM, ...)"}}
     flavor --> cm
     v --> cm
     rho --> cm
@@ -288,7 +285,7 @@ flowchart LR
 | =s_i=              | absent      | present    | =PRF(K_fam, i)=           | in-circuit only                       | private (bound via =subRoot=)  |
 | =subRoot=          | absent      | present    | Merkle(=s_0..s_{N-1}=)    | in-circuit only (via =predicate_fam=) | private                        |
 | =predicate_fam=    | absent      | present    | =Poseidon-2(pb, subRoot)= | in-circuit only                       | private                        |
-| =cm= / =cm_parent= | present     | present    | Poseidon-5 of above       | public leaf in =noteRoot=             | public on spend (serialized)   |
+| =cm= / =cm_parent= | present     | present    | Poseidon-6 of above       | public leaf in =noteRoot=             | public on spend (serialized)   |
 
 * Data Flow: Spend
 
@@ -302,7 +299,7 @@ flowchart LR
     pkt[mint payload<br/>flavor, v, rho, idHash,<br/>predicate, path_cm_in_noteRoot]
     rcp[recipient address]
     ch[chainId]
-    nf{{"nf = Poseidon rho,idHash,4242"}}
+    nf{{"nf = Poseidon T_NF,rho,idHash"}}
     pkt --> nf
     pkt --> spc[spend.circom]
     rcp --> spc
@@ -456,7 +453,7 @@ Reading the tables together so the whole attack surface is on one screen:
 | =flavor, v, rho, idHash, predicate= | mint       | commitment opening           | Poseidon preimage (2^128 work)             | in-circuit, never on-chain          |
 | =K_fam=                             | mint only  | PRF seed for =s_i=           | n/a (destroyed post-build)                 | never exposed                       |
 | =s_i=                               | mint+spend | sub-note serial              | PRF + subRoot binding (2^128)              | private witness at spend            |
-| =subRoot=                           | mint       | commits =s_0..s_{N-1}=       | Poseidon-5 cm binding                      | private witness at spend            |
+| =subRoot=                           | mint       | commits =s_0..s_{N-1}=       | Poseidon-6 cm binding                      | private witness at spend            |
 | =cm / cm_parent=                    | mint+spend | =noteRoot= leaf              | =noteRoot= Merkle bind                     | PUBLIC (linkability for serialized) |
 | =i=                                 | spend      | bit index in family          | =subRoot= Merkle bind                      | PUBLIC (position-in-family reveal)  |
 | =nf=                                | spend      | single-note double-spend key | Poseidon of =rho,idHash= (collision 2^128) | unlinkable (pseudorandom)           |
@@ -697,10 +694,9 @@ and family membership, neither of which is a secret in a bearer model.
 
 1. Mint path: add "serialize with N" option that builds =K_fam=,
    =subRoot=, =predicate_fam=.
-2. Payload schema v2: extend the bearer-note blob format to include =(i,
-   s_i, path_i_in_subRoot, subRoot)= when the note is serialized.
-3. Spend path: detect payload variant from schema version, route to the
-   appropriate verifier.
+2. Serialized payload variant: extend the bearer-note blob format to include
+   =(i, s_i, path_i_in_subRoot, subRoot)= when the note is serialized.
+3. Spend path: detect the payload variant, route to the appropriate verifier.
 
 ** Phase D: measure + promote
 

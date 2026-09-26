@@ -12,7 +12,6 @@
 # necessity proposition, and the related-work table were promoted from
 # here into the rewrite.
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 18
 #+weight: 19
 #+draft: true

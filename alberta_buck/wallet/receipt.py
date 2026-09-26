@@ -1,6 +1,6 @@
 """Off-chain non-deniable-receipt verifiers for BUCK payments.
 
-Reference: alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (AB-RCPT/1 receipts as independently verifiable proofs naming the registered counterparty).  Two payment paths, two receipt shapes, one verification idiom -- a
+Reference: alberta-buck-notes.org ("The Non-Deniable-Receipt Invariant") and alberta-buck-receipt.org (AB-RCPT/2 receipts as independently verifiable proofs naming the registered counterparty).  Two payment paths, two receipt shapes, one verification idiom -- a
 party assembles a receipt from data they hold plus public chain state, and any
 third party re-checks it with no secret, naming the counterparty's registered
 Identity:
@@ -22,11 +22,11 @@ Both verifiers share :class:`RegisteredIdentity` (the registry read) and
 For the Notes :class:`Receipt`, the chain has four links, each checkable
 against public chain state::
 
-    (a) OPENING   cm = Poseidon5(flavor, v, rho, idHash, predicate)
+    (a) OPENING   cm = Poseidon6(T_CM, flavor, v, rho, idHash, predicate)
     (b) MINTED    cm appears in the mint tx calldata cms[]
     (c) ISSUER    the public issuer's registered key signed keccak256(cms[]),
                   so every leaf in the batch is bound to their Identity M_iss
-    (d) PAID      nullifier = Poseidon3(rho, idHash, tag) was burned in a
+    (d) PAID      nullifier = Poseidon3(T_NF, rho, idHash) was burned in a
                   Spent* event delivering `face` to `recipient`
 
 This module covers the **public-issuer flavors (A1, B1)** -- the Phase 1
@@ -53,12 +53,9 @@ from typing import Mapping, Optional, Tuple
 
 from alberta_buck.wallet.notes import (
     NoteOpening,
-    FLAVOR_A1,
     FLAVOR_A2,
-    FLAVOR_B1,
     note_commitment,
-    nullifier_a,
-    nullifier_b,
+    nullifier,
 )
 from alberta_buck.wallet.schnorr import (
     SchnorrProof,
@@ -124,14 +121,8 @@ class RcptResult:
 
 
 def _nullifier_for(opening: NoteOpening) -> int:
-    """Deterministic nullifier of an opening, dispatched on flavor tag.
-
-    A-flavor (A1/A2) uses tag 4243, B-flavor (B1) uses tag 4242 -- the same
-    domain separation the spend circuits enforce.
-    """
-    if opening.flavor in (FLAVOR_A1, FLAVOR_A2):
-        return nullifier_a(opening.rho, opening.id_hash)
-    return nullifier_b(opening.rho, opening.id_hash)
+    """The opening's spent marker: one derivation for every flavour, as the spend circuit's."""
+    return nullifier(opening.rho, opening.id_hash)
 
 
 def receipt_verify(
@@ -213,6 +204,7 @@ class ApproveReceipt:
     cp_proof:      CPProof            # sender's approve handshake (soundness)
     M_named:       Tuple              # the revealed Identity point of `sender`
     vd_proof:      VDProof            # spender's verifiable decryption -> M_named
+    registry_addr: int                 # registry domain used by the approve proof
 
 
 def approve_receipt_verify(
@@ -240,6 +232,7 @@ def approve_receipt_verify(
     if not chaum_pedersen_verify(
         snd.E_addr, receipt.E_for_spender, snd.pk, spn.pk,
         receipt.cp_proof, receipt.sender, receipt.spender, receipt.chainid,
+        receipt.registry_addr,
     ):
         return RcptResult(False, None, None, "(soundness) approve handshake fails")
 

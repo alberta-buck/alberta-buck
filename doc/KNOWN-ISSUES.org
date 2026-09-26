@@ -1,0 +1,136 @@
+#+TITLE: Known issues
+#+OPTIONS: ^:nil toc:nil num:nil
+
+What is already known to be wrong with Alberta Buck, or deliberately not yet right, and where each
+stands.  Read it before reporting a vulnerability ([[file:../SECURITY.md][SECURITY.md]]): a
+restatement of one of these is already known, but a new angle on one is still welcome.
+
+Each issue keeps its number for good.  When one is resolved, its entry stays, with the release that
+resolved it.  An issue reported privately is added here when it is disclosed.
+
+| ID   | Issue                                       | Status                               |
+|------+---------------------------------------------+--------------------------------------|
+| KI-1 | An identity issuer could link registrations | Mitigated in 0.2.0; review pending   |
+| KI-2 | One interim insurance pool for every credit | Open; the per-insurer design written |
+| KI-3 | The Groth16 setup is a development one      | By design until v1.0.0               |
+| KI-4 | The sandbox keeps its keys in the clear     | By design: it is a simulation        |
+| KI-5 | Incomplete licence notices in distributions | Resolved on master; next release     |
+| KI-6 | Two price series have no recorded source    | Open                                 |
+
+* KI-1: An identity issuer could link registrations
+
+- Status :: Mitigated in 0.2.0, and believed fixed; the independent cryptographic review the fix
+  awaits is what remains.  Until it closes, treat the mitigation as a candidate.
+- Affects :: the registration presentation (=IdentityRegistry.register= and the wallet kernels that
+  build it), and the A1/A2 Notes receiving keys.
+
+As first built, a wallet registered by presenting a re-randomized Pointcheval-Sanders signature on
+its holder's identity, with a proof, and that public transcript let the issuer that certified a
+person recognize the person's registration and follow the account.  It never let anyone recover an
+unknown identity or decrypt the identity ciphertexts.  The review found six parts to it; what the
+code does about each, on =master= and in every 0.2 release:
+
+| ID | Problem                                          | Now                                   |
+|----+--------------------------------------------------+---------------------------------------|
+| R1 | The public PS signature tested an identity       | Mitigated: the A' presentation        |
+| R2 | The proof's public fields tested an identity     | Mitigated: the A' presentation        |
+| R3 | A public credential and identity could register  | Mitigated: A' (Theorem R-unforge)     |
+| R4 | A proposed blinding fix leaked through its proof | Never merged; superseded by A'        |
+| R5 | A1/A2 Notes keys were derived from the identity  | Mitigated: independent receiving keys |
+| R6 | Issuance logs, policy metadata, admission        | Partly: accumulator leaves are salted |
+
+- A' :: a single-commitment registration presentation that hides the signed identity and maps to
+  the EVM pairing precompile (merged 2026-09-20).  The review's own tests now assert the attacks
+  fail: =alberta_buck/test/review/test_wallet_failures.py=, tests 1 and 2.
+- R5 :: Notes are addressed to a receiving key derived from the wallet, not the identity, bound to
+  the identity inside the salted accumulator leaf so the binding is never public (protocol v2).
+- Still to watch :: R3 stays closed only while no wallet exports the raw credential -- the
+  sandbox's /Copy card/ does, by design (KI-4).  A' rests on PS unforgeability in the
+  committed-message key form, and its fresh blinding is security-critical (test 10).  The issuer's
+  own issuance logs and policy metadata (R6) are operational, not code.  Not addressed: a
+  malicious issuer issuing duplicates, and the optional holder secret.
+- Detail :: [[file:review/identity-findings-2.org][doc/review/identity-findings-2.org]] (the
+  findings and their reproductions); [[file:review/a-prime-plan.org][the A' plan]];
+  [[file:review/notes-receiving-key.org][the receiving-key architecture]];
+  [[file:../alberta-buck-proofs.org][alberta-buck-proofs.org]], Part I (the security argument).
+- Next :: the independent review that the proofs paper's "Review Status and Remaining Work for
+  Part I" briefs -- of the argument and of the Solidity verifier -- and then this entry resolves.
+
+* KI-2: One interim insurance pool for every credit
+
+- Status :: Open.  The intended design is written; it waits for insurers to exist on chain.
+- Affects :: =Buck= (its =insurancePool= constructor parameter, =mint=, =burn= and =setBasket=),
+  =BuckCredit=, and every deployment.
+
+=Buck= sends every credit's premium deposit to one address fixed at construction, refunds every
+burn from it, and lets it wire the basket.  Its solvency is shared: if that pool is drained, every
+holder's burn reverts.  The deposits should belong to each credit's own insurer, held in that
+insurer's Carrying premium pool, with solvency per insurer and the basket's wiring moved to the
+registry's governance.  Meanwhile every test and simulation binds the one pool Carrying through the
+registry, so its deposits keep their age; the simulations' stand-in lets anyone call it, and is
+not a vault.
+
+- Detail :: [[file:../alberta-buck-ethereum.org][alberta-buck-ethereum.org]], "The Insurance Pool:
+  an Interim Stand-in": today, the intended design, and what the change touches.
+- Next :: the insurer implementations -- the insurance company's interface to the premium pool its
+  credits fund -- and then the change to =Buck= and =BuckCredit= that section lists.
+
+* KI-3: The Groth16 setup is a development one
+
+- Status :: By design until v1.0.0.
+- Affects :: every Groth16 verifier: the Notes mint and spend proofs.
+
+The verifiers come from a development trusted setup whose secret is public, so anyone can forge
+their proofs.  That is deliberate: it lets the simulations model forged-proof attacks and the
+defences around them.  The contracts bundle marks each such verifier =trustedSetup:
+"development"=, both release workflows refuse a bundle that does not, and every README says so.
+
+- Detail :: [[file:../README.org][README.org]], Status;
+  [[file:snark-regeneration.org][doc/snark-regeneration.org]].
+- Next :: a production setup ceremony before v1.0.0.  A soundness or zero-knowledge flaw that a
+  proper ceremony would not cure is not this issue, and is worth reporting.
+
+* KI-4: The sandbox keeps its keys in the clear
+
+- Status :: By design: the sandbox is a simulation.
+- Affects :: the browser sandbox, [[https://sandbox.albertabuck.ca/]], and its exported worlds.
+
+Every key the sandbox makes -- the issuer's, the insurer's, every wallet's -- and every credential
+lives in the visitor's tab (IndexedDB) and in any world they export, in the clear.  Nothing leaves
+the tab unless the visitor exports it.
+
+- Detail :: [[file:SANDBOX.org][doc/SANDBOX.org]].
+- Next :: nothing, for the sandbox.  A wallet for real value would keep its keys elsewhere.
+
+* KI-5: The published packages and the hosted sandbox carried incomplete licence notices
+
+- Status :: Resolved on =master= (2026-09-26), so the packages carry them from the next release,
+  and the hosted sandbox from its next deploy; the published 0.2.1 packages still lack them.
+- Affected :: on npm, =alberta-buck-contracts=, =-kernel= and =-core=; on PyPI,
+  =alberta-buck-contracts=, =-core= and =-kernel=; the hosted sandbox; and
+  [[file:../NOTICE][NOTICE]].
+
+Six of the seven packages named their licence but carried no text; the kernels linked Rust crates,
+and the sandbox bundled JavaScript packages (MPL-2.0 among them) and Uniswap's compiled contracts,
+without their notices; NOTICE omitted the files vendored in the tree.
+
+- Fix :: every package now carries its own LICENSE, and those that build third-party code in --
+  the kernels and the contracts bundle -- a THIRD-PARTY-NOTICES.txt generated from =Cargo.lock=,
+  =lib/= and =node_modules= by =scripts/third_party_notices.py=, each component's own licence
+  files reproduced.  The sandbox generates its notices at every build and links them from the
+  page; NOTICE lists what is vendored in the tree and what each distribution redistributes.
+  =make nix-third-party-notices-check= fails while a notice is stale, and the release workflows
+  refuse a package without its licence files.
+
+* KI-6: Two vendored price series have no recorded source
+
+- Status :: Open.
+- Affects :: =alberta_buck/sim/quotes/data/AU-USD.csv= (gold, monthly from 1833) and =BTC-USD.csv=
+  (bitcoin, daily from 2010), shipped in the =alberta-buck= package.
+
+Every other vendored series names its publisher -- in its own header, or in the code that fetched
+it (see [[file:../NOTICE][NOTICE]]) -- but these two record no source, so their terms of
+redistribution are unknown.
+
+- Next :: record each series' source and its terms; replace it with a series whose terms permit
+  redistribution if they do not; or stop shipping it and fetch it at run time.

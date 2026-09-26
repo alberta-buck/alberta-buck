@@ -8,7 +8,7 @@
 //!
 //! The JSON itself is emitted by `constants/generate.py` from the Poseidon
 //! specification's Grain LFSR; it is byte-identical to circomlib's file,
-//! but derived rather than copied (`make poseidon-constants-check`, NOTICE).
+//! but derived rather than copied (`make poseidon-constants-check`).
 
 use std::env;
 use std::fmt::Write as _;

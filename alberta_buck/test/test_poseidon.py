@@ -73,8 +73,8 @@ def test_arity_bounds():
 def test_2_3_5_arities_round_trip_themselves():
     """The three arities the BUCK Notes circuits actually use:
        - Poseidon-3 (Merkle nodes, B-shape Merkle tree)
-       - Poseidon-3 (nullifiers: rho, id_hash, tag)
-       - Poseidon-5 (note commitments: flavor, v, rho, id_hash, predicate)
+       - Poseidon-3 (nullifiers: tag, rho, id_hash)
+       - Poseidon-6 (note commitments: tag, flavor, v, rho, id_hash, predicate)
     """
     # Different inputs yield different hashes.
     assert poseidon([1, 2]) != poseidon([2, 1])

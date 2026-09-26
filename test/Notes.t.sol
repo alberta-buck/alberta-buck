@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {BN254}                from "../src/BN254.sol";
 import {IdentityRegistry}     from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck}                 from "../src/Buck.sol";
 import {BuckCredit}           from "../src/BuckCredit.sol";
 import {BuckCreditHarness}           from "./harness/BuckCreditHarness.sol";
@@ -14,6 +15,7 @@ import {IMintVerifier}        from "../src/IMintVerifier.sol";
 import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
 import {GatedMint}            from "./helpers/GatedMint.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
 ///         without depending on StubMintVerifier's enabled toggle.
@@ -75,7 +77,7 @@ contract NotesTest is Test {
         vj = vm.readFile("test/vectors/identity.json");
 
         // Identity layer + Alice/Bob registered (mirrors Buck.t.sol).
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         bob   = address(uint160(_u(".bob.registrant")));
@@ -96,6 +98,7 @@ contract NotesTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
@@ -152,9 +155,9 @@ contract NotesTest is Test {
         return BN254.G1Point(_u(string.concat(key, ".x")), _u(string.concat(key, ".y")));
     }
 
-    function _ps(string memory who) internal view returns (IdentityRegistry.PSSig memory s) {
-        s.sigma_1 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        s.sigma_2 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+    function _ps(string memory who) internal view returns (IdentityRegistry.PSPresentation memory s) {
+        s.A = _g1(string.concat(".", who, ".ps_presentation.A"));
+        s.B = _g1(string.concat(".", who, ".ps_presentation.B"));
     }
 
     function _ct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
@@ -167,9 +170,12 @@ contract NotesTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
-        p.A_ps = _g1(string.concat(base, ".A_ps"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
+        p.s_b = _u(string.concat(base, ".s_b"));
+        p.C1 = _g1(string.concat(base, ".C1"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
 
     function _trustIssuer() internal {
@@ -182,6 +188,7 @@ contract NotesTest is Test {
         ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
         ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(".issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, ipk);
     }
@@ -477,31 +484,23 @@ contract NotesTest is Test {
         assertEq(notes.noteRoot(),      EMPTY_ROOT_);
     }
 
-    /// @notice Phase 7-bis duplicate-self-punishment economic test.  In the
-    ///         shipped per-leaf design, minting a duplicate `cm` reverted
-    ///         outright (the contract maintained `commitmentExists`).  The
-    ///         pivot drops that on-chain check -- the prover can publish a
-    ///         duplicate `cm` (paying totalFace twice for the same opening),
-    ///         the chain accepts it, but the deterministic nullifier
-    ///         Poseidon3(rho, idHash, 4242) collapses both notes to one
-    ///         spend.  The duplicate is unspendable forever; the issuer
-    ///         loses money but no other party is harmed.
-    ///
-    /// @dev We exercise the *first half* of that statement here: the chain
-    ///      no longer reverts on duplicate cm.  The "second half" (only one
-    ///      copy is spendable) belongs in the spend test suite.
-    function test_mint_acceptsDuplicateCommitmentInBatch() public {
+    /// @notice Public commitments carry immutable mint-time issuer attribution
+    ///         for B1 spends.  A duplicate within one batch must therefore
+    ///         revert atomically: neither the attribution written by the first
+    ///         loop iteration nor the note-tree/accounting update may survive.
+    function test_mint_rejectsDuplicateCommitmentInBatch() public {
         _approveNotes(alice, 200e18);
         uint256[] memory dup = _cms(CM1, CM1);
         uint256 newRoot = uint256(keccak256("dup")) % notes.FIELD_R();
-        _stubMint(alice, dup, 200e18, newRoot);
+        vm.expectRevert(bytes("Notes: duplicate public commitment"));
+        _pubMint(alice, DUMMY_PROOF, EMPTY_ROOT_, newRoot, 0, 200e18, dup);
 
-        // Both leaves accepted; nextLeafIndex advanced; tx did NOT revert.
-        assertEq(notes.nextLeafIndex(), 2);
-        assertEq(notes.noteFaceSum(),   200e18);
+        assertEq(notes.nextLeafIndex(), 0);
+        assertEq(notes.noteFaceSum(),   0);
+        assertEq(notes.publicIssuerOfCommitment(CM1), address(0));
     }
 
-    function test_mint_acceptsDuplicateAcrossBatches() public {
+    function test_mint_rejectsDuplicateAcrossBatches() public {
         _approveNotes(alice, 200e18);
         uint256[] memory first = new uint256[](1);
         first[0] = CM1;
@@ -511,10 +510,12 @@ contract NotesTest is Test {
         uint256[] memory second = new uint256[](1);
         second[0] = CM1; // same cm again
         uint256 r2 = uint256(keccak256("b")) % notes.FIELD_R();
-        _stubMint(alice, second, 100e18, r2);
+        vm.expectRevert(bytes("Notes: duplicate public commitment"));
+        _pubMint(alice, DUMMY_PROOF, r1, r2, 1, 100e18, second);
 
-        assertEq(notes.nextLeafIndex(), 2);
-        assertEq(notes.noteFaceSum(),   200e18);
+        assertEq(notes.nextLeafIndex(), 1);
+        assertEq(notes.noteFaceSum(),   100e18);
+        assertEq(notes.publicIssuerOfCommitment(CM1), alice);
     }
 
     // ---- root window -------------------------------------------------------

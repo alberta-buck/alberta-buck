@@ -1,17 +1,14 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in
 # LICENSING.md.  The code is free software; the design writing is not
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
-#
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Rebalancing the BuckBasket (v1.1)
+#+title: The Alberta Buck - Rebalancing the BuckBasket (v2)
 #+SUBTITLE: Waiting for the Turn: an Amortized On-Chain Rebalance Director
 #+author: Perry Kundert
 #+date: 2026-07-08
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 24
 #+weight: 25
 #+draft: false
@@ -209,7 +206,7 @@ per-trade measure:
 
 In short: the gated policies collect 75-90% of prop's premium, at 30-55% of
 its turnover, at roughly twice the mispricing depth, and with the least
-trend-bleed.  Full tables are in =BASKET-REBALANCE.md=.
+trend-bleed.  Full tables are in =doc/BASKET-REBALANCE.md=.
 
 Every policy in that table reads one signal: a constituent's share of basket
 value against its target, on one window.  The next section replaces that

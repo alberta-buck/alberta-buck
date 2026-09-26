@@ -1,0 +1,1143 @@
+#+TITLE: Identity accumulator specification, v0.9
+#+DATE: 2026-09-20
+#+OPTIONS: toc:3 num:t
+#+PROPERTY: header-args :eval never-export
+
+* 1 Scope, status and conformance
+:PROPERTIES:
+:CUSTOM_ID: scope
+:END:
+
+This is phase 1 of [[file:accumulator-plan.org][the accumulator plan]]: the
+specification of how a certified identity enters the accumulator that Notes
+membership proofs and credit issuance are checked against, and how a party
+holding an identity establishes facts about it, without handing anyone a
+test for an identity scalar.
+
+Status: written before implementation, unreviewed. v0.2 resolved the five
+design questions v0.1 left open. v0.3 sets the parameters from the expected
+posting cadences, and adds delegated authority, which the insurer band
+ladder made unavoidable. Both are in [[#decisions]]. v0.4 adds deployment
+and governance ([[#governance]]): one root authority per deployment, on-chain
+enrollment, an accountable rather than trustless aggregator, which rules
+bind a delegate and which do not, and the line between the consistency the
+protocol enforces and the accuracy it cannot. v0.5 settles the last three
+items: scope without an asset taxonomy ([[#scope]]), the retention window,
+and the aggregator's publication format. v0.6 adds the third leaf function,
+which binds an identity to the receiving key its Notes are addressed to
+([[#leaves]]), and the two conformance tests that hold it in place; the
+receiving key itself is specified in
+[[file:notes-receiving-key.org][its own document]], and phase 2 of the plan
+implements both. v0.7 makes that leaf commit the two SCALARS rather than
+the two points, which the folded spend gate's constraint budget forced and
+which turns out to bind more tightly ([[#leaves]]). v0.8 records the second
+association an A2 issuer keeps so it can be named without disclosing its
+mailbox ([[#renewal]]). v0.9 adds the FOURTH leaf function, the same
+receiving-key association committed over the two POINTS, because the scalar
+leaf of v0.7 is openable only by the holder and a payer must check the
+association BEFORE paying, holding no secret ([[#leaves]]). =MUST=,
+=MUST NOT=,
+=SHOULD= and =MAY= are normative. Constants are given as the names already
+in the source, with their current values, so that a conformance test can
+compare rather than guess.
+
+It specifies the accumulator only. The A' registration presentation, the
+issuer key format, =register=, =bindContract= and the approve handshake are
+unchanged and out of scope; see Part I of =alberta-buck-proofs.org=.
+
+** 1.1 Decisions this specification takes
+
+Listed for a reviewer who wants the choices without the prose.
+
+1. Four leaf functions, not one. The existing unsalted leaf is retained
+   for trees whose membership is advertised; a salted leaf is added for
+   trees whose membership is private; and the receiving-key association of an
+   identity registry is committed TWICE, once over the two scalars and once
+   over the two points ([[#leaves]]). The duplication is not redundancy: the
+   association has two consumers holding different things. The spend proves
+   it in zero knowledge and the prover holds the scalars, so committing the
+   points there would cost two fixed-base multiplications to hash preimages
+   the prover already has. A payer must check it before paying and holds no
+   secret at all -- only the two points, which it needs anyway -- so for that
+   consumer a scalar leaf is unopenable and the alternative is a circuit, a
+   ceremony and a Groth16 verifier inside every receipt checker to establish
+   what a fifth Poseidon input establishes for free. Distinct associations
+   carry distinct salts, so the two leaves do not link.
+2. Leaf hiding rests on Poseidon modelled as a random oracle, which the
+   system already assumes for the Notes nullifier, so the accumulator adds
+   no assumption. No cheaper construction gives an information-theoretically
+   hidden leaf, because a Merkle tree over field elements makes leaf hiding
+   a hash property whatever commits underneath it ([[#security]]).
+3. The salt is derived from a holder secret, never from the identity, so an
+   authority that learns one salt cannot derive another ([[#salt]]).
+4. Private subtrees are published in full. Their leaves are hiding
+   commitments, so publication leaks nothing and holders compute their own
+   witnesses. No witness service is required ([[#publication]]).
+5. Each posted root is stored with its timestamp, and each consumer
+   enforces its own maximum age. A count of postings is not a bound in
+   time, and the same number cannot serve both in-flight tolerance and
+   revocation urgency ([[#root]]).
+6. Admission stays off =register= permanently ([[#admission]]).
+7. Validity is membership in a registry's live-set subtree, whose freshness
+   comes from the root's timestamp. There is no epoch dimension in the
+   trees, and the identity scalar is stable for life ([[#renewal]]).
+8. The insurer envelope is a cached periodic attestation, verified by a
+   Poseidon Merkle path, not a per-credit proof, and carries only what a
+   consumer gates on ([[#insurer]]).
+9. An attesting authority retains the current association only, so it
+   cannot reconstruct a holder's change history ([[#renewal]]).
+
+* 2 Objects and notation
+:PROPERTIES:
+:CUSTOM_ID: objects
+:END:
+
+| Symbol | Meaning |
+|--------+---------|
+| =m= | identity scalar, =identity_scalar(canonical_identity)=, stable for the holder's life |
+| =M= | identity point, =m*G= on BN254 =G1= |
+| =F_R= | BN254 scalar field, the field Poseidon operates in |
+| =salt= | a per identity, per tree, per association blinding value in =[1, F_R)= |
+| =leaf= | a tree leaf, an element of =[0, F_R)=; =EMPTY_LEAF= is =0= |
+| subtree | one authority's own tree |
+| aggregator | the tree whose leaves are subtree roots and whose root is posted on chain |
+| =identityRoot= | the most recently posted aggregator root |
+| root record | a posted root together with the time it was posted |
+
+Depths, which differ deliberately and are already named in
+=alberta_buck/registry/tree.py=:
+
+| Name | Value | Constraint |
+|------+-------+------------|
+| =AGGREGATOR_DEPTH= | 20, raised from 10 | =MUST= equal Solidity =IDENTITY_TREE_DEPTH= and both membership circuits' main depth |
+| =KYC_SUBTREE_DEPTH= | 12 | capacity of one registry organization; changing it changes subtree roots and the committed kernel vectors |
+| =FEATURE_SUBTREE_DEPTH= | 10 | capacity of one attribute authority |
+
+=AGGREGATOR_DEPTH= is raised from 10 to 20, which is 1,048,576 authorities
+rather than 1,024. The design admits clubs, community boards, congregations
+and individuals as attribute authorities, and delegated sub-regulators as
+insurance authorities ([[#delegation]]), so authorities are a population
+rather than a roster. Ten extra levels cost ten Poseidon-2 hashes in the
+membership circuit, which is on the order of two thousand constraints
+against the millions the note-binding circuits already carry. The change
+=MUST= be made in the same trusted setup as the salted leaf and the
+finding-5 repairs, because all three touch the same circuits.
+
+* 3 Leaf functions
+:PROPERTIES:
+:CUSTOM_ID: leaves
+:END:
+
+Four functions. Implementations =MUST= provide all four and =MUST NOT=
+change the first two.
+
+#+begin_example
+identity_leaf(M)              = Poseidon([M.x mod F_R, M.y mod F_R])
+identity_leaf_salted(M, salt) = Poseidon([M.x mod F_R, M.y mod F_R, salt])
+receiving_leaf(m, k, salt)    = Poseidon([m, k, salt])
+mailbox_leaf(M, pk, salt)     = Poseidon([M.x mod F_R, M.y mod F_R,
+                                          pk.x mod F_R, pk.y mod F_R, salt])
+#+end_example
+
+- =identity_leaf= is the function in the source today. It is retained
+  unchanged for public trees ([[#classes]]), so every committed vector that
+  records it stays valid.
+- =identity_leaf_salted= is new. =salt= =MUST= lie in =[1, F_R)=;
+  implementations =MUST= reject =0=, which would make the leaf a
+  deterministic function of the identity in a tree declared private.
+- =receiving_leaf= is the leaf of an identity-registry subtree, and binds
+  two things rather than one: the identity a Note names, and the receiving
+  secret =k= whose public key =k*G= a Note is encrypted to
+  ([[file:notes-receiving-key.org][the receiving-key architecture]]). All
+  three arguments =MUST= lie in =[1, F_R)=. It is a third function rather
+  than a widened second one because attribute subtrees bind no receiving key
+  and their leaves =MUST NOT= change.
+
+  *It commits the SCALARS where its siblings commit coordinates, and that
+  difference is deliberate.* The siblings are computed by authorities that
+  hold identity points and nothing else. This leaf exists to be proven in
+  zero knowledge by a holder that has the scalars, and BN254's =G1= group
+  order equals =F_R=, so a scalar is a field element outright -- no
+  reduction, no limbs, no aliasing question about a limb decomposition.
+  Committing coordinates instead would oblige the spend circuit to re-derive
+  both points from those same scalars, at 471,896 constraints per fixed-base
+  multiplication: 943,792 to reach a commitment whose preimages the prover
+  already holds, and 22% of the circuit. Measured, not estimated: the gate is
+  4,247,066 constraints over coordinates and 3,303,970 over scalars, against
+  a =pot22= ceiling of 4,194,304.
+
+  Two properties improve rather than degrade. The circuit hashes the very
+  signals its other relations consume, so "the identity in the credential"
+  and "the identity in the leaf" are the /same signal/ rather than two values
+  joined by a derivation. And it is harder to scan: a payer is GIVEN both the
+  identity point and the receiving key, so under a coordinate leaf only the
+  salt stood between it and a membership test, where here it would also need
+  =k=, which is disclosed to nobody.
+- =mailbox_leaf= commits the SAME association over the two points, for the
+  consumer that cannot open the scalar one. =salt= =MUST= lie in =[1, F_R)=,
+  and it =MUST NOT= be the salt of the =receiving_leaf= association: they are
+  distinct associations of one identity and the salt discipline of
+  [[#renewal][section 8.3]] applies, so the salt a holder hands a payer does
+  not locate the leaf its spend proves under.
+
+  *Why two leaves rather than one.* A payer must check that the key it is
+  about to address a Note to really belongs to the person it intends to pay,
+  and it must check BEFORE paying, so no spend proof exists yet. It holds no
+  secret -- only =M= and =pk_recv=, both of which it needs anyway. Against
+  =receiving_leaf= it has three ways forward and all three are worse: take
+  =k= from the holder, which hands over the mailbox in both directions in
+  time; take a Groth16 proof of the scalar leaf's preimage, which costs a
+  fixed-base multiplication, a ceremony, and a pairing verifier inside every
+  receipt checker; or go without, and address Notes to unverified keys.
+  =mailbox_leaf= costs one Poseidon and one path.
+
+  It =MUST NOT= replace =receiving_leaf=: the spend gate's budget is what
+  forced the scalar form, and nothing about a payer's convenience changes
+  that.
+- Coordinates are reduced mod =F_R= exactly as today, because circom
+  reduces its Poseidon inputs the same way.
+
+*Why the binding is committed and not published.* Notes are keyed to =K=
+rather than to =M= because an identity scalar is a read capability the
+system discloses to every counterparty, and so cannot also be a decryption
+key. A note addressed to a key of the payer's choosing would break mutual
+decryptability and the receipt, so =K= =MUST= be bound to =M= -- and that
+binding =MUST NOT= be public, because a spend proving against a public
+binding would reveal the recipient's registered key and deanonymise them to
+everyone. Inside the leaf it is provable in zero knowledge and unscannable
+to a party holding every certified identity, the whole published subtree,
+and =K= itself, the last because deciding a ciphertext's addressee from the
+key alone is a DDH decision.
+
+All three =MUST= be implemented identically in Python, in the Rust
+kernel, in both bindings and in the circuits, and pinned by vectors, as
+every identity primitive is.
+
+* 4 Tree classes
+:PROPERTIES:
+:CUSTOM_ID: classes
+:END:
+
+Every subtree =MUST= be declared, at enrollment, as exactly one of:
+
+- *private*: membership is a fact about a person that the person did not
+  publish. Leaves =MUST= use =identity_leaf_salted=, or =receiving_leaf=
+  where the subtree is an identity registry whose members address Notes.
+  Membership =MUST= be proven in zero knowledge.
+- *public*: membership is a fact the member advertises, for an institution
+  acting in a public role. Leaves =MAY= use =identity_leaf=. Membership
+  =MAY= be proven by a plain Merkle path, on chain or off.
+
+Classification is a property of the subtree, not of a leaf, and =MUST NOT=
+vary per member within a subtree.
+
+| Subtree | Class | Why |
+|---------+-------+-----|
+| identity registry, per organization | private | participation is not the holder's announcement |
+| age, residence, licence and similar person attributes | private | same |
+| insurance regulator, per jurisdiction | public | an insurer advertises standing so counterparties can check it |
+| any future public-role authority | public | same, and =MUST= be justified at enrollment |
+
+Rationale: the privacy constraint exists because the issuer and a
+counterparty hold the same secret, so no function of the identity alone can
+admit the one and exclude the other. Where the member wants the fact
+checkable by anyone, that is the intent rather than a leak, and the cheaper
+construction is correct.
+
+* 5 The aggregator and the on-chain root
+:PROPERTIES:
+:CUSTOM_ID: root
+:END:
+
+The two-level structure in =alberta_buck/registry/merkle_service.py= is
+unchanged in shape. Aggregator leaves are subtree roots, which are not
+identity-derived, so they take no salt.
+
+A holder proving several facts produces one =FullMembershipProof= per
+subtree, each a subtree path plus an aggregator path, all verifying against
+one root, as =ComposedMembershipProof= already composes them. Nothing in
+the proof reveals which subtrees were walked, because the paths are private
+circuit inputs.
+
+*Root records and maximum age.* =IdentityRegistry= =MUST= retain a bounded
+ring of root records, each a root together with the block timestamp at
+which it was posted. Posting =MUST= emit both. A verifier =MUST= reject the
+zero root, and =MUST= accept a proof against a retained root only if that
+root's age does not exceed the maximum age its own consumer declares.
+
+The ring size is a storage decision. The bound that matters is the maximum
+age, and it =MUST= be declared per consumer rather than once for the
+protocol, because the two things a bound does pull in opposite directions:
+tolerance for proofs in flight wants a long window, and revocation urgency
+wants a short one. A count of postings is not a bound in time at all. With
+periodic attestation an authority may post monthly, so thirty postings
+could be years.
+
+Consequence to accept deliberately: an authority that stops posting
+eventually ages out every proof its members can make. Maximum ages
+=SHOULD= therefore be generous wherever revocation is not the point of the
+check.
+
+*Storage shape.* A root record =SHOULD= be a mapping from root to the time
+it was posted, plus a ring of roots for eviction, so that checking a
+proof's root is one lookup and eviction is one deletion.
+
+*Ring size: 256 records.* Sized from the fastest cadence the design
+expects. Private records resolve at the resolution of a day, so a registry
+posts daily; institutional records weekly; regulators quarterly now and
+weekly later. An aggregator batching many authorities may therefore post as
+often as hourly, and 256 hourly postings is ten days, which covers the
+longest maximum age below. The contract =MUST= refuse a maximum age longer
+than the ring can cover at the current posting rate, rather than silently
+truncating that consumer's window.
+
+*Maximum ages.* Governance-settable per consumer, with these defaults:
+
+| Consumer | Default | Why |
+|----------+---------+-----|
+| Notes membership gate | 7 days | the gate asks whether a counterparty is a registered identity, not whether it was revoked this morning; a spend that fails because a registry batched late is worse than a spend by someone revoked three days ago |
+| Insurer attestation ([[#insurer]]) | 1 day | the insurer proves against a root when it attests, and the aggregator posts at least daily |
+| Anything else | 7 days | until that consumer states a reason to differ |
+
+Credit issuance declares no maximum age, because it reads the cached
+envelope and its expiry rather than a root ([[#insurer]]).
+
+*Public subtree roots.* For a public subtree ([[#classes]]) the registry
+=MAY= additionally store the subtree's own root, posted by the aggregator
+service under the same record shape. A public membership proof then walks
+the subtree only, at =FEATURE_SUBTREE_DEPTH= hashes, instead of the subtree
+and the aggregator at =FEATURE_SUBTREE_DEPTH= plus =AGGREGATOR_DEPTH=. On
+chain that is the difference between ten Poseidon calls and thirty, which
+at tens of thousands of gas each is the difference between a few hundred
+thousand gas and most of a million. There is no privacy cost, because the
+subtree is public by construction. Phase 4 =MUST= measure both.
+
+* 6 Admission
+:PROPERTIES:
+:CUSTOM_ID: admission
+:END:
+
+1. =IdentityRegistry.register= and =bindContract= =MUST= continue to refuse
+   a nonzero caller-supplied =identityLeaf=, permanently. This is a
+   decision, not a stopgap, and the revert string =unchecked identity leaf=
+   =MUST= be retained so the existing reproduction keeps asserting it.
+2. Admission is performed by the authority that owns the subtree. For a
+   private subtree the exchange is:
+   1. the holder derives =salt= ([[#salt]]) and sends =(M, salt)= to the
+      authority over the channel that already carries the certificate;
+   2. the authority verifies it certified =M=, or for an attribute
+      authority that =M= satisfies the attribute by whatever evidence it
+      requires off chain;
+   3. the authority computes =identity_leaf_salted(M, salt)=, inserts it,
+      and records the association in its own books;
+   4. the authority pushes its new subtree root to the aggregator.
+3. The authority =MUST NOT= require a zero-knowledge proof at admission.
+   It knows =M= already, so a proof would establish nothing it cannot check
+   directly.
+4. Insertion =SHOULD= be batched. An authority that inserts one leaf per
+   holder action publishes the timing of that action; a batch publishes only
+   the batch.
+
+* 7 Salt derivation, storage and recovery
+:PROPERTIES:
+:CUSTOM_ID: salt
+:END:
+
+#+begin_example
+salt = Poseidon([holder_secret, H(tree_id), association_counter]) mod F_R,
+       redrawn if 0
+#+end_example
+
+- =holder_secret= is a wallet secret, recoverable from the wallet's seed
+  material, and =MUST NOT= leave the wallet.
+- =H(tree_id)= is the subtree identifier hashed into =F_R=.
+- =association_counter= starts at zero and increments on each
+  re-association into the same subtree ([[#renewal]]).
+
+Requirements:
+
+- The salt =MUST NOT= be derivable from =m=, from =M=, or from any value an
+  authority holds. An authority that learns one salt therefore learns
+  nothing about the holder's other leaves, in its own tree or any other.
+- The wallet =MUST= be able to recompute every salt it has used from its
+  seed material, so that losing local state does not lose the ability to
+  prove membership.
+- Distinct subtrees =MUST= yield distinct salts for the same identity.
+  Otherwise two authorities' leaves for one identity are equal and link
+  across trees.
+
+No key-derivation helper exists in the wallet today; one is part of phase 2.
+
+*Re-salting cadence: never on a timer.* A salt =MUST= change only on an
+event the holder takes part in: a re-association ([[#renewal]]), or a
+renewal the registry chooses to make interactive. Timer-driven re-salting
+would force either the holder to be online on the registry's schedule, or
+the authority to choose salts itself, which would break recovery from seed
+material and make a dormant holder's ability to prove membership depend on
+fetching from its authority. The cost of not re-salting is that a leaf's
+tenure is visible in the published tree ([[#renewal]]); that is weak
+information about an anonymous member, and it matters only where the
+anonymity set is small, which is a condition the earlier review already
+names.
+
+* 8 Revocation, renewal and re-association
+:PROPERTIES:
+:CUSTOM_ID: renewal
+:END:
+
+** 8.1 Validity is membership
+
+The =epoch= field of the certified record =MUST= be read as the epoch of
+first certification and =MUST NOT= be bumped. Nothing validates it today:
+=canonical_identity_data= imposes no schema, and only issuer documentation
+mentions epochs. The identity scalar is therefore stable for the holder's
+life and no committed vector changes.
+
+Validity is membership in the registry's live-set subtree: one subtree per
+registry organization, containing exactly the members the registry holds to
+be currently certified and in good standing. Freshness is the age of the
+root the proof is against ([[#root]]), so "live" means live as of that
+posting. A certificate's =expires_at= is advisory to its holder and =MUST
+NOT= be a protocol gate.
+
+There is deliberately no epoch dimension in the trees. Renewal is the
+registry continuing to include the member in the set it posts; lapse is
+clearance. This costs one subtree per registry rather than one per registry
+per epoch, which matters because the aggregator is depth
+=AGGREGATOR_DEPTH= and so holds a fixed number of subtrees in total (2^20).
+
+A leaf that persists across postings lets an observer see how long that
+leaf has been present and correlate its disappearance with a revocation. No
+identity is revealed. A registry =MAY= re-salt its live set periodically to
+remove even that, at the cost of every member refreshing its witness.
+
+** 8.2 Revocation
+
+Revocation is clearing the leaf to =EMPTY_LEAF= and pushing a fresh subtree
+root, which =registry/feature_authority.py= already implements. A revoked
+holder can produce no membership proof against any root posted after the
+clearance, and the consumer's maximum age bounds how long a proof against
+an earlier root remains acceptable. A consumer for which revocation is the
+point of the check =SHOULD= declare a short maximum age.
+
+Because private subtrees are published ([[#publication]]), a cleared slot is
+visible. It reveals that a member was removed, not which, since the leaf it
+replaced was a hiding commitment.
+
+** 8.3 Re-association for mutable facts
+
+Mutable facts, an address or a region, live in external records under the
+holder's control and are represented by membership in the subtree for their
+current value. On a change, the authority =MUST=:
+
+1. insert =identity_leaf_salted(M, salt')= into the subtree for the new
+   value, with =salt'= drawn at an incremented =association_counter=;
+2. clear the old leaf;
+3. push both subtree roots.
+
+The new and old leaves =MUST NOT= share a salt. With distinct salts they are
+unlinkable to any party without the authority's own records, and the
+attesting authority =MUST= be named as a party alongside the issuer.
+
+*A second association, deliberately.* A holder =MAY= hold more than one
+association of the same identity in one registry: its receiving leaf, whose
+preimage includes its mailbox key, and a plain =identity_leaf_salted=
+association whose salt it can disclose in order to be NAMED. The two carry
+distinct salts, so disclosing the naming one reveals nothing about the
+mailbox one. An A2 issuer =MUST= hold such a second association and =MUST=
+ship its salt in the note payload, because the recipient has to prove at
+spend that the Identity it decrypted is registered, and that is a claim about
+a party other than the prover
+([[file:notes-receiving-key.org::#payload][why only A2 ships it]]). The salt
+alone travels: the recipient rebuilds the path from the published subtree,
+since paths go stale as a subtree grows and salts do not.
+
+*Retention.* An authority needs the current association only, the identity,
+its salt and its leaf index, in order to clear and re-insert. It does not
+need history. An authority =MUST= discard a superseded salt and its
+association once the re-association is posted, including from operational
+logs and backups, so that it cannot reconstruct a holder's change history.
+An authority =MAY= retain a cleared association for up to 90 days, so that
+an erroneous revocation can be reversed, and =MUST= discard it after that.
+Ninety days covers an administrative appeal and nothing longer justifies
+keeping a link that exists only to be undone. This is a retention
+obligation on the authority rather than a property the protocol enforces,
+and it is auditable by policy review rather than by code. A construction in which the holder proves a re-association in zero
+knowledge, so the receiving authority never learns which prior leaf was
+cleared, would enforce it cryptographically; it conflicts with admission
+needing no proof ([[#admission]]) and is left to a later version.
+
+** 8.4 The core record and particulars certificates
+
+The certified record is M's preimage, so a field that can change cannot live
+in it: editing the record re-derives M, and every registration, receiving leaf,
+addressed Note and receipt made under the old M names a different point. The
+record is therefore a /core record/, fixed at first certification, and it
+=SHOULD= hold only facts that never change: the registry, a person number the
+registry never reuses (not a document number), the date of birth, the name at
+first certification, and the epoch of first certification. Test records whose
+fields read as document particulars are read this way; no vector changes.
+
+Free-form details that change -- a current legal name, a street address, a
+phone number, a photo, this year's licence number -- are /particulars/, held in
+a certificate the registry signs over M (=registry/particulars.py=):
+
+1. each particular is committed on its own, =keccak(IDENTITY_PARTICULAR_FIELD
+   || salt || name || value)= with a fresh 32-byte salt per field per version;
+2. the registry signs =keccak(IDENTITY_PARTICULARS || registry || M || version
+   || issued_at || sorted (name, commitment))= with its registry key;
+3. the holder keeps values and salts and discloses any subset; a verifier
+   checks the signature over the M it already trusts (from an approve, a
+   receipt or a verifiable decryption) and each disclosed value against its
+   commitment. An undisclosed commitment reveals nothing.
+
+A change is a new version. M, the registrations that encrypt it, the leaves
+that commit it, the Notes addressed to it and the receipts that name it are
+untouched, so nothing issued before the change stops working. A superseded
+version stays a true statement about its own date, which is what a receipt of
+that date should carry; whether a version is current is a question for the
+registry or a consumer's maximum age, as for every other standing. Categorical
+facts (a region, an age band) remain subtree memberships (8.3), because a
+membership proof shows the category without showing the certificate.
+
+* 9 Publication and witness updates
+:PROPERTIES:
+:CUSTOM_ID: publication
+:END:
+
+- An authority =MUST= publish enough of a subtree for a member to compute
+  its own path: the leaf list in insertion order suffices.
+- Private subtrees =MAY= be published in full, and =SHOULD= be, because
+  their leaves are hiding commitments. No witness service is required, and
+  the open question the earlier review raised about witness-service privacy
+  does not arise.
+- A deployment whose threat model includes a future break of Poseidon =MAY=
+  withhold private subtrees and have the authority deliver each member its
+  path instead. That restores the witness-delivery party and lets the
+  authority observe when a member refreshes, and it is the only way to
+  remove the retroactive-scan exposure of [[#security]]. Both modes
+  =MUST= be supported by the same proof statement, so the choice is
+  operational rather than structural.
+- A holder =MUST= refresh its path after any subtree update that changes a
+  sibling. Publication makes this self-service.
+- Public subtrees =MUST= be published in full, since their whole purpose is
+  third-party checking.
+
+* 10 Attribute vocabulary
+:PROPERTIES:
+:CUSTOM_ID: vocabulary
+:END:
+
+A predicate is membership in a named subtree. Identifiers are namespaced
+strings, already the key type of =CentralMerkleService=:
+
+#+begin_example
+kyc:<registry-id>                   private   certified and currently live
+feature:age-over-18                 private
+feature:region:<code>               private   one subtree per region value
+regulator:<jurisdiction>:insurer    public    licensed, in good standing
+regulator:<jurisdiction>:insurer:class:<n>   public   may underwrite asset class n
+regulator:<jurisdiction>:insurer:face:<band> public   per-contract face band, cumulative
+regulator:<jurisdiction>:delegates           public   authorities this regulator has delegated to
+regulator:<jurisdiction>:delegates:class:<n> public   the scope a delegate was granted
+regulator:<jurisdiction>:delegates:face:<b>  public   the band ceiling a delegate was granted
+#+end_example
+
+Rules:
+
+- A predicate =MUST= be expressible as membership. Anything needing a
+  comparison over the record, rather than a yes or no, is out of scope for
+  this version and =MUST NOT= be smuggled into a leaf.
+- Bands =MUST= be coarse and =MUST= be distinct subtrees, never a value
+  inside a leaf, so that a proof reveals the band and nothing finer.
+- A verifier =MUST= name the subtrees it requires, and =MUST= declare its
+  maximum root age ([[#root]]). A proof is meaningless without the
+  identifier it is against and the staleness it was accepted under.
+
+* 11 Proof statements
+:PROPERTIES:
+:CUSTOM_ID: proofs
+:END:
+
+** 11.1 Private membership, in zero knowledge
+
+Public: =identityRoot=, and the committed identity point the companion
+relation opens. Private: =M=, =salt=, the subtree path, the aggregator path.
+
+#+begin_example
+leaf   = Poseidon([M.x, M.y, salt])
+fold leaf up the subtree path      -> sub_root
+fold sub_root up the aggregator path -> identityRoot   (a posted root)
+and M is the point the companion relation opens
+#+end_example
+
+The final clause is the repair of finding 5 and =MUST= be the same private
+identity variable, not an equality inferred from two uses of a public
+point. The circuit therefore gains one private input, the salt, and its leaf
+hasher becomes Poseidon-3.
+
+** 11.2 Public membership
+
+A plain Merkle path, verifiable on chain through the Poseidon contract the
+registry already holds, or off chain by anyone. No circuit, no trusted
+setup.
+
+* 12 The insurer envelope and the credit gate
+:PROPERTIES:
+:CUSTOM_ID: insurer
+:END:
+
+The insurance regulator is a periodic attestor. Its review of underwriting
+quality, portfolio risk, reserves and reinsurance concludes in an envelope,
+and the envelope is published as membership in public subtrees
+([[#vocabulary]]).
+
+*Attestation.* A new entry point takes the insurer's identity point, the
+subtree identifiers it claims, and a Merkle path per claim against a root in
+the ring. It verifies the paths, then caches:
+
+| Field | Meaning |
+|-------+---------|
+| standing | attested, with the root index it was proven against |
+| asset classes | the set the insurer may underwrite |
+| face band | the maximum per-contract face |
+| expires at | the end of the attestation period |
+
+*The band ladder.* Bands are powers of ten of face, denominated in BUCK
+rather than in a fiat unit so that the check needs no oracle:
+
+| Band | Ceiling, BUCK |
+|------+---------------|
+| 1 | 10 |
+| 2 | 100 |
+| 3 | 1,000 |
+| 4 | 10,000 |
+| 5 | 100,000 |
+| 6 | 1,000,000 |
+| 7 | 10,000,000 |
+| 8 | 100,000,000 |
+
+Bands are cumulative: an insurer attested at band =n= may write any face
+below the band =n= ceiling, so the envelope stores one integer rather than
+a set, and membership in =face:<n>= implies every lower band. Faces are
+compared in =BuckCredit='s own units, which carry six decimals, so band
+=n= is a ceiling of =10^n * 10^6= in those units.
+
+The ladder starts at ten BUCK deliberately. An insurer underwriting a
+neighbour's bicycle is the same shape of actor as one underwriting a
+building, and the design supports individuals, families and communities
+underwriting things they understand. Nothing in the gate distinguishes a
+person from an institution except the envelope its regulator attested.
+
+*Issuance.* =BuckCredit.createCredit= keeps its signature. Before creating
+a credit it =MUST= require that the caller's cached envelope is unexpired,
+covers =assetClass=, and admits =faceValue= within its band. The check is a
+storage read. The client's =setCreditIssuer= opt-in is unchanged and both
+=MUST= hold.
+
+Rationale: the signature has 89 call sites across 38 files. A per-credit
+proof would touch all of them and would pay a Merkle verification per
+credit for a fact that changes once a review period.
+
+*Enumeration.* The envelope is cached on chain for the gate to read, so it
+is public and the insurer population and their bands can be enumerated.
+That is intrinsic once insurer authority is on chain, and licensee lists
+are public record in most jurisdictions, so standing and asset class add no
+disclosure. The commercially sensitive field is the underwriter risk
+estimate, which the credit gate does not need: the gate asks whether this
+insurer may write this asset class at this face, and premium adequacy is
+the insurer's own business. The risk estimate is therefore =NOT= part of
+the on-chain envelope, and =MUST NOT= be added unless a consumer is shown
+to gate on it. Bands =MUST= stay coarse for the same reason.
+
+** 12.2 Scope, and why there is no asset taxonomy
+:PROPERTIES:
+:CUSTOM_ID: scope
+:END:
+
+An asset taxonomy on chain would have to be global, versioned and endlessly
+refined: land becomes farmland and city lot, vehicle becomes car and truck
+and then Ford and pre-1995 and Mustang, across every class at once. The
+specification does not have one, for a reason that also makes the gate
+simpler.
+
+*What underwriting actually produces* is not a classification. It is a risk
+rating per unit time, a scale in BUCK, and a depreciation model chosen to
+represent that specific asset. =BuckCredit= already stores exactly those:
+=premiumRate=, =faceValue=, and =depType= with =depRate= and
+=depreciationFloor=. The asset's identity is a detail of the insurance
+contract, held by the insurer and its client, not a protocol object.
+
+The depreciation model carries more of the asset's nature than a class code
+would. A bicycle is linear to a floor over a few years, a building is
+declining balance at a low rate, land does not depreciate at all. Bounding
+an insurer's permitted models therefore bounds the economic shape of what
+it can insure, without naming a single asset kind.
+
+*Two restrictions, one checkable and one attributable.*
+
+1. *The parameter envelope*, fully checkable on chain because every value
+   is in the credit itself: the face band ([[#insurer]]), the permitted
+   depreciation types, a bound on =depRate=, and a bound on =premiumRate=.
+2. *The scope*, a =bytes32= identifier the insurer declares when it creates
+   a credit. The chain cannot verify what the asset is, so the scope is the
+   insurer's public claim about what it is writing. The gate checks that
+   the insurer's envelope covers that scope. A false claim is then evidence
+   rather than an inference, and the regulator's remedy is clearance.
+
+*Scope identifiers are names, not codes.* A scope is the hash of a
+namespaced string owned by the authority that granted it:
+
+#+begin_example
+regulator:<jurisdiction>:scope:asset:vehicle
+regulator:<jurisdiction>:scope:asset:vehicle:car:ford:pre-1995
+regulator:<jurisdiction>:scope:asset:toy
+community-board:<id>:scope:asset:bicycle
+#+end_example
+
+This gives refinement for free. A new distinction is a new name, granted by
+attesting insurers into the subtree for it; no existing name changes, no
+version is bumped, and the contract never parses a hierarchy. Two
+regulators' =vehicle= scopes are different identifiers, which is correct,
+because they are different judgements.
+
+*Narrower is not broader.* Membership in a fine scope does not imply the
+coarse one. An insurer attested only for pre-1995 Fords is a member of that
+subtree alone, and a credit declaring the broader vehicle scope fails
+because the insurer is not attested for it. A regulator that intends an
+insurer to write both attests it into both. The contract therefore needs no
+prefix matching, which is what makes names affordable.
+
+*The worked examples.* A child running an enterprise as a class project is
+attested into =scope:asset:toy= and =scope:asset:bicycle=, at face band 2,
+permitted =LINEAR= only. They may insure a neighbour's bicycle for eighty
+BUCK and cannot insure a car, because the car's credit declares a scope
+they do not hold, and a building's credit exceeds their band and their
+model. A car collector is attested into
+=scope:asset:vehicle:car:ford:pre-1995= at a higher band with
+=DECLINING_BALANCE= permitted, and cannot write a toy.
+
+*The cached envelope* therefore holds, per insurer: standing, the face
+band, a mask of permitted depreciation types, a maximum =depRate=, a
+maximum =premiumRate=, an expiry, and the set of scopes it may declare. The
+scope set is one storage write per scope at attestation, which is periodic,
+and one lookup per credit.
+
+*=createCredit= gains an overload*, not a changed signature. The existing
+eight-argument form declares the zero scope, which a regulator grants to a
+general insurer and withholds from a scoped one; the nine-argument form
+takes the scope explicitly. The existing call sites compile and run
+unchanged, needing only the fixture line that grants their test insurer an
+envelope. The scope is emitted with =CreditCreated= rather than stored, so
+=CreditParams= keeps its three-slot packing.
+
+The existing =uint8 assetClass= keeps its current status, which is an
+insurer's own coarse tag with no protocol meaning. The gated field is the
+scope.
+
+** 12.1 Delegated authority
+:PROPERTIES:
+:CUSTOM_ID: delegation
+:END:
+
+A regulator delegates parts of its remit to sub-regulators: community
+boards for local mutual insurance, trade bodies for a class of equipment,
+and so on. The same holds outside insurance, where the authority to attest
+that an identity belongs to a club, a congregation or a professional body
+is the club's, not the state's. Delegation is therefore a first-class
+object, and it is *public*: an authority's right to attest is not a secret
+of the authority.
+
+A delegate is an ordinary authority with its own subtree. What makes it a
+delegate is membership in its parent's public delegates subtree, scoped by
+the same machinery insurers are scoped by:
+
+- =regulator:<j>:delegates= holds the delegate authorities' identities;
+- =regulator:<j>:delegates:class:<n>= and =:face:<b>= hold the scope each
+  delegate was granted.
+
+A verifier decides how much delegation it trusts by naming the subtrees it
+requires ([[#vocabulary]]). One that trusts only the state requires
+membership in the state regulator's own subtree. One that accepts a
+delegate requires membership in the delegate's subtree *and* the delegate's
+membership in the parent's delegates subtree, both against the same root.
+Both are public proofs, so neither needs a circuit.
+
+Rules:
+
+- A delegate =MUST NOT= attest outside the scope its parent granted. The
+  protocol cannot enforce this, since the delegate owns its own subtree; a
+  verifier enforces it by checking the scope subtrees, and a parent
+  enforces it by clearing the delegate.
+- Delegation =MUST NOT= nest beyond the depth a verifier is willing to
+  walk. Each level is another public proof the verifier must name and
+  check, so a chain is self-limiting rather than bounded by the protocol.
+- Revoking a delegate is clearing it from the delegates subtree. Its own
+  attestations remain in its own subtree until it or the aggregator stops
+  posting them, so a verifier that checks the delegation edge sees the
+  revocation immediately and one that does not, never does. That is the
+  argument for checking the edge.
+
+This is why =AGGREGATOR_DEPTH= is raised: a roster of a thousand national
+authorities is one design, and a population of community authorities is
+another.
+
+*Out of scope, by decision.* The assumption of asset pools, contracts and
+company assets on an insurer's failure by its upstream reinsurers. This
+specification assumes instead that an insurer's soundness includes pools
+that will pay the expected rate of underwritten payouts with a buffer, and
+that reinsurance triggered by failure, together with removal from the
+regulator's subtree, tops those pools up where necessary.
+
+* 13 Security requirements
+:PROPERTIES:
+:CUSTOM_ID: security
+:END:
+
+Each is a claim an implementation =MUST= be testable against.
+
+- *A-scan.* No party holding any set of identity scalars, including every
+  scalar a registry ever certified, has non-negligible advantage in deciding
+  whether a given identity is a member of a private subtree, given the
+  subtree in full. Rests on Poseidon's preimage and pseudorandomness under
+  a uniform salt.
+- *A-bind.* A leaf commits to one identity: finding a second
+  =(M', salt')= with the same leaf is a Poseidon collision.
+- *A-sound.* An accepting membership proof implies the owning authority
+  inserted that leaf, under the collision resistance of Poseidon and the
+  soundness of the proof system.
+- *A-unlink.* Two leaves for one identity, in different subtrees or in the
+  same subtree at different association counters, are unlinkable to a party
+  without the authority's records, by the salt's independence.
+- *A-fresh.* Salt reuse across associations breaks A-unlink, and salt zero
+  breaks A-scan. Both =MUST= be rejected rather than merely avoided.
+- *A-noleak.* Nothing a verifier sees on chain is a deterministic function
+  of an identity: not the leaf, not the path, not the subtree identifier.
+  The one exception is a public subtree, where it is intended.
+- *A-scope.* A delegate's attestation carries no more authority than the
+  scope its parent granted, for a verifier that checks the delegation edge
+  and the scope subtrees. For one that does not, the delegate's own subtree
+  is the whole of its authority, which is the verifier's choice and =MUST=
+  be stated as such rather than treated as a protocol guarantee.
+
+*Assumption accounting.* Leaf hiding rests on Poseidon as a random oracle.
+The Notes nullifier already rests on exactly that, so the accumulator
+introduces no assumption the system does not already carry. Nothing here
+weakens the A' results, which are independent of the accumulator.
+
+No cheaper construction does better. A Merkle tree over field elements
+needs a field element at the leaf, so a Pedersen commitment would have to
+be hashed to reach one, and hiding of the leaf is then a hash property
+whatever commits underneath it: testing a candidate identity against a
+hashed Pedersen point costs the same search over the blinding as testing it
+against a salted Poseidon hash. Information-theoretic leaf hiding would
+take a different accumulator, not a different commitment.
+
+*Retroactive exposure.* Publication ([[#publication]]) means a future break
+of Poseidon preimage resistance would let an adversary scan the archived
+private subtrees and recover which identities were in which tree. What that
+yields is participation and attributes, never accounts, notes or amounts,
+so it is strictly less than the exposure the papers already accept for the
+ElGamal layer under a discrete-log break, and it =MUST= be recorded beside
+it in the long-horizon section of =alberta-buck-proofs.org=. The withheld
+mode of [[#publication]] removes it.
+
+* 14 Out of scope
+:PROPERTIES:
+:CUSTOM_ID: out-of-scope
+:END:
+
+- R5, the identity-derived A1 and A2 receiving keys, and the Notes design
+  decision it forces. Deferred by the plan until this is implemented and
+  tested. Until then, the note payload remains the one public value that is
+  a deterministic function of an identity, and A-noleak is a property of the
+  accumulator, not yet of the system.
+- Predicates needing comparison rather than membership.
+- Reinsurance assumption of pools, per [[#insurer]].
+- Cross-jurisdiction recognition of one regulator's attestation by another.
+- The issuance-log and policy-metadata halves of the earlier review's R6.
+
+* 15 Conformance tests
+:PROPERTIES:
+:CUSTOM_ID: conformance
+:END:
+
+1. *Scan.* Build a private subtree of many identities, publish it in full,
+   hand a test every certified scalar, and require zero membership
+   decisions better than guessing.
+2. *Leaf parity.* =identity_leaf= agrees with every committed vector that
+   records it, unchanged. =identity_leaf_salted= agrees across Python, the
+   Rust kernel, both bindings and the circuit.
+2a. *Receiving-key leaf.* The collapsed design -- an identity point
+    encrypted under itself -- is scannable with one scalar multiplication
+    per candidate, and keying the same plaintext to =k*G= is not; a party
+    holding every certified scalar, the whole published subtree and the
+    receiving key itself decides no membership of a =receiving_leaf=; the
+    holder's binding proof verifies for its own pair and for no other
+    identity; a rotated key yields an unlinkable leaf; each argument
+    outside =[1, F_R)= is refused; and =receiving_leaf= agrees across
+    Python, the Rust kernel, both bindings and the circuit.
+2b. *The folded deposit gate.* A witness exists for the honest spender;
+    a payload thief supplying the stolen receiving key with its own
+    registered identity and account is refused, and refused specifically
+    on the leaf relation; a wrong account key is refused on the credential
+    relation; an unregistered account and a stale root are each refused.
+    Both halves the thief would have passed =MUST= be shown individually
+    true, since that is why the tie cannot be left to inference.
+3. *Salt rules.* Zero salt rejected; the same identity in two subtrees
+   yields different leaves; a wallet restored from seed material recomputes
+   every salt it used.
+4. *Revocation.* A cleared member proves nothing against any root posted
+   after the clearance, and a proof against an earlier root is refused by a
+   consumer whose maximum age has passed and accepted by one whose has not.
+5. *Re-association.* An address change yields two leaves that no party
+   without the authority's records can link.
+6. *Root records.* Each retained root carries the timestamp it was posted
+   at; a proof against a root inside a consumer's maximum age verifies and
+   one outside it does not; a root evicted from the ring is unusable
+   whatever its age; the zero root is rejected.
+7. *Admission closed.* =register= and =bindContract= still refuse a nonzero
+   caller-supplied leaf, with the existing revert string.
+8. *Insurer envelope.* An unattested insurer cannot create a credit; an
+   attested one can within its asset classes and face band and cannot
+   outside them; an expired envelope fails; the 89 existing call sites
+   compile unchanged.
+9. *Notes.* The membership path still verifies with the salted leaf on the
+   repaired circuit, for A1, A2 and B1.
+10. *No epoch dimension.* A registry's live set is one subtree whose
+    membership changes by inclusion and clearance, and no identity scalar
+    or certified record changes at renewal.
+11. *Bands.* An insurer attested at a band writes a face below that band's
+    ceiling and is refused one above it; a lower band is implied by a
+    higher one; the smallest band admits a face of ten BUCK.
+11a. *Scope.* An insurer writes a credit declaring a scope it holds and is
+     refused one it does not; a fine scope does not admit a credit
+     declaring the coarse one; a permitted depreciation type is accepted
+     and an unpermitted one refused; the eight-argument overload declares
+     the zero scope and the existing call sites are unchanged.
+12. *Delegation.* A verifier requiring only the state regulator refuses a
+    delegate's attestation; one requiring the delegation edge accepts it
+    while the edge holds and refuses it once the parent clears the
+    delegate; a delegate attesting outside its granted scope is refused by
+    a verifier that checks the scope subtrees.
+13. *Aggregation is auditable.* Recomputing the posted root from the
+    published leaf list reproduces it; every leaf carries a valid signature
+    from its enrolled authority under an increasing sequence; an omitted
+    enrolled authority and a fabricated subtree root are each detected by
+    comparing that list against the on-chain enrollment set.
+14. *Deployment isolation.* A registration proof made for one registry
+    address or chain id verifies in no other, and the same certified person
+    in two deployments yields two unrelated identity scalars.
+
+* 16 Decisions taken, and the parameters that remain
+:PROPERTIES:
+:CUSTOM_ID: decisions
+:END:
+
+** 16.1 The five questions v0.1 left open
+
+1. *Staleness bound.* Resolved by changing the unit. A count of postings is
+   not a bound in time, and one number cannot serve both in-flight tolerance
+   and revocation urgency. Root records carry a timestamp and each consumer
+   declares a maximum age ([[#root]]).
+2. *Epochs in the trees.* Resolved by removing the dimension. One live-set
+   subtree per registry, with freshness from the root's timestamp, is
+   strictly better than either option v0.1 offered: renewal becomes
+   continued inclusion, lapse becomes clearance, and the aggregator's 1024
+   slots are spent at the rate of registries rather than registries times
+   epochs ([[#renewal]]).
+3. *Poseidon against Pedersen.* The question rested on a false premise, now
+   corrected in [[#security]]: no commitment gives an
+   information-theoretically hidden Merkle leaf. The real choice is
+   publication against retroactive exposure, and it is resolved in favour of
+   publication, with the withheld mode kept as a supported operational
+   variant for a stronger threat model.
+4. *The authority's change history.* Resolved with a retention obligation
+   rather than acceptance: the current association only, discarded on
+   re-association, logs and backups included ([[#renewal]]). The
+   zero-knowledge construction that would enforce it is recorded and
+   deferred.
+5. *Insurer enumeration.* Accepted as intrinsic, since the cached envelope
+   is public by necessity and licensee lists are public record. Mitigated by
+   dropping the underwriter risk estimate from the envelope and keeping
+   bands coarse ([[#insurer]]).
+
+** 16.2 Parameters, set in v0.3
+
+From the expected posting cadences: private records resolve at the
+resolution of a day, institutional records weekly, insurance regulators
+quarterly now and weekly later.
+
+| Parameter | Value | Basis |
+|-----------+-------+-------|
+| Ring size | 256 records | ten days at an hourly aggregator posting, which covers the longest maximum age |
+| Maximum age, Notes membership | 7 days | the gate is a registration check, not a revocation check |
+| Maximum age, insurer attestation | 1 day | the aggregator posts at least daily |
+| Maximum age, default | 7 days | until a consumer states a reason |
+| Re-salting cadence | never on a timer | a timer forces the holder online on the registry's schedule or hands salt choice to the authority, which breaks recovery from seed material |
+| Face bands | powers of ten, 1 to 8, cumulative, in BUCK | supports a neighbour underwriting a bicycle and an insurer underwriting a building with one ladder |
+| Envelope fields | standing, asset classes, face band, expiry | the underwriter risk estimate is not gated on and stays off chain |
+| Retention after clearance | a short correction window, then discard | long enough to reverse an erroneous revocation and no longer |
+
+Two things followed from setting them rather than being parameters:
+=AGGREGATOR_DEPTH= rises from 10 to 20 ([[#objects]]), and delegated
+authority becomes part of the specification ([[#delegation]]).
+
+** 16.3 What remains open
+
+Nothing of substance. The three items v0.4 listed are settled in v0.5:
+the retention window is 90 days ([[#renewal]]), the aggregator publishes
+its leaf list as canonical JSON with the document hash emitted beside the
+root ([[#aggregator-trust]]), and asset classes need no vocabulary because
+the gate checks a declared scope and the credit's own parameters rather
+than a taxonomy ([[#scope]]).
+
+What remains is implementation, and the security argument for the whole
+accumulator, which has not been written and which phase 6 of
+[[file:accumulator-plan.org][the plan]] owes in the same form Part I of
+=alberta-buck-proofs.org= owes for A'.
+
+* 17 Deployment, authority and governance
+:PROPERTIES:
+:CUSTOM_ID: governance
+:END:
+
+** 17.1 One root authority per deployment
+
+A deployment has exactly one root authority. For Alberta Buck that is the
+provincial identity authority, which exists because the deployment is
+provincial. The protocol treats the root as a single address. Whether that
+address is an institution, a multi-signature of several, or a governance
+contract is a property of who holds the key, not of the protocol, and this
+specification =MUST NOT= be read as claiming the root is decentralized. It
+is as decentralized as its holder.
+
+** 17.2 Enrollment is on chain
+
+The root authority enrolls the authorities that may own a subtree, and
+=MUST= record on chain, per authority: its identifier, its posting key, its
+class (private or public, [[#classes]]), and the scope it may attest.
+Eviction =MUST= likewise be on chain.
+
+This is not bureaucracy. An enrollment set that only the aggregator knows
+makes the aggregator unaccountable; an on-chain set is what makes omission
+provable ([[#aggregator-trust]]).
+
+** 17.3 The aggregator, and what it can do
+:PROPERTIES:
+:CUSTOM_ID: aggregator-trust
+:END:
+
+The aggregator combines subtree roots into the root that is posted. It is a
+role, appointed by the root authority, and it has exactly two powers worth
+naming:
+
+- *Censorship by omission.* Leaving an enrolled authority's latest root out
+  of a posting. That authority's members cannot prove membership against
+  any fresh root, so their proofs age out and they stop transacting.
+- *Forgery by inclusion.* Posting a root built over a subtree root its
+  authority never produced, fabricating members of that authority.
+
+Neither is prevented by the structure. Both are made *provable*, which is
+the achievable property:
+
+1. An authority =MUST= sign =(sub_root, sequence, posted_at)= with its
+   enrolled posting key, and the sequence =MUST= increase.
+2. The aggregator =MUST= publish the full list of leaves it combined, each
+   with the signature that authorized it, as a document in the canonical
+   JSON dialect the receipt envelope already uses: the posting sequence and
+   timestamp, then one entry per enrolled authority giving its identifier,
+   subtree root, sequence and signature. The posting =MUST= emit the hash
+   of that document beside the root, so the aggregator cannot show
+   different lists to different readers, and the enrollment record =MUST=
+   name where it is published.
+3. Enrollment being on chain, anyone can recompute the posted root from
+   that list, verify every signature, and check that every enrolled
+   authority's latest signed root was included.
+
+A mismatch is then evidence, and the remedy is governance replacing the
+aggregator rather than anything the protocol does by itself. The
+specification =MUST= state this plainly rather than imply the aggregator is
+trustless.
+
+*Alternative considered and rejected.* Each authority posts its own root on
+chain, and the registry keeps a root per authority with no aggregator at
+all. That removes the trusted role entirely and shortens a membership proof
+to the subtree path. It was rejected on two grounds. It costs a transaction
+per authority per posting, which does not scale to community authorities
+posting daily. More importantly it reveals which authority a member belongs
+to, because the verifier must name the root it checks, and authority-hiding
+matters most exactly where the anonymity set is smallest, which is a small
+community. Aggregation buys that hiding, so the aggregator is retained and
+accountability replaces removal.
+
+** 17.4 Delegation rules, and which of them bind
+
+The root authority sets the rules a sub-registry follows, and a
+sub-registry sets the rules its own delegates follow ([[#delegation]]).
+Rules divide into two kinds, and the specification =MUST= keep them
+distinct:
+
+- *Enforceable.* Any rule expressible as membership in a scope subtree:
+  the asset classes a delegate may attest, the face band ceiling it may
+  grant, and any other predicate of the same shape. A verifier that checks
+  the scope subtrees enforces these, and no cooperation from the delegate
+  is required.
+- *Contractual.* Everything else, such as "attest only members of your own
+  community" or "review reserves quarterly". The protocol cannot check
+  them, because the delegate owns its own subtree and may insert what it
+  likes. The parent's remedy is clearing the delegate; a verifier's remedy
+  is declining to accept that delegate at all.
+
+Scope =MUST= live in the parent's subtree, never in the delegate's, so a
+delegate cannot widen its own authority.
+
+** 17.5 Many deployments
+
+The same implementation is deployable by any group that wants its own
+identity authority and its own money: another province, a nation, or a
+community that prefers to define value through the insured assets its own
+members are willing to underwrite.
+
+- *Isolation is automatic.* A registration proof already binds the chain
+  id and the registry address, so a proof made for one deployment verifies
+  in no other. The identity scalar hashes a record that names its issuer,
+  so the same person certified by two deployments holds two unrelated
+  identities, and there is no cross-deployment linkage to remove because
+  none exists.
+- *Recognition is policy.* Deployment B accepts deployment A's identities
+  only if B's root authority enrolls A's authority, which is the delegation
+  mechanism of [[#delegation]] applied at the top. Nothing obliges B to,
+  and nothing prevents it.
+- *A deployment profile* is what a new deployment =MUST= choose: the root
+  authority, the aggregator operator, the depths, the maximum ages per
+  consumer, the face-band ladder, the asset-class vocabulary, the attribute
+  vocabulary, and the class of every subtree.
+
+** 17.6 What the protocol enforces, and what it does not
+
+The backing of the money is a chain of attestations. A credit's face is an
+insurer's claim about an asset; the insurer's authority to make that claim
+is a regulator's attestation; the regulator's authority is the root
+authority's delegation. The chain is explicit, attributable, and rooted in
+one authority per deployment.
+
+The protocol enforces *consistency*:
+
+- an insurer cannot write a credit outside the envelope its regulator
+  attested;
+- a delegate cannot claim scope its parent did not grant;
+- an identity cannot register without a credential it holds;
+- no party can test another's identity against public data.
+
+The protocol does not enforce *accuracy*. Nothing in it makes an insurer's
+reserves real, a regulator's review diligent, or an attestation honest. A
+group whose attestations are accurate ends with a currency backed by assets
+that exist. A group whose attestations are not ends with one backed by
+claims that do not, and the difference appears as a monetary outcome rather
+than as a protocol failure.
+
+That division is deliberate and =MUST NOT= be papered over. The protocol's
+job is to make the chain of claims explicit, attributable and internally
+consistent, so that the consequences of a group's trustworthiness, or its
+absence, fall on the group that chose them.

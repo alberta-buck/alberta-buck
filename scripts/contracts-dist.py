@@ -28,6 +28,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,13 @@ def pinned_solc() -> str:
     raise SystemExit("foundry.toml: [profile.default] has no solc pin")
 
 
+# Groth16 verifiers, from a DEVELOPMENT trusted setup (see DEV_SETUP).
+GROTH16 = (
+    [f"MintBatchN{n}Groth16Verifier" for n in (1, 2, 4, 8, 16, 32)]
+    + [f"MintBatchA2N{n}Groth16Verifier" for n in (1, 2, 4, 8, 16, 32)]
+    + ["SpendGroth16Verifier", "DepositFoldA1Verifier", "DepositFoldA2Verifier",
+       "IdentityMembershipB1Verifier"])
+
 # Contracts we own and publish.  Deliberately an allowlist: a wildcard over
 # out/ would sweep in interface stubs, test fixtures and the vendored
 # Uniswap implementations, which share the directory.
@@ -67,7 +75,38 @@ CONTRACTS = [
     "BuckBasketUniswapV3",     # basket: V3-routed
     "SimLP",                   # simulation liquidity helper
     "MockERC20",               # test/sim token
-]
+    # The Notes pool and the adapters that give it its verifiers.
+    "Notes",
+    "MintVerifierAdapter",     # public-issuer batches, dispatched by N
+    "MintVerifierA2Adapter",   # private-issuer (A2) batches, dispatched by N
+    "SpendVerifierAdapter",    # the one note proof every spend reuses
+    "DepositFoldVerifierAdapter",           # A1/A2 folded deposit gates
+    "IdentityMembershipB1VerifierAdapter",  # B1 depositor membership
+] + GROTH16
+
+# Until v1.0.0 every verifier above comes from scripts/snark/setup*.sh, which
+# contributes FIXED, PUBLISHED entropy: the toxic waste is known, so anyone can
+# forge a proof these verifiers accept.  That is deliberate -- it lets a
+# simulation model forged-proof attacks and the defences around them -- and the
+# bundle says so in data, not only in prose, so no consumer can miss it.
+DEV_SETUP = {
+    "kind": "development",
+    "until": "1.0.0",
+    "entropy": "fixed, published strings in scripts/snark/setup*.sh",
+    "consequence": "the toxic waste is public: anyone can forge a proof these verifiers accept",
+    "purpose": "simulation of forged-proof attacks and their defences; not for value",
+}
+
+# Contracts not produced by solc: circomlibjs's Poseidon hashers, whose creation
+# code lives in a hex constant (src/PoseidonT*Bytecode.sol) and whose ABI is our
+# interface.  IdentityRegistry needs both (setIdentityPoseidon/T4).
+GENERATED = {
+    "PoseidonT3": ("PoseidonT3Bytecode.sol", "IPoseidonT3"),
+    "PoseidonT4": ("PoseidonT4Bytecode.sol", "IPoseidonT4"),
+}
+
+EIP170 = 24_576                # runtime code limit
+EIP3860 = 2 * EIP170           # initcode limit
 
 # Contracts a BUCK world also needs, which we deliberately do NOT ship.
 # Recorded in the bundle so consumers know what to install alongside.
@@ -113,6 +152,8 @@ def collect(expect_solc: str):
             "bytecode": art["bytecode"]["object"],
             "deployedBytecode": deployed,
         }
+        if name in GROTH16:
+            contracts[name]["trustedSetup"] = DEV_SETUP["kind"]
         if settings is None and md:
             s = md.get("settings", {})
             settings = {
@@ -122,6 +163,18 @@ def collect(expect_solc: str):
                 "evmVersion": s.get("evmVersion"),
             }
     return contracts, settings, problems
+
+
+def generated(sol: str, iface: str) -> dict:
+    """A circomlibjs contract: its creation code from the Solidity hex constant,
+    its ABI from our interface, its runtime from the creation prefix."""
+    src = (REPO / "src" / sol).read_text(encoding="utf-8")
+    code = re.search(r'bytes internal constant BYTECODE = hex"([0-9a-fA-F]+)";', src).group(1).lower()
+    # CODESIZE; CODECOPY(0, 12, size); RETURN(0, n): the runtime is code[12:12+n].
+    pre = re.fullmatch(r"38600c60003961([0-9a-f]{4})6000f3", code[:24])
+    if not pre or len(code) // 2 - 12 != int(pre.group(1), 16):
+        raise SystemExit(f"{sol}: not circomlibjs's creation code")
+    return {"abi": load(iface)["abi"], "bytecode": "0x" + code, "deployedBytecode": "0x" + code[24:]}
 
 
 def main() -> int:
@@ -136,10 +189,21 @@ def main() -> int:
     expect = pinned_solc()
     contracts, settings, problems = collect(expect)
 
+    for name, (sol, iface) in GENERATED.items():
+        contracts[name] = generated(sol, iface)
+
     # Nothing third-party may carry bytecode into the bundle.
     for name in EXTERNAL:
         if name in contracts:
             problems.append(f"{name} is third-party and must not be published")
+
+    # Everything shipped must deploy where the size limits hold.
+    for name, c in contracts.items():
+        runtime, init = len(c["deployedBytecode"]) // 2 - 1, len(c["bytecode"]) // 2 - 1
+        if runtime > EIP170:
+            problems.append(f"{name}: {runtime}-byte runtime exceeds EIP-170 ({EIP170})")
+        if init > EIP3860:
+            problems.append(f"{name}: {init}-byte initcode exceeds EIP-3860 ({EIP3860})")
 
     if problems:
         print("contracts-dist: FAILED", file=sys.stderr)
@@ -159,13 +223,18 @@ def main() -> int:
         "commit": git_commit(),
         "sha256": digest,
         "external": EXTERNAL,
+        "trustedSetup": {**DEV_SETUP, "verifiers": GROTH16},
+        "generated": {name: {"source": f"src/{sol}", "abi": iface,
+                             "generator": "circomlibjs poseidon_gencontract"}
+                      for name, (sol, iface) in GENERATED.items()},
     }
 
     print(f"contracts-dist: {len(contracts)} contracts, solc {settings['solc']}, "
           f"viaIR={settings['viaIR']}, runs={settings['optimizer'].get('runs')}")
     print(f"  sha256 {digest}")
     for n, c in contracts.items():
-        print(f"    {n:24s} {len(c['bytecode'])//2:>7} bytes")
+        mark = "  DEVELOPMENT trusted setup" if n in GROTH16 else ""
+        print(f"    {n:36s} {len(c['deployedBytecode'])//2 - 1:>6} bytes runtime{mark}")
 
     if args.emit:
         contracts_txt = json.dumps(bundle, indent=1) + "\n"

@@ -3,9 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
-import {IdentityMembershipVerifier} from "../src/IdentityMembershipVerifier.sol";
 import {PoseidonT3Bytecode} from "../src/PoseidonT3Bytecode.sol";
-import {IPoseidonT3} from "../src/IPoseidonT3.sol";
 import {BN254} from "../src/BN254.sol";
 
 /// @notice Identity-axis V2 test: reads registry-generated vectors
@@ -45,7 +43,13 @@ contract IdentityRegistryV2Test is Test {
 
         expectedIdentityRoot = vm.parseJsonUint(rjRoot, ".identityRoot");
 
-        reg = new IdentityRegistry(GOV);
+        address registryAddr = address(uint160(_u(rj, ".registry.address")));
+        deployCodeTo(
+            "IdentityRegistry.sol:IdentityRegistry",
+            abi.encode(GOV),
+            registryAddr
+        );
+        reg = IdentityRegistry(registryAddr);
         _trustIssuer();
 
         // Compute deterministic addresses that match the Python vectors'
@@ -83,6 +87,7 @@ contract IdentityRegistryV2Test is Test {
             [_u(rj, ".ps_issuer.pk_Y.x[0]"), _u(rj, ".ps_issuer.pk_Y.x[1]")],
             [_u(rj, ".ps_issuer.pk_Y.y[0]"), _u(rj, ".ps_issuer.pk_Y.y[1]")]
         );
+        ipk.Y1 = _g1j(rj, ".ps_issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER_ADDR, ipk);
         assertTrue(reg.isTrustedIssuer(ISSUER_ADDR));
@@ -94,17 +99,20 @@ contract IdentityRegistryV2Test is Test {
             _g1j(j, ".ciphertext.R"),
             _g1j(j, ".ciphertext.C")
         );
-        IdentityRegistry.PSSig memory sigma = IdentityRegistry.PSSig(
-            _g1j(j, ".ps_sig_rerand.sigma_1"),
-            _g1j(j, ".ps_sig_rerand.sigma_2")
+        IdentityRegistry.PSPresentation memory sigma = IdentityRegistry.PSPresentation(
+            _g1j(j, ".ps_presentation.A"),
+            _g1j(j, ".ps_presentation.B")
         );
         IdentityRegistry.RegistrationProof memory proof;
         proof.e    = _u(j, ".registration_proof.e");
         proof.s_m  = _u(j, ".registration_proof.s_m");
         proof.s_r  = _u(j, ".registration_proof.s_r");
-        proof.A_ps = _g1j(j, ".registration_proof.A_ps");
+        proof.s_sk = _u(j, ".registration_proof.s_sk");
+        proof.s_b = _u(j, ".registration_proof.s_b");
+        proof.C1 = _g1j(j, ".registration_proof.C1");
         proof.T_C  = _g1j(j, ".registration_proof.T_C");
         proof.T_R  = _g1j(j, ".registration_proof.T_R");
+        proof.T_key = _g1j(j, ".registration_proof.T_key");
 
         vm.prank(who);
         reg.register(ISSUER_ADDR, pk, E, sigma, proof);
@@ -143,122 +151,111 @@ contract IdentityRegistryV2Test is Test {
 
     // ---- identity root accumulator (V2) ------------------------------------
 
-    /// @notice The identity root can be set by governance from an
-    ///         off-chain-computed Merkle root (the registry's aggregator).
-    function test_governance_setsIdentityRoot() public {
+    address internal constant ROOT_AUTH = address(0xA07);
+    address internal constant AGG       = address(0xA99);
+
+    function _appointAggregator() internal {
         vm.prank(GOV);
-        reg.setIdentityRoot(expectedIdentityRoot);
-        assertEq(reg.identityRoot(), expectedIdentityRoot);
+        reg.setRootAuthority(ROOT_AUTH);
+        vm.prank(ROOT_AUTH);
+        reg.setAggregator(AGG);
     }
 
-    function test_identityRoot_onlyGovernance() public {
-        vm.expectRevert(bytes("not governance"));
-        reg.setIdentityRoot(expectedIdentityRoot);
+    /// @notice The aggregator posts the off-chain-computed aggregator root.
+    function test_aggregator_postsIdentityRoot() public {
+        _appointAggregator();
+        vm.prank(AGG);
+        reg.postIdentityRoot(expectedIdentityRoot, keccak256("leaf list"));
+        assertEq(reg.identityRoot(), expectedIdentityRoot);
+        assertEq(reg.rootSequence(), 1);
+        assertEq(reg.rootPostedAt(expectedIdentityRoot), block.timestamp);
+    }
+
+    function test_identityRoot_onlyAggregator() public {
+        _appointAggregator();
+        vm.expectRevert(bytes("not aggregator"));
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
+        vm.prank(GOV);
+        vm.expectRevert(bytes("not aggregator"));
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
     }
 
     function test_identityRoot_rejectsZero() public {
-        vm.prank(GOV);
-        vm.expectRevert(bytes("root=0"));
-        reg.setIdentityRoot(0);
+        _appointAggregator();
+        vm.prank(AGG);
+        vm.expectRevert(bytes("bad root"));
+        reg.postIdentityRoot(0, bytes32(0));
     }
 
-    /// @notice Full flow: register both parties, set the identity root,
-    ///         verify the membership proof from the vectors against the
-    ///         on-chain root using the IdentityMembershipVerifier.
+    /// @notice Full flow: register both parties, post the identity root.
     function test_fullRegistrationPlusIdentityRoot() public {
         _registerFromVectors(rjAlice, alice);
         _registerFromVectors(rjBob, bob);
 
-        // Governance posts the off-chain-computed root.
-        vm.prank(GOV);
-        reg.setIdentityRoot(expectedIdentityRoot);
+        _appointAggregator();
+        vm.prank(AGG);
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
 
         assertEq(reg.identityRoot(), expectedIdentityRoot);
         assertTrue(reg.isVerified(alice));
         assertTrue(reg.isVerified(bob));
     }
 
-    // ---- incremental accumulator (Phase B) ----------------------------------
+    // ---- admission is never a registry call ---------------------------------
 
-    function test_incrementalAccumulator_singleLeaf() public {
-        // Deploy Poseidon and wire it.
+    function test_callerLeaf_singleLeaf_refused() public {
+        // A caller-supplied identityLeaf is refused, permanently: even Alice's
+        // honest leaf, because admission is the certifier's, not the caller's.
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
         assertEq(reg.identityPoseidon(), poseidonAddr);
 
-        // Read alice's identity leaf from vectors.
         uint256 aliceLeaf = _u(rjAlice, ".leaf");
-
-        // Register alice with the incremental leaf.
-        _registerFromVectorsWithLeaf(rjAlice, alice, aliceLeaf);
-
-        uint256 root = reg.identityRoot();
-        assertTrue(root != 0, "root should be non-zero after insertion");
-        assertEq(reg.identityNextLeafIndex(), 1);
-
-        // Verify with Poseidon directly: single leaf tree, depth 10.
-        uint256[2] memory pair;
-        pair[0] = aliceLeaf;
-        pair[1] = reg.IDENTITY_ZEROS(0);                       // ZERO_0 = 0
-        uint256 cur = IPoseidonT3(poseidonAddr).poseidon(pair); // level 0
-        for (uint8 d = 1; d < reg.IDENTITY_TREE_DEPTH(); d++) {
-            pair[0] = cur;
-            pair[1] = reg.IDENTITY_ZEROS(d);
-            cur = IPoseidonT3(poseidonAddr).poseidon(pair);
-        }
-        assertEq(root, cur,
-                "on-chain incremental root must match direct Poseidon computation");
+        _expectUncheckedLeaf(rjAlice, alice, aliceLeaf);
+        assertEq(reg.identityRoot(), 0);
+        assertEq(reg.rootSequence(), 0);
+        assertFalse(reg.isVerified(alice));
     }
 
-    function test_incrementalAccumulator_twoLeavesMatchesAggregator() public {
+    function test_callerLeaf_twoLeaves_refused() public {
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
 
-        uint256 aliceLeaf = _u(rjAlice, ".leaf");
-        uint256 bobLeaf   = _u(rjBob, ".leaf");
-
-        _registerFromVectorsWithLeaf(rjAlice, alice, aliceLeaf);
-        _registerFromVectorsWithLeaf(rjBob,   bob,   bobLeaf);
-
-        uint256 root = reg.identityRoot();
-        assertEq(reg.identityNextLeafIndex(), 2);
-
-        // The two-leaf on-chain root must match the Python registry sub_root
-        // (which is a depth=10 IdentityMerkleTree with both leaves inserted).
-        uint256 expectedSubRoot = vm.parseJsonUint(rjRoot, ".registry_sub_root");
-        assertEq(root, expectedSubRoot,
-                "two-leaf incremental root must match Python registry sub_root");
+        _expectUncheckedLeaf(rjAlice, alice, _u(rjAlice, ".leaf"));
+        _expectUncheckedLeaf(rjBob,   bob,   _u(rjBob, ".leaf"));
+        assertEq(reg.identityRoot(), 0);
+        assertEq(reg.rootSequence(), 0);
     }
 
-    function test_incrementalAccumulator_governanceCanStillSet() public {
-        // Governance-set root still works even with Poseidon wired.
+    function test_aggregatorPostsWithPoseidonWired() public {
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
 
-        vm.prank(GOV);
-        reg.setIdentityRoot(expectedIdentityRoot);
+        _appointAggregator();
+        vm.prank(AGG);
+        reg.postIdentityRoot(expectedIdentityRoot, bytes32(0));
         assertEq(reg.identityRoot(), expectedIdentityRoot);
     }
 
-    function test_incrementalAccumulator_zeroLeafSkipsUpdate() public {
+    function test_registerPostsNothing() public {
         address poseidonAddr = PoseidonT3Bytecode.deploy();
         vm.prank(GOV);
         reg.setIdentityPoseidon(poseidonAddr);
 
-        // Register WITHOUT a leaf (5-arg overload) — root stays 0.
+        // Register WITHOUT a leaf (5-arg overload) -- nothing is posted.
         _registerFromVectors(rjAlice, alice);
         assertEq(reg.identityRoot(), 0,
-                "5-arg register must not update identity root");
-        assertEq(reg.identityNextLeafIndex(), 0,
-                "leaf count must not advance with 5-arg register");
+                "register must not post a root");
+        assertEq(reg.rootSequence(), 0,
+                "register must not post a root");
     }
 
     // ---- helpers with leaf -------------------------------------------------
 
-    function _registerFromVectorsWithLeaf(
+    function _expectUncheckedLeaf(
         string memory j, address who, uint256 leaf
     ) internal {
         BN254.G1Point memory pk = _g1j(j, ".elgamal_kp.pk");
@@ -266,19 +263,23 @@ contract IdentityRegistryV2Test is Test {
             _g1j(j, ".ciphertext.R"),
             _g1j(j, ".ciphertext.C")
         );
-        IdentityRegistry.PSSig memory sigma = IdentityRegistry.PSSig(
-            _g1j(j, ".ps_sig_rerand.sigma_1"),
-            _g1j(j, ".ps_sig_rerand.sigma_2")
+        IdentityRegistry.PSPresentation memory sigma = IdentityRegistry.PSPresentation(
+            _g1j(j, ".ps_presentation.A"),
+            _g1j(j, ".ps_presentation.B")
         );
         IdentityRegistry.RegistrationProof memory proof;
         proof.e    = _u(j, ".registration_proof.e");
         proof.s_m  = _u(j, ".registration_proof.s_m");
         proof.s_r  = _u(j, ".registration_proof.s_r");
-        proof.A_ps = _g1j(j, ".registration_proof.A_ps");
+        proof.s_sk = _u(j, ".registration_proof.s_sk");
+        proof.s_b = _u(j, ".registration_proof.s_b");
+        proof.C1 = _g1j(j, ".registration_proof.C1");
         proof.T_C  = _g1j(j, ".registration_proof.T_C");
         proof.T_R  = _g1j(j, ".registration_proof.T_R");
+        proof.T_key = _g1j(j, ".registration_proof.T_key");
 
         vm.prank(who);
+        vm.expectRevert(bytes("unchecked identity leaf"));
         reg.register(ISSUER_ADDR, pk, E, sigma, proof, leaf);
     }
 }

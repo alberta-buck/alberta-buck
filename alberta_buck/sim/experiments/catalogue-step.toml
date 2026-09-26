@@ -3,7 +3,7 @@
 # at day 365.  The defender mix and intensity are swept from outside
 # (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
 # counts); this file fixes the physics and the injection only.
-# Design of record: REBALANCING-EQ.org, "The excursion catalogue".
+# Design of record: doc/REBALANCING-EQ.org, "The excursion catalogue".
 name = "catalogue-step"
 notes = "permanent constituent shock: NRGC x1.30 from day 365 (axis 2 + the lagged common mode)"
 

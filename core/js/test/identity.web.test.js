@@ -43,7 +43,11 @@ test("browser bundle: full registration ceremony proves + verifies", { skip }, (
   const sigma = wasm.ps_sign(hex(skX), hex(skY), hex(m), hex(rand()));
   assert.ok(wasm.ps_verify(pkX, pkY, ...sigma, hex(m)));
 
-  const sigmaP = wasm.ps_rerandomize(...sigma, hex(rand()));
+  const pkY1 = wasm.g1_mul("0x1", "0x2", hex(skY));
+  assert.ok(wasm.ps_key_consistent(pkY, ...pkY1));
+  const b = rand();
+  const pres = wasm.ps_present(...sigma, ...pkY1, hex(rand()), hex(b));
+  assert.ok(!wasm.ps_verify(pkX, pkY, ...pres, hex(m)), "presentation is not a signature");
   const sk = rand();
   const pk = wasm.g1_mul("0x1", "0x2", hex(sk));
   const M = wasm.g1_mul("0x1", "0x2", hex(m));
@@ -51,9 +55,15 @@ test("browser bundle: full registration ceremony proves + verifies", { skip }, (
   const E = wasm.elgamal_encrypt(...M, ...pk, hex(r));
 
   const registrant = "0x" + "a11ce".padStart(40, "0");
+  const chainid = "0x1";
+  const registry = "0x" + "1d".repeat(20);
   const proof = wasm.registration_prove(
-    sigmaP, hex(m), hex(r), ...pk, E, registrant, hex(rand()), hex(rand()));
-  assert.ok(wasm.registration_verify(sigmaP, E, ...pk, pkX, pkY, proof, registrant));
+    pres, hex(b), hex(m), hex(r), ...pk, E, registrant, hex(sk), chainid,
+    registry,
+    hex(rand()), hex(rand()), hex(rand()), hex(rand()));
+  assert.ok(wasm.registration_verify(
+    pres, E, ...pk, pkX, pkY, proof, registrant, chainid, registry));
   assert.ok(!wasm.registration_verify(
-    sigmaP, E, ...pk, pkX, pkY, proof, "0x" + "bad".padStart(40, "0")));
+    pres, E, ...pk, pkX, pkY, proof,
+    "0x" + "bad".padStart(40, "0"), chainid, registry));
 });

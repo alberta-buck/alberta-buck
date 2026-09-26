@@ -107,6 +107,11 @@ def test_ps(kv):
         assert not bi.ps_verify(pk_x, pk_y, sig[0], sig[1], m + 1)
         rr = bi.ps_rerandomize(sig[0], sig[1], _i(row["rerand_t"]))
         assert rr == (_pt(row["rerand_sigma_1"]), _pt(row["rerand_sigma_2"]))
+        pres = bi.ps_present(sig[0], sig[1], _pt(p["pk_Y1"]),
+                             _i(row["present_a"]), _i(row["present_b"]))
+        assert pres == (_pt(row["present_A"]), _pt(row["present_B"]))
+        assert not bi.ps_verify(pk_x, pk_y, pres[0], pres[1], m)
+    assert bi.ps_key_consistent(pk_y, _pt(p["pk_Y1"]))
 
 
 def test_schnorr(kv):
@@ -124,32 +129,42 @@ def test_schnorr(kv):
 def test_registration(kv):
     r = kv["registration"]
     sigma = (_pt(r["sigma_1"]), _pt(r["sigma_2"]))
+    pres = bi.ps_present(sigma[0], sigma[1], _pt(r["Y1"]), _i(r["a"]), _i(r["b"]))
+    assert pres == (_pt(r["A"]), _pt(r["B"]))
     e_ct = _ct(r["E"])
     proof = bi.registration_prove(
-        sigma[0], sigma[1], _i(r["m"]), _i(r["r"]), _pt(r["pk"]), e_ct,
-        _i(r["registrant"]), _i(r["m_tilde"]), _i(r["r_tilde"]),
+        pres[0], pres[1], _i(r["b"]), _i(r["m"]), _i(r["r"]), _pt(r["pk"]), e_ct,
+        _i(r["registrant"]), _i(r["sk"]), _i(r["chainid"]),
+        _i(r["registry"]),
+        _i(r["m_tilde"]), _i(r["b_tilde"]), _i(r["r_tilde"]), _i(r["sk_tilde"]),
     )
     pf = r["proof"]
     assert proof == (
-        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]),
-        _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]),
+        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_b"]), _i(pf["s_r"]), _i(pf["s_sk"]),
+        _pt(pf["C1"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
     )
     ps = kv["ps"]
-    assert bi.registration_verify(
-        sigma[0], sigma[1], e_ct, _pt(r["pk"]),
-        _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]),
-    )
-    assert not bi.registration_verify(
-        sigma[0], sigma[1], e_ct, _pt(r["pk"]),
-        _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]) ^ 1,
-    )
+    for verify in (bi.registration_verify, bi.registration_verify_v3):
+        assert verify(
+            pres[0], pres[1], e_ct, _pt(r["pk"]),
+            _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]),
+            _i(r["chainid"]), _i(r["registry"]),
+        )
+        assert not verify(
+            pres[0], pres[1], e_ct, _pt(r["pk"]),
+            _g2(ps["pk_X"]), _g2(ps["pk_Y"]), proof, _i(r["registrant"]) ^ 1,
+            _i(r["chainid"]), _i(r["registry"]),
+        )
 
 
 def test_chaum_pedersen(kv):
     c = kv["chaum_pedersen"]
     e_a, e_b = _ct(c["E_a"]), _ct(c["E_b"])
     pk_a, pk_b = _pt(c["pk_a"]), _pt(c["pk_b"])
-    args = (_i(c["sender"]), _i(c["spender"]), _i(c["chainid"]))
+    args = (
+        _i(c["sender"]), _i(c["spender"]), _i(c["chainid"]),
+        _i(c["registry"]),
+    )
     proof = bi.chaum_pedersen_prove(
         e_a, e_b, pk_a, pk_b, _i(c["sk_a"]), _i(c["r_prime"]),
         *args, _i(c["k1"]), _i(c["k2"]),
@@ -175,6 +190,25 @@ def test_verifiable_decrypt(kv):
     )
 
 
+def test_identity_opening(kv):
+    r = kv["identity_opening"]
+    e_ct = _ct(r["E"])
+    args = (_i(r["account"]), _i(r["chainid"]))
+    proof = bi.identity_opening_prove(e_ct, _i(r["sk"]), _pt(r["M"]), *args, _i(r["registry"]),
+                                      _i(r["t"]))
+    pf = r["proof"]
+    assert proof == (_i(pf["e"]), _i(pf["s"]), _pt(pf["T1"]), _pt(pf["T2"]))
+    pk, M = _pt(r["pk"]), _pt(r["M"])
+    assert bi.identity_opening_verify(e_ct, pk, M, proof, *args, _i(r["registry"])) == r["verify"]
+    assert not bi.identity_opening_verify(e_ct, pk, M, proof, *args, _i(r["registry"]) + 1)
+    # Its own tag: a receipt's proof opens nothing, and the opening is no receipt.
+    vd = kv["verifiable_decrypt"]["proof"]
+    vd_proof = (_i(vd["e"]), _i(vd["s"]), _pt(vd["T1"]), _pt(vd["T2"]))
+    assert (not bi.identity_opening_verify(e_ct, pk, M, vd_proof, *args, _i(r["registry"]))) \
+        == r["not_a_receipt_proof"]
+    assert not bi.verifiable_decrypt_verify(e_ct, pk, M, proof, *args)
+
+
 def test_issuer_reenc(kv):
     r = kv["issuer_reenc"]
     e_reg, e_iss = _ct(r["E_reg"]), _ct(r["E_iss"])
@@ -192,24 +226,6 @@ def test_issuer_reenc(kv):
     )
     assert bi.issuer_reenc_verify(
         _pt(r["pk_iss"]), e_reg, e_iss, proof, _i(r["issuer"]), _i(r["chainid"]),
-    )
-
-
-def test_deposit_couple(kv):
-    r = kv["deposit_couple"]
-    e_dep, e_iss = _ct(r["E_dep"]), _ct(r["eIss"])
-    proof = bi.deposit_couple_prove(
-        _i(r["m_rec"]), _i(r["sk_dep"]), e_dep, e_iss,
-        _i(r["account"]), _i(r["chainid"]),
-        _i(r["b"]), _i(r["k_m"]), _i(r["k_s"]), _i(r["k_b"]),
-    )
-    pf = r["proof"]
-    assert proof == (
-        _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_s"]), _i(pf["s_b"]),
-        _pt(pf["A2"]), _pt(pf["A3"]), _pt(pf["A4"]), _pt(pf["P_I"]),
-    )
-    assert bi.deposit_couple_verify(
-        _pt(r["pk_dep"]), e_dep, e_iss, proof, _i(r["account"]), _i(r["chainid"]),
     )
 
 
@@ -238,15 +254,14 @@ def test_b1_bind(kv):
 def test_notes_and_merkle(kv):
     n = kv["notes"]
     e_note, e_iss = _ct(n["eNote"]), _ct(n["eIss"])
-    assert bi.id_hash_b1(_i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_b1"])
-    assert bi.id_hash_a1(e_note, _i(n["m_issuer"]), _pt(n["sigma_R"]), _i(n["sigma_s"])) == _i(n["id_hash_a1"])
-    assert bi.id_hash_a2(e_note, e_iss) == _i(n["id_hash_a2"])
+    assert bi.id_hash_b1(_i(n["m_issuer"])) == _i(n["id_hash_b1"])
+    assert bi.id_hash_a1(e_note, _i(n["m_issuer"])) == _i(n["id_hash_a1"])
+    assert bi.id_hash_a2(e_note, e_iss, _pt(n["T"])) == _i(n["id_hash_a2"])
     op = n["opening"]
     assert bi.note_commitment(
         _i(op["flavor"]), _i(op["v"]), _i(op["rho"]), _i(op["idHash"]), _i(op["predicate"]),
     ) == _i(n["cm"])
-    assert bi.nullifier_b(_i(op["rho"]), _i(op["idHash"])) == _i(n["nullifier_b"])
-    assert bi.nullifier_a(_i(op["rho"]), _i(op["idHash"])) == _i(n["nullifier_a"])
+    assert bi.nullifier(_i(op["rho"]), _i(op["idHash"])) == _i(n["nullifier"])
     assert bi.identity_leaf(_pt(n["identity_leaf_M"])) == _i(n["identity_leaf"])
 
     mk = kv["merkle"]
@@ -287,6 +302,7 @@ def test_prove_rejects_inconsistent_witness(kv):
 
 def test_identity_fixture(iv):
     chainid = _i(iv["chainid"])
+    registry = _i(iv["registry"])
     iss_x, iss_y = _g2(iv["issuer"]["pk_X"]), _g2(iv["issuer"]["pk_Y"])
 
     for who in ("alice", "bob"):
@@ -295,18 +311,19 @@ def test_identity_fixture(iv):
         assert bi.identity_scalar(p["canonical_identity_data"]) == m
         assert bi.g1_mul(bi.G1, m) == _pt(p["M"])
         assert bi.elgamal_encrypt(_pt(p["M"]), _pt(p["elgamal_kp"]["pk"]), _i(p["r"])) == _ct(p["ciphertext"])
-        for sig in ("ps_sig_raw", "ps_sig_rerand"):
-            assert bi.ps_verify(iss_x, iss_y, _pt(p[sig]["sigma_1"]), _pt(p[sig]["sigma_2"]), m)
+        assert bi.ps_verify(iss_x, iss_y, _pt(p["ps_sig_raw"]["sigma_1"]), _pt(p["ps_sig_raw"]["sigma_2"]), m)
+        A, B = _pt(p["ps_presentation"]["A"]), _pt(p["ps_presentation"]["B"])
+        assert not bi.ps_verify(iss_x, iss_y, A, B, m), "presentation is not a signature"
         pf = p["registration_proof"]
         proof = (
-            _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_r"]),
-            _pt(pf["A_ps"]), _pt(pf["T_C"]), _pt(pf["T_R"]),
+            _i(pf["e"]), _i(pf["s_m"]), _i(pf["s_b"]), _i(pf["s_r"]), _i(pf["s_sk"]),
+            _pt(pf["C1"]), _pt(pf["T_C"]), _pt(pf["T_R"]), _pt(pf["T_key"]),
         )
-        assert bi.registration_verify(
-            _pt(p["ps_sig_rerand"]["sigma_1"]), _pt(p["ps_sig_rerand"]["sigma_2"]),
-            _ct(p["ciphertext"]), _pt(p["elgamal_kp"]["pk"]),
-            iss_x, iss_y, proof, _i(p["registrant"]),
+        assert bi.registration_verify_v3(
+            A, B, _ct(p["ciphertext"]), _pt(p["elgamal_kp"]["pk"]),
+            iss_x, iss_y, proof, _i(p["registrant"]), chainid, registry,
         )
+    assert bi.ps_key_consistent(iss_y, _pt(iv["issuer"]["pk_Y1"]))
 
     # Unicode canonical-dialect pin: raw UTF-8 (accents + CJK) hashes to m.
     up = iv["unicode_party"]
@@ -325,6 +342,7 @@ def test_identity_fixture(iv):
         _pt(iv["alice"]["elgamal_kp"]["pk"]), _pt(iv["bob"]["elgamal_kp"]["pk"]),
         (_i(cp["e"]), _i(cp["s1"]), _i(cp["s2"]), _pt(cp["T1"]), _pt(cp["T2"]), _pt(cp["T3"])),
         _i(ap["sender"]), _i(ap["spender"]), chainid,
+        _i(ap["registry"]),
     )
 
     isch = iv["issuer_schnorr"]
@@ -344,7 +362,7 @@ def test_identity_fixture(iv):
     assert cm == _i(rc["cm"]) and cm in [_i(c) for c in rc["cms"]]
     rcpt_h = bi.batch_commitment([_i(c) for c in rc["cms"]])
     assert rcpt_h == _i(rc["hBatch"])
-    assert bi.nullifier_b(_i(op["rho"]), _i(op["idHash"])) == _i(rc["nullifier"])
+    assert bi.nullifier(_i(op["rho"]), _i(op["idHash"])) == _i(rc["nullifier"])
     assert bi.issuer_schnorr_verify(
         _pt(rc["issuer_pk"]),
         (_i(rc["issuer_sig"]["e"]), _i(rc["issuer_sig"]["s"]), _pt(rc["issuer_sig"]["R"])),

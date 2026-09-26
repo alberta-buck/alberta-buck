@@ -30,6 +30,17 @@
           requests
         ]);
 
+        # Headless Chromium for Playwright: the sandbox's browser tests and
+        # screenshots (core/js/sandbox).  The headless shell only -- 83 MiB,
+        # against 389 MiB for every browser.  core/js pins playwright-core to
+        # this same version: the npm driver and these builds must agree.
+        playwrightBrowsers = pkgs.playwright-driver.browsers.override {
+          withChromium = false;
+          withFirefox = false;
+          withWebkit = false;
+          withFfmpeg = false;
+        };
+
         commonInputs = with pkgs; [
           # Common tools
           cacert
@@ -68,6 +79,9 @@
           # nowhere else.
           rustc
           cargo
+          # clippy from the same nixpkgs as rustc: a profile clippy of another
+          # version reads this rustc's crate metadata as incompatible (E0514).
+          clippy
           # wasm32-unknown-unknown links with lld; nixpkgs rustc ships the
           # target's std but not a linker for it, and cargo fails with
           # "linker `lld` not found" without this.
@@ -95,6 +109,8 @@
             if [ "$(uname -s)" = Linux ]; then
               export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.zlib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             fi
+            export PLAYWRIGHT_BROWSERS_PATH="${playwrightBrowsers}"
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 
             echo "Alberta Buck — Ethereum Development Environment"
             echo ""
@@ -107,6 +123,7 @@
             printf "  %-12s %s\n" "circom" "$(circom --version 2>/dev/null | head -1)"
             printf "  %-12s %s\n" "cargo"  "$(cargo --version 2>/dev/null)"
             printf "  %-12s %s\n" "wasm-opt" "$(wasm-opt --version 2>/dev/null)"
+            printf "  %-12s %s\n" "playwright" "${pkgs.playwright-driver.version} (headless chromium)"
             # snarkjs and circomlib come from npm; bootstrap on first entry.
             if [ ! -d node_modules ] && [ -f package.json ]; then
               echo ""

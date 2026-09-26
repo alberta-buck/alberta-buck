@@ -221,7 +221,10 @@ class PyrevmAnvil:
                  timestamp: Optional[int] = None):
         self.port = port or 0                       # no socket; kept for parity
         self.chain_id = chain_id or 31337
-        self.evm = pyrevm.EVM(gas_limit=gas_limit or 3_000_000_000)
+        # The EVM's block.chainid must be the chain id eth_chainId reports:
+        # identity proofs bind it (Fiat-Shamir), and pyrevm defaults to 1.
+        self.evm = pyrevm.EVM(env=pyrevm.Env(cfg=pyrevm.CfgEnv(chain_id=self.chain_id)),
+                              gas_limit=gas_limit or 3_000_000_000)
         self.block = 0
         self.ts = timestamp or GENESIS_TS
         self.nonces: dict[str, int] = {}
@@ -250,6 +253,40 @@ class PyrevmAnvil:
 
     def set_balance(self, addr: str, wei: int) -> None:
         self.evm.set_balance(to_checksum_address(addr), wei)
+
+    def set_code(self, addr: str, code) -> None:
+        """Anvil `anvil_setCode` analogue.  Preserves balance and nonce."""
+        addr = to_checksum_address(addr)
+        if isinstance(code, str):
+            h = code[2:] if code.startswith("0x") else code
+            code_bytes = bytes.fromhex(h)
+        else:
+            code_bytes = bytes(code)
+        try:
+            bal = int(self.evm.get_balance(addr))
+        except Exception:
+            bal = 0
+        nonce = self.nonces.get(addr, 0)
+        self.evm.insert_account_info(
+            addr, pyrevm.AccountInfo(balance=bal, nonce=nonce, code=code_bytes))
+
+    def _rpc(self, method: str, params: list):
+        """Subset of Anvil admin RPC used by NotesStack.bind_identities."""
+        if method == "anvil_setBalance":
+            wei = int(params[1], 16) if isinstance(params[1], str) else int(params[1])
+            self.set_balance(params[0], wei)
+            return {"jsonrpc": "2.0", "id": 1, "result": True}
+        if method == "anvil_setCode":
+            self.set_code(params[0], params[1])
+            return {"jsonrpc": "2.0", "id": 1, "result": True}
+        if method == "anvil_setNextBlockTimestamp":
+            ts = int(params[0], 16) if isinstance(params[0], str) else int(params[0])
+            self.set_next_block_timestamp(ts)
+            return {"jsonrpc": "2.0", "id": 1, "result": True}
+        if method == "evm_mine":
+            self.mine()
+            return {"jsonrpc": "2.0", "id": 1, "result": True}
+        raise NotImplementedError(f"PyrevmAnvil._rpc: {method}")
 
     def set_next_block_timestamp(self, ts: int) -> None:
         self.ts = max(ts, self.ts)

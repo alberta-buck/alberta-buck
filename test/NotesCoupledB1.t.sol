@@ -2,9 +2,11 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {StubIdentityMembershipVerifier} from "../src/StubIdentityMembershipVerifier.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
@@ -13,6 +15,7 @@ import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {Notes} from "../src/Notes.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @notice End-to-end wiring of the identity-M-bound B1 deposit (bearer, public
 ///         issuer): Notes.spendCoupledB1 co-verifies the depositor-binding sigma
@@ -25,6 +28,8 @@ import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 ///         membership-bound B1 spender path that completes the Identity-M design
 ///         for bearer notes.  See alberta-buck-notes.org ("Mutual Decryptability", B1) and notes-flow "Identity-M Spend Path".
 contract NotesCoupledB1Test is Test {
+    using stdStorage for StdStorage;
+
     Buck internal buck;
     BuckCreditHarness internal credit;
     BuckKControllerStatic internal kCtrl;
@@ -36,6 +41,10 @@ contract NotesCoupledB1Test is Test {
 
     address internal constant GOV  = address(0xA0);
     address internal constant POOL = address(0xBA51C);
+    uint256 internal constant ISSUANCE_CM = 0xB100;
+    /// @dev The identity root the spends name: read once, so no external call
+    ///      sits between a vm.prank or vm.expectRevert and the call it targets.
+    uint256 internal idRoot;
 
     string  internal vj;
     address internal depositor;   // the payout account (= recipient), bound to M_dep
@@ -47,7 +56,7 @@ contract NotesCoupledB1Test is Test {
         vm.chainId(1);
         vj = vm.readFile("test/vectors/b1_binding.json");
 
-        reg = new IdentityRegistry(GOV);
+        reg = new IdentityRegistryHarness(GOV);
 
         depositor = address(uint160(_u(".depositor.addr")));
         issuer    = address(uint160(_u(".issuer.addr")));
@@ -59,6 +68,7 @@ contract NotesCoupledB1Test is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
@@ -73,8 +83,9 @@ contract NotesCoupledB1Test is Test {
         reg.bindContract(address(notes), BN254.g1(),
                          IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, true);
 
-        vm.prank(GOV);
-        reg.setIdentityRoot(0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3);
+        IdentityRegistryHarness(address(reg)).fixturePostRoot(
+            0x2b1be837cccc27a8ab397ebd3818ffe3ae3f16fdda0bf9e62bde6d78a5336fa3);
+        idRoot = reg.identityRoot();
 
         idMemStub = new StubIdentityMembershipVerifier();
         vm.prank(GOV);
@@ -95,6 +106,13 @@ contract NotesCoupledB1Test is Test {
         buck.transfer(address(notes), 200e18);
         vm.stopPrank();
         vm.store(address(notes), bytes32(uint256(8)), bytes32(uint256(1000e18)));
+        // Unit-plumbing tests use stub mint/spend verifiers and seed the one
+        // mint-authenticated fact that spendCoupledB1 now consumes.  The real
+        // mint-to-spend linkage is exercised by NotesE2E_B1.
+        stdstore.target(address(notes))
+            .sig("publicIssuerOfCommitment(uint256)")
+            .with_key(ISSUANCE_CM)
+            .checked_write(issuer);
     }
 
     // ---- vector helpers -----------------------------------------------------
@@ -142,7 +160,7 @@ contract NotesCoupledB1Test is Test {
         uint256 nf   = 0xB10;
         uint256 balBefore = buck.balanceOf(depositor);
         vm.prank(depositor);
-        notes.spendCoupledB1(hex"00", root, nf, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, nf, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
         assertTrue(notes.nullifiers(nf), "nullifier consumed");
         assertEq(buck.balanceOf(depositor), balBefore + 100, "payout delivered");
@@ -153,7 +171,7 @@ contract NotesCoupledB1Test is Test {
         vm.expectEmit(true, true, true, true, address(notes));
         emit Notes.SpentCoupledB1(0xB11, 100, depositor, issuer, _eDepForIss());
         vm.prank(depositor);
-        notes.spendCoupledB1(hex"00", root, 0xB11, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB11, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
     }
 
@@ -165,7 +183,7 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad depositor binding"));
-        notes.spendCoupledB1(hex"00", root, 0xB12, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB12, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), p, hex"cafe");
     }
 
@@ -176,7 +194,7 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad depositor binding"));
-        notes.spendCoupledB1(hex"00", root, 0xB13, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB13, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), p, hex"cafe");
     }
 
@@ -185,18 +203,36 @@ contract NotesCoupledB1Test is Test {
         uint256 root = notes.noteRoot();
         vm.prank(depositor);
         vm.expectRevert(bytes("Notes: bad identity membership proof"));
-        notes.spendCoupledB1(hex"00", root, 0xB14, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB14, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
     }
 
     function test_coupledB1_doubleSpend_reverts() public {
         uint256 root = notes.noteRoot();
         vm.startPrank(depositor);
-        notes.spendCoupledB1(hex"00", root, 0xB15, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB15, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
         vm.expectRevert(bytes("Notes: already spent"));
-        notes.spendCoupledB1(hex"00", root, 0xB15, 100, depositor, issuer,
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB15, 100, depositor, ISSUANCE_CM, issuer,
                              _eDepForIss(), _b1(), hex"cafe");
         vm.stopPrank();
+    }
+
+    function test_coupledB1_emptyMembershipProof_reverts() public {
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: empty identity membership proof"));
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB16, 100, depositor, ISSUANCE_CM, issuer,
+                             _eDepForIss(), _b1(), "");
+    }
+
+    function test_coupledB1_unsetMembershipVerifier_reverts() public {
+        vm.prank(GOV);
+        notes.setIdentityMembershipVerifier(address(0));
+        uint256 root = notes.noteRoot();
+        vm.prank(depositor);
+        vm.expectRevert(bytes("Notes: membership verifier not set"));
+        notes.spendCoupledB1(hex"00", root, idRoot, 0xB17, 100, depositor, ISSUANCE_CM, issuer,
+                             _eDepForIss(), _b1(), hex"cafe");
     }
 }

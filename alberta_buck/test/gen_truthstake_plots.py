@@ -2,7 +2,7 @@
 """Generate TruthStake simulation plots using real XAUUSD data.
 
 Run: python -m alberta_buck.test.gen_truthstake_plots
-Produces plots and tables for README-truthstake.org.
+Produces plots and tables for doc/README-truthstake.org.
 """
 
 import csv

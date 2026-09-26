@@ -1,23 +1,20 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in
 # LICENSING.md.  The code is free software; the design writing is not
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
-#
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+TITLE: The Alberta Buck - Printable Receipt (v1.0)
+#+TITLE: The Alberta Buck - Printable Receipt (v2)
 #+SUBTITLE: A Plain-Text, Independently Re-Verifiable Record of an Identity-Bound BUCK Payment
 #+author: Perry Kundert
 #+date: 2026-05-29
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 19
 #+weight: 20
 #+draft: false
 #+bucky: true
 #+math: true
-#+description: The end-user artifact of the Alberta Buck identity layer is a literal printable receipt -- shaped like a cash-register / card-machine slip -- that names the plain-text Identity of both parties to a payment, states the transaction details, and carries everything required to independently re-verify its integrity by re-scanning its own text payload.  This document specifies that artifact: the point->human bridge (the canonical_identity_data preimage of each party's identity point), the two-tier verification model (offline proof-algebra + chain-anchored), the AB-RCPT/1 envelope serialization, the per-scenario payloads for the five receipt kinds (EOA from a public or private counterparty; B1, A1, A2 Notes) -- the Note kinds producible by EITHER party, issuer or depositor, from the Identity-M note payload both hold -- the 80mm/203dpi/576px ESC/POS plain-text layout, the verification procedure, and the wallet UX and storage required to gather the data and format/print the slip.
+#+description: The end-user artifact of the Alberta Buck identity layer is a literal printable receipt -- shaped like a cash-register / card-machine slip -- that names the plain-text Identity of both parties to a payment, states the transaction details, and carries everything required to independently re-verify its integrity by re-scanning its own text payload.  This document specifies that artifact: the point->human bridge (the canonical_identity_data preimage of each party's identity point), the two-tier verification model (offline proof-algebra + chain-anchored), the AB-RCPT/2 envelope serialization, the per-scenario payloads for the five receipt kinds (EOA from a public or private counterparty; B1, A1, A2 Notes) -- the Note kinds producible by EITHER party, issuer or depositor, from the Identity-M note payload both hold -- the 80mm/203dpi/576px ESC/POS plain-text layout, the verification procedure, and the wallet UX and storage required to gather the data and format/print the slip.
 #+EXPORT_FILE_NAME: ./images/alberta-buck-receipt
 #+STARTUP: org-startup-with-inline-images inlineimages
 #+STARTUP: org-latex-tables-centered nil
@@ -148,10 +145,10 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   print a /false/ one.
   #+end_property
 
-* The AB-RCPT/1 Envelope
+* The AB-RCPT/2 Envelope
 
   The verified *core* is a deterministic map, serialized canonically (CBOR), and
-  printed as =AB-RCPT/1.= followed by base64url of the bytes, wrapped to the
+  printed as =AB-RCPT/2.= followed by base64url of the bytes, wrapped to the
   print width.  (Text-only by decision -- no QR; the payload is literally
   plain-text, re-typable and OCR-able, and survives a scanner-less verifier.)
   The receipt id is =base32(sha256(core))= truncated to a short handle.  The
@@ -199,11 +196,10 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   }
 
   NotePayload {                 // per flavor -- the idHash preimage material
-    // B1:  "sigma_R", "sigma_s"            (id_hash_b1(m_iss, sigma))
-    //      + "eDepForIss"                  (the SpentCoupledB1 event ct)
-    // A1:  "eNote", "eRec", "sigma_R", "sigma_s"
-    //                                      (id_hash_a1(eNote, m_iss, sigma))
-    // A2:  "eNote", "eIss"                 (id_hash_a2(eNote, eIss))
+    // B1:  "eDepForIss"                    (the SpentCoupledB1 event ct;
+    //                                       idHash is id_hash_b1(m_iss))
+    // A1:  "eNote", "eRec"                 (id_hash_a1(eNote, m_iss))
+    // A2:  "eNote", "eIss", "T"            (id_hash_a2(eNote, eIss, T))
   }
   #+end_src
   #+LATEX: }
@@ -215,27 +211,39 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
   generating side's self-naming -- a =verifiable_decrypt= of one's /own/
   registered =E_addr= revealing one's =M= -- and, for the issuer-side B1
   receipt, the issuer's verifiable decryption of the event's =eDepForIss=
-  naming the depositor.  The Note legs themselves need *no* party proof: the
-  disclosed identity preimages let any verifier derive =m_iss= / =m_rec=,
-  recompute the =idHash=, and decrypt the addressed ciphertexts directly --
-  which is exactly why both parties can generate the same receipt core.
+  naming the depositor.  The ISSUER's leg needs no party proof -- its preimage
+  is disclosed, its scalar derivable, and B1/A1 bind it into the leaf.
+
+  The ADDRESSED legs do, and the asymmetry is the security property rather
+  than an inconvenience.  Those ciphertexts are keyed to the recipient's
+  mailbox key, so no verifier derives the opening secret from a disclosed
+  record -- and neither does a harvester, which is the whole reason the key
+  moved off the Identity.  Each side therefore proves what only it can: the
+  recipient by verifiable decryption under =pkRecv=, the issuer by disclosing
+  the mint randomness for any verifier to re-encrypt with.  A receipt whose
+  legs ANY reader could reproduce is not evidence that a payment happened.
+
+  What ties that key to a person is the =binding=: a mailbox leaf, over the
+  two POINTS, checked with a Poseidon and a path and no secret at all.  An
+  issuer-side addressed receipt without it names a mailbox rather than a
+  person, and prints *UNVERIFIED RECIPIENT*.
 
 * Per-Scenario Payloads
 
   For the EOA kinds the wallet owner is the *payee*; a Note receipt is
   generated from *either* side (the =role= field).  Each row names the tier-1
   re-check.  All Note flavors use the unified spend nullifier
-  \( \mathrm{Poseidon}(\rho, \texttt{idHash}, 4242) \) (the shipped
-  =spend.circom= tag) and anchor at the =Minted= and =SpentCoupled*= events.
+  \( \mathrm{Poseidon}(T_{NF}, \rho, \texttt{idHash}) \) (the shipped
+  =spend.circom= derivation) and anchor at the =Minted= and =SpentCoupled*= events.
 
   #+LATEX: {\scriptsize
-  | type     | payer           | party-naming (tier-1 re-check)                                                                                     | txn anchor                  |
-  |----------+-----------------+--------------------------------------------------------------------------------------------------------------------+-----------------------------|
-  | eoa-pub  | EOA, public     | none -- =payer.M= recomputed from public =identity=; =pk= anchors addr                                             | =Transfer(from,to,value)=   |
-  | eoa-priv | EOA, private    | approve handshake =cp_proof= + payee's =vd= of =E_for_spender=                                                     | =Transfer=                  |
-  | note-b1  | issuer, public  | =idHash= = =id_hash_b1(m_iss, sigma)= + batch Schnorr; issuer side: =vd= of =eDepForIss= names depositor           | =Minted= + =SpentCoupledB1= |
-  | note-a1  | issuer, public  | =idHash= = =id_hash_a1(eNote, m_iss, sigma)= + Schnorr; =Dec(eNote, m_rec) = vG=, =Dec(eRec, m_rec) = M_rec=       | =Minted= + =SpentCoupledA1= |
-  | note-a2  | issuer, private | =idHash= = =id_hash_a2(eNote, eIss)=; =Dec(eNote, m_rec) = vG=, =Dec(eIss, m_rec) = M_iss=; =issuer_reenc= binding | =Minted= + =SpentCoupledA2= |
+  | type     | payer           | party-naming (tier-1 re-check)                                                                                                                     | txn anchor                  |
+  |----------+-----------------+----------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------|
+  | eoa-pub  | EOA, public     | none -- =payer.M= recomputed from public =identity=; =pk= anchors addr                                                                             | =Transfer(from,to,value)=   |
+  | eoa-priv | EOA, private    | approve handshake =cp_proof= + payee's =vd= of =E_for_spender=                                                                                     | =Transfer=                  |
+  | note-b1  | issuer, public  | =idHash= = =id_hash_b1(m_iss)= + batch Schnorr; issuer side: =vd= of =eDepForIss= names depositor                                                  | =Minted= + =SpentCoupledB1= |
+  | note-a1  | issuer, public  | =idHash= = =id_hash_a1(eNote, m_iss)= + Schnorr; recipient: =vdNote=/=vdRec= under =pkRecv=; issuer: =rNote=/=rId= re-encrypt; + mailbox =binding= | =Minted= + =SpentCoupledA1= |
+  | note-a2  | issuer, private | =idHash= = =id_hash_a2(eNote, eIss, T)=; the same per-role legs (=vdIss= / =rId=); + =issuer_reenc= binding and \( C_{iss} - T + \gamma H = M \)   | =Minted= + =SpentCoupledA2= |
   #+LATEX: }
 
 ** eoa-pub -- EOA transfer from a public counterparty
@@ -249,7 +257,10 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
 
    The =ApproveReceipt= half: at approve time the payer re-encrypted their M for
    the payee (=E_for_spender=) and proved it (=cp_proof= = =verifyApprove=); the
-   payee verifiably decrypts it to =payer.M= (=vd_proof=).  Payload = both
+   repaired transcript binds the registry, chain, sender, and spender.  The
+   receipt retains that historical registry address, rather than consulting a
+   later system-wide default.  The payee verifiably decrypts the ciphertext to
+   =payer.M= (=vd_proof=).  Payload = both
    Parties (private) + =ApproveReceipt= proofs + payee self =vd_proof= +
    =Transfer= anchor + registry =pk= / =E_addr= for both (tier 2).
 
@@ -258,20 +269,25 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
    The four-link chain, now Identity-M-bound: the opening recomputes =cm=,
    =cm= is in the mint =cms[]=, the issuer is bound /into the leaf itself/
    (the verifier derives \( m_{iss} \) from the disclosed issuer preimage and
-   requires =opening.idHash= to recompute as =id_hash_b1(m_iss, sigma)= /
-   =id_hash_a1(eNote, m_iss, sigma)=) as well as over the batch (the Schnorr,
+   requires =opening.idHash= to recompute as =id_hash_b1(m_iss)= /
+   =id_hash_a1(eNote, m_iss)=) as well as over the batch (the Schnorr,
    whose Fiat-Shamir transcript folds in the issuer /account/ + chainid -- so
    the printed =acct= is provably the mint's =msg.sender=, the account whose
    BUCK funded the note), and the nullifier was burned in the
    =SpentCoupledB1= / =SpentCoupledA1= event paying the payee.
 
    The payee leg differs by flavor.  *A1* is addressed: =eNote= encrypts the
-   face under the recipient identity point and =eRec= the recipient identity
-   under itself, so \( \mathrm{Dec}(eNote, m_{rec}) = vG \) and
-   \( \mathrm{Dec}(eRec, m_{rec}) = M_{rec} \) bind the named recipient into
-   the leaf -- deterministically, from the disclosed preimage; only the
-   addressed identity satisfies the =eNote= relation (the face-pinning
-   principle).  *B1* is bearer: the depositor is named at spend -- the
+   face and =eRec= the recipient's Identity, both under the recipient's
+   receiving key =pkRecv=, which the receipt states.  The verifier derives
+   nothing that opens them; each side proves what only it can.  A
+   recipient-side receipt carries verifiable decryptions under =pkRecv=
+   (=vdNote=, =vdRec=) of \( vG \) and \( M_{rec} \); an issuer-side receipt
+   discloses the mint randomness (=rNote=, =rId=), and the verifier
+   re-encrypts and compares, since the ciphertexts are fixed by the
+   =idHash= the spend consumed.  The /mailbox binding/, when carried, ties
+   =pkRecv= to the named \( M_{rec} \) with a Poseidon and a path; an
+   issuer-side receipt without it names the mailbox it paid and prints
+   *UNVERIFIED RECIPIENT*.  *B1* is bearer: the depositor is named at spend -- the
    =SpentCoupledB1= event publishes =eDepForIss=, the depositor's Identity
    re-encrypted under the public issuer's registered key (proven well-formed
    on chain by =verifyDepositorBinding=) -- so the /issuer-side/ receipt names
@@ -280,43 +296,46 @@ the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-
 
 ** note-a2 -- Note from a private issuer
 
-   The hard case: both parties are encrypted-Identity.  Identity-M targeting
-   makes it symmetric and proof-free on the note legs: the issuer encrypted
-   the face under the recipient identity point (=eNote=) and their /own/
-   registered Identity under the same point (=eIss=), and
-   =opening.idHash = id_hash_a2(eNote, eIss)= commits both.  The verifier
-   derives \( m_{rec} \) from the disclosed payee preimage and checks
-   \( \mathrm{Dec}(eNote, m_{rec}) = vG \) and
-   \( \mathrm{Dec}(eIss, m_{rec}) = M_{named} = \texttt{payer.M} \) -- the
-   second equation /is/ the coupling: it algebraically forces =eIss='s key to
-   be \( M_{rec} \), so the note was addressed to the payee.  Anti-framing --
-   that =eIss= re-encrypts the issuer's /registered/ credential, so the
-   recovered Identity is the true minter, never a victim -- is the
-   *issuer_reenc binding* the issuer shipped at mint, verified on chain by
-   the A2 mint overload (=IdentityRegistry.verifyIssuerReenc= + the per-leaf
-   eIss leaf-tie) and re-verified offline here; its transcript folds in the
-   issuer account + chainid, anchoring the printed =acct= to the mint's
-   =msg.sender=.
+   The hard case: both parties are encrypted-Identity.  The issuer encrypted
+   the face (=eNote=) and its /own/ registered Identity (=eIss=) under the
+   recipient's receiving key, and =opening.idHash = id_hash_a2(eNote, eIss, T)=
+   commits both with the mint binding's blinded \( T \).  The addressed legs
+   are proven per role exactly as for A1: the recipient by verifiable
+   decryption under =pkRecv= (=vdNote=, =vdIss=), the issuer by disclosing
+   the mint randomness.  Anti-framing -- that =eIss= carries the issuer's
+   /registered/ credential, so the recovered Identity is the true minter,
+   never a victim -- is the *issuer_reenc binding* the issuer shipped at mint,
+   verified on chain by the A2 mint overload (=IdentityRegistry.verifyIssuerReenc=,
+   with the mint proof exposing each leaf's =eIss= and \( T \)) and re-verified
+   offline here; its transcript folds in the issuer account + chainid,
+   anchoring the printed =acct= to the mint's =msg.sender=.
 
-   Payload = both Parties (private) + the =note= payload (=eNote=, =eIss=) +
-   the =issuer_reenc= binding + the generator's self-naming (=payee_vd= or
-   =payer_vd=) + mint and spend anchors.  The chain saw only the /blinded/
-   binding (\( \hat{T} \) hides \( M_{iss} \), \( Q \) hides \( M_{rec} \));
-   no un-blinding scalar is ever disclosed -- the earlier account-keyed design
-   needed a disclosed \( \gamma \) here, but identity-targeting lets the
-   verifier decrypt directly, since the receipt already discloses the payee
-   preimage.  A receipt assembled /without/ the binding still prints, with
-   =M_iss= recovered but stamped *UNVERIFIED ISSUER* -- a narrow case, since
-   every chain-minted A2 leaf carries a verified binding (the mint reverts
-   otherwise).
+   The binding alone binds =eIss= to a key the minter chose, and an ElGamal
+   ciphertext does not commit to its key: a minter could key =eIss= so that
+   its hidden key opens it to its own Identity and the recipient's opens it to
+   a registered sock puppet.  So the receipt also checks the key tie,
+   \( C_{iss} - T + \gamma H_{\mathrm{PEDERSEN}} = \texttt{payer.M} \), with
+   the \( \gamma \) the delivery carried: the binding's plaintext is the
+   Identity the receipt names.  The spend enforced the same tie on chain, in
+   the A2 fold.
+
+   Payload = both Parties (private) + the =note= payload (=eNote=, =eIss=,
+   \( T \), \( \gamma \)) + the =issuer_reenc= binding + the per-role legs +
+   the generator's self-naming (=payee_vd= or =payer_vd=) + mint and spend
+   anchors.  The chain saw only the /blinded/ binding (\( T \) hides
+   \( M_{iss} \) without \( \gamma \), \( Q \) hides the recipient's key); no
+   un-blinding scalar is disclosed on chain.  A receipt assembled /without/
+   the binding still prints, with =M_iss= named but stamped *UNVERIFIED
+   ISSUER* -- a narrow case, since every chain-minted A2 leaf carries a
+   verified binding (the mint reverts otherwise).
 
 ** Why there is no "B2" (private-issuer bearer) receipt
 
    A2 is the /only/ private-issuer receipt kind because A2 is the only
    private-issuer note kind.  A private-issuer /bearer/ note ("B2") is
    impossible, not merely unimplemented: =eIss= is the issuer's Identity
-   re-encrypted under *the recipient's* identity point, openable only with
-   \( m_{rec} \) -- and a bearer note has no recipient at mint for the issuer
+   encrypted under *the recipient's* receiving key, openable only with its
+   secret \( k \) -- and a bearer note has no recipient at mint for the issuer
    to address.  Any
    binding the issuer could instead attach to "whoever bears the note" would be
    openable by every holder of the freely-circulating note (no privacy over a
@@ -378,7 +397,7 @@ VERIFICATION
 
   =albertabuck verify [-|FILE] [--rpc URL]=:
 
-  1. *Parse.*  Strip to =AB-RCPT/1.= ... =.END=, base64url-decode, decode the
+  1. *Parse.*  Strip to =AB-RCPT/2.= ... =.END=, base64url-decode, decode the
      canonical bytes to the core map; reject unknown =v= / =type= / =role=.
   2. *Tier 1 (always).*  For =payer= and =payee=: recompute \( M' =
      \mathrm{keccak}(\texttt{identity}) \cdot G \) and require \( M' = M \).
@@ -386,14 +405,17 @@ VERIFICATION
      =payee_vd=; issuer: =payer_vd= for a private payer).  Dispatch on =type=:
      eoa-pub needs no payer proof; eoa-priv re-runs the approve handshake +
      the payee's =vd= of =E_for_spender=.  For the Note kinds derive
-     \( m_{iss}, m_{rec} \) from the disclosed preimages and require: the
-     opening's =cm= \( \in \) =cms[]=; =opening.idHash= recomputes from the
-     =note= payload (=id_hash_b1/a1/a2=); the addressed ciphertexts decrypt
-     correctly under \( m_{rec} \) (A1: =eNote=, =eRec=; A2: =eNote=, =eIss=
-     -- the latter to =payer.M=, the coupling); the public issuer's batch
-     Schnorr (B1/A1) or the =issuer_reenc= binding (A2) verifies against the
-     embedded registry record and the printed issuer =acct=; the nullifier
-     equals \( \mathrm{Poseidon}(\rho, \texttt{idHash}, 4242) \); and
+     \( m_{iss} \) from the disclosed issuer preimage -- never the payee's,
+     which would open its mail -- and require: the opening's =cm= \( \in \)
+     =cms[]=; =opening.idHash= recomputes from the =note= payload
+     (=id_hash_b1/a1/a2=); the addressed legs hold under =pkRecv= per role
+     (recipient: =vdNote= and =vdRec= / =vdIss=; issuer: the disclosed mint
+     randomness re-encrypts to the committed ciphertexts); the mailbox
+     binding, when carried, folds to its stated root; the public issuer's
+     batch Schnorr (B1/A1) or the =issuer_reenc= binding (A2) verifies against
+     the embedded registry record and the printed issuer =acct=, and for A2
+     \( C_{iss} - T + \gamma H_{\mathrm{PEDERSEN}} = \texttt{payer.M} \); the nullifier
+     equals \( \mathrm{Poseidon}(T_{NF}, \rho, \texttt{idHash}) \); and
      =face= = =opening.v= = =txn.value=.  For an issuer-side B1 receipt also
      verify =vd_payee= over the event's =eDepForIss=.  Require the named
      \( M \), =value=, and addresses to match the human-readable fields the
@@ -419,7 +441,7 @@ VERIFICATION
      =issuer= address and decrypting each =eDepForIss=).
   2. *Gather* per the scenario table: a registry read (public payer), stored
      approve material (private EOA), or the stored note artifact -- the
-     =opening=, the Identity-M payload (=eNote= / =eRec= / =eIss=, =sigma=), and
+     =opening=, the Identity-M payload (=eNote= / =eRec= / =eIss= / =T=), and
      the mint reference; plus each party's =canonical_identity_data= from
      wallet storage.
   3. *Self-name*: =verifiable_decrypt= the owner's own =E_addr= (and, B1
@@ -453,9 +475,9 @@ VERIFICATION
   the committed end-to-end fixtures
   (=alberta_buck/test/vectors/e2e/{a1,a2,b1}.json=, built by =make
   nix-snark-e2e-fixtures= and shipped as package data): one mutually-consistent world per Note
-  flavor with a *real Groth16 proof at every gate* -- batch mint, spend,
-  bound G1-tie membership, and (A1/A2) the note\(\leftrightarrow\)=eEnc= tie
-  -- and *real named identities*: the canonical Alice Johnson / Bob Smith KYC
+  flavor with a *real Groth16 proof at every gate* -- batch mint, spend, and
+  the deposit gate (the folded proof for A1/A2, the depositor binding and
+  its membership proof for B1) -- and *real named identities*: the canonical Alice Johnson / Bob Smith KYC
   data of the wallet's identity vectors.  Proof generation happened when the
   fixtures were built (a wallet does it the same way; the measured prover
   wall-times ride along in each fixture, and the flow companion's /Prover
@@ -481,7 +503,7 @@ VERIFICATION
    from alberta_buck.wallet.verify_receipt import verify_receipt
    from alberta_buck.wallet.render import render_receipt, TextDriver
 
-   assert backend() == "kernel", "receipts must verify on the production kernel"
+   assert backend() == "kernel", "must run the production kernel: evaluate in the repo venv"
    print(f"wallet crypto backend: {backend()} (buck_core.buck_identity)")
 
    _seed = random.Random(0xAB12C97)          # ONE deterministic transcript
@@ -521,7 +543,7 @@ VERIFICATION
    : flavor     a2 (addressed, PRIVATE issuer); face 250.000000 BUCK
    : issuer     Bob Smith (Corporate Registration)  acct 0x0a11ce00000000000000000000000000000a11ce
    : depositor  Alice Johnson (Alberta Identity Card)  acct 0xde9051700000000000000000000000000de90517
-   : prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.959, 'spend_prove_s': 0.76, 'membership_prove_s': 1.556, 'note_binding_prove_s': 11.7}
+   : prover wall-times (offline, at mint/spend): {'mint_prove_s': 0.956, 'spend_prove_s': 0.746, 'deposit_gate_prove_s': 14.744}
 
    #+LATEX: }
 
@@ -545,9 +567,14 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : bind issuer                gas=  594,779
-   : bind depositor             gas=  557,628
-   : identityRoot (EVM-incremental Poseidon) = 0xab29ff540f4d0a25d9...
+   : authorize issuer binding   gas=   55,025
+   : bind issuer                gas=  521,991
+   : authorize depositor binding gas=   55,025
+   : bind depositor             gas=  522,039
+   : setRootAuthority           gas=   47,610
+   : setAggregator              gas=   48,821
+   : postIdentityRoot           gas=  118,126
+   : identityRoot (EVM-incremental Poseidon) = 0x6d343060b877f120f2...
    :   == the wallet's IdentityTree root:    True
 
    #+LATEX: }
@@ -572,11 +599,12 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : createCredit               gas=  202,935
-   : activateCredit             gas=   42,349
-   : buck.mint                  gas=   97,850
-   : approve issuer->pool       gas=  179,302   (CP proof: verifyApprove)
-   : approve depositor->pool    gas=  137,964   (CP proof: verifyApprove)
+   : acceptIssuer               gas=   46,654
+   : createCredit               gas=  198,342
+   : activateCredit             gas=   34,402
+   : buck.mint                  gas=  101,859
+   : approve issuer->pool       gas=  196,471   (CP proof: verifyApprove)
+   : approve depositor->pool    gas=  155,169   (CP proof: verifyApprove)
 
    #+LATEX: }
 
@@ -598,46 +626,61 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.mint  tx 0xc2fba76c99295fee9e..  block 32  gas 650,915  (0.111s on anvil)
-   :   proof was generated offline by the issuer in 0.959s (Groth16, mint_batch_a2 N=1)
+   : Notes.mint  tx 0xf768232909f1bb1f3c..  block 40  gas 671,961  (0.116s on anvil)
+   :   proof was generated offline by the issuer in 0.956s (Groth16, mint_batch_a2 N=1)
    :   escrowed: pool balance = 250.000000 BUCK
 
    #+LATEX: }
 
 ** Transmission verification (the recipient's act, offline)
 
-   Alice receives the note off chain -- the opening, the Identity-M payload
-   =(eNote, eIss)=, the binding, and the mint reference -- and verifies it
-   with *one secret she already owns*: her identity scalar \( m_{rec} \).
-   These are the same deterministic checks any receipt verifier later
-   re-runs.
+   Alice receives the note off chain -- the opening, the payload
+   =(eNote, eIss, T)= with \( \gamma \) wrapped to her mailbox, the binding,
+   and the mint reference -- and verifies it with *one secret she already
+   owns*: her receiving secret \( k \).  Her identity scalar opens nothing.
+   A receipt verifier later re-runs these checks from the proofs she
+   attaches, never from her secret.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesrcpt :results output
-   from alberta_buck.wallet.bn254 import G1, mul, eq
+   from alberta_buck.wallet.bn254 import G1, add, mul, neg, eq
+   from alberta_buck.wallet.nums import H_PEDERSEN
    from alberta_buck.wallet.elgamal import elgamal_decrypt
    from alberta_buck.wallet.notes import id_hash_a2, note_commitment
    from alberta_buck.wallet.issuer_reenc import issuer_reenc_verify
+   from alberta_buck.wallet.recvkey import verify_receiving_binding
 
    nc = fx.note_cts()
+   k_recv = int(fx.raw["parties"]["depositor"]["kRecv"])
    m_rec = fx.depositor.m
-   print(f"idHash == Poseidon8(eNote, eIss):     "
-         f"{id_hash_a2(nc['eNote'], nc['eIss']) == fx.opening.id_hash}")
-   print(f"Dec(eNote, m_rec) == v*G:             "
-         f"{eq(elgamal_decrypt(nc['eNote'], m_rec), mul(G1, fx.opening.v))}")
-   print(f"Dec(eIss, m_rec) == issuer's M:       "
-         f"{eq(elgamal_decrypt(nc['eIss'], m_rec), fx.issuer.M)}   (the coupling)")
+   gamma = int(fx.raw["issuerSecrets"]["gamma"])
+   print(f"idHash == id_hash_a2(eNote, eIss, T): "
+         f"{id_hash_a2(nc['eNote'], nc['eIss'], fx.binding.T) == fx.opening.id_hash}")
+   print(f"Dec(eNote, k_recv) == v*G:            "
+         f"{eq(elgamal_decrypt(nc['eNote'], k_recv), mul(G1, fx.opening.v))}")
+   print(f"Dec(eIss, k_recv) == issuer's M:      "
+         f"{eq(elgamal_decrypt(nc['eIss'], k_recv), fx.issuer.M)}")
+   print(f"Dec(eIss, m_rec)  == issuer's M:      "
+         f"{eq(elgamal_decrypt(nc['eIss'], m_rec), fx.issuer.M)}   (the Identity is NOT a key)")
+   print(f"mailbox binding ties pk_recv to M:    "
+         f"{verify_receiving_binding(fx.depositor.M, fx.mailbox_binding(), int(fx.raw['identityRoot']))}")
    print(f"mint binding (anti-framing) verifies: "
          f"{issuer_reenc_verify(fx.issuer.pk, fx.issuer.E, nc['eIss'], fx.binding, fx.issuer.addr, fx.chainid)}")
+   print(f"C_i - T + gamma*H == issuer's M:      "
+         f"{eq(add(add(nc['eIss'].C, neg(fx.binding.T)), mul(H_PEDERSEN, gamma)), fx.issuer.M)}"
+         f"   (the key tie)")
    print(f"cm in the Minted batch:               "
          f"{note_commitment(fx.opening) in fx.cms}")
    #+END_SRC
 
    #+RESULTS:
-   : idHash == Poseidon8(eNote, eIss):     True
-   : Dec(eNote, m_rec) == v*G:             True
-   : Dec(eIss, m_rec) == issuer's M:       True   (the coupling)
+   : idHash == id_hash_a2(eNote, eIss, T): True
+   : Dec(eNote, k_recv) == v*G:            True
+   : Dec(eIss, k_recv) == issuer's M:      True
+   : Dec(eIss, m_rec)  == issuer's M:      False   (the Identity is NOT a key)
+   : mailbox binding ties pk_recv to M:    True
    : mint binding (anti-framing) verifies: True
+   : C_i - T + gamma*H == issuer's M:      True   (the key tie)
    : cm in the Minted batch:               True
 
    #+LATEX: }
@@ -645,9 +688,8 @@ VERIFICATION
 ** Deposit (the recipient's act, on chain)
 
    Alice spends from her registered account: the real spend Groth16 against
-   the replayed note tree, the deposit-coupling sigma, the *bound* G1-tie
-   membership proof over the same committed point, and the
-   note\(\leftrightarrow\)=eEnc= tie -- one atomic =spendCoupledA2=.
+   the replayed note tree and one folded proof against a posted identity
+   root -- one atomic =spendCoupledA2=.
 
    #+LATEX: {\scriptsize
    #+BEGIN_SRC python :session notesrcpt :results output
@@ -655,8 +697,8 @@ VERIFICATION
    t = fx.timings
    print(f"Notes.spendCoupledA2  tx {spend.txhash[:20]}..  block {spend.block}  "
          f"gas {spend.gas:,}  ({spend.seconds:.3f}s on anvil)")
-   print(f"  proofs offline: spend {t['spend_prove_s']}s + membership "
-         f"{t['membership_prove_s']}s + note-tie {t['note_binding_prove_s']}s")
+   print(f"  proofs offline: spend {t['spend_prove_s']}s + folded gate "
+         f"{t['deposit_gate_prove_s']}s")
    print(f"  nullifier burned: "
          f"{stack.notes.functions.nullifiers(fx.nullifier).call()}")
    from web3 import Web3
@@ -666,8 +708,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : Notes.spendCoupledA2  tx 0xed88f3c35b57eefcb8..  block 33  gas 1,076,632  (0.111s on anvil)
-   :   proofs offline: spend 0.76s + membership 1.556s + note-tie 11.7s
+   : Notes.spendCoupledA2  tx 0x63bd53667874d71164..  block 41  gas 881,104  (0.115s on anvil)
+   :   proofs offline: spend 0.746s + folded gate 14.744s
    :   nullifier burned: True
    :   paid out: depositor balance = 249.999999 BUCK
 
@@ -694,8 +736,8 @@ VERIFICATION
    #+END_SRC
 
    #+RESULTS:
-   : depositor (Alice)  receipt 4egxeqphrl63  tier-1: VALID   (6,606 B payload)
-   : issuer (Bob)       receipt 4kymncsgb4jc  tier-1: VALID   (6,603 B payload)
+   : depositor (Alice)  receipt 574ey3drxxew  tier-1: VALID   (11,600 B payload)
+   : issuer (Bob)       receipt dwaeoczhbx6v  tier-1: VALID   (9,680 B payload)
 
    #+LATEX: }
 
@@ -716,33 +758,33 @@ VERIFICATION
 		    ALBERTA  BUCK                                         ALBERTA  BUCK
 	    P A Y M E N T   R E C E I P T                         P A Y M E N T   R E C E I P T
    ------------------------------------------------      ------------------------------------------------
-     Receipt  4egxeqphrl63                                 Receipt  4kymncsgb4jc
+     Receipt  574ey3drxxew                                 Receipt  dwaeoczhbx6v
    ------------------------------------------------      ------------------------------------------------
    FROM (payer) (PRIVATE IDENTITY)                       FROM (payer - you) (PRIVATE IDENTITY)
     Bob Smith                                             Bob Smith
    Corporate Registration - Alberta, Canada              Corporate Registration - Alberta, Canada
     acct 0x0a11ce00000000000000000000000000000a11ce       acct 0x0a11ce00000000000000000000000000000a11ce
-    idpt 0x0cef52e77ea5..0ae1f916d96b                     idpt 0x0cef52e77ea5..0ae1f916d96b
+    idpt 0x2dabfd96aabe..38e9d7c70dca                     idpt 0x2dabfd96aabe..38e9d7c70dca
    ------------------------------------------------      ------------------------------------------------
    TO (payee - you) (PRIVATE IDENTITY)                   TO (payee) (PRIVATE IDENTITY)
     Alice Johnson                                         Alice Johnson
    Alberta Identity Card - Alberta, Canada               Alberta Identity Card - Alberta, Canada
     acct 0xde9051700000000000000000000000000de90517       acct 0xde9051700000000000000000000000000de90517
-    idpt 0x07a0b762be40..d418d7bf5e7c                     idpt 0x07a0b762be40..d418d7bf5e7c
+    idpt 0x2e7538b21d80..54b64a191ea4                     idpt 0x2e7538b21d80..54b64a191ea4
    ------------------------------------------------      ------------------------------------------------
    TRANSACTION                                           TRANSACTION
     Type    Note spend — A2 addressed, private issuer     Type    Note spend — A2 addressed, private issuer
     Amount            250.000000  BUCK                    Amount            250.000000  BUCK
-    When        2026-05-28 20:28  UTC                     When        2026-05-28 20:28  UTC
+    When        2026-05-28 20:29  UTC                     When        2026-05-28 20:29  UTC
     Chain                      1                          Chain                      1
-    Block                     33                          Block                     33
+    Block                     41                          Block                     41
     Log                        2                          Log                        2
-    Tx      0xed88f3c35b57..d91308f0aced                  Tx      0xed88f3c35b57..d91308f0aced
-    Mint    0xc2fba76c9929..f00d5f89e9ac                  Mint    0xc2fba76c9929..f00d5f89e9ac
+    Tx      0x63bd53667874..36340dc10718                  Tx      0x63bd53667874..36340dc10718
+    Mint    0xf768232909f1..17c9888fcd90                  Mint    0xf768232909f1..17c9888fcd90
    ------------------------------------------------      ------------------------------------------------
    VERIFICATION                                          VERIFICATION
     status @ issue: VALID                                 status @ issue: VALID
-    receipt  4egxeqphrl63                                 receipt  4kymncsgb4jc
+    receipt  574ey3drxxew                                 receipt  dwaeoczhbx6v
    ------------------------------------------------      ------------------------------------------------
 	   a record, not a bearer instrument                     a record, not a bearer instrument
 	   github.com/pjkundert/alberta-buck                     github.com/pjkundert/alberta-buck
@@ -773,7 +815,7 @@ VERIFICATION
 
    #+RESULTS:
    : registry _pk[depositor] == receipt payee.pk:  True
-   : spend tx mined in block 33 (receipt says 33); log #2 present: True
+   : spend tx mined in block 41 (receipt says 41); log #2 present: True
    : issuer acct in receipt == Minted.issuer:      True
 
    #+LATEX: }
@@ -801,8 +843,7 @@ VERIFICATION
    for flavor in ("b1", "a1", "a2"):
        st, m, s = runs[flavor]
        f2, t = st.fx, st.fx.timings
-       prove_spend = (t["spend_prove_s"] + t["membership_prove_s"]
-                      + t.get("note_binding_prove_s", 0.0))
+       prove_spend = t["spend_prove_s"] + t["deposit_gate_prove_s"]
        a = st.anchors(m, s)
        rcpts = []
        for role in ("recipient", "issuer"):
@@ -816,9 +857,9 @@ VERIFICATION
    #+RESULTS:
    : flavor     mint gas  spend gas  mint prove  spend proves   receipts (dep / iss)
    : -------------------------------------------------------------------------------
-   : b1          520,944    751,313       0.94s         2.32s       VALID / VALID
-   : a1          520,908  1,083,066       1.07s        16.39s       VALID / VALID
-   : a2          650,915  1,076,632       0.96s        14.02s       VALID / VALID
+   : b1          545,962    775,091       0.91s        20.12s       VALID / VALID
+   : a1          545,974    886,997       1.04s        15.70s       VALID / VALID
+   : a2          671,961    881,104       0.96s        15.49s       VALID / VALID
 
    #+LATEX: }
 
@@ -858,24 +899,22 @@ VERIFICATION
     the free-text NOTES are unbound, so a generator may write anything there --
     hence they are labelled /informational, not verified/, and excluded from the
     receipt id.
-  - *A2 issuer privacy.*  The A2 binding is /blinded/: the chain sees \( \hat{T} \)
-    and \( Q = M_{rec} + \beta H \), revealing neither the issuer's
-    \( M_{iss} \) nor the recipient's \( M_{rec} \).  An earlier draft
-    published an unblinded \( T \), which leaks \( M_{iss} = C_i - T \) -- and
-    =msg.sender= at mint /is/ the issuer -- so the blind is load-bearing.  The
-    receipt discloses no un-blinding scalar at all: naming flows through
-    decryption of =eIss= under \( m_{rec} \), derivable from the payee
-    preimage the receipt already disclosed -- so the only new disclosure is
-    the deliberate one.  The mint-SNARK =issuerMode= signal is /bound/, the
-    per-leaf =eIss= tie is on chain (the =mint_batch_a2= circuit exposes each
-    committed leaf's =eIss=, which =Notes.mint= matches to its binding), and
-    the Identity-M spend gate (the deposit-coupling sigma + the /bound/
-    membership proof over the same committed point + the note\(\leftrightarrow\)=eEnc=
-    tie) makes an un-nameable note un-spendable: =eIss= keyed to a throwaway
-    key decrypts, under the depositor's authenticated \( m_{rec} \), to a
-    non-member, and the spend reverts.  =UNVERIFIED ISSUER= therefore narrows
-    to a receipt assembled without its binding -- never a spendable
-    chain-minted leaf.
+  - *A2 issuer privacy.*  The A2 binding is /blinded/: the chain sees
+    \( T = r'\,pk_{recv} + \gamma H_{\mathrm{PEDERSEN}} \) and
+    \( Q = pk_{recv} + \beta H_{\mathrm{PEDERSEN}} \), revealing neither the
+    issuer's \( M_{iss} \) nor the recipient's key.  An unblinded \( T \)
+    would leak \( M_{iss} = C_i - T \) -- and =msg.sender= at mint /is/ the
+    issuer -- so the blind is load-bearing.  The receipt discloses
+    \( \gamma \), deliberately: a receipt exists to name the issuer, and
+    \( \gamma \) is what lets any verifier check that the Identity it names is
+    the one the binding proved registered.  The mint-SNARK =issuerMode= signal
+    is /bound/, the per-leaf =eIss= and \( T \) are on chain (the
+    =mint_batch_a2= circuit exposes each committed leaf's, which =Notes.mint=
+    matches to its binding), and the folded spend gate makes an un-nameable
+    note un-spendable: =eIss= keyed to a throwaway key decrypts to an Identity
+    no registry certified, and a split key fails the key tie, so the spend
+    reverts either way.  =UNVERIFIED ISSUER= therefore narrows to a receipt
+    assembled without its binding -- never a spendable chain-minted leaf.
   - *Account provenance.*  The printed =acct= lines are not free text.  The
     issuer account is folded into the Fiat-Shamir transcript of its binding
     (the batch Schnorr for B1/A1, =issuer_reenc= for A2), so tier 1 already
@@ -883,8 +922,8 @@ VERIFICATION
     =msg.sender= whose =transferFrom= funded the note.  The payee account is
     the =SpentCoupled*= event's payout =recipient=; the recipient-side receipt
     ties it to the named Identity by =payee_vd= (mirroring the on-chain
-    deposit-coupling/depositor-binding sigma that authorized the spend from a
-    registered account bound to the same identity scalar).  Under Identity-M
+    deposit gate -- the fold, or B1's depositor binding -- that authorized
+    the spend from a registered account bound to the same identity scalar).  Under Identity-M
     the spend account need not exist at mint -- authorization keys on the
     /identity/ -- so the receipt names whichever registered account the
     recipient actually used, anchored by the event.
@@ -908,16 +947,16 @@ VERIFICATION
   3. *Phase C (shipped, Identity-M).*  The note kinds re-built on the
      identity-targeted payloads: =idHash= preimages (=id_hash_b1/a1/a2=) are
      conveyed in the envelope and re-checked against the disclosed identity
-     preimages; the addressed ciphertexts (=eNote= / =eRec= / =eIss=) decrypt
-     under the derivable \( m_{rec} \), closing the recipient-key coupling at
-     the receipt while the on-chain Identity-M spend gate (deposit-coupling +
-     bound membership + note\(\leftrightarrow\)=eEnc= tie) closes it at spend
-     -- a spendable note is always nameable, so no \( \gamma \) disclosure
-     remains and =UNVERIFIED ISSUER= survives only for a receipt missing its
-     binding.  Receipts are generated by *both Note parties* (=role=):
+     preimages; the addressed ciphertexts (=eNote= / =eRec= / =eIss=) are
+     keyed to the recipient's receiving key and proven per role -- verifiable
+     decryption by the recipient, disclosed mint randomness by the issuer --
+     never decrypted under a derivable scalar; the A2 key tie is checked
+     with the disclosed \( \gamma \); and the folded spend gate closes the
+     same ties on chain, so a spendable note is always nameable and
+     =UNVERIFIED ISSUER= survives only for a receipt missing its binding.  Receipts are generated by *both Note parties* (=role=):
      recipient-side and issuer-side ("I paid X") for B1/A1/A2, the B1 issuer
      naming its depositor from the =SpentCoupledB1= event's =eDepForIss=.
-     Anchors moved to the unified 4242 nullifier and the =SpentCoupled*=
+     Anchors moved to the unified nullifier and the =SpentCoupled*=
      events.
   4. *Later.*  The ESC/POS byte driver (Phase A shipped the plain-text driver;
      a port-9100 thermal driver is a new =Driver= subclass); optional QR

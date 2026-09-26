@@ -1,0 +1,96 @@
+#+TITLE: Notes hash tidy: plan of record
+#+DATE: 2026-09-24
+#+OPTIONS: toc:nil num:nil ^:nil
+
+Resume document for one regeneration round, done while the SNARK setups are still development
+setups (no ceremony yet), so every circuit-level change is cheap now and expensive later.
+
+* Decisions (author, 2026-09-24)
+
+1. *Remove the in-note issuer pair* =(sigma_R, sigma_s)= from B1 and A1 note identity hashes.
+   It had no message and no verifier, and the batch Schnorr already authenticates the issuing
+   account for every exact commitment (doc/review/privacy-paper-plan.org, findings).
+2. *Domain-tag the note hashes* (v2 convention: a leading field tag, =field_tag(tag) =
+   keccak(tag) mod F_R=, as the accumulator leaves already do):
+
+   | hash            | new                                              | was                          |
+   |-----------------+--------------------------------------------------+------------------------------|
+   | commitment      | =Poseidon6(T_CM, flavor, v, rho, idHash, pred)=  | =Poseidon5=, untagged        |
+   | spent marker    | =Poseidon3(T_NF, rho, idHash)=                   | =Poseidon3(rho, idHash, 4242)= |
+   | B1 identity     | =Poseidon2(T_ID, m_issuer)=                      | + sigma pair                 |
+   | A1 identity     | =Poseidon6(T_ID, eNote(4), m_issuer)=            | + sigma pair                 |
+   | A2 identity     | =Poseidon11(T_ID, eNote(4), eIss(4), T(2))=      | =Poseidon10=, untagged       |
+
+   Tags: =AlbertaBuck/Notes/Commitment/v2=, =AlbertaBuck/Notes/Nullifier/v2=,
+   =AlbertaBuck/Notes/IdHash/v2=.  One identity tag serves all flavours: their arities differ.
+3. *Code-only*: delete the reserved 4243 A-tag nullifier; delete dead circuits and contracts
+   (=test_g=, =test_nb_minimal=, =test_pow= circuits; =TestVerifier.sol=; the single-note
+   =mint.circom= + =MintGroth16Verifier.sol= + =prove_mint.js=, superseded by the batch mints).
+   =setup.sh='s legacy section keeps only spend, under =DO_SPEND= (was =DO_LEGACY=);
+   =prove_spend.js= takes a mint-fixture path (it defaulted to the legacy mint's).
+4. *Kept*: =predicate= (reserved spend-condition slot; keeps the commitment layout stable for
+   future conditions), the G1-tie circuit (review evidence), the regression verifier.
+5. Finish with a fresh venv and every paper re-rendered (author's request).
+
+* Constraints
+
+- =vectors.py='s rng stream is pinned by the a2b section (=NotesA2Tie='s =tie= fixture):
+  removed draws are RESERVED (consumed, ignored), never deleted.
+- SNARK artifacts are a matched set (doc/snark-regeneration.org): regenerate every affected
+  circuit, run =make nix-test= before committing, commit the whole result together.
+- Python wallet functions dispatch to the Rust kernel: Python, Rust (buck-identity,
+  buck-wallet, bindings) and JS change together, then the kernels rebuild.
+
+* Phases
+
+| Phase | Work                                                                          | Status |
+|-------+-------------------------------------------------------------------------------+--------|
+| H1    | Tag registry (py + rs); test_domains pins for circuits                        | done   |
+| H2    | Python reference and consumers (notes, a1, delivery, fold, receipts, vectors) | done   |
+| H3    | Rust + bindings + JS; rebuild kernels; kernel vectors                         | done   |
+| H4    | Circuits (spend, mint_batch, mint_batch_a2, folds); JS provers; deletions     | done   |
+| H5    | Setups + fixtures: mint pins x2, spend, folds, e2e, privacy; make nix-test    | done   |
+| H6    | identity.json + receipt goldens + forge identity vectors                      | done   |
+| H7    | Docs: notes, notes-flow, receipt, proofs, ethereum, privacy, spec             | done   |
+| H8    | Fresh venv; render every paper; commit (push at the author's word)            | done   |
+
+* Regeneration order (doc/snark-regeneration.org, adapted)
+
+#+begin_src bash
+make nix-venv-emit-vectors?          # identity.json first: the a2 tie fixtures read it
+DO_SPEND=0 make nix-snark-setup      # all mint_batch pins (commitment tag)
+make nix-snark-fixtures
+make nix-snark-a2                    # A2 pins + tie fixtures (identity tag)
+make nix-snark-spend                 # spend; its e2e re-prove step refuses the old worlds
+make nix-snark-deposit-fold-a1       # ~20 min
+make nix-snark-deposit-fold-a2       # ~25 min
+make nix-snark-e2e-fixtures
+make nix-snark-privacy-fixtures
+make nix-test
+#+end_src
+
+* Notes (in flight)
+
+- Findings along the way: Rust =receipt.rs= still dispatched A-flavour receipts to the dead 4243
+  nullifier (Python had moved to one derivation); both =gen_e2e_world.py= and
+  =gen_privacy_world.py= asserted the untagged A2 layout.  All fixed in this round.
+- Fold witness builders (Python and Rust) now also check =idHash= against its flavour's layout
+  before emitting, so a layout drift fails in the builder, not as an unsatisfiable witness.
+  The A2 =--split-raw= evidence steps around that check too (it hands the builder the idHash of
+  the substitute =T=, then restores the note's =T=, idHash and nullifier); the circuit still
+  refuses it at the key tie (=deposit_fold_a2.circom= line 253), with the idHash relation held.
+- R1CS counts and gas figures cited in the papers (ethereum, notes, notes-flow) move slightly
+  with the extra Poseidon input; refresh them from the setup logs.
+
+* Result (2026-09-24)
+
+- Timings: mint pins 221 s, mint fixtures 75 s, A2 family 233 s, spend 12 s, fold A1 1364 s,
+  fold A2 1374 s, e2e 62 s, privacy 62 s.
+- R1CS: mint_batch N=1 22,052 (N=32 701,697); spend 12,256; fold A1 3,309,276 (43 public);
+  fold A2 3,833,338 (42 public).  Gas moved only where fixture calldata did: A1 spend 964,291,
+  B1 spend 906,479, B1 spend proof 333,193.
+- Suites: forge 641 passed (1 fork skip); pytest 590 (kernel backend) and 585 (py backend);
+  core Rust, JS 58/58, Python 42/42; crate vectors in sync.  The forge-only vector sets (B1
+  binding, registry, insurer gate) do not involve note hashes and were not regenerated.
+- Fresh venv; all 19 papers rendered (nine byte-identical).  The three edited notes-serialized
+  diagrams were redrawn with mmdc (defaults reproduce the originals' geometry).

@@ -29,6 +29,7 @@ from alberta_buck.registry.tree import (
     IdentityMerkleTree,
     MembershipProof,
     identity_leaf,
+    identity_leaf_salted,
     EMPTY_LEAF,
 )
 from alberta_buck.registry.merkle_service import (
@@ -72,6 +73,7 @@ __all__ = [
     "IdentityMerkleTree",
     "MembershipProof",
     "identity_leaf",
+    "identity_leaf_salted",
     "EMPTY_LEAF",
     # merkle_service
     "CentralMerkleService",

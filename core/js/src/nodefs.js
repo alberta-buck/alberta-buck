@@ -71,6 +71,32 @@ export function loadArtifact(name, solFile = null) {
   return { abi: c.abi, bytecode: c.bytecode };
 }
 
+/** A vendored third-party build (alberta_buck/sim/artifacts/<name>.json:
+ *  UniversalRouter, Permit2), flattened to {abi, bytecode}. */
+export function vendoredArtifact(name) {
+  // Committed files: look first in the checkout this module belongs to,
+  // then wherever repoRoot() points (ALBERTA_BUCK_REPO may name another).
+  const rel = join("alberta_buck", "sim", "artifacts", `${name}.json`);
+  const own = resolve(dirname(new URL(import.meta.url).pathname), "..", "..", "..");
+  const f = [join(own, rel), join(repoRoot(), rel)].find((p) => existsSync(p));
+  if (!f) throw new Error(`no vendored artifact ${rel}`);
+  const art = JSON.parse(readFileSync(f, "utf8"));
+  return { abi: art.abi, bytecode: art.bytecode.object ?? art.bytecode };
+}
+
+/** loadArtifact, then the vendored builds: everything a market world needs. */
+export function loadAnyArtifact(name) {
+  try {
+    return loadArtifact(name);
+  } catch (e) {
+    try {
+      return vendoredArtifact(name);
+    } catch {
+      throw e;
+    }
+  }
+}
+
 /** True when the Foundry artifacts are built (tests skip when not). */
 export function artifactsAvailable() {
   try {

@@ -1,0 +1,53 @@
+{
+  "pool": {
+    "target": "0xdecaf",
+    "pk": {
+      "x": "0x260f787a044e3af962778a868b558466a6ac4e78bed38c3a4fa87e382e8ceb4b",
+      "y": "0x17f83b960bdfb1a5c5c01daf8cfbd92394cbb597a68498e876163bb3de3c4473"
+    },
+    "ciphertext": {
+      "R": {
+        "x": "0x22c238ad47259d9fdf65bac4f41869c55f6f061e8f0e300092cd536a68b8ebec",
+        "y": "0x26ee4236b55c5da03f3c58ef74cb81b5e2b8e40ba5523e6ec6be7b09ab25515d"
+      },
+      "C": {
+        "x": "0x045a4db00b068018eeea075aa48678bcd474e36aebb55d6f225cabfb381dba2b",
+        "y": "0x2402bc49f04f6d64ae068fdb4e7ef2d7143128fc773b7e69082f8d6c6daa3f81"
+      }
+    },
+    "registration_proof": {
+      "e": "0x1a01770587cce9b47d255bb84035688d3d195c291150ed5068959c75293c2d53",
+      "s_m": "0x29b5996336f9355727f799eeca1cc50a927436fad0029a4120aa0aafaefab744",
+      "s_b": "0x1565c1402b38e537a24e36278c88ccebb8bbc872cd3f40161537a33e17fe8f5f",
+      "s_r": "0x1c3549ede8821fec6f7b85cabf16df464ea5860378917eacd8d3f047dc6d2ce1",
+      "s_sk": "0x293bae6857525082e1fd9654e176da9a9029b3ebc750fae66cff89e0c0d6a5ee",
+      "C1": {
+        "x": "0x02b6dea6a9b256799d4c550eba77f5aef2e6faaa59294dacaba05bf8e1ce377e",
+        "y": "0x090672ff2d0683bbfeb66d44ff459880220c4f4a362d409b6a138d94e93ee49d"
+      },
+      "T_C": {
+        "x": "0x057389f5e2b2673e1ab9e578b563a0ee348755acfaad745e4d173a09638f40ad",
+        "y": "0x249f763048acac84249345b6fd9aea86a51d68b7e8a755cb9c6b64f560c6ee55"
+      },
+      "T_R": {
+        "x": "0x17a79371da0cd61a25dfa4b8df3da15c9cfdffd919f893c3626adee327c769c6",
+        "y": "0x2fc63138ad7c741ac20b3bd61f0c287482aa362cfbf830e78f541a768cd34a8f"
+      },
+      "T_key": {
+        "x": "0x2efd26e3a5be84e395efb33dee082f06521154110925f51eb0e46a8f043b993a",
+        "y": "0x1967d520b93e76e880e522cbe456fad22f5913a25394e4f97bd1fb70dfa803a0"
+      }
+    },
+    "registry": "0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d",
+    "ps_presentation": {
+      "A": {
+        "x": "0x14343000360dc5b1dc5f8091ee2a28a10a2380169b3985593a3eef9393e20631",
+        "y": "0x0fbbdae6a6a0e059a5844b575d2361a46e7006eb8ad582534e88bb7eb1555f94"
+      },
+      "B": {
+        "x": "0x06390e41be2ddb4adf07ba3f2a09a3d8f6c7ac11cb76cf79e997d5844970ce85",
+        "y": "0x183a5eef46641c119f0a001b99cca75a30d78a380e048800f46c76500a05ee10"
+      }
+    }
+  }
+}

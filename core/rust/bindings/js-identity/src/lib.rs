@@ -104,9 +104,11 @@ pub fn g2_generator() -> Vec<String> {
     vec![hx(&g.0 .0), hx(&g.0 .1), hx(&g.1 .0), hx(&g.1 .1)]
 }
 
+/// The Pedersen generator: hashed to the curve, so its discrete log is
+/// unknown.  Every blind in the protocol sits on it; see the kernel's `nums`.
 #[wasm_bindgen]
-pub fn h_point() -> Vec<String> {
-    out_g1(&kernel::issuer_reenc::h_point())
+pub fn h_pedersen() -> Vec<String> {
+    out_g1(&kernel::nums::h_pedersen())
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +250,35 @@ pub fn ps_rerandomize(
     Ok(vec![hx(&r1.0), hx(&r1.1), hx(&r2.0), hx(&r2.1)])
 }
 
+/// The hiding presentation `(A, B) = (a*sigma_1, a*sigma_2 + b*Y1)`.
+/// Returns `[Ax, Ay, Bx, By]`.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn ps_present(
+    s1x: &str,
+    s1y: &str,
+    s2x: &str,
+    s2y: &str,
+    y1x: &str,
+    y1y: &str,
+    a: &str,
+    b: &str,
+) -> Result<Vec<String>, JsError> {
+    let (pa, pb) = kernel::ps::ps_present(&g1(s1x, s1y)?, &g1(s2x, s2y)?, &g1(y1x, y1y)?, &w(a)?, &w(b)?)
+        .map_err(err)?;
+    Ok(vec![hx(&pa.0), hx(&pa.1), hx(&pb.0), hx(&pb.1)])
+}
+
+/// `e(Y1, g_2) == e(G, Y)`; `pk_y` is G2 (4 words).
+#[wasm_bindgen]
+pub fn ps_key_consistent(pk_y: Vec<String>, y1x: &str, y1y: &str) -> Result<bool, JsError> {
+    if pk_y.len() != 4 {
+        return Err(JsError::new("G2 point needs 4 words"));
+    }
+    kernel::ps::ps_key_consistent(&g2(&pk_y[0], &pk_y[1], &pk_y[2], &pk_y[3])?, &g1(y1x, y1y)?)
+        .map_err(err)
+}
+
 // ---------------------------------------------------------------------------
 // Schnorr
 // ---------------------------------------------------------------------------
@@ -309,58 +340,75 @@ pub fn issuer_schnorr_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Registration NIZK
+// Registration NIZK (A')
 // ---------------------------------------------------------------------------
 
-/// `sigma`/`e_ct` flattened (4 words each).  Returns
-/// `[e, s_m, s_r, A_ps x, y, T_C x, y, T_R x, y]` (9 words).
+/// `pres` = `[Ax, Ay, Bx, By]`, `e_ct` flattened (4 words).  Nonces in the
+/// Python draw order.  Returns the 13 words
+/// `[e, s_m, s_b, s_r, s_sk, C1 x, y, T_C x, y, T_R x, y, T_key x, y]`.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn registration_prove(
-    sigma: Vec<String>,
+    pres: Vec<String>,
+    blind: &str,
     m: &str,
     r: &str,
     pkx: &str,
     pky: &str,
     e_ct: Vec<String>,
     registrant: &str,
+    sk: &str,
+    chainid: &str,
+    registry: &str,
     m_tilde: &str,
+    b_tilde: &str,
     r_tilde: &str,
+    sk_tilde: &str,
 ) -> Result<Vec<String>, JsError> {
-    if sigma.len() != 4 || e_ct.len() != 4 {
-        return Err(JsError::new("sigma/e_ct need 4 words each"));
+    if pres.len() != 4 || e_ct.len() != 4 {
+        return Err(JsError::new("pres/e_ct need 4 words each"));
     }
     let p = kernel::nizk::registration_prove(
-        &g1(&sigma[0], &sigma[1])?,
-        &g1(&sigma[2], &sigma[3])?,
+        &g1(&pres[0], &pres[1])?,
+        &g1(&pres[2], &pres[3])?,
+        &w(blind)?,
         &w(m)?,
         &w(r)?,
         &g1(pkx, pky)?,
         &ct(&e_ct[0], &e_ct[1], &e_ct[2], &e_ct[3])?,
         &w(registrant)?,
+        &w(sk)?,
+        &w(chainid)?,
+        &w(registry)?,
         &w(m_tilde)?,
+        &w(b_tilde)?,
         &w(r_tilde)?,
+        &w(sk_tilde)?,
     )
     .map_err(err)?;
     Ok(vec![
         hx(&p.e),
         hx(&p.s_m),
+        hx(&p.s_b),
         hx(&p.s_r),
-        hx(&p.a_ps.0),
-        hx(&p.a_ps.1),
+        hx(&p.s_sk),
+        hx(&p.c1.0),
+        hx(&p.c1.1),
         hx(&p.t_c.0),
         hx(&p.t_c.1),
         hx(&p.t_r.0),
         hx(&p.t_r.1),
+        hx(&p.t_key.0),
+        hx(&p.t_key.1),
     ])
 }
 
-/// `proof` = the 9 words `registration_prove` returns; `issuer_x`/`issuer_y`
+/// `proof` = the 13 words `registration_prove` returns; `issuer_x`/`issuer_y`
 /// are G2 (4 words each).
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn registration_verify(
-    sigma: Vec<String>,
+    pres: Vec<String>,
     e_ct: Vec<String>,
     pkx: &str,
     pky: &str,
@@ -368,30 +416,37 @@ pub fn registration_verify(
     issuer_y: Vec<String>,
     proof: Vec<String>,
     registrant: &str,
+    chainid: &str,
+    registry: &str,
 ) -> Result<bool, JsError> {
-    if sigma.len() != 4 || e_ct.len() != 4 || issuer_x.len() != 4 || issuer_y.len() != 4 {
-        return Err(JsError::new("sigma/e_ct/issuer_x/issuer_y need 4 words each"));
+    if pres.len() != 4 || e_ct.len() != 4 || issuer_x.len() != 4 || issuer_y.len() != 4 {
+        return Err(JsError::new("pres/e_ct/issuer_x/issuer_y need 4 words each"));
     }
-    if proof.len() != 9 {
-        return Err(JsError::new("registration proof needs 9 words"));
+    if proof.len() != 13 {
+        return Err(JsError::new("registration proof needs 13 words"));
     }
     let p = kernel::nizk::RegistrationProof {
         e: w(&proof[0])?,
         s_m: w(&proof[1])?,
-        s_r: w(&proof[2])?,
-        a_ps: g1(&proof[3], &proof[4])?,
-        t_c: g1(&proof[5], &proof[6])?,
-        t_r: g1(&proof[7], &proof[8])?,
+        s_b: w(&proof[2])?,
+        s_r: w(&proof[3])?,
+        s_sk: w(&proof[4])?,
+        c1: g1(&proof[5], &proof[6])?,
+        t_c: g1(&proof[7], &proof[8])?,
+        t_r: g1(&proof[9], &proof[10])?,
+        t_key: g1(&proof[11], &proof[12])?,
     };
     kernel::nizk::registration_verify(
-        &g1(&sigma[0], &sigma[1])?,
-        &g1(&sigma[2], &sigma[3])?,
+        &g1(&pres[0], &pres[1])?,
+        &g1(&pres[2], &pres[3])?,
         &ct(&e_ct[0], &e_ct[1], &e_ct[2], &e_ct[3])?,
         &g1(pkx, pky)?,
         &g2(&issuer_x[0], &issuer_x[1], &issuer_x[2], &issuer_x[3])?,
         &g2(&issuer_y[0], &issuer_y[1], &issuer_y[2], &issuer_y[3])?,
         &p,
         &w(registrant)?,
+        &w(chainid)?,
+        &w(registry)?,
     )
     .map_err(err)
 }
@@ -415,6 +470,7 @@ pub fn chaum_pedersen_prove(
     sender: &str,
     spender: &str,
     chainid: &str,
+    registry: &str,
     k1: &str,
     k2: &str,
 ) -> Result<Vec<String>, JsError> {
@@ -431,6 +487,7 @@ pub fn chaum_pedersen_prove(
         &w(sender)?,
         &w(spender)?,
         &w(chainid)?,
+        &w(registry)?,
         &w(k1)?,
         &w(k2)?,
     )
@@ -462,6 +519,7 @@ pub fn chaum_pedersen_verify(
     sender: &str,
     spender: &str,
     chainid: &str,
+    registry: &str,
 ) -> Result<bool, JsError> {
     if e_alice.len() != 4 || e_bob.len() != 4 || proof.len() != 9 {
         return Err(JsError::new("bad word counts"));
@@ -483,6 +541,7 @@ pub fn chaum_pedersen_verify(
         &w(sender)?,
         &w(spender)?,
         &w(chainid)?,
+        &w(registry)?,
     )
     .map_err(err)
 }
@@ -556,6 +615,90 @@ pub fn verifiable_decrypt_verify(
         &w(chainid)?,
     )
     .map_err(err)
+}
+
+/// The DLEQ identity opening: the same proof as verifiable decryption, its
+/// transcript bound to (account, chainid, registry) under its own tag, so
+/// it opens an Identity to one registry and is no receipt.  Returns the 6
+/// words `[e, s, T1x, T1y, T2x, T2y]`.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn identity_opening_prove(
+    e_ct: Vec<String>,
+    sk: &str,
+    mx: &str,
+    my: &str,
+    account: &str,
+    chainid: &str,
+    registry: &str,
+    t: &str,
+) -> Result<Vec<String>, JsError> {
+    if e_ct.len() != 4 {
+        return Err(JsError::new("ciphertext needs 4 words"));
+    }
+    let p = kernel::verifiable_decrypt::identity_opening_prove(
+        &ct(&e_ct[0], &e_ct[1], &e_ct[2], &e_ct[3])?,
+        &w(sk)?,
+        &g1(mx, my)?,
+        &w(account)?,
+        &w(chainid)?,
+        &w(registry)?,
+        &w(t)?,
+    )
+    .map_err(err)?;
+    Ok(vec![hx(&p.e), hx(&p.s), hx(&p.t1.0), hx(&p.t1.1), hx(&p.t2.0), hx(&p.t2.1)])
+}
+
+/// `proof` = the 6 words `identity_opening_prove` returns.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn identity_opening_verify(
+    e_ct: Vec<String>,
+    pkx: &str,
+    pky: &str,
+    mx: &str,
+    my: &str,
+    proof: Vec<String>,
+    account: &str,
+    chainid: &str,
+    registry: &str,
+) -> Result<bool, JsError> {
+    if e_ct.len() != 4 || proof.len() != 6 {
+        return Err(JsError::new("bad word counts"));
+    }
+    let p = kernel::verifiable_decrypt::VdProof {
+        e: w(&proof[0])?,
+        s: w(&proof[1])?,
+        t1: g1(&proof[2], &proof[3])?,
+        t2: g1(&proof[4], &proof[5])?,
+    };
+    kernel::verifiable_decrypt::identity_opening_verify(
+        &ct(&e_ct[0], &e_ct[1], &e_ct[2], &e_ct[3])?,
+        &g1(pkx, pky)?,
+        &g1(mx, my)?,
+        &p,
+        &w(account)?,
+        &w(chainid)?,
+        &w(registry)?,
+    )
+    .map_err(err)
+}
+
+// ---------------------------------------------------------------------------
+// Holder-derived salts
+// ---------------------------------------------------------------------------
+
+/// The field tag of a subtree identifier, the salt derivation's second input.
+#[wasm_bindgen]
+pub fn tree_tag(tree_id: &str) -> Result<String, JsError> {
+    Ok(hx(&kernel::salt::tree_tag(tree_id).map_err(err)?))
+}
+
+/// A private subtree's leaf salt, derived from the holder's secret; a new
+/// `association_counter` for each re-association.
+#[wasm_bindgen]
+pub fn derive_salt(holder_secret: &str, tree_id: &str, association_counter: u64) -> Result<String, JsError> {
+    Ok(hx(&kernel::salt::derive_salt(&w(holder_secret)?, tree_id, association_counter).map_err(err)?))
 }
 
 // ---------------------------------------------------------------------------
@@ -668,91 +811,8 @@ pub fn issuer_reenc_verify(
 }
 
 // ---------------------------------------------------------------------------
-// Deposit coupling / B1 depositor binding
+// B1 depositor binding
 // ---------------------------------------------------------------------------
-
-/// Returns 12 words: `[e, s_m, s_s, s_b, A2x,y, A3x,y, A4x,y, P_Ix,y]`.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn deposit_couple_prove(
-    m_rec: &str,
-    sk_dep: &str,
-    e_dep: Vec<String>,
-    e_iss: Vec<String>,
-    account: &str,
-    chainid: &str,
-    b: &str,
-    k_m: &str,
-    k_s: &str,
-    k_b: &str,
-) -> Result<Vec<String>, JsError> {
-    if e_dep.len() != 4 || e_iss.len() != 4 {
-        return Err(JsError::new("ciphertexts need 4 words each"));
-    }
-    let p = kernel::unilateral_a2::deposit_couple_prove(
-        &w(m_rec)?,
-        &w(sk_dep)?,
-        &ct(&e_dep[0], &e_dep[1], &e_dep[2], &e_dep[3])?,
-        &ct(&e_iss[0], &e_iss[1], &e_iss[2], &e_iss[3])?,
-        &w(account)?,
-        &w(chainid)?,
-        &w(b)?,
-        &w(k_m)?,
-        &w(k_s)?,
-        &w(k_b)?,
-    )
-    .map_err(err)?;
-    Ok(vec![
-        hx(&p.e),
-        hx(&p.s_m),
-        hx(&p.s_s),
-        hx(&p.s_b),
-        hx(&p.a2.0),
-        hx(&p.a2.1),
-        hx(&p.a3.0),
-        hx(&p.a3.1),
-        hx(&p.a4.0),
-        hx(&p.a4.1),
-        hx(&p.p_i.0),
-        hx(&p.p_i.1),
-    ])
-}
-
-/// `proof` = the 12 words `deposit_couple_prove` returns.
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn deposit_couple_verify(
-    pk_depx: &str,
-    pk_depy: &str,
-    e_dep: Vec<String>,
-    e_iss: Vec<String>,
-    proof: Vec<String>,
-    account: &str,
-    chainid: &str,
-) -> Result<bool, JsError> {
-    if e_dep.len() != 4 || e_iss.len() != 4 || proof.len() != 12 {
-        return Err(JsError::new("bad word counts"));
-    }
-    let p = kernel::unilateral_a2::DepositCouplingProof {
-        e: w(&proof[0])?,
-        s_m: w(&proof[1])?,
-        s_s: w(&proof[2])?,
-        s_b: w(&proof[3])?,
-        a2: g1(&proof[4], &proof[5])?,
-        a3: g1(&proof[6], &proof[7])?,
-        a4: g1(&proof[8], &proof[9])?,
-        p_i: g1(&proof[10], &proof[11])?,
-    };
-    kernel::unilateral_a2::deposit_couple_verify(
-        &g1(pk_depx, pk_depy)?,
-        &ct(&e_dep[0], &e_dep[1], &e_dep[2], &e_dep[3])?,
-        &ct(&e_iss[0], &e_iss[1], &e_iss[2], &e_iss[3])?,
-        &p,
-        &w(account)?,
-        &w(chainid)?,
-    )
-    .map_err(err)
-}
 
 /// Returns 21 words: 17 proof words
 /// `[e, s_m, s_s, s_r, s_b, A2x,y, A4x,y, B1x,y, B2x,y, A_px,y, P_depx,y]`
@@ -886,50 +946,38 @@ pub fn note_commitment(
 }
 
 #[wasm_bindgen]
-pub fn nullifier_b(rho: &str, id_hash: &str) -> Result<String, JsError> {
-    Ok(hx(&kernel::notes::nullifier_b(&w(rho)?, &w(id_hash)?).map_err(err)?))
+pub fn nullifier(rho: &str, id_hash: &str) -> Result<String, JsError> {
+    Ok(hx(&kernel::notes::nullifier(&w(rho)?, &w(id_hash)?).map_err(err)?))
 }
 
 #[wasm_bindgen]
-pub fn nullifier_a(rho: &str, id_hash: &str) -> Result<String, JsError> {
-    Ok(hx(&kernel::notes::nullifier_a(&w(rho)?, &w(id_hash)?).map_err(err)?))
+pub fn id_hash_b1(m_issuer: &str) -> Result<String, JsError> {
+    Ok(hx(&kernel::notes::id_hash_b1(&w(m_issuer)?).map_err(err)?))
 }
 
 #[wasm_bindgen]
-pub fn id_hash_b1(m_issuer: &str, sig_rx: &str, sig_ry: &str, sigma_s: &str) -> Result<String, JsError> {
-    Ok(hx(&kernel::notes::id_hash_b1(&w(m_issuer)?, &g1(sig_rx, sig_ry)?, &w(sigma_s)?)
-        .map_err(err)?))
-}
-
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn id_hash_a1(
-    e_note: Vec<String>,
-    m_issuer: &str,
-    sig_rx: &str,
-    sig_ry: &str,
-    sigma_s: &str,
-) -> Result<String, JsError> {
+pub fn id_hash_a1(e_note: Vec<String>, m_issuer: &str) -> Result<String, JsError> {
     if e_note.len() != 4 {
         return Err(JsError::new("e_note needs 4 words"));
     }
-    Ok(hx(&kernel::notes::id_hash_a1(
-        &ct(&e_note[0], &e_note[1], &e_note[2], &e_note[3])?,
-        &w(m_issuer)?,
-        &g1(sig_rx, sig_ry)?,
-        &w(sigma_s)?,
-    )
-    .map_err(err)?))
+    Ok(hx(&kernel::notes::id_hash_a1(&ct(&e_note[0], &e_note[1], &e_note[2], &e_note[3])?, &w(m_issuer)?)
+        .map_err(err)?))
 }
 
+/// `id_hash_a2(eNote, eIss, T)` -- `T` is the mint binding's blinded point.
 #[wasm_bindgen]
-pub fn id_hash_a2(e_note: Vec<String>, e_iss: Vec<String>) -> Result<String, JsError> {
-    if e_note.len() != 4 || e_iss.len() != 4 {
-        return Err(JsError::new("ciphertexts need 4 words each"));
+pub fn id_hash_a2(
+    e_note: Vec<String>,
+    e_iss: Vec<String>,
+    t: Vec<String>,
+) -> Result<String, JsError> {
+    if e_note.len() != 4 || e_iss.len() != 4 || t.len() != 2 {
+        return Err(JsError::new("ciphertexts need 4 words each, and T 2"));
     }
     Ok(hx(&kernel::notes::id_hash_a2(
         &ct(&e_note[0], &e_note[1], &e_note[2], &e_note[3])?,
         &ct(&e_iss[0], &e_iss[1], &e_iss[2], &e_iss[3])?,
+        &g1(&t[0], &t[1])?,
     )
     .map_err(err)?))
 }
@@ -939,8 +987,32 @@ pub fn identity_leaf(mx: &str, my: &str) -> Result<String, JsError> {
     Ok(hx(&kernel::notes::identity_leaf(&g1(mx, my)?).map_err(err)?))
 }
 
+/// `identity_leaf_salted(M, salt)` -- the hiding leaf of a private subtree.
+#[wasm_bindgen]
+pub fn identity_leaf_salted(mx: &str, my: &str, salt: &str) -> Result<String, JsError> {
+    Ok(hx(
+        &kernel::notes::identity_leaf_salted(&g1(mx, my)?, &w(salt)?).map_err(err)?,
+    ))
+}
+
+/// `receiving_leaf(m_rec, k_recv, salt)` -- the hiding leaf binding an
+/// Identity to the receiving key its Notes are addressed to.  Over scalars.
+#[wasm_bindgen]
+pub fn receiving_leaf(
+    m_rec: &str,
+    k_recv: &str,
+    salt: &str,
+) -> Result<String, JsError> {
+    Ok(hx(&kernel::notes::receiving_leaf(
+        &w(m_rec)?,
+        &w(k_recv)?,
+        &w(salt)?,
+    )
+    .map_err(err)?))
+}
+
 // ---------------------------------------------------------------------------
-// buck-wallet: canonical dialect, AB-RCPT/1 envelope, receipt build /
+// buck-wallet: canonical dialect, AB-RCPT/2 envelope, receipt build /
 // verify, unilateral flows, issuer ceremony.  Structured inputs cross as
 // ONE JSON text of named args (the vector-fixture shapes); receipt cores
 // cross as their canonical text -- see buck-wallet's `args` module.
@@ -991,6 +1063,58 @@ pub fn wallet_verify_receipt(core_text: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn wallet_build_receipt(args_json: &str) -> Result<String, JsError> {
     wallet::args::build_receipt_args(&parse_args(args_json)?).map_err(werr)
+}
+
+// ---- Notes: receiving key, delivery, mailbox binding, fold witnesses ----
+
+#[wasm_bindgen]
+pub fn wallet_receiving_key(args_json: &str) -> Result<String, JsError> {
+    wallet::args::receiving_key_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_wrap_mask(args_json: &str) -> Result<String, JsError> {
+    wallet::args::wrap_mask_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deliver_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deliver_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deliver_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deliver_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_open_a1(args_json: &str) -> Result<String, JsError> {
+    wallet::args::open_a1_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_open_a2(args_json: &str) -> Result<String, JsError> {
+    wallet::args::open_a2_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_prove_receiving_binding(args_json: &str) -> Result<String, JsError> {
+    wallet::args::prove_receiving_binding_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_verify_receiving_binding(args_json: &str) -> Result<String, JsError> {
+    wallet::args::verify_receiving_binding_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deposit_fold_a1_witness(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deposit_fold_a1_witness_args(&parse_args(args_json)?).map_err(werr)
+}
+
+#[wasm_bindgen]
+pub fn wallet_deposit_fold_a2_witness(args_json: &str) -> Result<String, JsError> {
+    wallet::args::deposit_fold_a2_witness_args(&parse_args(args_json)?).map_err(werr)
 }
 
 #[wasm_bindgen]
@@ -1143,17 +1267,83 @@ pub fn registry_unseal_certificate(envelope: &[u8], client_sk: &str) -> Result<V
     Ok(signed.serialize())
 }
 
+// Tree paths, aggregator paths and envelopes cross as JSON texts in the
+// Python reference's shapes (`kernel_vectors._proof_json` and friends).
+
+type Json = serde_json::Value;
+
+fn jparse(text: &str, what: &str) -> Result<Json, JsError> {
+    serde_json::from_str(text).map_err(|e| JsError::new(&format!("{what}: invalid JSON: {e}")))
+}
+
+fn jword(v: &Json) -> Result<W256, JsError> {
+    w(v.as_str().ok_or_else(|| JsError::new("expected hex string"))?)
+}
+
+fn jwords(v: &Json) -> Result<Vec<W256>, JsError> {
+    v.as_array().ok_or_else(|| JsError::new("expected array"))?.iter().map(jword).collect()
+}
+
+fn jbits(v: &Json) -> Result<Vec<u8>, JsError> {
+    v.as_array()
+        .ok_or_else(|| JsError::new("expected array"))?
+        .iter()
+        .map(|b| b.as_u64().filter(|b| *b <= 1).map(|b| b as u8).ok_or_else(|| JsError::new("expected bit")))
+        .collect()
+}
+
+fn juint(v: &Json, what: &str) -> Result<u64, JsError> {
+    v.as_u64().ok_or_else(|| JsError::new(&format!("{what}: expected unsigned integer")))
+}
+
+fn proof_value(p: &registry::tree::MembershipProof) -> Json {
+    serde_json::json!({
+        "leaf": hx(&p.leaf),
+        "siblings": p.siblings.iter().map(hx).collect::<Vec<_>>(),
+        "index_bits": p.index_bits,
+        "root": hx(&p.root),
+        "leaf_index": p.leaf_index,
+    })
+}
+
 fn proof_json(p: &registry::tree::MembershipProof) -> String {
-    let sibs: Vec<String> = p.siblings.iter().map(|s| format!("\"{}\"", hx(s))).collect();
-    let bits: Vec<String> = p.index_bits.iter().map(|b| b.to_string()).collect();
-    format!(
-        "{{\"leaf\":\"{}\",\"siblings\":[{}],\"index_bits\":[{}],\"root\":\"{}\",\"leaf_index\":{}}}",
-        hx(&p.leaf),
-        sibs.join(","),
-        bits.join(","),
-        hx(&p.root),
-        p.leaf_index
-    )
+    proof_value(p).to_string()
+}
+
+fn proof_from(v: &Json) -> Result<registry::tree::MembershipProof, JsError> {
+    Ok(registry::tree::MembershipProof {
+        leaf: jword(&v["leaf"])?,
+        siblings: jwords(&v["siblings"])?,
+        index_bits: jbits(&v["index_bits"])?,
+        root: jword(&v["root"])?,
+        leaf_index: juint(&v["leaf_index"], "leaf_index")? as usize,
+    })
+}
+
+fn agg_value(p: &registry::aggregator::AggregatorMembershipProof) -> Json {
+    serde_json::json!({
+        "sub_root": hx(&p.sub_root),
+        "siblings": p.siblings.iter().map(hx).collect::<Vec<_>>(),
+        "index_bits": p.index_bits,
+        "aggregator_root": hx(&p.aggregator_root),
+        "sub_tree_id": p.sub_tree_id,
+        "aggregator_leaf_index": p.aggregator_leaf_index,
+    })
+}
+
+fn agg_from(v: &Json) -> Result<registry::aggregator::AggregatorMembershipProof, JsError> {
+    Ok(registry::aggregator::AggregatorMembershipProof {
+        sub_root: jword(&v["sub_root"])?,
+        siblings: jwords(&v["siblings"])?,
+        index_bits: jbits(&v["index_bits"])?,
+        aggregator_root: jword(&v["aggregator_root"])?,
+        sub_tree_id: v["sub_tree_id"].as_str().ok_or_else(|| JsError::new("expected sub_tree_id"))?.to_string(),
+        aggregator_leaf_index: juint(&v["aggregator_leaf_index"], "aggregator_leaf_index")? as usize,
+    })
+}
+
+fn record_value(r: &registry::aggregator::RootRecord) -> Json {
+    serde_json::json!({"root": hx(&r.root), "sequence": r.sequence, "posted_at": r.posted_at})
 }
 
 /// The identity Merkle accumulator as a stateful JS class.
@@ -1274,18 +1464,97 @@ impl Aggregator {
     /// `{sub_root, siblings, index_bits, aggregator_root, sub_tree_id,
     /// aggregator_leaf_index}`.
     pub fn aggregator_proof(&self, sub_tree_id: &str) -> Result<String, JsError> {
-        let p = self.0.aggregator_proof(sub_tree_id).map_err(werr)?;
-        let sibs: Vec<String> = p.siblings.iter().map(|s| format!("\"{}\"", hx(s))).collect();
-        let bits: Vec<String> = p.index_bits.iter().map(|b| b.to_string()).collect();
-        Ok(format!(
-            "{{\"sub_root\":\"{}\",\"siblings\":[{}],\"index_bits\":[{}],\"aggregator_root\":\"{}\",\"sub_tree_id\":{},\"aggregator_leaf_index\":{}}}",
-            hx(&p.sub_root),
-            sibs.join(","),
-            bits.join(","),
-            hx(&p.aggregator_root),
-            serde_json::to_string(&p.sub_tree_id).unwrap(),
-            p.aggregator_leaf_index
-        ))
+        Ok(agg_value(&self.0.aggregator_proof(sub_tree_id).map_err(werr)?).to_string())
+    }
+
+    /// Post the current root into the ring; the record as a JSON text
+    /// `{root, sequence, posted_at}`.
+    pub fn post(&mut self, timestamp: f64) -> Result<String, JsError> {
+        Ok(record_value(&self.0.post(timestamp).map_err(werr)?).to_string())
+    }
+
+    /// The ring's record of `root`, if it is still retained.
+    pub fn root_record(&self, root: &str) -> Result<Option<String>, JsError> {
+        Ok(self.0.root_record(&w(root)?).map(|r| record_value(r).to_string()))
+    }
+
+    /// Whether a consumer declaring `max_age` accepts `root` at `now`.
+    pub fn accepts(&self, root: &str, max_age: f64, now: f64) -> Result<bool, JsError> {
+        Ok(self.0.accepts(&w(root)?, max_age, now))
+    }
+
+    /// The age of the oldest root the ring still retains.
+    pub fn max_retained_age(&self, now: f64) -> f64 {
+        self.0.max_retained_age(now)
+    }
+
+    /// A sub-tree path joined to this aggregator's path: the one path of
+    /// sub-tree depth plus aggregator depth that the circuits take.
+    pub fn composed_path(&self, sub_tree_id: &str, sub_proof_json: &str) -> Result<String, JsError> {
+        let sub = proof_from(&jparse(sub_proof_json, "sub proof")?)?;
+        let full = self.0.full_proof(sub_tree_id, sub, [0u8; 32], [0u8; 32]).map_err(werr)?;
+        Ok(proof_json(&full.composed()))
+    }
+
+    /// Compose a holder's claims -- a JSON text `[[sub_tree_id, sub_proof],
+    /// ...]` -- into one attribute proof against the current root:
+    /// `{tree_ids, root, m: {x, y}, proofs: [{sub, aggregator}, ...]}`.
+    pub fn prove_attributes(&self, claims_json: &str, mx: &str, my: &str) -> Result<String, JsError> {
+        let claims = jparse(claims_json, "claims")?;
+        let mut pairs = Vec::new();
+        for c in claims.as_array().ok_or_else(|| JsError::new("claims: expected array"))? {
+            let id = c[0].as_str().ok_or_else(|| JsError::new("claim: expected sub_tree_id"))?;
+            pairs.push((id.to_string(), proof_from(&c[1])?));
+        }
+        let ap = registry::attributes::prove_attributes(&self.0, pairs, w(mx)?, w(my)?).map_err(werr)?;
+        let proofs: Vec<Json> = ap
+            .composed
+            .proofs
+            .iter()
+            .map(|f| serde_json::json!({"sub": proof_value(&f.sub_tree_proof), "aggregator": agg_value(&f.aggregator_proof)}))
+            .collect();
+        Ok(serde_json::json!({
+            "tree_ids": ap.tree_ids,
+            "root": hx(&ap.root),
+            "m": {"x": hx(&w(mx)?), "y": hx(&w(my)?)},
+            "proofs": proofs,
+        })
+        .to_string())
+    }
+
+    /// Check an attribute proof as a consumer must: every `required`
+    /// sub-tree claimed, every path valid, one root, posted within `max_age`.
+    pub fn verify_attributes(
+        &self,
+        proof_json: &str,
+        required: Vec<String>,
+        max_age: f64,
+        now: f64,
+    ) -> Result<bool, JsError> {
+        let v = jparse(proof_json, "attribute proof")?;
+        let (m_x, m_y) = (jword(&v["m"]["x"])?, jword(&v["m"]["y"])?);
+        let mut proofs = Vec::new();
+        for p in v["proofs"].as_array().ok_or_else(|| JsError::new("proofs: expected array"))? {
+            proofs.push(registry::aggregator::FullMembershipProof {
+                sub_tree_proof: proof_from(&p["sub"])?,
+                aggregator_proof: agg_from(&p["aggregator"])?,
+                m_x,
+                m_y,
+            });
+        }
+        let tree_ids = v["tree_ids"]
+            .as_array()
+            .ok_or_else(|| JsError::new("tree_ids: expected array"))?
+            .iter()
+            .map(|t| t.as_str().map(str::to_string).ok_or_else(|| JsError::new("tree_ids: expected string")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let ap = registry::attributes::AttributeProof {
+            composed: registry::aggregator::ComposedMembershipProof { proofs },
+            tree_ids,
+            root: jword(&v["root"])?,
+        };
+        let req: Vec<&str> = required.iter().map(String::as_str).collect();
+        registry::attributes::verify_attributes(&self.0, &ap, &req, max_age, now).map_err(werr)
     }
 }
 
@@ -1297,47 +1566,213 @@ pub fn registry_verify_full_proof(
     sub_proof_json: &str,
     aggregator_proof_json: &str,
 ) -> Result<bool, JsError> {
-    let sp: serde_json::Value = serde_json::from_str(sub_proof_json)
-        .map_err(|e| JsError::new(&format!("sub proof: {e}")))?;
-    let ap: serde_json::Value = serde_json::from_str(aggregator_proof_json)
-        .map_err(|e| JsError::new(&format!("aggregator proof: {e}")))?;
-    let jw = |v: &serde_json::Value| -> Result<kernel::W256, JsError> {
-        w(v.as_str().ok_or_else(|| JsError::new("expected hex string"))?)
-    };
-    let arr = |v: &serde_json::Value| -> Result<Vec<kernel::W256>, JsError> {
-        v.as_array()
-            .ok_or_else(|| JsError::new("expected array"))?
-            .iter()
-            .map(&jw)
-            .collect()
-    };
-    let bits = |v: &serde_json::Value| -> Result<Vec<u8>, JsError> {
-        Ok(v.as_array()
-            .ok_or_else(|| JsError::new("expected array"))?
-            .iter()
-            .map(|b| b.as_u64().unwrap_or(0) as u8)
-            .collect())
-    };
-    let sub = registry::tree::MembershipProof {
-        leaf: jw(&sp["leaf"])?,
-        siblings: arr(&sp["siblings"])?,
-        index_bits: bits(&sp["index_bits"])?,
-        root: jw(&sp["root"])?,
-        leaf_index: sp["leaf_index"].as_u64().unwrap_or(0) as usize,
-    };
-    let agg = registry::aggregator::AggregatorMembershipProof {
-        sub_root: jw(&ap["sub_root"])?,
-        siblings: arr(&ap["siblings"])?,
-        index_bits: bits(&ap["index_bits"])?,
-        aggregator_root: jw(&ap["aggregator_root"])?,
-        sub_tree_id: ap["sub_tree_id"].as_str().unwrap_or("").to_string(),
-        aggregator_leaf_index: ap["aggregator_leaf_index"].as_u64().unwrap_or(0) as usize,
-    };
     let full = registry::aggregator::FullMembershipProof {
-        sub_tree_proof: sub,
-        aggregator_proof: agg,
+        sub_tree_proof: proof_from(&jparse(sub_proof_json, "sub proof")?)?,
+        aggregator_proof: agg_from(&jparse(aggregator_proof_json, "aggregator proof")?)?,
         m_x: [0u8; 32],
         m_y: [0u8; 32],
     };
     full.verify().map_err(werr)
+}
+
+/// An attribute authority's subtree, private (salted leaves) or public.
+#[wasm_bindgen]
+pub struct FeatureAuthority(registry::feature::FeatureAuthority);
+
+#[wasm_bindgen]
+impl FeatureAuthority {
+    #[wasm_bindgen(constructor)]
+    pub fn new(feature_id: &str, depth: usize, private: bool) -> Result<FeatureAuthority, JsError> {
+        Ok(FeatureAuthority(
+            registry::feature::FeatureAuthority::new(feature_id, depth, private).map_err(werr)?,
+        ))
+    }
+
+    pub fn is_private(&self) -> bool {
+        self.0.private
+    }
+
+    pub fn sub_root(&self) -> Result<String, JsError> {
+        Ok(hx(&self.0.sub_root().map_err(werr)?))
+    }
+
+    /// Attest `M`; a private subtree needs the holder's `salt`, a public one
+    /// refuses it.  Returns `{leaf, leaf_index}` as a JSON text.
+    pub fn attest(&mut self, mx: &str, my: &str, salt: Option<String>, attested_at: f64) -> Result<String, JsError> {
+        let s = match &salt {
+            Some(h) => Some(w(h)?),
+            None => None,
+        };
+        let r = self.0.attest(&g1(mx, my)?, s.as_ref(), attested_at, None).map_err(werr)?;
+        Ok(serde_json::json!({"leaf": hx(&r.leaf), "leaf_index": r.leaf_index}).to_string())
+    }
+
+    /// Clear `M`'s leaf; the cleared index, or undefined if not attested.
+    pub fn revoke(&mut self, mx: &str, my: &str) -> Result<Option<u32>, JsError> {
+        Ok(self.0.revoke(&g1(mx, my)?).map_err(werr)?.map(|i| i as u32))
+    }
+
+    pub fn has_identity(&self, mx: &str, my: &str) -> Result<bool, JsError> {
+        self.0.has_identity(&g1(mx, my)?).map_err(werr)
+    }
+
+    /// `M`'s path in this subtree as a JSON text, or undefined.
+    pub fn membership_proof_for_identity(&self, mx: &str, my: &str) -> Result<Option<String>, JsError> {
+        Ok(self.0.membership_proof_for_identity(&g1(mx, my)?).map_err(werr)?.map(|p| proof_json(&p)))
+    }
+}
+
+fn envelope_from(v: &Json) -> Result<registry::regulator::InsurerEnvelope, JsError> {
+    let small = |k: &str| -> Result<u32, JsError> {
+        juint(&v[k], k)?.try_into().map_err(|_| JsError::new(&format!("{k}: out of range")))
+    };
+    let dep_types = v["dep_types"]
+        .as_array()
+        .ok_or_else(|| JsError::new("dep_types: expected array"))?
+        .iter()
+        .map(|d| juint(d, "dep_types").map(|d| d.min(255) as u8))
+        .collect::<Result<_, _>>()?;
+    let scopes = match v.get("scopes") {
+        Some(s) => jwords(s)?.into_iter().collect(),
+        None => Default::default(),
+    };
+    registry::regulator::InsurerEnvelope::new(
+        v.get("standing").map_or(Some(true), Json::as_bool).ok_or_else(|| JsError::new("standing: expected bool"))?,
+        small("face_band")?.min(255) as u8,
+        dep_types,
+        small("max_dep_rate")?,
+        small("max_premium_rate")?,
+        v["expires_at"].as_f64().ok_or_else(|| JsError::new("expires_at: expected number"))?,
+        scopes,
+    )
+    .map_err(werr)
+}
+
+fn envelope_value(e: &registry::regulator::InsurerEnvelope) -> Json {
+    serde_json::json!({
+        "standing": e.standing,
+        "face_band": e.face_band,
+        "dep_types": e.dep_types.iter().collect::<Vec<_>>(),
+        "max_dep_rate": e.max_dep_rate,
+        "max_premium_rate": e.max_premium_rate,
+        "expires_at": e.expires_at,
+        "scopes": e.scopes.iter().map(hx).collect::<Vec<_>>(),
+    })
+}
+
+/// A face in BuckCredit units: a decimal string, or 0x-hex.
+fn face(s: &str) -> Result<u128, JsError> {
+    match s.strip_prefix("0x") {
+        Some(h) => u128::from_str_radix(h, 16),
+        None => s.parse(),
+    }
+    .map_err(|_| JsError::new("face: expected a u128 decimal or 0x-hex string"))
+}
+
+/// A jurisdiction's insurance regulator: one public subtree per predicate.
+/// Envelopes cross as JSON texts `{standing, face_band, dep_types,
+/// max_dep_rate, max_premium_rate, expires_at, scopes}` (`standing` defaults
+/// to true, `scopes` to empty).
+#[wasm_bindgen]
+pub struct Regulator(registry::regulator::InsuranceRegulator);
+
+#[wasm_bindgen]
+impl Regulator {
+    #[wasm_bindgen(constructor)]
+    pub fn new(jurisdiction: &str, depth: usize) -> Result<Regulator, JsError> {
+        Ok(Regulator(
+            registry::regulator::InsuranceRegulator::new(jurisdiction, depth).map_err(werr)?,
+        ))
+    }
+
+    pub fn subtree_id(&self, suffix: &str) -> String {
+        self.0.subtree_id(suffix)
+    }
+
+    pub fn scope_name(&self, asset_path: &str) -> String {
+        self.0.scope_name(asset_path)
+    }
+
+    /// Attest an insurer's envelope for this review period; the envelope as
+    /// attested (its scopes filled in).
+    pub fn attest(
+        &mut self,
+        mx: &str,
+        my: &str,
+        envelope_json: &str,
+        scope_names: Vec<String>,
+        general: bool,
+    ) -> Result<String, JsError> {
+        let env = envelope_from(&jparse(envelope_json, "envelope")?)?;
+        let names: Vec<&str> = scope_names.iter().map(String::as_str).collect();
+        Ok(envelope_value(&self.0.attest(&g1(mx, my)?, &env, &names, general).map_err(werr)?).to_string())
+    }
+
+    /// The subtree names an attestation proves membership in, in the order
+    /// `BuckCredit.attestInsurer` takes their paths.
+    pub fn predicate_names(&self, envelope_json: &str, scope_names: Vec<String>) -> Result<Vec<String>, JsError> {
+        let env = envelope_from(&jparse(envelope_json, "envelope")?)?;
+        let names: Vec<&str> = scope_names.iter().map(String::as_str).collect();
+        Ok(self.0.predicate_names(&env, &names))
+    }
+
+    /// Clear an insurer from every subtree; the number cleared.
+    pub fn revoke(&mut self, mx: &str, my: &str) -> Result<usize, JsError> {
+        self.0.revoke(&g1(mx, my)?).map_err(werr)
+    }
+
+    pub fn envelope_of(&self, mx: &str, my: &str) -> Result<Option<String>, JsError> {
+        Ok(self.0.envelope_of(&g1(mx, my)?).map(|e| envelope_value(e).to_string()))
+    }
+
+    /// `M`'s path in the `suffix` subtree as a JSON text, or undefined.
+    pub fn membership_proof(&self, mx: &str, my: &str, suffix: &str) -> Result<Option<String>, JsError> {
+        Ok(self.0.membership_proof(&g1(mx, my)?, suffix).map_err(werr)?.map(|p| proof_json(&p)))
+    }
+
+    /// Every subtree's identifier and root, `[[name, root], ...]`.
+    pub fn sub_roots(&self) -> Result<String, JsError> {
+        let roots: Vec<(String, String)> =
+            self.0.sub_roots().map_err(werr)?.iter().map(|(n, r)| (n.clone(), hx(r))).collect();
+        Ok(serde_json::json!(roots).to_string())
+    }
+}
+
+/// The issuance gate as `BuckCredit.createCredit` applies it: "" if the
+/// credit is admitted, otherwise BuckCredit's revert reason.
+#[wasm_bindgen]
+pub fn registry_check_issuance(
+    envelope_json: &str,
+    scope: &str,
+    face_units: &str,
+    dep_type: u8,
+    dep_rate: u32,
+    premium_rate: u32,
+    now: f64,
+) -> Result<String, JsError> {
+    let env = envelope_from(&jparse(envelope_json, "envelope")?)?;
+    Ok(
+        match registry::regulator::check_issuance(&env, &w(scope)?, face(face_units)?, dep_type, dep_rate, premium_rate, now) {
+            Ok(()) => String::new(),
+            Err(e) => e.0.to_string(),
+        },
+    )
+}
+
+/// The smallest face band admitting `face_units`, or FACE_BAND_MAX + 1.
+#[wasm_bindgen]
+pub fn registry_band_for_face(face_units: &str) -> Result<u8, JsError> {
+    Ok(registry::regulator::band_for_face(face(face_units)?))
+}
+
+/// The identifier of a scope: keccak256 of its namespaced name.
+#[wasm_bindgen]
+pub fn registry_scope_id(name: &str) -> Result<String, JsError> {
+    Ok(hx(&registry::regulator::scope_id(name).map_err(werr)?))
+}
+
+/// The on-chain key of a subtree: keccak256 of its namespaced name.
+#[wasm_bindgen]
+pub fn registry_subtree_key(name: &str) -> Result<String, JsError> {
+    Ok(hx(&registry::regulator::subtree_key(name).map_err(werr)?))
 }

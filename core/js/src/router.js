@@ -8,16 +8,24 @@
 // real router -- the code path an integrator copies, and the surface real
 // JS AMM tooling (@uniswap/v3-sdk et al.) can be pointed at.
 //
-// Wiring facts (proven by the Python sim, mirrored here):
-//   * permit2 is a DUMMY address: swaps use the pre-fund route
-//     (transfer the input to the router, execute with payerIsUser=false),
-//     so Permit2 is never consulted.  Real Permit2 is optional follow-up
-//     for signature-based approvals.
+// Wiring facts:
+//   * BUCK's transfer gate checks only the two ends of every BUCK movement
+//     (Buck._identityCheckedTransfer), never the spender.  A router that
+//     never HOLDS BUCK therefore needs no identity -- which is the only kind
+//     of router BUCK can rely on, since the deployed ones cannot be bound.
+//     It never holds BUCK when (a) the holder pays through Permit2
+//     (payerIsUser=true: the pool pulls from the holder), (b) the output
+//     goes straight to the holder, and (c) BUCK is not an intermediate hop
+//     of an EXACT-INPUT route (the router takes custody of each intermediate
+//     output); an EXACT-OUTPUT route passes intermediates pool to pool.
+//     Proven on Tevm against an unbound router (test/buckmarket.tevm.test.js).
+//   * The pre-fund route (transfer the input to the router, payerIsUser=
+//     false) puts a BUCK input on the router: the Python sim and the
+//     equilibrium world still use it with a DUMMY permit2 and an
+//     identity-bound router, pending their move to Permit2.
 //   * poolInitCodeHash = keccak of OUR compiled UniswapV3Pool creation
 //     bytecode -- the router computes pool addresses via CREATE2, and the
 //     locally-built pool hash differs from mainnet's canonical one.
-//   * in BUCK worlds the router must be identity-bound public+carrying
-//     (it transiently custodies BUCK mid-route); deploy.py shows the bind.
 
 import { encodeAbiParameters, encodePacked, keccak256 } from "viem";
 
@@ -35,12 +43,14 @@ export const DUMMY_PERMIT2 = "0x" + "be".repeat(20);   // pre-fund route: unused
  * @param opts.weth         WETH9 address (unused by V3 swaps; real for fidelity)
  * @param opts.v3Factory    our UniswapV3Factory address
  * @param opts.poolInitCode our UniswapV3Pool CREATION bytecode (0x-hex)
+ * @param opts.permit2      a deployed Permit2 (default: a dummy address, for
+ *                          the pre-fund route only)
  */
 export async function deployUniversalRouter(session, urArtifact,
-    { weth, v3Factory, poolInitCode, gas = 15_000_000n }) {
+    { weth, v3Factory, poolInitCode, permit2 = DUMMY_PERMIT2, gas = 15_000_000n }) {
   const ctor = urArtifact.abi.find((e) => e.type === "constructor");
   const comps = ctor.inputs[0].components;
-  const vals = [DUMMY_PERMIT2, weth, ZERO_ADDR, v3Factory,
+  const vals = [permit2, weth, ZERO_ADDR, v3Factory,
                 "0x" + "00".repeat(32), keccak256(poolInitCode),
                 ZERO_ADDR, ZERO_ADDR, ZERO_ADDR, ZERO_ADDR];
   if (comps.length !== vals.length) {
@@ -68,9 +78,26 @@ export function encodePath(tokensFees) {
  * balance, so transfer amountIn to the router first).
  */
 export function urExecArgs(recipient, amountIn, path) {
+  return urSwapArgs({ recipient, amount: amountIn, limit: 0n, path, payerIsUser: false });
+}
+
+/**
+ * (commands, inputs) for one V3 swap through UniversalRouter.execute.
+ *
+ * @param o.exactOut    false: V3_SWAP_EXACT_IN (amount in, limit = minimum
+ *                      out; path written input first).  true:
+ *                      V3_SWAP_EXACT_OUT (amount out, limit = maximum in;
+ *                      path written OUTPUT first).
+ * @param o.payerIsUser true: the router pays the pool through Permit2 from
+ *                      the caller (who must have approved Permit2 and the
+ *                      router in it); false: from the router's own balance
+ * @param o.path        encodePath([...]) bytes
+ */
+export function urSwapArgs({ exactOut = false, recipient, amount, limit, path,
+                             payerIsUser = true }) {
   const input = encodeAbiParameters(
     [{ type: "address" }, { type: "uint256" }, { type: "uint256" },
      { type: "bytes" }, { type: "bool" }, { type: "uint256[]" }],
-    [recipient, amountIn, 0n, path, false, []]);
-  return ["0x00", [input]];   // 0x00 = V3_SWAP_EXACT_IN
+    [recipient, amount, limit, path, payerIsUser, []]);
+  return [exactOut ? "0x01" : "0x00", [input]];
 }

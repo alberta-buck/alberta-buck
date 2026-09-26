@@ -20,7 +20,7 @@ from alberta_buck.wallet.elgamal import (
     ElGamalCiphertext, identity_keygen, elgamal_encrypt, elgamal_decrypt,
 )
 from alberta_buck.wallet.issuer_reenc import (
-    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify, H_POINT,
+    IssuerReencProof, issuer_reenc_prove, issuer_reenc_verify,
 )
 
 ISSUER = 0x155EC00000000000000000000000000000155EC0
@@ -143,9 +143,9 @@ def test_replay_other_issuer_or_chain_rejected():
 # ---- issuer privacy: M_iss is blinded in the published T -------------------
 
 def test_issuer_M_not_recoverable_from_T():
-    # The published T is blinded (T = r'*pk_rec + gamma*G), so an observer
+    # The published T is blinded (T = r'*pk_rec + gamma*H), so an observer
     # cannot recover M_iss = C_i - r'*pk_rec as C_i - T.  C_i - T = M_iss -
-    # gamma*G, a uniformly random offset from the real M_iss.
+    # gamma*H, a uniformly random offset from the real M_iss.
     s = _setup(11)
     pf = issuer_reenc_prove(s["sk_iss"], s["r_prime"], s["rec"].pk,
                             s["E_reg"], s["E_iss"], ISSUER, CHAINID, rng=s["rng"])

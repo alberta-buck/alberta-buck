@@ -5,7 +5,7 @@ Mirrors the issuance ceremony described in alberta-buck-identity.org sec
 out-of-band, canonicalizes them, computes m = H(canonical_identity_data),
 produces the PS signature sigma = (h, (x + m*y)*h), and hands the applicant
 back (m, sigma, identity_data) for storage in their wallet's Holochain
-Private entry.  All wallet-side derivation steps (rerandomization, fresh
+Private entry.  All wallet-side derivation steps (hiding presentation, fresh
 identity key pair, ElGamal encryption under that key, registration NIZK)
 happen later, in the wallet -- not here.
 
@@ -17,11 +17,13 @@ the trust anchor, and a simulated issuance log standing in for the
 "issuance event published to the issuer's Holochain source chain" called
 out in the same section.
 
-Revocation follows the epoch-based renewal model from
-alberta-buck-identity.org sec "Epoch-Based Credential Renewal": the issuer
-does not invalidate the cryptographic artifact (sigma is eternal), it
-simply refuses to re-issue at the next epoch -- which is exactly what
-Issuer.revoke() simulates.
+Standing follows alberta-buck-identity.org "Liveness Is Membership" and the
+accumulator specification, section 8: a signature is a fact about the past
+and is never invalidated, and the record's epoch is the epoch of first
+certification, never bumped.  Whether a holder is still in good standing is
+membership in the registry's live-set subtree; revocation clears that leaf
+(registry/feature_authority.py FeatureAuthority.revoke).  Issuer.revoke()
+records only this issuer's own refusal to issue again.
 
 The optional `applicant_pk` parameter to issue() is a test convenience for
 modeling a confidential delivery channel; the spec assumes the (m, sigma,
@@ -40,7 +42,8 @@ from alberta_buck.wallet.bn254 import G1, mul, rand_scalar
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_encrypt
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.ps import (
-    PSKeyPair, PSSignature, ps_keygen, ps_rerandomize, ps_sign, ps_verify,
+    PSKeyPair, PSPresentation, PSSignature, ps_keygen, ps_present, ps_sign,
+    ps_verify,
 )
 
 
@@ -60,6 +63,7 @@ class IssuedCredential:
     issuer_id:  str
     issuer_addr: int
     delivery:   Optional[ElGamalCiphertext] = None
+    issuer_pk_Y1: Optional[Tuple] = None   # y*G, the presentation base (A')
 
 
 @dataclass
@@ -82,9 +86,10 @@ class Issuer:
 
     `keypair` is the PS keypair used to sign identity scalars.
 
-    `revoked` is the set of applicant Ethereum addresses whose credentials
-    have been revoked (simulated — the protocol's actual revocation lives
-    on-chain via IdentityRegistry.revokeIssuer / off-chain epoch rotation).
+    `revoked` is the set of applicant Ethereum addresses this issuer will not
+    issue to again (simulated).  The protocol's revocation of a holder is the
+    registry clearing its live-set leaf; of an issuer, the registry's
+    revokeIssuer.
     """
     issuer_id:   str
     issuer_addr: int
@@ -107,6 +112,10 @@ class Issuer:
     @property
     def pk_Y(self):
         return self.keypair.pk_Y
+
+    @property
+    def pk_Y1(self):
+        return self.keypair.pk_Y1
 
     def issue(
         self,
@@ -154,18 +163,19 @@ class Issuer:
             issuer_id=self.issuer_id,
             issuer_addr=self.issuer_addr,
             delivery=delivery,
+            issuer_pk_Y1=self.keypair.pk_Y1,
         )
 
     def revoke(self, applicant_addr: int) -> None:
-        """Mark an applicant as ineligible for re-issuance at the next epoch.
+        """Refuse to issue to this applicant again.
 
-        Per identity.org sec "Epoch-Based Credential Renewal", the issuer
-        does not (and cannot) invalidate already-issued PS signatures; it
-        simply refuses to provide the applicant's next-epoch credential.
-        Existing on-chain registrations remain mathematically valid until
-        their epoch expires, at which point isVerified returns false at
-        the IdentityRegistry layer.  This method records the issuer's
-        intent; the on-chain effect is the absence of a fresh issuance.
+        An issued PS signature cannot be invalidated, and a registration made
+        with it stays true: a binding is a fact about the past.  What lapses
+        is standing, which is membership in the registry's live-set subtree
+        (identity.org "Liveness Is Membership"); revoking a holder is the
+        registry clearing that leaf, after which every membership-gated check
+        (a Notes spend, an attribute proof, an insurer attestation) fails once
+        the older roots age out.  This method records only the issuer's side.
         """
         self._revoked.add(applicant_addr)
 
@@ -186,19 +196,23 @@ class Issuer:
         return ps_verify(self.pk_X, self.pk_Y, cred.sigma, cred.m)
 
 
-def rerandomize_for_registration(
+def present_for_registration(
     cred: IssuedCredential, rng=None
-) -> Tuple[PSSignature, int]:
-    """Convenience: wallet-side rerandomization step.
+) -> Tuple[PSPresentation, int, int]:
+    """Convenience: wallet-side presentation step (A').
 
-    Returns (sigma_p, t).  The rerandomized sigma_p is what gets sent to
-    IdentityRegistry.register; the unblinded sigma is never published.
+    Returns (presentation, a, b).  The presentation (A, B) is what gets sent
+    to IdentityRegistry.register together with the NIZK that uses b as a
+    witness; the raw sigma is never published, and neither is any
+    rerandomization of it (a rerandomized pair is still a testable signature).
     """
-    return ps_rerandomize(cred.sigma, rng=rng)
+    if cred.issuer_pk_Y1 is None:
+        raise ValueError("credential carries no issuer Y1; cannot present")
+    return ps_present(cred.sigma, cred.issuer_pk_Y1, rng=rng)
 
 
 __all__ = [
     "IssuedCredential",
     "Issuer",
-    "rerandomize_for_registration",
+    "present_for_registration",
 ]

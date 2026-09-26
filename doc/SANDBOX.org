@@ -1,0 +1,167 @@
+#+TITLE: The Alberta Buck sandbox
+#+OPTIONS: toc:nil num:nil ^:nil
+
+A private, simulated Alberta Buck world in your own browser tab.  Certify people, give them
+wallets, insure their (imaginary) homes and cars, activate credit against them, pay one another
+and trade BUCKs for dollars -- then look at the chain the way a stranger would, and see what it does
+and does not give away.  Nothing leaves the tab.
+
+Everything here is simulated: the identity issuer, the insurer, the dollars, the clock, and every
+key, which lives in the page in the clear.  What is *not* simulated is the machinery: the real
+Alberta Buck contracts on a real Ethereum virtual machine, the real identity cryptography, and
+Uniswap's own contracts for the market.
+
+* Run it
+
+Open [[https://sandbox.albertabuck.ca/]]: the hosted copy is the same static page, built from
+=master=, and runs entirely in your tab like a local one.
+
+To run it yourself, with [[https://nixos.org/download][Nix]] (flakes enabled), from a clone of
+this repository:
+
+#+BEGIN_SRC sh
+make nix-sandbox          # build, then serve http://localhost:8000/
+#+END_SRC
+
+Open [[http://localhost:8000/]].  The first build fetches the npm dependencies and compiles the
+identity kernel to WebAssembly, which takes a few minutes once; later builds take seconds.  The
+page then deploys a fresh world in a second or two.  =SANDBOX_PORT=8080 make nix-sandbox= serves
+on another port.
+
+Without Nix you need Node 22 or later, a Rust toolchain with the =wasm32-unknown-unknown= target,
+and Foundry's =forge=; then =make sandbox=.  The flake pins all of these, and is the supported
+path.
+
+* A first story
+
+1. *Issuer*: /Fill a sample person/ and /Issue credential/, twice -- Carol and Bob.
+2. On each card, /New wallet for .../: a wallet is created and registered with the card -- W1 and
+   W2.
+3. *Wallets*: /Introduce/ W1 to W2.  Bob's wallet now shows Carol's name; Carol's still shows only
+   W2 and its address.  Introduce W2 to W1 as well: paying BUCKs between two private wallets takes
+   both.  Try paying Bob 100 BUCKs: refused, Carol has none.
+4. /Open trading/ on Carol's wallet, then /Buy BUCKs/ with 500 USDC, and pay Bob 100 BUCKs -- and
+   12.50 USDC, which needs no introduction at all.
+5. *Credit*: insure Carol's home for 400,000 and ask to activate 50,000.  The quote shows the
+   premium deposit and her shortfall; /Buy ... BUCKs first/, then /Activate/.
+6. /+30 days/ in the world bar: Bob's BUCKs owe a little demurrage, and the home is worth a
+   little less.
+7. *Observer*: everything that happened, as anyone can see it.  Look for a name.
+
+* The tools
+
+** The world bar
+
+Always in view: the simulated day and date, the block, BUCK's price in the BUCK/USDC pool,
+=BUCK_K= (how much credit each unit of insured value supports), the BUCK supply and the insurance
+pool.  The clock moves only when you move it: /+1 hour/, /+1 day/, /+30 days/.  /Journal/ lists
+every transaction with its outcome and gas -- refusals included, since they are part of the
+story.  /Export/ saves the whole world to a file, /Import/ loads one, /Reset/ starts again.
+
+** Issuer
+
+[[file:../images/sandbox/issuer.png]]
+
+The sandbox's identity issuer, trusted on chain by governance.  It checks a person's documents
+(here, three form fields) and writes a short /core record/: the name at first certification, the
+date of birth, a person number it never reuses, and the date.  It signs the record's fingerprint
+and hands over a /credential card/, which you can copy, download, import elsewhere, or turn into a
+registered wallet in one click.  Issuance is off-chain: the chain learns nothing.
+
+** Wallets
+
+[[file:../images/sandbox/wallets.png]]
+
+Each wallet is an account with its own keys, starting with 10 ETH for gas and 10,000 USDC.  It is
+named by its number, the label you give it (if any) and, once registered, its holder's registered
+name, in green: =W1=, =W1: Savings=, =W1: Savings: Carol Nakamura=.
+
+- *Register* with a credential.  On chain this puts a fresh identity key, the identity encrypted
+  to it, a re-randomized signature and a zero-knowledge proof -- enough for the registry to know a
+  trusted issuer certified the holder, and nothing about who.
+- *Introduce* a wallet to another: it re-encrypts its identity for that wallet alone, which can
+  then say whom it dealt with -- and learns the registered name.  An introduction goes one way:
+  until W1 introduces itself to W2, W2's dropdowns show W1 by number, label and address only.
+- *Pay* in BUCKs, USDC or ETH: the amount and both addresses are public.  BUCKs also carry a
+  receipt each side can decrypt, so paying BUCKs between two private wallets takes an introduction
+  each way, and both must be registered; USDC and ETH go to any wallet, registered or not.
+- *Open trading*, once: an introduction to the BUCK/USDC pool (whose operator must be able to say
+  who traded with it) and approvals for Permit2, Uniswap's approval contract.  Then *buy* and
+  *sell* BUCKs.  The pool takes BUCKs straight from the wallet and pays straight back, so the
+  Uniswap router never holds BUCKs and needs no identity of its own.
+- *Deposit* more USDC, as a bank transfer would.
+
+Balances show BUCKs held (after demurrage), credit drawn, what is spendable (held BUCKs plus unused
+credit), the credit limit, the demurrage owing, USDC and ETH.  Every amount in the sandbox shows six
+decimal places, lined up on the decimal point, with its currency in a column of its own.
+
+** Credit
+
+[[file:../images/sandbox/credit-quote.png]]
+
+Sandbox Mutual insures simulated assets.  Pick an owner and an asset -- a home, a vehicle,
+equipment, farmland or gold -- and its value; the depreciation schedule and the premium fill in
+from the asset class, and every one can be changed.  /Insure/ issues a BuckCredit NFT to the owner.
+
+Activating credit is where the premium comes in, as a deposit rather than a cost: activation
+issues ten years' worth of premium to the insurance pool, which invests it -- at an assumed 10 % a
+year -- to earn the premiums, and returns it when the insurance is dropped.  At 0.35 % a year on a
+home, activating 50,000 BUCKs of spendable credit deposits about 1,813 BUCKs -- and the contract
+lets that through only if the owner /already/ holds as much.  So a first-time owner buys the
+shortfall in the pool; the quote offers to.  Once one credit is active, its unused credit covers the
+next one's deposit.
+
+[[file:../images/sandbox/credit.png]]
+
+The credits table shows each asset's value depreciated to today and what the activated part is
+worth now; move the clock and watch them fall on their schedules.
+
+** Observer
+
+[[file:../images/sandbox/observer.png]]
+
+The chain as anyone sees it, Mallory included: every transaction, newest first, with its sender,
+contract, function, arguments and events.  Addresses, amounts and credit terms are in the open.
+Identity is not: it appears only as keys, ciphertexts and proofs, each marked /opaque/ with a note
+on what opening it would take.  No name, birth date or person number appears anywhere -- unless
+you tick /Show what only you know/, which labels addresses with the sandbox's own names for them.
+Mallory has no such list.
+
+* Real and simulated
+
+| Real                                                | Simulated                              |
+|-----------------------------------------------------+----------------------------------------|
+| the production contracts: =IdentityRegistry=,       | the issuer and its keys; the insurer   |
+| =BuckCredit=, =Buck=, =BuckKControllerDirect=       |                                        |
+| Uniswap V3's factory and pool, Permit2, the         | USDC (a mock token); the market maker  |
+| Universal Router; =UniswapV3BindingAdapter=         | (=SimLP=) and its liquidity            |
+| PS signatures, ElGamal, the registration and        | every wallet's keys, kept in the page  |
+| approval proofs: the wasm identity kernel           |                                        |
+| an Ethereum VM (Tevm) in the tab                    | the clock                              |
+
+Not in the sandbox (yet): Notes and their private transfers; the commodity basket and the
+controller that moves =BUCK_K= (it stays at 0.75 here -- the equilibrium demo,
+=core/js/demo/eqworld.html=, runs that loop); the insurer attestation gate; revocation; receipts.
+The Groth16 verifiers in the published contracts use a development trusted setup until v1.0.0.
+
+* Your world
+
+The world saves itself after every action in the browser's own storage (IndexedDB), private to
+this page, and comes back when you reload.  /Export/ writes it all -- the chain's state, the
+credentials, every wallet's private keys -- to one JSON file; /Import/ loads such a file into any
+browser, replacing the current world only if the file loads.  A world saved by an older version
+of the sandbox is refused, and a new one started, with a note saying so.  If the browser refuses
+storage (some private windows), the world lasts until the tab closes, and the page says so.
+
+* Under the hood
+
+- =core/js/sandbox/= -- the page: =src/app.js= (=SandboxApp=, all the chain logic and none of the
+  page), =src/store.js=, =src/main.js=, and =src/ui/= (one module per tool).
+- =core/js/src/= -- what it is built from: =buckworld.js= (the ceremonies, whole and by role),
+  =market.js= (the BUCK/USDC market through Permit2), =observer.js=, =codec.js=, and the Tevm
+  snapshot in =backends.js=.
+- Tests (=make nix-core-test-js=): the ceremonies by role, the market and its premiums, the whole
+  story through =SandboxApp= with no page, and the built page in headless Chromium
+  (=test/sandbox.browser.test.js=; the browser comes from the flake).
+- =make nix-sandbox-screenshots= regenerates the pictures above.
+- The design and its history: =doc/review/sandbox-plan.org=.

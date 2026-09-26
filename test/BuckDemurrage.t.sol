@@ -4,10 +4,12 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
+import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
 /// @title BuckDemurrage.t.sol -- demurrage / Jubilee / transferCarrying invariants.
 ///
@@ -27,6 +29,8 @@ contract BuckDemurrageTest is Test {
     address internal constant GOV     = address(0xA0);
     address internal constant ISSUER  = address(0x1551E1);
     address internal constant POOL    = address(0xBA51C);
+    address internal constant REGISTRY_ADDR =
+        0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
     address internal alice;
     address internal bob;
@@ -37,7 +41,12 @@ contract BuckDemurrageTest is Test {
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
 
-        reg = new IdentityRegistry(GOV);
+        deployCodeTo(
+            "test/harness/IdentityRegistryHarness.sol:IdentityRegistryHarness",
+            abi.encode(GOV),
+            REGISTRY_ADDR
+        );
+        reg = IdentityRegistry(REGISTRY_ADDR);
         _trustIssuer();
         alice = address(uint160(_u(".alice.registrant")));
         // Bob acts as a Public-Identity counterparty contract throughout the
@@ -50,6 +59,7 @@ contract BuckDemurrageTest is Test {
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
         buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
@@ -71,9 +81,9 @@ contract BuckDemurrageTest is Test {
         return BN254.G1Point(_u(string.concat(key, ".x")), _u(string.concat(key, ".y")));
     }
 
-    function _ps(string memory who) internal view returns (IdentityRegistry.PSSig memory s) {
-        s.sigma_1 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_1"));
-        s.sigma_2 = _g1(string.concat(".", who, ".ps_sig_rerand.sigma_2"));
+    function _ps(string memory who) internal view returns (IdentityRegistry.PSPresentation memory s) {
+        s.A = _g1(string.concat(".", who, ".ps_presentation.A"));
+        s.B = _g1(string.concat(".", who, ".ps_presentation.B"));
     }
 
     function _ct(string memory key) internal view returns (IdentityRegistry.ElGamalCT memory c) {
@@ -86,9 +96,12 @@ contract BuckDemurrageTest is Test {
         p.e    = _u(string.concat(base, ".e"));
         p.s_m  = _u(string.concat(base, ".s_m"));
         p.s_r  = _u(string.concat(base, ".s_r"));
-        p.A_ps = _g1(string.concat(base, ".A_ps"));
+        p.s_sk = _u(string.concat(base, ".s_sk"));
+        p.s_b = _u(string.concat(base, ".s_b"));
+        p.C1 = _g1(string.concat(base, ".C1"));
         p.T_C  = _g1(string.concat(base, ".T_C"));
         p.T_R  = _g1(string.concat(base, ".T_R"));
+        p.T_key = _g1(string.concat(base, ".T_key"));
     }
 
     function _cpProof() internal view returns (IdentityRegistry.CPProof memory p) {
@@ -110,6 +123,7 @@ contract BuckDemurrageTest is Test {
         ipk.Y.X[1] = _u(".issuer.pk_Y.x[1]");
         ipk.Y.Y[0] = _u(".issuer.pk_Y.y[0]");
         ipk.Y.Y[1] = _u(".issuer.pk_Y.y[1]");
+        ipk.Y1 = _g1(".issuer.pk_Y1");
         vm.prank(GOV);
         reg.trustIssuer(ISSUER, ipk);
     }

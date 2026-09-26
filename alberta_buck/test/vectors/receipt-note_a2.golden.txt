@@ -1,19 +1,19 @@
                  ALBERTA  BUCK                  
          P A Y M E N T   R E C E I P T          
 ------------------------------------------------
-  Receipt  fo6idsp2dmel
+  Receipt  6wgog2f46taw
 ------------------------------------------------
 FROM (payer) (PRIVATE IDENTITY)
  Bob Smith
 Corporate Registration - Alberta, Canada
  acct 0x0b0b000000000000000000000000000000000b0b
- idpt 0x0cef52e77ea5..0ae1f916d96b
+ idpt 0x2dabfd96aabe..38e9d7c70dca
 ------------------------------------------------
 TO (payee - you) (PRIVATE IDENTITY)
  Alice Johnson
 Alberta Identity Card - Alberta, Canada
  acct 0x0a11ce00000000000000000000000000000a11ce
- idpt 0x07a0b762be40..d418d7bf5e7c
+ idpt 0x2e7538b21d80..54b64a191ea4
 ------------------------------------------------
 TRANSACTION
  Type    Note spend — A2 addressed, private issuer
@@ -27,7 +27,7 @@ TRANSACTION
 ------------------------------------------------
 VERIFICATION
  status @ issue: VALID
- receipt  fo6idsp2dmel
+ receipt  6wgog2f46taw
 ------------------------------------------------
         a record, not a bearer instrument       
         github.com/pjkundert/alberta-buck       

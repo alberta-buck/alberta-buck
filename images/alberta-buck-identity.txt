@@ -1,8 +1,8 @@
-           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            THE ALBERTA BUCK - IDENTITY AND RECEIPTS (V1.1)
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+             THE ALBERTA BUCK - IDENTITY AND RECEIPTS (V2)
 
                              Perry Kundert
-           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
                                2026-04-08
@@ -13,17 +13,21 @@
 Alberta Buck transactions carry provably authentic identity – without
 exposing it.  Every participant holds an ElGamal ciphertext[1] of their
 identity, backed by a Pointcheval-Sanders rerandomizable signature[2].
-A citizen with multiple accounts derives an independent, unlinkable
-credential for each – rerandomizing the signature offline – yet every
-credential is verifiable as issued by the same authority.  At
-transaction time, the participant re-encrypts under the counterparty's
-key and produces a Chaum-Pedersen proof[3] that the re-encrypted
-ciphertext contains the same identity as the registered credential.  No
-one sees the plaintext.
+A citizen with multiple accounts derives an independent credential
+presentation for each – blinding the signature offline into a pair that
+no holder of the identity, the issuer included, can test – yet every
+presentation is verifiable as issued by the same authority.  (That
+presentation is the A' design implemented on branch `feature/a-prime';
+its security argument awaits independent review, and claims that depend
+on it are marked so.)  At transaction time, the participant re-encrypts
+under the counterparty's key and produces a Chaum-Pedersen proof[3] that
+the re-encrypted ciphertext contains the same identity as the registered
+credential.  No one sees the plaintext.
 
 Per-transaction verification costs ~29,000 gas (alt_bn128 scalar
 multiplications, no pairings).  One-time credential registration costs
-~235,000 gas (pairing-based PS signature check).  No trusted setup.
+443,892 gas measured (a three-pair pairing product over the credential
+presentation).  No trusted setup.
 
 Identity data resides in three layers: Ethereum contract storage (proof
 chain), the local Holochain wallet (plaintext identity, secret keys),
@@ -43,7 +47,11 @@ Table of Contents
 .. 3. Counterparties Exchange Identities
 .. 4. ElGamal and Pointcheval-Sanders Over a Mandated Curve Group
 .. 5. Chaum-Pedersen Proof of Re-Encryption Correctness
-2. Attacks and Defenses
+2. The Identity Accumulator: Certified Attributes Without a Scan
+.. 1. Subtrees, leaves and the posted root
+.. 2. Attribute proofs belong to the holder
+.. 3. Insurers: a public attestation the credit gate reads
+3. Attacks and Defenses
 .. 1. Attack 1: Alice Substitutes a False Identity for Bob
 .. 2. Attack 2: Alice Forges an Issuer Credential
 .. 3. Attack 3: Alice and Complicit Bob Launder With False Identities
@@ -54,42 +62,42 @@ Table of Contents
 .. 8. Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
 .. 9. Attack 9: Systematic Forgery – Alice Attacks the Trust Chain
 .. 10. Summary: Why the Scheme Defeats All Attacks
-3. Identity Visibility Modes
-4. Operations Table
+4. Identity Visibility Modes
+5. Operations Table
 .. 1. Core BUCK (ERC-20) Operations
 .. 2. BuckCredit (ERC-721) Operations
 .. 3. BuckKController (PID Stabilization)
 .. 4. Oracle Operations
 .. 5. DeFi Integration (Uniswap, Lending, etc.)
 .. 6. Identity Management
-5. Contract Identity: How DeFi Pools Become BUCK Counterparties
+6. Contract Identity: How DeFi Pools Become BUCK Counterparties
 .. 1. What's actually wired up
 .. 2. The interaction surface
 .. 3. Step-by-step: bringing up a BUCK/USDC AMM
 .. 4. What this means for accountability
 .. 5. Encrypted-Identity contracts
-6. Why `approve' Is Always CP-Bound
+7. Why `approve' Is Always CP-Bound
 .. 1. Approve documents consent; transfer documents execution
 .. 2. Engagement with the BN254 identity key, not just the ETH key
 .. 3. Per-pair freshness vs. constant identity hash
 .. 4. Uniform receipt semantics; no fast-path / slow-path bifurcation
 .. 5. Defense against silent rebinding / identity rotation
 .. 6. Cost
-7. On-Chain Integration: Receipts and Transfer Flow
+8. On-Chain Integration: Receipts and Transfer Flow
 .. 1. The Receipt Constraint
 .. 2. The `approve' Function as Identity Handshake
 .. 3. Receipt Construction: What the Contract Emits
 .. 4. The Complete `transfer' / `transferFrom' Flow
 .. 5. Holochain: Off-Chain Computation and Storage
 .. 6. Summary: What Each Layer Sees
-8. Cryptographic Receipts: 3-Party ECDH
+9. Cryptographic Receipts: 3-Party ECDH
 .. 1. The Three Keys
 .. 2. Encryption Scheme
 .. 3. Who Can Decrypt
-9. Play-by-Play: BUCK/USDT Swap on Uniswap
+10. Play-by-Play: BUCK/USDT Swap on Uniswap
 .. 1. Prerequisites (One-Time Setup)
 .. 2. The Swap Transaction
-10. Edge Cases and Design Considerations
+11. Edge Cases and Design Considerations
 .. 1. Flash Loans and Atomic Transactions
 .. 2. Multi-Hop Swaps
 .. 3. Contract-to-Contract Transfers
@@ -97,14 +105,14 @@ Table of Contents
 .. 5. Gas Costs
 .. 6. Pool Operator Identity Binding
 .. 7. alt_bn128 Security Horizon
-11. Alternative Approaches Considered
+12. Alternative Approaches Considered
 .. 1. Pedersen Commitments + Groth16 ZK Proofs
 .. 2. Proxy Re-Encryption (NuCypher Umbral)[5]
 .. 3. BBS+ Signatures with Selective Disclosure
 .. 4. Camenisch-Shoup Verifiable Encryption
 .. 5. Pedersen Equality Proofs (Homomorphic Comparison)[6]
 .. 6. Comparison Summary
-12. Summary: Identity Requirement by Risk Level
+13. Summary: Identity Requirement by Risk Level
 
 
 [PDF] <https://perry.kundert.ca/images/alberta-buck-identity.pdf>
@@ -120,11 +128,12 @@ Table of Contents
   Every Alberta Buck account holds a cryptographically certified
   identity that is invisible to observers but provably genuine to
   authorized counterparties.  The core design rests on three pillars:
-  the Identity Fountain (offline credential derivation with statistical
-  unlinkability), the two-channel architecture (Ethereum proof chain
-  plus Holochain data channel), and the agent-per-account isolation
-  model.  Together with the bilateral `approve' / `transfer' flow, these
-  give citizens free transactions with verified counterparties, let
+  the Identity Fountain (offline credential derivation whose published
+  presentation hides the identity; the ciphertext lock is computational,
+  under DDH), the two-channel architecture (Ethereum proof chain plus
+  Holochain data channel), and the agent-per-account isolation model.
+  Together with the bilateral `approve' / `transfer' flow, these give
+  citizens free transactions with verified counterparties, let
   regulators recover identity under subpoena from on-chain proof chains,
   and ensure that no party – including the government – can surveil
   transactions at O(1) cost.
@@ -157,8 +166,9 @@ Table of Contents
   The Alberta Buck enforces /these/ principles:
   • The freedom to /transact in privacy and peace/ by keeping your
     identity private between only you and your counterparties (no third
-    party is able to correlate activity between any of your accounts),
-    and
+    party, the identity issuer included, is able to correlate activity
+    between any of your accounts from chain data – achieved by the A'
+    registration presentation, pending its review), and
   • The confidence that someone /really is who they say they are/ by
     proving their identity has not been forged (you have the ability to
     vet every counterparty's identity before transacting with them).
@@ -188,7 +198,10 @@ Table of Contents
   court must compel a /specific participant/ to decrypt a /specific
   transaction's counterparties'/ identity data.  Every individual's
   credential must be attacked separately.  The cost to surveil is O(N),
-  not O(1).
+  not O(1).  For the registration transcript this holds only with the A'
+  presentation: the earlier published rerandomized signature let anyone
+  holding an identity scalar test every registration against it at no
+  cost.
 
 
 1.1.1 The Identity Fountain
@@ -201,10 +214,11 @@ Table of Contents
   financial life is exposed to anyone who notices the link.
 
   The identity fountain solves this.  It gives every citizen the ability
-  to derive unlimited, unlinkable identity credentials – each
-  independently verifiable as issued by the same authority – from a
-  single KYC ceremony.  The construction uses Pointcheval-Sanders (PS)
-  rerandomizable signatures[2] over the alt_bn128 curve.
+  to derive unlimited account credentials from a single KYC ceremony,
+  each presented in a form that is verifiable as issued by the same
+  authority yet testable by no one – not even the issuer.  The
+  construction uses Pointcheval-Sanders (PS) rerandomizable
+  signatures[2] over the alt_bn128 curve.
 
 
 ◊ 1.1.1.1 Issuance: The Issuer Signs Once
@@ -224,9 +238,13 @@ Table of Contents
   5. Publishes the issuance event to the issuer's Holochain source
      chain.
 
-  The issuer's public key `(X, Y) = (x * g_2, y * g_2)' in `G_2' is
-  registered in the TrustedIssuersRegistry on Ethereum.  The issuer is
-  now done – permanently, if desired.
+  The issuer's public key `(X, Y, Y1) = (x * g_2, y * g_2, y * G)' – two
+  points in `G_2' plus the `G_1' image of `y' that holders blind with –
+  is registered on Ethereum by `IdentityRegistry.trustIssuer', which
+  checks `e(Y1, g_2) = e(G, Y)' once.  Publishing `y * G' places the key
+  in the committed-message form of Pointcheval-Sanders (their Section
+  6.1); the issuer keeps the signature base `h' with unknown discrete
+  logarithm.  The issuer is now done – permanently, if desired.
 
 
 ◊ 1.1.1.2 What `identity_data' Contains
@@ -249,10 +267,13 @@ Table of Contents
   └────
 
   The identity scalar is `m = H(identity_data)' where `H' is keccak256
-  over the canonical encoding.  The canonical encoding is deterministic:
-  field order, encoding format, and whitespace are fixed by the hApp
-  DNA, so any party who holds the same `identity_data' computes the same
-  `m'.
+  over the domain tag `AlbertaBuck/Identity/Scalar/v2' followed by the
+  canonical encoding, reduced mod the group order.  The tag keeps a
+  person's scalar out of every other protocol's range: the same record
+  hashed by anything else yields something else.  The canonical encoding
+  is deterministic: field order, encoding format, and whitespace are
+  fixed by the hApp DNA, so any party who holds the same `identity_data'
+  computes the same `m'.
 
   The issuer verifies these claims during the KYC ceremony and computes
   `m'.  Alice receives both `m' (the scalar) and `identity_data' (the
@@ -263,22 +284,24 @@ Table of Contents
 
   Different issuers may define different schemas (a province vs. a
   bank), but all schemas produce a single scalar `m' via the same hash
-  function.  The `epoch' field binds the credential to a renewal period
-  (see Epoch-Based Credential Renewal below).
+  function.  The `epoch' field records the epoch of first certification
+  and is never bumped, so `m' is stable for life; whether a person is
+  currently in good standing is a separate, revocable fact (see Liveness
+  Is Membership below).
 
 
 ◊ 1.1.1.3 Derivation: Alice Generates Credentials Offline
 
   For each new Ethereum account, Alice's Holochain wallet:
 
-  1. Picks a random scalar `t' and rerandomizes the PS signature:
-
-     `sigma' = (t * sigma_1, t * sigma_2)'
-
-     This `sigma'' is a valid PS signature on the same `m' under the
-     same issuer public key – but is /statistically unlinkable/ to
-     `sigma' or to any other rerandomization.  No algorithm can
-     correlate `sigma'' back to `sigma'.
+  1. Picks fresh random scalars `a, b' and /presents/ the PS signature:
+     `A = a * sigma_1, B = a * sigma_2 + b * Y1' This `(A, B)' presents
+     the same credential on the same `m' under the same issuer key, but
+     it is a uniform pair of points: it carries no test that anyone
+     holding `m' – the issuer, a past counterparty – can run.
+     Rerandomizing alone (`sigma' = t * sigma') would not do: `sigma''
+     is still a signature on `m', and the pairing check identifies it to
+     anyone who knows `m' (review finding R1).
 
   2. Generates a fresh identity key pair `(sk_new, pk_new)' on
      alt_bn128.
@@ -288,16 +311,19 @@ Table of Contents
      `E_new = (r * G, m * G + r * pk_new)'
 
   4. Computes a non-interactive zero-knowledge proof `pi' that `E_new'
-     encrypts the same `m' that `sigma'' signs:
-
+     encrypts the same `m' that `(A, B)' presents, and that she holds
+     the account key:
      ┌────
-     │ "I know (m, t, r) such that:
-     │   a) e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)   -- valid PS signature
-     │   b) C = m * G + r * pk_new                       -- ElGamal encryption of m
-     │   c) R = r * G                                    -- consistent randomness"
+     │ "I know (m, b, r, sk) such that:
+     │   a') e(B, g_2) = e(A, X) * e(m * A + b * G, Y)   -- (A, B) presents a credential on m
+     │   b)  C = m * G + r * pk_new                       -- ElGamal encryption of m
+     │   c)  R = r * G                                    -- consistent randomness
+     │   k)  pk_new = sk * G                              -- account key ownership"
      └────
-
-  5. Packages `(pk_new, E_new, sigma', pi)' for registration.
+     One commitment covers both hidden credential exponents `(m, b)', so
+     no proof field exposes `m * A' on its own (review finding R2).
+  5. Packages `(pk_new, E_new, (A, B), pi)' for registration and
+     discards `a' and `b'.
 
   This derivation runs entirely on Alice's device.  She can pre-generate
   a hundred credentials in a batch and store them in her Holochain
@@ -311,9 +337,11 @@ Table of Contents
   separate source chains.  The one artifact shared across agents is
   Alice's `identity_data' (and therefore `m = H(identity_data)'), which
   is copied into each new agent's Private entry store.  Since `m' is
-  committed only inside ElGamal ciphertexts (IND-CPA secure) and PS
-  signatures (statistically rerandomized), no observer on either network
-  can detect that two agents share the same `m'.
+  committed only inside ElGamal ciphertexts (IND-CPA secure) and
+  credential presentations (uniform pairs, whatever the identity), no
+  observer on either network can detect that two agents share the same
+  `m' – under DDH for the ciphertexts, unconditionally for the
+  presentations.
 
 
 ◊ 1.1.1.4 Registration: One-Time On-Chain Verification
@@ -321,18 +349,28 @@ Table of Contents
   Alice registers the derived credential in the IdentityRegistry:
 
   ┌────
-  │ identityRegistry.registerCredential(
-  │     alice_new_address,
-  │     pk_new,          // identity public key
-  │     E_new,           // ElGamal ciphertext (4 uint256)
-  │     sigma_prime,     // rerandomized PS signature (2 G_1 points)
-  │     pi               // NIZK proof linking sigma' to E_new
-  │ )
+  │ // Real entry point: register(issuer, pk, E, presentation, proof).  The
+  │ // registrant is msg.sender (NOT a passed address) -- it, the chain, the
+  │ // registry deployment, and the action/version domain
+  │ // (AlbertaBuck/FiatShamir/IdentityRegistry/Register/v2) are folded into
+  │ // the proof's Fiat-Shamir challenge, so a proof cannot be replayed across
+  │ // addresses, chains, registries or protocol versions.  A compatibility
+  │ // overload accepts identityLeaf only when it is zero; callers cannot
+  │ // insert an unconstrained accumulator leaf.
+  │ identityRegistry.register(
+  │     issuer,          // trusted issuer whose PS key signed the credential
+  │     pk_new,          // identity public key (G_1)
+  │     E_new,           // ElGamal ciphertext (2 G_1 points)
+  │     presentation,    // (A, B): the blinded credential (2 G_1 points)
+  │     pi               // (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
+  │ )                    // (msg.sender == the new account being registered)
   └────
 
-  The contract verifies the PS signature and NIZK proof using the
-  `ecPairing' precompile (address `0x08'), `ecMul', and `ecAdd'.  Gas
-  cost: ~235,000 gas, paid once per account.
+  The contract verifies the credential proof (one three-pair pairing
+  product), the ElGamal and account-key relations and the Fiat-Shamir
+  challenge using the `ecPairing' precompile (address `0x08'), `ecMul',
+  and `ecAdd'.  Gas cost: 443,892 gas measured on the A' branch with an
+  in-process EVM (472,630 before it), paid once per account.
 
   After registration, `isVerified(alice_new_address) == true'.  The
   credential is stored on-chain as an ElGamal ciphertext and an identity
@@ -343,38 +381,51 @@ Table of Contents
 ◊ 1.1.1.5 What the World Sees
 
   Alice creates five accounts over two years.  Each registers a
-  credential `(pk_i, E_i, sigma'_i, pi_i)'.  An observer can verify:
+  credential `(pk_i, E_i, (A_i, B_i), pi_i)'.  An observer can verify:
 
-  • Each `sigma'_i' was produced by the known issuer – the pairing check
-    passes.
-  • Each `E_i' encrypts the identity that `sigma'_i' signs – the proof
-    `pi_i' confirms it.
-  • Whether any two credentials belong to the same person – *no*.
+  • Each `(A_i, B_i)' presents a credential from the known issuer – the
+    proof's pairing product passes.
+  • Each `E_i' encrypts the identity that `(A_i, B_i)' presents – the
+    same proof confirms it.
+  • Whether any two registrations belong to the same person – *no*.
 
-  PS rerandomization is /statistically/ unlinkable – not merely
-  computationally hard to correlate, but information-theoretically
-  impossible.  The credentials contain zero bits of mutual information.
-  Alice's inheritance account, her walking-around-money account, her
-  savings account – each carries the issuer's stamp of authenticity,
-  each is cryptographically invisible to the others.
+  Nor can a party who /knows/ Alice's identity scalar do better.  The
+  presentation, and the one point derivable from its proof, are uniform
+  – the same distribution for every identity, information-theoretically
+  – and the ElGamal ciphertexts are testable only by breaking DDH.  The
+  earlier design published a rerandomized signature instead, which
+  verified against a known `m': a candidate test the issuer and every
+  past counterparty could run over all registrations.  The A'
+  presentation removes it; its review is outstanding.  Alice's
+  inheritance account, her walking-around-money account, her savings
+  account – each carries the issuer's stamp of authenticity, each is
+  cryptographically invisible to the others.
 
 
-◊ 1.1.1.6 Epoch-Based Credential Renewal
+◊ 1.1.1.6 Liveness Is Membership
 
-  If the issuer revokes Alice's identity (fraud, death, court order),
-  all her derived credentials must be invalidated – without linking
-  them.
+  If Alice's registry withdraws its certification (fraud, death, court
+  order), everything that relies on her being in good standing must stop
+  accepting her – without linking her accounts.
 
-  Credentials carry an expiry epoch (e.g., one year).  The issuer
-  publishes epoch keys; credential derivation requires the current epoch
-  key.  Revocation means the issuer refuses to provide Alice's next
-  epoch key.  Expired credentials are rejected at `isVerified' time.
-  Alice must periodically re-derive from a fresh issuance – giving the
-  issuer a natural checkpoint for continued eligibility.
+  Registration does not lapse: an account's credential binding is a fact
+  about the past and stays true.  What lapses is /membership/.  Each
+  registry keeps a subtree of the identities it currently holds in good
+  standing, with salted leaves nobody else can test ([The Identity
+  Accumulator]).  Renewal is the registry continuing to include Alice;
+  revocation is clearing her leaf.  Every check that asks whether she is
+  live – a Notes spend, an attribute proof a counterparty asks for, an
+  insurer's attestation – is a membership proof against a posted root no
+  older than the checker allows, so a revoked holder proves nothing once
+  the roots from before the clearance age out.
 
-  This fits Alberta Buck's model: the issuer remains the trust anchor
+  This fits Alberta Buck's model: the registry remains the trust anchor
   for "is this person still in good standing," which is the real-world
-  question regardless of the cryptography.
+  question regardless of the cryptography, and answering it never
+  re-issues the identity or links the accounts it backs.
+
+
+  [The Identity Accumulator] See section 2
 
 
 1.2 Accounts Belong to Someone
@@ -434,17 +485,17 @@ Table of Contents
      in her Holochain wallet.  (See [The Identity Fountain] for the full
      PS construction.)
 
-  2. *Derivation*: For each Ethereum account, Alice's wallet
-     rerandomizes the PS signature, generates a fresh identity key pair,
-     encrypts her identity under the new key using ElGamal, and produces
-     a NIZK proof linking the rerandomized signature to the ciphertext.
-     This runs entirely offline.
+  2. *Derivation*: For each Ethereum account, Alice's wallet blinds the
+     PS signature into a presentation `(A, B)', generates a fresh
+     identity key pair, encrypts her identity under the new key using
+     ElGamal, and produces a NIZK proof linking the presentation to the
+     ciphertext and to the account key.  This runs entirely offline.
 
   3. *Registration*: Alice registers the derived credential `(pk,
-     E_alice, sigma', pi)' in the on-chain IdentityRegistry.  The
-     contract verifies the PS signature and NIZK proof via the
-     `ecPairing' precompile (`235,000 gas, one-time).  After
-     registration, ~isVerified(alice) == true'.
+     E_alice, (A, B), pi)' in the on-chain IdentityRegistry.  The
+     contract verifies the credential proof via the `ecPairing'
+     precompile (443,892 gas measured, one-time).  After registration,
+     `isVerified(alice) == true'.
 
   4. *Re-encryption*: When Alice must identify herself to counterparty
      Bob (e.g., during an `approve' call on the BUCK contract), she
@@ -530,8 +581,8 @@ Table of Contents
     operations.
   • *Precompile efficiency*: per-transaction Chaum-Pedersen verification
     uses `ecMul' / `ecAdd' (`29,000 gas).  One-time credential
-    registration uses ~ecPairing' for PS signature verification
-    (~235,000 gas).
+    registration uses ~ecPairing' for the credential proof (443,892 gas
+    measured).
   • *No cross-group compatibility issues*: since all participants,
     issuers, and credentials use the same curve, re-encryption between
     any two participants is always algebraically compatible.
@@ -557,8 +608,9 @@ Table of Contents
   The Chaum-Pedersen protocol[3] is a sigma protocol (Schnorr family)
   that proves two ElGamal ciphertexts encrypt the same message point,
   without revealing the message.  Made non-interactive via the
-  Fiat-Shamir heuristic, the proof is compact (~128 bytes: two scalars
-  and two curve points) and verification requires only 3-4 multi-scalar
+  Fiat-Shamir heuristic, the proof is compact (the on-chain `CPProof'
+  carries three scalars `(e, s1, s2)' and three G1 commitment points
+  `(T1, T2, T3)') and verification requires only 3-4 multi-scalar
   multiplications.
 
 
@@ -569,7 +621,7 @@ Table of Contents
   │ Registered credential (verified at registration via PS signature + NIZK):
   │   E_alice = (R_a, C_a) = (r_a * G,  r_a * pk_alice + M)
   │   where M = m * G  (identity encoded as a curve point, m = H(identity_data))
-  │   Rerandomized PS signature sigma' verified at registration (not consulted again)
+  │   Credential presentation (A, B) proven at registration (not consulted again)
   │ 
   │ Alice's re-encryption for Bob:
   │   E_bob = (R_b, C_b) = (r_b * G,  r_b * pk_bob + M)
@@ -607,7 +659,8 @@ Table of Contents
   │   E_bob   = (R_b, C_b)     -- from Alice's approve() calldata
   │   pk_alice                 -- from IdentityRegistry
   │   pk_bob                   -- from IdentityRegistry
-  │   proof   = (e, s1, s2)    -- Fiat-Shamir challenge and responses
+  │   proof   = (e, s1, s2, T1, T2, T3)  -- challenge, two responses, and the
+  │                                      -- three G1 commitments (CPProof struct)
   │ 
   │ Verify:
   │   Recompute challenge e from commitments
@@ -625,13 +678,17 @@ Table of Contents
   prevent replay and malleability:
 
   ┌────
-  │ e = H(G, pk_alice, pk_bob, R_a, C_a, R_b, C_b, T1, T2,
-  │       msg.sender, spender, block.chainid)
+  │ e = H(R_a, C_a, R_b, C_b, pk_alice, pk_bob, T1, T2, T3,
+  │       msg.sender, spender, block.chainid, registry,
+  │       keccak("AlbertaBuck/FiatShamir/IdentityRegistry/Approve/v2"))
   └────
 
   Including `msg.sender' and `spender' (Ethereum addresses) binds the
   proof to the specific transaction context.  Including `block.chainid'
-  prevents cross-chain replay.  On-chain, `msg.sender' is authenticated
+  and the registry address prevents cross-chain and cross-deployment
+  replay, and the final domain word keeps the transcript out of every
+  other protocol's range: each sigma protocol in the system ends its
+  challenge in its own v2 tag.  On-chain, `msg.sender' is authenticated
   by ECDSA and `spender' is a calldata argument to `approve()', but
   including them in the hash explicitly prevents a proof generated for
   one `(sender, spender)' pair from being replayed in another context.
@@ -665,62 +722,63 @@ Table of Contents
 
 ◊ 1.5.4.2 One-Time (PS Signature + NIZK Verification at Registration)
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Operation                    Count  Gas each  Total          
-  ──────────────────────────────────────────────────────────────
-   `ecPairing' (precompile)       3-4  34,000    147,000        
-   `ecPairing' base cost            1  45,000    45,000         
-   `ecMul' (NIZK verification)    3-4  6,000     24,000         
-   `ecAdd' (NIZK verification)    3-4  150       600            
-   Calldata + SSTORE overhead                    ~10,000        
-   *Total*                                       *~235,000 gas* 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Operation (measured, in-process EVM)                            Gas     
+  ─────────────────────────────────────────────────────────────────────────
+   `register', A' verifier (three pairings, 772 B calldata)        443,892 
+   `register', pre-A' verifier (four pairings, 740 B)              472,630 
+   `trustIssuer' with the `Y1' consistency check, once per issuer  394,115 
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  The NIZK proof linking the PS signature to the ElGamal ciphertext is a
+  The NIZK proof linking the presentation to the ElGamal ciphertext is a
   standard Schnorr-family sigma protocol – /not/ a Groth-Sahai proof.
-  The PS verification relation `e(sigma'_1, X + m * Y) = e(sigma'_2,
-  g_2)' is /linear/ in `m': the public inputs `sigma'_1, sigma'_2, X, Y,
-  g_2' are fixed curve points, and the secret `m' enters linearly via `m
-  * Y'.  A single challenge-response pair binds `m' to both the pairing
-  equation and the ElGamal ciphertext.  The pairing is computed by the
-  /verifier/ on public inputs; the prover demonstrates knowledge of `m'
-  via scalar responses.  No bilinear-map proof system is needed.
+  The presentation relation `e(B, g_2) = e(A, X) * e(m * A + b * G, Y)'
+  is /linear/ in the hidden exponents `(m, b)': the public inputs `A, B,
+  X, Y, g_2' are fixed curve points, and the secrets enter linearly in
+  the `G_1' argument paired with `Y'.  A single response `s_m' binds `m'
+  to both the pairing equation and the ElGamal ciphertext.  The pairing
+  is computed by the /verifier/ on public inputs; the prover
+  demonstrates knowledge of `m' via scalar responses.  No bilinear-map
+  proof system is needed.
 
   The concrete verification protocol:
 
   ┌────
   │ Public inputs:
-  │   sigma' = (sigma'_1, sigma'_2)  -- rerandomized PS signature (G_1)
+  │   (A, B)                         -- credential presentation (G_1)
   │   E_new  = (R, C)                -- ElGamal ciphertext (G_1)
   │   pk_new                         -- identity public key (G_1)
-  │   (X, Y)                         -- issuer public key (G_2)
+  │   (X, Y)                         -- issuer public key (G_2); Y1 = y*G is used by the holder only
   │   g_2                            -- generator (G_2)
   │ 
-  │ Proof:  pi = (e, s_m, s_r)
+  │ Proof:  pi = (e, s_m, s_b, s_r, s_sk, C1, T_C, T_R, T_key)
   │ 
   │ Verifier computes:
-  │   // (a) PS signature check via ecPairing precompile:
-  │   //     Reconstruct the commitment A = s_m * sigma'_1 - e * sigma'_2
-  │   //     in G_1, then verify the pairing product equation:
-  │   A_ps = ecMul(sigma'_1, s_m) + ecMul(sigma'_2, -e)    // 2 ecMul + 1 ecAdd
-  │   ecPairing([A_ps, Y], [ecMul(sigma'_1, e), X],
-  │             [ecMul(sigma'_2, -e), g_2]) == 1            // 3 pairings
-  │ 
-  │   // (b) ElGamal consistency check (pure G_1 arithmetic):
-  │   //     s_m * G + s_r * pk_new  ==  e * C + T_b
-  │   //     s_r * G                 ==  e * R + T_r
-  │   //     where T_b, T_r are the prover's commitments (included in proof)
-  │ 
-  │   // (c) Fiat-Shamir challenge reconstruction:
-  │   e' = H(sigma', E_new, pk_new, A_ps, T_b, T_r, registrant_address)
+  │   // (g) guards: A != O, B != O, pk_new != O, R != O; scalars canonical.
+  │   //     A = O is security critical: the pairing product below then holds for every m.
+  │   // (fs) Fiat-Shamir challenge reconstruction:
+  │   e' = H(A, B, R, C, pk_new, C1, T_C, T_R, T_key,
+  │          msg.sender, chainid, address(this), DOMAIN_v3)
   │   require(e' == e)
+  │   // (b), (c) ElGamal consistency (pure G_1 arithmetic):
+  │   //     s_m * G + s_r * pk_new  ==  e * C + T_C
+  │   //     s_r * G                 ==  e * R + T_R
+  │   // (k) account key:
+  │   //     s_sk * G                ==  T_key + e * pk_new
+  │   // (a') credential presentation via the ecPairing precompile, three pairs.
+  │   //     The one commitment C1 = m~*A + b~*G covers both hidden exponents,
+  │   //     so no proof field reveals m*A on its own; the only derivable
+  │   //     point is L/e = m*A + b*G, uniform and the same for every m.
+  │   L = ecMul(A, s_m) + ecMul(G, s_b) - C1                 // 2 ecMul + 2 ecAdd
+  │   ecPairing([L, Y], [ecMul(A, e), X], [ecMul(B, -e), g_2]) == 1
   └────
 
-  Part (a) uses the `ecPairing' precompile (3 pairs: `147K gas).  Parts
-       (b) and (c) use ~ecMul' / `ecAdd' (~30K gas).  Total: ~235K gas.
-       This is a standard Schnorr-family sigma protocol applied to a
-       linear pairing relation – the same class of proof used in BLS
-       signature verification and PS credential presentation protocols.
+  Part (a') is one three-pair pairing product (the pre-A' verifier spent
+  four pairs on an unmerged `Y' term).  Parts (b), (c) and (k) use
+  `ecMul' / `ecAdd'.  Total: 443,892 gas measured, including calldata,
+  hashing and storage.  This is a standard Schnorr-family sigma protocol
+  applied to a linear pairing relation – the same class of proof used in
+  BLS signature verification and PS credential presentation protocols.
 
   This one-time registration cost is comparable to deploying a small
   contract.  For an account that will hold meaningful value and transact
@@ -729,7 +787,91 @@ Table of Contents
   performed /per transaction/ if used for re-encryption proofs.
 
 
-2 Attacks and Defenses
+2 The Identity Accumulator: Certified Attributes Without a Scan
+═══════════════════════════════════════════════════════════════
+
+  Registration proves an account belongs to /some/ certified identity.
+  Many checks need more: that the identity is in good standing today,
+  that it is over eighteen, that an insurer is licensed to write a
+  policy of this size.  Each such fact is a membership in a set somebody
+  certifies, and the system keeps those sets in one accumulator whose
+  root is on chain.  The constraint that shapes it is the one that
+  shaped the presentation: nobody holding identity scalars – the issuer,
+  a registry, a past counterparty – may be able to test which sets a
+  person is in.
+
+
+2.1 Subtrees, leaves and the posted root
+────────────────────────────────────────
+
+  Every certifying authority keeps subtrees of Poseidon leaves.  An
+  identity registry's are /private/, of depth 12, and its leaves are
+  salted:
+
+  ┌────
+  │ identity_leaf_salted(M, salt) = Poseidon(tag_S, M.x, M.y, salt)
+  │ receiving_leaf(m, k, salt)    = Poseidon(tag_R, m, k, salt)
+  └────
+
+  The salt derives from the holder's wallet secret, never from `m', so a
+  party holding every scalar it ever certified and the whole published
+  subtree decides no membership.  The second form pairs an identity with
+  the key its Notes are addressed to (/Notes/, "The Receiving Key").
+  Institutions whose membership is a fact they advertise – an insurer's
+  licence, its permitted scopes – sit in /public/ subtrees with the
+  unsalted leaf `Poseidon(tag_I, M.x, M.y)'.  Each leaf function leads
+  with its own `AlbertaBuck/Accumulator/Leaf/.../v2' tag.
+
+  An aggregator's tree, of depth 20, has the subtree roots for leaves.
+  Every level hashes alike, so a subtree path and an aggregator path
+  compose into one path of 32 levels, and a proof can hide which
+  authority certified the leaf.  Governance appoints one /root
+  authority/ per deployment, which enrolls each subtree at an aggregator
+  slot and appoints the aggregator; the aggregator alone posts roots,
+  into a ring of 256 records with their posting times.  Each consumer
+  declares the oldest root it accepts – Notes seven days, the insurer
+  gate one day – and that age is the protocol's statement of how long a
+  revoked member can still prove membership.
+
+  Admission is certification.  `register' and `bindContract' refuse a
+  caller-supplied leaf, and must: a registration that accepted any leaf
+  would accept one pairing any identity with any key.
+
+
+2.2 Attribute proofs belong to the holder
+─────────────────────────────────────────
+
+  A feature check is a proof the holder produces, not a lookup a
+  verifier runs: one path per claimed subtree, all against one posted
+  root, and the verifier names the subtrees it requires and the maximum
+  root age it accepts.  A counterparty that needs durable evidence – a
+  merchant selling to adults, a lender checking residency – captures the
+  proof in the payment's receipt.  Nobody else learns the holder was
+  asked.
+
+  Mutable facts, an address or a region, are re-associations: the
+  authority inserts a fresh leaf under a new salt in the subtree for the
+  new value and clears the old one, so the two leaves do not link for
+  anyone lacking the authority's own records, and the authority keeps
+  the current association only.
+
+
+2.3 Insurers: a public attestation the credit gate reads
+────────────────────────────────────────────────────────
+
+  An insurance regulator is a periodic attestor with public subtrees,
+  one per predicate: standing, a face band on a ladder of powers of ten,
+  each permitted depreciation model, the maximum depreciation and
+  premium rates, and each asset scope.  Once per review period the
+  insurer proves its memberships to `BuckCredit.attestInsurer', together
+  with an opening of its registered identity bound to its account, and
+  the envelope is cached with an expiry; every `createCredit' then
+  checks the credit's parameters against it (/Ethereum/, "The Insurer
+  Gate").  The regulator attests what it already reviews; the chain
+  holds it to the result.
+
+
+3 Attacks and Defenses
 ══════════════════════
 
   Nine adversarial scenarios follow – from a sanctioned individual
@@ -745,24 +887,26 @@ Table of Contents
 
   ┌────
   │ Issuer PS-signs identity m              --> identity is genuine
-  │ Alice derives (E_alice, sigma', pi)     --> credential is unlinkable
-  │ PS + NIZK verified at registration      --> credential is issuer-authorized
+  │ Alice derives (E_alice, (A, B), pi)     --> presentation hides the credential
+  │ credential proof verified at registration --> credential is issuer-authorized
   │ E_alice stored in registry              --> contract reads the genuine credential
   │ Chaum-Pedersen proof verified           --> E_bob encrypts same identity as E_alice
   │ Only Bob can decrypt E_bob              --> identity revealed only to counterparty
   └────
 
-  Breaking any link requires breaking either the q-SDH assumption (PS
-  signature unforgeability), the discrete logarithm assumption on
-  alt_bn128 (Chaum-Pedersen soundness, ElGamal security), or ECDSA
-  (Ethereum transaction authenticity) – all standard hardness
-  assumptions underpinning Ethereum's own security.
+  Breaking any link requires breaking either PS signature unforgeability
+  in the committed-message key form (the issuer publishes `y * G'), the
+  discrete logarithm assumption on alt_bn128 (Chaum-Pedersen soundness,
+  ElGamal security; DDH for unlinkability of the ciphertexts), or ECDSA
+  (Ethereum transaction authenticity).  All but the PS assumption
+  underpin Ethereum's own security; the PS assumption is the credential
+  scheme's own.
 
 
-2.1 Attack 1: Alice Substitutes a False Identity for Bob
+3.1 Attack 1: Alice Substitutes a False Identity for Bob
 ────────────────────────────────────────────────────────
 
-2.1.1 Scenario
+3.1.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice is a sanctioned individual.  She completed KYC under her real
@@ -781,7 +925,7 @@ Table of Contents
   Chaum-Pedersen proof tying it to her registry credential.
 
 
-2.1.2 Why It Fails
+3.1.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The Chaum-Pedersen verification checks:
@@ -814,7 +958,7 @@ Table of Contents
   mathematically non-existent.
 
 
-2.1.3 What the Contract Sees
+3.1.3 What the Contract Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   `approve()' reverts: "Re-encryption proof invalid."  The transaction
@@ -823,7 +967,7 @@ Table of Contents
   transaction – no information about Alice's intent leaks.
 
 
-2.1.4 Cost to Alice
+3.1.4 Cost to Alice
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   She wasted gas on a failed transaction.  Her address is still
@@ -831,10 +975,10 @@ Table of Contents
   Nothing has changed.
 
 
-2.2 Attack 2: Alice Forges an Issuer Credential
+3.2 Attack 2: Alice Forges an Issuer Credential
 ───────────────────────────────────────────────
 
-2.2.1 Scenario
+3.2.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice never completed KYC, or completed KYC but wants a credential
@@ -852,22 +996,24 @@ Table of Contents
   She attempts to register this credential in the IdentityRegistry.
 
 
-2.2.2 Why It Fails
+3.2.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  The IdentityRegistry verifies the Pointcheval-Sanders signature
-  against trusted issuer public keys registered in the
-  TrustedIssuersRegistry (part of the ERC-3643 framework[4]).
+  The IdentityRegistry verifies the Pointcheval-Sanders credential proof
+  against trusted issuer public keys it stores itself (`trustIssuer';
+  the ERC-3643 framework[4] names the same role TrustedIssuersRegistry).
   Registration checks the pairing equation:
 
   ┌────
-  │ e(sigma'_1, X + m * Y) == e(sigma'_2, g_2)
+  │ e(B, g_2) == e(A, X) * e(m * A + b * G, Y)
   └────
 
-  where `(X, Y)' is the trusted issuer's public key in `G_2'.  Alice
-  does not know the issuer's secret key `(x, y)', so she cannot produce
-  a `sigma'' that satisfies this equation for any `m' – let alone for
-  `m_fake'.  The PS signature is unforgeable under the q-SDH assumption.
+  where `(X, Y)' is the trusted issuer's public key in `G_2'.  An
+  accepting proof extracts `(m, b)' with `(A, B - b * Y1)' a plain PS
+  signature on `m'.  Alice does not know the issuer's secret key `(x,
+  y)', so she cannot produce a presentation with an accepting proof for
+  any `m' she was not issued – let alone for `m_fake'.  The PS signature
+  is unforgeable in the committed-message key form.
 
   Even if Alice could somehow produce a valid-looking PS signature (she
   cannot), the NIZK proof `pi' must prove that the ElGamal ciphertext
@@ -878,18 +1024,18 @@ Table of Contents
   in the history of elliptic curve cryptography.
 
 
-2.2.3 What the Contract Sees
+3.2.3 What the Contract Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  `registerCredential()' reverts: "Invalid issuer signature."  Alice is
-  not registered; `isVerified(alice) == false'.  She cannot participate
-  in any BUCK operation requiring identity.
+  `register()' reverts: "bad presentation".  Alice is not registered;
+  `isVerified(alice) == false'.  She cannot participate in any BUCK
+  operation requiring identity.
 
 
-2.3 Attack 3: Alice and Complicit Bob Launder With False Identities
+3.3 Attack 3: Alice and Complicit Bob Launder With False Identities
 ───────────────────────────────────────────────────────────────────
 
-2.3.1 Scenario
+3.3.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice and Bob are both criminals.  Both have legitimate PS-verified
@@ -903,7 +1049,7 @@ Table of Contents
   genuine.
 
 
-2.3.2 Why It Fails
+3.3.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice's `approve()' call must pass Chaum-Pedersen verification.  The
@@ -935,7 +1081,7 @@ Table of Contents
   `approve', and the proof verification succeeded).
 
 
-2.3.3 What the Contract Sees
+3.3.3 What the Contract Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   If Alice submits false data: `approve()' reverts ("Re-encryption proof
@@ -947,10 +1093,10 @@ Table of Contents
   identity trail is genuine and court-recoverable.
 
 
-2.4 Attack 4: Alice Repudiates a Transaction She Made
+3.4 Attack 4: Alice Repudiates a Transaction She Made
 ─────────────────────────────────────────────────────
 
-2.4.1 Scenario
+3.4.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice transacted legitimately with Bob (a law-abiding merchant).
@@ -961,7 +1107,7 @@ Table of Contents
   word.
 
 
-2.4.2 Why It Fails
+3.4.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The on-chain record contains everything needed to verify, without
@@ -994,7 +1140,7 @@ Table of Contents
   └────
 
 
-2.4.3 What the Court Sees
+3.4.3 What the Court Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   An unbroken, cryptographically verified chain from issuer to decrypted
@@ -1002,10 +1148,10 @@ Table of Contents
   verification records that she cannot alter or dispute.
 
 
-2.5 Attack 5: Criminal Bob Denies Receiving Alice's Identity
+3.5 Attack 5: Criminal Bob Denies Receiving Alice's Identity
 ────────────────────────────────────────────────────────────
 
-2.5.1 Scenario
+3.5.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Bob is a criminal merchant.  Alice (law-abiding) transacted with Bob.
@@ -1015,7 +1161,7 @@ Table of Contents
   customer.
 
 
-2.5.2 Why It Fails
+3.5.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The `IdentityExchange(alice, bob, E_bob)' event is on-chain and
@@ -1045,7 +1191,7 @@ Table of Contents
   Chaum-Pedersen proof verification is an on-chain fact.
 
 
-2.5.3 What the Court Sees
+3.5.3 What the Court Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   `E_bob' is on-chain.  The proof that it contains Alice's real identity
@@ -1053,10 +1199,10 @@ Table of Contents
   record is self-authenticating.
 
 
-2.6 Attack 6: Eve Links Alice's Identities Across Counterparties
+3.6 Attack 6: Eve Links Alice's Identities Across Counterparties
 ────────────────────────────────────────────────────────────────
 
-2.6.1 Scenario
+3.6.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Eve is a surveillance actor (competitor, stalker, rogue state).  She
@@ -1074,7 +1220,7 @@ Table of Contents
   these transactions reveal a pattern (e.g., Alice's spending habits).
 
 
-2.6.2 Why It Fails (Content Privacy Holds)
+3.6.2 Why It Fails (Content Privacy Holds)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Each re-encryption uses independent randomness:
@@ -1102,7 +1248,7 @@ Table of Contents
   a person.
 
 
-2.6.3 What Eve Sees
+3.6.3 What Eve Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Pseudonymous Ethereum addresses and opaque ciphertexts that are
@@ -1110,7 +1256,7 @@ Table of Contents
   of any ERC-20 token, plus meaningless (to her) encrypted blobs.
 
 
-2.6.4 Cross-Account Unlinkability
+3.6.4 Cross-Account Unlinkability
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   A stronger version of this attack: Eve suspects that addresses
@@ -1118,18 +1264,19 @@ Table of Contents
   each address's registered credential in the IdentityRegistry.
 
   Each credential was derived independently through the Identity
-  Fountain: different rerandomized PS signatures, different identity key
-  pairs, different ElGamal ciphertexts with independent randomness.  PS
-  rerandomization is /statistically/ unlinkable – not merely
-  computationally hard to correlate, but information-theoretically
-  impossible.  The credentials contain zero bits of mutual information.
+  Fountain: different credential presentations, different identity key
+  pairs, different ElGamal ciphertexts with independent randomness.  The
+  presentations are uniform pairs whatever the identity –
+  information-theoretically independent of it – and the ciphertexts are
+  unlinkable under DDH.  Knowing Alice's identity scalar does not help:
+  the presentation fails the signature test for every candidate.
 
   Eve's only path to linking accounts is off-chain analysis: timing,
   amounts, behavioral patterns.  The cryptographic identity layer gives
   her nothing.
 
 
-2.6.5 Scope of Unlinkability
+3.6.5 Scope of Unlinkability
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alberta Buck provides /identity privacy/ (no observer can determine
@@ -1152,7 +1299,7 @@ Table of Contents
   patterns, not people.
 
 
-2.6.6 Why \( M \) Is the Same Across All Accounts
+3.6.6 Why \( M \) Is the Same Across All Accounts
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   A natural concern: if Alice derives ten accounts from the Identity
@@ -1165,28 +1312,35 @@ Table of Contents
   account used a different \( m \), the two-channel verification would
   break: Bob couldn't verify that the `identity_data' he received
   matches what the issuer certified.  The Identity Fountain protects the
-  /credential wrapping/ (\( \sigma' \), \( pk \), \( E \)), not the
+  /credential wrapping/ (\( (A, B) \), \( pk \), \( E \)), not the
   identity scalar itself.
 
   The privacy boundary is:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Observer                  Can link accounts?  Why?                                         
-  ────────────────────────────────────────────────────────────────────────────────────────────
-   Eve (passive, on-chain)   NO                  All public artifacts are independent random  
-                                                 values (statistical unlinkability)           
-   Bob (authorized)          Learns one account  By design – the purpose of `approve'         
-   Bob + Carol (colluding)   Yes, via \( M \)    But both already know Alice's name from      
-                                                 `identity_data' exchange                     
-   Issuer (on-chain only)    NO                  Knows every \( M \) it issued, yet cannot    
-                                                 plaintext-check \( M \) against any on-chain 
-                                                 \( E \) (IND-CPA / DDH) nor recognise its    
-                                                 rerandomised PS credential (statistical)     
-   Issuer (given a receipt)  Names the person    A surrendered receipt carries account \(     
-                                                 ↔ M \); the issuer maps \( M \)              
-                                                 to the real person – it /verifies/ a link    
-                                                 others surrender, never /produces/ one       
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Observer                  Can link accounts?   Why?                                            
+  ────────────────────────────────────────────────────────────────────────────────────────────────
+   Eve (passive, on-chain)   NO                   All public artifacts are independent random     
+                                                  values (presentation: information-theoretic;    
+                                                  ciphertext: DDH)                                
+   Bob (authorized)          Learns one account   By design – the purpose of `approve'            
+   Bob + Carol (colluding)   Yes, via \( M \)     But both already know Alice's name from         
+                                                  `identity_data' exchange                        
+   Issuer (on-chain only)    NO                   Knows every \( M \) it issued, yet cannot       
+                                                  plaintext-check \( M \) against any on-chain    
+                                                  \( E \) (IND-CPA / DDH) nor recognise its       
+                                                  test its credential presentation, which is      
+                                                  uniform for every identity (A'; the pre-A'      
+                                                  rerandomised signature was testable)            
+   Counterparty who learned  NO (other accounts)  Knowing \( m \) tests neither a presentation    
+   \( m \) (Bob, later)                           nor, under DDH, a ciphertext; nor does it let   
+                                                  him register under \( m \) (needs \( \sigma \), 
+                                                  fresh \( b \))                                  
+   Issuer (given a receipt)  Names the person     A surrendered receipt carries account \(        
+                                                  ↔ M \); the issuer maps \( M \)                 
+                                                  to the real person – it /verifies/ a link       
+                                                  others surrender, never /produces/ one          
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Before `approve', Alice's accounts are unlinkable to everyone.  After
   `approve', only that specific counterparty learns Alice's identity for
@@ -1201,10 +1355,10 @@ Table of Contents
 <../alberta-buck-identity-example/#why-m-is-the-same-across-all-accounts----and-why-thats-correct>
 
 
-2.7 Attack 7: Alice Uses a Revoked or Expired Credential
+3.7 Attack 7: Alice Uses a Revoked or Expired Credential
 ────────────────────────────────────────────────────────
 
-2.7.1 Scenario
+3.7.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice's identity credential was revoked by the issuer (e.g., her
@@ -1213,37 +1367,47 @@ Table of Contents
   old `E_alice' and `sigma' and attempts to continue transacting.
 
 
-2.7.2 Why It Fails
+3.7.2 Why It Fails
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  The IdentityRegistry tracks credential validity.  When the issuer
-  revokes Alice's credential:
+  Revocation clears Alice's leaf from her registry's subtree and the
+  aggregator posts the new root.  Her registrations and old proofs
+  remain mathematically valid – the cryptography is eternal – but every
+  check that asks whether she is live asks for membership: a Notes spend
+  proves a certified leaf against a root Notes accepts for seven days,
+  an insurer's attestation against a root one day old, a counterparty's
+  attribute check against a root of the age the counterparty declares.
+  No root posted after the clearance contains her leaf, so once the
+  older roots age out she has nothing to prove against.
 
-  ┌────
-  │ identityRegistry.revokeIdentity(alice_address)
-  └────
+  The clearance links nothing.  The cleared leaf was a hiding
+  commitment, so an observer learns that a member was removed, not
+  which, and the registry never needed Alice's accounts to remove her –
+  which it could not have found anyway: under the A' presentation no one
+  can find a holder's addresses from chain data.
 
-  Subsequent calls to `isVerified(alice)' return false.  Alice's
-  `approve' call – and any `transfer' or `transferFrom' – reverts at the
-  identity check, before the Chaum-Pedersen proof is even evaluated.
+  What revocation does not do is freeze an account.  A registered
+  account's `approve' and `transfer' are gated on its registration,
+  which does not lapse; a counterparty that needs to know its payer is
+  in good standing asks for a membership proof, the way a merchant asks
+  for current ID, and the receipt captures it.  A compromised issuer key
+  is the one case handled at the registry: `revokeIssuer' refuses new
+  registrations under it.
 
-  Alice's old credential and proofs remain mathematically valid (the
-  cryptography is eternal), but the contract refuses to accept them
-  because her registration is no longer active.  The revocation is a
-  separate on-chain state, controlled by the trusted issuer.
 
-
-2.7.3 What the Contract Sees
+3.7.3 What the Contract Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  `isVerified(alice) == false'.  Transaction reverts immediately.  The
-  still-valid-but-revoked credential is never consulted.
+  A spend or attestation naming a root posted after the clearance has no
+  witness; one naming an older root is refused once that root ages past
+  the consumer's maximum.  The still-valid-but-revoked credential is
+  never consulted.
 
 
-2.8 Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
+3.8 Attack 8: Unwitting Bob Receives a Transaction From Criminal Alice
 ──────────────────────────────────────────────────────────────────────
 
-2.8.1 Scenario
+3.8.1 Scenario
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Bob is a law-abiding merchant running a BUCK-accepting storefront.
@@ -1257,7 +1421,7 @@ Table of Contents
   the receipt exonerate him?
 
 
-2.8.2 Why the Scheme Protects Bob
+3.8.2 Why the Scheme Protects Bob
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Bob received Alice's re-encrypted identity `E_bob' during the
@@ -1285,7 +1449,7 @@ Table of Contents
   convicts Alice.
 
 
-2.8.3 What the Court Sees
+3.8.3 What the Court Sees
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Bob holds a provably genuine receipt.  Alice's identity was valid at
@@ -1293,7 +1457,7 @@ Table of Contents
   of Bob's compliance, not his complicity.
 
 
-2.9 Attack 9: Systematic Forgery – Alice Attacks the Trust Chain
+3.9 Attack 9: Systematic Forgery – Alice Attacks the Trust Chain
 ────────────────────────────────────────────────────────────────
 
   The previous attacks target individual operations.  This attack
@@ -1304,65 +1468,63 @@ Table of Contents
   The trust chain has three links.  We attack each one.
 
 
-2.9.1 Link 1: PS Signature (Issuer Authority)
+3.9.1 Link 1: PS Signature (Issuer Authority)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  Alice has `(m, sigma_1, sigma_2)' from the issuer.  She produces
-  `sigma' = (t * sigma_1, t * sigma_2)'.
+  Alice has `(m, sigma_1, sigma_2)' from the issuer.  She produces the
+  presentation `(A, B) = (a * sigma_1, a * sigma_2 + b * Y1)'.
 
-  *Can she produce a `sigma'' that signs a different `m_fake'?*
+  *Can she produce a presentation, with an accepting proof, for a
+  different `m_fake'?*
 
-  PS verification checks:
-
-  ┌────
-  │ e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)
-  └────
-
-  Rearranging:
+  The registration proof is specially sound: two accepting transcripts
+  extract `(m*, b*)' such that
 
   ┌────
-  │ e(sigma'_1, Y)^m  =  e(sigma'_2, g_2) * e(sigma'_1, X)^(-1)
+  │ e(A, X + m* * Y) = e(B - b* * Y1, g_2)
   └────
 
-  The right side is fixed by `sigma'' (which Alice chose).  The left
-  side is determined by `m'.  For `sigma'' derived from the issuer's
-  signature on `m', this equation holds only for the real `m'.  Alice
-  cannot produce a valid PS signature on any `m_fake' without the
-  issuer's secret key `(x, y)'.  *Blocked by q-SDH unforgeability.*
+  i.e. `(A, B - b* * Y1)' is a plain PS signature on `m*'.  A
+  presentation accepted for `m_fake' is therefore a PS forgery on
+  `m_fake' under the issuer's key.  Alice cannot produce one without the
+  issuer's secret key `(x, y)'.  *Blocked by PS unforgeability
+  (committed-message key form).*
 
 
-2.9.2 Link 2: NIZK Proof (Binding PS Signature to ElGamal Ciphertext)
+3.9.2 Link 2: NIZK Proof (Binding PS Signature to ElGamal Ciphertext)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  Alice provides `(sigma', E_new, pk_new, pi)'.  The NIZK proof proves
-  knowledge of `(m, r)' satisfying:
+  Alice provides `((A, B), E_new, pk_new, pi)'.  The NIZK proof proves
+  knowledge of `(m, b, r, sk)' satisfying:
 
   ┌────
-  │ a) e(sigma'_1, X + m * Y) = e(sigma'_2, g_2)   -- sigma' signs m
-  │ b) C = m * G + r * pk_new                       -- E_new encrypts m
-  │ c) R = r * G                                    -- consistent randomness
+  │ a') e(B, g_2) = e(A, X) * e(m * A + b * G, Y)   -- (A, B) presents m
+  │ b)  C = m * G + r * pk_new                       -- E_new encrypts m
+  │ c)  R = r * G                                    -- consistent randomness
+  │ k)  pk_new = sk * G                              -- account key ownership
   └────
 
-  *Can she use a valid `sigma'' (signing `m') but create `E_new'
+  *Can she use a valid presentation (of `m') but create `E_new'
   encrypting `m_fake'?*
 
   The sigma protocol uses a single response scalar `s_m' that must
   simultaneously satisfy conditions (a) and (b):
 
-  • For condition (a): `s_m' encodes the real `m' (the value `sigma''
-    signs)
+  • For condition (a'): `s_m' encodes the real `m' (the value the
+    presentation carries)
   • For condition (b): `s_m' encodes whatever is in `E_new'
 
   If `E_new' encrypts `m_fake != m', no single `s_m' satisfies both
   checks.  *Blocked by sigma protocol soundness.*
 
-  *Can she forge the Fiat-Shamir challenge?* The challenge `e =
-  H(sigma', E_new, pk_new, commitments)' depends on all public inputs.
-  Finding inputs that yield a favorable challenge requires a keccak256
-  preimage attack.  *Blocked by random oracle assumption.*
+  *Can she forge the Fiat-Shamir challenge?* The challenge `e = H((A,
+  B), E_new, pk_new, commitments, registrant, chainid, registry,
+  domain)' depends on all public inputs and the context.  Finding inputs
+  that yield a favorable challenge requires a keccak256 preimage attack.
+  *Blocked by random oracle assumption.*
 
 
-2.9.3 Link 3: Chaum-Pedersen Proof (Binding Re-encryption to Registered Credential)
+3.9.3 Link 3: Chaum-Pedersen Proof (Binding Re-encryption to Registered Credential)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   At `approve()' time, Alice provides `E_bob' and a Chaum-Pedersen
@@ -1382,41 +1544,42 @@ Table of Contents
   from calldata.
 
 
-2.9.4 Critical Edge Case: The Trivial Signature
+3.9.4 Critical Edge Case: The Trivial Signature
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
-  If Alice sets `sigma' = (O, O)' where `O' is the point at infinity:
+  If Alice sets `A = O', the point at infinity, the credential term of
+  the proof's pairing product vanishes:
 
   ┌────
-  │ e(O, X + m * Y) = 1   (pairing with identity is trivial)
-  │ e(O, g_2)       = 1   (same)
+  │ e(s_m * O + s_b * G - C1, Y) * e(e * O, X) * e(-e * B, g_2)
+  │   = e(s_b * G - C1, Y) * e(-e * B, g_2)
   └────
 
-  The pairing equation `1 = 1' holds *for any `m'*.  Alice could
-  register a credential encrypting any `m_fake' she wants, produce a
-  valid-looking NIZK proof (because condition (a) is trivially
+  which `B = b * Y1' and `C1 = b' * G~ satisfy *for any `m'*.  Alice
+  could register a credential encrypting any `m_fake' she wants, produce
+  a valid-looking NIZK proof (because condition (a') is trivially
   satisfied), and the verification would pass.
 
-  She achieves this by picking `t = 0' in the rerandomization: `sigma' =
-  (0 * sigma_1, 0 * sigma_2) = (O, O)'.
+  She achieves this by picking `a = 0' in the presentation: `A = 0 *
+  sigma_1 = O'.  (The earlier published form met the same case as `t =
+  0', `sigma' = (O, O)'.)
 
-  *The fix is standard*: the PS signature specification requires
-  `sigma'_1 != O'.  The registration contract must check this before
-  evaluating the pairing:
+  *The fix is standard*: the registration contract must reject `A = O'
+  (and `B = O') before evaluating the pairing:
 
   ┌────
-  │ require(sigma_prime[0] != 0 || sigma_prime[1] != 0, "Degenerate signature");
+  │ require(!isInfinity(A) && !isInfinity(B), "Degenerate presentation");
   └────
 
   On BN254, `G_1' has prime order (cofactor 1), so there are no
-  small-order points.  The identity check `sigma'_1 != O' is the /only/
+  small-order points.  The identity check `A != O' is the /only/
   degenerate case.
 
   *Without this check, the entire fountain is broken.  With it, the
   system is sound.*
 
 
-2.9.5 Additional Attack Surfaces
+3.9.5 Additional Attack Surfaces
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   *Off-curve points*: post-Istanbul, the `ecPairing' precompile
@@ -1427,11 +1590,14 @@ Table of Contents
   `G_2' subgroup membership (EIP-197).  Alice cannot exploit small
   subgroups in the twist curve.
 
-  *Eve copies Alice's registered credential*: Eve can read `(pk, E,
-  sigma', pi)' from the chain and re-register it for her own address.
-  But Eve cannot /use/ it – the Chaum-Pedersen proof requires knowledge
-  of `sk_alice' (condition 1: `pk_alice = sk_alice * G').  A stolen
-  credential is useless without the corresponding secret key.
+  *Eve copies Alice's registered credential*: Eve can read `(pk, E, (A,
+  B), pi)' from the chain.  She cannot re-register it: the proof is
+  bound to Alice's address, chain and registry, and a fresh proof needs
+  `sk' (condition k) and the blinding `b', which never left Alice's
+  wallet.  Nor can a counterparty who has learned `m' from a receipt
+  register under it: knowing `m' gives neither `sigma' nor `b' (review
+  finding R3, closed by the A' presentation under an honest issuer).  A
+  copied credential is useless without the corresponding secrets.
 
   *Alice shares raw credential material*: Alice can give `(m, sigma)' to
   an accomplice, who can then derive valid credentials containing
@@ -1440,7 +1606,7 @@ Table of Contents
   system; it is no different from handing someone your driver's license.
 
 
-2.9.6 Verdict
+3.9.6 Verdict
 ╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The system is sound against an untrustworthy Alice who is willing to
@@ -1450,12 +1616,12 @@ Table of Contents
   chain together so that breaking any link requires breaking a standard
   hardness assumption.
 
-  One critical implementation requirement: `sigma'_1 != O' must be
-  checked at credential registration.  This is a standard requirement of
-  the Pointcheval-Sanders scheme and costs negligible gas.
+  One critical implementation requirement: `A != O' (and `B != O') must
+  be checked at credential registration; at `A = O' the credential
+  relation holds for every `m'.  The check costs negligible gas.
 
 
-2.10 Summary: Why the Scheme Defeats All Attacks
+3.10 Summary: Why the Scheme Defeats All Attacks
 ────────────────────────────────────────────────
 
   Every attack that involves substituting false identity data fails for
@@ -1468,27 +1634,31 @@ Table of Contents
   │ Therefore:          E_bob must encrypt Alice's real identity
   │ Alice cannot:       supply a different E_alice (contract reads from storage)
   │ Alice cannot:       produce a valid proof for different M (soundness)
-  │ Alice cannot:       forge the issuer's PS signature (q-SDH unforgeability)
-  │ Alice cannot:       link her accounts to each other (PS rerandomization)
+  │ Alice cannot:       forge the issuer's PS signature (PS unforgeability, committed-message key)
+  │ Alice cannot:       link her accounts to each other (hiding presentation; DDH for the ciphertexts)
+  │ Issuer cannot:      test a registration against an identity it certified (presentation is uniform)
   │ Bob cannot:         produce a different plaintext (ElGamal decryption is deterministic)
   │ Eve cannot:         decrypt E_bob (she lacks sk_bob)
-  │ Eve cannot:         link Alice's accounts (statistical unlinkability)
+  │ Eve cannot:         link Alice's accounts (presentation: information-theoretic; ciphertext: DDH)
   └────
 
   Three independent hardness assumptions protect the system:
-  1. *PS signature unforgeability* (q-SDH assumption): prevents forged
-     credentials
-  2. *Discrete logarithm hardness* (alt_bn128): prevents false
-     Chaum-Pedersen proofs and unauthorized ElGamal decryption
+  1. *PS signature unforgeability* in the committed-message key form
+     (Pointcheval-Sanders 2016, Section 6.1; the issuer publishes `y *
+     G'): prevents forged credentials and forged registrations
+  2. *Discrete logarithm hardness* (alt_bn128), with DDH for the
+     unlinkability of ciphertexts: prevents false Chaum-Pedersen proofs
+     and unauthorized ElGamal decryption
   3. *ECDSA unforgeability* (secp256k1): authenticates Ethereum
       transactions
 
-  All three assumptions also underpin Ethereum itself.  If any breaks,
-  Ethereum's own security fails first – the Alberta Buck identity system
-  does not introduce any novel cryptographic assumptions.
+  DLog, DDH and ECDSA also underpin Ethereum itself.  The PS assumption
+  is the credential scheme's own, in the key form that publishing `y *
+  G' requires; the A' presentation that rests on it is implemented on
+  branch `feature/a-prime' and awaits independent review.
 
 
-3 Identity Visibility Modes
+4 Identity Visibility Modes
 ═══════════════════════════
 
   BUCK accounts operate in one of three identity modes, which determine
@@ -1520,7 +1690,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-4 Operations Table
+5 Operations Table
 ══════════════════
 
   Every Alberta Buck operation has a defined identity requirement and
@@ -1535,7 +1705,7 @@ Table of Contents
   ERC-20, BuckCredit ERC-721, and governance contracts.
 
 
-4.1 Core BUCK (ERC-20) Operations
+5.1 Core BUCK (ERC-20) Operations
 ─────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1554,7 +1724,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-4.2 BuckCredit (ERC-721) Operations
+5.2 BuckCredit (ERC-721) Operations
 ───────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1572,7 +1742,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-4.3 BuckKController (PID Stabilization)
+5.3 BuckKController (PID Stabilization)
 ───────────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1587,7 +1757,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-4.4 Oracle Operations
+5.4 Oracle Operations
 ─────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1606,7 +1776,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-4.5 DeFi Integration (Uniswap, Lending, etc.)
+5.5 DeFi Integration (Uniswap, Lending, etc.)
 ─────────────────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1626,7 +1796,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-4.6 Identity Management
+5.6 Identity Management
 ───────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1636,6 +1806,11 @@ Table of Contents
                          (no claims yet)   (publicly identified)  PS sig       issuer PS-signs identity scalar.         
    Register in registry  Self              N/A                    Event log    Derives credential offline; registers    
                                                                                with PS signature + NIZK proof.          
+   Certify membership    Registry          N/A                    Posted root  Salted leaf into the registry's subtree; 
+                         (off chain)                                           the aggregator posts the new root.       
+   Revoke membership     Registry          N/A                    Posted root  Clears the leaf; links no accounts.      
+   Attest insurer        Insurer           Regulator              Event log    Proves its envelope once per review      
+                                           (public subtrees)                   period; gates createCredit.              
    Add public identity   Self              Trusted issuer         On-chain     Opts in to public identification.        
    claim                 KYC (topic 1)     (publicly identified)  claim        Exempts counterparties from `approve'.   
    Revoke claim          Issuer or self    N/A                    Event log    Removes a claim (e.g., expired license). 
@@ -1644,20 +1819,20 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-5 Contract Identity: How DeFi Pools Become BUCK Counterparties
+6 Contract Identity: How DeFi Pools Become BUCK Counterparties
 ══════════════════════════════════════════════════════════════
 
   Smart contracts can't do KYC, yet every BUCK transfer requires both
   parties to be /identifiable/.  The solution is *bindContract*: at
-  deployment time the operator (or an atomic
-  `BuckAwareDeployer.deployAndBind' helper) calls
-  `IdentityRegistry.bindContract(target, pk, E, isPublicIdentity_)',
-  publishing the operator's BN254 public key `pk' and ElGamal ciphertext
-  `E' against the contract's address.  `bindContract' is
-  *first-binder-wins* (anyone may bind any address whose code is
-  deployed; the deployer protects against front-running by binding
-  atomically with the deploy), the bound contract is marked
-  `isVerified[target] = true', and the boolean
+  deployment time the operator uses one of two certified paths.  A
+  contract with its own controller first calls
+  `authorizeContractBinding' and commits the exact binder, `(pk,E)', and
+  policy flags; the binder then calls `bindContract'.  A contract whose
+  authority lives in another protocol uses a narrowly audited,
+  governance-approved adapter.  The supplied Uniswap V2 and V3 adapters
+  accept only canonical pools from one immutable factory and only its
+  current registered `feeToSetter' or `owner', respectively.  The bound
+  contract is marked `isVerified[target] = true', and the boolean
   `isPublicIdentity[target]' is set per the binding.  When the spender
   or a transfer endpoint is bound under a Public Identity, the BUCK
   contract may fall back to the bound `_identityHash(target)' in
@@ -1673,43 +1848,65 @@ Table of Contents
   swaps in either direction; unverified Carol is rejected.
 
 
-5.1 What's actually wired up
+6.1 What's actually wired up
 ────────────────────────────
 
   The relevant code in `src/IdentityRegistry.sol':
 
   ┌────
-  │ /// Bind a deployed contract address to an operator-controlled identity.
-  │ /// First-binder-wins; deployers protect against front-running by binding
-  │ /// atomically alongside the deploy (BuckAwareDeployer.deployAndBind).
-  │ /// `isPublicIdentity_` selects the receipt-fragment fallback policy: if
+  │ /// An existing target authorizes this exact binder/identity/policy tuple.
+  │ function authorizeContractBinding(address binder, G1Point pk, ElGamalCT E,
+  │                                   bool isPublicIdentity_, bool isCarrying_);
+  │ 
+  │ /// Copy an already-registered operator identity onto an authorized target.
+  │ /// `isPublicIdentity_` selects the receipt-fragment fallback policy; if
   │ /// true, transfers may use the bound _identityHash on this side when no
   │ /// per-pair CP fragment exists; if false (Encrypted-Identity contract)
   │ /// the contract participates exactly like an EOA (no fallback).
+  │ /// `isCarrying_` selects the demurrage transfer flavour (service
+  │ /// contracts -- AMM pools, the Notes pool -- bind isCarrying_=true).
   │ function bindContract(
-  │     address target,
-  │     Point   calldata pk,
-  │     Cipher  calldata E,
-  │     bool             isPublicIdentity_
+  │     address              target,
+  │     BN254.G1Point calldata pk,
+  │     ElGamalCT     calldata E,
+  │     bool                 isPublicIdentity_,
+  │     bool                 isCarrying_
   │ ) external {
-  │     require(target.code.length > 0, "not a contract");
-  │     require(!isVerified[target],    "already bound");
-  │     _pks[target]                = pk;
-  │     _ciphers[target]            = E;
-  │     isVerified[target]          = true;
-  │     isPublicIdentity[target]    = isPublicIdentity_;
-  │     emit ContractBound(target, msg.sender, isPublicIdentity_);
+  │     require(target.code.length > 0, "target not a deployed contract");
+  │     require(!_isRegistered(target), "already bound");
+  │     require(_isRegistered(msg.sender), "binder not registered");
+  │     require(_samePkE(msg.sender, pk, E), "uncertified identity");
+  │     _consumeBindingControl(target, msg.sender, pk, E,
+  │                            isPublicIdentity_, isCarrying_);
+  │     _storeBinding(target, pk, E, isPublicIdentity_, isCarrying_,
+  │                   msg.sender, issuerOf[msg.sender]);
   │ }
+  │ 
+  │ /// A second overload verifies a target-bound PS credential and its
+  │ /// account-key ownership/policy authorization. Target control remains
+  │ /// mandatory.
+  │ 
+  │ /// A governance-approved adapter may bind a known-provenance contract.
+  │ /// The adapter supplies only the operator address; the registry copies
+  │ /// that registered operator's pk, E, and issuer from storage.
+  │ function bindContractFromAdapter(address target, address operator,
+  │                                  bool isPublicIdentity_, bool isCarrying_);
   └────
 
-  No `register' for the contract address (no PS signature is needed
-  because the contract has no underlying KYC credential of its own); the
-  operator's already-registered `(pk, E)' is republished against the
-  contract's address.  Whoever holds the operator's secret key `sk' can
-  decrypt every receipt that uses the bound ciphertext.
+  (`isVerified(target)' is a view returning true once `pk' is written –
+  both `register' and `bindContract' set it; reads use `pkOf' /
+  `ciphertextOf', not the illustrative `getCredential' /
+  `getIdentityKey' names used elsewhere in this document.)
+
+  No separate `register' transaction is needed for the contract address.
+  The certified-operator and adapter paths republish an
+  already-registered `(pk,E)'; the fresh-credential path verifies a PS
+  credential directly during an explicitly target-authorized bind.
+  Whoever holds the certified identity's secret key `sk' can decrypt
+  every receipt that uses the bound ciphertext.
 
 
-5.2 The interaction surface
+6.2 The interaction surface
 ───────────────────────────
 
   Public-Identity contracts compose with BUCK in two places.  Both relax
@@ -1738,30 +1935,42 @@ Table of Contents
      is no fallback for EOAs.
 
 
-[Why `approve' Is Always CP-Bound] See section 6
+[Why `approve' Is Always CP-Bound] See section 7
 
 
-5.3 Step-by-step: bringing up a BUCK/USDC AMM
+6.3 Step-by-step: bringing up a BUCK/USDC AMM
 ─────────────────────────────────────────────
 
-  Concrete deployment sequence as exercised by the integration test:
+  Production pool-admission sequence (the adapter suite exercises
+  admission; the separate V2 integration test exercises AMM transfer
+  mechanics):
 
-  1. Operator calls `UniswapV2Factory.createPair(BUCK, USDC)'.  The
-     factory deploys a new `UniswapV2Pair' at a CREATE2-deterministic
-     address.
+  1. Governance deploys and approves an `UniswapV2BindingAdapter' fixed
+     to the registry and the intended Uniswap V2 factory.  Approval is
+     an audit decision about that exact adapter and factory, not a
+     generic factory-call privilege.
 
-  2. Operator calls `reg.bindContract(pair, pk_op, E_op, true)' and
-     `reg.bindContract(router, pk_op, E_op, true)' (or atomically via
-     `BuckAwareDeployer.deployAndBind', which avoids any
-     first-binder-wins front-running between deploy and bind).  `pk_op'
-     and `E_op' are the operator's already-registered identity material.
+  2. The factory's registered `feeToSetter' calls
+     `adapter.createPairAndBind(BUCK, USDC)'.  The adapter requires that
+     no pair exists, calls `createPair', verifies both-order `getPair'
+     lookup and deployed code, then binds the pair Public/Carrying in
+     the same transaction.  The registry copies `pk_op', `E_op', and
+     issuer from the registered `feeToSetter'; the adapter cannot
+     substitute identity material.
 
-     That's the entire administrative step.  The pair and the router are
-     now valid Public-Identity BUCK counterparties; their
-     `_identityHash' is the operator's bound hash.
+     An already-created canonical pair uses `bindExistingPair'.  V3
+     follows the same pattern with `owner', `getPool', and `createPool'.
 
-  3. A verified user (Alice) approves the router for BUCK using the
-     identity-bound `approve' overload.  Alice's wallet reads
+     Stock routers do not expose an owner or governance identity and are
+     not covered by these pool adapters.  A deployment-specific router
+     adapter would need to prove creation and bind in the same
+     invocation; absent that, production must use a BUCK-aware
+     wrapper/controller rather than attributing a router to the
+     factory's governance by assumption.
+
+  3. If a separately justified deployment adapter has admitted an exact
+     router, a verified user (Alice) approves that router for BUCK using
+     the identity-bound `approve' overload.  Alice's wallet reads
      `pk_router' from `IdentityRegistry' (which is `pk_op'), decrypts
      her own stored ciphertext to recover `M', re-encrypts under
      `pk_router' to produce `E_router', generates the CP proof, and
@@ -1786,7 +1995,7 @@ Table of Contents
      TRANSFER_FAILED".
 
 
-5.4 What this means for accountability
+6.4 What this means for accountability
 ──────────────────────────────────────
 
   *The pool's identity is the operator's identity.* The bound `(pk, E)'
@@ -1805,20 +2014,19 @@ Table of Contents
 
   *The operator is the legal counterparty.* Setting up a BUCK/X AMM is
   permissionless at the factory level (anyone can call `createPair').
-  What gates the pool's usability for BUCK is `bindContract' – and
-  *whoever calls bindContract first wins*.  That is operationally
-  significant: the operator must bind atomically with the deploy (via
-  `BuckAwareDeployer.deployAndBind') to prevent an attacker from
-  front-running and binding the pool to /their/ key.  Once bound, the
-  operator's identity is the contract's identity for audit purposes.
+  What gates the pool's usability for BUCK is `bindContract', but an
+  arbitrary first caller cannot claim it: an existing pool must
+  authorize the exact binding, while an approved helper can bind a newly
+  deployed target atomically.  Once bound, the operator's identity is
+  the contract's identity for audit purposes.
 
-  `bindContract' does not require governance.  Permissioning is instead
-  a property of /how the contract is deployed/: a contract meant to be
-  operator-controlled deploys via a deployer/binder helper that performs
-  both steps atomically.  Governance plays no role.
+  Governance does not select ordinary operators, but it does approve
+  which factory helpers may use the atomic target-control exception.
+  Existing contracts express control through their own
+  controller/governance call to `authorizeContractBinding'.
 
 
-5.5 Encrypted-Identity contracts
+6.5 Encrypted-Identity contracts
 ────────────────────────────────
 
   Setting `isPublicIdentity_=false' in `bindContract' produces an
@@ -1831,7 +2039,7 @@ Table of Contents
   lack a fragment.
 
 
-6 Why `approve' Is Always CP-Bound
+7 Why `approve' Is Always CP-Bound
 ══════════════════════════════════
 
   The receipt-fragment fallback to `_identityHash' described above
@@ -1855,7 +2063,7 @@ Table of Contents
   CP-optional:
 
 
-6.1 Approve documents consent; transfer documents execution
+7.1 Approve documents consent; transfer documents execution
 ───────────────────────────────────────────────────────────
 
   In every `transferFrom' flow – DeFi routers, swap aggregators,
@@ -1874,7 +2082,7 @@ Table of Contents
   consent moment has been forgotten.
 
 
-6.2 Engagement with the BN254 identity key, not just the ETH key
+7.2 Engagement with the BN254 identity key, not just the ETH key
 ────────────────────────────────────────────────────────────────
 
   CP requires the sender's wallet to decrypt its own `E_alice' with
@@ -1890,7 +2098,7 @@ Table of Contents
   fragments and will be visibly non-conforming to a downstream audit.
 
 
-6.3 Per-pair freshness vs. constant identity hash
+7.3 Per-pair freshness vs. constant identity hash
 ─────────────────────────────────────────────────
 
   `_identityHash(spender)' is the same value forever – it appears
@@ -1904,7 +2112,7 @@ Table of Contents
   cryptographic proof of consent for that specific pair.
 
 
-6.4 Uniform receipt semantics; no fast-path / slow-path bifurcation
+7.4 Uniform receipt semantics; no fast-path / slow-path bifurcation
 ───────────────────────────────────────────────────────────────────
 
   If approve were CP-optional for Public-Identity counterparties, every
@@ -1919,7 +2127,7 @@ Table of Contents
   and only for the side that is `isPublicIdentity = true'.
 
 
-6.5 Defense against silent rebinding / identity rotation
+7.5 Defense against silent rebinding / identity rotation
 ────────────────────────────────────────────────────────
 
   Today `bindContract' is one-shot, so a contract's identity is fixed at
@@ -1931,7 +2139,7 @@ Table of Contents
   address can outlive the binding.
 
 
-6.6 Cost
+7.6 Cost
 ────────
 
   The premium for the always-CP rule is `29K gas per approve (4 ~ecMul'
@@ -1949,7 +2157,7 @@ Table of Contents
   its /execution/.
 
 
-7 On-Chain Integration: Receipts and Transfer Flow
+8 On-Chain Integration: Receipts and Transfer Flow
 ══════════════════════════════════════════════════
 
   The BUCK ERC-20 contract stores and emits the bilateral `approve' /
@@ -1964,7 +2172,7 @@ Table of Contents
   reveals who is transacting with whom.
 
 
-7.1 The Receipt Constraint
+8.1 The Receipt Constraint
 ──────────────────────────
 
   *Events are public.* Every `emit' on Ethereum is readable by every
@@ -1994,7 +2202,7 @@ Table of Contents
   coordinates.  No identity content touches the EVM in any form.
 
 
-7.2 The `approve' Function as Identity Handshake
+8.2 The `approve' Function as Identity Handshake
 ────────────────────────────────────────────────
 
   The ERC-20 `approve' function is the natural point for identity
@@ -2003,45 +2211,48 @@ Table of Contents
   proof:
 
   ┌────
+  │ // Real signature: E_spender is an ElGamalCT struct (R, C) and the proof
+  │ // is a CPProof struct (e, s1, s2, T1, T2, T3) -- three scalars and three
+  │ // G1 commitment points, not a bare (e, s1, s2) triple.
   │ function approve(
   │     address spender,
   │     uint256 amount,
-  │     uint256[4] calldata E_spender,       // ElGamal ciphertext (R.x, R.y, C.x, C.y)
-  │     uint256[3] calldata chaumPedersen     // Fiat-Shamir proof (e, s1, s2)
+  │     ElGamalCT calldata E_spender,         // (R, C)
+  │     CPProof   calldata chaumPedersen      // (e, s1, s2, T1, T2, T3)
   │ ) public returns (bool) {
-  │     _approve(msg.sender, spender, amount);
-  │ 
   │     // Read the caller's registered credential from the registry
-  │     // CRITICAL: read from storage, never from calldata
-  │     uint256[4] memory E_caller = identityRegistry.getCredential(msg.sender);
-  │     uint256[2] memory pk_caller = identityRegistry.getIdentityKey(msg.sender);
-  │     uint256[2] memory pk_spender = identityRegistry.getIdentityKey(spender);
-  │ 
-  │     // Verify Chaum-Pedersen proof: E_spender encrypts same M as E_caller
-  │     require(
-  │         _verifyChaumPedersen(
-  │             E_caller, E_spender, pk_caller, pk_spender, chaumPedersen
-  │         ),
-  │         "Re-encryption proof invalid"
-  │     );
+  │     // CRITICAL: read from storage, never from calldata.  (Real names:
+  │     // ciphertextOf(msg.sender) / pkOf(spender); verifyApprove reads
+  │     // E_alice itself from storage and binds the registry, sender, spender,
+  │     // and chainid.)
+  │     require(identityRegistry.verifyApprove(
+  │                 msg.sender, spender, E_spender, chaumPedersen),
+  │             "BUCK: bad CP proof");
   │ 
   │     // Store hash of the verified re-encrypted ciphertext for this pair
-  │     _receiptFragments[msg.sender][spender] = keccak256(
-  │         abi.encodePacked(E_spender)
-  │     );
+  │     bytes32 receipt = keccak256(abi.encode(E_spender));
+  │     _receiptFragments[msg.sender][spender] = receipt;
+  │     identity.markApproved(spender);
+  │     _approve(msg.sender, spender, amount);
   │ 
-  │     // Emit ONLY the opaque ElGamal ciphertext (4 uint256 curve coordinates)
-  │     emit IdentityExchange(msg.sender, spender, E_spender);
+  │     // Emit ONLY the hash -- NOT the ciphertext itself.
+  │     emit ApproveReceipt(msg.sender, spender, receipt);
   │     return true;
   │ }
   └────
 
-  What the public sees in the `IdentityExchange' event:
+  What the public sees in the `ApproveReceipt' event:
   • Alice's address approved a spender (same as standard ERC-20
     Approval)
-  • Four `uint256' values encoding an ElGamal ciphertext – opaque curve
-    point coordinates that only the spender can decrypt
+  • A single `bytes32' hash of the re-encrypted ElGamal ciphertext
   • *No* identity address, *no* public key, *no* linkable identifier
+
+  The opaque ciphertext `E_spender' itself is /not/ emitted; it lives in
+  the `approve' transaction's calldata, which is equally permanent and
+  publicly recoverable on-chain.  (This document elsewhere refers to an
+  `IdentityExchange' event carrying the ciphertext; read that as
+  shorthand for "the ciphertext recoverable from the approve calldata,
+  anchored by the `ApproveReceipt' hash.")
 
   What the contract verified (in ~29,000 gas):
   • The ciphertext contains Alice's real identity (Chaum-Pedersen proof
@@ -2055,7 +2266,7 @@ Table of Contents
   • Store verified identity for receipt construction on Holochain
 
 
-7.2.1 Bilateral Identity Exchange
+8.2.1 Bilateral Identity Exchange
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The `transfer' and `transferFrom' functions require that /both/
@@ -2074,13 +2285,13 @@ Table of Contents
 
   Both identity fragments must exist before BUCK can move.  If Bob's
   counterparty is a *Public-Identity contract* (e.g., a Uniswap pool
-  bound via `bindContract(pool, pk_op, E_op, true)'), step 2 is not
-  required from the pool side: `isPublicIdentity(pool) == true' lets the
-  bilateral check fall back to the bound `_identityHash(pool)' on the
-  pool side.  Alice still must complete step 1 (her own CP- bound
-  `approve') – approve always requires CP, even against Public-Identity
-  spenders, so a subpoena of Alice always recovers her per-pair
-  ciphertext for the pool.
+  authorized and bound via `bindContract(pool, pk_op, E_op, true,
+  true)'), step 2 is not required from the pool side:
+  `isPublicIdentity(pool) == true' lets the bilateral check fall back to
+  the bound `_identityHash(pool)' on the pool side.  Alice still must
+  complete step 1 (her own CP- bound `approve') – approve always
+  requires CP, even against Public-Identity spenders, so a subpoena of
+  Alice always recovers her per-pair ciphertext for the pool.
 
   This means a Public-Identity pool receives BUCK from any verified
   private account that has done a single `approve' – no per-counterparty
@@ -2088,7 +2299,7 @@ Table of Contents
   both `approve' steps; there is no fallback for EOAs.
 
 
-7.3 Receipt Construction: What the Contract Emits
+8.3 Receipt Construction: What the Contract Emits
 ─────────────────────────────────────────────────
 
   The BUCK contract emits a *minimal* event that reveals only
@@ -2118,7 +2329,7 @@ Table of Contents
   ElGamal ciphertext) can recover the plaintext identity.
 
 
-7.3.1 Canonical Receipts and Public Accounts
+8.3.1 Canonical Receipts and Public Accounts
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Both parties in a transfer hold each other's plaintext `identity_data'
@@ -2158,7 +2369,7 @@ Table of Contents
   off-chain coordination required.
 
 
-7.4 The Complete `transfer' / `transferFrom' Flow
+8.4 The Complete `transfer' / `transferFrom' Flow
 ─────────────────────────────────────────────────
 
   ┌────
@@ -2167,30 +2378,30 @@ Table of Contents
   │     require(identityRegistry.isVerified(to),         "Receiver not verified");
   │     require(compliance.canTransfer(msg.sender, to, amount), "Compliance");
   │ 
-  │     // Bilateral identity check.  Every transfer must carry identity
-  │     // material for both sides.  If a side has no per-pair CP receipt
-  │     // fragment, at least one party must be bound under a Public
-  │     // Identity so the fallback to the bound _identityHash is valid.
-  │     // EOA<->EOA private transfers MUST have prior CP receipts (no
-  │     // fallback -- neither side is public).
-  │     bytes32 fromHash = _receiptFragments[msg.sender][to];
-  │     bytes32 toHash   = _receiptFragments[to][msg.sender];
+  │     // Bilateral identity check.  Each side's identity must be recoverable
+  │     // from the receipt: a private endpoint must have laid down its OWN CP
+  │     // fragment toward the counterparty; only a Public-Identity side may
+  │     // fall back to its bound _identityHash.  The guard is per-side and
+  │     // single-party (NOT an OR over both): the sender-fragment branch keys
+  │     // on isPublicIdentity(sender), the recipient-fragment branch on
+  │     // isPublicIdentity(recipient).  So a private party always needs its
+  │     // own fragment, even against a public counterparty.
+  │     bytes32 fromHash = _receiptFragments[msg.sender][to];   // sender's identity, for `to`
+  │     bytes32 toHash   = _receiptFragments[to][msg.sender];   // recipient's identity, for sender
   │ 
-  │     if (toHash == 0) {
-  │         require(
-  │             identityRegistry.isPublicIdentity(msg.sender)
-  │              || identityRegistry.isPublicIdentity(to),
-  │             "sender must identity-approve recipient (both private)"
-  │         );
-  │         toHash = identityRegistry.identityHash(to);
-  │     }
   │     if (fromHash == 0) {
   │         require(
-  │             identityRegistry.isPublicIdentity(msg.sender)
-  │              || identityRegistry.isPublicIdentity(to),
-  │             "recipient must identity-approve sender (both private)"
+  │             identityRegistry.isPublicIdentity(msg.sender),
+  │             "BUCK: sender must identity-approve recipient"
   │         );
   │         fromHash = identityRegistry.identityHash(msg.sender);
+  │     }
+  │     if (toHash == 0) {
+  │         require(
+  │             identityRegistry.isPublicIdentity(to),
+  │             "BUCK: recipient must identity-approve sender"
+  │         );
+  │         toHash = identityRegistry.identityHash(to);
   │     }
   │ 
   │     _transfer(msg.sender, to, amount);
@@ -2206,19 +2417,21 @@ Table of Contents
   └────
 
   The bilateral identity check enforces that both sides of the receipt
-  event carry identity material.  A *Public-Identity contract* (pool,
-  router, treasury bound via `bindContract(target, pk, E, true)')
-  satisfies either direction's fallback — when no per-pair CP fragment
-  exists, the public side's bound `_identityHash' is a valid identity
-  commitment.  Approvals are always CP-bound; there is no
-  `isPublicIdentity' shortcut at approve time.
+  event carry identity material.  The fallback to a bound
+  `_identityHash' is available *only on the side that is bound under a
+  Public Identity*; a private endpoint must always supply its own
+  per-pair CP fragment.  In particular, a private EOA receiving BUCK out
+  of a Public-Identity pool must itself have CP-approved that pool first
+  – being a /public sender/ does not exempt the private /recipient/.
+  Approvals are always CP-bound; there is no `isPublicIdentity' shortcut
+  at approve time.
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Sender  Receiver  Minimum for transfer                          
   ─────────────────────────────────────────────────────────────────
    EOA     EOA       Both must CP-approve each other               
    EOA     Pub-Id    Sender CP-approves; pool side falls back      
-   Pub-Id  EOA       Neither needs CP; pool is public, guards pass 
+   Pub-Id  EOA       Recipient must CP-approve the (public) sender 
    Pub-Id  Pub-Id    Neither needs CP; both public, guards pass    
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -2229,7 +2442,7 @@ Table of Contents
   event (~2,000 gas plus two SLOADs for the fragments).
 
 
-7.5 Holochain: Off-Chain Computation and Storage
+8.5 Holochain: Off-Chain Computation and Storage
 ────────────────────────────────────────────────
 
   Alice's wallet (a Holochain hApp) performs all credential derivation
@@ -2237,10 +2450,10 @@ Table of Contents
 
   • *Credential derivation*: Alice's PS-signed identity `(m, sigma)'
     lives on her Holochain source chain.  For each new account, the hApp
-    rerandomizes the PS signature, generates a fresh key pair, creates
-    an ElGamal encryption, and computes the NIZK proof.  This runs
-    entirely offline and can be batched – Alice can pre-generate
-    credentials for future accounts.
+    blinds the PS signature into a presentation, generates a fresh key
+    pair, creates an ElGamal encryption, and computes the NIZK proof.
+    This runs entirely offline and can be batched – Alice can
+    pre-generate credentials for future accounts.
 
   • *Identity data storage*: Alice's plaintext `identity_data' is stored
     as a *Private entry* on her Holochain source chain, encrypted with
@@ -2248,7 +2461,7 @@ Table of Contents
     agent can read it.  This is the master copy from which `m =
     H(identity_data)' can always be recomputed.
 
-  • *Credential storage*: Each derived credential `(pk, E_alice, sigma',
+  • *Credential storage*: Each derived credential `(pk, E_alice, (A, B),
          pi, sk)' is also stored as a Private entry on the agent's
          source chain.  The identity private key `sk' (an alt_bn128
          scalar) is stored alongside the credential.  The ElGamal
@@ -2295,7 +2508,7 @@ Table of Contents
     provides only an anchor hash.
 
 
-7.5.1 Agent Isolation Model
+8.5.1 Agent Isolation Model
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice does not reuse a single Holochain agent across multiple BUCK
@@ -2307,9 +2520,9 @@ Table of Contents
   • The hApp DNA is the same (same code, same hash), but the agent
     identity is distinct.
   • Alice copies her `identity_data' into the new agent's Private store
-    and derives a credential from it (rerandomizing her PS signature,
-    generating a fresh alt_bn128 key pair, encrypting via ElGamal,
-    computing the NIZK proof).
+    and derives a credential from it (blinding her PS signature into a
+    presentation, generating a fresh alt_bn128 key pair, encrypting via
+    ElGamal, computing the NIZK proof).
 
   *Why agent isolation matters*: Holochain's DHT uses agent public keys
   as identifiers.  If Alice used a single Holochain agent for all her
@@ -2330,7 +2543,7 @@ Table of Contents
 
   *What is NOT shared across agents*: Holochain key pairs, source chain
   entries, Ethereum addresses, alt_bn128 identity key pairs, ElGamal
-  ciphertexts, PS signature rerandomizations, NIZK proofs.  *What IS
+  ciphertexts, PS credential presentations, NIZK proofs.  *What IS
   shared* (locally, within Alice's wallet, never on any network):
   Alice's plaintext `identity_data' and the master PS signature `(m,
   sigma)' from the issuer.
@@ -2346,7 +2559,7 @@ Table of Contents
   environment; the proofs provide the guarantees.
 
 
-7.6 Summary: What Each Layer Sees
+8.6 Summary: What Each Layer Sees
 ─────────────────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2364,7 +2577,7 @@ Table of Contents
                           Constructs full receipt on Holochain                     
    Sender (Alice)         Knows her own identity, knows Bob's (from his approve)   
                           Constructs full receipt on Holochain                     
-   Holochain hApp         Derives credentials (PS rerandomization + NIZK)          
+   Holochain hApp         Derives credentials (PS presentation + NIZK)             
                           Re-encrypts credential + generates proof locally         
                           Stores encrypted receipts on source chains               
                           Code identified by DNA hash (auditable)                  
@@ -2373,7 +2586,7 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-8 Cryptographic Receipts: 3-Party ECDH
+9 Cryptographic Receipts: 3-Party ECDH
 ══════════════════════════════════════
 
   While the BUCK contract emits only opaque ciphertext hashes on-chain,
@@ -2390,7 +2603,7 @@ Table of Contents
   coordination.
 
 
-8.1 The Three Keys
+9.1 The Three Keys
 ──────────────────
 
   For a transfer from Alice to a DeFi pool operated by Bob:
@@ -2423,7 +2636,7 @@ Table of Contents
   emitted in events.
 
 
-8.2 Encryption Scheme
+9.2 Encryption Scheme
 ─────────────────────
 
   The wallet (Holochain hApp) computes the encryption key via ECDH:
@@ -2459,10 +2672,10 @@ Table of Contents
   └────
 
 
-8.3 Who Can Decrypt
+9.3 Who Can Decrypt
 ───────────────────
 
-8.3.1 Sender (Alice)
+9.3.1 Sender (Alice)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice has `k_s' (her identity private key) and can recompute `k_e'
@@ -2477,7 +2690,7 @@ Table of Contents
   └────
 
 
-8.3.2 Receiver (Bob)
+9.3.2 Receiver (Bob)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Bob has `k_r' (his identity private key) and looks up Alice's identity
@@ -2492,7 +2705,7 @@ Table of Contents
   └────
 
 
-8.3.3 Court-Compelled Decryption (Subpoena of a Counterparty)
+9.3.3 Court-Compelled Decryption (Subpoena of a Counterparty)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   A court subpoenas Bob (a verified counterparty to the transfer) to
@@ -2516,7 +2729,7 @@ Table of Contents
   cannot decrypt receipts where he is not a party.
 
 
-8.3.4 Regulatory Escrow (Optional)
+9.3.4 Regulatory Escrow (Optional)
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   A regulatory authority's public key `K_reg' adds a third shared
@@ -2545,29 +2758,29 @@ Table of Contents
   transaction.
 
 
-9 Play-by-Play: BUCK/USDT Swap on Uniswap
-═════════════════════════════════════════
+10 Play-by-Play: BUCK/USDT Swap on Uniswap
+══════════════════════════════════════════
 
   A complete BUCK/USDT swap, step by step: from Alice's initial KYC
   ceremony through the final on-chain transfer, showing every piece of
   data, where it resides, and what each party does.  Alice is a private
   EOA; Bob's pool is a *Public-Identity contract*
   (`isPublicIdentity(pool) = true', bound at deploy time via
-  `bindContract(pool, pk_bob, E_bob, true)').  The Private-to-Public-
-  Identity mode means Alice still calls `approve' (always CP-bound, ~29K
-  gas) – there is no isPublicIdentity shortcut at approve time – but no
-  `approve' is needed from the pool's side because its receipt fragment
-  falls back to the bound `_identityHash(pool)'.  `transferFrom'
-  performs only state lookups, no cryptography.  Each step shows the
-  on-chain gas cost, the Holochain wallet actions, and what an observer
-  (Eve) can and cannot see.
+  `bindContract(pool, pk_bob, E_bob, true, true)').  The
+  Private-to-Public- Identity mode means Alice still calls `approve'
+  (always CP-bound, ~29K gas) – there is no isPublicIdentity shortcut at
+  approve time – but no `approve' is needed from the pool's side because
+  its receipt fragment falls back to the bound `_identityHash(pool)'.
+  `transferFrom' performs only state lookups, no cryptography.  Each
+  step shows the on-chain gas cost, the Holochain wallet actions, and
+  what an observer (Eve) can and cannot see.
 
   Alice holds 1000 BUCK and wants to swap 500 BUCK for USDT.  Bob has
   deployed a BUCK/USDT Uniswap V3 pool.
 
 
-9.1 Prerequisites (One-Time Setup)
-──────────────────────────────────
+10.1 Prerequisites (One-Time Setup)
+───────────────────────────────────
 
   ┌────
   │ Alice:
@@ -2576,29 +2789,25 @@ Table of Contents
   │      where m = H(identity_data)
   │   3. Alice receives (m, sigma) and stores in Holochain wallet
   │   4. Alice's wallet derives a credential for this account (offline):
-  │      - Rerandomizes PS signature: sigma' = (t * sigma_1, t * sigma_2)
+  │      - Presents the PS signature: (A, B) = (a * sigma_1, a * sigma_2 + b * Y1)
   │      - Generates fresh identity key pair (sk_alice, pk_alice)
   │      - Encrypts: E_alice = (r * G,  m * G + r * pk_alice)
-  │      - Computes NIZK proof pi linking sigma' to E_alice
-  │   5. Registers on-chain (~235K gas):
-  │      identityRegistry.registerCredential(
-  │          alice_wallet, pk_alice, E_alice, sigma', pi)
+  │      - Computes NIZK proof pi linking (A, B) to E_alice and pk_alice
+  │   5. Registers on-chain (443,892 gas measured):
+  │      identityRegistry.register(
+  │          issuer, pk_alice, E_alice, (A, B), pi)   // msg.sender = alice_wallet
   │   6. identityRegistry.isVerified(alice_wallet) == true
   │ 
   │ Pool operator Bob:
   │   1. Completed KYC (same ceremony as Alice).  His EOA is registered
   │      in IdentityRegistry with credential (pk_bob, E_bob).
-  │   2. Deploys the BUCK/USDT pool atomically with bindContract:
-  │      BuckAwareDeployer.deployAndBind(
-  │          UniswapV2Factory.createPair.selector(BUCK, USDT),
-  │          pk_bob, E_bob,
-  │          isPublicIdentity_=true
-  │      )
+  │   2. As the factory's registered feeToSetter, creates and binds the pair:
+  │      uniswapV2BindingAdapter.createPairAndBind(BUCK, USDT)
   │      -> pair at address 0xPOOL bound under Bob's published (pk, E),
   │         with isPublicIdentity[0xPOOL] = true and
   │         isVerified[0xPOOL]       = true.
-  │      Atomic deploy+bind defends against first-binder-wins front-running.
-  │   3. Same atomic pattern for the router 0xROUTER.
+  │      Atomic create+bind leaves no interval for a competing binding; the
+  │      registry accepts it only from the audited adapter approved for that factory.
   │ 
   │ After binding:
   │   isVerified(0xPOOL)       == true
@@ -2609,11 +2818,11 @@ Table of Contents
   └────
 
 
-9.2 The Swap Transaction
-────────────────────────
+10.2 The Swap Transaction
+─────────────────────────
 
-9.2.1 Step 1: Alice Approves the Router (Identity Handshake)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+10.2.1 Step 1: Alice Approves the Router (Identity Handshake)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice's wallet (Holochain hApp) prepares the identity exchange
   locally, then Alice calls `approve' on the BUCK contract:
@@ -2666,8 +2875,8 @@ Table of Contents
   Approve, however, was still fully CP-bound on Alice's side.
 
 
-9.2.2 Step 2: Alice Calls the Router
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+10.2.2 Step 2: Alice Calls the Router
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   ┌────
   │ // Alice initiates the swap (standard Uniswap call -- no BUCK-specific data)
@@ -2686,8 +2895,8 @@ Table of Contents
   Uniswap contract that knows nothing about BUCK identity.
 
 
-9.2.3 Step 3: Router Calls BUCK.transferFrom (Minimal Receipt Emission)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+10.2.3 Step 3: Router Calls BUCK.transferFrom (Minimal Receipt Emission)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Inside the router, the swap triggers:
 
@@ -2706,18 +2915,15 @@ Table of Contents
   │     require(identityRegistry.isVerified(to),   "Receiver not verified");
   │     require(compliance.canTransfer(from, to, amount), "Compliance");
   │ 
-  │     bytes32 fromHash = _receiptFragments[from][to];   // keccak256(E_pool from Alice)
+  │     bytes32 fromHash = _receiptFragments[from][to];   // Alice's fragment for the pool
   │     bytes32 toHash   = _receiptFragments[to][from];    // 0 -- pool never approved Alice
-  │     if (toHash == 0) {
-  │         require(
-  │             identityRegistry.isPublicIdentity(from)
-  │              || identityRegistry.isPublicIdentity(to),
-  │             "no receipt fragment and no public side"
-  │         );
-  │         toHash = identityRegistry.identityHash(to);    // _identityHash(0xPOOL)
-  │     }
-  │     if (fromHash == 0) {
+  │     if (fromHash == 0) {                               // single-party guard
+  │         require(identityRegistry.isPublicIdentity(from), "...");
   │         fromHash = identityRegistry.identityHash(from);
+  │     }
+  │     if (toHash == 0) {                                 // pool is public -> fallback ok
+  │         require(identityRegistry.isPublicIdentity(to),   "...");
+  │         toHash = identityRegistry.identityHash(to);    // _identityHash(0xPOOL)
   │     }
   │ 
   │     _transfer(from, to, amount);
@@ -2738,8 +2944,8 @@ Table of Contents
   encrypts the same identity as her registered credential.
 
 
-9.2.4 Step 4: Wallet Constructs the Full Receipt (Off-Chain)
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+10.2.4 Step 4: Wallet Constructs the Full Receipt (Off-Chain)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   Alice's wallet (Holochain hApp) observes the `BuckTransferReceipt'
   event and the `IdentityExchange' events to construct the full receipt:
@@ -2787,16 +2993,16 @@ Table of Contents
   └────
 
 
-9.2.5 Step 5: Pool Executes the Swap
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+10.2.5 Step 5: Pool Executes the Swap
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   The Uniswap pool sends USDT to Alice.  Since USDT is not an Alberta
   Buck token, the USDT transfer has no BUCK identity requirements (it
   follows whatever rules USDT imposes, which is typically none).
 
 
-9.2.6 Step 6: Completed State
-╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+10.2.6 Step 6: Completed State
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
 
   ┌────
   │ On-chain (public):
@@ -2842,21 +3048,21 @@ Table of Contents
   └────
 
 
-10 Edge Cases and Design Considerations
+11 Edge Cases and Design Considerations
 ═══════════════════════════════════════
 
   Practical deployment scenarios beyond the simple Alice-to-Bob model:
   flash loans (atomic borrow-repay cycles), multi-hop swaps (BUCK
   through intermediate pools), contract-to-contract transfers (yield
-  aggregators), epoch-based credential expiry, Holochain integration
-  details (private entry storage, agent isolation, DHT identity delivery
-  and non-publication detection), the 3-party ECDH regulatory escrow
-  model (O(N) surveillance cost, no unilateral decryption), and the
-  alt_bn128 security horizon (~100-bit pairing security, BLS12-381
-  migration path via EIP-2537).
+  aggregators), liveness as accumulator membership, Holochain
+  integration details (private entry storage, agent isolation, DHT
+  identity delivery and non-publication detection), the 3-party ECDH
+  regulatory escrow model (O(N) surveillance cost, no unilateral
+  decryption), and the alt_bn128 security horizon (~100-bit pairing
+  security, BLS12-381 migration path via EIP-2537).
 
 
-10.1 Flash Loans and Atomic Transactions
+11.1 Flash Loans and Atomic Transactions
 ────────────────────────────────────────
 
   A flash loan borrows and repays in a single transaction.  The
@@ -2865,7 +3071,7 @@ Table of Contents
   single atomic event.
 
 
-10.2 Multi-Hop Swaps
+11.2 Multi-Hop Swaps
 ────────────────────
 
   A swap routed through BUCK -> WETH -> USDT involves two BUCK transfers
@@ -2874,7 +3080,7 @@ Table of Contents
   registered if it holds BUCK transiently.
 
 
-10.3 Contract-to-Contract Transfers
+11.3 Contract-to-Contract Transfers
 ───────────────────────────────────
 
   When one DeFi contract sends BUCK to another (e.g., a yield aggregator
@@ -2884,7 +3090,7 @@ Table of Contents
   identified legal operator at each end.
 
 
-10.4 Wrapping and Bridging
+11.4 Wrapping and Bridging
 ──────────────────────────
 
   If BUCK is wrapped (WBUCK) for use on another chain, the wrapping
@@ -2896,28 +3102,28 @@ Table of Contents
   deployed.
 
 
-10.5 Gas Costs
+11.5 Gas Costs
 ──────────────
 
   The design has three gas-consuming identity operations:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Operation                                 Cost (~gas)   When             
-  ──────────────────────────────────────────────────────────────────────────
-   `registerCredential' with PS verify       ~235,000 gas  Once per account 
-   (PS pairing: ~181K + NIZK: ~44K)                                         
-   `approve' with Chaum-Pedersen verify      ~75,000 gas   Once per pair    
-   (proof verify: ~29K + std approve: ~46K)                                 
-   `BuckTransferReceipt' event               ~2,000 gas    Per transfer     
-   (2 indexed addresses + 3 uint256)                                        
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Operation                                 Cost (~gas)  When             
+  ─────────────────────────────────────────────────────────────────────────
+   `register' with the credential proof      443,892 gas  Once per account 
+   (three pairings + relations, measured)                                  
+   `approve' with Chaum-Pedersen verify      ~75,000 gas  Per approval     
+   (proof verify: ~29K + std approve: ~46K)                                
+   `BuckTransferReceipt' event               ~2,000 gas   Per transfer     
+   (2 indexed addresses + 3 uint256)                                       
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Credential registration uses the `ecPairing' precompile to verify the
-  Pointcheval-Sanders signature and NIZK proof (`235,000 gas, once per
-  account).  The Chaum-Pedersen proof verification uses ~ecMul' /
-  `ecAdd' (~29,000 gas per counterparty pair).  Subsequent transfers
-  emit only the minimal receipt event (~2,000 gas) with no additional
-  proof work.
+  Pointcheval-Sanders credential proof (443,892 gas measured on the A'
+  branch, once per account).  The Chaum-Pedersen proof verification uses
+  `ecMul' / `ecAdd' (~29,000 gas per counterparty pair).  Subsequent
+  transfers emit only the minimal receipt event (~2,000 gas) with no
+  additional proof work.
 
   All encrypted identity data and full receipts are stored on Holochain,
   not on Ethereum.  The only identity-related data emitted on-chain is
@@ -2926,28 +3132,27 @@ Table of Contents
   transfer.
 
 
-10.6 Pool Operator Identity Binding
+11.6 Pool Operator Identity Binding
 ───────────────────────────────────
 
   Under `bindContract', the pool's identity is the operator's identity.
   `isVerified(0xPOOL) == true' and `isPublicIdentity(0xPOOL) == true'
-  once the operator (or `BuckAwareDeployer.deployAndBind' atomically)
-  has bound the pool to the operator's published `(pk, E)'.  The pool
-  itself holds no decryption key; the operator does, and the operator's
-  `sk' decrypts every receipt that uses `_identityHash(pool)'.
+  once the factory-specific adapter has bound the canonical pool to the
+  operator's published `(pk, E)'.  The pool itself holds no decryption
+  key; the operator does, and the operator's `sk' decrypts every receipt
+  that uses `_identityHash(pool)'.
 
-  *First-binder-wins.* Because `bindContract' requires only that
-  `target.code.length > 0' and that the address has not yet been bound,
-  an attacker can race a passive deployment and bind a freshly deployed
-  contract to /their/ key before the deployer does.  The defense is
-  atomic deploy+bind via `BuckAwareDeployer'; passive `createPair'
-  followed by a separate `bindContract' from the operator's wallet is
-  unsafe in adversarial settings.
+  *Provenance, authority, and one-shot binding.* The Uniswap adapters
+  verify the pool against the immutable factory's canonical mapping and
+  require the invocation from its current registered governance identity
+  (`feeToSetter' for V2, `owner' for V3).  They can create and bind
+  atomically or bind an existing canonical pool.  The first authorized
+  binding remains final, but neither an unrelated caller nor a generic
+  factory can select the target.
 
-  The factory transaction is on-chain and pseudonymous; the
-  IdentityRegistry has no record of who deployed the contract.  Once
-  bound, the operator's identity (the EOA who registered `(pk_op,
-  E_op)') is the pool's accountability surface.
+  The registry records `binderOf' and the credential issuer.  Once
+  bound, the certified operator identity behind `(pk_op,E_op)' is the
+  pool's accountability surface.
 
   For commercial DeFi operators who want public branding ("DeFi Ops
   Inc., Alberta"), publication happens off-chain (their own website, the
@@ -2956,7 +3161,7 @@ Table of Contents
   on-chain link between contract and operator credential.
 
 
-10.7 alt_bn128 Security Horizon
+11.7 alt_bn128 Security Horizon
 ───────────────────────────────
 
   The alt_bn128 curve (BN254) offers ~128-bit security for discrete
@@ -2976,11 +3181,13 @@ Table of Contents
 
   Three mitigations apply:
 
-  1. *Epoch-based credential expiry*: PS signatures are verified once at
-     registration and carry an expiry epoch.  An attacker who invests
-     computational resources to break a pairing equation recovers a
-     single credential that has likely already expired.  The Identity
-     Fountain's renewal model limits the value of any single break.
+  1. *A pairing break forges registrations, not certification*: PS
+     signatures are verified once, at registration.  Everything that
+     needs a person in good standing – Notes spends, attribute checks,
+     the insurer gate – proves membership in a registry's subtree, which
+     the registry fills from its own KYC records, not from the pairing.
+     An attacker who forges a credential registers accounts that no
+     registry has certified.
 
   2. *DLog security is unaffected*: Per-transaction Chaum-Pedersen
      proofs rely on discrete logarithm hardness in G_1, which remains at
@@ -2993,16 +3200,17 @@ Table of Contents
      Chaum-Pedersen layer continues on alt_bn128 (or also migrates).
      The architecture's separation of registration-time pairings from
      transaction-time scalar multiplications makes this migration
-     straightforward -- only the ~registerCredential' function changes.
+     straightforward -- only the ~register' verifier changes.
 
   The ~100-bit pairing security is adequate for the current threat
   model.  The practical cost of a tower-NFS attack on BN254 pairings
   remains far beyond the value of any single Alberta Buck credential,
-  particularly given epoch-based expiry.  The system shares this
-  constraint with the entire Ethereum L2 scaling ecosystem.
+  particularly since a forged one earns no registry certification.  The
+  system shares this constraint with the entire Ethereum L2 scaling
+  ecosystem.
 
 
-11 Alternative Approaches Considered
+12 Alternative Approaches Considered
 ════════════════════════════════════
 
   Five cryptographic alternatives were evaluated before settling on the
@@ -3014,14 +3222,14 @@ Table of Contents
   time, targeted decryption support, and implementation complexity.  The
   comparison table shows ElGamal Chaum-Pedersen wins on per-transaction
   gas (~29K vs. ~200K+ for SNARK-based alternatives), requires no
-  trusted setup, and generates proofs instantaneously.  Combined with PS
-  rerandomizable signatures for one-time credential registration (~235K
-  gas), the system achieves both cross-account unlinkability and
+  trusted setup, and generates proofs instantaneously.  Combined with
+  the PS credential presentation for one-time registration (443,892 gas
+  measured), the system achieves both cross-account unlinkability and
   per-transaction re-encryption correctness without the gas burden or
   trusted setup of alternatives.
 
 
-11.1 Pedersen Commitments + Groth16 ZK Proofs
+12.1 Pedersen Commitments + Groth16 ZK Proofs
 ─────────────────────────────────────────────
 
   In this approach, the issuer stores a Pedersen commitment `C = v*G +
@@ -3059,7 +3267,7 @@ Table of Contents
     only adds attack surface.
 
 
-11.2 Proxy Re-Encryption (NuCypher Umbral)[5]
+12.2 Proxy Re-Encryption (NuCypher Umbral)[5]
 ─────────────────────────────────────────────
 
   In PRE, Alice generates a re-encryption key `rk_{A->B}' that allows an
@@ -3094,7 +3302,7 @@ Table of Contents
     model makes it unnecessary.
 
 
-11.3 BBS+ Signatures with Selective Disclosure
+12.3 BBS+ Signatures with Selective Disclosure
 ──────────────────────────────────────────────
 
   BBS+ (pairing-based multi-message signatures) allows an issuer to sign
@@ -3123,18 +3331,21 @@ Table of Contents
     these properties."  Alberta Buck needs "this ciphertext contains my
     specific issuer-certified identity."  The latter is a re-encryption
     correctness proof, not a selective disclosure proof.
-  • *Cross-account unlinkability is already solved*: Pointcheval-Sanders
-    rerandomizable signatures provide unlinkable credential derivation
-    for different accounts.  Within a single account, re-encryptions
-    share a common Ethereum address regardless of the credential scheme,
-    so BBS+ presentation unlinkability adds nothing.
+  • *Cross-account unlinkability is addressed by the A' presentation*:
+    Pointcheval-Sanders signatures, blinded into a presentation, provide
+    unlinkable credential derivation for different accounts
+    (rerandomization alone does not: a rerandomized signature is
+    testable by anyone holding the identity scalar).  Within a single
+    account, re-encryptions share a common Ethereum address regardless
+    of the credential scheme, so BBS+ presentation unlinkability adds
+    nothing.
   • BBS+ could complement Chaum-Pedersen in the future – e.g., for
     compliance checks that verify jurisdiction eligibility without full
     identity disclosure.  But it does not replace the core re-encryption
     mechanism.
 
 
-11.4 Camenisch-Shoup Verifiable Encryption
+12.4 Camenisch-Shoup Verifiable Encryption
 ──────────────────────────────────────────
 
   A purpose-built primitive: encrypt a value and simultaneously prove
@@ -3155,7 +3366,7 @@ Table of Contents
     efficient.
 
 
-11.5 Pedersen Equality Proofs (Homomorphic Comparison)[6]
+12.5 Pedersen Equality Proofs (Homomorphic Comparison)[6]
 ─────────────────────────────────────────────────────────
 
   Pedersen commitments support homomorphic equality checking: given `C_1
@@ -3180,7 +3391,7 @@ Table of Contents
     relation on the randomness).
 
 
-11.6 Comparison Summary
+12.6 Comparison Summary
 ───────────────────────
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3198,15 +3409,15 @@ Table of Contents
 
   ElGamal Chaum-Pedersen wins on per-transaction gas cost, has zero
   setup requirements, generates proofs instantly, supports targeted
-  decryption, and requires minimal implementation.  Combined with
-  Pointcheval-Sanders rerandomizable signatures for credential
-  derivation (one-time ~235K gas at registration), the system achieves
-  both cross-account unlinkability and per-transaction re-encryption
+  decryption, and requires minimal implementation.  Combined with the
+  Pointcheval-Sanders credential presentation for credential derivation
+  (443,892 gas measured, once at registration), the system achieves both
+  cross-account unlinkability and per-transaction re-encryption
   correctness – without the gas burden or trusted setup of SNARK-based
   alternatives.
 
 
-12 Summary: Identity Requirement by Risk Level
+13 Summary: Identity Requirement by Risk Level
 ══════════════════════════════════════════════
 
   The table below maps every Alberta Buck operation to its risk level,
@@ -3247,8 +3458,12 @@ EIP-196/197 precompiled contracts for efficient on-chain verification.
 O. "Short Randomizable Signatures."  CT-RSA 2016, LNCS 9610,
 pp. 111-126.  Rerandomizable signatures: given a valid signature sigma
 on message m, anyone can compute sigma' = (t * sigma_1, t * sigma_2)
-that is a valid, statistically unlinkable signature on the same m.
-Verification uses a bilinear pairing equation, compatible with
+that is a valid signature on the same m, distributed as a fresh one.
+It is not hidden from anyone who holds m, which is why Alberta Buck
+publishes the blinded presentation (A, B) = (a * sigma_1, a * sigma_2
++ b * y * G) with a proof instead; Section 6.1 of the paper
+(signatures on committed messages) publishes y * G as that design
+does.  Verification uses a bilinear pairing equation, compatible with
 Ethereum's alt_bn128 (BN254) ecPairing precompile.
 
 [3] Chaum-Pedersen Protocol.  Chaum, D. and Pedersen, T.P. "Wallet

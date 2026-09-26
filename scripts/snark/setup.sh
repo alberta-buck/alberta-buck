@@ -7,8 +7,8 @@
 #   build/snark/<c>/verification_key.json
 #   src/<C>Groth16Verifier.sol                  - auto-generated Solidity verifier
 #
-# The legacy `mint` and `spend` circuits share a pot15 ptau (`spend` is the
-# heavier of the two at ~12k constraints, FFT domain ~2x => 2^15).
+# The `spend` circuit uses a pot15 ptau (~12k constraints, FFT domain ~2x =>
+# 2^15); scripts/snark/setup_spend.sh sets it up alone.
 #
 # `mint_batch` (Phase 7-bis pivot) is the larger circuit -- per-leaf in-circuit
 # Merkle insertion costs ~10K R1CS, so each pinned-N variant has its own ptau:
@@ -56,7 +56,7 @@ ensure_ptau() {
 # the same generic "Groth16Verifier".
 setup_circuit() {
     local CIRCUIT="$1"          # e.g. "mint", "spend"
-    local CONTRACT_NAME="$2"    # e.g. "MintGroth16Verifier"
+    local CONTRACT_NAME="$2"    # e.g. "SpendGroth16Verifier"
     local PTAU="$3"
     local SRC_NAME="${4:-$CIRCUIT}"  # circom source filename (without .circom)
     local OUT="$BUILD/$CIRCUIT"
@@ -90,6 +90,12 @@ setup_circuit() {
     snarkjs zkesv "$ZKEYF" "$VERIFIER"
     sed -i.bak "s/contract Groth16Verifier/contract ${CONTRACT_NAME}/" "$VERIFIER"
     rm -f "$VERIFIER.bak"
+    # EIP-170: snarkjs unrolls ~166 bytes of code per public input, so a
+    # verifier past ~140 inputs cannot deploy where the 24,576-byte limit
+    # holds.  Those are rewritten to walk a code-resident IC table, the stock
+    # original kept for test/VerifierTable.t.sol; the rest stay stock.
+    python3 "$ROOT/scripts/snark/table_verifier.py" --over 128 \
+        --reference "$ROOT/test/reference/${CONTRACT_NAME}Stock.sol" "$VERIFIER"
     echo "wrote $VERIFIER"
 }
 
@@ -129,10 +135,10 @@ render_mint_batch_n() {
 }
 
 # Same idea for the A2 (private-issuer) mint circuit, which exposes per-leaf
-# eIss as a public output so Notes.mint can tie each committed leaf to its
-# re-encryption binding (the collusion-resistant A2 leaf-tie).  Reuses the same
-# ptau as mint_batch (the extra Poseidon-8 per leaf is small relative to the
-# dual Merkle walk that dominates).
+# eIss and the binding's T as public outputs so Notes.mint can tie each
+# committed leaf to its re-encryption binding (the collusion-resistant A2
+# leaf-tie).  Reuses the same ptau as mint_batch (the extra Poseidon-11 per leaf
+# is small relative to the dual Merkle walk that dominates).
 render_mint_batch_a2_n() {
     local N="$1"
     local SRC="$ROOT/circuits/mint_batch_a2.circom"
@@ -142,16 +148,15 @@ render_mint_batch_a2_n() {
 }
 
 # Section guards let `make snark-a2` rebuild only the A2 family (reusing the
-# existing ptau) without re-running the legacy circuits or the base mint_batch.
-DO_LEGACY="${DO_LEGACY:-1}"
+# existing ptau) without re-running spend or the base mint_batch.
+DO_SPEND="${DO_SPEND:-1}"
 DO_MINT_BATCH="${DO_MINT_BATCH:-1}"
 MINT_BATCH_A2_PINS="${MINT_BATCH_A2_PINS:-}"
 
-# ---- legacy mint + spend (pot15) -----------------------------------------
+# ---- spend (pot15) -------------------------------------------------------
 
-if [ "$DO_LEGACY" = "1" ]; then
+if [ "$DO_SPEND" = "1" ]; then
     PTAU15="$(ensure_ptau 15)"
-    setup_circuit mint    MintGroth16Verifier   "$PTAU15"
     setup_circuit spend   SpendGroth16Verifier  "$PTAU15"
 fi
 

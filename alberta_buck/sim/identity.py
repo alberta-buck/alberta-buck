@@ -7,17 +7,21 @@ alberta_buck.registry.RegistryAgent, which also maintains a Poseidon Merkle
 tree of registered identities — giving the sim Merkle membership proofs for
 free as a side effect of registration.
 
-Deterministic EOA + registration-args cache (test/vectors/identity-cache.json):
-the first run with a given seed incurs the full NIZK-prove cost; subsequent
-runs hit the cache (~instant).  Cache key = (seed_hex, class_name, agent_idx).
-The cache now also stores Merkle membership data.
+Deterministic EOA + registration-args cache (test/vectors/identity-cache.json,
+local and untracked): the first run with a given seed pays the NIZK-prove cost
+(~5 ms per registration on the kernel, ~0.2 s on py_ecc); later runs hit the
+cache.  Entries are deterministic, so deleting the file costs only time.  Cache
+key = (seed, class_name, agent_idx, schema, chainid, registry); each entry also
+carries its Merkle membership data.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -26,19 +30,25 @@ from eth_account.signers.local import LocalAccount
 
 from alberta_buck.wallet.bn254 import G1, mul, point_to_words, rand_scalar
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
-from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_rerandomize
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
 from alberta_buck.wallet.elgamal import identity_keygen, elgamal_encrypt
 from alberta_buck.wallet.nizk import registration_prove
 from alberta_buck.registry.certificate import registry_keygen
 from alberta_buck.registry.registry import RegistryAgent, FullRegistrationRecord
 
-# bindContract uses the G1 generator (1,2) as a non-zero placeholder pk/E so
-# isVerified() is true — exactly what the Forge tests pass (BN254.g1()).
+# Legacy placeholder (pk, E) = G1 generator.  Production bindContract no
+# longer accepts these from an unregistered caller; use bind_as_operator
+# after the sender has registered.
 _G = point_to_words(G1)                       # (1, 2)
 BIND_PK = _G
 BIND_E = (_G, _G)                              # ElGamalCT (R, C)
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "test" / "vectors" / "identity-cache.json"
+# Schema 6 is protocol v2: the registration transcript's domain tag and the
+# identity scalar's tag both changed, so every schema-5 proof is structurally
+# valid and cryptographically stale -- it would revert `bad FS challenge`.  The
+# bump turns those entries into misses, and the next save drops them.
+_CACHE_SCHEMA                   = 6
 
 # ---------------------------------------------------------------------------
 # Cache management
@@ -53,13 +63,47 @@ def _load_cache() -> dict:
     return {}
 
 
+def _valid_cache_entry(data: Any) -> bool:
+    """Return whether ``data`` matches the current registration ABI.
+
+    RegistrationProof grew from six to eight fields in schema 3 and to nine
+    (A' presentation: C1 replaces A_ps, s_b added) in schema 5.  Treat old
+    or partially-written entries as cache misses instead of handing a stale
+    tuple to web3's ABI encoder.  Schema 6 kept the shape and changed the
+    transcript, which is why the schema number -- part of every key -- is
+    what retires those entries, not this check.
+    """
+    return (
+        isinstance(data, list)
+        and len(data) in (4, 5)
+        and isinstance(data[3], list)
+        and len(data[3]) == 9
+    )
+
+
 def _save_cache(cache: dict) -> None:
+    """Keep only current-schema entries, and replace the file atomically.
+
+    Parallel runs (sim matrix jobs) share this file: each sees either the old
+    cache or the new one, never a torn write that would load as empty.  The
+    last writer wins, and an entry it drops is only a later miss.
+    """
+    live = {k: v for k, v in cache.items() if f":v{_CACHE_SCHEMA}:" in k}
     _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _CACHE_PATH.write_text(json.dumps(cache))
+    fd, tmp = tempfile.mkstemp(dir=_CACHE_PATH.parent, prefix=_CACHE_PATH.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(live, f)
+        os.replace(tmp, _CACHE_PATH)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
 
 
-def _cache_key(seed: int, class_name: str, idx: int) -> str:
-    return f"{seed:08x}:{class_name}:{idx}"
+def _cache_key(seed: int, class_name: str, idx: int, chainid: int = 31337,
+               registry: int = 0) -> str:
+    return f"{seed:08x}:{class_name}:{idx}:v{_CACHE_SCHEMA}:{chainid}:{registry:040x}"
 
 
 def _deterministic_key(seed: int, class_name: str, idx: int) -> bytes:
@@ -112,7 +156,8 @@ class SimRegistry:
         return self._identity_count
 
     def issue(self, class_name: str, idx: int, eoa_addr: int,
-              rng: Callable[[], int]) -> FullRegistrationRecord:
+              rng: Callable[[], int], chainid: int,
+              registry: int) -> FullRegistrationRecord:
         """Issue a full identity for one sim agent.
 
         Args:
@@ -120,6 +165,9 @@ class SimRegistry:
             idx: Agent index within its class.
             eoa_addr: Ethereum address (uint160) for Fiat-Shamir binding.
             rng: Seeded random generator.
+            chainid: Live EVM chain id (Anvil default 31337).  Bound into
+                the registration NIZK; must match block.chainid at register().
+            registry: Live IdentityRegistry contract address.
 
         Returns:
             FullRegistrationRecord with cert, PS credential, NIZK, and
@@ -129,6 +177,8 @@ class SimRegistry:
         rec = self.agent.issue_full_identity(
             identity_fields=fields,
             client_kp=None,  # auto-generate ElGamal keypair
+            chainid=chainid,
+            registry_addr=registry,
             registrant_addr=eoa_addr,
             rng=rng,
         )
@@ -172,13 +222,15 @@ def _to_serializable(rec: FullRegistrationRecord) -> list:
     g1 = lambda P: tuple(point_to_words(P))
     pk = g1(rec.client_kp.pk)
     E_arg = (g1(rec.E_addr.R), g1(rec.E_addr.C))
-    sig_arg = (g1(rec.ps_sigma_rerand.sigma_1), g1(rec.ps_sigma_rerand.sigma_2))
+    sig_arg = (g1(rec.ps_presentation.A), g1(rec.ps_presentation.B))
     proof_arg = (
         rec.registration_proof.e, rec.registration_proof.s_m,
-        rec.registration_proof.s_r,
-        g1(rec.registration_proof.A_ps),
+        rec.registration_proof.s_b,
+        rec.registration_proof.s_r, rec.registration_proof.s_sk,
+        g1(rec.registration_proof.C1),
         g1(rec.registration_proof.T_C),
         g1(rec.registration_proof.T_R),
+        g1(rec.registration_proof.T_key),
     )
     merkle_data = (rec.leaf_index, rec.leaf, rec.membership_proof.root if rec.membership_proof else 0)
     return [pk, E_arg, sig_arg, proof_arg, merkle_data]
@@ -191,10 +243,11 @@ def _from_serializable(data: list) -> tuple:
             return tuple(tup(v) for v in x)
         return x
     args = tuple(tup(v) for v in data)
-    if len(args) == 5 and isinstance(args[4], tuple) and len(args[4]) == 3:
-        # Cache format stores (leaf_index, identity_leaf, sub_root); the
-        # on-chain 6-arg register overload expects only identityLeaf.
-        return (*args[:4], args[4][1])
+    # Cache may store merkle (leaf_index, identity_leaf, sub_root) or a
+    # bare identityLeaf.  On-chain register refuses unconstrained leaves,
+    # so callers always get the 5-arg (pk, E, sigma, proof) tuple.
+    if len(args) >= 5:
+        return args[:4]
     return args
 
 
@@ -203,12 +256,14 @@ def _from_serializable(data: list) -> tuple:
 # ---------------------------------------------------------------------------
 
 def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
-                     rng: Callable[[], int]) -> tuple[LocalAccount, tuple]:
+                     rng: Callable[[], int], chainid: int,
+                     registry: int) -> tuple[LocalAccount, tuple]:
     """Return (account, register_args) for an agent, using disk cache.
 
     The EOA private key is deterministic (seed + class + idx), so the address
-    is stable across runs.  Registration args are cached per key; only the
-    first run pays the NIZK-prove cost.
+    is stable across runs.  Registration args are cached per key (including
+    chainid, which the NIZK Fiat-Shamir binds); only the first run pays the
+    NIZK-prove cost.
 
     If a SimRegistry is active, delegates to it for identity issuance
     (which also populates the Merkle tree).  Otherwise falls back to the
@@ -219,13 +274,13 @@ def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
     addr_int = int(account.address, 16)
 
     cache = _load_cache()
-    key = _cache_key(seed, class_name, idx)
-    if key in cache:
+    key = _cache_key(seed, class_name, idx, chainid, registry)
+    if key in cache and _valid_cache_entry(cache[key]):
         return account, _from_serializable(cache[key])
 
     # Generate fresh registration args and cache them.
     reg = get_sim_registry(seed)
-    rec = reg.issue(class_name, idx, addr_int, rng)
+    rec = reg.issue(class_name, idx, addr_int, rng, chainid, registry)
     # Attach the membership proof now (tree is current after issuance).
     rec.membership_proof = reg.membership_proof(rec.leaf_index)
     args = _to_serializable(rec)
@@ -254,34 +309,62 @@ def _g2(P) -> tuple:
 
 
 def pspubkey_arg(issuer) -> tuple:
-    """PSPubKey{ G2 X; G2 Y } for IdentityRegistry.trustIssuer."""
-    return (_g2(issuer.pk_X), _g2(issuer.pk_Y))
+    """PSPubKey{ G2 X; G2 Y; G1 Y1 } for IdentityRegistry.trustIssuer."""
+    return (_g2(issuer.pk_X), _g2(issuer.pk_Y), tuple(point_to_words(issuer.pk_Y1)))
 
 
 def register_args(issuer, eoa_addr: int, fields: dict,
-                   rng: Callable[[], int]) -> tuple:
-    """Args for IdentityRegistry.register(issuer, pk, E, sigma, proof),
+                   rng: Callable[[], int], chainid: int,
+                   registry: int) -> tuple:
+    """Args for IdentityRegistry.register(issuer, pk, E, presentation, proof),
     bound to eoa_addr (must equal the tx sender).
 
     This is the legacy standalone path — use cached_eoa_setup() which now
     delegates to the SimRegistry for identity issuance and Merkle tree
-    integration.
+    integration.  `chainid` must match block.chainid at submit time.
     """
     canonical = canonical_identity_data(fields)
     m = identity_scalar(canonical)
     sigma = ps_sign(issuer, m, rng=rng)
-    sigma_p, _ = ps_rerandomize(sigma, rng=rng)
+    pres, _a, b = ps_present(sigma, issuer.pk_Y1, rng=rng)
     kp = identity_keygen(rng=rng)
     r = rand_scalar(rng)
     E = elgamal_encrypt(mul(G1, m), kp.pk, r)
-    pf = registration_prove(sigma_p, m, r, kp.pk, E, eoa_addr, rng=rng)
+    pf = registration_prove(pres, b, m, r, kp.pk, E, eoa_addr, kp.sk,
+                            chainid, rng=rng, registry=registry)
 
     g1 = lambda P: tuple(point_to_words(P))
     pk = g1(kp.pk)
     E_arg = (g1(E.R), g1(E.C))
-    sig_arg = (g1(sigma_p.sigma_1), g1(sigma_p.sigma_2))
-    proof_arg = (pf.e, pf.s_m, pf.s_r, g1(pf.A_ps), g1(pf.T_C), g1(pf.T_R))
+    sig_arg = (g1(pres.A), g1(pres.B))
+    proof_arg = (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, g1(pf.C1), g1(pf.T_C),
+                 g1(pf.T_R), g1(pf.T_key))
     return pk, E_arg, sig_arg, proof_arg
+
+
+def register_deployer(chain, reg, issuer_addr, issuer, rng, chainid: int,
+                      sender=None, class_name: str = "Deployer") -> tuple:
+    """Register `sender` (default chain.deployer) with a real PS credential.
+
+    Returns (pk, E) suitable for subsequent bind_as_operator calls.
+    """
+    sender = sender if sender is not None else chain.deployer
+    addr = sender.address if hasattr(sender, "address") else sender
+    args = register_args(issuer, int(addr, 16), fields_for(class_name, 0),
+                         rng, chainid, int(reg.address, 16))
+    chain.send(reg.functions.register(issuer_addr, *args), sender=sender)
+    return args[0], args[1]
+
+
+def bind_as_operator(chain, reg, target, is_public: bool = True,
+                     is_carrying: bool = True, sender=None) -> None:
+    """Certified-operator bind: copy the already-registered sender's (pk, E)."""
+    sender = sender if sender is not None else chain.deployer
+    addr = sender.address if hasattr(sender, "address") else sender
+    pk = reg.functions.pkOf(addr).call()
+    E = reg.functions.ciphertextOf(addr).call()
+    chain.send(reg.functions.bindContract(target, pk, E, is_public, is_carrying),
+               sender=sender)
 
 
 def fields_for(name: str, i: int) -> dict:

@@ -16,7 +16,7 @@ from alberta_buck.wallet.bn254 import (
 )
 from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
 from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_decrypt, IdentityKeyPair
-from alberta_buck.wallet.ps import PSSignature, ps_verify
+from alberta_buck.wallet.ps import PSSignature, PSPresentation, ps_verify, ps_key_consistent
 from alberta_buck.wallet.nizk import RegistrationProof, registration_verify
 from alberta_buck.wallet.chaum_pedersen import CPProof, chaum_pedersen_verify
 from alberta_buck.wallet.vectors import build_vectors
@@ -47,18 +47,23 @@ def _decode(j):
             "M":  _pt(p["M"]),
             "kp": IdentityKeyPair(sk=_h(p["elgamal_kp"]["sk"]), pk=_pt(p["elgamal_kp"]["pk"])),
             "E":  ElGamalCiphertext(R=_pt(p["ciphertext"]["R"]), C=_pt(p["ciphertext"]["C"])),
-            "sigma_p": PSSignature(
-                sigma_1=_pt(p["ps_sig_rerand"]["sigma_1"]),
-                sigma_2=_pt(p["ps_sig_rerand"]["sigma_2"]),
+            "sigma_raw": PSSignature(
+                sigma_1=_pt(p["ps_sig_raw"]["sigma_1"]),
+                sigma_2=_pt(p["ps_sig_raw"]["sigma_2"]),
             ),
+            "pres": PSPresentation(A=_pt(p["ps_presentation"]["A"]),
+                                   B=_pt(p["ps_presentation"]["B"])),
             "registrant": _h(p["registrant"]),
             "proof": RegistrationProof(
                 e=_h(p["registration_proof"]["e"]),
                 s_m=_h(p["registration_proof"]["s_m"]),
+                s_b=_h(p["registration_proof"]["s_b"]),
                 s_r=_h(p["registration_proof"]["s_r"]),
-                A_ps=_pt(p["registration_proof"]["A_ps"]),
+                s_sk=_h(p["registration_proof"]["s_sk"]),
+                C1=_pt(p["registration_proof"]["C1"]),
                 T_C=_pt(p["registration_proof"]["T_C"]),
                 T_R=_pt(p["registration_proof"]["T_R"]),
+                T_key=_pt(p["registration_proof"]["T_key"]),
             ),
         }
 
@@ -70,6 +75,7 @@ def _decode(j):
         "sender":  _h(ap["sender"]),
         "spender": _h(ap["spender"]),
         "chainid": _h(ap["chainid"]),
+        "registry": _h(ap["registry"]),
         "E_alice":   ElGamalCiphertext(R=_pt(ap["E_alice"]["R"]),   C=_pt(ap["E_alice"]["C"])),
         "E_for_bob": ElGamalCiphertext(R=_pt(ap["E_for_bob"]["R"]), C=_pt(ap["E_for_bob"]["C"])),
         "proof": CPProof(
@@ -98,25 +104,41 @@ def test_ORDER_field_matches_constant(vectors):
 
 def test_alice_ps_signature_verifies(vectors):
     issuer_X, issuer_Y, a, b, _ = _decode(vectors)
-    assert ps_verify(issuer_X, issuer_Y, a["sigma_p"], a["m"])
+    assert ps_verify(issuer_X, issuer_Y, a["sigma_raw"], a["m"])
 
 
 def test_bob_ps_signature_verifies(vectors):
     issuer_X, issuer_Y, a, b, _ = _decode(vectors)
-    assert ps_verify(issuer_X, issuer_Y, b["sigma_p"], b["m"])
+    assert ps_verify(issuer_X, issuer_Y, b["sigma_raw"], b["m"])
+
+
+def test_presentations_are_not_signatures(vectors):
+    """The published pair is not a verifiable signature on m (finding R1)."""
+    issuer_X, issuer_Y, a, b, _ = _decode(vectors)
+    for p in (a, b):
+        assert not ps_verify(issuer_X, issuer_Y,
+                             PSSignature(p["pres"].A, p["pres"].B), p["m"])
+
+
+def test_issuer_key_is_consistent(vectors):
+    issuer_X, issuer_Y, *_ = _decode(vectors)
+    Y1 = _pt(vectors["issuer"]["pk_Y1"])
+    assert ps_key_consistent(issuer_X, issuer_Y, Y1)
 
 
 def test_alice_registration_proof_verifies(vectors):
     issuer_X, issuer_Y, a, _, _ = _decode(vectors)
     assert registration_verify(
-        a["sigma_p"], a["E"], a["kp"].pk, issuer_X, issuer_Y, a["proof"], a["registrant"],
+        a["pres"], a["E"], a["kp"].pk, issuer_X, issuer_Y, a["proof"], a["registrant"],
+        _h(vectors["chainid"]), _h(vectors["registry"]),
     )
 
 
 def test_bob_registration_proof_verifies(vectors):
     issuer_X, issuer_Y, _, b, _ = _decode(vectors)
     assert registration_verify(
-        b["sigma_p"], b["E"], b["kp"].pk, issuer_X, issuer_Y, b["proof"], b["registrant"],
+        b["pres"], b["E"], b["kp"].pk, issuer_X, issuer_Y, b["proof"], b["registrant"],
+        _h(vectors["chainid"]), _h(vectors["registry"]),
     )
 
 
@@ -132,7 +154,7 @@ def test_chaum_pedersen_proof_verifies(vectors):
         ap["E_alice"], ap["E_for_bob"],
         a["kp"].pk, b["kp"].pk,
         ap["proof"],
-        ap["sender"], ap["spender"], ap["chainid"],
+        ap["sender"], ap["spender"], ap["chainid"], ap["registry"],
     )
 
 

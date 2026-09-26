@@ -1,8 +1,16 @@
 # Publish the Alberta Buck JS packages to npm.
 #
-# Trigger: a js-v* tag, e.g.
+# Two tags, two jobs:
 #
-#     git tag js-v0.1.1 && git push origin js-v0.1.1
+#     git tag js-contracts-v0.2.0   # alberta-buck-contracts (the Solidity bundle)
+#     git tag js-v0.2.0             # alberta-buck-kernel + alberta-buck-core
+#
+# The contracts go first and alone.  core pins them exactly, and core's
+# lockfile can only name a version npm already serves, so the order at a
+# release is: js-contracts-v*, then bump core/js's contracts pin and
+# regenerate its lock (npm install --package-lock-only), then js-v*.  The
+# js-v* job refuses to run until that pin is at the release's major.minor
+# and installable.
 #
 # Authentication is OIDC trusted publishing -- no NPM_TOKEN anywhere.  It
 # requires a Trusted Publisher configured on npmjs.com for EACH package
@@ -26,6 +34,7 @@ on:
   push:
     tags:
       - 'js-v*'
+      - 'js-contracts-v*'
 
 concurrency:
   group: release-npm
@@ -35,8 +44,16 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    name: Publish kernel + core to npm
+  # ──────────────────────────────────────────────────────────────────────
+  # alberta-buck-contracts: the same bundle release-pypi.yml's contracts job
+  # ships, built the same way and gated by the same suite.  Its Groth16
+  # verifiers are from a DEVELOPMENT trusted setup until v1.0.0, and the
+  # bundle says so per artifact; the last check below refuses a tarball that
+  # does not.
+  # ──────────────────────────────────────────────────────────────────────
+  contracts:
+    name: Publish alberta-buck-contracts to npm
+    if: startsWith(github.ref_name, 'js-contracts-v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,6 +71,89 @@ jobs:
         run: |
           npm install -g npm@latest
           npm --version
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # Pinned to the flake's Foundry (nix develop: forge 1.7.1).  The suite's
+      # gas-bound tests are calibrated there, and 1.8.x meters them differently.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Tag matches the package version
+        run: |
+          node - <<'EOF'
+          const tag = process.env.GITHUB_REF_NAME.replace(/^js-contracts-v/, "");
+          const ver = require("./core/contracts/package.json").version;
+          if (ver !== tag) {
+            console.error(`::error::tag js-contracts-v${tag} does not match core/contracts ${ver}`);
+            process.exit(1);
+          }
+          console.log(`${ver} matches the tag`);
+          EOF
+
+      # Pinned Solidity dependencies; they compile INTO our contracts.
+      - name: Install Solidity dependencies
+        run: make install
+
+      # The Uniswap artifacts the test worlds deploy come from Uniswap's own
+      # npm packages at the repository root.
+      - name: Install JS dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The artifact we publish must be the artifact the suite exercises.
+      - name: Test
+        run: make test
+
+      - name: Build and verify the contracts bundle
+        run: |
+          make contracts-dist
+          python3 scripts/contracts-dist.py --check
+
+      - name: The tarball carries the bundle and its setup warning
+        # contracts.json and compiler.json are generated, hence gitignored;
+        # the package's files list is what ships them.
+        working-directory: core/contracts
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node - <<'EOF'
+          const fs = require("fs");
+          // npm <= 11 prints an array of packs; npm 12 an object keyed by name.
+          const pack = JSON.parse(fs.readFileSync("/tmp/pack.json", "utf8"));
+          const files = (Array.isArray(pack) ? pack[0] : Object.values(pack)[0]).files.map(f => f.path);
+          const errs = ["contracts.json", "compiler.json", "LICENSE", "THIRD-PARTY-NOTICES.txt"]
+            .filter(f => !files.includes(f))
+            .map(f => `the tarball is missing ${f}`);
+          const bundle = JSON.parse(fs.readFileSync("contracts.json", "utf8")).contracts;
+          const setup = JSON.parse(fs.readFileSync("compiler.json", "utf8")).trustedSetup;
+          if (!setup || setup.kind !== "development") errs.push("compiler.json has no development-setup record");
+          for (const v of (setup?.verifiers ?? []))
+            if (bundle[v]?.trustedSetup !== "development") errs.push(`${v} is not flagged as a development setup`);
+          if (errs.length) { console.error("::error::" + errs.join("\n  ")); process.exit(1); }
+          console.log(`${Object.keys(bundle).length} contracts, ${setup.verifiers.length} verifiers flagged`);
+          EOF
+
+      - name: Publish alberta-buck-contracts
+        working-directory: core/contracts
+        run: npm publish
+
+  publish:
+    name: Publish kernel + core to npm
+    if: startsWith(github.ref_name, 'js-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # required for npm trusted publishing
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -78,12 +178,34 @@ jobs:
           // publish a core that installs the previous kernel beside it.
           const pin = core.dependencies["alberta-buck-kernel"];
           if (pin !== tag) errs.push(`core depends on alberta-buck-kernel ${pin}, expected ${tag}`);
+          // core also pins alberta-buck-contracts exactly.  Its patch floats,
+          // but its major.minor must be this release's: a v0.2 kernel's
+          // transcripts do not verify against v0.1 contracts.
+          const cpin = core.dependencies["alberta-buck-contracts"];
+          const mm = v => v.split(".").slice(0, 2).join(".");
+          if (mm(cpin) !== mm(tag))
+            errs.push(`core depends on alberta-buck-contracts ${cpin}, not ${mm(tag)}.x`);
           if (errs.length) {
             console.error("::error::version mismatch:\n  " + errs.join("\n  "));
             process.exit(1);
           }
           console.log(`kernel, core and the kernel pin all at ${tag}`);
           EOF
+
+      - name: The pinned contracts are already on npm
+        # No job here publishes alberta-buck-contracts: it is the Solidity
+        # bundle (make contracts-dist), published by hand from core/contracts.
+        # Publishing core against a pin npm cannot serve would leave
+        # `npm i alberta-buck-core` failing for everyone, so check first.
+        working-directory: core/js
+        run: |
+          set -euo pipefail
+          pin=$(node -p 'require("./package.json").dependencies["alberta-buck-contracts"]')
+          if ! npm view "alberta-buck-contracts@$pin" version >/dev/null 2>&1; then
+            echo "::error::alberta-buck-contracts@$pin is not on npm; publish core/contracts first" >&2
+            exit 1
+          fi
+          echo "alberta-buck-contracts@$pin is available"
 
       - name: Build both wasm targets
         run: make core-build-wasm core-build-wasm-web
@@ -97,9 +219,30 @@ jobs:
           set -euo pipefail
           n=$(npm pack --dry-run --json -w alberta-buck-kernel |
               node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));
-                       console.log(p[0].files.filter(f=>f.path.endsWith(".wasm")).length)')
+                       const e=Array.isArray(p) ? p[0] : p["alberta-buck-kernel"];  // npm 12: keyed by name
+                       console.log(e.files.filter(f=>f.path.endsWith(".wasm")).length)')
           echo "wasm files in the kernel tarball: $n"
           [ "$n" -eq 4 ] || { echo "::error::expected 4 .wasm files, found $n" >&2; exit 1; }
+
+      - name: The tarballs carry their licences
+        # Each package's own LICENSE, and the kernel's notices for the Rust
+        # crates linked into its wasm (scripts/third_party_notices.py).
+        working-directory: core/js
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json --workspaces --include-workspace-root | node -e '
+            const p = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const packs = Array.isArray(p) ? p : Object.values(p);          // npm 12: keyed by name
+            const need = { "alberta-buck-core": ["LICENSE"],
+                           "alberta-buck-kernel": ["LICENSE", "THIRD-PARTY-NOTICES.txt"] };
+            const errs = [];
+            for (const [name, files] of Object.entries(need)) {
+              const pack = packs.find(x => x.name === name);
+              const have = new Set((pack?.files ?? []).map(f => f.path));
+              for (const f of files) if (!have.has(f)) errs.push(`${name} lacks ${f}`);
+            }
+            if (errs.length) { console.error("::error::" + errs.join("; ")); process.exit(1); }
+            console.log("both tarballs carry their licences");'
 
       - name: Test
         working-directory: core/js
@@ -111,6 +254,15 @@ jobs:
             test/registry.vectors.test.js \
             test/identity.web.test.js \
             test/journal.test.js
+
+      # Upgrade npm only now, for OIDC (>= 11.5.1).  Everything above ran on the
+      # runner's npm 10, as it does in the flake: npm 11+ `npm ci` refuses this
+      # lockfile, because @evmts/zevm@0.0.0 (via tevm) declares optional platform
+      # packages that do not exist on the registry, so no lockfile can list them.
+      - name: npm >= 11.5.1 (OIDC support)
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Publish alberta-buck-kernel
         working-directory: core/js

@@ -1,16 +1,13 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in
 # LICENSING.md.  The code is free software; the design writing is not
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
-#
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+title: Alberta Buck -- Direct Embodiment
 #+author: Perry Kundert
 #+date: 2026-05-15
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 20
 #+draft: false
 #+bucky: true
@@ -601,14 +598,13 @@ Not in v1: =removeBasketToken=, =setBasketAmount=, =setFeeTier=,
      8. Verify the residual liquidity remains inside the pools (Buck's
         retained share)
 
-** Layer 6: equilibrium simulation (analog of =BuckKArbScenarioTest=)
+** Layer 6: equilibrium simulation
 
-   Recreate the existing 18-month Carol/Hank simulation against the
-   direct embodiment.  Two basket constituents (gold-pegged + BTC-
-   pegged synthetic tokens, both 6-dec mocks), starting weights 50/50.
-   Confirm the same equilibrium-seeking behavior (BUCK price oscillates
-   around basket-implied parity, fundingFactor responds counter-
-   cyclically) without the USD reference.
+   A closed-loop simulation against the direct embodiment.  Two basket
+   constituents (gold-pegged + BTC-pegged synthetic tokens, both 6-dec
+   mocks), starting weights 50/50.  Confirm equilibrium-seeking behavior
+   (BUCK price oscillates around basket-implied parity, fundingFactor
+   responds counter-cyclically) without the USD reference.
 
 ** Acceptance gate
 

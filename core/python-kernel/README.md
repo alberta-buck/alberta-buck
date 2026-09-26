@@ -5,16 +5,20 @@ bit-identical to the Solidity contracts, and the BN254 identity, wallet and
 registry cryptography.
 
 **Nothing requires this package.** It is the optional fast path behind
-[`alberta-buck`](https://pypi.org/project/alberta-buck/). Everything here
-has a pure-Python equivalent in `alberta_buck.wallet`, which remains the
-executable specification -- this package is proven bit-identical to it by
-golden vectors, so choosing it cannot change a single emitted byte. It is
-only faster.
+[`alberta-buck-core`](https://pypi.org/project/alberta-buck-core/) and the
+`alberta-buck` reference implementation. Everything here has a pure-Python
+equivalent in `alberta_buck.wallet`, which remains the executable
+specification -- this package is proven bit-identical to it by golden
+vectors, so choosing it cannot change a single emitted byte. It is only
+faster.
 
 ```sh
-pip install alberta-buck            # pure Python, works everywhere
-pip install alberta-buck[kernel]    # adds this, where a wheel exists
+pip install alberta-buck-core            # pure Python, works everywhere
+pip install alberta-buck-core[kernel]    # adds this, where a wheel exists
 ```
+
+`alberta-buck` itself (not yet on PyPI) takes the kernel the same way, as
+its own `kernel` extra.
 
 ## Selection
 
@@ -41,7 +45,7 @@ component, not from the filename. Installed size is 2.0 MB rather than
 
 ## Status
 
-0.1.0, prototype. Unaudited cryptographic software. It has been checked for
+0.2.0, prototype. Unaudited cryptographic software. It has been checked for
 agreement with a reference implementation, which is not the same as having
 been checked for security.
 

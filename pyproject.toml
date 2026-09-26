@@ -1,11 +1,22 @@
 [build-system]
-requires = ["setuptools >= 40.9.0", "wheel"]
+requires = ["setuptools >= 77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name			= "alberta-buck"
-version			= "0.1.0"
-description		= "Alberta Buck commodity-basket stablecoin: oracle tools, historical analysis, and PID simulation"
+version			= "0.2.1"
+description		= "Alberta Buck reference implementation (protocol v2): identity credentials and accumulator, Notes, payment receipts, and agent simulations over the contracts"
+readme			= "README-pypi.md"
+keywords		= ["stablecoin", "ethereum", "zero-knowledge", "identity", "bn254", "simulation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Office/Business :: Financial",
+]
 # 3.11 is the floor of alberta-buck-core, which is a hard dependency below.
 requires-python		= ">=3.11"
 license			= "GPL-3.0-or-later"
@@ -31,8 +42,12 @@ dependencies = [
     # session/journal/artifacts, and the contract artifacts it depends on.
     # buck_contracts is never imported here directly -- it arrives through
     # core, which is what calls it.
-    "alberta-buck-core	>=0.1.0",
+    "alberta-buck-core	>=0.2.0,<0.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alberta-buck/alberta-buck"
+"Bug Tracker" = "https://github.com/alberta-buck/alberta-buck/issues"
 
 [project.optional-dependencies]
 # The compiled kernels.  Optional BY CONSTRUCTION, not by omission:
@@ -43,7 +58,7 @@ dependencies = [
 # Wheels exist for macOS arm64/x86_64 and manylinux_2_28 x86_64/aarch64;
 # elsewhere this extra simply has nothing to install, which is why it must
 # never become a hard dependency.
-kernel = ["alberta-buck-core[kernel]>=0.1.0"]
+kernel = ["alberta-buck-core[kernel]>=0.2.0,<0.3"]
 
 # pyrevm: the in-process EVM backend (~7000x per-tx vs anvil).  An extra
 # rather than a dependency because it has no wheel for every target we
@@ -81,7 +96,7 @@ include = ["alberta_buck*"]
 [tool.setuptools.package-data]
 # Poseidon round constants / MDS matrices (generated from the specification
 # by core/rust/buck-identity/constants/generate.py; byte-identical to
-# circomlib's values, see NOTICE) -- required at runtime by
+# circomlib's values, derived rather than copied) -- required at runtime by
 # alberta_buck.wallet.poseidon, so it must ship in wheels and sdists.
 "alberta_buck.wallet" = ["poseidon_constants.json"]
 # Generated test artifacts the installed package consumes: the golden receipt
@@ -89,11 +104,15 @@ include = ["alberta_buck*"]
 # (gen_e2e_fixtures.sh) that E2EFixture / test_receipt_e2e load -- shipped so
 # the E2E Notes receipt tests run from a venv-installed wheel, not only from
 # the repo checkout.
-"alberta_buck.test" = ["vectors/*.golden.txt", "vectors/e2e/*.json"]
+"alberta_buck.test" = ["vectors/*.golden.txt", "vectors/e2e/*.json",
+                      "vectors/privacy/*.json"]
 # Vendored Bank of Canada / StatCan source series (BCPI, CPI, USD/CAD, wages)
 # consumed at runtime by alberta_buck.sim.quotes to build the historical
 # commodity & labour quote source; shipped so the module is self-contained.
-"alberta_buck.sim.quotes" = ["data/*.csv"]
+"alberta_buck.sim.quotes" = ["data/*.csv", "data/us/*.csv"]
+# The simulation's own inputs: the price series basket_flow and the scenarios
+# replay, and the TOML experiments the harness runs (python -m alberta_buck.sim).
+"alberta_buck.sim" = ["prices/*.csv", "experiments/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["alberta_buck/test"]

@@ -1,16 +1,13 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in
 # LICENSING.md.  The code is free software; the design writing is not
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
-#
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - Platform Architecture (DRAFT v0.1)
+#+title: The Alberta Buck - Platform Architecture (DRAFT v2)
 #+author: Perry Kundert
 #+date: 2026-07-03 12:00:00
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 22
 #+weight: 23
 #+draft: true
@@ -336,10 +333,10 @@ build-generated from a vendored byte-identical
 =poseidon_constants.json=), and every sigma protocol the wallet
 implements: PS sign/verify/rerandomize, ElGamal, registration NIZK,
 Chaum-Pedersen approve, issuer Schnorr batch binding, verifiable
-decryption, A2 issuer re-encryption binding, deposit coupling,
-B1 depositor binding, note commitments / nullifiers / id-hashes /
+decryption and the identity opening, A2 issuer re-encryption
+binding, B1 depositor binding, note commitments / nullifiers / id-hashes /
 =identity_leaf=.  NOT kernel: canonical-JSON identity serialization, the
-AB-RCPT/1 envelope, receipt build/verify orchestration, rendering, the
+AB-RCPT/2 envelope, receipt build/verify orchestration, rendering, the
 Merkle tree container (Python/JS keep those; the tree's Poseidon calls
 hit the kernel), and Groth16 SNARK proving (stays snarkjs/rapidsnark).
 
@@ -373,9 +370,11 @@ package =core/js/wasm/buck_identity= with 0x-hex strings at the ABI and a
 canonical-JSON identity serializer for in-browser registration).
 
 *Vector gates* (in addition to the acceptance list above):
-1. Regenerating =test/vectors/identity.json= (=emit-vectors=), the golden
-   receipt texts, and =identity-cache.json= under the kernel backend
-   produces ZERO git diff; the full forge suite stays green.
+1. Regenerating =test/vectors/identity.json= (=emit-vectors=) and the golden
+   receipt texts under the kernel backend produces ZERO git diff, a cold
+   =identity-cache.json= (a local, untracked cache) regenerates
+   byte-identically under either backend, and the full forge suite stays
+   green.
 2. A new nonce-inclusive cross-language fixture,
    =core/vectors/identity-kernel-vectors.json=, emitted by the py_ecc
    REFERENCE path (=BUCK_IDENTITY_BACKEND=py=), replayed bit-identically
@@ -633,7 +632,7 @@ over arbitrary 32-byte messages, ElGamal seal/unseal), the central
 aggregator (enroll/update, full + AND-composed membership proofs), the
 feature authority.  =buck-wallet= -- THE canonical JSON dialect (an
 explicit dialect-enforcing writer: ints of any size pass through as
-their exact tokens, floats rejected), the AB-RCPT/1 envelope, tier-1
+their exact tokens, floats rejected), the AB-RCPT/2 envelope, tier-1
 receipt verification (reason-for-reason with =verify_receipt.py=), all
 five receipt-core builders from both generating sides, the
 public-issuer/approve verifiers, the unilateral A1/A2 flows, the
@@ -657,6 +656,19 @@ identity cdylib exports three pymodules (=buck_core.buck_identity= /
 each module filename), and ONE wasm blob (one arkworks copy) carries
 all three kernels plus =MerkleTree=/=Aggregator= as stateful classes
 (=core/js/src/wallet-core.js= wraps).
+
+*Amended for v2 (2026-09-22).*  The kernels follow the protocol to v2:
+every transcript, leaf and derived key carries its =AlbertaBuck/.../v2=
+tag.  =buck-wallet= gained the Notes deliveries -- receiving keys, the
+payload wrap, the mailbox binding and both fold witness builders -- and
+lost the deposit-coupling sigma, which no gate verifies.  =buck-registry=
+gained the accumulator services: holder salts, private feature subtrees,
+the posted-root ring with per-consumer ages, the composed 32-level path,
+the insurance regulator with its issuance gate, and holder attribute
+proofs; the wasm blob exports =FeatureAuthority= and =Regulator= classes
+beside the tree and aggregator.  PyO3 binds the free functions only (the
+gate, salts, the identity opening): the Python reference keeps its own
+classes.
 
 *Determinism doctrine extended*: nonces explicit and hoisted in the
 Python shims BEFORE branching (in the reference draw order, so kernel

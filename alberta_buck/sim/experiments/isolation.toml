@@ -4,7 +4,13 @@
 # can be audited against a pure-Python replica of the agent's ledgers:
 #
 #     adv(t) = nw(t) - hypo(t)
-#            = interest_saved(t) - premium_paid(t) - trade_loss(t)
+#            = interest_saved(t) + jubilee(t) - trade_loss(t)
+#              + hypo_premium(t) - (premium_paid(t) - deposit(t))
+#
+# Both paths insure the same asset at the same rate: the counterfactual pays
+# the premium as a cost; the BUCK path deposits ten years' premium with the
+# insurance pool, an asset returned when the insurance is dropped, whose only
+# cost is the opportunity of the capital (charged at the mortgage rate).
 #
 # Run + audit:
 #   make nix-venv-sim-isolation
@@ -35,7 +41,8 @@ apr = 0.055
 mortgage_k = 800            # $800k principal, 25y amortization
 income_k = 260              # $260k/yr salary (monthly)
 face_k = 900                # 4 credits x $225k face
-premium_bp = 100            # 1% insurance premium -> real funding gate
+premium_bp = 35             # 0.35%/yr, a typical home premium; the deposit
+                            # (10x) still makes the funding gate bite
 save_rate = 0.5
 buffer_k = 20
 arrive_frac = 0.0           # day-0 arrival: full-horizon ledgers

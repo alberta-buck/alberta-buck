@@ -7,7 +7,8 @@
 //   structured args  plain objects in the vector-fixture shapes --
 //                    "0x..." hex words, {x, y} points, {R, C} ciphertexts
 //   certificates     Uint8Array wire bytes (the Python-pinned formats)
-//   accumulators     the MerkleTree / Aggregator wasm classes
+//   accumulators     the MerkleTree / Aggregator / FeatureAuthority /
+//                    Regulator wasm classes; paths and envelopes as JSON
 //
 // Deterministic: every nonce rides inside the args (`nonces: {...}`),
 // exactly the order the Python reference draws them.
@@ -41,6 +42,20 @@ export function wrapWallet(wasm) {
     makeReceiptA1: (a) => JSON.parse(wasm.wallet_make_receipt_a1(toText(a))),
     verifyReceiptA1: (a) => JSON.parse(wasm.wallet_verify_receipt_a1(toText(a))),
 
+    // ---- Notes: the mailbox key, the delivery, and the folded gate --------
+    // A delivery and a fold witness are DOCUMENTS (decimal words); every other
+    // argument and result is hex, as throughout this ABI.
+    receivingKey: (a) => JSON.parse(wasm.wallet_receiving_key(toText(a))),
+    wrapMask: (a) => JSON.parse(wasm.wallet_wrap_mask(toText(a))),
+    deliverA1: (a) => JSON.parse(wasm.wallet_deliver_a1(toText(a))),
+    deliverA2: (a) => JSON.parse(wasm.wallet_deliver_a2(toText(a))),
+    openA1: (a) => JSON.parse(wasm.wallet_open_a1(toText(a))),
+    openA2: (a) => JSON.parse(wasm.wallet_open_a2(toText(a))),
+    proveReceivingBinding: (a) => JSON.parse(wasm.wallet_prove_receiving_binding(toText(a))),
+    verifyReceivingBinding: (a) => JSON.parse(wasm.wallet_verify_receiving_binding(toText(a))),
+    depositFoldA1Witness: (a) => JSON.parse(wasm.wallet_deposit_fold_a1_witness(toText(a))),
+    depositFoldA2Witness: (a) => JSON.parse(wasm.wallet_deposit_fold_a2_witness(toText(a))),
+
     // ---- issuer ceremony -----------------------------------------------
     issueCredential: (a) => JSON.parse(wasm.wallet_issue_credential(toText(a))),
 
@@ -68,8 +83,25 @@ export function wrapWallet(wasm) {
         wasm.registry_verify_full_proof(toText(subProof), toText(aggProof)),
       /** The identity Merkle accumulator (stateful wasm class). */
       MerkleTree: wasm.MerkleTree,
-      /** The central sub-root aggregator (stateful wasm class). */
+      /** The central sub-root aggregator, its root ring, composed paths and
+       *  attribute proofs (stateful wasm class). */
       Aggregator: wasm.Aggregator,
+      /** An attribute authority's subtree, private or public (wasm class). */
+      FeatureAuthority: wasm.FeatureAuthority,
+      /** An insurance regulator's predicate subtrees (wasm class). */
+      Regulator: wasm.Regulator,
+
+      // ---- the insurer gate ---------------------------------------------
+      /** The scope the eight-argument createCredit declares. */
+      GENERAL_SCOPE: "0x" + "0".repeat(64),
+      /** BuckCredit's gate: "" if admitted, else its revert reason.  `face`
+       *  in BuckCredit units (BigInt, number or decimal string). */
+      checkIssuance: (envelope, scope, face, depType, depRate, premiumRate, now) =>
+        wasm.registry_check_issuance(
+          toText(envelope), scope, String(face), depType, depRate, premiumRate, now),
+      bandForFace: (face) => wasm.registry_band_for_face(String(face)),
+      scopeId: (name) => wasm.registry_scope_id(name),
+      subtreeKey: (name) => wasm.registry_subtree_key(name),
     },
   };
 }

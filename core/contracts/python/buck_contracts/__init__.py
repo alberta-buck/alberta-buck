@@ -23,7 +23,7 @@ __all__ = ["artifact", "contracts", "compiler", "deployments", "names"]
 
 @lru_cache(maxsize=None)
 def _load(name: str) -> dict:
-    return json.loads((_HERE / f"{name}.json").read_text())
+    return json.loads((_HERE / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def contracts() -> dict:

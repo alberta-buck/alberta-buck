@@ -33,6 +33,12 @@ from alberta_buck.sim import experiment as expmod
 REPO = Path(__file__).resolve().parents[2]
 
 
+def _rel(path) -> str:
+    """A repository path as the summary records it: relative, so it travels with the checkout."""
+    p = Path(path).resolve()
+    return str(p.relative_to(REPO)) if p.is_relative_to(REPO) else str(p)
+
+
 def _window(exp) -> tuple:
     s = exp.scenario
     return (s.get("start", ""), s.get("end", ""), float(s.get("years", 0.0)))
@@ -50,9 +56,10 @@ def _run_one(spec: dict) -> dict:
         rc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT,
                             cwd=REPO).returncode
     if not Path(spec["out"]).exists():
-        return {"path": spec["out"], "name": spec["label"], "frames": 0,
+        return {"path": _rel(spec["out"]), "name": spec["label"], "frames": 0,
                 "error": f"no vector (exit {rc}; see {log})"}
     st = eqmetrics.summarize(spec["out"])
+    st["path"] = _rel(spec["out"])
     st["name"] = spec["label"]
     st["exit"] = rc
     return st

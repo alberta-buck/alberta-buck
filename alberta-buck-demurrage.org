@@ -1,16 +1,13 @@
 # Copyright (c) 2026 Perry Kundert.  All rights reserved.
-#
 # This document is NOT covered by the source-code licences in
 # LICENSING.md.  The code is free software; the design writing is not
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
-#
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+TITLE: The Alberta Buck - Demurrage and the Jubilee Fund
 #+AUTHOR: Perry Kundert
 #+date: 2026-04-30
 #+category: Alberta Buck
-#+series[]: Alberta-Buck
 #+series_order: 18
 #+weight: 19
 #+draft: false
@@ -942,12 +939,16 @@ consenting to.
 
 ** Premium routing and the insurance pool
 
-The mint =premium= computed by =_computePremium= is routed to
-=insurancePool=, a Non-Carrying account.  The insurance pool
-accrues demurrage on its holdings like any other Non-
-Carrying account; when it deploys funds it does so via
-standard Non-Carrying =transfer=.  No special handling is
-required.
+A mint's premium deposit is routed to =insurancePool=, today a
+single stand-in address that every test and simulation binds
+Carrying through the registry, as a contract working on its
+members' behalf: its =balanceOf= stays equal to its raw
+balance, and a refund on =burn= carries the refunded share of
+its accrued age back to the member.  In the intended design
+each credit's deposit goes to that credit's insurer, whose
+premium pool is Carrying in just the same way.
+See /The Insurance Pool: an Interim Stand-in/ in
+=alberta-buck-ethereum.org=.
 
 * References
 

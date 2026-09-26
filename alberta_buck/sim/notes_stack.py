@@ -6,7 +6,7 @@ Two pieces:
 * :class:`E2EFixture` -- loads one ``alberta_buck/test/vectors/e2e/{a1,a2,
   b1}.json`` world (built by scripts/snark/gen_e2e_fixtures.sh: REAL Groth16
   proofs at every gate, REAL named identities -- the canonical Alice/Bob KYC
-  data) into wallet objects, and builds the AB-RCPT/1 receipt for either
+  data) into wallet objects, and builds the AB-RCPT/2 receipt for either
   party over it.  The fixtures are package data, so this layer works from a
   venv-installed wheel with no repo checkout.
 
@@ -42,6 +42,11 @@ from alberta_buck.wallet.notes import NoteOpening
 from alberta_buck.wallet.build_receipt import (
     build_note_b1, build_note_a1, build_note_a2,
 )
+from alberta_buck.wallet.ps import ps_keygen, ps_sign, ps_present
+from alberta_buck.wallet.nizk import bind_contract_prove
+from alberta_buck.wallet.contract_binding import contract_binding_prove
+from alberta_buck.wallet.identity import canonical_identity_data, identity_scalar
+from alberta_buck.wallet.vectors import ALICE_FIELDS, BOB_FIELDS
 
 # The fixture worlds ship as alberta_buck.test package data, so a
 # venv-installed wheel can load them with no repo checkout; the live-EVM
@@ -54,6 +59,10 @@ EVENT_BY_FLAVOR = {"b1": "SpentCoupledB1", "a1": "SpentCoupledA1", "a2": "SpentC
 # A registered "contract" account needs code; the world accounts get the same
 # one-revert stub NotesE2E.t.sol etches.
 ACCOUNT_STUB = "0x60006000fd"
+
+# Must match scripts/snark/gen_e2e_world.py SEEDS so account() replay
+# recovers the fixture's (sk, r) for credential bind.
+_E2E_SEEDS = {"a1": 0xE2EA1, "a2": 0xE2EA2, "b1": 0xE2EB1}
 
 
 def _pt(d: dict):
@@ -107,7 +116,7 @@ class E2EFixture:
     nullifier: int
     issuer_sig: Optional[SchnorrProof]        # B1/A1 batch Schnorr
     binding:    Optional[IssuerReencProof]    # A2 mint binding
-    note:      Dict[str, Any]                 # raw notePayload (eNote/eRec/eIss/sigma)
+    note:      Dict[str, Any]                 # raw notePayload (eNote/eRec/eIss/T)
     timings:   Dict[str, float]
     raw:       Dict[str, Any]                 # the full fixture JSON
 
@@ -158,7 +167,7 @@ class E2EFixture:
         for k, v in self.note.items():
             if k in ("eNote", "eRec", "eIss"):
                 out[k] = _ct(v)
-            elif k == "sigma_R":
+            elif k == "T":
                 out[k] = _pt(v)
             else:
                 out[k] = int(v)
@@ -166,12 +175,34 @@ class E2EFixture:
             out["eDepForIss"] = _ct(self.raw["sigma"]["eDepForIss"])
         return out
 
+    def mailbox_binding(self):
+        """The recipient's holder-produced evidence, as a wallet object.
+
+        None for B1: a bearer note is addressed to nobody, so there is no
+        mailbox to bind.
+        """
+        b = self.raw.get("mailboxBinding")
+        if b is None:
+            return None
+        from alberta_buck.registry.tree import MembershipProof
+        from alberta_buck.wallet.recvkey import ReceivingBinding
+        return ReceivingBinding(
+            pk_recv=_pt(self.raw["parties"]["depositor"]["pkRecv"]),
+            salt=int(b["salt"]),
+            path=MembershipProof(
+                leaf=int(b["leaf"]),
+                siblings=[int(x) for x in b["siblings"]],
+                index_bits=[int(x) for x in b["indexBits"]],
+                root=int(b["root"]), leaf_index=0,
+            ),
+        )
+
     # -- receipts ------------------------------------------------------------
 
     def build_receipt(self, role: str, contracts: Dict[str, str],
                       mint: Dict[str, Any], spend: Dict[str, Any],
                       notes: Optional[List[str]] = None, rng=None):
-        """Build this world's AB-RCPT/1 :class:`ReceiptCore` from either side.
+        """Build this world's AB-RCPT/2 :class:`ReceiptCore` from either side.
 
         ``mint`` carries the Minted anchor (``txhash``, ``block``); ``spend``
         the SpentCoupled* anchor (``txhash``, ``block``, ``logindex``,
@@ -196,10 +227,38 @@ class E2EFixture:
         if role == "recipient":
             kw["payee_sk"] = dep.sk
 
+        if self.flavor != "b1":
+            # The addressed legs: the mailbox key, and whichever evidence about
+            # it this side can produce.  The recipient holds k; the issuer holds
+            # the randomness it encrypted with.  Neither holds the other's, and
+            # that is what makes the receipt evidence.
+            dp = self.raw["parties"]["depositor"]
+            kw["pk_recv"] = _pt(dp["pkRecv"])
+            kw["mailbox_binding"] = self.mailbox_binding()
+            if role == "recipient":
+                kw["k_recv"] = int(dp["kRecv"])
+            else:
+                # The minter's retained randomness -- not the payload's wrapped
+                # copy, which only the mailbox holder can open.  A1's identity
+                # ciphertext is eRec (randomness r'); A2's is eIss (also r').
+                # eNote carries the value under r_note in both flavours; the
+                # identity ciphertext (A1's eRec, A2's eIss) carries r'.
+                sec = self.raw["issuerSecrets"]
+                kw["r_note"] = int(sec["rNote"])
+                kw["r_id"] = int(sec["rPrime"])
+            if self.flavor == "a2":
+                # gamma opens the binding's T and ties it to the named issuer.
+                # Each side uses its own copy: the recipient unwraps it from the
+                # delivery with k, and the issuer kept the one it drew.
+                if role == "recipient":
+                    from alberta_buck.wallet.delivery import open_a2
+                    kw["gamma"] = open_a2(np, int(dp["kRecv"])).gamma
+                else:
+                    kw["gamma"] = int(self.raw["issuerSecrets"]["gamma"])
+
         if self.flavor == "b1":
             return build_note_b1(
                 issuer_sig=self.issuer_sig,
-                sigma_R=_pt(np["sigma_R"]), sigma_s=int(np["sigma_s"]),
                 eDepForIss=_ct(self.raw["sigma"]["eDepForIss"]),
                 issuer_sk=iss.sk if role == "issuer" else None,
                 **kw)
@@ -207,7 +266,6 @@ class E2EFixture:
             return build_note_a1(
                 issuer_sig=self.issuer_sig,
                 eNote=_ct(np["eNote"]), eRec=_ct(np["eRec"]),
-                sigma_R=_pt(np["sigma_R"]), sigma_s=int(np["sigma_s"]),
                 **kw)
         return build_note_a2(
             issuer_E_addr=iss.E,
@@ -243,7 +301,7 @@ class NotesStack:
     """
 
     def __init__(self, anvil, fixture: E2EFixture, rng=None,
-                 block_time: Optional[int] = None):
+                 block_time: Optional[int] = None, issuer=None):
         from alberta_buck.sim.chain import Chain
         self.anvil = anvil
         self.fx = fixture
@@ -260,6 +318,9 @@ class NotesStack:
         self.steps: List[Step] = []
         assert self.w3.eth.chain_id == fixture.chainid, \
             "anvil must run the fixture's chain id (Anvil(chain_id=1))"
+        # The trusted credential issuer: a wallet.issuer.Issuer, or None for a
+        # private one generated at deploy (the fixture worlds' default).
+        self._issuer = issuer
         self._deploy()
 
     # -- plumbing -------------------------------------------------------------
@@ -326,36 +387,66 @@ class NotesStack:
         # The REAL Groth16 verifier stack.
         mint_adapter = ch.deploy("MintVerifierAdapter", gov)
         a2_adapter   = ch.deploy("MintVerifierA2Adapter", gov)
+        self.mint_adapter, self.a2_adapter = mint_adapter, a2_adapter
         ch.send(mint_adapter.functions.registerVerifier(
             1, ch.deploy("MintBatchN1Groth16Verifier").address))
         ch.send(a2_adapter.functions.registerVerifier(
             1, ch.deploy("MintBatchA2N1Groth16Verifier").address))
         spend_adapter = ch.deploy("SpendVerifierAdapter",
                                   ch.deploy("SpendGroth16Verifier").address)
-        mem_adapter  = ch.deploy("IdentityMembershipG1TieVerifierAdapter")
-        bind_adapter = ch.deploy("NoteBindingVerifierAdapter")
+        # B1's membership goes through the REPAIRED circuit: its blind is
+        # proven rather than witnessed, and its generator has no known
+        # logarithm.  The G1-tie adapter it replaces let a depositor shift the
+        # blind onto another registered Identity and spend while unregistered.
+        mem_adapter  = ch.deploy("IdentityMembershipB1VerifierAdapter")
 
         self.notes = ch.deploy("Notes", self.buck.address, mint_adapter.address,
                                spend_adapter.address, gov)
         ch.send(self.notes.functions.setIdentityRegistry(self.reg.address))
         ch.send(self.notes.functions.setA2MintVerifier(a2_adapter.address))
         ch.send(self.notes.functions.setIdentityMembershipVerifier(mem_adapter.address))
-        ch.send(self.notes.functions.setNoteBindingVerifier(bind_adapter.address))
+
+        # The addressed flavours spend through the FOLDED gate: one proof
+        # carrying every relation.  The slot is not optional -- an addressed
+        # spend with it unset reverts, because there is no weaker path to fall
+        # back to.
+        fold_adapter = ch.deploy("DepositFoldVerifierAdapter", self.reg.address)
+        ch.send(self.notes.functions.setDepositFoldVerifier(fold_adapter.address))
 
         # The Notes pool is a Public-Identity Carrying contract with a REAL
         # key pair, so a private party's identity-bound approve toward it is
         # a genuine re-encryption (the operator could decrypt it).
         self.pool_sk = rand_scalar(self.rng)
         self.pool_pk = mul(G1, self.pool_sk)
-        ppk = _xy(self.pool_pk)
-        g1 = _xy(G1)
-        self._bind5 = self.reg.get_function_by_signature(
-            "bindContract(address,(uint256,uint256),"
-            "((uint256,uint256),(uint256,uint256)),bool,bool)")
-        self._bind6 = self.reg.get_function_by_signature(
-            "bindContract(address,(uint256,uint256),"
-            "((uint256,uint256),(uint256,uint256)),bool,bool,uint256)")
-        ch.send(self._bind5(self.notes.address, ppk, (g1, g1), True, True))
+        self._bind_cred = self.reg.get_function_by_signature(
+            "bindContract(address,address,(uint256,uint256),"
+            "((uint256,uint256),(uint256,uint256)),"
+            "((uint256,uint256),(uint256,uint256)),"
+            "(uint256,uint256,uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),"
+            "(uint256,uint256),(uint256,uint256)),"
+            "(uint256,uint256,(uint256,uint256)),"
+            "bool,bool)")
+        if self._issuer is None:
+            self._iss_kp = ps_keygen(rng=self.rng)
+            self._iss_addr = self._addr(0xAA)
+        else:
+            self._iss_kp = self._issuer.keypair
+            self._iss_addr = self._addr(self._issuer.issuer_addr)
+        self.pool_m = rand_scalar(self.rng)
+        self.pool_r = rand_scalar(self.rng)
+        self.pool_E = elgamal_encrypt(mul(G1, self.pool_m), self.pool_pk, self.pool_r)
+        g2 = lambda P: ((int(P[0].coeffs[0]), int(P[0].coeffs[1])),
+                        (int(P[1].coeffs[0]), int(P[1].coeffs[1])))
+        ch.send(self.reg.functions.trustIssuer(
+            self._iss_addr, (g2(self._iss_kp.pk_X), g2(self._iss_kp.pk_Y),
+                             _xy(self._iss_kp.pk_Y1))))
+        ch.send(self.notes.functions.authorizeIdentityBinding(
+            self.reg.address, self.gov, _xy(self.pool_pk),
+            (_xy(self.pool_E.R), _xy(self.pool_E.C)),
+            True, True))
+        ch.send(self._credential_bind_fn(
+            self.notes.address, self.pool_pk, self.pool_sk, True, True,
+            m=self.pool_m, r=self.pool_r, E=self.pool_E))
 
         self.contracts = {
             "registry": self.reg.address.lower(),
@@ -363,24 +454,85 @@ class NotesStack:
             "notes":    self.notes.address.lower(),
         }
 
+    def _proof_arg(self, pf):
+        return (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, _xy(pf.C1), _xy(pf.T_C),
+                _xy(pf.T_R), _xy(pf.T_key))
+
+    def _binding_arg(self, pf):
+        return (pf.e, pf.s, _xy(pf.T))
+
+    def _credential_bind_fn(self, target, pk, sk, is_public, is_carrying,
+                            m=None, r=None, E=None):
+        """PS credential + NIZK, Fiat-Shamir registrant = uint160(target)."""
+        if m is None:
+            m = rand_scalar(self.rng)
+        if r is None:
+            r = rand_scalar(self.rng)
+        if E is None:
+            E = elgamal_encrypt(mul(G1, m), pk, r)
+        pres, _a, b = ps_present(ps_sign(self._iss_kp, m, rng=self.rng),
+                                 self._iss_kp.pk_Y1, rng=self.rng)
+        pf = bind_contract_prove(
+            pres, b, m, r, pk, E, int(target, 16), sk,
+            chainid=self.fx.chainid, rng=self.rng,
+            registry=int(self.reg.address, 16))
+        binder = self.gov
+        bind_auth = contract_binding_prove(
+            sk, pk, int(target, 16), int(binder, 16), int(self.reg.address, 16),
+            is_public, is_carrying, chainid=self.fx.chainid, rng=self.rng)
+        return self._bind_cred(
+            target, self._iss_addr, _xy(pk), (_xy(E.R), _xy(E.C)),
+            (_xy(pres.A), _xy(pres.B)),
+            self._proof_arg(pf), self._binding_arg(bind_auth), is_public, is_carrying)
+
+    def _replay_fixture_accounts(self):
+        """Recover (sk, r) for issuer then depositor (gen_e2e_world.account)."""
+        import random
+        rng_state = random.Random(_E2E_SEEDS[self.fx.flavor])
+        rng = lambda: rng_state.getrandbits(256)
+        out = []
+        for fields in (BOB_FIELDS, ALICE_FIELDS):
+            m = identity_scalar(canonical_identity_data(fields))
+            sk = rand_scalar(rng)
+            pk = mul(G1, sk)
+            r = rand_scalar(rng)
+            E = elgamal_encrypt(mul(G1, m), pk, r)
+            out.append(dict(m=m, sk=sk, pk=pk, E=E, r=r))
+        return out
+
     # -- lifecycle steps -------------------------------------------------------
 
     def bind_identities(self) -> List[Step]:
-        """Bind the two fixture identities WITH their identity leaves -- the
-        registry's incremental Poseidon Merkle accumulator updates on chain,
-        and must replay to the Python wallet tree's root."""
+        """Credential-bind the two fixture identities.  Leaves are not
+        inserted on-chain (unconstrained); governance posts the fixture root."""
+        recovered = self._replay_fixture_accounts()
         out = []
-        for b in self.fx.raw["binds"]:
+        for b, rec in zip(self.fx.raw["binds"], recovered):
             addr = self._addr(int(b["addr"], 16))
             self.anvil._rpc("anvil_setCode", [addr, ACCOUNT_STUB])
             self._impersonate(addr)
+            who = "issuer" if int(b["addr"], 16) == self.fx.issuer.addr else "depositor"
             out.append(self._send_from(
-                self._bind6(addr, _g1_tuple(b["pk"]), _ct_tuple(b["E"]),
-                            bool(b["isPublic"]), False, int(b["identityLeaf"])),
-                self.gov, f"bind {'issuer' if int(b['addr'],16)==self.fx.issuer.addr else 'depositor'}"))
-        onchain_root = self.reg.functions.identityRoot().call()
-        assert onchain_root == int(self.fx.raw["identityRoot"]), \
-            "on-chain incremental identityRoot must replay the wallet tree"
+                self.reg.functions.authorizeContractBinding(
+                    self.gov, _xy(rec["pk"]),
+                    (_xy(rec["E"].R), _xy(rec["E"].C)), bool(b["isPublic"]), False),
+                addr, f"authorize {who} binding"))
+            out.append(self._send_from(
+                self._credential_bind_fn(
+                    addr, rec["pk"], rec["sk"], bool(b["isPublic"]), False,
+                    m=rec["m"], r=rec["r"], E=rec["E"]),
+                self.gov, f"bind {who}"))
+        # The world's aggregator root: governance appoints itself root authority
+        # and aggregator, and posts it, as a deployment's aggregator would.
+        root = int(self.fx.raw["identityRoot"])
+        gov_addr = self.gov.address if hasattr(self.gov, "address") else self.gov
+        out.append(self._send_from(
+            self.reg.functions.setRootAuthority(gov_addr), self.gov, "setRootAuthority"))
+        out.append(self._send_from(
+            self.reg.functions.setAggregator(gov_addr), self.gov, "setAggregator"))
+        out.append(self._send_from(
+            self.reg.functions.postIdentityRoot(root, b"\x00" * 32), self.gov, "postIdentityRoot"))
+        assert self.reg.functions.identityRoot().call() == root
         return out
 
     def fund_issuer(self) -> List[Step]:
@@ -412,6 +564,7 @@ class NotesStack:
             party.sk, r_prime,
             party.addr, int(self.notes.address, 16), self.fx.chainid,
             rng=self.rng,
+            registry=int(self.reg.address, 16),
         )
         approve4 = self.buck.get_function_by_signature(
             "approve(address,uint256,((uint256,uint256),(uint256,uint256)),"
@@ -457,9 +610,15 @@ class NotesStack:
                                contract=self.notes)
 
     def spend(self) -> Step:
-        """Submit the fixture's REAL coupled spend as the depositor: the spend
-        Groth16 + the deposit sigma + the bound membership proof (+ the
-        note<->eEnc tie for the addressed flavors)."""
+        """Submit the fixture's REAL coupled spend as the depositor.
+
+        The shape differs by flavour, and the difference is the architecture.
+        The addressed flavours submit ONE folded proof: their two facts rest
+        on two different secrets -- the Identity and the receiving key -- so
+        no sigma can tie them, and three checks sharing a public point would
+        let a payload thief supply one of each.  B1's rest on one secret, so
+        its sigma is a genuine tie and it submits sigma plus membership.
+        """
         d = self.fx.raw
         dep = self._addr(self.fx.depositor.addr)
         self._impersonate(dep)
@@ -467,26 +626,24 @@ class NotesStack:
         proof = bytes.fromhex(d["spend"]["proofBytes"][2:])
         root, nf = int(sp["noteRoot"]), int(sp["nullifier"])
         face, rec = int(sp["face"]), self._addr(int(sp["recipient"], 16))
-        mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
         if self.fx.flavor == "b1":
             db = d["sigma"]["db"]
             b1p = (int(db["e"]), int(db["s_m"]), int(db["s_s"]), int(db["s_r"]),
                    int(db["s_b"]),
                    _g1_tuple(db["A2"]), _g1_tuple(db["A4"]), _g1_tuple(db["B1"]),
                    _g1_tuple(db["B2"]), _g1_tuple(db["A_p"]), _g1_tuple(db["P_dep"]))
+            mem = bytes.fromhex(d["membership"]["proofBytes"][2:])
             fn = self.notes.functions.spendCoupledB1(
-                proof, root, nf, face, rec, self._addr(self.fx.issuer.addr),
+                proof, root, int(d["identityRoot"]), nf, face, rec, int(d["opening"]["cm"]),
+                self._addr(self.fx.issuer.addr),
                 _ct_tuple(d["sigma"]["eDepForIss"]), b1p, mem)
         else:
-            dc = d["sigma"]["dc"]
-            dcp = (int(dc["e"]), int(dc["s_m"]), int(dc["s_s"]), int(dc["s_b"]),
-                   _g1_tuple(dc["A2"]), _g1_tuple(dc["A3"]), _g1_tuple(dc["A4"]),
-                   _g1_tuple(dc["P_I"]))
-            nb = bytes.fromhex(d["noteBinding"]["proofBytes"][2:])
+            # The folded gate: the re-encryption and one proof, nothing else.
+            fold = bytes.fromhex(d["depositFold"]["proofBytes"][2:])
             f = (self.notes.functions.spendCoupledA1 if self.fx.flavor == "a1"
                  else self.notes.functions.spendCoupledA2)
-            fn = f(proof, root, nf, face, rec,
-                   _ct_tuple(d["sigma"]["eEnc"]), dcp, mem, nb)
+            fn = f(proof, root, int(d["identityRoot"]), nf, face, rec,
+                   _ct_tuple(d["sigma"]["eEnc"]), fold)
         return self._send_from(fn, dep, f"Notes.spendCoupled{self.fx.flavor.upper()}",
                                event=EVENT_BY_FLAVOR[self.fx.flavor],
                                contract=self.notes)

@@ -1,6 +1,6 @@
 {
   "name": "alberta-buck-kernel",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "Alberta Buck monetary and identity kernels as WebAssembly: integer money arithmetic bit-identical to the Solidity contracts, and the BN254 identity/wallet cryptography, for Node and the browser",
   "license": "CAL-1.0",
   "author": "Perry Kundert <perry@dominionrnd.com>",
@@ -25,7 +25,8 @@
   "files": [
     "node",
     "web",
-    "README.md"
+    "README.md",
+    "THIRD-PARTY-NOTICES.txt"
   ],
   "//exports": "Two builds of the same kernels: node/ is CommonJS (wasm-pack --target nodejs, loaded with createRequire), web/ is ESM (--target web, awaits an explicit wasm source). The bare subpaths pick by environment; the node/ and web/ subpaths force one.",
   "exports": {
