@@ -230,7 +230,7 @@ take $2-3k each):
 3. *The gaps narrow but do not close to the band.*  Three cycles per
    call, four calls a day, cycles capped at 2% of a leg's reserve: the
    sim's granularity, not the wheel's.  More work per call is a knob.
-4. *bvib gets noisier: understand before the wheel meets K.*  The
+4. *bvib gets noisier -- and TRUER (settled by CONVERGENCE E1, below).*  The
    hypothesis: consistent pools make bvib (a TWAP of the TOKEN/BUCK
    pools) track the USD venues' commodity moves instead of lagging them
    behind a 120 bp arb threshold -- a truer gauge, and more of the true
@@ -358,6 +358,97 @@ zero-premium face, the flash mint's stand-in).  A new activity is a
 =test_work_wheel.py= pins the round-robin, the scan amortization and
 idle memo, the re-arm, the reserve's build-up and draw-down, the quote,
 and the fee band only the basket can take.
+
+** 7.2 E1: noisier or truer? (2026-09-27)
+
+=build/sim/e1/= (the none arm, 60 days, L2 gas; the wheel acting last),
+days 30-59.  The gauge error is bvib against the basket priced at the
+REFERENCE prices: each pool's TOKEN/BUCK against the commodity's USD
+reference in BUCK, weighted by the pools' current value weights.
+
+| cell (cap, cycles per call) | bvib sd | gauge error p50 / p90 | error sd | wheel value | external arb cycles |
+|-----------------------------+---------+-----------------------+----------+-------------+---------------------|
+| control                     | 77 bp   | 152 / 377 bp          | 203 bp   | --          | 1,253               |
+| 2%, 3                       | 117 bp  | 107 / 216 bp          | 127 bp   | $39,908     | 814                 |
+| 0.5%, 3                     | 99 bp   | 140 / 260 bp          | 162 bp   | $26,358     | 909                 |
+| 2%, 12                      | 98 bp   | 101 / 214 bp          | 132 bp   | $52,582     | 685                 |
+| 0.5%, 12                    | 89 bp   | 126 / 282 bp          | 151 bp   | $33,591     | 832                 |
+
+The wheel cuts the gauge's error by a third at the median and 43% at the
+90th percentile: bvib reads the basket's true value better, and the
+extra variance is the commodities' real movement reaching it instead of
+lagging behind a 120 bp arb threshold.  More work per call (12) takes
+more value, errs least, and gives back most of the added variance -- so
+part of the 2%/3 cell's noise was the wheel's own lumpiness.  VERDICT
+(provisional, the thin cast): K may read the wheel's bvib as is; the
+demonstration's default is a 2% cap and 12 cycles per call.  (The 2%/3
+cell and the control reproduce 7.1's to the dollar: the merged tree,
+the refactor and the wheel's merge kept the run deterministic.)
+
+** 8.6 The Solidity v1 (2026-09-27)
+
+=src/wheel/WorkWheel.sol= (the chassis), =UpkeepKinds.sol= (=ComputeKind=,
+=DirectorKind=, =SweepKind=, =OpsKind=), =ArbKind.sol= (=CycleMath= and the
+arbitrage), =BasketWheel.sol= (the concrete wheel beside the shell; a kind
+whose target is unset has no slots, so one contract serves the savings
+basket and the monetary one by configuration).  Tests:
+=test/wheel/WorkWheel.t.sol= (8: layout, round-robin, the amortized scan and
+its per-block memo, re-arm, the reserve's build-up and draw-down, the cap)
+and =test/wheel/BasketWheelArb.t.sol= (8, on real V3 pools: nothing to do
+when consistent; a gap closed in either direction and credited to the
+depositors; a capped cycle closing the gap over blocks; the BUCK start
+funding the reserve then the treasury; the credit entry points and the
+callbacks closed to everyone else).
+
+What building it settled:
+
+1. *No flash mint is needed -- for either start.*  The design owner asked
+   how the basket issues flash liquidity for its closed paths.  V3 pays a
+   swap's output before it collects the input: the first leg funds the
+   cycle, the other two run inside its callback, and what they return
+   pays the first.  So a cycle needs no inventory from ANY start token,
+   and =Buck.sol= is untouched.  The basket's mint authority is what the
+   NAV leg uses (issuing at a premium, absorbing at a discount) -- the
+   undertakings' leg, now in the demonstration.
+2. *The start token decides where the profit lands, not how much it is.*
+   The same three swaps in the same rotation earn the same.  TOKEN start
+   (=startMode= 0): the profit is the constituent, credited to the
+   DEPOSITORS.  BUCK start (=startMode= 1): the profit is BUCK -- the
+   reserve's own asset -- so it funds the callers' gas offset up to the
+   reserve's cap and the rest goes to the treasury: the wheel pays for its
+   own calls without touching the basket's yield.  Both are measured.
+3. *The harvest reaches the receipts through the stress fee's door.*
+   ProRata's doctrine of record pays depositors in TOKEN only and keeps
+   BUCK profit in the treasury.  The TOKEN a cycle captures is re-LP'd as
+   DEPOSITOR liquidity with minted partner BUCK booked in
+   =stressBonusPrincipal= (=creditDepositors=), exactly the stress fee's
+   mechanics, so =totalOutstandingBuck == sum buckPrincipal +
+   stressBonusPrincipal= holds and every receipt's claim grows pro rata.
+4. *Hosted by the venue facet, for the Fence's sake.*  =setWheel=,
+   =creditDepositors= and =creditTreasury= in ProRata would have left the
+   Fence (which inherits it) 36 bytes under EIP-170.  The shell's
+   fallback already delegates every unknown selector to the venue facet
+   with =msg.sender= preserved, so they live there.  Sizes after:
+   ProRata 16,235 B, Ops 21,435 B (3,141 to spare), Fence 23,612 B (964),
+   the venue facet 19,039 B, =BasketWheel= 12,335 B.  The shells pay only
+   the public =wheel= getter (56 B).
+5. *BUCK/USDC liquidity is not the basket's.*  The owner asked whether
+   BUCK/USDC liquidity must be architected into the basket.  No: the
+   cycles route through whatever BUCK/USDC pool exists (the market's, or
+   the treasury seeder's temporary seeding, D5); owning a slice would
+   save its fee leg (0.05%) at the price of the standing USDC position
+   ruling 2 forbids.  What must be architected is its DEPTH: a thin
+   BUCK/USDC pool caps every cycle, so the demonstration seeds it and the
+   measurements record when it binds.
+6. *Gas, measured:* a working arbitrage tick is ~630-780k gas (the
+   depositor credit's V3 mint is a third of it), an idle memoized tick a
+   few thousand.  The L1 margin is correspondingly higher than 7.1's
+   estimate assumed.
+7. *v1 takes DIRECT profit only* (gaps beyond all three fees).  The band
+   only the basket can take needs a TOKEN float or the wheel inside the
+   shell; it is v2.  The cycle cap is =capBp= of the FIRST leg's input
+   reserve: against a small own pool a large gap closes over several
+   blocks, one bounded cycle per scan.
 
 * 9. Open
 

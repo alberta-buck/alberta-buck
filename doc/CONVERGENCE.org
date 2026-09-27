@@ -136,7 +136,7 @@ they choose a configuration to demonstrate, not a verdict of record.
 
 | #  | question                                   | cells                                                                                     | decides                                  |
 |----+--------------------------------------------+-------------------------------------------------------------------------------------------+------------------------------------------|
-| E1 | the wheel's effect on the gauge            | none arm, 60 d: wheel off / on x cap_frac {0.005, 0.02} x max_work {3, 12}; metric: bvib against the reference-priced basket value, not only its sd | whether K may see the wheel's bvib as is |
+| E1 | the wheel's effect on the gauge (DONE: TRUER -- error -34% p50 / -43% p90; BASKET-WHEEL 7.2) | none arm, 60 d: wheel off / on x cap_frac {0.005, 0.02} x max_work {3, 12}; metric: bvib against the reference-priced basket value, not only its sd | whether K may see the wheel's bvib as is |
 | E2 | the full stack on the bursts               | design A + undertakings (eps 0.5%) + wheel on / off, on none, squeeze x4, dump x4, grind-down, cohort-step, bookload; 2 years | (A)'s configuration to demonstrate       |
 | E3 | do the harvest legs add?                   | director off / vrate / pairs x wheel off / on, on the none arm and on a historical-replay arm; 2 years | (B)'s basket to demonstrate              |
 | E4 | the organic cast on the bursts             | E2's winner with the 30 retirees (T15) in place of the endog debtors                       | the demonstration's cast                  |

@@ -170,8 +170,19 @@ abstract contract BuckBasketStorage {
     uint256 public stressFeeSlopeBp;
     /// @notice Cap on the fee (bp of V).  0 disables the fee.
     uint256 public stressFeeMaxBp;
-    /// @notice Partner BUCK minted for re-LP'd stress fees, still outstanding.
+    /// @notice Partner BUCK minted for re-LP'd stress fees -- and for the work
+    ///         wheel's depositor credits, the same mechanics -- still outstanding.
     uint256 public stressBonusPrincipal;
+
+    // --- The work wheel (doc/BASKET-WHEEL.org) ----------------------------- //
+    //
+    // APPENDED.  The wheel's consistency arbitrage credits what it captures:
+    // TOKEN to the DEPOSITORS with the stress fee's mechanics (re-LP'd as
+    // depositor liquidity, the partner BUCK booked in stressBonusPrincipal,
+    // so the invariant above holds), BUCK to the treasury.
+
+    /// @notice The work wheel allowed to credit the basket (0: none).
+    address public wheel;
 
     // --- Events ----------------------------------------------------------- //
 
@@ -193,6 +204,8 @@ abstract contract BuckBasketStorage {
     ///         claim V, `feeValueBuck` the TOKEN value actually taken (spot).
     event StressFee(uint256 indexed receiptId, uint256 deviation1e18, uint256 feeBp, uint256 feeValueBuck);
     event StressFeeSet(uint256 deadbandBp, uint256 slopeBp, uint256 maxBp);
+    event WheelSet(address indexed wheel);
+    event WheelCredit(uint256 indexed poolIdx, uint256 tokenAmount, uint256 partnerBuck);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //
     error AlreadyPresent();
@@ -211,6 +224,8 @@ abstract contract BuckBasketStorage {
     error EmptyDeposit();
     error EmptyPool();
     error ExceedsPending();
+    error NotWheel();
+    error NoDepositors();
     error Gov0();
     error InvalidRescale();
     error L0();

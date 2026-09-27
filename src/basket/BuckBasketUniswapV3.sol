@@ -92,6 +92,46 @@ contract BuckBasketUniswapV3 is
 
     // --- Liquidity in/out ------------------------------------------------- //
 
+    // --- The work wheel's credits (doc/BASKET-WHEEL.org 8.4) --------------- //
+    //
+    // Policy, hosted here rather than in the shell for the shells' size budget
+    // (the Fence inherits ProRata with ~1 KB to spare): reached through the
+    // shell's fallback like every venue entry point, msg.sender preserved by
+    // the delegatecall.  A Diamond would give them a facet of their own.
+
+    function setWheel(address w) external {
+        if (!(msg.sender == governance)) revert NotGovernance();
+        wheel = w;
+        emit WheelSet(w);
+    }
+
+    /// @notice The wheel credits TOKEN it captured to the DEPOSITORS: re-LP'd
+    ///         into pool `i` as depositor liquidity with minted partner BUCK --
+    ///         the stress fee's mechanics, booked in `stressBonusPrincipal` --
+    ///         so every outstanding receipt's claim grows pro rata and the
+    ///         basket still burns exactly what it minted.
+    function creditDepositors(uint256 i, uint256 tokenAmount)
+        external returns (uint128 liquidity, uint256 partnerBuck)
+    {
+        if (!(msg.sender == wheel && msg.sender != address(0))) revert NotWheel();
+        if (!(totalOutstandingBuck > stressBonusPrincipal)) revert NoDepositors();
+        IERC20(constituents[i].token).transferFrom(msg.sender, address(this), tokenAmount);
+        (liquidity, partnerBuck) =
+            IBuckBasketVenue(address(this)).provideForToken(i, tokenAmount, 0);
+        stressBonusPrincipal += partnerBuck;
+        totalOutstandingBuck += partnerBuck;
+        emit WheelCredit(i, tokenAmount, partnerBuck);
+    }
+
+    /// @notice The wheel credits BUCK it captured to the treasury (re-LP'd by
+    ///         sweepTreasury, like every other treasury accrual).
+    function creditTreasury(uint256 buckAmount) external {
+        if (!(msg.sender == wheel && msg.sender != address(0))) revert NotWheel();
+        IERC20(address(buck)).transferFrom(msg.sender, address(this), buckAmount);
+        treasuryBuckPending += buckAmount;
+        emit TreasuryAccrued(buckAmount, treasuryBuckPending);
+    }
+
     function provideForToken(uint256 i, uint256 tokenAmount, uint256 maxDeviationBp)
         external override onlySelf returns (uint128 liquidity, uint256 buckMinted)
     {
