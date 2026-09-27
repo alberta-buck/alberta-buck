@@ -216,17 +216,19 @@ Beside it, the stand continues on its own files: T16 (demography, so a
 refinancing FLOW exists) and the standing-facility saver (in place of the
 premium-seller whose rule dominates every K response so far).
 
-* 8. Decisions for the design owner
+* 8. Decisions -- RESOLVED 2026-09-27 (design owner)
 
-1. *The phase rule and the demonstration.*  The demonstration shows
-   mechanisms, not a verdict: proceed on E1-E4's provisional readings in
-   parallel with the stand?
-2. *The savings basket:* ProRata + venue + director + the wheel, with the
-   Ops quadrants and undertakings as the monetary add-on -- or the
-   undertakings in the minimal demonstration too?
-3. *Prices:* the bundled 2020-2025 histories, a synthetic cycle, or both
-   as a toggle?
-4. *Where:* the Basket tab in the public sandbox (persistence, wallets,
-   identity) with eqworld's world lifted into it -- or a new page?
-5. *The chain shown:* the wheel's economics on L1 or L2 gas (a toggle
-   costs little).
+1. *The phase rule and the demonstration:* YES -- the demonstration
+   proceeds on E1-E4's provisional readings, in parallel with the stand.
+2. *The basket:* the savings basket AND the undertakings.  So the demo
+   deploys the Ops shell (ProRata + the desk's quadrants, whose
+   =monetaryOperation= becomes a wheel kind) and carries the WP-2
+   undertakings -- the unlimited strong side and the weak-side ladder --
+   as the monetary add-on: a JS port of =UndertakingAgent= over the
+   contracts first (the Python PoC's authority, a zero-premium face and a
+   TOKEN book), a wheel kind when the Solidity exists.
+3. *Prices:* BOTH -- the bundled 2020-2025 histories and a synthetic
+   cycle, as a toggle.
+4. *Where:* a Basket tab in the public sandbox, with eqworld's world
+   lifted into =core/js/src=.
+5. *The chain shown:* a TOGGLE between L1 and L2 gas.
