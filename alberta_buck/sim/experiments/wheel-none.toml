@@ -1,0 +1,72 @@
+# The consistency wheel (doc/BASKET-WHEEL.org) on the catalogue's none arm:
+# catalogue-none.toml verbatim plus one BasketWheelAgent, appended last in
+# the cast so it acts after the external arbs (Uniswap v3: searchers first).
+# Excursion CATALOGUE arm "none" -- the portcast cast (settled physics,
+# keyed rng, no FatCredit) on a 2-year window with ONE injected excursion
+# at day 365.  The defender mix and intensity are swept from outside
+# (alberta_buck.sim.catalogue overrides the Excursion*/CommodityRebal
+# counts); this file fixes the physics and the injection only.
+# Design of record: doc/REBALANCING-EQ.org, "The excursion catalogue".
+name = "wheel-none"
+notes = "catalogue none arm + the basket's consistency wheel (BasketWheelAgent, L2 gas, acting last)"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 2.0
+ticks_per_day = 4
+day_step = 1
+seed = 0xA1BC
+
+[deploy]
+target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
+
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 30
+DirectMintAgent = 120
+DirectMintBuckAgent = 30
+ArrivingDMAgent = 60
+ExcursionArbAgent = 5
+ExcursionCreditArbAgent = 3
+BasketWheelAgent = 1
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+[agents.BuckCreditDebtorAgent]
+theta = [0.0, 3.0]
+apr = [0.045, 0.065]
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [50, 150]
+save_rate = [0.25, 0.75]
+refi_mode = "atomic"        # ex-ante whole-conversion evaluation
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+arr_gain = 5.0
+arr_max = 3.0
+arr_k_ref = 0.75
+
+[agents.ArrivingDMAgent]
+arrive_mode = "endog"
+arrive_frac = [0.0, 1.0]
+ticket_k = [300, 700]
+enter_ptick = 2e-3
+exit_ptick = 2e-3
+dep_dev_ref = 0.02
+dep_halflife = 90.0
+
+[agents.BasketWheelAgent]
+tasks = ["arb"]
+chain = "l2"                # gas sets the margin (ruling 1); "l1" for mainnet
+call = "profitable"         # the caller simulates, calls when pay covers gas
+max_work = 3
+share = 0.10                # the caller's cut of the value captured
+fund_frac = 0.05            # the reserve's cut
+kappa = 0.02                # the reserve pays kappa of its balance per working tick
+yield_usd_day = 0.0         # the basket-yield slice into the reserve (a stand-in)
+
+# (no injection)
