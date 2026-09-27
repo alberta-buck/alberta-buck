@@ -40,7 +40,7 @@ and becomes a pure CALLER: its proxy sends =tick(max_work, max_scan)=, and
 the frame books the contract's own events (=Ticked=, =Cycled=) and the
 receipts' real gas.  Knobs: start "token" | "buck" (where the profit lands:
 the depositors, or the reserve then the treasury), share_bp 1000, cap_bp
-200, min_edge_bp 1, kappa_bp 200, reserve_cap_buck 50000, kinds ["arb"]
+200, min_edge_bp 1, kappa_bp 200, reserve_cap_buck 100 (a gas budget), kinds ["arb"]
 (+ "compute", "director", "sweep", "ops").  Its frame fields are wh_sol_*.
 """
 from __future__ import annotations
@@ -187,7 +187,10 @@ class BasketWheelAgent(_ProxyAgent):
         gov = d.gov
         wheel = d.chain.deploy(
             "BasketWheel", d.buck.address, d.usdc.address, gov,
-            int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 50_000)) * E6))
+            # the reserve offsets the callers' GAS: cap it to a gas budget, not
+            # to the profit, or a BUCK start passes the profit to the callers
+            # (BASKET-WHEEL 8.7: at 50,000 BUCK and kappa 2% they took $47k of $53k)
+            int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6))
         # a contract working for the basket, bound like the pools
         idmod.bind_as_operator(d.chain, d.reg, wheel.address, True, True,
                                sender=d.chain.deployer)
