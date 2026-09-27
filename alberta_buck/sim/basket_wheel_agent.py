@@ -116,6 +116,15 @@ class BasketWheelAgent(_ProxyAgent):
         self.pay = 0.0
         self.gas_usd = 0.0
 
+    def set_chain(self, name: str) -> None:
+        """The page's L1 / L2 toggle: the caller's gas profile, live."""
+        if name not in PROFILES:
+            return
+        if getattr(self, "impl", "python") == "solidity":
+            self.profile = PROFILES[name]
+        elif getattr(self, "wheel", None) is not None:
+            self.wheel.profile = PROFILES[name]
+
     def ensure_spendable(self, d, token, amount: int) -> None:
         """Before a BUCK leg: activate enough of the face that the draw is
         within the credit limit (zero premium: no deposit, no funding gate)."""

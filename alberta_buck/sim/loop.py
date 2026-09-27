@@ -30,6 +30,7 @@ import alberta_buck.sim.pusher_agent  # noqa: F401  WP-15  @_register PusherAgen
 import alberta_buck.sim.bookloader  # noqa: F401  WP-15  @_register BookLoaderAgent
 import alberta_buck.sim.household_agents as households  # T15  @_register ExternalDebtRetireeAgent
 import alberta_buck.sim.basket_wheel_agent  # noqa: F401  BASKET-WHEEL  @_register BasketWheelAgent
+import alberta_buck.sim.shock_agent  # noqa: F401  CONVERGENCE 7a  @_register ShockAgent
 
 E6 = 10 ** 6
 

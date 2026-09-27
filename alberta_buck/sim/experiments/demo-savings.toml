@@ -1,0 +1,67 @@
+# The server-backed SAVINGS WORLD (doc/CONVERGENCE.org 7a): the full stack of
+# section 6.3 on the six-token history, lean enough for interactive speed.
+# The catalogue's physics (keyed rng, the portcast settings, a deep BUCK/USDC
+# exit route) with the heavy parts cut: 24 depositors instead of 120, no
+# arrival hazards, 10 external-debt retirees (T15) in place of 30 endog
+# debtors.  Kept: the ops basket with the desk and the engaged undertakings,
+# the director, the Solidity work wheel (TOKEN start: its harvest reaches the
+# depositors), the market (the whale pinning TOKEN/USDC to the references,
+# the arbs), the savers.  Served by alberta_buck.sim.server; a session may
+# override anything here with ?set=.
+name = "demo-savings"
+notes = "the savings demonstration's world: full stack, lean cast, two ticks a day"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 5.0
+ticks_per_day = 2
+day_step = 1
+seed = 0xA1BC
+basket = "ops"
+
+[deploy]
+target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
+
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 0
+DirectMintAgent = 24
+DirectMintBuckAgent = 6
+ArrivingDMAgent = 0
+ExcursionArbAgent = 3
+ExcursionCreditArbAgent = 1
+UndertakingAgent = 1
+ExternalDebtRetireeAgent = 10
+BasketWheelAgent = 1
+ShockAgent = 1             # the page's demand / supply shock buttons arm it
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+[agents.UndertakingAgent]
+eps = 0.005
+p = 1.0
+
+[agents.BasketWheelAgent]
+impl = "solidity"
+start = "token"
+cap_bp = 200
+max_work = 12
+chain = "l2"                # the page's L1 / L2 toggle sets this live
+call = "profitable"
+
+[agents.ExternalDebtRetireeAgent]
+theta = [0.0, 3.0]          # payback years for one-time costs
+apr = [0.045, 0.065]        # the external mortgage rate
+home_k = [200, 1500]        # appraised home value, $k, LOG-uniform
+ltv = [0.05, 0.95]          # seasoned mortgage ladder, mean ~50% LTV
+income_frac = [0.20, 0.35]  # homes at ~3-5x income
+premium_bp = [25, 50]       # home insurance, %/yr of the insured value
+save_rate = [0.25, 0.75]
+term_months = 60            # five-year terms
+renew_frac = [0.0, 1.0]     # a seasoned ladder of renewal dates
+penalty_months = 3.0        # prepayment penalty off renewal
+switch_k = [1.0, 3.0]       # legal, appraisal, discharge, $k
+risk = [0.0, 0.01]          # /yr for owing basket-indexed BUCK
