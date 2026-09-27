@@ -3,6 +3,37 @@
 #+DATE: 2026-09-27
 #+OPTIONS: ^:nil toc:2 num:t
 
+* 0. STATUS -- resume here (2026-09-27, 07:10)
+
+- *Where the branch is:* =feature/carry-convexity= at c1eb181, not pushed.
+  Master merged (0a33970; bvib and K identical over 731 days).
+- *Done:*
+  - T15's first role (87471be; =doc/reports/wp-t15.org=): the supply
+    answers K with no arrival formula, as a stock and a timing response.
+  - The consistency wheel: the Python prototype (333a7e1) and the Solidity
+    v1 (5f8af2b; =src/wheel/=; =doc/BASKET-WHEEL.org= 8.6).
+  - E1: the wheel makes bvib TRUER (gauge error -34% median, -43% p90;
+    BASKET-WHEEL 7.2).
+  - Step 3 PASS: the sim driving the Solidity wheel matches the prototype;
+    TOKEN start credits $51.8k to the depositors in 30 days
+    (BASKET-WHEEL 8.7).
+  - The Tevm spike (=doc/reports/tevm-memory.org=) and the design owner's
+    two-tier ruling (7a).
+  - Step 5, server half (c1eb181): the savings world
+    (=demo-savings.toml=, ~10-15 s per simulated day -- accepted for the
+    high-fidelity sandbox), the server's controls, lite frames, the chain
+    lock, =sim_info=, =--public=, =ShockAgent=.
+- *Running:* E2-E4, 31 two-year cells launched 06:26 into
+  =build/sim/conv/conv-e{2,3,4}/= (logs and done markers in
+  =build/sim/regen/conv-e*.{log,done}=), expected in the afternoon.  Judge
+  with =python -m alberta_buck.sim.star
+  alberta_buck/sim/experiments/stars/conv-e2.toml --report-only --outdir
+  build/sim/conv= (and e3, e4), plus the gauge-error and wheel-counter
+  readings of BASKET-WHEEL 7.2 / 8.7; record the verdicts in section 5.
+- *Next:* judge E2-E4; the Savings tab (step 5's page half, 7a); the
+  six-token reverting price mode; serving the world behind the tunnel with
+  =--public= (the old catalogue server still holds port 8797).
+
 * 1. What this document is
 
 The design owner's goal of 2026-09-27: bring the ideas of the last two
