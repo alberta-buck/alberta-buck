@@ -3,7 +3,9 @@
   The Alberta Buck sandbox: a private, simulated Alberta Buck world in this browser
   tab -- an issuer that certifies people, wallets that register, pay and
   trade, an insurer that turns simulated assets into credit, a BUCK/USDC
-  market, and the chain as an observer sees it.  Nothing leaves the tab.
+  market, and the chain as an observer sees it.  Nothing leaves the tab --
+  except on the Savings tab, which watches, steers and saves in a bigger
+  world run on a sim server (alberta_buck/sim/server.py; doc/CONVERGENCE.org 7a).
 
   Build and serve:  make nix-sandbox   (then open http://localhost:8000/)
 -->
@@ -36,6 +38,8 @@
     <button role="tab" id="tab-wallets" aria-controls="panel-wallets" data-tab="wallets">Wallets</button>
     <button role="tab" id="tab-credit" aria-controls="panel-credit" data-tab="credit">Credit</button>
     <button role="tab" id="tab-observer" aria-controls="panel-observer" data-tab="observer">Observer</button>
+    <button role="tab" id="tab-savings" aria-controls="panel-savings" data-tab="savings"
+            title="The BuckBasket as a savings facility, in a whole economy run on a server">Savings</button>
   </nav>
 
   <main>
@@ -43,6 +47,7 @@
     <section role="tabpanel" id="panel-wallets" aria-labelledby="tab-wallets" hidden></section>
     <section role="tabpanel" id="panel-credit" aria-labelledby="tab-credit" hidden></section>
     <section role="tabpanel" id="panel-observer" aria-labelledby="tab-observer" hidden></section>
+    <section role="tabpanel" id="panel-savings" aria-labelledby="tab-savings" hidden></section>
   </main>
 
   <footer class="footer">

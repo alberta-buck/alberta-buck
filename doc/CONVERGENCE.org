@@ -3,9 +3,9 @@
 #+DATE: 2026-09-27
 #+OPTIONS: ^:nil toc:2 num:t
 
-* 0. STATUS -- resume here (2026-09-27, 07:10)
+* 0. STATUS -- resume here (2026-09-27, 09:30)
 
-- *Where the branch is:* =feature/carry-convexity= at c1eb181, not pushed.
+- *Where the branch is:* =feature/carry-convexity=, not pushed.
   Master merged (0a33970; bvib and K identical over 731 days).
 - *Done:*
   - T15's first role (87471be; =doc/reports/wp-t15.org=): the supply
@@ -23,6 +23,12 @@
     (=demo-savings.toml=, ~10-15 s per simulated day -- accepted for the
     high-fidelity sandbox), the server's controls, lite frames, the chain
     lock, =sim_info=, =--public=, =ShockAgent=.
+  - Step 5, page half: the sandbox's *Savings tab* (=doc/SANDBOX.org=
+    "Savings"; 7a below) -- the world's charts, its controls, and a
+    visitor's own key saving in the basket and redeeming, against the
+    server; the reverting price mode for the six-token world
+    (=scenario.prices = "revert"=); =make nix-venv-sim-savings= serves the
+    page and its worlds on one port.
 - *Running:* E2-E4, 31 two-year cells launched 06:26 into
   =build/sim/conv/conv-e{2,3,4}/= (logs and done markers in
   =build/sim/regen/conv-e*.{log,done}=), expected in the afternoon.  Judge
@@ -30,9 +36,10 @@
   alberta_buck/sim/experiments/stars/conv-e2.toml --report-only --outdir
   build/sim/conv= (and e3, e4), plus the gauge-error and wheel-counter
   readings of BASKET-WHEEL 7.2 / 8.7; record the verdicts in section 5.
-- *Next:* judge E2-E4; the Savings tab (step 5's page half, 7a); the
-  six-token reverting price mode; serving the world behind the tunnel with
-  =--public= (the old catalogue server still holds port 8797).
+  At day 150-175 of 731 by 08:50: expected around 17:00-18:00.
+- *Next:* judge E2-E4; serve the savings world on port 8797 in place of
+  the old catalogue server (the design owner's go-ahead, 2026-09-27);
+  a pass over the demonstration's story on a settled world (section 6.2).
 
 * 1. What this document is
 
@@ -278,6 +285,49 @@ mode for the six-token world; pause / resume, shock and chain-toggle
 controls; a =sim_info= method (the world's addresses for the page); lite
 frames (no per-agent telemetry).  Page work: the tab, its charts and the
 visitor's wallet flow; a Playwright test against a local server.
+
+*Built (2026-09-27).*  All of the above, and what building it taught:
+
+- *The chain is shared fairly.*  A released =threading.Lock= is not handed
+  to its waiter: the sim thread re-took the chain at once and a visitor's
+  deposit could wait forever.  Between days the sim thread now lets queued
+  RPC through, and while a page holds an rpc channel it waits half a second
+  after each frame (and each answer) for the calls a frame prompts.  A JSON-RPC
+  batch is answered under one hold, so the page's faucet + approve + deposit,
+  each with a preflight =eth_call= (its refusal comes back with the basket's
+  reason) and its receipt, land together between two days.
+- *Signed transactions are real ones.*  The pyrevm backend answers
+  =eth_sendRawTransaction= with keccak of the raw bytes (the page names the
+  receipt in the same batch), refuses a nonce that is not the sender's next
+  (no replay), and decodes EIP-1559 transactions (that path had never run).
+- *Every frame carries the savings book* (=sv=: the outstanding principal
+  O, the credited bonus S, the depositors' BUCK side B, the treasury's
+  pending BUCK), read from the positions themselves: the venue's
+  =poolBuckValues= applies the slippage guard and reverts on any day a pool
+  is off its average.  From it, the SAVINGS INDEX D = min(B, 2B - O)/(O - S)
+  -- what a redemption pays, in BUCK value, per BUCK deposited (the TOKEN
+  side of the claim, =BuckBasketProRata._redeem=): 1 at the start, raised by
+  the wheel's credits and the harvest of reversion.
+- *The deposit guard shows.*  A deposit into a pool more than 2% from its
+  10-minute TWAP is refused (=Slippage=).  With the clock still between days,
+  that measures the last tick's move, and in the world's first days (BUCK
+  from $1.09 to $0.99 in three) every pool may be past it.  The tab reads
+  each pool's tick and TWAP tick, says how far each is, and "the basket's
+  choice" is the director's hint when admitted, else the most underweight
+  pool the guard admits; a refused save keeps its minted TOKEN for the retry.
+- *A step begun in a pause ran one day too many* (the paused day was never
+  counted); fixed, and the browser test is what caught it.
+- *Reloads and links.*  The server keeps each world's lite frames and
+  replays them to a new subscriber (=&replay=1=): a reloaded page redraws
+  its charts, and =?world=<sid>= opens the same world elsewhere.
+  =--static DIR= serves the built page on the websocket port, and the page
+  opens on the Savings tab when served so (the in-tab Tevm world then boots
+  only if one of its own tools is opened).
+- *Reverting prices* (=scenario.prices = "revert"=,
+  =gen_prices.revert_like=): each history's first price, its own realized
+  volatility, the established OU walk pinned to end where it began
+  (=gen_revert=, tau 120 days), fixed seeds, written beside the window's
+  history files on first use.
 
 * 8. Decisions -- RESOLVED 2026-09-27 (design owner)
 

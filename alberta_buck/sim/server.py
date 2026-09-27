@@ -18,9 +18,13 @@ sessions share the process GIL: N concurrent worlds timeshare the
 Python core; scale-out is one process per port behind the tunnel.)
 
 WebSocket channels (websockets):
-  /s/<sid>/frames    every captured day frame as JSON + measured pace;
-                     ?lite=1 drops the per-agent telemetry (ag, octl,
-                     arb2, lp, mx) for a browser client
+  /s/<sid>/frames    every captured day frame as JSON + measured pace
+                     and the savings facility's block "sv" (the depositors'
+                     book, read from the basket at the frame); ?lite=1
+                     drops the per-agent telemetry (ag, octl, arb2, lp, mx)
+                     for a browser client, and &replay=1 first sends every
+                     lite frame the world has made (a reloaded page redraws
+                     its charts)
   /s/<sid>/control   {"op": ..., ...} applied at the next day boundary:
                      "pace" {days_per_second}, "population" {cls, count},
                      "knob" {cls, name, value}, "pause", "resume",
@@ -44,11 +48,21 @@ one can drive that world.
 The chain is serialized against the world: the sim thread holds the
 session's chain lock from the end of each day's start (after any pause)
 to its frame, so RPC -- a visitor's deposit, say -- lands only BETWEEN
-days or while the world is paused, never inside an agent's day.
+days or while the world is paused, never inside an agent's day.  A JSON-RPC
+batch is answered under ONE hold of the lock (a page's approve + deposit +
+their receipts land together), and between days the sim thread lets queued
+RPC through before it takes the chain again -- and, while a page holds an
+rpc channel open, waits a moment after each frame for the reads that frame
+prompts -- so a running world never starves its visitor.
 
 HTTP (port+1, stdlib, CORS *):
   POST /s/<sid>/rpc  JSON-RPC 2.0 -- viem's standard http transport:
                      anvilSession("http://host:port+1/s/<sid>/rpc")
+
+STATIC (--static DIR): plain GETs on the websocket port serve DIR (the
+built sandbox, core/js/sandbox/dist), and /sim-server.json tells the page
+its world is on the same origin -- one port for the page and the world,
+behind a single-origin tunnel.
 
 Run:
     python -m alberta_buck.sim.server --experiment \
@@ -61,10 +75,13 @@ import argparse
 import asyncio
 import json
 import logging
+import mimetypes
+import re
 import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from queue import Queue, Empty
 
 from websockets.exceptions import ConnectionClosed, InvalidMessage
@@ -74,7 +91,41 @@ from alberta_buck.sim.loop import run
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
 
 IDLE_REAP_S = 600           # reap a session with no subscribers this long
+RPC_GRACE_S = 0.5           # after a frame / an answer, a connected page's turn
+RPC_YIELD_S = 5.0           # the most a day waits on queued RPC
+HISTORY_MAX = 4000          # lite frames kept for a reloaded page's replay
 _BUILD_LOCK = threading.Lock()   # agent classes keep build-time counters
+
+# The depositors' book, read at each frame (the venue facet's view through
+# the shell's fallback).
+_SV_ABI = [
+    {"type": "function", "name": n, "stateMutability": "view", "inputs": [],
+     "outputs": [{"type": "uint256", "name": ""}]}
+    for n in ("totalOutstandingBuck", "stressBonusPrincipal", "treasuryBuckPending")
+]
+_POSITIONS_ABI = [{"type": "function", "name": "positions", "stateMutability": "view",
+                   "inputs": [{"type": "bytes32", "name": "key"}],
+                   "outputs": [{"type": "uint128", "name": "liquidity"}] + [
+                       {"type": "uint256", "name": n} for n in ("fg0", "fg1")] + [
+                       {"type": "uint128", "name": n} for n in ("owed0", "owed1")]}]
+
+
+def _depositor_buck(d) -> int | None:
+    """B of the venue's poolBuckValues -- each pool's BUCK balance, the
+    depositors' share of the basket's position (its liquidity less the
+    treasury's slice) -- read without poolBuckValues' slippage guard, which
+    reverts whenever any pool is off its average: the book is the book."""
+    from web3 import Web3
+    B = 0
+    for i in range(len(d.tokens)):
+        c = d.basket.functions.constituents(i).call()
+        pool, lo, hi, treasury_l = c[5], c[6], c[7], c[10]
+        key = Web3.solidity_keccak(["address", "int24", "int24"], [d.basket.address, lo, hi])
+        total_l = d.w3.eth.contract(address=pool, abi=_POSITIONS_ABI).functions.positions(key).call()[0]
+        if total_l <= treasury_l:
+            continue
+        B += (total_l - treasury_l) * int(d.buck.functions.balanceOf(pool).call()) // total_l
+    return B or None
 
 
 class StopSession(Exception):
@@ -115,6 +166,13 @@ class Session:
         self._holding = False
         self._last_day_ts = time.monotonic()
         self._idle_since = time.monotonic()
+        self.history: list[str] = []            # lite frames, for replay
+        self.rpc_clients = 0                    # open rpc channels
+        self.rpc_waiting = 0                    # RPC envelopes queued on the chain
+        self._rpc_count = threading.Lock()
+        self._rpc_ts = 0.0                      # the last frame or answer
+        self._sv = None
+        self.scenario = None
         exp = expmod.load(exp_path, sets=sets)
         self.scenario_factory = lambda: expmod.build(exp)
         self.basket_impl = basket_impl or exp.scenario.get("basket", "prorata")
@@ -127,7 +185,7 @@ class Session:
     def _run(self):
         try:
             with _BUILD_LOCK:
-                scenario = self.scenario_factory()
+                scenario = self.scenario = self.scenario_factory()
                 anvil = PyrevmAnvil()
                 anvil.start()
                 self.provider = anvil.w3.provider
@@ -161,16 +219,41 @@ class Session:
                 time.sleep(wait)
         self._drain(day, agents)
         self._advance_step()
-        while self.paused:                  # RPC is served meanwhile
+        self._wait_while_paused(day, agents)
+        self._last_day_ts = time.monotonic()
+        self._yield_to_rpc()
+        self.chain_lock.acquire()           # the day is the world's
+        self._holding = True
+
+    def _yield_to_rpc(self):
+        """Between days, let queued RPC through before the day takes the
+        chain.  The sim thread would otherwise re-take the lock at once (a
+        released lock is not handed to its waiter), and a page's deposit
+        could wait forever.  While a page holds an rpc channel open, a short
+        grace after each frame and each answer lets the reads a frame
+        prompts, and a sequence of calls, land in the same gap."""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < RPC_YIELD_S:
+            if self.rpc_waiting:
+                time.sleep(0.002)
+            elif self.rpc_clients and time.monotonic() - self._rpc_ts < RPC_GRACE_S:
+                time.sleep(0.005)
+            else:
+                break
+
+    def _wait_while_paused(self, day, agents):
+        """Hold the day's start while paused (RPC is served meanwhile).  A
+        step begun here starts with THIS day: its first day is counted now,
+        or "+1 day" would run two."""
+        while self.paused:
             if self.subscribers:
                 self._idle_since = time.monotonic()
             elif time.monotonic() - self._idle_since > IDLE_REAP_S:
                 raise StopSession()
             time.sleep(0.05)
             self._drain(day, agents)
-        self._last_day_ts = time.monotonic()
-        self.chain_lock.acquire()           # the day is the world's
-        self._holding = True
+            if not self.paused and self.step_left is not None:
+                self._advance_step()
 
     def _advance_step(self):
         """A "step" of n days runs n days, then pauses at the next start."""
@@ -230,16 +313,48 @@ class Session:
     HEAVY = ("ag", "octl", "arb2", "lp", "mx")
 
     def _on_frame(self, frame):
+        self._sv = self._savings()          # still the day's: the chain is ours
         if self._holding:
             self._holding = False
             self.chain_lock.release()       # between days: RPC may run
+        self._rpc_ts = time.monotonic()
         self._fanout_threadsafe(*self._payloads(frame))
+
+    def _savings(self) -> dict | None:
+        """The savings facility's book at this frame: outstanding principal
+        O (receipts P plus the credited bonus S), the depositors' BUCK side
+        B, the treasury's pending BUCK, and D -- what a depositor is paid, in
+        BUCK value, per BUCK deposited.  A redemption burns its share Rb of O
+        and pays the TOKEN side of its claim Rb*2B/O: the half, when B >= O
+        (the BUCK surplus goes to the treasury), or the claim less the burn
+        when B < O (TOKEN converted to cover it) -- per BUCK of principal
+        R = Rb*P/O, D = min(B, 2B - O) / P.  1 at the start; the wheel's
+        credits and the harvest of reversion raise it."""
+        d = self.d
+        if d is None or getattr(d, "basket", None) is None:
+            return None
+        try:
+            c = d.w3.eth.contract(address=d.basket.address, abi=_SV_ABI)
+            O = int(c.functions.totalOutstandingBuck().call())
+            S = int(c.functions.stressBonusPrincipal().call())
+            T = int(c.functions.treasuryBuckPending().call())
+        except Exception:
+            return None
+        try:
+            B = _depositor_buck(d)
+        except Exception:                   # no depositors yet
+            B = None
+        P = O - S
+        D = (min(B, 2 * B - O) / P) if (B is not None and P > 0) else None
+        return {"O": O, "S": S, "P": P, "B": B, "T": T,
+                "D": round(D, 6) if D is not None else None}
 
     def _payloads(self, frame) -> tuple[str, str]:
         """(full, lite) JSON for one frame."""
         now = time.monotonic()
         pace = round(1.0 / max(now - self._last_day_ts, 1e-9), 2)
-        full = {**frame, "pace": pace, "sid": self.sid, "paused": self.paused}
+        full = {**frame, "pace": pace, "sid": self.sid, "paused": self.paused,
+                "sv": self._sv}
         lite = {k: v for k, v in full.items() if k not in self.HEAVY}
         return json.dumps(_jsonable(full)), json.dumps(_jsonable(lite))
 
@@ -248,6 +363,10 @@ class Session:
             self.aloop.call_soon_threadsafe(self._fanout, payload, lite)
 
     def _fanout(self, payload, lite=None):
+        if lite is not None:                # a frame (not done / error)
+            self.history.append(lite)
+            if len(self.history) > HISTORY_MAX:
+                del self.history[:len(self.history) - HISTORY_MAX]
         for q in list(self.subscribers):
             if q.qsize() < 100:
                 q.put_nowait(lite if (lite is not None and q in self.lite)
@@ -268,6 +387,16 @@ class Session:
                              "decimals": int(d.dec[i]),
                              "pool_usdc": d.pool_usdc[i],
                              "pool_buck": d.pool_buck[i]})
+            sc = self.scenario
+            files = list(getattr(sc, "csv_files", []) or [])
+            # A window's files are stamped <end>-<n>d (gen_historical): it
+            # began n-1 days before its end.
+            m = re.search(r"(\d{4}-\d{2}-\d{2})-(\d+)d", files[0]) if files else None
+            start = None
+            if m:
+                import datetime
+                start = (datetime.date.fromisoformat(m.group(1))
+                         - datetime.timedelta(days=int(m.group(2)) - 1)).isoformat()
             wheel = next((getattr(a, "sol", None) for a in (self.agents or [])
                           if getattr(a, "sol", None) is not None), None)
             try:
@@ -281,37 +410,65 @@ class Session:
                 "kctrl": d.kctrl.address, "pool_ub": d.pool_ub,
                 "router": getattr(getattr(d, "router", None), "address", None),
                 "wheel": wheel.address if wheel is not None else None,
+                "director": getattr(getattr(d, "director", None), "address", None),
+                "name": getattr(sc, "name", None),
+                "days": getattr(sc, "days", None),
+                "ticks_per_day": getattr(sc, "ticks_per_day", None),
+                "prices": files,
+                "start_date": start,
                 "tokens": toks}
         return self._info or {}
 
     def status(self) -> dict:
+        chain = next((a.profile.name for a in (self.agents or [])
+                      if hasattr(a, "set_chain") and getattr(a, "profile", None)), None)
         return {"day": self.day, "paused": self.paused, "pace": self.pace,
-                "step_left": self.step_left, "done": self.done}
+                "step_left": self.step_left, "done": self.done, "chain": chain}
 
     def rpc(self, req):
         """Answer a JSON-RPC envelope (or batch) from the world's provider,
-        serialized against the sim loop by the chain lock."""
+        serialized against the sim loop by the chain lock -- ONE hold for
+        the whole batch, taken only if some request needs the chain."""
         batch = req if isinstance(req, list) else [req]
         out = []
-        for r in batch:
-            if getattr(self, "public", False) and r.get("method") not in PUBLIC_RPC:
-                out.append({"jsonrpc": "2.0", "id": r.get("id"), "error": {
-                    "code": -32601, "message": f"not served publicly: {r.get('method')}"}})
-                continue
-            if r.get("method") in ("sim_info", "sim_status"):
-                with self.chain_lock:
-                    body = self.info() if r["method"] == "sim_info" else self.status()
-                out.append({"jsonrpc": "2.0", "id": r.get("id"), "result": body})
-                continue
-            with self.chain_lock:
-                try:
-                    resp = self.provider.make_request(
-                        r["method"], r.get("params", []))
+        held = False
+        with self._rpc_count:
+            self.rpc_waiting += 1
+        try:
+            for r in batch:
+                method = r.get("method")
+                if getattr(self, "public", False) and method not in PUBLIC_RPC:
+                    out.append({"jsonrpc": "2.0", "id": r.get("id"), "error": {
+                        "code": -32601, "message": f"not served publicly: {method}"}})
+                    continue
+                if method == "sim_status":      # no chain: answered at once
                     out.append({"jsonrpc": "2.0", "id": r.get("id"),
-                                "result": _jsonable(resp.get("result"))})
+                                "result": _jsonable(self.status())})
+                    continue
+                if not held:
+                    self.chain_lock.acquire()
+                    held = True
+                if method == "sim_info":
+                    out.append({"jsonrpc": "2.0", "id": r.get("id"),
+                                "result": _jsonable(self.info())})
+                    continue
+                try:
+                    resp = self.provider.make_request(method, r.get("params", []))
+                    if "error" in resp:
+                        out.append({"jsonrpc": "2.0", "id": r.get("id"),
+                                    "error": resp["error"]})
+                    else:
+                        out.append({"jsonrpc": "2.0", "id": r.get("id"),
+                                    "result": _jsonable(resp.get("result"))})
                 except Exception as e:
                     out.append({"jsonrpc": "2.0", "id": r.get("id"),
                                 "error": {"code": -32000, "message": str(e)}})
+        finally:
+            if held:
+                self.chain_lock.release()
+            with self._rpc_count:
+                self.rpc_waiting -= 1
+            self._rpc_ts = time.monotonic()
         return out if isinstance(req, list) else out[0]
 
 
@@ -337,9 +494,10 @@ class SessionRefused(Exception):
 
 class SimServer:
     def __init__(self, exp_path, basket_impl=None, pace=0.0, public=False,
-                 max_sessions=0):
+                 max_sessions=0, static_dir=None):
         self.exp_path = exp_path
         self.public = public
+        self.static_dir = Path(static_dir).resolve() if static_dir else None
         self.max_sessions = max_sessions
         self.basket_impl = basket_impl
         self.pace = pace
@@ -397,16 +555,34 @@ class SimServer:
                 except Exception as e:
                     await ws.send(json.dumps({"ok": False, "err": str(e)}))
         elif chan == "rpc":
-            async for msg in ws:
-                req = json.loads(msg)
-                resp = await asyncio.to_thread(s.rpc, req)
-                await ws.send(json.dumps(resp))
+            s.rpc_clients += 1
+            try:
+                async for msg in ws:
+                    try:
+                        req = json.loads(msg)
+                    except ValueError as e:
+                        await ws.send(json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+                            "code": -32700, "message": f"parse error: {e}"}}))
+                        continue
+                    resp = await asyncio.to_thread(s.rpc, req)
+                    await ws.send(json.dumps(resp))
+            except ConnectionClosed:
+                pass
+            finally:
+                s.rpc_clients -= 1
         else:                               # frames
             q: asyncio.Queue = asyncio.Queue()
+            qs = urllib.parse.parse_qs(query)
+            lite = qs.get("lite", ["0"])[0] not in ("0", "")
+            # No await from here to the add: _fanout runs on this loop, so
+            # the replay and the stream neither overlap nor miss a frame.
+            past = list(s.history) if lite and qs.get("replay", ["0"])[0] not in ("0", "") else []
             s.subscribers.add(q)
-            if urllib.parse.parse_qs(query).get("lite", ["0"])[0] not in ("0", ""):
+            if lite:
                 s.lite.add(q)
             try:
+                for f in past:
+                    await ws.send(f)
                 while True:
                     await ws.send(await q.get())
             except ConnectionClosed:
@@ -415,16 +591,50 @@ class SimServer:
                 s.subscribers.discard(q)
                 s.lite.discard(q)
 
+    def static(self, connection, request):
+        """websockets' process_request: a plain GET (no Upgrade) is a file of
+        the static page, or /sim-server.json; an upgrade proceeds."""
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            return None
+        path = urllib.parse.unquote(urllib.parse.urlparse(request.path).path)
+        if path == "/sim-server.json":
+            body = json.dumps({"server": "same-origin", "public": self.public}).encode()
+            ctype = "application/json"
+        else:
+            rel = path.lstrip("/")
+            if rel == "" or rel.endswith("/"):
+                rel += "index.html"
+            f = (self.static_dir / rel).resolve()
+            if not f.is_relative_to(self.static_dir) or not f.is_file():
+                return connection.respond(404, "not found\n")
+            body = f.read_bytes()
+            ctype = {".js": "text/javascript", ".mjs": "text/javascript",
+                     ".wasm": "application/wasm", ".css": "text/css",
+                     ".html": "text/html; charset=utf-8",
+                     ".json": "application/json", ".txt": "text/plain; charset=utf-8",
+                     }.get(f.suffix) or mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+        r = connection.respond(200, "")
+        r.body = body
+        for k in ("Content-Length", "Content-Type"):
+            del r.headers[k]
+        r.headers["Content-Length"] = str(len(body))
+        r.headers["Content-Type"] = ctype
+        r.headers["Cache-Control"] = "no-cache"
+        return r
+
     async def serve(self, host, port):
         import websockets
         logging.getLogger("websockets.server").addFilter(_HandshakeProbes())
         self.loop = asyncio.get_running_loop()
         httpd = ThreadingHTTPServer((host, port + 1), _make_rpc_handler(self))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        async with websockets.serve(self.route, host, port):
+        extra = {"process_request": self.static} if self.static_dir else {}
+        async with websockets.serve(self.route, host, port, max_size=2 ** 22, **extra):
             print(f"[sim.server] ws://{host}:{port}/s/<sid>/"
                   f"{{frames|control|rpc}}  http://{host}:{port + 1}"
-                  f"/s/<sid>/rpc (POST)")
+                  f"/s/<sid>/rpc (POST)"
+                  + (f"  page: http://{host}:{port}/ ({self.static_dir})"
+                     if self.static_dir else ""))
             while True:
                 await asyncio.sleep(3600)
 
@@ -504,9 +714,12 @@ def main(argv=None) -> int:
                          "eth_sendTransaction), session overrides limited to the page's toggles")
     ap.add_argument("--max-sessions", type=int, default=0,
                     help="refuse new sessions beyond this many live ones (0 = no cap)")
+    ap.add_argument("--static", default=None, metavar="DIR",
+                    help="serve this directory (the built sandbox) on the websocket port")
     a = ap.parse_args(argv)
     srv = SimServer(a.experiment, basket_impl=a.basket, pace=a.pace,
-                    public=a.public, max_sessions=a.max_sessions)
+                    public=a.public, max_sessions=a.max_sessions,
+                    static_dir=a.static)
     asyncio.run(srv.serve(a.host, a.port))
     return 0
 

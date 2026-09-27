@@ -1290,6 +1290,25 @@ sim-server:	sim-build
 		--experiment $(SIM_SERVER_EXPERIMENT) \
 		--port $(SIM_SERVER_PORT) --pace $(SIM_SERVER_PACE)
 
+# The SAVINGS WORLD (doc/CONVERGENCE.org 7a): the sandbox page and the
+# server-hosted worlds on ONE port -- the page's Savings tab watches, steers
+# and saves in a demo-savings world of its own (one per visitor session).
+# --public answers reads and signed transactions only; SIM_SAVINGS_SESSIONS
+# caps the live worlds (each takes a core while it runs).  Behind a tunnel,
+# point its origin at http://127.0.0.1:$(SIM_SAVINGS_PORT).
+#
+#   make nix-venv-sim-savings             # then open http://127.0.0.1:8797/
+SIM_SAVINGS_HOST     ?= 127.0.0.1
+SIM_SAVINGS_PORT     ?= 8797
+SIM_SAVINGS_SESSIONS ?= 4
+
+.PHONY: sim-savings
+sim-savings:	sim-build sandbox-build
+	python -m alberta_buck.sim.server \
+		--experiment alberta_buck/sim/experiments/demo-savings.toml \
+		--host $(SIM_SAVINGS_HOST) --port $(SIM_SAVINGS_PORT) --public \
+		--max-sessions $(SIM_SAVINGS_SESSIONS) --static $(SANDBOX_DIST)
+
 sim-sweep:	sim-build
 	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \
 		$(if $(EQ_SEEDS),--seeds $(EQ_SEEDS)) --jobs $(EQ_JOBS) \
@@ -1554,6 +1573,10 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 #
 #   make nix-sandbox          # build, then serve http://localhost:8000/
 #
+# The Savings tab watches worlds on a sim server: SANDBOX_SIM_SERVER=wss://...
+# names one for a static deployment (written to dist/sim-server.json); the
+# sim server itself serves the page with its own (make nix-venv-sim-savings).
+#
 # A fresh clone needs no full Foundry build: the BUCK stack, MockERC20 and
 # SimLP come from the published alberta-buck-contracts (or out/, once
 # built), Uniswap's factory, pool and WETH9 from Uniswap's npm packages
@@ -1585,6 +1608,8 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 	mkdir -p $(SANDBOX_DIST)/wasm
 	cp core/js/sandbox/index.html core/js/sandbox/styles.css $(SANDBOX_DIST)/
 	cp core/js/kernel/web/buck_identity_bg.wasm $(SANDBOX_DIST)/wasm/
+	printf '{"server": %s}\n' '$(if $(SANDBOX_SIM_SERVER),"$(SANDBOX_SIM_SERVER)",null)' \
+		> $(SANDBOX_DIST)/sim-server.json
 	python3 scripts/third_party_notices.py sandbox core/js/artifacts/sandbox-meta.json \
 		> $(SANDBOX_DIST)/THIRD-PARTY-NOTICES.txt
 
@@ -1629,6 +1654,23 @@ SANDBOX_PORT ?= 8000
 sandbox:	sandbox-build
 	@echo "sandbox: http://localhost:$(SANDBOX_PORT)/   (Ctrl-C stops it)"
 	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_PORT)
+
+# The Savings tab against a real sim server (core/js/test/savings.browser.test.js):
+# the page built, a server on a spare port serving it and the savings world,
+# the browser test, the server stopped.  Minutes: a world builds in about a
+# minute and runs a simulated day in 10-60 s.
+#
+#   make nix-venv-sandbox-savings-test
+SAVINGS_TEST_PORT ?= 8987
+.PHONY: sandbox-savings-test
+sandbox-savings-test:	sim-build sandbox-build
+	@python -m alberta_buck.sim.server --experiment alberta_buck/sim/experiments/demo-savings.toml \
+		--port $(SAVINGS_TEST_PORT) --public --max-sessions 2 --static $(SANDBOX_DIST) & pid=$$!; \
+	trap "kill $$pid" EXIT; \
+	for i in $$(seq 120); do \
+	  curl -sf http://127.0.0.1:$(SAVINGS_TEST_PORT)/sim-server.json >/dev/null && break; sleep 1; \
+	done; \
+	cd core/js && SAVINGS_PAGE=http://127.0.0.1:$(SAVINGS_TEST_PORT)/ node --test test/savings.browser.test.js
 
 # The screenshots in doc/SANDBOX.org: a scripted story in headless Chromium
 # (the flake's), each tool captured into images/sandbox/.

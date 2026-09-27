@@ -150,19 +150,31 @@ class _RevmProvider(BaseProvider):
         return self.b.execute(frm, to, data, value)
 
     def rpc_sendRawTransaction(self, p):
+        """A signed transaction: the sender is recovered from the signature,
+        its nonce must be the sender's next (so a captured transaction cannot
+        be replayed), and its hash is the real one, keccak of the raw bytes --
+        a client can name the receipt before it asks for it."""
         raw = bytes.fromhex(p[0][2:]) if isinstance(p[0], str) else bytes(p[0])
         frm = to_checksum_address(Account.recover_transaction(raw))
         if raw[0] > 0x7F:                          # legacy (type-0)
             tx = rlp.decode(raw, LegacyTx)
             to = "0x" + tx.to.hex() if tx.to else None
-            data, value = bytes(tx.data), tx.value
+            data, value, nonce = bytes(tx.data), tx.value, int(tx.nonce)
         else:                                      # typed (EIP-2718)
             from eth_account.typed_transactions import TypedTransaction
-            d = TypedTransaction.from_bytes(raw).as_dict()
+            from hexbytes import HexBytes
+            d = TypedTransaction.from_bytes(HexBytes(raw)).as_dict()
             to = d.get("to") or None
+            if isinstance(to, (bytes, bytearray)):
+                to = "0x" + bytes(to).hex() if to else None
             data = bytes(d.get("data", b""))
             value = int(d.get("value", 0))
-        return self.b.execute(frm, to, data, value)
+            nonce = int(d.get("nonce", 0))
+        want = self.b.nonces.get(frm, 0)
+        if nonce != want:
+            raise _RpcError({"code": -32000, "message":
+                             f"nonce {nonce} is not the sender's next ({want})"})
+        return self.b.execute(frm, to, data, value, txh="0x" + keccak(raw).hex())
 
     def rpc_getTransactionReceipt(self, p):
         r = self.b.receipts.get(p[0])
@@ -306,13 +318,13 @@ class PyrevmAnvil:
             number=self.block, timestamp=self.ts))
 
     def execute(self, frm: str, to: Optional[str], data: bytes,
-                value: int) -> str:
+                value: int, txh: Optional[str] = None) -> str:
         self.block += 1
         self._push_block_env()
         nonce = self.nonces.get(frm, 0)
         self.nonces[frm] = nonce + 1
-        txh = _h32(frm.encode() + nonce.to_bytes(8, "big")
-                   + self.block.to_bytes(8, "big"))
+        txh = txh or _h32(frm.encode() + nonce.to_bytes(8, "big")
+                          + self.block.to_bytes(8, "big"))
         blockh = _h32(b"blk" + self.block.to_bytes(8, "big"))
 
         ok = True

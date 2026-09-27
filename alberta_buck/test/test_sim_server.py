@@ -18,6 +18,8 @@ def session():
     s.day, s.d, s.agents, s._info, s._holding = None, None, None, None, False
     s.aloop, s.provider = None, None
     s._last_day_ts = s._idle_since = time.monotonic()
+    s.history, s.rpc_clients, s.rpc_waiting = [], 0, 0
+    s._rpc_count, s._rpc_ts, s._sv, s.scenario = threading.Lock(), 0.0, None, None
     return s
 
 
@@ -50,6 +52,25 @@ def test_pause_resume_step():
         assert not s.paused
     s._advance_step()                    # the fourth day's start: paused
     assert s.paused and s.step_left is None
+
+
+def test_a_step_begun_in_a_pause_runs_exactly_its_days():
+    """Paused at day D's start, "+1 day" runs day D and pauses at D+1's."""
+    s = session()
+    s.subscribers = {object()}
+    s.paused = True
+    s.controls.put({"op": "step", "days": 1})
+    s._wait_while_paused(10, [])             # day 10 runs
+    assert not s.paused
+    s._advance_step()                        # day 11's start: paused again
+    assert s.paused
+    s.controls.put({"op": "step", "days": 3})
+    s._wait_while_paused(11, [])             # days 11, 12, 13 run
+    for _ in range(2):
+        s._advance_step()
+        assert not s.paused
+    s._advance_step()                        # day 14's start
+    assert s.paused
 
 
 def test_shock_arms_the_shock_agent_and_chain_toggles_the_wheel():
@@ -115,3 +136,108 @@ def test_public_session_overrides_are_the_pages_toggles_only():
             "agents.BasketWheelAgent.chain=l1"]
     kept = [x for x in sets if x.startswith(PUBLIC_SETS)]
     assert kept == ["scenario.prices=revert", "agents.BasketWheelAgent.chain=l1"]
+
+
+def test_a_batch_is_answered_under_one_hold_and_status_needs_no_chain():
+    """A page's approve + deposit + their receipts land together: one hold of
+    the chain lock for the whole batch.  sim_status touches no chain, so it
+    is answered even while a day holds the lock."""
+    s = session()
+    held = []
+
+    class Provider:
+        def make_request(self, method, params):
+            held.append(s.chain_lock.locked())
+            return {"result": method}
+
+    s.provider = Provider()
+    out = s.rpc([{"jsonrpc": "2.0", "id": i, "method": m}
+                 for i, m in enumerate(["eth_sendRawTransaction", "eth_getTransactionReceipt"])])
+    assert [r["result"] for r in out] == ["eth_sendRawTransaction", "eth_getTransactionReceipt"]
+    assert held == [True, True] and not s.chain_lock.locked()
+    s.chain_lock.acquire()                       # a day is running
+    s.day = 4
+    out = s.rpc({"jsonrpc": "2.0", "id": 9, "method": "sim_status"})
+    assert out["result"]["day"] == 4
+    s.chain_lock.release()
+
+
+def test_provider_errors_reach_the_client():
+    """A revert's code and data pass through (the page decodes the basket's
+    custom errors from them)."""
+    s = session()
+
+    class Provider:
+        def make_request(self, method, params):
+            return {"error": {"code": 3, "message": "execution reverted", "data": "0x1234"}}
+
+    s.provider = Provider()
+    out = s.rpc({"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [{}]})
+    assert out["error"] == {"code": 3, "message": "execution reverted", "data": "0x1234"}
+
+
+def test_the_next_day_waits_for_queued_rpc():
+    """Between days the sim thread lets a queued envelope through before it
+    takes the chain: a released lock is not handed to its waiter, and the
+    visitor's deposit would otherwise starve behind a running world."""
+    s = session()
+    order = []
+
+    class Provider:
+        def make_request(self, method, params):
+            order.append("rpc")
+            return {"result": "0x1"}
+
+    s.provider = Provider()
+    s.chain_lock.acquire()                       # the day running
+    t = threading.Thread(target=s.rpc, args=({"jsonrpc": "2.0", "id": 1,
+                                              "method": "eth_blockNumber"},))
+    t.start()
+    while not s.rpc_waiting:
+        time.sleep(0.001)
+    s.chain_lock.release()                       # the frame
+    s._yield_to_rpc()                            # the next day's start
+    order.append("day")
+    t.join()
+    assert order == ["rpc", "day"]
+
+
+def test_frames_are_kept_for_a_reloaded_pages_replay():
+    s = session()
+    s._fanout("full-1", "lite-1")
+    s._fanout(json.dumps({"done": True}))        # not a frame
+    s._fanout("full-2", "lite-2")
+    assert s.history == ["lite-1", "lite-2"]
+
+
+def test_the_savings_block_rides_in_every_frame():
+    s = session()
+    s._sv = {"O": 200, "S": 20, "P": 180, "B": 230, "T": 0, "D": 1.2778}
+    full, lite = s._payloads({"day": 1})
+    assert json.loads(lite)["sv"]["D"] == 1.2778 and json.loads(full)["sv"]["B"] == 230
+
+
+def test_signed_transactions_carry_their_real_hash_and_need_the_next_nonce():
+    """eth_sendRawTransaction answers keccak(raw) -- a page names the receipt
+    in the same batch -- and refuses a nonce that is not the sender's next
+    (a captured transaction cannot be replayed)."""
+    from eth_account import Account
+    from eth_utils import keccak
+    from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
+
+    anvil = PyrevmAnvil().start()
+    acct = Account.create()
+    tx = {"to": "0x" + "22" * 20, "value": 0, "gas": 100_000, "gasPrice": 0,
+          "nonce": 0, "chainId": anvil.chain_id, "data": b""}
+    raw = acct.sign_transaction(tx).raw_transaction
+    p = anvil.w3.provider
+    out = p.make_request("eth_sendRawTransaction", ["0x" + raw.hex()])
+    assert out["result"] == "0x" + keccak(raw).hex()
+    assert p.make_request("eth_getTransactionReceipt", [out["result"]])["result"]["status"] == "0x1"
+    again = p.make_request("eth_sendRawTransaction", ["0x" + raw.hex()])
+    assert "nonce 0 is not the sender's next (1)" in again["error"]["message"]
+    eip1559 = {k: v for k, v in tx.items() if k != "gasPrice"}
+    typed = acct.sign_transaction({**eip1559, "nonce": 1, "type": 2,
+                                   "maxFeePerGas": 0, "maxPriorityFeePerGas": 0})
+    out = p.make_request("eth_sendRawTransaction", ["0x" + typed.raw_transaction.hex()])
+    assert out["result"] == "0x" + keccak(typed.raw_transaction).hex()

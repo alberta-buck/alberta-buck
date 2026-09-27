@@ -103,6 +103,53 @@ def gen_revert(start: float, sigma: float, seed: int, days: int,
     return [start * math.exp(v) for v in xs]
 
 
+# The six-token reverting set: one seed per constituent, fixed so a window's
+# reverting prices are the same on every machine (house rule: the vectors
+# are byte-identical across hosts).
+REVERT_SEED = 0x5AFE
+
+
+def revert_like(files: list[str], out_dir: Path = OUT_DIR) -> list[str]:
+    """The reverting twin of a price window (the savings demonstration's
+    "Reverting" toggle, doc/CONVERGENCE.org 7a): for each series in `files`,
+    a `gen_revert` walk from the same first price with that series' own
+    realized volatility -- the same commodities and the same scale, their
+    trend removed, each ending where it began.  Written beside the originals
+    as rev-<name> (hist-labr-...csv -> rev-labr-...csv) on first use, under
+    the window's lock and atomically, like gen_historical's (WAVE3.org
+    decision 21); returns the reverting file names."""
+    import fcntl
+    import os
+
+    want = [("rev-" + f[len("hist-"):]) if f.startswith("hist-") else f"rev-{f}" for f in files]
+    lock = out_dir / (want[0] + ".lock")
+    with lock.open("a+") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            if all((out_dir / f).exists() for f in want):
+                return want
+            for k, (src, dst) in enumerate(zip(files, want)):
+                with (out_dir / src).open() as f:
+                    rows = [int(r[1]) for r in list(csv.reader(f))[1:]]
+                logs = [math.log(b / a) for a, b in zip(rows, rows[1:]) if a > 0 and b > 0]
+                mean = sum(logs) / len(logs)
+                sd = math.sqrt(sum((x - mean) ** 2 for x in logs) / (len(logs) - 1))
+                sigma = sd * math.sqrt(365.25)            # annual, as gen_revert takes it
+                series = gen_revert(float(rows[0]), sigma, REVERT_SEED + k, len(rows))
+                tmp = out_dir / f"{dst}.tmp-{os.getpid()}"
+                with tmp.open("w", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["day", "close_usd_micro"])
+                    for day, px in enumerate(series):
+                        w.writerow([day, round(px)])
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, out_dir / dst)
+            return want
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+
+
 def write(path: Path, prices):
     with path.open("w", newline="") as f:
         w = csv.writer(f)

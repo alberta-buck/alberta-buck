@@ -1,7 +1,9 @@
 // The sandbox page: boot the world (the wasm kernels, an in-tab EVM, the
 // saved world or a new one), then wire the tools to the SandboxApp
 // controller.  Everything here is presentation; every chain fact comes from
-// the controller.
+// the controller.  The Savings tab is the exception: it watches a world on
+// a sim server, needs none of the in-tab one, and so the in-tab world boots
+// only when one of its own tools is first shown.
 //
 // Build: make nix-sandbox-build  (esbuild bundle -> sandbox/dist/app.js)
 
@@ -16,9 +18,13 @@ import { mountIssuer, renderIssuer } from "./ui/issuer.js";
 import { mountWallets, renderWallets } from "./ui/wallets.js";
 import { mountCredit, renderCredit } from "./ui/credit.js";
 import { mountObserver, renderObserver } from "./ui/observer.js";
+import { mountSavings } from "./ui/savings.js";
 
 const $ = (id) => document.getElementById(id);
-const TABS = ["issuer", "wallets", "credit", "observer"];
+const TABS = ["issuer", "wallets", "credit", "observer", "savings"];
+let worldReady = false;
+let worldBoot = null;
+const ctx = { act, say, lastView: null };
 const FRESH_WORLD_TXS = 40;          // about how many transactions a new world takes
 
 function say(text, kind = "") {
@@ -50,6 +56,15 @@ function selectTab(name) {
     $(`panel-${t}`).hidden = !on;
   }
   prefs.set("tab", name);
+  // The world bar's clock and stats are the in-tab world's: not the Savings tab's.
+  document.body.dataset.mode = name === "savings" ? "savings" : "world";
+  if (name === "savings") {
+    $("loading").hidden = true;
+    ctx.savings?.activate();
+  } else if (!worldReady) {
+    $("loading").hidden = false;
+    ensureWorld();
+  }
 }
 
 function mountTabs() {
@@ -64,11 +79,39 @@ function mountTabs() {
       $(`tab-${TABS[j]}`).focus();
     });
   }
-  const saved = prefs.get("tab", "issuer");
+  const asked = new URLSearchParams(location.search).get("tab");
+  const saved = TABS.includes(asked) ? asked : ctx.sameOrigin ? "savings" : prefs.get("tab", "issuer");
   selectTab(TABS.includes(saved) ? saved : "issuer");
 }
 
+function ensureWorld() {
+  worldBoot ??= bootWorld().catch((e) => {
+    console.error(e);
+    $("loading-step").textContent = `The sandbox could not start: ${e.message}`;
+  });
+  return worldBoot;
+}
+
+// Where the Savings tab's worlds are: sim-server.json, which the build
+// writes ({"server": null}, or SANDBOX_SIM_SERVER's URL) and the sim server
+// answers itself ("same-origin") when it serves the page (--static).
+async function simServer() {
+  try {
+    const r = await fetch("./sim-server.json", { cache: "no-store" });
+    return r.ok ? (await r.json()).server ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 async function boot() {
+  ctx.simServer = await simServer();
+  ctx.sameOrigin = ctx.simServer === "same-origin";
+  mountSavings(ctx);
+  mountTabs();
+}
+
+async function bootWorld() {
   const step = (text, frac) => {
     $("loading-step").textContent = text;
     if (frac !== undefined) $("loading-fill").style.width = `${Math.min(100, frac * 100)}%`;
@@ -88,13 +131,12 @@ async function boot() {
     },
   });
 
-  const ctx = {
-    app, act, say, lastView: null,
+  Object.assign(ctx, {
+    app,
     storageNote: store.persistent ? ""
       : "This browser refuses site storage: the world lasts until the tab closes (Export keeps it).",
-  };
+  });
   mountWorldBar(ctx);
-  mountTabs();
   mountIssuer(ctx);
   mountWallets(ctx);
   mountCredit(ctx);
@@ -129,8 +171,11 @@ async function boot() {
   };
   app.onChange(render);
   await render();
-  $("loading").hidden = true;
-  say("Ready.  Certify someone in the Issuer, then give them a wallet.", "ok");
+  worldReady = true;
+  if (document.body.dataset.mode !== "savings") {
+    $("loading").hidden = true;
+    say("Ready.  Certify someone in the Issuer, then give them a wallet.", "ok");
+  }
   globalThis.sandbox = app;          // for the curious, in the console
 }
 

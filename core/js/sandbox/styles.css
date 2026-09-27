@@ -14,6 +14,10 @@
   --bad: #cf222e;
   --chip: #eef2f7;
   --opaque: #6e40c9;
+  --s1: #1f6feb;
+  --s2: #bf5700;
+  --s3: #1a7f37;
+  --s4: #6e7781;
   --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 2px 8px rgba(20, 30, 40, .05);
   --radius: 10px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -35,6 +39,10 @@
     --bad: #f85149;
     --chip: #1f2833;
     --opaque: #a78bfa;
+    --s1: #4c8dff;
+    --s2: #f0883e;
+    --s3: #3fb950;
+    --s4: #8b98a6;
     --shadow: none;
     color-scheme: dark;
   }
@@ -53,6 +61,10 @@
   --bad: #f85149;
   --chip: #1f2833;
   --opaque: #a78bfa;
+  --s1: #4c8dff;
+  --s2: #f0883e;
+  --s3: #3fb950;
+  --s4: #8b98a6;
   --shadow: none;
   color-scheme: dark;
 }
@@ -269,3 +281,52 @@ tbody tr:last-child td { border-bottom: 0; }
 .ev-name { font-family: var(--mono); font-size: .8rem; color: var(--good); }
 form > button, .form > button { align-self: flex-start; }
 .toolbar .field { flex: 0 1 14rem; }
+
+/* ---- savings (a world on a sim server) --------------------------------- */
+
+/* The world bar's clock, stats and notice are the in-tab world's. */
+body[data-mode="savings"] #stats,
+body[data-mode="savings"] #controls,
+body[data-mode="savings"] #notice { display: none; }
+
+.savings-cols { grid-template-columns: minmax(0, 26rem) minmax(0, 1fr); align-items: start; }
+@media (max-width: 960px) { .savings-cols { grid-template-columns: minmax(0, 1fr); } }
+.stack { display: flex; flex-direction: column; gap: .9rem; min-width: 0; }
+.kpis { margin: .6rem 0; }
+.row.ctl { align-items: center; margin-top: .45rem; }
+.seg { display: inline-flex; align-items: center; gap: .25rem; margin-left: auto; }
+.seg-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+label.inline { display: inline-flex; align-items: center; gap: .3rem; font-size: .85rem; color: var(--muted); }
+input.narrow { width: 5rem; }
+code.wrap { overflow-wrap: anywhere; font-size: .78rem; }
+tr.done td { color: var(--muted); }
+.grid-title { margin: .6rem 0 .3rem; font-size: .85rem; color: var(--muted); font-weight: 600; }
+
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); gap: .9rem; }
+.chart-grid.small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); gap: .7rem; }
+.chart {
+  margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .55rem .7rem .5rem; box-shadow: var(--shadow); min-width: 0;
+}
+.chart figcaption { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .35rem; }
+.chart-title { font-weight: 650; font-size: .88rem; }
+.legend { display: flex; flex-wrap: wrap; gap: .1rem .7rem; font-size: .75rem; color: var(--muted); }
+.legend .key { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.legend .num { color: var(--ink); }
+.swatch { display: inline-block; width: 1rem; border-top: 2px solid; }
+.swatch.dash { border-top-style: dashed; }
+.plot { position: relative; margin: 0 0 1.1rem 2.6rem; }
+.plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.plot .line { stroke-width: 1.6; }
+.plot .grid { stroke: var(--line); stroke-width: 1; }
+.plot .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.plot .ylab, .plot .xlab {
+  position: absolute; font: .68rem var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none;
+}
+.plot .ylab { right: calc(100% + .3rem); transform: translateY(-50%); }
+.plot .xlab { top: calc(100% + .15rem); transform: translateX(-50%); }
+.plot .nodata { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted);
+                font-size: .8rem; font-style: italic; }
+.chart .hint { font-size: .75rem; }
+.card .notice { margin: .5rem 0; font-size: .85rem; }

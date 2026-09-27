@@ -266,6 +266,18 @@ def build(exp: Experiment):
         years=s["years"] or None,
         ticks_per_day=int(s["ticks_per_day"]),
         seed=int(s["seed"]))
+    # prices = "revert": the window's reverting twin (gen_prices.revert_like)
+    # -- the same six commodities cycling about their first price, trend
+    # removed; the savings demonstration's toggle.  Absent or "history": the
+    # history itself.
+    mode = str(s.get("prices", "history") or "history")
+    if mode == "revert":
+        from alberta_buck.sim.gen_prices import revert_like
+        from alberta_buck.sim.prices import Prices
+        sc.csv_files = revert_like(sc.csv_files)
+        sc.prices = Prices(sc.csv_files)
+    elif mode != "history":
+        raise ValueError(f"scenario.prices must be 'history' or 'revert', not {mode!r}")
     if s["agents"]:
         sc.agents = {**sc.agents, **{k: int(v) for k, v in s["agents"].items()}}
     if s["days"]:

@@ -4,7 +4,8 @@
 A private, simulated Alberta Buck world in your own browser tab.  Certify people, give them
 wallets, insure their (imaginary) homes and cars, activate credit against them, pay one another
 and trade BUCKs for dollars -- then look at the chain the way a stranger would, and see what it does
-and does not give away.  Nothing leaves the tab.
+and does not give away.  Nothing leaves the tab -- except on the /Savings/ tab, which watches, steers
+and saves in a far bigger world run on a server (below).
 
 Everything here is simulated: the identity issuer, the insurer, the dollars, the clock, and every
 key, which lives in the page in the clear.  What is *not* simulated is the machinery: the real
@@ -31,6 +32,12 @@ on another port.
 Without Nix you need Node 22 or later, a Rust toolchain with the =wasm32-unknown-unknown= target,
 and Foundry's =forge=; then =make sandbox=.  The flake pins all of these, and is the supported
 path.
+
+The /Savings/ tab needs a sim server.  One command serves the page and its worlds together:
+
+#+BEGIN_SRC sh
+make nix-venv-sim-savings  # then open http://127.0.0.1:8797/ (it opens on the Savings tab)
+#+END_SRC
 
 * A first story
 
@@ -127,6 +134,44 @@ on what opening it would take.  No name, birth date or person number appears any
 you tick /Show what only you know/, which labels addresses with the sandbox's own names for them.
 Mallory has no such list.
 
+** Savings
+
+[[file:../images/sandbox/savings.png]]
+
+The BuckBasket as a savings facility, in a whole economy too big for a browser tab: five years of
+real commodity prices for its six constituents (or their reverting twins: the same commodities
+cycling about their first price, trend removed), the basket with its director and work wheel, the
+undertakings, =BUCK_K=, a market maker and arbitrageurs pinning every TOKEN to its commodity,
+depositors, retirees refinancing their mortgages.  It runs on a sim server
+(=alberta_buck/sim/server.py=, pyrevm; one world per visitor), a simulated day every 10 to 60
+seconds, and this tab watches it frame by frame.
+
+- /The savings world/: the day and date, BUCK's price in the BUCK/USDC pool, what the basket costs
+  in BUCK (=BUCK_K= steers it to 1), =BUCK_K=, the savings index (below), the work wheel's harvest
+  credited to the depositors, the pace.  /Pause/ and /Run/, or /Step/ /1/, /7/ or /30 days/ and pause.
+  /Gas/ switches the wheel's callers between a rollup's gas (/L2/: it closes narrow gaps too) and
+  mainnet's (/L1/: only wide ones pay).  /Shock/: someone buys BUCK with USDC (/BUCK demand/), or
+  issues BUCK and sells it (/BUCK supply/), uncapped, over the days given -- the undertakings, the
+  arbitrage, the wheel and =BUCK_K= restore the peg.  /World settings/: the server, and a /New world/
+  on history or reverting prices, with a seed; the link to this world, which anyone holding it can
+  watch and steer.
+- /Your savings/: a key of your own, made in this browser (it signs everything it does; the server
+  runs nothing unsigned).  /Save/ dollars in a TOKEN -- or let the basket choose: the pool it most
+  needs, among those the deposit guard admits.  Saving mints the TOKEN at its market price (the
+  world's TOKENs are faucets), deposits it and takes a receipt; the basket partners it with freshly
+  minted BUCK.  Each receipt shows what it would pay now and what keeping the TOKEN instead would be
+  worth.  /Redeem/ burns the receipt's BUCK and pays you in TOKENs, from the pools the basket holds
+  too much of.  Actions land between simulated days: the world is never interrupted mid-day.
+- /The charts/: BUCK against USD and the basket; the savings index -- what a depositor is paid, in
+  BUCK value, per BUCK deposited -- against holding the basket's commodities instead; the wheel's
+  harvest, what its callers earned and the gas they spent; =BUCK_K=; the undertakings' open books;
+  and each commodity: its real price, its TOKEN/USDC pool, and its TOKEN/BUCK pool times
+  BUCK/USDC -- the arbitrage pulls all three together.
+
+The deposit guard refuses a pool that has just moved more than 2% from its recent average price, a
+protection against being priced by a pool someone just pushed; the tab says how far each pool is,
+and in the world's first days, while it settles, it may refuse them all for a day or two.
+
 * Real and simulated
 
 | Real                                                | Simulated                              |
@@ -163,5 +208,12 @@ storage (some private windows), the world lasts until the tab closes, and the pa
 - Tests (=make nix-core-test-js=): the ceremonies by role, the market and its premiums, the whole
   story through =SandboxApp= with no page, and the built page in headless Chromium
   (=test/sandbox.browser.test.js=; the browser comes from the flake).
+- The Savings tab: =src/ui/savings.js= and =src/ui/chart.js=, over =src/savings/= (=link.js= the
+  server's frames, control and JSON-RPC channels; =wallet.js= the key, its signed batches, save and
+  redeem; =model.js= the arithmetic; =abi.js= the contract surface it touches).  Its world is
+  =alberta_buck/sim/experiments/demo-savings.toml= on =alberta_buck/sim/server.py=
+  (=doc/CONVERGENCE.org= 7a).  Tests: =test/savings.model.test.js= (with the ABI against the
+  compiled contracts), and the tab against a real server in headless Chromium
+  (=make nix-venv-sandbox-savings-test=, minutes: a world takes about a minute to build).
 - =make nix-sandbox-screenshots= regenerates the pictures above.
 - The design and its history: =doc/review/sandbox-plan.org=.
