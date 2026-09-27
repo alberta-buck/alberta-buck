@@ -607,6 +607,11 @@ predicted before it was tried:
   fail against master's regenerated proof; without it the Makefile skips
   the suite, as on a fresh clone.
 
+The drift, measured like for like (the six 2-year none-arm cells re-run
+on the merged tree, =build/sim/merge2y/=, against the frozen grid's): bvib
+and K identical on all 731 days in every design; rounding-level drift in
+a few counters only.  Cycle 1's verdicts stand on master's basis.
+
 Evidence on the merged tree (datasim): =make nix-venv-sim-build= clean;
 the eleven wave-3 pytest files plus master's =test_debtor_ledger.py=
 220 passed, 1 skipped; =make nix-test= 56 suites, 653 passed, 0
