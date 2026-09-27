@@ -200,6 +200,45 @@ monetary operation (ruling 3), so the prototype can be built beside the
 stand; its quantitative verdict, like everything else, is read on the
 stand's rungs.
 
+** 7.1 First results (2026-09-27)
+
+=build/sim/wheel/{ctrl,l1,l2}-60.json=: the catalogue none arm for 60
+days -- the control, and the same with one =BasketWheelAgent= (=tasks=
+["arb"], =call= "profitable", =max_work= 3, share 0.10, fund_frac 0.05,
+acting LAST, after the external arbs) on L1 (5 gwei) and L2 (0.01 gwei)
+gas.  Days 30-59 (the first month is the pools' bootstrap: the TOKEN/BUCK
+pools are seeded ~12% off the USD venues, and the wheel's first cycles
+take $2-3k each):
+
+| days 30-59                        | control     | wheel, L1     | wheel, L2     |
+|-----------------------------------+-------------+---------------+---------------|
+| residual gap, p50 / p90           | 120 / 324 bp | 89 / 192 bp  | 91 / 191 bp   |
+| external arb cycles               | 1,253       | 875           | 814           |
+| wheel value / kept by the basket  | --          | $49.7k / $42.2k | $39.9k / $33.9k |
+| caller pay / gas                  | --          | $7,011 / $1,869 | $5,682 / $3.57 |
+| quote shortfall (realized < quote) | --         | $505          | $589          |
+| bvib standard deviation           | 77 bp       | 104 bp        | 117 bp        |
+
+1. *It pays, on both chains.*  ~$1.3-1.7k/day on a $16-28M basket (2-3%
+   of NAV a year on this thin, noisy cast); the calls fund themselves
+   with room to spare even on L1.
+2. *Part of it was the external arbs'.*  Their cycles fall ~30-35% and
+   the EOAs' aggregate P&L ~$28k over the window: the wheel takes
+   roughly half its value from the band nobody else could take and
+   half from gaps the arbs would have closed.  (On chain, v3 searchers
+   would keep the large gaps; this sim orders by agent, not by fee.)
+3. *The gaps narrow but do not close to the band.*  Three cycles per
+   call, four calls a day, cycles capped at 2% of a leg's reserve: the
+   sim's granularity, not the wheel's.  More work per call is a knob.
+4. *bvib gets noisier: understand before the wheel meets K.*  The
+   hypothesis: consistent pools make bvib (a TWAP of the TOKEN/BUCK
+   pools) track the USD venues' commodity moves instead of lagging them
+   behind a 120 bp arb threshold -- a truer gauge, and more of the true
+   deviation reaching the controller.  The alternative, the wheel's own
+   impact, is testable (cap_frac, max_work).  Decisive for (A).
+5. *The quote holds* to ~1.2-1.5% of the value; the misses are the
+   virtual-reserve closed form beyond the active range.
+
 * 8. The chassis: activities as task kinds
 
 The design owner's question: can the work wheel be abstracted, so a
