@@ -75,10 +75,10 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     }
     assert.ok(saved, "a deposit landed");
     assert.match(await status(), /^Saved: receipt #\d+, \$10,000\.00 of \w+ partnered with/);
-    const receiptRow = page.locator("#panel-savings tbody tr").first();
+    const receiptRow = page.locator("#panel-savings li.receipt").first();
     await receiptRow.locator("button", { hasText: "Redeem" }).waitFor({ timeout: DAY_MS });
     await page.waitForFunction(() => /\$[\d,]+\.\d\d/.test(
-      document.querySelector("#panel-savings tbody tr td:nth-child(4)")?.textContent ?? ""), null, { timeout: DAY_MS });
+      document.querySelector("#panel-savings li.receipt dd.worth")?.textContent ?? ""), null, { timeout: DAY_MS });
 
     // Pause, then one day, then paused again.
     await page.click("#panel-savings button:text-is('Pause')");
@@ -107,14 +107,14 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     await receiptRow.locator("button", { hasText: "Redeem" }).click();
     await idle();
     assert.match(await status(), /^Redeemed #\d+: paid \$[\d,]+\.\d\d in TOKENs/);
-    assert.match(await receiptRow.textContent(), /paid, day \d+/);
-    assert.match(await page.textContent("#panel-savings dl.kv"), /\(\$[\d,]+\.\d\d\)/, "the wallet holds the payout");
+    assert.match(await receiptRow.textContent(), /paid on day \d+/);
+    assert.match(await page.textContent("#panel-savings dl.wallet"), /\(\$[\d,]+\.\d\d\)/, "the wallet holds the payout");
 
     // Reload: the same world, its days replayed, the receipt remembered.
     const days = await page.evaluate(() => globalThis.savings.rows.length);
     await page.reload();
     await page.waitForFunction((n) => (globalThis.savings?.rows.length ?? 0) >= n, days, { timeout: 60_000 });
-    assert.match(await page.textContent("#panel-savings tbody"), /paid, day \d+/);
+    assert.match(await page.textContent("#panel-savings ul.receipts"), /paid on day \d+/);
 
     // A phone: no sideways scroll.
     await page.setViewportSize({ width: 390, height: 844 });

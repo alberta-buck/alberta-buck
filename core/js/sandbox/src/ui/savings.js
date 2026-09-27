@@ -138,8 +138,9 @@ export function mountSavings(ctx) {
       note: "K steers the basket's BUCK price to 1; the BUCK/USDC pool says what a BUCK fetches." }),
     k: lineChart({ title: "K: credit per unit of insured value", fmt: f4, series: [{ label: "K", color: S3 }] }),
     index: lineChart({ title: "The savings index", ref: 1, fmt: f4, series: [
-      { label: "paid per BUCK saved", color: S1 }, { label: "holding the basket instead", color: S2, dash: true }],
-      note: "What a depositor is paid, in BUCK value, per BUCK deposited, against holding the basket's commodities." }),
+      { label: "paid per BUCK saved", color: S1 }],
+      note: "What a redemption pays, in BUCK value, per BUCK deposited: 1 at the start, raised by the "
+        + "wheel's credits and the pools' harvest of the commodities' cycles." }),
     wheel: lineChart({ title: "The work wheel (cumulative)", fmt: dollars, series: [
       { label: "to depositors", color: S1 }, { label: "to callers", color: S2 }, { label: "gas", color: S4 }],
       note: "Consistency cycles through TOKEN/USDC, TOKEN/BUCK and BUCK/USDC: the harvest reaches the depositors." }),
@@ -369,8 +370,7 @@ export function mountSavings(ctx) {
     const xs = rows.map((r) => r.day);
     charts.buck.update(xs, [rows.map((r) => r.bu || null), rows.map((r) => r.bv || null)]);
     charts.k.update(xs, [rows.map((r) => r.k || null)]);
-    const bv0 = rows.find((r) => r.bv > 0)?.bv;
-    charts.index.update(xs, [rows.map((r) => r.D), rows.map((r) => (bv0 ? r.bv / bv0 : null))]);
+    charts.index.update(xs, [rows.map((r) => r.D)]);
     charts.wheel.update(xs, [rows.map((r) => r.credited), rows.map((r) => r.callers), rows.map((r) => r.gasUsd)]);
     charts.ops.update(xs, [rows.map((r) => r.utIssued), rows.map((r) => r.utAbsorbed)]);
     S.commodity.forEach((c, i) => {
@@ -424,41 +424,41 @@ export function mountSavings(ctx) {
     const sv = { O: last.O, S: last.S, B: last.B };
     const onChain = new Map((S.holdings?.receipts ?? []).map((r) => [r.id, r]));
     const list = receipts();
-    const rows = list.map((rec) => {
+    // One block per receipt: what it would pay now against what it cost,
+    // and against keeping the TOKEN instead -- the comparison that is exact.
+    const blocks = list.map((rec) => {
       const tok = S.info.tokens[rec.i];
-      const p = prices(last, rec.i).usdc;
+      const sym = tok?.symbol ?? "?";
+      const head = (...extra) => h("div", { class: "receipt-head" },
+        h("b", {}, `#${rec.id}`), ` ${sym}, saved on day ${rec.day}`, ...extra);
       if (rec.redeemedDay !== undefined) {
-        return h("tr", { class: "done" },
-          h("td", {}, `#${rec.id}`), h("td", {}, tok?.symbol ?? "?"),
-          h("td", { class: "r" }, usd(rec.usd), h("div", { class: "sub" }, `day ${rec.day}`)),
-          h("td", { class: "r" }, usd(rec.paidUsd), h("div", { class: "sub" }, `paid, day ${rec.redeemedDay}`)),
-          h("td", { class: "r" }, "–"),
-          h("td", { class: "r" }, pct(rec.paidUsd / rec.usd - 1)), h("td", {}));
+        const paidIn = (rec.paid ?? []).map(([i]) => S.info.tokens[i]?.symbol).filter(Boolean).join(", ");
+        return h("li", { class: "receipt done" }, head(`, paid on day ${rec.redeemedDay}`),
+          h("dl", { class: "kv" },
+            h("dt", {}, "Saved"), h("dd", {}, usd(rec.usd)),
+            h("dt", {}, `Paid${paidIn ? ` in ${paidIn}` : ""}`),
+            h("dd", { class: "paid" }, usd(rec.paidUsd), " ", pct(rec.paidUsd / rec.usd - 1))));
       }
       const c = onChain.get(rec.id);
       const worth = c?.live ? receiptWorth(c.buckPrincipal, sv) : null;
       const worthUsd = worth ? (Number(worth.paid) / 1e6) * last.bu : null;
-      const held = (Number(BigInt(rec.amount)) / 10 ** (tok?.decimals ?? 18)) * p;
-      return h("tr", {},
-        h("td", {}, `#${rec.id}`), h("td", {}, tok?.symbol ?? "?"),
-        h("td", { class: "r" }, usd(rec.usd), h("div", { class: "sub" }, `day ${rec.day}`)),
-        h("td", { class: "r" }, worthUsd === null ? "…" : usd(worthUsd),
-          worth ? h("div", { class: "sub" }, `${compact(Number(worth.paid) / 1e6)} BUCK`) : null),
-        h("td", { class: "r" }, usd(held)),
-        h("td", { class: "r" }, worthUsd === null ? "" : pct(worthUsd / rec.usd - 1)),
-        h("td", {}, c?.live ? h("button", { type: "button", onclick: () => redeem(rec, worthUsd) }, "Redeem") : null));
+      const held = (Number(BigInt(rec.amount)) / 10 ** (tok?.decimals ?? 18)) * prices(last, rec.i).usdc;
+      return h("li", { class: "receipt" },
+        head(c?.live ? h("button", { type: "button", onclick: () => redeem(rec, worthUsd) }, "Redeem") : null),
+        h("dl", { class: "kv" },
+          h("dt", {}, "Saved"), h("dd", {}, usd(rec.usd)),
+          h("dt", { title: "What redeeming would pay now, in TOKENs valued at their USDC pools" }, "Worth now"),
+          h("dd", { class: "worth" }, worthUsd === null ? "…" : [usd(worthUsd), " ", pct(worthUsd / rec.usd - 1)],
+            worth ? h("div", { class: "sub" }, `${compact(Number(worth.paid) / 1e6)} BUCK of TOKENs`) : null),
+          h("dt", {}, `Kept the ${sym} instead`), h("dd", {}, usd(held), " ", pct(held / rec.usd - 1))));
     });
     fill(receiptsBox, list.length === 0 ? h("p", { class: "empty" }, "No savings yet.")
-      : h("div", { class: "table-wrap" }, h("table", {},
-        h("thead", {}, h("tr", {}, h("th", {}, "Receipt"), h("th", {}, "In"), h("th", { class: "r" }, "Saved"),
-          h("th", { class: "r" }, "Worth now"), h("th", { class: "r" }, "Kept the TOKEN",
-            h("div", { class: "sub" }, "instead")), h("th", { class: "r" }, "Change"), h("th", {}))),
-        h("tbody", {}, rows))));
+      : h("ul", { class: "receipts" }, blocks));
 
     const bal = (S.holdings?.balances ?? []).map((b, i) => [b, i]).filter(([b]) => b > 0n);
     fill(balancesBox, bal.length === 0 ? null : [
       h("h3", { class: "grid-title" }, "In your wallet"),
-      h("dl", { class: "kv" }, bal.flatMap(([b, i]) => {
+      h("dl", { class: "kv wallet" }, bal.flatMap(([b, i]) => {
         const t = S.info.tokens[i];
         const n = Number(b) / 10 ** t.decimals;
         return [h("dt", {}, t.symbol), h("dd", {}, `${compact(n, 4)} (${usd(n * prices(last, i).usdc)})`)];

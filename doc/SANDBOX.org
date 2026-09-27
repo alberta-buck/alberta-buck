@@ -162,9 +162,9 @@ seconds, and this tab watches it frame by frame.
   minted BUCK.  Each receipt shows what it would pay now and what keeping the TOKEN instead would be
   worth.  /Redeem/ burns the receipt's BUCK and pays you in TOKENs, from the pools the basket holds
   too much of.  Actions land between simulated days: the world is never interrupted mid-day.
-- /The charts/: BUCK against USD and the basket; the savings index -- what a depositor is paid, in
-  BUCK value, per BUCK deposited -- against holding the basket's commodities instead; the wheel's
-  harvest, what its callers earned and the gas they spent; =BUCK_K=; the undertakings' open books;
+- /The charts/: BUCK against USD and the basket; the savings index -- what a redemption pays, in
+  BUCK value, per BUCK deposited; the wheel's harvest, what its callers earned and the gas they
+  spent; =BUCK_K=; the undertakings' open books;
   and each commodity: its real price, its TOKEN/USDC pool, and its TOKEN/BUCK pool times
   BUCK/USDC -- the arbitrage pulls all three together.
 

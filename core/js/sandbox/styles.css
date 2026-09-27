@@ -300,7 +300,12 @@ button[aria-pressed="true"] { background: var(--accent); border-color: var(--acc
 label.inline { display: inline-flex; align-items: center; gap: .3rem; font-size: .85rem; color: var(--muted); }
 input.narrow { width: 5rem; }
 code.wrap { overflow-wrap: anywhere; font-size: .78rem; }
-tr.done td { color: var(--muted); }
+ul.receipts { list-style: none; margin: .6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.receipt { border: 1px solid var(--line); border-radius: 8px; padding: .45rem .6rem; }
+.receipt.done { color: var(--muted); }
+.receipt-head { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; font-size: .9rem; }
+.receipt-head button { margin-left: auto; }
+.receipt .kv { margin: .35rem 0 0; }
 .grid-title { margin: .6rem 0 .3rem; font-size: .85rem; color: var(--muted); font-weight: 600; }
 
 .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); gap: .9rem; }
