@@ -56,8 +56,15 @@ function selectTab(name) {
     $(`panel-${t}`).hidden = !on;
   }
   prefs.set("tab", name);
-  // The world bar's clock and stats are the in-tab world's: not the Savings tab's.
+  // Two worlds: the tools' own, in this tab, on the clock the world bar moves;
+  // and the Savings tab's, on a server, on its own clock.  The badge says which.
   document.body.dataset.mode = name === "savings" ? "savings" : "world";
+  const kind = $("world-kind");
+  kind.textContent = name === "savings" ? "SERVER WORLD" : "THIS TAB'S WORLD";
+  kind.title = name === "savings"
+    ? "The Savings tab watches a separate, much larger world run on a sim server, on its own clock."
+    : "Issuer, Wallets, Credit and Observer share one small world in this browser tab; its clock moves "
+      + "only when you move it.  The Savings tab's world is a separate one, on a server.";
   if (name === "savings") {
     $("loading").hidden = true;
     ctx.savings?.activate();

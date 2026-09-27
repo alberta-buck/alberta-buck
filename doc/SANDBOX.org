@@ -59,9 +59,9 @@ make nix-venv-sim-savings  # then open http://127.0.0.1:8797/ (it opens on the S
 
 ** The world bar
 
-Always in view: the simulated day and date, the block, BUCK's price in the BUCK/USDC pool,
-=BUCK_K= (how much credit each unit of insured value supports), the BUCK supply and the insurance
-pool.  The clock moves only when you move it: /+1 hour/, /+1 day/, /+30 days/.  /Journal/ lists
+Always in view on the tools' tabs (the Savings tab has its own): the simulated day and date, the
+block, BUCK's price in the BUCK/USDC pool, =BUCK_K= (how much credit each unit of insured value
+supports), the BUCK supply and the insurance pool.  The clock moves only when you move it: /+1 hour/, /+1 day/, /+30 days/.  /Journal/ lists
 every transaction with its outcome and gas -- refusals included, since they are part of the
 story.  /Export/ saves the whole world to a file, /Import/ loads one, /Reset/ starts again.
 
@@ -138,7 +138,9 @@ Mallory has no such list.
 
 [[file:../images/sandbox/savings.png]]
 
-The BuckBasket as a savings facility, in a whole economy too big for a browser tab: five years of
+The BuckBasket as a savings facility, in a whole economy too big for a browser tab -- a separate
+world from the other tools', which share one small world in your tab on the clock the world bar
+moves (the header's badge says which world you are looking at): five years of
 real commodity prices for its six constituents (or their reverting twins: the same commodities
 cycling about their first price, trend removed), the basket with its director and work wheel, the
 undertakings, =BUCK_K=, a market maker and arbitrageurs pinning every TOKEN to its commodity,

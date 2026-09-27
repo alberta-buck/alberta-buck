@@ -111,6 +111,8 @@ code, .num { font-family: var(--mono); font-size: .92em; }
   padding: .3rem .45rem; border-radius: 6px;
   background: var(--warn); color: #fff;
 }
+.badge.world { background: var(--chip); color: var(--ink); cursor: help; white-space: nowrap; }
+.tabs .tab-sep { flex: none; width: 1px; margin: .45rem .35rem; background: var(--line); }
 .stats { display: flex; flex-wrap: wrap; gap: .3rem 1rem; flex: 1 1 22rem; min-width: 0; }
 @media (max-width: 760px) {
   .bar { position: static; }        /* a tall bar should not pin half a phone screen */
