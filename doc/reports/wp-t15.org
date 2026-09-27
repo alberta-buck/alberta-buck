@@ -5,7 +5,16 @@
 
 * Summary
 
-PENDING-SUMMARY
+Built: the carry kernel (=carry.py=, Buck.mint's coverage arithmetic,
+insurance as a returned outlay) and =ExternalDebtRetireeAgent=, the
+debtor's household with its arrival formula replaced by a monthly
+refinance decision.  Showed: with no arrival hazard anywhere in the
+credit channel, all 30 retirees join within the year and the supply
+answers K -- as a STOCK and a TIMING response (a K rise pulls refinancing
+forward, +$866k on the step day, +$164k kept; a cut, -$196k), not the
+ramp the formula produced; the savers' premium/discount rule still makes
+the largest swings.  Next: demography (T16) for a steady refinancing
+flow, and the standing-facility saver in place of the premium-seller.
 
 * The role, and what it replaces
 
@@ -83,7 +92,11 @@ that refinances under this accounting and would not under the old one
 
 * Commits
 
-PENDING-COMMITS
+On =wp/t15-retiree= (newest first): f69fcfa (Buck.mint's coverage
+arithmetic), 44b70b6 (doc: a K cut withdraws the offer), 6ea3213 (the
+kernel and the retiree), 817589c (snapshot: stabilizer fields in deploy
+order), 706e970 (the debtor's tail as =_carry_tail=), and the kdesign
+K-step tooling.
 
 * Files
 
@@ -98,4 +111,71 @@ PENDING-COMMITS
   =k_step_interventions=, its committed TOMLs unchanged), =loop.py=
   (registration), =test_kdesign.py= (the K-step TOMLs pinned)
 
-PENDING-EVIDENCE
+* Layers passed
+
+- L1: =test_carry.py= 13 passed; =test_kdesign.py= 17 passed, 1 skipped
+  (WP-16's committed TOMLs unchanged by the shared helper; the K-step
+  TOMLs pinned).
+- L2: =build/sim/t15/smoke-60b.json= (0 joins in 60 days: households save
+  from zero cash; 22 cash waits, 33 gate waits);
+  =build/sim/t15/smoke-path.json= (buffer 0, save_rate 1: household 278
+  joins day 30, $79,904 retired, carry $8,375/yr against $2,646 one-time;
+  the why-note carries the whole decomposition).
+- L3: the =_carry_tail= extraction is byte-identical on the six 30-day
+  design smokes (cmp) once the snapshot's set-order defect was fixed.
+
+* Acceptance evidence: g without the formula
+
+=build/sim/kdesign/ksteps-organic-retiree/=, 365-day cells, gains off day
+120, K held 0.75, step day 150; =python -m alberta_buck.sim.kdesign kfit
+--base organic-retiree= and =python -m alberta_buck.sim.household_agents
+VECTOR=.
+
+| cell | retirees joined | refis / top-ups | USD retired | Delta supply vs ctrl, day 150 / 180 / 364 |
+|------+-----------------+-----------------+-------------+-------------------------------------------|
+| ctrl | 30 of 30        | 30 / 4          | $9,309,946  | --                                        |
+| p10  | 30 of 30        | 30 / 3          | $9,474,323  | +828k / -380k / +173k BUCK                |
+| m10  | 30 of 30        | 30 / 9          | $9,113,361  | -28k / +103k / -200k BUCK                 |
+
+The ramp fit is null (supply F_K 8-9k BUCK/day/K, R2 ~0): the response
+is a step, not a ramp.  Attribution (frame differences, step vs ctrl):
+under p10 the retirees retire $866k more on the step day (pending joins
+and top-ups pulled forward), the control catches up by day 180 as its
+households join, and +$164k stays (the capacity); the SaverAgent
+population moves 1.46M BUCK the same day and -1.95M over the month --
+the premium/discount rule that also made WP-16's "-6.3M".
+
+* Findings
+
+1. *The gate passes: g exists without a formula, both signs.*  About
+   1.6-2.0M BUCK of retiree supply per unit K on this cast, as a stock.
+2. *It is a stock and a timing response, not a flow.*  A finite
+   population refinances once; K moves how much and when.  A steady
+   supply flow per unit K needs households arriving (T16 demography:
+   new mortgages, renewals), so WP-16's ramp cannot be re-identified on
+   this cast -- and should not be expected to exist without arrivals.
+3. *The savers' rule dominates the total.*  The next role (the
+   standing-facility saver) replaces a price-only premium-seller.
+4. *Pacing is savings.*  From zero cash, a $20k buffer and the gate's
+   reserve (poolPrincipal x fundingFactor), joins spread over months.
+5. *The debtor's gate pre-check tolerates a 1-BUCK shortfall*
+   (=short > 10**6=): likely most of its "insufficient mint funding"
+   reverts.  Left alone (audited); the retiree saves to +0.5%.
+6. *Insurance as an outlay decides refinances.*  =test_carry.py= pins a
+   household that refinances under fe3083f's accounting and would not
+   with the deposit written off.
+
+* Open issues and proposed decisions
+
+1. Initial household savings (a stylized fact to source) -- today every
+   household starts at zero cash.
+2. The basket-risk charge (=risk=, 0-1%/yr, assumed).
+3. Whether BuckCredit insures the unactivated face: the external premium
+   stops on joining (master's doctrine), though the deposit covers only
+   the coverage activated.
+4. T16 next: arrivals (new mortgages, renewals) for a refinancing flow.
+
+* Left behind
+
+=build/sim/t15/= (smokes), =build/sim/kdesign/ksteps-organic-retiree/=
+(three 365-day vectors, ~20 MB each); not committed.
