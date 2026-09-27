@@ -205,9 +205,9 @@ shows the price leave the band and come back.
 | step | what                                                                                          | size (sessions) | depends on |
 |------+-----------------------------------------------------------------------------------------------+-----------------+------------|
 | 1    | E1 (the wheel's gauge effect) and the Tevm memory spike                                        | 1               | --         |
-| 2    | the wheel in Solidity (chassis, kinds, flash mint) + forge tests                                | 2               | --         |
-| 3    | the Python =BasketWheelAgent= invokes the Solidity wheel; L3 against the prototype              | 1               | 2          |
-| 4    | E2-E4 on datasim; the configuration to demonstrate                                             | 1 + a night     | 1, 3       |
+| 2    | the wheel in Solidity (chassis, kinds; no flash mint needed) + forge tests -- DONE (BASKET-WHEEL 8.6) | 2 | -- |
+| 3    | the Python =BasketWheelAgent= invokes the Solidity wheel; L3 against the prototype -- DONE, PASS (BASKET-WHEEL 8.7) | 1 | 2 |
+| 4    | E2-E4 on datasim; the configuration to demonstrate -- RUNNING (conv-e2/e3/e4, 31 cells, build/sim/conv/) | 1 + a night | 1, 3 |
 | 5    | the JS savings world: eqworld lifted into =core/js/src=, N constituents, bundled histories, the invoker, the shock whale; Tevm tests | 2-3 | 2, spike |
 | 6    | the sandbox's Basket tab, auto-run, charts; Playwright; screenshots                             | 2               | 5          |
 | 7    | the records: this document's verdicts, the guide, a hosted preview                              | 1               | 6          |

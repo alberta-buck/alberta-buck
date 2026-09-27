@@ -450,6 +450,39 @@ What building it settled:
    reserve: against a small own pool a large gap closes over several
    blocks, one bounded cycle per scan.
 
+** 8.7 The contract against the prototype: CONVERGENCE step 3 (2026-09-27)
+
+=build/sim/step3/sol-{token,buck}.json= -- the Python sim driving the
+Solidity =BasketWheel= (=BasketWheelAgent= =impl= "solidity"; cap 200 bp,
+12 cycles per call, L2 gas, acting last) -- against E1's best prototype
+cell (=build/sim/e1/c020-w12.json=), the none arm, days 30-59:
+
+| cell                   | captured | to the depositors / basket | caller  | gauge error p50 / p90 | gap p50 | ext. arb cycles | gas   |
+|------------------------+----------+----------------------------+---------+-----------------------+---------+-----------------+-------|
+| control                | --       | --                         | --      | 152 / 377 bp          | 156 bp  | 1,253           | --    |
+| prototype (Python)     | $52.6k   | $44.7k (kept)              | $7.7k   | 101 / 214 bp          | 97 bp   | 685             | $4.7  |
+| Solidity, TOKEN start  | $57.6k   | $51.8k to the DEPOSITORS   | $5.8k   | 112 / 263 bp          | 116 bp  | 654             | $5.3  |
+| Solidity, BUCK start   | $52.6k   | (reserve, then treasury)   | $47.2k  | 101 / 184 bp          | 94 bp   | 688             | $4.3  |
+
+1. *PASS.*  The contract takes what the prototype took (within 10%),
+   displaces the external arbitrage as much, and improves the gauge alike;
+   ~365k gas a cycle through real identity-bound BUCK.
+2. *The band barely mattered here.*  v1 takes direct profit only, yet
+   matched the prototype, which reached into the fee band: this cast's
+   residual gaps sit mostly above it.  The band's worth appears once real
+   searchers compete the gaps down.
+3. *The harvest reaches the receipts:* $51.8k credited to the depositors
+   in 30 days, ~3% a year on the savings basket (the thin cast).
+4. *A tuning rule from the BUCK start.*  With a reserve cap of 50,000 BUCK
+   and kappa 2% per working tick, the reserve became a pass-through and
+   the callers took $47.2k of $52.6k.  The cap must be sized to the
+   callers' GAS BUDGET, not to the profit; above it the BUCK goes to the
+   treasury, as designed.  (In that row the Cycled events' =credited=
+   counts the reserve's share too; the basket kept the treasury part only.)
+5. *The cap rule shows through the start token:* =capBp= of the FIRST
+   leg's input reserve sizes the two starts' cycles differently (the
+   TOKEN start's error is a little higher).  v2: cap every leg.
+
 * 9. Open
 
 1. The share s and kappa, per chain or adaptive.
