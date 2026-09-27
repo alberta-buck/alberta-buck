@@ -216,6 +216,38 @@ Beside it, the stand continues on its own files: T16 (demography, so a
 refinancing FLOW exists) and the standing-facility saver (in place of the
 premium-seller whose rule dominates every K response so far).
 
+* 7a. Step 5, revised: two tiers of sandbox (design owner, 2026-09-27)
+
+The Tevm spike (=doc/reports/tevm-memory.org=) solved the in-browser memory
+ceiling (prune the history, trim the system rings: a flat heap) and found
+the CPU one: every read deep-copies the state, ~100-190 s of wall time
+per simulated day for six constituents -- a year in 10-20 hours.  So the
+design owner's ruling: SMALL, SIMPLER SANDBOXES stay hosted in the browser
+-- the sandbox we have now, preserved as it is -- and the COMPLEX ones run
+on server-hosted pyrevm.  The savings demonstration is the second kind:
+
+- *The world* runs in =alberta_buck.sim.server= (pyrevm; one world per
+  session; frames over WebSocket; controls at each day boundary; JSON-RPC
+  to the world's chain), the full stack of section 6.3 with the real
+  contracts: the basket, its director, the undertakings and the desk,
+  the wheel (Solidity), the market (whale, arbs), savers and retirees,
+  six constituents on the real 2020-2025 histories -- or on reverting
+  series with the same volatilities (the toggle).
+- *The page* is a new Savings tab in the sandbox, beside the existing
+  in-browser tabs: it opens a session, plays / pauses / sets the pace,
+  charts the world from its frames, and acts as the visitor's wallet
+  through the session's RPC (a faucet, a deposit into the basket, the
+  receipt's value, a redemption), with the demand / supply shock buttons
+  and the L1 / L2 toggle as controls.
+- *Serving* is one server process per port behind the cloudflared tunnel
+  (the tunnel's public-hostname rules are the design owner's dashboard).
+
+Server work: a lean demo cast at interactive speed; the reverting price
+mode for the six-token world; pause / resume, shock and chain-toggle
+controls; a =sim_info= method (the world's addresses for the page); lite
+frames (no per-agent telemetry).  Page work: the tab, its charts and the
+visitor's wallet flow; a Playwright test against a local server.
+
 * 8. Decisions -- RESOLVED 2026-09-27 (design owner)
 
 1. *The phase rule and the demonstration:* YES -- the demonstration
