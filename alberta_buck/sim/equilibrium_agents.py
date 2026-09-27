@@ -2807,6 +2807,14 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                     if self._refi_atomic and self.mortgage <= 10 ** 6:
                         ctr["bcdAtomicRefis"] = (
                             ctr.get("bcdAtomicRefis", 0) + 1)
+        self._carry_tail(d, drawn, limit, jub, ctr)
+
+    def _carry_tail(self, d, drawn, limit, jub, ctr) -> None:
+        """Steps 4-5 and the voluntary unwind: what the debtor does with
+        its claim and its surplus once the tranche step has run.  `drawn`,
+        `limit` and `jub` are the month's opening reads.  Shared with the
+        wave-4 households (household_agents.py), which reach it once their
+        external debt is gone."""
         # 4. AMORTIZE THE CLAIM on the same schedule as the mortgage would
         #    have.  `hypo_mortgage` is the counterfactual's remaining
         #    balance, so buying BUCK back until `drawn - jub` meets it keeps

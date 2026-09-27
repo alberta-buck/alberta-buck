@@ -772,7 +772,12 @@ next.  Paste acceptance evidence here, not in chat.
   years).  So the six 2-year none-arm cells are re-running on the
   merged tree (=build/sim/merge2y/d7-c1/=, log
   =build/sim/regen/merge2y.{log,done}=) for =vecdiff= against
-  =../alberta-buck-grid/build/sim/star/d7-c1/none-*.json=.
+  =../alberta-buck-grid/build/sim/star/d7-c1/none-*.json=.  RESULT
+  (2026-09-27, all six EXIT 0): bvib and K IDENTICAL on every one of
+  731 days (|delta| max 0) in designs A, S0k and V; the only drift is
+  rounding in a handful of counters (a few to ~1,000 micro-units: DM
+  dollar-days, treasury BUCK, the desk's books, NAV).  Cycle 1's
+  verdicts stand verbatim on master's basis.
 - A master-side defect found on the way: =make snark-test-regression=
   cannot regenerate on master's tree (=IdentityMembership(32)= vs the
   script's =AGGREGATOR_DEPTH= 20), and its first act deletes the tracked

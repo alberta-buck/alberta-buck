@@ -28,6 +28,7 @@ import alberta_buck.sim.seeder_agent  # noqa: F401  WP-8  triggers @_register
 from alberta_buck.sim import shadow_book  # WP-13: the stand-ins' book -> observer
 import alberta_buck.sim.pusher_agent  # noqa: F401  WP-15  @_register PusherAgent, LpExitAgent
 import alberta_buck.sim.bookloader  # noqa: F401  WP-15  @_register BookLoaderAgent
+import alberta_buck.sim.household_agents as households  # T15  @_register ExternalDebtRetireeAgent
 
 E6 = 10 ** 6
 
@@ -68,6 +69,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     eqm.FatCreditBorrowerAgent._regime_counter = 0
     eqm.SaverAgent._regime_counter = 0
     eqm.BuckCreditDebtorAgent._arrival_seq = 0
+    households.ExternalDebtRetireeAgent._arrival_seq = 0
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]

@@ -357,7 +357,7 @@ noise are population ASSUMPTIONS, not measurements of an economy:
 |-----------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | supply flow per unit K, ~50k BUCK/day         | a pending debtor's arrival clock advances at (K / 0.75) x (1 + 5 x (1 - bvib)), capped at 3x (=equilibrium_agents.py=, the =endog= arrival hazard: =arr_k_ref=, =arr_gain=, =arr_max=).  One line, an assumed elasticity. |
 | the price reverts within the day              | the excursion arbs' thresholds and their effectively unlimited capital                                                                                                                              |
-| cuts delever at once, rises ramp slowly       | genuine in kind, but its size is the debtors' K-scaled limits on a 30-debtor cast                                                                                                                 |
+| cuts delever at once, rises ramp slowly       | NOT a mechanism: a cut calls nothing (it lowers limits); the 6.3M was the savers selling into the premium the cut made (=doc/K-AND-OPS.org= F4, corrected 2026-09-26)                                                                                                                 |
 
 A real borrower decides to refinance a 6% USD mortgage into BUCK credit
 when the premium, the funding factor and the discount make it pay, and
@@ -373,8 +373,9 @@ The structural half of the controller work does not wait, and it is
 what tells the stand what to measure.  Three facts hold in every
 population: one lever zeroes one integral (algebra); K acts only
 through voluntary borrowing, so it is a slow rate lever everywhere and
-only g and the uptake lag change; a cut can compel while a rise can
-only offer, in any credit money.  Those fix the controller's SHAPE (D9:
+only g and the uptake lag change; a rise offers credit and a cut
+withdraws the offer -- it lowers limits, possibly below what an account
+has issued, and calls nothing -- in any credit money.  Those fix the controller's SHAPE (D9:
 one integrated signal plus an estimated persistent flow) and name what
 the stand must be able to measure at each rung: g, the uptake lag
 tau_K, the persistence spectrum of organic flow, and the ratio of K's

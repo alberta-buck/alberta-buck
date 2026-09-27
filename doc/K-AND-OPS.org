@@ -193,7 +193,7 @@ at day 150; plus three loaded-book (grind) confirmation cells.
 | draining a full $15M book at the rail   | ~600 days                                     |
 | price shift from full authority         | 0.2-0.4% of bvib                              |
 | daily price error with the loop open    | std 0.70%, lag-1 autocorrelation -0.53        |
-| a cut to K 0.55                         | -6.3M BUCK at once (borrowers' limits bind)   |
+| a cut to K 0.55                         | -6.3M BUCK in 5 days (the SAVERS sold; see 3) |
 | cuts vs rises, BUCK/day per unit K      | 55k vs 44k at depth 10; 44k vs 75k at depth 40 |
 
 Three design consequences, all of which survive re-identification even
@@ -207,9 +207,21 @@ though the numbers will move:
    arrival hazard and their K-scaled limits, so a step in K yields a
    supply ramp that compounds late.  A K move lasting a day moves supply
    by a few thousand BUCK.
-3. *The lever is asymmetric.*  A cut can compel (a margin call, 6.3M at
-   once); a rise is an offer nobody has to take.  No single linear gain
-   describes both directions.
+3. *The lever is asymmetric -- but neither side compels.*  A rise OFFERS
+   credit nobody has to take.  A cut WITHDRAWS the offer: it lowers every
+   credit limit, possibly below the BUCK an account has already issued,
+   and nothing is called -- there is no borrowing to call.  An account
+   under water simply cannot issue more; one with credit left can issue
+   less.  (Corrected 2026-09-26, design owner.  The -6.3M "at once" that
+   read as a margin call was the SaverAgent population: the cut made BUCK
+   dear -- spot 1.057 -> 1.088 on the step day -- and savers sell at a
+   premium, 6.4M of =saver_hold= in days 150-160 of =d10-m20= against
+   =d10-ctrl=, supply contracting as that BUCK found the accounts drawn
+   below zero.  A price response of the cast, not a mechanism of the
+   protocol.)  So a cut acts on the flow of NEW issuance, like a rise,
+   and on the stock only through the price it moves; the two sides
+   differ in size (whoever is near their limit, whoever sells into a
+   premium), not in kind.  No single linear gain describes both.
 
 *Why these are thin-cast numbers.*  The flow per unit K is set, in
 today's sim, by one line: a pending borrower's arrival clock advances at
@@ -330,20 +342,20 @@ because its verdict turns on saturation and sign, not on magnitude.
 ** 5.1 The two controllers, side by side
 
 #+LATEX: {\scriptsize
-| aspect                  | K (the slow lever)                                                                 | The monetary operations (the fast actuators)                                            |
-|-------------------------+------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------|
-| goal                    | hold the STOCK of credit-backed BUCK where a bundle prices at par over months       | hold the PRICE inside the band now, and make disruption expensive                        |
-| the thing it controls   | the credit-limit multiplier: how much BUCK a pledged asset supports                | its own inventory position, taken at its own edge                                       |
-| process variable        | the PERSISTENT component of net demand for BUCK at par (one scalar)                | bvib against this actuator's own edge (eps, the ladder's tranche, x / y, the range)      |
-| inputs                  | raw bvib (decision 10); the estimated persistent flow; the escalated stock from level 2 | the price, its own inventory, its own remaining capacity, its own carry cost         |
-| output                  | K in (KMIN, KMAX), ppm per tick, integral-dominant, conditional integration at rails | trades: BUCK absorbed or issued at a priced edge                                       |
-| timescale               | tau_I = 90 days, plus the borrowers' uptake lag; the supply answers as a ramp       | ticks to days                                                                            |
-| what it damps           | the deviation that OUTLIVES the fast actuators' willingness to hold it              | the transient excursion, and the attacker's ability to move price cheaply                 |
-| what it must never see  | any signal the fast actuators can suppress; any inventory an adversary can create, at a gain | K's gains (it must never wait for the slow lever); other actuators' filtered signals |
-| its own mid-ranging lever | none needed: level 2 hands it a stock, not a book                                | the local skew kappa_i on its own edge (n positions, n levers)                            |
-| failure mode            | saturation at the rail (F1, F2); and an unexplainable K (the P-term question)       | inventory that persists: carry cost, and a wall that works against restoration            |
-| cost of being wrong     | the whole economy's credit capacity moves                                          | the basket's reserve and the depositors' P&L                                              |
-| who owns it             | governance (gains, rails, K0), monthly                                              | each actuator's own parameters, and the desk's quadrant rules                             |
+| aspect                    | K (the slow lever)                                                                           | The monetary operations (the fast actuators)                                         |
+|---------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------|
+| goal                      | hold the STOCK of credit-backed BUCK where a bundle prices at par over months                | hold the PRICE inside the band now, and make disruption expensive                    |
+| the thing it controls     | the credit-limit multiplier: how much BUCK a pledged asset supports                          | its own inventory position, taken at its own edge                                    |
+| process variable          | the PERSISTENT component of net demand for BUCK at par (one scalar)                          | bvib against this actuator's own edge (eps, the ladder's tranche, x / y, the range)  |
+| inputs                    | raw bvib (decision 10); the estimated persistent flow; the escalated stock from level 2      | the price, its own inventory, its own remaining capacity, its own carry cost         |
+| output                    | K in (KMIN, KMAX), ppm per tick, integral-dominant, conditional integration at rails         | trades: BUCK absorbed or issued at a priced edge                                     |
+| timescale                 | tau_I = 90 days, plus the borrowers' uptake lag; the supply answers as a ramp                | ticks to days                                                                        |
+| what it damps             | the deviation that OUTLIVES the fast actuators' willingness to hold it                       | the transient excursion, and the attacker's ability to move price cheaply            |
+| what it must never see    | any signal the fast actuators can suppress; any inventory an adversary can create, at a gain | K's gains (it must never wait for the slow lever); other actuators' filtered signals |
+| its own mid-ranging lever | none needed: level 2 hands it a stock, not a book                                            | the local skew kappa_i on its own edge (n positions, n levers)                       |
+| failure mode              | saturation at the rail (F1, F2); and an unexplainable K (the P-term question)                | inventory that persists: carry cost, and a wall that works against restoration       |
+| cost of being wrong       | the whole economy's credit capacity moves                                                    | the basket's reserve and the depositors' P&L                                         |
+| who owns it               | governance (gains, rails, K0), monthly                                                       | each actuator's own parameters, and the desk's quadrant rules                        |
 #+LATEX: }
 
 ** 5.2 The seam: persistence, not magnitude
@@ -387,15 +399,16 @@ admissible uses, both to be tested rather than assumed:
 
 ** 5.3 What is retired, and what is kept
 
-| kept                                                                  | retired or demoted                                                       |
-|-----------------------------------------------------------------------+--------------------------------------------------------------------------|
-| =BuckKControllerDirect= as the controller of record (A passes 6 of 6)  | the second PID loop on the aggregate position as the intended design      |
-| the =IStabilizer= seam: position, cap, saturation, staleness           | the shadow bvib as a continuous input to K's gains (D4's lambda)          |
-| the stabilizer observer, as INSTRUMENTATION and for level 2's test     | =shadowValueInBuck= feeding =_readReferences=                            |
-| the local skews as the differential-mode lever (but see F7)            | the derived position gains and the "lambda knee" of 24                    |
-| decision 10: the funding factor and the price loop read RAW bvib       | gamma, the saturation gain schedule (measured, never adopted)             |
-| decision 9: hold the last good cap, flag stale, exclude disabled       | tau_s as a tuning target for a loop that cannot reach its own setpoint    |
-| the fill-unit aggregation (V) as the units of choice if a level ever needs the aggregate: no reference depth D in the law | the joint LQR as the source of feedback gains       |
+| kept                                                                  | retired or demoted                                                     |
+|-----------------------------------------------------------------------+------------------------------------------------------------------------|
+| =BuckKControllerDirect= as the controller of record (A passes 6 of 6) | the second PID loop on the aggregate position as the intended design   |
+| the =IStabilizer= seam: position, cap, saturation, staleness          | the shadow bvib as a continuous input to K's gains (D4's lambda)       |
+| the stabilizer observer, as INSTRUMENTATION and for level 2's test    | =shadowValueInBuck= feeding =_readReferences=                          |
+| the local skews as the differential-mode lever (but see F7)           | the derived position gains and the "lambda knee" of 24                 |
+| decision 10: the funding factor and the price loop read RAW bvib      | gamma, the saturation gain schedule (measured, never adopted)          |
+| decision 9: hold the last good cap, flag stale, exclude disabled      | tau_s as a tuning target for a loop that cannot reach its own setpoint |
+| the fill-unit aggregation (V) as the units of choice if a level       | the joint LQR as the source of feedback gains                          |
+| ever needs the aggregate: no reference depth D in the law             |                                                                        |
 
 The contracts stay: =BuckKControllerShadow= with its position gains at
 zero IS =BuckKControllerDirect= (an identity asserted by forge tests), so
@@ -443,10 +456,11 @@ change, no limit cycle.
 Three limits to state plainly, because they are what makes this different
 from a rocket landing:
 
-1. *The plant's gain is uncertain by a factor of 2 and signed.*  Cuts
-   compel, rises offer (F4).  A single linear g is wrong; the law needs
-   a per-sign g, and the cut side needs a rate limit because its
-   immediate effect is a margin call.
+1. *The plant's gain is uncertain by a factor of 2 and signed.*  Rises
+   offer, cuts withdraw the offer (F4); neither calls anything.  A single
+   linear g is wrong; the law needs a per-sign g, and the cut side needs
+   a rate limit because its immediate effect is a price move that the
+   premium-sellers answer at once.
 2. *The disturbance can exceed the lever by 5-8x.*  During a large attack
    the feedforward is at the rail and the facilities are doing the work.
    The estimator earns its keep on the RELEASE, deciding how much of the
@@ -592,6 +606,11 @@ predicted before it was tried:
   =build/snark/regression/RegressVerifier.sol= makes =RegressionTest=
   fail against master's regenerated proof; without it the Makefile skips
   the suite, as on a fresh clone.
+
+The drift, measured like for like (the six 2-year none-arm cells re-run
+on the merged tree, =build/sim/merge2y/=, against the frozen grid's): bvib
+and K identical on all 731 days in every design; rounding-level drift in
+a few counters only.  Cycle 1's verdicts stand on master's basis.
 
 Evidence on the merged tree (datasim): =make nix-venv-sim-build= clean;
 the eleven wave-3 pytest files plus master's =test_debtor_ledger.py=
