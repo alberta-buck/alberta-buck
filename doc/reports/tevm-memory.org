@@ -1,0 +1,513 @@
+#+TITLE: Tevm memory on long eqworld runs -- cause, measurements, mitigations
+#+AUTHOR: Claude (spike) for Perry Kundert
+#+DATE: 2026-09-27
+#+OPTIONS: ^:nil toc:2 num:t
+
+Spike question: how can the in-browser EVM (Tevm =createMemoryClient=, the
+sandbox and eqworld demo backend) run the Alberta Buck world for months to
+years without running out of memory, and what should the browser demo do?
+Branch =feature/carry-convexity=; nothing tracked was modified.  The
+benchmark is =core/js/bin/tevm-membench.mjs= (new).
+
+* Summary
+
+- *The cause is not the blocks.*  Tevm 1.0.0-next.149 keeps a complete
+  JavaScript copy of the world state -- every account, every storage slot,
+  every contract's bytecode as a hex string -- under the state root of
+  *every block it mines*, forever (=@tevm/actions= =mineHandler= calls
+  =stateManager.commit(true)=, which stores =dumpCanonicalGenesis()= in the
+  =stateRoots= Map; nothing ever deletes from it).  Under automine every
+  transaction is its own block, so memory grows by one full state copy per
+  transaction: *~0.6 MB per tx for the 1-token eqworld, ~1.1 MB per tx for
+  the 6-token basket.*  Block objects, receipts and logs are small next to
+  that.
+- *An aggravator makes it quadratic.*  Tevm's default hardfork is
+  =prague=, so every block also writes 3 storage slots into two system
+  contracts (EIP-4788 beacon roots: 2, EIP-2935 block-hash history: 1),
+  8191-entry rings that fill only after 8191 blocks (24,573 slots).  Each
+  new state copy is therefore bigger than the last, and -- because Tevm
+  deep-copies the whole state for every =eth_call= -- every read gets
+  slower too: 15 ms per read on an empty chain, 145 ms after 1000 blocks,
+  620 ms after 4000.
+- *Measured baseline* (automine, Node 22, heap after forced GC): 1 token,
+  eqsim's cast: 60 MB at build, 152 MB at day 30, 237 MB at day 60, 487 MB
+  at day 120, 983 MB at day 180 (1317 blocks, RSS 4.1 GB); fitted
+  =heap ~ 36 + 0.54 B + 1.3e-4 B^2= MB for B blocks, i.e. a 4 GB V8 heap
+  (desktop Chrome's per-tab ceiling) at ~3,900 blocks.  6 tokens: ~24
+  blocks/day at ParityArb's default 100 bp threshold (+27 MB/day, 4 GB in
+  roughly 4 months), ~52 blocks/day with a busy arb (+60 MB/day, 4 GB in
+  under 2 months).  That is the "OOM past ~6 months" of
+  alberta-buck-deployment.org and eqsim.mjs.
+- *Mitigations measured:*
+  - (a) *Fewer blocks (manual mining)* works mechanically -- 50 txs in one
+    block cost 53 KB/tx instead of 592 KB/tx -- but breaks the agent
+    layer: no receipt exists until the block is mined, and a read that
+    sees the pending txs ('pending' tag) costs 670 ms with 1 pending tx
+    and 3.8 s with 50 (Tevm re-mines the mempool on a deep copy per
+    read).  Not viable without rewriting the agents; and moot once (c)
+    is in.
+  - (b) *Periodic dump/reload into a fresh client* (public API:
+    =tevmDumpState= / =tevmLoadState=, swap =session.client=) works:
+    0.4-0.95 s per reload, heap back to ~55-70 MB after each, the world
+    reads back bit-identically, and a 180-day run gives the same
+    =world.series= digest as the untouched run.  The sawtooth peak is the
+    growth between reloads.  *Do not rebuild the block height*
+    (=restoreTevm= mines one empty block per past block): it took 64 s,
+    130 s, 203 s for the 1st/2nd/3rd reload and left the heap at 3.6 GB
+    by day 90 -- worse than doing nothing.
+  - (c) *Prune Tevm's history in place* (drop old =stateRoots= entries,
+    old blocks and their receipts; ~40 lines against Tevm internals) plus
+    *trim the two system rings* (public =tevmSetAccount({address,
+    state: {}})=): heap *flat* at 60-98 MB through 180 days and 1317
+    blocks (vs 983 MB and still climbing), RSS flat at ~750 MB, per-read
+    cost flat, and the same 180-day =world.series= digest as the stock
+    run.
+- *TWAP is not a blocker for any of these.*  The basket's 600 s TWAP
+  already equals "the tick before today's first swap" under automine
+  (the daily 86,400 s clock jump dwarfs the window; a read in the swap's
+  own block sees none of it), and a one-block-per-day batch gives the
+  same value; the next day both have caught up exactly.  Pruning and
+  reload keep the pools' observation rings (they are contract storage,
+  not block history) and the exact timestamps.
+- *CPU is the other ceiling.*  Even with memory flat, Tevm deep-copies
+  the full state on every call and re-dumps it on every call-frame
+  commit, so cost per op scales with state size: 2-20 s per simulated day
+  for 1 token, ~100 s per day for 6 tokens (more with a busy arb), in
+  Node.  A small Tevm patch (skip the full dump on non-root commits)
+  measured 2-2.7x faster with an identical series digest.
+- *Recommendation for the browser demo:* at the end of every simulated
+  day run =pruneTevm()= (keep 8 state roots, 256 blocks) and
+  =trimSystemRings()=, feature-detected, with a periodic height-free
+  reload (b) as the fallback when the internals are absent; pin the Tevm
+  version and gate it with a node test.  Keep the world at the fewest
+  constituents and reads the demo needs, since CPU -- not memory -- will
+  then bound how many simulated years a visitor can watch.  Details in
+  [[*Recommendation for the browser demo]].
+
+* Setup
+
+- Tevm =tevm@1.0.0-next.149= (=@tevm/node=, =@tevm/vm=, =@tevm/state=,
+  =@tevm/actions= all =1.0.0-rc.151=), viem 2.x, EthereumJS EVM (pure JS;
+  the =@evmts/zevm= native addon is only the light-client ABI), Node
+  v22.22.3 from the nix flake.  Default mining =auto=, default hardfork
+  =prague=.
+- Built with the project recipes: =make nix-core-js-deps= (npm ci) and
+  =make nix-core-build-wasm= (the Node =buck_identity= kernel that
+  eqsim's onboarding needs).  Contract artifacts from =out/= (already
+  built); =core-js-artifacts= is only needed for the browser bundle.
+- World: =buildEquilibriumWorld= (the eqsim / eqworld-demo world:
+  identity stack, BuckBasketProRata + Uniswap venue, per-token TOKEN/USDC
+  and TOKEN/BUCK V3 pools, the floating BUCK/USDC pool, the Universal
+  Router) with eqsim's cast: DayClock, one PinWhale per token, ParityArb,
+  PidKeeper, one BasketSaver, MonthlyIncome + MortgageRetiree.  1 token
+  (CNST, eqsim's default) or 6 tokens (CNST NRGY BULN FOOD METL LABR).
+- Reproducibility: the chain clock is pinned (first block at t = 1.9e9)
+  and the agents' keys are fixed, so a run is deterministic and the final
+  =keccak256(world.series)= digest compares modes: equal digests mean a
+  mitigation changed nothing the agents observe.
+- Heap = =process.memoryUsage().heapUsed= after two forced GCs
+  (=--expose-gc=); runs used =--max-old-space-size=8192= so the trend
+  could be watched past the 4 GB mark; several runs shared a 32-core host,
+  so seconds per day are indicative only (compare within a table).
+
+#+begin_src sh
+cd core/js
+nix develop ../.. --command node --expose-gc --max-old-space-size=8192 \
+    bin/tevm-membench.mjs --mode auto   --days 180 --every 10
+#   --mode prune  --trim-system --keep 256 --keep-roots 8
+#   --mode reload --trim-system --height skip --reload-every 30
+#   --mode reload --height full                  (the restoreTevm path)
+#   --mode batch  --batch-k 50                   (manual mining + TWAP probe)
+#   --mode empty  --days 5                       (no world: empty blocks)
+#   --mode readcost --days 120                   (read latency vs ring size)
+#   --tokens 6 --arb-bp 10                       (6 constituents, busy arb)
+#+end_src
+
+* Where the memory goes
+
+Tevm 1.0.0-next.149, read from =core/js/node_modules/@tevm/*/dist=:
+
+1. *A full state copy per block.*  =mineHandler= (=@tevm/actions=) deep-
+   copies the VM, runs the block, then =vm.stateManager.commit(true)=.
+   Tevm's =commit= (=@tevm/state=) builds =dumpCanonicalGenesis()= -- a
+   plain object with every account's nonce, balance, storage (hex slot ->
+   hex value) and, for contracts, =deployedBytecode= as a hex string --
+   hashes its JSON into a pseudo state root and stores the object in
+   =baseState.stateRoots= (a Map).  =mineHandler= then saves the same
+   object into the original VM's Map.  Nothing deletes from it: it is how
+   Tevm serves calls "at block N".  For this world the object is ~0.5 MB
+   (1 token, 33 accounts; mostly bytecode) to ~1 MB (6 tokens, 46
+   accounts; each V3 pool carries its own copy of the pool bytecode).
+2. *Blocks, receipts, tx index* live in Maps too (=@tevm/blockchain=
+   =blocks= / =blocksByNumber=, the receipts manager's map DB, the tx
+   pool's =handled= map).  Small per block; also never pruned.
+3. *The system rings.*  Under =prague= each block writes the parent beacon
+   root (EIP-4788: 2 slots) and parent block hash (EIP-2935: 1 slot) into
+   system-contract storage, rings of 8191.  An empty chain shows it alone:
+
+   | mode (no world)                  | blocks | heap MB | state copy KB | ring slots   | ms/block |
+   |----------------------------------+--------+---------+---------------+--------------+----------|
+   | start                            |      0 |    41.7 |             3 | 0            |        - |
+   | one =tevmMine({blockCount:500})= |    500 |   193.7 |           144 | 1000 + 500   |       26 |
+   | 500 separate =evm_mine=          |   1000 |   316.1 |           285 | 2000 + 1000  |      174 |
+
+   So each new state copy is bigger than the last until the rings fill
+   (~7 MB of JSON at 24,573 slots): growth is quadratic in blocks for the
+   first 8191 blocks.  Nothing in this world reads the rings (no contract
+   uses BLOCKHASH or the beacon-roots contract, and EthereumJS routes
+   BLOCKHASH through the EIP-2935 storage only when EIP-7709 is active,
+   which it is not).
+4. *Per-call copies (CPU, not retention).*  Every =eth_call=,
+   =eth_getTransactionReceipt= and mine deep-copies the VM (a full dump
+   plus a rebuild of the caches from it), and every call-frame commit
+   inside the EVM runs Tevm's =commit()=, which dumps the full state again
+   even when no new root is wanted.  This is garbage, not retention, but
+   it makes every operation cost O(state size) -- see [[*CPU: the other ceiling]].
+
+* Baseline: automine, as eqsim and the demo run today
+
+1 token (eqsim's world and cast; =--mode auto=):
+
+| day | block | sends | heap MB | rss MB | state copies | copy KB | slots | s/day |
+|-----+-------+-------+---------+--------+--------------+---------+-------+-------|
+|   0 |    44 |    42 |    60.3 |    467 |           45 |     504 |   424 |       |
+|  30 |   197 |   164 |   151.5 |    892 |          198 |     559 |   949 |  13.0 |
+|  60 |   341 |   278 |   236.5 |   1147 |          342 |     600 |  1381 |   6.2 |
+|  90 |   450 |   357 |   303.2 |   1470 |          451 |     631 |  1714 |   5.8 |
+| 120 |   710 |   587 |   487.4 |   2279 |          711 |     706 |  2492 |  19.6 |
+| 150 |   925 |   772 |   665.7 |   2928 |          926 |     765 |  3121 |  27.2 |
+| 170 |  1215 |  1042 |   891.8 |   3789 |         1216 |     834 |  3811 |  44.8 |
+| 180 |  1317 |  1134 |   982.9 |   4114 |         1318 |     862 |  4117 |  52.9 |
+
+- Blocks = sends + one DayClock block per day: automine is one tx per
+  block.  The cast averaged 7 blocks/day over 180 days (3/day when the
+  arb is idle, ~14/day in days 140-180 when the walk drifted and the arb
+  worked every day).
+- Heap per block: 0.59 MB (blocks 44-341), 0.69 (341-742), 0.80
+  (742-1215).  Fit: =heap ~ 36 + 0.54 B + 1.3e-4 B^2= MB (predicts 981 MB
+  at B = 1317; measured 983).  At a 4 GB heap:
+  ~3,900 blocks (about 1.5 years at 7 blocks/day, 9 months at 14/day).
+- Seconds per simulated day rise with the block count as well (every read
+  copies the growing state): ~5-6 s/day at blocks 300-450, 45 s/day at
+  1200-1300 with a busier arb.
+
+6 tokens (=--tokens 6=; the demo-target shape):
+
+#+name: auto6
+| run                          | day | block | heap MB | rss MB | copy KB | s/day |
+|------------------------------+-----+-------+---------+--------+---------+-------|
+| auto, arb 100 bp             |   0 |    94 |   102.2 |    696 |    1027 |       |
+| auto, arb 100 bp             |   5 |   215 |   239.4 |   1364 |    1074 |   103 |
+| auto, busy arb (10 bp)       |   5 |   355 |   400.9 |   1923 |    1117 |   223 |
+
+- ~24 blocks/day (6 whales, the arb, PID, saver, clock) and ~1.13 MB per
+  block: +27 MB/day, a 4 GB heap in roughly 110-120 days.  With a busy
+  arb, ~52 blocks/day and +60 MB/day: 4 GB in ~50 days.
+- The 6-token world is also slow: ~100 s per simulated day in Node (220 s
+  with the busy arb) -- see [[*CPU: the other ceiling]].
+
+* Mitigation (a): fewer blocks -- manual mining, one block per batch
+
+Tevm's API (=@tevm/node= =MiningConfig=): ={type: 'auto'}= (default),
+={type: 'manual'}= (txs wait in the pool until =tevmMine= /
+=evm_mine=), ={type: 'interval', blockTime}=; switchable at runtime with
+=node.setMiningConfig()=.  =tevmMine({blockCount, interval})= mines
+several blocks in one call.  Probe (=--mode batch --batch-k 50=, 1-token
+world, 50 =MockERC20.mint= txs):
+
+| measurement                                    | automine (50 blocks) | manual (1 block)  |
+|------------------------------------------------+----------------------+-------------------|
+| heap per tx                                    | 592 KB               | 53 KB             |
+| blocks for 50 txs                              | 50                   | 1                 |
+| eth_call at 'latest'                           | 134 ms               | 141 ms            |
+| eth_call at 'pending' (1 / 50 pending txs)     | -                    | 673 ms / 3,829 ms |
+| receipt of a submitted tx before the mine      | immediate            | null              |
+| submit 50 txs / mine the block                 | -                    | 19.2 s / 3.5 s    |
+
+- Batching does cut memory ~11x per tx: one state copy per block instead
+  of per tx.
+- But the agents cannot run on it unchanged.  Every agent is read ->
+  send -> await receipt -> read again (the ParityArb iterates until the
+  gap closes; =world.route= returns a balance delta; =basketDeposit=
+  needs the =Deposited= log for the receipt id; the debtor's
+  =mintTranche= needs the receipt status).  Under manual mining the
+  receipt does not exist until the block is mined, and a read that sees
+  the pending txs costs a deep copy plus re-executing the whole mempool
+  (=getPendingClient=), i.e. quadratic in the day's tx count.  A
+  one-block-per-day world needs agents rewritten to decide from the
+  day's opening state and submit fire-and-forget -- a different
+  simulation.
+- Once (c) is in, a block costs almost nothing to keep, so batching buys
+  no memory.  Verdict: not recommended.
+
+* Mitigation (b): periodic dump / reload into a fresh client
+
+Every N simulated days: =snapshotTevm(session)= (=tevmDumpState= + head
+number and timestamp), a fresh =tevmSession()=, =tevmLoadState=, then one
+=evm_mine= at the snapshot's timestamp; assign the fresh client to the
+running =session.client=.  Contract handles are ={abi, address}= and the
+world's helpers go through =session=, so the world and agents carry on
+untouched.  =--height skip= keeps only the time (block numbers restart at
+1); =--height full= is =backends.js restoreTevm= (rebuilds the height by
+mining one empty block per past block).  Reload every 30 days, 1 token:
+
+| day | heap MB (skip) | reload ms (skip) | heap MB (skip + trim) | reload ms (skip + trim) | heap MB (full height) | reload ms (full height) |
+|-----+----------------+------------------+-----------------------+-------------------------+-----------------------+-------------------------|
+|  20 |          103.5 |                  |                 103.2 |                         |                 103.5 |                         |
+|  30 |           56.3 |              609 |                  55.1 |                     421 |                1537.5 |                  64,329 |
+|  50 |          117.1 |                  |                 114.0 |                         |                1603.3 |                         |
+|  60 |           56.0 |              538 |                  56.2 |                     432 |                2695.0 |                 130,332 |
+|  90 |           54.4 |              619 |                  53.6 |                     414 |                3603.4 |                 202,948 |
+| 110 |          160.8 |                  |                 149.9 |                         |                3748.9 |                         |
+| 120 |           62.7 |              628 |                  61.5 |                     401 |                         |                         |
+| 170 |          257.9 |                  |                 222.6 |                         |                         |                         |
+| 180 |           70.0 |              953 |                  68.1 |                     701 |                         |                         |
+
+- Correctness: before/after each reload the probe (block timestamp, K,
+  bvib, BUCK/USDC spot, fundingFactor, every TOKEN/USDC and TOKEN/BUCK
+  spot, BUCK and USDC balances of the saver, the debtor's proxy and
+  SimLP, BUCK totalSupply) read back identical, all 6 reloads; the run
+  finished with 0 journal mismatches and the *same 180-day series digest*
+  as the untouched automine run and the in-place pruning run
+  (0xd44577cb...).  Time is exact (same
+  timestamp), so demurrage, depreciation, the PID's dT and the V3
+  observation rings carry on.
+- Memory is a sawtooth: back to ~55-70 MB after each reload, peaking at
+  the growth over the interval (258 MB at day 170, 30-day interval, while
+  the arb was busiest).  Shorten the interval (or reload on a block-count or
+  heap threshold) to lower the peak; a reload costs ~0.4-1 s (1 token).
+- =--trim-system= (drop the two system rings from the snapshot) keeps the
+  restored state small (367 slots vs 3193 by day 180) and the reload
+  faster (400-700 ms vs 540-950 ms).
+- *The height rebuild (=restoreTevm= as written) must not be used for
+  this.*  It mines one empty block per past block inside one
+  =tevmMine({blockCount})= call; each gets its own state copy (the rings
+  change every block, so every root is distinct) and the call retained
+  ~7 MB per rebuilt block (heap 609 MB right after restoring 77 blocks
+  in a short diagnostic run, 1.5 GB after 197), and its time is
+  O(blocks x state).  No contract in the eqworld reads =block.number=
+  or =blockhash= (Uniswap V3, the router and Permit2 use
+  =block.timestamp=), so there the height is cosmetic.  The one =src/=
+  user is the work wheel's clock (=src/wheel/WorkWheel.sol= =_clock()=
+  returns =block.number=), not deployed in the eqworld today: a demo
+  that adds the wheel must not restart the height (use (c), which keeps
+  it).  (The sandbox's save/load uses =restoreTevm= for small worlds; it
+  is fine there, but the same cost applies to a long-lived saved world.)
+- Caveats: reload drops block/tx/receipt/log history and the fee market
+  (baseFee restarts at the fresh chain's value; only ETH gas accounting
+  sees that); block numbers restart unless rebuilt; RSS stayed high
+  (0.9-1.6 GB) even though the heap dropped -- V8 keeps the pages -- which
+  in a browser tab counts against the tab.  Uses public Tevm API only.
+
+* Mitigation (c): prune Tevm's history in place, and trim the rings
+
+=pruneTevm(session, {keep, keepRoots})= in =tevm-membench.mjs=, run at the
+end of each simulated day:
+
+- delete every =stateRoots= entry except genesis, the live root and the
+  roots of the last =keepRoots= blocks (8);
+- delete blocks older than =keep= (256) from =blocksByNumber= and
+  =blocks=, and their receipts + tx-hash index (=receiptsManager.
+  deleteReceipts=); clear the tx pool's =handled= map when the pool is
+  empty.
+
+=trimSystemRings(client)= clears the EIP-4788 / EIP-2935 storage with
+=tevmSetAccount({address, state: {}})= (public API; code, nonce and
+balance kept).
+
+1 token, 180 days (the auto run above, same cast and seed):
+
+| day | block | heap MB (auto) | heap MB (prune) | heap MB (prune + trim) | rss MB (prune + trim) | slots (prune / +trim) | s/day (auto / prune / +trim) |
+|-----+-------+----------------+-----------------+------------------------+-----------------------+-----------------------+------------------------------|
+|   0 |    44 |           60.3 |            60.3 |                   60.3 |                   453 | 424 / 424             |                              |
+|  30 |   197 |          151.5 |            64.2 |                   70.5 |                   633 | 949 / 358             | 13.0 / 14.3 / 12.9           |
+|  60 |   341 |          236.5 |            65.9 |                   85.7 |                   637 | 1381 / 358            | 6.2 / 5.9 / 4.7              |
+|  90 |   450 |          303.2 |            64.7 |                   84.1 |                   636 | 1714 / 364            | 5.8 / 5.9 / 4.3              |
+| 120 |   710 |          487.4 |            74.0 |                   92.4 |                   650 | 2492 / 364            | 19.6 / 20.1 / 13.0           |
+| 150 |   925 |          665.7 |            86.6 |                   97.5 |                   752 | 3121 / 364            | 27.2 / 26.6 / 15.2           |
+| 180 |  1317 |          982.9 |      (pending) |                   85.3 |                   752 | 4117 / 364            | 52.9 / - / 15.5              |
+
+- The heap stops growing: 60-98 MB for 1317 blocks (vs 983 MB at the
+  same 1317 blocks untouched, and climbing).  RSS is flat at ~640-750 MB (churn from the per-call
+  copies; it does not climb).
+- Pruning alone bounds retention but the rings still grow the *live*
+  state (3121 slots by day 150), so every call keeps getting slower
+  (27 s/day vs 15 s/day with the trim at day 150).  Trim and prune belong
+  together.
+- Cost: pruning is a few ms per day; the trim is one =tevmSetAccount=
+  per ring per day (~70 ms/day, dominated by Tevm's commit dump).
+- Correctness: 0 mismatches; the 180-day series digest is the same
+  (0xd44577cb...) for the untouched automine run, prune + trim, reload
+  and reload + trim -- all four see exactly the same world.  The 30-day
+  prune + trim digest equals the 30-day runs with and without the
+  fast-commit patch (0x20d62a5f...).
+- Caveats:
+  - It touches Tevm internals: =vm.stateManager._baseState.stateRoots=,
+    =vm.blockchain.blocksByNumber= / =.blocks= / =.blocksByTag=,
+    =node.getReceiptsManager()=, =node.getTxPool().handled=.  They are not
+    API and can change in any Tevm release (the package is a
+    =next=/=rc= line).  Pin the version (package-lock does today), gate
+    with a node test, and feature-detect at runtime.
+  - History beyond the windows is gone: =eth_call= / =getBalance= at a
+    block older than 8 fails (no state root); =getBlock=, receipts and
+    logs older than 256 blocks return nothing.  The eqworld demo reads
+    only =latest= plus its own =world.series=; =Session='s revert-reason
+    replay reads the receipt's own (latest) block; the sandbox's
+    =observe()= walks forward from its last block and must run at least
+    every 256 blocks (it runs after every action).
+  - =keep= >= 256 keeps BLOCKHASH's window and =putBlock='s parent
+    lookup whole.
+
+* TWAP and clock semantics
+
+The basket values constituents with a 600 s TWAP (=basketValueInBuck=,
+the redeem/deposit spot-vs-TWAP guard at =defaultMaxDeviationBp= 500).  A
+V3 pool writes at most one observation per block (at the block's first
+swap, recording the tick *before* it), so batching a day into one block
+could in principle change what the TWAP sees.  Probe (=--mode batch=): jump
+the clock one day, then a $400k USDC -> BUCK -> CNST route through the
+Universal Router that moves the TOKEN/BUCK pool ~750 ticks; read slot0 and
+=observe([600, 0])=:
+
+| mining             | blocks | swap at      | pre tick | post tick | TWAP tick | TWAP - pre | next day: TWAP - post |
+|--------------------+--------+--------------+----------+-----------+-----------+------------+-----------------------|
+| automine           |      3 | day + 2 s    | -267161  | -266409   | -267161   |          0 |                     0 |
+| manual (one block) |      1 | day + 0 s    | -266409  | -265737   | -266409   |          0 |                     0 |
+
+- In both, a read in the swap's own block sees none of it (the
+  observation written by the swap carries the pre-swap tick), and a day
+  later the 600 s window lies wholly after the swap.  Under automine the
+  TWAP can creep toward the new tick by (seconds of later blocks)/600
+  within the same day -- under 10% of the move at this cast's 3-50
+  blocks a day, 1 s apart -- where a batched block freezes it exactly.
+  At day granularity the two are the same: the TWAP is "yesterday's
+  close" for everything done today, and the slippage guard compares
+  today's spot to it either way.  The real blocker for batching is
+  read-after-write (above), not the oracle.
+- Clock: automine stamps each tx block max(wall clock, parent + 1); the
+  simulated clock runs ahead of the wall clock, so a day's txs land at
+  day + 1 s, + 2 s, ...; =eth_call= executes in the latest block's
+  context (deterministic).  Pruning keeps the chain untouched; the
+  height-free reload keeps the exact timestamp and the pools'
+  observation rings (contract storage), so TWAPs straddling a reload are
+  exact -- confirmed by the equal series digests.
+
+* CPU: the other ceiling
+
+With memory flat, speed decides how many simulated years a visitor can
+watch.  Tevm's per-operation cost is O(state size), because
+
+- each =eth_call= and each receipt fetch deep-copies the VM
+  (=cloneVmWithBlockTag= -> =vm.deepCopy()=: a full dump, a rebuild of the
+  caches from it, then =setStateRoot= rebuilds again from the stored
+  copy), and
+- every call-frame commit inside the EVM (=Journal.commit= ->
+  =stateManager.commit()=) runs Tevm's =commit=, which dumps the whole
+  state even when no new root is wanted.
+
+Read latency against state size (=--mode readcost=: one MockERC20 on an
+otherwise empty chain, history pruned, rings left to grow):
+
+| blocks | ring + token slots | state copy KB | ms per =balanceOf= read |
+|--------+--------------------+---------------+-------------------------|
+|      1 |                  2 |             7 |                    15.5 |
+|   1000 |               2999 |           288 |                     145 |
+|   2000 |               5999 |           570 |                     298 |
+|   4000 |              11999 |          1132 |                     620 |
+
+About 0.5 ms per KB of state per read -- so the 1-token world (~0.5 MB)
+pays ~130-250 ms per read and the 6-token world (~1 MB) twice that, and
+an untrimmed chain adds ~0.3 KB per block to every read until the rings
+fill.  A day of the 6-token world is roughly 60-100 reads and 25-40 txs:
+~100-190 s per simulated day in Node (one year = 10-20 hours).
+
+Experiment: a copy of =@tevm/state/dist/index.js= whose =commit(false)=
+folds the caches without the full dump (the new-root =commit(true)= at
+the end of each block is unchanged), injected with a Node
+=module.register()= resolve hook that maps ="@tevm/state"= to the copy
+(node_modules untouched; the hook and copy lived in the session scratch
+directory):
+
+#+begin_src js
+ var commit = (baseState) => async (createNewStateRoot = false) => {
++  if (!createNewStateRoot && globalThis.__TEVM_FAST_COMMIT__) {
++    // Frame/tx-level commit: fold the caches, skip the full-state dump.
++    baseState.caches.accounts.commit();
++    baseState.caches.contracts.commit();
++    baseState.caches.storage.commit();
++    baseState.tombstones.checkpoints.pop();
++    baseState.options.onCommit?.(baseState);
++    return;
++  }
+   const state = await dumpCanonicalGenesis(baseState)();
+#+end_src
+
+1 token, 30 days, prune + trim:
+
+| variant           | build s | s/day (days 5-25) | series digest |
+|-------------------+---------+-------------------+---------------|
+| stock Tevm        |    25.7 | 5.0-7.9           | 0x20d62a5f... |
+| fast-commit patch |    13.5 | 1.9-2.9           | 0x20d62a5f... |
+
+Identical results, 2-2.7x faster.  It is not a supported option: it
+leaves the live root's stored copy stale until the next block, which
+breaks cheat methods that rely on =commit(false)= publishing state to
+reads in the same block (=tevmSetAccount= et al. become visible at the
+next block).  Worth an upstream issue or a =patch-package= patch if the
+demo needs the speed; the deeper fix (checkpoint/revert calls on the live
+state instead of a deep copy per read) is Tevm's to make.
+
+* Recommendation for the browser demo
+
+The demo must advance months to years with ~6 commodity tokens, V3
+pools, the basket and a few agents per day.
+
+1. *Prune + trim at every day boundary* (mitigation (c)).  After the
+   day's agents act, before =world.record=: =pruneTevm(session, {keep:
+   256, keepRoots: 8})= then =trimSystemRings(session.client)=.  Memory
+   becomes flat (one state copy per kept root, ~10 x 1 MB for 6 tokens,
+   plus 256 small blocks), and per-op cost stops rising with age.  Lift
+   the two functions from =bin/tevm-membench.mjs= into =src/backends.js=
+   beside =snapshotTevm=/=restoreTevm= when adopting.
+2. *Feature-detect, fall back to (b).*  If =_baseState.stateRoots= or
+   =blockchain.blocksByNumber= is missing (a Tevm upgrade), reload every
+   ~30 days (or when =performance.memory= / block count crosses a
+   threshold): =snapshotTevm= -> fresh =tevmSession()= -> =tevmLoadState=
+   -> one =evm_mine= at the snapshot timestamp -> swap =session.client=,
+   stripping the two ring accounts' storage from the snapshot.  *Never*
+   the full-height =restoreTevm= for this.
+3. *Pin and gate.*  Keep =tevm= pinned (package-lock) and add a node test
+   (in the =*.tevm.test.js= family) that runs ~20 days of the eqworld cast
+   with prune + trim and asserts: =stateRoots.size <= keepRoots + 2=,
+   heap bounded, and the series digest equal to an unpruned run.
+4. *Do not batch into one block per day* for memory: it would need an
+   agent rewrite and buys nothing once (1) is in.  TWAP behaviour would
+   survive it, but read-after-write would not.
+5. *Budget CPU, not memory.*  With (1)-(3) a 6-token world stays near
+   100 MB of heap indefinitely, but costs ~100 s per simulated day in
+   Node at this cast.  To show years: fewer reads per day (the arb's
+   per-iteration triple spot read, =world.record='s per-token spots --
+   sample weekly), fewer constituents in the on-chain part of the demo,
+   the fast-commit patch (2-2.7x), or a hybrid that fast-forwards quiet
+   stretches with the kernels and replays only the interesting days on
+   Tevm.  Heap headroom is not the limit any more; wall time is.
+
+* Measurements not reached
+
+- The 6-token runs were started for 120 days but, at ~100-220 s per
+  simulated day on a shared host, had reached only the days shown when
+  this report was written; the per-block slopes are measured, the
+  4 GB-crossing days are extrapolated.  Re-run with the commands above
+  (=--tokens 6 --every 5=) for the long tail.
+- No run was taken to an actual V8 OOM: runs used an 8 GB heap limit and
+  the crossing of the ~4 GB browser ceiling is interpolated from the
+  fitted curve.
+- Browser (Chrome) heap was not measured directly; the demo runs the same
+  Tevm/EthereumJS code in V8, so the Node heap figures should carry over,
+  but a =performance.memory= check in the page would confirm.
+
+* Files
+
+- =core/js/bin/tevm-membench.mjs= -- the benchmark (modes auto, prune,
+  reload, batch, empty, readcost), =pruneTevm()=, =trimSystemRings()=.
+- =doc/reports/tevm-memory.org= -- this report.
