@@ -1,0 +1,232 @@
+#+TITLE: Convergence: one system from the pieces -- equilibrium, harvest, and the savings demonstration
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-27
+#+OPTIONS: ^:nil toc:2 num:t
+
+* 1. What this document is
+
+The design owner's goal of 2026-09-27: bring the ideas of the last two
+months together and find
+
+- (A) the best approach we have to maintaining equilibrium, under normal
+  price regimes and under bursts of organic and inorganic activity (a
+  BUCK demand shock, a BUCK supply shock, and the rest of the catalogue);
+- (B) the best BuckBasket architecture for harvesting reversion to the
+  mean, and -- where it can -- opportunistic arbitrage;
+
+and then build a MINIMAL implementation -- agents, contracts and the
+contract-invokers that call the contracts' ticks -- that makes the best
+available BuckBasket a savings facility in the JS + HTML sandbox, where
+simulated time can be advanced to show commodities cycling, arbitrage
+forcing TOKEN prices to track real commodity prices, and the BuckBasket
+exploiting BUCK / USDC / TOKEN divergences for its LP holders.
+
+This document is the map from here to there.  It selects from the
+documents of record (=CARRY-CONVEXITY.org=, =K-AND-OPS.org=,
+=BASKET-WHEEL.org=, =ORGANIC-SCALE.org=, =REBALANCING-EQ.org=,
+=BASKET-REBALANCE.md=, =doc/reports/wp-t15.org=); it supersedes none of
+them.
+
+* 2. Where we are
+
+** 2.1 The mechanisms, and what we know of each
+
+| mechanism                                    | its job                                              | status                                   | the evidence                                                                 |
+|----------------------------------------------+------------------------------------------------------+------------------------------------------+------------------------------------------------------------------------------|
+| K, price-only (=BuckKControllerDirect=)       | the STOCK of credit-backed BUCK, over months         | controller of record                     | cycle 1: design A passes 6 of 6 arms, never rails (K-AND-OPS F1)             |
+| K coupled to the ops books (D4 / D7)          | --                                                   | RETIRED                                  | rails K on every arm; pays a book-loader $3.14M at the derived knee (F2)     |
+| the persistence seam (level 2)                | escalate a book that outlives its holders            | designed, not built                      | K-AND-OPS 5.2; the Q2 burn / Q4 acknowledgment                               |
+| Convertibility Undertakings + ladder          | hold PRICE in the band, now                          | built (Python, WP-2), in cycle 1          | engaged at eps 0.5%; the book on a calm arm is transient (F5)                |
+| stress fee                                     | charge duress exits                                  | built (Solidity, WP-5)                    | CARRY-CONVEXITY D2                                                           |
+| latent-credit facility                         | issue into premiums, repay at discounts              | built (Python, WP-6)                      | throttled by pool depth; D8 bounds it (the flood cell, K-AND-OPS 6.2)        |
+| treasury seeder                                | seed BUCK/USDC depth, temporarily                    | built (Python, WP-8)                      | decision 15 (its sizing) open                                                |
+| the rebalance director (factor / vrate / pairs) | harvest commodity relative value                   | built (Solidity + Python)                 | +322..+423 bp/yr over hold on synthetic reversion; trend-bleed in history (BASKET-REBALANCE.md 4) |
+| the consistency wheel                          | close venue gaps; harvest LVR; a truer gauge         | prototype (Python), chassis designed      | $40-50k in 30 days on the none arm, self-funding calls on L1 and L2; bvib sd 77 -> 104-117 bp (BASKET-WHEEL 7.1) |
+| the organic stand, first role (T15)            | supply that answers K by decision, not formula       | built (Python)                            | g exists, both signs, as a stock and a timing response (wp-t15)              |
+| the savings demo                               | show it                                              | eqworld demo: one-constituent ProRata basket, agents, charts; the public sandbox: no basket | the sandbox survey, section 6.1 |
+
+** 2.2 What the evidence has already decided
+
+- *One lever, one integral, on price.*  K reads bvib and nothing an
+  adversary can inflate at a gain.  Every quantitative claim about K's
+  authority waits for the stand (the phase rule of record).
+- *A rise offers credit; a cut withdraws the offer.*  Nothing is called.
+  The supply's fast response to a K step is a price response of the
+  cast -- the savers' premium / discount rule both times it was traced.
+- *Restoration dominates; harvest where it coincides* (D1).  The
+  undertakings earn on the legs where closing the gap pays.
+- *The basket leaks its LVR today.*  It is the TOKEN/BUCK liquidity; the
+  sim's arbs take ~120 bp gaps off it.  The wheel takes part of that
+  back, and the band 0.35-0.65% no one else can.
+- *The merge moved nothing economic* (bvib and K identical over 731 days
+  on master's basis).
+
+* 3. (A) Equilibrium: the architecture the evidence points to
+
+Four layers, separated by timescale and by what each is allowed to see,
+over an organic load:
+
+| layer | mechanism                                     | acts on                            | timescale      | sees                                  |
+|-------+-----------------------------------------------+------------------------------------+----------------+---------------------------------------|
+| L0    | the consistency wheel                          | venue coherence (and the gauge)    | blocks         | the three pools of each triangle      |
+| L1    | undertakings (strong side unlimited, weak side ladder), stress fee, facility | the PRICE, inside the band | ticks to days | bvib against its own edge |
+| L2    | the persistence seam (dwell test -> Q2 burn / Q4 acknowledge) | a book that will not go away | weeks | its own dwell |
+| L3    | K, price-only                                  | the credit-backed STOCK            | months         | raw bvib                              |
+| load  | the organic population (retirees now; savers, businesses, demography next) | produces the flows | -- | carry rates |
+
+How each burst is met:
+
+| burst                                   | catalogue arm(s)                  | L0                         | L1                                          | L2 / L3                                        |
+|-----------------------------------------+-----------------------------------+----------------------------+---------------------------------------------+------------------------------------------------|
+| BUCK DEMAND shock (buyers want BUCK)    | squeeze x1 / x4; cohort-add       | keeps venues coherent      | strong side ISSUES at par + eps, unlimited  | persistent: Q4 acknowledges; K rises and offers |
+| BUCK SUPPLY shock (holders dump BUCK)   | dump x1 / x4; cohort-step         | keeps venues coherent      | weak side ABSORBS down the ladder; stress fee on duress exits | persistent: Q2 burns; K lowers, withdrawing the offer |
+| a grind (slow one-way pressure)         | grind-down / grind-up             | --                         | the ladder's tranches pace it               | the seam's dwell decides "persistent"          |
+| book-loading (an attack on the books)   | bookload                          | --                         | the local skews unwind the book             | K never reads the book (F2): the attack cannot move K |
+| a sensor fault                          | guardtrip                         | --                         | hold the last good cap, flag stale (decision 9) | --                                          |
+| liquidity leaving                       | lpexit                            | cycle sizes shrink with depth | caps shrink with NAV                     | --                                             |
+| organic bursts (harvest season, renewal waves, commodity moves) | ORGANIC-SCALE item 6 (to build) | as above | as above | as above |
+
+What is NOT known yet, and decides (A):
+
+1. *The wheel and K together.*  The wheel makes bvib noisier (77 -> 104-117
+   bp).  If that is a truer gauge (bvib tracking the USD venues instead
+   of lagging behind a 120 bp arb threshold), K should see it; if it is
+   the wheel's own impact, it must be damped.  Experiment E1.
+2. *The full stack on the shock arms.*  Cycle 1 judged K's coupling with
+   the undertakings engaged; the wheel, the director and the retirees
+   were not in it.  Experiment E2.
+3. *The seam* is designed, not built.  Its dwell test is the smallest
+   piece of Solidity in the monetary set.
+
+* 4. (B) Harvest: three legs, one per mispricing
+
+A basket's excess return over holding its constituents comes from three
+different mispricings, each with its own harvester, timescale and risk:
+
+| leg | the mispricing                                        | the harvester                         | risk                                           | measured                                              |
+|-----+-------------------------------------------------------+---------------------------------------+------------------------------------------------+-------------------------------------------------------|
+| 1   | venue INCONSISTENCY: TOKEN/BUCK vs TOKEN/USDC x BUCK/USDC | the wheel's consistency cycles       | none on the cycle (atomic, realized-profit check); a gauge side effect | ~2-3% of NAV/yr on the thin, noisy cast (BASKET-WHEEL 7.1) |
+| 2   | commodity RELATIVE VALUE: constituent vs constituent, vs its own trend | the director's rebalancing (vrate / factor / pairs) | trend whipsaw (BTC x9)                         | +322..+423 bp/yr synthetic; -1..-4% CAGR vs hold in the 2020-25 history (BASKET-REBALANCE 4) |
+| 3   | BUCK vs its basket (bvib vs par)                       | the undertakings / desk / ladder      | inventory that persists; the monetary rules govern it | defenders +$1.77M, depositors +$0.67M on the x4 dump under A (cycle 1) |
+
+Plus the base: fees on the basket's own pools, less the LVR the wheel
+does not recapture.  Legs 1 and 2 are the SAVINGS basket's; leg 3 is the
+monetary system's and belongs to the Ops shell.
+
+*The basket of record for the savings facility (proposed):* the ProRata
+shell with the Uniswap V3 venue facet (the eqworld demo already runs it;
+~8.4 KB of headroom), a director (vrate or pairs), and the wheel with the
+arb kind plus the upkeep kinds (director poke, treasury sweep, the
+controller's =compute=) -- deployed INSIDE the ProRata shell where it
+fits, beside it otherwise (BASKET-WHEEL 8.4).  The Ops quadrants and the
+undertakings are the monetary add-on, not the savings minimum.
+
+What is NOT known yet, and decides (B):
+
+1. *Do legs 1 and 2 add?*  The wheel re-prices the TOKEN/BUCK pools the
+   director reads; the director's trades open gaps the wheel closes.
+   Experiment E3.
+2. *Trend.*  Leg 2's history loses to hold in a secular trend; the
+   savings story must show both a reverting regime and a trending one.
+
+* 5. The experiments that converge it (Python, on datasim)
+
+Readings are PROVISIONAL on the thin cast (decision 22, the phase rule);
+they choose a configuration to demonstrate, not a verdict of record.
+
+| #  | question                                   | cells                                                                                     | decides                                  |
+|----+--------------------------------------------+-------------------------------------------------------------------------------------------+------------------------------------------|
+| E1 | the wheel's effect on the gauge            | none arm, 60 d: wheel off / on x cap_frac {0.005, 0.02} x max_work {3, 12}; metric: bvib against the reference-priced basket value, not only its sd | whether K may see the wheel's bvib as is |
+| E2 | the full stack on the bursts               | design A + undertakings (eps 0.5%) + wheel on / off, on none, squeeze x4, dump x4, grind-down, cohort-step, bookload; 2 years | (A)'s configuration to demonstrate       |
+| E3 | do the harvest legs add?                   | director off / vrate / pairs x wheel off / on, on the none arm and on a historical-replay arm; 2 years | (B)'s basket to demonstrate              |
+| E4 | the organic cast on the bursts             | E2's winner with the 30 retirees (T15) in place of the endog debtors                       | the demonstration's cast                  |
+
+About 30 two-year cells: one datasim night at 26-way.
+
+* 6. The demonstration
+
+** 6.1 The starting point
+
+- *The public sandbox* (=core/js/sandbox/=) is an identity, credit and
+  BUCK/USDC market tool in an in-browser EVM (Tevm): Buck, BuckCredit,
+  the identity registry, =BuckKControllerDirect= (K held at 0.75), a
+  Carrying insurance pool, one BUCK/USDC V3 pool; time by +1 hour / +1
+  day / +30 day buttons; no basket, no commodity tokens, no agents.
+- *The eqworld demo* (=core/js/demo/eqworld.html=) is most of the target:
+  =BuckBasketProRata= with its venue facet, a =PinWhale= snapping
+  TOKEN/USDC to a seeded walk, =ParityArb= routing USDC triangles so
+  TOKEN/BUCK tracks (100 bp threshold), =BasketSaver=, =MortgageRetiree=
+  debtors, a =PidKeeper= calling =compute()=, play / pause, SVG charts.
+  Its limits: one constituent; a synthetic walk, not commodity prices;
+  savers only as agents (no direct deposit or redeem); a receipt value
+  that leaves out the position's fees; and Tevm keeps every block in
+  memory (OOM beyond ~6 simulated months in the Node runners).
+
+** 6.2 The story it must show
+
+A saver deposits into the BuckBasket and advances time.  Commodity prices
+move as they really did (or through a synthetic cycle); a market pins
+TOKEN/USDC to them; external arbitrage and the basket's wheel keep
+TOKEN/BUCK coherent with TOKEN/USDC and BUCK/USDC; the director sells
+what has run ahead and buys what has fallen behind; the saver's receipt
+is shown against holding the commodities and against USDC, with the
+wheel's captured value and the director's premium broken out.  Two
+buttons inject a BUCK demand shock and a BUCK supply shock, and the page
+shows the price leave the band and come back.
+
+** 6.3 The minimal implementation
+
+| part            | what                                                                                                                     | from                                     |
+|-----------------+--------------------------------------------------------------------------------------------------------------------------+------------------------------------------|
+| contracts       | Buck, BuckCredit, identity (harness), =BuckKControllerDirect=, =BuckBasketProRata= + venue, a director, mock USDC and N commodity TOKENs, V3 pools (TOKEN/USDC, TOKEN/BUCK, BUCK/USDC), and the WHEEL (new Solidity: chassis + arb / director / sweep / compute kinds; a flash mint on the basket) | eqworld's deploy; BASKET-WHEEL 8.4        |
+| the invoker     | one agent that calls =tick(maxWork, maxScan)= a few times a step -- the only keeper: the wheel's kinds run the controller's =compute=, the director's poke, the sweep and the arbitrage | the Python =BasketWheelAgent='s caller   |
+| the market      | =PinWhale= pinning TOKEN/USDC to the price series; =ParityArb= as the outside arbitrage (so the page can show who takes which gap) | eqworld                                  |
+| prices          | the quotes engine's daily histories (LABR, CNST, FOOD, NRGC, PAXG, cbBTC, 2020-09..2025-09) bundled as JSON, and a synthetic cycle mode | =alberta_buck/sim/prices/=               |
+| the saver       | the page's own wallet: deposit (USDC routed to the underweight TOKEN, or TOKEN, or BUCK), see the receipt's value INCLUDING the position's fees, redeem | new: a Basket tab in the sandbox          |
+| shocks          | a whale buying or selling BUCK on BUCK/USDC on demand                                                                    | the Python =WhaleRaidAgent='s idea         |
+| UI              | a Basket tab and an auto-run world bar (speed, +1 day, +30 days); charts: commodity reference vs TOKEN/USDC vs TOKEN/BUCK x BUCK/USDC per constituent; the receipt vs hold vs USDC; the wheel's captured value, the callers' pay, the reserve; bvib and K | eqworld's charts; the sandbox's world bar |
+
+** 6.4 The engineering risks, named now
+
+1. *Tevm memory.*  Every block stays in memory; a multi-year run dies.
+   Candidates: mine many transactions per block, dump / reload state to
+   drop history, or cap a session's horizon.  A spike before the build.
+2. *Receipt value with fees.*  The venue must expose the position's
+   uncollected fees, or the page understates the harvest.
+3. *Bundle size.*  The basket, venue, director and wheel add artifacts
+   to a 2.4 MB hosted script.
+4. *The wheel in Solidity* is the one new contract: forge tests for the
+   mixin layout, the amortized scan, the flash mint's invariant (supply
+   unchanged, principal back), the realized-profit revert, and a
+   manipulation test (a pool moved first only pays the basket).
+
+* 7. The sequence
+
+| step | what                                                                                          | size (sessions) | depends on |
+|------+-----------------------------------------------------------------------------------------------+-----------------+------------|
+| 1    | E1 (the wheel's gauge effect) and the Tevm memory spike                                        | 1               | --         |
+| 2    | the wheel in Solidity (chassis, kinds, flash mint) + forge tests                                | 2               | --         |
+| 3    | the Python =BasketWheelAgent= invokes the Solidity wheel; L3 against the prototype              | 1               | 2          |
+| 4    | E2-E4 on datasim; the configuration to demonstrate                                             | 1 + a night     | 1, 3       |
+| 5    | the JS savings world: eqworld lifted into =core/js/src=, N constituents, bundled histories, the invoker, the shock whale; Tevm tests | 2-3 | 2, spike |
+| 6    | the sandbox's Basket tab, auto-run, charts; Playwright; screenshots                             | 2               | 5          |
+| 7    | the records: this document's verdicts, the guide, a hosted preview                              | 1               | 6          |
+
+Beside it, the stand continues on its own files: T16 (demography, so a
+refinancing FLOW exists) and the standing-facility saver (in place of the
+premium-seller whose rule dominates every K response so far).
+
+* 8. Decisions for the design owner
+
+1. *The phase rule and the demonstration.*  The demonstration shows
+   mechanisms, not a verdict: proceed on E1-E4's provisional readings in
+   parallel with the stand?
+2. *The savings basket:* ProRata + venue + director + the wheel, with the
+   Ops quadrants and undertakings as the monetary add-on -- or the
+   undertakings in the minimal demonstration too?
+3. *Prices:* the bundled 2020-2025 histories, a synthetic cycle, or both
+   as a toggle?
+4. *Where:* the Basket tab in the public sandbox (persistence, wallets,
+   identity) with eqworld's world lifted into it -- or a new page?
+5. *The chain shown:* the wheel's economics on L1 or L2 gas (a toggle
+   costs little).

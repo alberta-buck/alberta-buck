@@ -58,6 +58,14 @@ discipline); =alberta_buck/sim/TELEMETRY.md= (keyed-RNG determinism).
   harness check, and T15's first gate is g from the retiree's decision
   with the arrival hazard off.  Wave 4's T15 / T16 / T17 (the organic
   stand) are the critical path by the phase rule.
+  2026-09-27: T15's first role MERGED (87471be; =doc/reports/wp-t15.org=:
+  g exists without the formula, as a stock and a timing response) and
+  the consistency wheel's prototype MERGED (333a7e1;
+  =doc/BASKET-WHEEL.org=).  The design owner's new goal -- converge the
+  ideas into (A) an equilibrium architecture, (B) a harvesting basket,
+  and a minimal savings demonstration in the JS sandbox -- is mapped in
+  =doc/CONVERGENCE.org= (experiments E1-E4, the demo's parts and
+  sequence, five decisions pending).
 - *Branch of record*: =feature/carry-convexity= (from master at 3a9e170,
   the --no-ff merge of =feature/fee-account=).  Merges in order: WP-1
   4e4700c, WP-12 7e5c46e, WP-5 2303eaf, WP-2 479456b, WP-6 30ab49b,
