@@ -3,7 +3,7 @@
 #+DATE: 2026-09-27
 #+OPTIONS: ^:nil toc:2 num:t
 
-* 0. STATUS -- resume here (2026-09-27, 09:30)
+* 0. STATUS -- resume here (2026-09-28)
 
 - *Where the branch is:* =feature/carry-convexity=, not pushed.
   Master merged (0a33970; bvib and K identical over 731 days).
@@ -36,16 +36,22 @@
   alberta_buck/sim/experiments/stars/conv-e2.toml --report-only --outdir
   build/sim/conv= (and e3, e4), plus the gauge-error and wheel-counter
   readings of BASKET-WHEEL 7.2 / 8.7; record the verdicts in section 5.
-  At day 150-175 of 731 by 08:50: expected around 17:00-18:00.
+  COMPLETE and JUDGED (section 5.1, 2026-09-28).
 - *Serving:* the savings world is public at
   <https://savings-sandbox.albertabuck.ca/> (=make nix-venv-sim-savings= on
   datasim, through the datasim tunnel; the browser test passes through it).
   The static <https://sandbox.albertabuck.ca/> stays browser-only (no
   Savings tab without a sim server).  A third site, the sandbox's tools in
   a moving world, is planned in =doc/DEMO-SANDBOX.org= (awaiting a "go").
-- *Next:* judge E2-E4; merge to =master= and deploy the savings sandbox
-  from it; the demo sandbox on a "go"; a pass over the demonstration's
-  story on a settled world (section 6.2).
+- *Verdicts (5.1):* E2 -- demonstrate design A + undertakings + the wheel
+  on (the gauge truer on every arm; shocks transmitted, not amplified);
+  E3 -- the legs add for the depositors, but director + wheel saturate the
+  monetary desk one-sided; E4 -- the organic cast passes and answers the
+  shocks faster, but the depositors' realized profit collapses on the calm
+  arms (no wheel-off twin yet).
+- *Next:* E4's wheel-off twins; the desk's saturation; merge to =master=
+  and deploy the savings sandbox from it; the demo sandbox on a "go"; a
+  pass over the demonstration's story on a settled world (section 6.2).
 
 * 1. What this document is
 
@@ -186,6 +192,131 @@ they choose a configuration to demonstrate, not a verdict of record.
 | E4 | the organic cast on the bursts             | E2's winner with the 30 retirees (T15) in place of the endog debtors                       | the demonstration's cast                  |
 
 About 30 two-year cells: one datasim night at 26-way.
+
+** 5.1 E2-E4 judged (2026-09-28)
+
+All 31 two-year cells (=build/sim/conv/conv-e{2,3,4}/=; the star reports
+=summary.md= beside them; the per-cell readings below from a judging pass
+over the vectors).  PROVISIONAL, on the thin cast.  The wheel in every
+"on" cell is the Solidity =BasketWheel=, TOKEN start, cap 2%, 12 cycles a
+call, L2 gas, acting last.
+
+*E2 -- the full stack on the bursts (design A + undertakings + desk).*
+
+| arm         | take $k | gauge err p50/p90 bp | pool gap p50 bp | BUCK/USDC range          | bvib peak %     | recov d  | K sd          | depositors $M |
+|-------------+---------+----------------------+-----------------+--------------------------+-----------------+----------+---------------+---------------|
+| none        |     935 | 129>102 / 222>186    | 122>92          | 0.97-1.39 > 0.98-1.39    | --              | --       | 0.001>0.002   | 0.97>1.72     |
+| squeeze-x1  |     952 | 128>92 / 215>177     | 121>88          | .. 1.48 > .. 1.42        | -9.2>-10.1      | 15>4     | 0.003>0.003   | 0.84>1.63     |
+| squeeze-x4  |   2,422 | 128>92 / 215>185     | 119>89          | .. 2.85 > .. 2.71        | -24.9>-35.5     | 14>23    | 0.038>0.035   | 0.87>2.45     |
+| cohort-add  |     932 | 121>103 / 218>184    | 118>93          | same                     | +2.2>-1.6       | 44>12    | 0.003>0.003   | 0.67>1.29     |
+| grind-up    |     852 | 125>90 / 218>183     | 117>88          | same                     | -3.6>+2.2       | 0>100*   | 0.006>0.002   | 0.95>1.63     |
+| dump-x1     |     890 | 115>95 / 217>184     | 117>89          | 0.91 .. > 0.93 ..        | +9.4>+12.8      | 5>3      | 0.005>0.006   | 0.97>1.66     |
+| dump-x4     |   1,643 | 105>91 / 207>186     | 107>85          | 0.49 .. > 0.55 ..        | +28.6>+54.0     | 10>11    | 0.043>0.013   | 0.67>2.28     |
+| cohort-step |     867 | 111>95 / 210>174     | 110>86          | same                     | +1.4>-1.6       | 10>46*   | 0.001>0.002   | 0.80>1.50     |
+| grind-down  |     869 | 116>96 / 214>186     | 117>89          | same                     | +1.8>+2.7       | 21>91*   | 0.015>0.002   | 0.85>1.51     |
+| bookload    |   4,121 | 133>96 / 260>194     | 125>92          | 0.63-3.12 > 0.98-1.49    | --              | --       | 0.032>0.007   | 0.76>4.35     |
+| lpexit      |   1,152 | 141>112 / 273>243    | 140>109         | same                     | --              | --       | 0.004>0.003   | 1.12>1.84     |
+
+(off > on; take = the wheel's two-year capture, 90% of it credited to the
+depositors; depositors = the direct-mint depositors' realized round-trip
+profit; * see recovery below.)
+
+1. *PASS on every arm, wheel off and on*: the parity gate holds, K never
+   rails.
+2. *The gauge is truer everywhere*, over two years and through the
+   bursts: error -14..-37 bp at the median, -21..-66 at the 90th
+   percentile; the residual pool gaps -25..-33 bp.  E1 holds.
+3. *The wheel does not amplify a shock; it transmits it.*  BUCK/USDC's own
+   extremes are MILDER with the wheel (the x4 squeeze's spike +153% ->
+   +140%; the x4 dump's floor $0.488 -> $0.545; the book-loader's swings
+   $0.63-3.12 -> $0.98-1.49).  bvib's peaks are deeper (x4 squeeze -24.9%
+   -> -35.5%, x4 dump +28.6% -> +54.0%) because the basket's pools now
+   follow the market instead of lagging it: the pools -- the depositors --
+   take part of the BUCK/USDC dislocation, and are paid for it (+$1.6M on
+   both x4 arms).  On the x4 dump the undertakings carry a quarter of the
+   inventory (362M -> 92M BUCK-days) and K moves a third as much (sd 0.043
+   -> 0.013); on every arm K ends near 0.73-0.75, where without the wheel
+   the heavy arms left it at 0.80-0.85.
+4. *Recovery.*  One real slowdown: the x4 squeeze, +9 days (its deeper
+   bvib peak).  The x4 dump is unchanged.  The long "recoveries" on the
+   grinds and the cohort step (*) are the metric's: the wheel's
+   commodity-tracking bvib has its largest excursion AFTER the injection
+   (day 512 against 421-440), which restarts the clock; after the
+   injection bvib sits only 2-8 bp further from par on average.
+5. *The book-loading attack* still loses, less ($15.4M -> $6.0M): the wild
+   swings it lost money to are gone.  Its K excursion stays under 1%.
+6. *The take*: ~$0.43-0.58M a year on the calm and mild arms (about 1.3% a
+   year of a ~$34M basket, 90% to the depositors), more under stress
+   ($1.6-4.1M over two years), for $100-200 of L2 gas in all.
+
+VERDICT E2: (A)'s configuration to demonstrate is design A + the
+undertakings + the wheel ON -- with the desk held back (E3).
+
+*E3 -- do the harvest legs add?* (the none arm)
+
+| corner              | wheel take $k | gauge err p50/p90 | depositors $M | net LP $M | NAV (baskets) M | desk carry M BUCK-days |
+|---------------------+---------------+-------------------+---------------+-----------+-----------------+------------------------|
+| neither             |            -- | 121 / 220         |          1.08 |      1.15 |            31.5 |                      0 |
+| director            |            -- | 129 / 222         |          0.97 |      1.56 |            34.1 |                    144 |
+| wheel               |           847 | 100 / 189         |          1.75 |      2.49 |            32.6 |                      0 |
+| director and wheel  |           935 | 102 / 186         |          1.72 |      2.77 |            34.0 |                  1,910 |
+
+1. *For the depositors, the legs add*: realized profit -0.11 (director) +
+   0.67 (wheel) against +0.64 together; the net LP take (fees less adverse
+   selection) +0.41 + 1.33 against +1.62.
+2. *For NAV counted in baskets, the director's leg dominates*: +2.6M
+   baskets alone; the wheel's +1.1M alone vanishes beside the director.
+3. *The interaction: the monetary desk saturates one-sided.*  With the
+   director AND the wheel the ops desk issues BUCK into a persistent
+   premium from day 90 and never unwinds: 3.8M BUCK against $7.25M of
+   TOKENs at day 730, at or past its cap (3.4M) for most of the run --
+   carry 1,910M BUCK-days, against 144M with the director alone (which
+   trades both ways and ends flat) and none with the wheel alone.  A desk
+   parked at its cap has no room for a shock.  Not yet diagnosed; the
+   hypothesis: with the wheel, bvib's tail sits a few bp under par (0.9992
+   -1.0000 against 1.0000-1.0005) and the desk, reading the director's
+   filter bank the wheel re-prices, keeps issuing into it.
+
+VERDICT E3: the savings basket to demonstrate is the director + the wheel
+(the demonstration's =demo-savings.toml= runs no desk).  The monetary desk
+must not run beside them until the one-sided saturation is understood or
+bounded.
+
+*E4 -- the organic cast (30 external-debt retirees, T15) with the wheel on.*
+
+| arm         | K range      | K sd  | bvib peak % | recov d | depositors $M (E2 wheel-on) | bookload P&L $M |
+|-------------+--------------+-------+-------------+---------+-----------------------------+-----------------|
+| none        | 0.710-0.746  | 0.009 | --          | --      | 0.01 (1.72)                 |                 |
+| squeeze-x4  | 0.721-0.809  | 0.029 | -34.5       | 13      | 1.95 (2.45)                 |                 |
+| dump-x4     | 0.674-0.769  | 0.023 | +49.2       | 6       | 1.55 (2.28)                 |                 |
+| cohort-step | 0.710-0.746  | 0.009 | -2.5        | 32      | -0.08 (1.50)                |                 |
+| bookload    | 0.711-0.747  | 0.010 | --          | --      | 3.85 (4.35)                 | -6.71           |
+
+1. *PASS on all five arms.*  The shocks are answered faster than E2's
+   wheel-on cells (x4 squeeze 23 -> 13 days, x4 dump 11 -> 6); the wheel's
+   take and the gauge are as in E2.
+2. *K answers the credit channel*: the 30 refinancings add 7.7M BUCK, K
+   averages 0.727 (0.743 in E2) and moves more (sd 0.009 against 0.002) --
+   T15's stock-and-timing response.
+3. *The depositors' realized profit collapses on the calm arms* ($1.72M ->
+   $0.01M; the cohort step $1.50M -> -$0.08M) and falls $0.5M on the
+   shocks, with the wheel's ~$0.8M of credits in it.  Hypothesis: the wheel
+   carries BUCK/USDC's moves into the basket's pools (3 above), which pays
+   the depositors for a transient shock and costs them under a persistent
+   supply increase.  E4 has no wheel-off twin, so the cast's effect and the
+   wheel's cannot yet be separated.
+
+VERDICT E4: the organic cast passes, and answers the shocks better; it is
+NOT yet the savings demonstration's cast (which runs ten retirees) until
+the depositors' loss is explained.
+
+*Next (in order):* (i) E4's wheel-off twins, five cells, to separate the
+retirees' effect on the depositors from the wheel's; (ii) the desk's
+one-sided saturation under director + wheel (its decision trace, bvib's
+tail bias); (iii) the x4 squeeze's slower recovery; (iv) a recovery
+metric on a smoothed bvib, so a truer gauge's noise does not restart the
+clock.  None of it blocks the merge: the wheel's contracts are a
+prototype under test (=alberta-buck-ethereum-wheel.org=).
 
 * 6. The demonstration
 

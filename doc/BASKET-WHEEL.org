@@ -492,3 +492,11 @@ cell (=build/sim/e1/c020-w12.json=), the none arm, days 30-59:
 4. Inside or beside: the ProRata shell has room for the kinds; the ops
    shell and the Fence do not, so there the wheel is its own contract
    (and later a Diamond facet).
+5. (E2-E4, =doc/CONVERGENCE.org= 5.1.)  The wheel carries BUCK/USDC's
+   moves into the basket's pools: the depositors absorb part of a shock
+   (paid for it on the transient ones; under the retirees' persistent
+   supply their realized profit fell to nothing -- not yet separated from
+   the cast's effect).
+6. (E3.)  Director + wheel saturate the monetary desk one-sided (issuing
+   into a persistent premium, at its cap for most of two years); either
+   alone does not.

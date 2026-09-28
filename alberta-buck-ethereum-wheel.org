@@ -4,7 +4,7 @@
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - The BasketWheel (prototype)
+#+title: The Alberta Buck -- The BasketWheel (prototype)
 #+SUBTITLE: The BuckBasket Closing Its Own Arbitrage
 #+author: Perry Kundert
 #+date: 2026-09-27
@@ -55,18 +55,18 @@ The BasketWheel refines the BuckBasket; it does not replace it.  It sits
 permissions: to credit captured value to the basket's depositors, and to
 credit BUCK to its treasury.  Everything else it does, anyone could do.
 
-| Piece                          | State (2026-09-27)                                                 |
-|--------------------------------+--------------------------------------------------------------------|
-| The theory (this paper)        | written; the numbers are the simulation's, and provisional         |
-| Python prototype               | built; measured on a simulated economy (the none arm, 60 days)    |
-| Solidity v1 (=src/wheel/=)     | built; 16 Foundry tests on real Uniswap V3 pools; driven by the   |
-|                                | simulation, where it matches the prototype                         |
-| The bursts (demand and supply   | running: 31 two-year cells, wheel off and on, not yet judged        |
-| shocks, attacks, exits)         |                                                                    |
-| Deployment, audit               | none                                                               |
+| Piece                         | State (2026-09-27)                                              |
+|-------------------------------+-----------------------------------------------------------------|
+| The theory (this paper)       | written; the numbers are the simulation's, and provisional      |
+| Python prototype              | built; measured on a simulated economy (the none arm, 60 days)  |
+| Solidity v1 (=src/wheel/=)    | built; 16 Foundry tests on real Uniswap V3 pools; driven by the |
+|                               | simulation, where it matches the prototype                      |
+| The bursts (demand and supply | judged, provisionally: 31 two-year cells, wheel off and on      |
+| shocks, attacks, exits)       |                                                                 |
+| Deployment, audit             | none                                                            |
 
 Read every figure below as "in a simulated economy, with a thin and noisy
-cast of arbitrageurs, over a month", not as a forecast.
+cast of arbitrageurs", not as a forecast.
 
 * Where it sits among the BuckBasket's embodiments
 :PROPERTIES:
@@ -241,12 +241,12 @@ two: on its own TOKEN/BUCK pool it is the only liquidity provider, so the
 fee it pays comes back to it.  With the simulation's fee tiers (TOKEN/USDC
 0.30%, TOKEN/BUCK 0.30%, BUCK/USDC 0.05%):
 
-| The gap (roughly)                     | Who takes it                                                      |
-|---------------------------------------+-------------------------------------------------------------------|
-| under 0.35%, plus gas                 | nobody: a cycle costs more than it earns                          |
-| 0.35% to 0.65%, plus gas              | only the basket: the fee it pays on its own pool comes back to it |
-| over 0.65%, plus gas and a margin     | searchers, directly -- and they pay the basket's fee on the way   |
-| any gap the basket's own trade opens  | the basket, in the same transaction: there is no race             |
+| The gap (roughly)                    | Who takes it                                                      |
+|--------------------------------------+-------------------------------------------------------------------|
+| under 0.35%, plus gas                | nobody: a cycle costs more than it earns                          |
+| 0.35% to 0.65%, plus gas             | only the basket: the fee it pays on its own pool comes back to it |
+| over 0.65%, plus gas and a margin    | searchers, directly -- and they pay the basket's fee on the way   |
+| any gap the basket's own trade opens | the basket, in the same transaction: there is no race             |
 
 The middle row is the wheel's natural domain: value no one else can take.
 The top row it must race for, and on today's Uniswap V3 pools it cannot
@@ -391,42 +391,75 @@ calm arm, days 30-59 (the first month is the pools' own settling).
    about 3% a year on the savings basket, at about 365,000 gas a cycle through the
    real identity-bound BUCK.
 
+Then the bursts: eleven two-year runs, wheel off and on -- demand and
+supply shocks at one and four times a whale's budget, slow grinds, cohorts
+of new debtors arriving and leaving, a book-loading attack, a liquidity
+exit.
+
+1. *Nothing broke.*  The system held its parity with the basket on every
+   run, with the wheel and without it.
+2. *The gauge was truer on every run*, and the pools' residual gaps
+   narrower, over two years and through every burst.
+3. *The wheel transmits a shock; it does not amplify one.*  BUCK's own
+   price against the dollar swung LESS with the wheel -- a four-fold supply
+   shock's floor rose from $0.49 to $0.55, and the book-loading attack's
+   swings narrowed from $0.63-3.12 to $0.98-1.49 -- while bvib moved MORE,
+   because the basket's pools now followed the market instead of lagging
+   it.  The pools, which is to say the depositors, took part of the
+   dislocation -- and were paid for it: their realized profit rose on every
+   run, by $1.6M on each four-fold shock.
+4. *Over two years* the wheel captured about $0.4-0.6 million a year on
+   the calm and mildly disturbed runs -- about 1.3% a year of the basket --
+   and more under stress, for a few hundred dollars of rollup gas in all.
+
 Two cautions about what these numbers are.  The simulation's arbitrageurs
 demand a 60-basis-point edge on top of the fees, so they leave wide gaps
 that real searchers, competing toward their gas cost, would not; the
 wheel's take against a competitive market will be smaller, and more of it
-will come from the fee band.  And one calm month says nothing yet about
-bursts -- demand and supply shocks, a book-loading attack, a liquidity
-exit -- which are being run now, wheel off and on, over two simulated years
-each.
+will come from the fee band.  And the same runs raised the two questions
+at the head of the next section.
 
 * Open questions
 :PROPERTIES:
 :CUSTOM_ID: open
 :END:
 
-1. *The fee band, in practice.*  v1 takes only /direct/ profit -- gaps wider
+1. *Depositors as shock absorbers.*  Carrying BUCK/USDC's moves into the
+   basket's pools paid the depositors for transient shocks.  In a cast
+   whose households refinance their mortgages into BUCK -- a persistent
+   increase in supply -- the depositors' realized profit on the calm runs
+   fell to nothing.  Whether the wheel or the cast did that is not yet
+   separated; the runs that would separate them are next.
+2. *The wheel beside a monetary desk.*  With both the rebalancing director
+   and the wheel, the monetary desk (which issues and absorbs BUCK against
+   the basket) took a one-sided position and sat at its cap for most of two
+   years; with either alone it did not.  Until that interaction is
+   understood, the savings basket's wheel and a monetary desk should not
+   run together.
+3. *The fee band, in practice.*  v1 takes only /direct/ profit -- gaps wider
    than all three fees.  The band only the basket can take needs the
    basket's own fee to come back within the cycle: a small TOKEN float, or
    the wheel inside the basket's shell (the savings basket's shell has
    about 8 KB to spare; the monetary shells about 1-3 KB).  That is v2.
-2. *The share and kappa.*  Fixed, per chain, or adaptive to the reserve's
+4. *The share and kappa.*  Fixed, per chain, or adaptive to the reserve's
    balance and the calling rate?
-3. *Cycle sizing.*  v1 caps a cycle at a fraction of its /first/ leg's
+5. *Cycle sizing.*  v1 caps a cycle at a fraction of its /first/ leg's
    reserve, so the two starting tokens size differently; every leg should
    be capped.
-4. *Legs 1 and 2 together.*  The wheel re-prices the pools the director
-   reads, and the director's trades open gaps the wheel closes.  Do their
-   harvests add, or does one eat the other?  (Being measured.)
-5. *A competitive market.*  How much remains when real searchers compete
+6. *Legs 1 and 2 together.*  The wheel re-prices the pools the director
+   reads, and the director's trades open gaps the wheel closes.  Measured
+   over two calm years: for the depositors' realized profit the two
+   harvests add; for the basket's value counted in baskets the director's
+   leg dominates, and the wheel adds little beside it.  (And see 2.)
+7. *A competitive market.*  How much remains when real searchers compete
    the large gaps down to gas -- and does thinning their participation
    widen the gaps beyond the wheel's reach?
-6. *The large gaps.*  A v4 hook that runs the wheel first in each block, or
+8. *The large gaps.*  A v4 hook that runs the wheel first in each block, or
    an auction for the right to, would capture what v1 must race for; each
    has its own trust and liveness questions.
-7. *The reserve's funding.*  From pool-fee yield, from the arbitrage's
+9. *The reserve's funding.*  From pool-fee yield, from the arbitrage's
    value, or both -- and which of the upkeep kinds it should pay for.
-8. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The wheel owns no
+10. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The wheel owns no
    BUCK/USDC position (and should not); how much depth the cycles need, and
    who provides it, is an open question for any deployment.
 
@@ -453,7 +486,9 @@ each.
 - *The wheel's own impact on the gauge.*  bvib moves more with the wheel.
   The evidence so far is that it moves /truer/; a wheel with coarse cycles
   adds its own lumpiness, which smaller, more frequent cycles remove.  K
-  reads bvib, so this matters more than it appears.
+  reads bvib, so this matters more than it appears -- and a truer bvib
+  shows a shock's full depth: a four-fold demand shock took nine days
+  longer to settle with the wheel.
 - *Liveness.*  No calls, no harvest.  The reserve pays for calling, and
   the basket's own traffic can carry ticks, but a wheel nobody turns is
   simply the BuckBasket without it -- no worse, and no better.
