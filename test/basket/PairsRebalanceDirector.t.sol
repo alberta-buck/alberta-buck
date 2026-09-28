@@ -34,8 +34,17 @@ contract MockBasket {
     address public buck;
     address[] internal tokens_;
     address[] internal pools_;
+    int256 internal bvib_ = 1e18;
+    bool internal bvibReverts;
 
     constructor(address _buck) { buck = _buck; }
+
+    function setBvib(int256 b) external { bvib_ = b; }
+    function setBvibReverts(bool r) external { bvibReverts = r; }
+    function basketValueInBuck() external view returns (int256) {
+        require(!bvibReverts, "unreadable");
+        return bvib_;
+    }
 
     function add(address token, address pool) external {
         tokens_.push(token);
@@ -373,5 +382,90 @@ contract PairsRebalanceDirectorTest is Test {
             new PairsRebalanceDirector(address(basket), GOV, _params());
         vm.expectRevert(RebalanceDirectorBase.NotSynced.selector);
         fresh.poke(1);
+    }
+
+    // --- The common mode: the basket's own value against par ---------------- //
+    //
+    // Regressions for the diagnosed desk bias (doc/CONVERGENCE.org 5.1, E3):
+    // the common mode must read log(basketValueInBuck) against PAR, whatever
+    // the legs' ticks were at their first observation and however they move
+    // relative to one another.
+
+    uint8 constant MEAS = 2;                    // the 20-epoch rung
+
+    function _monParams(uint16 persist) internal {
+        vm.prank(GOV);
+        dir.setMonParams(PairsRebalanceDirector.MonParams({
+            deadband1e9: 100e9, leash1e9: 200e9, kappa1e9: 250_000_000,
+            capBpPerEpoch: 40, persistEpochs: persist, measIdx: MEAS}));
+    }
+
+    function _cmBp() internal view returns (int256) {
+        return dir.commonMode(MEAS) / 1e9;
+    }
+
+    function test_commonMode_isTheBasketAgainstPar_notTheLegsOpening() public {
+        // A mis-referenced opening: the legs first seen far from where they
+        // settle, and then moving apart -- with the basket at par throughout.
+        pools[0].setTick(1200);
+        pools[1].setTick(-800);
+        pools[2].setTick(300);
+        _run(0, 1);
+        pools[0].setTick(0);
+        pools[1].setTick(0);
+        pools[2].setTick(900);
+        _run(2, 80);
+        assertApproxEqAbs(_cmBp(), 0, 1, "par reads zero, whatever the legs did");
+    }
+
+    function test_commonMode_tracksLogBvib() public {
+        _run(0, 1);
+        basket.setBvib(1.03e18);                // ln 1.03 = 0.029559 -> ~295.6 bp
+        _run(2, 120);
+        assertApproxEqAbs(_cmBp(), 296, 2, "a 3% cheap BUCK reads ~+296 bp");
+        basket.setBvib(0.97e18);                // ln 0.97 = -0.030459
+        _run(121, 240);
+        assertApproxEqAbs(_cmBp(), -305, 2, "a 3% dear BUCK reads ~-305 bp");
+    }
+
+    function test_monetaryEffort_signDeadbandAndPersistence() public {
+        _monParams(3);
+        _run(0, 1);
+        basket.setBvib(1.005e18);               // inside the 100 bp deadband
+        _run(2, 40);
+        (int32 e0,) = dir.monetaryEffort();
+        assertEq(e0, 0, "inside the deadband: no advice");
+
+        basket.setBvib(0.97e18);                // BUCK dear, past the leash
+        _run(41, 100);
+        (int32 e1, bool o1) = dir.monetaryEffort();
+        assertGt(e1, 0, "BUCK dear: issue");
+        assertTrue(o1, "sustained past the leash: outright");
+
+        basket.setBvib(1.03e18);                // BUCK cheap
+        _run(101, 160);
+        (int32 e2,) = dir.monetaryEffort();
+        assertLt(e2, 0, "BUCK cheap: retire");
+    }
+
+    function test_monetaryEffort_waitsForTheRungToWarm() public {
+        _monParams(3);
+        basket.setBvib(0.95e18);
+        _run(0, 5);                             // the 20-epoch rung is still cold
+        (int32 e,) = dir.monetaryEffort();
+        assertEq(e, 0, "no advice from a cold rung");
+        _run(6, 25);
+        (e,) = dir.monetaryEffort();
+        assertGt(e, 0, "warm: advice");
+    }
+
+    function test_commonMode_unreadableBasket_holdsAndPokesStillWork() public {
+        _run(0, 1);
+        basket.setBvib(1.02e18);
+        _run(2, 100);
+        int256 before = _cmBp();
+        basket.setBvibReverts(true);
+        _run(101, 140);                         // pokes must not revert
+        assertEq(_cmBp(), before, "an unreadable basket leaves the ladder as it was");
     }
 }

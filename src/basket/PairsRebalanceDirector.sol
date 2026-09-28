@@ -3,6 +3,12 @@ pragma solidity ^0.8.20;
 
 import {RebalanceDirectorBase} from "./RebalanceDirectorBase.sol";
 
+/// @dev The basket's own value in BUCK (1e18), the K controller's process
+///      variable -- read by the common mode (see `commonMode`).
+interface IBasketValue {
+    function basketValueInBuck() external view returns (int256);
+}
+
 /// @title PairsRebalanceDirector -- the differential-mode signal engine on
 ///        the shared rebalance-director chassis.
 ///
@@ -93,6 +99,15 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
     mapping(uint256 => int32) internal pairEffortBp;    // per pair (i*16+j, i<j)
     uint256 internal leashedBits;                       // pair leash flags
 
+    /// @dev The common mode's own ladder: EMAs of log(basketValueInBuck) in
+    ///      tick*1e9, one per window, against PAR (log 1 = 0).  See
+    ///      `commonMode` for why it is not derived from the legs.
+    int64[K] internal bvM;
+    uint32 internal bvLastEpoch;
+    /// @notice The epoch the basket's value was first sampled, +1-encoded
+    ///         (0 = never).
+    uint32 public bvFirstEpoch;
+
     event Poked(uint256 indexed i, uint32 epoch, int24 normTick, int32 netEffortBp);
     event ParamsSet(Params p);
 
@@ -153,36 +168,71 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         return (leg.refTick, leg.lastEpoch, leg.firstEpoch);
     }
 
-    /// @notice The COMMON mode at ladder scale `k`: the mean of every leg's
-    ///         ladder, measured from that leg's own first observation.
+    /// @notice The COMMON mode at ladder scale `k`: the EMA of
+    ///         log(basketValueInBuck) -- the basket priced in BUCK, the K
+    ///         controller's own process variable -- measured against PAR.
     ///
-    ///         A tick is a log price, so leg `i`'s ladder is log(price of
-    ///         TOKEN_i in BUCK) and the MEAN of the legs is log(basket priced
-    ///         in BUCK) -- basketValueInBuck itself, the K controller's own
-    ///         process variable.  Because the EMA is linear,
+    ///         It was once derived from the legs: the mean of every leg's
+    ///         ladder less that leg's first observation, on the reasoning
+    ///         that a tick is a log price and the mean of the legs is
+    ///         log(basket in BUCK).  Two things break that, and together they
+    ///         drove the monetary desk one-sided for years at a time with
+    ///         bvib within ~1.5% of par (doc/CONVERGENCE.org 5.1, E3): the
+    ///         reference was each leg's FIRST observation -- whatever the
+    ///         opening moments left, not par -- and an EQUAL-weighted mean of
+    ///         log moves is not the basket-weighted value, drifting from it by
+    ///         +1,000..+1,700 bp over two years as the constituents diverged.
+    ///         The basket's own value has neither flaw, so the common mode is
+    ///         now a ladder of it (sampled once an epoch; `_foldBasket`).  The
+    ///         legs' ladders keep steering the differential mode, where their
+    ///         references cancel pairwise.
     ///
-    ///             mean_i EMA_k(c_i)  ==  EMA_k(mean_i c_i)
-    ///
-    ///         so this is the EMA of the common mode at scale k and it costs
-    ///         no new state: the `pairs` engine already maintains every term.
-    ///         The differences steer commodity rebalancing; the mean steers
-    ///         monetary operations.  One filter bank, two mandates.
-    ///
-    ///         Sign: normTick is positive when TOKEN appreciates in BUCK, so
-    ///         a POSITIVE common mode means the basket costs more BUCK than
-    ///         it did -- BUCK is CHEAP.  Units are tick*1e9 (~1bp per tick).
+    ///         Sign: POSITIVE means the basket costs more than a BUCK -- BUCK
+    ///         is CHEAP.  Units are tick*1e9 (~1bp per tick).  Zero until the
+    ///         basket has been sampled.
     function commonMode(uint256 k) public view returns (int256 cm) {
-        if (k >= K) return 0;
-        uint256 seen = 0;
-        uint256 n = constituentCount;
-        for (uint256 i = 0; i < n; i++) {
-            Leg storage leg = legOf[i];
-            if (leg.firstEpoch == 0) continue;
-            cm += int256(leg.m[k]) - int256(leg.refTick) * 1e9;
-            seen++;
+        if (k >= K || bvFirstEpoch == 0) return 0;
+        cm = bvM[k];
+    }
+
+    /// @dev log(b / 1e18) in tick*1e9 (a tick is log base 1.0001, ~1bp), by
+    ///      ln b = 2 atanh(y) ~ 2(y + y^3/3), y = (b - 1)/(b + 1): within ~1bp
+    ///      of the exact log out to +/-50%, and monotone beyond -- ample for a
+    ///      deadband / leash signal.
+    function _logTick1e9(int256 b) internal pure returns (int256) {
+        int256 y = ((b - ONE) * ONE) / (b + ONE);
+        int256 ln = 2 * y + (2 * ((y * y) / ONE) * y) / (3 * ONE);
+        return ln / 1e5;                // ln * 1e4 ticks * 1e9 / 1e18
+    }
+
+    /// @dev Sample the basket's value into the common-mode ladder, once per
+    ///      epoch: the same closed-form sample-and-hold catch-up as the legs'
+    ///      ladders.  A basket that cannot be read (no pools yet, a guard)
+    ///      leaves the ladder as it was.
+    function _foldBasket(uint32 e) internal {
+        if (bvFirstEpoch != 0 && bvLastEpoch == e) return;
+        int256 b;
+        try IBasketValue(address(basket)).basketValueInBuck() returns (int256 v) {
+            b = v;
+        } catch {
+            return;
         }
-        if (seen == 0) return 0;
-        cm /= int256(seen);
+        if (b <= 0) return;
+        int256 x = _logTick1e9(b);
+        if (bvFirstEpoch == 0) {
+            for (uint256 k = 0; k < K; k++) bvM[k] = int64(x);
+            bvFirstEpoch = e + 1;
+            bvLastEpoch = e;
+            return;
+        }
+        uint32 dn = e - bvLastEpoch;
+        if (dn > 3650) dn = 3650;
+        for (uint256 k = 0; k < K; k++) {
+            int256 q = ONE - 2 * ONE / int256(uint256(WINDOWS[k]) + 1);
+            int256 qn = _pow1e18(q, dn);
+            bvM[k] = int64(x + ((int256(bvM[k]) - x) * qn) / ONE);
+        }
+        bvLastEpoch = e;
     }
 
     /// @notice Signed monetary effort, bp of NAV per epoch, and whether the
@@ -220,6 +270,7 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
     // --- Signal update ---------------------------------------------------------- //
 
     function _pokeOne(uint256 i, uint32 e) internal override {
+        _foldBasket(e);
         Leg storage leg = legOf[i];
         (uint256 bvNew, uint256 sNew, int24 normTick) = _observe(i);
         _fold(i, bvNew, sNew);
@@ -273,17 +324,11 @@ contract PairsRebalanceDirector is RebalanceDirectorBase {
         if (monLastEpoch == e + 1) return;          // once per epoch
         monLastEpoch = e + 1;
 
-        // Every leg must have the measurement rung warm, or the mean is taken
-        // over ladders that are still seeded at their first observation and
-        // reads as a spurious zero.
+        // The measurement rung must be warm: a ladder still seeded at its
+        // first sample reads that sample, not a moving average of the value.
         uint32 w = WINDOWS[mp.measIdx];
-        uint256 n = constituentCount;
-        if (n == 0) { monEffortBp = 0; monOutright = false; return; }
-        for (uint256 i = 0; i < n; i++) {
-            Leg storage leg = legOf[i];
-            if (leg.firstEpoch == 0 || e + 1 < leg.firstEpoch + w) {
-                monEffortBp = 0; monOutright = false; return;
-            }
+        if (constituentCount == 0 || bvFirstEpoch == 0 || e + 1 < bvFirstEpoch + w) {
+            monEffortBp = 0; monOutright = false; return;
         }
 
         int256 cm = commonMode(mp.measIdx);

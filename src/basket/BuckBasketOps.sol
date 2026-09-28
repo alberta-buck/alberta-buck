@@ -17,11 +17,11 @@ interface IMonetaryDirector {
 ///
 /// @notice The `pairs` director reads a seven-scale filter bank over the pool
 ///         ticks.  A tick is a log price, so the DIFFERENCES between legs say
-///         which commodity is rich against which -- the existing mandate --
-///         and the MEAN of the legs is log(basket priced in BUCK), which is
-///         `basketValueInBuck`, the K controller's own process variable.  The
-///         signal was already being computed every cycle and thrown away.
-///         `PairsRebalanceDirector.commonMode` now returns it and
+///         which commodity is rich against which -- the existing mandate.
+///         The COMMON mode is log(basket priced in BUCK), `basketValueInBuck`,
+///         the K controller's own process variable, which the director keeps
+///         as a ladder of its own against par (`commonMode`; it was once the
+///         legs' mean, which drifted from the basket -- see there), and
 ///         `monetaryEffort()` turns it into a signed instruction.
 ///
 /// # Why a fast desk at all, when K exists
