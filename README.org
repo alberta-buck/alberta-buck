@@ -43,6 +43,11 @@ make nix-sandbox          # then open http://localhost:8000/
 
 [[file:images/sandbox/credit-quote.png]]
 
+A bigger world runs on a server: open [[https://savings-sandbox.albertabuck.ca/]] for the
+BuckBasket as a savings facility in a whole economy -- five years of commodity prices, =BUCK_K=
+moving, arbitrage pinning every TOKEN to its commodity, the basket's work wheel harvesting the gaps
+-- a world of your own for each visit, which you can pause, step, shock and save in.
+
 The tour and the details: [[file:doc/SANDBOX.org][doc/SANDBOX.org]].
 
 * What is here

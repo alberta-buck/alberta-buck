@@ -4,7 +4,8 @@
 
 Alberta Buck is a prototype.  It is unaudited, it is at version 0.2, and it is not for anything of
 real value.  Nothing is deployed at a fixed address on any chain: every world -- the tests, the
-simulations, the browser sandbox -- deploys its own contracts into its own EVM.  The Groth16
+simulations, the browser sandbox, each visitor's world in the savings sandbox -- deploys its own
+contracts into its own EVM.  The Groth16
 verifiers behind Notes come from a *development* trusted setup whose secret is public, on purpose,
 until v1.0.0.
 
@@ -57,6 +58,13 @@ In scope:
 - **The protocol**, as the papers (`alberta-buck-*.org`) specify it.
 - **The hosted sandbox**, <https://sandbox.albertabuck.ca/>: anything that makes a visitor's tab do
   what they did not ask, or leak what they did not share.
+- **The hosted savings sandbox**, <https://savings-sandbox.albertabuck.ca/>, and the sim server
+  behind it (`alberta_buck/sim/server.py`).  Each visitor gets a world of their own, and the server
+  executes only transactions its visitors sign.  Inside your own world anyone's key may be yours
+  to use -- its governance and agents run on the well-known development accounts, by design (see
+  [KI-7](doc/KNOWN-ISSUES.org)) -- so acting as them there is not a finding.  Reaching another
+  visitor's world, reading or steering their session without its id, making the server execute a
+  transaction nobody signed, or running code on the server is.
 - **The release pipeline** (`.github/workflows/`): anything that would let someone publish in our
   name.
 
@@ -79,7 +87,8 @@ Out of scope:
 - What [doc/KNOWN-ISSUES.org](doc/KNOWN-ISSUES.org) already lists, restated.
 - Flaws in third-party code -- OpenZeppelin, Uniswap, arkworks, tevm, viem and the rest.  Report
   those upstream; do tell us if the way we use them makes things worse.
-- Denial of service against a local test chain, or volumetric attacks on the hosted sandbox.
+- Denial of service against a local test chain, or volumetric attacks on the hosted sandboxes --
+  exhausting the savings sandbox's cap on concurrent worlds included.
 - Missing best practices with no concrete impact, and social engineering.
 
 ## Supported versions
@@ -97,7 +106,9 @@ as backports.
 Test on your own machine: `make nix-test`, the simulations and the sandbox all deploy fresh worlds
 you control.  There is no Alberta Buck deployment on a public chain to test against -- if you come
 across one claiming to be ours, please say so; it is not.  The hosted sandbox is a static page that
-runs in your own tab; nothing there is shared with other visitors.
+runs in your own tab; nothing there is shared with other visitors.  The hosted savings sandbox runs
+your world on a server: test only in a world of your own there, or run the same server locally
+(`make nix-venv-sim-savings`).
 
 Research done in good faith under this policy -- on your own copies, without harming other people
 or their data, and reported privately -- will not be pursued by us, legally or otherwise.

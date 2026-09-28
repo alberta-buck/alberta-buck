@@ -16,6 +16,7 @@ resolved it.  An issue reported privately is added here when it is disclosed.
 | KI-4 | The sandbox keeps its keys in the clear     | By design: it is a simulation        |
 | KI-5 | Incomplete licence notices in distributions | Resolved on master; next release     |
 | KI-6 | Two price series have no recorded source    | Open                                 |
+| KI-7 | Savings worlds are open and short-lived     | By design: a world per visitor       |
 
 * KI-1: An identity issuer could link registrations
 
@@ -134,3 +135,24 @@ redistribution are unknown.
 
 - Next :: record each series' source and its terms; replace it with a series whose terms permit
   redistribution if they do not; or stop shipping it and fetch it at run time.
+
+* KI-7: Savings worlds are open and short-lived
+
+- Status :: By design: each visitor's world is their own.
+- Affects :: the hosted savings sandbox, [[https://savings-sandbox.albertabuck.ca/]], and any sim
+  server run with =--public= (=alberta_buck/sim/server.py=).
+
+A savings world's governance, its insurer and its agents act from the well-known development
+accounts, whose keys are public: the server executes only signed transactions, but anyone can sign
+as them.  In a world of one's own that is harmless -- it is the visitor's to break -- and it is why
+the server gives each visitor a separate world and never a shared one.  The worlds' TOKENs and
+USDC are mock tokens anyone can mint.  A world lives only while it is watched: the server discards
+it after ten idle minutes, and all of them when it restarts; a visitor's key and receipts, kept in
+their browser, then name a world that is gone.  And in a world's first days, while its market
+settles from its opening prices, the basket's deposit guard (a pool within 2% of its recent
+average) refuses most deposits for a day or two.
+
+- Detail :: [[file:SANDBOX.org][doc/SANDBOX.org]], Savings; [[file:DEMO-SANDBOX.org][doc/DEMO-SANDBOX.org]]
+  section 5, what a shared world would need.
+- Next :: nothing, for per-visitor worlds.  A shared world would first need governance and agents
+  on server-private keys, and faucets with limits.
