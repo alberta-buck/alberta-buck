@@ -1,0 +1,159 @@
+#+TITLE: The demo sandbox: the sandbox's tools in a moving world
+#+OPTIONS: toc:2 num:t ^:nil
+
+* 0. Status -- a plan, not started (2026-09-27)
+
+The design owner's ruling of 2026-09-27: three sandboxes, three sites.  The
+first two are live; this document plans the third and waits on a "go".
+
+- *sandbox.albertabuck.ca* -- the sandbox as built: Issuer, Wallets,
+  Credit, Observer, in the visitor's tab (Tevm), on a clock that moves only
+  when they move it; no Savings tab.  Cloudflare Pages, from =master=
+  (=.github/workflows/sandbox-pages.yml=).  LIVE.
+- *savings-sandbox.albertabuck.ca* -- the Savings tab (=doc/SANDBOX.org=
+  "Savings"), a pyrevm world per visitor on the sim server, on its own
+  clock; the tools' tabs beside it, unchanged.  =make nix-venv-sim-savings=
+  on datasim, through the tunnel.  LIVE.
+- *demo-sandbox.albertabuck.ca* -- THIS PLAN: the tools themselves, acting
+  in a savings world that moves -- K, prices, the basket -- while the
+  visitor creates credit and saves.  A pyrevm world per visitor, served by
+  a second sim server process.
+
+*The point:* the visitor certifies people, gives them wallets, insures
+their assets and activates credit -- and watches =BUCK_K= move under them
+as the world's debtors, savers, undertakings and arbitrage move it, their
+credit limits breathing with it; then they save in the BuckBasket from those
+same wallets (TOKENs, or the BUCKs their credit issued).
+
+*The scope the design owner set:*
+- *No Observer.*  (pyrevm keeps no transaction history, and the world sends
+  thousands of transactions a day: an Observer needs a server-side journal.)
+- *No persistence.*  A world lives while its visitor does (the server reaps
+  it after ten idle minutes); a reload within that finds it again; there is
+  no Export, Import or saved world.
+- *The clock is the sim's.*  The world runs day by day; the tools' "+1 hour
+  / +1 day / +30 days" become the savings world's /Step/ (whole days).
+- *Calls wait for the gap between days.*  One visitor per world; every read
+  and transaction lands between two simulated days (10-60 s at worst), as
+  the Savings tab's do.  (A bounded "hold" while a multi-step ceremony runs
+  is an optional nicety, section 3.)
+
+* 1. What exists to build on
+
+- *The chain session already signs locally* (=core/js/src/backends.js=,
+  =session.js=): raw legacy transactions, gas price 0 -- exactly what a
+  =--public= sim server accepts.  =anvilSession(url)= is the pattern.
+- *The tools already attach to deployed contracts*: =attachBuckWorld(session,
+  artifacts, worldRecord)= and =attachMarket(session, artifacts,
+  marketRecord)= rebuild every handle from addresses (the saved-world path).
+- *The server world runs the production contracts the tools use*: =Buck=
+  (the same identity gate), =BuckCredit=, =BuckKControllerDirect= (moving),
+  the BUCK/USDC pool, a Carrying insurance pool -- see
+  =alberta_buck/sim/deploy.py=.
+- *The Savings tab's link and wallet* (=core/js/sandbox/src/savings/=): the
+  frames / control / rpc channels, signed batches with preflights and
+  receipts, deposit / receipt / redeem against the basket.
+- *The vendored Permit2 and Universal Router* in =alberta_buck/sim/artifacts/=.
+
+* 2. What differs, and what each difference costs
+
+- (a) *The world's Universal Router has a DUMMY Permit2* (=deploy.py=:
+  "permit2 (unused)") and is identity-bound.  The market tab (buy / sell
+  BUCK) pays through Permit2 and a router that never holds BUCK, so it
+  cannot trade.  Remedy: the overlay deploys a real Permit2 and a stock,
+  unbound router beside the sim's.
+- (b) *The registry is =IdentityRegistryHarness=* (a test-only subclass of
+  the production registry), trusting the sim's own Python issuer.  The
+  page's issuer is not trusted, so its credentials would not register.
+  Remedy: the overlay has governance trust the page's issuer public key.
+- (c) *=BuckCredit='s issuers are the sim's.*  The page's insurer ("Sandbox
+  Mutual") cannot create credits.  Remedy: the overlay makes the page's
+  insurer account a credit issuer.
+- (d) *No account of the page's holds ETH or USDC*, so new wallets have no
+  endowment.  Remedy: the overlay funds a page "bank" account (ETH through
+  the backend, USDC from the mock).
+- (e) *Time is the sim's*, warped a tick at a time.  "+1 hour" is
+  meaningless, and a quote shown before a day may be refused after it.
+  Remedy: the time buttons become /Step/; actions land between days.
+- (f) *K, prices and limits move* -- the point of the exercise.  The tools'
+  view must be re-read after each frame.
+- (g) *No block history and no =eth_getLogs=*: the Observer, and anything
+  else that walks blocks, cannot work.  Remedy: no Observer (the ruling).
+- (h) *A world dies when idle or when the server restarts*: nothing to
+  restore.  Remedy: no persistence (the ruling); a vanished world says so
+  and offers a new one.
+
+*The overlay* is deployed by the server AFTER the sim's own deployment, so
+every contract the sim deploys keeps its address (vectors and cells stay
+byte-identical); it is part of the demo-sandbox experiment only.
+
+* 3. The work, in order
+
+1. *Server: the demo-sandbox world.*  =alberta_buck/sim/experiments/
+   demo-sandbox.toml= (the savings world's cast; possibly leaner still), and
+   the overlay: a real Permit2 and a stock Universal Router (vendored
+   artifacts), a funded "bank" account for the page.  A server method,
+   =sim_sandbox=, that (i) accepts the page's issuer public key and insurer
+   address, and has the world's governance trust the one and make the other
+   a credit issuer (scoped to the session: each world is its visitor's own),
+   and (ii) answers the =worldRecord= / =marketRecord= shapes
+   =attachBuckWorld= / =attachMarket= take (the sim's registry, credit,
+   controller, Buck, insurance pool, the BUCK/USDC pool and its operator,
+   the new Permit2 and router, USDC).  *Medium, about a day.*
+2. *Page: a remote mode for =SandboxApp=.*  A session over the world's RPC
+   with the page's own keys (the bank key in the deployer's role);
+   =open()= attaches instead of building; no =snapshotTevm= / =restoreTevm=,
+   Export, Import (Reset = a new world); =advance()= becomes a /Step/ op; the
+   world bar shows the sim's day, K and prices (from the frames, as the
+   Savings tab does); the tools' view re-read after each frame; the Observer
+   tab absent.  *Medium, one to two days.*
+3. *The ceremonies on the harness* -- certify, register, introduce, open
+   trading, pay, insure, quote, activate -- each checked against the server
+   world (a node test driving =SandboxApp= in remote mode against a local
+   server, the counterpart of =test/sandbox.app.tevm.test.js=).  *The main
+   risk* (section 4).  *A day, if they pass as expected.*
+4. *Saving from the tools' wallets.*  The Savings deposit / receipt / redeem
+   flow offered on each wallet: TOKENs from the faucet, or the wallet's own
+   BUCKs (=depositToken(BUCK, ...)= needs a BUCK identity -- which these
+   wallets have, and the Savings tab's bare key does not).  *Small.*
+5. *Serve it.*  A second server process (its own port), a
+   =make nix-venv-sim-demo= target, a =demo-sandbox.albertabuck.ca= ingress
+   pair on the datasim tunnel, a browser test (the counterpart of
+   =test/savings.browser.test.js=).  *Half a day.*
+6. *Optional: hold during a ceremony.*  A bounded control op ("hold the
+   world at the next day boundary for up to N seconds") the page takes
+   while a multi-step ceremony runs -- proof generation between steps
+   outlasts the server's half-second grace, so without it each step may
+   wait a day.  *Small.*
+
+In all: *about three to five days*, most of the uncertainty in step 3.
+
+* 4. Risks and what to check first
+
+- *The identity ceremonies on =IdentityRegistryHarness=.*  It extends the
+  production registry, so registration, approval and the transfer gate
+  should behave identically; check before anything else (a spike: attach
+  to a savings world, trust a page issuer, certify one person, register one
+  wallet, pay one BUCK).
+- *Trading on the sim's BUCK/USDC pool.*  =openTrading= makes an identity
+  handshake with the pool (=pkOf(pool)=); the sim binds that pool through
+  the harness (=bind_as_operator=), so it has a key -- check the handshake
+  and a Permit2 swap through the stock router.
+- *Credit against a moving K.*  Activation sizes its deposit from K at the
+  block; between days K is fixed, so a quote and its activation agree --
+  but a quote shown before a day and acted on after it can be refused; the
+  tools must re-quote after each frame.
+- *The world's own agents are the anvil dev accounts* (public keys).  A
+  per-visitor world makes that harmless (it is the visitor's own); it rules
+  out a SHARED world until governance and the agents are re-keyed.
+
+* 5. Not in scope, and what a shared world would need
+
+A world per visitor, as the savings sandbox does.  One world shared by many
+visitors would need, beyond this plan: governance and agents on
+server-private keys (the dev keys are public: anyone can sign as
+governance); faucets with minter roles and rate limits (the mock TOKENs and
+USDC mint to anyone); global controls (no one visitor pauses or shocks the
+world); persistence (a long-lived world outlives restarts); the Observer on
+a server-side transaction journal; and the gaps between days shared by many
+clients.

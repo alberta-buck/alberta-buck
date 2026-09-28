@@ -37,9 +37,15 @@
   build/sim/conv= (and e3, e4), plus the gauge-error and wheel-counter
   readings of BASKET-WHEEL 7.2 / 8.7; record the verdicts in section 5.
   At day 150-175 of 731 by 08:50: expected around 17:00-18:00.
-- *Next:* judge E2-E4; serve the savings world on port 8797 in place of
-  the old catalogue server (the design owner's go-ahead, 2026-09-27);
-  a pass over the demonstration's story on a settled world (section 6.2).
+- *Serving:* the savings world is public at
+  <https://savings-sandbox.albertabuck.ca/> (=make nix-venv-sim-savings= on
+  datasim, through the datasim tunnel; the browser test passes through it).
+  The static <https://sandbox.albertabuck.ca/> stays browser-only (no
+  Savings tab without a sim server).  A third site, the sandbox's tools in
+  a moving world, is planned in =doc/DEMO-SANDBOX.org= (awaiting a "go").
+- *Next:* judge E2-E4; merge to =master= and deploy the savings sandbox
+  from it; the demo sandbox on a "go"; a pass over the demonstration's
+  story on a settled world (section 6.2).
 
 * 1. What this document is
 
