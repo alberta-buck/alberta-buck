@@ -114,7 +114,14 @@ async function simServer() {
 async function boot() {
   ctx.simServer = await simServer();
   ctx.sameOrigin = ctx.simServer === "same-origin";
-  mountSavings(ctx);
+  // No sim server configured (the static site, sandbox.albertabuck.ca) and
+  // none asked for (?sim=): the sandbox is the browser-only one, no Savings tab.
+  if (ctx.simServer || new URLSearchParams(location.search).get("sim")) {
+    mountSavings(ctx);
+  } else {
+    TABS.splice(TABS.indexOf("savings"), 1);
+    for (const el of [$("tab-savings"), $("panel-savings"), document.querySelector(".tabs .tab-sep")]) el.remove();
+  }
   mountTabs();
 }
 

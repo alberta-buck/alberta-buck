@@ -33,7 +33,9 @@ Without Nix you need Node 22 or later, a Rust toolchain with the =wasm32-unknown
 and Foundry's =forge=; then =make sandbox=.  The flake pins all of these, and is the supported
 path.
 
-The /Savings/ tab needs a sim server.  One command serves the page and its worlds together:
+The /Savings/ tab needs a sim server, and appears only when the page has one: served by the sim
+server itself, built with =SANDBOX_SIM_SERVER=wss://...=, or opened with =?sim=wss://...=.  One
+command serves the page and its worlds together:
 
 #+BEGIN_SRC sh
 make nix-venv-sim-savings  # then open http://127.0.0.1:8797/ (it opens on the Savings tab)

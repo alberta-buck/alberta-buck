@@ -65,6 +65,8 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     const t0 = Date.now();
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.waitForSelector("#loading", { state: "hidden", timeout: 240_000 });
+    assert.equal(await page.locator("#tab-savings").count(), 0,
+      "a static page with no sim server is the browser-only sandbox: no Savings tab");
     t.diagnostic(`a new world booted in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
     // The page links its third-party notices, which the build wrote beside it.
