@@ -11,7 +11,8 @@ After=network-online.target
 Type=simple
 WorkingDirectory=@WORKTREE@
 Environment=PATH=%h/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/make nix-venv-sim-savings SIM_SAVINGS_HOST=127.0.0.1
+# The server only: `make savings-sandbox-deploy` builds, from a normal shell.
+ExecStart=/usr/bin/make nix-venv-sim-savings-serve SIM_SAVINGS_HOST=127.0.0.1
 Restart=on-failure
 RestartSec=15
 # Visitors' worlds share the machine with the simulation grids.

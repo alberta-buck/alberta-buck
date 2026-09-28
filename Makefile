@@ -1302,8 +1302,12 @@ SIM_SAVINGS_HOST     ?= 127.0.0.1
 SIM_SAVINGS_PORT     ?= 8797
 SIM_SAVINGS_SESSIONS ?= 4
 
-.PHONY: sim-savings
-sim-savings:	sim-build sandbox-build
+.PHONY: sim-savings sim-savings-serve
+sim-savings:	sim-build sandbox-build sim-savings-serve
+
+# The server alone, building nothing (the hosted unit's command: its builds
+# happen at deploy, in a shell whose toolchain is the flake's).
+sim-savings-serve:
 	python -m alberta_buck.sim.server \
 		--experiment alberta_buck/sim/experiments/demo-savings.toml \
 		--host $(SIM_SAVINGS_HOST) --port $(SIM_SAVINGS_PORT) --public \
@@ -1658,8 +1662,9 @@ sandbox:	sandbox-build
 # The HOSTED savings sandbox (https://savings-sandbox.albertabuck.ca/), served
 # from its OWN worktree on the savings-sandbox branch, so work in any other
 # checkout never changes the live site: a systemd USER unit
-# (scripts/savings-sandbox.service) runs make nix-venv-sim-savings there, on
-# 127.0.0.1:8797, the tunnel's origin.  The worktree builds its own venv; the
+# (scripts/savings-sandbox.service) runs make nix-venv-sim-savings-serve there,
+# on 127.0.0.1:8797, the tunnel's origin; it builds nothing (a service's bare
+# environment can put another toolchain first) -- the deploy builds.  The worktree builds its own venv; the
 # untracked inputs a fresh checkout lacks -- lib/, the generated price
 # windows, the identity cache -- are copied in from this one (lib/ only
 # when absent: rm -rf it there to refresh).  Run these from this checkout,
