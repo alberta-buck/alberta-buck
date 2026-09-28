@@ -49,6 +49,7 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
       await page.waitForFunction((d0) => (globalThis.savings?.rows.at(-1)?.day ?? -1) > d0, d, { timeout: DAY_MS });
     };
 
+    await page.waitForSelector("[role=tab][aria-selected=true]");   // boot asked where its world is
     assert.equal(await page.getAttribute("#tab-savings", "aria-selected"), "true",
       "a page served by the sim server opens on the Savings tab");
     assert.ok(await page.isHidden("#loading"), "the Savings tab needs none of the in-tab world");
