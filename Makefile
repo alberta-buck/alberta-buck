@@ -1655,6 +1655,56 @@ sandbox:	sandbox-build
 	@echo "sandbox: http://localhost:$(SANDBOX_PORT)/   (Ctrl-C stops it)"
 	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_PORT)
 
+# The HOSTED savings sandbox (https://savings-sandbox.albertabuck.ca/), served
+# from its OWN worktree on the savings-sandbox branch, so work in any other
+# checkout never changes the live site: a systemd USER unit
+# (scripts/savings-sandbox.service) runs make nix-venv-sim-savings there, on
+# 127.0.0.1:8797, the tunnel's origin.  The worktree builds its own venv; the
+# untracked inputs a fresh checkout lacks -- lib/, the generated price
+# windows, the identity cache -- are copied in from this one (lib/ only
+# when absent: rm -rf it there to refresh).  Run these from this checkout,
+# as plain make (they call nix themselves):
+#
+#   git worktree add -b savings-sandbox $(SAVINGS_WT) HEAD      # once
+#   sudo loginctl enable-linger $USER     # once: the unit runs with nobody logged in
+#   make savings-sandbox-install          # once: the unit, enabled
+#   make savings-sandbox-deploy SAVINGS_REF=master   # each release: ff, build, restart
+#
+# NB: `git worktree remove --force` deletes the worktree's untracked builds.
+SAVINGS_WT   ?= $(abspath $(CURDIR)/../alberta-buck-savings-sandbox)
+SAVINGS_REF  ?= master
+SAVINGS_UNIT  = $(HOME)/.config/systemd/user/savings-sandbox.service
+
+.PHONY: savings-sandbox-seed savings-sandbox-install savings-sandbox-deploy savings-sandbox-status
+savings-sandbox-seed:
+	@test -d $(SAVINGS_WT)/.git -o -f $(SAVINGS_WT)/.git \
+		|| { echo "no worktree at $(SAVINGS_WT): git worktree add -b savings-sandbox $(SAVINGS_WT) HEAD"; exit 1; }
+	test -d $(SAVINGS_WT)/lib/forge-std || { cp -a lib/. $(SAVINGS_WT)/lib/ && rm -f $(SAVINGS_WT)/lib/circom-lib/.git; }
+	cp -p alberta_buck/sim/prices/hist-*-*d.csv alberta_buck/sim/prices/hist-manifest-*.json \
+		$(SAVINGS_WT)/alberta_buck/sim/prices/
+	-cp -p alberta_buck/sim/prices/rev-*-*d.csv $(SAVINGS_WT)/alberta_buck/sim/prices/ 2>/dev/null
+	mkdir -p $(SAVINGS_WT)/test/vectors
+	cp -p test/vectors/identity-cache.json $(SAVINGS_WT)/test/vectors/
+
+savings-sandbox-install:
+	mkdir -p $(dir $(SAVINGS_UNIT))
+	sed 's|@WORKTREE@|$(SAVINGS_WT)|g' scripts/savings-sandbox.service > $(SAVINGS_UNIT)
+	systemctl --user daemon-reload
+	systemctl --user enable savings-sandbox
+	@loginctl show-user $$USER -p Linger | grep -q yes \
+		|| echo "NB: lingering is off -- sudo loginctl enable-linger $$USER, or the unit stops at logout"
+
+savings-sandbox-deploy:	savings-sandbox-seed
+	git -C $(SAVINGS_WT) merge --ff-only $(SAVINGS_REF)
+	$(MAKE) -C $(SAVINGS_WT) nix-venv-sim-build nix-sandbox-build
+	systemctl --user restart savings-sandbox
+	@echo "deployed $$(git -C $(SAVINGS_WT) log --oneline -1); journalctl --user -u savings-sandbox -f"
+
+savings-sandbox-status:
+	@git -C $(SAVINGS_WT) log --oneline -1
+	@systemctl --user --no-pager status savings-sandbox | head -5
+	@curl -s -m 10 http://127.0.0.1:8797/sim-server.json; echo
+
 # The Savings tab against a real sim server (core/js/test/savings.browser.test.js):
 # the page built, a server on a spare port serving it and the savings world,
 # the browser test, the server stopped.  Minutes: a world builds in about a

@@ -1,0 +1,23 @@
+# The hosted savings sandbox (https://savings-sandbox.albertabuck.ca/): the sim
+# server serving the sandbox page and a savings world per visitor on
+# 127.0.0.1:8797, the cloudflared tunnel's origin.  A systemd USER unit,
+# rendered by `make savings-sandbox-install` (@WORKTREE@ becomes the worktree
+# on the savings-sandbox branch); see the Makefile's savings-sandbox section.
+[Unit]
+Description=Alberta Buck savings sandbox (sim server on 127.0.0.1:8797)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKTREE@
+Environment=PATH=%h/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/make nix-venv-sim-savings SIM_SAVINGS_HOST=127.0.0.1
+Restart=on-failure
+RestartSec=15
+# Visitors' worlds share the machine with the simulation grids.
+Nice=10
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
