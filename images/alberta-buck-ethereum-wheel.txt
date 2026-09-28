@@ -455,12 +455,17 @@ Table of Contents
      the calm runs fell to nothing.  Whether the wheel or the cast did
      that is not yet separated; the runs that would separate them are
      next.
-  2. *The wheel beside a monetary desk.* With both the rebalancing
-     director and the wheel, the monetary desk (which issues and absorbs
-     BUCK against the basket) took a one-sided position and sat at its
-     cap for most of two years; with either alone it did not.  Until
-     that interaction is understood, the savings basket's wheel and a
-     monetary desk should not run together.
+  2. *The wheel beside a monetary desk – diagnosed: not the wheel.* With
+     the rebalancing director and the wheel, the monetary desk (which
+     issues and absorbs BUCK against the basket) took a one-sided
+     position and sat at its cap for two years.  The cause is the desk's
+     own signal: it averages each pool's price move since the director
+     first looked, with equal weights, and takes that for BUCK's
+     deviation from its basket.  The reference is whatever the opening
+     moments left (the wheel changed them), and the equal weighting
+     drifts from the basket as the commodities diverge.  Without the
+     wheel the same desk ran one-sided the other way.  The remedy is the
+     desk's, not the wheel's: read the basket's own value against par.
   3. *The fee band, in practice.* v1 takes only /direct/ profit – gaps
      wider than all three fees.  The band only the basket can take needs
      the basket's own fee to come back within the cycle: a small TOKEN

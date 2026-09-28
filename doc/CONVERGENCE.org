@@ -45,11 +45,11 @@
   a moving world, is planned in =doc/DEMO-SANDBOX.org= (awaiting a "go").
 - *Verdicts (5.1):* E2 -- demonstrate design A + undertakings + the wheel
   on (the gauge truer on every arm; shocks transmitted, not amplified);
-  E3 -- the legs add for the depositors, but director + wheel saturate the
-  monetary desk one-sided; E4 -- the organic cast passes and answers the
+  E3 -- the legs add for the depositors; the monetary desk runs one-sided
+  in every run (its signal is mis-referenced -- diagnosed, fix designed); E4 -- the organic cast passes and answers the
   shocks faster, but the depositors' realized profit collapses on the calm
   arms (no wheel-off twin yet).
-- *Next:* E4's wheel-off twins; the desk's saturation; merge to =master=
+- *Next:* the desk's signal on bvib against par; E4's wheel-off twins; merge to =master=
   and deploy the savings sandbox from it; the demo sandbox on a "go"; a
   pass over the demonstration's story on a settled world (section 6.2).
 
@@ -266,21 +266,51 @@ undertakings + the wheel ON -- with the desk held back (E3).
    selection) +0.41 + 1.33 against +1.62.
 2. *For NAV counted in baskets, the director's leg dominates*: +2.6M
    baskets alone; the wheel's +1.1M alone vanishes beside the director.
-3. *The interaction: the monetary desk saturates one-sided.*  With the
-   director AND the wheel the ops desk issues BUCK into a persistent
-   premium from day 90 and never unwinds: 3.8M BUCK against $7.25M of
-   TOKENs at day 730, at or past its cap (3.4M) for most of the run --
-   carry 1,910M BUCK-days, against 144M with the director alone (which
-   trades both ways and ends flat) and none with the wheel alone.  A desk
-   parked at its cap has no room for a shock.  Not yet diagnosed; the
-   hypothesis: with the wheel, bvib's tail sits a few bp under par (0.9992
-   -1.0000 against 1.0000-1.0005) and the desk, reading the director's
-   filter bank the wheel re-prices, keeps issuing into it.
+3. *The monetary desk runs one-sided -- in EVERY run with a desk, and the
+   wheel only picks the side.*  With the director and the wheel the desk
+   issues from day 50 to its outright cap (10% of NAV) and stays there:
+   3.8M BUCK against $7.25M of TOKENs at day 730.  With the director
+   alone it issues briefly, then RETIRES 2.8M for the rest of the run (a
+   one-sided contraction the carry metric, |held|, never counted).  In
+   both runs bvib stays within about 1.5% of par throughout.
+
+   *Diagnosed (2026-09-28; the director's state read from storage in
+   instrumented reruns, its signal recomputed from the vectors, matching
+   the desk's action over all 731 days):* the desk acts on
+   =PairsRebalanceDirector.commonMode= -- the EQUAL-weighted mean over the
+   legs of (the leg's 20-epoch tick EMA - its =refTick=) -- which the design
+   takes to be log(bvib).  It is not, for two reasons:
+
+   - *Its reference is not par.*  =refTick= is each leg's tick at the
+     director's first touch, in epoch 0 -- inside the world's opening
+     transient.  The wheel's run took its references 950-1,550 ticks
+     (~12%) richer in BUCK than the director-only run did, so its common
+     mode opened at -1,457 bp against -245: an arbitrary opening state,
+     read ever after as a deviation.
+   - *Its weighting is not the basket's.*  An equal-weighted mean of log
+     moves drifts from the basket-weighted value K steers as the
+     constituents diverge (cbBTC and gold against the rest): +1,000 to
+     +1,700 bp over two years in every run.
+
+   Director alone: the drift overtakes the small opening offset by day
+   ~100, and the desk retires for the rest of the run.  With the wheel:
+   the large offset outlasts two years of drift, and the desk issues
+   throughout.  Neither is a response to BUCK against par.  The wheel is
+   not working against the desk; the desk's signal is mis-referenced, and
+   the wheel changed the opening state it captured.
+
+   *The fix:* drive the desk from a filtered log(bvib) itself -- the
+   controller's own process variable, basket-weighted, measured against
+   par (a tick of bvib by =TickMath=, folded into the same ladder) -- and
+   keep the director's pair (differential) signals as they are, since they
+   are correctly relative.  A small contract change, then E3's corners and
+   E2's desk arms rerun.  (Every earlier run with the ops desk used this
+   signal, cycle 1's included: their desk readings deserve a second look.)
 
 VERDICT E3: the savings basket to demonstrate is the director + the wheel
 (the demonstration's =demo-savings.toml= runs no desk).  The monetary desk
-must not run beside them until the one-sided saturation is understood or
-bounded.
+joins them -- the design owner wants it in the demonstration -- once its
+signal reads bvib against par (above).
 
 *E4 -- the organic cast (30 external-debt retirees, T15) with the wheel on.*
 
@@ -310,10 +340,9 @@ VERDICT E4: the organic cast passes, and answers the shocks better; it is
 NOT yet the savings demonstration's cast (which runs ten retirees) until
 the depositors' loss is explained.
 
-*Next (in order):* (i) E4's wheel-off twins, five cells, to separate the
-retirees' effect on the depositors from the wheel's; (ii) the desk's
-one-sided saturation under director + wheel (its decision trace, bvib's
-tail bias); (iii) the x4 squeeze's slower recovery; (iv) a recovery
+*Next (in order):* (i) the desk's signal on bvib against par, and E3's
+corners and E2's desk arms rerun; (ii) E4's wheel-off twins, five cells,
+to separate the retirees' effect on the depositors from the wheel's; (iii) the x4 squeeze's slower recovery; (iv) a recovery
 metric on a smoothed bvib, so a truer gauge's noise does not restart the
 clock.  None of it blocks the merge: the wheel's contracts are a
 prototype under test (=alberta-buck-ethereum-wheel.org=).

@@ -497,6 +497,9 @@ cell (=build/sim/e1/c020-w12.json=), the none arm, days 30-59:
    (paid for it on the transient ones; under the retirees' persistent
    supply their realized profit fell to nothing -- not yet separated from
    the cast's effect).
-6. (E3.)  Director + wheel saturate the monetary desk one-sided (issuing
-   into a persistent premium, at its cap for most of two years); either
-   alone does not.
+6. (E3.)  The monetary desk runs one-sided with the director + wheel --
+   diagnosed: NOT the wheel.  The desk's signal (the director's
+   equal-weighted common mode against each leg's first-touch tick) is
+   mis-referenced; the wheel only changed the opening state it captured,
+   and without the wheel the desk ran one-sided the other way
+   (CONVERGENCE 5.1, E3 item 3).
