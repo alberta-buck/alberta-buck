@@ -107,13 +107,6 @@ contract BuckCredit is ERC721Enumerable {
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
 
-    /// @dev Retired: the Jubilee aging that lived here accrued relief on
-    ///      activated coverage, drawn or not.  Relief now accrues on the BUCK
-    ///      actually issued -- the holder's lien, in Buck.sol -- so a credit
-    ///      no longer ages (doc/JUBILEE-ISSUANCE.org).  The slot is kept so
-    ///      that nothing declared after it moves.
-    mapping(uint256 => uint256) private __retiredCovSeconds;
-
     /// @notice The Buck contract permitted to drive activation.  Wired
     ///         one-shot post-deployment via setBuck(...).  BuckCredit never
     ///         calls Buck -- this is an authorisation record, nothing more.
