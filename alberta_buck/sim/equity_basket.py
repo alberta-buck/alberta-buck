@@ -119,28 +119,39 @@ class Pool:
                 w[0] += tok_fee * l / self.L
                 w[1] += buck_fee * l / self.L
 
-    # swaps (exact in)
+    # swaps (exact in); the quotes change nothing
+
+    def _after_sell_tok(self, dx: float) -> float:
+        return self.L * self.sqrtP / (self.L + dx * (1 - self.fee) * self.sqrtP)
+
+    def _after_sell_buck(self, dy: float) -> float:
+        return self.sqrtP + dy * (1 - self.fee) / self.L
+
+    def quote_sell_tok(self, dx: float) -> float:
+        if dx <= 0 or self.L <= 0:
+            return 0.0
+        return self.L * (self.sqrtP - self._after_sell_tok(dx))
+
+    def quote_sell_buck(self, dy: float) -> float:
+        if dy <= 0 or self.L <= 0:
+            return 0.0
+        return self.L * (1 / self.sqrtP - 1 / self._after_sell_buck(dy))
 
     def sell_tok(self, dx: float) -> float:
         """TOKEN in, BUCK out."""
-        if dx <= 0 or self.L <= 0:
-            return 0.0
-        s = self.sqrtP
-        eff = dx * (1 - self.fee)
-        s1 = self.L * s / (self.L + eff * s)
-        self.sqrtP = s1
-        self._accrue(dx * self.fee, 0.0)
-        return self.L * (s - s1)
+        out = self.quote_sell_tok(dx)
+        if out > 0:
+            self.sqrtP = self._after_sell_tok(dx)
+            self._accrue(dx * self.fee, 0.0)
+        return out
 
     def sell_buck(self, dy: float) -> float:
         """BUCK in, TOKEN out."""
-        if dy <= 0 or self.L <= 0:
-            return 0.0
-        s = self.sqrtP
-        s1 = s + dy * (1 - self.fee) / self.L
-        self.sqrtP = s1
-        self._accrue(0.0, dy * self.fee)
-        return self.L * (1 / s - 1 / s1)
+        out = self.quote_sell_buck(dy)
+        if out > 0:
+            self.sqrtP = self._after_sell_buck(dy)
+            self._accrue(0.0, dy * self.fee)
+        return out
 
     def tok_for_buck(self, dy_out: float) -> float:
         """TOKEN in needed for exactly `dy_out` BUCK out (inf if too deep)."""
@@ -215,23 +226,25 @@ class EquityBasket:
 
     # -- valuation ------------------------------------------------------------ #
 
-    def position_value(self, t: str, high: bool = False) -> float:
-        """The position's fair value, 2 L sqrtP, at the TWAP (or at the
-        higher of the TWAP and the spot: the incumbents' side of an entry)."""
+    def position_value(self, t: str, high: bool = False, low: bool = False) -> float:
+        """The position's fair value, 2 L sqrtP, at the TWAP -- or at the
+        higher of the TWAP and the spot (the incumbents' side of an entry),
+        or the lower (their side of an exit)."""
         p = self.pools[t]
-        s = max(p.twap, p.sqrtP) if high else p.twap
+        s = max(p.twap, p.sqrtP) if high else min(p.twap, p.sqrtP) if low else p.twap
         return 2 * p.liq.get(ME, 0.0) * s
 
-    def gross(self, high: bool = False) -> float:
+    def gross(self, high: bool = False, low: bool = False) -> float:
         g = self.idle_buck
         for t, p in self.pools.items():
-            P = max(p.twap_price, p.price) if high else p.twap_price
+            P = (max(p.twap_price, p.price) if high else
+                 min(p.twap_price, p.price) if low else p.twap_price)
             ot, ob = p.owed.get(ME, [0.0, 0.0])
-            g += (self.idle[t] + ot) * P + self.position_value(t, high) + ob
+            g += (self.idle[t] + ot) * P + self.position_value(t, high, low) + ob
         return g
 
-    def equity(self, high: bool = False) -> float:
-        return self.gross(high) - self.debt
+    def equity(self, high: bool = False, low: bool = False) -> float:
+        return self.gross(high, low) - self.debt
 
     def price(self) -> float:
         return self.equity() / self.S if self.S > 0 else 1.0
@@ -267,15 +280,7 @@ class EquityBasket:
         else:
             p = self.pools[asset]
             value = amount * min(p.price, p.twap_price)
-        # the deposit pays for its own deployment: the pool fee on what the
-        # wheel will swap to pair it -- (1+K)/2 of a BUCK deposit (into the
-        # dearest pool, not yet chosen), (1-K)/2 of a TOKEN one
-        k = self.k()
-        if asset == BUCK:
-            charge = max(p.fee for p in self.pools.values()) * (1 + k) / 2
-        else:
-            charge = self.pools[asset].fee * max(1 - k, 0.0) / 2
-        net = value * (1 - charge)
+        net = value * (1 - self.charge(asset))
         shares = net if self.S == 0 else net * self.S / self.equity(high=True)
         if asset == BUCK:
             self.idle_buck += amount
@@ -287,6 +292,15 @@ class EquityBasket:
         self._next += 1
         self.receipts[rid] = Receipt(shares, value)
         return rid
+
+    def charge(self, asset: str) -> float:
+        """The deposit pays for its own deployment: the pool fee on what the
+        wheel will swap to pair it -- (1+K)/2 of a BUCK deposit (into the
+        dearest pool, not yet chosen), (1-K)/2 of a TOKEN one."""
+        k = self.k()
+        if asset == BUCK:
+            return max(p.fee for p in self.pools.values()) * (1 + k) / 2
+        return self.pools[asset].fee * max(1 - k, 0.0) / 2
 
     def redeem(self, rid: int, frac: float = 1.0) -> dict[str, float]:
         """Pro rata: the receipt's share of everything, the debt burned

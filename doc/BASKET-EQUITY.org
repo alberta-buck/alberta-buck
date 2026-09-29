@@ -14,6 +14,15 @@ The design is settled and prototyped, but not yet built in Solidity.
   =make nix-venv-test-equity=.
 - *The contracts* are not started.  Section 10 is the plan, step by step.
   A fresh session restarts there.
+- *Section 12 proposes the BUCK basis* (2026-09-29, awaiting the design
+  owner's ruling): payouts in BUCK from a reserve the wheel keeps, the
+  wheel's own arbitrage with that reserve as its float, and a director that
+  leans against excursions and parks its proceeds in the reserve.  It is
+  prototyped in =alberta_buck/sim/reserve_basket.py= (19 tests in
+  =alberta_buck/test/test_reserve_basket.py=) and measured by
+  =alberta_buck/sim/basket_harvest.py= (=make nix-venv-sim-harvest=).  It
+  also answers why section 9.1's scenario showed no reversion yield.  If it
+  is ruled in, section 12.6 amends the Solidity plan of section 10.
 
 It replaces the pro-rata basket's principal and burn-obligation accounting
 (=BuckBasketProRata=, which the ops and Fence shells inherit) with shares of
@@ -534,3 +543,303 @@ expected numbers are the prototype's, with tolerances for tick math.
    shell uses, or the basket's own leverage.
 6. The treasury's policy: when governance redeems its shares, and whether
    any of them fund the wheel's reserve.
+7. The rulings section 12.7 asks for: BUCK payouts and the reserve, the
+   wheel's arbitrage in the basket, the director's lean and its anchor.
+
+* 12. The harvest, and the BUCK basis (proposed, 2026-09-29)
+
+The design owner asked three things: why the prototype shows no yield,
+even in strictly reverting markets; whether the multi-EMA rebalancing
+strategy is still being built; and whether paying and holding BUCK would
+make the arbitrage and the reweighting simpler, cheaper and able to work
+together.  The answers are measured by =alberta_buck/sim/basket_harvest.py=
+over three synthetic worlds, each TOKEN independent with daily volatility
+of about 1.5%:
+
+- *fast*: an OU log price with a 10-day half-life, where the reversion
+  lives in the noise;
+- *cycle*: slow damped cycles (a year's period, 15% swings) with momentum,
+  plus fast noise, where the reversion lives in the swings;
+- *walk*: a random walk, where nothing reverts (the control).
+
+Every basket starts from the same placed deposit (K = 0.75, 90% of each
+pool its own).  An outside arbitrageur re-pins every pool to the edge of
+its no-arbitrage band (the pool fee plus a 0.1% outside cost) each step,
+after the wheel's tick.  The results are 8 seeds over 4 years, with 6-hour
+steps and a 0.3% pool fee unless stated.  "Over holding" compares each
+basket with its own starting holdings never traded.  "cmix" is those
+holdings' value weights rebalanced every step at the outside price, at no
+cost: all the rebalancing premium there is.
+
+** 12.1 Why the prototype showed no reversion yield
+
+*A full-range position is a constant-mix rebalancer that trades at stale
+prices, and whoever re-pins the pool is paid its rebalancing.*  The pool
+sells TOKEN as the price rises and buys as it falls, which is the reversion
+harvest, but it does so at its own price.  The arbitrageur who moves it to
+the outside price keeps the difference, which is the LP's loss-versus-
+rebalancing (LVR), about sigma^2/8 of the position per unit of time.  In a
+reverting market that is almost exactly the rebalancing premium: the
+harvest goes to the arbitrageur, and the pool keeps only the fee on the
+arbitrageur's volume.
+
+For one pool (OU, 1.5% a day, a 20-day half-life), the premium is 1.0% a
+year of the position:
+
+| outside arbitrage | pool fee | pool keeps | the basket's own arbitrage keeps (best band) |
+|-------------------+----------+------------+----------------------------------------------|
+| once a day        | 0.3%     | 0.22%      | 0.90%                            |
+| once a day        | 1%       | 0.49%      | 0.90%                            |
+| every hour        | 0.3%     | 0.52%      | 0.75%                            |
+| every hour        | 1%       | 0.79%      | 0.83%                            |
+
+The finer the steps against the fee, the more the fee recovers by itself.
+The coarser, the more only the basket's own arbitrage can.
+
+The prototype's scenario (section 9.1) is the coarse case at its worst:
+- one 2% jump a step, re-pinned exactly to the price by the outside
+  arbitrage, against a 0.3% fee;
+- no arbitrage of the basket's own;
+- rebalancing through its own pools.  Every trade moved its own price for
+  the outside arbitrageur to re-pin.
+- Over short holdings, entry and exit costs, the 25% cut, and a comparator
+  (holding the deposited TOKEN) dominated by relative price noise swamp the
+  rest.
+
+*A pool cannot harvest slow swings at all.*  A constant-mix rebalancer earns
+the variance of short-horizon moves, the quadratic variation.  A smooth
+cycle has almost none of it, however large its amplitude.  Swings are
+harvested only by trades timed across pools: selling a leg near its top,
+buying another near its bottom.  That is the director's work (12.3).
+
+** 12.2 Where the harvest goes
+
+| world | basket                          | over holding | taken by outsiders | captured by the wheel |
+|-------+---------------------------------+--------------+--------------------+-----------------------|
+| fast  | TOKEN payout (the prototype)    | +0.66%       | 1.09%              | 0                     |
+| fast  | BUCK reserve, no arbitrage      | +0.66%       | 0.99%              | 0                     |
+| fast  | + the wheel's arbitrage         | +1.63%       | 0                  | 0.99%                 |
+| fast  | + the director's lean, ungated  | +4.41%       | 0                  | 1.03%                 |
+| fast  | + the lean, turn-gated          | +2.62%       | 0                  | 1.01%                 |
+| cycle | TOKEN payout                    | +0.46%       | 1.06%              | 0                     |
+| cycle | BUCK reserve, no arbitrage      | +1.09%       | 0.37%              | 0                     |
+| cycle | + the wheel's arbitrage         | +1.52%       | 0                  | 0.37%                 |
+| cycle | + the lean, ungated             | +1.08%       | 0                  | 0.37%                 |
+| cycle | + the lean, turn-gated          | +2.17%       | 0                  | 0.37%                 |
+| walk  | TOKEN payout                    | -1.19%       | 1.70%              | 0                     |
+| walk  | + the wheel's arbitrage         | +0.55%       | 0                  | 1.01%                 |
+| walk  | + the lean, turn-gated          | +0.38%       | 0                  | 1.00%                 |
+
+(Per year, of the settled NAV.  Over holding, the random walk's spread
+across seeds is about 1.5-2.5%; the other worlds' are 0.03-0.45%.)
+- cmix earns 2.6% a year over holding in the fast world.  The TOKEN-payout
+  basket keeps about a quarter of that, and the wheel's arbitrage lifts it
+  to about two thirds.
+- The wheel captures what the outsiders took, to the basis point.
+- *Steps and fees.*  At daily steps the arbitrage is worth +1.3% in the fast
+  world (the outsiders took 1.43%); at hourly steps, +0.5%.  A 1% pool fee
+  halves what outsiders take (0.57%), and the arbitrage then adds +0.5%.
+
+** 12.3 The multi-EMA director: what it is for
+
+*Status.*  The Solidity =PairsRebalanceDirector= is built and is the sim's
+default director in every pro-rata and ops run, driven by the
+=DirectorKeeperAgent=.  It is a ladder of 7 EMAs per leg, from 5 to 320
+days, with a quorum of 4 votes on a confirmed turn (=BASKET-REBALANCE.md=
+2c).  The equity prototype did not use it: its Rebalance had fixed targets
+and a 2% band.  The =TurnDirector= in =reserve_basket.py= ports the ladder
+per leg (each TOKEN's log price against the basket's mean) and adds what
+the experiment says it needs.
+
+What the experiment says:
+
+1. *The turn gate alone adds little on LP positions*: about +0.1-0.4% a
+   year.  A pool's weight moves by only half its price move, and the pool
+   already sells into every run within itself.
+2. *The value is in leaning against the excursion.*  Each target is scaled
+   by exp(-tilt x excursion), where the excursion is the leg's price against
+   its anchor, and then renormalized.  The lean is worth +2.8% a year over
+   the arbitrage alone in the fast world.
+3. *The gate is the regime knob.*  In momentum cycles it is what makes the
+   lean pay:
+   - the ungated lean loses 0.5% a year;
+   - quorum 4 of 6 votes gains 0.6-0.8%;
+   - quorum 6 of 6 gains 1.2-1.4%.
+
+   In memoryless reversion it costs, by trading late: quorum 0 gains
+   +2.6-4.4%, quorum 6 only +0.2-0.5%.  In a walk every setting is within
+   noise of zero, slightly negative, with more variance.  This is
+   =BASKET-REBALANCE.md='s frontier again: gated for trends, ungated for
+   reversion.
+4. *The anchor must be much longer than the swings.*
+   - A 320-day EMA anchor against a year-long cycle phase-shifts the lean
+     into a loss: -0.7% at tilt 1, -2.1% at tilt 2.
+   - A near-fixed anchor (a 5000-day EMA) gains +0.6% and +0.8%.
+   - A real anchor is a governed reference for relative prices, or a
+     multi-year EMA.  Its risk is a permanent repricing, which the leash
+     bounds.
+5. *The leash keeps the mandate; the lean only times it.*  A weight more
+   than 30% off its DECLARED target trades regardless of the gate.  Measured
+   against the leaning target, the leash tripped in the middle of a run
+   (a test caught it).
+6. *Proceeds park in the reserve.*  Between selling a leg that has turned
+   down and buying one that has turned up, the BUCK waits in the reserve,
+   up to 3x its target.  Past that, Fund places it anyway.  New credit is
+   placed by itself, and the parked BUCK stays parked
+   (=test_the_turn_director_buys_no_falling_knife=).  The gate needs this
+   parking; without a reserve, Rebalance's proceeds went straight to Fund.
+
+"Let the run run" is the gate: never trim a leg still running up, never buy
+one still running down.  An LP cannot ride a run fully, because its pool
+sells into it.  Riding one would mean holding unpooled TOKEN, a momentum
+sleeve.  This design does not propose one.
+
+** 12.4 The BUCK basis
+
+- *Deposits*: TOKEN or BUCK, valued in BUCK, as now (section 4).
+- *Exits pay BUCK.*
+  - The exit's value is taken at the exiter's marks: each pool at the lower
+    of spot and TWAP, the mirror of entry.  It pays that value less the
+    same charge a BUCK deposit pays, (1+K)/2 of the dearest pool fee.
+  - Its share of the debt is burned, and both come out of the reserve.
+    *No pool is touched.*
+  - An exit the reserve cannot cover goes pro rata: its fraction of
+    everything, the TOKEN sold for BUCK, its own conversion borne.
+- *The reserve* is the wallet's BUCK.  Its target is the larger of
+  =reserve= x gross (fixed) and a flow-sized amount.  The flow-sized amount
+  puts z standard deviations of the daily net flow, x (1+K), at the band's
+  floor, which is where the wheel starts refilling.  (A first cut put 2
+  sigma at the target, and so only about 1 sigma at the floor: it covered
+  81% of exits.)  The reserve floats within +-50% of its target, so
+  deposits and exits NET inside the band without a trade.
+- *The components*, in slot order:
+  - Arb: the outside arbitrageur's trade, made first.
+  - Daily: the director's sample, and the day's flow folded into the
+    reserve's sizing.
+  - Sync.
+  - Deploy: pairs idle TOKEN with the reserve's spare BUCK, then with
+    minted credit, then by selling TOKEN.
+  - Fund: buys the director's pick, or places the overflow, or places new
+    credit alone.
+  - Trim: refills the reserve at its floor, or trims the director's pick.
+- *Routing.*  Every trade takes the better of its pool (counting the part
+  of the fee that comes back to the basket) and the outside market.
+- *The arbitrage takes no narrower band than an outsider's.*  On its own
+  share of a pool the basket trades with itself.  So at the outside price,
+  a "capture" inside the outsiders' band gains only the outside LP's share
+  of the gap, and pays the outside cost on all of it.  That is a
+  rebalancing bet, not an arbitrage
+  (=test_inside_the_band_a_trade_is_not_arbitrage=).  Measured, the narrow
+  band gains nothing over the outsider's edge (within 0.02-0.16% a year,
+  either sign).  This corrects the premise of =ArbKind='s planned v2 ("the
+  band only the basket can take ... recouped by the fee its own pool
+  earns"): what the basket gains is what the outsiders would have taken,
+  and the float lets it take that first.
+
+Flows, in the fast world over a year: 2 arrivals a day (lognormal sizes
+about 10k, 30% in BUCK), 60-day mean holds, about 600 exits, and a first
+holder of 1M who stays:
+
+| basket                   | pool ops per exit | exits paid by the reserve | reserve (of gross) | the stayer's return a year |
+|--------------------------+-------------------+---------------------------+--------------------+----------------------------|
+| TOKEN payout (prototype) |               9.0 | -                         | -                  | -0.86%                     |
+| TOKEN payout, routed     |               7.4 | -                         | -                  | +2.35%                     |
+| BUCK, 5% reserve         |               0.1 | 99.0%                     | 3.8%               | +3.18%                     |
+| BUCK, flow-sized (z = 2) |               0.5 | 92.8%                     | 1.9%               | +2.92%                     |
+
+With no flows, the same stayer earns +1.4-1.5% in every basket.
+- *The flows cost the TOKEN-payout prototype's stayers about 2.3% a year.*
+  The prototype's trades go through its own pools:
+  - a BUCK deposit's deployment (about (1+K)/2 of the deposit);
+  - an exit's conversion of its residue.
+
+  A basket trading in its own pool pays its price impact twice: once as
+  impact, and again when the outside arbitrageur re-pins the pool.
+  Routed, the same flows earn the stayer +0.9% a year: the charges exceed
+  the routed costs.
+- *The reserve earns the stayer +1.4-1.8% a year from the flows*: flows
+  net, the exit charge compensates the stayers, and an exit touches no
+  pool.  The flow-sized reserve covers 93%
+  of exits with half the BUCK of the fixed 5%.  The other 7% are the
+  unusually large retirements, and they go pro rata.
+
+Why the BUCK basis is simpler:
+
+| | TOKEN payout | BUCK basis |
+|-+--------------+------------|
+| an exit | N burns, N collects, residue swaps, N transfers | one transfer and one burn |
+| the payout | a bundle of N TOKENs | BUCK |
+| deposits against exits | none net: every flow is placed or withdrawn | net inside the reserve's band |
+| the arbitrage's float | none: v1 needs a flash-callback cycle | the reserve |
+| the director's proceeds | straight to Fund | parked until a buy is due |
+| where captures land | a TOKEN or BUCK in the wallet, redeployed | BUCK in the reserve |
+
+What it costs:
+- *Cash drag.*  2-6% of the gross earns nothing.  In the table the reserve
+  basket still matches or beats the TOKEN one, because routing and netting
+  pay for it.
+- *An exit charge*, the mirror of the entry charge.
+- *A run.*  Once the reserve is spent, exits go pro rata and bear their own
+  costs, so the first exits pay only the flat charge.  That advantage is
+  bounded by the charge, and the stress fee (5, 11.5) is the lever.  A big
+  exit may prefer the pro-rata path when its routed conversion costs less
+  than the charge.  It still pays its own way: the stayers' price stays
+  whole (=test_an_exit_beyond_the_reserve_goes_pro_rata_and_bears_its_conversion=).
+
+** 12.5 What else the experiments taught
+
+1. *Don't trade in your own pool when you can route.*  See 12.4.  It
+   applies to the TOKEN design too.
+2. *The pool fee is a moat.*  At 1% the outside arbitrage takes half as
+   much, and the fee pays for it.  The wheel's arbitrage matters most where
+   prices jump against the fee (coarse steps).
+3. *Judge a basket against its own holdings and against cmix*, not against
+   the TOKEN a depositor brought.
+4. *The prototype's first deposit, placed through thin pools, moved them
+   several-fold* before arbitrage pinned them back.  This is the price
+   impact section 4 leaves shared.  With routing it is one outside trade.
+
+** 12.6 If ruled in: the Solidity plan's changes
+
+- *=redeem=*, beside the unchanged =_exit= fallback:
+  - The common path pays BUCK from =idleBuck= and burns f x debt.  It is
+    O(1), with no pool call and no =minOut= per TOKEN (one =minBuck=).
+  - The pro-rata fallback keeps the present =_exit= and ends by selling
+    its TOKEN through the better route.
+- *Storage*: =reserveBp=, =rbandBp=, =flowZ=, =flowMs=, =dayFlow=,
+  =lastDay=, =parkBp=, =arbBandBp=; the director's anchor (below).
+- *The arbitrage moves into the basket's components* as the seventh kind,
+  with the reserve as its float:
+  - Its route is =ArbKind='s triangle: the basket's pool, TOKEN/USDC,
+    BUCK/USDC.
+  - Its size is the outsider's band edge, with no v2 band.
+  - =ArbKind= leaves =BasketWheel=, which keeps only =EquityKind=.
+- *The director*:
+  - =PairsRebalanceDirector= (or a per-leg successor) supplies the leaning
+    targets and the two gates (=mayTrim=, =mayFund=).
+  - Its anchor is new: a governed reference relative price per leg, or a
+    long EMA slot.
+  - The leash is measured against the declared targets.
+- *Daily*: one slot.  It folds the day's net flow into =flowMs= and pokes
+  the director's sample.
+- *Tests*: the 19 of =test_reserve_basket.py=, one for one.  The harvest
+  ordering (=test_the_wheel_takes_back_what_outside_arbitrage_took=) becomes
+  a sim check in E5.
+- *Section 10.9's order*:
+  - Step 2 becomes simpler (the exit).
+  - Step 3 adds Arb, Daily and the director's gates.
+  - The Savings tab shows one BUCK payout.
+
+** 12.7 The rulings asked for
+
+1. *BUCK payouts*, in place of ruling 4 (TOKEN payouts).  A depositor who
+   wants TOKEN swaps once, into the basket's own pool.
+2. *The reserve*: a fixed fraction, or flow-sized (z = 2 at the floor, a
+   1% floor fraction).
+3. *The wheel's arbitrage inside the basket*, with the reserve as its
+   float, taking the outsider's edge.
+4. *The director*: the lean (tilt 1), its anchor (a governed reference, or
+   a multi-year EMA), and the quorum as the regime knob (4 by default; 6
+   for trend-like swings, 0 for fast reversion).
+5. *Symmetric entry and exit charges*, (1+K)/2 of the dearest pool fee for
+   BUCK.
