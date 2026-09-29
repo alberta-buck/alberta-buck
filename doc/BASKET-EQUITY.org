@@ -1,233 +1,536 @@
 #+TITLE: The BuckBasket as equity: K credit, TOKEN payouts, shared returns
 #+AUTHOR: Perry Kundert (design owner) with Claude
-#+DATE: 2026-09-28
+#+DATE: 2026-09-29
 #+OPTIONS: ^:nil toc:2 num:t
 
 * 0. Status
 
-A design, not yet built.  It replaces the pro-rata basket's principal /
-burn-obligation accounting (=BuckBasketProRata=, inherited by the ops and
-Fence shells) with shares of equity.  The rulings in section 1 are the
-design owner's (2026-09-28); the choices in section 7 are still open.
+The design is settled and prototyped, but not yet built in Solidity.
+
+- *The prototype* is =alberta_buck/sim/equity_basket.py=: pure Python with
+  no EVM, covering the pools, the accounting and the wheel's components.
+  Its 28 tests, one per promise this document makes, are in
+  =alberta_buck/test/test_equity_basket.py=; run them with
+  =make nix-venv-test-equity=.
+- *The contracts* are not started.  Section 10 is the plan, step by step.
+  A fresh session restarts there.
+
+It replaces the pro-rata basket's principal and burn-obligation accounting
+(=BuckBasketProRata=, which the ops and Fence shells inherit) with shares of
+equity, one pooled debt, and a wallet the work wheel operates.  The rulings
+are the design owner's.  Everything else is the simplest machine the
+prototype found that keeps them.
 
 * 1. The rulings
 
-1. *Every deposit is equity, valued in BUCK* -- a TOKEN deposit and a BUCK
-   deposit alike.
-2. *Each deposit is matched by K worth of BUCK credit* that the basket
-   mints to pair with it, whatever was deposited (K = =buckK= at the
-   deposit: the same credit-per-unit-of-real-value BuckCredit grants
-   against insured assets).
+From 2026-09-28:
+
+1. *Every deposit is equity, valued in BUCK*, whether it is TOKEN or BUCK.
+2. *Each deposit is matched by K worth of BUCK credit*, which the basket may
+   mint, whatever was deposited.
 3. *Depositors own the gains.*
-4. *Payouts are in TOKENs.*
-5. *The basket's share:* "fair" is K's share of the returns and losses;
-   splitting the excess returns with the depositor may be the better
-   incentive for depositors and the better return for the basket.  Both
-   are designed below (section 4).
+4. *Payouts are in TOKEN.*
 
-* 2. Why: what the present accounting does
+From 2026-09-29:
 
-A receipt records a BUCK principal R (for a TOKEN deposit worth R the
-basket mints R to pair with it); its claim is V = R x 2B/O (the
-depositors' BUCK side B, total principal O); a redemption burns R and
-pays min(V/2, V - R), in TOKEN only, any BUCK surplus to the treasury.
+5. *The basket's share is shared excess*: 25% of a receipt's gain above
+   its cost basis, taken at exit.  It takes nothing of a loss.
+6. *Withdrawal is simple*: pro rata.
+7. *Rebalancing is separate from deposit.*  A deposit only leaves its
+   proceeds in the basket's wallet.  State-machine components operated by
+   the work wheel deploy, fund, distribute and rebalance them.
+8. *The simplest design that meets the goals*: prototype it first, then
+   document it for implementation.
 
-| TOKEN moves (in BUCK)  | holding it | depositor now     |
-|------------------------+------------+-------------------|
-| +21%                   | +21%       | +10% (treasury +10% of R) |
-| -19%                   | -19%       | -20%              |
+* 2. What it replaces, and why
 
-The treasury takes the BUCK half's gains; the depositor covers the BUCK
-half's shortfalls.  And the accounting underneath has four faults the
-equity design removes by construction (measured on
-=wip/basket-accounting=, and in =doc/CONVERGENCE.org= 5.1):
+In the present basket, a receipt records a BUCK principal R, which is the
+BUCK minted to pair its TOKEN.  Its claim is V = R x 2B/O, where B is the
+depositors' BUCK side and O the total principal.  A redemption burns R and
+pays min(V/2, V - R) in TOKEN; any BUCK surplus goes to the treasury.
 
-- *BUCK deposits count double.*  Their principal is their whole value,
-  where a TOKEN deposit's is half of its; a BUCK deposit and redemption
-  pays the depositor TOKEN out of the other depositors' positions and burns
-  her BUCK (4,000 BUCK in: a claim of 7,999; the TOKEN depositor -4,000
-  once arbitrage restores the price).  Alone in a pool, she is paid
-  nothing.
+| TOKEN moves (in BUCK) | holding it | depositor now             |
+|-----------------------+------------+---------------------------|
+| +21%                  | +21%       | +10% (treasury +10% of R) |
+| -19%                  | -19%       | -20%                      |
+
+The treasury takes the BUCK half's gains, and the depositor covers the BUCK
+half's shortfalls.  The accounting underneath also has faults the equity
+design removes by construction:
+
+- *BUCK deposits count double.*  A BUCK deposit's principal is its whole
+  value, where a TOKEN deposit's is half of its value.  A BUCK deposit and
+  redemption pays TOKEN out of the other depositors' positions.
 - *Entry is at face, not at value.*  A new deposit shares the pool's
-  history at once (+5% after a 5% move).
-- *Value is read from pool balances and at spot*: balances hold
-  anyone's tokens; spot is the transactor's to push, within a 5% guard.
+  history at once: +5% after a 5% move.
+- *Value is read from pool balances and at the spot.*  Balances include
+  anyone's tokens, and the spot can be pushed by whoever is trading, within
+  a 5% guard.
 
-* 3. The model
+* 3. The machine on one page
 
-** 3.1 The units
+** 3.1 State
 
-- *Shares of the GROSS position.*  Receipts hold shares of everything the
-  basket's depositor positions are worth -- every pool's liquidity at a
-  TWAP price, their accrued fees, any loose TOKEN or BUCK awaiting
-  re-investment.  Gross value per share: G/S.
-- *Each receipt carries its own debt* d: the BUCK the basket minted for it
-  (d = K0 x E at its deposit, K0 the K of that day).  Debt is per receipt,
-  not pooled, so deposits made at different K share one share pool fairly.
-- *Each receipt carries its cost basis* E: its equity at deposit, in BUCK.
-- A receipt's EQUITY is s x G/S - d.  Depositors own it.
+| state         | what it is                                                                                  |
+|---------------+---------------------------------------------------------------------------------------------|
+| wallet        | =idle[i]= TOKEN_i and =idleBuck=, placed by no one yet; counted, never read from a balance |
+| positions     | one full-range position per pool; its liquidity =L[i]= is the basket's own count           |
+| =debt=        | ONE pooled number: the BUCK the basket has minted and not burned                            |
+| =pending=     | credit that deposits brought, not yet minted                                                |
+| =S=           | shares outstanding                                                                          |
+| =treasury=    | the basket's own shares (the 25% cut is paid in them)                                       |
+| receipts      | per ERC-721: (=shares=, =basis=), where the basis is the BUCK value brought, less what has left |
 
-** 3.2 A deposit
+** 3.2 Value (in BUCK, at each pool's TWAP P_i)
 
-Of TOKEN_i worth E, or of BUCK E (valued at the pool's TWAP, the spot
-guarded against it):
+#+begin_example
+  gross  G  = idleBuck + sum_i [ (idle_i + owedTok_i) P_i + owedBuck_i + 2 L_i sqrt(P_i) ]
+  equity Q  = G - debt
+  price  pi = Q / S
+  headroom  = K Q - debt              (K of the day)
+#+end_example
 
-1. The basket mints m = K x E BUCK -- its credit -- and records d = m.
-2. It LPs the deposit and the credit, (1+K)E, full range, balanced: a
-   TOKEN deposit sells (1-K)E/2 of its TOKEN for BUCK first; a BUCK deposit
-   (into the director's hint pool) buys (1+K)E/2 of TOKEN.
-3. Shares are minted on the GROSS value actually added, measured at the
-   TWAP after the LP: s = dG x S/G.  The swap's fee and impact are the
-   depositor's, not the other shareholders'.  Entry is at value: a new
-   deposit neither gains nor loses by the pool's history.
+=2 L sqrt(P)= is the full-range position's fair value.  It is the value of
+the reserves the position holds at the TWAP, so it cannot be moved by
+pushing the spot.
 
-TOKEN and BUCK deposits are treated identically: equity E, debt K x E,
-position (1+K)E.  At K < 1 the equity is (1+K)/2 exposed to the TOKEN at
-inception (87.5% at K = 0.75); the BUCK part is the deposit's own.
+** 3.3 Two verbs, four components
 
-** 3.3 A redemption
+- *deposit(asset, amount)* books equity: it mints shares at the price, adds
+  K x value to =pending=, and leaves the asset in the wallet.  Nothing is
+  swapped and nothing is minted (section 4).
+- *redeem(id, fraction)* takes the receipt's share of everything, pro rata.
+  It burns its share of the debt first, gives the treasury its cut of the
+  gain in shares, and pays TOKEN (section 5).
+- *The wheel's components* do all the placing (section 7):
+  - Sync: fees go to the wallet.
+  - Deploy: idle TOKEN is paired with BUCK and added as liquidity.
+  - Fund: idle BUCK and credit go to the neediest pool.
+  - Rebalance: overweight liquidity goes back to the wallet.
 
-1. Withdraw the receipt's share s/S of every depositor position,
-   principal AND its share of the accrued fees -- pro rata, so fair by
-   construction with no valuation needed.  (Sell-high draws -- more from
-   overweight pools -- remain available, valued at the TWAP.)
-2. Burn the receipt's debt d from the BUCK withdrawn; cover a shortfall by
-   selling TOKEN, convert an excess BUCK into TOKEN.  The debt is always
-   repaid first.
-3. Apply the split (section 4) to the gain = equity at exit - E.
-4. Pay the rest in TOKEN: the depositor's chosen constituent, or the
-   withdrawn mix, converted through the basket's own pools at a
-   TWAP-guarded price.
+** 3.4 The invariants (checked after every step of the prototype's scenario)
 
-** 3.4 K
+1. =minted - burned == debt=: every BUCK the basket minted is either
+   outstanding in =debt= or burned.
+2. =sum(receipt.shares) + treasury == S=.
+3. =0 <= pending <= K x gross=.
+4. At every mint, =debt + amount <= K x equity=.  This is checked only at
+   the mint: after a price fall the debt may exceed K x equity, and that is
+   no margin call (section 6).
 
-The credit is fixed at the deposit.  A later K cut withdraws the OFFER
-(new deposits get less credit), never a receipt's credit: no margin call
-(the K-cut doctrine).  A later K rise could let a receipt top up its
-credit -- the basket minting more BUCK into its pools against existing
-equity, a monetary expansion by the basket -- which is left to the
-monetary rules, not this design.
+* 4. Deposit
 
-K now governs the basket's issuance the way it governs BuckCredit's: BUCK
-created per unit of real collateral.  Per deposit the basket mints K
-instead of 1, so a basket at K = 0.75 has ~12% less depth per unit of
-equity than today's 1:1 pairing.
+1. *Valuation, conservative both ways.*  The deposit is valued at the LOWER
+   of its pool's spot and TWAP, and the basket it joins at the HIGHER of
+   each pool's.  A lagging TWAP or a pushed spot then gives the entrant no
+   edge in either direction (=test_a_lagging_twap_gives_the_entrant_no_edge=,
+   TOKEN and BUCK, spot up and down).  A guard (5%) only bounds a
+   manipulated pool; it no longer refuses ordinary lag.
+2. *The deposit pays for its own deployment.*  Shares are minted on its
+   value less the pool fee on the swap the wheel will make to pair it:
+   - (1+K)/2 of a BUCK deposit, at the dearest pool's fee, because the Fund
+     pool is not yet chosen;
+   - (1-K)/2 of a TOKEN deposit, at its own pool's fee.
 
-** 3.5 Fees, the wheel, the stress fee, the treasury
+   At 0.3% and K = 0.75 that is 0.26% for BUCK and 0.04% for TOKEN.  Price
+   impact is not charged: it grows with the deposit's size against the
+   pools' depth, and stays shared.  A per-block deposit cap is the lever if
+   it ever matters (=test_a_deposit_pays_for_its_own_deployment=).
+3. *Shares* = net value x S / Q_high, or net value for the first deposit.
+4. *Credit*: =pending += K x value=, with K the K of the day.
+5. *The asset lands in the wallet*, and that is all.  TOKEN and BUCK
+   deposits are identical: equity E, credit KE, and after the wheel places
+   them a position of (1+K)E
+   (=test_a_buck_deposit_is_the_same_equity_as_a_token_deposit=).
 
-- *Fees* are counted in G as they accrue (the positions' tokensOwed, from
-  the pools' fee growth -- a view) and leave with each exit's share; the
-  wheel compounds them into liquidity periodically (a routine kind), with
-  no debt: fees are equity.
-- *The wheel's credits* are equity with no debt -- simpler than today's
-  bonus principal.  The fee-band enhancement (counting the fee a cycle pays
-  into the basket's own pool) falls out: that fee is G.
-- *The stress fee* is a share of an exit's payout left in G, for the
-  remaining shareholders.
-- *The treasury* holds the basket's share of returns (section 4) in its
-  own position (liquidity with no shares) -- the basket's own capital.
-- *The monetary desk* is untouched: its book is plain balances outside the
-  depositor positions.
+* 5. Redemption
 
-** 3.6 Supply integrity
+In this order:
 
-A receipt's debt is burned before anything is paid, so every BUCK the
-basket minted is burned when its deposit leaves.  Only if a position falls
-below its debt -- (1+K) sqrt(p) < K, a TOKEN collapse to (K/(1+K))^2 of
-its entry price (18% at K = 0.75, 24% at 0.95) -- is there bad debt, which
-the treasury's capital absorbs first.
+1. *The cut.*  gain = shares x pi - basis.  The treasury takes
+   lambda x max(gain, 0) / pi shares (lambda = 25%), so the rest of the
+   receipt's shares, =out=, leave.
+2. *Withdraw the fraction f = out / S of everything*: the wallet's idle
+   TOKEN and BUCK, every position's liquidity, and every owed fee.  This
+   is pro rata, so it is fair by construction and needs no valuation.
+3. *Burn f x debt first.*  If the BUCK withdrawn exceeds it, the residue
+   is swapped into TOKEN, pro rata to the TOKEN being paid.  If it falls
+   short, TOKEN is sold to cover the shortfall.  If even that cannot cover
+   it, the redemption *refuses* (=Underwater=) rather than burn less than
+   its share.
+4. *Drop f x pending*: the exit takes its share of the credit not yet
+   drawn.  Otherwise orphaned credit would accrue to the holders who stay.
+5. *Pay TOKEN*: the withdrawn mix, one transfer per constituent.  A
+   single-TOKEN payout is a router's job, at the redeemer's cost.
 
-* 4. The split: two designs
+The exit's own swaps (residue or shortfall) are its own costs, because they
+come out of its payout.  A redemption straight after a deposit takes back
+at most what it brought (=test_a_round_trip_takes_back_only_its_own=), and
+an exit leaves the others' price whole
+(=test_a_pro_rata_exit_leaves_the_others_price_whole=).
 
-Per unit of equity E, K = 0.75, the TOKEN moving by p in BUCK over a
-receipt's life and a harvest h (fees, rebalancing, the wheel's captures)
-on the position.  "Lender" is the equity before any split: the position
-(1+K)E(sqrt p + h) less the debt KE.
+- *The treasury* leaves by the same door with no cut (=redeemTreasury=,
+  governance only).  Its shares carry their share of the debt like anyone's
+  (=test_the_treasury_leaves_by_the_same_door=).
+- *The stress fee* (CARRY-CONVEXITY D2) carries over as an exit fee.  The
+  shares retire, but their fee fraction of the assets, and of the debt,
+  stays with the holders who remain.  It is off by default; its condition
+  (a duress exit while BUCK is dear) is the present shell's
+  (=test_an_exit_fee_stays_with_the_holders_who_stay=).
 
-| scenario             | holding | today (treasury) | lender | *fair* (basket) | *shared, lambda 25%* (basket) |
-|----------------------+---------+------------------+--------+-----------------+-------------------------------|
-| p = 1.00, h = +3%    |   100.0 | 103.0 (+3.0)     |  105.2 | 103.0 (+2.25)   | 103.9 (+1.31)                 |
-| p = 1.21 (TOKEN +21%)|   121.0 | 110.0 (+10.0)    |  117.5 | 110.0 (+7.50)   | 113.1 (+4.38)                 |
-| p = 0.81 (TOKEN -19%)|    81.0 |  80.0 (0)        |   82.5 | 90.0 (-7.50)    |  82.5 (0)                     |
-| p = 0.81, h = +3%    |    81.0 |  86.0 (0)        |   87.8 | 93.0 (-5.25)    |  87.8 (0)                     |
+* 6. Credit and K
 
-** 4.1 Fair: K's share of returns and losses
+- *Credit follows deposits.*  A deposit of E brings KE of =pending= at the
+  K of its day.  The wheel mints it only as it places the deposit (Deploy
+  and Fund), and never past =headroom = K x Q - debt= at the K of the day
+  it mints.
+- *Earnings compound unlevered.*  Fees and the wheel's captures are equity
+  with no credit.  Rebalancing and exit residue never mint
+  (=test_fees_are_equity_and_compound_unlevered=, =test_residue_never_mints=).
+  So leverage drifts below K as the basket earns, and above it after a
+  fall.
+- *A K cut is no margin call.*  Nothing is called back; it only shrinks
+  headroom.  New money gets only the room the smaller offer leaves, and the
+  pooled debt rises back to K x Q (=test_a_K_cut_is_no_margin_call=).
+- *A K rise re-offers the credit deposits brought.*  Pending credit mints
+  again as headroom opens, and never beyond what the deposits brought.
+- *The debt is pooled.*  Every share carries the same debt ratio, so
+  deposits made at different K share one pool fairly: the difference
+  between their K lives in the pending credit they brought, until it is
+  drawn.
+- *Supply integrity.*  Each exit burns its full share of the debt before
+  anything is paid (=test_the_debt_is_whole_and_burned_before_any_payout=).
+  Bad debt needs a TOKEN collapse below (K/(1+K))^2 of the entry price
+  (18% at K = 0.75); before that, the redemption refuses
+  (=test_an_underwater_redemption_refuses_rather_than_steals=).
 
-The basket put in K for the depositor's 1, so it takes K/(1+K) of every
-gain and pays K/(1+K) of every loss (43% at K = 0.75): the depositor ends
-with E(sqrt p + h) -- exactly an unlevered LP of their own deposit.
+* 7. The wheel's components
 
-- For: symmetric; the depositor's downside is halved against today's.
-- Against: the basket carries half the downside of every position -- it
-  needs a first-loss reserve (its accumulated gain share), and beyond the
-  reserve a loss share means BUCK it cannot burn (net issuance).  The
-  depositor gets nothing for the credit: their return is what LPing alone
-  would earn.
+Each component is a wheel kind: slots, a =due= view and a =run=.  None of
+them is a user's verb.  Every component works only on more than a *grain*
+(1e-4 of the gross), so dust neither triggers work nor holds the basket
+unsettled.
 
-** 4.2 Shared excess: depositors own the levered equity, the basket takes a share of the gain
+| component | slots | due when                                                         | run                                                                                                                 |
+|-----------+-------+------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------|
+| Sync      | N     | pool i's owed fees > grain (on chain: once per epoch)            | collect them into the wallet                                                                                        |
+| Deploy    | N     | idle TOKEN_i > grain                                             | pair it with the wallet's BUCK, then with minted pending credit; sell part of the TOKEN only if both fall short; add liquidity to pool i |
+| Fund      | 1     | no TOKEN waiting, and idle BUCK + mintable credit > grain        | take the neediest pool j (the largest target x (positions + available) - position); mint just enough; swap half of the amount into TOKEN_j (for Deploy) |
+| Rebalance | N     | the basket is *settled* and pool i's weight > target + band      | unwind min(excess, step x position) of pool i to the wallet; sell its TOKEN for BUCK (for Fund)                     |
 
-The depositor owns the equity, gains and losses (the "lender" column); at
-exit the basket takes lambda of the GAIN above the receipt's cost basis,
-nothing on a loss (a per-receipt high-water mark: fees are taken only at
-exit, so the basis is the mark).  Taken in TOKEN, into the treasury.
+*Settled* means nothing worth placing waits in the wallet or as mintable
+credit.  While Deploy and Fund are placing new money the weights are in
+flux, and a Rebalance then would fight them.
 
-- For: the depositor gets the credit's leverage on the harvest -- (1+K)h,
-  5.25% on a 3% harvest before the basket's share -- and more of the
-  upside than "fair" whenever lambda < K/(1+K); the basket earns a share of
-  a levered harvest across the whole basket and never carries a
-  depositor's loss (its minted BUCK is repaid first, section 3.6); it is
-  the standard, legible performance fee.
-- Against: the depositor carries the levered downside (-17.5% where the
-  TOKEN fell 19%: less than holding, because the equity is 87.5% TOKEN).
-- lambda = K/(1+K) gives the depositor exactly "fair"'s upside with the
-  full downside -- so the incentive is lambda BELOW it: 20-30%.
+How work flows:
 
-** 4.3 The benchmark ("excess" over what)
+| event          | the wheel's path                                        |
+|----------------+---------------------------------------------------------|
+| TOKEN deposit  | Deploy(i)                                               |
+| BUCK deposit   | Fund -> Deploy(j), pool by pool, up to the targets      |
+| fees           | Sync(i) -> Deploy(i) (-> Fund, for their BUCK)          |
+| a price move   | Rebalance(i) -> Fund -> Deploy(j)                       |
+| an arb capture | the wallet (TOKEN or BUCK) -> Deploy / Fund             |
+| an exit        | none: redeem draws pro rata from the wallet and positions |
 
-Section 4.2 measures the gain against the cost basis (in BUCK).  Two
-alternatives: a hurdle (the basket takes its share only of the gain above
-a rate -- BUCK's demurrage, say, so a depositor always nets at least what
-holding BUCK costs); or holding the TOKEN (the basket's share only of what
-it earned beyond the TOKEN's own move -- the purest "excess", but at K < 1
-the equity is not fully TOKEN-exposed, so part of that difference is
-direction, not harvest).  The cost basis is the simplest and is
-recommended; a hurdle is a one-parameter refinement.
+Deploy's swap belongs to the deposit, which paid the entry charge for it.
+Rebalance's trades belong to the basket, like all rebalancing: a TOKEN
+deposit that overweights its pool leaves Rebalance a job, and one that
+underweights it saves Rebalance a job.  Fund sizes each step to the
+neediest pool's gap, so a BUCK deposit is never dumped into one pool and
+then unwound (=test_funding_fills_every_pool_to_target_without_churn=).
 
-* 5. Recommendation
+The targets and the band are the simple policy: equal weights and 2%.  The
+director (=IRebalanceDirector=) can supply the policy instead.  Its
+=redeemHint= and =effortOf= choose Rebalance's pool and size, its
+=depositHint= chooses Fund's pool, and its deviation-times-MA timing
+(=BASKET-REBALANCE.md=) gates Rebalance's =due=.
 
-*Shared excess (4.2), lambda = 25%, against the cost basis, taken at
-exit, in TOKEN.*  It keeps the basket out of the depositors' losses (no
-reserve to size, no BUCK that cannot be burned), pays the depositor the
-credit's leverage on the harvest, and pays the basket a quarter of every
-depositor's gain -- on a (1+K)-levered harvest across the whole basket.
-Fair (4.1) remains a governance switch if the basket should share losses.
+* 8. The split
 
-* 6. Building it
+lambda = 25% of the gain above the cost basis, at exit, in shares moved to
+the treasury, and nothing on a loss.  Per unit of equity E at K = 0.75,
+with the TOKEN moving by p (in BUCK) over the receipt's life and a harvest
+h (fees, rebalancing, the wheel's captures) on the position:
 
-1. *Contracts.*  The pro-rata shell's deposit / redeem / claim accounting
-   becomes shares, per-receipt debt and basis, and a TWAP-valued G (with
-   accrued fees from the pools' fee growth).  The Fence has ~1 KB of
-   headroom, so the accounting core lives where the venue logic does (a
-   facet behind the shell's fallback), as the wheel's credits already do.
-   The receipt's =deposits(id)= becomes (shares, debt, basis, token, time).
-2. *Tests -- the properties, one each:* a deposit neither gains nor loses
-   by the pool's history (entry neutrality); an immediate redemption
-   returns the deposit less its own costs (TOKEN and BUCK alike); a
-   redemption takes exactly its pro-rata share; the debt is burned in full before any payout (supply
-   integrity); the split's arithmetic at lambda and in fair mode; K cut
-   after a deposit changes nothing of it.
-3. *The simulation.*  The direct-mint agents' bookkeeping (they read
-   =deposits=), eqmetrics' depositor readings, the server's savings block
-   and the Savings tab's receipt value (a receipt's equity replaces
-   min(V/2, V - R)).
-4. *Then rerun* the savings experiments -- E2-E4 read depositor P&L
-   through the present accounting, BUCK deposits and all.
+- depositor equity = (1+K) E (sqrt p + h) - K E
+- payout = equity - 0.25 x max(equity - E, 0)
 
-* 7. Open
+| scenario              | holding | today (treasury) | equity | *payout* (basket) |
+|-----------------------+---------+------------------+--------+-------------------|
+| p = 1.00, h = +3%     |   100.0 | 103.0 (+3.0)     |  105.2 | 103.9 (+1.31)     |
+| p = 1.21 (TOKEN +21%) |   121.0 | 110.0 (+10.0)    |  117.5 | 113.1 (+4.38)     |
+| p = 0.81 (TOKEN -19%) |    81.0 |  80.0 (0)        |   82.5 | 82.5 (0)          |
+| p = 0.81, h = +3%     |    81.0 |  86.0 (0)        |   87.8 | 87.8 (0)          |
 
-1. lambda, and whether it is fixed or governed.
-2. The benchmark: cost basis (recommended) or a hurdle.
-3. Redemption draws: pro rata (fair by construction) or sell-high
-   (helps rebalance; needs TWAP valuation).
-4. The payout TOKEN: the depositor's choice, or the withdrawn mix.
-5. K top-ups when K rises: here, or left to the monetary rules.
+The p rows with h = 0 are =test_the_design_payoffs=, and the arithmetic of
+the cut is =test_the_basket_takes_a_quarter_of_the_gain_and_none_of_a_loss=.
+
+The "fair" alternative, K/(1+K) = 43% of gains and losses, leaves the
+depositor an unlevered LP and puts the basket in every loss.  It would
+need a first-loss reserve, and BUCK it cannot burn beyond that.  It is not
+built.  The credit's leverage on the harvest, (1+K)h, is the depositor's
+reward.  The basket's is a quarter of every gain, on a levered harvest,
+and it never carries a loss: its minted BUCK is burned first.
+
+* 9. What the prototype taught
+
+Each of these changed the design; each has its test.
+
+1. *Pooled debt, not per-receipt debt.*  A single number, fair because
+   every share carries the same debt ratio.  The K of each deposit's day
+   lives in the pending credit it brought.
+2. *Credit comes from deposits, not from value.*  Fees arrive in both
+   tokens and would otherwise earn no credit, or would re-lever without a
+   deposit.
+3. *Exits take their share of pending credit.*  Without it, credit
+   orphaned by early exits accrues to those who stay.
+4. *The cap binds at the mint, not as an invariant.*  debt <= K x Q fails
+   the moment prices fall, which is no margin call.
+5. *Conservative entry.*  At the TWAP alone, a TOKEN deposit while the spot
+   is below a lagging TWAP bought shares cheap.
+6. *The entry charge.*  Without it, a BUCK deposit's deployment swaps cost
+   the other holders about 0.26%.
+7. *Fund sized to the gap.*  All-to-the-neediest dumped a BUCK deposit into
+   one pool, and Rebalance then unwound two thirds of it.
+8. *Rebalance only when settled.*  Otherwise it fights Fund while new money
+   is still being placed.
+9. *The grain.*  With a dust threshold, Sync collected crumbs every block,
+   the wallet was never settled, and rebalancing starved: weights drifted
+   to 0.28-0.38 against a 2% band.
+10. *Explicit books.*  The wallet and the liquidity are the basket's own
+    counters.  The desk's balances, stray transfers and liquidity others
+    mint to the basket's position key are never counted.  Pool reads are
+    for prices only.
+11. *Price impact stays shared.*  It is quadratic in size over depth.
+    Charging it would take per-deposit attribution in a pooled wallet,
+    which is not worth it.
+
+** 9.1 The whole machine (=run_scenario=)
+
+The scenario runs 3 pools, 720 steps and OU log-prices (vol 2%, reversion
+2% or 0).  An outside arbitrage re-pins every pool each step and pays the
+fees; depositors arrive at 15% per step (30% of them with BUCK) and leave
+at 8%; the wheel does 6 units of work per step.  Invariants 1-4 hold at
+every step (=test_the_whole_machine_keeps_its_books=, seeds 1-3).
+
+| market      | seed | exits | mean return | vs holding | treasury | equity | debt/equity | weights        |
+|-------------+------+-------+-------------+------------+----------+--------+-------------+----------------|
+| reverting   |    1 |    58 | +1.68%      | -2.23%     |     4893 | 438896 |       0.694 | 0.32 0.34 0.34 |
+| reverting   |    2 |    53 | +1.01%      | -1.61%     |     3563 | 498819 |       0.705 | 0.31 0.35 0.34 |
+| reverting   |    3 |    57 | +1.20%      | +0.12%     |     4566 | 491787 |       0.705 | 0.33 0.33 0.34 |
+| reverting   |    4 |    51 | -2.29%      | -0.86%     |      964 | 485878 |       0.752 | 0.32 0.35 0.33 |
+| random walk |    1 |    58 | -3.02%      | -1.11%     |     3303 | 497650 |       0.611 | 0.33 0.34 0.33 |
+| random walk |    2 |    53 | -2.15%      | -2.16%     |     2684 | 518281 |       0.676 | 0.31 0.35 0.34 |
+| random walk |    3 |    57 | -0.93%      | -1.73%     |     5415 | 564335 |       0.617 | 0.33 0.33 0.34 |
+| random walk |    4 |    51 | -1.70%      | +0.88%     |     2635 | 520185 |       0.717 | 0.34 0.34 0.32 |
+
+This proves the books, not the returns.  Holdings are short and prices are
+noise, so a receipt's result is mostly its price path (at K = 0.75 the
+equity is 87.5% TOKEN at entry, with the LP's negative convexity) and its
+entry and exit costs.  In every run the treasury earns, leverage drifts
+below K as earnings compound unlevered, and the weights stay near target.
+Whether depositors beat holding is for the sim's experiments (section
+10.8), with real flows, the director and the arbitrage kind.
+
+* 10. Building it in Solidity
+
+** 10.1 Where it goes
+
+- *A new shell, =BuckBasketEquity=*, on the shared =BuckBasketStorage=,
+  replaces =BuckBasketProRata= as the base of =BuckBasketOps= (the desk).
+  It keeps the constituents, the wiring, the receipt NFT, the director
+  hook, the venue-facet dispatch and the desk.  It drops the allocator
+  (=_allocateSellHigh=, =_allocateSingleToken=), =_bonusSlice= and
+  =stressBonusPrincipal=, =treasuryLiquidity= and =treasuryBuckPending=
+  with =sweepTreasury=, and =rebalanceStep= (now the Rebalance component).
+  =creditDepositors= and =creditTreasury= become =creditWallet(token, amount)=.
+- *The venue facet* (=BuckBasketUniswapV3=) supplies the pool primitives,
+  built on the =wip/basket-accounting= pieces (=_positionBuck= is the
+  position's fair value at the TWAP, =_virtualReserves= the swap sizing,
+  and =withdrawLiquidity= returns principal only):
+
+  | primitive                               | does                                                           |
+  |-----------------------------------------+----------------------------------------------------------------|
+  | =positionMint(i, tok, buck)=            | add full-range L; return (L, tokUsed, buckUsed)                |
+  | =positionBurn(i, L)=                    | remove L; collect exactly the principal burned                 |
+  | =positionSync(i)=                       | burn(0) then collect everything owed; return (tok, buck)       |
+  | =swapExactIn(i, sellBuck, amountIn, minOut)= | one swap in pool i                                        |
+  | =sqrtPrices(i)=                         | (spot, TWAP) sqrtP: the valuation's only pool read             |
+
+- *The components live in the basket*, as a second facet (=EquityWheelFacet=)
+  if the shell's size demands it.  They move the basket's assets and need
+  its V3 callbacks.  The wheel gets one thin kind, =EquityKind=
+  (=src/wheel/UpkeepKinds.sol=), with 3N+1 slots.  Its =_due= calls
+  =basket.wheelDue(c, i)= and its =_run= calls =basket.wheelStep(c, i)=
+  (=onlyWheel=).  =BasketWheel= adds it to its bases and loses =SweepKind=.
+  =ArbKind._distribute= calls =creditWallet=.
+- *Size*: =BuckBasketOps= is 21.4 KB today, and the allocator it drops is
+  the bulk of ProRata's 16.2 KB.  Measure after step 2 (section 10.9); the
+  facet split is the fallback.
+- *The Fence* (=BuckBasketFence=) stays on ProRata.  It is a separate
+  experiment, and not this design's.
+
+** 10.2 Storage (appended to =BuckBasketStorage=; the old fields stay for layout)
+
+#+begin_src solidity
+struct Share { uint128 shares; uint128 basis; address token; uint64 time; }
+mapping(uint256 => Share) public holdings;       // replaces deposits(id)
+uint256 public totalShares;
+uint256 public treasuryShares;
+uint256 public debt;                             // == minted - burned by the equity path
+uint256 public pendingCredit;
+uint256 public idleBuck;
+mapping(uint256 => uint256) public idleToken;    // native decimals
+mapping(uint256 => uint128) public liquidityOf;  // own count; never pool.positions()
+uint16  public lambdaBp;       // 2500
+uint16  public bandBp;         // 200
+uint16  public stepBp;         // 500
+uint16  public grainBp;        // 1 (= 1e-4 of gross)
+uint16  public guardBp;        // 500: max |spot/TWAP - 1| on any pool at a deposit
+uint32  public syncEvery;      // blocks (or epochs) between a pool's Syncs
+mapping(uint256 => uint32) public lastSync;
+uint16  public exitFeeBp;      // the stress fee's current bp, set by its rule (0: off)
+#+end_src
+
+Units: values and shares are 1e18 BUCK.  TOKEN amounts are native, scaled
+by =decimals= as the shell does now.  Prices come from the venue's TWAP
+read (what =basketValueInBuck= uses).
+
+** 10.3 Entry points
+
+- =deposit(address asset, uint256 amount, uint256 minShares) returns (uint256 id)=
+  with =asset == buck= for BUCK.  It runs =_syncAll()=, then applies the
+  guard, values the deposit conservatively, applies the charge, mints
+  shares, adds =pendingCredit=, adds to the wallet and mints the receipt.
+- =redeem(uint256 id, uint256 bp, uint256[] minOut) returns (uint256[] paid)=.
+  It runs =_syncAll()=, then takes the cut, runs =_exit=, and checks
+  =minOut= per TOKEN.
+- =redeemTreasury(uint256 bp, address to)=, =onlyGov=.
+- Views: =gross()=, =equity()=, =sharePrice()=, =valueOf(id)=, =headroom()=,
+  =weights()=, =wheelDue(c, i)=.
+- =wheelStep(uint8 c, uint256 i) onlyWheel returns (uint256 work)= and
+  =creditWallet(address token, uint256 amount) onlyWheel=.
+- Governance: =setEquityParams(...)= and =setWheel=.
+
+*Sync on touch.*  deposit and redeem first collect every pool's owed fees
+into the wallet (=positionSync=).  The price then includes them exactly,
+with no fee-growth math on chain, and a redemption's pro-rata share of the
+wallet IS its share of the fees.  The Sync component compounds between
+touches on a timer.  The views may add the uncollected fees
+(feeGrowthInside) for the UI; that is optional.
+
+*Donations.*  Liquidity minted to the basket's position key by others is
+not in =liquidityOf= and is never counted.  Seed the first deposit from
+governance (dead shares) against share-price inflation.
+
+** 10.4 The primitives' rules
+
+- =_mint(amount)=: =amount = min(amount, pendingCredit, headroom)=, then
+  =buck.mintFromBasket(this, amount)=, =debt +==, =idleBuck +==.
+  =require(debt <= K x equity)= after.
+- =_burn(amount)=: =buck.burnFromBasket=, =debt -==.
+- Every swap is =swapExactIn= with a =minOut= from the TWAP less a
+  tolerance.  Deploy and Fund sizes are small against depth, so a failed
+  bound makes a =run= return 0 and the wheel moves on.
+
+** 10.5 Invariants (Foundry invariant tests; a handler for deposit, redeem, wheel ticks and price moves)
+
+1. =debt= equals the equity path's mints less its burns (the handler's
+   ghost counters; the desk's issuance is =monetaryOutstanding=, apart).
+2. =sum(holdings.shares) + treasuryShares == totalShares=.
+3. =idleToken[i] + monetaryTokenHeld[i] <= token_i.balanceOf(basket)= and
+   =idleBuck + monetaryBuckHeld <= buck.balanceOf(basket)=.
+4. =liquidityOf[i] <= pool.positions(key).liquidity=.
+5. After any mint, =debt <= K x equity=.  =pendingCredit >= 0=.
+6. =redeem= never pays more than the fraction's value at the TWAP, plus
+   the TWAP/spot tolerance.
+
+** 10.6 Tests: the prototype's, one for one (=test/basket/BuckBasketEquity.t.sol=)
+
+| Python (=test_equity_basket.py=)                       | Foundry                                    |
+|--------------------------------------------------------+--------------------------------------------|
+| test_a_deposit_only_books_equity                       | test_deposit_booksEquityOnly               |
+| test_the_wheel_deploys_with_K_credit                   | test_wheel_deploysWithKCredit              |
+| test_a_buck_deposit_is_the_same_equity_as_a_token_deposit | test_buckDeposit_equalsTokenDeposit     |
+| test_entry_is_at_value_after_a_move                    | test_entry_atValueAfterMove                |
+| test_a_lagging_twap_gives_the_entrant_no_edge (x4)     | test_entry_laggingTwap_noEdge (fuzz)       |
+| test_funding_fills_every_pool_to_target_without_churn  | test_fund_fillsTargets_noChurn             |
+| test_a_deposit_pays_for_its_own_deployment (x2)        | test_entry_paysOwnDeployment               |
+| test_a_round_trip_takes_back_only_its_own              | test_roundTrip_takesOnlyItsOwn             |
+| test_a_pro_rata_exit_leaves_the_others_price_whole     | test_exit_leavesPriceWhole                 |
+| test_the_debt_is_whole_and_burned_before_any_payout    | test_debt_burnedFirst                      |
+| test_a_K_cut_is_no_margin_call                         | test_kCut_noMarginCall                     |
+| test_the_basket_takes_a_quarter_of_the_gain_and_none_of_a_loss | test_cut_quarterOfGain_noneOfLoss  |
+| test_the_treasury_leaves_by_the_same_door              | test_treasury_redeems                      |
+| test_an_exit_fee_stays_with_the_holders_who_stay       | test_exitFee_staysWithHolders              |
+| test_the_design_payoffs (x3)                           | test_payoffs (1.21, 1.00, 0.81)            |
+| test_fees_are_equity_and_compound_unlevered            | test_fees_compoundUnlevered                |
+| test_residue_never_mints                               | test_residue_neverMints                    |
+| test_rebalancing_moves_value_to_the_underweight_pool   | test_rebalance_movesToUnderweight          |
+| test_an_underwater_redemption_refuses_rather_than_steals | test_redeem_underwaterRefuses            |
+| test_the_whole_machine_keeps_its_books (x3)            | invariant_* (section 10.5)                 |
+
+Where the Python has an ideal pool, the Foundry tests use real V3 pools
+(the =_swapToPrice= helper from =wip/basket-accounting= moves them).  The
+expected numbers are the prototype's, with tolerances for tick math.
+
+** 10.7 The simulation, the server, the Savings tab
+
+- =alberta_buck/sim/deploy.py=: a =basket_impl= of ="equity"= deploys
+  =BuckBasketEquity= and then =setEquityParams= and =setWheel=.  The wheel
+  becomes required, because without it nothing is placed.
+- Readers of =deposits(id)=, which become =holdings(id)= and =valueOf(id)=:
+  - =facility_agent.py:274=
+  - =direct_mint.py:150,394=
+  - =equilibrium_agents.py:2506,3236=
+- =wheel_tasks.py=: =TreasurySweepTask= retires.  Add the Python mirror of
+  =EquityKind= (the prototype's kinds are its logic).
+- =eqmetrics.py=: the depositor readings become receipt value against
+  basis, and the treasury's shares.
+- =server.py=: the savings block reports shares, price, debt, pending and
+  the wallet.
+- =core/js/sandbox/src/savings/model.js=: a receipt's value is shares x
+  price, net of the cut, replacing min(V/2, V - R).  =abi.js= gets the new
+  views.
+
+** 10.8 Experiments to rerun
+
+1. E3 (director on/off x wheel off/on) on the equity basket.
+2. E2's desk arms.
+3. E4's wheel-off twins.  The wheel is now required on the equity basket,
+   so "wheel off" means "arb kind off".
+4. A new E5: depositor return against holding, across K (0.5, 0.75, 0.95)
+   and lambda (0, 25%, 43%), on the calm and burst arms.  This is the
+   question section 9.1 leaves open.
+
+** 10.9 The order of work
+
+1. *The venue primitives* (10.1), with unit tests on a real pool.  Fold in
+   the =wip/basket-accounting= pieces.
+2. *=BuckBasketEquity=*: storage, deposit, redeem, views and =_syncAll=.
+   The tests of 10.6 that need no component (entry, the cut, exits, the
+   debt, the treasury, the exit fee), with the wallet placed by hand through
+   =wheelStep=.  Measure the size.
+3. *The components* in =wheelStep= and =wheelDue=, and =EquityKind= in
+   =BasketWheel=.  The remaining tests, then the invariant suite.
+4. *=BuckBasketOps= rebased* onto the equity shell.  The desk's tests pass
+   unchanged, and its books stay outside the wallet.
+5. *The sim*: deploy, agents, wheel tasks, eqmetrics.  A short
+   =demo-savings= run end to end.
+6. *The server and the Savings tab*: the browser tests pass.
+7. *The experiments* of 10.8, with judgement in =doc/CONVERGENCE.org=.
+
+* 11. Open
+
+1. lambda: fixed at 25%, or governed.  A hurdle (the gain above BUCK's
+   demurrage, say) is a one-parameter refinement of the cost basis.
+2. Re-levering earnings: treat realized earnings as a deposit (credit
+   K x earnings), or keep them unlevered, as now.
+3. Pending credit that a K cut strands: keep it until K rises (as now), or
+   let it expire.
+4. The deposit cap, if price impact on large deposits proves material.
+5. The stress fee's rule on the equity basket: the deviation the present
+   shell uses, or the basket's own leverage.
+6. The treasury's policy: when governance redeems its shares, and whether
+   any of them fund the wheel's reserve.

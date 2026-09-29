@@ -976,6 +976,11 @@ sim-quotes-plot:
 test-quotes:
 	python -m pytest alberta_buck/test/test_quotes.py -v
 
+# The equity BuckBasket's prototype (doc/BASKET-EQUITY.org): pure Python.
+.PHONY: test-equity
+test-equity:
+	python -m pytest alberta_buck/test/test_equity_basket.py -v
+
 
 # ── Historical basket simulation (real macro data) ───────────────────
 #
