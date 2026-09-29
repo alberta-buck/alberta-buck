@@ -179,8 +179,26 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- mint-side bookkeeping (rare path) ---------------------------------
 
-    /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
+    /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT,
+    ///         in its face units.  Equal to its `activatedValue` at every
+    ///         observation point: activation happens only in `_allocateMint`
+    ///         and deactivation only in `_allocateBurn`, each moving both.
     mapping(uint256 => uint256) public mintsBacked;
+
+    /// @notice Pool principal currently held against a given BuckCredit NFT.
+    /// @dev    The deposit is *returnable*.  Its yield at the insurer's
+    ///         assumed ROI funds the premium in perpetuity -- that is what
+    ///         makes a policy a one-time purchase rather than a recurring
+    ///         expense -- so what the holder actually pays for cover is the
+    ///         opportunity cost of the deposit, not the deposit.  Releasing
+    ///         coverage returns it pro rata on the face units released.
+    ///
+    ///         It has to be stored rather than recomputed: the deposit for a
+    ///         credit is the sum over past draws of `V_i * effRate_i / BP`,
+    ///         and both the appraisal and the premium rate can have moved
+    ///         between them, so `mintsPrincipal / mintsBacked` is a weighted
+    ///         average that no amount of present-day state can reconstruct.
+    mapping(uint256 => uint256) public mintsPrincipal;
 
     // ---- Jubilee accrual checkpoint ----------------------------------------
 
@@ -256,25 +274,6 @@ contract Buck is IERC20, IERC20Metadata {
     /// @notice Pending election: `a` has named this account, which has not
     ///         yet accepted.  Cleared on accept.
     mapping(address => address) public demurragePayerRequest;
-
-    /// @notice Pool principal currently held against a given BuckCredit NFT.
-    /// @dev    Declared here, away from `mintsBacked` which it shadows, only
-    ///         because the slots before it are load-bearing for fixtures that
-    ///         reach `_receiptFragments` (5) by hard-coded index.
-    ///
-    ///         The deposit is *returnable*.  Its yield at the insurer's
-    ///         assumed ROI funds the premium in perpetuity -- that is what
-    ///         makes a policy a one-time purchase rather than a recurring
-    ///         expense -- so what the holder actually pays for cover is the
-    ///         opportunity cost of the deposit, not the deposit.  Releasing
-    ///         coverage returns it pro rata on the face units released.
-    ///
-    ///         It has to be stored rather than recomputed: the deposit for a
-    ///         credit is the sum over past draws of `V_i * effRate_i / BP`,
-    ///         and both the appraisal and the premium rate can have moved
-    ///         between them, so `mintsPrincipal / mintsBacked` is a weighted
-    ///         average that no amount of present-day state can reconstruct.
-    mapping(uint256 => uint256) public mintsPrincipal;
 
     /// @notice How many accounts name `a` as their demurrage payer.  Touched
     ///         only when a delegation is armed or released, so it lives here
