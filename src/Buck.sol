@@ -60,8 +60,8 @@ contract Buck is IERC20, IERC20Metadata {
     IBuckCredit       public immutable buckCredit;
     IBuckK            public immutable buckK;
     IdentityRegistry  public immutable identity;
-    /// @dev Interim: one address receives every mint's premium deposit, pays
-    ///      every refund and wires the basket; deployments bind it Carrying
+    /// @dev Interim: one address receives every mint's premium deposit and
+    ///      pays every refund; deployments bind it Carrying
     ///      through the registry.  Intended: each credit's insurer holds its
     ///      credits' deposits in a Carrying premium pool, and this parameter
     ///      goes (alberta-buck-ethereum.org, "The Insurance Pool: an Interim
@@ -169,7 +169,7 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- ERC-20 supply + allowances ----------------------------------------
 
-    uint256 private _totalSupply;
+    uint256 internal _totalSupply;
     mapping(address => mapping(address => uint256)) private _allowances;
 
     // ---- mint-side bookkeeping (rare path) ---------------------------------
@@ -213,19 +213,11 @@ contract Buck is IERC20, IERC20Metadata {
     ///      exact proportion to the BUCKs transferred.
     uint64 internal _jubileeLastUpdate;
 
-    // ---- Direct-mint integration -------------------------------------------
-    //
-    // BuckBasket is the privileged caller of mintFromBasket / burnFromBasket
-    // for the TOKEN-presentation (direct-mint) path.  Wired post-deploy by
-    // `setBasket(address)` so the basket can be constructed with Buck's
-    // address.  Once set, the field is immutable in effect (further
-    // setBasket calls revert).
-    //
-    // Placed after the maps above.  Several tests reach _state (slot 0),
-    // _totalSupply (1), _allowances (2) and _receiptFragments (5) by
-    // hard-coded index via `vm.store`; anything added from here on leaves
-    // those alone.
-    address public basket;
+    // (The basket's mint/burn hooks and their `basket` address lived here,
+    // packed into _jubileeLastUpdate's slot.  A BuckBasket is now an ordinary
+    // credit holder -- a MARKED BuckCredit, a lien, relief like anyone's --
+    // and the hooks survive only in the sims' BuckWithBasketHooks, for the
+    // pro-rata baselines.  Removing the field moves no slot.)
 
     // ---- delegated demurrage (fee payer) -----------------------------------
     //
@@ -306,11 +298,12 @@ contract Buck is IERC20, IERC20Metadata {
     // ---- the Jubilee's two sides (doc/JUBILEE-ISSUANCE.org) ----------------
     //
     // Demurrage accrues on BUCK in circulation; relief must pay back exactly
-    // that to whoever issued them.  Only three things move the sum of the
-    // (non-Jubilee) signed balances -- the basket's hooks, relief paid out of
-    // the fund, and fees realized (taken out of circulation) -- so
+    // that to whoever issued them.  Every BUCK is issued against a lien, and
+    // only two things move the sum of the (non-Jubilee) signed balances --
+    // relief paid out of the fund, and fees realized (taken out of
+    // circulation) -- so
     //
-    //     totalSupply = sum(liens) + basketIssued + reliefRealized - feesRealized
+    //     totalSupply = sum(liens) + reliefRealized - feesRealized
     //
     // and the BUCK issued, which the fund accrues on, is computable from
     // these counters without touching the transfer hot path.
@@ -323,16 +316,6 @@ contract Buck is IERC20, IERC20Metadata {
     uint256 public feesRealized;
     /// @notice Cumulative relief paid out of the fund to issuers.
     uint256 public reliefRealized;
-    /// @notice The basket hooks' net issuance: minted, less what burns
-    ///         retired.  Signed: a basket that burns BUCK it bought (a desk's
-    ///         buy-back) retires more than it issued.
-    int256  public basketIssued;
-    /// @dev    basketIssued integrated over time (BUCK-seconds, signed): the
-    ///         relief the basket has earned (+) or the demurrage it owes (-)
-    ///         on its net issuance.  Recorded only; nothing realizes it yet
-    ///         (JUBILEE-ISSUANCE 6.2).
-    int256  internal _basketIssuanceSeconds;
-    uint64  internal _basketFoldedAt;
 
     // ---- premium / mutual-insurance pool model -----------------------------
     //
@@ -372,8 +355,8 @@ contract Buck is IERC20, IERC20Metadata {
     event JubileeRedeemed(address indexed account, uint256 relief);
     /// @notice A fee taken out of circulation at `account`: the demurrage
     ///         locked in its balance when it spent past its held BUCK into
-    ///         credit, the fee aged BUCK carried into its lien, or the fee
-    ///         burned basket BUCK carried out.  Sums to `feesRealized`.
+    ///         credit, or the fee aged BUCK carried into its lien.  Sums to
+    ///         `feesRealized`.
     event FeeRealized(address indexed account, uint256 fee);
     event DemurragePayerRequested(address indexed account, address indexed payer);
     event DemurragePayerSet(address indexed account, address indexed payer);
@@ -396,7 +379,6 @@ contract Buck is IERC20, IERC20Metadata {
         identity      = IdentityRegistry(_identity);
         insurancePool = _insurancePool;
         _jubileeLastUpdate = uint64(block.timestamp);
-        _basketFoldedAt    = uint64(block.timestamp);
     }
 
     // ---- IERC20Metadata ----------------------------------------------------
@@ -667,80 +649,6 @@ contract Buck is IERC20, IERC20Metadata {
 
     function burn(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _burnAllocated(amount, tokenIds);
-    }
-
-    // ---- Direct-mint path (TOKEN-presentation via BuckBasket) -------------
-
-    /// @notice One-shot wiring of the BuckBasket address; immutable thereafter.
-    /// @dev    Must be set by `insurancePool` (which is governance-bound at
-    ///         deploy) so that the basket address is locked under the same
-    ///         authority that holds the system's mutual reserves.
-    function setBasket(address _basket) external {
-        require(msg.sender == insurancePool, "BUCK: not insurancePool");
-        require(basket == address(0), "BUCK: basket already set");
-        require(_basket != address(0), "BUCK: basket=0");
-        basket = _basket;
-    }
-
-    /// @notice Mint `amount` BUCK to `to`.  Bypasses the BuckCredit /
-    ///         funding-factor machinery -- direct-mint BUCK is backed by
-    ///         the TOKEN reserves in BuckBasket's pools, not by insured-
-    ///         asset credit.  Only callable by the registered basket.
-    function mintFromBasket(address to, uint256 amount) external nonReentrant {
-        require(msg.sender == basket && basket != address(0), "BUCK: not basket");
-        if (amount == 0) return;
-        _accrueJubilee();
-        _foldBasket();
-        basketIssued += int256(amount);
-        _crystallize(to);
-        // Fresh BUCK: no age rides in.  Credited like any receipt, so BUCK
-        // minted to an account below zero repay its lien (and cross it).
-        _credit(to, amount, 0);
-        emit Transfer(address(0), to, amount);
-    }
-
-    /// @notice Burn `amount` BUCK from BuckBasket's balance.  Only callable
-    ///         by the registered basket.  Mirrors mintFromBasket on the
-    ///         supply side without consulting credit-NFT machinery.
-    /// @dev    The burned BUCK carry their share of the basket's age out with
-    ///         them (`liveBs * amount / raw`, as a carrying transfer would),
-    ///         so what the basket keeps keeps its own age; without this the
-    ///         burned BUCK's age stayed behind and the next recipient of
-    ///         basket BUCK paid it.  Their fee is realized here: aged BUCK
-    ///         retire `amount - fee` of the basket's issuance, exactly as
-    ///         aged BUCK repay `value - fee` of a lien (see `_credit`).
-    function burnFromBasket(uint256 amount) external nonReentrant {
-        require(msg.sender == basket && basket != address(0), "BUCK: not basket");
-        if (amount == 0) return;
-        _accrueJubilee();
-        _crystallize(msg.sender);
-        AccountState memory s = _state[msg.sender];
-        int256 raw = s.balance.asInt();
-        require(raw > 0 && uint256(raw) >= amount, "BUCK: insufficient");
-        uint256 bs    = s.buckSeconds.asUint();
-        uint256 share = Math.mulDiv(bs, amount, uint256(raw));
-        uint256 fee   = Math.mulDiv(share, BASE_RATE_PER_SEC, SCALE);
-        if (fee > amount) fee = amount;
-        s.buckSeconds = toBuckSeconds(bs - share);
-        s.balance     = toBuckQtySigned(raw - int256(amount));
-        _state[msg.sender] = s;
-        _totalSupply -= amount;      // Carrying: the balance stays >= 0
-        if (fee != 0) {
-            feesRealized += fee;
-            emit FeeRealized(msg.sender, fee);
-        }
-        _foldBasket();
-        basketIssued -= int256(amount - fee);
-        emit Transfer(msg.sender, address(0), amount);
-    }
-
-    /// @notice The relief the basket has earned on its net issuance (+), or
-    ///         the demurrage it owes on BUCK it retired beyond it (-), in
-    ///         BUCK.  Recorded only: nothing realizes it yet.
-    function basketRelief() external view returns (int256) {
-        int256 s = _basketIssuanceSeconds
-                 + basketIssued * int256(block.timestamp - uint256(_basketFoldedAt));
-        return s * int256(BASE_RATE_PER_SEC) / int256(SCALE);
     }
 
     /// @notice Quote total coverage / pool principal for delivering `amount`
@@ -1365,10 +1273,9 @@ contract Buck is IERC20, IERC20Metadata {
     // Every BUCK carries its fee to the end; every issuer earns back the fee
     // its issuance collected.  A fee is a lien inside a positive balance and
     // never moves -- until the BUCK carrying it would shed it.  Then it is
-    // realized: taken out of circulation.  That happens in exactly three
-    // places: a spend that reaches past the held BUCK into credit
-    // (`_debit`), aged BUCK arriving at an account below zero (`_credit`),
-    // and a basket burn (`burnFromBasket`).
+    // realized: taken out of circulation.  That happens in exactly two
+    // places: a spend that reaches past the held BUCK into credit (`_debit`),
+    // and aged BUCK arriving at an account below zero (`_credit`).
     //
     // With the fee realized at zero, an account below zero never holds
     // fee-seconds, so while negative its `buckSeconds` counts issuance-seconds
@@ -1599,14 +1506,10 @@ contract Buck is IERC20, IERC20Metadata {
         _realizeRelief(msg.sender);
     }
 
-    /// @notice The BUCK issued -- the fund's accrual base: the liens, plus
-    ///         the basket's net issuance where it is positive.  A basket that
-    ///         has retired more than it issued (a desk's buy-back) owes that
-    ///         demurrage itself (`basketRelief` < 0); it is not taken from
-    ///         the accounts' relief.
-    function totalIssued() public view returns (uint256) {
+    /// @notice The BUCK issued -- the fund's accrual base: the sum of the
+    ///         liens, from the identity above.
+    function totalIssued() public view virtual returns (uint256) {
         int256 base = int256(_totalSupply) - int256(reliefRealized) + int256(feesRealized);
-        if (basketIssued < 0) base -= basketIssued;
         return base > 0 ? uint256(base) : 0;
     }
 
@@ -1763,15 +1666,6 @@ contract Buck is IERC20, IERC20Metadata {
         js.balance = toBuckQtySigned(newJubSigned);
         _state[address(this)] = js;
         emit JubileeAccrued(delta, newJubSigned > 0 ? uint256(newJubSigned) : 0);
-    }
-
-    /// @dev Fold the basket's net issuance over the time since the last fold.
-    function _foldBasket() internal {
-        uint256 elapsed = block.timestamp - uint256(_basketFoldedAt);
-        if (elapsed != 0) {
-            _basketIssuanceSeconds += basketIssued * int256(elapsed);
-            _basketFoldedAt = uint64(block.timestamp);
-        }
     }
 
     // ---- balance writes ----------------------------------------------------

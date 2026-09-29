@@ -147,7 +147,10 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   const kctrl = await session.deploy(artifacts("BuckKControllerDirect"),
     [p.kp, p.ki, p.kd, p.dt, p.kmin, p.kmax, p.k0, gov],
     { name: "BuckKControllerDirect", gas });
-  const buck = await session.deploy(artifacts("Buck"),
+  // Production Buck has no basket hooks; a world that wires one of the
+  // pro-rata baskets (eqworld) passes buckArtifact = "BuckWithBasketHooks",
+  // the sims' subclass that keeps them.  Either way it is labelled "Buck".
+  const buck = await session.deploy(artifacts(opts.buckArtifact ?? "Buck"),
     [credit.address, kctrl.address, reg.address, poolAcct],
     { name: "Buck", gas });
   await session.send(reg, "setBuck", [buck.address], { tag: "world:reg.setBuck" });

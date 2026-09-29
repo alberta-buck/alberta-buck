@@ -33,6 +33,7 @@ export const NEEDED = [
   "BuckCreditHarness",         // eq world: credits to proxies that never opt in
   "BuckKControllerDirect",
   "Buck",
+  "BuckWithBasketHooks",       // eq world: the pro-rata basket's mint/burn hooks
   "WETH9",
   "BuckBasketProRata",
   "BuckBasketUniswapV3",

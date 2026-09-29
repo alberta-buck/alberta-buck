@@ -91,7 +91,9 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       // (deploy.py / notes_stack.py) -- uncertified binds of SimLP and
       // the routers, credits to proxies that never opt in.
       registryArtifact: "IdentityRegistryHarness",
-      creditArtifact: "BuckCreditHarness" });
+      creditArtifact: "BuckCreditHarness",
+      // The pro-rata basket mints by the hooks: the sims' subclass.
+      buckArtifact: "BuckWithBasketHooks" });
   const { reg, credit, kctrl, buck } = world;
   const me = session.account.address;
   // The deployer registers a real identity, then binds contracts as the
@@ -314,20 +316,20 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   };
 
   /** The debtor's chain truth in one read: drawn / limit / held /
-   *  unactivated face / the Jubilee relief quote (liability melts). */
+   *  unactivated face / the Jubilee relief quote (the lien melts:
+   *  Buck.reliefOf, ~2%/yr of the drawn balance). */
   world.creditState = async (account) => {
     const me = world.holderAddress(account);
     const ids = world._credits.get(account.address) ?? [];
-    const [signed, limit] = await Promise.all([
+    const [signed, limit, jub] = await Promise.all([
       session.call(buck, "signedBalanceOf", [me]),
-      session.call(buck, "creditLimit", [me])]);
+      session.call(buck, "creditLimit", [me]),
+      session.call(buck, "reliefOf", [me])]);
     let unactivated = 0n;
-    let jub = 0n;
     for (const tid of ids) {
       const info = await session.call(credit, "creditInfo", [tid]);
       const [face, act] = [info[0], info[1]];
       unactivated += face > act ? face - act : 0n;
-      jub += await session.call(credit, "jubileeRelief", [tid]);
     }
     const drawn = signed < 0n ? -signed : 0n;
     return { drawn, limit, held: signed > 0n ? signed : 0n, unactivated, jub,

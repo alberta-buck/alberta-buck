@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {BN254} from "../src/BN254.sol";
 import {Buck} from "../src/Buck.sol";
+import {BuckWithBasketHooks} from "../src/legacy/BuckWithBasketHooks.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BuckJubileeReliefTest} from "./BuckJubileeRelief.t.sol";
@@ -24,6 +25,16 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
     address internal constant BASKET = address(0xBA5E7);
     address internal constant CAROL  = address(0xCA201);   // public, non-Carrying
 
+    /// The pro-rata baskets' hooks live in the sims' subclass: deploy it,
+    /// so the basket cases below test the hooks' side of the Jubilee too.
+    function _newBuck() internal override returns (Buck) {
+        return new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
+    }
+
+    function _hooks() internal view returns (BuckWithBasketHooks) {
+        return BuckWithBasketHooks(address(buck));
+    }
+
     function _poke() internal {
         buck.settleDemurrage(bob);          // runs _accrueJubilee
     }
@@ -34,7 +45,7 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
     function _booksBalance() internal view {
         int256 supply = int256(buck.totalSupply());
         int256 liens  = int256(_lien(alice));
-        assertEq(supply, liens + buck.basketIssued() + int256(buck.reliefRealized())
+        assertEq(supply, liens + _hooks().basketIssued() + int256(buck.reliefRealized())
                          - int256(buck.feesRealized()), "supply identity");
         uint256 positive = buck.rawBalanceOf(alice) + buck.rawBalanceOf(bob)
                          + buck.rawBalanceOf(POOL) + buck.rawBalanceOf(BASKET)
@@ -114,7 +125,7 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         reg.bindContract(CAROL, BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), true, false);
         vm.prank(POOL);
-        buck.setBasket(BASKET);
+        _hooks().setBasket(BASKET);
     }
 
     /// An account holding aged BUCK that spends past them into its credit
@@ -122,7 +133,7 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
     function test_aFeeSpentIntoCreditIsPaidFirst() public {
         _basket();
         vm.prank(BASKET);
-        buck.mintFromBasket(alice, 200e6);                // alice: -100 -> +100, fresh
+        _hooks().mintFromBasket(alice, 200e6);                // alice: -100 -> +100, fresh
         vm.warp(t0 + YEAR);
         uint256 fee = buck.feeOwing(alice);
         assertApproxEqRel(fee, 2e6, 0.001e18, "her 100 carry a year: 2");
@@ -142,16 +153,16 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
     function test_burnedBasketBuckTakeTheirAgeWithThem() public {
         _basket();
         vm.prank(BASKET);
-        buck.mintFromBasket(BASKET, 1000e6);
+        _hooks().mintFromBasket(BASKET, 1000e6);
         vm.warp(t0 + YEAR);
         vm.expectEmit(true, false, false, false, address(buck));
         emit Buck.FeeRealized(BASKET, 0);
         vm.prank(BASKET);
-        buck.burnFromBasket(900e6);
+        _hooks().burnFromBasket(900e6);
         assertEq(buck.rawBalanceOf(BASKET), 100e6);
         assertApproxEqRel(buck.feeOwing(BASKET), 2e6, 0.001e18, "100 BUCK carry 2%");
         assertApproxEqRel(buck.feesRealized(), 18e6, 0.001e18, "the burned 900 paid their 18");
-        assertApproxEqAbs(buck.basketIssued(), int256(1000e6 - (900e6 - 18e6)), 1,
+        assertApproxEqAbs(_hooks().basketIssued(), int256(1000e6 - (900e6 - 18e6)), 1,
                           "aged BUCK retire 900 less their fee of the basket's issuance");
         vm.prank(BASKET);
         buck.transfer(CAROL, 50e6);
@@ -165,12 +176,12 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
     function test_theBasketsIssuanceIsRecorded() public {
         _basket();
         vm.prank(BASKET);
-        buck.mintFromBasket(BASKET, 1000e6);
+        _hooks().mintFromBasket(BASKET, 1000e6);
         vm.warp(t0 + YEAR);
         _poke();
-        assertApproxEqRel(buck.basketRelief(), int256(20e6), 0.001e18, "2% of 1000");
+        assertApproxEqRel(_hooks().basketRelief(), int256(20e6), 0.001e18, "2% of 1000");
         assertApproxEqAbs(buck.jubileeActual(),
-                          uint256(buck.basketRelief()) + buck.reliefOf(alice), 2,
+                          uint256(_hooks().basketRelief()) + buck.reliefOf(alice), 2,
                           "the fund holds the basket's relief and alice's");
         _booksBalance();
     }
@@ -222,11 +233,11 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
             } else if (op == 3) {                                   // basket mint
                 address to = _pick3(r2, BASKET, BASKET, alice);
                 vm.prank(BASKET);
-                buck.mintFromBasket(to, (r2 >> 8) % 500e6);
+                _hooks().mintFromBasket(to, (r2 >> 8) % 500e6);
             } else if (op == 4) {                                   // basket burn
                 uint256 amt = r2 % (buck.rawBalanceOf(BASKET) + 1);
                 vm.prank(BASKET);
-                buck.burnFromBasket(amt);
+                _hooks().burnFromBasket(amt);
             } else if (op == 5) {                                   // basket pays out
                 address to = _pick3(r2, alice, CAROL, bob);
                 uint256 amt = (r2 >> 8) % (buck.rawBalanceOf(BASKET) + 1);
@@ -246,13 +257,13 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
             _poke();
             int256 liens = int256(_lien(alice) + _lien(CAROL));
             assertEq(int256(buck.totalSupply()),
-                     liens + buck.basketIssued() + int256(buck.reliefRealized())
+                     liens + _hooks().basketIssued() + int256(buck.reliefRealized())
                            - int256(buck.feesRealized()), "supply identity");
             uint256 positive = buck.rawBalanceOf(alice) + buck.rawBalanceOf(bob)
                              + buck.rawBalanceOf(POOL) + buck.rawBalanceOf(BASKET)
                              + buck.rawBalanceOf(CAROL);
             assertEq(positive, buck.totalSupply(), "positive raw == totalSupply");
-            int256 br = buck.basketRelief();
+            int256 br = _hooks().basketRelief();
             uint256 owed = buck.reliefOf(alice) + buck.reliefOf(CAROL) + (br > 0 ? uint256(br) : 0);
             assertGe(buck.jubileeActual() + step + 2, owed, "the fund holds the relief it owes");
         }

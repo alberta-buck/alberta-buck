@@ -7,6 +7,7 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {Buck} from "../src/Buck.sol";
+import {BuckWithBasketHooks} from "../src/legacy/BuckWithBasketHooks.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
@@ -609,16 +610,29 @@ contract BuckTest is Test {
         assertEq(poolBefore   - buck.balanceOf(POOL),  quotedRefund, "refund matches quote");
     }
 
-    // ---- setBasket ----------------------------------------------------------
+    // ---- the basket hooks: the sims' subclass only -----------------------
+
+    /// Production Buck has no basket hooks: a basket is a credit holder.
+    function test_productionBuckHasNoBasketHooks() public {
+        (bool ok,) = address(buck).call(
+            abi.encodeWithSignature("mintFromBasket(address,uint256)", alice, 1));
+        assertFalse(ok, "no mintFromBasket");
+        (ok,) = address(buck).call(abi.encodeWithSignature("burnFromBasket(uint256)", 1));
+        assertFalse(ok, "no burnFromBasket");
+        (ok,) = address(buck).call(abi.encodeWithSignature("setBasket(address)", alice));
+        assertFalse(ok, "no setBasket");
+    }
 
     function test_setBasket_onlyInsurancePool() public {
-        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        BuckWithBasketHooks fresh =
+            new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
         vm.expectRevert("BUCK: not insurancePool");
         fresh.setBasket(address(0xDECAF));
     }
 
     function test_setBasket_oneShot() public {
-        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        BuckWithBasketHooks fresh =
+            new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(POOL);
         fresh.setBasket(address(0xB0CC));
         vm.prank(POOL);
@@ -627,7 +641,8 @@ contract BuckTest is Test {
     }
 
     function test_setBasket_rejectsZero() public {
-        Buck fresh = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        BuckWithBasketHooks fresh =
+            new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
         vm.prank(POOL);
         vm.expectRevert("BUCK: basket=0");
         fresh.setBasket(address(0));

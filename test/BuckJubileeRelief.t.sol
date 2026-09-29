@@ -63,7 +63,7 @@ contract BuckJubileeReliefTest is Test {
 
         credit = new BuckCreditHarness();
         kCtrl  = new BuckKControllerStatic(1e18, GOV);
-        buck   = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        buck   = _newBuck();
         bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));
@@ -88,6 +88,12 @@ contract BuckJubileeReliefTest is Test {
         assertEq(buck.totalSupply(), DRAW, "supply == bob's received BUCK");
         (, uint256 active,) = credit.creditInfo(tid);
         assertEq(active, FACE, "mint activated the full face");
+    }
+
+    /// @dev Production Buck; JubileeBasis.t.sol deploys the sims' hooked
+    ///      subclass to test the pro-rata baskets' hooks too.
+    function _newBuck() internal virtual returns (Buck) {
+        return new Buck(address(credit), address(kCtrl), address(reg), POOL);
     }
 
     // ---- JSON / identity helpers (copied from BuckDemurrage.t.sol) ---------

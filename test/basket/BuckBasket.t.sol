@@ -8,7 +8,7 @@ import {IERC20}                from "@openzeppelin/contracts/token/ERC20/IERC20.
 import {BN254}                 from "../../src/BN254.sol";
 import {IdentityRegistry}      from "../../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
-import {Buck}                  from "../../src/Buck.sol";
+import {BuckWithBasketHooks}   from "../../src/legacy/BuckWithBasketHooks.sol";
 import {BuckCredit}            from "../../src/BuckCredit.sol";
 import {BuckCreditHarness}            from "../harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
@@ -49,7 +49,7 @@ contract BuckBasketTest is Test {
     address constant REGISTRY_ADDR =
         0x1D1D1D1d1d1D1D1d1d1D1D1d1d1D1d1d1d1d1D1D;
 
-    Buck                   internal buck;
+    BuckWithBasketHooks    internal buck;      // the legacy basket mints by the hooks
     BuckCreditHarness             internal credit;
     BuckKControllerDirect  internal kCtrl;
     BuckBasket             internal basketC;
@@ -90,7 +90,7 @@ contract BuckBasketTest is Test {
             GOV
         );
 
-        buck = new Buck(address(credit), address(kCtrl), address(reg), POOL);
+        buck = new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
         bindCarryingPool(reg, POOL);
         vm.prank(GOV);
         reg.setBuck(address(buck));

@@ -251,7 +251,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     pool = chain.deploy("SimLP")
     idmod.bind_as_operator(chain, reg, pool.address, True, True, sender=deployer)
     pool_acct = pool.address
-    buck = chain.deploy("Buck", credit.address, kctrl.address, reg.address, pool_acct)
+    # Production Buck has no basket hooks; the pro-rata baskets (and, until it
+    # holds its own credit, the equity basket) mint and burn through them, so
+    # the sim deploys the hooked subclass (src/legacy/BuckWithBasketHooks.sol).
+    buck = chain.deploy("BuckWithBasketHooks", credit.address, kctrl.address,
+                        reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
     # activateFromBuck (which requires msg.sender == buck).  The wiring is an
