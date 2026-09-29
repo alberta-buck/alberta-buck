@@ -40,8 +40,8 @@ import statistics
 
 from alberta_buck.sim.equity_basket import (ME, EquityBasket, Pool, Receipt,
                                             equity_wheel_tasks)
-from alberta_buck.sim.reserve_basket import (External, ReserveBasket, TurnDirector,
-                                             arbitrage, reserve_wheel_tasks)
+from alberta_buck.sim.reserve_basket import (CreditBasket, External, ReserveBasket,
+                                             TurnDirector, arbitrage, reserve_wheel_tasks)
 from alberta_buck.sim.work_wheel import Clock, WorkWheel
 
 ARMS = ("token", "reserve", "arb", "tilt", "turn")
@@ -97,10 +97,11 @@ def nav(b, ref) -> float:
 
 
 def build(arm: str, ref, K=0.75, fee=0.003, cost=0.001, share=0.9, E0=1e6,
-          reserve=0.05, arb_band=0.005, per_day=4, **turn):
+          reserve=0.05, arb_band=0.005, per_day=4, basket_kw=None, **turn):
     names = list(ref)
     pools = {}
-    side = E0 * (1 + K) / len(names) / 2 * (1 - share) / share
+    k0 = K() if callable(K) else K
+    side = E0 * (1 + k0) / len(names) / 2 * (1 - share) / share
     for t in names:
         p = Pool(ref[t], fee)
         p.add("outside", side / ref[t], side)
@@ -112,7 +113,8 @@ def build(arm: str, ref, K=0.75, fee=0.003, cost=0.001, share=0.9, E0=1e6,
     else:
         director = (TurnDirector(**turn) if arm == "turn" else
                     TurnDirector(**{**turn, "quorum": 0}) if arm == "tilt" else None)
-        b = ReserveBasket(pools, ext=ext, K=K, reserve=reserve, director=director)
+        cls = CreditBasket if arm == "credit" else ReserveBasket
+        b = cls(pools, ext=ext, K=K, reserve=reserve, director=director, **(basket_kw or {}))
         tasks = reserve_wheel_tasks(arb_band if arm != "reserve" else None,
                                     day=per_day)
     w = WorkWheel(tasks)
@@ -129,14 +131,19 @@ def start(b, E0: float, reserve: float) -> None:
     charge's business, tested in test_equity_basket)."""
     k = b.k()
     gross = (1 + k) * E0
-    b.idle_buck = reserve * gross
-    per = gross * (1 - reserve) / len(b.pools)
+    if isinstance(b, CreditBasket):          # the reserve is unminted headroom
+        gross -= reserve * gross
+        b.idle_buck = 0.0
+        per = gross / len(b.pools)
+    else:
+        b.idle_buck = reserve * gross
+        per = gross * (1 - reserve) / len(b.pools)
     for p in b.pools.values():
         l = per / (2 * p.sqrtP)
         p.liq[ME] = p.liq.get(ME, 0.0) + l
         p.owed.setdefault(ME, [0.0, 0.0])
         p.L += l
-    b.debt = b.minted = k * E0
+    b.debt = b.minted = gross - E0
     b.S = E0
     b.receipts[1] = Receipt(E0, E0)
     b._next = 2
@@ -231,7 +238,7 @@ class RoutedEquityBasket(EquityBasket):
             pay[t] += self._route_sell_buck(t, residue * val[t] / tot)
 
 
-FLOW_ARMS = ("token", "routed", "reserve", "flow")
+FLOW_ARMS = ("token", "routed", "reserve", "flow", "credit")
 
 
 def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
@@ -256,10 +263,10 @@ def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
                 b.__class__ = RoutedEquityBasket
                 b.ext = ext
         else:
-            b, w, ext = build("reserve", ref, K=K, fee=fee, cost=cost, share=share, E0=E0,
-                              per_day=per_day, arb_band=None,
-                              reserve=0.05 if arm == "reserve" else 0.01)
-            if arm == "flow":
+            b, w, ext = build("credit" if arm == "credit" else "reserve", ref, K=K,
+                              fee=fee, cost=cost, share=share, E0=E0, per_day=per_day,
+                              arb_band=None, reserve=0.05 if arm == "reserve" else 0.01)
+            if arm != "reserve":
                 b.flow_z = 2.0
     finally:
         g["Pool"] = saved
@@ -267,6 +274,7 @@ def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
     open_: dict[int, float] = {}                 # rid -> the TOKEN's... value paid in
     exits = []
     exit_ops = 0
+    idle = 0.0
     wheel_ops0 = CountingPool.ops
     block = 0
     for day in range(days):
@@ -298,6 +306,7 @@ def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
                 arbitrage(p, ext, t, p.fee)
                 p.mark()
             block += 1
+        idle += b.idle_buck / b.gross()
     stayer = b.receipts[1].shares * b.price()
     ops = CountingPool.ops - wheel_ops0
     return {
@@ -308,6 +317,8 @@ def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
         "from_reserve": 1 - getattr(b, "pro_rata_exits", len(exits)) / max(len(exits), 1),
         "stayer": (b.price() / price0) ** (365.0 / days) - 1,
         "reserve": b.idle_buck / b.gross(),
+        "idle": idle / days,
+        "leverage": b.debt / b.equity(),
     }
 
 
@@ -317,6 +328,125 @@ def _poisson(rng, lam: float) -> int:
         n += 1
         t += rng.expovariate(1.0)
     return n
+
+
+# -- stress: a K cut, a fall and an exit wave ------------------------------------------ #
+
+STRESS_ARMS = ("minted", "hold", "burn", "deleverage")
+
+
+def _ramp(d: float, pts) -> float:
+    """Piecewise-linear through (day, value) points."""
+    if d <= pts[0][0]:
+        return pts[0][1]
+    for (d0, v0), (d1, v1) in zip(pts, pts[1:]):
+        if d <= d1:
+            return v0 + (v1 - v0) * (d - d0) / (d1 - d0)
+    return pts[-1][1]
+
+
+K_PATH = [(0, 0.75), (160, 0.75), (190, 0.60), (300, 0.60), (360, 0.75)]
+FALL = [(0, 0.0), (150, 0.0), (210, math.log(0.75)), (400, math.log(0.875))]
+
+
+def run_stress(arm: str, seed: int = 1, days: int = 450, per_day: int = 4,
+               E0: float = 1e6, size: float = 1e4, fee: float = 0.003,
+               cost: float = 0.001, share: float = 0.9, k_path=K_PATH,
+               fall=FALL) -> dict:
+    """Normal flows (2 arrivals a day, 60-day holds) to day 150; then the
+    TOKENs fall 25% together (days 150-210) and recover half by day 400; K is
+    cut from 0.75 to 0.60 (days 160-190) and restored (days 300-360); and
+    from day 160 to 260 arrivals slow to 0.5 a day while holders leave at
+    1/15 a day.  The fast world's noise on top.  The arms, each with the
+    wheel's arbitrage and a flow-sized reserve (z = 2 at the floor, 1% of
+    the gross at least):
+
+      minted      the BUCK reserve (ReserveBasket), pending credit at each
+                  deposit's K
+      hold        CreditBasket: liquidity is headroom, held as BUCK only
+                  when a K cut takes the headroom
+      burn        CreditBasket: headroom only; after a cut exits go pro rata
+      deleverage  CreditBasket: after a cut the wheel burns until the
+                  headroom is back"""
+    rng = random.Random(seed * 104729)
+    names = ["T0", "T1", "T2"]
+    gen = paths("fast", names, per_day, seed, sigma=0.01)
+    now = [0.0]
+    K = lambda: _ramp(now[0], k_path)
+    ref = next(gen)
+    kw = {"flow_z": 2.0}
+    if arm != "minted":
+        kw["mode"] = arm
+    b, w, ext = build("credit" if arm != "minted" else "arb", ref, K=K, fee=fee,
+                      cost=cost, share=share, E0=E0, per_day=per_day, reserve=0.01,
+                      basket_kw=kw)
+    v_first0 = b.value_of(1)
+    open_: list[int] = []
+    exits = []
+    sold0 = burned0 = minted0 = paid = None
+    lev_max = 0.0
+    block = 0
+    for day in range(days):
+        now[0] = day
+        stressed = 160 <= day < 260
+        if day == 150:
+            sold0, burned0, minted0, paid = b.sold, b.burned, b.minted, 0.0
+        for sub in range(per_day):
+            base = next(gen)
+            f = math.exp(_ramp(day + sub / per_day, fall))
+            ref = {t: base[t] * f for t in names}
+            ext.price.update(ref)
+            if sub == 0:
+                for _ in range(_poisson(rng, 0.5 if stressed else 2.0)):
+                    amt = size * math.exp(rng.gauss(0, 0.8) - 0.32)
+                    if rng.random() < 0.3:
+                        rid = b.deposit("BUCK", amt)
+                    else:
+                        t = rng.choice(names)
+                        rid = b.deposit(t, amt / b.pools[t].price)
+                    open_.append(rid)
+                for rid in list(open_):
+                    if rng.random() < (1 / 15 if stressed else 1 / 60):
+                        marked = b.value_of(rid)
+                        n0 = b.pro_rata_exits
+                        pay = b.redeem(rid)
+                        exits.append((day, pay / marked, b.pro_rata_exits == n0))
+                        if paid is not None and day < 300:
+                            paid += pay
+                        open_.remove(rid)
+            w.mark_dirty()
+            w.tick(b, Clock(block, 0), max_work=len(w._table))
+            for t, p in b.pools.items():
+                arbitrage(p, ext, t, p.fee)
+                p.mark()
+            block += 1
+            lev_max = max(lev_max, b.debt / b.equity())
+        if day == 299:
+            sold, net_burn = b.sold - sold0, (b.burned - burned0) - (b.minted - minted0)
+    sx = [e for e in exits if 160 <= e[0] < 260]
+    return {
+        "exits": len(exits),
+        "stress_exits": len(sx),
+        "instant": sum(e[2] for e in sx) / max(len(sx), 1),
+        "got": statistics.mean(e[1] for e in sx) if sx else 0.0,
+        "first": b.value_of(1) / v_first0 - 1,
+        "lev_max": lev_max,
+        "lev_end": b.debt / b.equity(),
+        "sold": sold / v_first0,
+        "net_burn": net_burn / v_first0,
+        "paid": paid / v_first0,
+    }
+
+
+def stress_table(seeds=4, **kw) -> list[dict]:
+    rows = []
+    for arm in STRESS_ARMS:
+        rs = [run_stress(arm, seed=s, **kw) for s in range(1, seeds + 1)]
+        row = {"arm": arm}
+        for k in rs[0]:
+            row[k] = statistics.mean(r[k] for r in rs)
+        rows.append(row)
+    return rows
 
 
 def flows_table(seeds=4, **kw) -> list[dict]:
@@ -353,6 +483,8 @@ def main() -> None:
     ap.add_argument("--world", action="append", choices=WORLDS)
     ap.add_argument("--arm", action="append", choices=ARMS)
     ap.add_argument("--flows", action="store_true", help="also the flows experiment")
+    ap.add_argument("--stress", action="store_true",
+                    help="also the stress run (a K cut, a fall, an exit wave)")
     a = ap.parse_args()
     rows = table(worlds=a.world or WORLDS, arms=a.arm or ARMS, seeds=a.seeds,
                  days=a.days, per_day=a.per_day, fee=a.fee, cost=a.cost)
@@ -373,6 +505,15 @@ def main() -> None:
                   f"{r['wheel_ops_per_day']:12.1f} {100 * r['exit_got']:8.2f}% "
                   f"{100 * r['from_reserve']:12.1f}% {pct(r['stayer'])}% "
                   f"{100 * r['reserve']:7.2f}%")
+    if a.stress:
+        for label, kw in (("cut+fall", {}), ("cut", {"fall": [(0, 0.0)]})):
+            print()
+            print(f"{label:9} {'reserve':11} {'at once':>8} {'first':>8} {'D/E max':>8} "
+                  f"{'D/E end':>8} {'sold':>6} {'burned':>7}")
+            for r in stress_table(seeds=a.seeds, per_day=a.per_day, **kw):
+                print(f"{'':9} {r['arm']:11} {100 * r['instant']:7.1f}% {pct(r['first'])}% "
+                      f"{r['lev_max']:8.3f} {r['lev_end']:8.3f} {r['sold']:6.2f} "
+                      f"{r['net_burn']:7.2f}")
 
 
 if __name__ == "__main__":

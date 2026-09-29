@@ -982,11 +982,11 @@ test-equity:
 	python -m pytest alberta_buck/test/test_equity_basket.py alberta_buck/test/test_reserve_basket.py -v
 
 # Where the equity basket's reversion harvest goes, and what the BUCK basis
-# changes (doc/BASKET-EQUITY.org section 12): 3 worlds x 5 baskets, 8 seeds
-# over 4 years, then the flows (a few minutes).
+# changes (doc/BASKET-EQUITY.org sections 12-13): 3 worlds x 5 baskets, 8
+# seeds over 4 years, then the flows and the K-cut stress (a few minutes).
 .PHONY: sim-harvest
 sim-harvest:
-	python -m alberta_buck.sim.basket_harvest --days 1460 --seeds 8 --flows
+	python -m alberta_buck.sim.basket_harvest --days 1460 --seeds 8 --flows --stress
 
 
 # ── Historical basket simulation (real macro data) ───────────────────

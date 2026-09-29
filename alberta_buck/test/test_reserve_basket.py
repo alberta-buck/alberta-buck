@@ -302,3 +302,129 @@ def test_the_wheel_takes_back_what_outside_arbitrage_took():
     assert plain["outside"] > 0.005               # outside arbitrage takes > 0.5%/yr
     assert arb["outside"] < 0.1 * plain["outside"]
     assert arb["nav"] > plain["nav"] + 0.005
+
+
+# -- the reserve as unminted credit (doc section 13) ------------------------------------ #
+
+def credit_world(mode="hold", k=K, arb_band=None, **kw):
+    """A CreditBasket holding a placed deposit of 1e6 BUCK; `k` may be a
+    one-element list, so a test can move K."""
+    from alberta_buck.sim.reserve_basket import CreditBasket
+    pools, ref = {}, {}
+    for n, p in enumerate((1.0, 2.0, 3.0)):
+        pool = Pool(p, 0.003)
+        pool.add("seed", 1e6 / p, 1e6)
+        pools[f"T{n}"] = pool
+        ref[f"T{n}"] = p
+    ext = External(ref, 0.001)
+    kk = (lambda: k[0]) if isinstance(k, list) else k
+    b = CreditBasket(pools, ext=ext, K=kk, mode=mode, reserve=0.02, **kw)
+    w = WorkWheel(reserve_wheel_tasks(arb_band))
+    w.bind(b)
+    tick = Ticker()
+    rid = b.deposit(BUCK, 1e6)
+    tick(b, w, ext)
+    return b, w, ext, tick, rid
+
+
+def test_credit_holds_no_buck_and_keeps_its_headroom():
+    b, *_ = credit_world()
+    H, R = b.headroom(), b.reserve_target()
+    assert b.idle_buck < 1e-6 * b.gross()
+    assert R * (1 - b.rband) <= H <= R * (1 + b.rband)
+    assert b.debt + H == pytest.approx(K * min(b.basis(), b.equity()), rel=1e-9)
+    assert b.pending == 0.0
+
+
+def test_the_limit_is_K_of_the_moment_on_the_lesser_of_basis_and_equity():
+    k = [K]
+    b, w, ext, tick, _ = credit_world(k=k)
+    assert b.limit() == pytest.approx(K * min(b.basis(), b.equity()))
+    k[0] = 0.5
+    assert b.limit() == pytest.approx(0.5 * min(b.basis(), b.equity()))
+    b.idle_buck += 1e5                    # a gain: earnings bring no credit
+    assert b.limit() == pytest.approx(0.5 * b.basis())
+
+
+def test_a_credit_exit_mints_its_pay_and_owes_its_share():
+    b, w, ext, tick, first = credit_world()
+    small = b.deposit(BUCK, 2e4)
+    tick(b, w, ext)
+    before, pi = snapshot(b), b.price()
+    f = b.receipts[small].shares / b.S
+    debt = b.debt
+    paid = b.redeem(small)
+    assert snapshot(b) == before                               # no pool touched
+    assert b.debt == pytest.approx(debt + paid, rel=1e-9)      # paid by minting
+    assert b.owed == pytest.approx(f * debt + paid, rel=1e-9)
+    assert b.price() >= pi * (1 - 1e-12)
+    tick(b, w, ext)
+    assert b.owed < b.grain * b.gross() and b.debt < debt      # the wheel repaid it
+
+
+def test_a_K_cut_calls_nothing_back_and_liquidity_is_held_as_buck():
+    k = [K]
+    b, w, ext, tick, _ = credit_world(k=k)
+    debt = b.debt
+    k[0] = 0.6
+    assert b.headroom() < 0
+    tick(b, w, ext)
+    assert b.debt == pytest.approx(debt, rel=1e-6)             # nothing burned
+    assert b.idle_buck >= b.reserve_target() * (1 - b.rband)   # liquidity as BUCK
+    rid = b.deposit(BUCK, 1e4)
+    tick(b, w, ext)
+    b.redeem(rid)
+    assert b.pro_rata_exits == 0                               # still paid at once
+
+
+def test_burn_mode_leaves_exits_pro_rata_after_a_cut():
+    k = [K]
+    b, w, ext, tick, _ = credit_world(mode="burn", k=k)
+    k[0] = 0.6
+    tick(b, w, ext)
+    rid = b.deposit(BUCK, 1e4)
+    tick(b, w, ext)
+    b.redeem(rid)
+    assert b.pro_rata_exits == 1 and b.idle_buck < 1e-6 * b.gross()
+
+
+def test_deleverage_mode_follows_K_down():
+    k = [K]
+    b, w, ext, tick, _ = credit_world(mode="deleverage", k=k)
+    k[0] = 0.6
+    tick(b, w, ext, n=200)
+    assert b.headroom() >= b.reserve_target() * (1 - b.rband) - 1e-6
+    assert b.debt / b.equity() < 0.6
+
+
+@pytest.mark.parametrize("mode", ["hold", "burn", "deleverage"])
+def test_the_whole_credit_machine_keeps_its_books(mode):
+    import random
+    from alberta_buck.sim.reserve_basket import CreditBasket
+    rng = random.Random(11)
+    k = [K]
+    b, w, ext, tick, first = credit_world(mode=mode, k=k, arb_band=0.005, flow_z=2.0,
+                                          director=TurnDirector())
+    open_ = []
+    x = {t: 0.0 for t in b.pools}
+    base = {t: ext.price[t] for t in b.pools}
+    for step in range(400):
+        k[0] = 0.675 + 0.075 * math.cos(step / 40)             # K moving both ways
+        for t in b.pools:
+            x[t] += -0.05 * x[t] + 0.015 * rng.gauss(0, 1)
+            ext.price[t] = base[t] * math.exp(x[t])
+        if rng.random() < 0.5:
+            t = rng.choice([BUCK] + list(b.pools))
+            amt = rng.uniform(1e3, 3e4)
+            open_.append(b.deposit(t, amt if t == BUCK else amt / b.pools[t].price))
+        if open_ and rng.random() < 0.4:
+            b.redeem(open_.pop(rng.randrange(len(open_))))
+        tick(b, w, ext, n=1)
+        assert b.minted - b.burned == pytest.approx(b.debt, abs=1e-6)
+        held = sum(r.shares for r in b.receipts.values()) + b.treasury
+        assert held == pytest.approx(b.S, rel=1e-9)
+        assert b.idle_buck >= -1e-6 and b.owed >= 0 and min(b.idle.values()) >= -1e-9
+        if mode != "hold":
+            assert b.idle_buck <= 1e-6 * b.gross() + 1e-6       # no BUCK at rest
+    assert b.value_of(first) > 0
+    assert isinstance(b, CreditBasket)

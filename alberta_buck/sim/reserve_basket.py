@@ -103,6 +103,7 @@ class ReserveBasket(EquityBasket):
         self.flow_ms = 0.0             # the EMA of the daily net flow squared
         self.captured = 0.0            # BUCK the wheel's arbitrage has brought in
         self.pro_rata_exits = 0        # exits the reserve could not cover
+        self.sold = 0.0                # BUCK the basket's TOKEN sales have raised
 
     def reserve_target(self) -> float:
         r = self.reserve * self.gross()
@@ -182,9 +183,10 @@ class ReserveBasket(EquityBasket):
             return 0.0
         p = self.pools[t]
         here = p.quote_sell_tok(dx) + dx * p.fee * self._pool_share(t) * p.price
-        if self.ext and self.ext.sell_tok(t, dx) > here:
-            return self.ext.sell_tok(t, dx)
-        return p.sell_tok(dx)
+        out = self.ext.sell_tok(t, dx) if self.ext and self.ext.sell_tok(t, dx) > here \
+            else p.sell_tok(dx)
+        self.sold += out
+        return out
 
     def _route_sell_buck(self, t: str, dy: float) -> float:
         if dy <= 0:
@@ -205,6 +207,37 @@ class ReserveBasket(EquityBasket):
         self.idle_buck -= dy
         self.idle[t] += self._route_sell_buck(t, dy)
 
+    # -- the placing verbs (CreditBasket overrides them) ------------------------ #
+
+    def short(self) -> float:
+        """BUCK the reserve lacks once it is below its band's floor (else 0):
+        what Trim raises."""
+        R = self.reserve_target()
+        g = max(self.grain * self.gross(), 1e3 * self.dust)
+        return R - self.idle_buck if self.idle_buck < R * (1 - self.rband) - g else 0.0
+
+    def op_fund(self, t: str, amount: float, from_spare: float) -> None:
+        """Buy TOKEN_t with half of `amount` -- `from_spare` of it the
+        reserve's spare, the rest minted credit -- leaving the other half for
+        Deploy to pair."""
+        self.op_mint(amount - from_spare)
+        self.op_sell_buck(t, amount / 2)
+
+    def op_pair(self, t: str) -> None:
+        """Pair the wallet's TOKEN_t with the reserve's spare BUCK (never below
+        its target), then minted credit, then by selling part of the TOKEN;
+        add it to pool t."""
+        p = self.pools[t]
+        v = self.idle[t] * p.price
+        have = min(max(self.spare(), 0.0), v)
+        have += self.op_mint(v - have)
+        if have < v:
+            self.op_sell_tok(t, (v - have) / 2 / p.price)
+        self.op_add(t)
+
+    def settle(self) -> None:
+        """After the wheel's trades: the reserve basket keeps its BUCK."""
+
     def op_arb(self, t: str, band_: float) -> float:
         """If pool t strays more than `band_` from the outside price, make
         the outside arbitrageur's trade first, the reserve as the float.
@@ -213,6 +246,177 @@ class ReserveBasket(EquityBasket):
         if not self.ext or abs(p.price / self.ext.price[t] - 1) <= band_:
             return 0.0
         spent, got = arbitrage(p, self.ext, t, p.fee, budget=self.idle_buck)
+        self.idle_buck += got - spent
+        self.captured += got - spent
+        return got - spent
+
+
+class CreditBasket(ReserveBasket):
+    """The reserve as unminted CREDIT (doc/BASKET-EQUITY.org section 13).
+
+    One limit: K x min(the open receipts' cost basis, equity), K of the
+    moment -- deposits bring credit, earnings do not, and nothing mints past
+    K x equity after a fall.  No per-deposit pending credit.
+
+    LIQUIDITY is the BUCK held plus the unminted headroom, and the wheel
+    keeps it at the flow-sized target (`reserve_target`).  It pays exits
+    (from BUCK held, else by minting), funds the director's buys, and is
+    where a sale's proceeds park until a buy is due.  An exit leaves its
+    share of the debt, plus anything minted to pay it, `owed`: Trim sells
+    positions and burns until it is repaid, restoring the exit's pro rata.
+
+    What the basket does with BUCK at rest, and after a K cut takes the
+    headroom (`mode`):
+      "hold"        BUCK repays debt, except what liquidity lacks in
+                    headroom: after a cut, Trim sells into BUCK and HOLDS
+                    it (no burn, the leverage untouched).  Normally no BUCK
+                    is held.  A K cut calls nothing back.
+      "burn"        BUCK always repays debt; after a cut liquidity is gone
+                    and exits go pro rata until K recovers.
+      "deleverage"  BUCK always repays debt; after a cut Trim sells and
+                    burns until the headroom is back -- the basket follows
+                    K down."""
+
+    def __init__(self, pools: dict[str, Pool], mode: str = "hold", **kw):
+        super().__init__(pools, **kw)
+        if mode not in ("hold", "burn", "deleverage"):
+            raise ValueError(mode)
+        self.mode = mode
+        self.owed = 0.0                # exits' debt shares and mints, to repay
+        self._leaving = 0.0            # the basis of the receipt now redeeming
+
+    # -- the limit and liquidity ------------------------------------------------ #
+
+    def basis(self) -> float:
+        return sum(r.basis for r in self.receipts.values())
+
+    def limit(self) -> float:
+        return self.k() * min(self.basis(), self.equity())
+
+    def headroom(self) -> float:
+        return self.limit() - self.debt
+
+    def liquidity(self) -> float:
+        return self.idle_buck + max(self.headroom(), 0.0)
+
+    def keep(self) -> float:
+        """BUCK to hold: what the target lacks in headroom ("hold" only)."""
+        if self.mode != "hold":
+            return 0.0
+        return max(self.reserve_target() - max(self.headroom(), 0.0), 0.0)
+
+    def spare(self) -> float:
+        """BUCK Fund may place: the liquidity beyond its target."""
+        return self.liquidity() - self.reserve_target()
+
+    def short(self) -> float:
+        g = max(self.grain * self.gross(), 1e3 * self.dust)
+        owed = self.owed if self.owed > g else 0.0
+        target = self.reserve_target()
+        have = {"hold": self.liquidity(), "burn": target,
+                "deleverage": self.headroom()}[self.mode]
+        lacks = target - have if have < target * (1 - self.rband) - g else 0.0
+        return max(owed, lacks)
+
+    def _mint(self, amount: float) -> float:
+        amount = max(0.0, min(amount, self.headroom()))
+        assert amount == 0 or self.debt + amount <= self.k() * self.equity() + 1e-6
+        self.debt += amount
+        self.minted += amount
+        self.idle_buck += amount
+        return amount
+
+    def op_mint(self, amount: float) -> float:
+        return self._mint(amount)
+
+    def settle(self) -> None:
+        """BUCK at rest repays the exits' debt first, then any debt, but for
+        what liquidity lacks in headroom ("hold")."""
+        b = min(self.idle_buck, self.owed, self.debt)
+        if b > 0:
+            self.idle_buck -= b
+            self._burn(b)
+            self.owed -= b
+        b = min(max(self.idle_buck - self.keep(), 0.0), self.debt)
+        if b > 0:
+            self.idle_buck -= b
+            self._burn(b)
+            self.owed = max(self.owed - b, 0.0)
+
+    # -- the verbs ----------------------------------------------------------- #
+
+    def deposit(self, asset: str, amount: float, guard: float = 0.05) -> int:
+        rid = super().deposit(asset, amount, guard)
+        self.pending = 0.0             # no pending credit: the limit is pooled
+        self.settle()
+        return rid
+
+    def redeem(self, rid: int, frac: float = 1.0):
+        self._leaving = self.receipts[rid].basis * frac
+        try:
+            return super().redeem(rid, frac)
+        finally:
+            self._leaving = 0.0
+
+    def _exit(self, out: float) -> float:
+        """Pay the exit's value (at the exiter's marks, less the charge) from
+        the BUCK held, then by minting if the limit after the exit allows;
+        its debt share and the mint become `owed`.  Otherwise pro rata."""
+        left = out * self.exit_fee() if self.exit_fee else 0.0
+        f = (out - left) / self.S
+        value = f * self.equity(low=True)
+        if value <= 0:
+            raise Underwater(-value)
+        pay = value * (1 - self.charge(BUCK))
+        use = min(self.idle_buck, pay)
+        need = pay - use
+        room = self.k() * min(self.basis() - self._leaving, self.equity() - pay) - self.debt
+        if need <= max(room, 0.0):
+            self.owed += self.debt * f + need
+            self.idle_buck -= use
+            self.debt += need
+            self.minted += need
+        else:
+            pay = self._exit_pro_rata(f, self.debt * f)
+            self.pro_rata_exits += 1
+        self.flow -= pay
+        self.S -= out
+        self.settle()
+        return pay
+
+    def op_collect(self, t: str) -> None:
+        super().op_collect(t)
+        self.settle()
+
+    def _usable(self) -> float:
+        return max(self.idle_buck - self.keep(), 0.0)
+
+    def op_fund(self, t: str, amount: float, from_spare: float = 0.0) -> None:
+        """Buy TOKEN_t with half of `amount` (BUCK not held for liquidity,
+        then minted); Deploy pairs the other half."""
+        half = amount / 2
+        self._mint(half - min(self._usable(), half))
+        self.op_sell_buck(t, half)
+
+    def op_pair(self, t: str) -> None:
+        p = self.pools[t]
+        v = self.idle[t] * p.price
+        avail = max(self.spare(), 0.0)
+        have = min(self._usable(), avail, v)
+        have += self._mint(min(v - have, avail - have))
+        if have < v:
+            self.op_sell_tok(t, (v - have) / 2 / p.price)
+        self.op_add(t)
+
+    def op_arb(self, t: str, band_: float) -> float:
+        """The outsider's trade, made first, on a flash of credit (on chain
+        the V3 callback funds it and no mint is needed)."""
+        p = self.pools[t]
+        if not self.ext or abs(p.price / self.ext.price[t] - 1) <= band_:
+            return 0.0
+        budget = self.idle_buck + max(self.headroom(), 0.0)
+        spent, got = arbitrage(p, self.ext, t, p.fee, budget=budget)
+        self._mint(max(spent - self.idle_buck, 0.0))
         self.idle_buck += got - spent
         self.captured += got - spent
         return got - spent
@@ -398,9 +602,7 @@ def _fund_due(d: ReserveBasket) -> bool:
 
 
 def _reserve_short(d: ReserveBasket) -> float:
-    """BUCK the reserve lacks, once it is below its band (else 0)."""
-    R = d.reserve_target()
-    return R - d.idle_buck if d.idle_buck < R * (1 - d.rband) - _grain(d) else 0.0
+    return d.short()
 
 
 class DailyKind(WheelTask):
@@ -437,11 +639,13 @@ class ArbKind(WheelTask):
 
     def due(self, d, i, clk) -> bool:
         t = _names(d)[i]
-        return (d.ext is not None and d.idle_buck > _grain(d)
+        return (d.ext is not None
                 and abs(d.pools[t].price / d.ext.price[t] - 1) > self.band)
 
     def run(self, d, i, clk):
-        return TaskResult(value=d.op_arb(_names(d)[i], self.band))
+        got = d.op_arb(_names(d)[i], self.band)
+        d.settle()
+        return TaskResult(value=got)
 
 
 class ReserveDeployKind(DeployKind):
@@ -449,14 +653,8 @@ class ReserveDeployKind(DeployKind):
     target), then with minted credit, then by selling part of the TOKEN."""
 
     def run(self, d, i, clk):
-        t = _names(d)[i]
-        p = d.pools[t]
-        v = d.idle[t] * p.price
-        have = min(max(d.spare(), 0.0), v)
-        have += d.op_mint(v - have)
-        if have < v:                  # balance the pair: the reserve stays whole
-            d.op_sell_tok(t, (v - have) / 2 / p.price)
-        d.op_add(t)
+        d.op_pair(_names(d)[i])
+        d.settle()
         return TaskResult()
 
 
@@ -473,8 +671,7 @@ class ReserveFundKind(WheelTask):
         if plan is None:
             return None
         j, amount, from_spare = plan
-        d.op_mint(amount - from_spare)
-        d.op_sell_buck(j, amount / 2)
+        d.op_fund(j, amount, from_spare)
         return TaskResult()
 
 
@@ -511,6 +708,7 @@ class TrimKind(WheelTask):
         tok0 = d.idle[t]
         d.op_remove(t, value / (2 * d.pools[t].sqrtP))
         d.op_sell_tok(t, d.idle[t] - tok0)
+        d.settle()
         return TaskResult()
 
 

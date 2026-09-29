@@ -23,6 +23,10 @@ The design is settled and prototyped, but not yet built in Solidity.
   =alberta_buck/sim/basket_harvest.py= (=make nix-venv-sim-harvest=).  It
   also answers why section 9.1's scenario showed no reversion yield.  If it
   is ruled in, section 12.6 amends the Solidity plan of section 10.
+- *Section 13 evaluates the reserve as unminted credit* (the owner's
+  proposal, after ruling BUCK payouts, a flow-sized reserve and the
+  arbitrage in the basket).  It recommends =CreditBasket= in hold mode, and
+  lists the open questions (13.4) to settle one by one before implementing.
 
 It replaces the pro-rata basket's principal and burn-obligation accounting
 (=BuckBasketProRata=, which the ops and Fence shells inherit) with shares of
@@ -50,6 +54,14 @@ From 2026-09-29:
    the work wheel deploy, fund, distribute and rebalance them.
 8. *The simplest design that meets the goals*: prototype it first, then
    document it for implementation.
+
+From 2026-09-29, later (on section 12's proposal):
+
+9. *Payouts are in BUCK*, replacing ruling 4.
+10. *The reserve is flow-sized.*
+11. *The arbitrage is in the basket.*
+12. *Evaluate the reserve as unminted credit*, then work through the open
+    questions one by one before implementing (section 13).
 
 * 2. What it replaces, and why
 
@@ -843,3 +855,135 @@ What it costs:
    for trend-like swings, 0 for fast reversion).
 5. *Symmetric entry and exit charges*, (1+K)/2 of the dearest pool fee for
    BUCK.
+
+Ruled on 2026-09-29: 1 (BUCK payouts), 2 (flow-sized) and 3 (the
+arbitrage in the basket).  4 and 5 are among section 13.4's questions.
+
+* 13. The reserve as unminted credit (2026-09-29)
+
+The design owner's proposal: do not mint and hold the whole K x deposit.
+Keep part of the credit limit unminted as the reserve instead, and mint it
+when the arbitrage, a reweighting or an exit needs it.  It costs no
+demurrage, is instantly available up to K x the deposits, and moves with
+K.  Each claim is a proportion of the whole, and each exit burns its
+proportion of the debt of the moment.
+
+Prototyped as =CreditBasket= (=reserve_basket.py=, 9 tests), with a stress
+run in =basket_harvest.run_stress=.
+
+** 13.1 What it changes
+
+- *One credit limit*: K of the moment x min(the open receipts' cost basis,
+  equity).
+  - It replaces each deposit's pending credit (K on its day), and the
+    bookkeeping that went with it: pending dropped pro rata at exits, and
+    re-offered when K rises.
+  - Deposits bring credit and earnings do not, because the limit is on the
+    basis.  After a fall, nothing mints past K x equity.
+- *Valuation does not change.*  Unminted credit is not an asset, so the
+  share price never includes it, and neither entry nor exit needs K.
+  Every share carries the same debt ratio, so a move in K treats every
+  holder alike.  An incoming depositor is valued exactly as before.
+- *Liquidity is the BUCK held plus the unminted headroom*, and the wheel
+  keeps it at the flow-sized target.  Normally the basket holds no BUCK:
+  every BUCK it receives repays debt, and every BUCK it needs, it mints.
+- *Exits*:
+  - An exit is paid from the BUCK held, or else minted, if the limit
+    after the exit allows it.
+  - Its share of the debt, plus the mint, is *owed*.  Trim sells positions
+    and burns until the owed is repaid, which completes the exit's pro rata.
+  - Beyond the limit, the exit goes pro rata at once.
+- *The director's parking is headroom*, and a buy ahead of a sale mints.
+- *The arbitrage needs no float*, so the reserve is not its float after
+  all.  The outsider's trade funds itself through the V3 callback, as
+  =ArbKind= v1 already does.
+- *Demurrage is not the reason.*  At 2% a year on a reserve of about 2% of
+  the gross, it costs about 0.04% a year.
+
+** 13.2 The catch: a K cut takes the headroom
+
+A cut from 0.75 to 0.60 removes 15% of the basis from the limit.  With it
+goes the headroom that exits would mint from.  Three answers, one per
+=mode=:
+
+- *burn*: BUCK always repays debt.  After a cut there is no liquidity, and
+  exits go pro rata until K recovers.
+- *deleverage*: after a cut, Trim sells and burns until the headroom is
+  back.  The basket follows K down, which is in effect a margin call,
+  however orderly.
+- *hold*: after a cut, Trim sells into BUCK and HOLDS it, without burning
+  it.  Liquidity is kept, the leverage is untouched, and nothing is called
+  back.  Normally no BUCK is held.
+
+The stress run, 8 seeds:
+- normal flows to day 150;
+- the TOKENs fall 25% together (days 150-210) and recover half by day 400;
+- K is cut from 0.75 to 0.60 (days 160-190) and restored (days 300-360);
+- from day 160 to 260 arrivals slow to 0.5 a day, and holders leave at
+  1/15 a day.
+
+The same run is repeated with the cut and the exits but no fall.
+
+| scenario           | reserve                   | stress exits paid at once | first holder, 450 days | highest debt/equity |
+|--------------------+---------------------------+---------------------------+------------------------+---------------------|
+| cut + fall + exits | minted BUCK (section 12)  |                     88.4% | -9.75%                 |                0.81 |
+|                    | credit, burn              |                     41.1% | -9.47%                 |                0.74 |
+|                    | credit, deleverage        |                     91.9% | -8.47%                 |                0.73 |
+|                    | *credit, hold*            |                     91.1% | -9.15%                 |                0.74 |
+| cut + exits        | minted BUCK               |                     89.4% | +2.14%                 |                0.76 |
+|                    | credit, burn              |                     65.6% | +2.04%                 |                0.73 |
+|                    | credit, deleverage        |                     93.7% | +2.13%                 |                0.73 |
+|                    | *credit, hold*            |                     92.1% | +2.13%                 |                0.73 |
+
+And in normal flows (section 12.4's run):
+
+| reserve         | exits paid at once | pool ops per exit | the stayer, a year | BUCK held (of gross) | debt/equity |
+|-----------------+--------------------+-------------------+--------------------+----------------------+-------------|
+| minted, 2 sigma |              92.8% |              0.47 | +2.92%             | 2.24%                |        0.74 |
+| credit, hold    |              97.7% |              0.15 | +2.97%             | 0.02%                |        0.68 |
+
+- *burn* loses its liquidity exactly when exits come.
+- *deleverage*'s edge is timing, not structure.  It sold into the fall
+  (+0.7%); with no fall it is level with hold.
+- *hold* is as liquid as deleverage, and more liquid than the minted
+  reserve in every run.  It calls nothing back, and holds BUCK only while a
+  cut has taken the headroom.
+- Exiters got the same in every arm (99.6-99.7% of their marked value).
+
+** 13.3 Recommendation
+
+Adopt the credit reserve in hold mode, with the one limit.
+
+What it removes:
+- pending credit and its rules;
+- a BUCK reserve held at all times;
+- the arbitrage's float;
+- any cost to parking.
+
+What it adds:
+- =owed=: one counter, repaid by Trim;
+- the keep rule: hold BUCK only for what the target lacks in headroom.
+
+An exit's debt share is then burned by the wheel after the exit rather
+than before it (13.4, question 3).
+
+** 13.4 The open questions, in order
+
+1. *The credit reserve in hold mode, with the one limit* (13.3).
+2. *The limit's base*: min(basis, equity), so earnings are unlevered (as
+   ruled on 2026-09-28's "earnings compound unlevered"), or equity, so
+   earnings re-lever.
+3. *An exit's debt share burned after the exit* (the owed, repaid at the
+   wheel's pace), not before it.  The stayers carry the exit's share of the
+   positions until Trim sells it.  The exit charge pays for that, and the
+   limit still binds at the mint.
+4. *The exit charge*: the mirror of the entry charge, (1+K)/2 of the
+   dearest pool fee.
+5. *The director*: the lean (tilt 1), its anchor (a governed reference or a
+   multi-year EMA), and the quorum as the regime knob.
+6. *lambda*: fixed at 25%, or governed; a hurdle.
+7. *A deposit cap* against price impact, or none (routing has made impact
+   small).
+8. *The stress fee* on the equity basket: whether it applies, and its rule.
+9. *The treasury*: when it redeems.
+10. *The Fence* stays on ProRata.
