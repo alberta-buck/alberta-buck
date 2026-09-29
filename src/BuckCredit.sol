@@ -65,7 +65,8 @@ contract BuckCredit is ERC721Enumerable {
     enum DepreciationType {
         NONE,              // Non-depreciating (land, gold, crypto)
         LINEAR,            // Constant annual reduction
-        DECLINING_BALANCE  // Percentage of remaining value per year
+        DECLINING_BALANCE, // Percentage of remaining value per year
+        MARKED             // Valued at its insurer's latest mark (see `mark`)
     }
 
     /// @dev Field declaration order is chosen to pack into 3 storage slots:
@@ -143,6 +144,7 @@ contract BuckCredit is ERC721Enumerable {
     event CreditActivated(uint256 indexed tokenId, address indexed owner,
                           uint256 additionalValue, uint256 totalActivated);
     event BuckSet(address indexed buck);
+    event CreditMarked(uint256 indexed tokenId, uint256 value);
     event InsurerGateConfigured(address indexed registry, string regulatorNamespace,
                                 uint32 attestationPeriod);
     event InsurerAttested(address indexed insurer, uint256 indexed root, uint48 expiresAt,
@@ -182,6 +184,22 @@ contract BuckCredit is ERC721Enumerable {
     /// @dev A scope is attested iff its epoch equals the envelope's, so a new
     ///      attestation withdraws every scope it does not repeat.
     mapping(address => mapping(bytes32 => uint32)) internal _scopeEpoch;
+
+    // ── Marked credits ──────────────────────────────────────────────
+    //
+    // A MARKED credit is valued at a mark its insurer keeps current, in place
+    // of a depreciation schedule: collateral whose value is on-chain and
+    // moves every block (a BuckBasket's equity).  Like depreciation, the mark
+    // moves the credit limit without touching the coverage, so it can fall
+    // below the activated coverage -- which is exactly why only a SELF-issued
+    // credit may be marked (insurer == holder, fixed at creation, and never
+    // switched to or from MARKED by updateCredit).  An insurer marking
+    // someone else's credit down would be revoking a purchased policy, the
+    // one thing an insurer may never do.
+
+    /// @notice A MARKED credit's present value, as its insurer last marked
+    ///         it (capped by the face when read).
+    mapping(uint256 => uint256) public markOf;
 
     /// @notice The scope the eight-argument createCredit declares: a regulator
     ///         grants it to a general insurer and withholds it from a scoped one.
@@ -518,6 +536,8 @@ contract BuckCredit is ERC721Enumerable {
     ) internal returns (uint256) {
         _requireAccepted(client);
         require(depreciationFloor <= faceValue, "floor > face");
+        require(depType != DepreciationType.MARKED || client == msg.sender,
+                "BuckCredit: a marked credit is self-issued");
         _requireEnvelope(true, scope, faceValue, depType, depRate, premiumRate);
 
         uint256 tokenId = _nextTokenId++;
@@ -565,6 +585,11 @@ contract BuckCredit is ERC721Enumerable {
     ///         insured value.
     function depreciatedFaceValue(uint256 tokenId) public view returns (uint256) {
         CreditParams storage c = credits[tokenId];
+        if (c.depType == DepreciationType.MARKED) {
+            uint256 face = c.faceValue.asUint();
+            uint256 m = markOf[tokenId];
+            return m < face ? m : face;
+        }
         return _depreciate(
             c.faceValue.asUint(), c.depType, c.depRate,
             c.depreciationFloor.asUint(), c.depStartAt
@@ -751,6 +776,9 @@ contract BuckCredit is ERC721Enumerable {
         CreditParams storage c = credits[tokenId];
         require(msg.sender == c.insurer,                "Not insurer");
         require(newDepreciationFloor <= newFaceValue,   "floor > face");
+        // A credit is MARKED from creation or never (see `mark`).
+        require((c.depType == DepreciationType.MARKED) == (newDepType == DepreciationType.MARKED),
+                "BuckCredit: MARKED is fixed at creation");
 
         // An insurer may reappraise freely down to the coverage the holder
         // has already bought, and no further.  Activated coverage is a
@@ -785,5 +813,15 @@ contract BuckCredit is ERC721Enumerable {
         c.lastUpdated       = uint48(block.timestamp);
 
         emit CreditUpdated(tokenId, msg.sender, newFaceValue, newDepRate, newPremiumRate);
+    }
+
+    /// @notice Mark a MARKED credit at `value`: its present value from now,
+    ///         capped by the face.  Only its insurer (who is its holder).
+    function mark(uint256 tokenId, uint256 value) external {
+        CreditParams storage c = credits[tokenId];
+        require(msg.sender == c.insurer, "Not insurer");
+        require(c.depType == DepreciationType.MARKED, "BuckCredit: not marked");
+        markOf[tokenId] = value;
+        emit CreditMarked(tokenId, value);
     }
 }
