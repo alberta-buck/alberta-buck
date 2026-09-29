@@ -109,9 +109,13 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
     # treasury when nothing of the sort had happened.
     if d.basket_impl != "legacy":
         basket_tokens = {c.address.lower() for c in d.tokens}
+        # The equity baskets pay BUCK; a pro-rata exit's TOKEN (paid in kind)
+        # is in the holder's portfolio, which the round trip values -- the
+        # counter stays in BUCK.
+        equity = str(d.basket_impl).startswith("equity")
         for log in rcpt["logs"]:
             t0 = log["topics"][0]
-            if (t0 == ERC20_TRANSFER_TOPIC
+            if (not equity and t0 == ERC20_TRANSFER_TOPIC
                     and log["address"].lower() in basket_tokens
                     and len(log["topics"]) >= 3
                     and bytes(log["topics"][2])[-20:] == holder_bytes):
@@ -122,7 +126,7 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
                     ["uint256", "uint256", "uint256", "uint256"],
                     bytes(log["data"]))
                 treasury_buck += tb
-                if str(d.basket_impl).startswith("equity"):
+                if equity:
                     # The equity basket pays BUCK (depositorBuck); its
                     # treasuryBuck is the value of the cut, taken in shares.
                     token_to_user += db
@@ -251,11 +255,13 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     pool = chain.deploy("SimLP")
     idmod.bind_as_operator(chain, reg, pool.address, True, True, sender=deployer)
     pool_acct = pool.address
-    # Production Buck has no basket hooks; the pro-rata baskets (and, until it
-    # holds its own credit, the equity basket) mint and burn through them, so
-    # the sim deploys the hooked subclass (src/legacy/BuckWithBasketHooks.sol).
-    buck = chain.deploy("BuckWithBasketHooks", credit.address, kctrl.address,
-                        reg.address, pool_acct)
+    # Production Buck has no basket hooks: the equity baskets are credit
+    # holders (a MARKED BuckCredit, a lien) and get it as is.  The pro-rata
+    # baskets mint and burn through the hooks, so for them the sim deploys the
+    # hooked subclass (src/legacy/BuckWithBasketHooks.sol).
+    credit_holder = basket_impl in ("equity", "equity-ops")
+    buck = chain.deploy("Buck" if credit_holder else "BuckWithBasketHooks",
+                        credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
     # activateFromBuck (which requires msg.sender == buck).  The wiring is an
@@ -305,7 +311,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         deposited_topic, redeemed_topic = PRORATA_DEPOSITED_TOPIC, PRORATA_REDEEMED_TOPIC
     elif basket_impl in ("equity", "equity-ops"):
         # The equity basket (doc/BASKET-EQUITY.org 13.6): shares, one pooled
-        # debt, BUCK payouts, a wallet its work wheel places.  Two facets:
+        # lien, BUCK payouts, a wallet its work wheel places.  Two facets:
         # the venue and the components; the shell emits the pro-rata
         # shells' Deposited / Redeemed, so the topics are theirs.
         name = "BuckBasketEquityOps" if basket_impl == "equity-ops" else "BuckBasketEquity"
@@ -328,10 +334,18 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     else:
         basket = chain.deploy("BuckBasket", *ctor)
         deposited_topic, redeemed_topic = LEGACY_DEPOSITED_TOPIC, LEGACY_REDEEMED_TOPIC
-    chain.send(pool.functions.exec(
-        buck.address, buck.encode_abi("setBasket", args=[basket.address])), sender=deployer)
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
-    idmod.bind_as_operator(chain, reg, basket.address, True, True, sender=deployer)
+    if credit_holder:
+        # A credit holder: bound public and NON-Carrying (it holds a lien), and
+        # it issues itself its MARKED credit.  The face caps what it may ever
+        # issue at K x face; 1e23 raw (1e17 BUCK) is no practical cap.
+        idmod.bind_as_operator(chain, reg, basket.address, True, False, sender=deployer)
+        chain.send(basket.functions.openCredit(credit.address, 10**23), sender=gov)
+    else:
+        chain.send(pool.functions.exec(
+            buck.address, buck.encode_abi("setBasket", args=[basket.address])),
+            sender=deployer)
+        idmod.bind_as_operator(chain, reg, basket.address, True, True, sender=deployer)
 
     # --- WP-3a: the stabilizer seam and the observer ------------------ #
     # The observer (ShadowObserver) reads the basket's bvib and the ops
