@@ -76,8 +76,7 @@ contract BuckBasketEquityTest is Test {
         buck = new EqBuck();
         ctrl = new EqController();
         address factory = deployCode("out/UniswapV3Factory.sol/UniswapV3Factory.json");
-        b = new BuckBasketEquity(address(buck), address(ctrl), factory, GOV,
-                                 3000, 600, 64, 500, 1e3);
+        b = _newBasket(factory);
         buck.setBasket(address(b));
         vm.startPrank(GOV);
         b.setVenue(address(new BuckBasketUniswapV3()));
@@ -103,6 +102,11 @@ contract BuckBasketEquityTest is Test {
     }
 
     // ---- the world ------------------------------------------------------------ //
+
+    function _newBasket(address factory) internal virtual returns (BuckBasketEquity) {
+        return new BuckBasketEquity(address(buck), address(ctrl), factory, GOV,
+                                    3000, 600, 64, 500, 1e3);
+    }
 
     function _sqrt18(uint256 x) internal pure returns (uint256 y) {       // sqrt(x) for 1e18 x, in 1e9
         uint256 z = (x + 1) / 2; y = x;

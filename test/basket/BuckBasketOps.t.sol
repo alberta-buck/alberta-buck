@@ -6,6 +6,7 @@ import {ERC20}   from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20}  from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {BuckBasketOps}       from "../../src/basket/BuckBasketOps.sol";
+import {MonetaryDesk}        from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
 import {BuckBasketStorage}   from "../../src/basket/BuckBasketStorage.sol";
 import {IBuckBasketVenue}    from "../../src/basket/IBuckBasketVenue.sol";
@@ -110,7 +111,7 @@ contract BuckBasketOpsTest is Test {
 
     function _enable() internal {
         vm.prank(GOV);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 200, maxPositionBp: 1000, maxOutrightBp: 1000, enabled: true
         }));
     }
@@ -255,12 +256,12 @@ contract BuckBasketOpsTest is Test {
         _operate(40, true);
         // A zero position ceiling makes any inventory too much.
         vm.prank(GOV);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 200, maxPositionBp: 1000, maxOutrightBp: 1000, enabled: true
         }));
         _operate(-40, false);                    // Q1 builds some inventory
         vm.prank(GOV);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 200, maxPositionBp: 0, maxOutrightBp: 1000, enabled: true
         }));
         dir.set(-40, false); dir.bump();
@@ -272,7 +273,7 @@ contract BuckBasketOpsTest is Test {
         _addPaxg(); _depositPaxg(alice, 1e18); _enable();
         _operate(40, true);
         vm.prank(GOV);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 200, maxPositionBp: 1000, maxOutrightBp: 0, enabled: true
         }));
         dir.set(40, true); dir.bump();
@@ -283,7 +284,7 @@ contract BuckBasketOpsTest is Test {
     function test_legBound_rejectsOversizedPolicy() public {
         vm.prank(GOV);
         vm.expectRevert(BuckBasketStorage.Bp10000.selector);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 501, maxPositionBp: 1000, maxOutrightBp: 1000, enabled: true
         }));
     }
@@ -306,7 +307,7 @@ contract BuckBasketOpsTest is Test {
 
         // Pin it: any inventory at all is now over the ceiling.
         vm.prank(GOV);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 200, maxPositionBp: 0, maxOutrightBp: 1000, enabled: true
         }));
 
@@ -442,7 +443,7 @@ contract BuckBasketOpsTest is Test {
 
     function _setOps(uint32 posBp, uint32 outBp, bool enabled) internal {
         vm.prank(GOV);
-        basketC.setOpsParams(BuckBasketOps.OpsParams({
+        basketC.setOpsParams(MonetaryDesk.OpsParams({
             maxLegBp: 200, maxPositionBp: posBp, maxOutrightBp: outBp, enabled: enabled
         }));
     }
@@ -561,7 +562,7 @@ contract BuckBasketOpsTest is Test {
         assertEq(basketC.shadowDepth(), 0);
         // WP-13: the cap is the one view that REVERTS on an unreadable NAV
         // -- the observer holds its last good cap behind try/catch.
-        vm.expectRevert(BuckBasketOps.NavUnreadable.selector);
+        vm.expectRevert(MonetaryDesk.NavUnreadable.selector);
         basketC.positionCap();
     }
 
@@ -832,7 +833,7 @@ contract BuckBasketOpsTest is Test {
         _arb(pool, address(buck), 3000e18);                       // spot far off TWAP
         vm.expectRevert(BuckBasketStorage.Slippage.selector);
         _venueView().poolBuckValues();
-        vm.expectRevert(BuckBasketOps.NavUnreadable.selector);
+        vm.expectRevert(MonetaryDesk.NavUnreadable.selector);
         basketC.positionCap();
         assertEq(basketC.netInventory(), q, "position always readable");
         assertEq(basketC.capacity(), 0, "capacity() keeps its WP-3a pinned reading");
@@ -867,7 +868,7 @@ contract BuckBasketOpsTest is Test {
         assertEq(s0, pos0, "one stabilizer at weight 1: s is its fill");
 
         _arb(pool, address(buck), 3000e18);                       // the trip
-        vm.expectRevert(BuckBasketOps.NavUnreadable.selector);
+        vm.expectRevert(MonetaryDesk.NavUnreadable.selector);
         basketC.positionCap();
         vm.warp(vm.getBlockTimestamp() + 100);                    // inside the window
         kS.compute();                                             // observe() refreshes
