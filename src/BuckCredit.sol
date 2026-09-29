@@ -171,11 +171,12 @@ contract BuckCredit is ERC721Enumerable {
 
     /// @notice The accumulator the regulator's subtrees are proven against.
     IAccumulatorRegistry public insurerRegistry;
+    /// @notice How long an attestation lasts from the root it was proven on.
+    ///         (Packed with `insurerRegistry`: both are written once, together.)
+    uint32  public attestationPeriod;
     /// @notice The regulator's namespace, e.g. "regulator:ca-ab": every
     ///         predicate subtree and scope is named under it.
     string  public regulatorNamespace;
-    /// @notice How long an attestation lasts from the root it was proven on.
-    uint32  public attestationPeriod;
     address private immutable _deployer;
 
     /// @notice The attested envelope an insurer's issuance is checked against.
