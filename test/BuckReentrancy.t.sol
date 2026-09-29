@@ -79,9 +79,9 @@ contract ReenteringCredit {
         }
     }
 
-    function deactivateFromBuck(uint256, address, uint256 amount)
-        external returns (uint256)
-    { activated -= amount; return 0; }
+    function deactivateFromBuck(uint256, address, uint256 amount) external {
+        activated -= amount;
+    }
 }
 
 /// @notice The minter.  Bound as a verified public identity so it can hold

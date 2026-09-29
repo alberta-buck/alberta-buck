@@ -2,18 +2,18 @@
 pragma solidity ^0.8.20;
 
 import {BN254} from "../src/BN254.sol";
+import {BuckCredit} from "../src/BuckCredit.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BuckJubileeReliefTest} from "./BuckJubileeRelief.t.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
 
-/// @title JubileeBasis.t.sol -- the Jubilee's two sides do not balance today.
+/// @title JubileeBasis.t.sol -- the Jubilee's two sides balance.
 ///
-/// The fund takes in 2%/yr of the BUCK in circulation (totalSupply).  Relief
-/// should pay back exactly that: 2%/yr of the BUCK each issuer actually put
-/// into circulation.  These tests pin the places where the two sides part
-/// company today (doc/JUBILEE-ISSUANCE.org, section 1), and one place the
-/// fund's own accrual is not the demurrage the holders owe.  Each asserts the
-/// CURRENT behaviour and is named test_defect_*: the fix inverts them.
+/// The fund takes in 2%/yr of the BUCK issued; relief pays back exactly that,
+/// 2%/yr of the BUCK each issuer actually put into circulation; and every
+/// BUCK carries its own fee to the end.  Each test here was a
+/// test_defect_* that pinned the old behaviour (doc/JUBILEE-ISSUANCE.org,
+/// section 1, commit e177c79); each now pins the fix.
 ///
 /// Inherits BuckJubileeReliefTest's fixture: alice holds a zero-premium
 /// credit of FACE = 1000, fully activated, and has drawn DRAW = 100 into bob
@@ -27,23 +27,35 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         buck.settleDemurrage(bob);          // runs _accrueJubilee
     }
 
-    // ---- relief accrues on coverage, not on BUCK issued --------------------
-
-    /// Coverage alice never drew earns relief all the same: the quote is ten
-    /// times what the fund took in from the BUCK she did put out.
-    function test_defect_undrawnCoverageEarnsRelief() public {
-        vm.warp(t0 + YEAR);
-        _poke();
-        uint256 quote = credit.jubileeRelief(tid);
-        uint256 fund  = buck.jubileeActual();
-        assertApproxEqRel(quote, FACE * 2 / 100, 0.001e18, "quoted on the 1000 activated");
-        assertApproxEqRel(fund,  DRAW * 2 / 100, 0.001e18, "funded by the 100 drawn");
-        assertApproxEqRel(quote, fund * FACE / DRAW, 0.002e18, "10x over the fund");
+    /// Buck's books: the supply is the liens, the basket's net issuance, and
+    /// the relief paid out, less the fees realized; and the fund plus the
+    /// positive balances is the sum of every positive raw balance.
+    function _booksBalance() internal view {
+        int256 supply = int256(buck.totalSupply());
+        int256 liens  = int256(_lien(alice));
+        assertEq(supply, liens + buck.basketIssued() + int256(buck.reliefRealized())
+                         - int256(buck.feesRealized()), "supply identity");
+        uint256 positive = buck.rawBalanceOf(alice) + buck.rawBalanceOf(bob)
+                         + buck.rawBalanceOf(POOL) + buck.rawBalanceOf(BASKET)
+                         + buck.rawBalanceOf(CAROL);
+        assertEq(positive, buck.totalSupply(), "sum of positive raw == totalSupply");
     }
 
-    /// Fully drawn, at K < 1, the quote still runs on coverage: 1/K of what
-    /// the credit could ever issue.
-    function test_defect_drawnCreditEarnsOnCoverageNotIssuance() public {
+    // ---- relief accrues on the BUCK issued ----------------------------------
+
+    /// Coverage alice never drew earns nothing: the quote is what the fund
+    /// took in from the 100 she did put out.
+    function test_undrawnCoverageEarnsNothing() public {
+        vm.warp(t0 + YEAR);
+        _poke();
+        uint256 quote = buck.reliefOf(alice);
+        assertApproxEqRel(quote, DRAW * 2 / 100, 0.001e18, "quoted on the 100 drawn");
+        assertApproxEqAbs(quote, buck.jubileeActual(), 1, "the fund holds exactly it");
+        _booksBalance();
+    }
+
+    /// Fully drawn at K < 1, the quote runs on what the credit issued.
+    function test_aDrawnCreditEarnsOnItsLien() public {
         vm.prank(GOV);
         kCtrl.setBuckK(0.75e18);
         uint256 limit = FACE * 3 / 4;
@@ -52,88 +64,46 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         assertEq(buck.signedRawBalanceOf(alice), -int256(limit), "fully drawn");
         vm.warp(t0 + YEAR);
         _poke();
-        uint256 quote = credit.jubileeRelief(tid);
-        uint256 fund  = buck.jubileeActual();
-        assertApproxEqRel(fund, limit * 2 / 100, 0.002e18, "fund: 2% of the 750 issued");
-        assertApproxEqRel(quote, FACE * 2 / 100, 0.001e18, "quote: 2% of the 1000 covered");
-        assertApproxEqRel(quote * 3 / 4, fund, 0.002e18, "over by 1/K");
+        uint256 quote = buck.reliefOf(alice);
+        assertApproxEqRel(quote, limit * 2 / 100, 0.001e18, "2% of the 750 issued");
+        assertApproxEqAbs(quote, buck.jubileeActual(), 1, "the fund holds exactly it");
+        _booksBalance();
     }
 
-    /// When the quote exceeds the fund, settlement pays the fund and the rest
-    /// is gone: the coverage-seconds are consumed either way.
-    function test_defect_theFundCapForfeitsRelief() public {
+    /// The fund covers the relief, so settlement pays the whole quote.
+    function test_theFundPaysTheWholeRelief() public {
         vm.warp(t0 + YEAR);
-        uint256 quoteBefore = credit.jubileeRelief(tid);
-        int256 rawBefore = buck.signedRawBalanceOf(alice);
+        uint256 quote = buck.reliefOf(alice);
         uint256[] memory tids = new uint256[](1);
         tids[0] = tid;
         vm.prank(alice);
-        buck.burn(FACE / 2 * 98 / 100, tids);             // unwinds ~half the coverage
-        uint256 paid = uint256(buck.signedRawBalanceOf(alice) - rawBefore);
-        uint256 quoteAfter = credit.jubileeRelief(tid);
-        uint256 carriedOut = quoteBefore - quoteAfter;    // relief the unwind consumed
-        assertApproxEqRel(carriedOut, quoteBefore * 49 / 100, 0.02e18,
-                          "the unwind carried out its pro-rata relief");
-        assertLt(paid, carriedOut / 4, "but the fund paid a fraction of it");
-        assertLt(buck.jubileeActual(), 1e3, "fund drained");
+        buck.burn(FACE / 2 * 98 / 100, tids);
+        assertApproxEqAbs(DRAW - _lien(alice), quote, 1, "paid in full");
+        assertEq(buck.reliefRealized(), DRAW - _lien(alice), "and booked");
+        assertLt(buck.jubileeActual(), 2, "fund paid out to dust");
+        _booksBalance();
     }
 
-    // ---- demurrage carried into a lien is never collected -------------------
+    // ---- every BUCK carries its fee to the end -----------------------------
 
-    /// Aged BUCK that repay a lien repay it in full: the fee they carry is
-    /// parked on an account whose fee reads zero while it is negative.
-    function test_defect_ageCarriedIntoALienGoesUncollected() public {
+    /// Aged BUCK that repay a lien pay their fee on arrival.
+    function test_agedBuckRepayALienNetOfTheirFee() public {
         vm.warp(t0 + YEAR);
         _poke();                                          // fund: 2% of the 100
         uint256 bobFee = buck.feeOwing(bob);
         assertApproxEqRel(bobFee, DRAW * 2 / 100, 0.001e18, "bob's 100 carry a year");
         vm.prank(bob);
         buck.transfer(alice, DRAW / 2);                   // repays half alice's lien
-        assertEq(buck.signedRawBalanceOf(alice), -int256(DRAW / 2),
-                 "the lien fell by the full 50, not 50 less its fee");
-        assertEq(buck.feeOwing(alice), 0, "and alice owes no fee while negative");
-        assertApproxEqRel(buck.feeOwing(bob), bobFee / 2, 0.001e18,
-                          "bob kept only his half");
-        assertApproxEqRel(buck.jubileeActual(),
-                          buck.feeOwing(bob) + buck.feeOwing(alice) + bobFee / 2, 0.001e18,
-                          "the fund holds a fee nobody now owes");
+        assertApproxEqAbs(_lien(alice), DRAW / 2 + bobFee / 2, 1,
+                          "the lien fell by 50 less their fee of 1");
+        assertApproxEqAbs(buck.feesRealized(), bobFee / 2, 1, "the fee, realized");
+        assertApproxEqRel(buck.feeOwing(bob), bobFee / 2, 0.001e18, "bob keeps his half");
+        // The fund holds alice's relief; the fees are paid or owed in full.
+        assertApproxEqAbs(buck.jubileeActual(), buck.reliefOf(alice), 1, "fund == relief owed");
+        assertApproxEqAbs(buck.feesRealized() + buck.feeOwing(bob), buck.jubileeActual(), 1,
+                          "fees realized + owed == the fund");
+        _booksBalance();
     }
-
-    /// The mirror case: an account holding aged BUCK that spends past them
-    /// into its credit.  The fee locked in its balance is spent as if it were
-    /// BUCK -- it shrinks the lien -- and then reads zero while negative.
-    function test_defect_aFeeSpentIntoCreditShrinksTheLien() public {
-        _basket();
-        vm.prank(BASKET);
-        buck.mintFromBasket(alice, 200e6);                // alice: -100 -> +100, fresh
-        vm.warp(t0 + YEAR);
-        uint256 fee = buck.feeOwing(alice);
-        assertApproxEqRel(fee, 2e6, 0.001e18, "her 100 carry a year: 2");
-        vm.prank(alice);
-        buck.transfer(bob, 150e6);                        // 98 held + 52 of credit
-        assertEq(buck.signedRawBalanceOf(alice), -50e6,
-                 "the lien is 50, though she drew 52 of credit");
-        assertEq(buck.feeOwing(alice), 0, "and the fee reads zero");
-    }
-
-    // ---- the fund accrues at whatever the supply is at its next checkpoint --
-
-    /// Only mint, burn and the demurrage pokes checkpoint the fund; a
-    /// transfer that draws credit (or repays it) changes totalSupply without
-    /// one.  So the next checkpoint accrues the whole quiet period at the new
-    /// supply: a year at 100, then a draw of 900, accrues a year at 1000.
-    function test_defect_supplyChangesDoNotCheckpointTheFund() public {
-        vm.warp(t0 + YEAR);
-        vm.prank(alice);
-        buck.transfer(bob, 900e6);                        // supply 100 -> 1000
-        _poke();
-        assertApproxEqRel(buck.jubileeActual(), 1000e6 * 2 / 100, 0.001e18,
-                          "accrued a year on 1000, where 100 circulated");
-        assertApproxEqRel(buck.feeOwing(bob), DRAW * 2 / 100, 0.001e18,
-                          "while the holders owe a year on 100");
-    }
-
-    // ---- burned basket BUCK leave their age behind -------------------------
 
     function _basket() internal {
         bindCarryingPool(reg, BASKET);
@@ -144,10 +114,27 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         buck.setBasket(BASKET);
     }
 
-    /// The basket burns 900 of 1000 BUCK it held for a year.  The burned
-    /// BUCK's age stays on the basket, so its last 100 read ten years old,
-    /// and the next recipient of basket BUCK pays for all of it.
-    function test_defect_burnedBasketBuckLeaveTheirAgeBehind() public {
+    /// An account holding aged BUCK that spends past them into its credit
+    /// pays the locked fee first: the lien is exactly the credit drawn.
+    function test_aFeeSpentIntoCreditIsPaidFirst() public {
+        _basket();
+        vm.prank(BASKET);
+        buck.mintFromBasket(alice, 200e6);                // alice: -100 -> +100, fresh
+        vm.warp(t0 + YEAR);
+        uint256 fee = buck.feeOwing(alice);
+        assertApproxEqRel(fee, 2e6, 0.001e18, "her 100 carry a year: 2");
+        vm.prank(alice);
+        buck.transfer(bob, 150e6);                        // 98 held + 52 of credit
+        assertApproxEqAbs(_lien(alice), 52e6, 1, "the lien is the 52 drawn");
+        assertEq(buck.feeOwing(alice), 0, "and nothing is left owing");
+        assertApproxEqAbs(buck.feesRealized(), fee, 1, "because it was paid");
+        _booksBalance();
+    }
+
+    /// The basket burns 900 of 1000 BUCK it held for a year: the burned BUCK
+    /// take their age with them, so the last 100 keep a year's, and the next
+    /// recipient of basket BUCK pays only its own.
+    function test_burnedBasketBuckTakeTheirAgeWithThem() public {
         _basket();
         vm.prank(BASKET);
         buck.mintFromBasket(BASKET, 1000e6);
@@ -155,11 +142,132 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         vm.prank(BASKET);
         buck.burnFromBasket(900e6);
         assertEq(buck.rawBalanceOf(BASKET), 100e6);
-        assertApproxEqRel(buck.feeOwing(BASKET), 20e6, 0.001e18,
-                          "100 BUCK carry the fee of 1000: 20%, not 2%");
+        assertApproxEqRel(buck.feeOwing(BASKET), 2e6, 0.001e18, "100 BUCK carry 2%");
+        assertApproxEqRel(buck.feesRealized(), 18e6, 0.001e18, "the burned 900 paid their 18");
+        assertApproxEqAbs(buck.basketIssued(), int256(1000e6 - (900e6 - 18e6)), 1,
+                          "aged BUCK retire 900 less their fee of the basket's issuance");
         vm.prank(BASKET);
         buck.transfer(CAROL, 50e6);
-        assertApproxEqRel(buck.feeOwing(CAROL), 10e6, 0.001e18,
-                          "carol pays 10 on the 50 she received, not 1");
+        assertApproxEqRel(buck.feeOwing(CAROL), 1e6, 0.001e18, "carol pays 1 on her 50");
+        _booksBalance();
+    }
+
+    /// The basket's issuance is recorded: a year of 1000 issued earns 20 of
+    /// relief, which the fund accrued -- and holds, until the basket's
+    /// relief is realized (JUBILEE-ISSUANCE 6.2).
+    function test_theBasketsIssuanceIsRecorded() public {
+        _basket();
+        vm.prank(BASKET);
+        buck.mintFromBasket(BASKET, 1000e6);
+        vm.warp(t0 + YEAR);
+        _poke();
+        assertApproxEqRel(buck.basketRelief(), int256(20e6), 0.001e18, "2% of 1000");
+        assertApproxEqAbs(buck.jubileeActual(),
+                          uint256(buck.basketRelief()) + buck.reliefOf(alice), 2,
+                          "the fund holds the basket's relief and alice's");
+        _booksBalance();
+    }
+
+    // ---- random sequences ---------------------------------------------------
+
+    /// Plant a receipt fragment so private alice can transfer with `other`
+    /// in both directions (Buck's `_receiptFragments[alice][other]`, slot 5).
+    function _frag(address other) internal {
+        bytes32 slot = keccak256(abi.encode(other, keccak256(abi.encode(alice, uint256(5)))));
+        vm.store(address(buck), slot, bytes32(uint256(1)));
+    }
+
+    function _pick3(uint256 r, address a, address b, address c) internal pure returns (address) {
+        uint256 k = r % 3;
+        return k == 0 ? a : (k == 1 ? b : c);
+    }
+
+    /// Random draws, repayments (fresh and aged), basket mints, burns and
+    /// payouts, coverage burns, relief settlements and time: after every
+    /// step the supply identity holds, the positive balances are the supply,
+    /// and the fund holds at least the relief it owes.
+    function testFuzz_theJubileeBalances(uint256 seed) public {
+        _basket();
+        _frag(CAROL);
+        _frag(BASKET);
+        uint256 ctid = credit.createCredit(
+            CAROL, 0, FACE, FACE, BuckCredit.DepreciationType.NONE, 0, 0, 0);
+        vm.prank(CAROL);
+        buck.mint(FACE);
+
+        for (uint256 step = 0; step < 32; step++) {
+            uint256 r = uint256(keccak256(abi.encode(seed, step)));
+            uint256 r2 = r >> 8;
+            uint256 op = r % 8;
+            if (op == 0) {
+                vm.warp(block.timestamp + r2 % 200 days);
+            } else if (op == 1) {                                   // draw / spend
+                address from = r2 % 2 == 0 ? alice : CAROL;
+                address to   = _pick3(r2 >> 8, bob, BASKET, from == alice ? CAROL : alice);
+                uint256 amt  = (r2 >> 16) % (buck.balanceOf(from) + 1);
+                vm.prank(from);
+                try buck.transfer(to, amt) {} catch {}
+            } else if (op == 2) {                                   // aged BUCK from bob
+                address to = _pick3(r2, alice, CAROL, BASKET);
+                uint256 amt = (r2 >> 8) % (buck.rawBalanceOf(bob) + 1);
+                vm.prank(bob);
+                try buck.transfer(to, amt) {} catch {}
+            } else if (op == 3) {                                   // basket mint
+                address to = _pick3(r2, BASKET, BASKET, alice);
+                vm.prank(BASKET);
+                buck.mintFromBasket(to, (r2 >> 8) % 500e6);
+            } else if (op == 4) {                                   // basket burn
+                uint256 amt = r2 % (buck.rawBalanceOf(BASKET) + 1);
+                vm.prank(BASKET);
+                buck.burnFromBasket(amt);
+            } else if (op == 5) {                                   // basket pays out
+                address to = _pick3(r2, alice, CAROL, bob);
+                uint256 amt = (r2 >> 8) % (buck.rawBalanceOf(BASKET) + 1);
+                vm.prank(BASKET);
+                try buck.transfer(to, amt) {} catch {}
+            } else if (op == 6) {                                   // settle relief
+                vm.prank(r2 % 2 == 0 ? alice : CAROL);
+                buck.settleRelief();
+            } else {                                                // burn coverage
+                address who = r2 % 2 == 0 ? alice : CAROL;
+                uint256[] memory ids = new uint256[](1);
+                ids[0] = who == alice ? tid : ctid;
+                vm.prank(who);
+                try buck.burn((r2 >> 8) % 300e6, ids) {} catch {}
+            }
+
+            _poke();
+            int256 liens = int256(_lien(alice) + _lien(CAROL));
+            assertEq(int256(buck.totalSupply()),
+                     liens + buck.basketIssued() + int256(buck.reliefRealized())
+                           - int256(buck.feesRealized()), "supply identity");
+            uint256 positive = buck.rawBalanceOf(alice) + buck.rawBalanceOf(bob)
+                             + buck.rawBalanceOf(POOL) + buck.rawBalanceOf(BASKET)
+                             + buck.rawBalanceOf(CAROL);
+            assertEq(positive, buck.totalSupply(), "positive raw == totalSupply");
+            int256 br = buck.basketRelief();
+            uint256 owed = buck.reliefOf(alice) + buck.reliefOf(CAROL) + (br > 0 ? uint256(br) : 0);
+            assertGe(buck.jubileeActual() + step + 2, owed, "the fund holds the relief it owes");
+        }
+    }
+
+    // ---- the fund accrues each period at that period's issuance ------------
+
+    /// A transfer that draws credit checkpoints the fund first: a year at
+    /// 100, then a draw of 900, accrues a year at 100 -- and the next year
+    /// at 1000.
+    function test_theFundAccruesAtEachPeriodsIssuance() public {
+        vm.warp(t0 + YEAR);
+        vm.prank(alice);
+        buck.transfer(bob, 900e6);                        // issued: 100 -> 1000
+        _poke();
+        assertApproxEqRel(buck.jubileeActual(), DRAW * 2 / 100, 0.001e18,
+                          "a year on the 100 that circulated");
+        vm.warp(t0 + 2 * YEAR);
+        _poke();
+        assertApproxEqRel(buck.jubileeActual(), DRAW * 2 / 100 + 1000e6 * 2 / 100, 0.001e18,
+                          "then a year on 1000");
+        assertApproxEqAbs(buck.jubileeActual(), buck.reliefOf(alice), 2, "== the relief owed");
+        _booksBalance();
     }
 }

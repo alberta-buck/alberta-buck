@@ -50,8 +50,7 @@ interface IBuckCredit {
     function batchCreditInfo(uint256[] calldata tokenIds)
         external view returns (CreditSlice[] memory slices);
     function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external;
-    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount)
-        external returns (uint256 jubileeRelief);
+    function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external;
 }
 
 contract Buck is IERC20, IERC20Metadata {
@@ -304,6 +303,37 @@ contract Buck is IERC20, IERC20Metadata {
     ///         paths ever ask.  No second flag bit is needed for it.
     mapping(address => uint32) public sponseeCount;
 
+    // ---- the Jubilee's two sides (doc/JUBILEE-ISSUANCE.org) ----------------
+    //
+    // Demurrage accrues on BUCK in circulation; relief must pay back exactly
+    // that to whoever issued them.  Only three things move the sum of the
+    // (non-Jubilee) signed balances -- the basket's hooks, relief paid out of
+    // the fund, and fees realized (taken out of circulation) -- so
+    //
+    //     totalSupply = sum(liens) + basketIssued + reliefRealized - feesRealized
+    //
+    // and the BUCK issued, which the fund accrues on, is computable from
+    // these counters without touching the transfer hot path.
+    //
+    // Appended last so every pre-existing slot index is unchanged.
+
+    /// @notice Cumulative fees realized: demurrage taken out of circulation
+    ///         when the BUCK carrying it repaid a lien, were spent past into
+    ///         credit, or were burned.
+    uint256 public feesRealized;
+    /// @notice Cumulative relief paid out of the fund to issuers.
+    uint256 public reliefRealized;
+    /// @notice The basket hooks' net issuance: minted, less what burns
+    ///         retired.  Signed: a basket that burns BUCK it bought (a desk's
+    ///         buy-back) retires more than it issued.
+    int256  public basketIssued;
+    /// @dev    basketIssued integrated over time (BUCK-seconds, signed): the
+    ///         relief the basket has earned (+) or the demurrage it owes (-)
+    ///         on its net issuance.  Recorded only; nothing realizes it yet
+    ///         (JUBILEE-ISSUANCE 6.2).
+    int256  internal _basketIssuanceSeconds;
+    uint64  internal _basketFoldedAt;
+
     // ---- premium / mutual-insurance pool model -----------------------------
     //
     // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
@@ -361,6 +391,7 @@ contract Buck is IERC20, IERC20Metadata {
         identity      = IdentityRegistry(_identity);
         insurancePool = _insurancePool;
         _jubileeLastUpdate = uint64(block.timestamp);
+        _basketFoldedAt    = uint64(block.timestamp);
     }
 
     // ---- IERC20Metadata ----------------------------------------------------
@@ -654,29 +685,54 @@ contract Buck is IERC20, IERC20Metadata {
         require(msg.sender == basket && basket != address(0), "BUCK: not basket");
         if (amount == 0) return;
         _accrueJubilee();
+        _foldBasket();
+        basketIssued += int256(amount);
         _crystallize(to);
-        // _addBalance -> _setBalanceSigned tracks _totalSupply.  BuckBasket
-        // is a Carrying account, so its balance always crosses upward through
-        // the positive branch and the invariant grows by exactly `amount`.
-        _addBalance(to, amount);
+        // Fresh BUCK: no age rides in.  Credited like any receipt, so BUCK
+        // minted to an account below zero repay its lien (and cross it).
+        _credit(to, amount, 0);
         emit Transfer(address(0), to, amount);
     }
 
     /// @notice Burn `amount` BUCK from BuckBasket's balance.  Only callable
     ///         by the registered basket.  Mirrors mintFromBasket on the
     ///         supply side without consulting credit-NFT machinery.
+    /// @dev    The burned BUCK carry their share of the basket's age out with
+    ///         them (`liveBs * amount / raw`, as a carrying transfer would),
+    ///         so what the basket keeps keeps its own age; without this the
+    ///         burned BUCK's age stayed behind and the next recipient of
+    ///         basket BUCK paid it.  Their fee is realized here: aged BUCK
+    ///         retire `amount - fee` of the basket's issuance, exactly as
+    ///         aged BUCK repay `value - fee` of a lien (see `_credit`).
     function burnFromBasket(uint256 amount) external nonReentrant {
         require(msg.sender == basket && basket != address(0), "BUCK: not basket");
         if (amount == 0) return;
         _accrueJubilee();
         _crystallize(msg.sender);
-        int256 raw = _state[msg.sender].balance.asInt();
+        AccountState memory s = _state[msg.sender];
+        int256 raw = s.balance.asInt();
         require(raw > 0 && uint256(raw) >= amount, "BUCK: insufficient");
-        // _subBalance -> _setBalanceSigned tracks _totalSupply.  BuckBasket
-        // is Carrying so the post-balance stays >= 0 and the invariant
-        // decrements by exactly `amount`.
-        _subBalance(msg.sender, amount);
+        uint256 bs    = s.buckSeconds.asUint();
+        uint256 share = Math.mulDiv(bs, amount, uint256(raw));
+        uint256 fee   = Math.mulDiv(share, BASE_RATE_PER_SEC, SCALE);
+        if (fee > amount) fee = amount;
+        s.buckSeconds = toBuckSeconds(bs - share);
+        s.balance     = toBuckQtySigned(raw - int256(amount));
+        _state[msg.sender] = s;
+        _totalSupply -= amount;      // Carrying: the balance stays >= 0
+        feesRealized += fee;
+        _foldBasket();
+        basketIssued -= int256(amount - fee);
         emit Transfer(msg.sender, address(0), amount);
+    }
+
+    /// @notice The relief the basket has earned on its net issuance (+), or
+    ///         the demurrage it owes on BUCK it retired beyond it (-), in
+    ///         BUCK.  Recorded only: nothing realizes it yet.
+    function basketRelief() external view returns (int256) {
+        int256 s = _basketIssuanceSeconds
+                 + basketIssued * int256(block.timestamp - uint256(_basketFoldedAt));
+        return s * int256(BASE_RATE_PER_SEC) / int256(SCALE);
     }
 
     /// @notice Quote total coverage / pool principal for delivering `amount`
@@ -769,7 +825,9 @@ contract Buck is IERC20, IERC20Metadata {
             _crystallize(insurancePool);
             _addBalance(insurancePool, poolPrincipal);
             _crystallize(msg.sender);
-            _subBalance(msg.sender, poolPrincipal);
+            // A draw like any other: past the minter's held BUCK, its fee is
+            // paid first and the lien is exactly the credit drawn.
+            _debit(msg.sender, poolPrincipal);
             // Per-side Transfer events.  The minter→pool transfer is a real
             // BUCK flow; we emit it as `from -> insurancePool` for
             // observability (the BUCK is freshly minted into the pool from
@@ -818,8 +876,7 @@ contract Buck is IERC20, IERC20Metadata {
         // Burn activity amortizes the PID; the K value isn't consumed here.
         buckK.compute();
 
-        (uint256 totalUnwind, uint256 poolRefund, uint256 jubRelief) =
-            _allocateBurn(amount, tokenIds);
+        (uint256 totalUnwind, uint256 poolRefund) = _allocateBurn(amount, tokenIds);
 
         _accrueJubilee();
         if (poolRefund > 0) {
@@ -834,34 +891,19 @@ contract Buck is IERC20, IERC20Metadata {
                 _crystallize(insurancePool);
                 _subBalance(insurancePool, poolRefund);
                 _crystallize(msg.sender);
-                _addBalance(msg.sender, poolRefund);
+                _credit(msg.sender, poolRefund, 0);
             }
             // Per-side Transfer event: pool -> holder for the refund.
             emit Transfer(insurancePool, address(0), poolRefund);
         }
 
-        // Jubilee settlement: the redeemed coverage's accrued relief (aged
-        // in BuckCredit, ~2%/yr) rebates the holder from the fund's balance,
-        // capped by what the fund actually holds.  Fund side mirrors
-        // _accrueJubilee (direct slot write -- its accrual was never counted
-        // in totalSupply); holder side goes through _addBalance.  Both sides
-        // of the invariant
-        //     sum_a max(0, signedRaw(a)) == totalSupply + jubileeActual
-        // move by exactly `jubRelief`, so it holds across settlement.
-        if (jubRelief > 0) {
-            _crystallize(address(this));
-            int256 jubRaw = _state[address(this)].balance.asInt();
-            uint256 avail = jubRaw > 0 ? uint256(jubRaw) : 0;
-            if (jubRelief > avail) jubRelief = avail;
-            if (jubRelief > 0) {
-                AccountState memory js = _state[address(this)];
-                js.balance = toBuckQtySigned(jubRaw - int256(jubRelief));
-                _state[address(this)] = js;
-                _crystallize(msg.sender);
-                _addBalance(msg.sender, jubRelief);
-                emit JubileeRedeemed(msg.sender, jubRelief);
-            }
-        }
+        // Jubilee settlement: the relief accrued on the holder's lien (its
+        // issuance-seconds, ~2%/yr of the BUCK it put into circulation) pays
+        // out of the fund and shrinks the lien, before the solvency check
+        // reads it.  A holder already at or above zero was paid its relief
+        // when it crossed (see `_credit`).
+        _crystallize(msg.sender);
+        _realizeRelief(msg.sender);
 
         // Post-burn solvency: the holder's used credit must not exceed their
         // shrunken creditLimit.  Computed after settlement so signed raw
@@ -1097,7 +1139,7 @@ contract Buck is IERC20, IERC20Metadata {
     }
 
     function _allocateBurn(uint256 amount, uint256[] memory tokenIds)
-        internal returns (uint256 totalUnwind, uint256 poolRefund, uint256 jubRelief)
+        internal returns (uint256 totalUnwind, uint256 poolRefund)
     {
         uint256 remaining = amount;
         CreditSlice[] memory slices = buckCredit.batchCreditInfo(tokenIds);
@@ -1131,11 +1173,9 @@ contract Buck is IERC20, IERC20Metadata {
             // of the activateFromBuck call in _allocateMint.  Burning
             // is THE deactivation; it shrinks activatedValue (and thus
             // creditLimit) in lockstep with mintsBacked and refunds the
-            // proportional pool principal.
-            // deactivateFromBuck reports the Jubilee relief carried by the
-            // unwound coverage (aged ~2%/yr in BuckCredit's coverage-
-            // seconds); _burnAllocated settles it from the fund.
-            jubRelief   += buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
+            // proportional pool principal.  (Relief no longer rides on the
+            // coverage: it accrues on the holder's lien, in this contract.)
+            buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }
@@ -1269,16 +1309,25 @@ contract Buck is IERC20, IERC20Metadata {
         _crystallize(from);
         require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
         _crystallize(to);
-        _subBalance(from, value);
-        _addBalance(to, value);
+        // A draw (past the sender's held BUCK) or a repayment (into an
+        // account at or below zero) moves the BUCK issued, which the fund
+        // accrues on: checkpoint it first, at the rate that held until now.
+        if (value > _heldOf(from) || _state[to].balance.asInt() < 0) _accrueJubilee();
+        _debit(from, value);
+        _credit(to, value, 0);     // the sender keeps its fee: nothing rides out
     }
 
     /// @dev Carrying transfer: proportionally apportions the sender's live
     ///      buckSeconds (crystallised + current rectangle) to the recipient.
-    ///      Both sides settle in one SSTORE each.  Carrying accounts hold no
-    ///      NFT-backed credit (creditLimit == 0) and cannot go negative; the
-    ///      `value <= raw` assertion enforces this.
+    ///      Carrying accounts hold no NFT-backed credit (creditLimit == 0)
+    ///      and cannot go negative; the `value <= raw` assertion enforces
+    ///      this.  The recipient side is `_credit`: a holder takes the age
+    ///      in, an account at or below zero pays the fee on arrival.
     function _carryingTransfer(address from, address to, uint256 value) internal {
+        // A repayment moves the BUCK issued: checkpoint the fund before any
+        // supply write (the sender's comes first).
+        if (_state[to].balance.asInt() < 0) _accrueJubilee();
+
         // ---- from ----
         AccountState memory fs = _state[from];
         int256 rawSigned = fs.balance.asInt();
@@ -1289,9 +1338,8 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 liveBs  = fs.buckSeconds.asUint() + raw * elapsed;
         uint256 carried = raw > 0 ? liveBs * value / raw : 0;
 
-        // Compute new positive contributions for totalSupply tracking
-        // (Carrying accounts only ever hold raw >= 0, so the deltas are
-        // simple unsigned subtractions/additions in this branch).
+        // Carrying accounts only ever hold raw >= 0, so the from-side delta
+        // is a simple unsigned subtraction.
         uint256 newFromRaw = raw - value;
         fs.balance     = toBuckQtySigned(int256(newFromRaw));
         fs.buckSeconds = toBuckSeconds(liveBs - carried);
@@ -1300,40 +1348,158 @@ contract Buck is IERC20, IERC20Metadata {
         _totalSupply -= value;     // from's positive contribution dropped by value
 
         // ---- to ----
-        AccountState memory ts = _state[to];
-        int256 toRawSigned = ts.balance.asInt();
-        // The recipient may have used credit (raw < 0); receiving BUCK first pays
-        // down their used credit before turning positive.  We use _setBalanceSigned-
-        // style accounting for the totalSupply delta but inline the writes
-        // here to preserve the carrying-fold-buckSeconds logic.
-        uint256 oldToPos = toRawSigned > 0 ? uint256(toRawSigned) : 0;
-        int256  newToSigned = toRawSigned + int256(value);
-        uint256 newToPos = newToSigned > 0 ? uint256(newToSigned) : 0;
+        _crystallize(to);
+        _credit(to, value, carried);
+    }
 
-        // buckSeconds carry-over uses the *positive* portion of the recipient's
-        // history; if the recipient was using their credit their buckSeconds is zero and
-        // elapsed-rectangle is meaningless.
-        uint256 toRawPos  = oldToPos;
-        uint256 toElapsed = block.timestamp - uint256(ts.timestamp);
-        // The recipient's own rectangle plus the age basis the Carrying
-        // sender hands over.  Both are new exposure for `to`, so both route
-        // to `to`'s payer when it has one -- otherwise a sponsored account
-        // would still be eroded by whatever it received from a pool.
-        uint256 toNewBs   = toRawPos * toElapsed + carried;
-        if (ts.flags & FLAG_SPONSORED != 0) {
-            toNewBs = _routeToPayer(to, toNewBs);
-        }
-        uint256 toBs      = ts.buckSeconds.asUint() + toNewBs;
+    // ---- the two sides of a balance change ---------------------------------
+    //
+    // Every BUCK carries its fee to the end; every issuer earns back the fee
+    // its issuance collected.  A fee is a lien inside a positive balance and
+    // never moves -- until the BUCK carrying it would shed it.  Then it is
+    // realized: taken out of circulation.  That happens in exactly three
+    // places: a spend that reaches past the held BUCK into credit
+    // (`_debit`), aged BUCK arriving at an account at or below zero
+    // (`_credit`), and a basket burn (`burnFromBasket`).
+    //
+    // With the fee realized at zero, an account below zero never holds
+    // fee-seconds, so while negative its `buckSeconds` counts issuance-seconds
+    // instead (see `_crystallize`): the lien integrated over time, on which
+    // relief accrues.  Read by sign: fee-seconds above zero, issuance-seconds
+    // below.
 
-        ts.balance     = toBuckQtySigned(newToSigned);
-        ts.buckSeconds = toBuckSeconds(toBs);
-        ts.timestamp   = uint40(block.timestamp);
-        _state[to] = ts;
-        if (newToPos > oldToPos) {
-            _totalSupply += (newToPos - oldToPos);
-        } else if (oldToPos > newToPos) {
-            _totalSupply -= (oldToPos - newToPos);
+    /// @dev Held BUCK: the positive balance less the fee locked in it.
+    ///      Caller has crystallised `a`.
+    function _heldOf(address a) internal view returns (uint256) {
+        int256 raw = _state[a].balance.asInt();
+        if (raw <= 0) return 0;
+        uint256 fee = Math.mulDiv(_state[a].buckSeconds.asUint(), BASE_RATE_PER_SEC, SCALE);
+        return fee >= uint256(raw) ? 0 : uint256(raw) - fee;
+    }
+
+    /// @dev Debit `value` from non-Carrying `a`.  Caller has crystallised
+    ///      `a`, checked the spend against balanceOf, and -- if the spend
+    ///      reaches into credit -- checkpointed the fund.
+    ///
+    ///      Spent from held BUCK, the fee stays locked in what remains, as
+    ///      ever.  Spent past them, the fee is paid first: the lien absorbs
+    ///      it, so the lien is exactly the credit drawn.  (Before, the locked
+    ///      fee was spent as if it were BUCK: 98 held + 52 drawn left a lien
+    ///      of 50, and the fee read zero while the account stayed negative.)
+    function _debit(address a, uint256 value) internal {
+        if (value == 0) return;
+        AccountState memory s = _state[a];
+        int256 old = s.balance.asInt();
+        if (old > 0) {
+            uint256 raw = uint256(old);
+            uint256 fee = Math.mulDiv(s.buckSeconds.asUint(), BASE_RATE_PER_SEC, SCALE);
+            if (fee > raw) fee = raw;
+            if (value <= raw - fee) {
+                s.balance = toBuckQtySigned(old - int256(value));
+                _state[a] = s;
+                _totalSupply -= value;
+                return;
+            }
+            feesRealized += fee;
+            s.buckSeconds = toBuckSeconds(0);
+            s.balance     = toBuckQtySigned(old - int256(fee) - int256(value));
+            _state[a] = s;
+            _totalSupply -= raw;       // the whole positive contribution goes
+            return;
         }
+        // Already at or below zero: deeper into credit.  At exactly zero any
+        // fee-seconds left are dust (a fee that rounded to nothing); clear
+        // them so the field starts counting issuance-seconds clean.
+        if (old == 0) s.buckSeconds = toBuckSeconds(0);
+        s.balance = toBuckQtySigned(old - int256(value));
+        _state[a] = s;
+    }
+
+    /// @dev Credit `value` BUCK carrying `carriedBs` of age to `a`.  Caller
+    ///      has crystallised `a` and, if `a` is below zero, checkpointed the
+    ///      fund.
+    ///
+    ///      A holder (at or above zero: no lien) takes the BUCK and their age
+    ///      in, as ever: the age routes to its payer if it has one.
+    ///
+    ///      Below zero the BUCK repay a lien, and they pay their fee on
+    ///      arrival: they repay `value - fee`.  (Before, the age rode into an
+    ///      account whose fee reads zero while negative, and the lien fell by
+    ///      the full `value`.)  If the receipt repays the whole lien, the
+    ///      relief accrued on it pays out with it, and the account starts
+    ///      above zero with no age.
+    function _credit(address a, uint256 value, uint256 carriedBs) internal {
+        if (value == 0) return;
+        AccountState memory s = _state[a];
+        int256 old = s.balance.asInt();
+        if (old >= 0) {
+            if (carriedBs != 0) {
+                if (s.flags & FLAG_SPONSORED != 0) carriedBs = _routeToPayer(a, carriedBs);
+                s.buckSeconds = toBuckSeconds(s.buckSeconds.asUint() + carriedBs);
+            }
+            s.balance = toBuckQtySigned(old + int256(value));
+            _state[a] = s;
+            _totalSupply += value;
+            return;
+        }
+        uint256 fee = carriedBs == 0 ? 0 : Math.mulDiv(carriedBs, BASE_RATE_PER_SEC, SCALE);
+        if (fee > value) fee = value;
+        feesRealized += fee;
+        int256 nw = old + int256(value - fee);
+        uint256 bs = s.buckSeconds.asUint();                 // issuance-seconds
+        if (nw >= 0) {
+            nw += int256(_payRelief(a, bs, uint256(-old)));
+            bs = 0;
+        }
+        s.balance     = toBuckQtySigned(nw);
+        s.buckSeconds = toBuckSeconds(bs);
+        _state[a] = s;
+        if (nw > 0) _totalSupply += uint256(nw);
+    }
+
+    /// @dev Pay `a` the relief on `bs` issuance-seconds, capped at the lien
+    ///      being relieved and at what the fund holds.  Moves fund BUCK to
+    ///      the caller's books (the caller credits `a`); the fund side is a
+    ///      direct slot write, as its accrual is, so both sides of
+    ///          sum_a max(0, signedRaw(a)) == totalSupply + jubileeActual
+    ///      move together.
+    function _payRelief(address a, uint256 bs, uint256 lien) internal returns (uint256 relief) {
+        if (bs == 0 || lien == 0) return 0;
+        relief = Math.mulDiv(bs, BASE_RATE_PER_SEC, SCALE);
+        if (relief > lien) relief = lien;
+        _crystallize(address(this));
+        AccountState memory js = _state[address(this)];
+        int256 jubRaw = js.balance.asInt();
+        uint256 avail = jubRaw > 0 ? uint256(jubRaw) : 0;
+        if (relief > avail) relief = avail;
+        if (relief == 0) return 0;
+        js.balance = toBuckQtySigned(jubRaw - int256(relief));
+        _state[address(this)] = js;
+        reliefRealized += relief;
+        emit JubileeRedeemed(a, relief);
+    }
+
+    /// @dev Realize the relief accrued on `a`'s lien without waiting for it
+    ///      to be repaid: the lien shrinks by it.  Caller has crystallised
+    ///      `a` and checkpointed the fund.  The issuance-seconds it pays for
+    ///      are consumed; any the fund could not pay stay, to be paid later.
+    function _realizeRelief(address a) internal {
+        AccountState memory s = _state[a];
+        int256 raw = s.balance.asInt();
+        if (raw >= 0) return;
+        uint256 lien = uint256(-raw);
+        uint256 bs   = s.buckSeconds.asUint();
+        uint256 relief = _payRelief(a, bs, lien);
+        if (relief == 0) return;
+        if (relief == lien) {
+            bs = 0;                    // relieved in full: the cap forfeits the rest
+        } else {
+            uint256 used = Math.mulDiv(relief, SCALE, BASE_RATE_PER_SEC, Math.Rounding.Ceil);
+            bs = used >= bs ? 0 : bs - used;
+        }
+        s.balance     = toBuckQtySigned(raw + int256(relief));
+        s.buckSeconds = toBuckSeconds(bs);
+        _state[a] = s;
     }
 
     // ---- demurrage views ---------------------------------------------------
@@ -1377,12 +1543,58 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- Jubilee lien relief ------------------------------------------------
     //
-    // The aging that melts a credit position's redemption cost lives in
-    // BuckCredit (coverage-seconds per NFT: jubileeRelief / redeemCost) --
-    // the money contract carries NO per-account relief state.  Buck's only
-    // involvement is settlement inside the existing burn path: the fund's
-    // accrued balance rebates the relief BuckCredit reports for the
-    // coverage being unwound (see _burnAllocated).
+    // Relief accrues on BUCK actually issued: ~2%/yr of an account's lien
+    // (its negative balance), integrated in the same `buckSeconds` field that
+    // counts fee-seconds while the account is positive.  Undrawn credit earns
+    // nothing.  It pays out of the fund when the lien is repaid (`_credit`),
+    // when the holder burns (`_burnAllocated`), or when the holder asks
+    // (`settleRelief`), and is capped at the lien: a lien carried ~50 years
+    // closes free.  (Relief used to accrue in BuckCredit on activated
+    // coverage, drawn or not -- 1/K of the BUCK a fully drawn credit could
+    // issue, and more than the fund took in.  test/JubileeBasis.t.sol.)
+
+    /// @notice Relief accrued on `a`'s lien and not yet paid, in BUCK:
+    ///         what closing the lien would be discounted by.
+    function reliefOf(address a) public view returns (uint256) {
+        AccountState storage s = _state[a];
+        int256 raw = s.balance.asInt();
+        if (raw >= 0) return 0;
+        uint256 lien = uint256(-raw);
+        uint256 bs = s.buckSeconds.asUint() + lien * (block.timestamp - uint256(s.timestamp));
+        uint256 relief = Math.mulDiv(bs, BASE_RATE_PER_SEC, SCALE);
+        return relief > lien ? lien : relief;
+    }
+
+    /// @notice What closing `a`'s lien costs: the lien net of its accrued
+    ///         relief.  THE liability-side quote for a credit position -- it
+    ///         declines year by year while the lien is carried, and is never
+    ///         called due.
+    function redeemCost(address a) external view returns (uint256) {
+        int256 raw = _state[a].balance.asInt();
+        if (raw >= 0) return 0;
+        return uint256(-raw) - reliefOf(a);
+    }
+
+    /// @notice Pay the caller the relief accrued on its lien now: the lien
+    ///         shrinks by it.  Only the holder may: relief accrues linearly
+    ///         on the lien, so paying it early (a smaller lien accruing
+    ///         thereafter) is the holder's choice, never a third party's.
+    function settleRelief() external nonReentrant {
+        _accrueJubilee();
+        _crystallize(msg.sender);
+        _realizeRelief(msg.sender);
+    }
+
+    /// @notice The BUCK issued -- the fund's accrual base: the liens, plus
+    ///         the basket's net issuance where it is positive.  A basket that
+    ///         has retired more than it issued (a desk's buy-back) owes that
+    ///         demurrage itself (`basketRelief` < 0); it is not taken from
+    ///         the accounts' relief.
+    function totalIssued() public view returns (uint256) {
+        int256 base = int256(_totalSupply) - int256(reliefRealized) + int256(feesRealized);
+        if (basketIssued < 0) base -= basketIssued;
+        return base > 0 ? uint256(base) : 0;
+    }
 
     // ---- demurrage internals -----------------------------------------------
 
@@ -1477,17 +1689,24 @@ contract Buck is IERC20, IERC20Metadata {
     function _crystallize(address a) internal {
         AccountState memory s = _state[a];
         int256 rawSigned = s.balance.asInt();
-        uint256 raw      = rawSigned > 0 ? uint256(rawSigned) : 0;
         uint256 elapsed  = block.timestamp - uint256(s.timestamp);
         bool dirty = false;
-        if (elapsed != 0 && raw != 0) {
-            uint256 delta = raw * elapsed;
-            // Delegated demurrage: hand the rectangle to this account's payer
-            // as far as the payer can carry it.  Conserved, never destroyed --
-            // whatever the payer has no room for stays here.  Free for the
-            // unsponsored: the flags word is already in memory.
-            if (s.flags & FLAG_SPONSORED != 0) {
-                delta = _routeToPayer(a, delta);
+        if (elapsed != 0 && rawSigned != 0) {
+            uint256 delta;
+            if (rawSigned > 0) {
+                // Fee-seconds.  Delegated demurrage: hand the rectangle to
+                // this account's payer as far as the payer can carry it.
+                // Conserved, never destroyed -- whatever the payer has no room
+                // for stays here.  Free for the unsponsored: the flags word is
+                // already in memory.
+                delta = uint256(rawSigned) * elapsed;
+                if (s.flags & FLAG_SPONSORED != 0) {
+                    delta = _routeToPayer(a, delta);
+                }
+            } else {
+                // Issuance-seconds: the lien over time, on which the holder's
+                // relief accrues.  The holder's own; never routed to a payer.
+                delta = uint256(-rawSigned) * elapsed;
             }
             if (delta != 0) {
                 s.buckSeconds = toBuckSeconds(s.buckSeconds.asUint() + delta);
@@ -1501,16 +1720,19 @@ contract Buck is IERC20, IERC20Metadata {
         if (dirty) _state[a] = s;
     }
 
-    /// @dev System-level Jubilee accrual.  Adds totalSupply*RATE*elapsed to
+    /// @dev System-level Jubilee accrual.  Adds totalIssued*RATE*elapsed to
     ///      Jubilee's balance directly -- NOT a mint, totalSupply unchanged.
-    ///      Accrues for all BUCK (Carrying and non-Carrying alike); when
-    ///      Carrying BUCKs later move to non-Carrying via _carryingTransfer,
-    ///      liveBs*value/raw of the sender's full live integral propagates
-    ///      proportionally to the recipient -- Jubilee pre-accrued it.
+    ///      The fund accrues on the BUCK *issued*, the base relief accrues
+    ///      on, so it always holds the relief it owes.  (It used to accrue on
+    ///      totalSupply, which also counts BUCK whose issuer has already been
+    ///      relieved of them.)  Every operation that moves the BUCK issued
+    ///      calls this first, so each period accrues at the base that held
+    ///      through it; before, a transfer that drew or repaid credit moved
+    ///      the base without a checkpoint.
     function _accrueJubilee() internal {
         uint256 elapsed = block.timestamp - uint256(_jubileeLastUpdate);
         if (elapsed == 0) return;
-        uint256 supply = _totalSupply;
+        uint256 supply = totalIssued();
         _jubileeLastUpdate = uint64(block.timestamp);
         if (supply == 0) return;
         uint256 delta = Math.mulDiv(supply, BASE_RATE_PER_SEC * elapsed, SCALE);
@@ -1527,6 +1749,15 @@ contract Buck is IERC20, IERC20Metadata {
         js.balance = toBuckQtySigned(newJubSigned);
         _state[address(this)] = js;
         emit JubileeAccrued(delta, newJubSigned > 0 ? uint256(newJubSigned) : 0);
+    }
+
+    /// @dev Fold the basket's net issuance over the time since the last fold.
+    function _foldBasket() internal {
+        uint256 elapsed = block.timestamp - uint256(_basketFoldedAt);
+        if (elapsed != 0) {
+            _basketIssuanceSeconds += basketIssued * int256(elapsed);
+            _basketFoldedAt = uint64(block.timestamp);
+        }
     }
 
     // ---- balance writes ----------------------------------------------------

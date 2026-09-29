@@ -163,19 +163,24 @@ contract BuckCreditReappraisalTest is Test {
 
     /// @notice Doing nothing is a supported outcome.  The policy is paid up
     ///         and stays in force, and the Jubilee relief accruing on the
-    ///         coverage shrinks what closing it costs, year on year, with no
-    ///         action from the holder.
+    ///         lien -- the BUCK the credit actually put into circulation --
+    ///         shrinks what closing it costs, year on year, with no action
+    ///         from the holder.
     function test_openPosition_decaysInFavourOfTheHolder() public {
         uint256 tid = _buy(2_000e6, 100, 900e6);
+        uint256 spendable = buck.balanceOf(alice);
+        vm.prank(alice);
+        buck.transfer(bob, spendable);                  // issue it: spend it all
+        uint256 lien = uint256(-buck.signedRawBalanceOf(alice));
 
         (, uint256 activatedAtStart,) = credit.creditInfo(tid);
-        uint256 costAtStart = credit.redeemCost(tid);
-        assertEq(costAtStart, activatedAtStart, "nothing forgiven yet");
+        uint256 costAtStart = buck.redeemCost(alice);
+        assertEq(costAtStart, lien, "nothing forgiven yet");
 
         _at(10 * YEAR);
 
         (, uint256 activatedLater,) = credit.creditInfo(tid);
-        uint256 costLater = credit.redeemCost(tid);
+        uint256 costLater = buck.redeemCost(alice);
 
         emit log_named_uint("coverage in force at t0     ", activatedAtStart);
         emit log_named_uint("coverage in force at t+10yr ", activatedLater);
@@ -183,8 +188,8 @@ contract BuckCreditReappraisalTest is Test {
         emit log_named_uint("redeemCost at t+10yr        ", costLater);
 
         assertEq(activatedLater, activatedAtStart, "insurance still in force");
-        assertApproxEqRel(costLater, costAtStart * 8 / 10, 1e15,
-                          "~2%/yr of the coverage forgiven by the Jubilee");
+        assertApproxEqRel(costLater, lien * 8 / 10, 1e15,
+                          "~2%/yr of the lien forgiven by the Jubilee");
     }
 
     // ---------------------------------------------------------------------
@@ -318,9 +323,11 @@ contract BuckCreditReappraisalTest is Test {
         assertEq(buck.mintsPrincipal(tid), 0, "deposit fully returned");
         assertEq(buck.mintsBacked(tid),    0, "cover fully released");
         assertEq(buck.rawBalanceOf(POOL),  0, "the pool gave back every unit");
-        // Alice ends square or slightly ahead: the Jubilee also rebates the
-        // relief that five years of carrying the coverage accrued.
-        assertGe(buck.signedRawBalanceOf(alice), 0, "no principal lost to depreciation");
+        // Alice ends square.  Her lien was the deposit; the refund carries
+        // the deposit's five years of demurrage and pays that fee on
+        // arrival, and the relief five years of carrying the lien accrued
+        // pays exactly the rest: the Jubilee's two sides balance.
+        assertEq(buck.signedRawBalanceOf(alice), 0, "no principal lost to depreciation");
     }
 
     /// @notice A non-depreciating credit is unaffected: with rho == 1 the
