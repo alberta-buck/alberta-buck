@@ -10,6 +10,7 @@ import {BuckCredit}             from "../src/BuckCredit.sol";
 import {BuckCreditHarness}             from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic}  from "../src/BuckKControllerStatic.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title BuckSignedBalance.t.sol -- Phase 1a signedBalanceOf / signedRawBalanceOf
 ///        invariant tests.
@@ -60,7 +61,7 @@ contract BuckSignedBalanceTest is Test {
         // storage slot for _state[ALICE] and write the AccountState
         // packed as int80 balance + uint120 buckSeconds + uint40 ts +
         // uint16 flags.  We set balance only; other fields stay 0.
-        uint256 slot = uint256(keccak256(abi.encode(ALICE, uint256(0))));
+        uint256 slot = uint256(BuckSlots.state(ALICE));
         uint256 raw  = 1_234_567_890;          // = 1234.56789 BUCK at 6 dec
         vm.store(address(buck), bytes32(slot), bytes32(uint256(uint80(raw))));
 
@@ -83,7 +84,7 @@ contract BuckSignedBalanceTest is Test {
     ///         direct slot poke since no public path can produce negative
     ///         raw at Phase 1a.
     function test_negativeSeed_rawBalanceOf_clamps_signed_reveals() public {
-        uint256 slot = uint256(keccak256(abi.encode(ALICE, uint256(0))));
+        uint256 slot = uint256(BuckSlots.state(ALICE));
         // int80 = -1234_567_890 encoded into the low 80 bits via two's
         // complement; rest of the 256-bit slot is zero.
         int80   raw   = -int80(int256(1_234_567_890));

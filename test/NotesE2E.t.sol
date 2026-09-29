@@ -21,6 +21,7 @@ import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
 import {IdentityMembershipB1VerifierAdapter} from "../src/IdentityMembershipB1VerifierAdapter.sol";
 import {DepositFoldVerifierAdapter} from "../src/DepositFoldVerifierAdapter.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title NotesE2E -- the full Note lifecycle, every verifier REAL.
 /// @notice One mutually-consistent fixture per flavor
@@ -173,14 +174,12 @@ abstract contract NotesE2EBase is Test {
         _grantCredit(issuer, 10 * face);
         vm.prank(issuer);
         buck.mint(2 * face);
-        bytes32 slot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(issuer, uint256(2)))));
+        bytes32 slot = BuckSlots.allowance(issuer, address(notes));
         vm.store(address(buck), slot, bytes32(2 * face));   // allowance
     }
 
     function _storeFragment(address party) internal {
-        bytes32 fragSlot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(party, uint256(5)))));
+        bytes32 fragSlot = BuckSlots.fragment(party, address(notes));
         vm.store(address(buck), fragSlot, bytes32(uint256(1)));
     }
 

@@ -21,6 +21,7 @@ import {MintVerifierAdapter}         from "../src/MintVerifierAdapter.sol";
 import {StubSpendVerifier}           from "../src/StubSpendVerifier.sol";
 import {GatedMint}                   from "./helpers/GatedMint.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title MintVerifier.t.sol -- end-to-end Groth16-verified batch mint.
 /// @notice Builds the full Buck + Identity + Notes stack with a *real* mint
@@ -128,9 +129,7 @@ contract MintVerifierTest is Test {
         );
         // Mutual decryptability: Alice must CP-approve the public Notes.
         {
-            bytes32 _fragSlot = keccak256(
-                abi.encode(address(notes), keccak256(abi.encode(alice, uint256(5))))
-            );
+            bytes32 _fragSlot = BuckSlots.fragment(alice, address(notes));
             vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
         }
 
@@ -222,9 +221,7 @@ contract MintVerifierTest is Test {
 
     function _approveNotes(address from, uint256 amount) internal {
         // _allowances at slot 2 in packed-state Buck layout.
-        bytes32 slot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(from, uint256(2))))
-        );
+        bytes32 slot = BuckSlots.allowance(from, address(notes));
         vm.store(address(buck), slot, bytes32(amount));
     }
 

@@ -16,6 +16,7 @@ import {StubMintVerifier}     from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier}    from "../src/StubSpendVerifier.sol";
 import {GatedMint}            from "./helpers/GatedMint.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @notice IMintVerifier that always rejects -- exercises the negative path
 ///         without depending on StubMintVerifier's enabled toggle.
@@ -128,14 +129,10 @@ contract NotesTest is Test {
         // Mutual decryptability: private EOAs must CP-approve the public
         // Notes contract so the operator can decrypt identities from receipts.
         {
-            bytes32 _fragSlot = keccak256(
-                abi.encode(address(notes), keccak256(abi.encode(alice, uint256(5))))
-            );
+            bytes32 _fragSlot = BuckSlots.fragment(alice, address(notes));
             vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
             // Bob also needs a fragment if any test receives BUCK from Notes.
-            _fragSlot = keccak256(
-                abi.encode(address(notes), keccak256(abi.encode(bob, uint256(5))))
-            );
+            _fragSlot = BuckSlots.fragment(bob, address(notes));
             vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
         }
 
@@ -223,9 +220,7 @@ contract NotesTest is Test {
     ///      buck.approve().  This suite focuses on Notes mint/spend
     ///      mechanics, not the CP plumbing.
     function _approveNotes(address from, uint256 amount) internal {
-        bytes32 slot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(from, uint256(2))))
-        );
+        bytes32 slot = BuckSlots.allowance(from, address(notes));
         vm.store(address(buck), slot, bytes32(amount));
     }
 

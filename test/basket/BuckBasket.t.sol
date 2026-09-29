@@ -15,6 +15,7 @@ import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
 import {BuckBasket}            from "../../src/basket/BuckBasket.sol";
 import {BuckBasketReceipt}     from "../../src/basket/BuckBasketReceipt.sol";
 import {bindCarryingPool} from "../harness/CarryingPool.sol";
+import {BuckSlots} from "../harness/BuckSlots.sol";
 
 contract BBToken is ERC20 {
     uint8 immutable _dec;
@@ -130,9 +131,7 @@ contract BuckBasketTest is Test {
         // public basket so the operator can decrypt her identity from the
         // receipt on redeem (basket→alice BUCK payout).
         {
-            bytes32 _fragSlot = keccak256(
-                abi.encode(address(basketC), keccak256(abi.encode(alice, uint256(5))))
-            );
+            bytes32 _fragSlot = BuckSlots.fragment(alice, address(basketC));
             vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
         }
 

@@ -14,6 +14,7 @@ import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {MockBasket} from "./mocks/MockBasket.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title Buck.t.sol — identity-bound ERC-20 mint / approve / transfer flow.
 contract BuckTest is Test {
@@ -154,7 +155,7 @@ contract BuckTest is Test {
     ///      effect of a CP-bound approve without needing a proof fixture for the
     ///      (from, to) pair.  _receiptFragments is at slot 5 in Buck's layout.
     function _setReceiptFragment(address from, address to, bytes32 value) internal {
-        bytes32 slot = keccak256(abi.encode(to, keccak256(abi.encode(from, uint256(5)))));
+        bytes32 slot = BuckSlots.fragment(from, to);
         vm.store(address(buck), slot, value);
     }
 

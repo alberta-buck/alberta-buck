@@ -19,6 +19,7 @@ import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 import {SpendGroth16Verifier} from "../src/SpendGroth16Verifier.sol";
 import {SpendVerifierAdapter} from "../src/SpendVerifierAdapter.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @notice Integration test: identity membership verifier wired into Notes spend paths.
 ///         Exercises the Phase 9 identity-axis plumbing: governance sets the verifier,
@@ -93,9 +94,7 @@ contract NotesIdentityMembershipTest is Test {
 
         // Mutual decryptability fragment hack (same as Notes.t.sol).
         {
-            bytes32 fragSlot = keccak256(
-                abi.encode(address(notes), keccak256(abi.encode(alice, uint256(5))))
-            );
+            bytes32 fragSlot = BuckSlots.fragment(alice, address(notes));
             vm.store(address(buck), fragSlot, bytes32(uint256(1)));
         }
 

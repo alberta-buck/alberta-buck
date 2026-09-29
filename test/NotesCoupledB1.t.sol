@@ -16,6 +16,7 @@ import {Notes} from "../src/Notes.sol";
 import {StubMintVerifier} from "../src/StubMintVerifier.sol";
 import {StubSpendVerifier} from "../src/StubSpendVerifier.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @notice End-to-end wiring of the identity-M-bound B1 deposit (bearer, public
 ///         issuer): Notes.spendCoupledB1 co-verifies the depositor-binding sigma
@@ -91,9 +92,7 @@ contract NotesCoupledB1Test is Test {
         vm.prank(GOV);
         notes.setIdentityMembershipVerifier(address(idMemStub));
 
-        bytes32 fragSlot = keccak256(
-            abi.encode(address(notes), keccak256(abi.encode(depositor, uint256(5))))
-        );
+        bytes32 fragSlot = BuckSlots.fragment(depositor, address(notes));
         vm.store(address(buck), fragSlot, bytes32(uint256(1)));
 
         funder = address(0xF00D);

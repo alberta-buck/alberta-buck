@@ -8,6 +8,7 @@ import {BuckCredit} from "../src/BuckCredit.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BuckJubileeReliefTest} from "./BuckJubileeRelief.t.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title JubileeBasis.t.sol -- the Jubilee's two sides balance.
 ///
@@ -191,7 +192,7 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
     /// Plant a receipt fragment so private alice can transfer with `other`
     /// in both directions (Buck's `_receiptFragments[alice][other]`, slot 5).
     function _frag(address other) internal {
-        bytes32 slot = keccak256(abi.encode(other, keccak256(abi.encode(alice, uint256(5)))));
+        bytes32 slot = BuckSlots.fragment(alice, other);
         vm.store(address(buck), slot, bytes32(uint256(1)));
     }
 

@@ -10,6 +10,7 @@ import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title BuckDemurrage.t.sol -- demurrage / Jubilee / transferCarrying invariants.
 ///
@@ -67,7 +68,7 @@ contract BuckDemurrageTest is Test {
         // Mutual decryptability: private EOA Alice must CP-approve the
         // public-identity contract Bob so the operator can decrypt Alice's
         // identity from any transfer receipt.
-        bytes32 slot = keccak256(abi.encode(bob, keccak256(abi.encode(alice, uint256(5)))));
+        bytes32 slot = BuckSlots.fragment(alice, bob);
         vm.store(address(buck), slot, bytes32(uint256(1)));
     }
 
@@ -155,14 +156,14 @@ contract BuckDemurrageTest is Test {
         // Seed her signed raw directly to `mintAmt` via vm.store of slot 0
         // (the AccountState mapping); also reset her timestamp to `now` so
         // _crystallize doesn't double-count elapsed time.
-        bytes32 slot = keccak256(abi.encode(alice, uint256(0)));
+        bytes32 slot = BuckSlots.state(alice);
         uint256 packed = uint256(uint80(uint256(int256(int80(int256(mintAmt))))))
             | (uint256(uint40(block.timestamp)) << 200);
         vm.store(address(buck), slot, bytes32(packed));
         // Maintain the _totalSupply invariant: the seed adds `mintAmt`
         // positive contribution to alice's signed raw, so _totalSupply must
         // grow correspondingly.  _totalSupply lives at slot 1.
-        bytes32 supplySlot = bytes32(uint256(1));
+        bytes32 supplySlot = BuckSlots.supply();
         uint256 oldSupply  = uint256(vm.load(address(buck), supplySlot));
         vm.store(address(buck), supplySlot, bytes32(oldSupply + mintAmt));
     }

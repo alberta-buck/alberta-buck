@@ -10,6 +10,7 @@ import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title BuckJubileeRelief.t.sol -- Jubilee relief on the BUCK issued.
 ///
@@ -69,7 +70,7 @@ contract BuckJubileeReliefTest is Test {
         reg.setBuck(address(buck));
         credit.setBuck(address(buck));
 
-        bytes32 slot = keccak256(abi.encode(bob, keccak256(abi.encode(alice, uint256(5)))));
+        bytes32 slot = BuckSlots.fragment(alice, bob);
         vm.store(address(buck), slot, bytes32(uint256(1)));
 
         t0 = block.timestamp;

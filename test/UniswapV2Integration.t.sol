@@ -11,6 +11,7 @@ import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerStatic} from "../src/BuckKControllerStatic.sol";
 import {bindCarryingPool} from "./harness/CarryingPool.sol";
+import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @dev Plain ERC-20 stand-in for USDC.  Lives in the test file so it does not
 ///      collide with the OpenZeppelin ERC20.json artifact path.
@@ -175,16 +176,16 @@ contract UniswapV2IntegrationTest is Test {
         // Both the router and the pair can appear as counterparties in BUCK
         // transfers during addLiquidity / swap / removeLiquidity.
         bytes32 _fragSlot =
-            keccak256(abi.encode(pair, keccak256(abi.encode(alice, uint256(5)))));
+            BuckSlots.fragment(alice, pair);
         vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
         _fragSlot =
-            keccak256(abi.encode(pair, keccak256(abi.encode(bob, uint256(5)))));
+            BuckSlots.fragment(bob, pair);
         vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
         _fragSlot =
-            keccak256(abi.encode(router, keccak256(abi.encode(alice, uint256(5)))));
+            BuckSlots.fragment(alice, router);
         vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
         _fragSlot =
-            keccak256(abi.encode(router, keccak256(abi.encode(bob, uint256(5)))));
+            BuckSlots.fragment(bob, router);
         vm.store(address(buck), _fragSlot, bytes32(uint256(1)));
 
         // Distribute USDC from this test contract to Alice and Bob.
@@ -482,9 +483,7 @@ contract UniswapV2IntegrationTest is Test {
     ///      requires CP -- exercised in Buck.t.sol).
     function _setBuckAllowance(address owner_, address spender, uint256 amount) internal {
         // _allowances at slot 2 in packed-state Buck layout.
-        bytes32 slot = keccak256(
-            abi.encode(spender, keccak256(abi.encode(owner_, uint256(2))))
-        );
+        bytes32 slot = BuckSlots.allowance(owner_, spender);
         vm.store(address(buck), slot, bytes32(amount));
     }
 
