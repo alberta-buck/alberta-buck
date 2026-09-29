@@ -1234,8 +1234,55 @@ Where the build departed from 13.7, and why:
 
 *Identity.*  BUCK transfers are identity-gated.  With BUCK payouts an
 exiter must be able to receive BUCK, where TOKEN payouts let a depositor
-never touch BUCK.  In the sim every agent that receives BUCK is bound; for
-production this is a question for the owner (13.5 did not raise it).
+never touch BUCK.  A private account receives BUCK from a public contract
+only after an identity-bound =Buck.approve= of it: it re-encrypts its
+registered identity under the contract's key and proves, in a
+Chaum-Pedersen proof, that the two ciphertexts carry the same identity.
+So an equity-basket depositor makes that approve once, from its wallet,
+before its first exit.  The sim does exactly that
+(=identity.identity_approve=).  The identity cache keeps the identity
+secret key for the agent classes that approve (=KEEP_IDENTITY_SECRET=), and
+their entries regenerate once.
 
-Next: step 6, the sim (=deploy.py= =basket_impl= "equity" and
-"equity-ops", the wheel and director wiring, the agents' readings, eqmetrics).
+** 13.9 In the sim (2026-09-29): step 6
+
+=basket_impl= "equity" and "equity-ops" (=deploy.py=):
+- the shell and its two facets, the =EquityTurnDirector=, and a
+  =BasketWheel= deployed with the basket (the wheel is not optional);
+- for "equity-ops", the pairs director feeds the desk its common mode and
+  nothing else;
+- the loop turns the wheel every tick, unless a =BasketWheelAgent= is cast
+  to call it;
+- =parse_redeem= books the BUCK paid, and the depositors' round trips value
+  BUCK at the BUCK/USDC market.
+
+What the sim taught:
+
+1. *A young basket's pools are thin, and a capped step assumes a market.*
+   The sim's TOKEN/BUCK pools start empty; before tick 0 no arbitrageur
+   trades.
+   - Run to rest there, the wheel's capped sales went into its own pools
+     with nobody re-pinning them, and the basket opened at half its value.
+   - So before tick 0 the wheel makes only the pools' first pairings, which
+     need no market.  The rest is placed while the arbitrageurs trade.
+   - The arbitrage's triangles are set after those pairings: an arbitrage
+     against half-built pools only moves the marks.
+2. *Deploy pairs pro rata.*  Stepped pool by pool, the first pool paired
+   its TOKEN with all the usable BUCK and left the last pool to be placed
+   only by selling into itself.  That pool stayed at 0.3% weight with its
+   TOKEN idle, and its idle TOKEN blocked Fund and Trim for the whole basket.
+   Deploy now shares the usable BUCK in proportion to the TOKEN waiting in
+   every pool.
+3. *The arbitrage keeps the basket's pools on the market.*  In the
+   "rebalancing" world BUCK fell 14% against USDC in eight days, on ProRata
+   and on the equity basket alike.  Without the triangles, the basket's
+   pools implied BUCK at 0.94-1.05 while its market was 0.86, and exits
+   lost about 10% in USD.  With them, the two agree within about 2%, and a
+   TOKEN depositor's four-day round trip returned 97-99% of its USD.
+4. *BUCK payouts give a saver BUCK's market price at exit.*  This is the
+   economic consequence of ruling 9.  A depositor's USD outcome is its
+   basket value in BUCK times BUCK/USD at the exit.  TOKEN payouts left
+   that exposure with the TOKEN, which BUCK weakness does not touch.  The
+   arbitrage removes only the gap between the basket's pools and the
+   market, not a fall in BUCK itself.
+

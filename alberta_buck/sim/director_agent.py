@@ -49,6 +49,8 @@ class DirectorKeeperAgent(Agent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if d.director is None:          # legacy basket: nothing to drive
             return
+        if str(getattr(d, "basket_impl", "")).startswith("equity"):
+            return                      # the equity basket rebalances itself (its wheel)
 
         # 1. Advance the state machine by a bounded slice -- the same work
         #    any deposit/redeem activation would carry.
@@ -138,7 +140,7 @@ class MonetaryKeeperAgent(Agent):
     QUADRANT = {1: "mkQ1", 2: "mkQ2", 3: "mkQ3", 4: "mkQ4"}
 
     def act(self, d, scenario, day, tick, ctr) -> None:
-        if tick != 0 or getattr(d, "basket_impl", "") != "ops":
+        if tick != 0 or getattr(d, "basket_impl", "") not in ("ops", "equity-ops"):
             return
         try:
             q = d.basket.functions.monetaryOperation().call(

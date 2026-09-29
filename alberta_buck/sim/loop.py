@@ -35,6 +35,22 @@ import alberta_buck.sim.shock_agent  # noqa: F401  CONVERGENCE 7a  @_register Sh
 E6 = 10 ** 6
 
 
+def turn_wheel(d, rounds: int = 1, max_work: int = 12) -> int:
+    """Tick the equity basket's work wheel as the deployer, up to `rounds`
+    times or until a tick finds nothing to do; return the work done."""
+    from web3.logs import DISCARD
+    work = 0
+    for _ in range(rounds):
+        d.chain.send(d.wheel.functions.rearm())
+        rc = d.chain.send(d.wheel.functions.tick(max_work, 0))
+        w = sum(int(ev["args"]["work"])
+                for ev in d.wheel.events.Ticked().process_receipt(rc, errors=DISCARD))
+        work += w
+        if w == 0:
+            break
+    return work
+
+
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
         director_impl="pairs", on_day_start=None, on_frame=None,
         controller_impl="direct") -> dict:
@@ -96,6 +112,24 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     ctr = {"directTrades": 0, "cycleTrades": 0, "ubTrades": 0}
     for a in agents:
         a.bootstrap(d, scenario, ctr)
+    # The equity basket places nothing itself: its wheel does, and the pools
+    # are empty until it has made their first pairings.  Before tick 0 only
+    # those: a pairing into an empty pool needs no market, but the rest of a
+    # deposit is SOLD in capped steps, and those assume the arbitrageurs
+    # re-pin the pool between them -- which they do only once the day's
+    # ticks run.  (Run to rest here, the wheel sold into its own pools with
+    # nobody re-pinning them, and the basket opened at half its value.)
+    # Afterwards the loop turns it every tick unless a BasketWheelAgent is
+    # cast to call it (and to be paid for it).
+    builtin_wheel = (d.wheel is not None and not any(
+        type(a).__name__ == "BasketWheelAgent" for a in agents))
+    if d.wheel is not None:
+        from alberta_buck.sim.deploy import equity_arb_on
+        placed = turn_wheel(d, rounds=2)
+        equity_arb_on(d)
+        if verbose:
+            print(f"[sim] equity basket: the wheel made the pools' first "
+                  f"pairings ({placed} steps)", flush=True)
     if verbose and ctr.get("dmEntries", 0) > 0:
         print(f"[sim] bootstrap: {ctr['dmEntries']} DM deposits seeded "
               f"basket pools before tick 0", flush=True)
@@ -230,6 +264,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                         ledger.record(day, tick, tag, pool, db, dq, dec, fee,
                                       bvib_now)
                     reserves = after
+            if builtin_wheel:
+                turn_wheel(d, rounds=1)
         # WP-13: book the agent stand-ins' net inventory (the undertakings'
         # open books, the facility's drawn lines) into the observer's
         # pseudo-stabilizer before K's cycle; a no-op without an observer.

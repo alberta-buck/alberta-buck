@@ -75,8 +75,20 @@ DEPOSITED_TOPIC = LEGACY_DEPOSITED_TOPIC
 REDEEMED_TOPIC = LEGACY_REDEEMED_TOPIC
 
 
+def equity_arb_on(d) -> None:
+    """Give the equity basket's wheel its arbitrage: one triangle per
+    constituent (its TOKEN/BUCK pool, TOKEN/USDC, BUCK/USDC)."""
+    if d.wheel is None or int(d.wheel.functions.triangleCount().call()) > 0:
+        return
+    for k, t in enumerate(d.tokens):
+        d.chain.send(d.wheel.functions.setTriangle(
+            k, (t.address, d.pool_buck[k], d.pool_usdc[k], k)), sender=d.gov)
+
+
 def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
     """(token_to_user, treasury_buck) from a redeem receipt, impl-aware.
+
+    The equity baskets pay BUCK: token_to_user is then the BUCK paid.
 
     Legacy BuckBasket emits one RedeemedFromPool per pool (sum `tokToUser`) and
     Redeemed(..., retainedBuck, ...).  BuckBasketProRata has no per-pool event:
@@ -106,10 +118,14 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
                 token_to_user += decode(["uint256"], bytes(log["data"]))[0]
             elif t0 == d.redeemed_topic:
                 # (burned, depositorBuck, treasuryBuck, remainingBp)
-                _, _, tb, _ = decode(
+                _, db, tb, _ = decode(
                     ["uint256", "uint256", "uint256", "uint256"],
                     bytes(log["data"]))
                 treasury_buck += tb
+                if str(d.basket_impl).startswith("equity"):
+                    # The equity basket pays BUCK (depositorBuck); its
+                    # treasuryBuck is the value of the cut, taken in shares.
+                    token_to_user += db
     else:
         for log in rcpt["logs"]:
             t0 = log["topics"][0]
@@ -152,12 +168,15 @@ class Deployment:
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "legacy"
+    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "fence" | "equity"
+                                  # | "equity-ops" | "legacy"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs" (default) | "vrate"
     controller_impl: str = "direct"   # "direct" (default) | "shadow"  (WP-3a)
     observer: Any = None          # ShadowObserver (shadow controller on ops only)
+    equity_director: Any = None   # EquityTurnDirector (equity baskets)
+    wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
     # WP-14: the per-class sim-only stabilizers (SimStabilizer per agent
@@ -280,6 +299,28 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         union = shell_abi + [e for e in facet_abi if e not in shell_abi]
         basket = w3.eth.contract(address=basket.address, abi=union)
         deposited_topic, redeemed_topic = PRORATA_DEPOSITED_TOPIC, PRORATA_REDEEMED_TOPIC
+    elif basket_impl in ("equity", "equity-ops"):
+        # The equity basket (doc/BASKET-EQUITY.org 13.6): shares, one pooled
+        # debt, BUCK payouts, a wallet its work wheel places.  Two facets:
+        # the venue and the components; the shell emits the pro-rata
+        # shells' Deposited / Redeemed, so the topics are theirs.
+        name = "BuckBasketEquityOps" if basket_impl == "equity-ops" else "BuckBasketEquity"
+        basket = chain.deploy(name, *ctor)
+        venue = chain.deploy("BuckBasketUniswapV3")
+        chain.send(basket.functions.setVenue(venue.address), sender=gov)
+        eq_facet = chain.deploy("BuckBasketEquityWheel")
+        chain.send(basket.functions.setEquityWheel(eq_facet.address), sender=gov)
+        union, seen = [], set()
+        for art in (name, "BuckBasketUniswapV3", "BuckBasketEquityWheel"):
+            abi, _ = load_artifact(art)
+            for e in abi:        # the shell's entry wins a shared signature
+                key = (e.get("type"), e.get("name"),
+                       tuple(i.get("type") for i in e.get("inputs", [])))
+                if key not in seen:
+                    seen.add(key)
+                    union.append(e)
+        basket = w3.eth.contract(address=basket.address, abi=union)
+        deposited_topic, redeemed_topic = PRORATA_DEPOSITED_TOPIC, PRORATA_REDEEMED_TOPIC
     else:
         basket = chain.deploy("BuckBasket", *ctor)
         deposited_topic, redeemed_topic = LEGACY_DEPOSITED_TOPIC, LEGACY_REDEEMED_TOPIC
@@ -298,7 +339,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # SIM_SHADOW_GAMMA schedules Ki by the desk's saturation.  Defaults 0:
     # the observer wired but inert, byte-for-byte Direct's trajectory.
     observer = None
-    if controller_impl == "shadow" and basket_impl == "ops":
+    if controller_impl == "shadow" and basket_impl in ("ops", "equity-ops"):
         shadow_lambda = int(float(os.environ.get("SIM_SHADOW_LAMBDA", "0")) * E18)
         shadow_gamma = int(float(os.environ.get("SIM_SHADOW_GAMMA", "0")) * E18)
         observer = chain.deploy("ShadowObserver", basket.address, gov)
@@ -634,7 +675,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # DIRECTOR_WINDOW / DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides
     # let short smoke sims exercise the trade path (pairs quorum 4 needs the
     # 40-epoch window warm -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
-    if basket_impl in ("prorata", "ops", "fence"):
+    if basket_impl in ("prorata", "ops", "fence", "equity-ops"):
+        # (on "equity-ops" the pairs director only feeds the desk its
+        # common-mode signal; the basket rebalances itself -- see below)
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
         if director_impl == "pairs":
             dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
@@ -684,7 +727,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                           f"A={os.environ.get('SIM_FACTOR_A','100')}% "
                           f"B={os.environ.get('SIM_FACTOR_B','100')}% "
                           f"maxSkew={os.environ.get('SIM_FACTOR_MAXSKEW','5000')}bp")
-        if basket_impl == "ops" and director_impl == "pairs":
+        if basket_impl in ("ops", "equity-ops") and director_impl == "pairs":
             # Thresholds are in tick*1e9 and a tick is ~1bp, so 100e9 reads as
             # 100bp.  measIdx 2 is the 20-epoch rung: the article's sweep puts
             # the knee there, and past the 80-epoch rung the lagged reading
@@ -739,6 +782,40 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             print(f"[deploy] {director_impl} rebalance director "
                   f"{director.address[:10]}...  {desc}"
                   f" deadband={dir_deadband}bp cap=50bp/epoch")
+    # --- The equity basket's director and work wheel ----------------- #
+    # The basket rebalances itself: its wheel's Trim and Fund, gated and
+    # leaned by the EquityTurnDirector (doc/BASKET-EQUITY.org 12.3, 13.6).
+    # The wheel is not optional -- without it nothing a deposit brings is
+    # ever placed -- so it is deployed here, beside the basket, and every
+    # later caller (BasketWheelAgent, or the loop's own tick) turns it.
+    if basket_impl in ("equity", "equity-ops"):
+        eqd = chain.deploy("EquityTurnDirector", basket.address, gov)
+        chain.send(basket.functions.setEquityDirector(eqd.address), sender=gov)
+        d.equity_director = eqd
+        wheel = chain.deploy(
+            "BasketWheel", buck.address, usdc.address, gov,
+            int(os.environ.get("SIM_WHEEL_KAPPA_BP", "200")),
+            int(float(os.environ.get("SIM_WHEEL_RESERVE_BUCK", "100")) * E6))
+        idmod.bind_as_operator(chain, reg, wheel.address, True, True, sender=deployer)
+        chain.send(basket.functions.setWheel(wheel.address), sender=gov)
+        chain.send(wheel.functions.setEquity(basket.address), sender=gov)
+        # The arbitrage is the basket's (ruled 2026-09-29): one triangle per
+        # constituent -- its own TOKEN/BUCK pool, TOKEN/USDC, BUCK/USDC --
+        # the outsider's trade made first, its profit (TOKEN start) credited
+        # to the basket's wallet.
+        # (Its triangles are set by `equity_arb_on`, once the pools have
+        # their first pairings: before the market trades, an arbitrage
+        # against half-built pools only moves the marks.)
+        chain.send(wheel.functions.setArb(
+            d.pool_ub, basket.address,
+            int(os.environ.get("SIM_WHEEL_ARB_SHARE_BP", "1000")),
+            int(os.environ.get("SIM_WHEEL_ARB_CAP_BP", "200")), 1), sender=gov)
+        d.wheel = wheel
+        if verbose:
+            print(f"[deploy] equity basket {basket.address[:10]}...  "
+                  f"director {eqd.address[:10]}...  wheel {wheel.address[:10]}... "
+                  f"({int(wheel.functions.slotCount().call())} slots)")
+
     # --- WP-14: one sim-only stabilizer per agent class (decision 17) --- #
     # Replaces the ONE lumped pseudo-stabilizer of WP-3a / WP-13 (three
     # books summed under one lambda, one weight and one cap that was

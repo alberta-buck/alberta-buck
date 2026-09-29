@@ -75,7 +75,7 @@ def _valid_cache_entry(data: Any) -> bool:
     """
     return (
         isinstance(data, list)
-        and len(data) in (4, 5)
+        and len(data) in (4, 5, 6)
         and isinstance(data[3], list)
         and len(data[3]) == 9
     )
@@ -212,7 +212,7 @@ def reset_sim_registry() -> None:
 # Serialization helpers (maintain backward-compatible wire format)
 # ---------------------------------------------------------------------------
 
-def _to_serializable(rec: FullRegistrationRecord) -> list:
+def _to_serializable(rec: FullRegistrationRecord, keep_secret: bool = False) -> list:
     """Convert FullRegistrationRecord to the cached JSON-serialisable form.
 
     The wire format matches the original register_args() tuple:
@@ -233,6 +233,11 @@ def _to_serializable(rec: FullRegistrationRecord) -> list:
         g1(rec.registration_proof.T_key),
     )
     merkle_data = (rec.leaf_index, rec.leaf, rec.membership_proof.root if rec.membership_proof else 0)
+    if keep_secret:
+        # The identity secret key, for the identity-bound Buck.approve (a
+        # Chaum-Pedersen proof over the registered credential).  Kept only for
+        # agents that ask: a sim fixture, never a production wallet's store.
+        return [pk, E_arg, sig_arg, proof_arg, merkle_data, {"sk": hex(rec.client_kp.sk)}]
     return [pk, E_arg, sig_arg, proof_arg, merkle_data]
 
 
@@ -257,7 +262,7 @@ def _from_serializable(data: list) -> tuple:
 
 def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
                      rng: Callable[[], int], chainid: int,
-                     registry: int) -> tuple[LocalAccount, tuple]:
+                     registry: int, keep_secret: bool = False) -> tuple[LocalAccount, tuple]:
     """Return (account, register_args) for an agent, using disk cache.
 
     The EOA private key is deterministic (seed + class + idx), so the address
@@ -275,7 +280,8 @@ def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
 
     cache = _load_cache()
     key = _cache_key(seed, class_name, idx, chainid, registry)
-    if key in cache and _valid_cache_entry(cache[key]):
+    if key in cache and _valid_cache_entry(cache[key]) and (
+            not keep_secret or len(cache[key]) >= 6):
         return account, _from_serializable(cache[key])
 
     # Generate fresh registration args and cache them.
@@ -283,10 +289,50 @@ def cached_eoa_setup(seed: int, class_name: str, idx: int, issuer,
     rec = reg.issue(class_name, idx, addr_int, rng, chainid, registry)
     # Attach the membership proof now (tree is current after issuance).
     rec.membership_proof = reg.membership_proof(rec.leaf_index)
-    args = _to_serializable(rec)
+    args = _to_serializable(rec, keep_secret)
     cache[key] = args
     _save_cache(cache)
     return account, _from_serializable(args)
+
+
+def identity_secret(seed: int, class_name: str, idx: int, chainid: int,
+                    registry: int) -> Optional[int]:
+    """The identity secret key cached for an agent set up with keep_secret."""
+    entry = _load_cache().get(_cache_key(seed, class_name, idx, chainid, registry))
+    if entry is None or len(entry) < 6:
+        return None
+    return int(entry[5]["sk"], 16)
+
+
+def identity_approve(chain, reg, buck, account, register_args, sk: int,
+                     spender: str, rng, amount: int = 0):
+    """Buck's identity-bound approve of `spender` by `account` (a private
+    identity): re-encrypt the account's registered identity M under the
+    spender's key and prove it is the same (Chaum-Pedersen, checked by
+    IdentityRegistry.verifyApprove).  Lays down the receipt fragment a public
+    contract needs before it may send this account BUCK."""
+    from alberta_buck.wallet.bn254 import words_to_point
+    from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
+    from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_decrypt
+
+    pt = lambda w: words_to_point(int(w[0]), int(w[1]))
+    pk_a = pt(register_args[0])
+    E_a = ElGamalCiphertext(R=pt(register_args[1][0]), C=pt(register_args[1][1]))
+    M = elgamal_decrypt(E_a, sk)
+    pk_b = pt(reg.functions.pkOf(spender).call())
+    r_prime = rand_scalar(rng)
+    E_b = elgamal_encrypt(M, pk_b, r_prime)
+    cp = chaum_pedersen_prove(E_a, E_b, pk_a, pk_b, sk, r_prime,
+                              int(account.address, 16), int(spender, 16),
+                              int(chain.w3.eth.chain_id), rng=rng,
+                              registry=int(reg.address, 16))
+    xy = lambda P: tuple(point_to_words(P))
+    fn = buck.get_function_by_signature(
+        "approve(address,uint256,((uint256,uint256),(uint256,uint256)),"
+        "(uint256,uint256,uint256,(uint256,uint256),(uint256,uint256),(uint256,uint256)))")
+    return chain.send(fn(spender, amount, (xy(E_b.R), xy(E_b.C)),
+                         (cp.e, cp.s1, cp.s2, xy(cp.T1), xy(cp.T2), xy(cp.T3))),
+                      sender=account)
 
 
 def seeded_rng(seed: int) -> Callable[[], int]:

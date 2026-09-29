@@ -194,18 +194,27 @@ class BasketWheelAgent(_ProxyAgent):
         self.start = str(sp("start", "token"))
         self.share_bp = int(sp("share_bp", 1000))
         gov = d.gov
-        wheel = d.chain.deploy(
-            "BasketWheel", d.buck.address, d.usdc.address, gov,
-            # the reserve offsets the callers' GAS: cap it to a gas budget, not
-            # to the profit, or a BUCK start passes the profit to the callers
-            # (BASKET-WHEEL 8.7: at 50,000 BUCK and kappa 2% they took $47k of $53k)
-            int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6))
-        # a contract working for the basket, bound like the pools
-        idmod.bind_as_operator(d.chain, d.reg, wheel.address, True, True,
-                               sender=d.chain.deployer)
-        facet_abi, _ = load_artifact("BuckBasketUniswapV3", "BuckBasketUniswapV3")
-        host = d.w3.eth.contract(address=d.basket.address, abi=facet_abi)
-        d.chain.send(host.functions.setWheel(wheel.address), sender=gov)
+        self.equity = getattr(d, "wheel", None) is not None
+        if self.equity:
+            # The equity basket's wheel is deployed with it (it places the
+            # deposits); this agent adds its kinds and calls it.
+            wheel = d.wheel
+            d.chain.send(wheel.functions.setReserveParams(
+                int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6)),
+                sender=gov)
+        else:
+            wheel = d.chain.deploy(
+                "BasketWheel", d.buck.address, d.usdc.address, gov,
+                # the reserve offsets the callers' GAS: cap it to a gas budget, not
+                # to the profit, or a BUCK start passes the profit to the callers
+                # (BASKET-WHEEL 8.7: at 50,000 BUCK and kappa 2% they took $47k of $53k)
+                int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6))
+            # a contract working for the basket, bound like the pools
+            idmod.bind_as_operator(d.chain, d.reg, wheel.address, True, True,
+                                   sender=d.chain.deployer)
+            facet_abi, _ = load_artifact("BuckBasketUniswapV3", "BuckBasketUniswapV3")
+            host = d.w3.eth.contract(address=d.basket.address, abi=facet_abi)
+            d.chain.send(host.functions.setWheel(wheel.address), sender=gov)
         d.chain.send(wheel.functions.setArb(
             d.pool_ub, d.basket.address, self.share_bp, int(sp("cap_bp", 200)),
             int(sp("min_edge_bp", 1))), sender=gov)
@@ -218,13 +227,13 @@ class BasketWheelAgent(_ProxyAgent):
                 continue
             d.chain.send(wheel.functions.setTriangle(
                 k, (tok.address, d.pool_buck[i], d.pool_usdc[i], idx)), sender=gov)
-            k += 1
+            k += 1                  # (the equity deploy set the same triangles; this re-sets them)
         kinds = list(sp("kinds", ["arb"]))
         if "compute" in kinds:
             d.chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
         if "director" in kinds and d.director is not None:
             d.chain.send(wheel.functions.setDirector(d.director.address), sender=gov)
-        if "sweep" in kinds:
+        if "sweep" in kinds and not self.equity:     # the equity basket has no treasury BUCK
             d.chain.send(wheel.functions.setSweep(d.basket.address, 10 ** 15), sender=gov)
         if "ops" in kinds and d.director is not None:
             d.chain.send(wheel.functions.setOps(d.basket.address, d.director.address),
@@ -268,7 +277,13 @@ class BasketWheelAgent(_ProxyAgent):
 
     def _act_solidity(self, d, scenario, day, tick, ctr) -> None:
         c = self.sol_ctr
-        if self.call_mode == "profitable":
+        # An equity basket's components must run whatever the arbitrage pays:
+        # they are the basket's placing, and the reserve pays for the upkeep.
+        upkeep = False
+        if getattr(self, "equity", False):
+            self.sol.functions.rearm().call()
+            upkeep = int(self.sol.functions.pending().call()) > 0
+        if self.call_mode == "profitable" and not upkeep:
             pay = self._quote_pay_usd(d)
             if pay < self.profile.usd(self.profile.tx_base + 700_000):
                 c["wh_sol_skipped"] += 1

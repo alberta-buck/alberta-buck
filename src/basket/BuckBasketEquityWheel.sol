@@ -106,13 +106,20 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         return idleBuck > k ? idleBuck - k : 0;
     }
 
+    /// @dev Pair pool i's waiting TOKEN with its share of the usable BUCK --
+    ///      pro rata to the TOKEN waiting in every pool, so the first pool
+    ///      stepped does not take it all and leave another to be placed only
+    ///      by selling into its own thin pool -- then sell part of the TOKEN
+    ///      (capped) if the pair is still short; add it.
     function _deploy(Snap memory s, uint256 i) internal returns (uint256) {
         uint256 one = 10 ** constituents[i].decimals;
         IBuckBasketVenue.Marks memory m = s.m[i];
         uint256 p = m.pTwap;
         if (p == 0) return 0;
         uint256 v = idleToken[i] * p / one;
-        uint256 have = _usable(s);
+        uint256 waiting = 0;
+        for (uint256 j = 0; j < s.m.length; j++) waiting += _tokenValue(s, j);
+        uint256 have = waiting == 0 ? 0 : _usable(s) * v / waiting;
         if (have > v) have = v;
         if (have < v && m.depth > 0) {                   // balance the pair: sell TOKEN
             uint256 sell = (v - have) / 2;

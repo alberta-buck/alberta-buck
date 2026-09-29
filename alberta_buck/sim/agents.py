@@ -81,11 +81,21 @@ class Agent:
         value tracking.  None means the agent has no BuckBasket deposit."""
         return None
 
+    # An agent that will make identity-bound approvals (a private identity
+    # receiving BUCK from a public contract) keeps its identity secret key.
+    KEEP_IDENTITY_SECRET: bool = False
+
     # registered as a real cryptographic identity (disk-cached per seed).
     def setup(self, d, scenario, rng) -> None:
+        chainid, registry = int(d.w3.eth.chain_id), int(d.reg.address, 16)
         self.account, args = idmod.cached_eoa_setup(
             scenario.seed, type(self).__name__, self.idx,
-            d.issuer_kp, rng, int(d.w3.eth.chain_id), int(d.reg.address, 16))
+            d.issuer_kp, rng, chainid, registry,
+            keep_secret=self.KEEP_IDENTITY_SECRET)
+        self.register_args = args
+        if self.KEEP_IDENTITY_SECRET:
+            self.identity_sk = idmod.identity_secret(
+                scenario.seed, type(self).__name__, self.idx, chainid, registry)
         d.anvil.set_balance(self.address, 100 * 10 ** 18)
         d.chain.send(
             d.reg.functions.register(d.issuer_addr, *args),

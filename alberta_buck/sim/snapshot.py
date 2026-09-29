@@ -51,7 +51,7 @@ def _wp13_frame(d) -> dict:
          "pid_s": None, "pid_is": None, "pid_ds": None,
          "pid_up": None, "pid_ui": None, "pid_ud": None,
          "pid_q": None, "pid_qi": None, "pid_qd": None}
-    if getattr(d, "basket_impl", "") == "ops":
+    if getattr(d, "basket_impl", "") in ("ops", "equity-ops"):
         try:
             f["sh_held"] = int(d.basket.functions.monetaryBuckHeld().call())
             f["sh_outstanding"] = int(d.basket.functions.monetaryOutstanding().call())

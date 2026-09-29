@@ -33,7 +33,7 @@ def main(argv=None) -> int:
                          "default 0, make it Direct's twin).  Env SIM_CONTROLLER "
                          "sets the default so catalogue/star cells can select it")
     ap.add_argument("--basket", default=None,
-                    choices=["legacy", "prorata", "ops", "fence"],
+                    choices=["legacy", "prorata", "ops", "fence", "equity", "equity-ops"],
                     help="basket implementation: BuckBasketProRata (prorata, "
                          "default), BuckBasketOps (ops -- prorata plus the "
                          "monetary-operations desk on the director's common "

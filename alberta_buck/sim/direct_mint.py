@@ -70,6 +70,10 @@ class _DMBase(Agent):
 
     SEED_USDC = 100_000 * 10 ** 6    # smaller stochastic entries
 
+    # The equity baskets pay BUCK: a private depositor approves the basket
+    # (identity-bound) before it can be paid, so it keeps its identity key.
+    KEEP_IDENTITY_SECRET = True
+
     def __init__(self, idx: int):
         super().__init__(idx)
         self._receipt_id: int | None = None
@@ -84,13 +88,33 @@ class _DMBase(Agent):
 
     def _token_portfolio_usd(self, d, holder, ctr) -> int:
         """USD (6-dec) value of `holder`'s TOKEN balances at the current day's
-        reference prices (`ctr['refUsd']`, set by the loop each day)."""
+        reference prices (`ctr['refUsd']`, set by the loop each day) -- and,
+        where the basket pays BUCK (the equity baskets), its BUCK at the
+        BUCK/USDC market."""
         refs = ctr.get("refUsd", [])
         v = 0
         for i, tc in enumerate(d.tokens):
             if i < len(refs) and refs[i]:
                 v += d.chain.balance_of(tc, holder) * refs[i] // (10 ** d.dec[i])
+        if self._equity(d):
+            from alberta_buck.sim.gauge import buck_usd6
+            v += (d.chain.balance_of(d.buck, holder)
+                  * buck_usd6(d.chain, d.pool_ub, d.buck) // 10 ** 6)
         return v
+
+    def _equity(self, d) -> bool:
+        return str(getattr(d, "basket_impl", "")).startswith("equity")
+
+    def _approve_basket(self, d) -> None:
+        """Once: the identity-bound approve of the basket, so it may pay this
+        (private) account BUCK."""
+        if getattr(self, "_basket_approved", False) or not self._equity(d):
+            return
+        idmod.identity_approve(d.chain, d.reg, d.buck, self.account,
+                               self.register_args, self.identity_sk,
+                               d.basket.address,
+                               idmod.seeded_rng(0xA99 * 1_000_003 + self.idx))
+        self._basket_approved = True
 
     def _record_roundtrip(self, d, ctr, holder, before_usd) -> None:
         """Book a completed deposit->redeem: realized USD profit and the
@@ -105,8 +129,10 @@ class _DMBase(Agent):
         ctr["dmDepositedUsd"] = ctr.get("dmDepositedUsd", 0) + self._deposit_value_usd
 
     def deposit_info(self, d) -> tuple | None:
-        if (self._receipt_id is None or self._deposit_token_idx is None
-                or self._exited):
+        # A BUCK deposit into an equity basket names no TOKEN (idx None); it
+        # is still a stake, valued at its BUCK (ptok == 0).
+        if (self._receipt_id is None or self._exited
+                or (self._deposit_token_idx is None and self._principal_tok > 0)):
             return None
         return (self._deposit_token_idx,
                 self._principal_tok, self._principal_buck)
@@ -178,6 +204,7 @@ class _DMBase(Agent):
         if seed == 0:
             return
 
+        self._approve_basket(d)
         d.chain.send(tc.functions.approve(d.basket.address, seed),
                      sender=self.account)
         try:

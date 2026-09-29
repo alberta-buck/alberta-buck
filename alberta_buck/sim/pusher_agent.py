@@ -186,7 +186,7 @@ class PusherAgent(_ProxyAgent):
         self.pushes += 1
         self._pending = True
         self._refresh(d)
-        if getattr(d, "basket_impl", "") == "ops" and self._cap_reverts(d):
+        if getattr(d, "basket_impl", "") in ("ops", "equity-ops") and self._cap_reverts(d):
             self.tripped += 1
 
     def _unwind(self, d) -> None:
