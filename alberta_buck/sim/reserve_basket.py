@@ -498,7 +498,7 @@ class TurnDirector(BandDirector):
     target (not the leaning one) by that fraction of it -- a leg trades
     regardless: the leash keeps the mandate, the lean only times it."""
 
-    def __init__(self, windows=(5, 10, 20, 40, 80, 160, 5000), quorum: int = 4,
+    def __init__(self, windows=(5, 10, 20, 40, 80, 160, 1280), quorum: int = 4,
                  band: float = 0.01, tilt: float = 1.0, leash: float = 0.3,
                  park: float = 3.0):
         super().__init__(band)
@@ -739,3 +739,27 @@ def reserve_wheel_tasks(arb_band: float | None = 0.005, step: float = 0.05) -> l
     tasks: list[WheelTask] = [ArbKind(arb_band)] if arb_band is not None else []
     return tasks + [DailyKind(), SyncKind(), ReserveDeployKind(), ReserveFundKind(),
                     TrimKind(step)]
+
+
+# -- the design as ruled (doc/BASKET-EQUITY.org section 13.6) ------------------------- #
+
+def ruled_basket(pools: dict[str, Pool], ext: External | None = None, K=0.75,
+                 **kw) -> CreditBasket:
+    """The equity basket as the design owner ruled it (2026-09-29): payouts in
+    BUCK; each deposit mints its full K of the day at once; the limit for
+    minting on demand (exits, the arbitrage) is K x equity; no margin calls;
+    liquidity -- BUCK held plus that headroom -- flow-sized (2 sigma of the
+    daily net flow at the band's floor, 1% of the gross at least); an exit's
+    debt share burned after, by the wheel; the exit charge the mirror of
+    entry; lambda 25% of the gain over cost basis, fixed; the stress fee's
+    hook off; the director leaning at tilt 1 against a 1280-day anchor,
+    gated at quorum 4 of 6."""
+    params = dict(ext=ext, K=K, issue=True, base="equity", mode="hold", reserve=0.01,
+                  flow_z=2.0, lam=0.25, director=TurnDirector())
+    params.update(kw)
+    return CreditBasket(pools, **params)
+
+
+def ruled_wheel_tasks() -> list[WheelTask]:
+    """The ruled basket's components: Arb, Daily, Sync, Deploy, Fund, Trim."""
+    return reserve_wheel_tasks(arb_band=0.005, step=0.05)

@@ -8,7 +8,7 @@ The same markets and the same outside arbitrageurs, against five baskets:
   reserve  ReserveBasket: the BUCK basis, a 5% reserve, still no arbitrage
   arb      + the wheel's arbitrage, the reserve as its float
   tilt     + a director leaning the targets against each TOKEN's excursion
-           from its anchor (a 5000-day EMA), trading at once
+           from its anchor (a 1280-day EMA), trading at once
   turn     + the same lean, gated by the multi-EMA turn detector (quorum 4
            of 6): never trimming a leg still running up, never buying one
            still running down; the proceeds park in the reserve between

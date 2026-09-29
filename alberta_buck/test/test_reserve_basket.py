@@ -428,3 +428,46 @@ def test_the_whole_credit_machine_keeps_its_books(mode):
             assert b.idle_buck <= 1e-6 * b.gross() + 1e-6       # no BUCK at rest
     assert b.value_of(first) > 0
     assert isinstance(b, CreditBasket)
+
+
+def test_the_ruled_design_keeps_its_books():
+    """doc section 13.6, the whole machine: prices, K moving both ways,
+    deposits and exits, the wheel with every component."""
+    import random
+    from alberta_buck.sim.reserve_basket import ruled_basket, ruled_wheel_tasks
+    rng = random.Random(5)
+    pools, ref = {}, {}
+    for n, p in enumerate((1.0, 2.0, 3.0)):
+        pool = Pool(p, 0.003)
+        pool.add("seed", 1e6 / p, 1e6)
+        pools[f"T{n}"], ref[f"T{n}"] = pool, p
+    ext = External(ref, 0.001)
+    k = [K]
+    b = ruled_basket(pools, ext, K=lambda: k[0])
+    w = WorkWheel(ruled_wheel_tasks())
+    w.bind(b)
+    tick = Ticker()
+    first = b.deposit(BUCK, 1e6)
+    assert b.debt == pytest.approx(K * b.receipts[first].basis)   # its full K, at once
+    tick(b, w, ext, n=10)
+    open_, x = [], {t: 0.0 for t in b.pools}
+    for step in range(400):
+        k[0] = 0.675 + 0.075 * math.cos(step / 40)
+        for t in b.pools:
+            x[t] += -0.05 * x[t] + 0.015 * rng.gauss(0, 1)
+            ext.price[t] = ref[t] * math.exp(x[t])
+        if rng.random() < 0.5:
+            t = rng.choice([BUCK] + list(b.pools))
+            amt = rng.uniform(1e3, 3e4)
+            d0 = b.debt
+            rid = b.deposit(t, amt if t == BUCK else amt / b.pools[t].price)
+            assert b.debt - d0 == pytest.approx(k[0] * b.receipts[rid].basis, rel=1e-9)
+            open_.append(rid)
+        if open_ and rng.random() < 0.4:
+            b.redeem(open_.pop(rng.randrange(len(open_))))
+        tick(b, w, ext, n=1)
+        assert b.minted - b.burned == pytest.approx(b.debt, abs=1e-6)
+        held = sum(r.shares for r in b.receipts.values()) + b.treasury
+        assert held == pytest.approx(b.S, rel=1e-9)
+        assert b.idle_buck >= -1e-6 and b.owed >= 0 and min(b.idle.values()) >= -1e-9
+    assert b.pro_rata_exits == 0 and b.value_of(first) > 0

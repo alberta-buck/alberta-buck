@@ -27,8 +27,9 @@ The design is settled and prototyped, but not yet built in Solidity.
   proposal, after ruling BUCK payouts, a flow-sized reserve and the
   arbitrage in the basket).  The owner then ruled the reserve's form: full
   K minted on deposit, the room from K rises and earnings minted only on
-  demand, no margin calls (13.3), measured in 13.4.  The remaining open
-  questions (13.5) are settled one by one before implementing.
+  demand, no margin calls (13.3), measured in 13.4.  Every open question
+  was then ruled (13.5).  *The design to implement is 13.6; the Solidity
+  plan's amendments are 13.7.*
 
 It replaces the pro-rata basket's principal and burn-obligation accounting
 (=BuckBasketProRata=, which the ops and Fence shells inherit) with shares of
@@ -560,6 +561,10 @@ expected numbers are the prototype's, with tolerances for tick math.
 7. The rulings section 12.7 asks for: BUCK payouts and the reserve, the
    wheel's arbitrage in the basket, the director's lean and its anchor.
 
+All of these were ruled on 2026-09-29 (13.3, 13.5).  Earnings raise the
+room available on demand (the limit is K x equity) but are never minted
+just to be placed; pending credit is gone.
+
 * 12. The harvest, and the BUCK basis (proposed, 2026-09-29)
 
 The design owner asked three things: why the prototype shows no yield,
@@ -1013,15 +1018,165 @@ mode="hold")=:
 2. [ruled] The limit: K x equity.
 3. [ruled] An exit's debt share: burned after, by the wheel.
 4. [ruled] The exit charge: the mirror of the entry charge.
-5. *The director*: the lean (tilt 1), its anchor (a governed reference or a
-   multi-year EMA), and the quorum as the regime knob (4 for cycles, 0 for
-   fast reversion).
-6. *lambda*: fixed at 25%, or governed; a hurdle.
-7. *A deposit cap* against price impact, or none (routing has made impact
-   small).
-8. *The stress fee* on the equity basket: whether it applies, and its rule.
-9. *The treasury*: when it redeems.
-10. *The Fence* stays on ProRata.
-11. *A deposit into an over-limit pool* (13.4): mint its full K at once (as
-    ruled), or only while the pool's debt is below K x equity, its credit
-    waiting otherwise.
+5. [ruled] The director: the lean at tilt 1; the anchor a multi-year EMA
+   (1280 days, governance may reset it); the turn gate at quorum 4 of 6.
+6. [ruled] lambda: 25% of the gain over cost basis, fixed (a constant).
+7. [ruled] No deposit cap: the wheel places a deposit in gap-sized steps
+   through the better route.
+8. [ruled] The stress fee: the exit-fee hook stays, off.  The stress run
+   showed no first-mover edge.
+9. [ruled] The treasury redeems by governance only, by the same door.
+10. [ruled] The Fence stays on ProRata.
+11. [ruled] A deposit into an over-limit pool (13.4) mints its full K at
+    once: a K cut changes only what new deposits bring, never whether they
+    bring it.
+
+** 13.6 The design as ruled
+
+This is the design to implement.  Its prototype is =ruled_basket()= and
+=ruled_wheel_tasks()= in =reserve_basket.py=, and the whole machine is
+=test_the_ruled_design_keeps_its_books=.  Sections 3-9 still hold where
+this does not say otherwise: shares, the cost basis, conservative marks,
+the cut, the grain, explicit books.
+
+*State.*
+
+| state                        | what it is                                                                                 |
+|------------------------------+--------------------------------------------------------------------------------------------|
+| S, receipts, treasury shares | as 3.1: a receipt is (shares, basis)                                                       |
+| debt                         | the BUCK minted and not burned                                                             |
+| idleBuck                     | BUCK held: liquidity that headroom cannot supply, deposits' BUCK and credit awaiting Fund, sale proceeds |
+| idleToken[i]                 | TOKEN awaiting Deploy                                                                      |
+| liquidity[i]                 | the basket's own position counts                                                           |
+| owed                         | exits' debt shares and mints, not yet repaid                                               |
+| flowMs, dayFlow              | the EMA (30 days) of the daily net flow squared; today's net flow                          |
+| the director's ladder        | per leg: EMAs of 5-160 days and the 1280-day anchor, and their last steps                  |
+
+*Limit and liquidity* (K of the moment):
+
+#+begin_example
+  headroom  = K x equity - debt
+  liquidity = idleBuck + max(headroom, 0)
+  target    = max(1% of gross, 2 sqrt(flowMs) (1+K) / (1 - 0.5))   floor = target / 2
+  keep      = max(target - max(headroom, 0), 0)                    the BUCK held for liquidity
+#+end_example
+
+*Verbs.*
+
+- *deposit(asset, amount)*: value v at the conservative marks, less the
+  charge, buys shares.  The basket mints K x v at once, which is the
+  deposit's own credit, whatever the pool's leverage.  The asset and the
+  BUCK land in the wallet, and dayFlow += v.
+- *redeem(id, fraction)*:
+  1. The cut: 25% of the gain over basis, as treasury shares.
+  2. The exit's value is taken at the exiter's marks, less the charge.
+  3. It is paid from idleBuck, then minted from the headroom left after
+     the exit.  owed += f x debt + the mint.
+  4. If neither covers it, the exit goes pro rata: f of everything, the
+     TOKEN sold by the better route, f x debt burned, the rest paid in BUCK.
+  5. dayFlow -= the payment, and BUCK at rest repays owed.
+- *redeemTreasury*: the same door, no cut, governance only.
+
+*The wheel's components*, in slot order:
+
+| component | slots | due when                                                                                          | run                                                                                                            |
+|-----------+-------+---------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------------|
+| Arb       | N     | pool i beyond 0.5% of the outside price                                                           | the outside arbitrageur's trade, first (the V3 callback funds it); the profit to idleBuck                     |
+| Daily     | 1     | a new day                                                                                         | fold dayFlow into flowMs; the director's sample                                                                |
+| Sync      | N     | pool i's owed fees > grain                                                                        | collect into the wallet                                                                                        |
+| Deploy    | N     | idle TOKEN_i > grain                                                                              | pair with the BUCK held beyond keep; sell part of the TOKEN if short; add liquidity                             |
+| Fund      | 1     | BUCK held beyond keep > grain, and the director picks a pool or the excess passes 3x the target   | buy the pick's (else the neediest's) TOKEN with half, by the better route; Deploy pairs it                     |
+| Trim      | 1     | settled, and owed > grain, or liquidity under its floor, or the director names a pool             | unwind at most 5% of a position; sell its TOKEN by the better route; the proceeds repay owed, the rest is held |
+
+*The director.*
+- Targets are the declared ones x exp(-excursion), renormalized.  The
+  excursion is the leg's log price against the basket's mean, measured
+  against its 1280-day EMA.
+- A leg has TURNED when at least 4 of its 6 shorter EMAs are moving back.
+  The director never trims a leg still running up, nor buys one still
+  running down.
+- The leash is 30% of the declared target, and parking goes up to 3x the
+  liquidity target.
+
+*Invariants.*
+1. minted - burned == debt.
+2. The receipts' shares + the treasury's == S.
+3. A deposit mints exactly K x its value.
+4. Every other mint (exits, the arbitrage) is at most K x equity - debt.
+5. owed >= 0 and idleBuck >= 0.
+6. No payout exceeds its fraction's value at the exiter's marks.
+
+*Parameters.*
+- Constants: lambda 25%; the charge, (1+K)/2 x the dearest pool fee, both
+  ways.
+- Governed:
+  - liquidity: floor 1% of gross, z = 2, band 50%, flow EMA 30 days,
+    parking 3x;
+  - the arbitrage band 0.5%;
+  - Trim's step 5%;
+  - the grain 1e-4;
+  - the director: windows 5-160 and 1280 days, quorum 4, tilt 1, band 1%,
+    leash 30%;
+  - the stress-fee hook, off.
+
+** 13.7 The Solidity plan, amended
+
+Section 10 stands, except:
+
+- *Storage (10.2)*:
+  - Drop =pendingCredit=.
+  - =lambdaBp= becomes a constant (2500).
+  - Add =owed=, =flowMs=, =dayFlow=, =lastDay=, =reserveFloorBp= (100),
+    =flowZ= (2), =rbandBp= (5000), =parkBp= (30000) and =arbBandBp= (50).
+  - The director keeps its ladder in its own storage.
+- *Entry points (10.3)*:
+  - =deposit= mints K x value inside the call (=mintFromBasket=).
+  - =redeem= and =redeemTreasury= pay BUCK, and =redeem= takes one
+    =minBuck= in place of a =minOut= per TOKEN.
+- *Primitives (10.4)*:
+  - A deposit's mint is exactly K x value.
+  - Every other mint is capped by the headroom.
+  - =_burn= repays =owed= first.
+  - A swap goes by the better route: the basket's pool, or TOKEN/USDC then
+    BUCK/USDC.
+- *Components*:
+  - The basket runs Arb, Daily, Sync, Deploy, Fund and Trim: 3N + 3 slots.
+  - =ArbKind= moves into the basket, and its v2 plan (a band only the
+    basket can take) is dropped.
+  - =BasketWheel= keeps =EquityKind= only.
+- *The director*: a per-leg turn director, as measured.  This is either a
+  new contract, or =PairsRebalanceDirector= given the lean, the anchor and
+  the leash against the declared targets.  It supplies =targets()=,
+  =mayTrim(i)= and =mayFund(i)=.
+- *Invariants (10.5)*: 13.6's.
+- *Tests (10.6)*:
+
+  | Python (=test_reserve_basket.py=)                                         | Foundry                          |
+  |---------------------------------------------------------------------------+----------------------------------|
+  | test_a_reserve_exit_pays_buck_and_touches_no_pool                         | test_redeem_paysBuck_noPool      |
+  | test_a_credit_exit_mints_its_pay_and_owes_its_share                       | test_redeem_mintsPay_owesShare   |
+  | test_an_exit_beyond_the_reserve_goes_pro_rata_and_bears_its_conversion    | test_redeem_proRataFallback      |
+  | test_a_K_cut_calls_nothing_back_and_liquidity_is_held_as_buck             | test_kCut_holdsLiquidity         |
+  | test_the_wheel_refills_a_short_reserve                                    | test_trim_refillsLiquidity       |
+  | test_the_flow_reserve_holds_z_sigma_at_its_floor                          | test_liquidity_flowSized         |
+  | test_trades_take_the_better_of_the_pool_and_the_outside_market            | test_route_betterVenue           |
+  | test_the_arb_brings_the_pool_back_and_keeps_the_gap                       | test_arb_outsiderEdge            |
+  | test_inside_the_band_there_is_nothing_to_take                             | test_arb_insideBand_noop         |
+  | test_the_turn_director_lets_a_run_run_and_sells_the_turn                  | test_director_letsRunRun         |
+  | test_the_turn_director_buys_no_falling_knife                              | test_director_noFallingKnife     |
+  | test_the_ruled_design_keeps_its_books                                     | invariant_* (13.6)               |
+
+- *Sim, server and tab (10.7)*: the Savings tab shows one BUCK payout.  The
+  server's savings block reports liquidity (held and headroom) and owed.
+- *Experiments (10.8)*: E5 runs across K and the director's quorum and
+  tilt, on the calm and burst arms.  lambda is fixed.
+- *The order of work (10.9)*:
+  1. the venue primitives, with the better-route swap;
+  2. =BuckBasketEquity=: storage, deposit (minting its K), redeem (BUCK,
+     owed, the fallback), the views;
+  3. the components, Arb and Daily included;
+  4. the director: the lean, the anchor, the gates;
+  5. =BuckBasketOps= rebased;
+  6. the sim;
+  7. the server and the Savings tab;
+  8. the experiments.
