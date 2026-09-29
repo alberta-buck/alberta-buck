@@ -307,6 +307,19 @@ undertakings + the wheel ON -- with the desk held back (E3).
    E2's desk arms rerun.  (Every earlier run with the ops desk used this
    signal, cycle 1's included: their desk readings deserve a second look.)
 
+*E3 rerun with the desk's signal fixed (2026-09-28;
+=build/sim/conv-r1/conv-e3/=, the director's common mode on bvib against
+par, and the parked accounting changes of =wip/basket-accounting=).*  On the
+calm arm the desk now rests in every corner -- no advice on all 731 days,
+bvib within ~1% of par (mean 1.0002-1.0004), inside its 100 bp deadband --
+where before it ran one-sided both ways.  All four PASS.  With the desk
+out of the way the legs add for NAV in baskets too (director 34.1M,
+director + wheel 34.6M; the wheel alone 32.9M, neither 32.6M); the
+depositors' realized P&L is lower in every corner (0.50-1.43 against
+0.97-1.75), from the parked accounting changes; the equity design
+(=doc/BASKET-EQUITY.org=) replaces that accounting.  Whether the fixed desk
+DEFENDS is for the burst arms: E2's desk arms, next.
+
 VERDICT E3: the savings basket to demonstrate is the director + the wheel
 (the demonstration's =demo-savings.toml= runs no desk).  The monetary desk
 joins them -- the design owner wants it in the demonstration -- once its
