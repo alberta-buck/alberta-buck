@@ -25,8 +25,10 @@ The design is settled and prototyped, but not yet built in Solidity.
   is ruled in, section 12.6 amends the Solidity plan of section 10.
 - *Section 13 evaluates the reserve as unminted credit* (the owner's
   proposal, after ruling BUCK payouts, a flow-sized reserve and the
-  arbitrage in the basket).  It recommends =CreditBasket= in hold mode, and
-  lists the open questions (13.4) to settle one by one before implementing.
+  arbitrage in the basket).  The owner then ruled the reserve's form: full
+  K minted on deposit, the room from K rises and earnings minted only on
+  demand, no margin calls (13.3), measured in 13.4.  The remaining open
+  questions (13.5) are settled one by one before implementing.
 
 It replaces the pro-rata basket's principal and burn-obligation accounting
 (=BuckBasketProRata=, which the ops and Fence shells inherit) with shares of
@@ -631,19 +633,21 @@ buying another near its bottom.  That is the director's work (12.3).
 | fast  | TOKEN payout (the prototype)    | +0.66%       | 1.09%              | 0                     |
 | fast  | BUCK reserve, no arbitrage      | +0.66%       | 0.99%              | 0                     |
 | fast  | + the wheel's arbitrage         | +1.63%       | 0                  | 0.99%                 |
-| fast  | + the director's lean, ungated  | +4.41%       | 0                  | 1.03%                 |
-| fast  | + the lean, turn-gated          | +2.62%       | 0                  | 1.01%                 |
+| fast  | + the director's lean, ungated  | +4.39%       | 0                  | 1.03%                 |
+| fast  | + the lean, turn-gated          | +1.88%       | 0                  | 1.00%                 |
 | cycle | TOKEN payout                    | +0.46%       | 1.06%              | 0                     |
 | cycle | BUCK reserve, no arbitrage      | +1.09%       | 0.37%              | 0                     |
 | cycle | + the wheel's arbitrage         | +1.52%       | 0                  | 0.37%                 |
-| cycle | + the lean, ungated             | +1.08%       | 0                  | 0.37%                 |
-| cycle | + the lean, turn-gated          | +2.17%       | 0                  | 0.37%                 |
+| cycle | + the lean, ungated             | +1.52%       | 0                  | 0.37%                 |
+| cycle | + the lean, turn-gated          | +3.24%       | 0                  | 0.38%                 |
 | walk  | TOKEN payout                    | -1.19%       | 1.70%              | 0                     |
 | walk  | + the wheel's arbitrage         | +0.55%       | 0                  | 1.01%                 |
-| walk  | + the lean, turn-gated          | +0.38%       | 0                  | 1.00%                 |
+| walk  | + the lean, turn-gated          | +0.35%       | 0                  | 1.00%                 |
 
 (Per year, of the settled NAV.  Over holding, the random walk's spread
-across seeds is about 1.5-2.5%; the other worlds' are 0.03-0.45%.)
+across seeds is about 1.5-3%; the other worlds' are 0.03-0.9%.  Corrected
+the same day: a first run sampled the director every six hours rather than
+daily, shrinking its windows fourfold.)
 - cmix earns 2.6% a year over holding in the fast world.  The TOKEN-payout
   basket keeps about a quarter of that, and the wheel's arbitrage lifts it
   to about two thirds.
@@ -665,31 +669,38 @@ the experiment says it needs.
 
 What the experiment says:
 
-1. *The turn gate alone adds little on LP positions*: about +0.1-0.4% a
+1. *The turn gate alone adds little on LP positions*: about 0 to +0.5% a
    year.  A pool's weight moves by only half its price move, and the pool
    already sells into every run within itself.
 2. *The value is in leaning against the excursion.*  Each target is scaled
    by exp(-tilt x excursion), where the excursion is the leg's price against
    its anchor, and then renormalized.  The lean is worth +2.8% a year over
    the arbitrage alone in the fast world.
-3. *The gate is the regime knob.*  In momentum cycles it is what makes the
-   lean pay:
-   - the ungated lean loses 0.5% a year;
-   - quorum 4 of 6 votes gains 0.6-0.8%;
-   - quorum 6 of 6 gains 1.2-1.4%.
+3. *The gate is the regime knob.*  Over the arbitrage alone, at tilt 1
+   and 2, a year:
 
-   In memoryless reversion it costs, by trading late: quorum 0 gains
-   +2.6-4.4%, quorum 6 only +0.2-0.5%.  In a walk every setting is within
-   noise of zero, slightly negative, with more variance.  This is
-   =BASKET-REBALANCE.md='s frontier again: gated for trends, ungated for
-   reversion.
-4. *The anchor must be much longer than the swings.*
-   - A 320-day EMA anchor against a year-long cycle phase-shifts the lean
-     into a loss: -0.7% at tilt 1, -2.1% at tilt 2.
-   - A near-fixed anchor (a 5000-day EMA) gains +0.6% and +0.8%.
-   - A real anchor is a governed reference for relative prices, or a
-     multi-year EMA.  Its risk is a permanent repricing, which the leash
-     bounds.
+   | quorum (of 6 votes) | cycles     | fast reversion | walk        |
+   |---------------------+------------+----------------+-------------|
+   | 0 (ungated)         | -0.1, +0.3 | +2.7, +4.5     | 0.0, -0.3   |
+   | 2                   | +1.2, +2.2 | +1.0, +1.6     | -0.1, -0.4  |
+   | 4                   | +1.9, +3.7 | +0.2, +0.5     | -0.1, -0.4  |
+   | 6                   | +0.8, +1.7 | 0.0, 0.0       | -0.2, -0.3  |
+
+   In momentum cycles the gate is what makes the lean pay, and quorum 4
+   does best.  In memoryless reversion the gate costs, by trading late.  In
+   a walk every setting is within noise of zero, slightly negative, with
+   more variance.  This is =BASKET-REBALANCE.md='s frontier again: gated
+   for trends, ungated for reversion.
+4. *The longer the anchor, the better the lean.*  In the cycle world at
+   quorum 4, the anchor as an EMA of:
+   - 320 days gains +1.1% and +1.7% (tilt 1 and 2);
+   - 1280 days, +1.6% and +3.0%;
+   - 5000 days (all but fixed), +1.9% and +3.7%.
+
+   A real anchor is a governed reference for relative prices, or a
+   multi-year EMA.  Its risk is a permanent repricing, which the leash
+   bounds.  (The first run's clock error made its "320-day" anchor an
+   80-day one, which lost against the year-long cycle.)
 5. *The leash keeps the mandate; the lean only times it.*  A weight more
    than 30% off its DECLARED target trades regardless of the gate.  Measured
    against the leaning target, the leash tripped in the middle of a run
@@ -720,10 +731,10 @@ sleeve.  This design does not propose one.
 - *The reserve* is the wallet's BUCK.  Its target is the larger of
   =reserve= x gross (fixed) and a flow-sized amount.  The flow-sized amount
   puts z standard deviations of the daily net flow, x (1+K), at the band's
-  floor, which is where the wheel starts refilling.  (A first cut put 2
-  sigma at the target, and so only about 1 sigma at the floor: it covered
-  81% of exits.)  The reserve floats within +-50% of its target, so
-  deposits and exits NET inside the band without a trade.
+  floor, which is where the wheel starts refilling (sized at the target,
+  the floor would hold only half of it).  The reserve floats within +-50%
+  of its target, so deposits and exits NET inside the band without a
+  trade.
 - *The components*, in slot order:
   - Arb: the outside arbitrageur's trade, made first.
   - Daily: the director's sample, and the day's flow folded into the
@@ -756,8 +767,8 @@ holder of 1M who stays:
 |--------------------------+-------------------+---------------------------+--------------------+----------------------------|
 | TOKEN payout (prototype) |               9.0 | -                         | -                  | -0.86%                     |
 | TOKEN payout, routed     |               7.4 | -                         | -                  | +2.35%                     |
-| BUCK, 5% reserve         |               0.1 | 99.0%                     | 3.8%               | +3.18%                     |
-| BUCK, flow-sized (z = 2) |               0.5 | 92.8%                     | 1.9%               | +2.92%                     |
+| BUCK, 5% reserve         |              0.07 | 99.0%                     | 3.8%               | +3.18%                     |
+| BUCK, flow-sized (z = 2) |              0.09 | 98.7%                     | 3.6%               | +3.06%                     |
 
 With no flows, the same stayer earns +1.4-1.5% in every basket.
 - *The flows cost the TOKEN-payout prototype's stayers about 2.3% a year.*
@@ -771,9 +782,10 @@ With no flows, the same stayer earns +1.4-1.5% in every basket.
   the routed costs.
 - *The reserve earns the stayer +1.4-1.8% a year from the flows*: flows
   net, the exit charge compensates the stayers, and an exit touches no
-  pool.  The flow-sized reserve covers 93%
-  of exits with half the BUCK of the fixed 5%.  The other 7% are the
-  unusually large retirements, and they go pro rata.
+  pool.  The flow-sized reserve covers 98.7% of exits, holding 3.6% of
+  the gross, about what the fixed 5% target averaged here.  It follows the
+  flows rather than the basket's size.  The rest are the unusually large
+  retirements, and they go pro rata.
 
 Why the BUCK basis is simpler:
 
@@ -782,7 +794,7 @@ Why the BUCK basis is simpler:
 | an exit | N burns, N collects, residue swaps, N transfers | one transfer and one burn |
 | the payout | a bundle of N TOKENs | BUCK |
 | deposits against exits | none net: every flow is placed or withdrawn | net inside the reserve's band |
-| the arbitrage's float | none: v1 needs a flash-callback cycle | the reserve |
+| the arbitrage | a flash-callback cycle (=ArbKind= v1) | the same: it needs no float (13.1) |
 | the director's proceeds | straight to Fund | parked until a buy is due |
 | where captures land | a TOKEN or BUCK in the wallet, redeployed | BUCK in the reserve |
 
@@ -857,7 +869,7 @@ What it costs:
    BUCK.
 
 Ruled on 2026-09-29: 1 (BUCK payouts), 2 (flow-sized) and 3 (the
-arbitrage in the basket).  4 and 5 are among section 13.4's questions.
+arbitrage in the basket).  4 and 5 are among section 13.5's questions.
 
 * 13. The reserve as unminted credit (2026-09-29)
 
@@ -897,8 +909,8 @@ run in =basket_harvest.run_stress=.
 - *The arbitrage needs no float*, so the reserve is not its float after
   all.  The outsider's trade funds itself through the V3 callback, as
   =ArbKind= v1 already does.
-- *Demurrage is not the reason.*  At 2% a year on a reserve of about 2% of
-  the gross, it costs about 0.04% a year.
+- *Demurrage is not the reason* (the owner's point).  At 2% a year on a
+  reserve of about 3-4% of the gross, it costs under 0.1% a year.
 
 ** 13.2 The catch: a K cut takes the headroom
 
@@ -922,68 +934,94 @@ The stress run, 8 seeds:
 - from day 160 to 260 arrivals slow to 0.5 a day, and holders leave at
   1/15 a day.
 
-The same run is repeated with the cut and the exits but no fall.
+The same run is repeated with the cut and the exits but no fall.  The
+"issue" arm is the design owner's rule (13.3).
 
-| scenario           | reserve                   | stress exits paid at once | first holder, 450 days | highest debt/equity |
-|--------------------+---------------------------+---------------------------+------------------------+---------------------|
-| cut + fall + exits | minted BUCK (section 12)  |                     88.4% | -9.75%                 |                0.81 |
-|                    | credit, burn              |                     41.1% | -9.47%                 |                0.74 |
-|                    | credit, deleverage        |                     91.9% | -8.47%                 |                0.73 |
-|                    | *credit, hold*            |                     91.1% | -9.15%                 |                0.74 |
-| cut + exits        | minted BUCK               |                     89.4% | +2.14%                 |                0.76 |
-|                    | credit, burn              |                     65.6% | +2.04%                 |                0.73 |
-|                    | credit, deleverage        |                     93.7% | +2.13%                 |                0.73 |
-|                    | *credit, hold*            |                     92.1% | +2.13%                 |                0.73 |
+| scenario           | reserve                  | stress exits paid at once | first holder, 450 days | highest debt/equity |
+|--------------------+--------------------------+---------------------------+------------------------+---------------------|
+| cut + fall + exits | minted BUCK (section 12) |                     97.7% | -9.33%                 |                0.80 |
+|                    | credit, burn             |                     75.3% | -9.14%                 |                0.72 |
+|                    | credit, deleverage       |                     99.6% | -8.14%                 |                0.72 |
+|                    | credit, hold             |                     99.3% | -8.34%                 |                0.72 |
+|                    | *issue (ruled)*          |                     97.8% | -9.42%                 |                0.92 |
+| cut + exits        | minted BUCK              |                     97.4% | +2.27%                 |                0.76 |
+|                    | credit, burn             |                     96.6% | +2.23%                 |                0.72 |
+|                    | credit, deleverage       |                     99.6% | +2.17%                 |                0.72 |
+|                    | credit, hold             |                     99.3% | +2.21%                 |                0.72 |
+|                    | *issue (ruled)*          |                     98.0% | +2.32%                 |                0.77 |
 
 And in normal flows (section 12.4's run):
 
 | reserve         | exits paid at once | pool ops per exit | the stayer, a year | BUCK held (of gross) | debt/equity |
 |-----------------+--------------------+-------------------+--------------------+----------------------+-------------|
-| minted, 2 sigma |              92.8% |              0.47 | +2.92%             | 2.24%                |        0.74 |
-| credit, hold    |              97.7% |              0.15 | +2.97%             | 0.02%                |        0.68 |
+| minted, 2 sigma |              98.7% |              0.09 | +3.06%             | 3.7%                 |        0.74 |
+| credit, hold    |             100.0% |              0    | +3.07%             | 0                    |        0.62 |
+| issue (ruled)   |              99.6% |              0.03 | +2.82%             | 4.0%                 |        0.74 |
 
-- *burn* loses its liquidity exactly when exits come.
-- *deleverage*'s edge is timing, not structure.  It sold into the fall
-  (+0.7%); with no fall it is level with hold.
-- *hold* is as liquid as deleverage, and more liquid than the minted
-  reserve in every run.  It calls nothing back, and holds BUCK only while a
-  cut has taken the headroom.
+- *burn* loses a quarter of its liquidity exactly when exits come.
+- *With the reserve sized on the day's flows, every other arm pays
+  97-100% of the stress exits at once.*
+- The differences in the first holder's result follow leverage.  hold
+  keeps its headroom unminted and runs at 0.62 where the others run at
+  0.74: that is less in the fall, and less in the rise.
 - Exiters got the same in every arm (99.6-99.7% of their marked value).
 
-** 13.3 Recommendation
+** 13.3 Ruled (2026-09-29)
 
-Adopt the credit reserve in hold mode, with the one limit.
+The design owner's answers to 13.5's first four questions:
 
-What it removes:
-- pending credit and its rules;
-- a BUCK reserve held at all times;
-- the arbitrage's float;
-- any cost to parking.
+1. *Mint the full K on deposit.*  Each deposit mints K of its day x its
+   value at once, into the wallet, for the wheel to place.  When K rises,
+   the extra room, up to the new K x the deposits, is minted only when BUCK
+   is required: for exits and the arbitrage.  No margin calls: a K cut does
+   not touch BUCK already issued, and only lowers what new deposits bring.
+2. *The limit is K x equity*: earnings raise the room available on demand.
+3. *An exit's debt share is burned after the exit*, by the wheel (=owed=).
+4. *The exit charge mirrors the entry charge.*
 
-What it adds:
-- =owed=: one counter, repaid by Trim;
-- the keep rule: hold BUCK only for what the target lacks in headroom.
+In the prototype this is =CreditBasket(issue=True, base="equity",
+mode="hold")=:
+- Liquidity is the BUCK held plus the headroom (K x equity - debt), kept
+  at the flow-sized target.  Normally that means holding the BUCK, since
+  deposits mint their full K.  After a K rise, or as earnings grow, the
+  headroom takes over and the held BUCK beyond what liquidity needs is
+  placed.
+- Fund places only BUCK held beyond what liquidity needs.  Nothing is
+  minted just to be placed.
+- There is no pending credit.
 
-An exit's debt share is then burned by the wheel after the exit rather
-than before it (13.4, question 3).
+** 13.4 The ruled design, measured
 
-** 13.4 The open questions, in order
+- *Liquidity*: 99.6% of exits paid at once in normal flows, 97.8-98.0%
+  through the stress.
+- *Leverage in a cut*: during a cut new deposits still mint K of their day,
+  even while the pool's debt is above K x equity.  So the pool
+  de-levers only as prices recover.
+  - Peak debt/equity is 0.92 in the fall, against 0.80 for the minted
+    reserve, whose deposits' credit waits for the pool's headroom.
+  - It is 0.77 with no fall.
+  - It is far from bad debt: that would need a further fall of about three
+    quarters.  But it is the one place the rule departs from the pooled
+    limit (13.5, question 11).
+- *Returns* are within noise of the minted reserve (-9.42% against -9.33%
+  in the fall, +2.32% against +2.27% without it).
 
-1. *The credit reserve in hold mode, with the one limit* (13.3).
-2. *The limit's base*: min(basis, equity), so earnings are unlevered (as
-   ruled on 2026-09-28's "earnings compound unlevered"), or equity, so
-   earnings re-lever.
-3. *An exit's debt share burned after the exit* (the owed, repaid at the
-   wheel's pace), not before it.  The stayers carry the exit's share of the
-   positions until Trim sells it.  The exit charge pays for that, and the
-   limit still binds at the mint.
-4. *The exit charge*: the mirror of the entry charge, (1+K)/2 of the
-   dearest pool fee.
+** 13.5 The open questions, in order
+
+1. [ruled] The reserve: full K minted on deposit; room from K rises and
+   earnings minted on demand (13.3).
+2. [ruled] The limit: K x equity.
+3. [ruled] An exit's debt share: burned after, by the wheel.
+4. [ruled] The exit charge: the mirror of the entry charge.
 5. *The director*: the lean (tilt 1), its anchor (a governed reference or a
-   multi-year EMA), and the quorum as the regime knob.
+   multi-year EMA), and the quorum as the regime knob (4 for cycles, 0 for
+   fast reversion).
 6. *lambda*: fixed at 25%, or governed; a hurdle.
 7. *A deposit cap* against price impact, or none (routing has made impact
    small).
 8. *The stress fee* on the equity basket: whether it applies, and its rule.
 9. *The treasury*: when it redeems.
 10. *The Fence* stays on ProRata.
+11. *A deposit into an over-limit pool* (13.4): mint its full K at once (as
+    ruled), or only while the pool's debt is below K x equity, its credit
+    waiting otherwise.

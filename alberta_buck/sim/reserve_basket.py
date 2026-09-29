@@ -277,11 +277,16 @@ class CreditBasket(ReserveBasket):
                     burns until the headroom is back -- the basket follows
                     K down."""
 
-    def __init__(self, pools: dict[str, Pool], mode: str = "hold", **kw):
+    def __init__(self, pools: dict[str, Pool], mode: str = "hold", base: str = "basis",
+                 issue: bool = False, **kw):
         super().__init__(pools, **kw)
-        if mode not in ("hold", "burn", "deleverage"):
-            raise ValueError(mode)
+        if mode not in ("hold", "burn", "deleverage") or base not in ("basis", "equity"):
+            raise ValueError((mode, base))
+        if issue and mode != "hold":
+            raise ValueError("issue on deposit needs hold")
         self.mode = mode
+        self.base = base               # the limit on the basis (earnings unlevered) or equity
+        self.issue = issue             # each deposit mints K of the day x its value at once
         self.owed = 0.0                # exits' debt shares and mints, to repay
         self._leaving = 0.0            # the basis of the receipt now redeeming
 
@@ -291,7 +296,8 @@ class CreditBasket(ReserveBasket):
         return sum(r.basis for r in self.receipts.values())
 
     def limit(self) -> float:
-        return self.k() * min(self.basis(), self.equity())
+        e = self.equity()
+        return self.k() * (min(self.basis(), e) if self.base == "basis" else e)
 
     def headroom(self) -> float:
         return self.limit() - self.debt
@@ -306,7 +312,11 @@ class CreditBasket(ReserveBasket):
         return max(self.reserve_target() - max(self.headroom(), 0.0), 0.0)
 
     def spare(self) -> float:
-        """BUCK Fund may place: the liquidity beyond its target."""
+        """BUCK Fund may place: the liquidity beyond its target -- or, when
+        deposits issue their credit, only the BUCK held beyond what liquidity
+        needs (headroom is minted only when required: exits, arbitrage)."""
+        if self.issue:
+            return self.idle_buck - self.keep()
         return self.liquidity() - self.reserve_target()
 
     def short(self) -> float:
@@ -330,13 +340,16 @@ class CreditBasket(ReserveBasket):
         return self._mint(amount)
 
     def settle(self) -> None:
-        """BUCK at rest repays the exits' debt first, then any debt, but for
-        what liquidity lacks in headroom ("hold")."""
+        """BUCK at rest repays the exits' debt first, then (unless deposits
+        issue their credit, whose BUCK waits for Fund) any debt, but for what
+        liquidity lacks in headroom ("hold")."""
         b = min(self.idle_buck, self.owed, self.debt)
         if b > 0:
             self.idle_buck -= b
             self._burn(b)
             self.owed -= b
+        if self.issue:
+            return
         b = min(max(self.idle_buck - self.keep(), 0.0), self.debt)
         if b > 0:
             self.idle_buck -= b
@@ -348,6 +361,11 @@ class CreditBasket(ReserveBasket):
     def deposit(self, asset: str, amount: float, guard: float = 0.05) -> int:
         rid = super().deposit(asset, amount, guard)
         self.pending = 0.0             # no pending credit: the limit is pooled
+        if self.issue:                 # the deposit's own credit, whatever the pool's
+            m = self.k() * self.receipts[rid].basis
+            self.debt += m
+            self.minted += m
+            self.idle_buck += m
         self.settle()
         return rid
 
@@ -370,7 +388,9 @@ class CreditBasket(ReserveBasket):
         pay = value * (1 - self.charge(BUCK))
         use = min(self.idle_buck, pay)
         need = pay - use
-        room = self.k() * min(self.basis() - self._leaving, self.equity() - pay) - self.debt
+        e = self.equity() - pay
+        room = self.k() * (min(self.basis() - self._leaving, e) if self.base == "basis"
+                           else e) - self.debt
         if need <= max(room, 0.0):
             self.owed += self.debt * f + need
             self.idle_buck -= use
@@ -403,7 +423,8 @@ class CreditBasket(ReserveBasket):
         v = self.idle[t] * p.price
         avail = max(self.spare(), 0.0)
         have = min(self._usable(), avail, v)
-        have += self._mint(min(v - have, avail - have))
+        if not self.issue:
+            have += self._mint(min(v - have, avail - have))
         if have < v:
             self.op_sell_tok(t, (v - have) / 2 / p.price)
         self.op_add(t)
@@ -606,19 +627,18 @@ def _reserve_short(d: ReserveBasket) -> float:
 
 
 class DailyKind(WheelTask):
-    """Once a day (`every` blocks): the director's sample, and the day's net
+    """Once a day (the clock's day): the director's sample, and the day's net
     flow folded into the reserve's sizing."""
     kind = "daily"
 
-    def __init__(self, every: int = 1):
-        self.every = every
+    def __init__(self):
         self.last: int | None = None
 
     def due(self, d, i, clk) -> bool:
-        return self.last is None or clk.block - self.last >= self.every
+        return self.last is None or clk.day > self.last
 
     def run(self, d, i, clk):
-        self.last = clk.block
+        self.last = clk.day
         d.close_day()
         d.director.observe(d, clk)
         return TaskResult()
@@ -712,11 +732,10 @@ class TrimKind(WheelTask):
         return TaskResult()
 
 
-def reserve_wheel_tasks(arb_band: float | None = 0.005, step: float = 0.05,
-                        day: int = 1) -> list[WheelTask]:
+def reserve_wheel_tasks(arb_band: float | None = 0.005, step: float = 0.05) -> list[WheelTask]:
     """The BUCK basis's components, in slot order: the arbitrage first (it is
-    the one racing outside arbitrageurs), then the upkeep.  `day` is a day
-    in blocks; `arb_band` None leaves the arbitrage out."""
+    the one racing outside arbitrageurs), then the upkeep.  `arb_band` None
+    leaves the arbitrage out."""
     tasks: list[WheelTask] = [ArbKind(arb_band)] if arb_band is not None else []
-    return tasks + [DailyKind(day), SyncKind(), ReserveDeployKind(), ReserveFundKind(),
+    return tasks + [DailyKind(), SyncKind(), ReserveDeployKind(), ReserveFundKind(),
                     TrimKind(step)]

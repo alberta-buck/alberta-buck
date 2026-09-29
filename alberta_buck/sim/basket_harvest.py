@@ -115,8 +115,7 @@ def build(arm: str, ref, K=0.75, fee=0.003, cost=0.001, share=0.9, E0=1e6,
                     TurnDirector(**{**turn, "quorum": 0}) if arm == "tilt" else None)
         cls = CreditBasket if arm == "credit" else ReserveBasket
         b = cls(pools, ext=ext, K=K, reserve=reserve, director=director, **(basket_kw or {}))
-        tasks = reserve_wheel_tasks(arb_band if arm != "reserve" else None,
-                                    day=per_day)
+        tasks = reserve_wheel_tasks(arb_band if arm != "reserve" else None)
     w = WorkWheel(tasks)
     w.bind(b)
     start(b, E0, reserve if arm != "token" else 0.0)
@@ -131,7 +130,7 @@ def start(b, E0: float, reserve: float) -> None:
     charge's business, tested in test_equity_basket)."""
     k = b.k()
     gross = (1 + k) * E0
-    if isinstance(b, CreditBasket):          # the reserve is unminted headroom
+    if isinstance(b, CreditBasket) and not b.issue:   # the reserve is unminted headroom
         gross -= reserve * gross
         b.idle_buck = 0.0
         per = gross / len(b.pools)
@@ -168,7 +167,7 @@ def run(arm: str, world: str, days: int = 730, per_day: int = 4, seed: int = 1,
         ref = next(gen)
         ext.price.update(ref)
         w.mark_dirty()
-        w.tick(b, Clock(block, 0), max_work=len(w._table))
+        w.tick(b, Clock(block // per_day, block % per_day, per_day), max_work=len(w._table))
         for t, p in b.pools.items():
             spent, got = arbitrage(p, ext, t, p.fee)
             outside += got - spent
@@ -223,6 +222,7 @@ class RoutedEquityBasket(EquityBasket):
     separate what routing buys from what the reserve's netting buys."""
 
     ext = None
+    sold = 0.0
     _pool_share = ReserveBasket._pool_share
     _route_sell_tok = ReserveBasket._route_sell_tok
     _route_sell_buck = ReserveBasket._route_sell_buck
@@ -238,7 +238,7 @@ class RoutedEquityBasket(EquityBasket):
             pay[t] += self._route_sell_buck(t, residue * val[t] / tot)
 
 
-FLOW_ARMS = ("token", "routed", "reserve", "flow", "credit")
+FLOW_ARMS = ("token", "routed", "reserve", "flow", "credit", "issue")
 
 
 def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
@@ -263,9 +263,11 @@ def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
                 b.__class__ = RoutedEquityBasket
                 b.ext = ext
         else:
-            b, w, ext = build("credit" if arm == "credit" else "reserve", ref, K=K,
-                              fee=fee, cost=cost, share=share, E0=E0, per_day=per_day,
-                              arb_band=None, reserve=0.05 if arm == "reserve" else 0.01)
+            b, w, ext = build("credit" if arm in ("credit", "issue") else "reserve", ref,
+                              K=K, fee=fee, cost=cost, share=share, E0=E0, per_day=per_day,
+                              arb_band=None, reserve=0.05 if arm == "reserve" else 0.01,
+                              basket_kw={"issue": True, "base": "equity"}
+                              if arm == "issue" else None)
             if arm != "reserve":
                 b.flow_z = 2.0
     finally:
@@ -301,7 +303,7 @@ def run_flows(arm: str, seed: int = 1, days: int = 365, per_day: int = 4,
                         exits.append(got / marked)
                         open_.pop(rid)
             w.mark_dirty()
-            w.tick(b, Clock(block, 0), max_work=len(w._table))
+            w.tick(b, Clock(block // per_day, block % per_day, per_day), max_work=len(w._table))
             for t, p in b.pools.items():
                 arbitrage(p, ext, t, p.fee)
                 p.mark()
@@ -332,7 +334,7 @@ def _poisson(rng, lam: float) -> int:
 
 # -- stress: a K cut, a fall and an exit wave ------------------------------------------ #
 
-STRESS_ARMS = ("minted", "hold", "burn", "deleverage")
+STRESS_ARMS = ("minted", "hold", "burn", "deleverage", "issue")
 
 
 def _ramp(d: float, pts) -> float:
@@ -367,7 +369,11 @@ def run_stress(arm: str, seed: int = 1, days: int = 450, per_day: int = 4,
                   when a K cut takes the headroom
       burn        CreditBasket: headroom only; after a cut exits go pro rata
       deleverage  CreditBasket: after a cut the wheel burns until the
-                  headroom is back"""
+                  headroom is back
+      issue       CreditBasket, the owner's rule: each deposit mints K of
+                  the day x its value at once, the limit on equity,
+                  headroom minted only for exits and the arbitrage, BUCK
+                  held for what liquidity lacks in headroom (no margin call)"""
     rng = random.Random(seed * 104729)
     names = ["T0", "T1", "T2"]
     gen = paths("fast", names, per_day, seed, sigma=0.01)
@@ -375,7 +381,9 @@ def run_stress(arm: str, seed: int = 1, days: int = 450, per_day: int = 4,
     K = lambda: _ramp(now[0], k_path)
     ref = next(gen)
     kw = {"flow_z": 2.0}
-    if arm != "minted":
+    if arm == "issue":
+        kw.update(mode="hold", issue=True, base="equity")
+    elif arm != "minted":
         kw["mode"] = arm
     b, w, ext = build("credit" if arm != "minted" else "arb", ref, K=K, fee=fee,
                       cost=cost, share=share, E0=E0, per_day=per_day, reserve=0.01,
@@ -415,7 +423,7 @@ def run_stress(arm: str, seed: int = 1, days: int = 450, per_day: int = 4,
                             paid += pay
                         open_.remove(rid)
             w.mark_dirty()
-            w.tick(b, Clock(block, 0), max_work=len(w._table))
+            w.tick(b, Clock(block // per_day, block % per_day, per_day), max_work=len(w._table))
             for t, p in b.pools.items():
                 arbitrage(p, ext, t, p.fee)
                 p.mark()
