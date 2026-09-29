@@ -15,7 +15,7 @@ library BuckSlots {
     uint256 internal constant STATE      = 0;   // mapping(address => AccountState) _state
     uint256 internal constant SUPPLY     = 1;   // uint256 _totalSupply
     uint256 internal constant ALLOWANCES = 2;   // mapping(address => mapping(address => uint256)) _allowances
-    uint256 internal constant FRAGMENTS  = 5;   // mapping(address => mapping(address => bytes32)) _receiptFragments
+    uint256 internal constant FRAGMENTS  = 4;   // mapping(address => mapping(address => bytes32)) _receiptFragments
 
     /// @notice `_state[a]`: the packed (balance, buckSeconds, timestamp, flags) word.
     function state(address a) internal pure returns (bytes32) {

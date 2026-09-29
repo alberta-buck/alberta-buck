@@ -174,20 +174,6 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- mint-side bookkeeping (rare path) ---------------------------------
 
-    /// @notice The account that carries `a`'s demurrage, once both sides have
-    ///         consented.  Zero when `a` pays its own.  See the delegated
-    ///         demurrage section below for the mechanism; the other two fields
-    ///         it needs are declared there.
-    /// @dev    Housed here, out of order, to reclaim the slot the Phase-1a
-    ///         `storedLimit` ratchet used to occupy -- a highest-ever credit
-    ///         limit per account, from before the limit was read live.
-    ///         Nothing had written it in a long time, but it was still
-    ///         exported as a public getter that always answered zero.
-    ///         Reusing its slot retires it without shifting `mintsBacked` (4)
-    ///         or `_receiptFragments` (5), which several test fixtures reach
-    ///         by hard-coded index via `vm.store`.
-    mapping(address => address) public demurragePayer;
-
     /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
     mapping(uint256 => uint256) public mintsBacked;
     /// @dev keccak256(E_to) per (from, to) from approve-time CP receipts.
@@ -259,11 +245,10 @@ contract Buck is IERC20, IERC20Metadata {
     // No spend decision is ever made on a stale number: every balance-moving
     // path crystallises the account it is about to debit, immediately before
     // reading its balance.
-    //
-    // Appended last so every pre-existing slot index is unchanged.
 
-    // `demurragePayer` itself is declared further up, in the slot the
-    // retired `storedLimit` ratchet used to hold.
+    /// @notice The account that carries `a`'s demurrage, once both sides have
+    ///         consented.  Zero when `a` pays its own.
+    mapping(address => address) public demurragePayer;
 
     /// @notice Pending election: `a` has named this account, which has not
     ///         yet accepted.  Cleared on accept.
