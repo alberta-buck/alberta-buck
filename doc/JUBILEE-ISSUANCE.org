@@ -5,9 +5,13 @@
 
 * 0. Status
 
-Architecture, awaiting the design owner's rulings (section 6).  Nothing in
-=src/= has changed.  The defects are proven by =test/JubileeBasis.t.sol=:
-each =test_defect_*= asserts today's behaviour, and the fix inverts it.
+*The core fix is built* (section 8), on branch =fix/jubilee-accounting=:
+step 1 of section 7, with the recommended options of 6.1.1-6.1.5.  The
+defects were proven by =test/JubileeBasis.t.sol= (commit e177c79, each a
+=test_defect_*= asserting the old behaviour); that suite now pins the fix.
+The basket's side (section 4, rulings 6.2) is not built: the basket's
+issuance is recorded, and its relief is not yet paid.  6.1.6 (re-judging
+the T15 and octl results) is still asked.
 
 The owner's principle (2026-09-29): *the Jubilee relief must equal the
 demurrage accrued.*  Demurrage accrues on BUCK in circulation, so relief
@@ -255,6 +259,25 @@ prices, not credit), the venue, the director, the wheel's other kinds.
 
 ** 6.2 The basket
 
+*Ruled (2026-09-29):*
+- 6.2.1: *the credit holder* -- and remove every basket special case from
+  Buck.  The hook baskets (ProRata, Ops, Fence, the legacy basket) move
+  onto a *sim-only subclass* of Buck that keeps the hooks, so the sims'
+  baselines and judged results stay reproducible; production Buck carries
+  no basket code.
+- 6.2.2: *Buck's ordinary rule*: a deposit into an under-water basket
+  first restores its limit (an under-water account stops issuing).
+- 6.2.6: *the fallback exit pays in kind*.  (Weighed and rejected:
+  capping redemptions to the BUCK the basket can issue, completing a full
+  exit over several attempts as the wheel recharges -- it would invite a
+  run on a crowded exit.)
+- Following from "no special cases": the desk's issuance is the basket's
+  credit (bounded by K x equity); the marked credit is issued through
+  BuckCredit like any credit, the basket as its own insurer (gated in
+  production by an insurer attestation that permits MARKED).
+- 6.2.3 (=owed= retired into the liquidity floor) and 6.2.4 (relief in the
+  share price, realized daily) proceed as recommended.
+
 1. *The equity basket as a credit holder* (4.1), or the ledger credit
    (4.2).  Recommended: the credit holder.
 2. *A deposit into an under-water basket.*  Ruled (13.3): each deposit
@@ -290,3 +313,238 @@ Fence.
 4. The Python prototype and the sims (close-cost quotes, =carry.py=,
    =deploy.py=); rerun per 6.1.6.
 5. The docs.
+
+* 8. Built (2026-09-29): the core
+
+On =fix/jubilee-accounting=, off =feature/carry-convexity=.
+
+| commit | what |
+|--------+------|
+| Buck: Jubilee relief on BUCK issued; every BUCK carries its fee to the end | =src/Buck.sol=, =src/BuckCredit.sol=, the core tests |
+| core: the carrying-transfer kernel follows the lien rules | =core/rust/buck-math= and the regenerated =math-vectors.json= |
+| sims and docs: relief on the lien | the close-cost quotes, =carry.py=, this document and the design doc |
+
+*What changed in =Buck=, piece by piece:*
+
+- *Storage*, appended last: =feesRealized=, =reliefRealized=,
+  =basketIssued= (signed), the basket's issuance-seconds and its fold time.
+- *=_crystallize=*: the rectangle is =|raw| x dt= either side of zero;
+  above zero it is fee-seconds (routed to a payer as before), below it is
+  issuance-seconds (never routed).
+- *=_debit=* (new; the non-Carrying sender and the minter's deposit): a
+  spend within the held BUCK is unchanged; one that reaches past them pays
+  the locked fee into the lien first.
+- *=_credit=* (new; every receipt): a recipient at or above zero takes the
+  BUCK and their age, as before; below zero, the BUCK repay the lien net
+  of their fee, and repaying it all pays the lien's relief.
+- *=_carryingTransfer=*, *=_nonCarryingTransfer=*: the sender sides are
+  unchanged; the recipient sides are =_crystallize= + =_credit=; each
+  checkpoints the fund first when it moves the BUCK issued.
+- *=_accrueJubilee=* accrues on =totalIssued()=.
+- *Relief*: =reliefOf(a)=, =redeemCost(a)=, =settleRelief()= (the
+  caller's own), realized in =_burnAllocated= before the solvency check.
+- *Basket hooks*: =mintFromBasket= records the issuance and credits like
+  any receipt; =burnFromBasket= carries out the burned BUCK's age;
+  =basketRelief()= reports what the basket has earned.
+- *=BuckCredit=*: the aging is gone (its storage slot kept, retired);
+  =deactivateFromBuck= returns nothing.
+
+*Where the build departed from sections 3-4, and why:*
+
+1. *A zero balance is a holder's.*  3.1 said aged BUCK "arriving at an
+   account at or below zero" pay their fee on arrival.  At exactly zero
+   there is no lien to repay, so the receipt keeps the age as a positive
+   account's does (the fee stays a lien in the balance, as before).  Only
+   a negative account pays on arrival.
+2. *=settleRelief()= is the holder's own.*  3.2 proposed a permissionless
+   poke.  Relief accrues linearly on the lien; paying it early shrinks the
+   lien it accrues on, so a third party poking daily would compound a
+   holder's relief down (from 20% to about 18% over ten years).  The
+   holder settles; everything else is realized at repayment or burn.
+3. *A basket burn's fee comes out of the burn* (D3).  Taking it on top
+   would leave the baskets' own books (=idleBuck=, =treasuryBuckPending=)
+   claiming BUCK Buck no longer holds.  Instead the burn of =amount=
+   retires =amount - fee= of the basket's recorded issuance: aged BUCK
+   retire less than face, as they repay less than face of a lien.  No
+   basket code changes; the difference lives in Buck's record of the
+   basket's issuance, and the basket's relief, when it is paid (6.2),
+   squares it.
+4. *The basket's relief is recorded, not paid.*  Paying it needs the
+   basket to book it (6.2.4, 6.2.5).  The fund accrues on the basket's
+   positive issuance meanwhile, so the relief is there when it is.
+5. *A basket that retired more than it issued does not dilute the
+   accounts.*  A desk's buy-back burns BUCK it did not issue, so
+   =basketIssued= can go negative; the fund's base then counts the liens
+   alone (=totalIssued()= adds back the negative part).  That demurrage is
+   owed by the basket (=basketRelief= < 0), to be charged when its relief
+   is settled.
+6. *Relief the fund cannot pay at a crossing is forfeited.*  A positive
+   account cannot hold issuance-seconds.  With the fund accruing on
+   issuance this binds only if governance has drawn the fund down.
+   =settleRelief= and =burn= defer instead.
+7. *The core kernels had to follow* (missed in section 5).
+   =core/rust/buck-math='s =carrying_transfer= mirrors
+   =_carryingTransfer=, and the Rust, Python (PyO3) and JS (wasm) suites
+   replay =test/vectors/math-vectors.json= bit for bit.  Two carry rows
+   changed (aged BUCK into a lien) and one was added (a crossing that pays
+   a year's relief); the vector harness plants a funded Jubilee, as the
+   fund covers relief by construction.
+8. *Size.*  =Buck= grows from 18,783 to 21,690 bytes: 2,886 left under
+   the 24,576 limit (5,793 before).  =BuckCredit= shrinks by 701.  The
+   basket's credit creation in =setBasket= (section 4) must fit in that.
+
+*Tests.*  The whole forge suite passes (762 before the fuzz case, from
+757).  =test/JubileeBasis.t.sol= now pins every defect inverted, the two
+books identities, and =testFuzz_theJubileeBalances=: 32 random draws,
+repayments, basket mints, burns and payouts, coverage burns, settlements
+and warps per run, the books checked after each (256 runs).  Gas: the
+median core test moves +0.15%; a transfer that draws or repays credit
+pays the fund checkpoint once per block.
+
+* 8b. Built (2026-09-29): the basket as a credit holder
+
+On =fix/jubilee-accounting=, after the core (section 8), per the rulings
+of 6.2.
+
+| commit | what |
+|--------+------|
+| BuckCredit: MARKED credits, valued at their insurer's mark | =src/BuckCredit.sol=, =test/BuckCreditMarked.t.sol= |
+| Buck: no basket code; the hooks move to the sims' BuckWithBasketHooks | =src/Buck.sol=, =src/legacy/BuckWithBasketHooks.sol=, the tests and sims that wire a hook basket |
+| BuckBasketEquity: a credit holder | the equity shell, storage, facet, Ops, =MonetaryDesk= hooks; the suites on the real Buck |
+| sim: the equity baskets as credit holders | =deploy.py= |
+
+*The pieces:*
+
+- *MARKED credits* (=BuckCredit=): present value = the insurer's latest
+  mark (=mark(tokenId, value)=), capped by the face.  Self-issued only
+  (insurer == holder) and MARKED from creation or never, because a mark may
+  fall below the activated coverage and an insurer marking someone else's
+  credit down would be revoking a purchased policy.  Gated in production
+  by the insurer envelope's =depTypes= bit, like any depreciation model.
+- *Buck* carries no basket code; its identity is =totalSupply = sum(liens)
+  + reliefRealized - feesRealized=.  The hooks, the basket's issuance
+  record and =basketRelief= live on in =BuckWithBasketHooks=, which only
+  the sims and tests deploy (for the pro-rata baselines).
+- *The equity basket* holds one MARKED credit (=openCredit=, by
+  governance; the face caps its issuance at K x face).  It marks the credit
+  at its equity (the exiters' LOW marks, plus the desk's book) before it
+  spends -- every deposit, exit and wheel step -- and activates it with an
+  ordinary =Buck.mint= at the first mark above zero.  Its debt is its lien;
+  relief is collected on Daily and counted, accrued, in the share price.
+
+*Where the build departed from section 4, and why:*
+
+1. *Liquidity is unused credit, so the lien is smaller.*  Before, a deposit
+   minted its whole K at once and the wheel held liquidity as idle BUCK.
+   Now nothing is issued until the wheel places it, and liquidity is the
+   credit left unspent: placing 300k of BUCK leaves a lien of about 110k,
+   not the old 225k of debt.  Same economics (idle BUCK paid demurrage, an
+   issued lien earns relief), less issued.  A K cut therefore has to be
+   deeper to put the basket under water.
+2. *After a K cut, Trim deleverages to the new limit.*  An account below
+   zero cannot hold BUCK -- what it receives repays the lien -- so its
+   liquidity comes back only once the lien is under K x equity.  Trim's
+   refill (liquidity below its floor) now includes the amount the basket
+   is over its limit, paced at 2 x =swapCapBp= of a pool a step; until
+   then, exits pay in kind.  This buys BUCK when a K cut says it is weak,
+   which is the controller's intent; the alternative (no refill while under
+   water, exits in kind until equity or K recover) is one line of
+   =_trimPlan=.  *For the owner to confirm.*
+3. *An exit is marked first.*  =_exit= marks the credit at the equity that
+   stays (=eLow - pay=) and pays in BUCK only if Buck then lets the account
+   spend it -- the ruled "K x (E - pay)" test, enforced by Buck.
+4. *The in-kind exit's two corners.*  Short of its lien share (leverage
+   above one), it leaves TOKEN behind worth the shortfall at the LOW marks.
+   Owed more BUCK than an under-water account can spend, the rest stays in
+   the receipt as shares at the post-exit price: the exit completes, and no
+   claim moves ahead of another's.  No exit charge in kind (nothing is
+   converted).
+5. *The desk is a sub-account.*  Its BUCK is explicit counters
+   (=monetaryBuckHeld=, =monetaryOutstanding=) inside the shared account;
+   equity's BUCK is the account less that position.  Its issuance spends
+   the basket's credit, bounded by what the account can spend beyond the
+   liquidity target; its purchases book the BUCK that actually arrived
+   (their fee on arrival is the desk's, not equity's); and it keeps its own
+   relief accumulator on its own issuance, folded at every desk swap -- a
+   share of the account's relief by the current split misattributed relief
+   whenever the split moved.
+6. *The facet reads the desk by a self-call* (=deskPosition=): it runs
+   its own code under delegatecall and cannot see the shell's overrides.
+7. *A bug found and fixed in the build:* the in-kind exit valued what
+   stays, and marked the credit, from the snapshot taken before its
+   positions were burned -- overstating the remaining equity by the burned
+   positions, shorting the exiter's left-over shares and, worse, marking
+   the credit above its collateral.  It now reads fresh; a test pins the
+   post-exit mark to the equity that stays.
+8. *The suites run on the real Buck, BuckCredit and the identity
+   harness*, in 6-decimal BUCK (the mock ERC-20 could show no lien, limit,
+   relief or fee).  Placement's weight tolerance is one capped Fund step
+   (500 bp): with no director, Fund places only while the spare passes
+   half the target.
+9. *Size.*  =BuckBasketEquityOps= is 24,131 bytes, 445 under the limit.
+   The next addition to the shell or the desk must first move code to the
+   components facet (=_exitInKind= is the natural candidate; the facet has
+   13 KB to spare).
+
+* 9. Storage cleanup (asked 2026-09-29; next)
+
+The owner asked to remove the orphaned slots and put the rest in a sensible
+order.  Nothing is deployed, so layouts may change; what can break is
+anything that reaches a slot by *number* rather than by name -- a
+=vm.store= / =vm.load= at a hard-coded index, or a mapping slot computed as
+=keccak256(key, N)=.  The compiler cannot see those: a moved slot makes
+them read and write the wrong place, silently.
+
+** 9.1 The inventory (2026-09-29)
+
+| contract | slot | variable             | reached by number in                                                                 |
+|----------+------+----------------------+--------------------------------------------------------------------------------------|
+| Buck     |    0 | =_state=             | =BuckSignedBalance.t.sol=, =BuckDemurrage.t.sol=                                     |
+| Buck     |    1 | =_totalSupply=       | =BuckDemurrage.t.sol=                                                                |
+| Buck     |    2 | =_allowances=        | =Notes.t.sol=, =NotesE2E.t.sol=, =MintVerifier.t.sol=, =UniswapV2Integration.t.sol=   |
+| Buck     |    5 | =_receiptFragments=  | =Buck.t.sol=, =BuckDemurrage=, =BuckJubileeRelief=, =JubileeBasis=, =Notes=, =NotesE2E=, =NotesCoupledB1=, =NotesIdentityMembership=, =MintVerifier=, =UniswapV2Integration=, =basket/BuckBasket= |
+| Notes    |    8 | (a pool balance)     | =NotesCoupledB1.t.sol=, =NotesIdentityMembership.t.sol=                              |
+
+No Python or JS code reads or writes storage by position (=eth_getStorageAt=
+appears only in =truthstake.py='s comments on archive reads).
+
+Buck's layout today: 0 =_state=, 1 =_totalSupply=, 2 =_allowances=, 3
+=demurragePayer= (in the retired =storedLimit= ratchet's slot), 4
+=mintsBacked=, 5 =_receiptFragments=, 6 =_jubileeLastUpdate= (half empty
+now: the removed =basket= address shared it), 7 =demurragePayerRequest=, 8
+=mintsPrincipal= (away from =mintsBacked= only because slot 5 is
+load-bearing), 9 =sponseeCount=, 10 =feesRealized=, 11 =reliefRealized=.
+BuckCredit carries two orphans: the slot =__retiredCovSeconds= (the
+retired Jubilee aging), and the =CreditParams= field =lastActivatedAt=,
+the aging's fold anchor -- still written by =_activate= and
+=deactivateFromBuck=, read by no contract.  Removing the field frees no slot
+(it packs with =activatedValue=) but changes the =credits(tokenId)= getter's
+tuple, which is read *by position* in =core/js/src/buckworld.js= (line 420)
+and =test/basket/BuckBasketEquity.t.sol= -- positional reads of a tuple are
+the same hazard as positional slots, and go in the same inventory.
+
+** 9.2 The procedure
+
+1. *Name every positional access.*  One test helper (=test/harness/BuckSlots.sol=)
+   holds each slot number once, as a named constant, with the slot
+   arithmetic for its mappings; every file above calls it instead of
+   spelling a number.  A layout test pins each constant against the real
+   layout: write through the public API, =vm.load= the helper's slot,
+   compare.  After this step a slot move changes one file, and a wrong
+   constant fails a test instead of corrupting one.
+2. *Remove orphans, one at a time*: BuckCredit's =__retiredCovSeconds= first.
+   After each removal, renumber every access to a slot above it down by
+   one (with step 1, in the helper alone), run the whole suite, and diff
+   =forge inspect <contract> storageLayout= against the table above.
+3. *Reorder, one move at a time*, into groups a reader can follow:
+   accounts (=_state=, =_totalSupply=, =_allowances=, =_receiptFragments=),
+   credit bookkeeping (=mintsBacked=, =mintsPrincipal=), the Jubilee
+   (=_jubileeLastUpdate=, =feesRealized=, =reliefRealized=), delegated
+   demurrage (=demurragePayer=, =demurragePayerRequest=, =sponseeCount=).
+   Each move: update the helper, run the suite, diff the layout.  The
+   comments that explain today's contortions ("housed here, out of order,
+   to reclaim the slot...") go with them.
+4. *The equity basket's layout* (=BuckBasketEquityStorage=, shared by the
+   shell and both facets through inheritance) is compiler-derived and
+   reached by number nowhere; it was rewritten in the credit-holder change.
+5. Record the final layouts in this section.
