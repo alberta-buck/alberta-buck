@@ -200,31 +200,41 @@ contract Buck is IERC20, IERC20Metadata {
     ///         average that no amount of present-day state can reconstruct.
     mapping(uint256 => uint256) public mintsPrincipal;
 
-    // ---- Jubilee accrual checkpoint ----------------------------------------
+    // ---- the Jubilee ---------------------------------------------------------
+    //
+    // Demurrage accrues on BUCK in circulation; relief pays back exactly that
+    // to whoever issued them.  Every BUCK is issued against a lien (a
+    // negative balance), and only two things move the sum of the non-Jubilee
+    // signed balances -- relief paid out of the fund, and fees realized (taken
+    // out of circulation) -- so
+    //
+    //     totalSupply = sum(liens) + reliefRealized - feesRealized
+    //
+    // and `totalIssued()` (= sum(liens)), which the fund accrues on, is
+    // computable from these counters without touching the transfer hot path.
+    //
+    // The fund is the account at address(this), treated as Carrying.  Every
+    // operation that moves the BUCK issued calls `_accrueJubilee` first, which
+    // adds totalIssued * RATE * elapsed to the fund's raw balance by a direct
+    // slot write (not a mint: totalSupply is unchanged), so each period
+    // accrues at the base that held through it.  Invariant:
+    //
+    //     sum_a max(0, signedRaw(a)) == totalSupply + jubileeActual
+    //
+    // Every BUCK has exactly one fee owner: a non-Carrying holder, whose fee
+    // is locked inside its raw balance (balanceOf = raw - feeOwing), or a
+    // Carrying one, whose fee rides out with its BUCK (a carrying transfer
+    // hands the recipient liveBs * value / raw of its buck-seconds).
 
-    /// @dev Timestamp through which Jubilee accrual has been applied.
-    ///      Mint/burn -> _accrueJubilee writes
-    ///        _state[address(this)].balance += totalSupply * RATE * elapsed
-    ///      directly into Jubilee's slot.  totalSupply is NOT mutated --
-    ///      demurrage is internal redistribution, not minting.
-    ///
-    ///      Exact invariant: sum_a(rawBalance(a)) == totalSupply + jubileeActual.
-    ///
-    ///      Every BUCK has exactly one fee owner:
-    ///        Non-Carrying: locked silently inside raw balance
-    ///                      (balanceOf = raw - feeOwing).
-    ///        Carrying:     balanceOf == raw; Jubilee pre-accrues their share.
-    ///      When Carrying BUCKs flow to non-Carrying via _carryingTransfer,
-    ///      liveBs*value/raw of the sender's full live integral propagates
-    ///      to the recipient -- Jubilee pre-accrued it; it now debits in
-    ///      exact proportion to the BUCKs transferred.
+    /// @dev Timestamp through which the fund's accrual has been applied.
     uint64 internal _jubileeLastUpdate;
-
-    // (The basket's mint/burn hooks and their `basket` address lived here,
-    // packed into _jubileeLastUpdate's slot.  A BuckBasket is now an ordinary
-    // credit holder -- a MARKED BuckCredit, a lien, relief like anyone's --
-    // and the hooks survive only in the sims' BuckWithBasketHooks, for the
-    // pro-rata baselines.  Removing the field moves no slot.)
+    /// @notice Cumulative fees realized: demurrage taken out of circulation
+    ///         when the BUCK carrying it repaid a lien or were spent past into
+    ///         credit (`FeeRealized` events sum to it).
+    uint256 public feesRealized;
+    /// @notice Cumulative relief paid out of the fund to issuers
+    ///         (`JubileeRedeemed` events sum to it).
+    uint256 public reliefRealized;
 
     // ---- delegated demurrage (fee payer) -----------------------------------
     //
@@ -234,13 +244,13 @@ contract Buck is IERC20, IERC20Metadata {
     //
     // The mechanism is a *transfer of buckSeconds*, not a discount.  Buck's
     // demurrage is a lien, never a movement: an account's fee is locked
-    // inside its own raw balance (balanceOf = raw - fee) and the Jubilee's
-    // system-level accrual against totalSupply is what that sterilisation
-    // backs.  Sum_a buckSeconds(a) tracks integral(totalSupply dt); destroy
-    // buckSeconds anywhere and the Jubilee over-accrues against nothing --
-    // silent inflation.  So delegation moves the (balance * dt) rectangle
-    // from the sponsored account's slot into the payer's slot at
-    // crystallisation.  The total is conserved exactly; only its owner moves.
+    // inside its own raw balance (balanceOf = raw - fee), and the fees so
+    // locked are the demurrage the fund's relief pays back to issuers.
+    // Destroy buckSeconds anywhere and that demurrage goes uncollected while
+    // its relief is still paid -- silent inflation.  So delegation moves the
+    // (balance * dt) rectangle from the sponsored account's slot into the
+    // payer's slot at crystallisation.  The total is conserved exactly; only
+    // its owner moves.
     //
     // Absorption is capped at the payer's own capacity to carry a lien --
     // the point where feeOwing(payer) would exceed rawBalance(payer).  Past
@@ -281,28 +291,6 @@ contract Buck is IERC20, IERC20Metadata {
     ///         makes `a` a payer, which is a question only those two cold
     ///         paths ever ask.  No second flag bit is needed for it.
     mapping(address => uint32) public sponseeCount;
-
-    // ---- the Jubilee's two sides (doc/JUBILEE-ISSUANCE.org) ----------------
-    //
-    // Demurrage accrues on BUCK in circulation; relief must pay back exactly
-    // that to whoever issued them.  Every BUCK is issued against a lien, and
-    // only two things move the sum of the (non-Jubilee) signed balances --
-    // relief paid out of the fund, and fees realized (taken out of
-    // circulation) -- so
-    //
-    //     totalSupply = sum(liens) + reliefRealized - feesRealized
-    //
-    // and the BUCK issued, which the fund accrues on, is computable from
-    // these counters without touching the transfer hot path.
-    //
-    // Appended last so every pre-existing slot index is unchanged.
-
-    /// @notice Cumulative fees realized: demurrage taken out of circulation
-    ///         when the BUCK carrying it repaid a lien, were spent past into
-    ///         credit, or were burned.
-    uint256 public feesRealized;
-    /// @notice Cumulative relief paid out of the fund to issuers.
-    uint256 public reliefRealized;
 
     // ---- premium / mutual-insurance pool model -----------------------------
     //
