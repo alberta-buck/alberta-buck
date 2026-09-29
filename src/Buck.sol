@@ -720,7 +720,7 @@ contract Buck is IERC20, IERC20Metadata {
         s.balance     = toBuckQtySigned(raw - int256(amount));
         _state[msg.sender] = s;
         _totalSupply -= amount;      // Carrying: the balance stays >= 0
-        feesRealized += fee;
+        if (fee != 0) feesRealized += fee;
         _foldBasket();
         basketIssued -= int256(amount - fee);
         emit Transfer(msg.sender, address(0), amount);
@@ -1310,8 +1310,8 @@ contract Buck is IERC20, IERC20Metadata {
         require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
         _crystallize(to);
         // A draw (past the sender's held BUCK) or a repayment (into an
-        // account at or below zero) moves the BUCK issued, which the fund
-        // accrues on: checkpoint it first, at the rate that held until now.
+        // account below zero) moves the BUCK issued, which the fund accrues
+        // on: checkpoint it first, at the rate that held until now.
         if (value > _heldOf(from) || _state[to].balance.asInt() < 0) _accrueJubilee();
         _debit(from, value);
         _credit(to, value, 0);     // the sender keeps its fee: nothing rides out
@@ -1322,7 +1322,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///      Carrying accounts hold no NFT-backed credit (creditLimit == 0)
     ///      and cannot go negative; the `value <= raw` assertion enforces
     ///      this.  The recipient side is `_credit`: a holder takes the age
-    ///      in, an account at or below zero pays the fee on arrival.
+    ///      in, an account below zero pays the fee on arrival.
     function _carryingTransfer(address from, address to, uint256 value) internal {
         // A repayment moves the BUCK issued: checkpoint the fund before any
         // supply write (the sender's comes first).
@@ -1359,8 +1359,8 @@ contract Buck is IERC20, IERC20Metadata {
     // never moves -- until the BUCK carrying it would shed it.  Then it is
     // realized: taken out of circulation.  That happens in exactly three
     // places: a spend that reaches past the held BUCK into credit
-    // (`_debit`), aged BUCK arriving at an account at or below zero
-    // (`_credit`), and a basket burn (`burnFromBasket`).
+    // (`_debit`), aged BUCK arriving at an account below zero (`_credit`),
+    // and a basket burn (`burnFromBasket`).
     //
     // With the fee realized at zero, an account below zero never holds
     // fee-seconds, so while negative its `buckSeconds` counts issuance-seconds
@@ -1400,7 +1400,7 @@ contract Buck is IERC20, IERC20Metadata {
                 _totalSupply -= value;
                 return;
             }
-            feesRealized += fee;
+            if (fee != 0) feesRealized += fee;
             s.buckSeconds = toBuckSeconds(0);
             s.balance     = toBuckQtySigned(old - int256(fee) - int256(value));
             _state[a] = s;
@@ -1444,7 +1444,7 @@ contract Buck is IERC20, IERC20Metadata {
         }
         uint256 fee = carriedBs == 0 ? 0 : Math.mulDiv(carriedBs, BASE_RATE_PER_SEC, SCALE);
         if (fee > value) fee = value;
-        feesRealized += fee;
+        if (fee != 0) feesRealized += fee;
         int256 nw = old + int256(value - fee);
         uint256 bs = s.buckSeconds.asUint();                 // issuance-seconds
         if (nw >= 0) {
