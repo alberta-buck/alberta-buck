@@ -71,7 +71,7 @@ contract EquityTurnDirectorTest is BuckBasketEquityTest {
         _wheel(5, true);
         for (uint256 d = 0; d < 20; d++) { _move(0, -10_000); _wheel(1, true); }
         uint128 l0 = b.liquidityOf(0);
-        _deposit(bob, address(buck), 100_000e18);          // new money to place
+        _deposit(bob, address(buck), 100_000 * B);         // new money to place
         for (uint256 d = 0; d < 20; d++) { _move(0, -10_000); _wheel(1, true); }
         assertLe(b.liquidityOf(0), l0 + l0 / 200, "nothing bought while it falls");
         assertGt(b.liquidityOf(1), 0);

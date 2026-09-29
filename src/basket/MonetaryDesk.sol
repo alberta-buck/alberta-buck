@@ -295,7 +295,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         // that was blocking further operations.
         if (outright && room && monetaryBuckHeld > 0) {
             uint256 burnAmt = size < monetaryBuckHeld ? size : monetaryBuckHeld;
-            buck.burnFromBasket(burnAmt);
+            _deskRetire(burnAmt);
             monetaryBuckHeld -= burnAmt;
             monetaryOutstanding -= int256(burnAmt);
             emit MonetaryOperation(2, effortBp, true, burnAmt,
@@ -321,7 +321,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         // nothing -- the basket burns BUCK it bought from ANYONE.  That is
         // the whole reason this lives in the contract.
         if (outright && room) {
-            buck.burnFromBasket(bought);
+            _deskRetire(bought);
             monetaryOutstanding -= int256(bought);
             emit MonetaryOperation(2, effortBp, true, bought,
                                    monetaryOutstanding, monetaryBuckHeld);
@@ -354,21 +354,38 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         if (monetaryOutstanding >= int256(nav * op.maxOutrightBp / 10000)) {
             revert MonetaryBound();
         }
-        // Q4 ISSUE: mint against the basket's own TOKEN reserves and sell into
+        // Q4 ISSUE: issue against the basket's own TOKEN reserves and sell into
         // the bid, acquiring real assets with money the market has over-valued.
-        // mintFromBasket bypasses creditLimit entirely -- direct-mint BUCK is
-        // backed by basket TOKEN, not by insured-asset credit -- which is the
-        // second thing no agent can do.
-        buck.mintFromBasket(address(this), size);
+        size = _deskIssue(size);
+        if (size == 0) revert MonetaryBound();
         uint256 issued = _swapAcross(true, size, op);
         if (issued == 0) revert NoValue();
         // Anything the pools could not absorb goes straight back out; leaving
-        // it minted would overstate the liability against real assets.
-        if (issued < size) buck.burnFromBasket(size - issued);
+        // it issued would overstate the liability against real assets.
+        if (issued < size) _deskRetire(size - issued);
         monetaryOutstanding += int256(issued);
         emit MonetaryOperation(4, effortBp, true, issued,
                                monetaryOutstanding, monetaryBuckHeld);
         return 4;
+    }
+
+    // --- Issue and retire: the host's hooks ---------------------------------- //
+
+    /// @dev Make up to `size` BUCK available to sell, returning how much.
+    ///      The pro-rata host mints it through Buck's basket hooks (the sims'
+    ///      BuckWithBasketHooks): direct-mint BUCK backed by basket TOKEN.  A
+    ///      credit-holding host (BuckBasketEquityOps) mints nothing -- selling
+    ///      spends its credit -- and returns what its limit leaves room for.
+    function _deskIssue(uint256 size) internal virtual returns (uint256) {
+        buck.mintFromBasket(address(this), size);
+        return size;
+    }
+
+    /// @dev Take `amount` BUCK the desk bought (or could not sell) out of
+    ///      circulation.  The pro-rata host burns it; a credit-holding host
+    ///      has nothing to do -- BUCK it receives repay its lien on arrival.
+    function _deskRetire(uint256 amount) internal virtual {
+        buck.burnFromBasket(amount);
     }
 
     // --- Execution --------------------------------------------------------- //
@@ -382,7 +399,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///      engine would then spend real money undoing.  The two mandates
     ///      share one actuator, and this is how they are kept from fighting.
     function _swapAcross(bool sellBuck, uint256 sizeBuck, OpsParams memory op)
-        internal returns (uint256 moved)
+        internal virtual returns (uint256 moved)
     {
         uint256 n = constituents.length;
         if (n == 0) return 0;

@@ -40,20 +40,26 @@ contract BuckBasketEquityOpsTest is BuckBasketEquityTest {
         vm.stopPrank();
     }
 
-    struct Books { uint256 debt; uint256 shares; uint256 idle; uint256 owed; uint256 minted;
-                   uint128 l0; uint128 l1; uint128 l2; uint256 t0; }
+    /// @dev The equity books: shares, the positions, the wallet's TOKEN, and
+    ///      equity's BUCK -- the account at Buck, plus its relief, less the
+    ///      desk's position.
+    struct Books { int256 eqBuck; uint256 shares; uint128 l0; uint128 l1; uint128 l2; uint256 t0; }
+
+    function _eqBuck() internal view returns (int256) {
+        int256 signed = buck.signedBalanceOf(address(b));
+        uint256 relief = buck.reliefOf(address(b));
+        (int256 deskBuck,) = b.deskPosition(relief, signed < 0 ? uint256(-signed) : 0);
+        return signed + int256(relief) - deskBuck;
+    }
 
     function _snapBooks() internal view returns (Books memory k) {
-        k = Books(b.debt(), b.totalShares(), b.idleBuck(), b.owed(), b.mintedTotal(),
-                  b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2), b.idleToken(0));
+        k = Books(_eqBuck(), b.totalShares(), b.liquidityOf(0), b.liquidityOf(1),
+                  b.liquidityOf(2), b.idleToken(0));
     }
 
     function _sameBooks(Books memory a, Books memory c) internal pure {
-        assertEq(a.debt, c.debt, "debt");
+        assertEq(a.eqBuck, c.eqBuck, "equity's BUCK");
         assertEq(a.shares, c.shares, "shares");
-        assertEq(a.idle, c.idle, "wallet BUCK");
-        assertEq(a.owed, c.owed, "owed");
-        assertEq(a.minted, c.minted, "equity mints");
         assertEq(a.l0, c.l0, "liquidity");
         assertEq(a.l1, c.l1, "liquidity");
         assertEq(a.l2, c.l2, "liquidity");
@@ -88,8 +94,7 @@ contract BuckBasketEquityOpsTest is BuckBasketEquityTest {
         b.redeem(id, 10000);
         assertEq(_ops().monetaryBuckHeld(), held, "the desk's BUCK untouched");
         assertEq(_ops().monetaryTokenHeld(0), t0, "the desk's TOKEN untouched");
-        assertGe(IERC20(address(buck)).balanceOf(address(b)), b.idleBuck() + held,
-                 "both books backed");
+        assertGe(tok[0].balanceOf(address(b)), b.idleToken(0) + t0, "both TOKEN books backed");
         _books();
     }
 }

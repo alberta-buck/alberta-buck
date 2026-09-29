@@ -18,51 +18,94 @@ interface IEquityDirector {
     function mayFund(uint256 i) external view returns (bool);
 }
 
+/// @notice Buck, as the basket sees it: an ordinary credit holder's account.
+interface IBuckHolder {
+    function signedBalanceOf(address a) external view returns (int256);
+    function balanceOf(address a) external view returns (uint256);
+    function reliefOf(address a) external view returns (uint256);
+    function settleRelief() external;
+    function mint(uint256 amount, uint256[] calldata tokenIds) external;
+}
+
+/// @notice BuckCredit, as the basket sees it: the issuer of its own MARKED
+///         credit (DepreciationType 3).
+interface IMarkedCredit {
+    function setCreditIssuer(address insurer, bool accepted) external;
+    function createCredit(address client, uint8 assetClass, uint256 faceValue,
+                          uint256 depreciationFloor, uint8 depType, uint32 depRate,
+                          uint48 depStartAt, uint32 premiumRate) external returns (uint256);
+    function mark(uint256 tokenId, uint256 value) external;
+    function markOf(uint256 tokenId) external view returns (uint256);
+    function depreciatedFaceValue(uint256 tokenId) external view returns (uint256);
+}
+
+/// @notice The desk's book, as the shell reports it (BuckBasketEquityOps
+///         answers; the plain shell reports none).  A self-call, so the
+///         components facet -- which runs its own code under delegatecall and
+///         cannot see the shell's overrides -- reads the same numbers.
+interface IEquityDeskPosition {
+    /// @return buck  the desk's net BUCK inside the shared account (held
+    ///               less issued), plus its share of the accrued relief
+    /// @return value the desk's whole book at the TWAP (TOKEN and BUCK)
+    function deskPosition(uint256 relief, uint256 lien)
+        external view returns (int256 buck, int256 value);
+    /// @notice Assign the desk its share of relief just paid (self only).
+    function deskRelief(uint256 relief, uint256 lien) external;
+}
+
 /// @title BuckBasketEquityStorage -- the equity basket's books, appended to the
 ///        shared basket layout, and the valuation both of its contracts use.
 ///
-/// @notice doc/BASKET-EQUITY.org section 13.6.  The shell (`BuckBasketEquity`)
-///         and its components facet (`BuckBasketEquityWheel`) inherit this and
-///         nothing else, so they share one layout; the venue facet
-///         (`BuckBasketUniswapV3`) inherits only `BuckBasketStorage`, of which
-///         this is a strict extension, so it sees the same slots it always did.
+/// @notice doc/BASKET-EQUITY.org 13.6, as a credit holder
+///         (doc/JUBILEE-ISSUANCE.org section 4).  The shell
+///         (`BuckBasketEquity`) and its components facet
+///         (`BuckBasketEquityWheel`) inherit this and nothing else, so they
+///         share one layout; the venue facet (`BuckBasketUniswapV3`) inherits
+///         only `BuckBasketStorage`, of which this is a strict extension.
 ///
-///         Books are explicit.  The wallet (`idleBuck`, `idleToken`) and each
-///         pool's liquidity (`liquidityOf`) are the basket's own counters, never
-///         its balances or its V3 position: the desk's inventory, stray
-///         transfers and liquidity others mint to the basket's position key are
-///         never counted.  Pool reads are for prices only.
+///         The basket is an ordinary BUCK credit holder.  It holds one
+///         self-issued MARKED BuckCredit, marked at its equity, so Buck
+///         enforces its limit: creditLimit = K x equity.  Its debt is its
+///         lien -- its negative balance -- and it earns Jubilee relief on it
+///         like any issuer.  It never mints or burns: spending past its held
+///         BUCK issues, and BUCK it receives repay the lien.
 ///
-///         Value is in BUCK (1e18).  A position's fair value is twice its BUCK
-///         side at the chosen price (2 L sqrtP, full range).  The marks are:
-///         TWAP (the price), HIGH (each pool at the higher of spot and TWAP:
-///         the incumbents' side of an entry) and LOW (the lower: their side of
-///         an exit).
+///         The TOKEN books are explicit: the wallet (`idleToken`) and each
+///         pool's liquidity (`liquidityOf`) are the basket's own counters,
+///         never its balances or its V3 position.  Its BUCK is one signed
+///         account at Buck, shared with the monetary desk when there is one:
+///         equity's BUCK is that balance plus the relief accrued on it, less
+///         the desk's net position (`_deskBuck`).
+///
+///         Value is in BUCK.  A position's fair value is twice its BUCK side
+///         at the chosen price (2 L sqrtP, full range).  The marks are: TWAP
+///         (the price), HIGH (each pool at the higher of spot and TWAP: the
+///         incumbents' side of an entry) and LOW (the lower: their side of an
+///         exit).
 abstract contract BuckBasketEquityStorage is BuckBasketStorage {
 
     // --- The equity books (appended) ---------------------------------------- //
 
     struct Holding {
         uint128 shares;                  // 1e18
-        uint128 basis;                   // BUCK brought, less what has left (1e18)
+        uint128 basis;                   // BUCK brought, less what has left
     }
     mapping(uint256 => Holding) public holdings;
 
     uint256 public totalShares;          // receipts' + the treasury's
     uint256 public treasuryShares;       // the basket's own: the 25% cuts
-    uint256 public debt;                 // BUCK the equity path minted and has not burned
-    uint256 public mintedTotal;          // ghost counters: mintedTotal - burnedTotal == debt
-    uint256 public burnedTotal;
-    uint256 public idleBuck;             // the wallet's BUCK
     mapping(uint256 => uint256) public idleToken;     // the wallet's TOKEN_i, native decimals
     mapping(uint256 => uint128) public liquidityOf;   // the basket's own count per pool
-    uint256 public owed;                 // exits' debt shares and mints the wheel must burn
     uint256 public flowMs;               // EMA of the daily net flow squared (BUCK^2, 1e36)
     int256  public dayFlow;              // today's net flow (BUCK)
     uint64  public lastDay;              // the day Daily last ran (block.timestamp / 1 days)
     address public equityWheel;          // the components facet
     address public equityDirector;       // optional IEquityDirector
     mapping(uint256 => uint64) public lastSyncDay;    // Sync: once a day per pool
+
+    IMarkedCredit public credit;         // the BuckCredit its credit lives in
+    uint256 public creditId;             // its MARKED credit
+    bool    public creditLive;           // activated (the first mark above zero)
 
     struct EquityParams {
         uint16 floorBp;                  // liquidity target at least this of the gross (100)
@@ -82,12 +125,29 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
 
+    uint8 internal constant DEP_MARKED = 3;    // BuckCredit.DepreciationType.MARKED
+
     // Deposits and redemptions emit the pro-rata shells' Deposited and
     // Redeemed (BuckBasketStorage), which the simulation already reads.
     event WalletCredited(address indexed token, uint256 amount);
     event WheelWork(uint8 indexed kind, uint256 indexed i, uint256 amount);
+    event CreditOpened(address indexed credit, uint256 indexed tokenId, uint256 face);
+    /// @notice A pro-rata exit's TOKEN, paid in kind.
+    event PaidInKind(address indexed to, address indexed token, uint256 amount);
 
     error MinOut();
+
+    // --- Buck and the credit --------------------------------------------------- //
+
+    function _bk() internal view returns (IBuckHolder) {
+        return IBuckHolder(address(buck));
+    }
+
+    /// @dev The monetary desk's net BUCK inside the shared account, and its
+    ///      whole book (which backs its issuance in the mark).
+    function _desk(uint256 relief, uint256 lien) internal view returns (int256, int256) {
+        return IEquityDeskPosition(address(this)).deskPosition(relief, lien);
+    }
 
     // --- Valuation ----------------------------------------------------------- //
 
@@ -95,12 +155,16 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     uint8 internal constant MARK_HIGH = 1;
     uint8 internal constant MARK_LOW  = 2;
 
-    /// @notice One read of every pool's marks, and K: everything a verb or a
-    ///         wheel step values is computed from it, so a step reads each pool
-    ///         once.
+    /// @notice One read of every pool's marks, K, and the basket's account at
+    ///         Buck: everything a verb or a wheel step values is computed from
+    ///         it, so a step reads each once.
     struct Snap {
         IBuckBasketVenue.Marks[] m;
         uint256 k;
+        int256  buckEq;                  // equity's BUCK: the account + relief - the desk's
+        uint256 lien;                    // the basket's lien (0 when it holds BUCK)
+        uint256 relief;                  // relief accrued on the lien, unpaid
+        uint256 spend;                   // what the account can spend: held + headroom
     }
 
     function _k() internal view returns (uint256) {
@@ -111,16 +175,27 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return IBuckBasketVenue(address(this)).marks(i, liquidityOf[i]);
     }
 
+    /// @dev Read the basket's account at Buck into `s`.
+    function _account(Snap memory s) internal view {
+        IBuckHolder b = _bk();
+        int256 signed = b.signedBalanceOf(address(this));
+        s.lien   = signed < 0 ? uint256(-signed) : 0;
+        s.relief = b.reliefOf(address(this));
+        (int256 deskBuck,) = _desk(s.relief, s.lien);
+        s.buckEq = signed + int256(s.relief) - deskBuck;
+        s.spend  = b.balanceOf(address(this));
+    }
+
     function _snap() internal view returns (Snap memory s) {
         uint256 n = constituents.length;
         s.m = new IBuckBasketVenue.Marks[](n);
         for (uint256 i = 0; i < n; i++) s.m[i] = _marks(i);
         s.k = _k();
+        _account(s);
     }
 
-    /// @notice The wallet and every position (fair value) at `mark`, in BUCK.
+    /// @notice Every position (fair value) and the wallet's TOKEN at `mark`.
     function _grossS(Snap memory s, uint8 mark) internal view returns (uint256 g) {
-        g = idleBuck;
         for (uint256 i = 0; i < s.m.length; i++) {
             IBuckBasketVenue.Marks memory m = s.m[i];
             uint256 p = mark == MARK_HIGH ? m.pHigh : mark == MARK_LOW ? m.pLow : m.pTwap;
@@ -130,24 +205,15 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         }
     }
 
+    /// @notice The gross plus equity's BUCK (negative: the lien, net of relief).
     function _equityS(Snap memory s, uint8 mark) internal view returns (uint256) {
-        uint256 g = _grossS(s, mark);
-        return g > debt ? g - debt : 0;
-    }
-
-    /// @notice BUCK the basket may mint on demand: K x equity - debt (<= 0: none).
-    function _headroomS(Snap memory s) internal view returns (int256) {
-        return int256(s.k * _equityS(s, MARK_TWAP) / 1e18) - int256(debt);
-    }
-
-    function _headroomPosS(Snap memory s) internal view returns (uint256) {
-        int256 h = _headroomS(s);
-        return h > 0 ? uint256(h) : 0;
+        int256 e = int256(_grossS(s, mark)) + s.buckEq;
+        return e > 0 ? uint256(e) : 0;
     }
 
     /// @notice The liquidity target: the larger of `floorBp` of the gross and
     ///         enough that the band's floor holds z sigma of the daily net flow,
-    ///         x (1 + K) (an exit takes its equity and its share of the debt) --
+    ///         x (1 + K) (an exit takes its equity and its share of the lien) --
     ///         but never more than `ceilBp` of the gross: a young basket's
     ///         first deposits are its whole size, and a flow that large is
     ///         growth, not the churn the reserve is for.
@@ -156,7 +222,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         uint256 g = _grossS(s, MARK_TWAP);
         t = g * p.floorBp / 10000;
         if (p.flowZx100 > 0 && flowMs > 0) {
-            uint256 sigma = _sqrt(flowMs * 1e18);               // BUCK, 1e18
+            uint256 sigma = _sqrt(flowMs * 1e18);
             uint256 fl = sigma * p.flowZx100 / 100 * (1e18 + s.k) / 1e18;
             uint256 t2 = fl * 10000 / (10000 - p.bandBp);
             uint256 ceil = g * p.ceilBp / 10000;
@@ -165,16 +231,23 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         }
     }
 
-    /// @notice Liquidity: the BUCK held plus the positive headroom.
-    function _liquidityS(Snap memory s) internal view returns (uint256) {
-        return idleBuck + _headroomPosS(s);
+    /// @notice Liquidity: what the account can spend -- the BUCK held plus the
+    ///         headroom under K x equity.  Buck computes it.
+    function _liquidityS(Snap memory s) internal pure returns (uint256) {
+        return s.spend;
     }
 
-    /// @notice BUCK held for liquidity: what the target lacks in headroom.
-    function _keepS(Snap memory s) internal view returns (uint256) {
+    /// @notice K x the credit's mark, less the lien (< 0: under water).  The
+    ///         mark is the one the step just wrote (`_markS`).
+    function _headroomS(Snap memory s) internal view returns (int256) {
+        uint256 m = address(credit) == address(0) ? 0 : credit.markOf(creditId);
+        return int256(s.k * m / 1e18) - int256(s.lien);
+    }
+
+    /// @notice What the wheel may place: the liquidity beyond its target.
+    function _usableS(Snap memory s) internal view returns (uint256) {
         uint256 t = _targetS(s);
-        uint256 h = _headroomPosS(s);
-        return t > h ? t - h : 0;
+        return s.spend > t ? s.spend - t : 0;
     }
 
     function _grainS(Snap memory s) internal view returns (uint256) {
@@ -182,40 +255,36 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return g > 1e3 ? g : 1e3;                       // a floor tiny at any BUCK decimals
     }
 
+    /// @notice Mark the credit at the basket's equity (the exiters' LOW marks)
+    ///         plus the desk's book, activating it the first time the mark is
+    ///         above zero, then re-read what the account can spend.  Every verb
+    ///         and wheel step marks before it spends.
+    function _markS(Snap memory s) internal {
+        (, int256 deskValue) = _desk(s.relief, s.lien);
+        int256 v = int256(_equityS(s, MARK_LOW)) + deskValue;
+        _markAt(v > 0 ? uint256(v) : 0);
+        s.spend = _bk().balanceOf(address(this));
+    }
+
+    /// @dev Mark the credit at `value` (activating it the first time it is
+    ///      above zero).
+    function _markAt(uint256 value) internal {
+        IMarkedCredit c = credit;
+        if (address(c) == address(0)) return;
+        if (c.markOf(creditId) != value) c.mark(creditId, value);
+        if (!creditLive && value > 0) {
+            // One mint activates the whole face: zero premium, so no deposit.
+            uint256[] memory ids = new uint256[](1);
+            ids[0] = creditId;
+            _bk().mint(c.depreciatedFaceValue(creditId), ids);
+            creditLive = true;
+        }
+    }
+
     // The one-shot forms, for the views.
     function _gross(uint8 mark) internal view returns (uint256) { return _grossS(_snap(), mark); }
     function _equity(uint8 mark) internal view returns (uint256) { return _equityS(_snap(), mark); }
-    function _headroom() internal view returns (int256) { return _headroomS(_snap()); }
     function _target() internal view returns (uint256) { return _targetS(_snap()); }
-    function _liquidity() internal view returns (uint256) { return _liquidityS(_snap()); }
-    function _keep() internal view returns (uint256) { return _keepS(_snap()); }
-
-    // --- Mint and burn (the only two ways debt moves) ------------------------ //
-
-    function _mint(uint256 amount) internal {
-        if (amount == 0) return;
-        buck.mintFromBasket(address(this), amount);
-        debt += amount;
-        mintedTotal += amount;
-        idleBuck += amount;
-    }
-
-    function _burn(uint256 amount) internal {
-        if (amount == 0) return;
-        buck.burnFromBasket(amount);
-        debt -= amount;
-        burnedTotal += amount;
-        idleBuck -= amount;
-        owed = owed > amount ? owed - amount : 0;
-    }
-
-    /// @notice BUCK at rest repays what exits owe (and nothing else: deposits'
-    ///         BUCK and credit wait for Fund).
-    function _settle() internal {
-        uint256 b = idleBuck < owed ? idleBuck : owed;
-        if (b > debt) b = debt;
-        _burn(b);
-    }
 
     /// @notice The most BUCK (value) one wheel swap may move in pool i: a
     ///         large deposit is placed over many ticks, and the arbitrage

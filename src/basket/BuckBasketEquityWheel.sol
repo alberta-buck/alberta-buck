@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
-import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorage.sol";
+import {BuckBasketEquityStorage, IEquityDirector, IEquityDeskPosition} from "./BuckBasketEquityStorage.sol";
 
 /// @title BuckBasketEquityWheel -- the equity basket's components, a facet.
 ///
@@ -12,20 +12,28 @@ import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorag
 ///         a state-machine step that does at most one bounded thing:
 ///
 ///           0 Daily    fold the day's net flow into the liquidity sizing;
-///                      the director's sample
-///           1 Sync(i)  collect pool i's fees into the wallet (once a day)
-///           2 Deploy(i) pair the wallet's TOKEN_i with the BUCK held beyond
+///                      collect the Jubilee relief on the lien; the
+///                      director's sample
+///           1 Sync(i)  collect pool i's fees (once a day)
+///           2 Deploy(i) pair the wallet's TOKEN_i with the credit beyond
 ///                      what liquidity needs, selling part of the TOKEN if
 ///                      short; add liquidity
-///           3 Fund     buy the director's pick (or, when the wallet's spare
-///                      BUCK passes the parking room, the neediest pool's)
-///                      TOKEN with half of what it places; Deploy pairs it
-///           4 Trim     repay what exits owe, refill liquidity below its
-///                      floor, or trim the pool the director names: unwind at
-///                      most `stepBp` of a position, sell its TOKEN
+///           3 Fund     buy the director's pick (or, when the spare credit
+///                      passes the parking room, the neediest pool's) TOKEN
+///                      with half of what it places; Deploy pairs it
+///           4 Trim     refill liquidity below its floor, or trim the pool
+///                      the director names: unwind at most `stepBp` of a
+///                      position, sell its TOKEN
+///
+///         The basket is a credit holder (BuckBasketEquityStorage): every
+///         step marks its credit before it spends, the BUCK it spends are
+///         issued against its limit, and the BUCK it receives repay its lien.
+///         After a K cut that leaves it under water, Trim's refill is what
+///         brings it back under the limit, at most 2 x `swapCapBp` of a pool
+///         a step; until then exits pay in kind.
 ///
 ///         The arbitrage stays in the wheel (ArbKind): it needs no float and
-///         credits its captures to the wallet (creditDepositors /
+///         credits its captures to the basket (creditDepositors /
 ///         creditTreasury).
 contract BuckBasketEquityWheel is BuckBasketEquityStorage {
 
@@ -56,6 +64,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         if (kind == SYNC)   return _sync(i);
         if (kind > TRIM)    return 0;
         Snap memory s = _snap();
+        _markS(s);                                       // mark before spending
         if (kind == DEPLOY) return _deploy(s, i);
         if (kind == FUND)   return _fund(s);
         return _trim(s);
@@ -75,8 +84,18 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         flowMs = sq >= ms ? ms + (sq - ms) * 2 / span : ms - (ms - sq) * 2 / span;
         dayFlow = 0;
         lastDay = today;
+        // The Jubilee relief on the lien: collected daily, so the share price
+        // (which counts it accrued) and the lien stay in step.  The desk's
+        // share of it goes to the desk's book.
+        int256 signed = _bk().signedBalanceOf(address(this));
+        if (signed < 0 && _bk().reliefOf(address(this)) > 0) {
+            _bk().settleRelief();
+            uint256 r = uint256(_bk().signedBalanceOf(address(this)) - signed);
+            IEquityDeskPosition(address(this)).deskRelief(r, uint256(-signed));
+        }
         address d = equityDirector;
         if (d != address(0)) { try IEquityDirector(d).observe() {} catch {} }
+        _markS(_snap());
         emit WheelWork(DAILY, 0, f);
         return 1;
     }
@@ -85,10 +104,8 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
 
     function _sync(uint256 i) internal returns (uint256) {
         lastSyncDay[i] = uint64(block.timestamp / 1 days);
-        (uint256 t, uint256 b) = _v().positionSync(i);
+        (uint256 t, uint256 b) = _v().positionSync(i);   // its BUCK repay the lien
         idleToken[i] += t;
-        idleBuck += b;
-        _settle();
         emit WheelWork(SYNC, i, b);
         return 1;
     }
@@ -101,12 +118,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         return tok * s.m[i].pTwap / (10 ** constituents[i].decimals);
     }
 
-    function _usable(Snap memory s) internal view returns (uint256) {
-        uint256 k = _keepS(s);
-        return idleBuck > k ? idleBuck - k : 0;
-    }
-
-    /// @dev Pair pool i's waiting TOKEN with its share of the usable BUCK --
+    /// @dev Pair pool i's waiting TOKEN with its share of the usable credit --
     ///      pro rata to the TOKEN waiting in every pool, so the first pool
     ///      stepped does not take it all and leave another to be placed only
     ///      by selling into its own thin pool -- then sell part of the TOKEN
@@ -119,7 +131,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         uint256 v = idleToken[i] * p / one;
         uint256 waiting = 0;
         for (uint256 j = 0; j < s.m.length; j++) waiting += _tokenValue(s, j);
-        uint256 have = waiting == 0 ? 0 : _usable(s) * v / waiting;
+        uint256 have = waiting == 0 ? 0 : _usableS(s) * v / waiting;
         if (have > v) have = v;
         if (have < v && m.depth > 0) {                   // balance the pair: sell TOKEN
             uint256 sell = (v - have) / 2;
@@ -129,8 +141,10 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
             if (dx > 0) {
                 (uint256 spent, uint256 got) = _v().monetaryLeg(i, false, dx);
                 idleToken[i] -= spent;
-                idleBuck += got;
                 have += got;
+                // What the sale's BUCK freed to spend (under water: nothing).
+                uint256 sp = _bk().balanceOf(address(this));
+                if (have > sp) have = sp;
             }
         }
         (uint128 l, uint256 tokUsed, uint256 buckUsed) =
@@ -138,7 +152,6 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         if (l == 0) return 0;
         liquidityOf[i] += l;
         idleToken[i] -= tokUsed;
-        idleBuck -= buckUsed;
         emit WheelWork(DEPLOY, i, buckUsed);
         return 1;
     }
@@ -184,7 +197,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         return false;
     }
 
-    /// @notice (pool, BUCK) Fund would place now.  The spare is the BUCK held
+    /// @notice (pool, BUCK) Fund would place now.  The spare is the credit
     ///         beyond what liquidity needs.  It goes to the director's pick
     ///         (the largest gap beyond the band it may fund), or -- once the
     ///         spare passes the parking room (with no director, the band) --
@@ -193,7 +206,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         j = NONE;
         uint256 g = _grainS(s);
         if (_anyTokenWaiting(s, g)) return (NONE, 0);
-        uint256 spare = _usable(s);
+        uint256 spare = _usableS(s);
         if (spare <= g) return (NONE, 0);
         (uint256[] memory pos, uint256 tot) = _positions(s);
         uint256[] memory tg = _targetsBp();
@@ -227,7 +240,6 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         if (half > cap) half = cap;
         if (half == 0) return 0;
         (uint256 spent, uint256 got) = _v().monetaryLeg(j, true, half);
-        idleBuck -= spent;
         idleToken[j] += got;
         emit WheelWork(FUND, j, spent);
         return 1;
@@ -236,21 +248,26 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
     // --- Trim --------------------------------------------------------------------------- //
 
     /// @notice (pool, BUCK value) Trim would unwind now: only a settled basket
-    ///         trims (no TOKEN waiting, nothing to fund).  It repays what exits
-    ///         owe, refills liquidity below its floor, or trims the pool the
-    ///         director names (with none: the pool furthest over its target
-    ///         beyond the band).
+    ///         trims (no TOKEN waiting, nothing to fund).  It refills
+    ///         liquidity below its floor -- exits spend credit, and the BUCK
+    ///         Trim brings in repay the lien until the credit is back -- or
+    ///         trims the pool the director names (with none: the pool furthest
+    ///         over its target beyond the band).
     function _trimPlan(Snap memory s) internal view returns (uint256 t, uint256 value) {
         t = NONE;
         uint256 g = _grainS(s);
         if (_anyTokenWaiting(s, g)) return (NONE, 0);
         (uint256 jf,) = _fundPlan(s);
         if (jf != NONE) return (NONE, 0);
-        uint256 short = owed > g ? owed : 0;
+        uint256 short = 0;
         uint256 target = _targetS(s);
         uint256 liq = _liquidityS(s);
-        if (liq + g < target * (10000 - eq.bandBp) / 10000 && target - liq > short) {
+        if (liq + g < target * (10000 - eq.bandBp) / 10000) {
+            // Short of the floor: refill to the target, and first back under
+            // the limit if a K cut or an exit left the basket under water.
             short = target - liq;
+            int256 over = -_headroomS(s);
+            if (over > 0) short += uint256(over);
         }
         (uint256[] memory pos, uint256 tot) = _positions(s);
         if (tot == 0) return (NONE, 0);
@@ -291,15 +308,12 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         uint256 pos = s.m[t].posTwap;
         uint128 l = uint128(uint256(liquidityOf[t]) * value / pos);
         if (l == 0) return 0;
-        (uint256 tok, uint256 b) = _v().positionBurn(t, l);
+        (uint256 tok,) = _v().positionBurn(t, l);          // its BUCK repay the lien
         liquidityOf[t] -= l;
-        idleBuck += b;
         if (tok > 0) {
-            (uint256 spent, uint256 got) = _v().monetaryLeg(t, false, tok);
-            idleBuck += got;
+            (uint256 spent,) = _v().monetaryLeg(t, false, tok);
             idleToken[t] += tok - spent;
         }
-        _settle();
         emit WheelWork(TRIM, t, value);
         return 1;
     }
