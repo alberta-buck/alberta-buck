@@ -33,6 +33,12 @@ interface IWheelEpoch {
     function epochNow() external view returns (uint32);
 }
 
+interface IWheelEquity {
+    function constituentsLength() external view returns (uint256);
+    function wheelDue(uint8 kind, uint256 i) external view returns (bool);
+    function wheelStep(uint8 kind, uint256 i) external returns (uint256);
+}
+
 /// @title ComputeKind -- the controller's PID cycle, when its interval is up.
 abstract contract ComputeKind is WorkWheel {
     address public controller;
@@ -141,5 +147,53 @@ abstract contract OpsKind is WorkWheel {
         if (s < b) return super._run(s);
         opsEpochSeen = IWheelEpoch(opsDirector).epochNow() + 1;
         try IWheelOps(opsBasket).monetaryOperation() { return 1; } catch { return 0; }
+    }
+}
+
+/// @title EquityKind -- the equity basket's components (doc/BASKET-EQUITY.org
+///        13.6): Daily, Sync x N, Deploy x N, Fund, Trim -- 2N + 3 slots, each
+///        a bounded step the basket runs itself (BuckBasketEquityWheel), the
+///        wheel only choosing when.  The basket must name this wheel
+///        (=setWheel=) for its steps to be accepted.
+abstract contract EquityKind is WorkWheel {
+    address public equityBasket;
+
+    function setEquity(address basket) external onlyGov { equityBasket = basket; }
+
+    function _equitySlots() internal view returns (uint256) {
+        if (equityBasket == address(0)) return 0;
+        try IWheelEquity(equityBasket).constituentsLength() returns (uint256 n) {
+            return 2 * n + 3;
+        } catch { return 0; }
+    }
+
+    /// @dev Slot j of the kind: 0 Daily; 1..N Sync(i); N+1..2N Deploy(i);
+    ///      2N+1 Fund; 2N+2 Trim.
+    function _equityOf(uint256 j) internal view returns (uint8 kind, uint256 i) {
+        uint256 n = (_equitySlots() - 3) / 2;
+        if (j == 0) return (0, 0);
+        if (j <= n) return (1, j - 1);
+        if (j <= 2 * n) return (2, j - n - 1);
+        return (j == 2 * n + 1) ? (3, 0) : (4, 0);
+    }
+
+    function _slotCount() internal view virtual override returns (uint256) {
+        return super._slotCount() + _equitySlots();
+    }
+
+    function _due(uint256 s) internal view virtual override returns (bool) {
+        uint256 b = super._slotCount();
+        if (s < b) return super._due(s);
+        (uint8 kind, uint256 i) = _equityOf(s - b);
+        try IWheelEquity(equityBasket).wheelDue(kind, i) returns (bool d) { return d; }
+        catch { return false; }
+    }
+
+    function _run(uint256 s) internal virtual override returns (uint256) {
+        uint256 b = super._slotCount();
+        if (s < b) return super._run(s);
+        (uint8 kind, uint256 i) = _equityOf(s - b);
+        try IWheelEquity(equityBasket).wheelStep(kind, i) returns (uint256 w) { return w; }
+        catch { return 0; }
     }
 }

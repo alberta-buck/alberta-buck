@@ -71,7 +71,7 @@ contract BuckBasketEquityTest is Test {
     address internal alice = address(0xA11CE);
     address internal bob   = address(0xB0B);
 
-    function setUp() public {
+    function setUp() public virtual {
         vm.warp(1_000_000);
         buck = new EqBuck();
         ctrl = new EqController();
@@ -153,7 +153,7 @@ contract BuckBasketEquityTest is Test {
     /// @dev The wheel: step every due component, the arbitrage re-pinning the
     ///      pools after each round, `rounds` times; a day apart when `days_`,
     ///      else a TWAP window.
-    function _wheel(uint256 rounds, bool days_) internal {
+    function _wheel(uint256 rounds, bool days_) internal virtual {
         for (uint256 r = 0; r < rounds; r++) {
             for (uint8 kind = 0; kind < 5; kind++) {
                 uint256 slots = (kind == 1 || kind == 2) ? 3 : 1;
@@ -349,7 +349,7 @@ contract BuckBasketEquityTest is Test {
 
     // ---- the wheel's credits ---------------------------------------------------------- //
 
-    function test_credits_landInTheWallet() public {
+    function test_credits_landInTheWallet() public virtual {
         _placed();
         uint256 t0 = b.idleToken(2);
         tok[2].approve(address(b), 5e18);
