@@ -167,17 +167,20 @@ contract Buck is IERC20, IERC20Metadata {
     }
     mapping(address => AccountState) internal _state;
 
-    // ---- ERC-20 supply + allowances ----------------------------------------
+    // ---- ERC-20 supply, allowances, identity receipts ---------------------
 
     uint256 internal _totalSupply;
     mapping(address => mapping(address => uint256)) private _allowances;
+    /// @dev keccak256(E_to) per (from, to), laid down by the identity-bound
+    ///      approve (a Chaum-Pedersen re-encryption of `from`'s identity to
+    ///      `to`'s key): the receipt `_identityCheckedTransfer` requires of a
+    ///      private party.
+    mapping(address => mapping(address => bytes32)) internal _receiptFragments;
 
     // ---- mint-side bookkeeping (rare path) ---------------------------------
 
     /// @notice Outstanding BUCK coverage backed by a given BuckCredit NFT.
     mapping(uint256 => uint256) public mintsBacked;
-    /// @dev keccak256(E_to) per (from, to) from approve-time CP receipts.
-    mapping(address => mapping(address => bytes32)) internal _receiptFragments;
 
     // ---- Jubilee accrual checkpoint ----------------------------------------
 
