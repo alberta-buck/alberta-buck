@@ -11,6 +11,13 @@
 //!
 //! Carrying transfers apportion the sender's live buckSeconds to the
 //! recipient in proportion value/raw, so demurrage follows the BUCKs.
+//!
+//! buckSeconds is read by sign.  Above zero it counts fee-seconds, as
+//! above; below zero (a lien: credit drawn) it counts issuance-seconds,
+//! the lien integrated over time, on which the holder's Jubilee relief
+//! accrues at the same 2%/year.  BUCK arriving at an account below zero
+//! repay its lien net of the fee they carry, and a receipt that repays the
+//! whole lien pays the relief out with it (doc/JUBILEE-ISSUANCE.org).
 
 use crate::wide::mul_div_wide;
 use crate::{BASE_RATE_PER_SEC, MAX_BALANCE_SIGNED, MAX_BS, SCALE};
@@ -55,8 +62,14 @@ fn to_buck_qty_signed(x: i128) -> i128 {
 /// Apportion the sender's live buckSeconds across a transfer of `value`.
 ///
 /// `from_elapsed` / `to_elapsed` are the seconds since each side's last
-/// crystallisation.  The recipient may be negative (credit drawn); its
-/// buckSeconds rectangle uses only the positive portion of its history.
+/// crystallisation.  A recipient at or above zero takes the BUCK and their
+/// age in.  A recipient below zero first crystallises its issuance-seconds,
+/// then is repaid `value - fee` (the fee the carried age owes); if that
+/// repays the whole lien, the relief its issuance-seconds earned is paid
+/// out too (capped at the lien) and its buckSeconds restart at zero.
+/// Mirrors Buck._carryingTransfer / _credit, assuming the Jubilee fund
+/// covers the relief -- which it does by construction, accruing on the BUCK
+/// issued.
 pub fn carrying_transfer(from_raw: i128, from_bs: u128, from_elapsed: u64,
                          to_raw: i128, to_bs: u128, to_elapsed: u64,
                          value: u128) -> CarryingResult {
@@ -69,10 +82,24 @@ pub fn carrying_transfer(from_raw: i128, from_bs: u128, from_elapsed: u64,
     let from_raw_after = to_buck_qty_signed((raw - value) as i128);
     let from_bs_after = to_buck_seconds(live_bs - carried);
 
-    let to_raw_pos = if to_raw > 0 { to_raw as u128 } else { 0 };
-    let to_raw_after = to_buck_qty_signed(to_raw + value as i128);
-    let to_bs_after =
-        to_buck_seconds(to_bs + to_raw_pos * to_elapsed as u128 + carried);
+    let (to_raw_after, to_bs_after) = if to_raw >= 0 {
+        // A holder: the age rides in.
+        let to_live = to_bs + to_raw as u128 * to_elapsed as u128;
+        (to_buck_qty_signed(to_raw + value as i128),
+         to_buck_seconds(to_live + carried))
+    } else {
+        // A lien: issuance-seconds through now, then repaid net of the fee.
+        let lien = (-to_raw) as u128;
+        let to_live = to_buck_seconds(to_bs + lien * to_elapsed as u128);
+        let fee = mul_div_wide(carried, BASE_RATE_PER_SEC, SCALE).min(value);
+        let net = to_raw + (value - fee) as i128;
+        if net >= 0 {
+            let relief = mul_div_wide(to_live, BASE_RATE_PER_SEC, SCALE).min(lien);
+            (to_buck_qty_signed(net + relief as i128), 0)
+        } else {
+            (to_buck_qty_signed(net), to_live)
+        }
+    };
 
     CarryingResult {
         carried,
@@ -104,5 +131,18 @@ mod tests {
         assert_eq!(r.from_bs + r.carried, 15_000);
         assert_eq!(r.to_bs, 6_000);
         assert_eq!((r.from_raw, r.to_raw), (600, 400));
+    }
+
+    #[test]
+    fn a_lien_is_repaid_net_of_the_fee_and_crossing_pays_its_relief() {
+        // 1e12 raw aged a day into a lien of 3e11 carried a year.
+        let y = SECONDS_PER_YEAR as u128;
+        let r = carrying_transfer(1_000_000_000_000, 0, 86_400,
+                                  -300_000_000_000, 300_000_000_000 * y, 0,
+                                  1_000_000_000_000);
+        let fee = mul_div_wide(r.carried, BASE_RATE_PER_SEC, SCALE);
+        let relief = mul_div_wide(300_000_000_000 * y, BASE_RATE_PER_SEC, SCALE);
+        assert_eq!(r.to_raw, 700_000_000_000 - fee as i128 + relief as i128);
+        assert_eq!(r.to_bs, 0, "crossed: the age restarts");
     }
 }

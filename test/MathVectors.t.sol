@@ -182,7 +182,12 @@ contract MathVectorsTest is Test {
 
     function _carryingRows() internal {
         // (fromRaw, fromBs, fromElapsed, toRaw, toBs, toElapsed, value)
-        int256[7][8] memory cases = [
+        // A recipient below zero holds issuance-seconds and is repaid net of
+        // the carried fee; a receipt that repays the whole lien pays its
+        // relief (the last row: a lien carried a year).  Each harness plants
+        // a Jubilee fund that covers the relief, as the fund does by
+        // construction (it accrues on the BUCK issued).
+        int256[7][9] memory cases = [
             [int256(1e12), 5e15, 3600, 0, 0, 0, 4e11],
             [int256(1e12), 5e15, 3600, 2e11, 7e14, 7200, 4e11],
             [int256(1e12), 0, 86_400, -3e11, 0, 500, 1e12],
@@ -190,7 +195,8 @@ contract MathVectorsTest is Test {
             [int256(7), 13, 1, 1, 1, 1, 3],
             [int256(1e6), 1, 0, 0, 0, 0, 1e6],
             [int256(9e11), 123_456_789, 55, 1e11, 987_654_321, 66, 899_999_999_999],
-            [int256(2e12), 1e15, 31_557_600, 1e12, 1e15, 31_557_600, 1]
+            [int256(2e12), 1e15, 31_557_600, 1e12, 1e15, 31_557_600, 1],
+            [int256(1e12), 0, 86_400, -3e11, 9_467_280_000_000_000_000, 0, 1e12]
         ];
         for (uint256 i = 0; i < cases.length; i++) {
             // Fresh harness per case: clean state, clean totals.
@@ -199,6 +205,7 @@ contract MathVectorsTest is Test {
             address to = address(0x700);
             int256[7] memory c = cases[i];
             vm.warp(T0 + 1_000_000);
+            h.setState(address(h), 1e15, 0, uint40(T0 + 1_000_000));   // the fund
             h.setState(from, c[0], uint256(c[1]),
                        uint40(T0 + 1_000_000 - uint256(c[2])));
             h.setState(to, c[3], uint256(c[4]),
