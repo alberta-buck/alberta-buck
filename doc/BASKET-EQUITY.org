@@ -1383,6 +1383,14 @@ local commits through =981d433= and none pushed.  =test/vectors/= is never
 committed.
 
 - *Asked of the owner*: the fallback exit in kind (13.10).
+- *Superseding the basket's issuance* (2026-09-29): =doc/JUBILEE-ISSUANCE.org=.
+  The Jubilee relief accrues on coverage, not on BUCK issued, and six more
+  places where relief and demurrage part company are proven
+  (=test/JubileeBasis.t.sol=).  The fix puts relief on each issuer's lien
+  in Buck, and proposes the equity basket as a plain credit holder: one
+  marked BuckCredit, =creditLimit = K x equity= enforced by Buck, no hooks,
+  no =owed=, relief native.  Its section 6 lists the rulings, including a
+  re-ruling of "full K at once, even over the limit" (6.2.2).  Resume there.
 - *To report to the owner* (not yet acknowledged):
   - BUCK payouts give a saver BUCK's market price at exit (13.9 lesson 4).
   - Depositors need one identity-bound approve before their first exit

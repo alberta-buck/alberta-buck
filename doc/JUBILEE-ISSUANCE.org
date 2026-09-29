@@ -1,0 +1,292 @@
+#+TITLE: The Jubilee on issuance: relief equals demurrage, and the basket as a credit holder
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-29
+#+OPTIONS: ^:nil toc:2 num:t
+
+* 0. Status
+
+Architecture, awaiting the design owner's rulings (section 6).  Nothing in
+=src/= has changed.  The defects are proven by =test/JubileeBasis.t.sol=:
+each =test_defect_*= asserts today's behaviour, and the fix inverts it.
+
+The owner's principle (2026-09-29): *the Jubilee relief must equal the
+demurrage accrued.*  Demurrage accrues on BUCK in circulation, so relief
+may accrue only on BUCK actually issued, never on credit that could be
+issued.  Every account carries its own accrued demurrage.  And the
+BuckBasket should be a real BuckCredit issuer, earning real relief on the
+BUCK it issues, with a BuckCredit overseeing its issuance.
+
+* 1. The defects (proven)
+
+The fund takes in 2%/yr of =totalSupply=.  Relief is meant to pay back
+exactly that to the issuers.  Seven places where the two sides part
+company today, each pinned by a test in =test/JubileeBasis.t.sol=:
+
+| # | defect                                                                 | test_defect_...                              | effect                                                                     |
+|---+------------------------------------------------------------------------+----------------------------------------------+----------------------------------------------------------------------------|
+| 1 | relief accrues on activated coverage, drawn or not                      | undrawnCoverageEarnsRelief                   | 1000 activated, 100 drawn: a year's quote is 20, the fund took in 2         |
+| 2 | a drawn credit earns on its coverage, not on the BUCK it issued          | drawnCreditEarnsOnCoverageNotIssuance        | fully drawn at K = 0.75: quote / fund = 1/K                                |
+| 3 | a quote the fund cannot cover is forfeited, not deferred                 | theFundCapForfeitsRelief                     | the unwind consumes its coverage-seconds; the fund pays a fraction; first come, first paid |
+| 4 | aged BUCK that repay a lien repay it in full                             | ageCarriedIntoALienGoesUncollected           | the fee rides into a negative account, where it reads zero                 |
+| 5 | a fee locked in a balance is spent into credit as if it were BUCK        | aFeeSpentIntoCreditShrinksTheLien            | 98 held + 52 drawn leaves a lien of 50                                     |
+| 6 | burned basket BUCK leave their age on the basket                         | burnedBasketBuckLeaveTheirAgeBehind          | 900 of 1000 burned after a year: the last 100 carry 20%; the next recipient pays it |
+| 7 | a transfer that changes the supply does not checkpoint the fund          | supplyChangesDoNotCheckpointTheFund          | a year at 100, then a draw of 900: the fund accrues a year at 1000          |
+
+And by construction: *8. BUCK the basket issues earn no relief at all*
+(=mintFromBasket= touches no credit).
+
+Defects 1-3 over-claim the fund; 4-6 under-collect it; 7 mis-accrues it
+either way.  1 and 2 are why the relief quote overstates what the fund can
+pay; 3 then makes settlement a race.  4 and 5 are the same leak from two
+sides: a fee is deferred whenever an account is at or below zero, and
+collected only if it ever climbs back.
+
+* 2. The principle, and the identity it rests on
+
+*Every BUCK carries its fee to the end; every issuer earns back the fee its
+issuance collected.*
+
+- A fee accrues on each BUCK while it circulates, wherever it goes.  It is
+  *realized* -- taken out of circulation -- whenever the BUCK carrying it
+  would otherwise shed it: when it repays a lien, when its holder spends
+  past it into credit, and when it is burned.
+- Relief accrues on each issuer's *outstanding issuance*: an account's lien
+  (its negative balance), and the basket's issued BUCK.  It is paid from the
+  fund and reduces what closing the issuance costs.
+
+The fund balances because of an identity Buck already maintains.  Only
+three things change the sum of the (non-Jubilee) signed balances: the
+basket's hooks, relief paid out, and fees realized (under this design).
+Premium deposits, refunds and every transfer conserve it.  So
+
+#+BEGIN_SRC text
+totalSupply = sum(liens) + basketIssued + reliefRealized - feesRealized
+#+END_SRC
+
+and the BUCK /issued/ is
+
+#+BEGIN_SRC text
+totalIssued = sum(liens) + basketIssued = totalSupply - reliefRealized + feesRealized
+#+END_SRC
+
+computable from two counters that move only on the cold paths.  The fund
+accrues 2%/yr on =totalIssued=; relief claims accrue 2%/yr on each issuer's
+issuance; the two are equal by construction.  The fees holders owe accrue
+on =totalSupply=; the difference, 2%/yr of (relief realized - fees
+realized), is demurrage on BUCK whose issuer has already been relieved of
+them.  It is second order, it never lets the fund pay relief it did not
+accrue, and the invariant test measures it.
+
+* 3. The core fix
+
+** 3.1 The demurrage side: every BUCK carries its fee to the end
+
+- *D1. Checkpoint the fund on every supply change* (defect 7).  A transfer
+  that draws credit or repays it calls =_accrueJubilee= before the supply
+  moves.  It costs one SLOAD, and the fund's writes once per block.
+- *D2. Realize the fee at zero* (defects 4, 5).
+  - An account spending past its held BUCK into credit first pays its fee:
+    the lien absorbs it (=raw -= fee=, =buckSeconds = 0=).  The lien is then
+    exactly the credit drawn.
+  - Aged BUCK arriving at an account at or below zero pay their carried fee
+    on arrival: they repay =value - fee=.
+- *D3. A burn carries out its fee* (defect 6).  =burnFromBasket(amount)=
+  realizes the burned BUCK's share of the basket's age
+  (=liveBs * amount / raw=), so what remains keeps its own age.
+- *The fund accrues on issuance* (section 2): =_accrueJubilee= uses
+  =totalSupply - reliefRealized + feesRealized=.
+
+Demurrage stays a lien, never a movement, everywhere else: the hot path is
+unchanged for positive accounts.
+
+** 3.2 The relief side: relief on issuance, in Buck
+
+- *R1. The account's age is signed.*  With D2, an account at or below zero
+  always holds =buckSeconds = 0= in fee terms.  So while it is negative the
+  same field accumulates its /issuance-seconds/, =|raw| x dt=.  One field,
+  read by sign: fee-seconds while positive, issuance-seconds while
+  negative.  No new storage, and the account slot stays one SSTORE.
+  (Delegated demurrage routes only positive rectangles already.)
+- *R2. Relief is quoted live and realized at three points*:
+  - at the crossing to zero or above (the lien is repaid: its relief pays
+    out with it);
+  - in =burn= (closing coverage, as today);
+  - on a permissionless =settleRelief(a)= poke, like =settleDemurrage=.
+
+  Realizing moves =min(relief, lien, fund)= from the fund into the
+  account's raw, and bumps =reliefRealized=.  The views are
+  =reliefOf(a)= and =redeemCost(a) = lien - reliefOf(a)=, per account.
+  =balanceOf= does not count unrealized relief: the limit is checked
+  against the raw lien, as now.
+- *R3. The cap stays at the lien*: a position carried ~50 years still
+  redeems free, and relief never becomes income beyond it.
+- *R4. BuckCredit stops aging.*  =_covSeconds=, the =JUB_= constants,
+  =_foldCoverage=, =_covSecondsLive=, =jubileeRelief(tokenId)= and
+  =redeemCost(tokenId)= go.  =deactivateFromBuck= returns nothing.
+  BuckCredit becomes purely the record of collateral and coverage, and
+  still never calls Buck.
+
+With issuance-based relief the fund always covers the outstanding claims
+(section 2), so the fund cap stops binding and defect 3 disappears with
+defects 1 and 2: settlement is no longer a race.
+
+** 3.3 The invariants (=test/JubileeBasis.t.sol=, inverted)
+
+- The fund equals the outstanding relief claims, to rounding, less relief
+  forfeited to the lien cap.
+- Every defect test inverts: undrawn coverage earns nothing; a drawn credit
+  earns 2%/yr of its lien; a lien repaid with aged BUCK falls by value less
+  fee; a burn leaves the survivors' age unchanged; the fund accrues each
+  period at that period's issuance.
+- =sum(raw) == totalSupply + jubileeActual= holds across every realization.
+- A fuzzed handler (draws, repayments, carrying transfers, burns, basket
+  hooks, warps) holds all of these.
+
+* 4. The basket as a real BuckCredit issuer
+
+** 4.1 The design: a credit holder, like any other
+
+The first proposal gave the basket a /ledger/ credit that Buck activated
+one-for-one with =mintFromBasket=, so BuckCredit's coverage-seconds would
+age its issuance.  With the fix, relief lives on the issuer's lien in Buck,
+and the natural completion is that *the equity basket is simply a credit
+holder*:
+
+- *It is bound public and non-Carrying* (as =SimLP= already is), so it can
+  hold a lien.
+- *It holds one BuckCredit*, created by Buck when the basket is wired
+  (=setBasket=): the basket is its insurer, the premium is zero (no
+  deposit; outside the funding-factor gate by the core's own rule), it is
+  fully activated and non-transferable.
+- *Its value is a mark*: a new valuation mode, =MARKED=, in which the
+  credit's present value is the insurer's latest mark (capped by the face)
+  instead of a depreciation schedule.  Like depreciation it moves the limit
+  without touching the coverage, so "an insurer may not reappraise below
+  activated coverage" still holds.  The basket marks its equity at the
+  conservative marks at every entry point, before any issuance.
+- So =creditLimit(basket) = K x equity= -- ruling 13.3's limit, enforced
+  by Buck.
+
+Everything else is Buck's native credit model:
+
+| ruled (BASKET-EQUITY 13.6)                        | as a credit holder                                                          |
+|---------------------------------------------------+-----------------------------------------------------------------------------|
+| limit = K x equity                                | =creditLimit(basket)= = K x mark                                            |
+| a deposit mints its K                             | the mark rises by the deposit: K x value of headroom, at once                |
+| room from K rises and earnings, minted on demand  | headroom, spent when needed                                                  |
+| no margin calls                                   | a K cut lowers the limit, never the lien (the system's rule)                 |
+| liquidity = BUCK held + headroom                  | =balanceOf(basket)=                                                          |
+| debt; =mintFromBasket= / =burnFromBasket=          | the lien: =-signedRawBalanceOf(basket)=; no hooks                            |
+| =owed=: an exit's debt share, burned later         | gone: BUCK received repay the lien as they arrive; Trim's target is the lien's band |
+| relief: none                                       | native: 2%/yr on the lien, realized daily (=settleRelief=)                  |
+| burned BUCK's age                                  | gone: nothing is burned; aged BUCK repaying the lien pay their fee (D2)     |
+| held BUCK's demurrage                              | paid in place, as a non-Carrying account                                     |
+
+The equity basket's own books lose =debt=, =idleBuck=, =owed=,
+=mintedTotal=, =burnedTotal=, =_mint=, =_burn= and =_settle=; it reads its
+lien and its held BUCK from Buck.  Equity is =gross + signedRaw +
+reliefOf(basket)=.  Relief accretes to the share price, so every holder
+earns it for exactly the time they hold, with no bookkeeping.
+
+*What it is worth.*  At the limit the lien is K/(1+K) of gross.  At K =
+0.75 relief is 0.86%/yr of gross, 1.5%/yr of equity -- as much as the
+director's lean harvests.
+
+** 4.2 The alternative: the ledger credit
+
+Keep the hooks; Buck activates and deactivates a basket-owned ledger
+credit one-for-one with them, and tracks the hooks' issuance-seconds for
+relief; the basket stays Carrying, D3 makes its burns carry out their fee,
+and its books gain a relief line.  Smaller change to the basket; but the
+basket remains a parallel issuer beside the credit model, with its own
+debt books, and the NFT carries no relief once relief lives on liens.  I
+recommend the credit holder.
+
+** 4.3 The pro-rata baskets
+
+=BuckBasketProRata=, =BuckBasketOps= and =BuckBasketFence= (the sim's
+baselines) keep the hooks.  D3 fixes their burns.  Their hook issuance can
+earn relief through a Buck-side issuer record, paid into the basket at
+=burnFromBasket= and booked to the treasury -- or none, leaving the fund a
+small surplus (a ruling, 6.2).
+
+* 5. Blast radius
+
+| area                    | files                                                                    | change                                                                                 |
+|-------------------------+--------------------------------------------------------------------------+----------------------------------------------------------------------------------------|
+| money                   | =src/Buck.sol=                                                           | D1-D3, R1-R2, the two counters, =reliefOf= / =redeemCost= / =settleRelief=, =setBasket= creates the basket's credit |
+| credit                  | =src/BuckCredit.sol=                                                     | R4 (aging removed, net smaller); =MARKED= valuation and =mark=; the Buck-created protocol credit |
+| equity basket           | =src/basket/BuckBasketEquity*.sol=, =BuckBasketEquityWheel.sol=          | books to Buck reads; deposit and the components spend headroom; Trim receives; =mark= writes |
+| pro-rata baskets        | =BuckBasketProRata.sol= (and heirs)                                      | none, or a relief receipt at burn (6.2)                                                 |
+| registry                | =src/IdentityRegistry.sol=                                               | comments: a public non-Carrying basket                                                  |
+| core tests              | =BuckJubileeRelief.t.sol=, =JubileeBasis.t.sol=, =BuckCreditReappraisal.t.sol=, =BuckReentrancy.t.sol= (mock signature), and every test whose accounts cross zero with aged BUCK (=BuckSignedBalance=, =BuckDemurrage=, =BuckDelegatedDemurrage=: counted when built) | rewritten on issuance; inverted defects; new numbers where D2 bites |
+| basket tests            | =test/basket/BuckBasketEquity*.t.sol=, =test/wheel/BasketWheelEquity.t.sol= | a credit-model mock Buck (signed balance, limit = K x mark) in place of =EqBuck=      |
+| gas                     | =.gas-snapshot=                                                          | draws and repayments: the fund checkpoint, once per block                               |
+| sims (Python)           | =equilibrium_agents.py= (2), =household_agents.py= (1)                   | close-cost quote: =buck.redeemCost(account)= in place of summing =credit.jubileeRelief(tid)= |
+|                         | =carry.py= (T15 kernel), =test_debtor_ledger.py=                         | relief = 2% x BUCK drawn, not coverage (1/K less; none on undrawn)                    |
+|                         | =deploy.py=, =reserve_basket.py= (prototype)                             | the equity basket bound non-Carrying, its credit wired; relief and the credit model in the prototype |
+| sims (JS)               | =core/js/src/scenarios/eqworld.js=, =core/js/prototypes/mortgage-retiree.js= | the close-cost quote                                                              |
+| docs                    | =alberta-buck-ethereum.org= (Demurrage and Jubilee; the lien relief; "Two Kinds of BUCK"; #10), =doc/CREDIT-IMPROVEMENT.org=, =doc/reports/wp-t15.org=, =doc/BASKET-EQUITY.org= | the principle, the numbers ("1,000 BUCK redeems at ~800 after ten years" becomes a statement about the drawn lien) |
+| results                 | T15 retiree cells; octl debtors' close decisions; equilibrium runs where debtors close | relief was overstated by 1/K (33% at 0.75) and paid on undrawn coverage: re-judge (6.1) |
+
+Not touched: the identity and Notes machinery, the controllers (they read
+prices, not credit), the venue, the director, the wheel's other kinds.
+
+* 6. Rulings asked
+
+** 6.1 The core
+
+1. *Relief on BUCK issued* (the lien), system-wide: undrawn coverage earns
+   nothing, a drawn credit earns 2%/yr of its lien, and the quotes move from
+   BuckCredit (per credit) to Buck (per account).  (The owner's principle;
+   asked to confirm the consequences.)
+2. *Every BUCK carries its fee to the end* (D2, D3): realized when it
+   repays a lien, when it is spent past into credit, and when it is burned.
+3. *Where relief is realized*: at the crossing to zero, at =burn=, and on
+   a =settleRelief= poke (recommended); or continuously, which would put a
+   fund write on every touch of a negative account.
+4. *The fund accrues on issuance* (=totalIssued=), so it always equals the
+   claims; the residual (demurrage on already-relieved BUCK) stays with
+   the holders.
+5. *The cap at the lien* stays ("carried ~50 years, redeems free").
+6. *The results that used coverage-based relief*: rerun the T15 retiree
+   cells and the octl debtors' close decisions after the fix, or annotate
+   them as superseded.
+
+** 6.2 The basket
+
+1. *The equity basket as a credit holder* (4.1), or the ledger credit
+   (4.2).  Recommended: the credit holder.
+2. *A deposit into an under-water basket.*  Ruled (13.3): each deposit
+   mints its full K at once, even over the limit.  As a credit holder the
+   deposit's headroom first restores the limit -- the system's rule that an
+   under-water account stops issuing.  A TOKEN deposit then pairs with less
+   BUCK, and Deploy sells more of it.  Re-rule, or keep the old rule by a
+   basket-side exception (which Buck would have to grant).
+3. *=owed= retired*: repayment is receipt, and Trim's target is the lien's
+   band.  The substance of "burned after, by the wheel" is unchanged.
+4. *Relief in the share price*: equity counts the live relief quote, and
+   Daily realizes it.  With the fund covering claims (6.1.4), no haircut
+   at exit.
+5. *The pro-rata baskets' relief* (4.3): a Buck-side issuer record paid to
+   their treasury, or none.
+6. Still open from BASKET-EQUITY 13.10: the fallback exit in kind.
+
+The other rulings of BASKET-EQUITY 13.3/13.5 stand as they are: BUCK
+payouts, the flow-sized liquidity (now =balanceOf=), the arbitrage in the
+basket, the limit, the room on demand, no margin calls, the exit charge,
+the director, lambda, no deposit cap, the stress hook, the treasury, the
+Fence.
+
+* 7. The order of work, once ruled
+
+1. The core: D1 and the counters; D2 and D3; R1-R4.  Invert
+   =JubileeBasis.t.sol=, rewrite =BuckJubileeRelief.t.sol=, add the
+   invariant handler; fix every test D2 moves.
+2. BuckCredit: =MARKED= and the protocol credit; Buck's =setBasket=
+   creates it.
+3. The equity basket as a credit holder, with a credit-model mock Buck for
+   its suites.
+4. The Python prototype and the sims (close-cost quotes, =carry.py=,
+   =deploy.py=); rerun per 6.1.6.
+5. The docs.
