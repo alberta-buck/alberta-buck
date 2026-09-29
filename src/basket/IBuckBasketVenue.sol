@@ -137,4 +137,41 @@ interface IBuckBasketVenue {
 
     function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
         external returns (uint256 gained, uint256 lossValue, uint256[] memory inventoryAfter);
+
+    // --- Equity primitives (BuckBasketEquity; doc/BASKET-EQUITY.org 13.7) --- //
+    //
+    // The equity basket keeps its own books (the wallet, liquidityOf) and asks
+    // the venue only to value, place, withdraw and swap.  Pool reads are for
+    // prices; nothing here reads a balance.
+
+    /// @notice A pool's marks: `liquidity` of the basket's full-range position
+    ///         valued in BUCK (twice its BUCK side) at the TWAP and at the
+    ///         higher and lower of spot and TWAP, and one whole TOKEN's price
+    ///         in BUCK at the same three marks.
+    struct Marks {
+        uint256 posLow;
+        uint256 posTwap;
+        uint256 posHigh;
+        uint256 pLow;
+        uint256 pTwap;
+        uint256 pHigh;
+        uint256 depth;          // the pool's virtual BUCK reserve at the spot (all LPs')
+    }
+
+    function marks(uint256 i, uint128 liquidity) external view returns (Marks memory);
+
+    /// @notice Whether pool `i` has active liquidity to trade against.
+    function poolLive(uint256 i) external view returns (bool);
+
+    /// @notice Add the most full-range liquidity `tokenAmount` and `buckAmount`
+    ///         (held by the basket) balance at the spot; report what was used.
+    function positionMint(uint256 i, uint256 tokenAmount, uint256 buckAmount)
+        external returns (uint128 liquidity, uint256 tokenUsed, uint256 buckUsed);
+
+    /// @notice Remove `liquidity` and collect exactly the principal it releases.
+    function positionBurn(uint256 i, uint128 liquidity)
+        external returns (uint256 tokenOut, uint256 buckOut);
+
+    /// @notice Collect everything the position is owed (its fees).
+    function positionSync(uint256 i) external returns (uint256 tokenOut, uint256 buckOut);
 }

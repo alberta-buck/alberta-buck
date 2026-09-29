@@ -253,6 +253,92 @@ contract BuckBasketUniswapV3 is
         }
     }
 
+    // --- Equity primitives (BuckBasketEquity) ------------------------------ //
+
+    /// @inheritdoc IBuckBasketVenue
+    function marks(uint256 i, uint128 liquidity)
+        external view override returns (Marks memory m)
+    {
+        Constituent storage c = constituents[i];
+        (uint160 sSpot, int24 tSpot,,,,,) = IUniswapV3Pool(c.pool).slot0();
+        int24 tTwap = tSpot;
+        try this.consultTickExternal(c.pool, twapWindow) returns (int24 t) { tTwap = t; }
+        catch {}
+        uint160 sTwap = UniswapV3OracleLib.getSqrtRatioAtTick(tTwap);
+        uint128 one = uint128(10 ** c.decimals);
+        uint256 pSpot = UniswapV3OracleLib.getQuoteAtTick(tSpot, one, c.token, address(buck));
+        m.pTwap = UniswapV3OracleLib.getQuoteAtTick(tTwap, one, c.token, address(buck));
+        (m.pHigh, m.pLow) = pSpot > m.pTwap ? (pSpot, m.pTwap) : (m.pTwap, pSpot);
+        uint128 L = IUniswapV3Pool(c.pool).liquidity();
+        if (L > 0) {
+            m.depth = c.buckIsToken0 ? UniswapV3OracleLib.mulDiv(uint256(L), 1 << 96, sSpot)
+                                     : UniswapV3OracleLib.mulDiv(uint256(L), sSpot, 1 << 96);
+        }
+        if (liquidity == 0) return m;
+        uint256 vSpot = 2 * _buckSideAt(c, liquidity, sSpot);
+        m.posTwap = 2 * _buckSideAt(c, liquidity, sTwap);
+        (m.posHigh, m.posLow) = vSpot > m.posTwap ? (vSpot, m.posTwap) : (m.posTwap, vSpot);
+    }
+
+    function poolLive(uint256 i) external view override returns (bool) {
+        return IUniswapV3Pool(constituents[i].pool).liquidity() > 0;
+    }
+
+    function positionMint(uint256 i, uint256 tokenAmount, uint256 buckAmount)
+        external override onlySelf
+        returns (uint128 liquidity, uint256 tokenUsed, uint256 buckUsed)
+    {
+        Constituent storage c = constituents[i];
+        liquidity = _liquidityForAmounts(c, tokenAmount, buckAmount);
+        if (liquidity == 0) return (0, 0, 0);
+        _callbackPool = c.pool;
+        (uint256 a0, uint256 a1) = IUniswapV3Pool(c.pool).mint(
+            address(this), c.tickLower, c.tickUpper, liquidity, abi.encode(c.token));
+        _callbackPool = address(0);
+        (buckUsed, tokenUsed) = c.buckIsToken0 ? (a0, a1) : (a1, a0);
+    }
+
+    function positionBurn(uint256 i, uint128 liquidity)
+        external override onlySelf returns (uint256 tokenOut, uint256 buckOut)
+    {
+        Constituent storage c = constituents[i];
+        if (liquidity == 0) return (0, 0);
+        (uint256 p0, uint256 p1) =
+            IUniswapV3Pool(c.pool).burn(c.tickLower, c.tickUpper, liquidity);
+        (uint128 a0, uint128 a1) = IUniswapV3Pool(c.pool).collect(
+            address(this), c.tickLower, c.tickUpper, uint128(p0), uint128(p1));
+        (buckOut, tokenOut) = c.buckIsToken0 ? (uint256(a0), uint256(a1))
+                                             : (uint256(a1), uint256(a0));
+    }
+
+    function positionSync(uint256 i)
+        external override onlySelf returns (uint256 tokenOut, uint256 buckOut)
+    {
+        Constituent storage c = constituents[i];
+        if (_positionLiquidity(c) > 0) {
+            IUniswapV3Pool(c.pool).burn(c.tickLower, c.tickUpper, 0);   // accrue fees owed
+        }
+        (uint128 a0, uint128 a1) = IUniswapV3Pool(c.pool).collect(
+            address(this), c.tickLower, c.tickUpper, type(uint128).max, type(uint128).max);
+        (buckOut, tokenOut) = c.buckIsToken0 ? (uint256(a0), uint256(a1))
+                                             : (uint256(a1), uint256(a0));
+    }
+
+    /// @notice The BUCK side of `liquidity` of the full-range position at
+    ///         `sqrtP` (clamped to the range).
+    function _buckSideAt(Constituent storage c, uint128 liquidity, uint160 sqrtP)
+        internal view returns (uint256)
+    {
+        uint160 lo = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickLower);
+        uint160 hi = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickUpper);
+        if (c.buckIsToken0) {
+            if (sqrtP >= hi) return 0;
+            return UniswapV3OracleLib.getAmount0ForLiquidity(sqrtP > lo ? sqrtP : lo, hi, liquidity);
+        }
+        if (sqrtP <= lo) return 0;
+        return UniswapV3OracleLib.getAmount1ForLiquidity(lo, sqrtP < hi ? sqrtP : hi, liquidity);
+    }
+
     // --- Fence primitives (BuckBasketFence) ------------------------------- //
 
     function fencePool(address token, uint8 decimals, uint256 initialPriceInBuck,
