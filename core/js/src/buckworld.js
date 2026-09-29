@@ -416,14 +416,15 @@ export async function creditView(world, tokenId) {
     s.call(world.credit, "depreciatedFaceValue", [tokenId]),
     s.call(world.credit, "currentValue", [tokenId]),
   ]);
+  // The credits() getter's tuple, by position: BuckCredit.CreditParams order.
   const [insurer, assetClass, createdAt, face, floor, depType, depRate, depStartAt,
-         premiumRate, lastUpdated, activated, lastActivatedAt] = c;
+         premiumRate, lastUpdated, activated] = c;
   return {
     tokenId: BigInt(tokenId), holder, insurer, assetClass,
     face: BigInt(face), floor: BigInt(floor), depType, depRate,
     depStartAt: BigInt(depStartAt), premiumRate,
     createdAt: BigInt(createdAt), lastUpdated: BigInt(lastUpdated),
-    activated: BigInt(activated), lastActivatedAt: BigInt(lastActivatedAt),
+    activated: BigInt(activated),
     depreciatedFace, currentValue,
   };
 }

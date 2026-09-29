@@ -228,11 +228,15 @@ licence.
   =depStartAt=, =premiumRate=, =lastUpdated=.  =faceValue= may not be reappraised below
   =activatedValue= -- see [[#insurer-updates][Insurer Updates]].
 - *Buck-mutable* via =activateFromBuck= / =deactivateFromBuck=: =activatedValue= (capped at
-  =faceValue=), =lastActivatedAt=.  The client never writes these directly.
+  =faceValue=).  The client never writes it directly.
 
-=DepreciationType= is one of =NONE= (land, gold), =LINEAR= (constant annual reduction), or
-=DECLINING_BALANCE= (continuous-compounded percentage).  Three events --
-=CreditCreated=, =CreditUpdated=, =CreditActivated= -- record every state change.
+=DepreciationType= is one of =NONE= (land, gold), =LINEAR= (constant annual reduction),
+=DECLINING_BALANCE= (continuous-compounded percentage), or =MARKED= (valued at its insurer's
+latest mark: [[#marked-credits][Marked Credits]]).  Four events -- =CreditCreated=,
+=CreditUpdated=, =CreditActivated=, =CreditMarked= -- record every state change.
+
+A credit does not age.  Jubilee relief accrues on the BUCK an account has actually drawn -- its
+lien, in =Buck= -- not on coverage ([[#demurrage][Demurrage and Jubilee]]).
 
 ** Depreciation Models
 
@@ -258,6 +262,40 @@ In every case the activated portion depreciates proportionally:
 
 A residential property would typically have two BUCK_CREDITs: one for the land (NONE) and one for
 the structure (LINEAR or DECLINING_BALANCE with a salvage floor).
+
+** Marked Credits
+   :PROPERTIES:
+   :CUSTOM_ID: marked-credits
+   :END:
+
+Some collateral is revalued on-chain every block -- a BuckBasket's equity is the case in point --
+and no depreciation schedule describes it.  A =MARKED= credit is valued at a mark its insurer
+keeps current, =mark(tokenId, value)=:
+
+#+BEGIN_SRC text
+depreciatedFaceValue(tokenId) = min(faceValue, markOf[tokenId])        (MARKED)
+currentValue(tokenId)         = depreciatedFaceValue * activatedValue / faceValue
+#+END_SRC
+
+so with the whole face activated, =currentValue= is the mark and the holder's =creditLimit= is
+=K x mark=.  Like depreciation, the mark moves the limit without touching the coverage: it may
+fall below =activatedValue=, and a holder whose lien then exceeds its limit is under water -- it
+cannot spend further credit, and nothing is called back.
+
+That is exactly what an insurer must never be able to do to someone else: a mark written down on
+another's credit would revoke a purchased policy, which [[#insurer-updates][Insurer Updates]]
+forbids.  So three rules bound it:
+
+- *Self-issued only.*  =createCredit= with =MARKED= requires =client == msg.sender=: the holder is
+  its own insurer, and marks only its own collateral.
+- *Fixed at creation.*  =updateCredit= refuses to switch a credit to or from =MARKED=, so a
+  scheduled credit cannot be converted and then marked down.
+- *Gated like any model.*  Where the insurer gate is configured, the insurer's attested envelope
+  must permit =MARKED= (bit 3 of =depTypes=), as it must permit any depreciation model.
+
+A marked credit is activated like any other -- one =Buck.mint= at zero premium, once the mark is
+above zero (a credit appraised at zero insures nothing and is skipped) -- and its holder's lien
+earns relief like any other.  Its face caps what the holder can ever draw, at =K x face=.
 
 ** Activation = Mint, Deactivation = Burn
    :PROPERTIES:

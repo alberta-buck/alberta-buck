@@ -252,7 +252,7 @@ contract BuckBasketEquityTest is Test {
     function test_credit_isTheBasketsOwnMarkedCredit() public {
         uint256 id = b.creditId();
         assertEq(credit.ownerOf(id), address(b), "held by the basket");
-        (address insurer,,,,, BuckCredit.DepreciationType dt,,,,,,) = credit.credits(id);
+        (address insurer,,,,, BuckCredit.DepreciationType dt,,,,,) = credit.credits(id);
         assertEq(insurer, address(b), "its own insurer");
         assertEq(uint8(dt), uint8(BuckCredit.DepreciationType.MARKED));
         _deposit(alice, address(tok[1]), 1000e18);

@@ -73,8 +73,7 @@ contract BuckCredit is ERC721Enumerable {
     ///      slot 0: insurer (20) + assetClass (1) + createdAt (6)            = 27
     ///      slot 1: faceValue (10) + depreciationFloor (10) + depType (1)
     ///              + depRate (4) + depStartAt (6)                           = 31
-    ///      slot 2: premiumRate (4) + lastUpdated (6) + activatedValue (10)
-    ///              + lastActivatedAt (6)                                    = 26
+    ///      slot 2: premiumRate (4) + lastUpdated (6) + activatedValue (10) = 20
     struct CreditParams {
         // Immutable (set at creation)
         address insurer;            // Vendor who can update this credit
@@ -92,9 +91,8 @@ contract BuckCredit is ERC721Enumerable {
         uint32  premiumRate;        // Annual premium: basis points of activated value
         uint48  lastUpdated;        // Timestamp of last insurer update
 
-        // Client-mutable (activation)
+        // Client-mutable (activation, through Buck only)
         BuckQty activatedValue;     // Currently activated portion (<= faceValue) (uint80 BUCK, 6 decimals)
-        uint48  lastActivatedAt;    // Timestamp of last activation
     }
 
     // ── Depreciation constants ──────────────────────────────────────
@@ -547,8 +545,7 @@ contract BuckCredit is ERC721Enumerable {
             depStartAt: depStartAt,
             premiumRate: premiumRate,
             lastUpdated: uint48(block.timestamp),
-            activatedValue: BuckQty.wrap(0),
-            lastActivatedAt: 0
+            activatedValue: BuckQty.wrap(0)
         });
 
         emit CreditCreated(tokenId, msg.sender, client, faceValue, scope);
@@ -688,7 +685,6 @@ contract BuckCredit is ERC721Enumerable {
         uint256 current = c.activatedValue.asUint();
         require(amount <= current, "BuckCredit: deactivate > active");
         c.activatedValue  = toBuckQty(current - amount);
-        c.lastActivatedAt = uint48(block.timestamp);
 
         emit CreditActivated(tokenId, holder, 0, current - amount);
     }
@@ -700,7 +696,6 @@ contract BuckCredit is ERC721Enumerable {
         require(newActivated <= c.faceValue.asUint(), "Exceeds face value");
 
         c.activatedValue  = toBuckQty(newActivated);
-        c.lastActivatedAt = uint48(block.timestamp);
 
         emit CreditActivated(tokenId, holder, amount, newActivated);
     }
