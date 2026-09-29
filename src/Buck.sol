@@ -370,6 +370,11 @@ contract Buck is IERC20, IERC20Metadata {
     );
     event JubileeAccrued(uint256 delta, uint256 newJubileeBalance);
     event JubileeRedeemed(address indexed account, uint256 relief);
+    /// @notice A fee taken out of circulation at `account`: the demurrage
+    ///         locked in its balance when it spent past its held BUCK into
+    ///         credit, the fee aged BUCK carried into its lien, or the fee
+    ///         burned basket BUCK carried out.  Sums to `feesRealized`.
+    event FeeRealized(address indexed account, uint256 fee);
     event DemurragePayerRequested(address indexed account, address indexed payer);
     event DemurragePayerSet(address indexed account, address indexed payer);
     event DemurragePayerCleared(address indexed account, address indexed payer);
@@ -720,7 +725,10 @@ contract Buck is IERC20, IERC20Metadata {
         s.balance     = toBuckQtySigned(raw - int256(amount));
         _state[msg.sender] = s;
         _totalSupply -= amount;      // Carrying: the balance stays >= 0
-        if (fee != 0) feesRealized += fee;
+        if (fee != 0) {
+            feesRealized += fee;
+            emit FeeRealized(msg.sender, fee);
+        }
         _foldBasket();
         basketIssued -= int256(amount - fee);
         emit Transfer(msg.sender, address(0), amount);
@@ -1400,7 +1408,10 @@ contract Buck is IERC20, IERC20Metadata {
                 _totalSupply -= value;
                 return;
             }
-            if (fee != 0) feesRealized += fee;
+            if (fee != 0) {
+                feesRealized += fee;
+                emit FeeRealized(a, fee);
+            }
             s.buckSeconds = toBuckSeconds(0);
             s.balance     = toBuckQtySigned(old - int256(fee) - int256(value));
             _state[a] = s;
@@ -1444,7 +1455,10 @@ contract Buck is IERC20, IERC20Metadata {
         }
         uint256 fee = carriedBs == 0 ? 0 : Math.mulDiv(carriedBs, BASE_RATE_PER_SEC, SCALE);
         if (fee > value) fee = value;
-        if (fee != 0) feesRealized += fee;
+        if (fee != 0) {
+            feesRealized += fee;
+            emit FeeRealized(a, fee);
+        }
         int256 nw = old + int256(value - fee);
         uint256 bs = s.buckSeconds.asUint();                 // issuance-seconds
         if (nw >= 0) {

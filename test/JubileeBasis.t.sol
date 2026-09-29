@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {BN254} from "../src/BN254.sol";
+import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {BuckJubileeReliefTest} from "./BuckJubileeRelief.t.sol";
@@ -92,6 +93,8 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         _poke();                                          // fund: 2% of the 100
         uint256 bobFee = buck.feeOwing(bob);
         assertApproxEqRel(bobFee, DRAW * 2 / 100, 0.001e18, "bob's 100 carry a year");
+        vm.expectEmit(true, false, false, false, address(buck));
+        emit Buck.FeeRealized(alice, 0);
         vm.prank(bob);
         buck.transfer(alice, DRAW / 2);                   // repays half alice's lien
         assertApproxEqAbs(_lien(alice), DRAW / 2 + bobFee / 2, 1,
@@ -123,6 +126,8 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         vm.warp(t0 + YEAR);
         uint256 fee = buck.feeOwing(alice);
         assertApproxEqRel(fee, 2e6, 0.001e18, "her 100 carry a year: 2");
+        vm.expectEmit(true, false, false, true, address(buck));
+        emit Buck.FeeRealized(alice, fee);
         vm.prank(alice);
         buck.transfer(bob, 150e6);                        // 98 held + 52 of credit
         assertApproxEqAbs(_lien(alice), 52e6, 1, "the lien is the 52 drawn");
@@ -139,6 +144,8 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         vm.prank(BASKET);
         buck.mintFromBasket(BASKET, 1000e6);
         vm.warp(t0 + YEAR);
+        vm.expectEmit(true, false, false, false, address(buck));
+        emit Buck.FeeRealized(BASKET, 0);
         vm.prank(BASKET);
         buck.burnFromBasket(900e6);
         assertEq(buck.rawBalanceOf(BASKET), 100e6);
