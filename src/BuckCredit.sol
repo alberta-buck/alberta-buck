@@ -105,6 +105,22 @@ contract BuckCredit is ERC721Enumerable {
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
 
+    // ── Marked credits ──────────────────────────────────────────────
+    //
+    // A MARKED credit is valued at a mark its insurer keeps current, in place
+    // of a depreciation schedule: collateral whose value is on-chain and
+    // moves every block (a BuckBasket's equity).  Like depreciation, the mark
+    // moves the credit limit without touching the coverage, so it can fall
+    // below the activated coverage -- which is exactly why only a SELF-issued
+    // credit may be marked (insurer == holder, fixed at creation, and never
+    // switched to or from MARKED by updateCredit).  An insurer marking
+    // someone else's credit down would be revoking a purchased policy, the
+    // one thing an insurer may never do.
+
+    /// @notice A MARKED credit's present value, as its insurer last marked
+    ///         it (capped by the face when read).
+    mapping(uint256 => uint256) public markOf;
+
     /// @notice The Buck contract permitted to drive activation.  Wired
     ///         one-shot post-deployment via setBuck(...).  BuckCredit never
     ///         calls Buck -- this is an authorisation record, nothing more.
@@ -175,22 +191,6 @@ contract BuckCredit is ERC721Enumerable {
     /// @dev A scope is attested iff its epoch equals the envelope's, so a new
     ///      attestation withdraws every scope it does not repeat.
     mapping(address => mapping(bytes32 => uint32)) internal _scopeEpoch;
-
-    // ── Marked credits ──────────────────────────────────────────────
-    //
-    // A MARKED credit is valued at a mark its insurer keeps current, in place
-    // of a depreciation schedule: collateral whose value is on-chain and
-    // moves every block (a BuckBasket's equity).  Like depreciation, the mark
-    // moves the credit limit without touching the coverage, so it can fall
-    // below the activated coverage -- which is exactly why only a SELF-issued
-    // credit may be marked (insurer == holder, fixed at creation, and never
-    // switched to or from MARKED by updateCredit).  An insurer marking
-    // someone else's credit down would be revoking a purchased policy, the
-    // one thing an insurer may never do.
-
-    /// @notice A MARKED credit's present value, as its insurer last marked
-    ///         it (capped by the face when read).
-    mapping(uint256 => uint256) public markOf;
 
     /// @notice The scope the eight-argument createCredit declares: a regulator
     ///         grants it to a general insurer and withholds it from a scoped one.
