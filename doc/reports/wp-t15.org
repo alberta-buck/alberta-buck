@@ -60,7 +60,7 @@ same accounting the audit judges it by:
 | carry term (/yr)  | value                                        | source                                                       |
 |-------------------+----------------------------------------------+--------------------------------------------------------------|
 | interest          | + usd x rate                                 | the external interest no longer paid                         |
-| relief            | + coverage x 2%                               | =BuckCredit.jubileeRelief= accrues on the activated coverage |
+| relief            | + (buck + deposit) x 2%                       | =Buck.reliefOf= accrues on the lien (the BUCK issued) -- since 2026-09-29; it was coverage x 2% |
 | premium           | + face x premium, until it joins              | the external premium stops once BuckCredit insures           |
 | deposit_opp       | - deposit x opportunity (the external rate)   | fe3083f: the deposit's only cost is the opportunity          |
 | deposit_age       | - deposit x 2%                                | bd792e7: a Carrying pool's refund carries its accrued age back |
@@ -84,8 +84,13 @@ Go iff carry > 0 and theta x carry > one-time.  With every term but the
 interest zeroed this is the octl debtors' theta law.  With the whole face
 activated the deposit is ten years' premium on the face, so the BUCK
 path's insurance is the cheaper one below an opportunity rate of
-1 / POOL_ROI_INV = 10%, whatever the premium; the relief the coverage
-earns (2%/yr) offsets the carried age of the deposit many times over.
+1 / POOL_ROI_INV = 10%, whatever the premium.  The deposit is drawn from
+the same signed balance as the BUCK, so its relief (2%/yr) pays exactly
+the age its refund carries back, and the relief the refinance adds is 2%
+of the BUCK drawn.  (Before the Jubilee fix of 2026-09-29, relief accrued
+on the coverage activated, about 1/K of the draw, and was said to offset
+the deposit's age "many times over": cells judged before then overstate
+the relief by that much; doc/JUBILEE-ISSUANCE.org.)
 =test_carry.py= pins the terms, the theta-law reduction, and a household
 that refinances under this accounting and would not under the old one
 (the deposit written off as a loss).

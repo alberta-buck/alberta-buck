@@ -2485,13 +2485,11 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         drawn = max(0, -signed)
         held = max(0, signed)
         # Pure chain truth at par; the liability side is the chain's OWN
-        # close-cost quote: drawn net of the accrued Jubilee relief on the
-        # credits (BuckCredit.jubileeRelief -- the redemption discount that
-        # melts ~2%/yr while the position is carried).
-        jub = 0
+        # close-cost quote: drawn net of the Jubilee relief accrued on the
+        # lien (Buck.reliefOf -- the redemption discount that melts ~2%/yr
+        # of the drawn balance while it is carried; capped at the lien).
         try:
-            for tid in self._token_ids:
-                jub += d.credit.functions.jubileeRelief(tid).call()
+            jub = d.buck.functions.reliefOf(self.proxy.address).call()
         except Exception:
             jub = 0
         jub = min(jub, drawn)
@@ -2680,10 +2678,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         # and the melt is therefore a benefit -- it lets the BUCK side carry
         # more drawn for the same encumbrance, which is exactly the asymmetry
         # the comparison is meant to price.
-        jub = 0
         try:
-            for tid in self._token_ids:
-                jub += d.credit.functions.jubileeRelief(tid).call()
+            jub = d.buck.functions.reliefOf(self.proxy.address).call()
         except Exception:
             jub = 0
         jub = min(jub, drawn)

@@ -7,7 +7,7 @@
 //     the SAVE leg buys the required BUCK buffer ahead of each tranche
 //     (a revert is the gate saying "save more" -- counted, retried);
 //   * the liability is the chain's own melting quote: drawn net of
-//     BuckCredit.jubileeRelief (~2%/yr aging; never force-closed);
+//     Buck.reliefOf (~2%/yr of the lien; never force-closed);
 //   * the unwind buys ONLY below USD par (the basket signal says nothing
 //     about USD price) and never lifts the pool past par -- profitable.
 //

@@ -913,10 +913,10 @@ outcome, and costs them nothing acutely:
 
 - *The insurance stays in force.*  Its premium was paid up front, in perpetuity, and no path
   cancels it.  =activatedValue= does not move.
-- *The exposure shrinks on its own.*  Jubilee relief accrues against the coverage's
-  age at ~2 %/year, so what closing the position eventually costs declines year on year with no
-  action from the holder.  Over ten years a 1,000 BUCK position's =redeemCost= falls to
-  ~800 BUCK.
+- *The exposure shrinks on its own.*  Jubilee relief accrues against the lien -- the BUCK the
+  credit actually put into circulation -- at ~2 %/year, so what closing the position eventually
+  costs declines year on year with no action from the holder.  Over ten years a 1,000 BUCK
+  lien's =redeemCost= falls to ~800 BUCK.  Undrawn credit earns nothing.
 
 So there is no liquidation, no margin call, and no forced sale.  The position simply becomes
 cheaper to close the longer it is carried -- which is the whole point of the Jubilee.
@@ -1021,21 +1021,38 @@ point for router integration.
    :CUSTOM_ID: demurrage
    :END:
 
-BUCK accrues continuous demurrage to fund a perpetual Jubilee.  Each account's =buckSeconds=
-field is the cumulative integral of (positive raw balance × dt) crystallised at =timestamp=; the
-live fee owed is
+BUCK accrues continuous demurrage to fund a perpetual Jubilee, and the Jubilee pays it back as
+relief to whoever issued the BUCK: *the relief equals the demurrage accrued*.  Each account's
+=buckSeconds= field is the cumulative integral of (|raw balance| × dt) crystallised at
+=timestamp=, read by sign: while the balance is positive it counts /fee-seconds/, while it is
+negative (a lien: credit drawn) it counts /issuance-seconds/.  The live fee owed and the live
+relief accrued are
 
 #+BEGIN_SRC text
-feeOwing(a) = (buckSeconds + max(0, balance) * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE
-            = 0    when signed raw <= 0   (no demurrage on used credit)
+feeOwing(a) = (buckSeconds + balance * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE   balance > 0
+reliefOf(a) = min(lien, (buckSeconds + lien * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE)
+                                                              lien = -balance > 0
 #+END_SRC
 
 with ~BASE_RATE_PER_YEAR = 0.02~ (2%/year) and ~SCALE = 1e27~.  Demurrage is a per-second property
-of /held/ BUCK; accounts using credit (signed raw < 0) accrue zero fee until they climb back into
-positive territory.  =_crystallize= uses ~max(0, signedRaw)~ as the rectangle height so a
-negative-going transfer doesn't poison the buckSeconds integral.  This makes sense; any account
-extends into its credit only when a transfer has produced a positive BUCK balance somewhere else,
-where it accrues demurrage.
+of /held/ BUCK; relief is a per-second property of /issued/ BUCK.  One field serves both because
+an account never holds a fee when it crosses zero: *every BUCK carries its fee to the end*, and
+the fee is /realized/ -- taken out of circulation -- whenever the BUCK carrying it would
+otherwise shed it:
+
+- *Spending past held BUCK into credit.*  The fee locked in the balance is paid first; the lien
+  absorbs it, so the lien is exactly the credit drawn.
+- *Aged BUCK arriving at an account below zero.*  They repay the lien net of the fee they carry.
+  A receipt that repays the whole lien also pays out the relief the lien earned.
+- *A basket burn.*  The burned BUCK take their share of the basket's age with them, and retire
+  that much less of the basket's issuance.
+
+Relief pays out of the fund when the lien is repaid, when the holder burns coverage, or when the
+holder calls =settleRelief()= (only the holder: relief accrues linearly on the lien, so paying it
+early is the holder's choice).  It is capped at the lien, so a lien carried ~50 years closes free.
+=redeemCost(a) = lien - reliefOf(a)= is the liability-side quote.  (Until 2026-09-29 relief
+accrued in BuckCredit on /activated coverage/, drawn or not -- 1/K of what a fully drawn credit
+issues, and more than the fund took in; doc/JUBILEE-ISSUANCE.org.)
 
 Visible balance:
 
@@ -1056,11 +1073,17 @@ integral to the recipient (where ~liveBs = buckSeconds + raw * (now - timestamp)
 each side in one SSTORE.
 
 The Jubilee is a normal account at =address(this)=, treated as Carrying.  On every mint or burn,
-=_accrueJubilee= writes
+and on every transfer that draws or repays credit, =_accrueJubilee= writes
 
 #+BEGIN_SRC text
-_state[address(this)].balance += totalSupply * BASE_RATE_PER_SEC * elapsed / SCALE
+_state[address(this)].balance += totalIssued * BASE_RATE_PER_SEC * elapsed / SCALE
+totalIssued = totalSupply - reliefRealized + feesRealized     (+ |basketIssued| if negative)
 #+END_SRC
+
+=totalIssued= is the BUCK issued -- the liens plus the basket's net issuance -- which the relief
+accrues on, so the fund always holds the relief it owes.  It follows from the only three things
+that move the sum of the non-Jubilee signed balances: the basket's hooks, relief paid out, and
+fees realized.
 
 directly into Jubilee's slot via a raw slot write -- bypassing =_setBalanceSigned= -- so
 =totalSupply= is *not* mutated.  Demurrage is internal redistribution from positive-balance
@@ -1073,13 +1096,11 @@ sum_a max(0, signedRawBalanceOf(a)) == totalSupply + jubileeActual()
 Jubilee is the system-wide fee escrow.  Every BUCK has exactly one fee owner: non-Carrying accounts
 lock it silently inside their raw balance (=balanceOf = raw - feeOwing=); Carrying accounts (Notes
 pool, AMM pools, Jubilee itself) show =balanceOf = raw=, so their fee portion sits in Jubilee
-instead.  The =_accrueJubilee= call credits Jubilee at the full =totalSupply= rate, covering
-Carrying holdings too.  When Carrying BUCKs flow to a non-Carrying account via =_carryingTransfer=, the recipient absorbs
+instead.  When Carrying BUCKs flow to a holder via =_carryingTransfer=, the recipient absorbs
 ~liveBs * value / raw~ as extra =buckSeconds=, where =liveBs= is the sender's full live integral
-(crystallised history plus the current elapsed rectangle).  Jubilee pre-accrued the full fee at
-the =totalSupply= rate; it now debits in exact proportion to the BUCKs transferred, with both
-sides settled through the current block.  =JubileeAccrued(delta, newBalance)= surfaces every
-accrual.
+(crystallised history plus the current elapsed rectangle); flowing to an account below zero, that
+fee is realized on arrival instead.  =JubileeAccrued(delta, newBalance)= surfaces every accrual,
+=JubileeRedeemed(account, relief)= every payout.
 
 The Jubilee is the sink that funds default coverage, perpetual-ground-rent disbursement, or a
 periodic balance reset -- all governance-driven on-chain disbursement paths land on top of this
@@ -1192,6 +1213,11 @@ BUCK in circulation today has two provenances, both flowing through the same ERC
    described in [[#buck-erc20][BUCK]], backed by =BuckCredit= insured-asset NFTs and gated by =BUCK_K=.
    These BUCK reach the TOKEN/BUCK pools indirectly via arbitrage swaps and are the lever the
    PID actually pulls on.
+
+Buck records the basket's net issuance (=basketIssued=: minted, less what burns retired) and the
+relief it has earned on it (=basketRelief=), and the fund accrues on it like any lien.  The
+basket's relief is recorded but not yet paid: how it reaches the basket's depositors is part of
+the basket's redesign as a credit holder (doc/JUBILEE-ISSUANCE.org, section 4).
 
 The two supply paths converge in the basket's BUCK-side balance.  Price-up TOKEN moves leave
 extra BUCK in the pool (TOKEN bought with BUCK by external traders); price-down moves draw BUCK
@@ -1727,7 +1753,7 @@ Meanwhile #42 keeps depreciating on its schedule -- =NONE=, so not at all here, 
 depreciating credit would pull =creditLimit= down under Alice continuously.  If it fell below her
 drawn 2,631.58 she would be [[#underwater][underwater]]: she could not burn until she reacquired BUCK and
 repaid, her insurance would stay in force regardless, and the Jubilee relief accruing against
-#42's coverage-age would shrink the cost of closing the position year on year.
+her lien would shrink the cost of closing the position year on year.
 
 * Gas Cost Snapshot
 

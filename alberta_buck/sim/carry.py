@@ -28,8 +28,14 @@ Both paths insure the same asset at the same rate:
     insurance is dropped.  What it costs is the opportunity of the capital
     it ties up (the external interest that credit would otherwise have
     retired), plus the pool's accrued age the refund carries back to the
-    member (demurrage, Buck._carryingTransfer).  The coverage it buys
-    earns the Jubilee relief.
+    member (demurrage, Buck._carryingTransfer).
+
+The Jubilee relief accrues on the lien -- the BUCK actually issued, which is
+the BUCK drawn plus the deposit (both come out of the same signed balance)
+-- at the demurrage rate (doc/JUBILEE-ISSUANCE.org).  So the deposit's
+relief exactly pays the age its refund carries back, and the relief the
+refinance adds is 2% of the BUCK drawn.  (It used to accrue on the coverage
+activated, about 1/K of the draw.)
 
 So joining the BUCK system SAVES the external premium outright, and the
 insurance leg costs only the deposit's opportunity: with the whole face
@@ -51,7 +57,7 @@ POOL_ROI_INV = 10
 # alberta-buck-demurrage.org: a flat 2%/yr on every BUCK held.  A Carrying
 # insurance pool keeps its deposits' age and a refund hands it back.
 DEMURRAGE = 0.02
-# BuckCredit.jubileeRelief: ~2%/yr of the activated coverage, capped at it.
+# Buck.reliefOf: ~2%/yr of the lien (the BUCK issued), capped at it.
 RELIEF = 0.02
 
 
@@ -154,8 +160,9 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
     parts = {
         # external interest no longer paid
         "interest": usd * t.rate,
-        # the Jubilee relief the new coverage earns
-        "relief": cov * RELIEF,
+        # the Jubilee relief the new lien earns: the BUCK drawn and the
+        # deposit drawn with it
+        "relief": (buck + dep) * RELIEF,
         # the external premium stops once the asset is insured through BUCK
         "premium": 0.0 if t.joined else t.face * t.premium_bp / 10_000.0,
         # the deposit: an outlay, whose cost is the opportunity it forgoes...

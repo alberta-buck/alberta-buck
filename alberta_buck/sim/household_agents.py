@@ -174,8 +174,9 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
         jub = 0
         unactivated = 0
         try:
+            # Relief accrues on the lien (Buck.reliefOf), not on coverage.
+            jub = d.buck.functions.reliefOf(self.proxy.address).call()
             for tid in self._token_ids:
-                jub += d.credit.functions.jubileeRelief(tid).call()
                 face_v, act_v, _ = d.credit.functions.creditInfo(tid).call()
                 unactivated += max(0, face_v - act_v)
         except Exception:

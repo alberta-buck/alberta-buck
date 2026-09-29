@@ -15,7 +15,7 @@ can be checked against first principles:
                   + hypo_premium(t) - (premium_paid(t) - deposit(t))
 
      where interest_saved is the cumulative extra interest the hypo mortgage
-     accrues over the real one, jubilee is BuckCredit's accrued relief quote
+     accrues over the real one, jubilee is Buck's accrued relief quote on the lien
      (the liability is valued at its close cost), trade_loss is the
      par-value cost of crossing the pool, and hypo_premium is the insurance
      premium the counterfactual pays as a cost.  Both paths insure the same
@@ -223,10 +223,10 @@ def test_buck_path_uniformly_superior_net_of_costs():
                     reason="eq-eq-isolation.json not generated; "
                            "run: make nix-venv-sim-isolation")
 def test_jubilee_melts_obligations():
-    """The liability side of a BUCK position reduces year by year:
-    BuckCredit ages the activated coverage (coverage-seconds) and quotes
-    the accrued relief via jubileeRelief(tokenId) -- the redemption
-    discount settled from the fund at burn.  The agent values its drawn
+    """The liability side of a BUCK position reduces year by year: Buck
+    ages the lien (issuance-seconds) and quotes the accrued relief via
+    reliefOf(account) -- the redemption discount paid from the fund when
+    the lien is repaid or the credit burned.  The agent values its drawn
     obligation net of that quote; measure the quoted relief's growth over
     the carried window against the ~2%/yr doctrine rate."""
     days, ags = _frames()

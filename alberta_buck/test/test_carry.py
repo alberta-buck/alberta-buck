@@ -47,11 +47,14 @@ def test_insurance_is_an_outlay_not_a_cost():
     assert v.coverage == pytest.approx(cov)
     assert v.deposit == pytest.approx(cov * 0.035)
     assert v.parts["premium"] == pytest.approx(900_000 * 0.0035)
-    assert v.parts["relief"] == pytest.approx(cov * carry.RELIEF)
+    # relief accrues on the lien: the BUCK drawn and the deposit drawn with it
+    assert v.parts["relief"] == pytest.approx((404_000 + v.deposit) * carry.RELIEF)
     assert v.parts["deposit_opp"] == pytest.approx(-v.deposit * 0.055)
     assert v.parts["deposit_age"] == pytest.approx(-v.deposit * carry.DEMURRAGE)
-    # the insurance leg as a whole favours the BUCK path at a 5.5% opportunity
-    ins = sum(v.parts[k] for k in ("premium", "relief", "deposit_opp", "deposit_age"))
+    # the deposit's relief pays exactly the age its refund carries back...
+    assert v.deposit * carry.RELIEF + v.parts["deposit_age"] == pytest.approx(0)
+    # ...so the insurance leg favours the BUCK path at a 5.5% opportunity
+    ins = v.parts["premium"] + v.parts["deposit_opp"]
     assert ins > 0
 
 
@@ -107,7 +110,9 @@ def test_joined_household_saves_no_further_premium():
 
 def test_a_top_up_inside_headroom_makes_no_deposit():
     v = carry.refinance(terms(joined=True, headroom=200_000), 100_000, 100_500)
-    assert v.coverage == 0 and v.deposit == 0 and v.parts["relief"] == 0
+    assert v.coverage == 0 and v.deposit == 0
+    # but the draw is issuance all the same: its lien earns the relief
+    assert v.parts["relief"] == pytest.approx(100_500 * carry.RELIEF)
 
 
 def test_no_carry_no_go():
