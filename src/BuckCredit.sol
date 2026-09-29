@@ -25,11 +25,32 @@ import {IAccumulatorRegistry} from "./IAccumulatorRegistry.sol";
 /// Buck.sol's ERC-20 balances.  Bounds and precision come from BuckTypes so a
 /// future change propagates to both contracts in lockstep.
 ///
+/// *Value.*  A credit's present value is its face on a schedule
+/// (`DepreciationType` NONE / LINEAR / DECLINING_BALANCE), or -- for a MARKED
+/// credit -- its insurer's latest mark, capped by the face.  `currentValue`
+/// is that scaled by the activated share, and Buck's credit limit for a
+/// holder is K x the sum of its credits' current values.  A credit does not
+/// age: Jubilee relief belongs to the holder's lien, in Buck.
+///
+/// *Invariants* (alberta-buck-ethereum.org, "BUCK_CREDIT: ERC-721 Insured
+/// Asset NFT"):
+///   C1  activatedValue <= faceValue; only Buck moves activatedValue
+///       (activateFromBuck / deactivateFromBuck).
+///   C2  updateCredit never sets faceValue below activatedValue: purchased
+///       coverage is never written down (depreciation and a mark lower the
+///       VALUE, never the coverage).
+///   C3  a credit with activatedValue > 0 cannot be transferred.
+///   C4  a MARKED credit is self-issued (insurer == holder) and MARKED from
+///       creation; updateCredit never switches a credit into or out of it.
+///   C5  issuance needs the client's opt-in, and -- where the insurer gate
+///       is configured -- an envelope that covers the credit.
+///
 /// === Architectural note: why BuckCredit is its own contract ===
 ///
-/// BuckCredit and Buck currently communicate via:
+/// BuckCredit and Buck communicate via:
 ///   Buck -> BuckCredit: totalCurrentValue, batchCreditInfo, ownerOf,
-///                       balanceOf, tokenOfOwnerByIndex, activateFromBuck
+///                       balanceOf, tokenOfOwnerByIndex, activateFromBuck,
+///                       deactivateFromBuck
 ///   BuckCredit -> Buck: nothing.  The call graph is one-way.
 ///
 /// It is tempting to collapse the pair into a single Diamond (EIP-2535)
@@ -158,7 +179,7 @@ contract BuckCredit is ERC721Enumerable {
                           uint8 faceBand, uint8 depTypes, uint32 maxDepRate,
                           uint32 maxPremiumRate, bytes32[] scopes);
 
-    // ── The insurer gate (doc/review/accumulator-spec.org, section 12) ──
+    // ── The insurer gate (alberta-buck-ethereum.org, "The Insurer Gate") ──
     //
     // An insurer may write a credit only inside the envelope its regulator
     // attested: standing, a face band, the depreciation models, maximum
@@ -444,8 +465,8 @@ contract BuckCredit is ERC721Enumerable {
     ///      without consulting Buck, so the property does not depend on
     ///      another contract being correct or even reachable.  The two agree
     ///      by construction -- activation happens only inside
-    ///      `Buck._allocateMint`, and `updateCredit` may no longer clamp one
-    ///      without the other.
+    ///      `Buck._allocateMint`, and `updateCredit` may not reappraise below
+    ///      `activatedValue`, so nothing moves one without the other.
     ///
     ///      Release is by burning the position down (`Buck.burn`), which
     ///      deactivates the coverage.  At `activatedValue == 0` the credit
@@ -779,12 +800,10 @@ contract BuckCredit is ERC721Enumerable {
         // holder's credit limit without touching the coverage itself.
         //
         // This is also what keeps `activatedValue` and Buck's `mintsBacked`
-        // equal.  Clamping one without the other used to leave the holder
-        // unable to unwind: Buck sizes the burn from `mintsBacked` while
-        // `deactivateFromBuck` measures it against `activatedValue`, so a
-        // clamp stranded the position permanently -- burnable only down to
-        // the clamped line, with the remainder stuck and the credit
-        // disqualified from ever backing BUCK again.
+        // equal.  A clamp of one without the other would strand the holder:
+        // Buck sizes a burn from `mintsBacked` while `deactivateFromBuck`
+        // measures it against `activatedValue`, so the position would be
+        // burnable only down to the clamped line, the rest stuck for good.
         require(newFaceValue >= c.activatedValue.asUint(),
                 "BuckCredit: face below activated coverage");
         // A reappraisal stays inside the envelope too, or an insurer writes

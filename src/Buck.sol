@@ -9,22 +9,39 @@ import {BN254}            from "./BN254.sol";
 import {BuckTypes, BuckQty, BuckSeconds, CreditSlice, toBuckQty, toBuckQtySigned, toBuckSeconds} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
-/// @title Buck — identity-bound ERC-20 with single-slot per-account state.
+/// @title Buck — identity-bound ERC-20 with signed balances, demurrage, and
+///        Jubilee relief (alberta-buck-ethereum.org, "BUCK: ERC-20 Token").
 ///
-/// All transfer-path state for an account fits in one storage slot
-/// (AccountState).  Demurrage runs against the packed `balance` field; the
-/// Jubilee receives system-level demurrage credit via direct slot writes
-/// (`totalSupply` is NOT mutated by demurrage -- only by user mint / burn).
+/// Every account's transfer-path state is one packed slot (AccountState):
+/// a SIGNED balance -- positive: BUCK held; negative: a lien, credit drawn
+/// against the account's BuckCredits -- and the seconds that balance has
+/// accrued (fee-seconds while positive, issuance-seconds while negative).
 ///
-/// Mint/burn-side bookkeeping (mintsBacked, allowances, receipt fragments)
-/// lives in separate maps because it's touched per-mint, not per transfer.
-/// This keeps the hot path to one SSTORE per side per transfer.
+/// *Issuance.*  BUCK are issued only against a lien: `mint` activates
+/// BuckCredit coverage, raising the account's credit limit to
+/// K x (the credits' present value), and a transfer that spends past the
+/// held BUCK draws the rest on credit.  `burn` releases coverage.  A K cut
+/// lowers limits, never liens: an account whose lien exceeds its limit
+/// simply cannot draw more.
+///
+/// *Demurrage and relief.*  Held BUCK accrue a 2%/yr fee, locked inside the
+/// balance (balanceOf = raw - fee) and taken out of circulation ("realized")
+/// only when the BUCK carrying it would shed it -- a spend past held BUCK
+/// into credit, or aged BUCK arriving at an account below zero.  Liens
+/// accrue relief at the same 2%/yr, paid from the Jubilee fund when the
+/// lien is repaid, at burn, or when the holder settles.  The fund accrues
+/// 2%/yr on the BUCK issued, so it always holds the relief it owes.
+///
+/// Invariants the code maintains (tests: BuckDemurrage, BuckSignedBalance,
+/// JubileeBasis -- the last fuzzes all of them):
+///   I0  _totalSupply == sum over non-Jubilee a of max(0, raw(a))
+///   J   sum_a max(0, raw(a)) == totalSupply + jubileeActual
+///   S   totalSupply == sum(liens) + reliefRealized - feesRealized
+///   I1  raw(a) == 0  =>  buckSeconds(a) == 0
+///   M   mintsBacked[tid] == BuckCredit.activatedValue(tid)
 ///
 /// Nothing derived is stored.  An account's credit limit, and therefore its
-/// balanceOf, is recomputed from live BuckCredit state on every read: it is
-/// meant to track the insured assets behind it as they are acquired,
-/// reappraised and depreciated, and a cached copy of a number whose inputs
-/// live in two other contracts is a wrong balance waiting to happen.
+/// balanceOf, is recomputed from live BuckCredit state on every read.
 interface IBuckK {
     function currentBuckK() external view returns (uint256);
     /// @dev State-changing accessor.  Runs a PID cycle if `dT` has elapsed,
@@ -32,11 +49,12 @@ interface IBuckK {
     ///      so user activity drives (and amortizes) PID work.
     function compute() external returns (uint256);
     /// @dev Counter-cyclical insurance funding factor (18-dec; 1e18 == 1.0).
-    ///      Buck.mint gates on `balanceOf(minter) >= amount * fundingFactor
-    ///      / 1e18` -- the minter must hold (as positive BUCK or unused
-    ///      credit headroom) a reserve scaled to the BUCKs being issued.
-    ///      The Static controller returns 0 (gate disabled); the PID
-    ///      controller returns max(0, 1e18 + 10*(basket-BUCK)*1e18/basket).
+    ///      Buck.mint gates on `balanceOf(minter) >= poolPrincipal *
+    ///      fundingFactor / 1e18`, the minter's balance read before the
+    ///      mint: it must already hold (as positive BUCK or unused credit) a
+    ///      reserve scaled to the insurance deposit the mint pays.  A
+    ///      zero-premium mint pays no deposit and is exempt.  The Static
+    ///      controller returns 0 (gate disabled).
     function fundingFactor() external view returns (uint256);
 }
 
@@ -92,12 +110,10 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- reentrancy guard ---------------------------------------------------
     //
-    // Transient storage (EIP-1153; the build already targets cancun).  TSTORE
-    // / TLOAD are 100 gas flat with no cold tier, no refund accounting, and
-    // no persistent slot -- so this occupies NO storage slot and leaves the
-    // existing layout, which tests reach by hard-coded index via `vm.store`,
-    // completely undisturbed.  Measured cost is ~600 gas on a guarded call
-    // against ~5150 for the classic storage-slot guard.
+    // Transient storage (EIP-1153; the build targets cancun).  TSTORE / TLOAD
+    // are 100 gas flat with no cold tier, no refund accounting, and no
+    // persistent slot, so the guard occupies no storage slot.  Measured cost
+    // is ~600 gas on a guarded call against ~5150 for a storage-slot guard.
     //
     // Deliberately a contract-level mutex rather than a bit in AccountState.
     // A per-account bit is cheaper still (~390 gas, since the slot is written
@@ -112,11 +128,10 @@ contract Buck is IERC20, IERC20Metadata {
     // anything.
     bool private transient _entered;
 
-    /// @dev Blocks reentry into any BUCK state-mutating entry point.  Since
-    ///      the credit-limit cache and its `onCreditMutation` hook were
-    ///      removed, BuckCredit no longer calls back into Buck at all and the
-    ///      guard has no exemption to make for it: the call graph between the
-    ///      two contracts runs one way.
+    /// @dev Blocks reentry into any BUCK state-mutating entry point.
+    ///      BuckCredit never calls back into Buck -- the call graph between
+    ///      the two contracts runs one way -- so the guard makes no exemption
+    ///      for it.
     ///
     ///      It is not applied to the plain 2-arg `approve`, which touches only
     ///      the allowance map and calls nothing: re-entering it grants an
@@ -133,9 +148,11 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- packed per-account state ------------------------------------------
     //
-    //   balance      uint80   raw stored balance.  Spendable (Non-Carrying):
-    //                         balance - feeOwing.  Cap = 2^80-1 ≈ 1.21e24
-    //                         (= 1.21e18 BUCK at 6 decimals).
+    //   balance      int80    raw stored balance, signed: > 0 BUCK held,
+    //                         < 0 a lien (credit drawn).  Range +-6.04e23 raw
+    //                         (+-6.04e17 BUCK at 6 decimals).  Spendable for a
+    //                         non-Carrying account: held - feeOwing + unused
+    //                         credit (`balanceOf`).
     //
     //   buckSeconds  uint120  cumulative integral of (|balance| * dt)
     //                         crystallised through `timestamp`, read by the
@@ -651,28 +668,25 @@ contract Buck is IERC20, IERC20Metadata {
         return _allocateBurnView(amount, tokenIds);
     }
 
-    /// @dev Mint flow (Phase 1b): one-step activate + draw.  For each NFT in
-    ///      `tokenIds`, _allocateMint computes a `take_i` (insurance-overhead-
-    ///      inclusive) and a `principal_i = take_i - amount_i` per the per-NFT
-    ///      inversion `take = ceil(amount * BP / (BP - rate * POOL_ROI_INV))`.
-    ///      It calls `BuckCredit.activateFromBuck(tid, holder, take_i)` so the
-    ///      holder's NFT-backed credit headroom expands by `take_i`, and writes
-    ///      `mintsBacked[tid] += take_i`.
+    /// @dev Mint: activate coverage and pay its deposit, in one step.  For
+    ///      each NFT in `tokenIds` (cheapest premium first), `_allocateMint`
+    ///      activates the present value V_i that settles its share of
+    ///      `amount` net of the insurance deposit, per the inversion
+    ///      V = ceil(net * BP / (BP - premiumRate * POOL_ROI_INV)), with
+    ///      principal_i = V_i - net_i; it calls `activateFromBuck` for the face
+    ///      units carrying V_i and adds them to `mintsBacked[tid]` (M).
     ///
-    ///      Insurance pool gets `poolPrincipal` (= sum principal_i) added; the
-    ///      minter's signed balance is deducted by the same amount, driving it
-    ///      negative (NFT-backed credit used).  _setBalanceSigned tracks `_totalSupply`
-    ///      across both writes -- net effect on totalSupply: `+poolPrincipal`
-    ///      (insurance pool gained positive; minter's positive contribution
-    ///      stayed 0 since they went from 0 toward negative).
+    ///      The deposit, poolPrincipal = sum principal_i, moves from the
+    ///      minter to the insurance pool as a draw like any other (`_debit`):
+    ///      past the minter's held BUCK it is drawn on credit.
     ///
-    ///      End-state arithmetic:
-    ///          creditLimit(alice)  = sum take_i      (= totalCurrentValue * buckK)
-    ///          signedRawBalance     = -poolPrincipal  (= -sum principal_i)
-    ///          balanceOf            = creditLimit - used
-    ///                               = sum(take_i) - sum(principal_i)
-    ///                               = sum amount_i
-    ///                               = `amount`        (modulo integer rounding)
+    ///      End state, for a minter that held no BUCK, at one K:
+    ///          coverage activated = sum V_i = amount + poolPrincipal
+    ///          creditLimit rises by K x sum V_i (at the credits' present value)
+    ///          signedRawBalance  = -poolPrincipal
+    ///          balanceOf         = K x (amount + poolPrincipal) - poolPrincipal
+    ///      which is `amount` exactly when K = 1.  `amount` is the coverage to
+    ///      place, net of the deposit; the spendable it yields scales with K.
     function _mintAllocated(uint256 amount, uint256[] memory tokenIds) internal {
         require(identity.isVerified(msg.sender), "BUCK: sender not verified");
 
@@ -758,13 +772,10 @@ contract Buck is IERC20, IERC20Metadata {
     ///      Insurance pool's raw shrinks by `poolRefund` (= sum
     ///      principal); holder's signed raw grows by `poolRefund`.
     ///
-    ///      Solvency check (replaces the Phase 1a "amount <= balanceOf"
-    ///      gate, which was a Phase-1a-era "burn N from your held
-    ///      balance" semantic that doesn't fit the Phase 1b atomic
-    ///      activate-pay-draw / deactivate-refund-release model): after
-    ///      the burn, the holder's credit used must still fit under the
-    ///      shrunken credit limit.  If you owe X and want to release
-    ///      enough coverage to drop creditLimit below X, repay first.
+    ///      Solvency check: after the burn, the holder's lien (net of the
+    ///      refund and any relief paid) must still fit under the shrunken
+    ///      credit limit.  To release coverage that backs a lien, repay
+    ///      first.
     ///
     ///      End-state arithmetic:
     ///          activatedValue, mintsBacked   -= sum unwind_i  (per NFT)
@@ -817,8 +828,8 @@ contract Buck is IERC20, IERC20Metadata {
         // intended shape -- you repay the credit, then release the coverage,
         // as with any loan.  Doing nothing is also a supported outcome: the
         // insurance is paid up in perpetuity and stays in force, and the
-        // Jubilee relief accruing on the coverage shrinks what closing it
-        // costs, year on year, without the holder doing anything.
+        // Jubilee relief accruing on the lien shrinks what closing it costs,
+        // year on year, without the holder doing anything.
         int256 signedRaw = signedBalanceOf(msg.sender);
         uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
         require(used <= creditLimit(msg.sender),
@@ -1050,9 +1061,9 @@ contract Buck is IERC20, IERC20Metadata {
             CreditSlice memory s = slices[i];
             require(s.owner == msg.sender, "BUCK: not credit owner");
             uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
-            // `mintsBacked` and `activatedValue` are equal by construction --
-            // activation happens only in _allocateMint, and updateCredit may
-            // no longer reappraise below activated coverage.  Take the lesser
+            // `mintsBacked` and `activatedValue` are equal by construction (M)
+            // -- activation happens only in _allocateMint, and updateCredit
+            // may not reappraise below activated coverage.  Take the lesser
             // anyway: an unwind larger than the coverage on the token reverts
             // inside deactivateFromBuck, and a burn that reverts is a holder
             // who cannot close a position.  Whatever future edit puts these
@@ -1075,8 +1086,8 @@ contract Buck is IERC20, IERC20Metadata {
             // of the activateFromBuck call in _allocateMint.  Burning
             // is THE deactivation; it shrinks activatedValue (and thus
             // creditLimit) in lockstep with mintsBacked and refunds the
-            // proportional pool principal.  (Relief no longer rides on the
-            // coverage: it accrues on the holder's lien, in this contract.)
+            // proportional pool principal.  (Relief is not the coverage's:
+            // it accrues on the holder's lien, in this contract.)
             buckCredit.deactivateFromBuck(tid, msg.sender, unwind);
             totalUnwind += unwind;
             poolRefund  += refund_i;
@@ -1459,9 +1470,7 @@ contract Buck is IERC20, IERC20Metadata {
     // nothing.  It pays out of the fund when the lien is repaid (`_credit`),
     // when the holder burns (`_burnAllocated`), or when the holder asks
     // (`settleRelief`), and is capped at the lien: a lien carried ~50 years
-    // closes free.  (Relief used to accrue in BuckCredit on activated
-    // coverage, drawn or not -- 1/K of the BUCK a fully drawn credit could
-    // issue, and more than the fund took in.  test/JubileeBasis.t.sol.)
+    // closes free.
 
     /// @notice Relief accrued on `a`'s lien and not yet paid, in BUCK:
     ///         what closing the lien would be discounted by.
@@ -1628,13 +1637,12 @@ contract Buck is IERC20, IERC20Metadata {
 
     /// @dev System-level Jubilee accrual.  Adds totalIssued*RATE*elapsed to
     ///      Jubilee's balance directly -- NOT a mint, totalSupply unchanged.
-    ///      The fund accrues on the BUCK *issued*, the base relief accrues
-    ///      on, so it always holds the relief it owes.  (It used to accrue on
-    ///      totalSupply, which also counts BUCK whose issuer has already been
-    ///      relieved of them.)  Every operation that moves the BUCK issued
-    ///      calls this first, so each period accrues at the base that held
-    ///      through it; before, a transfer that drew or repaid credit moved
-    ///      the base without a checkpoint.
+    ///      The fund accrues on the BUCK *issued* -- the base relief accrues
+    ///      on -- not on totalSupply, which also counts BUCK whose issuer has
+    ///      already been relieved of them; so it always holds the relief it
+    ///      owes.  Every operation that moves the BUCK issued (a mint, a
+    ///      burn, a draw, a repayment, a relief payment) calls this first, so
+    ///      each period accrues at the base that held through it.
     function _accrueJubilee() internal {
         uint256 elapsed = block.timestamp - uint256(_jubileeLastUpdate);
         if (elapsed == 0) return;
