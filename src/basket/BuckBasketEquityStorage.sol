@@ -82,15 +82,12 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
 
-    event EquityDeposited(address indexed who, uint256 indexed id, address asset,
-                          uint256 amount, uint256 value, uint256 shares, uint256 credit);
-    event EquityRedeemed(address indexed who, uint256 indexed id, uint256 shares,
-                         uint256 cutShares, uint256 paid, bool proRata);
+    // Deposits and redemptions emit the pro-rata shells' Deposited and
+    // Redeemed (BuckBasketStorage), which the simulation already reads.
     event WalletCredited(address indexed token, uint256 amount);
     event WheelWork(uint8 indexed kind, uint256 indexed i, uint256 amount);
 
     error MinOut();
-    error NotEquityWheel();
 
     // --- Valuation ----------------------------------------------------------- //
 
@@ -182,7 +179,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
 
     function _grainS(Snap memory s) internal view returns (uint256) {
         uint256 g = _grossS(s, MARK_TWAP) * eq.grainPpm / 1e6;
-        return g > 1e12 ? g : 1e12;
+        return g > 1e3 ? g : 1e3;                       // a floor tiny at any BUCK decimals
     }
 
     // The one-shot forms, for the views.

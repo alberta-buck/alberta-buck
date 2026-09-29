@@ -1180,3 +1180,62 @@ Section 10 stands, except:
   6. the sim;
   7. the server and the Savings tab;
   8. the experiments.
+
+** 13.8 Built (2026-09-29): steps 1-5
+
+| contract                             | what it is                                                                                     | runtime size |
+|--------------------------------------+------------------------------------------------------------------------------------------------+--------------|
+| =BuckBasketEquityStorage=            | the equity books appended to the shared layout; the valuation, from one snapshot of the marks  | (abstract)   |
+| =BuckBasketEquity=                   | the shell: deposit (the full K at once), redeem (BUCK; owed; pro-rata fallback), the treasury, the wheel's credits, views; dispatch to two facets | 16.7 KB |
+| =BuckBasketEquityWheel=              | the components facet: Daily, Sync, Deploy, Fund, Trim                                         | 9.0 KB       |
+| =BuckBasketUniswapV3= (extended)     | the venue: marks, poolLive, positionMint, positionBurn (principal only), positionSync          | 21.2 KB      |
+| =EquityTurnDirector=                 | the per-leg ladder, the lean, the gates                                                        | -            |
+| =MonetaryDesk=                       | the desk as a mixin: its quadrants, bounds, book and stabilizer seam, unchanged                | (abstract)   |
+| =BuckBasketOps= (unchanged behaviour) | the pro-rata basket with the desk: the sim's baselines                                        | 21.4 KB      |
+| =BuckBasketEquityOps=                | the equity basket with the desk                                                               | 21.8 KB      |
+| =EquityKind= (in =BasketWheel=)      | the components as 2N + 3 wheel slots                                                           | (wheel 13.1 KB) |
+
+Tests: =test/basket/BuckBasketEquity.t.sol= (15), the same suite through
+a real =BasketWheel= (=test/wheel/BasketWheelEquity.t.sol=, 17), on
+=BuckBasketEquityOps= with the desk's two (17), and the director's four
+(=EquityTurnDirector.t.sol=, 19 with the inherited).  Every existing basket,
+wheel and shadow-controller suite passes unchanged.
+
+Where the build departed from 13.7, and why:
+
+1. *The arbitrage stays in the wheel* (=ArbKind=).  It needs no float -- the
+   V3 callback funds it -- and it already credits the basket through
+   =creditDepositors= / =creditTreasury=, which the equity shell answers by
+   landing the captures in the wallet.  "In the basket" is where its profit
+   goes, not where its code runs.  So =BasketWheel= keeps its kinds and adds
+   =EquityKind=; the components are 2N + 3 slots, not 3N + 3.
+2. *No better-route swap yet.*  The basket trades in its own pools, and the
+   wheel's arbitrage re-pins them and keeps what an outsider would have
+   taken, which prices the basket's own trades at about the outside route's
+   cost.  A route through TOKEN/USDC and BUCK/USDC is a later refinement.
+3. *A wheel swap is capped at 1% of the pool's depth* (=swapCapBp=).  The
+   prototype's outside market had unlimited depth; on chain, a gap-sized
+   swap into a thin pool moved it several-fold.  A large deposit is placed
+   over many ticks, the arbitrage re-pinning the pool between them.  "No
+   deposit cap" stands: what is bounded is the wheel's pace.
+4. *The liquidity target is capped at 20% of the gross* (=ceilBp=).  A young
+   basket's first deposits are its whole size, and the flow sizing read them
+   as one enormous flow and kept everything as liquidity.
+5. *One snapshot per step.*  Each component reads every pool's marks once
+   and computes gross, equity, headroom, target and keep from it; a
+   due-check had cost a million gas re-reading them.
+6. *The desk is a mixin* rather than =BuckBasketOps= rebased, so the
+   pro-rata desk and its tests stand as the sim's baseline and the equity
+   desk is a second concrete contract.
+7. *Sim compatibility*: the shell keeps =depositToken= and the two-argument
+   =redeem= (0 bp redeems all, the pro-rata convention), and emits the
+   pro-rata shells' =Deposited= and =Redeemed= events.  The grain's floor is
+   1e3 raw units, tiny at 6 decimals (the sim's BUCK) and at 18.
+
+*Identity.*  BUCK transfers are identity-gated.  With BUCK payouts an
+exiter must be able to receive BUCK, where TOKEN payouts let a depositor
+never touch BUCK.  In the sim every agent that receives BUCK is bound; for
+production this is a question for the owner (13.5 did not raise it).
+
+Next: step 6, the sim (=deploy.py= =basket_impl= "equity" and
+"equity-ops", the wheel and director wiring, the agents' readings, eqmetrics).

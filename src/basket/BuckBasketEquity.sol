@@ -216,7 +216,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         totalShares = S + shares;
         dayFlow += int256(value);
         _settle();
-        emit EquityDeposited(msg.sender, id, asset, amount, value, shares, credit);
+        // The pro-rata shells' event (the sim reads it): buckMinted is the credit.
+        emit Deposited(msg.sender, id, asset, amount, credit, 0);
     }
 
     // --- Redemption ----------------------------------------------------------- //
@@ -225,9 +226,12 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         return redeem(id, bp, 0);
     }
 
+    /// @notice Redeem `bp` of receipt `id` (0: all of it, the pro-rata shells'
+    ///         convention); revert unless at least `minBuck` is paid.
     function redeem(uint256 id, uint256 bp, uint256 minBuck) public returns (uint256 paid) {
         if (receipt.ownerOf(id) != msg.sender) revert NotOwner();
-        if (bp == 0 || bp > 10000) revert RedeemZero();
+        if (bp == 0) bp = 10000;
+        if (bp > 10000) revert Bp10000();
         Holding storage h = holdings[id];
         uint256 shares = uint256(h.shares) * bp / 10000;
         uint256 basis = uint256(h.basis) * bp / 10000;
@@ -241,14 +245,17 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         uint256 cut = worth > basis ? (worth - basis) * LAMBDA_BP / 10000 * S / e : 0;
         treasuryShares += cut;
 
-        bool proRata;
-        (paid, proRata) = _exit(shares - cut, sn);
+        uint256 burned0 = burnedTotal;
+        (paid,) = _exit(shares - cut, sn);
         h.shares -= uint128(shares);
         h.basis -= uint128(basis);
+        uint256 remainingBp = h.shares == 0 ? 0
+            : uint256(h.shares) * 10000 / (uint256(h.shares) + shares);
         if (h.shares == 0) receipt.burn(id);
         if (paid < minBuck) revert MinOut();
         IERC20(address(buck)).transfer(msg.sender, paid);
-        emit EquityRedeemed(msg.sender, id, shares, cut, paid, proRata);
+        // The pro-rata shells' event: burned now, paid, the cut's value (BUCK).
+        emit Redeemed(msg.sender, id, burnedTotal - burned0, paid, cut * e / S, remainingBp);
     }
 
     /// @notice The treasury's shares leave by the same door, with no cut.
