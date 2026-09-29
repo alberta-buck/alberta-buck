@@ -5,15 +5,16 @@
 
 * 0. Status
 
-The design is settled and prototyped, but not yet built in Solidity.
+The design is ruled (13.3, 13.5, 13.6), built in Solidity (13.8, plan
+steps 1-5) and running in the sim (13.9, step 6).  One ruling is asked
+(13.10: the fallback exit in kind).  *A fresh session restarts at 13.11.*
 
-- *The prototype* is =alberta_buck/sim/equity_basket.py=: pure Python with
+- *The first prototype* is =alberta_buck/sim/equity_basket.py=: pure Python with
   no EVM, covering the pools, the accounting and the wheel's components.
   Its 28 tests, one per promise this document makes, are in
   =alberta_buck/test/test_equity_basket.py=; run them with
-  =make nix-venv-test-equity=.
-- *The contracts* are not started.  Section 10 is the plan, step by step.
-  A fresh session restarts there.
+  =make nix-venv-test-equity= (which also runs the ruled design's 29).
+- *The contracts* are built (13.8): section 10 was the plan, amended by 13.7.
 - *Section 12 proposes the BUCK basis* (2026-09-29, awaiting the design
   owner's ruling): payouts in BUCK from a reserve the wheel keeps, the
   wheel's own arbitrage with that reserve as its float, and a director that
@@ -1286,3 +1287,131 @@ What the sim taught:
    arbitrage removes only the gap between the basket's pools and the
    market, not a fall in BUCK itself.
 
+
+** 13.10 Where the basket trades TOKEN, and the fallback exit in kind (2026-09-29; a ruling asked)
+
+The owner's question: buying TOKEN to place a BUCK deposit drives TOKEN up,
+and dissolving positions to pay BUCK drives it down.  A payout of whatever
+mix a dissolved position returns moves no market and costs only ERC-20
+transfers.  With a stock of BUCK and BUCK credit sized to the flow, where is
+the basket's hand forced, and is the damage only at bootstrap?
+
+*Where the basket trades, and why:*
+
+1. *An exit does not trade.*  It is paid from the BUCK held, then from
+   minted headroom (K x equity - debt): one BUCK transfer and perhaps a
+   mint.  No position is touched.  In the prototype's flows experiment
+   that came to 0.03-0.09 pool operations per exit.
+2. *The net outflow is sold later, paced.*  An exit's debt share, plus
+   anything minted to pay it, becomes =owed=.  BUCK from deposits, fees and
+   arbitrage captures repays it with no trade.  Only what inflows do not
+   cover reaches Trim, which burns a slice of a position and sells its
+   TOKEN.  Trim takes the director's pick or the most overweight pool, at
+   most 2 x =swapCapBp= (2% of that pool's depth) a step, with the
+   arbitrage re-pinning between steps.  This is inherent to BUCK payouts:
+   value that leaves as BUCK comes out of TOKEN, unless inflows net it.
+   It is the trade the owner wants: selling the overweight, likely dear,
+   TOKEN.
+3. *A deposit trades, and a levered basket's inflow buys TOKEN.*  A
+   deposit of value v is placed with its K v of minted BUCK as full-range
+   positions, which are 50/50 by value.
+   - A BUCK deposit buys (1 + K)/2 x v of TOKEN: 87.5% at K = 0.75.
+   - A TOKEN deposit sells (1 - K)/2 x v: 12.5%.
+   - Deploy pairs a TOKEN deposit with the BUCK waiting in the wallet first,
+     pro rata, so the two kinds of deposit net.  They cancel only when TOKEN
+     deposits are (1 + K)/(1 - K) times the BUCK deposits: 7 to 1 at 0.75.
+   - Fund aims the purchase at the director's pick or the largest
+     underweight, which is again the trade the owner wants.
+4. *The pro-rata fallback exit trades, at once.*  When the BUCK held and
+   the headroom cannot pay an exit (a large exit, or one after a K cut),
+   =_exitProRata= burns the exit's fraction of every position, then sells
+   all of the TOKEN through =monetaryLeg= to pay BUCK.  This is the one
+   place the basket's hand is forced: an unpaced sale of N TOKENs, as large
+   as the exit.  (=BuckBasketEquity.sol=, =_exitProRata=.)
+
+*The bootstrap.*  The large moves seen in the sim were bootstrap's (13.9
+lesson 1):
+- A wheel run to rest before tick 0 sold into its own empty pools with
+  nobody re-pinning them.  It now only makes the first pairings there.
+- The day-0 move of about +50% in every TOKEN/BUCK pool was the wheel's
+  arbitrage, and it was correct.  On the first tick the scenario's outside
+  market jumped: BUCK/USDC fell to 0.814 and TOKEN/USDC rose to 37.3.  That
+  implies about 45.8 BUCK per TOKEN, where the young pools still held the
+  price they were seeded at.  The arbitrage re-pinned them in one trade,
+  large in percentage only because they were thin.  They agreed with the
+  market at the next tick.
+- After that, the largest single move each actor made in that run was
+  about 1.7% (the anonymous arbitrageurs) and 0.8% (the TOKEN accumulators).
+
+*Proposed (asked; not built): the fallback exit pays in kind.*  The exit's
+fraction f of every position is burned and paid as it comes out: each
+TOKEN, plus the BUCK left after its debt share is burned, plus f of the
+wallet (idle BUCK and idle TOKEN).  That is N position burns and N + 1
+transfers with no swaps, cheaper than the swaps, and it leaves the TOKEN
+markets alone.
+- *It always covers its debt share while the basket is at or under its
+  limit.*  A full-range position is 50/50 by value at the current price, so
+  its BUCK side is half the positions' value.  At the limit D = K x E, so
+  D / G = K / (1 + K) < 1/2 for any K < 1: the BUCK side covers the debt
+  share with BUCK to spare.
+- *Past a leverage of 1* (D > E, reached only by a K cut plus a fall in the
+  basket's BUCK value), the BUCK side falls short of the debt share by some
+  s.  The exit then burns the BUCK it has, keeps TOKEN worth s at the
+  conservative mark in the wallet, and adds s to =owed=.  Trim sells that
+  TOKEN later, paced.  The exiter bears s; the remaining holders are
+  unchanged at the marks.
+- *Normal exits stay one BUCK payout* (ruling 9).  Only the fallback's
+  payout asset changes.  An in-kind option for any exit, at the exiter's
+  choice, would also be possible, but it is not proposed.
+- *To build*:
+  - =_exitProRata= in =BuckBasketEquity.sol=: drop the =monetaryLeg= sale;
+    transfer each TOKEN and the BUCK residue; retain the shortfall's TOKEN
+    as above.  =Redeemed= reports the BUCK paid, and a new event, or the
+    existing =WalletCredited= pattern, reports each TOKEN paid.
+  - The prototype's =CreditBasket= fallback, and its test
+    (=test_an_exit_beyond_the_reserve_goes_pro_rata_and_bears_its_conversion=),
+    must match.
+  - =test_redeem_proRataFallback= must assert that no pool's price moves.
+  - The sim's =parse_redeem= must book the TOKEN paid.
+  - The exiter needs no TOKEN approval to receive TOKEN; its BUCK residue
+    goes to an account already identity-approved for BUCK (13.8).
+
+** 13.11 Resume here
+
+State at the compaction (2026-09-29): branch =feature/carry-convexity=, with
+local commits through =981d433= and none pushed.  =test/vectors/= is never
+committed.
+
+- *Asked of the owner*: the fallback exit in kind (13.10).
+- *To report to the owner* (not yet acknowledged):
+  - BUCK payouts give a saver BUCK's market price at exit (13.9 lesson 4).
+  - Depositors need one identity-bound approve before their first exit
+    (13.8).
+- *Next work*, in 13.7's order:
+  1. Finish step 6.  Add the equity fields to =snapshot.py= and the
+     eqmetrics: shares, share price, debt, liquidity (held and headroom),
+     owed, the flow sigma, and the director's targets.
+  2. Step 7.  Give the server a savings block with the same fields.  The
+     Savings tab's JS model gets one BUCK payout and reads =valueOf=.
+  3. Step 8.  Run the experiments on the equity basket: E2 (the desk's
+     arms, on "equity-ops"), E3, the E4 twins against ProRata, and E5
+     across K and the director's quorum and tilt (13.7).
+  4. Later: the better-route swap (13.8 departure 2).
+- *How to run*:
+  - Foundry: =nix develop --command forge test --optimize --optimizer-runs
+    200 --skip test/RegressionTest.sol --match-path "test/{basket,wheel}/*"=.
+  - Sim artifacts: =make nix-sim-build=.
+  - A smoke run: =python -m alberta_buck.sim --scenario rebalancing
+    --basket equity --days 6= in the repo venv
+    (../alberta-buck.venv-0.2.1-nix-linux-cpython-313, via =make nix-venv-*=).
+  - The Python suites: =make nix-venv-test-equity= (57).
+- *Gotchas*:
+  - =work_wheel.Clock(day, tick, ticks_per_day)=: =Clock(step, 0)= makes
+    every step a day.
+  - The sim's BUCK has 6 decimals; the grain's floor is 1e3.
+  - Set the arbitrage's triangles after the first pairings
+    (=equity_arb_on=), never before.
+  - The shell and the facet both answer =creditDepositors= and
+    =creditTreasury=; =deploy.py= deduplicates the ABI union by signature.
+  - The first run after =KEEP_IDENTITY_SECRET= regenerates those agents'
+    cached identities, once.
