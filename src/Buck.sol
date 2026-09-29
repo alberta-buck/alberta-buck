@@ -137,10 +137,21 @@ contract Buck is IERC20, IERC20Metadata {
     //                         balance - feeOwing.  Cap = 2^80-1 ≈ 1.21e24
     //                         (= 1.21e18 BUCK at 6 decimals).
     //
-    //   buckSeconds  uint120  cumulative integral of (balance * dt)
-    //                         crystallised through `timestamp`.
-    //                         feeOwing(a) = (buckSeconds + balance*elapsed)
-    //                                       * BASE_RATE_PER_SEC / SCALE
+    //   buckSeconds  uint120  cumulative integral of (|balance| * dt)
+    //                         crystallised through `timestamp`, read by the
+    //                         sign of `balance`:
+    //                           balance > 0  fee-seconds: the demurrage the
+    //                                        held BUCK owe,
+    //                                        feeOwing = (bs + balance*elapsed)
+    //                                                   * BASE_RATE_PER_SEC / SCALE
+    //                           balance < 0  issuance-seconds: the lien over
+    //                                        time, on which relief accrues
+    //                           balance = 0  always 0 (invariant I1)
+    //                         A balance changes sign only at a write, after
+    //                         `_crystallize` has folded the old side through
+    //                         now, so the old side's seconds are settled
+    //                         there and the new side's start at 0 (see
+    //                         `_debit` / `_credit`).
     //
     //   timestamp    uint40   last crystallisation (seconds since epoch).
     //                         2^40 sec ≈ year 36812 -- safe past 2038.
@@ -1271,11 +1282,11 @@ contract Buck is IERC20, IERC20Metadata {
     ///      `a`, checked the spend against balanceOf, and -- if the spend
     ///      reaches into credit -- checkpointed the fund.
     ///
-    ///      Spent from held BUCK, the fee stays locked in what remains, as
-    ///      ever.  Spent past them, the fee is paid first: the lien absorbs
-    ///      it, so the lien is exactly the credit drawn.  (Before, the locked
-    ///      fee was spent as if it were BUCK: 98 held + 52 drawn left a lien
-    ///      of 50, and the fee read zero while the account stayed negative.)
+    ///      Spent from held BUCK (value <= raw - fee), the fee stays locked in
+    ///      what remains.  Spent past them, the fee is paid first (realized:
+    ///      out of circulation) and the rest is drawn, so the resulting lien
+    ///      is exactly the credit drawn, value - (raw - fee), and the seconds
+    ///      restart at 0 as issuance-seconds.
     function _debit(address a, uint256 value) internal {
         if (value == 0) return;
         AccountState memory s = _state[a];
@@ -1286,6 +1297,9 @@ contract Buck is IERC20, IERC20Metadata {
             if (fee > raw) fee = raw;
             if (value <= raw - fee) {
                 s.balance = toBuckQtySigned(old - int256(value));
+                // I1.  Spending down to exactly zero means fee == 0 here: the
+                // seconds left are dust (under one raw unit of fee).
+                if (value == raw) s.buckSeconds = toBuckSeconds(0);
                 _state[a] = s;
                 _totalSupply -= value;
                 return;
@@ -1300,10 +1314,8 @@ contract Buck is IERC20, IERC20Metadata {
             _totalSupply -= raw;       // the whole positive contribution goes
             return;
         }
-        // Already at or below zero: deeper into credit.  At exactly zero any
-        // fee-seconds left are dust (a fee that rounded to nothing); clear
-        // them so the field starts counting issuance-seconds clean.
-        if (old == 0) s.buckSeconds = toBuckSeconds(0);
+        // Already at or below zero: deeper into credit.  The seconds are
+        // issuance-seconds (or 0 at zero, by I1) and keep counting.
         s.balance = toBuckQtySigned(old - int256(value));
         _state[a] = s;
     }
@@ -1316,16 +1328,17 @@ contract Buck is IERC20, IERC20Metadata {
     ///      in, as ever: the age routes to its payer if it has one.
     ///
     ///      Below zero the BUCK repay a lien, and they pay their fee on
-    ///      arrival: they repay `value - fee`.  (Before, the age rode into an
-    ///      account whose fee reads zero while negative, and the lien fell by
-    ///      the full `value`.)  If the receipt repays the whole lien, the
-    ///      relief accrued on it pays out with it, and the account starts
-    ///      above zero with no age.
+    ///      arrival: they repay `value - fee`, the fee realized (an account
+    ///      below zero holds issuance-seconds, not fee-seconds, so the age
+    ///      cannot ride in).  If the receipt repays the whole lien, the
+    ///      relief accrued on it pays out with it, and the account starts at
+    ///      or above zero with no seconds (I1 at exactly zero).
     function _credit(address a, uint256 value, uint256 carriedBs) internal {
         if (value == 0) return;
         AccountState memory s = _state[a];
         int256 old = s.balance.asInt();
         if (old >= 0) {
+            // A holder: fee-seconds (0 at zero, by I1) plus the carried age.
             if (carriedBs != 0) {
                 if (s.flags & FLAG_SPONSORED != 0) carriedBs = _routeToPayer(a, carriedBs);
                 s.buckSeconds = toBuckSeconds(s.buckSeconds.asUint() + carriedBs);
@@ -1335,6 +1348,7 @@ contract Buck is IERC20, IERC20Metadata {
             _totalSupply += value;
             return;
         }
+        // Below zero: the seconds are issuance-seconds.
         uint256 fee = carriedBs == 0 ? 0 : Math.mulDiv(carriedBs, BASE_RATE_PER_SEC, SCALE);
         if (fee > value) fee = value;
         if (fee != 0) {
@@ -1675,6 +1689,9 @@ contract Buck is IERC20, IERC20Metadata {
         int256 oldSigned = _state[a].balance.asInt();
         AccountState memory s = _state[a];
         s.balance = toBuckQtySigned(newSigned);
+        // I1.  (Only the insurance pool's paths reach here, and never below
+        // zero; a non-Carrying pool paid down to zero forgives its fee.)
+        if (newSigned == 0) s.buckSeconds = toBuckSeconds(0);
         _state[a] = s;
         int256 oldPos = oldSigned > 0 ? oldSigned : int256(0);
         int256 newPos = newSigned > 0 ? newSigned : int256(0);

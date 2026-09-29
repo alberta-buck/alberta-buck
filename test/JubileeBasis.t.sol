@@ -201,6 +201,38 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
         return k == 0 ? a : (k == 1 ? b : c);
     }
 
+    /// I1: a zero balance holds no seconds, so the seconds' meaning (fee-
+    /// seconds above zero, issuance-seconds below) is given by the sign.
+    /// Read from the packed account word: balance int80 (bits 0..79),
+    /// buckSeconds uint120 (bits 80..199).
+    function _assertI1(address a) internal view {
+        uint256 w = uint256(vm.load(address(buck), BuckSlots.state(a)));
+        int80 bal = int80(uint80(w));
+        uint256 bs = uint120(w >> 80);
+        if (bal == 0) assertEq(bs, 0, "I1: a zero balance holds no seconds");
+    }
+
+    /// The one path that left seconds at a zero balance: spending exactly
+    /// all held BUCK when their fee rounds to nothing (100 BUCK held a
+    /// second).  The writer now clears them, so a later draw's issuance-
+    /// seconds start clean.
+    function test_I1_spendingDownToZeroLeavesNoSeconds() public {
+        _basket();
+        vm.prank(BASKET);
+        _hooks().mintFromBasket(alice, 200e6);            // alice: -100 -> +100, fresh
+        vm.warp(block.timestamp + 1);
+        assertEq(buck.feeOwing(alice), 0, "a second's fee rounds to nothing");
+        vm.prank(alice);
+        buck.transfer(bob, 100e6);                        // exactly all she holds
+        assertEq(buck.signedRawBalanceOf(alice), 0);
+        _assertI1(alice);
+        vm.prank(alice);
+        buck.transfer(bob, 100e6);                        // now draw 100 of credit
+        vm.warp(block.timestamp + 365 days + 6 hours);
+        assertApproxEqRel(buck.reliefOf(alice), 2e6, 0.001e18,
+                          "relief on the new lien alone: 2% of 100 for the year");
+    }
+
     /// Random draws, repayments (fresh and aged), basket mints, burns and
     /// payouts, coverage burns, relief settlements and time: after every
     /// step the supply identity holds, the positive balances are the supply,
@@ -267,6 +299,7 @@ contract JubileeBasisTest is BuckJubileeReliefTest {
             int256 br = _hooks().basketRelief();
             uint256 owed = buck.reliefOf(alice) + buck.reliefOf(CAROL) + (br > 0 ? uint256(br) : 0);
             assertGe(buck.jubileeActual() + step + 2, owed, "the fund holds the relief it owes");
+            _assertI1(alice); _assertI1(bob); _assertI1(CAROL); _assertI1(BASKET); _assertI1(POOL);
         }
     }
 
