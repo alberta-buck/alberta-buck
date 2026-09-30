@@ -1,0 +1,129 @@
+#+TITLE: The desk's reserve as BuckBasket shares (for discussion; not built)
+#+AUTHOR: Perry Kundert (design owner) with Claude
+#+DATE: 2026-09-30
+#+OPTIONS: ^:nil toc:nil num:t
+
+/Status: an idea raised by the design owner on 2026-09-30, written down for a
+later discussion and experiment.  Nothing here is implemented.  The desk as
+built: alberta-buck-ethereum-wheel.org, "The desk"; =src/basket/EquityDesk.sol=._
+
+* The idea
+
+The desk (=EquityDesk=) needs a reserve to act before it has ever issued: Q1
+sells reserve TOKEN for cheap BUCK, and Q3 buys the reserve back when BUCK
+recovers.  Today that reserve is the founding grant, held as plain TOKEN in the
+desk's contract.  The proposal:
+
+1. The desk puts its founding holdings into the BuckBasket -- it deposits them
+   and holds the receipt's shares -- so the reserve earns the basket's harvest
+   instead of sitting idle.
+2. It pledges those shares: its marked credit is marked at a net value that
+   includes the receipt, refreshed by a wheel step, so it can issue (Q4)
+   against them.
+3. Since a deposit makes the basket issue BUCK (it draws =K x= the deposit to
+   pair it in its pools) and an exit retires it (its lien share is repaid from
+   the positions' BUCK), perhaps depositing and exiting can themselves be part
+   of the desk's issue and retire strategy.
+
+* What the desk has to do (the quadrants, and where a reserve enters)
+
+| BUCK is             | quadrant | the desk                                   | supply    | needs            |
+|---------------------+----------+--------------------------------------------+-----------+------------------|
+| cheap, reverting    | Q1       | sells reserve TOKEN for BUCK, holds it     | unchanged | a TOKEN reserve  |
+| dear, reverting     | Q3       | sells held BUCK back for TOKEN             | unchanged | held BUCK (Q1's) |
+| dear, persistent    | Q4       | draws its credit, sells the BUCK for TOKEN | rises     | credit (its mark)|
+| cheap, persistent   | Q2       | buys BUCK; while drawn it repays the lien  | falls     | a lien to repay  |
+
+Q1 and Q3 are the "foreign reserve" round trip and work from day one on the
+grant.  Q4 then Q2 -- issue dear, retire cheap -- works once the desk has
+issued.  The one unfinished case is BUCK cheap and persisting before any issue:
+the BUCK bought is held, supporting the price as well as retirement would while
+held, but staying in supply and paying the holding fee (=_deskRetire= is a
+no-op; Buck has no way to destroy held BUCK).
+
+* Assessment
+
+** As the reserve's home: promising
+
+- *It earns.*  The reserve collects the basket's harvest instead of idling.
+- *The correlation is the right way round.*  When BUCK is cheap a basket costs
+  more BUCK, so the desk's shares buy more BUCK exactly when it must buy.
+- *In-kind exits deliver what Q1 spends.*  An exit beyond the basket's
+  liquidity is paid in kind -- a fraction of every position and of the idle
+  TOKEN, by transfer -- which is the TOKEN Q1 sells for BUCK.
+- *Pledging needs no new machinery.*  The desk's marked credit is already
+  re-marked at its net value before every operation; the receipt joins
+  =netValue()= at the basket's LOW share price (after the 25% cut and the exit
+  charge it would pay to leave).
+- *No re-hypothecation spiral.*  The mark is NET of the desk's lien: drawing
+  against shares, buying TOKEN and depositing it adds assets and lien alike, so
+  net value -- and the room under =K x= it -- does not grow.  (A mark at gross
+  would spiral to =K/(1-K)=, 3x at K = 0.75.)
+- *The desk's trades cannot inflate its own collateral.*  Its swaps move the
+  pools that value its shares, but the LOW mark takes the lower of spot and
+  TWAP, so a push raises nothing.
+
+** As the issue/retire lever itself: weak, and wrong-way under stress
+
+A deposit's BUCK and an exit's retirement happen INSIDE the pools, as liquidity
+added or removed at the current price.  They change supply and pool depth, not
+BUCK's price -- and the price is the desk's job.
+
+- *An exit during an inflation attack* thins the pools just when depth is what
+  resists the attacker.
+- *A TOKEN deposit while BUCK is dear* buys a little BUCK as the wheel places it
+  (the =(1-K)/2= swap), pushing the price the wrong way; a BUCK deposit sells
+  BUCK ((1+K)/2), the right way, but the basket then draws =K x= it again.
+- *An exit paid in BUCK* hands the desk BUCK the basket drew for it: no price
+  effect until the basket's Trim sells TOKEN to repay, at most 1% of a pool's
+  depth per step.  It makes the basket do the desk's buying, slowly.
+
+So the swaps stay the lever; the basket is where the reserve waits.
+
+** Costs and rule changes
+
+- Every round trip pays the treasury's 25% of any gain over cost basis, and
+  the entry and exit charges.  A ruling: is the desk's receipt exempt from
+  the cut (it is the system's own capital), or does it pay like anyone?
+- D2 ("nothing the desk holds or owes enters the basket's books") becomes "the
+  desk is an ordinary depositor": its receipt is in the basket's books by
+  design, its lien and held BUCK are not.  The invariant suite
+  (=test/basket/EquityDeskInvariant.t.sol=) needs a desk-deposit handler, and
+  its ghosts must tell a legitimate deposit from a leak.
+- A large desk exit may be paid in kind; Q1 wants TOKEN anyway, but the
+  desk's accounting of =monetaryTokenHeld= must take TOKEN arriving from an
+  exit.
+- The founding grant enters the basket as equity, so the depositors' share
+  price is unaffected, but the basket's size (and so the desk's bounds, which
+  are sized in the basket's equity) grows by the grant.
+
+** Where it might also help: the standing book
+
+A desk holding shares could open a /standing book/ cheaply: draw part of its
+line at founding against the shares and sell it for TOKEN.  Then Q2 always has
+a lien to retire against, and Q1 has twice the ammunition.  The costs are a
+one-time supply increase at launch and a desk long commodities against a BUCK
+lien (its room shrinks if commodities fall; no margin call).
+
+* An experiment to decide it
+
+On the E2 shock arms (dump and squeeze at x1 and x4, the grinds, the
+book-loading attack), three desks beside the equity basket:
+
+1. today's: the grant as plain TOKEN;
+2. the grant deposited as shares, pledged; Q1 funded by in-kind exits;
+3. as 2, plus a standing book of a fraction of the line.
+
+Read: the peak and mean deviation of BUCK from its basket; days =K= railed;
+the desk's P&L AND its inventory (never P&L alone); the depositors' return
+(does the desk's in-and-out cost the other depositors?); the treasury's cut
+paid by the desk; how often Q2 found no lien.
+
+* Open questions
+
+1. The cut: exempt the desk's receipt, or not?
+2. How much of the reserve stays as plain TOKEN, for Q1 without an exit?
+3. Does the desk's exit compete with depositors' exits for the basket's
+   liquidity in the same stress, and should it queue behind them?
+4. Should the standing book be sized in K (a fraction of the line) or in the
+   basket's equity (like the bounds)?

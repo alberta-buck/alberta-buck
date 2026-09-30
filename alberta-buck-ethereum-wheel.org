@@ -531,7 +531,7 @@ epochs of an EMA with decay /q/ collapse exactly,
 in O(log n) by binary exponentiation (with a matching closed form for its velocity), so a poke after
 a quiet month costs the same as one after a busy hour and lands where /n/ diligent pokes would have.
 Work is conserved: triggering more often trades per-call gas against staleness, never total cost.
-The desk's director does this; the equity director does not yet (below).
+Both directors do this.
 
 ** Paying the caller
 :PROPERTIES:
@@ -650,16 +650,14 @@ Jubilee accounting now.
    desk and the director competing for the same pool depth.
 6. *The desk's reach.*  It retires only what it has issued.  Opening with a standing book -- part of
    its line drawn and sold, which funds Q1 and gives Q2 something to retire -- is the remedy an
-   earlier desk used.
-7. *The director's catch-up.*  The equity director advances one step per sample, so a skipped week
-   under-advances its ladder; the closed form above would land it where daily samples would have.
-8. *The director's bands.*  The 30% leash is hand-set.  Two refinements with firm theory: under
+   earlier desk used.  =doc/DESK-LP-RESERVE.org= sketches a reserve held as basket shares, pledged.
+7. *The director's bands.*  The 30% leash is hand-set.  Two refinements with firm theory: under
    proportional costs the optimal policy is a no-trade region, trading only to its /boundary/
    (Davis and Norman, 1990); and for a reverting spread the optimal thresholds are known in closed
    form from its reversion rate and volatility (Bertram, 2010).
-9. *The wheel's parameters*: the share /s/, /kappa/, where the callers' reserve is funded from, and
+8. *The wheel's parameters*: the share /s/, /kappa/, where the callers' reserve is funded from, and
    capping every leg of a cycle (v1 caps only the first).
-10. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The basket owns no BUCK/USDC position, and
+9. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The basket owns no BUCK/USDC position, and
    should not; who provides that depth is a question for any deployment.
 
 * Risks
