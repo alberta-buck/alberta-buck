@@ -55,10 +55,11 @@ contract BuckCreditMarkedTest is Test {
         ids[0] = tid;
     }
 
-    /// @dev Mark, then activate the whole face once: the limit is K x mark.
+    /// @dev Mark, then activate the whole face once (a mint for all the
+    ///      credit can give): the limit is K x mark.
     function _open(uint256 m) internal {
         credit.mark(tid, m);
-        buck.mint(m, _ids());
+        buck.mint(type(uint256).max, _ids());
     }
 
     function test_marked_valueFollowsTheMark() public {

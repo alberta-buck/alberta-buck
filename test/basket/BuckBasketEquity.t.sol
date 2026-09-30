@@ -104,7 +104,7 @@ contract BuckBasketEquityTest is Test {
                                           BuckCredit.DepreciationType.NONE, 0, 0, 0);
         uint256[] memory ids = new uint256[](1);
         ids[0] = own;
-        buck.mint(1e14, ids);
+        buck.mint(type(uint256).max, ids);                  // the whole face: K x 1e8 BUCK
         address holder = address(new EqHolder());
         for (uint256 j = 0; j < 3; j++) {
             address who = j == 0 ? alice : (j == 1 ? bob : GOV);

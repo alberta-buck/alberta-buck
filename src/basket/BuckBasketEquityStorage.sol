@@ -36,7 +36,6 @@ interface IMarkedCredit {
                           uint48 depStartAt, uint32 premiumRate) external returns (uint256);
     function mark(uint256 tokenId, uint256 value) external;
     function markOf(uint256 tokenId) external view returns (uint256);
-    function depreciatedFaceValue(uint256 tokenId) external view returns (uint256);
 }
 
 /// @notice The desk's book, as the shell reports it (BuckBasketEquityOps
@@ -286,10 +285,11 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         if (address(c) == address(0)) return;
         if (c.markOf(creditId) != value) c.mark(creditId, value);
         if (!creditLive && value > 0) {
-            // One mint activates the whole face: zero premium, so no deposit.
+            // One mint for all the credit can give activates its whole face:
+            // zero premium, so no deposit.
             uint256[] memory ids = new uint256[](1);
             ids[0] = creditId;
-            _bk().mint(c.depreciatedFaceValue(creditId), ids);
+            _bk().mint(type(uint256).max, ids);
             creditLive = true;
         }
     }
