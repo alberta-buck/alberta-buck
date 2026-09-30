@@ -1,0 +1,24 @@
+# E2's EQUITY TWIN (doc/CONVERGENCE.org): conv-e2's eleven burst arms, cast and
+# seeds on the equity basket with the desk (equity-ops), paired cell by cell
+# against conv-e2 (python -m alberta_buck.sim.star writes pair.md).  The equity
+# basket's wheel is not optional -- its components place the deposits and keep
+# the liquidity -- so its agent is cast in every cell, and E2's axis becomes
+# the wheel's arbitrage: off (SIM_WHEEL_ARB=0, the components alone) / on.
+extends = "conv-e2"
+name = "conv-e2-eq"
+notes = "E2 twin: equity-ops, the wheel's arbitrage off/on, eleven burst arms"
+objective = "parity gate on every arm with the arbitrage on; the depositors' P&L and the gauge against conv-e2's cell of the same label"
+
+[baseline]
+"scenario.basket" = "equity-ops"
+"scenario.agents.BasketWheelAgent" = 1
+"agents.BasketWheelAgent.impl" = "solidity"
+"agents.BasketWheelAgent.start" = "token"
+"agents.BasketWheelAgent.cap_bp" = 200
+"agents.BasketWheelAgent.max_work" = 12
+"agents.BasketWheelAgent.chain" = "l2"
+"agents.BasketWheelAgent.call" = "profitable"
+
+[presets.wheel]
+off = { SIM_WHEEL_ARB = "0" }
+on = { SIM_WHEEL_ARB = "1" }

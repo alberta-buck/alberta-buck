@@ -387,6 +387,7 @@ def main(argv=None) -> int:
                 print(f"[star] {r}", flush=True)
 
     report(spec, specs, outdir, a.resp_days, a.band)
+    pair_report(spec, outdir)
     return 0
 
 
@@ -471,7 +472,11 @@ def load_star(path: str | Path) -> dict:
             break
     else:
         raise SystemExit(f"no such star spec: {path} (looked under {STARS})")
-    spec = tomllib.loads(p.read_text())
+    return _finish_spec(tomllib.loads(p.read_text()), p)
+
+
+def _finish_spec(spec: dict, p: Path) -> dict:
+    """Defaults and validation of a star spec read from `p`."""
     spec.setdefault("name", p.stem)
     spec.setdefault("baseline", {})
     spec.setdefault("arm", [])
@@ -508,6 +513,14 @@ def cells(spec: dict, outdir: Path, arms=None, axes=None, days=None) -> list[dic
     (values axes) or lo / hi (compound axes)."""
     wp12 = {**spec, "axis": [ax for ax in spec["axis"] if not _wp15_axis(ax)]}
     out = _cells_wp12(wp12, outdir, arms=arms, axes=axes, days=days)
+    # A [baseline] or arm entry with an environment variable's name (SIM_*)
+    # is an environment variable, as it is in a preset: passed to the sim as
+    # --set it would land in the experiment's config and be read by nothing.
+    for c in out:
+        for tok in [t for t in c["sets"] if _is_env_name(t.split("=", 1)[0])]:
+            k, _, v = tok.partition("=")
+            c["env"].setdefault(k, v)
+            c["sets"].remove(tok)
     w15 = [ax for ax in spec["axis"] if _wp15_axis(ax)]
     if not w15:
         return out
@@ -653,6 +666,126 @@ def report(spec: dict, specs: list[dict], outdir: Path, resp_days: int,
          "cells": table}, indent=1))
     print(md)
     print(f"[star] summary -> {outdir / 'summary.md'} / summary.json")
+    return table
+
+
+# ---------------------------------------------------------------------------
+# Twins (2026-09-29): a star that EXTENDS another -- the same arms, cast and
+# seeds on a different design -- and the PAIRING report that sets each of its
+# cells beside the parent's cell of the same label.  Written for the equity
+# basket's twins of the E-series (doc/CONVERGENCE.org), whose parents run the
+# pro-rata ops basket.
+#
+#   extends = "conv-e2"    the parent star.  The twin's [baseline] and its
+#                          preset tables override the parent's key by key
+#                          (a preset level the twin names replaces the
+#                          parent's level); a twin [[axis]] replaces the
+#                          parent's axis of the same name (others are
+#                          appended); `drop_axes` removes axes; a twin
+#                          [[arm]] list replaces the parent's arms.
+#   pair = "conv-e2"       the star it is compared with (default: the one it
+#                          extends).  After the twin's own summary, pair.md
+#                          beside it: per arm and cell label, the twin's
+#                          value of each metric and its delta against the
+#                          paired star's cell (its summary.json under the
+#                          same --outdir).
+# ---------------------------------------------------------------------------
+
+_load_star_wp15 = load_star
+
+
+def _resolve_star(path) -> Path:
+    p = Path(path)
+    for cand in (p, p.with_suffix(".toml"), STARS / p.name,
+                 STARS / (p.name + ".toml")):
+        if cand.exists():
+            return cand
+    raise SystemExit(f"no such star spec: {path} (looked under {STARS})")
+
+
+def _merge_star(parent: dict, child: dict) -> dict:
+    """The twin's spec: the parent's, with the child's overrides."""
+    s = {k: v for k, v in parent.items()
+         if not k.startswith("_") and k not in ("name", "notes", "objective", "pair")}
+    for k, v in child.items():
+        if k in ("extends", "drop_axes"):
+            continue
+        if k == "baseline":
+            s[k] = {**parent.get(k, {}), **v}
+        elif k == "presets":
+            pr = {t: dict(tbl) for t, tbl in (parent.get("presets") or {}).items()}
+            for t, tbl in v.items():
+                pr[t] = {**pr.get(t, {}), **tbl}
+            s[k] = pr
+        elif k == "axis":
+            axes = [dict(a) for a in parent.get("axis", [])]
+            for a in v:
+                i = next((j for j, x in enumerate(axes) if x.get("name") == a.get("name")), None)
+                if i is None:
+                    axes.append(a)
+                else:
+                    axes[i] = a
+            s[k] = axes
+        else:
+            s[k] = v
+    drop = set(child.get("drop_axes") or [])
+    s["axis"] = [a for a in s.get("axis", []) if a.get("name") not in drop]
+    s.setdefault("pair", child["extends"])
+    return s
+
+
+def load_star(path: str | Path) -> dict:
+    """The WP-15 loader, and a star that extends another."""
+    p = _resolve_star(path)
+    raw = tomllib.loads(p.read_text())
+    if "extends" not in raw:
+        return _load_star_wp15(p)
+    return _finish_spec(_merge_star(load_star(raw["extends"]), raw), p)
+
+
+PAIR_COLS = [("bv", ".4f"), ("K", ".3f"), ("rail", ".0%"), ("peak", "+.1f"),
+             ("auc", ".0f"), ("recov", "d"), ("exc_real", "+.2f"), ("whale", "+.2f"),
+             ("dm_real", "+.2f"), ("nav_bsk", ".1f"), ("netlp", "+.3f"),
+             ("carry", ".3g"), ("k_tv", ".3f")]
+
+
+def pair_report(spec: dict, outdir: Path) -> dict | None:
+    """The twin's cells beside the paired star's: per arm and label, the
+    verdicts and each metric (the twin's value, its delta against the pair).
+    Needs both summaries (run the paired star first, or --report-only)."""
+    other = spec.get("pair")
+    if not other:
+        return None
+    mine_p, theirs_p = outdir / "summary.json", outdir.parent / other / "summary.json"
+    if not (mine_p.exists() and theirs_p.exists()):
+        print(f"[star] pair: waiting on {theirs_p if mine_p.exists() else mine_p}")
+        return None
+    mine = json.loads(mine_p.read_text())["cells"]
+    theirs = json.loads(theirs_p.read_text())["cells"]
+    lines = [f"# pair {spec['name']} against {other}", "",
+             f"Each cell: {spec['name']}'s value ({spec['name']} - {other}, the cell of "
+             "the same label); the verdicts side by side.", ""]
+    table = {}
+    for arm, rows in mine.items():
+        base = {r["label"]: r for r in theirs.get(arm, [])}
+        lines += [f"## arm {arm}", "",
+                  "| cell | verdict | " + " | ".join(c for c, _ in PAIR_COLS) + " |",
+                  "|---|---|" + "---|" * len(PAIR_COLS)]
+        out = []
+        for r in rows:
+            b = base.get(r["label"])
+            verdict = f"{r.get('verdict')} / {b.get('verdict') if b else '--'}"
+            txt = [_cellfmt(c, s, r.get(c), b) for c, s in PAIR_COLS]
+            lines.append(f"| {r['label']} | {verdict} | " + " | ".join(txt) + " |")
+            out.append({"label": r["label"], "twin": r, "pair": b})
+        lines.append("")
+        table[arm] = out
+    md = "\n".join(lines)
+    (outdir / "pair.md").write_text(md)
+    (outdir / "pair.json").write_text(json.dumps({"star": spec["name"], "pair": other,
+                                                  "cells": table}, indent=1))
+    print(md)
+    print(f"[star] pair -> {outdir / 'pair.md'} / pair.json")
     return table
 
 

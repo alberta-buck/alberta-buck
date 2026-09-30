@@ -75,10 +75,18 @@ DEPOSITED_TOPIC = LEGACY_DEPOSITED_TOPIC
 REDEEMED_TOPIC = LEGACY_REDEEMED_TOPIC
 
 
+def wheel_arb_enabled() -> bool:
+    """SIM_WHEEL_ARB=0 turns the wheel's arbitrage off (no triangles): on an
+    equity basket, whose wheel must run to place deposits, it is the
+    "wheel off" of the experiments."""
+    return os.environ.get("SIM_WHEEL_ARB", "1") != "0"
+
+
 def equity_arb_on(d) -> None:
     """Give the equity basket's wheel its arbitrage: one triangle per
     constituent (its TOKEN/BUCK pool, TOKEN/USDC, BUCK/USDC)."""
-    if d.wheel is None or int(d.wheel.functions.triangleCount().call()) > 0:
+    if d.wheel is None or not wheel_arb_enabled() \
+            or int(d.wheel.functions.triangleCount().call()) > 0:
         return
     for k, t in enumerate(d.tokens):
         d.chain.send(d.wheel.functions.setTriangle(
@@ -806,9 +814,12 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # ever placed -- so it is deployed here, beside the basket, and every
     # later caller (BasketWheelAgent, or the loop's own tick) turns it.
     if basket_impl in ("equity", "equity-ops"):
-        eqd = chain.deploy("EquityTurnDirector", basket.address, gov)
-        chain.send(basket.functions.setEquityDirector(eqd.address), sender=gov)
-        d.equity_director = eqd
+        # The director is optional (SIM_EQUITY_DIRECTOR=0: none -- the
+        # components then keep the plain band).
+        if os.environ.get("SIM_EQUITY_DIRECTOR", "1") != "0":
+            eqd = chain.deploy("EquityTurnDirector", basket.address, gov)
+            chain.send(basket.functions.setEquityDirector(eqd.address), sender=gov)
+            d.equity_director = eqd
         wheel = chain.deploy(
             "BasketWheel", buck.address, usdc.address, gov,
             int(os.environ.get("SIM_WHEEL_KAPPA_BP", "200")),
@@ -829,8 +840,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             int(os.environ.get("SIM_WHEEL_ARB_CAP_BP", "200")), 1), sender=gov)
         d.wheel = wheel
         if verbose:
+            eqd_s = d.equity_director.address[:10] + "..." if d.equity_director else "none"
             print(f"[deploy] equity basket {basket.address[:10]}...  "
-                  f"director {eqd.address[:10]}...  wheel {wheel.address[:10]}... "
+                  f"director {eqd_s}  wheel {wheel.address[:10]}... "
                   f"({int(wheel.functions.slotCount().call())} slots)")
 
     # --- WP-14: one sim-only stabilizer per agent class (decision 17) --- #

@@ -1,0 +1,23 @@
+# E4's EQUITY TWIN (doc/CONVERGENCE.org): conv-e4's organic cast (30 external-
+# debt retirees) and five burst arms on the equity basket with the desk
+# (equity-ops), the wheel's agent cast as in conv-e4.  Its base cells pair with
+# conv-e4's by label; the axis adds the wheel-off twin E4 never had -- on the
+# equity basket, the wheel's arbitrage off (SIM_WHEEL_ARB=0: the components
+# alone), a cell with no conv-e4 counterpart.
+extends = "conv-e4"
+name = "conv-e4-eq"
+notes = "E4 twin: equity-ops with the retiree cast; the wheel's arbitrage on (base) / off"
+objective = "the parity gate with the organic credit channel on the equity basket, against conv-e4; what the arbitrage adds"
+
+[baseline]
+"scenario.basket" = "equity-ops"
+
+[presets.wheel]
+on = { SIM_WHEEL_ARB = "1" }
+off = { SIM_WHEEL_ARB = "0" }
+
+[[axis]]
+name = "wheel"
+preset = "wheel"
+base = "on"
+values = ["off"]

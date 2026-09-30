@@ -52,6 +52,7 @@ from web3.logs import DISCARD
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.agents import _register
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.deploy import wheel_arb_enabled
 from alberta_buck.sim.equilibrium_agents import _ProxyAgent
 from alberta_buck.sim.experiment import spec as _spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
@@ -218,7 +219,7 @@ class BasketWheelAgent(_ProxyAgent):
         d.chain.send(wheel.functions.setStartMode(1 if self.start == "buck" else 0),
                      sender=gov)
         k = 0
-        for i, tok in enumerate(d.tokens):
+        for i, tok in enumerate(d.tokens if wheel_arb_enabled() else []):
             idx = int(d.basket.functions.indexOf(tok.address).call()) - 1
             if idx < 0 or not d.pool_usdc[i] or not d.pool_buck[i]:
                 continue
