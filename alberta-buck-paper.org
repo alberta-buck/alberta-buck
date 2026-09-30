@@ -34,7 +34,7 @@
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 Public money is going digital, and every design on the table pays for
 the convenience with a ledger its issuer can read, freeze, and mine.
 Cash resists surveillance, but only by keeping no evidence at all: no
@@ -61,7 +61,7 @@ binding is vacuous, and prove that zero-knowledge registry membership is
 necessary for the doubly-anonymous case under a stated restriction. This is
 exactly the branch the shipped system takes. Every theorem carries an executable
 witness. ([[https://perry.kundert.ca/images/alberta-buck-paper.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-paper-flow.txt][Text]])
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 2

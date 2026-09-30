@@ -6,7 +6,7 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 We analyze the Panoptic carry/convexity critique against the BuckBasket and specify the wave-3 markout
 instrument.  We evaluate the basket's own side of the excursion catalogue and record the design
 decisions reached by working each open question through one historical and one synthetic example.
@@ -17,7 +17,7 @@ model with falsifiable predictions, and specify the wave-3 program cell by cell.
 the basket's convertibility undertaking is struck as a tranche ladder -- successively deeper
 discounts sized to the reserve remaining -- so it has no cliff for an attacker to time.  Testability
 and modelling are the spine: nothing here ships on-chain that has not first won its catalogue cell.
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 2

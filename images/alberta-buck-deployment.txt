@@ -65,7 +65,7 @@ Table of Contents
 ..... 4. JSON is UTF-8; `read_text()' is whatever the locale says
 ..... 5. Wheels only – no sdist
 ..... 6. What gates a wheel
-.. 4. P5: `alberta-buck' on PyPI
+.. 4. P5: `alberta-buck' on PyPI  [done 2026-09-25]
 ..... 1. The base install is pure Python, and that is the point
 ..... 2. The kernel extra is safe because the fallback is real
 ..... 3. Done, and what is left
@@ -78,22 +78,23 @@ Table of Contents
 1 Status
 ════════
 
-  Published, and each verified by installing from the registry into an
-  empty project outside this checkout:
+  Published (0.3.0, 2026-09-30), and each verified by installing from
+  the registry into an empty project outside this checkout:
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    artifact                  registry   version  licence          
   ────────────────────────────────────────────────────────────────
-   `alberta-buck-math'       crates.io    0.1.0  CAL-1.0          
-   `alberta-buck-identity'   crates.io    0.1.0  CAL-1.0          
-   `alberta-buck-registry'   crates.io    0.1.0  CAL-1.0          
-   `alberta-buck-wallet'     crates.io    0.1.0  CAL-1.0          
-   `alberta-buck-kernel'     npm          0.1.1  CAL-1.0          
-   `alberta-buck-core'       npm          0.1.1  CAL-1.0          
-   `alberta-buck-contracts'  npm          0.1.0  GPL-3.0-or-later 
-   `alberta-buck-contracts'  PyPI         0.1.0  GPL-3.0-or-later 
-   `alberta-buck-core'       PyPI         0.1.0  CAL-1.0          
-   `alberta-buck-kernel'     PyPI         0.1.0  CAL-1.0          
+   `alberta-buck-math'       crates.io    0.3.0  CAL-1.0          
+   `alberta-buck-identity'   crates.io    0.3.0  CAL-1.0          
+   `alberta-buck-registry'   crates.io    0.3.0  CAL-1.0          
+   `alberta-buck-wallet'     crates.io    0.3.0  CAL-1.0          
+   `alberta-buck-kernel'     npm          0.3.0  CAL-1.0          
+   `alberta-buck-core'       npm          0.3.0  CAL-1.0          
+   `alberta-buck-contracts'  npm          0.3.0  GPL-3.0-or-later 
+   `alberta-buck-contracts'  PyPI         0.3.0  GPL-3.0-or-later 
+   `alberta-buck-core'       PyPI         0.3.0  CAL-1.0          
+   `alberta-buck-kernel'     PyPI         0.3.0  CAL-1.0          
+   `alberta-buck'            PyPI         0.3.0  GPL-3.0-or-later 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   Remaining:
@@ -101,7 +102,6 @@ Table of Contents
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    #  artifact / step              registry  blocked on                 
   ──────────────────────────────────────────────────────────────────────
-   5  `alberta-buck'               PyPI      dependency hygiene         
    6  `alberta-buck-game' + zomes  npm       D2 – where authority lives 
    7  repository public            GitHub    a deliberate decision      
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -111,9 +111,117 @@ Table of Contents
   `LICENSE' / `core/LICENSE' / `LICENSING.md' / `NOTICE', a Rust
   toolchain and `binaryen' in the flake, `Cargo.lock' and `foundry.lock'
   committed.  The repository is pushed to
-  `github.com/alberta-buck/alberta-buck' (private), and all three
-  release workflows have run green – every PyPI row above was published
-  with no human holding a token.
+  `github.com/alberta-buck/alberta-buck' (private).  All three release
+  workflows have now published with no human holding a token: 0.2.0 was
+  the first trusted publish for the crates and the npm packages, whose
+  0.1.x went out by hand.
+
+  *0.2.0, the v2 roll* (released 2026-09-25).  Protocol v2 changes every
+  tag, transcript and note hash, so it is a minor bump everywhere, math
+  included (lockstep).  0.2.0 also brings `alberta-buck' to PyPI (P5),
+  and the Notes pool, its adapters, its Groth16 verifiers and the
+  Poseidon hashers into the contracts bundle.
+
+  Those verifiers are from the *development* trusted setup, and are
+  published deliberately (author, 2026-09-25): until v1.0.0 the toxic
+  waste is public, so a simulation can model forged-proof attacks and
+  the defences around them.  The bundle says so per artifact
+  (`trustedSetup: "development"') and in its compiler record, both
+  release workflows refuse a bundle that does not, and every README
+  states it.  Every bundled contract fits EIP-170; the one verifier
+  snarkjs emits too large (A2, N=32) ships table-driven
+  (doc/snark-regeneration.org).
+
+  Release in dependency order, each tag's workflow green before the
+  next:
+
+  1. `js-contracts-v0.2.0' and `py-contracts-v0.2.0' – the bundle, to
+     npm and PyPI.
+  2. Bump `core/js''s `alberta-buck-contracts' pin to 0.2.0, regenerate
+     its lock (`npm install --package-lock-only'), commit, push.
+  3. `py-kernel-v0.2.0' (four platform wheels), then `py-core-v0.2.0'.
+  4. `rs-v0.2.0' (the four crates) and `js-v0.2.0' (kernel, then core).
+  5. `py-sim-v0.2.0' – `alberta-buck', which pins core at 0.2.
+
+  Before step 1 the registries need their publishers: npm trusted
+  publishers for all three packages, crates.io trusted publishers for
+  the four crates, and a PyPI pending publisher for `alberta-buck'
+  (environment `pypi-sim').
+
+  *0.2.1, the sandbox patch* (released 2026-09-26, with
+  `feature/public').  Only what changed is released: the contracts
+  (`Buck.burn' refunds a pool the registry binds Carrying by carrying
+  transfer), `alberta-buck-core' on npm (the role ceremonies, observer,
+  market and codec the browser sandbox is built on) and `alberta-buck'
+  on PyPI (the Carrying insurance pool, the fair debtor ledger, pyrevm's
+  chain id).  The kernel rides along at 0.2.1 because the `js-v' tag
+  publishes kernel and core in lockstep; the crates, the Python kernel
+  and `alberta-buck-core' on PyPI stay at 0.2.0 (unchanged; patches
+  float).  Order: `js-contracts-v0.2.1' and `py-contracts-v0.2.1', then
+  core's contracts pin and lock, then `js-v0.2.1' and `py-sim-v0.2.1'.
+
+  *0.3.0, the accounting roll* (released 2026-09-30, from
+  `feature/carry-convexity').  The Jubilee accounting changes Buck
+  (relief on liens, MARKED credits, `mint(amount)' raising spendable by
+  `amount' at K) and `buck-math''s carrying transfer, so it is a minor
+  bump everywhere, lockstep, every package moving.  The bundle drops
+  `BuckBasketProRata' (it mints through the basket hooks of the sims'
+  `BuckWithBasketHooks', which the bundle never shipped) and adds the
+  equity basket: `BuckBasketEquity', its components facet
+  `BuckBasketEquityWheel', `EquityTurnDirector', `BasketWheel' and the
+  monetary desk `EquityDesk'.  Order: `js-contracts-v0.3.0' and
+  `py-contracts-v0.3.0', then core/js's contracts pin and lock, then
+  `py-kernel-v0.3.0', `py-core-v0.3.0' and `py-sim-v0.3.0' one at a
+  time, with `rs-v0.3.0' and `js-v0.3.0' beside them.  A workflow's runs
+  share one concurrency group, and GitHub keeps only one run pending per
+  group – a third tag cancels the second – so tags for the same workflow
+  go one at a time.  The first `py-sim-v0.3.0' run failed its smoke test
+  within seconds of `py-core-v0.3.0' going green: PyPI's index did not
+  yet serve the new core, so its install could not resolve.  Nothing was
+  published; the tag was re-pushed at the same commit and passed.
+  Before tagging a package whose job installs from PyPI, wait until `pip
+  download --no-deps' fetches its dependency.
+
+  From 0.3.0 every package carries its LICENSE, and the kernels and the
+  contracts bundle their generated THIRD-PARTY-NOTICES.txt
+  (doc/KNOWN-ISSUES.org, KI-5).  Before tagging, run `make
+  nix-third-party-notices-check': a dependency bump since the last
+  regeneration fails it, and `make nix-third-party-notices' brings the
+  notices up to date.  The release workflows refuse a package that lacks
+  them.
+
+  *What the 0.2.0 release taught* – read before the next one:
+
+  • /Every registry's publisher is per package, and each has a trap./
+    crates.io: Settings -> Trusted Publishing on each crate, owner the
+    `alberta-buck' organization (else "No Trusted Publishing config
+    found").  npm: Settings -> Trusted Publisher on each package, and
+    since 2026-09-03 a new one allows only `npm stage publish' – tick
+    direct `npm publish' under Allowed actions, or the publish fails
+    `E403 OIDC permission denied' after the token was minted (a missing
+    publisher is `E404').  PyPI: a new project takes a /pending/
+    publisher under the account (Account -> Publishing); the
+    organization's "Add existing project" only moves a project that
+    exists, so `alberta-buck' is created under the account and moved
+    into the organization afterwards.
+  • /Pin Foundry in CI to the flake's./ Foundry "stable" (1.8.3) meters
+    the gas-bound tests differently and failed three that pass on 1.7.1;
+    both contracts jobs now pin v1.7.1.
+  • /npm 12 and npm 11 changed two things under us./ `npm pack --json'
+    is an object keyed by package name in 12, not an array (both checks
+    read either shape).  And npm >= 11 `npm ci' refuses `core/js''s
+    lockfile: `@evmts/zevm@0.0.0' (via tevm) declares optional platform
+    packages that do not exist on the registry, so no lockfile can list
+    them.  The `js-v' job installs, builds and tests on npm 10 and
+    upgrades only to publish.
+  • /Consumers of `alberta-buck-core' on npm need npm >= 11./ npm 10's
+    installer crashes on its dependency graph (`Cannot read properties
+    of null (reading 'edgesOut')'), for 0.1.2 as for 0.2.0; Node 24
+    bundles npm 11.
+  • /A failed tag's run is re-run, not re-tagged/ (`gh run rerun
+    --failed'), unless the workflow file itself changed: a re-run uses
+    the tag's commit.  A re-pointed tag shares its name with the old
+    run, so find the new run by its commit SHA.
 
 
 2 The architecture, and why
@@ -715,8 +823,8 @@ Table of Contents
   kernel is absent.
 
 
-6.4 P5: `alberta-buck' on PyPI
-──────────────────────────────
+6.4 P5: `alberta-buck' on PyPI  [done 2026-09-25]
+─────────────────────────────────────────────────
 
 6.4.1 The base install is pure Python, and that is the point
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
@@ -773,10 +881,14 @@ Table of Contents
   the same mechanism declared rather than improvised.  `requires-python'
   is >= 3.11, the floor of `alberta-buck-core'.
 
-  Remaining before the tag: a dynamic version from
-  `alberta_buck/version.py', and the `py-sim-v*' job in
+  Ready for its first tag (2026-09-25): the `py-sim-v*' job in
   `release-pypi.yml' (pending publisher `alberta-buck', environment
-  `pypi-sim').
+  `pypi-sim') builds it, checks it is pure and carries its runtime data,
+  and smoke-tests base and `[kernel]' installs outside any checkout
+  before publishing.  Its PyPI page is `README-pypi.md' (the repository
+  README is Org, which PyPI does not render).  The planned dynamic
+  version was dropped: the tag gate reads `pyproject.toml', and one
+  version source is enough.
 
 
 6.4.4 An unseeded global RNG cost two full-suite runs

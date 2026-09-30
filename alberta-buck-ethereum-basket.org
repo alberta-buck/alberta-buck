@@ -25,7 +25,7 @@
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 A currency is only as steady as what it is tied to.  The Alberta Buck (BUCK) is tied to a basket of
 base commodities -- energy, metals, food -- whose prices are held in place, over the long run, by
 physics and by human ingenuity rather than by anyone's promise.  This article is about that
@@ -35,7 +35,7 @@ turns their coming back into a return for anyone who parks savings in it.
 It is written for everyone.  The machinery, and the arithmetic behind each claim, is in the
 companion paper, [[file:alberta-buck-ethereum-wheel.org][The BasketWheel]].
 ([[https://perry.kundert.ca/images/alberta-buck-ethereum-basket.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-ethereum-basket.txt][Text]])
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 1

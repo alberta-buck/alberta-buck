@@ -27,7 +27,7 @@
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 Buy a coffee with a card and at least four businesses learn about it: the coffee shop, its payment
 processor, the card network and your bank. Each keeps the record, and several build products to
 sell from what they learn. Show your licence at a bar, a rental counter or a dispensary and a scanner may keep a
@@ -48,7 +48,7 @@ We follow one payment. Bob owes Carol 100 BUCK. Mallory, who has no special acce
 everything public. We will build the payment one layer at a time, and every step below is
 running code: each fragment executes against a live local Ethereum chain, and its output is
 printed beneath it.[fn:status] ([[https://perry.kundert.ca/images/alberta-buck-privacy.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-privacy.txt][Text]])
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 * The cast, and how to read this

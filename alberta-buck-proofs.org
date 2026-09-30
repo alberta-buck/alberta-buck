@@ -34,7 +34,7 @@
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 The Alberta Buck identity system ([[https://perry.kundert.ca/range/finance/alberta-buck-identity][Identity]], [[http://perry.kundert.ca/range/finance/alberta-buck-identity-example][Examples]]) rests on
 two cryptographic transformations: the /Identity Fountain/ blinds a
 Pointcheval-Sanders credential into a hiding presentation \( (A, B) \)
@@ -124,7 +124,7 @@ presentation results (Theorems 1', 2', R-HVZK, R-sound, R-comp)
 describe the A' registration implemented on branch =feature/a-prime=;
 they are stated with proofs here but await independent review, and
 that branch is not a production release. ([[https://perry.kundert.ca/images/alberta-buck-proofs.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-proofs.txt][Text]])
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 3

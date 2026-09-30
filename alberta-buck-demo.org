@@ -17,7 +17,7 @@
 #+OPTIONS: ^:nil
 #+OPTIONS: toc:nil
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 Dale runs 2,400 acres of wheat and canola east of Vulcan, Alberta.  Like
 most working farms, the land is good, the equity is real -- and the cash
 flow belongs to somebody else: a $650,000 land loan at 6.2%, $4,300 every
@@ -37,7 +37,7 @@ deployed contracts; every identity proof is generated and verified
 on-chain in the tab; every trade routes through a real Uniswap V3 pool
 via the real Universal Router.  Only the world around the contracts --
 commodity prices, the fiat rail, the insurance office -- is simulated.
-#+END_ABSTRACT
+#+end_abstract
 
 * The stage, before the story
 

@@ -18,7 +18,7 @@
 #+OPTIONS: ^:nil # Disable sub/superscripting with bare _; _{...} still works
 #+OPTIONS: toc:nil
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 Bootstrapping the BUCK monetary system requires three deliverables that share
 one foundation:
 
@@ -42,7 +42,7 @@ overlays, and in-process JS EVMs (Tevm); and (b) a Rust mathematical kernel --
 monetary arithmetic and the Identity/proving cryptography -- compiled to WASM
 for JavaScript and bound natively for Python, so every platform predicts
 bit-identical fees, demurrage, depreciation, and proofs.
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 3

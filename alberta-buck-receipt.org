@@ -31,7 +31,7 @@
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 The cryptography of the Alberta Buck identity layer names an /identity point/ \(
 M \in \mathbb{G}_1 \) and binds a transaction; the artifact a human actually
 holds is a /receipt/.  This document specifies that receipt: a plain-text slip,
@@ -56,7 +56,7 @@ proofs are the primitives already shipped (the approve handshake +
 =verifiable_decrypt= for EOA, the batch Schnorr for public issuers, and for
 the private-issuer A2 case the recipient-blinded =verifyIssuerReenc= binding
 the mint verified on chain).  ([[https://perry.kundert.ca/range/finance/alberta-buck-notes-flow/][Decryptability]], [[https://perry.kundert.ca/range/finance/alberta-buck-identity-example/][Identity]])
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 3

@@ -22,7 +22,7 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 [[file:alberta-buck-ethereum-basket.org][The BuckBasket]] says the basket earns from tolls, from
 correcting its own prices and from timing slow swings, and that a desk beside it steadies BUCK.
 This paper is the machinery and the arithmetic behind those claims.
@@ -41,7 +41,7 @@ that pay their callers from what they capture.
 *This is a prototype.*  The contracts exist and run in a simulated economy and in a public sandbox.
 None of it is deployed or audited, and the numbers below are a simulation's or a model's.
 ([[https://perry.kundert.ca/images/alberta-buck-ethereum-wheel.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-ethereum-wheel.txt][Text]])
-#+END_ABSTRACT
+#+end_abstract
 
 #+TOC: headlines 1
 

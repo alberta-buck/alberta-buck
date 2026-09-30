@@ -20,7 +20,7 @@
 #+ATTR_LATEX: :width 10cm
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
-#+BEGIN_ABSTRACT
+#+begin_abstract
 The Phase 7-bis batch-mint pivot (see =alberta-buck-notes-rollup-mint.org=)
 pushes per-leaf Merkle insertion into the SNARK and recovers ~N-fold mint
 amortization at the /batch/ level.  This memo describes a second, orthogonal
@@ -50,7 +50,7 @@ N bearer notes from /one/ commitment.  Together the two drop marginal
 per-note mint cost by 2-3 orders of magnitude vs. the shipped per-leaf
 design, at the cost of the linkability disclosure described in /Privacy
 Model/.
-#+END_ABSTRACT
+#+end_abstract
 
 #+LATEX: \clearpage
 #+TOC: headlines 3
