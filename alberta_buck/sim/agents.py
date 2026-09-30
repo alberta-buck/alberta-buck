@@ -49,6 +49,44 @@ class Agent:
     def address(self) -> str:
         return self.account.address
 
+    # -- randomized decisions -------------------------------------------------- #
+    #
+    # A population on one threshold acts in lockstep: every member reads the
+    # same signal at the same tick and crosses it together, so the herd's
+    # trade overshoots and the next reading crosses back -- the period-2
+    # whipsaw of the savings world (lag-1 autocorrelation of the daily moves
+    # near -0.65 in bvib, BUCK/USD and K).  Spreading the thresholds would
+    # only sort the population: the tightest member always first.  Instead
+    # each call of the decision acts with a probability that grows with how
+    # far past the threshold the signal is,
+    #
+    #     p(x) = 1 - exp(-x / w)        x = the excess past the threshold
+    #
+    # so a marginal signal moves a few members and a large one nearly all: in
+    # expectation the population responds in proportion to the signal, not
+    # all or nothing.  `w` is the class's `decide_w` knob, in the signal's own
+    # units (DECIDE_W by default; 0 = the hard threshold, the historical
+    # behaviour).  The draws come from the agent's own keyed substream,
+    # "<Class>/decide", so no other random stream moves (house rule 12).
+    DECIDE_W: float = 0.0
+
+    def _decides(self, scenario, excess: float) -> bool:
+        """Act on a signal `excess` past this agent's threshold?"""
+        if excess <= 0:
+            return False
+        from alberta_buck.sim.experiment import spec
+        w = float(spec(scenario, type(self).__name__, "decide_w", self.DECIDE_W))
+        if w <= 0:
+            return True
+        rng = getattr(self, "_decide_rng", None)
+        if rng is None:
+            from alberta_buck.sim.rng import agent_rng
+            rng = self._decide_rng = agent_rng(
+                int(getattr(scenario, "seed", 0) or 0),
+                type(self).__name__ + "/decide", self.idx)
+        import math
+        return rng.random() < 1.0 - math.exp(-excess / w)
+
     # -- per-agent telemetry (schema: alberta_buck/sim/TELEMETRY.md) -------- #
     #
     # Opt-in: the default returns None and the snapshot emits nothing, so

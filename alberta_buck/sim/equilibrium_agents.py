@@ -687,6 +687,11 @@ class ExcursionArbAgent(_ProxyAgent):
     NEUTRAL = None                  # subclass pin ("credit" | "basket" | ..)
     BUCK_FRAC = None                # subclass pin (rest-state BUCK share)
 
+    # Randomized decisions (Agent._decides) on every entry and exit: the
+    # population reads the same filtered bvib at tick 0 and used to enter
+    # (and exit) as one.  1% of bvib past the threshold.
+    DECIDE_W = 0.01
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
@@ -867,6 +872,7 @@ class ExcursionArbAgent(_ProxyAgent):
         if ru <= 0 or rb <= 0:
             return
         fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
+        self._scn = scenario                 # for the decisions' draws
         # Effective signal: the filter farther from parity.
         e_eff = (self._fast
                  if abs(self._fast - 1.0) > abs(self._ewma - 1.0)
@@ -899,7 +905,10 @@ class ExcursionArbAgent(_ProxyAgent):
             self._base_buck = held
         pos = held - self._base_buck
         tol = max(10 ** 6, self._base_buck // 1000)
+        scn = getattr(self, "_scn", None)
         if self._open > 0 and e <= 1.0 + self.exit_dev:
+            if not self._decides(scn, 1.0 + self.exit_dev - e + 1e-12):
+                return                          # holding on, this time
             sold, got = leg(d, "sell", max(0, pos), ctr, gated=False)
             if sold > 0:
                 ctr["excQ3"] = ctr.get("excQ3", 0) + sold
@@ -914,6 +923,8 @@ class ExcursionArbAgent(_ProxyAgent):
                 self._basis = 0
             return
         if self._open < 0 and e >= 1.0 - self.exit_dev:
+            if not self._decides(scn, e - (1.0 - self.exit_dev) + 1e-12):
+                return
             got, spent = leg(d, "buy", max(0, -pos), ctr, gated=False)
             if got > 0:
                 ctr["excQ1"] = ctr.get("excQ1", 0) + got
@@ -927,6 +938,8 @@ class ExcursionArbAgent(_ProxyAgent):
                 self._short_recv = 0
             return
         if self._open >= 0 and e > 1.0 + self.entry_dev:
+            if not self._decides(scn, e - (1.0 + self.entry_dev)):
+                return
             got, spent = leg(d, "buy", None, ctr, gated=True)
             if got > 0:
                 ctr["excQ1"] = ctr.get("excQ1", 0) + got
@@ -934,6 +947,8 @@ class ExcursionArbAgent(_ProxyAgent):
                 self._open = 1
                 ctr["excursionEntries"] = ctr.get("excursionEntries", 0) + 1
         elif self._open <= 0 and e < 1.0 - self.entry_dev and held > 10 ** 6:
+            if not self._decides(scn, (1.0 - self.entry_dev) - e):
+                return
             sold, got = leg(d, "sell", None, ctr, gated=True)
             if sold > 0:
                 ctr["excQ3"] = ctr.get("excQ3", 0) + sold
@@ -1068,7 +1083,8 @@ class ExcursionArbAgent(_ProxyAgent):
     def _act_credit(self, d, e, ru, rb, fee, ctr) -> None:
         signed = d.buck.functions.signedBalanceOf(self.proxy.address).call()
         drawn = max(0, -signed)
-        if e < 1.0 - self.entry_dev:
+        scn = getattr(self, "_scn", None)
+        if e < 1.0 - self.entry_dev and self._decides(scn, (1.0 - self.entry_dev) - e):
             # Premium excursion: issue against latent credit, sell above par.
             y = _impact_cap(rb, self.max_impact_bp)
             if y < 10 ** 6:
@@ -1091,7 +1107,8 @@ class ExcursionArbAgent(_ProxyAgent):
             if sold > 0:
                 ctr["excursionEntries"] = ctr.get("excursionEntries", 0) + 1
                 ctr["excQ4"] = ctr.get("excQ4", 0) + sold
-        elif e > 1.0 + self.cover_dev and drawn > 10 ** 6:
+        elif e > 1.0 + self.cover_dev and drawn > 10 ** 6 \
+                and self._decides(scn, e - (1.0 + self.cover_dev)):
             # Discount excursion: buy the obligation back below par.
             cash = d.chain.balance_of(d.usdc, self.proxy.address)
             x = min(cash, _impact_cap(ru, self.max_impact_bp))
@@ -1461,6 +1478,9 @@ class CommodityRebalArbAgent(Agent):
 
     TELEMETRY_STRIDE = 1
 
+    # Randomized decisions (Agent._decides): 1% of log spread past the band.
+    DECIDE_W = 0.01
+
     def setup(self, d, scenario, rng) -> None:
         super().setup(d, scenario, rng)
         r = _agent_rng(scenario.seed, type(self).__name__, self.idx)
@@ -1551,6 +1571,8 @@ class CommodityRebalArbAgent(Agent):
         buy_i = min(range(N), key=lambda i: sig[i])
         spread = sig[sell_i] - sig[buy_i]
         if sell_i == buy_i or spread < self.band:
+            return
+        if not self._decides(scenario, spread - self.band + 1e-12):
             return
         held = d.chain.balance_of(d.tokens[sell_i], self.address)
         rt = d.chain.balance_of(d.tokens[sell_i], d.pool_buck[sell_i])
@@ -2079,6 +2101,12 @@ class SaverAgent(_ProxyAgent):
 
     _regime_counter = 0           # per-class seq (reset in build_equilibrium)
 
+    # Randomized decisions (Agent._decides): the savers read one signal
+    # (bvib against par) on every tick and crossed it together -- the
+    # savings world's whipsaw.  1% of bvib: a 0.5% discount moves 39% of
+    # them, 1% 63%, 3% 95%.
+    DECIDE_W = 0.01
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
@@ -2215,7 +2243,8 @@ class SaverAgent(_ProxyAgent):
 
             dtd = _dt_days(scenario)      # base_rate is per-DAY
             if discount > 0 and holding < self.savings_goal \
-                    and self._spent < self.budget:
+                    and self._spent < self.budget \
+                    and self._decides(scenario, discount):
                 # Buy below value: accelerate accumulation with the discount.
                 rate = int(self.base_rate * dtd
                            * (1.0 + self.disc_gain * discount))
@@ -2231,7 +2260,8 @@ class SaverAgent(_ProxyAgent):
                 ctr["saverBuys"] = ctr.get("saverBuys", 0) + 1
                 ctr["saverSpent"] = ctr.get("saverSpent", 0) + amt
 
-            elif premium > 0 and holding > 10 ** 6:
+            elif premium > 0 and holding > 10 ** 6 \
+                    and self._decides(scenario, premium):
                 # Spend above value: sell BUCK for USDC, keeping reserve_frac.
                 # Decision 8: spot from slot0 (micro-USD per BUCK), not the
                 # balance ratio, which a concentrated position distorts.
@@ -3060,6 +3090,10 @@ class DiscountBuckArbAgent(_ProxyAgent):
     # what its edge is measured against.  The basketeer overrides it.
     TRACKS_BUCK = True
 
+    # Randomized decisions (Agent._decides) on the buy and sell legs: 1% of
+    # the round trip's excess return (the basketeer variant inherits it).
+    DECIDE_W = 0.01
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
@@ -3192,6 +3226,8 @@ class DiscountBuckArbAgent(_ProxyAgent):
         excess = self._excess(d)
         if excess <= self.cost:
             return 0                       # the round trip does not pay
+        if not self._decides(getattr(self, "_scn", None), excess - self.cost):
+            return 0                       # not this time
         room = self._target_deploy(excess) - self._deployed
         if room < 10 ** 6:
             return 0                       # already sized to this conviction
@@ -3227,7 +3263,10 @@ class DiscountBuckArbAgent(_ProxyAgent):
         # No `cost` term here: entry cost is already sunk, so the buy and
         # sell thresholds differ by exactly that -- the hysteresis that keeps
         # a position from churning on noise around its own hurdle.
-        if held < 10 ** 6 or self._excess(d) >= 0:
+        ex = self._excess(d)
+        if held < 10 ** 6 or ex >= 0:
+            return 0
+        if not self._decides(getattr(self, "_scn", None), -ex):
             return 0
         cap = int(r_out * (math.sqrt(spot) - 1.0)) if spot > 1.0 else held
         cap = min(cap if cap > 0 else held,
@@ -3273,6 +3312,7 @@ class DiscountBuckArbAgent(_ProxyAgent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or self.proxy is None:
             return
+        self._scn = scenario                 # for the legs' decision draws
         self.observe(d)                      # trend first, then decide
         if not self._buy_leg(d, day, ctr):
             self._sell_leg(d, day, ctr)
@@ -3683,6 +3723,9 @@ class BuckIssuerArbAgent(_ProxyAgent):
     CTR = "bia"
     N_CREDITS = 4
 
+    # Randomized decisions (Agent._decides) on issue and cover: 1% of bvib.
+    DECIDE_W = 0.01
+
     def setup(self, d, scenario, rng) -> None:
         self._rng = _agent_rng(scenario.seed, type(self).__name__, self.idx)
         r = self._rng
@@ -3883,9 +3926,11 @@ class BuckIssuerArbAgent(_ProxyAgent):
             return
         bvib = self._bvib(d)
         if bvib < 1.0 - self.issue_at:
-            self._issue(d, day, ctr)          # BUCK rich: issue into it
+            if self._decides(scenario, (1.0 - self.issue_at) - bvib):
+                self._issue(d, day, ctr)      # BUCK rich: issue into it
         elif bvib > 1.0 - self.cover_at:
-            self._cover(d, day, ctr)          # back toward parity: cover
+            if self._decides(scenario, bvib - (1.0 - self.cover_at)):
+                self._cover(d, day, ctr)      # back toward parity: cover
 
 
 @_register
@@ -4002,6 +4047,7 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or self.proxy is None:
             return
+        self._scn = scenario                 # for the legs' decision draws
         self.observe(d)                      # trend first, then decide
         if not self._buy_leg(d, day, ctr):
             self._harvest_leg(d, day, ctr)

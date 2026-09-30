@@ -203,6 +203,13 @@ Recipe (all integers big-endian, blake2b = RFC 7693, unkeyed):
   KeyedRandom so a gap fails loudly instead of diverging silently.
 - The loop's world machinery (whale scheduling, identity nonces) is NOT
   on this contract; it stays server-side.
+- Randomized decisions (`Agent._decides`, 2026-09-29) draw from a SECOND
+  stream per agent, keyed with the class name suffixed "/decide"
+  (`utf8(class_name + "/decide")`, same seed and idx), so they never move
+  the agent's own stream.  One x per decision, and only when the signal is
+  past the threshold (excess > 0) and the class's `decide_w` > 0: the
+  agent acts iff `x < 1 - exp(-excess / decide_w)`.  The stream is created
+  lazily at the first such decision.
 
 ### The loop's own draws (keyed mode)
 
