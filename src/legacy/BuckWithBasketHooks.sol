@@ -11,7 +11,8 @@ import {toBuckQtySigned, toBuckSeconds} from "../BuckTypes.sol";
 ///
 /// @notice Production Buck carries no basket code: a BuckBasket is an
 ///         ordinary credit holder -- a self-issued MARKED BuckCredit, its
-///         debt a lien, relief like anyone's (doc/JUBILEE-ISSUANCE.org 6.2).
+///         debt a lien, relief like anyone's (alberta-buck-ethereum.org,
+///         "Two Kinds of BUCK").
 ///         The pro-rata baskets that came before it (BuckBasketProRata,
 ///         BuckBasketOps, BuckBasketFence and the legacy BuckBasket) mint
 ///         and burn through these hooks instead, so the sims deploy this

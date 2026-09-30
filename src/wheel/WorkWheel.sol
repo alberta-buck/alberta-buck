@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /// @title WorkWheel -- the chassis of a basket's work wheel.
 ///
-/// @notice doc/BASKET-WHEEL.org section 8.  RebalanceDirectorBase carries one
+/// @notice (alberta-buck-ethereum-wheel.org, "The work wheel".)  RebalanceDirectorBase carries one
 ///         wheel (an epoch clock, a round-robin cursor, poke(maxWork), policy
 ///         through two hooks); this generalizes it from "constituents x
 ///         epochs" to "tasks x clocks".  Everything policy-agnostic lives

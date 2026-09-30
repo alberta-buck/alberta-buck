@@ -75,7 +75,7 @@ interface IWheelCreditee {
 
 /// @title ArbKind -- the consistency arbitrage, one slot per triangle.
 ///
-/// @notice doc/BASKET-WHEEL.org 3-5.  A triangle through constituent TOKEN:
+/// @notice (alberta-buck-ethereum-wheel.org, "The consistency cycle".)  A triangle through constituent TOKEN:
 ///         the basket's own TOKEN/BUCK pool, TOKEN/USDC and BUCK/USDC.  A run
 ///         goes round it from TOKEN to TOKEN in whichever direction pays,
 ///         with no inventory: the first swap pays out before it is paid, the

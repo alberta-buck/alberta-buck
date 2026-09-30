@@ -92,7 +92,7 @@ contract BuckBasketUniswapV3 is
 
     // --- Liquidity in/out ------------------------------------------------- //
 
-    // --- The work wheel's credits (doc/BASKET-WHEEL.org 8.4) --------------- //
+    // --- The work wheel's credits -------------------------------------------- //
     //
     // Policy, hosted here rather than in the shell for the shells' size budget
     // (the Fence inherits ProRata with ~1 KB to spare): reached through the

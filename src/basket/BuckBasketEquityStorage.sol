@@ -8,9 +8,9 @@ interface IBuckKSource {
     function currentBuckK() external view returns (uint256);   // 1e18
 }
 
-/// @notice The director the equity basket consults (doc/BASKET-EQUITY.org
-///         13.6): leaning targets and the two gates.  Optional: with none set
-///         the basket keeps its declared targets and a plain band.
+/// @notice The director the equity basket consults: leaning targets and the
+///         two gates (EquityTurnDirector).  Optional: with none set the basket
+///         keeps its declared targets and a plain band.
 interface IEquityDirector {
     function observe() external;
     function targetsBp() external view returns (uint256[] memory);
@@ -56,9 +56,8 @@ interface IEquityDeskPosition {
 /// @title BuckBasketEquityStorage -- the equity basket's books, appended to the
 ///        shared basket layout, and the valuation both of its contracts use.
 ///
-/// @notice doc/BASKET-EQUITY.org 13.6, as a credit holder
-///         (doc/JUBILEE-ISSUANCE.org section 4).  The shell
-///         (`BuckBasketEquity`) and its components facet
+/// @notice (alberta-buck-ethereum.org, "BuckBasketEquity: the Basket as a
+///         Credit Holder".)  The shell (`BuckBasketEquity`) and its components facet
 ///         (`BuckBasketEquityWheel`) inherit this and nothing else, so they
 ///         share one layout; the venue facet (`BuckBasketUniswapV3`) inherits
 ///         only `BuckBasketStorage`, of which this is a strict extension.
@@ -75,7 +74,21 @@ interface IEquityDeskPosition {
 ///         never its balances or its V3 position.  Its BUCK is one signed
 ///         account at Buck, shared with the monetary desk when there is one:
 ///         equity's BUCK is that balance plus the relief accrued on it, less
-///         the desk's net position (`_deskBuck`).
+///         the desk's net position (`_desk`, a self-call the facet can make).
+///
+///         Invariants (the tests check E1, E4, E5 and E6 directly):
+///           E1  equity(mark) = gross(mark) + signedBalance + reliefAccrued
+///               - deskBuck, clamped at zero (`_equityS`)
+///           E2  every spend is preceded by a mark at equity(LOW) + the desk's
+///               book (`_markS` / `_markAt`), so Buck holds every issuance
+///               within K x that equity
+///           E3  the lien moves only by the basket's own spends, BUCK it
+///               receives, and relief collected: a K cut calls nothing back
+///           E4  an exit takes at most its fraction: in BUCK, its value at
+///               LOW less the charge; in kind, exactly its fraction of the
+///               positions and wallet TOKEN, its lien share repaid
+///           E5  token.balanceOf(basket) >= idleToken[i]
+///           E6  after an in-kind exit the mark is read afresh, positions gone
 ///
 ///         Value is in BUCK.  A position's fair value is twice its BUCK side
 ///         at the chosen price (2 L sqrtP, full range).  The marks are: TWAP

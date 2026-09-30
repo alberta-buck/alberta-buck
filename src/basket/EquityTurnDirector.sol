@@ -19,8 +19,9 @@ interface IV3Observe {
     function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool);
 }
 
-/// @title EquityTurnDirector -- the equity basket's director (doc/BASKET-EQUITY.org
-///        12.3 and 13.6): the multi-scale turn detector, per leg, and the lean.
+/// @title EquityTurnDirector -- the equity basket's director: the multi-scale
+///        turn detector, per leg, and the lean (alberta-buck-rebalance.org, "The
+///        quorum turn detector"; alberta-buck-ethereum.org, "The Director").
 ///
 /// @notice Once a day (`observe`, the basket's Daily step, or anyone) it reads
 ///         each constituent's TWAP tick -- a tick is a log price, so no ln() --
@@ -39,9 +40,8 @@ interface IV3Observe {
 ///                        (its weight over its DECLARED target by leashBp of it)
 ///           mayFund(i)   not a leg still running down -- or past the leash
 ///
-///         Measured (the Python prototype): the lean pays where prices revert,
-///         the gate where excursions have momentum; quorum 4 of 6 is best for
-///         cycles.  The leash keeps the mandate; the lean only times it.
+///         The lean pays where prices revert, the gate where excursions have
+///         momentum.  The leash keeps the mandate; the lean only times it.
 contract EquityTurnDirector is IEquityDirector {
     uint256 internal constant W = 7;                      // the ladder's windows
     int256  internal constant TICK_LN_WAD = 99995000333297;   // ln(1.0001), 1e18

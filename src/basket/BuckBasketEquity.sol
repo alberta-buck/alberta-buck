@@ -19,8 +19,7 @@ interface IEquityWheel {
 /// @title BuckBasketEquity -- the BuckBasket as equity: shares, one pooled
 ///        lien, BUCK payouts, a wallet the work wheel places.
 ///
-/// @notice doc/BASKET-EQUITY.org 13.6, as a credit holder
-///         (doc/JUBILEE-ISSUANCE.org section 4).
+/// @notice (alberta-buck-ethereum.org, "BuckBasketEquity: the Basket as a Credit Holder".)
 ///
 ///         The basket is an ordinary credit holder: one self-issued MARKED
 ///         BuckCredit (`openCredit`), marked at its equity before it spends,

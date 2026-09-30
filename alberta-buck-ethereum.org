@@ -601,7 +601,9 @@ struct AccountState {
     BuckQty     balance;       // int80 underlying; signed.  Range = [-6.04e23, +6.04e23] raw
                                // = [-6.04e17, +6.04e17] BUCK at 6 decimals.  Negative ==
                                // NFT-backed used credit; positive == held BUCK.
-    BuckSeconds buckSeconds;   // uint120 underlying; demurrage IOU integral on positive holdings
+    BuckSeconds buckSeconds;   // uint120 underlying; |balance| * dt, read by sign:
+                               // fee-seconds while positive, issuance-seconds (the
+                               // lien over time) while negative, 0 at zero (I1)
     uint40      timestamp;     // last crystallisation (safe past year 36800)
     uint16      flags;         // bit 0: demurrage routed to demurragePayer[a].
                                // bits 1-15 reserved.
@@ -621,9 +623,31 @@ path already loads and stores, so testing one is free.  That is exactly why it i
 hot-path dispatch.  Cold-path bookkeeping -- the count of accounts a demurrage payer carries --
 lives in its own mapping instead.
 
-Outside the hot path: allowances, per-credit outstanding cover and the deposit held against it
-(=mintsBacked[tokenId]=, =mintsPrincipal[tokenId]=), approve-time receipt fragments, and the
-delegated-demurrage maps.  *Nothing derived is stored.*  An account's credit limit, and therefore
+A balance changes sign only at a write, after =_crystallize= has folded the old side's rectangle
+through the current block, so the old side's seconds are settled there (a fee realized, or relief
+paid) and the new side's start at zero.  Invariant I1 -- a zero balance holds no seconds -- is
+kept by every writer that can produce a zero, so the field's meaning is given by the sign alone.
+
+The slots, grouped by concern:
+
+| slot | variable                | what it holds                                                    |
+|------+-------------------------+------------------------------------------------------------------|
+|    0 | =_state=                | the packed per-account word above                                |
+|    1 | =_totalSupply=          | sum of the positive balances, the Jubilee fund's excluded        |
+|    2 | =_allowances=           | ERC-20 allowances                                                |
+|    3 | =_receiptFragments=     | the identity-bound approve's receipt per (from, to)              |
+|    4 | =mintsBacked=           | coverage outstanding per credit, in face units (= its activated value) |
+|    5 | =mintsPrincipal=        | the insurance deposit held against it                            |
+|    6 | =_jubileeLastUpdate=    | through when the fund has accrued                                |
+|    7 | =feesRealized=          | fees taken out of circulation, cumulative                        |
+|    8 | =reliefRealized=        | relief paid out of the fund, cumulative                          |
+|    9 | =demurragePayer=        | an account's accepted fee payer                                  |
+|   10 | =demurragePayerRequest= | a pending payer election                                         |
+|   11 | =sponseeCount=          | how many accounts a payer carries                                |
+
+Tests that seed state by slot number (where the public path would need the identity machinery)
+go through =test/harness/BuckSlots.sol=, and =test/BuckSlots.t.sol= pins each slot against the
+live layout.  *Nothing derived is stored.*  An account's credit limit, and therefore
 its =balanceOf=, is recomputed from live =BuckCredit= state on every read; there is no cached copy
 of it anywhere.  =mintsPrincipal= is not an exception -- it is a record of what was actually paid,
 which no amount of present-day state can reconstruct once the appraisal or the rate has moved.
@@ -1230,6 +1254,12 @@ the transfer revert instead.
   :CUSTOM_ID: buck-basket
   :END:
 
+/This section describes the pro-rata basket (=BuckBasketProRata= and its heirs =BuckBasketOps=,
+=BuckBasketFence=, and the legacy =BuckBasket=).  It mints and burns BUCK through basket hooks that
+production =Buck= does not have; it runs in the simulations, on =BuckWithBasketHooks=, as the
+baseline the production basket is measured against.  The production basket is
+[[#buck-basket-equity][BuckBasketEquity]], an ordinary credit holder./
+
 =BuckBasket= is the contract that closes the loop between BUCK and the real-world commodity tokens
 it tracks.  It registers a set of TOKEN/BUCK Uniswap-V3 pools (one per basket constituent),
 custodies a single full-range Buck-owned LP position in each, lets anyone direct-mint BUCK by
@@ -1240,22 +1270,20 @@ by =BuckKControllerDirect=.
 
 ** Two Kinds of BUCK
 
-BUCK in circulation today has two provenances, both flowing through the same ERC-20:
+In production every BUCK is issued against a lien: drawn on a =BuckCredit= through the standard
+=Buck.mint= path ([[#buck-erc20][BUCK]]), gated by =BUCK_K=.  The equity basket is no exception --
+its credit is a [[#marked-credits][marked credit]] on its own equity.
 
-1. *BuckBasket-minted BUCK* -- minted by =BuckBasket= via the privileged =Buck.mintFromBasket(to,
-   amount)= hook when a depositor pledges a TOKEN.  Tracked in
-   =BuckBasket.totalOutstandingBuck=; burned on redemption.  The activation gate is /not/ the
-   BuckCredit credit limit -- it is the depositor's willingness to put TOKEN (or BUCK) into the
-   basket at the current pool valuation.
-2. *Externally-supplied BUCK* -- created by the standard =Buck.mint(amount, tokenIds)= path
-   described in [[#buck-erc20][BUCK]], backed by =BuckCredit= insured-asset NFTs and gated by =BUCK_K=.
-   These BUCK reach the TOKEN/BUCK pools indirectly via arbitrage swaps and are the lever the
-   PID actually pulls on.
+The pro-rata basket is the exception, and only in the simulations:
 
-Buck records the basket's net issuance (=basketIssued=: minted, less what burns retired) and the
-relief it has earned on it (=basketRelief=), and the fund accrues on it like any lien.  The
-basket's relief is recorded but not yet paid: how it reaches the basket's depositors is part of
-the basket's redesign as a credit holder (doc/JUBILEE-ISSUANCE.org, section 4).
+1. *Hook-minted BUCK* -- minted by the basket via =mintFromBasket(to, amount)= when a depositor
+   pledges a TOKEN, tracked in =totalOutstandingBuck=, burned on redemption.  The gate is not a
+   credit limit but the depositor's willingness to put TOKEN (or BUCK) in at the pool valuation.
+   =BuckWithBasketHooks= records the hooks' net issuance (=basketIssued=) and the relief it has
+   earned (=basketRelief=, recorded, not paid); a burn's BUCK carry their share of the basket's
+   age out and retire =amount - fee= of that issuance.  The fund accrues on it like any lien.
+2. *Credit-drawn BUCK* -- as in production; these reach the TOKEN/BUCK pools through arbitrage and
+   are the lever the PID pulls on.
 
 The two supply paths converge in the basket's BUCK-side balance.  Price-up TOKEN moves leave
 extra BUCK in the pool (TOKEN bought with BUCK by external traders); price-down moves draw BUCK
@@ -1416,6 +1444,130 @@ deposits are the *value injector* (asset coming in); =BuckCredit= backed mints u
 are the *supply regulator* (BUCK going out).
 
 #+LATEX: \clearpage
+* BuckBasketEquity: the Basket as a Credit Holder
+  :PROPERTIES:
+  :CUSTOM_ID: buck-basket-equity
+  :END:
+
+The production basket holds shares of equity, one pooled lien, and a wallet its work wheel
+places.  Four contracts share one storage layout: the shell =BuckBasketEquity= (deposit, redeem,
+the treasury, views), the components facet =BuckBasketEquityWheel= (the wheel's steps), the venue
+facet =BuckBasketUniswapV3= (the pools), and optionally =BuckBasketEquityOps= (the shell plus the
+monetary desk).  The shell delegatecalls the facets: =wheelDue= / =wheelStep= to the components,
+every other unknown selector to the venue.
+
+** The Account and the Credit
+
+The basket is an ordinary BUCK account -- bound public and non-Carrying -- and an ordinary credit
+holder.  =openCredit= (governance, once) has it issue itself one [[#marked-credits][marked
+credit]]: the basket is its insurer, the premium is zero, and the face caps all it may ever draw
+at =K x face=.  Before anything that spends -- a deposit, an exit, every wheel step -- the basket
+marks the credit at its equity at the exit marks (plus the desk's book, when there is one), so
+Buck enforces =creditLimit(basket) = K x equity=.  The credit is activated, with one =Buck.mint=,
+at the first mark above zero.
+
+It never mints or burns.  Spending past its held BUCK (placing a position, buying TOKEN, paying
+an exit) draws on the credit; BUCK it receives (a position's BUCK side, a sale's proceeds, a
+deposit, fees) repay the lien.  Its debt is its lien, which earns Jubilee relief like any other;
+the Daily step collects it.
+
+** Valuation
+
+A position's fair value is twice its BUCK side at a price (full range: =2 L sqrtP=).  Three marks:
+TWAP (the price), HIGH (each pool at the higher of spot and TWAP -- the incumbents' side of an
+entry) and LOW (the lower -- their side of an exit).
+
+#+BEGIN_SRC text
+gross(mark)  = sum over pools (position value at mark + idle TOKEN at mark)
+equity(mark) = gross(mark) + signedBalance(basket) + reliefAccrued(basket) - deskBuck
+#+END_SRC
+
+where =signedBalance= is negative by the lien (or positive by BUCK held, net of its fee), and
+=deskBuck= is the monetary desk's net position inside the shared account (0 without a desk).
+=liquidity= is what Buck lets the account spend -- held BUCK plus headroom under the limit.  Its
+target is the larger of 1% of the gross and enough that half the target covers two sigma of the
+daily net flow times =1 + K=, capped at 20% of the gross.
+
+** Deposit
+
+A deposit of TOKEN or BUCK is equity: valued at its pool's LOW mark (BUCK at par), against the
+basket at its HIGH marks, less a charge -- the pool fee on the swap the wheel will make to place
+it: =(1 - K)/2= of the pool fee for TOKEN, =(1 + K)/2= of the dearest for BUCK.  It buys shares,
+lands in the wallet (BUCK straight into the account), and raises the mark: =K x value= of new
+credit.  Into an under-water basket (lien above its limit) the new credit first restores the
+limit -- an under-water account stops issuing.
+
+** Redemption
+
+The treasury takes 25% of the receipt's gain over its cost basis, as shares.  The rest leaves
+at the exit marks, less the same charge as a BUCK deposit.  The shell first marks the credit at
+the equity that stays (=equity(LOW) - pay=), then pays in BUCK if Buck lets the account spend
+it.  Otherwise the exit is paid *in kind*: its fraction =f= of every position and of the
+wallet's TOKEN, by transfer, with no swap.  The BUCK its positions return repay its share of the
+lien; what they returned beyond that share is paid in BUCK.  Two corners: short of its lien share
+(leverage above one) it leaves TOKEN behind worth the shortfall at the LOW marks; owed more BUCK
+than an under-water account can spend, the rest stays in the receipt as shares at the
+post-exit price.  No charge in kind.
+
+** The Wheel's Components
+
+Each step is bounded, marks the credit first, and trades at most 1% of a pool's depth
+(=swapCapBp=), the arbitrage re-pinning between steps:
+
+- *Daily*: fold the day's net flow into the flow EMA; collect the relief on the lien; the
+  director's sample.
+- *Sync(i)*: collect pool i's fees (TOKEN to the wallet, BUCK into the account).
+- *Deploy(i)*: pair pool i's waiting TOKEN with its share of the credit beyond the target --
+  pro rata to the TOKEN waiting in every pool -- selling part of the TOKEN if the pair is short.
+- *Fund*: buy the director's pick (or, past the parking room, the largest gap) with half of what
+  it places; Deploy pairs it.
+- *Trim*: when liquidity is below its floor, unwind a slice of a position (the director's pick,
+  else the most overweight) and sell its TOKEN until liquidity is back at its target -- including,
+  after a K cut, the amount the basket is over its new limit; or trim what the director names.
+
+** The Director
+
+=EquityTurnDirector= (optional) supplies leaning targets and two gates, per leg, from a ladder of
+EMAs of each pool's TWAP tick against the basket's mean ([[file:alberta-buck-rebalance.org][the
+rebalance policy]], "The quorum turn detector"):
+
+- *The lean*: the declared weights scaled by =exp(-tilt x excursion)= and renormalized, the
+  excursion being the leg's deviation from the basket's mean against its anchor EMA (1280 days)
+  -- a leg rich against its anchor is leaned down.  =tilt= defaults to 1.
+- *The turn*: six shorter EMAs (5 to 160 days) each vote when moving back toward the anchor;
+  =quorum= votes (default 4) is a turn.  A leg not turned is running.
+- *mayTrim(i)*: true unless the leg is still running up -- a run is let run -- and true
+  regardless once its weight is over its declared target by the leash (=leashBp=, 30% of the
+  target).  *mayFund(i)*: the mirror, for a leg running down.  The leash is measured against the
+  declared targets, not the leaned ones.
+
+With no director, the basket keeps its declared targets and trims or funds only beyond a plain
+weight band.
+
+** The Desk as a Sub-Account
+
+=BuckBasketEquityOps= keeps the monetary desk's BUCK as explicit counters inside the shared
+account -- =monetaryBuckHeld= (bought and held: those BUCK repaid the lien on arrival) and
+=monetaryOutstanding= (issued, net of retired: selling spent the credit) -- so equity's BUCK is
+the account less that position.  Its issuance spends the basket's credit, at most what the
+account can spend beyond the liquidity target; its purchases book the BUCK that actually arrived
+(their fee on arrival is the desk's); and it keeps its own relief accumulator on its own net
+issuance, folded at every desk swap.  The components facet reads the desk's position by a
+self-call (=deskPosition=), since it runs its own code under delegatecall.
+
+** Invariants
+
+- E1: =equity = gross + signedBalance + reliefAccrued - deskBuck= (clamped at zero), at any mark.
+- E2: every issuance is within =K x equity(LOW)=: the credit is marked before any spend, and Buck
+  enforces the limit.
+- E3: no margin calls: a K cut changes no lien; only the wheel's paced Trim repays.
+- E4: an exit takes no more than its fraction: in BUCK, at most its value at the LOW marks less
+  the charge; in kind, exactly =f= of the positions and TOKEN with its lien share repaid; the
+  remaining holders' share price is whole, to rounding.
+- E5: the wallet's TOKEN is backed: =token.balanceOf(basket) >= idleToken= (the desk's TOKEN is
+  held beside it, outside the equity books).
+- E6: the mark after an exit is the equity that stays, read after its positions are burned.
+
 * BUCK_K: Value Stabilization Controller
   :PROPERTIES:
   :CUSTOM_ID: buck-k-pid

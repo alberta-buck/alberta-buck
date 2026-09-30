@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {WorkWheel} from "./WorkWheel.sol";
 
 /// @notice The permissionless upkeep the keepers do today, as wheel kinds
-///         (doc/BASKET-WHEEL.org 8.1).  Each claims one slot after its bases'
+///         (alberta-buck-ethereum-wheel.org, "The work wheel").  Each claims one slot after its bases'
 ///         when its target is set (zero slots when unset: a kind is enabled by
 ///         configuration) and hands every other slot to `super`.  They capture
 ///         nothing; the reserve pays for them.
@@ -150,8 +150,8 @@ abstract contract OpsKind is WorkWheel {
     }
 }
 
-/// @title EquityKind -- the equity basket's components (doc/BASKET-EQUITY.org
-///        13.6): Daily, Sync x N, Deploy x N, Fund, Trim -- 2N + 3 slots, each
+/// @title EquityKind -- the equity basket's components (alberta-buck-ethereum.org,
+///        "The Wheel's Components"): Daily, Sync x N, Deploy x N, Fund, Trim -- 2N + 3 slots, each
 ///        a bounded step the basket runs itself (BuckBasketEquityWheel), the
 ///        wheel only choosing when.  The basket must name this wheel
 ///        (=setWheel=) for its steps to be accepted.

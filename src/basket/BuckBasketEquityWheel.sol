@@ -6,7 +6,7 @@ import {BuckBasketEquityStorage, IEquityDirector, IEquityDeskPosition} from "./B
 
 /// @title BuckBasketEquityWheel -- the equity basket's components, a facet.
 ///
-/// @notice doc/BASKET-EQUITY.org 13.6.  Reached by the shell's fallback
+/// @notice (alberta-buck-ethereum.org, "BuckBasketEquity: the Basket as a Credit Holder", "The Wheel's Components".)  Reached by the shell's fallback
 ///         (delegatecall over the shared storage) for `wheelDue` and
 ///         `wheelStep`; only the basket's work wheel may step it.  Each kind is
 ///         a state-machine step that does at most one bounded thing:

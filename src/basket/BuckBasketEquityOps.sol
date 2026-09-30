@@ -6,10 +6,9 @@ import {MonetaryDesk}        from "./MonetaryDesk.sol";
 
 /// @title BuckBasketEquityOps -- the equity basket plus the monetary desk.
 ///
-/// @notice doc/BASKET-EQUITY.org 10.1 and 13.7, step 5, on the credit-holding
-///         basket (doc/JUBILEE-ISSUANCE.org section 4).  The desk (MonetaryDesk)
-///         on the equity shell: NAV is the equity at the TWAP marks, prices the
-///         TWAP.
+/// @notice The monetary desk (MonetaryDesk; alberta-buck-operations.org) on
+///         the equity shell (alberta-buck-ethereum.org, "BuckBasketEquity: the Basket as a Credit Holder", "The Desk as a Sub-Account"): NAV is the
+///         equity at the TWAP marks, prices the TWAP.
 ///
 ///         The basket's BUCK is one signed account at Buck, so the desk keeps
 ///         its BUCK as a sub-account of explicit counters rather than as a

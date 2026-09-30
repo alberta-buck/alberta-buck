@@ -108,7 +108,7 @@ interface IMonetaryDirector {
 ///                           until the window caught up.  The basket must not
 ///                           be able to brick its own redemption path.
 ///
-/// # The stabilizer seam (WP-3a; CARRY-CONVEXITY.org 6.4)
+/// # The stabilizer seam
 ///
 ///         The desk is the first level-1 stabilizer: it implements
 ///         `IStabilizer` from its own book (`netInventory`, `capacity`,
@@ -452,8 +452,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///
     ///         The negative side of monetaryOutstanding is deliberately NOT
     ///         inventory.  A Q2 burn is the persistence escalation: it moves
-    ///         BUCK out of level 1 and into K's stock (CARRY-CONVEXITY.org
-    ///         6.4, level 2), so the shadow term must DROP when it fires
+    ///         BUCK out of level 1 and into K's stock (level 2), so the shadow term must DROP when it fires
     ///         (D4: "burned inventory leaves the book and the shadow term
     ///         drops to zero").  Counting the retired amount as absorbed would
     ///         leave the term where it was; counting it against the issued

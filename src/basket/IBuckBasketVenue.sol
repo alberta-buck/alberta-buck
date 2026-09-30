@@ -138,7 +138,7 @@ interface IBuckBasketVenue {
     function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
         external returns (uint256 gained, uint256 lossValue, uint256[] memory inventoryAfter);
 
-    // --- Equity primitives (BuckBasketEquity; doc/BASKET-EQUITY.org 13.7) --- //
+    // --- Equity primitives (BuckBasketEquity) -------------------------------- //
     //
     // The equity basket keeps its own books (the wallet, liquidityOf) and asks
     // the venue only to value, place, withdraw and swap.  Pool reads are for

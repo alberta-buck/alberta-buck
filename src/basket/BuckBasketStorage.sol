@@ -144,7 +144,7 @@ abstract contract BuckBasketStorage {
     address internal _callbackPool;
     address internal _swapCallbackPool;
 
-    // --- Stress fee on duress exits (WP-5; CARRY-CONVEXITY D2) ------------ //
+    // --- Stress fee on duress exits --------------------------------------- //
     //
     // APPENDED at the end of the shared layout: every slot above keeps its
     // position for the venue facet and for the ops / fence shells that add
@@ -174,7 +174,7 @@ abstract contract BuckBasketStorage {
     ///         wheel's depositor credits, the same mechanics -- still outstanding.
     uint256 public stressBonusPrincipal;
 
-    // --- The work wheel (doc/BASKET-WHEEL.org) ----------------------------- //
+    // --- The work wheel ----------------------------------------------------- //
     //
     // APPENDED.  The wheel's consistency arbitrage credits what it captures:
     // TOKEN to the DEPOSITORS with the stress fee's mechanics (re-LP'd as

@@ -7,7 +7,7 @@ import {ArbKind} from "./ArbKind.sol";
 
 /// @title BasketWheel -- a BuckBasket's work wheel, deployed beside its shell.
 ///
-/// @notice doc/BASKET-WHEEL.org 8.4.  The chassis plus every kind the basket
+/// @notice (alberta-buck-ethereum-wheel.org, "The work wheel".)  The chassis plus every kind the basket
 ///         has today; the order of the bases IS the slot layout (the
 ///         controller's compute, the director's poke, the treasury sweep, the
 ///         desk's quadrant operation, the equity basket's components, then one
