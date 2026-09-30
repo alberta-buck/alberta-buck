@@ -65,6 +65,52 @@ contract EquityTurnDirectorTest is BuckBasketEquityTest {
         assertEq(tg[0] + tg[1] + tg[2] <= 10000 && tg[0] + tg[1] + tg[2] >= 9997, true);
     }
 
+    // ---- catch-up: a gap between samples ----------------------------------- //
+
+    function _nextDay() internal {
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+    }
+
+    /// @dev Two directors on one basket share ten daily samples while T0
+    ///      drifts; T0 then moves by `ppm` and holds.  `daily` samples each of
+    ///      the next `n` days, `lazy` only the last: under sample-and-hold the
+    ///      lazy one must land where the daily one did, window by window.
+    function _twins(uint256 n, int256 ppm) internal {
+        _placed();
+        EquityTurnDirector daily = new EquityTurnDirector(address(b), GOV);
+        EquityTurnDirector lazy  = new EquityTurnDirector(address(b), GOV);
+        for (uint256 d = 0; d < 10; d++) {
+            _move(0, 10_000);
+            _nextDay();
+            daily.observe();
+            lazy.observe();
+        }
+        _move(0, ppm);
+        for (uint256 d = 0; d < n; d++) { _nextDay(); daily.observe(); }
+        lazy.observe();
+        for (uint256 i = 0; i < 3; i++) {
+            (int256[7] memory eD, int256[7] memory vD) = daily.ladder(i);
+            (int256[7] memory eL, int256[7] memory vL) = lazy.ladder(i);
+            for (uint256 k = 0; k < 7; k++) {
+                assertApproxEqAbs(eL[k], eD[k], 1e9, "the EMA lands where daily samples left it");
+                assertApproxEqAbs(vL[k], vD[k], 1e9, "and so does its last step");
+            }
+        }
+    }
+
+    /// Regression (2026-09-30): a sample after a gap advanced each EMA by one
+    /// day's step, so a quiet week under-advanced the ladder -- the 5-day EMA
+    /// moved 33% of the way where seven days move it 94%.
+    function test_theDirectorCatchesUpAfterAGap() public {
+        _twins(7, 50_000);
+    }
+
+    /// forge-config: default.fuzz.runs = 24
+    function testFuzz_theDirectorCatchesUpAfterAnyGap(uint16 n, int32 ppm) public {
+        _twins(bound(n, 1, 200), bound(ppm, -200_000, 200_000));
+    }
+
     function test_theDirectorBuysNoFallingKnife() public {
         _withDirector();
         _placed();

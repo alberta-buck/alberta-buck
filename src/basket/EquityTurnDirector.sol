@@ -45,6 +45,7 @@ interface IV3Observe {
 contract EquityTurnDirector is IEquityDirector {
     uint256 internal constant W = 7;                      // the ladder's windows
     int256  internal constant TICK_LN_WAD = 99995000333297;   // ln(1.0001), 1e18
+    int256  internal constant ONE = 1e18;
 
     IEquityBasketView public immutable basket;
     address public governance;
@@ -76,9 +77,20 @@ contract EquityTurnDirector is IEquityDirector {
 
     // --- the daily sample ------------------------------------------------------- //
 
+    /// @notice The daily sample.  A sample after a gap of `n` days advances
+    ///         each EMA as if today's reading had held through all of them
+    ///         (sample-and-hold), in closed form: a quiet week costs one
+    ///         sample and lands where seven daily samples would have.
+    ///
+    ///           e' = x + (e - x) q^n        v' = a q^(n-1) (x - e)
+    ///
+    ///         with a = 2/(w+1) and q = 1 - a; v' is the last day's step, whose
+    ///         sign the turn votes read.  One day apart it is the plain step.
     function observe() external {
         uint64 today = uint64(block.timestamp / 1 days);
         if (primed && today <= lastDay) return;
+        uint256 gap = primed ? uint256(today - lastDay) : 1;
+        if (gap > 3650) gap = 3650;
         lastDay = today;
         uint256 n = basket.constituentsLength();
         if (n == 0) return;
@@ -99,12 +111,31 @@ contract EquityTurnDirector is IEquityDirector {
             int256[7] storage v = _vel[i];
             for (uint256 k = 0; k < W; k++) {
                 if (!primed) { e[k] = x; v[k] = 0; continue; }
-                int256 step = (x - e[k]) * 2 / (int256(uint256(windows[k])) + 1);
-                e[k] += step;
-                v[k] = step;
+                int256 w1 = int256(uint256(windows[k])) + 1;
+                if (gap == 1) {
+                    int256 step = (x - e[k]) * 2 / w1;
+                    e[k] += step;
+                    v[k] = step;
+                } else {
+                    int256 q = ONE - 2 * ONE / w1;
+                    int256 qn1 = _powWad(q, gap - 1);
+                    int256 d0 = x - e[k];
+                    e[k] = x - d0 * (qn1 * q / ONE) / ONE;
+                    v[k] = d0 * 2 / w1 * qn1 / ONE;
+                }
             }
         }
         primed = true;
+    }
+
+    /// @dev b^n in 1e18 fixed point, 0 <= b < 1e18, by squaring: O(log n).
+    function _powWad(int256 b, uint256 n) internal pure returns (int256 r) {
+        r = ONE;
+        while (n > 0) {
+            if (n & 1 == 1) r = r * b / ONE;
+            b = b * b / ONE;
+            n >>= 1;
+        }
     }
 
     function _tick(address pool, uint32 window) internal view returns (int24) {
@@ -122,6 +153,12 @@ contract EquityTurnDirector is IEquityDirector {
     }
 
     // --- the reading ---------------------------------------------------------- //
+
+    /// @notice Leg i's ladder: each window's EMA and its last day's step, in
+    ///         ticks x 1e18 (the anchor last).
+    function ladder(uint256 i) external view returns (int256[7] memory ema, int256[7] memory vel) {
+        return (_ema[i], _vel[i]);
+    }
 
     /// @notice The leg against its anchor, in ticks x 1e18 (0 before a sample).
     function excursion(uint256 i) public view returns (int256) {
