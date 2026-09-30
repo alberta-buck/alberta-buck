@@ -145,7 +145,7 @@ class MonetaryKeeperAgent(Agent):
     every equity run, a desk that never operated while looking merely calm.
 
     Telemetry (ctr): mkQ1..mkQ4 / mkOps / mkIdle / mkBound / mkNoAdvice /
-    mkDone / mkPokes / mkCm / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage /
+    mkDone / mkPokes / mkCm / dk_q1..dk_q4 (BUCK moved) / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage /
     mk_err.
     """
 
@@ -191,12 +191,22 @@ class MonetaryKeeperAgent(Agent):
             self._classify(ctr, e)
             return
         try:
-            d.chain.send(self._desk(d).functions.monetaryOperation(),
-                         sender=self.account, gas=6_000_000)
+            rcpt = d.chain.send(self._desk(d).functions.monetaryOperation(),
+                                sender=self.account, gas=6_000_000)
         except Exception as e:
             self._classify(ctr, e)
             return
         ctr["mkOps"] = ctr.get("mkOps", 0) + 1
+        # What each operation moved, cumulative BUCK base units per quadrant
+        # (dk_q1 absorbed .. dk_q4 issued), as the desk reports it.
+        try:
+            from web3.logs import DISCARD
+            for ev in self._desk(d).events.MonetaryOperation().process_receipt(
+                    rcpt, errors=DISCARD):
+                k = f"dk_q{int(ev['args']['quadrant'])}"
+                ctr[k] = ctr.get(k, 0) + int(ev["args"]["buckMoved"])
+        except Exception as e:
+            ctr["mk_err"] = repr(e)[:160]
         key = self.QUADRANT.get(int(q))
         if key:
             ctr[key] = ctr.get(key, 0) + 1

@@ -192,6 +192,7 @@ class UndertakingAgent(_ProxyAgent):
             self.proxy.address, 0, face, 0, 0, 0, now_ts, 0))
         self.ladder: Ladder | None = None
         self._book0 = 0             # the TOKEN book at par when struck
+        self._tok0 = None           # ... and in TOKEN base units, per constituent
         self._nw0 = 0
         self._tpb = None
         self._sig = None
@@ -227,12 +228,14 @@ class UndertakingAgent(_ProxyAgent):
         book = int(nav * self.reserve_frac)
         # Constituent TOKENs in basket proportions worth `book` at the
         # day-0 reference prices (ExcursionArbAgent's neutral="basket" leg).
+        self._tok0 = [0] * len(d.tokens)
         for i, tok in enumerate(d.tokens):
             w = ExcursionArbAgent._weight(scenario, d, i)
             ref = max(1, scenario.prices.ref(i, 0))
             amt = int(book * w) * (10 ** d.dec[i]) // ref
             if amt > 0:
                 d.chain.send(tok.functions.mint(self.proxy.address, amt))
+                self._tok0[i] = amt
         self._book0 = book
         self._nw0 = book
         # The ladder is in bundles (par baskets); p = 1: the bundle path.
@@ -346,6 +349,30 @@ class UndertakingAgent(_ProxyAgent):
         L = self.ladder
         ctr["ut_rho"] = round(L.rho, 6) if L else 1.0
         ctr["ut_tranche"] = L.tranche if L else 0
+        try:
+            self._mark_book(d, ctr)
+        except Exception:
+            pass
+
+    def _mark_book(self, d, ctr) -> None:
+        """The book marked -- signed BUCK, relief, and the TOKENs held -- and
+        the opening TOKEN book simply held, both at the basket's LOW marks in
+        BUCK base units: ut_nw against ut_hold is what operating earned over
+        sitting still (summed over the class; the savings page's chart)."""
+        if not self._tok0:
+            return
+        p = [int(d.basket.functions.marks(i, 0).call()[3]) for i in range(len(d.tokens))]
+        a = self.proxy.address
+        nw = (int(d.buck.functions.signedBalanceOf(a).call())
+              + int(d.buck.functions.reliefOf(a).call()))
+        hold = 0
+        for i, tok in enumerate(d.tokens):
+            nw += d.chain.balance_of(tok, a) * p[i] // 10 ** d.dec[i]
+            hold += self._tok0[i] * p[i] // 10 ** d.dec[i]
+        book = ctr.setdefault("utMark", {})
+        book[self.idx] = (nw, hold)
+        ctr["ut_nw"] = sum(v[0] for v in book.values())
+        ctr["ut_hold"] = sum(v[1] for v in book.values())
 
     def _signed(self, d) -> int:
         return int(d.buck.functions.signedBalanceOf(self.proxy.address).call())

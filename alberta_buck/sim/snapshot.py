@@ -109,6 +109,60 @@ WP15_KEYS = (
 )
 
 
+def _eqsave_frame(d, ctr) -> dict:
+    """The savings page's view of the equity basket and its desks
+    (2026-09-30): what each decided and how much, and each book against
+    simply holding what it started with.  Prices are the basket's LOW marks
+    (a whole TOKEN in BUCK base units), the marks the desk values itself at.
+
+      eq_hold   the basket's day-0 declared weights, held: an index from 1
+      eq_decl   declared weights, bp        eq_w     actual weights, bp
+      eq_lean   the director's leaned targets, bp (None without a director)
+      desk_nav  the EquityDesk's net value; desk_hold its founding grant,
+                held (BUCK base units)
+      ut_nw / ut_hold  the undertakings' book, marked, and their opening
+                TOKEN book held (BUCK base units; from UndertakingAgent)
+    Every field is None where its source is absent."""
+    f = {"eq_hold": None, "eq_decl": None, "eq_w": None, "eq_lean": None,
+         "desk_nav": None, "desk_hold": None,
+         "ut_nw": ctr.get("ut_nw"), "ut_hold": ctr.get("ut_hold")}
+    if not str(getattr(d, "basket_impl", "")).startswith("equity"):
+        return f
+    b, n = d.basket, len(d.tokens)
+    try:
+        p_low = [int(b.functions.marks(i, 0).call()[3]) for i in range(n)]
+    except Exception:
+        p_low = None
+    try:
+        f["eq_decl"] = [int(b.functions.constituents(i).call()[9]) for i in range(n)]
+        f["eq_w"] = [int(x) for x in b.functions.weightsBp().call()]
+    except Exception:
+        pass
+    eqd = getattr(d, "equity_director", None)
+    if eqd is not None:
+        try:
+            f["eq_lean"] = [int(x) for x in eqd.functions.targetsBp().call()]
+        except Exception:
+            pass
+    if p_low and all(p_low) and f["eq_decl"]:
+        st = d.__dict__.setdefault("_eqsave", {})
+        if "p0" not in st:
+            st["p0"], st["w0"] = p_low, f["eq_decl"]
+        tot = sum(st["w0"]) or 1
+        f["eq_hold"] = sum(w * p / p0 for w, p, p0 in zip(st["w0"], p_low, st["p0"])) / tot
+    desk = getattr(d, "desk", None)
+    if desk is not None:
+        try:
+            f["desk_nav"] = int(desk.functions.netValue().call())
+        except Exception:
+            pass
+        grant = getattr(d, "desk_grant", None)
+        if grant and p_low:
+            f["desk_hold"] = sum(g * p // 10 ** d.dec[i]
+                                 for i, (g, p) in enumerate(zip(grant, p_low)))
+    return f
+
+
 def _wp15_frame(d, ctr, agents) -> dict:
     f = {k: ctr[k] for k in WP15_KEYS if k in ctr}
     if "raidCycle" in ctr:
@@ -848,7 +902,8 @@ class Snapshotter:
             # present; see _wp14_frame above).
             **_wp14_frame(d, ctr),
             **_t15_frame(ctr),
-            **{k: v for k, v in ctr.items() if k.startswith(("wh_", "shk_"))},
+            **_eqsave_frame(d, ctr),
+            **{k: v for k, v in ctr.items() if k.startswith(("wh_", "shk_", "dk_"))},
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

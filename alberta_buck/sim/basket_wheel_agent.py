@@ -65,6 +65,11 @@ E6 = 10 ** 6
 
 @_register
 class BasketWheelAgent(_ProxyAgent):
+    # WheelWork kinds (BuckBasketEquityWheel): the BUCK each step moved --
+    # Sync its fees' BUCK side, Deploy the BUCK it paired, Fund the BUCK it
+    # spent on the director's pick, Trim the value it unwound.
+    EQ_KINDS = {1: "sync", 2: "deploy", 3: "fund", 4: "trim"}
+
     def setup(self, d, scenario, rng) -> None:
         cls = type(self).__name__
         sp = lambda k, v: _spec(scenario, cls, k, v)
@@ -244,6 +249,12 @@ class BasketWheelAgent(_ProxyAgent):
                         "wh_sol_share_usd": 0.0, "wh_sol_credited_usd": 0.0,
                         "wh_sol_reserve_pay_usd": 0.0, "wh_sol_gas": 0,
                         "wh_sol_gas_usd": 0.0, "wh_sol_triangles": k}
+        if self.equity:
+            # The equity basket's components, as it reports them (WheelWork):
+            # cumulative BUCK base units and step counts per kind.
+            for key in self.EQ_KINDS.values():
+                self.sol_ctr[f"wh_eq_{key}"] = 0
+                self.sol_ctr[f"wh_eq_{key}_n"] = 0
 
     def _usd_per_unit(self, d, token_addr: str) -> float:
         """USD per whole unit of a token: BUCK at the BUCK/USDC pool, a
@@ -315,4 +326,10 @@ class BasketWheelAgent(_ProxyAgent):
             self.note(d, "cycle", k=int(a["k"]), dir=int(a["dir"]),
                       x=int(a["amountIn"]), profit_usd=round(int(a["profit"]) * px, 2),
                       credited_usd=round(int(a["credited"]) * px, 2), gas=gas)
+        if self.equity:
+            for ev in d.basket.events.WheelWork().process_receipt(rcpt, errors=DISCARD):
+                key = self.EQ_KINDS.get(int(ev["args"]["kind"]))
+                if key:
+                    c[f"wh_eq_{key}"] += int(ev["args"]["amount"])
+                    c[f"wh_eq_{key}_n"] += 1
         ctr.update({k: (round(v, 2) if isinstance(v, float) else v) for k, v in c.items()})

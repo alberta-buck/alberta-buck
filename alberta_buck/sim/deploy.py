@@ -189,6 +189,7 @@ class Deployment:
     observer: Any = None          # ShadowObserver (shadow controller on ops only)
     desk: Any = None              # EquityDesk ("equity-ops": the desk, its own credit holder)
     equity_director: Any = None   # EquityTurnDirector (equity baskets)
+    desk_grant: Any = None        # the desk's founding grant, TOKEN base units per constituent
     wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
@@ -830,6 +831,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                 chain.send(tc.functions.mint(gov, amt))
                 chain.send(tc.functions.approve(mon.address, amt), sender=gov)
                 chain.send(mon.functions.capitalizeMonetary(i, amt), sender=gov)
+                d.desk_grant = d.desk_grant or [0] * len(tok)
+                d.desk_grant[i] = amt
             if verbose:
                 print(f"[deploy] monetary desk capitalized "
                       f"${cap_usd:,}/token across {len(tok)} tokens")
