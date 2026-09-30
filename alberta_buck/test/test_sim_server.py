@@ -241,3 +241,36 @@ def test_signed_transactions_carry_their_real_hash_and_need_the_next_nonce():
                                    "maxFeePerGas": 0, "maxPriorityFeePerGas": 0})
     out = p.make_request("eth_sendRawTransaction", ["0x" + typed.raw_transaction.hex()])
     assert out["result"] == "0x" + keccak(typed.raw_transaction).hex()
+
+
+def test_a_reset_unwinds_the_day():
+    """"reset" rebuilds the world from its first day, in place: applied at a
+    day's start, it unwinds the run like a reaped session, to be rebuilt."""
+    import pytest
+    from alberta_buck.sim.server import ResetSession
+    s = session()
+    with pytest.raises(ResetSession):
+        s._apply({"op": "reset"}, 12, [])
+
+
+def test_a_reset_clears_the_world_and_tells_its_watchers():
+    import asyncio
+    s = session()
+    s._enrolled = {"0xabc": ("args", 1)}
+    s.history = ['{"day": 1}', '{"day": 2}']
+    s.day, s.d, s.agents, s._info, s._sv = 7, object(), [], {"basket": "0x1"}, {"D": 1.1}
+    s.paused, s.step_left = True, 2
+    s.controls.put({"op": "shock"})
+    s.chain_lock.acquire()
+    s._holding = True
+    full, lite = asyncio.Queue(), asyncio.Queue()
+    s.subscribers, s.lite = {full, lite}, {lite}
+    s._restarting()
+    assert (s.day, s.d, s.agents, s._info, s._sv) == (None, None, None, None, None)
+    assert s._enrolled == {} and not s.paused and s.step_left is None
+    assert s.controls.empty(), "ops queued for the old world do not reach the new one"
+    assert not s._holding and s.chain_lock.acquire(blocking=False), "the chain is let go"
+    s._reset_fanout()                    # the asyncio side (no loop in a test)
+    assert s.history == [], "a reloaded page replays only the new world"
+    for q in (full, lite):
+        assert json.loads(q.get_nowait()) == {"reset": True}

@@ -61,9 +61,10 @@ export class RpcError extends Error {
 }
 
 export class SimLink {
-  /** urls: channels(base, sid, sets); onFrame(frame); onState(state, detail). */
-  constructor({ urls, onFrame, onState, WebSocket: WS = globalThis.WebSocket }) {
-    Object.assign(this, { urls, onFrame, onState, WS });
+  /** urls: channels(base, sid, sets); onFrame(frame); onState(state, detail);
+   *  onReset() when the server rebuilds the world from its first day. */
+  constructor({ urls, onFrame, onState, onReset, WebSocket: WS = globalThis.WebSocket }) {
+    Object.assign(this, { urls, onFrame, onState, onReset, WS });
     this.state = "idle";
     this.closed = false;
     this.nextId = 1;
@@ -91,6 +92,11 @@ export class SimLink {
       if (m.error) {
         this._set(m.refused ? "refused" : "failed", m.error);
         this.closed = true;
+        return;
+      }
+      if (m.reset) {                    // the world starts over: same link, first day
+        this.onReset?.();
+        this._set("building");
         return;
       }
       if (m.done) {

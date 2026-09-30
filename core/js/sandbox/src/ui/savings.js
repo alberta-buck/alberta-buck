@@ -56,6 +56,9 @@ export function mountSavings(ctx) {
   const stateChip = h("span", { class: "chip" }, STATES.idle);
   const kpis = h("div", { class: "stats kpis" });
   const runBtn = h("button", { type: "button", class: "primary", onclick: () => toggleRun() }, "Pause");
+  const resetBtn = h("button", { type: "button", class: "danger", onclick: () => resetWorld(),
+                                 title: "Start this world over from its first day: the same link, prices and seed" },
+    "Reset");
   const stepBtns = [1, 7, 30].map((n) => h("button", {
     type: "button", title: `Run ${n} simulated day${n > 1 ? "s" : ""}, then pause`,
     onclick: () => op(`Running ${n} day${n > 1 ? "s" : ""}`, { op: "step", days: n }),
@@ -94,7 +97,7 @@ export function mountSavings(ctx) {
     h("div", { class: "card-head" }, h("h2", {}, "The savings world"), stateChip),
     noServer,
     kpis,
-    h("div", { class: "row ctl" }, runBtn, h("span", { class: "seg-label" }, "Step"), ...stepBtns,
+    h("div", { class: "row ctl" }, runBtn, resetBtn, h("span", { class: "seg-label" }, "Step"), ...stepBtns,
       h("span", { class: "seg", role: "group", "aria-label": "the wheel's gas" },
         h("span", { class: "seg-label" }, "Gas"), ...chainBtns)),
     h("div", { class: "row ctl" },
@@ -238,6 +241,32 @@ export function mountSavings(ctx) {
     }, msg.op === "step" ? `${label}: queued for the day's end.` : "Queued for the day's end.");
   }
 
+  // Rebuild this world from its first day, on the server, in place: everyone
+  // watching its link sees it start over.  A world that has run its course
+  // has no day left to take the op, so a fresh connection rebuilds it.
+  function resetWorld() {
+    if (!S.link) return undefined;
+    if (!confirm("Reset this world to its first day?  Everyone watching its link sees it start over, "
+      + "and savings in it are gone.")) return undefined;
+    if (S.link.state === "done") return connect();
+    return op("Resetting the world", { op: "reset" });
+  }
+
+  // The server said the world starts over: forget the old one's days, its
+  // key's holdings and its receipts, and wait for the new one's first frame.
+  function forgetWorld() {
+    S.rows = [];
+    S.info = null;
+    S.saver = null;
+    S.holdings = null;
+    keepReceipts([]);
+    S.commodity = [];
+    commodityGrid.replaceChildren();
+    S.lean = [];
+    leanGrid.replaceChildren();
+    draw();
+  }
+
   function toggleRun() {
     const paused = S.status?.paused;
     return op(paused ? "Running the world" : "Pausing the world", { op: paused ? "resume" : "pause" });
@@ -283,6 +312,7 @@ export function mountSavings(ctx) {
         }
         if (state === "live" && !S.info) loadInfo();
       },
+      onReset: () => forgetWorld(),
       onFrame: (f) => {
         S.rows.push(row(f));
         queueDraw();
@@ -485,6 +515,7 @@ export function mountSavings(ctx) {
     const st = S.status;
     const live = S.link?.state === "live";
     runBtn.disabled = !live;
+    resetBtn.disabled = !(live || S.link?.state === "done");
     runBtn.textContent = st?.paused ? "Run" : "Pause";
     for (const b of stepBtns) b.disabled = !live;
     for (const b of chainBtns) {

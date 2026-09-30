@@ -149,5 +149,17 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
 
     await page.click("#panel-savings button:text-is('Run')");
     await idle();
+
+    // Reset: the same link, the world rebuilt from its first day on the
+    // server; this world's savings are gone with it.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    page.once("dialog", (dlg) => dlg.accept());
+    await page.click("#panel-savings button:text-is('Reset')");
+    await idle();
+    await page.waitForFunction(() => (globalThis.savings?.rows.length ?? 1) === 0, null, { timeout: DAY_MS });
+    await page.waitForFunction(() => (globalThis.savings?.rows.length ?? 0) >= 2 && globalThis.savings?.info, null,
+      { timeout: WORLD_MS });
+    assert.ok((await day()) < 10, "the world starts over");
+    assert.match(await page.textContent("#panel-savings"), /No savings yet/, "the old world's receipts are gone");
     assert.deepEqual(errors, []);
   });

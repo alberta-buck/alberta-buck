@@ -30,7 +30,9 @@ WebSocket channels (websockets):
                      "knob" {cls, name, value}, "pause", "resume",
                      "step" {days}, "shock" {side buy|sell, usd, days}
                      (arms the cast's ShockAgent), "chain" {name l1|l2}
-                     (the work wheel's caller gas profile)
+                     (the work wheel's caller gas profile), "reset"
+                     (rebuild the world from its first day, in place: the
+                     same link and watchers, who receive {"reset": true})
   /s/<sid>/rpc       JSON-RPC 2.0 over WS; besides the chain's own methods,
                      "sim_info" (the world's addresses and constituents),
                      "sim_status" (day, paused, pace) and "sim_enroll"
@@ -151,6 +153,11 @@ class StopSession(Exception):
     """Raised inside on_day_start to unwind a reaped session's loop."""
 
 
+class ResetSession(Exception):
+    """Raised by a "reset" control to unwind the run and rebuild the world
+    from its first day, in place: the same session, link and watchers."""
+
+
 def _jsonable(o):
     if isinstance(o, dict):
         return {k: _jsonable(v) for k, v in o.items()}
@@ -204,17 +211,12 @@ class Session:
 
     def _run(self):
         try:
-            with _BUILD_LOCK:
-                scenario = self.scenario = self.scenario_factory()
-                anvil = PyrevmAnvil()
-                anvil.start()
-                self.provider = anvil.w3.provider
-            try:
-                run(scenario, anvil, out_path=None, verbose=False,
-                    basket_impl=self.basket_impl,
-                    on_day_start=self._on_day_start, on_frame=self._on_frame)
-            finally:
-                anvil.stop()
+            while True:
+                try:
+                    self._build_and_run()
+                    break
+                except ResetSession:
+                    self._restarting()
         except StopSession:
             print(f"[sim.server] session '{self.sid}' reaped (idle)")
         except Exception as e:
@@ -226,6 +228,47 @@ class Session:
                 self.chain_lock.release()
             self.done = True
             self._fanout_threadsafe(json.dumps({"done": True}))
+
+    def _build_and_run(self):
+        with _BUILD_LOCK:
+            scenario = self.scenario = self.scenario_factory()
+            anvil = PyrevmAnvil()
+            anvil.start()
+            self.provider = anvil.w3.provider
+        try:
+            run(scenario, anvil, out_path=None, verbose=False,
+                basket_impl=self.basket_impl,
+                on_day_start=self._on_day_start, on_frame=self._on_frame)
+        finally:
+            anvil.stop()
+
+    def _restarting(self):
+        """Between a reset and the rebuild: let the chain go, forget the old
+        world (its day, its deployment, the keys enrolled with its issuer,
+        the ops queued for it), and tell the watchers -- whose pages clear
+        and wait for the new world's first frame."""
+        if self._holding:
+            self._holding = False
+            self.chain_lock.release()
+        self.day = self.d = self.agents = self._info = self._sv = None
+        self._enrolled.clear()
+        self.paused, self.step_left = False, None
+        while True:
+            try:
+                self.controls.get_nowait()
+            except Empty:
+                break
+        self._idle_since = self._last_day_ts = time.monotonic()
+        print(f"[sim.server] session '{self.sid}' reset")
+        if self.aloop is not None:
+            self.aloop.call_soon_threadsafe(self._reset_fanout)
+
+    def _reset_fanout(self):
+        """(asyncio side) The replay starts over, and every watcher hears so."""
+        self.history.clear()
+        msg = json.dumps({"reset": True})
+        for q in list(self.subscribers):
+            q.put_nowait(msg)
 
     def _on_day_start(self, day, d, agents, ctr):
         self.day, self.d, self.agents = day, d, agents
@@ -311,6 +354,8 @@ class Session:
             for a in agents:
                 if type(a).__name__ == cls and hasattr(a, name):
                     setattr(a, name, type(getattr(a, name))(op["value"]))
+        elif kind == "reset":
+            raise ResetSession()
         elif kind == "pause":
             self.paused = True
         elif kind == "resume":
