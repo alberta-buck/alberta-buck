@@ -240,6 +240,13 @@ prices, not credit), the venue, the director, the wheel's other kinds.
 
 ** 6.1 The core
 
+*Ruled (2026-09-29)*: all six, as recommended -- relief on the lien, every
+BUCK carrying its fee to the end, realization at the crossing / burn /
+=settleRelief=, the fund on =totalIssued=, the cap at the lien; and the
+results that used coverage-based relief are annotated as pre-fix
+accounting (6.1.6, option A: annotate now, rerun after the merge -- the
+E-series reruns and their equity twins are 10.8's experiments).
+
 1. *Relief on BUCK issued* (the lien), system-wide: undrawn coverage earns
    nothing, a drawn credit earns 2%/yr of its lien, and the quotes move from
    BuckCredit (per credit) to Buck (per account).  (The owner's principle;
@@ -277,6 +284,8 @@ prices, not credit), the venue, the director, the wheel's other kinds.
   production by an insurer attestation that permits MARKED).
 - 6.2.3 (=owed= retired into the liquidity floor) and 6.2.4 (relief in the
   share price, realized daily) proceed as recommended.
+- 6.2.5: the pro-rata baskets' relief is recorded (=basketRelief= on the
+  sim-only =BuckWithBasketHooks=), never paid.
 
 1. *The equity basket as a credit holder* (4.1), or the ledger credit
    (4.2).  Recommended: the credit holder.

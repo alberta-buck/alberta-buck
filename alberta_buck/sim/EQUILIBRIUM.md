@@ -1,5 +1,13 @@
 # Equilibrium Simulation -- Current State
 
+> **Accounting note (2026-09-29):** the sim results here were produced before the
+> `fix/jubilee-accounting` merge: Jubilee relief then accrued on activated coverage
+> rather than on BUCK issued, a BUCK that repaid a lien or was spent into credit did
+> not carry its demurrage fee, and `Buck.mint(amount)` took coverage rather than the
+> spendable it delivers.  Every cell with credit drawn ran on that accounting; the
+> pro-rata baskets' mechanics are unchanged (sim-only `BuckWithBasketHooks`).  The
+> rules now: alberta-buck-ethereum.org; the reruns: doc/CONVERGENCE.org.
+
 A closed-loop simulation of BUCK-K value stabilization on real macro data.
 Agents issue/redeem BUCK credit and save BUCK; the on-chain `BuckKControllerDirect`
 PID adjusts **K** (the LTV credit cap) to defend basket parity

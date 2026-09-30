@@ -3,6 +3,17 @@
 #+DATE: 2026-09-26
 #+OPTIONS: ^:nil toc:2 num:t
 
+/Accounting note (2026-09-29)/: the sim results in this document were produced
+before the =fix/jubilee-accounting= merge.  Jubilee relief then accrued on
+activated coverage rather than on BUCK issued, a BUCK that repaid a lien or was
+spent into credit did not carry its demurrage fee, and =Buck.mint(amount)= took
+coverage rather than the spendable it delivers.  Every cell with credit drawn
+(debtors, retirees, the desk, the undertakings, the facility) ran on that
+accounting; the pro-rata baskets' mechanics are unchanged (they run on the sim-only
+=BuckWithBasketHooks=).  The rules now: alberta-buck-ethereum.org, "Demurrage and
+Jubilee" and "mint(N) and burn(N)"; the reruns on the fixed accounting, with the
+equity basket's twins: doc/CONVERGENCE.org.
+
 * 1. What this document is, and how to use it
 
 The =feature/carry-convexity= branch ran a two-month measurement program on
