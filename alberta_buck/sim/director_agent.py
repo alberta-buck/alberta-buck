@@ -145,7 +145,7 @@ class MonetaryKeeperAgent(Agent):
     every equity run, a desk that never operated while looking merely calm.
 
     Telemetry (ctr): mkQ1..mkQ4 / mkOps / mkIdle / mkBound / mkNoAdvice /
-    mkDone / mkPokes / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage /
+    mkDone / mkPokes / mkCm / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage /
     mk_err.
     """
 
@@ -177,6 +177,13 @@ class MonetaryKeeperAgent(Agent):
                 ctr["mkPokes"] = ctr.get("mkPokes", 0) + 1
             except Exception as e:
                 ctr["mk_err"] = repr(e)[:160]
+        if getattr(d, "director", None) is not None:
+            # The signal itself (the common mode on its 20-day rung, tick*1e9;
+            # a view): zero only while the director has never sampled.
+            try:
+                ctr["mkCm"] = int(d.director.functions.commonMode(2).call())
+            except Exception:
+                pass
         try:
             q = self._desk(d).functions.monetaryOperation().call(
                 {"from": self.address})

@@ -103,3 +103,12 @@ def test_the_star_report_flags_a_silent_desk(tmp_path):
     assert not desk_silent(vec("fed.json", {"mk_no_advice": 700, "mk_pokes": 731}))
     assert not desk_silent(vec("ops.json", {"mk_no_advice": 700, "directorPokes": 2924}))
     assert not desk_silent(vec("nodesk.json", {"day": 1}))
+    # poked, but the signal never moved: the director could not read the basket
+    dead = tmp_path / "dead.json"
+    dead.write_text(json.dumps({"frames": [{"day": i, "mk_cm": 0} for i in range(40)]
+                                + [{"mk_no_advice": 40, "mk_pokes": 40, "mk_cm": 0}]}))
+    assert desk_silent(dead)
+    live = tmp_path / "live.json"
+    live.write_text(json.dumps({"frames": [{"day": i, "mk_cm": i} for i in range(40)]
+                                + [{"mk_no_advice": 40, "mk_pokes": 40, "mk_cm": 3}]}))
+    assert not desk_silent(live)

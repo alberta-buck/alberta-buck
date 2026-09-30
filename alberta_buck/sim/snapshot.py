@@ -676,6 +676,7 @@ class Snapshotter:
             "mk_bound": ctr.get("mkBound", 0),
             "mk_no_advice": ctr.get("mkNoAdvice", 0),
             "mk_pokes": ctr.get("mkPokes", 0),
+            "mk_cm": ctr.get("mkCm", 0),
             "mk_done": ctr.get("mkDone", 0),
             "mk_no_value": ctr.get("mkNoValue", 0),
             "mk_tok_held": list(ctr.get("mkTokHeld", [])),

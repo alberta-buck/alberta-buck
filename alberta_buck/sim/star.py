@@ -606,7 +606,9 @@ def desk_silent(path: Path) -> bool:
               ("mk_no_advice", "mk_ops", "mk_idle", "mk_bound", "mk_done")) > 0
     sampled = (int(last.get("directorPokes", 0) or 0)
                + int(last.get("mk_pokes", 0) or 0)) > 0
-    return ran and not sampled
+    dead = "mk_cm" in last and len(frames) > 30 and not any(
+        f.get("mk_cm") for f in frames)
+    return ran and (not sampled or dead)
 
 
 def report(spec: dict, specs: list[dict], outdir: Path, resp_days: int,
