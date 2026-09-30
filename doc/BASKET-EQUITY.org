@@ -20,6 +20,10 @@ The design is ruled (13.3, 13.5, 13.6), built in Solidity (13.8, plan
 steps 1-5) and running in the sim (13.9, step 6).  One ruling is asked
 (13.10: the fallback exit in kind).  *A fresh session restarts at 13.11.*
 
+*Section 14 (2026-09-30)*: the wheel's rebalancing (Fund, Trim) is starved
+by continuous deposits -- a defect with its mechanism, its cost and six
+mitigations for a ruling.
+
 - *The first prototype* is =alberta_buck/sim/equity_basket.py=: pure Python with
   no EVM, covering the pools, the accounting and the wheel's components.
   Its 28 tests, one per promise this document makes, are in
@@ -1434,3 +1438,106 @@ committed.
     =creditTreasury=; =deploy.py= deduplicates the ABI union by signature.
   - The first run after =KEEP_IDENTITY_SECRET= regenerates those agents'
     cached identities, once.
+
+* 14. Rebalancing starved by deposits (2026-09-30)
+
+/Found by the savings page's new charts (the director's lean, per
+commodity; what the wheel did): in the savings world's first 45 days the
+basket placed 1.49M BUCK of deposits and never once bought for the
+director or trimmed, while its actual weights left the declared ones far
+behind -- cbBTC 13.8% against 6% declared, PAXG 15.3% against 8%, LABR
+19.0% against 24% -- every one past the director's 30% leash./
+
+** 14.1 The mechanism
+
+=BuckBasketEquityWheel= gates both rebalancing components on a settled
+wallet:
+
+- =_fundPlan= returns nothing while =_anyTokenWaiting(s, grain)=: any
+  pool's idle TOKEN worth more than the grain (=grainPpm= = 100, 0.01% of
+  the gross; about 600 BUCK on the savings world's basket).
+- =_trimPlan= returns nothing while TOKEN waits, AND while Fund has a plan.
+  The liquidity refill (short of the floor) is behind the same gate.
+
+The gate was meant as an ordering: place what arrived before rebalancing
+what is there.  It becomes a starvation because TOKEN is nearly always
+waiting:
+
+1. *Deposits arrive continuously.*  Each lands as idle TOKEN of the
+   deposited commodity (=deposit= only books equity; 13.6).  The savings
+   world's cast deposits most days; any world with a depositor population
+   will.
+2. *Deploy is paced.*  It pairs pool i's TOKEN with i's share of the usable
+   credit (liquidity above its target, pro rata to the TOKEN waiting), and
+   sells the shortfall at most =swapCapBp= (1% of the pool's depth) per
+   step.  A deposit large against its pool, or arriving while liquidity sits
+   at its target, takes many steps -- during all of which Fund and Trim are
+   gated off.
+3. *Sync refills the queue.*  Each day's fee collection lands the fees'
+   TOKEN side in the wallet as idle TOKEN.
+4. *Deposits are placed where they came in.*  Deploy pairs TOKEN i in pool
+   i, never toward the targets, so the flow itself pushes the weights toward
+   whatever depositors bring (and bitcoin and gold ran in 2020-21).
+
+So the drift has two sources -- prices and the deposits' own mix -- and the
+only components that correct it cannot run while deposits keep coming.
+The leash does not help: =mayTrim= is true past it, but =_trimPlan= never
+asks.  The wheel paper's "a leg more than 30% off its declared weight
+trades regardless of the gate" holds for the director's gate only.
+
+What it costs:
+- the rebalancing premium and the director's lean (legs 2 of the harvest;
+  12.2-12.3) are not collected at all in a growing basket;
+- the basket's composition -- the anchor K is steered by -- follows the
+  depositors' mix rather than the declared basket;
+- the E-series equity cells with depositor populations measure a basket
+  that could not rebalance: E3's director leg in particular (read those
+  cells with this in mind).
+
+** 14.2 Mitigations
+
+In rough order of cost:
+
+1. *Gate by what actually conflicts, not globally.*  Trim conflicts with a
+   placement only in its own pool (pairing and unwinding pool t in one
+   step), and its sale brings in BUCK that helps every other placement:
+   gate Trim on =idleToken[t]= alone, and drop "while Fund has a plan".
+   Fund does compete with Deploy -- both spend the usable credit -- so it
+   should spend only what is left after reserving the waiting TOKEN's
+   pairing (=usable - value waiting=), rather than nothing whenever anything
+   waits.  Small, local, keeps the intended ordering where it matters.
+2. *Let the leash through.*  A leg past the leash (the mandate) trims or
+   funds even with TOKEN waiting elsewhere, at =stepBp= per step.  Makes
+   the documented leash true.  Composable with 1.
+3. *A size threshold instead of the grain.*  Rebalance when the waiting
+   TOKEN is small against the gross -- say under the day's typical flow
+   (the flow EMA the liquidity target already keeps) -- not merely above
+   the grain.  Simplest change; still defers to a large placement.
+4. *Place deposits toward the targets* (flow rebalancing).  Deploy places
+   a deposit's VALUE by the (leaned) targets instead of in its own pool:
+   an overweight commodity's TOKEN is partly sold (through the better
+   route, 13.8 departure 2) and the proceeds fund the most underweight
+   legs, gated by the director (no buying a falling knife).  The standard
+   way funds rebalance: with contributions, selling nothing held.  Costs a
+   swap on part of each deposit, which the entry charge only partly
+   covers; the trade is the depositor's own and the gain is everyone's.
+   Largest change; needs its own tests and an experiment.
+5. *Price the mix into the entry charge.*  A deposit that moves the
+   weights toward the targets pays less, one that moves them away pays
+   more; the page already steers a saver to "the basket's choice".  A
+   nudge, not a guarantee; composable with any of the above.
+6. *Let the targets float* (not recommended): declare the weights a
+   leash only and accept the depositors' mix.  It gives up the declared
+   anchor.
+
+Recommended: 1 and 2 now (they restore the ordering's intent and the
+leash's promise with small, testable changes), and 4 as the design to
+measure against them.  A regression test first: a basket with a leg past
+the leash and a deposit waiting in another pool must trim the leg.
+
+** 14.3 Measured
+
+(filled in below when the diagnostic runs finish: the savings world for
+90 days, logging each day's waiting TOKEN, whether Deploy / Fund / Trim
+were due, the weights, the director's targets and mayTrim; arm B freezes
+the basket's depositors from day 45.)

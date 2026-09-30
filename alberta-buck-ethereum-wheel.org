@@ -321,8 +321,9 @@ takes it against the basket's mean, and keeps for each leg a ladder of EMAs of t
   quorum (default 4 of 6) is a turn.  No rung can fire alone, which is what makes the fast ones
   safe to include.  A leg not turned is still running, and a run is let run: the director never
   trims a leg still rising or buys one still falling.
-- *The leash.*  A leg more than 30% off its /declared/ weight trades regardless of the gate.  The
-  lean times the mandate; the leash enforces it.
+- *The leash.*  A leg more than 30% off its /declared/ weight trades regardless of the turn.  The
+  lean times the mandate; the leash enforces it.  (Today a deposit waiting to be placed still
+  defers it: see the open questions.)
 
 The Fund step buys the director's pick and the Trim step sells it.  Proceeds wait in the wallet
 between a sale and the buy that is due, so the director never has to catch a falling knife to stay
@@ -651,13 +652,18 @@ Jubilee accounting now.
 6. *The desk's reach.*  It retires only what it has issued.  Opening with a standing book -- part of
    its line drawn and sold, which funds Q1 and gives Q2 something to retire -- is the remedy an
    earlier desk used.  =doc/DESK-LP-RESERVE.org= sketches a reserve held as basket shares, pledged.
-7. *The director's bands.*  The 30% leash is hand-set.  Two refinements with firm theory: under
+7. *Rebalancing under continuous deposits.*  The wheel's Fund and Trim wait for a settled wallet
+   -- no deposit waiting to be placed -- which a growing basket seldom has; in the savings world
+   they never ran in 45 days while legs drifted to twice their declared weight.  Gating by what
+   actually conflicts, letting the leash through, and placing deposits toward the targets are the
+   candidates (=doc/BASKET-EQUITY.org=, section 14).
+8. *The director's bands.*  The 30% leash is hand-set.  Two refinements with firm theory: under
    proportional costs the optimal policy is a no-trade region, trading only to its /boundary/
    (Davis and Norman, 1990); and for a reverting spread the optimal thresholds are known in closed
    form from its reversion rate and volatility (Bertram, 2010).
-8. *The wheel's parameters*: the share /s/, /kappa/, where the callers' reserve is funded from, and
+9. *The wheel's parameters*: the share /s/, /kappa/, where the callers' reserve is funded from, and
    capping every leg of a cycle (v1 caps only the first).
-9. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The basket owns no BUCK/USDC position, and
+10. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The basket owns no BUCK/USDC position, and
    should not; who provides that depth is a question for any deployment.
 
 * Risks
