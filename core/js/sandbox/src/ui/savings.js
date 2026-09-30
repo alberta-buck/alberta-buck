@@ -166,8 +166,13 @@ export function mountSavings(ctx) {
       "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and ",
       "its work wheel, the undertakings, K, arbitrageurs pinning every TOKEN to its commodity, depositors ",
       "and retirees.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
-      "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.  It is a separate world ",
-      "from the other tabs', which runs in your browser on a clock of its own."),
+      "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.",
+      ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', which runs in your browser on a "
+        + "clock of its own."),
+    ctx.savingsOnly ? h("p", { class: "hint" }, "The sandbox's other tools -- an identity issuer, wallets ",
+      "and payments, insured credit, what an observer of the chain sees -- run in your browser, in a small ",
+      "world of their own: ", h("a", { href: "https://sandbox.albertabuck.ca/" }, "sandbox.albertabuck.ca"), ".")
+      : null,
     h("div", { class: "cols savings-cols" },
       h("div", { class: "stack" }, worldCard, walletCard),
       h("div", { class: "stack" },

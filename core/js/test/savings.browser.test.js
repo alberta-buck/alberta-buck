@@ -54,6 +54,11 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
       "a page served by the sim server opens on the Savings tab");
     assert.ok(await page.isHidden("#loading"), "the Savings tab needs none of the in-tab world");
     assert.equal(await page.evaluate(() => globalThis.sandbox), undefined, "the in-tab world did not boot");
+    for (const t of ["issuer", "wallets", "credit", "observer"]) {
+      assert.equal(await page.locator(`#tab-${t}`).count(), 0, `the savings sandbox has no ${t} tab`);
+    }
+    assert.match(await page.textContent("#panel-savings"), /sandbox\.albertabuck\.ca/,
+      "it points at the in-browser sandbox for the other tools");
 
     await page.waitForSelector("#panel-savings .kpis .stat", { timeout: WORLD_MS });
     await page.waitForFunction(() => globalThis.savings?.holdings, null, { timeout: WORLD_MS });

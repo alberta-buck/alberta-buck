@@ -3,7 +3,9 @@
 // controller.  Everything here is presentation; every chain fact comes from
 // the controller.  The Savings tab is the exception: it watches a world on
 // a sim server, needs none of the in-tab one, and so the in-tab world boots
-// only when one of its own tools is first shown.
+// only when one of its own tools is first shown.  Served BY the sim server
+// (the savings sandbox) the page is the Savings tab alone: the in-browser
+// tools are the static sandbox's, and it links there.
 //
 // Build: make nix-sandbox-build  (esbuild bundle -> sandbox/dist/app.js)
 
@@ -62,7 +64,9 @@ function selectTab(name) {
   const kind = $("world-kind");
   kind.textContent = name === "savings" ? "SERVER WORLD" : "THIS TAB'S WORLD";
   kind.title = name === "savings"
-    ? "The Savings tab watches a separate, much larger world run on a sim server, on its own clock."
+    ? (ctx.savingsOnly
+      ? "A whole economy run on a sim server, on its own clock."
+      : "The Savings tab watches a separate, much larger world run on a sim server, on its own clock.")
     : "Issuer, Wallets, Credit and Observer share one small world in this browser tab; its clock moves "
       + "only when you move it.  The Savings tab's world is a separate one, on a server.";
   if (name === "savings") {
@@ -88,7 +92,7 @@ function mountTabs() {
   }
   const asked = new URLSearchParams(location.search).get("tab");
   const saved = TABS.includes(asked) ? asked : ctx.sameOrigin ? "savings" : prefs.get("tab", "issuer");
-  selectTab(TABS.includes(saved) ? saved : "issuer");
+  selectTab(TABS.includes(saved) ? saved : TABS[0]);
 }
 
 function ensureWorld() {
@@ -117,6 +121,16 @@ async function boot() {
   // No sim server configured (the static site, sandbox.albertabuck.ca) and
   // none asked for (?sim=): the sandbox is the browser-only one, no Savings tab.
   if (ctx.simServer || new URLSearchParams(location.search).get("sim")) {
+    if (ctx.sameOrigin) {
+      // The savings sandbox: the Savings tab alone.
+      ctx.savingsOnly = true;
+      for (const t of ["issuer", "wallets", "credit", "observer"]) {
+        TABS.splice(TABS.indexOf(t), 1);
+        $(`tab-${t}`).remove();
+        $(`panel-${t}`).remove();
+      }
+      document.querySelector(".tabs .tab-sep").remove();
+    }
     mountSavings(ctx);
   } else {
     TABS.splice(TABS.indexOf("savings"), 1);
