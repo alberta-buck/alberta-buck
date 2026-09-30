@@ -590,6 +590,25 @@ def _metrics_d7(st: dict) -> dict:
             "bl_kexc": b.get("k_exc_max"), "attr_pos": a.get("share_pos")}
 
 
+def desk_silent(path: Path) -> bool:
+    """A cell whose desk keeper ran but whose director -- the desk's signal --
+    was never sampled: the desk read no signal and could not operate.  Every
+    equity cell of the first E-series reruns was such a cell (2026-09-30), and
+    nothing said so; the report now does."""
+    try:
+        frames = json.loads(Path(path).read_text()).get("frames") or []
+    except (OSError, ValueError):
+        return False
+    last = frames[-1] if frames else {}
+    if "mk_no_advice" not in last:
+        return False
+    ran = sum(int(last.get(k, 0) or 0) for k in
+              ("mk_no_advice", "mk_ops", "mk_idle", "mk_bound", "mk_done")) > 0
+    sampled = (int(last.get("directorPokes", 0) or 0)
+               + int(last.get("mk_pokes", 0) or 0)) > 0
+    return ran and not sampled
+
+
 def report(spec: dict, specs: list[dict], outdir: Path, resp_days: int,
            band: float) -> dict:
     """The WP-12 sensitivity table with the WP-15 levels' `value` column
@@ -618,6 +637,12 @@ def report(spec: dict, specs: list[dict], outdir: Path, resp_days: int,
     P("")
     P(f"objective: {spec.get('objective', '(none declared)')}")
     P("")
+    silent = [sp["label"] for sp in specs
+              if stats.get(sp["label"]) is not None and desk_silent(Path(sp["out"]))]
+    if silent:
+        P(f"**WARNING: the desk was silent (its director never sampled) in "
+          f"{len(silent)} cell(s): {', '.join(silent)}.  They do not test the desk.**")
+        P("")
     arms = []
     for sp in specs:
         if sp["arm"] not in arms:

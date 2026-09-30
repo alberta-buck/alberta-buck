@@ -133,10 +133,20 @@ class MonetaryKeeperAgent(Agent):
                   substituting a fast fix for the slow, structural withdrawal
                   of BUCK that K performs through creditLimit, so a run where
                   they never bind has not tested the overlap at all.
-      mkNoAdvice  inside the deadband: nothing to do, which is most days.
+      mkNoAdvice  inside the deadband: nothing to do, which is most days --
+                  PROVIDED the director is being sampled (below).
+
+    The desk's signal comes from the director, which advances only when
+    poked.  DirectorKeeperAgent pokes it on the pro-rata ops basket; it skips
+    equity baskets, and a run can cast it away to remove the director's
+    rebalancing.  So wherever it will not poke, this agent pokes the director
+    itself before asking for advice (mkPokes).  Until 2026-09-30 nothing did,
+    and the equity desk read an unsampled director: NoAdvice on every day of
+    every equity run, a desk that never operated while looking merely calm.
 
     Telemetry (ctr): mkQ1..mkQ4 / mkOps / mkIdle / mkBound / mkNoAdvice /
-    mkDone / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage / mk_err.
+    mkDone / mkPokes / mkOutstanding / mkBuckHeld / mkOffset / mkSlippage /
+    mk_err.
     """
 
     # Quadrant index -> counter suffix, matching the article's numbering.
@@ -148,9 +158,25 @@ class MonetaryKeeperAgent(Agent):
         ops shell."""
         return d.desk if getattr(d, "desk", None) is not None else d.basket
 
+    @staticmethod
+    def _signal_driven(d, scenario) -> bool:
+        """Does DirectorKeeperAgent poke the desk's director in this run?  On
+        the pro-rata ops basket, when it is cast; never on an equity basket."""
+        if str(getattr(d, "basket_impl", "")).startswith("equity"):
+            return False
+        agents = getattr(scenario, "agents", None) or {}
+        return int(agents.get("DirectorKeeperAgent", 0)) > 0
+
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or getattr(d, "basket_impl", "") not in ("ops", "equity-ops"):
             return
+        if getattr(d, "director", None) is not None and not self._signal_driven(d, scenario):
+            try:
+                d.chain.send(d.director.functions.pokeAll(),
+                             sender=self.account, gas=6_000_000)
+                ctr["mkPokes"] = ctr.get("mkPokes", 0) + 1
+            except Exception as e:
+                ctr["mk_err"] = repr(e)[:160]
         try:
             q = self._desk(d).functions.monetaryOperation().call(
                 {"from": self.address})
