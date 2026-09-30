@@ -486,7 +486,35 @@ of 6.2.
    components facet (=_exitInKind= is the natural candidate; the facet has
    13 KB to spare).
 
-* 9. Storage cleanup (asked 2026-09-29; next)
+* 9. Storage cleanup (asked 2026-09-29; done)
+
+*Done*, one step per commit, each diffed with =forge inspect ... storageLayout= and run through
+the whole suite: every positional slot access routed through =test/harness/BuckSlots.sol=
+(pinned by =test/BuckSlots.t.sol=); BuckCredit's =__retiredCovSeconds= slot and dead
+=CreditParams.lastActivatedAt= field removed; Buck reordered into accounts / credit bookkeeping /
+the Jubilee / delegated demurrage in four moves; BuckCredit's =markOf= moved beside =credits= and
+=attestationPeriod= packed with =insurerRegistry=.  Invariant I1 (a zero balance holds no seconds)
+now enforced by the writers.  The final layouts are in alberta-buck-ethereum.org ("Storage
+Layout"), which is where this document's surviving substance now lives: the design of relief on
+issuance ("Demurrage and Jubilee"), marked credits ("Marked Credits"), and the equity basket
+("BuckBasketEquity: the Basket as a Credit Holder").
+
+*Still open for the owner*:
+- 8b.2: after a K cut, Trim deleverages to the new limit (built); or stop refilling while under
+  water, exits in kind until equity or K recover.
+- 6.1.6: rerun or annotate the T15 retiree cells and the octl debtors' close decisions, which
+  used coverage-based relief.
+- =Buck.mint(amount)=: at K != 1 it activates coverage worth =amount= net of the deposit, and
+  the spendable it yields is =K x (amount + deposit) - deposit=; the old comment claimed
+  =amount= exactly.  Is the argument meant to be coverage (as coded) or spendable?
+- =BuckBasketEquityOps= is 24,131 bytes (445 under the limit): move =_exitInKind= to the
+  components facet before adding to the shell or the desk.
+- The contracts outside this work still cite doc/ files: Notes, IdentityRegistry, the verifier
+  interfaces and adapters (doc/review/notes-receiving-key.org), IAccumulatorRegistry
+  (doc/review/accumulator-spec.org), the shadow controller and observer, IStabilizer,
+  SimStabilizer (CARRY-CONVEXITY.org, WAVE3.org), PairsRebalanceDirector (CONVERGENCE.org).
+
+** 9.0 The plan, as written before the work
 
 The owner asked to remove the orphaned slots and put the rest in a sensible
 order.  Nothing is deployed, so layouts may change; what can break is
