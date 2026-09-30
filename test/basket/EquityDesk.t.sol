@@ -26,7 +26,7 @@ contract EquityDeskTest is BuckBasketEquityTest {
     EquityDesk internal desk;
     EqMonDir internal md;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         md = new EqMonDir();
         desk = new EquityDesk(address(buck), address(ctrl), address(b), GOV);
