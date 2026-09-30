@@ -37,7 +37,7 @@
     "./*": "./src/*.js"
   },
   "dependencies": {
-    "alberta-buck-contracts": "0.2.1",
+    "alberta-buck-contracts": "0.3.0",
     "alberta-buck-kernel": "0.3.0",
     "tevm": "^1.0.0-next.149",
     "viem": "^2.54.2"
