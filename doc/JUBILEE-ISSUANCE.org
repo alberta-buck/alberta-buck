@@ -500,13 +500,13 @@ issuance ("Demurrage and Jubilee"), marked credits ("Marked Credits"), and the e
 ("BuckBasketEquity: the Basket as a Credit Holder").
 
 *Still open for the owner*:
-- 8b.2: after a K cut, Trim deleverages to the new limit (built); or stop refilling while under
-  water, exits in kind until equity or K recover.
+- 8b.2 RULED (2026-09-29): after a K cut, Trim deleverages to the new limit, as built -- no
+  second account.  A K cut says BUCK is at a discount and over-issued; accumulating BUCK (selling
+  TOKEN, repaying the lien) reduces exposure and supports reversion of bvib toward 1.  Until the
+  basket is back under the limit, exits pay in kind.
+- mint RULED (2026-09-29): B -- =mint(amount)= delivers =amount= of spendable at today's K.
 - 6.1.6: rerun or annotate the T15 retiree cells and the octl debtors' close decisions, which
   used coverage-based relief.
-- =Buck.mint(amount)=: at K != 1 it activates coverage worth =amount= net of the deposit, and
-  the spendable it yields is =K x (amount + deposit) - deposit=; the old comment claimed
-  =amount= exactly.  Is the argument meant to be coverage (as coded) or spendable?
 - =BuckBasketEquityOps= is 24,131 bytes (445 under the limit): move =_exitInKind= to the
   components facet before adding to the shell or the desk.
 - The contracts outside this work still cite doc/ files: Notes, IdentityRegistry, the verifier
