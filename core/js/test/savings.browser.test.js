@@ -69,7 +69,8 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     assert.ok(await page.locator("#panel-savings .chart path.line").count() > 10, "the charts draw");
     const panelText = await page.textContent("#panel-savings");
     for (const title of ["The basket's credit (BUCK)", "What the basket's wheel did", "The director's lean",
-                         "The desk's signal", "The desk's operations", "The desk's return", "The undertakings' return"]) {
+                         "The desk's signal", "The desk's operations", "What the desks earned over holding",
+                         "The desk's inventory"]) {
       assert.ok(panelText.includes(title), `the ${title} chart is on the page`);
     }
     assert.equal(await page.locator("#panel-savings .chart-grid.small").count(), 2,

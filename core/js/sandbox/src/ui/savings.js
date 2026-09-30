@@ -34,6 +34,10 @@ const dollars = (v) => `$${compact(v)}`;
 const bucks = (v) => compact(v);
 const pct1 = (v) => `${v.toFixed(1)}%`;
 const pct2 = (v) => `${v.toFixed(2)}%`;
+// The held benchmark starts once the pools have settled: the world's first
+// placements move thin pools a long way, and a benchmark struck in that
+// churn would credit the basket with the bootstrap's noise.
+const HOLD_FROM_DAY = 7;
 const signed = (v, f) => (v === null || v === undefined ? "–" : `${v >= 0 ? "+" : ""}${f(v)}`);
 const priceFmt = (v) => (v >= 1000 ? compact(v, 4) : v >= 10 ? v.toFixed(1) : v.toFixed(3));
 
@@ -152,10 +156,11 @@ export function mountSavings(ctx) {
       note: "K steers the basket's BUCK price to 1; the BUCK/USDC pool says what a BUCK fetches." }),
     k: lineChart({ title: "K: credit per unit of insured value", fmt: f4, series: [{ label: "K", color: S3 }] }),
     index: lineChart({ title: "The savings index", ref: 1, fmt: f4, series: [
-      { label: "paid per BUCK saved", color: S1 }, { label: "its commodities, held", color: S4, dash: true }],
+      { label: "paid per BUCK saved", color: S1 }, { label: `its commodities, held from day ${HOLD_FROM_DAY}`, color: S4, dash: true }],
       note: "What a saving is worth, in BUCK value, per BUCK deposited (the basket's share price), against "
-        + "the basket's day-0 commodities simply held: the gap is what the basket's work has added -- "
-        + "the pools' fees, the wheel's captures, the director's timing -- or cost." }),
+        + "the basket's declared commodities bought on the day the pools have settled and simply held: the "
+        + "gap is what the basket's work has added -- the pools' fees, the wheel's captures, the director's "
+        + "timing -- or cost." }),
     wheel: lineChart({ title: "The work wheel (cumulative)", fmt: dollars, series: [
       { label: "to depositors", color: S1 }, { label: "to callers", color: S2 }, { label: "gas", color: S4 }],
       note: "Consistency cycles through TOKEN/USDC, TOKEN/BUCK and BUCK/USDC: the harvest reaches the depositors." }),
@@ -163,19 +168,20 @@ export function mountSavings(ctx) {
       { label: "issued", color: S1 }, { label: "absorbed", color: S2 }],
       note: "BUCK the undertakings have issued at a premium and not yet bought back, and BUCK bought at a "
         + "discount and not yet sold back." }),
-    utRet: lineChart({ title: "The undertakings' return (BUCK)", fmt: bucks, series: [
-      { label: "their book now", color: S1 }, { label: "their opening book, held", color: S4, dash: true }],
-      note: "What the undertakings own less what they have drawn, against the commodities they started with "
-        + "simply held: the gap is what their operations have earned." }),
+    earned: lineChart({ title: "What the desks earned over holding (BUCK)", ref: 0, fmt: bucks, series: [
+      { label: "the monetary desk", color: S1 }, { label: "the undertakings", color: S2 }],
+      note: "Each desk's book -- what it owns, less what it has drawn -- against the commodities it started "
+        + "with simply held, at the same prices: above zero, operating has paid." }),
     credit: lineChart({ title: "The basket's credit (BUCK)", fmt: bucks, series: [
       { label: "equity", color: S1 }, { label: "lien", color: S2 }, { label: "liquidity", color: S3 }],
       note: "The depositors' equity; the BUCK the basket has drawn (at most K times that equity) to pair "
         + "its commodities in the pools; the BUCK it keeps ready for exits." }),
     steps: lineChart({ title: "What the basket's wheel did (cumulative BUCK)", fmt: bucks, series: [
       { label: "placed", color: S1 }, { label: "bought for the director", color: S2 },
-      { label: "trimmed", color: S3 }, { label: "fees collected", color: S4 }],
+      { label: "trimmed", color: S3 }],
       note: "Deploy pairs new deposits with BUCK in the pools; Fund buys the director's pick; Trim unwinds a "
-        + "position (the most overweight, or the director's pick) to refill liquidity; Sync collects fees." }),
+        + "position (the most overweight, or the director's pick) to refill liquidity.  Fund and Trim wait "
+        + "until no deposit is waiting to be placed." }),
     deskOps: lineChart({ title: "The desk's operations (cumulative BUCK)", fmt: bucks, series: [
       { label: "absorbed (Q1)", color: S1 }, { label: "retired (Q2)", color: S2 },
       { label: "supplied (Q3)", color: S3 }, { label: "issued (Q4)", color: S4 }],
@@ -185,12 +191,10 @@ export function mountSavings(ctx) {
       { label: "premium (20-day)", color: S1 }],
       note: "Above zero BUCK is dear, and the desk supplies or issues; below, cheap, and it absorbs or "
         + "retires.  It acts only past a dead-band, and outright only after the push persists." }),
-    deskRet: lineChart({ title: "The desk's return (BUCK)", fmt: bucks, series: [
-      { label: "its book now", color: S1 }, { label: "its grant, held", color: S4, dash: true },
-      { label: "BUCK it holds", color: S2 }, { label: "BUCK it has issued", color: S3 }],
-      note: "Everything the desk owns less what it has drawn, against its founding grant of commodities "
-        + "simply held: the gap is what operating has earned.  Beside it, its inventory: never judge a "
-        + "desk by its return alone." }),
+    deskInv: lineChart({ title: "The desk's inventory (BUCK)", fmt: bucks, series: [
+      { label: "BUCK it holds", color: S1 }, { label: "BUCK it has issued", color: S2 }],
+      note: "What its operations have left it holding: read it beside what it earned -- a desk that "
+        + "damps BUCK by holding a position it could never unwind has moved the loss, not removed it." }),
   };
   const leanGrid = h("div", { class: "chart-grid small" });
   S.lean = [];
@@ -219,8 +223,8 @@ export function mountSavings(ctx) {
           + "target, declared)"),
         leanGrid,
         h("h3", { class: "grid-title" }, "The desks: what they did, and what it earned"),
-        h("div", { class: "chart-grid" }, charts.deskSignal.el, charts.deskOps.el, charts.deskRet.el,
-          charts.ops.el, charts.utRet.el),
+        h("div", { class: "chart-grid" }, charts.deskSignal.el, charts.deskOps.el, charts.earned.el,
+          charts.deskInv.el, charts.ops.el),
         h("h3", { class: "grid-title" }, "Commodities: the real price, the TOKEN/USDC pool, and via BUCK"),
         commodityGrid)));
 
@@ -441,8 +445,9 @@ export function mountSavings(ctx) {
       stat("Savings index", last.D === null ? "–" : last.D.toFixed(4), "Paid per BUCK saved, in BUCK value"),
       stat("A year", signed(yearly(rows), (v) => `${(v * 100).toFixed(2)}%`),
         "The savings index's growth, compounded to a year"),
-      stat("Over holding", last.D === null || !last.hold ? "–" : signed(last.D / last.hold - 1, (v) => `${(v * 100).toFixed(2)}%`),
-        "The savings index against the basket's day-0 commodities simply held"),
+      stat("Over holding", signed(overHolding(rows), (v) => `${(v * 100).toFixed(2)}%`),
+        `The savings index against the basket's commodities held from day ${HOLD_FROM_DAY}`),
+      stat("Pool fees", last.eqSync === null ? "–" : bucks(last.eqSync), "BUCK the basket's pools have paid it in fees"),
       stat("Desk", last.deskNav === null || last.deskHold === null ? "–"
         : signed(last.deskNav - last.deskHold, bucks), "The monetary desk's book against its grant held, BUCK"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
@@ -455,15 +460,14 @@ export function mountSavings(ctx) {
     const xs = rows.map((r) => r.day);
     charts.buck.update(xs, [rows.map((r) => r.bu || null), rows.map((r) => r.bv || null)]);
     charts.k.update(xs, [rows.map((r) => r.k || null)]);
-    charts.index.update(xs, [rows.map((r) => r.D), rows.map((r) => r.hold)]);
+    charts.index.update(xs, [rows.map((r) => r.D), heldLine(rows)]);
     charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
-    charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim),
-      rows.map((r) => r.eqSync)]);
+    charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim)]);
     charts.deskSignal.update(xs, [rows.map((r) => r.premium)]);
     charts.deskOps.update(xs, [0, 1, 2, 3].map((q) => rows.map((r) => r.dkQ[q])));
-    charts.deskRet.update(xs, [rows.map((r) => r.deskNav), rows.map((r) => r.deskHold), rows.map((r) => r.deskHeld),
-      rows.map((r) => r.deskOut)]);
-    charts.utRet.update(xs, [rows.map((r) => r.utNw), rows.map((r) => r.utHold)]);
+    const gap = (a, b) => (a === null || b === null ? null : a - b);
+    charts.earned.update(xs, [rows.map((r) => gap(r.deskNav, r.deskHold)), rows.map((r) => gap(r.utNw, r.utHold))]);
+    charts.deskInv.update(xs, [rows.map((r) => r.deskHeld), rows.map((r) => r.deskOut)]);
     S.lean.forEach((c, i) => {
       const at = (v) => (v && v[i] !== undefined ? v[i] / 100 : null);
       c.update(xs, [rows.map((r) => at(r.w)), rows.map((r) => at(r.lean)), rows.map((r) => at(r.decl))]);
@@ -578,12 +582,25 @@ export function mountSavings(ctx) {
 
   const pct = (x) => h("span", { class: x >= 0 ? "good" : "bad" }, `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`);
 
-  // The savings index's growth, compounded to a year, from its first day.
+  // The savings index's growth from its base of 1, compounded to a year.
   const yearly = (rows) => {
     const first = rows.find((r) => r.D !== null && r.D > 0);
     const last = rows[rows.length - 1];
     if (!first || !last || last.D === null || last.day - first.day < 30) return null;   // too short to say
-    return annualized(first.D, last.D, last.day - first.day);
+    return annualized(1, last.D, last.day - first.day);
+  };
+
+  // The basket's commodities bought on HOLD_FROM_DAY at the savings index's
+  // value that day, and held: a fixed bundle's value moves by eq_hold's ratio.
+  const heldLine = (rows) => {
+    const a = rows.findIndex((r) => r.day >= HOLD_FROM_DAY && r.hold > 0 && r.D !== null);
+    return rows.map((r, i) => (a < 0 || i < a || !(r.hold > 0) ? null : rows[a].D * (r.hold / rows[a].hold)));
+  };
+  const overHolding = (rows) => {
+    const held = heldLine(rows);
+    const last = rows[rows.length - 1];
+    const h0 = held[held.length - 1];
+    return last && last.D !== null && h0 ? last.D / h0 - 1 : null;
   };
 
   S.activate = () => {
