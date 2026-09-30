@@ -1,4 +1,4 @@
-"""Article figures for alberta-buck-rebalance.org.
+"""Figures for the gated rebalancing policies (alberta-buck-ethereum-wheel.org shows the mechanism).
 
 Four purpose-built comparison charts from test/vectors/rebalance-policy.json,
 each illustrating the gated policies' merit against one alternative:

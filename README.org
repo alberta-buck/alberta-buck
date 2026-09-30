@@ -106,12 +106,6 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
 - [[file:alberta-buck-ethereum-wheel.org][The BasketWheel]]
   ([[file:images/alberta-buck-ethereum-wheel.pdf][pdf]]) -- how the basket earns: its credit, its
   own arbitrage, its timing, its desk, and the wheel that turns them.
-- [[file:alberta-buck-operations.org][Basket Operations]]
-  ([[file:images/alberta-buck-operations.pdf][pdf]]) -- how the basket reads its pools and moves
-  value from rich constituents to poor.
-- [[file:alberta-buck-rebalance.org][Rebalancing the BuckBasket]]
-  ([[file:images/alberta-buck-rebalance.pdf][pdf]]) -- using timing, the one thing the basket's free
-  balancing leaves unused.
 
 *Identity, receipts and Notes*
 - [[file:alberta-buck-identity.org][Identity and Receipts]]

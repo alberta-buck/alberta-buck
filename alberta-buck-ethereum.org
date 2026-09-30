@@ -1554,8 +1554,8 @@ Each step is bounded, marks the credit first, and trades at most 1% of a pool's 
 ** The Director
 
 =EquityTurnDirector= (optional) supplies leaning targets and two gates, per leg, from a ladder of
-EMAs of each pool's TWAP tick against the basket's mean ([[file:alberta-buck-rebalance.org][the
-rebalance policy]], "The quorum turn detector"):
+EMAs of each pool's TWAP tick against the basket's mean ([[file:alberta-buck-ethereum-wheel.org::#director][The
+BasketWheel]], "The director"):
 
 - *The lean*: the declared weights scaled by =exp(-tilt x excursion)= and renormalized, the
   excursion being the leg's deviation from the basket's mean against its anchor EMA (1280 days)
@@ -1576,7 +1576,7 @@ weight band.
    :END:
 
 The monetary desk (=MonetaryDesk=: the four quadrants, the bounds, the stabilizer seam;
-[[https://perry.kundert.ca/images/alberta-buck-operations.pdf][alberta-buck-operations.org]]) beside
+[[file:alberta-buck-ethereum-wheel.org::#desk][The BasketWheel]], "The desk") beside
 an equity basket is =EquityDesk=: its own contract, so its own account at Buck -- bound public and
 non-Carrying -- and its own self-issued marked credit, marked before every operation at its own
 net value: its TOKEN at the pools' low marks, plus its account and the relief accrued on it.  Its

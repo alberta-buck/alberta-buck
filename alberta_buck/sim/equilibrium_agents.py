@@ -4058,7 +4058,7 @@ class DiscountBasketArbAgent(DiscountBuckArbAgent):
 class MonetaryOpsAgent(_ProxyAgent):
     """The BuckBasket's operations desk, run as an agent.
 
-    This is phase 2 of alberta-buck-operations.org: the four quadrants driven
+    The desk's second phase (alberta-buck-ethereum-wheel.org, "The desk"): the four quadrants driven
     against the live chain, against real pools and real counterparties, BEFORE
     any contract change.  The point of doing it as an agent first is that it
     puts the basket's own sensor outside its own control loop while the

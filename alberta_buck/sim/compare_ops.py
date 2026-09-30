@@ -11,7 +11,7 @@ whether MonetaryOpsAgent was in the roster:
 
 WHAT IS BEING COMPARED
 
-The claim in alberta-buck-operations.org is that a basket which trades the
+The claim (alberta-buck-ethereum-wheel.org, "The desk") is that a basket which trades the
 COMMON mode of its own filter bank -- the mean of the per-leg ladders, which
 is basketValueInBuck -- damps excursions in BUCK's own valuation faster than
 BUCK_K can, because K acts only through creditLimit and a credit book turns

@@ -20,8 +20,8 @@ interface IV3Observe {
 }
 
 /// @title EquityTurnDirector -- the equity basket's director: the multi-scale
-///        turn detector, per leg, and the lean (alberta-buck-rebalance.org, "The
-///        quorum turn detector"; alberta-buck-ethereum.org, "The Director").
+///        turn detector, per leg, and the lean (alberta-buck-ethereum-wheel.org, "The
+///        director"; alberta-buck-ethereum.org, "The Director").
 ///
 /// @notice Once a day (`observe`, the basket's Daily step, or anyone) it reads
 ///         each constituent's TWAP tick -- a tick is a log price, so no ln() --

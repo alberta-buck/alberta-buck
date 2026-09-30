@@ -32,12 +32,13 @@ Table of Contents
 4. Where the return comes from
 5. The world's traders, working for the basket
 6. The basket is a customer too
-7. Yield against demurrage
-8. What it is for
-9. The one real risk: the asset that never comes back
-10. The discipline: only civilization's basics
-11. Try it
-12. Conclusion: an anchor of stone, kept honest by the crowd
+7. A tugboat beside the tanker
+8. Yield against demurrage
+9. What it is for
+10. The one real risk: the asset that never comes back
+11. The discipline: only civilization's basics
+12. Try it
+13. Conclusion: an anchor of stone, kept honest by the crowd
 
 
 [The BasketWheel] <file:alberta-buck-ethereum-wheel.org>
@@ -177,14 +178,17 @@ Table of Contents
      first.  So the basket goes for it too: it corrects its own pools,
      through a loop of three trades that needs no money up front and
      cannot lose, and keeps the change.
-  3. *Timing the tides.* A trading pool harvests the chop, the
-     day-to-day wobbles.  It cannot harvest a slow tide at all: a
-     commodity that drifts up for a year and back down the next leaves a
-     pool almost nothing.  Only deliberate timing can – trimming a
-     commodity that is rich against its own long memory, adding to one
-     that is cheap, and never trimming one that is still rising.  /Let a
-     run run/, then lean against it once it turns.  An optional
-     /director/ does exactly that, and nothing more clever.
+  3. *Timing the tides.* New money does not reach every price at once.
+     It reaches money-like assets first, energy and building materials
+     in about a year, and wages and food a year or two after that – so
+     the basket's commodities drift apart and come home again on a tide
+     about a year long.  A trading pool harvests the chop, the
+     day-to-day wobbles, but it cannot harvest a tide at all.  Only
+     deliberate timing can: trimming a commodity that is rich against
+     its own long memory, adding to one that is cheap, and never
+     trimming one that is still rising.  /Let a run run/, then lean
+     against it once it turns.  An optional /director/ does exactly
+     that, and nothing more clever.
 
   The details – how the three trades close a gap, how the director
   decides a tide has turned, and the simulations behind every claim here
@@ -233,15 +237,42 @@ Table of Contents
   If nobody turns it, new deposits wait in the basket's wallet and it
   earns less; nothing already in it is put at risk.
 
-  Next to the basket there may also be a /monetary desk/, which buys and
-  sells BUCK to steady its price.  It is a separate machine with its own
-  account, its own credit and its own wheel.  Two households, two sets
-  of books: we learned that one the honest way, when a simulated desk's
-  capital briefly counted toward the depositors' borrowing, and a test
-  now guards the wall between them.
+
+7 A tugboat beside the tanker
+═════════════════════════════
+
+  The controller that moves `K' steers like a supertanker.  It works
+  only through how much credit people may draw, and a book of credit
+  takes months to turn.  Someone with deep pockets can shove BUCK off
+  course in days.
+
+  So beside the basket there may be a /monetary desk/: a tugboat.  When
+  BUCK is cheap it buys; when BUCK is dear it sells.  Most of the time
+  that is all it does, and the two cancel out as the price comes back.
+  Only when a push persists for weeks does it do something permanent –
+  retire BUCK it issued, or issue more – and then only within a
+  published limit.  That is how a central bank splits the work between
+  its policy rate and its open-market desk.
+
+  The best thing about the desk is when it loses.  Against an attack it
+  buys cheap BUCK from the attacker and sells it back dearer, and in our
+  model every attacker left poorer.  Against a real change in the world
+  – commodities genuinely worth more BUCK – it loses a little money and
+  gets out of the way.  A desk that seems to profit from everything has
+  not been tested properly.  An early version of ours did, right up
+  until we noticed it had quietly bought half the pool it traded in.
+
+  The desk is a separate machine with its own account, its own credit
+  and its own wheel.  Two households, two sets of books: we learned that
+  one the honest way, when a simulated desk's capital briefly counted
+  toward the depositors' borrowing, and a test now guards the wall
+  between them.  The details are in [The BasketWheel].
 
 
-7 Yield against demurrage
+[The BasketWheel] <file:alberta-buck-ethereum-wheel.org::#desk>
+
+
+8 Yield against demurrage
 ═════════════════════════
 
   The BUCK is designed to /circulate/.  Idle balances pay a small
@@ -269,7 +300,7 @@ Table of Contents
 [Demurrage and the Jubilee Fund] <file:alberta-buck-demurrage.org>
 
 
-8 What it is for
+9 What it is for
 ════════════════
 
   Anywhere money has to stay available but should not sit idle:
@@ -283,8 +314,8 @@ Table of Contents
     at once.
 
 
-9 The one real risk: the asset that never comes back
-════════════════════════════════════════════════════
+10 The one real risk: the asset that never comes back
+═════════════════════════════════════════════════════
 
   Every honest design names the case in which it loses.  The
   BuckBasket's is simple.
@@ -303,7 +334,7 @@ Table of Contents
   opposed.[1]
 
 
-10 The discipline: only civilization's basics
+11 The discipline: only civilization's basics
 ═════════════════════════════════════════════
 
   So the rule is strict.  *The BuckBasket admits only low-level,
@@ -324,7 +355,7 @@ Table of Contents
   coming back.
 
 
-11 Try it
+12 Try it
 ═════════
 
   A simulated economy runs the real contracts at
@@ -339,7 +370,7 @@ Table of Contents
 <https://savings-sandbox.albertabuck.ca/>
 
 
-12 Conclusion: an anchor of stone, kept honest by the crowd
+13 Conclusion: an anchor of stone, kept honest by the crowd
 ═══════════════════════════════════════════════════════════
 
   The BuckBasket is a heavy, open, liquid pantry of civilization's

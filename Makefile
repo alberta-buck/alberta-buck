@@ -807,7 +807,7 @@ sim-plot-basket-split:	$(REBALANCING_VECTOR_REVERT)
 
 # ── Monetary operations A/B ───────────────────────────────────────────
 #
-# The BuckBasket's operations desk (alberta-buck-operations.org, phase 2)
+# The BuckBasket's operations desk (alberta-buck-ethereum-wheel.org, "The desk")
 # run as an agent against the live chain sim, compared against the same
 # scenario and seed without it.  Two runs, then the comparison:
 #
@@ -939,8 +939,8 @@ sim-policy:	sim-run-policy
 sim-policy-sweep:	sim-run-policy-sweep
 	python -m alberta_buck.sim.plot_rebalance_policy
 
-# Article figures for alberta-buck-rebalance.org (mechanism, vs-hold,
-# vs-prop, frontier) from the same rebalance-policy vector.
+# Figures for the gated rebalancing policies (mechanism, vs-hold, vs-prop,
+# frontier; alberta-buck-ethereum-wheel.org shows the mechanism) from the same rebalance-policy vector.
 sim-plot-article:	$(POLICY_VECTOR)
 	python -m alberta_buck.sim.plot_rebalance_article
 

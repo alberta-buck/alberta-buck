@@ -22,7 +22,7 @@ interface IEquityBasketView {
 ///        beside the equity basket.
 ///
 /// @notice The desk (MonetaryDesk: the four quadrants, the bounds, the
-///         stabilizer seam; alberta-buck-operations.org) runs beside a
+///         stabilizer seam; alberta-buck-ethereum-wheel.org, "The desk") runs beside a
 ///         BuckBasketEquity and shares nothing with it but the pools it
 ///         trades in:
 ///

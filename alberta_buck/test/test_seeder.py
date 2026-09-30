@@ -1,6 +1,6 @@
 """Unit tests for the treasury seeder's pure logic (WAVE3.org WP-8, L1).
 
-The orientation checklist of alberta-buck-operations.org, pinned for BOTH
+The pool-orientation rule (price is token1/token0), pinned for BOTH
 token orderings of the BUCK/USDC pool: the range from current toward ideal
 must be funded with BUCK when BUCK/USD must rise and with USDC when it
 must fall, whichever token is token0.

@@ -67,9 +67,10 @@ Table of Contents
 3. BUCK_CREDIT: ERC-721 Insured Asset NFT
 .. 1. Data Model
 .. 2. Depreciation Models
-.. 3. Activation = Mint, Deactivation = Burn
-.. 4. Buck Wiring
-.. 5. Insurer Updates
+.. 3. Marked Credits
+.. 4. Activation = Mint, Deactivation = Burn
+.. 5. Buck Wiring
+.. 6. Insurer Updates
 4. IdentityRegistry: On-Chain Trust Anchor
 .. 1. Cryptographic Surface
 .. 2. Solidity Surface
@@ -100,31 +101,40 @@ Table of Contents
 .. 6. Invariant
 .. 7. Known Gaps
 .. 8. Dynamic Issuance: Why BuckBasket Needs BUCK_K
-7. BUCK_K: Value Stabilization Controller
+7. BuckBasketEquity: the Basket as a Credit Holder
+.. 1. The Account and the Credit
+.. 2. Valuation
+.. 3. Deposit
+.. 4. Redemption
+.. 5. The Wheel's Components
+.. 6. The Director
+.. 7. The Desk: Its Own Credit Holder
+.. 8. Invariants
+8. BUCK_K: Value Stabilization Controller
 .. 1. The Loop
 .. 2. Three Controllers
-8. Notes: Privacy-Preserving Denomination
+9. Notes: Privacy-Preserving Denomination
 .. 1. Mint Circuit (Batch, In-Circuit Merkle Insertion)
 .. 2. The Spend Proof and the Deposit Gates
 .. 3. Verifier Interfaces
 .. 4. Notes Contract
-9. End-to-End Walkthrough
+10. End-to-End Walkthrough
 .. 1. Step 0: Identity Registration (One-Time)
 .. 2. Step 1: Mint
 .. 3. Step 2: Approve Bob (Identity Handshake)
 .. 4. Step 3: Bob Pulls the Transfer
 .. 5. Step 4: Alice Denominates as Notes
 .. 6. Step 5: Spend a Note
-10. Gas Cost Snapshot
-11. Security Considerations
+11. Gas Cost Snapshot
+12. Security Considerations
 .. 1. Oracle Manipulation
 .. 2. The Insurer Gate
 .. 3. Recipient Opt-In
 .. 4. Insurer Trust
 .. 5. Reentrancy
-.. 6. Pool Solvency
-12. Future Directions
-13. Status
+.. 6. The Insurance Pool: an Interim Stand-in
+13. Future Directions
+14. Status
 
 
 [Alberta Buck Architecture]
@@ -235,9 +245,9 @@ Table of Contents
      P/I spike.
 
 
-[The Insurer Gate] See section 11.2
+[The Insurer Gate] See section 12.2
 
-[Activation = Mint, Deactivation = Burn] See section 3.3
+[Activation = Mint, Deactivation = Burn] See section 3.4
 
 [mint(N) and burn(N)] See section 5.3
 
@@ -287,18 +297,27 @@ Table of Contents
     `premiumRate', `lastUpdated'.  `faceValue' may not be reappraised
     below `activatedValue' – see [Insurer Updates].
   • *Buck-mutable* via `activateFromBuck' / `deactivateFromBuck':
-    `activatedValue' (capped at `faceValue'), `lastActivatedAt'.  The
-    client never writes these directly.
+    `activatedValue' (capped at `faceValue').  The client never writes
+    it directly.
 
   `DepreciationType' is one of `NONE' (land, gold), `LINEAR' (constant
-  annual reduction), or `DECLINING_BALANCE' (continuous-compounded
-  percentage).  Three events – `CreditCreated', `CreditUpdated',
-  `CreditActivated' – record every state change.
+  annual reduction), `DECLINING_BALANCE' (continuous-compounded
+  percentage), or `MARKED' (valued at its insurer's latest mark: [Marked
+  Credits]).  Four events – `CreditCreated', `CreditUpdated',
+  `CreditActivated', `CreditMarked' – record every state change.
+
+  A credit does not age.  Jubilee relief accrues on the BUCK an account
+  has actually drawn – its lien, in `Buck' – not on coverage ([Demurrage
+  and Jubilee]).
 
 
-[The Insurer Gate] See section 11.2
+[The Insurer Gate] See section 12.2
 
-[Insurer Updates] See section 3.5
+[Insurer Updates] See section 3.6
+
+[Marked Credits] See section 3.3
+
+[Demurrage and Jubilee] See section 5.6
 
 
 3.2 Depreciation Models
@@ -332,7 +351,51 @@ Table of Contents
   with a salvage floor).
 
 
-3.3 Activation = Mint, Deactivation = Burn
+3.3 Marked Credits
+──────────────────
+
+  Some collateral is revalued on-chain every block – a BuckBasket's
+  equity is the case in point – and no depreciation schedule describes
+  it.  A `MARKED' credit is valued at a mark its insurer keeps current,
+  `mark(tokenId, value)':
+
+  ┌────
+  │ depreciatedFaceValue(tokenId) = min(faceValue, markOf[tokenId])        (MARKED)
+  │ currentValue(tokenId)         = depreciatedFaceValue * activatedValue / faceValue
+  └────
+
+  so with the whole face activated, `currentValue' is the mark and the
+  holder's `creditLimit' is `K x mark'.  Like depreciation, the mark
+  moves the limit without touching the coverage: it may fall below
+  `activatedValue', and a holder whose lien then exceeds its limit is
+  under water – it cannot spend further credit, and nothing is called
+  back.
+
+  That is exactly what an insurer must never be able to do to someone
+  else: a mark written down on another's credit would revoke a purchased
+  policy, which [Insurer Updates] forbids.  So three rules bound it:
+
+  • *Self-issued only.* `createCredit' with `MARKED' requires `client ='
+    msg.sender=: the holder is its own insurer, and marks only its own
+    collateral.
+  • *Fixed at creation.* `updateCredit' refuses to switch a credit to or
+    from `MARKED', so a scheduled credit cannot be converted and then
+    marked down.
+  • *Gated like any model.* Where the insurer gate is configured, the
+    insurer's attested envelope must permit `MARKED' (bit 3 of
+    `depTypes'), as it must permit any depreciation model.
+
+  A marked credit is activated like any other – one `Buck.mint' at zero
+  premium, once the mark is above zero (a credit appraised at zero
+  insures nothing and is skipped) – and its holder's lien earns relief
+  like any other.  Its face caps what the holder can ever draw, at `K x
+  face'.
+
+
+[Insurer Updates] See section 3.6
+
+
+3.4 Activation = Mint, Deactivation = Burn
 ──────────────────────────────────────────
 
   There is no public `BuckCredit.activate()' function.  Activation –
@@ -404,7 +467,7 @@ Table of Contents
 [mint(N) and burn(N)] See section 5.3
 
 
-3.4 Buck Wiring
+3.5 Buck Wiring
 ───────────────
 
   The dependency is one-way: `Buck' reads `BuckCredit' to size credit,
@@ -435,10 +498,10 @@ Table of Contents
 
 [The Credit Limit Is Read Live] See section 5.2.1
 
-[Future Directions] See section 12
+[Future Directions] See section 13
 
 
-3.5 Insurer Updates
+3.6 Insurer Updates
 ───────────────────
 
   `updateCredit(tokenId, newFaceValue, newDepreciationFloor, newDepType,
@@ -472,7 +535,7 @@ Table of Contents
   not a default: see [Underwater Is a State, Not a Failure].
 
 
-[Activation = Mint] See section 3.3
+[Activation = Mint] See section 3.4
 
 [Underwater Is a State, Not a Failure] See section 5.3.4
 
@@ -550,9 +613,9 @@ Table of Contents
   each accumulator leaf leads with one as a field element.
 
 
-[Notes] See section 8
+[Notes] See section 9
 
-[insurer gate] See section 11.2
+[insurer gate] See section 12.2
 
 
 4.2 Solidity Surface
@@ -732,7 +795,9 @@ Table of Contents
   │     BuckQty     balance;       // int80 underlying; signed.  Range = [-6.04e23, +6.04e23] raw
   │                                // = [-6.04e17, +6.04e17] BUCK at 6 decimals.  Negative ==
   │                                // NFT-backed used credit; positive == held BUCK.
-  │     BuckSeconds buckSeconds;   // uint120 underlying; demurrage IOU integral on positive holdings
+  │     BuckSeconds buckSeconds;   // uint120 underlying; |balance| * dt, read by sign:
+  │                                // fee-seconds while positive, issuance-seconds (the
+  │                                // lien over time) while negative, 0 at zero (I1)
   │     uint40      timestamp;     // last crystallisation (safe past year 36800)
   │     uint16      flags;         // bit 0: demurrage routed to demurragePayer[a].
   │                                // bits 1-15 reserved.
@@ -755,15 +820,41 @@ Table of Contents
   dispatch.  Cold-path bookkeeping – the count of accounts a demurrage
   payer carries – lives in its own mapping instead.
 
-  Outside the hot path: allowances, per-credit outstanding cover and the
-  deposit held against it (`mintsBacked[tokenId]',
-  `mintsPrincipal[tokenId]'), approve-time receipt fragments, and the
-  delegated-demurrage maps.  *Nothing derived is stored.* An account's
-  credit limit, and therefore its `balanceOf', is recomputed from live
-  `BuckCredit' state on every read; there is no cached copy of it
-  anywhere.  `mintsPrincipal' is not an exception – it is a record of
-  what was actually paid, which no amount of present-day state can
-  reconstruct once the appraisal or the rate has moved.
+  A balance changes sign only at a write, after `_crystallize' has
+  folded the old side's rectangle through the current block, so the old
+  side's seconds are settled there (a fee realized, or relief paid) and
+  the new side's start at zero.  Invariant I1 – a zero balance holds no
+  seconds – is kept by every writer that can produce a zero, so the
+  field's meaning is given by the sign alone.
+
+  The slots, grouped by concern:
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   slot  variable                 what it holds                                                          
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────
+      0  `_state'                 the packed per-account word above                                      
+      1  `_totalSupply'           sum of the positive balances, the Jubilee fund's excluded              
+      2  `_allowances'            ERC-20 allowances                                                      
+      3  `_receiptFragments'      the identity-bound approve's receipt per (from, to)                    
+      4  `mintsBacked'            coverage outstanding per credit, in face units (= its activated value) 
+      5  `mintsPrincipal'         the insurance deposit held against it                                  
+      6  `_jubileeLastUpdate'     through when the fund has accrued                                      
+      7  `feesRealized'           fees taken out of circulation, cumulative                              
+      8  `reliefRealized'         relief paid out of the fund, cumulative                                
+      9  `demurragePayer'         an account's accepted fee payer                                        
+     10  `demurragePayerRequest'  a pending payer election                                               
+     11  `sponseeCount'           how many accounts a payer carries                                      
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Tests that seed state by slot number (where the public path would need
+  the identity machinery) go through `test/harness/BuckSlots.sol', and
+  `test/BuckSlots.t.sol' pins each slot against the live layout.
+  *Nothing derived is stored.* An account's credit limit, and therefore
+  its `balanceOf', is recomputed from live `BuckCredit' state on every
+  read; there is no cached copy of it anywhere.  `mintsPrincipal' is not
+  an exception – it is a record of what was actually paid, which no
+  amount of present-day state can reconstruct once the appraisal or the
+  rate has moved.
 
   `BUCK' implements `IERC20' and `IERC20Metadata' directly – no
   OpenZeppelin ERC20 inheritance, so the slot layout is explicit and the
@@ -844,14 +935,32 @@ Table of Contents
   caller-supplied order an off-chain optimizer pre-computes against
   effective rate, depreciation, or coverage midpoint.
 
-  `burn(uint256 amount)' mirrors the overload pair, but the default
-  selector walks the holder's NFTs *most-expensive-first* – the dearest
-  insurance is released first, returning the largest pool principal per
-  BUCK burned and freeing expensive coverage capacity for re-use.  The
-  asymmetry is not arbitrageable: per-NFT inversion is symmetric (same
-  `denom' on both sides), so a mint-burn round-trip on the same NFT
-  restores both its `mintsBacked' and `activatedValue' exactly.
+  *`amount' is spendable, at the K the mint runs at.* `mint(amount)'
+  raises the caller's `balanceOf' by `amount': it activates whatever
+  coverage, and pays whatever deposit, that takes at today's `BUCK_K'.
+  A caller who wants 50,000 to spend asks for 50,000, whatever K is; the
+  coverage it activates is the dependent quantity, larger when K is
+  lower.  A mint for more than the listed credits can give reverts
+  ("insufficient credit allocation"), with one exception:
+  `mint(type(uint256).max)' delivers everything they can give,
+  activating their whole faces.  That is how a holder opens all of a
+  credit at once – a SimLP seeding a pool, or a [BuckBasketEquity]
+  opening its marked credit – without computing `K x face' first and
+  racing K to the block.
 
+  `burn(uint256 amount)' mirrors the overload pair: it lowers the
+  caller's spendable by `amount' at the K it runs at, releasing coverage
+  and refunding its deposit.  It moves no held BUCK; the caller must
+  still be within their limit afterwards.  The default selector walks
+  the holder's NFTs *most-expensive-first* – the dearest insurance is
+  released first, returning the largest pool principal per BUCK released
+  and freeing expensive coverage capacity for re-use.  The asymmetry is
+  not arbitrageable: at one K the per-NFT inversion is symmetric (the
+  same `K - e' on both sides), so a mint-burn round-trip on the same NFT
+  restores both its `mintsBacked' and `activatedValue', to rounding.
+
+
+[BuckBasketEquity] See section 7
 
 5.3.1 The Per-Credit Inversion
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
@@ -871,13 +980,15 @@ Table of Contents
   Each credit carries an annual `premiumRate' in basis points, and *the
   premium is charged on what is actually insured* – the present value,
   not the face slice.  You pay for the cover you have, not for the cover
-  the asset used to be worth.  So, given a target net headroom `amount'
-  and rate `r':
+  the asset used to be worth.  A unit of present insured value raises
+  the credit limit by `K' and costs a deposit of `e = r * POOL_ROI_INV /
+  BP', so it yields `K - e' of spendable.  Given a target spendable
+  `amount', rate `r' and today's `K':
 
   ┌────
-  │ denom     = BP - r * POOL_ROI_INV          (must be > 0; max effective rate ~1000bp)
-  │ V         = ceil(amount * BP / denom)      present insured value that settles `amount`
-  │ principal = V - amount                     = V * r * POOL_ROI_INV / BP
+  │ e         = r * POOL_ROI_INV / BP          the deposit per unit of cover (K > e, or the credit is skipped)
+  │ V         = ceil(amount / (K - e))         present insured value that yields `amount`
+  │ principal = floor(K * V) - amount          the deposit, ~ e * V
   │ take      = ceil(V * faceValue / depreciatedFace)     face units that carry V
   └────
 
@@ -885,17 +996,20 @@ Table of Contents
   premium on `V', so at the insurer's assumed 10 % ROI its yield funds
   that premium in perpetuity; the insurer keeps any return above 10 % as
   profit.  When `rho = 1' the last line is the identity and this reduces
-  exactly to the undepreciated case.
+  exactly to the undepreciated case; at `K = 1' it is `V = amount / (1 -
+  e)', `principal = V - amount'.  A credit whose deposit rate reaches K
+  (`e >= K': a premium of 750bp at K 0.75) can deliver nothing and is
+  skipped.
 
   Charging the premium on present value is not merely fairer, it is the
   only formulation that does not fall over.  Charge on the face slice
-  instead and the inversion becomes `take = amount * BP / (rho * BP -
-  effRate)', which is unsatisfiable once `rho * BP <= effRate': a 200bp
-  credit would become unmintable at /any/ price below 20 % of face,
-  because depreciation had eaten the premium margin.  With the premium
-  on `V', `denom' is independent of `rho', every credit with a non-zero
-  appraisal still works, and the cost per BUCK delivered stays `amount *
-  effRate / denom' however old the asset is.  That last property is why
+  instead and the inversion becomes `take = amount / (rho * K - e)',
+  which is unsatisfiable once `rho * K <= e': a 200bp credit would
+  become unmintable at /any/ price below 20 % of face at K = 1, because
+  depreciation had eaten the premium margin.  With the premium on `V',
+  `K - e' is independent of `rho', every credit with a non-zero
+  appraisal still works, and the cost per BUCK delivered stays `e / (K -
+  e)' however old the asset is.  That last property is why
   cheapest-first by `premiumRate' remains the correct selector:
   depreciation changes how much *capacity* a draw consumes, never how
   much it *costs*.
@@ -903,8 +1017,8 @@ Table of Contents
   The allocator (`_allocateMint') walks
   `BuckCredit.batchCreditInfo(tokenIds)' once, then iterates in memory.
   Per credit the available present value is `capV = (faceValue -
-  mintsBacked) * rho' and the net it can settle is `capV * denom / BP';
-  the credit is either fully consumed or partially consumed via the
+  mintsBacked) * rho' and the spendable it can yield is `capV * (K -
+  e)'; the credit is either fully consumed or partially consumed via the
   closed form above to land exactly on `remaining'.  A credit whose
   appraisal has reached zero insures nothing and is skipped.  For each
   credit touched, `_allocateMint' calls
@@ -925,7 +1039,7 @@ Table of Contents
 
   ┌────
   │ capV   = mintsBacked * rho                     present value of the outstanding cover
-  │ netCap = capV - mintsPrincipal                 net spendable it can release
+  │ netCap = K * capV - mintsPrincipal             spendable it can release: its limit less the deposit
   │ units  = ceil(amount * mintsBacked / netCap)   face units to deactivate
   │ refund = mintsPrincipal * units / mintsBacked  the deposit those units carry
   └────
@@ -952,15 +1066,15 @@ Table of Contents
   and the premium rate may have moved between them, so `mintsPrincipal /
   mintsBacked' is a weighted average with no closed form.
 
-  Two properties fall out.  `capV <= mintsPrincipal' means the position
-  has no spendable left in it – the holder is underwater and must repay
-  before releasing, which is the same rule the post-burn solvency check
-  enforces, reached from the other direction.  And when the holder holds
-  no loose BUCK, `netCap == creditLimit - used == balanceOf': *burning
-  exactly their spendable closes the position and squares the deposit*.
-  A mint and an immediate burn of the same amount cancel exactly;
-  partial releases floor, so the dust stays in the pool until the final
-  release hands it back.
+  Two properties fall out.  `K * capV <= mintsPrincipal' means the
+  position has no spendable left in it – the holder is underwater and
+  must repay before releasing, which is the same rule the post-burn
+  solvency check enforces, reached from the other direction.  And when
+  the holder holds no loose BUCK, `netCap == creditLimit - used ==
+  balanceOf': *burning exactly their spendable closes the position and
+  squares the deposit*.  A mint and an immediate burn of the same amount
+  cancel exactly; partial releases floor, so the dust stays in the pool
+  until the final release hands it back.
 
   Per-NFT bookkeeping: `mintsBacked[tokenId]' tracks the cumulative
   outstanding allocation against each NFT, capped at `faceValue'.  The
@@ -972,8 +1086,9 @@ Table of Contents
   sizes its unwind from `min(mintsBacked, activatedValue)' anyway – with
   the rules above they cannot differ, and the clamp is there so that any
   future divergence costs the system a rounding rather than costing a
-  holder their exit.  A mint-burn round-trip on the same NFT order is
-  rate-neutral and not arbitrageable – both sides hit the same `denom'.
+  holder their exit.  A mint-burn round-trip on the same NFT order at
+  one K is rate-neutral and not arbitrageable – both sides hit the same
+  `K - e'.
 
   The shipped `mint' sequence:
 
@@ -985,7 +1100,7 @@ Table of Contents
      *pre-activation* `balanceOf'.  The reserve is measured before this
      mint activates the credit it pledges, so the freshly-activated
      headroom cannot satisfy its own reserve.
-  4. `_allocateMint(amount, tokenIds)' reads
+  4. `_allocateMint(amount, tokenIds, K)' reads
      `BuckCredit.batchCreditInfo(tokenIds)' once, walks the slice array,
      calls `BuckCredit.activateFromBuck(tid, holder, take_i)' per NFT
      (grows `activatedValue' and `mintsBacked' in lockstep), returns
@@ -1023,52 +1138,55 @@ Table of Contents
      totalCoverage, poolPrincipal, creditValue, buckKValue, newLimit)'.
 
   End-state arithmetic for a fresh mint against a zero-balance,
-  non-credit-using holder, where every credit drawn on is
-  *undepreciated*:
+  non-credit-using holder:
 
   ┌────
   │ signedRawBalanceOf(holder) = -poolPrincipal       (used = principal paid to pool)
-  │ creditLimit(holder)        = sum take_i           (= activatedValue * BUCK_K / UNIT)
-  │ balanceOf(holder)          = creditLimit - used   = sum take_i - sum principal_i
+  │ creditLimit(holder)        = K * sum V_i          (= K x the activated cover's present value)
+  │ balanceOf(holder)          = creditLimit - used   = sum (K * V_i - principal_i)
   │                                                   = sum amount_i
   │                                                   = amount               (modulo rounding)
   │ totalSupply                += poolPrincipal       (only the pool's positive contribution grows)
   └────
 
-  *A depreciated credit delivers in full.* The allocator inverts in
-  present insured value and grosses the face units back up by `faceValue
-  / depreciatedFace', so the last line above holds whatever the
-  appraisal has done.  Depreciation costs the holder /capacity/ on the
-  credit – the same headroom consumes more face units – never headroom
-  on the mint.
+  *A depreciated credit delivers in full, and so does a low K.* The
+  allocator inverts in present insured value at today's K and grosses
+  the face units back up by `faceValue / depreciatedFace', so the last
+  line above holds whatever the appraisal and the controller have done.
+  Depreciation and a low K cost the holder /capacity/ on the credit –
+  the same spendable consumes more face units – never spendable on the
+  mint.
 
   Worked through on a 300,000 structure, LINEAR 200bp/yr on a 60,000
   floor, three years in (appraisal 285,600, so rho = 0.952), premium
-  200bp:
+  200bp (e = 0.2), at K = 0.75:
 
   ┌────
-  │ mint(50,000)  ->  V         = 62,500          present insured value, ceil(50,000 * 10000/8000)
-  │                   principal = 12,500          = V * 2000/10000
-  │                   take      = 65,651.260505   face units, ceil(V * 300,000/285,600)
+  │ mint(50,000)  ->  V         = 90,909.090910   present insured value, ceil(50,000 / (0.75 - 0.2))
+  │                   principal = 18,181.818182   = floor(0.75 * V) - 50,000  (= 0.2 * V)
+  │                   take      = 95,492.742553   face units, ceil(V * 300,000/285,600)
   │                   balanceOf = 50,000          exactly what was asked for
   └────
 
-  The premium is charged on the 62,500 actually insured, not on the
-  65,651 face slice that carries it: at the assumed 10 % ROI the 12,500
-  deposit yields 1,250/yr, which is 200bp of 62,500.  Charged on the
-  face slice it would have been 1,313/yr, and the holder would have been
+  The premium is charged on the 90,909 actually insured, not on the
+  95,493 face slice that carries it: at the assumed 10 % ROI the 18,182
+  deposit yields 1,818/yr, which is 200bp of 90,909.  Charged on the
+  face slice it would have been 1,910/yr, and the holder would have been
   paying for cover the asset no longer has.
 
-  `burn(amount[, tokenIds])' mirrors the math but with the
-  most-expensive-first default selector: unwind dearest NFT first, call
+  `burn(amount[, tokenIds])' mirrors the math – spendable falls by
+  `amount' at the K it runs at – but with the most-expensive-first
+  default selector: unwind dearest NFT first, call
   `BuckCredit.deactivateFromBuck(tid, holder, unwind_i)' which shrinks
   `activatedValue' and `mintsBacked' in lockstep, debit `poolRefund'
   from `insurancePool', credit `poolRefund' to the holder's signed raw
   (climbs toward zero from used credit, or further positive from a
   positive balance).  `quoteMint' and `quoteBurn' are read-only views
   that return `(totalCoverage, poolPrincipal)' or `(totalUnwind,
-  poolRefund)' for the same allocator math, so an off-chain optimizer
-  can size required limits and refunds before submitting.
+  poolRefund)' for the same allocator math at today's stored K, so an
+  off-chain optimizer can size required limits and refunds before
+  submitting.  (The mint itself runs at the K `compute()' returns, which
+  can step if a PID interval has elapsed.)
 
 
 [The Funding-Factor Reserve] See section 5.3.3
@@ -1166,10 +1284,11 @@ Table of Contents
   • *The insurance stays in force.* Its premium was paid up front, in
     perpetuity, and no path cancels it.  `activatedValue' does not move.
   • *The exposure shrinks on its own.* Jubilee relief accrues against
-    the coverage's age at ~2 %/year, so what closing the position
-    eventually costs declines year on year with no action from the
-    holder.  Over ten years a 1,000 BUCK position's `redeemCost' falls
-    to ~800 BUCK.
+    the lien – the BUCK the credit actually put into circulation – at ~2
+    %/year, so what closing the position eventually costs declines year
+    on year with no action from the holder.  Over ten years a 1,000 BUCK
+    lien's `redeemCost' falls to ~800 BUCK.  Undrawn credit earns
+    nothing.
 
   So there is no liquidation, no margin call, and no forced sale.  The
   position simply becomes cheaper to close the longer it is carried –
@@ -1301,23 +1420,45 @@ Table of Contents
 5.6 Demurrage and Jubilee
 ─────────────────────────
 
-  BUCK accrues continuous demurrage to fund a perpetual Jubilee.  Each
-  account's `buckSeconds' field is the cumulative integral of (positive
-  raw balance × dt) crystallised at `timestamp'; the live fee owed is
+  BUCK accrues continuous demurrage to fund a perpetual Jubilee, and the
+  Jubilee pays it back as relief to whoever issued the BUCK: *the relief
+  equals the demurrage accrued*.  Each account's `buckSeconds' field is
+  the cumulative integral of (|raw balance| × dt) crystallised at
+  `timestamp', read by sign: while the balance is positive it counts
+  /fee-seconds/, while it is negative (a lien: credit drawn) it counts
+  /issuance-seconds/.  The live fee owed and the live relief accrued are
 
   ┌────
-  │ feeOwing(a) = (buckSeconds + max(0, balance) * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE
-  │             = 0    when signed raw <= 0   (no demurrage on used credit)
+  │ feeOwing(a) = (buckSeconds + balance * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE   balance > 0
+  │ reliefOf(a) = min(lien, (buckSeconds + lien * (now - timestamp)) * BASE_RATE_PER_SEC / SCALE)
+  │                                                               lien = -balance > 0
   └────
 
   with `BASE_RATE_PER_YEAR = 0.02' (2%/year) and `SCALE = 1e27'.
-  Demurrage is a per-second property of /held/ BUCK; accounts using
-  credit (signed raw < 0) accrue zero fee until they climb back into
-  positive territory.  `_crystallize' uses `max(0, signedRaw)' as the
-  rectangle height so a negative-going transfer doesn't poison the
-  buckSeconds integral.  This makes sense; any account extends into its
-  credit only when a transfer has produced a positive BUCK balance
-  somewhere else, where it accrues demurrage.
+  Demurrage is a per-second property of /held/ BUCK; relief is a
+  per-second property of /issued/ BUCK.  One field serves both because
+  an account never holds a fee when it crosses zero: *every BUCK carries
+  its fee to the end*, and the fee is /realized/ – taken out of
+  circulation – whenever the BUCK carrying it would otherwise shed it:
+
+  • *Spending past held BUCK into credit.* The fee locked in the balance
+    is paid first; the lien absorbs it, so the lien is exactly the
+    credit drawn.
+  • *Aged BUCK arriving at an account below zero.* They repay the lien
+    net of the fee they carry.  A receipt that repays the whole lien
+    also pays out the relief the lien earned.
+  • *A basket burn.* The burned BUCK take their share of the basket's
+    age with them, and retire that much less of the basket's issuance.
+
+  Relief pays out of the fund when the lien is repaid, when the holder
+  burns coverage, or when the holder calls `settleRelief()' (only the
+  holder: relief accrues linearly on the lien, so paying it early is the
+  holder's choice).  It is capped at the lien, so a lien carried ~50
+  years closes free.  `redeemCost(a) = lien - reliefOf(a)' is the
+  liability-side quote.  (Until 2026-09-29 relief accrued in BuckCredit
+  on /activated coverage/, drawn or not – 1/K of what a fully drawn
+  credit issues, and more than the fund took in;
+  doc/JUBILEE-ISSUANCE.org.)
 
   Visible balance:
 
@@ -1342,11 +1483,19 @@ Table of Contents
   timestamp)'), and settles each side in one SSTORE.
 
   The Jubilee is a normal account at `address(this)', treated as
-  Carrying.  On every mint or burn, `_accrueJubilee' writes
+  Carrying.  On every mint or burn, and on every transfer that draws or
+  repays credit, `_accrueJubilee' writes
 
   ┌────
-  │ _state[address(this)].balance += totalSupply * BASE_RATE_PER_SEC * elapsed / SCALE
+  │ _state[address(this)].balance += totalIssued * BASE_RATE_PER_SEC * elapsed / SCALE
+  │ totalIssued = totalSupply - reliefRealized + feesRealized     (+ |basketIssued| if negative)
   └────
+
+  `totalIssued' is the BUCK issued – the liens plus the basket's net
+  issuance – which the relief accrues on, so the fund always holds the
+  relief it owes.  It follows from the only three things that move the
+  sum of the non-Jubilee signed balances: the basket's hooks, relief
+  paid out, and fees realized.
 
   directly into Jubilee's slot via a raw slot write – bypassing
   `_setBalanceSigned' – so `totalSupply' is *not* mutated.  Demurrage is
@@ -1361,15 +1510,13 @@ Table of Contents
   owner: non-Carrying accounts lock it silently inside their raw balance
   (`balanceOf = raw - feeOwing'); Carrying accounts (Notes pool, AMM
   pools, Jubilee itself) show `balanceOf = raw', so their fee portion
-  sits in Jubilee instead.  The `_accrueJubilee' call credits Jubilee at
-  the full `totalSupply' rate, covering Carrying holdings too.  When
-  Carrying BUCKs flow to a non-Carrying account via `_carryingTransfer',
-  the recipient absorbs `liveBs * value / raw' as extra `buckSeconds',
-  where `liveBs' is the sender's full live integral (crystallised
-  history plus the current elapsed rectangle).  Jubilee pre-accrued the
-  full fee at the `totalSupply' rate; it now debits in exact proportion
-  to the BUCKs transferred, with both sides settled through the current
-  block.  `JubileeAccrued(delta, newBalance)' surfaces every accrual.
+  sits in Jubilee instead.  When Carrying BUCKs flow to a holder via
+  `_carryingTransfer', the recipient absorbs `liveBs * value / raw' as
+  extra `buckSeconds', where `liveBs' is the sender's full live integral
+  (crystallised history plus the current elapsed rectangle); flowing to
+  an account below zero, that fee is realized on arrival instead.
+  `JubileeAccrued(delta, newBalance)' surfaces every accrual,
+  `JubileeRedeemed(account, relief)' every payout.
 
   The Jubilee is the sink that funds default coverage,
   perpetual-ground-rent disbursement, or a periodic balance reset – all
@@ -1484,6 +1631,14 @@ Table of Contents
 6 BuckBasket: Direct-Mint Orchestrator + USD-Free Value Anchor
 ══════════════════════════════════════════════════════════════
 
+  /This section describes the pro-rata basket (`BuckBasketProRata' and
+  its heirs `BuckBasketOps', `BuckBasketFence', and the legacy
+  `BuckBasket').  It mints and burns BUCK through basket hooks that
+  production `Buck' does not have; it runs in the simulations, on
+  `BuckWithBasketHooks', as the baseline the production basket is
+  measured against.  The production basket is [BuckBasketEquity], an
+  ordinary credit holder./
+
   `BuckBasket' is the contract that closes the loop between BUCK and the
   real-world commodity tokens it tracks.  It registers a set of
   TOKEN/BUCK Uniswap-V3 pools (one per basket constituent), custodies a
@@ -1496,24 +1651,29 @@ Table of Contents
   `BuckKControllerDirect'.
 
 
+[BuckBasketEquity] See section 7
+
 6.1 Two Kinds of BUCK
 ─────────────────────
 
-  BUCK in circulation today has two provenances, both flowing through
-  the same ERC-20:
+  In production every BUCK is issued against a lien: drawn on a
+  `BuckCredit' through the standard `Buck.mint' path ([BUCK]), gated by
+  `BUCK_K'.  The equity basket is no exception – its credit is a [marked
+  credit] on its own equity.
 
-  1. *BuckBasket-minted BUCK* – minted by `BuckBasket' via the
-        privileged `Buck.mintFromBasket(to, amount)' hook when a
-        depositor pledges a TOKEN.  Tracked in
-        `BuckBasket.totalOutstandingBuck'; burned on redemption.  The
-        activation gate is /not/ the BuckCredit credit limit – it is the
-        depositor's willingness to put TOKEN (or BUCK) into the basket
-        at the current pool valuation.
-  2. *Externally-supplied BUCK* – created by the standard
-     `Buck.mint(amount, tokenIds)' path described in [BUCK], backed by
-     `BuckCredit' insured-asset NFTs and gated by `BUCK_K'.  These BUCK
-     reach the TOKEN/BUCK pools indirectly via arbitrage swaps and are
-     the lever the PID actually pulls on.
+  The pro-rata basket is the exception, and only in the simulations:
+
+  1. *Hook-minted BUCK* – minted by the basket via `mintFromBasket(to,
+     amount)' when a depositor pledges a TOKEN, tracked in
+     `totalOutstandingBuck', burned on redemption.  The gate is not a
+     credit limit but the depositor's willingness to put TOKEN (or BUCK)
+     in at the pool valuation.  `BuckWithBasketHooks' records the hooks'
+     net issuance (`basketIssued') and the relief it has earned
+     (`basketRelief', recorded, not paid); a burn's BUCK carry their
+     share of the basket's age out and retire `amount - fee' of that
+     issuance.  The fund accrues on it like any lien.
+  2. *Credit-drawn BUCK* – as in production; these reach the TOKEN/BUCK
+     pools through arbitrage and are the lever the PID pulls on.
 
   The two supply paths converge in the basket's BUCK-side balance.
   Price-up TOKEN moves leave extra BUCK in the pool (TOKEN bought with
@@ -1525,6 +1685,8 @@ Table of Contents
 
 
 [BUCK] See section 5
+
+[marked credit] See section 3.3
 
 
 6.2 Constituents and Weights
@@ -1731,10 +1893,226 @@ Table of Contents
   *supply regulator* (BUCK going out).
 
 
-[BUCK_K] See section 7
+[BUCK_K] See section 8
 
 
-7 BUCK_K: Value Stabilization Controller
+7 BuckBasketEquity: the Basket as a Credit Holder
+═════════════════════════════════════════════════
+
+  The production basket holds shares of equity, one pooled lien, and a
+  wallet its work wheel places.  Three contracts share one storage
+  layout: the shell `BuckBasketEquity' (deposit, redeem, the treasury,
+  views), the components facet `BuckBasketEquityWheel' (the wheel's
+  steps), and the venue facet `BuckBasketUniswapV3' (the pools).  The
+  shell delegatecalls the facets: `wheelDue' / `wheelStep' to the
+  components, every other unknown selector to the venue.  A monetary
+  desk, when there is one, is a separate contract beside it ([The Desk:
+  Its Own Credit Holder]).
+
+  The rule the layout follows: *independent machines get independent
+  accounts and independent wheels*.  Buck keys everything by address –
+  one signed balance, one lien, one limit, one relief quote per address
+  – so bookkeeping "sub-accounts" inside one contract are invisible to
+  it, and it cannot hold one party within its own collateral.  The
+  basket's depositors and the desk are two parties with two books of
+  collateral, so they are two contracts, two BUCK accounts, two marked
+  credits, and two work wheels (one engine, `BasketWheel', instantiated
+  per machine with only that machine's kinds, and its own reserve and
+  callers).  A caller who wants both turned in one transaction batches
+  the calls; nothing is shared to do it.
+
+
+[The Desk: Its Own Credit Holder] See section 7.7
+
+7.1 The Account and the Credit
+──────────────────────────────
+
+  The basket is an ordinary BUCK account – bound public and non-Carrying
+  – and an ordinary credit holder.  `openCredit' (governance, once) has
+  it issue itself one [marked credit]: the basket is its insurer, the
+  premium is zero, and the face caps all it may ever draw at `K x face'.
+  Before anything that spends – a deposit, an exit, every wheel step –
+  the basket marks the credit at its equity at the exit marks, and
+  nothing else, so Buck enforces `creditLimit(basket) = K x equity' –
+  the depositors' equity.  The credit is activated, with one
+  `Buck.mint', at the first mark above zero.
+
+  It never mints or burns.  Spending past its held BUCK (placing a
+  position, buying TOKEN, paying an exit) draws on the credit; BUCK it
+  receives (a position's BUCK side, a sale's proceeds, a deposit, fees)
+  repay the lien.  Its debt is its lien, which earns Jubilee relief like
+  any other; the Daily step collects it.
+
+
+[marked credit] See section 3.3
+
+
+7.2 Valuation
+─────────────
+
+  A position's fair value is twice its BUCK side at a price (full range:
+  `2 L sqrtP').  Three marks: TWAP (the price), HIGH (each pool at the
+  higher of spot and TWAP – the incumbents' side of an entry) and LOW
+  (the lower – their side of an exit).
+
+  ┌────
+  │ gross(mark)  = sum over pools (position value at mark + idle TOKEN at mark)
+  │ equity(mark) = gross(mark) + signedBalance(basket) + reliefAccrued(basket)
+  └────
+
+  where `signedBalance' is negative by the lien (or positive by BUCK
+  held, net of its fee).  `liquidity' is what Buck lets the account
+  spend – held BUCK plus headroom under the limit.  Its target is the
+  larger of 1% of the gross and enough that half the target covers two
+  sigma of the daily net flow times `1 + K', capped at 20% of the gross.
+
+
+7.3 Deposit
+───────────
+
+  A deposit of TOKEN or BUCK is equity: valued at its pool's LOW mark
+  (BUCK at par), against the basket at its HIGH marks, less a charge –
+  the pool fee on the swap the wheel will make to place it: `(1 - K)/2'
+  of the pool fee for TOKEN, `(1 + K)/2' of the dearest for BUCK.  It
+  buys shares, lands in the wallet (BUCK straight into the account), and
+  raises the mark: `K x value' of new credit.  Into an under-water
+  basket (lien above its limit) the new credit first restores the limit
+  – an under-water account stops issuing.
+
+
+7.4 Redemption
+──────────────
+
+  The treasury takes 25% of the receipt's gain over its cost basis, as
+  shares.  The rest leaves at the exit marks, less the same charge as a
+  BUCK deposit.  The shell first marks the credit at the equity that
+  stays (`equity(LOW) - pay'), then pays in BUCK if Buck lets the
+  account spend it.  Otherwise the exit is paid *in kind*: its fraction
+  `f' of every position and of the wallet's TOKEN, by transfer, with no
+  swap.  The BUCK its positions return repay its share of the lien; what
+  they returned beyond that share is paid in BUCK.  Two corners: short
+  of its lien share (leverage above one) it leaves TOKEN behind worth
+  the shortfall at the LOW marks; owed more BUCK than an under-water
+  account can spend, the rest stays in the receipt as shares at the
+  post-exit price.  No charge in kind.
+
+
+7.5 The Wheel's Components
+──────────────────────────
+
+  Each step is bounded, marks the credit first, and trades at most 1% of
+  a pool's depth (`swapCapBp'), the arbitrage re-pinning between steps:
+
+  • *Daily*: fold the day's net flow into the flow EMA; collect the
+    relief on the lien; the director's sample.
+  • *Sync(i)*: collect pool i's fees (TOKEN to the wallet, BUCK into the
+     account).
+  • *Deploy(i)*: pair pool i's waiting TOKEN with its share of the
+    credit beyond the target – pro rata to the TOKEN waiting in every
+    pool – selling part of the TOKEN if the pair is short.
+  • *Fund*: buy the director's pick (or, past the parking room, the
+    largest gap) with half of what it places; Deploy pairs it.
+  • *Trim*: when liquidity is below its floor, unwind a slice of a
+    position (the director's pick, else the most overweight) and sell
+    its TOKEN until liquidity is back at its target – including, after a
+    K cut, the amount the basket is over its new limit; or trim what the
+    director names.
+
+
+7.6 The Director
+────────────────
+
+  `EquityTurnDirector' (optional) supplies leaning targets and two
+  gates, per leg, from a ladder of EMAs of each pool's TWAP tick against
+  the basket's mean ([The BasketWheel], "The director"):
+
+  • *The lean*: the declared weights scaled by `exp(-tilt x excursion)'
+    and renormalized, the excursion being the leg's deviation from the
+    basket's mean against its anchor EMA (1280 days) – a leg rich
+    against its anchor is leaned down.  `tilt' defaults to 1.
+  • *The turn*: six shorter EMAs (5 to 160 days) each vote when moving
+    back toward the anchor; `quorum' votes (default 4) is a turn.  A leg
+    not turned is running.
+  • *mayTrim(i)*: true unless the leg is still running up – a run is let
+    run – and true regardless once its weight is over its declared
+    target by the leash (`leashBp', 30% of the target).  *mayFund(i)*:
+    the mirror, for a leg running down.  The leash is measured against
+    the declared targets, not the leaned ones.
+
+  With no director, the basket keeps its declared targets and trims or
+  funds only beyond a plain weight band.
+
+
+[The BasketWheel] <file:alberta-buck-ethereum-wheel.org::#director>
+
+
+7.7 The Desk: Its Own Credit Holder
+───────────────────────────────────
+
+  The monetary desk (`MonetaryDesk': the four quadrants, the bounds, the
+  stabilizer seam; [The BasketWheel], "The desk") beside an equity
+  basket is `EquityDesk': its own contract, so its own account at Buck –
+  bound public and non-Carrying – and its own self-issued marked credit,
+  marked before every operation at its own net value: its TOKEN at the
+  pools' low marks, plus its account and the relief accrued on it.  Its
+  founding grant (`capitalizeMonetary') is its own TOKEN, in its own
+  contract, collateral for it alone.  It issues by spending its own
+  credit, so Buck holds its lien within `K x' its own value; BUCK it
+  buys repay that lien (their fee on arrival is its own); the relief on
+  its lien is its own, collected before each operation, and melts its
+  outstanding issuance.
+
+  From the basket it reads two things: its equity, which sizes the
+  desk's bounds (as the ops shell's NAV sized them), and its
+  constituents, mirrored so the desk trades in the same pools through
+  the same venue facet (the desk's fallback delegatecalls to it).
+  Nothing the desk holds or owes enters the basket's books, mark, or
+  limit.  Its invoker is its own: `monetaryOperation' once per director
+  epoch, from a `BasketWheel' carrying only the ops kind (pointed at the
+  desk) or a keeper.
+
+  (It was first built as a sub-account of the basket's one account,
+  marked at the basket's equity /plus/ the desk's book.  The desk's
+  founding grant then raised the depositors' limit, and the savings
+  world levered its depositors to a lien of 6.3M on 5.8M of equity at `K
+  = 0.75'.  The separation above is structural for that reason: two
+  accounts, so Buck enforces each limit.)
+
+
+[The BasketWheel] <file:alberta-buck-ethereum-wheel.org::#desk>
+
+
+7.8 Invariants
+──────────────
+
+  • E1: `equity = gross + signedBalance + reliefAccrued' (clamped at
+    zero), at any mark.
+  • E2: every issuance is within `K x equity(LOW)' of the depositors
+    alone: the credit is marked at that equity, and nothing else, before
+    any spend, and Buck enforces the limit.
+  • E3: no margin calls: a K cut changes no lien; only the wheel's paced
+    Trim repays.
+  • E4: an exit takes no more than its fraction: in BUCK, at most its
+    value at the LOW marks less the charge; in kind, exactly `f' of the
+    positions and TOKEN with its lien share repaid; the remaining
+    holders' share price is whole, to rounding.
+  • E5: the wallet's TOKEN is backed: `token.balanceOf(basket) >'
+    idleToken=.
+  • E6: the mark after an exit is the equity that stays, read after its
+    positions are burned.
+
+  And for the desk beside it:
+
+  • D1: the desk spends only after a mark at its own net value, so its
+    lien stays within `K x' that value (Buck enforces it on the desk's
+    own account).
+  • D2: nothing the desk holds or owes enters the basket's books, mark
+    or limit.
+  • D3: the relief on the desk's lien is the desk's, and melts its
+    outstanding issuance.
+
+
+8 BUCK_K: Value Stabilization Controller
 ════════════════════════════════════════
 
   `BUCK_K' is the loan-to-value cap on insured credit: a holder's credit
@@ -1757,7 +2135,7 @@ Table of Contents
 
 [The Funding-Factor Reserve] See section 5.3.3
 
-7.1 The Loop
+8.1 The Loop
 ────────────
 
   The error is the BUCK-side reference minus the basket-side reference,
@@ -1800,7 +2178,7 @@ Table of Contents
   set the pacing.
 
 
-7.2 Three Controllers
+8.2 Three Controllers
 ─────────────────────
 
   The PID machinery – state, pacing, rails, anti-windup, the funding
@@ -1842,7 +2220,7 @@ Table of Contents
     0.8-compatible port of the V3 oracle helpers.
 
 
-8 Notes: Privacy-Preserving Denomination
+9 Notes: Privacy-Preserving Denomination
 ════════════════════════════════════════
 
   BUCK transfers carry a public `(from, to, amount)' quartet.  Notes
@@ -1860,7 +2238,7 @@ Table of Contents
 
 [Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
-8.1 Mint Circuit (Batch, In-Circuit Merkle Insertion)
+9.1 Mint Circuit (Batch, In-Circuit Merkle Insertion)
 ─────────────────────────────────────────────────────
 
   `circuits/mint_batch.circom' is a parameterised batch-mint circuit.
@@ -1919,7 +2297,7 @@ Table of Contents
 <https://perry.kundert.ca/images/alberta-buck-notes-rollup-mint.pdf>
 
 
-8.2 The Spend Proof and the Deposit Gates
+9.2 The Spend Proof and the Deposit Gates
 ─────────────────────────────────────────
 
   `circuits/spend.circom' is the one note proof every spend reuses.
@@ -1967,7 +2345,7 @@ Table of Contents
 [Proofs] <https://perry.kundert.ca/range/finance/alberta-buck-proofs/>
 
 
-8.3 Verifier Interfaces
+9.3 Verifier Interfaces
 ───────────────────────
 
   `Notes' is decoupled from the SNARK toolchain via narrow interfaces:
@@ -2008,7 +2386,7 @@ Table of Contents
   pinned per-N verifier.
 
 
-8.4 Notes Contract
+9.4 Notes Contract
 ──────────────────
 
   `src/Notes.sol' is constructed with `(buck, mintVerifier,
@@ -2057,8 +2435,8 @@ Table of Contents
   carries `eDepForIss', which only the issuer decrypts.
 
 
-9 End-to-End Walkthrough
-════════════════════════
+10 End-to-End Walkthrough
+═════════════════════════
 
   Alice owns a $500K Calgary home (land $200K, structure $300K).  Two
   insurers (LandCo, HomeCo) have issued `BUCK_CREDIT' NFTs; HomeCo's
@@ -2080,8 +2458,8 @@ Table of Contents
   credit by `faceValue - mintsBacked'.
 
 
-9.1 Step 0: Identity Registration (One-Time)
-────────────────────────────────────────────
+10.1 Step 0: Identity Registration (One-Time)
+─────────────────────────────────────────────
 
   Alice obtains a PS-signed credential off-chain from a trusted issuer
   (the Alberta government, ATB Financial, etc.), blinds it into a
@@ -2095,8 +2473,8 @@ Table of Contents
   issuer never sees those accounts.
 
 
-9.2 Step 1: Mint
-────────────────
+10.2 Step 1: Mint
+─────────────────
 
   Alice calls `BUCK.mint(50_000e6)' – the no-arg form, so the built-in
   selector sorts her credits by `premiumRate' ascending: LandCo (50bp)
@@ -2106,11 +2484,14 @@ Table of Contents
   1. `buckK.compute()' runs the PID cadence.  The static controller
      returns `fundingFactor() =' 0=, so the counter-cyclical reserve
      gate is disabled and no pre-mint balance is captured.
-  2. The allocator walks #42 first: `denom = 10000 - 50*10 = 9500',
-     `avail = 200,000 - 0', `netCap = avail * 9500 / 10000 = 190,000'.
+  2. The allocator walks #42 first: `e = 50bp * 10 = 0.05', `K - e =
+     0.95', `avail = 200,000 - 0', `netCap = avail * 0.95 = 190,000'.
      Since `netCap >= 50,000' the closed-form partial fill lands it in
-     one credit: `take = ceil(50,000 * 10000 / 9500) = 52,631.578948',
+     one credit: `take = ceil(50,000 / 0.95) = 52,631.578948',
      `principal = take - 50,000 = 2,631.578948'.  #43 is never touched.
+     (At K = 0.75 the same mint would take `50,000 / 0.70 =
+     71,428.571429' of #42 and deposit 3,571.428571: Alice still gets
+     50,000.)
   3. `activateFromBuck(#42, alice, take)' grows `activatedValue' to
      `take', and `mintsBacked[#42]' with it.  From this moment #42
      cannot be transferred.
@@ -2139,8 +2520,8 @@ Table of Contents
 [mint(N) and burn(N)] See section 5.3
 
 
-9.3 Step 2: Approve Bob (Identity Handshake)
-────────────────────────────────────────────
+10.3 Step 2: Approve Bob (Identity Handshake)
+─────────────────────────────────────────────
 
   Alice's wallet reads Bob's `pk_bob' from `IdentityRegistry', decrypts
   `E_alice' (it knows `sk_alice') to recover M, and re-encrypts under
@@ -2161,8 +2542,8 @@ Table of Contents
   two-channel binding from the Identity document.
 
 
-9.4 Step 3: Bob Pulls the Transfer
-──────────────────────────────────
+10.4 Step 3: Bob Pulls the Transfer
+───────────────────────────────────
 
   `BUCK.transferFrom(alice, bob, 10_000e6)' debits the allowance, runs
   `_identityCheckedTransfer' (both parties verified,
@@ -2174,8 +2555,8 @@ Table of Contents
   that addresses Alice and Bob exchanged 10,000e6.
 
 
-9.5 Step 4: Alice Denominates as Notes
-──────────────────────────────────────
+10.5 Step 4: Alice Denominates as Notes
+───────────────────────────────────────
 
   Alice picks flavour A2 and values `[100e6, 25e6]' (totalFace 125e6).
   Her wallet pads the live pair with 14 dummies (`v=0') so the batch
@@ -2199,8 +2580,8 @@ Table of Contents
      the dummies are discarded.
 
 
-9.6 Step 5: Spend a Note
-────────────────────────
+10.6 Step 5: Spend a Note
+─────────────────────────
 
   Later, the holder of one of Alice's notes (Alice herself, or a bearer
   she off-chain handed the opening to) redeems `cm[0]' for 100 BUCK to
@@ -2234,16 +2615,16 @@ Table of Contents
   under Alice continuously.  If it fell below her drawn 2,631.58 she
   would be [underwater]: she could not burn until she reacquired BUCK
   and repaid, her insurance would stay in force regardless, and the
-  Jubilee relief accruing against #42's coverage-age would shrink the
-  cost of closing the position year on year.
+  Jubilee relief accruing against her lien would shrink the cost of
+  closing the position year on year.
 
 
-[Insurer Updates] See section 3.5
+[Insurer Updates] See section 3.6
 
 [underwater] See section 5.3.4
 
 
-10 Gas Cost Snapshot
+11 Gas Cost Snapshot
 ════════════════════
 
   Approximate gas costs from the current Foundry suite (Solidity 0.8.28,
@@ -2283,10 +2664,10 @@ Table of Contents
   Optimism, Base) where gas is 10-100x cheaper.
 
 
-11 Security Considerations
+12 Security Considerations
 ══════════════════════════
 
-11.1 Oracle Manipulation
+12.1 Oracle Manipulation
 ────────────────────────
 
   BUCK/USDT and basket pool prices use Uniswap V3 TWAPs (600 s shipped,
@@ -2300,7 +2681,7 @@ Table of Contents
   acceptable window (~1 hour) and revert if stale.
 
 
-11.2 The Insurer Gate
+12.2 The Insurer Gate
 ─────────────────────
 
   A credit's `faceValue' and `premiumRate' are whatever its issuer says
@@ -2380,7 +2761,7 @@ Table of Contents
 [identity accumulator] See section 4.5
 
 
-11.3 Recipient Opt-In
+12.3 Recipient Opt-In
 ─────────────────────
 
   A credit only lands where its recipient asked for it.  A client calls
@@ -2410,7 +2791,7 @@ Table of Contents
 [read live] See section 5.2.1
 
 
-11.4 Insurer Trust
+12.4 Insurer Trust
 ──────────────────
 
   An insurer may reappraise `faceValue' downward, but not below coverage
@@ -2432,14 +2813,14 @@ Table of Contents
   Gate].
 
 
-[Insurer Updates] See section 3.5
+[Insurer Updates] See section 3.6
 
 [underwater] See section 5.3.4
 
-[The Insurer Gate] See section 11.2
+[The Insurer Gate] See section 12.2
 
 
-11.5 Reentrancy
+12.5 Reentrancy
 ───────────────
 
   Every state-mutating entry point on `Buck' carries a transient-storage
@@ -2467,26 +2848,78 @@ Table of Contents
 
 [Reentrancy Guard] See section 5.5.1
 
-[Future Directions] See section 12
+[Future Directions] See section 13
 
 [Integrating with BUCK] See section 5.7
 
 
-11.6 Pool Solvency
-──────────────────
+12.6 The Insurance Pool: an Interim Stand-in
+────────────────────────────────────────────
 
-  `insurancePool' holds the cumulative pool principal for every
-  outstanding mint.  Burn requires the pool's spendable balance to cover
-  the proportional refund; if the pool is drained out-of-band the burn
-  reverts.  Today no path drains the pool: it is not a verified identity
-  (so no identity-checked transfer can move BUCK out of it) and holds no
-  NFTs (so it cannot self-burn via the allocator).  Adding
-  governance-controlled disbursement requires explicit accounting of how
-  the pool's invariant (`poolBalance >= sum of all outstanding mint
-  principals') is preserved.
+  *Today.* `insurancePool' is one address, fixed at construction, that
+  receives every mint's premium deposit, pays every burn's refund, and
+  is the authority that wires the basket (`setBasket').  It holds the
+  cumulative pool principal for every outstanding mint.  Burn requires
+  the pool's spendable balance to cover the proportional refund; if the
+  pool is drained out-of-band the burn reverts.  Every test and
+  simulation constructs the pool as a contract bound Carrying through
+  the registry – the Foundry suites with `bindCarryingPool', the Python
+  and JavaScript worlds with a `SimLP' their operator binds – so its
+  deposits keep their age, and `burn' dispatches the refund on the
+  registry's flag like any transfer: a Carrying pool hands the refunded
+  share of its accrued age back to the holder.  (The Notes paper's
+  fixture world, `notes_stack.py', leaves its pool unbound: its credits
+  carry no premium, so no deposit ever reaches it, and binding would
+  disturb its pinned fixtures.)  A bound pool is a verified identity, so
+  a transfer out of it is possible, and the simulations' `SimLP' lets
+  anyone call its `exec': a stand-in, not a vault.  It stands in for the
+  design below until insurers exist on chain.
+
+  *Intended* (author, 2026-09-25).  A credit's premium deposit belongs
+  with that credit's insurer – `credits[tokenId].insurer', the account
+  that wrote it.  The insurer holds its credits' deposits in a premium
+  pool: a hot wallet that invests the deposits to earn the premiums, and
+  that it must keep funded to cover every upcoming cancellation (the
+  refunds due when holders drop their insurance) and every upcoming
+  claim payout.  The pool works on its members' behalf, so it is
+  Carrying – a contract bound through the identity registry with
+  `isCarrying', like any other account doing work for others, not a
+  special case in `Buck' (an EOA cannot be Carrying).  `Buck' then takes
+  no pool address at all:
+
+  • `mint' credits each slice's pool principal to that slice's insurer,
+    and `burn' refunds each slice from its insurer; the funding gate is
+    unchanged (it sees the total).
+  • Solvency becomes per insurer: `pool(insurer) >= sum of
+    mintsPrincipal[tokenId]' over the insurer's credits, plus what its
+    outstanding claims require.  A burn against an underfunded insurer
+    reverts, so an insurer that lets its hot wallet run dry traps its
+    holders' cancellations – a condition for the insurer gate's
+    attestation to police.
+  • The basket's wiring moves to the registry's governance
+    (`identity.governance()').
+
+  What the change touches, when the insurer implementations – the
+  insurance company's interface to the premium pool its credits fund –
+  are built:
+
+  • `Buck': drop the constructor parameter; route mint principals and
+    burn refunds per slice; move the `setBasket' authority; per-insurer
+    `Transfer' events.
+  • `BuckCredit' and `BuckTypes': `CreditSlice' gains the insurer, which
+    `batchCreditInfo' returns.
+  • Deployments: `scripts/deploy/Deploy.s.sol',
+    `alberta_buck/sim/deploy.py' and `notes_stack.py',
+    `core/js/src/buckworld.js' with the equilibrium world's `setBasket'
+    and the sandbox.
+  • Tests: the sixteen Foundry suites that construct `Buck',
+    `Buck.t.sol''s pool and `setBasket' cases and the basket suites'
+    wiring; the JavaScript market and sandbox tests that read the pool.
+  • The published contract bundle: `Buck''s constructor and
+    `batchCreditInfo' change, a new minor version.
 
 
-12 Future Directions
+13 Future Directions
 ════════════════════
 
   This implementation prioritises clarity and correctness; alternatives
@@ -2503,11 +2936,10 @@ Table of Contents
     agent-role granularity, and lost-key recovery via identity
     verification.  This is the likely production standard if Alberta
     deploys BUCK under provincial regulation.
-  • *ERC-4626 InsurancePool* – a vault-shaped wrapping of the existing
-    `insurancePool' address, so pool deposits become standardised
-    mutual-insurance shares with `deposit' / `shares' / yield
-    composability.  Mechanical layer on top of the current
-    single-address pool.
+  • *ERC-4626 premium pools* – a vault shape for each insurer's premium
+    pool (see "The Insurance Pool: an Interim Stand-in"), so deposits
+    become standardised shares with `deposit' / `shares' / yield
+    composability.
   • *L2 deployment*.  The contracts are EVM-compatible and deploy on
     Arbitrum, Optimism, Base, or Polygon with no changes.  Cross-chain
     BUCK via canonical bridges or LayerZero/Axelar would enable
@@ -2548,7 +2980,7 @@ Table of Contents
 [BUCK_CREDIT] See section 3
 
 
-13 Status
+14 Status
 ═════════
 
   Current Foundry suite: 55 test files cover all six contracts in tree

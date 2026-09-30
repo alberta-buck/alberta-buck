@@ -154,12 +154,14 @@ The BuckBasket earns from three places:
    exactly the rebalancing premium above.  The demon works for whoever gets there first.  So the
    basket goes for it too: it corrects its own pools, through a loop of three trades that needs no
    money up front and cannot lose, and keeps the change.
-3. *Timing the tides.*  A trading pool harvests the chop, the day-to-day wobbles.  It cannot harvest
-   a slow tide at all: a commodity that drifts up for a year and back down the next leaves a pool
-   almost nothing.  Only deliberate timing can -- trimming a commodity that is rich against its own
-   long memory, adding to one that is cheap, and never trimming one that is still rising.  /Let a
-   run run/, then lean against it once it turns.  An optional /director/ does exactly that, and
-   nothing more clever.
+3. *Timing the tides.*  New money does not reach every price at once.  It reaches money-like
+   assets first, energy and building materials in about a year, and wages and food a year or two
+   after that -- so the basket's commodities drift apart and come home again on a tide about a year
+   long.  A trading pool harvests the chop, the day-to-day wobbles, but it cannot harvest a tide at
+   all.  Only deliberate timing can: trimming a commodity that is rich against its own long memory,
+   adding to one that is cheap, and never trimming one that is still rising.  /Let a run run/, then
+   lean against it once it turns.  An optional /director/ does exactly that, and nothing more
+   clever.
 
 The details -- how the three trades close a gap, how the director decides a tide has turned, and
 the simulations behind every claim here -- are in [[file:alberta-buck-ethereum-wheel.org][The BasketWheel]].
@@ -199,10 +201,31 @@ whoever turns it out of what the turning captures.  There is no keeper on a sala
 turns it, new deposits wait in the basket's wallet and it earns less; nothing already in it is put
 at risk.
 
-Next to the basket there may also be a /monetary desk/, which buys and sells BUCK to steady its
-price.  It is a separate machine with its own account, its own credit and its own wheel.  Two
+* A tugboat beside the tanker
+:PROPERTIES:
+:CUSTOM_ID: the-desk
+:END:
+
+The controller that moves =K= steers like a supertanker.  It works only through how much credit
+people may draw, and a book of credit takes months to turn.  Someone with deep pockets can shove
+BUCK off course in days.
+
+So beside the basket there may be a /monetary desk/: a tugboat.  When BUCK is cheap it buys; when
+BUCK is dear it sells.  Most of the time that is all it does, and the two cancel out as the price
+comes back.  Only when a push persists for weeks does it do something permanent -- retire BUCK it
+issued, or issue more -- and then only within a published limit.  That is how a central bank splits
+the work between its policy rate and its open-market desk.
+
+The best thing about the desk is when it loses.  Against an attack it buys cheap BUCK from the
+attacker and sells it back dearer, and in our model every attacker left poorer.  Against a real
+change in the world -- commodities genuinely worth more BUCK -- it loses a little money and gets out
+of the way.  A desk that seems to profit from everything has not been tested properly.  An early
+version of ours did, right up until we noticed it had quietly bought half the pool it traded in.
+
+The desk is a separate machine with its own account, its own credit and its own wheel.  Two
 households, two sets of books: we learned that one the honest way, when a simulated desk's capital
 briefly counted toward the depositors' borrowing, and a test now guards the wall between them.
+The details are in [[file:alberta-buck-ethereum-wheel.org::#desk][The BasketWheel]].
 
 * Yield against demurrage
 :PROPERTIES:

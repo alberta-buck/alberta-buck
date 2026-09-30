@@ -15,7 +15,7 @@ from typing import Any
 from alberta_buck.sim.prices import Prices
 
 # The BuckBasket's monetary-operations desk, run as an agent
-# (alberta-buck-operations.org, phase 2).  OFF by default so the committed
+# (alberta-buck-ethereum-wheel.org, "The desk").  OFF by default so the committed
 # vectors stay the baseline; the comparison is a pair of runs on one seed:
 #
 #     make nix-sim-rebalancing-revert                       # baseline
