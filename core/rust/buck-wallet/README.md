@@ -56,7 +56,7 @@ parsed receipt.  For worked usage of the builders and the Note flows, read
 
 ## Status
 
-0.2.0, prototype.  Unaudited software that builds and verifies the
+0.3.0, prototype.  Unaudited software that builds and verifies the
 instruments people would hold value in.  Treat accordingly.
 
 ## Licence

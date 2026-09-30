@@ -75,7 +75,7 @@ proven with that setup.
 
 ## Status
 
-0.2.1, prototype, protocol v2.  Unaudited.
+0.3.0, prototype, protocol v2.  Unaudited.
 
 ## Licence
 

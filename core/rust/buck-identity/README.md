@@ -58,7 +58,7 @@ compares.
 
 ## Status
 
-0.2.0, prototype.  Unaudited cryptographic software.  It has been checked
+0.3.0, prototype.  Unaudited cryptographic software.  It has been checked
 for agreement with a reference implementation, which is not the same thing
 as having been checked for security.
 

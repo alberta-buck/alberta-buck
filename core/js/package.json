@@ -1,6 +1,6 @@
 {
   "name": "alberta-buck-core",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Alberta Buck core platform (JS): the ChainSession API over Tevm/anvil/testnets with expectation journaling, the agent simulation platform, and the BigInt-native wrappers around the WebAssembly kernels",
   "type": "module",
   "license": "CAL-1.0",
@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "alberta-buck-contracts": "0.2.1",
-    "alberta-buck-kernel": "0.2.1",
+    "alberta-buck-kernel": "0.3.0",
     "tevm": "^1.0.0-next.149",
     "viem": "^2.54.2"
   },

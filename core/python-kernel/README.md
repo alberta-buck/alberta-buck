@@ -45,7 +45,7 @@ component, not from the filename. Installed size is 2.0 MB rather than
 
 ## Status
 
-0.2.0, prototype. Unaudited cryptographic software. It has been checked for
+0.3.0, prototype. Unaudited cryptographic software. It has been checked for
 agreement with a reference implementation, which is not the same as having
 been checked for security.
 

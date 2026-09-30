@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "alberta-buck-identity"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -27,14 +27,14 @@ dependencies = [
 
 [[package]]
 name = "alberta-buck-math"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "alberta-buck-registry"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "alberta-buck-identity",
  "serde_json",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "alberta-buck-wallet"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "alberta-buck-identity",
  "alberta-buck-registry",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "buck-identity-py"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "alberta-buck-identity",
  "alberta-buck-registry",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "buck-identity-wasm"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "alberta-buck-identity",
  "alberta-buck-registry",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "buck-math-py"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "alberta-buck-math",
  "pyo3",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "buck-math-wasm"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "alberta-buck-math",
  "wasm-bindgen",

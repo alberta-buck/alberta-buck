@@ -71,8 +71,12 @@ CONTRACTS = [
     "BuckCredit",              # ERC-721, insured asset with depreciation
     "BuckKControllerDirect",   # the on-chain PID controller
     "IdentityRegistry",        # identity accumulator + verifier wiring
-    "BuckBasketProRata",       # basket: pro-rata redemption
-    "BuckBasketUniswapV3",     # basket: V3-routed
+    "BuckBasketEquity",        # the equity basket: a credit holder
+    "BuckBasketEquityWheel",   # its components facet
+    "BuckBasketUniswapV3",     # its venue facet (V3 pools)
+    "EquityTurnDirector",      # its turn director
+    "BasketWheel",             # the work wheel a keeper turns
+    "EquityDesk",              # the monetary desk: its own credit holder
     "SimLP",                   # simulation liquidity helper
     "MockERC20",               # test/sim token
     # The Notes pool and the adapters that give it its verifiers.

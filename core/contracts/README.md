@@ -4,7 +4,9 @@ Compiled ABI and bytecode for the Alberta Buck contracts: the BUCK token
 (`Buck`), the insured asset NFT (`BuckCredit`), the on-chain PID controller
 (`BuckKControllerDirect`), the identity accumulator (`IdentityRegistry`) and
 the Poseidon hashers it takes, the Notes pool (`Notes`) with its verifier
-adapters and Groth16 verifiers, the two baskets, and the simulation helpers.
+adapters and Groth16 verifiers, the equity basket (`BuckBasketEquity`, its
+components and venue facets, its turn director and its work wheel), the
+monetary desk beside it (`EquityDesk`), and the simulation helpers.
 
 **Unaudited prototype software for a monetary system.** These contracts have
 never been audited. They are published so the research and simulations can be

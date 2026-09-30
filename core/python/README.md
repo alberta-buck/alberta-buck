@@ -44,7 +44,7 @@ the extension, so a freshly rebuilt kernel takes effect immediately.
 
 ## Status
 
-0.2.0, prototype. Unaudited software for a monetary system, published so
+0.3.0, prototype. Unaudited software for a monetary system, published so
 the simulation and identity work can be reproduced and built on.
 
 ## Licence

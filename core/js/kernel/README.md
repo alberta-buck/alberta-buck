@@ -65,7 +65,7 @@ plan.
 
 ## Status
 
-0.2.1, prototype. Unaudited software implementing the arithmetic and
+0.3.0, prototype. Unaudited software implementing the arithmetic and
 cryptography of a monetary system. It has been checked for agreement with a
 reference implementation, which is not the same as having been checked for
 security.

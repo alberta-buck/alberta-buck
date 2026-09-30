@@ -1,6 +1,6 @@
 {
   "name": "alberta-buck-contracts",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Compiled ABI and bytecode for the Alberta Buck contracts (unaudited prototype): the BUCK token, BuckCredit, the BUCK_K controller, the identity registry, the Notes pool with Groth16 verifiers from a DEVELOPMENT trusted setup (forgeable until v1.0.0), and the baskets, built with a pinned compiler",
   "type": "module",
   "license": "GPL-3.0-or-later",

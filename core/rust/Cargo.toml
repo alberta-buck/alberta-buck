@@ -12,7 +12,7 @@
 # guarantee that spans versions is not a guarantee.  The bindings/ crates are
 # build artifacts (publish = false) and inherit only for consistency.
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "CAL-1.0"
 repository = "https://github.com/alberta-buck/alberta-buck"

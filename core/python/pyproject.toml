@@ -7,7 +7,7 @@
 
 [project]
 name = "alberta-buck-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Alberta Buck core platform (Python): the ChainSession API over anvil/testnets/pyrevm with expectation journaling, and the Foundry artifact loader"
 readme = "README.md"
 license = "CAL-1.0"
@@ -21,13 +21,13 @@ dependencies = [
     "web3>=7",
     # The contract artifacts, so an installed package can deploy a world
     # without a repo checkout (buck_core.artifacts.load_artifact).
-    "alberta-buck-contracts>=0.2.0,<0.3",
+    "alberta-buck-contracts>=0.3.0,<0.4",
 ]
 
 [project.optional-dependencies]
 # The compiled kernels: optional by construction.  Everything they do has a
 # pure-Python equivalent, so this only makes it faster.
-kernel = ["alberta-buck-kernel>=0.2.0,<0.3"]
+kernel = ["alberta-buck-kernel>=0.3.0,<0.4"]
 
 [project.urls]
 Homepage = "https://github.com/alberta-buck/alberta-buck"
