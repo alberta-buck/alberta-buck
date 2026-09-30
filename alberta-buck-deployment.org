@@ -50,22 +50,22 @@ deleted, PyPI filenames cannot be reused, npm unpublish is a 72-hour window.
 #+LATEX: \clearpage
 * Status
 
-Published (0.2.0, 2026-09-25), and each verified by installing from the
+Published (0.3.0, 2026-09-30), and each verified by installing from the
 registry into an empty project outside this checkout:
 
 | artifact                 | registry  | version | licence          |
 |--------------------------+-----------+---------+------------------|
-| =alberta-buck-math=      | crates.io |   0.2.0 | CAL-1.0          |
-| =alberta-buck-identity=  | crates.io |   0.2.0 | CAL-1.0          |
-| =alberta-buck-registry=  | crates.io |   0.2.0 | CAL-1.0          |
-| =alberta-buck-wallet=    | crates.io |   0.2.0 | CAL-1.0          |
-| =alberta-buck-kernel=    | npm       |   0.2.0 | CAL-1.0          |
-| =alberta-buck-core=      | npm       |   0.2.0 | CAL-1.0          |
-| =alberta-buck-contracts= | npm       |   0.2.0 | GPL-3.0-or-later |
-| =alberta-buck-contracts= | PyPI      |   0.2.0 | GPL-3.0-or-later |
-| =alberta-buck-core=      | PyPI      |   0.2.0 | CAL-1.0          |
-| =alberta-buck-kernel=    | PyPI      |   0.2.0 | CAL-1.0          |
-| =alberta-buck=           | PyPI      |   0.2.0 | GPL-3.0-or-later |
+| =alberta-buck-math=      | crates.io |   0.3.0 | CAL-1.0          |
+| =alberta-buck-identity=  | crates.io |   0.3.0 | CAL-1.0          |
+| =alberta-buck-registry=  | crates.io |   0.3.0 | CAL-1.0          |
+| =alberta-buck-wallet=    | crates.io |   0.3.0 | CAL-1.0          |
+| =alberta-buck-kernel=    | npm       |   0.3.0 | CAL-1.0          |
+| =alberta-buck-core=      | npm       |   0.3.0 | CAL-1.0          |
+| =alberta-buck-contracts= | npm       |   0.3.0 | GPL-3.0-or-later |
+| =alberta-buck-contracts= | PyPI      |   0.3.0 | GPL-3.0-or-later |
+| =alberta-buck-core=      | PyPI      |   0.3.0 | CAL-1.0          |
+| =alberta-buck-kernel=    | PyPI      |   0.3.0 | CAL-1.0          |
+| =alberta-buck=           | PyPI      |   0.3.0 | GPL-3.0-or-later |
 
 Remaining:
 
@@ -122,7 +122,28 @@ kernel and =alberta-buck-core= on PyPI stay at 0.2.0 (unchanged; patches
 float).  Order: =js-contracts-v0.2.1= and =py-contracts-v0.2.1=, then core's
 contracts pin and lock, then =js-v0.2.1= and =py-sim-v0.2.1=.
 
-From 0.2.2 every package carries its LICENSE, and the kernels and the contracts bundle their
+*0.3.0, the accounting roll* (released 2026-09-30, from
+=feature/carry-convexity=).  The Jubilee accounting changes Buck (relief on
+liens, MARKED credits, =mint(amount)= raising spendable by =amount= at K)
+and =buck-math='s carrying transfer, so it is a minor bump everywhere,
+lockstep, every package moving.  The bundle drops =BuckBasketProRata= (it
+mints through the basket hooks of the sims' =BuckWithBasketHooks=, which the
+bundle never shipped) and adds the equity basket: =BuckBasketEquity=, its
+components facet =BuckBasketEquityWheel=, =EquityTurnDirector=,
+=BasketWheel= and the monetary desk =EquityDesk=.  Order:
+=js-contracts-v0.3.0= and =py-contracts-v0.3.0=, then core/js's contracts
+pin and lock, then =py-kernel-v0.3.0=, =py-core-v0.3.0= and
+=py-sim-v0.3.0= one at a time, with =rs-v0.3.0= and =js-v0.3.0= beside
+them.  A workflow's runs share one concurrency group, and GitHub keeps only
+one run pending per group -- a third tag cancels the second -- so tags for
+the same workflow go one at a time.  The first =py-sim-v0.3.0= run failed
+its smoke test within seconds of =py-core-v0.3.0= going green: PyPI's index
+did not yet serve the new core, so its install could not resolve.  Nothing
+was published; the tag was re-pushed at the same commit and passed.  Before
+tagging a package whose job installs from PyPI, wait until =pip download
+--no-deps= fetches its dependency.
+
+From 0.3.0 every package carries its LICENSE, and the kernels and the contracts bundle their
 generated THIRD-PARTY-NOTICES.txt (doc/KNOWN-ISSUES.org, KI-5).  Before tagging, run
 =make nix-third-party-notices-check=: a dependency bump since the last regeneration fails it, and
 =make nix-third-party-notices= brings the notices up to date.  The release workflows refuse a

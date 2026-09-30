@@ -70,7 +70,7 @@ The tour and the details: [[file:doc/SANDBOX.org][doc/SANDBOX.org]].
 | =doc/=               | guides and design reviews                                                |
 | =alberta-buck-*.org= | the papers (below)                                                       |
 
-The kernels and contracts are published at 0.2.0:
+The kernels and contracts are published at 0.3.0:
 
 | Registry  | Packages                                                     |
 |-----------+--------------------------------------------------------------|
