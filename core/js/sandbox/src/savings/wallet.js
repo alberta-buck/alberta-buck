@@ -2,7 +2,11 @@
 // through transactions it signs itself (a --public server executes nothing
 // else).  Gas is free in the simulated chain (gas price 0), so the key
 // needs no ETH; the world's TOKENs are faucets, so saving starts by minting
-// the TOKEN a deposit needs at its market price.
+// the TOKEN a deposit needs at its market price.  An equity basket pays its
+// exits in BUCK, which only a registered identity may receive: before its
+// first exit the key asks the server to enroll it (sim_enroll -- a
+// credential from the world's issuer and the identity-bound approve of the
+// basket, as the world's own depositors hold).
 //
 // Every action is ONE JSON-RPC batch, answered under one hold of the
 // world's chain: for each transaction, a preflight eth_call (the same call
@@ -44,6 +48,18 @@ export class Saver {
     this.account = privateKeyToAccount(this.key);
     this.address = this.account.address;
     this.nonce = null;
+    this.enrolled = false;
+  }
+
+  /** The basket pays its exits in BUCK (an equity basket). */
+  get equity() { return this.info.basket_kind === "equity"; }
+
+  /** Register this key as an identity and approve the basket to pay it
+   *  BUCK (the server does both, once). */
+  async enroll() {
+    if (this.enrolled) return;
+    await this.link.call("sim_enroll", [this.address]);
+    this.enrolled = true;
   }
 
   async _nonce() {
@@ -136,24 +152,28 @@ export class Saver {
     return { id: ev.args.receiptId, buckMinted: ev.args.buckMinted, tokenAmount: ev.args.tokenAmount };
   }
 
-  /** Redeem a whole receipt.  Resolves to what was paid: [{token index,
-   *  amount}] from the transfers to this key. */
+  /** Redeem a whole receipt.  Resolves to what was paid: [{i, amount}]
+   *  from the transfers to this key -- i a TOKEN's index, or -1 for BUCK. */
   async redeem(id) {
+    if (this.equity) await this.enroll();
     const [r] = await this.send([{ to: this.info.basket, abi: BASKET, functionName: "redeem",
                                    args: [BigInt(id), 10_000n] }]);
     if (!r.ok) throw Object.assign(new Error(`the redemption was refused: ${r.reason}`),
       { reason: `the redemption was refused: ${r.reason}` });
     const me = this.address.toLowerCase();
     const index = new Map(this.info.tokens.map((t, i) => [t.address.toLowerCase(), i]));
+    if (this.info.buck) index.set(this.info.buck.toLowerCase(), -1);
     const paid = parseEventLogs({ abi: ERC20, eventName: "Transfer", logs: r.receipt.logs })
       .filter((e) => e.args.to.toLowerCase() === me && index.has(e.address.toLowerCase()))
       .map((e) => ({ i: index.get(e.address.toLowerCase()), amount: e.args.value }));
     return { paid };
   }
 
-  /** What this key holds -- each TOKEN's balance, each receipt's deposit
-   *  and owner -- with the director's hint and each TOKEN/BUCK pool's tick
-   *  now and at its average (the deposit guard's two readings): one batch. */
+  /** What this key holds -- each TOKEN's balance and its BUCK, each
+   *  receipt's deposit and owner (and, in an equity basket, its shares and
+   *  cost basis) -- with the director's hint (a pro-rata basket's director
+   *  gives one) and each TOKEN/BUCK pool's tick now and at its average (the
+   *  deposit guard's two readings): one batch. */
   async holdings(ids) {
     const toks = this.info.tokens;
     if (this.twapWindow === undefined) {
@@ -170,9 +190,13 @@ export class Saver {
       ...ids.flatMap((id) => [
         { address: this.info.basket, abi: BASKET, functionName: "deposits", args: [BigInt(id)] },
         { address: this.info.receipt, abi: RECEIPT, functionName: "ownerOf", args: [BigInt(id)] },
+        ...(this.equity ? [{ address: this.info.basket, abi: BASKET, functionName: "holdings",
+                             args: [BigInt(id)] }] : []),
       ]),
+      { address: this.info.buck, abi: ERC20, functionName: "balanceOf", args: [this.address] },
     ];
-    if (this.info.director) calls.push({ address: this.info.director, abi: DIRECTOR, functionName: "depositHint" });
+    const hinted = !!this.info.director && !this.equity;
+    if (hinted) calls.push({ address: this.info.director, abi: DIRECTOR, functionName: "depositHint" });
     const out = await this.read(calls);
     const balances = out.slice(0, toks.length).map((r) => r.result ?? 0n);
     const ticks = toks.map((_, i) => ({
@@ -180,18 +204,23 @@ export class Saver {
       twap: this.twapWindow ? out[toks.length + 2 * i + 1].result ?? null : null,
     }));
     const base = 3 * toks.length;
+    const per = this.equity ? 3 : 2;
     const receipts = ids.map((id, k) => {
-      const dep = out[base + 2 * k];
-      const owner = out[base + 2 * k + 1];
+      const dep = out[base + per * k];
+      const owner = out[base + per * k + 1];
+      const hold = this.equity ? out[base + per * k + 2].result : null;
       const d = dep.result;
       return {
         id,
-        live: !!d && d[0] > 0n && owner.result?.toLowerCase() === this.address.toLowerCase(),
+        live: !!d && d[0] > 0n && owner.result?.toLowerCase() === this.address.toLowerCase()
+          && (!this.equity || (hold?.[0] ?? 0n) > 0n),
         buckPrincipal: d ? d[0] : 0n, tokenPrincipal: d ? d[1] : 0n,
         token: d ? d[2] : null, depositTime: d ? Number(d[3]) : 0,
+        shares: hold ? hold[0] : 0n, basis: hold ? hold[1] : 0n,
       };
     });
-    const hint = this.info.director ? out[out.length - 1].result : undefined;
-    return { balances, receipts, hint, ticks };
+    const buck = out[base + per * ids.length].result ?? 0n;
+    const hint = hinted ? out[out.length - 1].result : undefined;
+    return { balances, buck, receipts, hint, ticks };
   }
 }

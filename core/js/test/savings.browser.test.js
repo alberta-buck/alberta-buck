@@ -58,6 +58,8 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     await page.waitForSelector("#panel-savings .kpis .stat", { timeout: WORLD_MS });
     await page.waitForFunction(() => globalThis.savings?.holdings, null, { timeout: WORLD_MS });
     assert.match(await page.textContent("#panel-savings"), /Your key \(simulated, kept in this browser\): 0x/);
+    assert.match(await page.textContent("#panel-savings"), /shares of the basket's equity/,
+      "the savings world runs the equity basket");
     await nextDay();
     assert.ok(await page.locator("#panel-savings .chart path.line").count() > 10, "the charts draw");
 
@@ -75,7 +77,7 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
       }
     }
     assert.ok(saved, "a deposit landed");
-    assert.match(await status(), /^Saved: receipt #\d+, \$10,000\.00 of \w+ partnered with/);
+    assert.match(await status(), /^Saved: receipt #\d+, \$10,000\.00 of \w+: the basket's equity, drawing [\d.,kM]+ BUCK of credit/);
     const receiptRow = page.locator("#panel-savings li.receipt").first();
     await receiptRow.locator("button", { hasText: "Redeem" }).waitFor({ timeout: DAY_MS });
     await page.waitForFunction(() => /\$[\d,]+\.\d\d/.test(
@@ -107,7 +109,9 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     // Redeem (the world is paused: it lands at once).
     await receiptRow.locator("button", { hasText: "Redeem" }).click();
     await idle();
-    assert.match(await status(), /^Redeemed #\d+: paid \$[\d,]+\.\d\d in TOKENs/);
+    // In BUCK (to the key, enrolled as an identity at its first exit); in
+    // kind, TOKEN, only when the basket's account cannot spend the BUCK.
+    assert.match(await status(), /^Redeemed #\d+: paid \$[\d,]+\.\d\d in BUCK/);
     assert.match(await receiptRow.textContent(), /paid on day \d+/);
     assert.match(await page.textContent("#panel-savings dl.wallet"), /\(\$[\d,]+\.\d\d\)/, "the wallet holds the payout");
 

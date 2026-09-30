@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { BASKET, DIRECTOR, ERC20, POOL, RECEIPT } from "../sandbox/src/savings/abi.js";
-import { channels, chooseIndex, dateOf, deviationBp, hintIndex, newSid, prices, receiptWorth, row,
+import { channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices, receiptWorth, row,
          serverBase, tokenFor } from "../sandbox/src/savings/model.js";
 
 const loc = (href) => new URL(href);
@@ -64,6 +64,20 @@ test("a receipt pays the TOKEN side of its claim (BuckBasketProRata._redeem)", (
   assert.equal(receiptWorth(100n, { O: 1000, S: 0, B: null }), null);
 });
 
+test("an equity receipt pays its shares' value, less the treasury's cut and the exit charge", () => {
+  const E18 = 10n ** 18n;
+  const sv = { sp: (E18 * 11n) / 10n, lam: 2500, chg: 0n };     // share price 1.1, a quarter of the gain
+  // 100 shares bought for 100: worth 110, the treasury takes 2.5 of the 10 gained.
+  assert.deepEqual(equityWorth(100n * E18, 100n * E18, sv),
+                   { claim: 110n * E18, cut: (25n * E18) / 10n, paid: (1075n * E18) / 10n });
+  // At a loss there is no cut.
+  assert.equal(equityWorth(100n * E18, 120n * E18, sv).cut, 0n);
+  // The exit charge (1e18 scale) comes off what is left.
+  assert.equal(equityWorth(100n * E18, 110n * E18, { ...sv, chg: E18 / 100n }).paid, (1089n * E18) / 10n);
+  assert.equal(equityWorth(100n * E18, 100n * E18, { sp: null }), null);
+  assert.equal(equityWorth(0n, 0n, sv), null);
+});
+
 test("dollars into TOKEN units at the pool's price; where a deposit helps most", () => {
   assert.equal(tokenFor(10_000, 2.5, 18), 4_000n * 10n ** 18n);
   assert.equal(tokenFor(100_000, 100_000, 8), 100_000_000n);
@@ -91,7 +105,8 @@ const OUT = fileURLToPath(new URL("../../../out/", import.meta.url));
 const ARTIFACTS = {
   ERC20: ["MockERC20.sol/MockERC20.json"],
   BASKET: ["BuckBasketOps.sol/BuckBasketOps.json", "BuckBasketProRata.sol/BuckBasketProRata.json",
-           "BuckBasketUniswapV3.sol/BuckBasketUniswapV3.json"],
+           "BuckBasketUniswapV3.sol/BuckBasketUniswapV3.json",
+           "BuckBasketEquityOps.sol/BuckBasketEquityOps.json"],
   POOL: ["UniswapV3Pool.sol/UniswapV3Pool.json"],
   RECEIPT: ["BuckBasketReceipt.sol/BuckBasketReceipt.json"],
   DIRECTOR: ["PairsRebalanceDirector.sol/PairsRebalanceDirector.json"],

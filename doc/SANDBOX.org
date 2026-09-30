@@ -164,11 +164,16 @@ seconds, and this tab watches it frame by frame.
 - /Your savings/: a key of your own, made in this browser (it signs everything it does; the server
   runs nothing unsigned).  /Save/ dollars in a TOKEN -- or let the basket choose: the pool it most
   needs, among those the deposit guard admits.  Saving mints the TOKEN at its market price (the
-  world's TOKENs are faucets), deposits it and takes a receipt; the basket partners it with freshly
-  minted BUCK.  Each receipt shows what it would pay now and what keeping the TOKEN instead would be
-  worth.  /Redeem/ burns the receipt's BUCK and pays you in TOKENs, from the pools the basket holds
-  too much of.  Actions land between simulated days: the world is never interrupted mid-day.
-- /The charts/: BUCK against USD and the basket; the savings index -- what a redemption pays, in
+  world's TOKENs are faucets), deposits it and takes a receipt: shares of the basket's equity.  The
+  basket (the equity basket, a credit holder) draws =BUCK_K= of credit against it, and its wheel
+  places it in the pools.  Each receipt shows what it would pay now -- its shares' value, less the
+  treasury's quarter of any gain over what it cost, less the exit charge -- and what keeping the
+  TOKEN instead would be worth.  /Redeem/ pays the shares' value in BUCK (in kind, in TOKEN, only
+  when the basket's account cannot spend the BUCK).  Only an identity may hold BUCK, so before your
+  key's first redemption the server registers it with the world's issuer and approves the basket to
+  pay it, as the world's own depositors are.  Actions land between simulated days: the world is
+  never interrupted mid-day.
+- /The charts/: BUCK against USD and the basket; the savings index -- what a share is worth, in
   BUCK value, per BUCK deposited; the wheel's harvest, what its callers earned and the gas they
   spent; =BUCK_K=; the undertakings' open books;
   and each commodity: its real price, its TOKEN/USDC pool, and its TOKEN/BUCK pool times

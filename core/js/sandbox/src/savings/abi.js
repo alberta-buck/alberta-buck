@@ -1,9 +1,13 @@
 // The Savings tab's contract surface: only what a saver calls or reads, in
 // viem's human-readable form -- no artifact bundle, since the world's
-// contracts live on the server.  The basket is the ops shell; its venue
-// facet's entry points (poolBuckValues) are reached through the shell's
-// fallback at the same address.  test/savings.model.test.js checks every
-// signature here against the compiled artifacts when out/ is built.
+// contracts live on the server.  The basket is a pro-rata shell (ops) or an
+// equity shell (equity-ops, sim_info's basket_kind "equity"): both take
+// depositToken / redeem(id, bp) and emit Deposited / Redeemed; the venue
+// facet's views are reached through the shell's fallback at the same
+// address.  An equity basket also answers holdings / valueOf, and pays its
+// exits in BUCK (in kind, TOKEN, when its account cannot spend them).
+// test/savings.model.test.js checks every signature here against the
+// compiled artifacts when out/ is built.
 
 import { parseAbi } from "viem";
 
@@ -22,6 +26,8 @@ export const BASKET = parseAbi([
   "function consultTickExternal(address pool, uint32 secondsAgo) view returns (int24)",
   "event Deposited(address indexed who, uint256 indexed receiptId, address token, uint256 tokenAmount, uint256 buckMinted, uint128 liquidity)",
   "event Redeemed(address indexed who, uint256 indexed receiptId, uint256 burned, uint256 depositorBuck, uint256 treasuryBuck, uint256 remainingBp)",
+  "function holdings(uint256 id) view returns (uint128 shares, uint128 basis)",
+  "event PaidInKind(address indexed to, address indexed token, uint256 amount)",
   "error Amount0()",
   "error NotInBasket()",
   "error NotOwner()",

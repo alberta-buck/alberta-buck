@@ -310,7 +310,9 @@ def identity_approve(chain, reg, buck, account, register_args, sk: int,
     identity): re-encrypt the account's registered identity M under the
     spender's key and prove it is the same (Chaum-Pedersen, checked by
     IdentityRegistry.verifyApprove).  Lays down the receipt fragment a public
-    contract needs before it may send this account BUCK."""
+    contract needs before it may send this account BUCK.  `account` is a
+    signing account or, on a chain that executes unsigned transactions for
+    any sender (pyrevm), a bare address."""
     from alberta_buck.wallet.bn254 import words_to_point
     from alberta_buck.wallet.chaum_pedersen import chaum_pedersen_prove
     from alberta_buck.wallet.elgamal import ElGamalCiphertext, elgamal_decrypt
@@ -323,7 +325,8 @@ def identity_approve(chain, reg, buck, account, register_args, sk: int,
     r_prime = rand_scalar(rng)
     E_b = elgamal_encrypt(M, pk_b, r_prime)
     cp = chaum_pedersen_prove(E_a, E_b, pk_a, pk_b, sk, r_prime,
-                              int(account.address, 16), int(spender, 16),
+                              int(getattr(account, "address", account), 16),
+                              int(spender, 16),
                               int(chain.w3.eth.chain_id), rng=rng,
                               registry=int(reg.address, 16))
     xy = lambda P: tuple(point_to_words(P))
@@ -361,9 +364,10 @@ def pspubkey_arg(issuer) -> tuple:
 
 def register_args(issuer, eoa_addr: int, fields: dict,
                    rng: Callable[[], int], chainid: int,
-                   registry: int) -> tuple:
+                   registry: int, with_sk: bool = False) -> tuple:
     """Args for IdentityRegistry.register(issuer, pk, E, presentation, proof),
-    bound to eoa_addr (must equal the tx sender).
+    bound to eoa_addr (must equal the tx sender); with `with_sk`, (args, the
+    identity secret key) -- what identity_approve needs later.
 
     This is the legacy standalone path — use cached_eoa_setup() which now
     delegates to the SimRegistry for identity issuance and Merkle tree
@@ -385,7 +389,8 @@ def register_args(issuer, eoa_addr: int, fields: dict,
     sig_arg = (g1(pres.A), g1(pres.B))
     proof_arg = (pf.e, pf.s_m, pf.s_b, pf.s_r, pf.s_sk, g1(pf.C1), g1(pf.T_C),
                  g1(pf.T_R), g1(pf.T_key))
-    return pk, E_arg, sig_arg, proof_arg
+    args = (pk, E_arg, sig_arg, proof_arg)
+    return (args, kp.sk) if with_sk else args
 
 
 def register_deployer(chain, reg, issuer_addr, issuer, rng, chainid: int,

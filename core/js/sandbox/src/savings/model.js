@@ -4,8 +4,10 @@
 // Units, as the server sends them (alberta_buck/sim/snapshot.py): prices in
 // micro-USD (refUsd, spotUsdc, buck_usd) or micro-BUCK (spotBuck) per whole
 // TOKEN; basketVal and buckK 1e18 fixed point (strings past 2^53); BUCK
-// amounts 6-decimal base units; the savings block sv (server.py _savings)
-// O / S / P / B / T in BUCK base units, D a plain ratio.
+// amounts 6-decimal base units; the savings block sv (server.py _savings):
+// a pro-rata basket's O / S / P / B / T in BUCK base units, an equity
+// basket's share price sp (1e18), treasury cut lam (bp) and exit charge chg
+// (1e18); D a plain ratio either way.
 
 /** The world's base URL: ?sim= wins, then the one this browser was told to
  *  use (World settings), then the page's own configuration (sim-server.json:
@@ -51,6 +53,7 @@ export function row(f) {
     supply: Number(big(f.supply)) / 1e6,
     D: sv.D ?? null, O: sv.O ?? null, S: sv.S ?? null, P: sv.P ?? null, B: sv.B ?? null,
     T: sv.T ?? null,
+    kind: sv.kind ?? null, sp: sv.sp ?? null, lam: sv.lam ?? null, chg: sv.chg ?? null,
     credited: f.wh_sol_credited_usd ?? 0,          // the wheel's harvest to depositors
     callers: f.wh_sol_share_usd ?? 0,
     gasUsd: f.wh_sol_gas_usd ?? 0,
@@ -138,6 +141,21 @@ export function receiptWorth(buckPrincipal, sv) {
   const half = V / 2n;
   const net = V - Rb;
   return { burn: Rb, claim: V, paid: half < net ? half : net };
+}
+
+/** An equity receipt's worth at a frame's book (sv), in BUCK base units:
+ *  its shares at the share price, less the treasury's cut (lam bp of the
+ *  gain over the receipt's cost basis), less the exit charge.  Mirrors
+ *  BuckBasketEquity.redeem, which values the exit at the pools' low marks:
+ *  this quote, at the TWAP marks, is a little above what it pays. */
+export function equityWorth(shares, basis, sv) {
+  if (sv?.sp === null || sv?.sp === undefined || big(shares) === 0n) return null;
+  const E18 = 10n ** 18n;
+  const worth = (big(shares) * big(sv.sp)) / E18;
+  const b = big(basis);
+  const cut = worth > b ? ((worth - b) * BigInt(sv.lam ?? 0)) / 10_000n : 0n;
+  const paid = ((worth - cut) * (E18 - big(sv.chg))) / E18;
+  return { claim: worth, cut, paid };
 }
 
 /** Days since the world began as a date, when the world says when it began. */

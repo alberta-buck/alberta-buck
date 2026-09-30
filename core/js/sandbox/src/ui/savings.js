@@ -12,7 +12,7 @@ import { lineChart } from "./chart.js";
 import { fill, h, prefs } from "./dom.js";
 import { SimLink } from "../savings/link.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
-import { channels, chooseIndex, compact, dateOf, deviationBp, newSid, prices, receiptWorth, row,
+import { channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices, receiptWorth, row,
          serverBase, tokenFor, usd } from "../savings/model.js";
 
 const S1 = "var(--s1)";
@@ -120,15 +120,25 @@ export function mountSavings(ctx) {
   const keyLine = h("p", { class: "hint" });
   const receiptsBox = h("div", {});
   const balancesBox = h("div", {});
+  // How a saving works, by the world's basket (sim_info's basket_kind).
+  const HOW = {
+    prorata: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
+      "deposits it and takes a receipt: a claim on the basket's pools.  The basket partners it with ",
+      "freshly minted BUCK; redeeming burns that BUCK and pays you in TOKENs."],
+    equity: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
+      "deposits it and takes a receipt: shares of the basket's equity.  The basket draws K of credit ",
+      "against it and its wheel places it in the pools; redeeming pays your shares' value in BUCK, less ",
+      "the treasury's quarter of any gain.  Your key is registered as an identity (with the world's issuer) ",
+      "before its first redemption: only identities may hold BUCK."],
+  };
+  const howLine = h("p", { class: "hint" }, HOW.prorata);
   const walletCard = h("div", { class: "card" },
     h("div", { class: "card-head" }, h("h2", {}, "Your savings")),
     keyLine,
     h("div", { class: "row" },
       h("label", { class: "field" }, h("span", { class: "field-label" }, "Save (USD)"), saveUsd),
       h("label", { class: "field" }, h("span", { class: "field-label" }, "In"), tokenSel), saveBtn),
-    h("p", { class: "hint" }, "Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
-      "deposits it and takes a receipt: a claim on the basket's pools.  The basket partners it with ",
-      "freshly minted BUCK; redeeming burns that BUCK and pays you in TOKENs."),
+    howLine,
     receiptsBox, balancesBox);
 
   // ---- the charts --------------------------------------------------------
@@ -139,8 +149,9 @@ export function mountSavings(ctx) {
     k: lineChart({ title: "K: credit per unit of insured value", fmt: f4, series: [{ label: "K", color: S3 }] }),
     index: lineChart({ title: "The savings index", ref: 1, fmt: f4, series: [
       { label: "paid per BUCK saved", color: S1 }],
-      note: "What a redemption pays, in BUCK value, per BUCK deposited: 1 at the start, raised by the "
-        + "wheel's credits and the pools' harvest of the commodities' cycles." }),
+      note: "What a saving is worth, in BUCK value, per BUCK deposited (the equity basket: its share "
+        + "price): 1 at the start, raised by the wheel's credits and the pools' harvest of the "
+        + "commodities' cycles." }),
     wheel: lineChart({ title: "The work wheel (cumulative)", fmt: dollars, series: [
       { label: "to depositors", color: S1 }, { label: "to callers", color: S2 }, { label: "gas", color: S4 }],
       note: "Consistency cycles through TOKEN/USDC, TOKEN/BUCK and BUCK/USDC: the harvest reaches the depositors." }),
@@ -238,6 +249,7 @@ export function mountSavings(ctx) {
           S.info = info;
           const key = prefs.get("savings:key", "");
           S.saver = new Saver({ link: S.link, info, key });
+          fill(howLine, HOW[info.basket_kind] ?? HOW.prorata);
           prefs.set("savings:key", S.saver.key);
           buildCommodities();
           draw();
@@ -298,7 +310,11 @@ export function mountSavings(ctx) {
                                        amount: r.tokenAmount.toString() }]);
         await readHoldings();
         return r;
-      }, (r) => `Saved: receipt #${r.id}, ${usd(dollarsIn)} of ${tok.symbol} partnered with ${compact(Number(r.buckMinted) / 1e6)} BUCK.`);
+      }, (r) => (S.saver.equity
+        ? `Saved: receipt #${r.id}, ${usd(dollarsIn)} of ${tok.symbol}: the basket's equity, `
+          + `drawing ${compact(Number(r.buckMinted) / 1e6)} BUCK of credit.`
+        : `Saved: receipt #${r.id}, ${usd(dollarsIn)} of ${tok.symbol} partnered with `
+          + `${compact(Number(r.buckMinted) / 1e6)} BUCK.`));
     } finally {
       saveBtn.disabled = false;
     }
@@ -308,13 +324,22 @@ export function mountSavings(ctx) {
     const last = S.rows[S.rows.length - 1];
     await ctx.act(`Redeeming receipt #${rec.id} (it lands between simulated days)`, async () => {
       const { paid } = await S.saver.redeem(rec.id);
-      const got = paid.reduce((a, p) => a + (Number(p.amount) / 10 ** S.info.tokens[p.i].decimals)
-        * prices(last, p.i).usdc, 0);
+      // BUCK at the BUCK/USDC pool; TOKEN (a pro-rata payout, or an equity
+      // exit in kind) at its TOKEN/USDC pool.
+      const got = paid.reduce((a, p) => a + (p.i < 0 ? (Number(p.amount) / 1e6) * last.bu
+        : (Number(p.amount) / 10 ** S.info.tokens[p.i].decimals) * prices(last, p.i).usdc), 0);
       keepReceipts(receipts().map((r) => (r.id === rec.id ? { ...r, redeemedDay: last?.day, paidUsd: got, paid:
         paid.map((p) => [p.i, p.amount.toString()]) } : r)));
       await readHoldings();
-      return got;
-    }, (got) => `Redeemed #${rec.id}: paid ${usd(got)} in TOKENs (quoted ${usd(worthUsd)}).`);
+      return { got, what: paidIn(paid.map((p) => p.i)) };
+    }, ({ got, what }) => `Redeemed #${rec.id}: paid ${usd(got)} in ${what || "nothing"} (quoted ${usd(worthUsd)}).`);
+  }
+
+  // What a payout came in: "BUCK", "TOKENs", or "BUCK and TOKENs".
+  function paidIn(indexes) {
+    const buck = indexes.some((i) => i < 0);
+    const toks = indexes.some((i) => i >= 0);
+    return [buck && "BUCK", toks && "TOKENs"].filter(Boolean).join(" and ");
   }
 
   function newWorld() {
@@ -433,7 +458,8 @@ export function mountSavings(ctx) {
       const head = (...extra) => h("div", { class: "receipt-head" },
         h("b", {}, `#${rec.id}`), ` ${sym}, saved on day ${rec.day}`, ...extra);
       if (rec.redeemedDay !== undefined) {
-        const paidIn = (rec.paid ?? []).map(([i]) => S.info.tokens[i]?.symbol).filter(Boolean).join(", ");
+        const paidIn = (rec.paid ?? []).map(([i]) => (i < 0 ? "BUCK" : S.info.tokens[i]?.symbol))
+          .filter(Boolean).join(", ");
         return h("li", { class: "receipt done" }, head(`, paid on day ${rec.redeemedDay}`),
           h("dl", { class: "kv" },
             h("dt", {}, "Saved"), h("dd", {}, usd(rec.usd)),
@@ -441,29 +467,38 @@ export function mountSavings(ctx) {
             h("dd", { class: "paid" }, usd(rec.paidUsd), " ", pct(rec.paidUsd / rec.usd - 1))));
       }
       const c = onChain.get(rec.id);
-      const worth = c?.live ? receiptWorth(c.buckPrincipal, sv) : null;
+      const worth = !c?.live ? null : last.kind === "equity"
+        ? equityWorth(c.shares, c.basis, { sp: last.sp, lam: last.lam, chg: last.chg })
+        : receiptWorth(c.buckPrincipal, sv);
       const worthUsd = worth ? (Number(worth.paid) / 1e6) * last.bu : null;
       const held = (Number(BigInt(rec.amount)) / 10 ** (tok?.decimals ?? 18)) * prices(last, rec.i).usdc;
       return h("li", { class: "receipt" },
         head(c?.live ? h("button", { type: "button", onclick: () => redeem(rec, worthUsd) }, "Redeem") : null),
         h("dl", { class: "kv" },
           h("dt", {}, "Saved"), h("dd", {}, usd(rec.usd)),
-          h("dt", { title: "What redeeming would pay now, in TOKENs valued at their USDC pools" }, "Worth now"),
+          h("dt", { title: last.kind === "equity"
+            ? "What redeeming would pay now, in BUCK valued at the BUCK/USDC pool"
+            : "What redeeming would pay now, in TOKENs valued at their USDC pools" }, "Worth now"),
           h("dd", { class: "worth" }, worthUsd === null ? "…" : [usd(worthUsd), " ", pct(worthUsd / rec.usd - 1)],
-            worth ? h("div", { class: "sub" }, `${compact(Number(worth.paid) / 1e6)} BUCK of TOKENs`) : null),
+            worth ? h("div", { class: "sub" }, last.kind === "equity"
+              ? `${compact(Number(worth.paid) / 1e6)} BUCK`
+              : `${compact(Number(worth.paid) / 1e6)} BUCK of TOKENs`) : null),
           h("dt", {}, `Kept the ${sym} instead`), h("dd", {}, usd(held), " ", pct(held / rec.usd - 1))));
     });
     fill(receiptsBox, list.length === 0 ? h("p", { class: "empty" }, "No savings yet.")
       : h("ul", { class: "receipts" }, blocks));
 
     const bal = (S.holdings?.balances ?? []).map((b, i) => [b, i]).filter(([b]) => b > 0n);
-    fill(balancesBox, bal.length === 0 ? null : [
+    const buck = S.holdings?.buck ?? 0n;
+    fill(balancesBox, bal.length === 0 && buck === 0n ? null : [
       h("h3", { class: "grid-title" }, "In your wallet"),
-      h("dl", { class: "kv wallet" }, bal.flatMap(([b, i]) => {
-        const t = S.info.tokens[i];
-        const n = Number(b) / 10 ** t.decimals;
-        return [h("dt", {}, t.symbol), h("dd", {}, `${compact(n, 4)} (${usd(n * prices(last, i).usdc)})`)];
-      }))]);
+      h("dl", { class: "kv wallet" },
+        buck > 0n ? [h("dt", {}, "BUCK"), h("dd", {}, `${compact(Number(buck) / 1e6, 4)} (${usd((Number(buck) / 1e6) * last.bu)})`)] : [],
+        bal.flatMap(([b, i]) => {
+          const t = S.info.tokens[i];
+          const n = Number(b) / 10 ** t.decimals;
+          return [h("dt", {}, t.symbol), h("dd", {}, `${compact(n, 4)} (${usd(n * prices(last, i).usdc)})`)];
+        }))]);
   }
 
   // Each TOKEN/BUCK pool's distance from its recent average (bp): the deposit guard's measure.

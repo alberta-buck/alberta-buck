@@ -32,9 +32,12 @@ WebSocket channels (websockets):
                      (arms the cast's ShockAgent), "chain" {name l1|l2}
                      (the work wheel's caller gas profile)
   /s/<sid>/rpc       JSON-RPC 2.0 over WS; besides the chain's own methods,
-                     "sim_info" (the world's addresses and constituents)
-                     and "sim_status" (day, paused, pace) are answered by
-                     the server
+                     "sim_info" (the world's addresses and constituents),
+                     "sim_status" (day, paused, pace) and "sim_enroll"
+                     [address] (register the address as an identity with
+                     the world's issuer and approve the basket to pay it
+                     BUCK: an equity basket pays its exits in BUCK) are
+                     answered by the server
 
 PUBLIC mode (--public, for serving behind the tunnel): the pyrevm provider
 executes eth_sendTransaction for ANY `from` with no signature, so a public
@@ -103,11 +106,27 @@ _SV_ABI = [
      "outputs": [{"type": "uint256", "name": ""}]}
     for n in ("totalOutstandingBuck", "stressBonusPrincipal", "treasuryBuckPending")
 ]
+# The equity basket's book: shares, and the equity, lien and liquidity of its
+# credit account (BuckBasketEquity).
+_SV_EQ_ABI = [
+    {"type": "function", "name": n, "stateMutability": "view", "inputs": [],
+     "outputs": [{"type": t, "name": ""}]}
+    for n, t in (("totalShares", "uint256"), ("treasuryShares", "uint256"),
+                 ("equity", "uint256"), ("sharePrice", "uint256"),
+                 ("lien", "uint256"), ("reliefAccrued", "uint256"),
+                 ("liquidity", "uint256"), ("headroom", "int256"),
+                 ("LAMBDA_BP", "uint256"))
+]
 _POSITIONS_ABI = [{"type": "function", "name": "positions", "stateMutability": "view",
                    "inputs": [{"type": "bytes32", "name": "key"}],
                    "outputs": [{"type": "uint128", "name": "liquidity"}] + [
                        {"type": "uint256", "name": n} for n in ("fg0", "fg1")] + [
                        {"type": "uint128", "name": n} for n in ("owed0", "owed1")]}]
+
+
+def _is_equity(d) -> bool:
+    """An equity basket (a credit holder paying its exits in BUCK)."""
+    return str(getattr(d, "basket_impl", "")).startswith("equity")
 
 
 def _depositor_buck(d) -> int | None:
@@ -158,6 +177,7 @@ class Session:
         self.done = False
         self.paused = False
         self.step_left: int | None = None
+        self._enrolled: dict = {}           # sim_enroll: address -> (register args, sk)
         self.day = None
         self.d = None                       # the deployment, once built
         self.agents = None
@@ -333,6 +353,8 @@ class Session:
         d = self.d
         if d is None or getattr(d, "basket", None) is None:
             return None
+        if _is_equity(d):
+            return self._savings_equity()
         try:
             c = d.w3.eth.contract(address=d.basket.address, abi=_SV_ABI)
             O = int(c.functions.totalOutstandingBuck().call())
@@ -346,8 +368,69 @@ class Session:
             B = None
         P = O - S
         D = (min(B, 2 * B - O) / P) if (B is not None and P > 0) else None
-        return {"O": O, "S": S, "P": P, "B": B, "T": T,
+        return {"kind": "prorata", "O": O, "S": S, "P": P, "B": B, "T": T,
                 "D": round(D, 6) if D is not None else None}
+
+    def _savings_equity(self) -> dict | None:
+        """The equity basket's book at this frame: its shares N (the
+        treasury's cut among them, NT), the equity E they own (1e18-scaled
+        share price sp, at the TWAP marks), and its credit account -- the
+        lien L, the relief accrued on it, the BUCK it can spend (liquidity Q)
+        and the room left under K x equity (headroom H, negative under
+        water).  A redemption of `shares` with cost basis b pays
+        worth = shares x sp less the treasury's cut, lam of the gain over b,
+        less the exit charge chg = (1 + K)/2 x the widest pool fee (1e18),
+        at the pools' low marks.  D = sp: BUCK value per BUCK deposited, 1
+        at the start (less the entry charge)."""
+        d = self.d
+        try:
+            c = d.w3.eth.contract(address=d.basket.address, abi=_SV_EQ_ABI)
+            v = {n: c.functions[n]().call() for n in (
+                "totalShares", "treasuryShares", "equity", "sharePrice", "lien",
+                "reliefAccrued", "liquidity", "headroom", "LAMBDA_BP")}
+            k = int(d.kctrl.functions.buckK().call())
+            fee = max((int(d.basket.functions.constituents(i).call()[4])
+                       for i in range(len(d.tokens))), default=0)
+        except Exception:
+            return None
+        sp = int(v["sharePrice"])
+        return {"kind": "equity", "N": int(v["totalShares"]), "NT": int(v["treasuryShares"]),
+                "E": int(v["equity"]), "sp": sp, "L": int(v["lien"]),
+                "relief": int(v["reliefAccrued"]), "Q": int(v["liquidity"]),
+                "H": int(v["headroom"]), "lam": int(v["LAMBDA_BP"]),
+                "chg": fee * 10 ** 12 * (10 ** 18 + k) // (2 * 10 ** 18),
+                "D": round(sp / 1e18, 6)}
+
+    def enroll(self, address: str) -> dict:
+        """Make `address` a registered identity -- a credential from the
+        world's issuer, as the sim's own depositors hold -- and lay down its
+        identity-bound approve of the basket, which a public contract needs
+        before it may pay the address BUCK.  Idempotent.  The world executes
+        unsigned transactions for any sender, so the server acts as the
+        address; the identity's secret stays on the server."""
+        from web3 import Web3
+        from alberta_buck.sim import identity as idmod
+        d = self.d
+        addr = Web3.to_checksum_address(address)
+        rng = idmod.seeded_rng(int(addr, 16) ^ int(getattr(self.scenario, "seed", 0) or 0))
+        chainid, registry = int(d.w3.eth.chain_id), int(d.reg.address, 16)
+        ident = self._enrolled.get(addr)
+        if ident is None:
+            if d.reg.functions.isVerified(addr).call():
+                return {"address": addr, "registered": True, "approved": False}
+            ident = idmod.register_args(
+                d.issuer_kp, int(addr, 16),
+                idmod.fields_for("Saver", len(self._enrolled)), rng, chainid, registry,
+                with_sk=True)
+            d.chain.send(d.reg.functions.register(d.issuer_addr, *ident[0]),
+                         sender=addr, gas=3_000_000)
+            self._enrolled[addr] = ident
+        approved = False
+        if _is_equity(d):
+            idmod.identity_approve(d.chain, d.reg, d.buck, addr, ident[0], ident[1],
+                                   d.basket.address, rng)
+            approved = True
+        return {"address": addr, "registered": True, "approved": approved}
 
     def _payloads(self, frame) -> tuple[str, str]:
         """(full, lite) JSON for one frame."""
@@ -411,6 +494,7 @@ class Session:
                 "router": getattr(getattr(d, "router", None), "address", None),
                 "wheel": wheel.address if wheel is not None else None,
                 "director": getattr(getattr(d, "director", None), "address", None),
+                "basket_kind": "equity" if _is_equity(d) else "prorata",
                 "name": getattr(sc, "name", None),
                 "days": getattr(sc, "days", None),
                 "ticks_per_day": getattr(sc, "ticks_per_day", None),
@@ -452,6 +536,15 @@ class Session:
                     out.append({"jsonrpc": "2.0", "id": r.get("id"),
                                 "result": _jsonable(self.info())})
                     continue
+                if method == "sim_enroll":
+                    try:
+                        res = self.enroll((r.get("params") or [""])[0])
+                        out.append({"jsonrpc": "2.0", "id": r.get("id"),
+                                    "result": _jsonable(res)})
+                    except Exception as e:
+                        out.append({"jsonrpc": "2.0", "id": r.get("id"),
+                                    "error": {"code": -32000, "message": str(e)}})
+                    continue
                 try:
                     resp = self.provider.make_request(method, r.get("params", []))
                     if "error" in resp:
@@ -480,7 +573,7 @@ PUBLIC_RPC = frozenset({
     "eth_getBlockByNumber", "eth_getBlockByHash", "eth_call",
     "eth_sendRawTransaction", "eth_getTransactionReceipt",
     "eth_getTransactionByHash", "net_version", "web3_clientVersion",
-    "sim_info", "sim_status"})
+    "sim_info", "sim_status", "sim_enroll"})
 
 
 # The session overrides a --public server accepts (?set=key=value): the

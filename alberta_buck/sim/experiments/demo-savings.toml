@@ -3,10 +3,12 @@
 # The catalogue's physics (keyed rng, the portcast settings, a deep BUCK/USDC
 # exit route) with the heavy parts cut: 24 depositors instead of 120, no
 # arrival hazards, 10 external-debt retirees (T15) in place of 30 endog
-# debtors.  Kept: the ops basket with the desk and the engaged undertakings,
-# the director, the Solidity work wheel (TOKEN start: its harvest reaches the
-# depositors), the market (the whale pinning TOKEN/USDC to the references,
-# the arbs), the savers.  Served by alberta_buck.sim.server; a session may
+# debtors.  Kept: the desk and the engaged undertakings, the director, the
+# Solidity work wheel (TOKEN start: its harvest reaches the depositors), the
+# market (the whale pinning TOKEN/USDC to the references, the arbs), the
+# savers.  The basket is the equity basket with the desk (equity-ops): a
+# credit holder whose wheel components place deposits and keep its BUCK
+# liquidity, paying exits in BUCK (alberta-buck-ethereum.org, "BuckBasketEquity").  Served by alberta_buck.sim.server; a session may
 # override anything here with ?set=.
 name = "demo-savings"
 notes = "the savings demonstration's world: full stack, lean cast, two ticks a day"
@@ -18,7 +20,7 @@ years = 5.0
 ticks_per_day = 2
 day_step = 1
 seed = 0xA1BC
-basket = "ops"
+basket = "equity-ops"
 
 [deploy]
 target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route
