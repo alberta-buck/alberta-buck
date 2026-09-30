@@ -387,16 +387,16 @@ class SeederAgent(_ProxyAgent):
         # The USDC side: the treasury's cash.
         d.chain.send(d.usdc.functions.mint(self.proxy.address, self.budget))
         # The BUCK side: an equal capacity through a zero-premium credit,
-        # sized off the live K0 with deploy.py's 20% margin (a zero-premium
-        # mint yields SPENDABLE headroom == amount * K, not amount).  Minting
-        # activates coverage only; BUCK enters supply when the mint callback
-        # transfers it into the pool and draws the proxy's signed balance
-        # negative -- an outstanding claim on its own assets, released when
-        # the converted USDC is used to buy the BUCK back (out of scope here;
-        # the treasury program's job).
+        # with deploy.py's 20% margin (Buck.mint(amount) raises spendable by
+        # amount, activating amount / K), on a face that covers it at the
+        # live K0 with a further 20%.  Minting activates coverage only; BUCK
+        # enters supply when the mint callback transfers it into the pool and
+        # draws the proxy's signed balance negative -- an outstanding claim
+        # on its own assets, released when the converted USDC is used to buy
+        # the BUCK back (out of scope here; the treasury program's job).
         k0 = int(d.kctrl.functions.buckK().call())
-        mint_amt = (self.budget * E18 // max(1, k0)) * 12 // 10
-        self._face = max(2 * self.budget, mint_amt * 12 // 10)
+        mint_amt = self.budget * 12 // 10
+        self._face = max(2 * self.budget, (mint_amt * E18 // max(1, k0)) * 12 // 10)
         now_ts = d.w3.eth.get_block("latest")["timestamp"]
         self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
             "setCreditIssuer",

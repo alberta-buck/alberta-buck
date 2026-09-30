@@ -504,9 +504,23 @@ issuance ("Demurrage and Jubilee"), marked credits ("Marked Credits"), and the e
   second account.  A K cut says BUCK is at a discount and over-issued; accumulating BUCK (selling
   TOKEN, repaying the lien) reduces exposure and supports reversion of bvib toward 1.  Until the
   basket is back under the limit, exits pay in kind.
-- mint RULED (2026-09-29): B -- =mint(amount)= delivers =amount= of spendable at today's K.
+- mint RULED (2026-09-29): B -- =mint(amount)= delivers =amount= of spendable at today's K;
+  =burn(amount)= releases as much; =mint(type(uint256).max)= activates the listed credits' whole
+  faces.  *Done*: the contract (=_drawSlice= / =_releaseSlice= at K, pinned by
+  =test/BuckMintSpendable.t.sol=), alberta-buck-ethereum.org ("mint(N) and burn(N)", worked example
+  now at K 0.75), and every caller.  In the sims each call site now says what it means:
+  a spendable target is the mint argument itself (the old =/ K= gross-ups are gone); a whole-face
+  activation is =MINT_MAX=; a coverage-sized bite is converted with =mint_capacity= (unactivated x
+  (K - e)) and =mint_amount= asks for everything once within 1% of it
+  (=alberta_buck/sim/equilibrium_agents.py=).  The JS world's =mintTranche= / =gateShortfall= take
+  the spendable tranche and mint only what the activated headroom does not already cover.
+  /Behaviour that moved/: the octl debtor (Python =BuckCreditDebtorAgent= and the JS
+  mortgage-retiree / farmer) used to mint its whole monthly tranche as coverage even when unused
+  headroom covered it, and at K < 1 that coverage gave less than the tranche; it now mints the
+  spendable shortfall, so it activates -- and pays deposit on -- less cover.  The facility's
+  release burn keeps 2% of the limit (not of the draw) against K stepping inside the tx.
 - 6.1.6: rerun or annotate the T15 retiree cells and the octl debtors' close decisions, which
-  used coverage-based relief.
+  used coverage-based relief -- and, since mint B, a different tranche activation (above).
 - =BuckBasketEquityOps= is 24,131 bytes (445 under the limit): move =_exitInKind= to the
   components facet before adding to the shell or the desk.
 - The contracts outside this work still cite doc/ files: Notes, IdentityRegistry, the verifier

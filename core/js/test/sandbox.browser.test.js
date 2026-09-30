@@ -140,11 +140,15 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     await page.fill("#panel-credit input[data-key='credit:amount']", "50000");
     const buyFirst = page.locator("#panel-credit .quote button", { hasText: "first" });
     await buyFirst.waitFor({ timeout: 30_000 });
-    assert.match(await page.textContent("#panel-credit .quote"), /Premium deposit\s*1,81\d\.\d{6}/);
+    // 50,000 to spend at K 0.75 on a 0.35 %/yr credit (a deposit of e = 3.5 %
+    // of the cover): 50,000 / (0.75 - 0.035) of cover, and a deposit of
+    // 50,000 x 0.035 / 0.715.
+    assert.match(await page.textContent("#panel-credit .quote"), /Premium deposit\s*2,44\d\.\d{6}/);
     await ok(buyFirst, /^Bought [\d,.]+ BUCKs for [\d,.]+ USDC\.$/);
     const activate = page.locator("#panel-credit .quote button", { hasText: "Activate" });
     await activate.waitFor({ timeout: 30_000 });
-    await ok(activate, /1,81\d\.\d{6} BUCKs of premium deposited with the insurance pool/);
+    await ok(activate, /2,44\d\.\d{6} BUCKs of premium deposited with the insurance pool/);
+    assert.match(await page.textContent("#panel-credit"), /69,93\d\.\d{6}/, "the cover it activated");
     const worth = async () => (await page.locator("#panel-credit [data-col=activated-now]").textContent()).trim();
     const was = await worth();
     await ok(page.locator("button", { hasText: "+30 days" }), /Thirty days passed/);

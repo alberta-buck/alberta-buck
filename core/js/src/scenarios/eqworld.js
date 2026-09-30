@@ -37,6 +37,11 @@ import { seededWalk } from "../prices.js";
 export const FEES = { usdc: 3000, buck: 3000, ub: 500 };
 const SPACING = { 3000: 60, 500: 10 };
 const E18 = 10n ** 18n;
+// Buck.mint(amount) raises the minter's spendable by `amount` at the K it
+// runs at, and reverts past what the credits can give; mint(MINT_MAX)
+// delivers all they can give, activating their whole faces.
+const MINT_MAX = (1n << 256n) - 1n;
+const POOL_ROI_INV = 10n;                 // Buck.sol: deposit = e x coverage
 const DEPOSITED_TOPIC = keccak256(toBytes(
   "Deposited(address,uint256,address,uint256,uint256,uint128)"));
 
@@ -188,9 +193,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   }
 
   // --- floating BUCK/USDC pool: SimLP is the BUCK-backed LP ------------
+  // Mint targetBuck with a 20% margin, on a face that covers it at the
+  // resting K with a further 20%.
   const k0 = await session.call(kctrl, "buckK");
-  const mintAmt = ((targetBuck * E18) / k0) * 12n / 10n;
-  const face2 = (mintAmt * 12n) / 10n;
+  const mintAmt = (targetBuck * 12n) / 10n;
+  const face2 = (((mintAmt * E18) / k0) * 12n) / 10n;
   const FACE = 2n * targetBuck > face2 ? 2n * targetBuck : face2;
   const now = (await session.client.getBlock()).timestamp;
   await session.send(credit, "createCredit",
@@ -317,47 +324,71 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
 
   /** The debtor's chain truth in one read: drawn / limit / held /
    *  unactivated face / the Jubilee relief quote (the lien melts:
-   *  Buck.reliefOf, ~2%/yr of the drawn balance). */
+   *  Buck.reliefOf, ~2%/yr of the drawn balance) / spendable (the
+   *  activated headroom, limit - drawn) / capacity (the spendable the
+   *  unactivated face can still deliver: K - e per unit, e the premium's
+   *  deposit) / headroom (spendable + capacity: the most it can draw). */
   world.creditState = async (account) => {
     const me = world.holderAddress(account);
     const ids = world._credits.get(account.address) ?? [];
-    const [signed, limit, jub] = await Promise.all([
+    const [signed, limit, jub, k] = await Promise.all([
       session.call(buck, "signedBalanceOf", [me]),
       session.call(buck, "creditLimit", [me]),
-      session.call(buck, "reliefOf", [me])]);
-    let unactivated = 0n;
+      session.call(buck, "reliefOf", [me]),
+      session.call(kctrl, "buckK")]);
+    let unactivated = 0n, capacity = 0n;
     for (const tid of ids) {
       const info = await session.call(credit, "creditInfo", [tid]);
-      const [face, act] = [info[0], info[1]];
-      unactivated += face > act ? face - act : 0n;
+      const [face, act, rate] = [info[0], info[1], BigInt(info[2])];
+      const room = face > act ? face - act : 0n;
+      const per = k - rate * POOL_ROI_INV * 10n ** 14n;     // K - e, 1e18
+      unactivated += room;
+      capacity += per > 0n ? (room * per) / E18 : 0n;
     }
     const drawn = signed < 0n ? -signed : 0n;
+    const spendable = limit > drawn ? limit - drawn : 0n;
     return { drawn, limit, held: signed > 0n ? signed : 0n, unactivated, jub,
-             headroom: (limit > drawn ? limit - drawn : 0n) + unactivated };
+             spendable, capacity, headroom: spendable + capacity };
   };
 
-  /** What the funding gate demands for the next tranche: quoteMint's
-   *  insurance principal scaled by the live fundingFactor, less what
-   *  the holder's balanceOf already covers. */
+  /** The Buck.mint argument that makes `tranche` spendable: what it
+   *  needs beyond the headroom already activated, or MINT_MAX (all the
+   *  credits give) once that is within 1% of their capacity -- K moves a
+   *  little before the mint runs.  0n when the headroom covers it. */
+  world.mintArg = async (account, tranche) => {
+    const cs = await world.creditState(account);
+    const need = tranche > cs.spendable ? tranche - cs.spendable : 0n;
+    if (need === 0n) return 0n;
+    return need * 100n >= cs.capacity * 99n ? MINT_MAX : need;
+  };
+
+  /** What the funding gate demands before the mint that makes `tranche`
+   *  spendable: quoteMint's insurance principal scaled by the live
+   *  fundingFactor, less what the holder's balanceOf already covers. */
   world.gateShortfall = async (account, tranche) => {
     const me = world.holderAddress(account);
     const ids = world._credits.get(account.address) ?? [];
-    const quote = await session.call(buck, "quoteMint", [tranche, ids]);
+    const arg = await world.mintArg(account, tranche);
+    if (arg === 0n) return { required: 0n, shortfall: 0n };
+    const quote = await session.call(buck, "quoteMint", [arg, ids]);
     const ff = await session.call(kctrl, "fundingFactor");
     const required = (quote[1] * ff) / E18;
     const bal = await session.call(buck, "balanceOf", [me]);
     return { required, shortfall: required > bal ? required - bal : 0n };
   };
 
-  /** Activate a tranche through the REAL gate.  Returns {ok, premium}
-   *  -- premium is the insurance principal drawn (signed delta); a
-   *  revert is the gate saying "save more" (the caller's throttle). */
-  world.mintTranche = async (account, amount, { tag } = {}) => {
+  /** Activate what makes `tranche` spendable, through the REAL gate
+   *  (nothing, when the activated headroom covers it).  Returns {ok,
+   *  premium} -- premium is the insurance principal drawn (signed delta);
+   *  a revert is the gate saying "save more" (the caller's throttle). */
+  world.mintTranche = async (account, tranche, { tag } = {}) => {
     const p = world._proxies.get(account.address);
+    const arg = await world.mintArg(account, tranche);
+    if (arg === 0n) return { ok: true, premium: 0n };
     const before = await session.call(buck, "signedBalanceOf", [p.address]);
     const rcpt = await session.send(p, "exec",
       [buck.address, encodeFunctionData(
-        { abi: buck.abi, functionName: "mint", args: [amount] })],
+        { abi: buck.abi, functionName: "mint", args: [arg] })],
       { tag, gas: 3_000_000n, expect: "either" });
     if (rcpt.status !== "success") return { ok: false, premium: 0n };
     const after = await session.call(buck, "signedBalanceOf", [p.address]);

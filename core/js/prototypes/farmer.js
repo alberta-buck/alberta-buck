@@ -122,8 +122,8 @@ export class Farmer {
         this.usdc -= save;
         this.tradeLoss += save - got;
       }
-      const m = await world.mintTranche(this.account,
-        min(tranche, cs.unactivated), { tag: `farmer:mint:d${day}` });
+      const m = await world.mintTranche(this.account, tranche,
+        { tag: `farmer:mint:d${day}` });
       if (!m.ok) {
         this.throttled += 1;
       } else {

@@ -60,7 +60,6 @@ from alberta_buck.sim.work_wheel import (PROFILES, Clock, RewardReserve,
                                          WorkWheel)
 
 E6 = 10 ** 6
-E18 = 10 ** 18
 
 
 @_register
@@ -127,16 +126,14 @@ class BasketWheelAgent(_ProxyAgent):
 
     def ensure_spendable(self, d, token, amount: int) -> None:
         """Before a BUCK leg: activate enough of the face that the draw is
-        within the credit limit (zero premium: no deposit, no funding gate)."""
+        within the credit limit (zero premium: no deposit, no funding gate).
+        Buck.mint(m) raises spendable by m, so mint the shortfall + 5%."""
         if token is not d.buck or amount <= 0:
             return
         bal = int(d.buck.functions.balanceOf(self.proxy.address).call())
         if bal >= amount:
             return
-        k = int(d.kctrl.functions.buckK().call())
-        if k <= 0:
-            return
-        m = ((amount - bal) * E18 // k) * 105 // 100
+        m = (amount - bal) * 105 // 100
         self._proxy_exec(d, d.buck.address,
                          d.buck.encode_abi("mint(uint256)", args=[int(m)]))
 

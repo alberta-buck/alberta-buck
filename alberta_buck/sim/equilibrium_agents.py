@@ -217,6 +217,33 @@ def _growth_active(agent, day: int, ctr) -> bool:
     return False
 
 
+# -- Buck.mint / Buck.burn arguments --------------------------------------
+#
+# Buck.mint(amount) raises the minter's spendable (balanceOf) by `amount` at
+# the K it runs at: a unit of present-value coverage raises the limit by K
+# and costs a deposit of e = premiumRate x POOL_ROI_INV / BP, so it activates
+# amount / (K - e) and reverts when the credits cannot give that much.
+# Buck.mint(MINT_MAX) delivers all they can give, activating their whole
+# faces.  Buck.burn(amount) mirrors it: spendable falls by `amount`.
+MINT_MAX = (1 << 256) - 1
+POOL_ROI_INV = 10                       # Buck.sol
+
+
+def mint_capacity(unactivated: int, k: int, premium_bp: int = 0) -> int:
+    """The spendable `unactivated` present-value coverage can still deliver
+    at K = `k` (1e18 scale), for credits charging `premium_bp`."""
+    per = k - premium_bp * POOL_ROI_INV * 10 ** 14     # K - e, 1e18 scale
+    return max(0, unactivated * per // 10 ** 18)
+
+
+def mint_amount(want: int, capacity: int) -> int:
+    """The Buck.mint argument for `want` of spendable: `want`, or MINT_MAX
+    (everything) once `want` is within 1% of the credits' `capacity` -- K
+    moves a little between the read and the mint, and a mint past capacity
+    reverts."""
+    return MINT_MAX if want * 100 >= capacity * 99 else want
+
+
 class _ProxyAgent(Agent):
     """Base for the two proxy (SimLP-backed, identity-bound) agents.  Holds
     the deploy+bind boilerplate and the transfer-to-simlp + simlp.swap
@@ -568,9 +595,11 @@ def _simlp_endow_buck(d, to_addr: str, amount: int) -> None:
     SaverAgent "endow" arrival recipe."""
     if amount < 10 ** 6:
         return
+    # Mint the endowment with a 20% margin; the face covers that at the
+    # resting K, with a further 20%.
     k0 = d.kctrl.functions.buckK().call()
-    mint_amt = (amount * 10 ** 18 // max(1, k0)) * 12 // 10
-    face = max(2 * amount, mint_amt * 12 // 10)
+    mint_amt = amount * 12 // 10
+    face = max(2 * amount, (mint_amt * 10 ** 18 // max(1, k0)) * 12 // 10)
     now_ts = d.w3.eth.get_block("latest")["timestamp"]
     d.chain.send(d.credit.functions.createCredit(
         d.simlp.address, 0, face, 0, 0, 0, now_ts, 0))
@@ -1051,17 +1080,13 @@ class ExcursionArbAgent(_ProxyAgent):
             spendable = max(0, d.buck.functions.balanceOf(
                 self.proxy.address).call())
             if spendable < y:
+                # Mint the shortfall + 5%: Buck.mint(m) raises spendable by m.
+                m = (y - spendable) * 105 // 100
                 try:
-                    k = int(d.kctrl.functions.buckK().call())
-                except Exception:
-                    k = 0
-                if k > 0:
-                    m = ((y - spendable) * 10 ** 18 // k) * 105 // 100
-                    try:
-                        self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
-                            "mint(uint256)", args=[int(m)]))
-                    except Exception as ex:
-                        ctr["exc_mint_err"] = repr(ex)[:120]
+                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                        "mint(uint256)", args=[int(m)]))
+                except Exception as ex:
+                    ctr["exc_mint_err"] = repr(ex)[:120]
             sold = self._sell_capped(d, d.pool_ub, y)
             if sold > 0:
                 ctr["excursionEntries"] = ctr.get("excursionEntries", 0) + 1
@@ -1710,7 +1735,7 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         for _ in range(self.N_CREDITS):
             rcpt = d.chain.send(d.credit.functions.createCredit(
                 self.proxy.address, 0, per, 0, 0, 0, now_ts, 0))
-        # Activate the WHOLE face once: mint face_total (zero premium => this
+        # Activate the WHOLE face once: mint(MINT_MAX) (zero premium => this
         # only activates credit headroom; no BUCK enters circulation, raw
         # stays 0, drawn stays 0).  creditLimit is now face * buckK and moves
         # live with the controller.  The RAMP is applied to the TARGET, not the
@@ -1719,7 +1744,7 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         try:
             self._proxy_exec(
                 d, d.buck.address,
-                d.buck.encode_abi("mint(uint256)", args=[self._face]))
+                d.buck.encode_abi("mint(uint256)", args=[MINT_MAX]))
         except Exception as e:
             print(f"[fatborrower-{self.idx}] activate mint failed: {e!r}",
                   flush=True)
@@ -2119,12 +2144,13 @@ class SaverAgent(_ProxyAgent):
             endow = int(_draw(scenario, cls, "endow_m", r,
                               (1, 3)) * 1_000_000 * 10 ** 6)
             if endow >= 10 ** 6:
-                # Deploy-time SimLP seed formula: mint activates coverage,
-                # freeing mint*K spendable, so size mint (and face) off the
-                # live resting K with a 20% margin.
+                # Deploy-time SimLP seed formula: mint the endowment with a
+                # 20% margin, on a face that covers it at the live resting K
+                # with a further 20%.
                 k0 = d.kctrl.functions.buckK().call()
-                mint_amt = (endow * 10 ** 18 // max(1, k0)) * 12 // 10
-                face = max(2 * endow, mint_amt * 12 // 10)
+                mint_amt = endow * 12 // 10
+                face = max(2 * endow,
+                           (mint_amt * 10 ** 18 // max(1, k0)) * 12 // 10)
                 now_ts = d.w3.eth.get_block("latest")["timestamp"]
                 d.chain.send(d.credit.functions.createCredit(
                     d.simlp.address, 0, face, 0, 0, 0, now_ts, 0))
@@ -2533,19 +2559,20 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
     # -- atomic refinance planning ------------------------------------------- #
 
-    def _atomic_plan(self, d, limit, drawn, unactivated, ctr):
+    def _atomic_plan(self, d, spendable, cap, k, ctr):
         """Ex-ante evaluation of the WHOLE mortgage conversion.
 
         Quote the BUCK/USDC pool for the BUCK input needed to net the FULL
         remaining USDC mortgage after slippage and the pool fee (constant-
         product closed form on the full-range floating pool, +0.5% safety
-        margin), then check the credit side can supply it: spendable
-        headroom plus K-scaled unactivated face.  Returns (face units to
-        mint, all-in execution discount vs par) and stashes the sale size
-        in self._atomic_B; on any infeasibility returns (0, inf) -- nothing
-        is minted, no premium is paid, the debtor simply waits.  This makes
-        the population self-limiting: refinances execute only as the market
-        can bear them, at full size or not at all."""
+        margin), then check the credit side can supply it: `spendable`
+        headroom plus (95% of) `cap`, the spendable the unactivated face can
+        still deliver.  Returns (spendable to mint, all-in execution discount
+        vs par) and stashes the sale size in self._atomic_B; on any
+        infeasibility returns (0, inf) -- nothing is minted, no premium is
+        paid, the debtor simply waits.  This makes the population
+        self-limiting: refinances execute only as the market can bear them,
+        at full size or not at all."""
         M = int(self.mortgage)
         self._atomic_B = 0
         if M <= 10 ** 6 or not d.pool_ub:
@@ -2563,25 +2590,18 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         bprime = M * rb // max(1, ru - M)
         need_b = int(bprime / max(1e-9, 1.0 - fee) * 1.005) + 10 ** 6
         d_eff = max(0.0, 1.0 - M / need_b)
-        try:
-            k = int(d.kctrl.functions.buckK().call())
-        except Exception:
-            k = 0
-        spendable = max(0, limit - drawn)
-        capacity = spendable + (unactivated * k // 10 ** 18) * 95 // 100
+        capacity = spendable + cap * 95 // 100
         if need_b > capacity:
             ctr["bcdAtomicDeclined"] = ctr.get("bcdAtomicDeclined", 0) + 1
             ctr.setdefault("bcdAtomicWhy", {})
             ctr["bcdAtomicWhy"]["capacity"] = (
                 ctr["bcdAtomicWhy"].get("capacity", 0) + 1)
             return 0, float("inf")
-        face_need = 0
+        mint_need = 0
         if need_b > spendable and k > 0:
-            face_need = min(unactivated,
-                            ((need_b - spendable) * 10 ** 18 // k)
-                            * 105 // 100)
+            mint_need = min(cap, (need_b - spendable) * 105 // 100)
         self._atomic_B = need_b
-        return face_need, d_eff
+        return mint_need, d_eff
 
     # -- the loop -------------------------------------------------------------- #
 
@@ -2685,10 +2705,11 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         jub = min(jub, drawn)
         target = self.hypo_mortgage + jub
 
-        # Tranche capacity comes from UNACTIVATED face: creditLimit only
-        # reflects credit already activated by a mint, and the mint itself
-        # is what activates -- so size against faceValue - activatedValue
-        # (real chain reads), plus any already-activated unused headroom.
+        # Tranche capacity: the already-activated unused headroom, plus the
+        # spendable the UNACTIVATED face can still deliver -- creditLimit
+        # only reflects credit already activated by a mint, and the mint
+        # itself is what activates (faceValue - activatedValue, real chain
+        # reads, at K - e per unit).
         unactivated = 0
         try:
             for tid in self._token_ids:
@@ -2696,7 +2717,13 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 unactivated += max(0, face_v - act_v)
         except Exception:
             unactivated = 0
-        headroom = max(0, limit - drawn) + unactivated
+        try:
+            k = int(d.kctrl.functions.buckK().call())
+        except Exception:
+            k = 0
+        spend_now = max(0, limit - drawn)
+        cap = mint_capacity(unactivated, k, self.premium_rate)
+        headroom = spend_now + cap
 
         # 2. SAVE for the real funding gate: estimate the next tranche's
         #    insurance principal via quoteMint and top the BUCK buffer up to
@@ -2705,21 +2732,25 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         # Draw toward the encumbrance target, not toward a calendar.  On the
         # first month that is the whole mortgage: the refinance is a single
         # act, paced only by headroom and by what the exit route can absorb.
-        # Atomic mode replaces this with the ex-ante whole-conversion plan:
-        # want_tranche becomes the FACE to activate for the full quoted
-        # sale, gate_disc the all-in execution discount vs par.
+        # The mint adds only the spendable the tranche needs beyond the
+        # headroom already on hand.  Atomic mode replaces this with the
+        # ex-ante whole-conversion plan: want_tranche becomes the spendable
+        # to mint for the full quoted sale, gate_disc the all-in execution
+        # discount vs par.
         if self._refi_atomic:
             want_tranche, gate_disc = self._atomic_plan(
-                d, limit, drawn, unactivated, ctr)
+                d, spend_now, cap, k, ctr)
+            mint_amt = want_tranche
             ready = self._atomic_B >= 10 ** 6
         else:
             want_tranche = min(max(0, target - drawn), headroom)
+            mint_amt = min(max(0, want_tranche - spend_now), cap)
             gate_disc = disc
             ready = want_tranche >= 10 ** 6
-        if want_tranche >= 10 ** 6 and self.mortgage > 10 ** 6:
+        if mint_amt >= 10 ** 6 and self.mortgage > 10 ** 6:
             try:
                 _, principal = d.buck.functions.quoteMint(
-                    want_tranche, self._token_ids).call()
+                    mint_amount(mint_amt, cap), self._token_ids).call()
             except Exception:
                 principal = 0
             required = principal * ff // 10 ** 18 if ff else 0
@@ -2740,16 +2771,16 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         # 3. THE CONTROL: activate a tranche through the REAL gate, then
         #    deploy it against the mortgage.  Atomic mode fires only when
         #    the whole conversion clears its ex-ante checks (ready); the
-        #    face mint may be zero if spendable headroom already covers it.
+        #    mint may be zero if spendable headroom already covers it.
         if gate_disc <= self.theta * self.apr and ready:
-            mint_amt = min(want_tranche, unactivated)
             try:
                 if mint_amt >= 10 ** 6:
                     pre = d.buck.functions.signedBalanceOf(
                         self.proxy.address).call()
                     self._proxy_exec(
                         d, d.buck.address,
-                        d.buck.encode_abi("mint(uint256)", args=[mint_amt]))
+                        d.buck.encode_abi("mint(uint256)", args=[
+                            mint_amount(mint_amt, cap)]))
                     post = d.buck.functions.signedBalanceOf(
                         self.proxy.address).call()
                     # mint activates credit (creditLimit += coverage) and
@@ -3535,26 +3566,19 @@ class BuckPoolInvestorAgent(_ProxyAgent):
         if self._pos is not None and self._in_range(tick):
             return                      # working: leave it alone
         buck_is_token0 = d.buck.address.lower() == t0.lower()
-        # Draw the BUCK side against the insurance, once.
+        # Draw the BUCK side against the insurance, once: mint all the
+        # insurance supports at the current K (K x its face, zero premium).
         if self._drawn == 0:
-            room = 0
-            for tid in self._token_ids:
-                try:
-                    face = d.credit.functions.depreciatedFaceValue(tid).call()
-                    used = d.buck.functions.mintsBacked(tid).call()
-                    room += max(0, face - used)
-                except Exception:
-                    pass
-            want = min(room, self.stable)
-            if want >= 10 ** 6:
-                try:
-                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
-                        "mint(uint256)", args=[want]))
-                    self._drawn += want
-                    ctr["bpiMinted"] = ctr.get("bpiMinted", 0) + want
-                except Exception as e:
-                    ctr["bpi_err"] = repr(e)[:160]
-                    return
+            try:
+                pre = d.buck.functions.balanceOf(self.proxy.address).call()
+                self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                    "mint(uint256)", args=[MINT_MAX]))
+                got = d.buck.functions.balanceOf(self.proxy.address).call() - pre
+                self._drawn += got
+                ctr["bpiMinted"] = ctr.get("bpiMinted", 0) + got
+            except Exception as e:
+                ctr["bpi_err"] = repr(e)[:160]
+                return
         # What is actually on hand, in token0/token1 terms.
         bal_b = max(0, d.buck.functions.balanceOf(self.proxy.address).call())
         bal_u = d.chain.balance_of(d.usdc, self.proxy.address)
@@ -3752,18 +3776,21 @@ class BuckIssuerArbAgent(_ProxyAgent):
                 pass
         if unactivated < 10 ** 6:
             return
-        amt = int(unactivated * self.step_frac)
+        # The spendable it can still deliver, net of the premium deposit.
+        cap = mint_capacity(unactivated, int(d.kctrl.functions.buckK().call()),
+                            self.premium_rate)
+        amt = int(cap * self.step_frac)
         # Cap the bite so one issuance does not reprice the venue by itself.
         _ru, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
         amt = min(amt, max(10 ** 6, _impact_cap(r_out, self.max_impact_bp)),
-                  unactivated)
+                  cap)
         if amt < 10 ** 6:
             return
-        # Step one: open the line.  This is where the funding-factor gate
-        # applies, and where the premium is paid.
+        # Step one: open the line -- spendable rises by amt.  This is where
+        # the funding-factor gate applies, and where the premium is paid.
         try:
-            self._proxy_exec(d, d.buck.address,
-                             d.buck.encode_abi("mint(uint256)", args=[amt]))
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                "mint(uint256)", args=[mint_amount(amt, cap)]))
             self._activated += amt
         except Exception as e:
             ctr["biaThrottled"] = ctr.get("biaThrottled", 0) + 1
@@ -4266,14 +4293,18 @@ class MonetaryOpsAgent(_ProxyAgent):
         return max(0, sold)
 
     def _mint(self, d, amt: int, ctr) -> int:
-        """Activate coverage.  Issues nothing by itself -- spending is what
-        draws the signed balance negative and puts BUCK into circulation."""
-        amt = min(amt, self._unactivated(d))
+        """Activate coverage so spendable rises by `amt` (or by all the
+        unactivated coverage can give).  Issues nothing by itself --
+        spending is what draws the signed balance negative and puts BUCK
+        into circulation."""
+        cap = mint_capacity(self._unactivated(d),
+                            int(d.kctrl.functions.buckK().call()))
+        amt = min(amt, cap)
         if amt < 10 ** 6:
             return 0
         try:
-            self._proxy_exec(d, d.buck.address,
-                             d.buck.encode_abi("mint(uint256)", args=[amt]))
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                "mint(uint256)", args=[mint_amount(amt, cap)]))
             return amt
         except Exception as e:
             self._why(ctr, e)

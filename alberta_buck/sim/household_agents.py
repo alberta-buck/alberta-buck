@@ -44,7 +44,7 @@ from __future__ import annotations
 from alberta_buck.sim import carry
 from alberta_buck.sim.agents import _register
 from alberta_buck.sim.equilibrium_agents import (
-    BuckCreditDebtorAgent, _growth_active,
+    BuckCreditDebtorAgent, _growth_active, mint_amount, mint_capacity,
 )
 from alberta_buck.sim.experiment import draw as _draw
 from alberta_buck.sim.gauge import active_reserves
@@ -217,22 +217,20 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
             ctr["rtrCashWait"] = ctr.get("rtrCashWait", 0) + 1
             return
 
-        # Buck.mint takes the NET amount the new coverage settles: coverage
-        # C settles C x (1 - e), and each credit settles at most its
-        # unactivated face x (1 - e) -- ask a hair under that.
-        e_bp = self.premium_rate * carry.POOL_ROI_INV
+        # Buck.mint(amount) raises spendable by `amount`: mint what the draw
+        # needs beyond the headroom on hand (+0.2%), at most what the
+        # unactivated face can deliver at K - e (mint_amount asks for all of
+        # it once the need is within 1%).
+        cap = mint_capacity(unactivated, k, self.premium_rate)
         amount = 0
         if v.coverage > 0:
-            net_cap = unactivated * (10_000 - e_bp) // 10_000
-            amount = min(int(v.coverage * M6) * (10_000 - e_bp) // 10_000
-                       * 1_002 // 1_000,
-                       net_cap - net_cap // 10_000)
+            amount = min(max(0, buck - spendable) * 1_002 // 1_000, cap)
         # The funding gate: hold poolPrincipal x fundingFactor BEFORE the
         # mint.  Short, the household SAVES (buys BUCK) and waits a month.
         if amount >= M6 and ff:
             try:
                 _, principal = d.buck.functions.quoteMint(
-                    amount, self._token_ids).call()
+                    mint_amount(amount, cap), self._token_ids).call()
             except Exception:
                 principal = 0
             # +0.5%: the gate is strict (balance >= required) and Buck.mint
@@ -258,8 +256,8 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
             try:
                 pre = d.buck.functions.signedBalanceOf(
                     self.proxy.address).call()
-                self._proxy_exec(d, d.buck.address,
-                                 d.buck.encode_abi("mint(uint256)", args=[amount]))
+                self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                    "mint(uint256)", args=[mint_amount(amount, cap)]))
                 post = d.buck.functions.signedBalanceOf(
                     self.proxy.address).call()
                 self.premium_paid += max(0, pre - post)

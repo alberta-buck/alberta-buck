@@ -134,10 +134,12 @@ test("eqworld: the minimal equilibrium world deploys and runs on tevm", { skip }
   await bind(pb, true, "eq:bind:pool-tok-buck");
 
   // --- floating BUCK/USDC pool: SimLP is the BUCK-backed LP ------------
+  // Mint TARGET_BUCK of spendable with a 20% margin, on a face that covers
+  // it at the resting K with a further 20%.
   const k0 = await session.call(kctrl, "buckK");
-  const mintAmt = ((TARGET_BUCK * E18) / k0) * 12n / 10n;
-  const FACE = 2n * TARGET_BUCK > (mintAmt * 12n) / 10n
-    ? 2n * TARGET_BUCK : (mintAmt * 12n) / 10n;
+  const mintAmt = (TARGET_BUCK * 12n) / 10n;
+  const cover = (((mintAmt * E18) / k0) * 12n) / 10n;
+  const FACE = 2n * TARGET_BUCK > cover ? 2n * TARGET_BUCK : cover;
   const now = (await session.client.getBlock()).timestamp;
   await session.send(credit, "createCredit",
     [simlp.address, 0, FACE, 0n, 0, 0, now, 0], { tag: "eq:credit:simlp" });

@@ -20,7 +20,7 @@
 
 import { encodeFunctionData, maxUint160, maxUint256, maxUint48, parseEventLogs } from "viem";
 
-import { identityApprove, onboard } from "./buckworld.js";
+import { MINT_MAX, identityApprove, onboard } from "./buckworld.js";
 import { deployUniversalRouter, encodePath, urSwapArgs } from "./router.js";
 import { Q96, fullRangeTicks, sqrtPriceX96, spotFromSqrtPriceX96 } from "./v3.js";
 
@@ -94,15 +94,16 @@ export async function buildMarket(world, artifacts, opts = {}) {
     [simlp.address, g(operator.kp.pk), ct(operator.E), true, false],
     { tag: "market:simlp:bind" });
 
-  // Its capital: a zero-premium credit, activated, then LP'd with USDC.
+  // Its capital: a zero-premium credit, activated whole (Buck.mint(max):
+  // K x face of headroom, depth + 20% at the resting K), then LP'd with USDC.
   const k = await s.call(world.kctrl, "buckK");
-  const mintAmt = ((depth * E18) / k) * 12n / 10n;
+  const face = ((depth * E18) / k) * 12n / 10n;
   const now = (await s.client.getBlock()).timestamp;
   await exec(credit, credit.abi, "setCreditIssuer", [me.address, true],
     "market:simlp:acceptInsurer");
   await s.send(credit, "createCredit",
-    [simlp.address, 0, mintAmt, 0n, 0, 0, now, 0], { tag: "market:simlp:credit" });
-  await exec(buck, buck.abi, "mint", [mintAmt], "market:simlp:activate",
+    [simlp.address, 0, face, 0n, 0, 0, now, 0], { tag: "market:simlp:credit" });
+  await exec(buck, buck.abi, "mint", [MINT_MAX], "market:simlp:activate",
     { gas: 3_000_000n });
   await s.send(usdc, "mint", [simlp.address, 2n * depth], { tag: "market:simlp:usdc" });
   const [t0, t1] = buck.address.toLowerCase() < usdc.address.toLowerCase()

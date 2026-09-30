@@ -136,7 +136,9 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
      async () => {
     home = await app.insure(W1, { assetClass: "home", face: 400_000n * BUCK });
     const q = await app.quote(W1, 50_000n * BUCK);
-    assert.ok(q.principal > 1_800n * BUCK && q.principal < 1_820n * BUCK, "0.35 %/yr: ~3.6 % up front");
+    // 0.35 %/yr deposits e = 3.5 % of the cover; 50,000 to spend at K 0.75
+    // takes 50,000 / (0.75 - 0.035) of cover: ~4.9 % of the draw up front.
+    assert.ok(q.principal > 2_440n * BUCK && q.principal < 2_455n * BUCK, `${q.principal}`);
     assert.equal(q.shortfall, q.principal, "she holds no BUCK yet");
     await assert.rejects(app.activate(W1, 50_000n * BUCK),
       (e) => e instanceof S.SandboxError && /insufficient mint funding/.test(e.reason));
@@ -229,7 +231,7 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(q.shortfall, 0n, "balance counts unused credit");
     const minted = await app.activate(W1, 10_000n * BUCK, [car]);
     assert.equal(minted.premium, q.principal);
-    assert.ok(minted.premium > 4_000n * BUCK, "3 %/yr: 30 % of the draw up front");
+    assert.ok(minted.premium > 6_600n * BUCK, "3 %/yr at K 0.75: e / (K - e) = 2/3 of the draw up front");
   });
 
   it("thirty days later: demurrage owing, the home depreciated", async () => {

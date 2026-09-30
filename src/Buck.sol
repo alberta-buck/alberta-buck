@@ -322,19 +322,21 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- premium / mutual-insurance pool model -----------------------------
     //
-    // mint(N) delivers N to the holder + a mutual-insurance pool deposit of
-    // (annual_premium * POOL_ROI_INV) to insurancePool, both drawn against
-    // BuckCredit NFT capacity cheapest-first to minimise the holder's premium
-    // cost.  Per-NFT inversion:
-    //     take = ceil(remaining * BP / (BP - rate * POOL_ROI_INV))
+    // mint(N) raises the holder's spendable by N at the K it runs at, and
+    // pays a mutual-insurance pool deposit of (annual_premium * POOL_ROI_INV)
+    // on the coverage it activates to insurancePool, drawing on BuckCredit
+    // NFT capacity cheapest-first to minimise the holder's premium cost.  A
+    // unit of present-value coverage raises the limit by K and costs a
+    // deposit of e = rate * POOL_ROI_INV / BP, so per NFT (_drawSlice):
+    //     V = ceil(remaining / (K - e)),   deposit = floor(K * V) - remaining
     //
     // burn(N) walks the holder's NFTs most-expensive-first.  This frees the
     // most expensive coverage capacity and returns the largest pool principal
     // per BUCK burned (the holder's mutual-insurance investment unwound
     // dearest-side first).  The asymmetry is rate-neutral: per-NFT inversion is
-    // symmetric (same `denom` on both sides), so a mint-burn round-trip on the
-    // same NFT restores its mintsBacked exactly -- no arbitrage from the
-    // differing default selectors.
+    // symmetric (the same K - e on both sides at one K), so a mint-burn
+    // round-trip on the same NFT restores its mintsBacked (to rounding) -- no
+    // arbitrage from the differing default selectors.
 
     // ---- events ------------------------------------------------------------
 
@@ -634,22 +636,33 @@ contract Buck is IERC20, IERC20Metadata {
 
     // ---- mint / burn -------------------------------------------------------
 
+    /// @notice Raise the caller's spendable (`balanceOf`) by `amount` at the K
+    ///         this call runs at, by activating coverage on the caller's
+    ///         credits cheapest-premium-first and paying its insurance
+    ///         deposit; reverts when the credits cannot give that much.
+    ///         `amount` == type(uint256).max delivers all they can give,
+    ///         activating their whole faces.
     function mint(uint256 amount) external nonReentrant {
         _mintAllocated(amount, _selectCheapest(msg.sender));
     }
 
+    /// @notice `mint(amount)`, drawing on `tokenIds` in the order given.
     function mint(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _mintAllocated(amount, tokenIds);
     }
 
-    /// @notice Burn `amount` BUCK.  Coverage is unwound most-expensive-first
-    ///         so the dearest insurance is released first, returning the
-    ///         largest pool principal per BUCK burned and freeing expensive
-    ///         capacity for re-use.
+    /// @notice Lower the caller's spendable by `amount` at the K this call
+    ///         runs at, by releasing activated coverage and refunding its
+    ///         deposit; the reverse of `mint`.  Coverage is unwound
+    ///         most-expensive-first so the dearest insurance is released
+    ///         first, returning the largest pool principal per BUCK released
+    ///         and freeing expensive capacity for re-use.  Held BUCK are not
+    ///         touched; the caller must stay within its limit after.
     function burn(uint256 amount) external nonReentrant {
         _burnAllocated(amount, _selectMostExpensive(msg.sender));
     }
 
+    /// @notice `burn(amount)`, releasing `tokenIds` in the order given.
     function burn(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
         _burnAllocated(amount, tokenIds);
     }

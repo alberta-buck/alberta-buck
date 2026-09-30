@@ -128,13 +128,15 @@ describe("the BUCK/USDC market through an unbound router", { skip }, () => {
     const q = await bw.quoteActivation(world, uma, want);
     assert.deepEqual(q.tokenIds, [home]);
     assert.equal(q.factor, 10n ** 18n, "no basket: the funding factor is 1.0");
-    // principal = net * 10r / (BP - 10r): 0.35 %/yr at the 10 % pool ROI.
-    const expect = (want * 350n) / (10_000n - 350n);
-    assert.ok(q.principal >= expect && q.principal <= expect + 2n, `${q.principal} vs ${expect}`);
+    // principal = net * e / (K - e), e = 10r: 0.35 %/yr at the 10 % pool ROI.
+    const k = await session.call(world.kctrl, "currentBuckK");
+    const e = 350n * 10n ** 14n;
+    const expect = (want * e) / (k - e);
+    assert.ok(q.principal + 2n >= expect && q.principal <= expect + 2n, `${q.principal} vs ${expect}`);
     assert.equal(q.required, q.principal);
     assert.ok(q.shortfall > 0n && q.shortfall === q.required - q.balance);
 
-    // Uma holds ~1,200 BUCK; 100,000 needs ~3,627 up front.
+    // Uma holds ~1,200 BUCK; 100,000 needs ~4,895 up front at K 0.75.
     await assert.rejects(bw.activateCredit(world, uma, want), /insufficient mint funding/);
     session.mismatches.length = 0;
 

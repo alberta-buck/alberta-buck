@@ -96,7 +96,6 @@ from alberta_buck.sim.experiment import draw as _draw
 from alberta_buck.sim.ladder import Ladder
 
 E6 = 10 ** 6
-E18 = 10 ** 18
 EPS_MAX = 0.45                  # a skewed edge never past this (bid > 0)
 
 
@@ -532,17 +531,13 @@ class UndertakingAgent(_ProxyAgent):
         spendable = max(0, d.buck.functions.balanceOf(
             self.proxy.address).call())
         if spendable < spend:
+            # Mint the shortfall + 5%: Buck.mint(m) raises spendable by m.
+            m = (spend - spendable) * 105 // 100
             try:
-                k = int(d.kctrl.functions.buckK().call())
-            except Exception:
-                k = 0
-            if k > 0:
-                m = ((spend - spendable) * E18 // k) * 105 // 100
-                try:
-                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
-                        "mint(uint256)", args=[int(m)]))
-                except Exception as ex:
-                    ctr["ut_mint_err"] = repr(ex)[:120]
+                self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                    "mint(uint256)", args=[int(m)]))
+            except Exception as ex:
+                ctr["ut_mint_err"] = repr(ex)[:120]
         before = d.chain.balance_of(d.buck, self.proxy.address)
         for i in range(N):
             if needs[i] > 0:

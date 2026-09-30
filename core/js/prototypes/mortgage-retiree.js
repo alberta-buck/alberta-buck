@@ -89,8 +89,8 @@ export class MortgageRetiree {
         this.tradeLoss += spend - got;
       }
       // DEPLOY: activate a tranche through the gate, sell, retire.
-      const m = await world.mintTranche(this.account,
-        min(tranche, cs.unactivated), { tag: `debtor:mint:d${day}` });
+      const m = await world.mintTranche(this.account, tranche,
+        { tag: `debtor:mint:d${day}` });
       if (!m.ok) {
         this.throttled += 1;
       } else {

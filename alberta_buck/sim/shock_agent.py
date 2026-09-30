@@ -27,7 +27,6 @@ from alberta_buck.sim.equilibrium_agents import _ProxyAgent
 from alberta_buck.sim.experiment import spec as _spec
 
 E6 = 10 ** 6
-E18 = 10 ** 18
 
 
 @_register
@@ -57,14 +56,13 @@ class ShockAgent(_ProxyAgent):
         self.armed += 1
 
     def _spendable(self, d, amount: int) -> None:
+        """Mint the spendable shortfall + 5% (Buck.mint(m) raises it by m)."""
         bal = int(d.buck.functions.balanceOf(self.proxy.address).call())
         if bal >= amount:
             return
-        k = int(d.kctrl.functions.buckK().call())
-        if k > 0:
-            m = ((amount - bal) * E18 // k) * 105 // 100
-            self._proxy_exec(d, d.buck.address,
-                             d.buck.encode_abi("mint(uint256)", args=[int(m)]))
+        m = (amount - bal) * 105 // 100
+        self._proxy_exec(d, d.buck.address,
+                         d.buck.encode_abi("mint(uint256)", args=[int(m)]))
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or self.proxy is None or not d.pool_ub:

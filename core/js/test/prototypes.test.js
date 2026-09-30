@@ -61,7 +61,7 @@ test("prototypes: the debtor's mortgage arithmetic amortizes", async () => {
     house: 400_000n * 10n ** 6n, mortgageBp: 550n, premiumBp: 50n,
     payment: 3_000n * 10n ** 6n, account: { address: "0x0" } });
   const zeroCredit = { drawn: 0n, limit: 0n, held: 0n, unactivated: 0n,
-                       jub: 0n, headroom: 0n };
+                       jub: 0n, spendable: 0n, capacity: 0n, headroom: 0n };
   const world = { session: { call: async () => 0n }, buck: {}, basket: {},
                   holderAddress: (a) => a.address,
                   creditState: async () => zeroCredit,

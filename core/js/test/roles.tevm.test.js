@@ -64,6 +64,7 @@ describe("the ceremonies by role", { skip }, () => {
   let bob;
   let insurer;            // "Sandbox Mutual": a fresh account, not the deployer
   let homeId;             // the credit Sandbox Mutual insures for Chloé
+  let homePv;             // the present value her activation put under it
 
   const head = async (s = session) => (await s.client.getBlock()).number;
 
@@ -173,10 +174,13 @@ describe("the ceremonies by role", { skip }, () => {
     assert.deepEqual(await bw.creditsOf(world, chloe.account.address), [homeId, carId]);
 
     const minted = await bw.activateCredit(world, chloe, 50_000n * BUCK, { tokenIds: [homeId] });
-    // Seconds of depreciation since insurance: 50,000 of present value
-    // takes a hair more face.
-    assert.ok(minted.coverage >= 50_000n * BUCK && minted.coverage < 50_001n * BUCK);
+    // 50,000 of spendable at K takes 50,000 / K of present value, and
+    // seconds of depreciation since insurance take a hair more face.
+    homePv = (50_000n * BUCK * 10n ** 18n) / minted.buckK;
+    assert.ok(minted.coverage >= homePv && minted.coverage < homePv + BUCK);
     assert.equal(minted.premium, 0n);
+    assert.ok(minted.newLimit >= 50_000n * BUCK - 1n && minted.newLimit <= 50_000n * BUCK,
+      "zero premium: the limit rises by the amount");
     const a = await bw.accountView(world, chloe.account.address);
     assert.equal(a.verified, true);
     assert.equal(a.creditLimit, minted.newLimit);
@@ -190,7 +194,7 @@ describe("the ceremonies by role", { skip }, () => {
     const loss = (v.face - v.floor) * BigInt(v.depRate) * (now - v.depStartAt) / (YEAR * BP);
     assert.equal(v.depreciatedFace, v.face - loss);
     assert.equal(v.currentValue, v.depreciatedFace * v.activated / v.face);
-    assert.ok(v.currentValue < 50_000n * BUCK);
+    assert.ok(v.currentValue < homePv);
   });
 
   it("the observer decodes every transaction and never sees a name", async () => {

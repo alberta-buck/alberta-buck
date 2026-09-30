@@ -74,7 +74,8 @@ from __future__ import annotations
 
 from alberta_buck.sim.agents import _register
 from alberta_buck.sim.equilibrium_agents import (
-    FEE_DEN, _ProxyAgent, _agent_rng, _cp_out, _impact_cap,
+    FEE_DEN, _ProxyAgent, _agent_rng, _cp_out, _impact_cap, mint_amount,
+    mint_capacity,
 )
 from alberta_buck.sim.experiment import draw as _draw, spec as _spec
 from alberta_buck.sim.gauge import active_reserves
@@ -423,15 +424,17 @@ class FacilityAgent(_ProxyAgent):
     # -- issue -------------------------------------------------------------- #
 
     def _ensure_headroom(self, d, size: int, k: int, ctr) -> int:
-        """Activate enough coverage that `size` is spendable (the mint
-        activates; balanceOf then reports the K-scaled headroom).  Capped by
-        the face's unactivated remainder, read from chain."""
+        """Activate enough coverage that `size` is spendable: mint the
+        shortfall + 5% (Buck.mint(m) raises spendable by m), or everything
+        the face's unactivated remainder, read from chain, can give."""
         sp = self._spendable(d)
         if sp >= size or k <= 0:
             return min(sp, size)
-        m = ((size - sp) * E18 // k) * 105 // 100
-        m = min(m, max(0, self._face_now(d) - self._activated(d)))
+        m = (size - sp) * 105 // 100
+        cap = mint_capacity(max(0, self._face_now(d) - self._activated(d)), k)
+        m = min(m, cap)
         if m >= E6:
+            m = mint_amount(m, cap)
             self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
                 "mint(uint256)", args=[int(m)]))
         return min(self._spendable(d), size)
@@ -580,14 +583,12 @@ class FacilityAgent(_ProxyAgent):
     def _release_coverage(self, d, k: int, ctr) -> None:
         """Best-effort burn: release as much activated coverage as the
         remaining draw allows (Buck requires used <= creditLimit after the
-        burn), so a retired line cannot simply be redrawn for free.  The
-        live creditLimit is what the contract checks, and it is the
-        activated coverage's CURRENT (depreciated) value x K -- so the
-        coverage the draw pins is act * used / creditLimit, not used / K
-        (the latter under-counted it and the burn reverted)."""
+        burn), so a retired line cannot simply be redrawn for free.
+        Buck.burn(b) lowers the live creditLimit -- the activated coverage's
+        CURRENT (depreciated) value x K -- by b, so what is releasable is
+        creditLimit - used."""
         if k <= 0:
             return
-        act = self._activated(d)
         used = self._drawn(d)
         try:
             live = int(d.buck.functions.creditLimit(self.proxy.address).call())
@@ -595,11 +596,10 @@ class FacilityAgent(_ProxyAgent):
             live = 0
         if used > 0 and live <= 0:
             return                              # nothing releasable
-        # 2% on the PINNED coverage, not on the remainder: the burn itself
-        # runs buckK.compute() before the check, and in a discount K steps
-        # down, so the limit inside the tx is a step below the one read here.
-        keep = (act * used * 102 + live * 100 - 1) // (live * 100) if used else 0
-        b = int(act - keep)
+        # 2% off the limit: the burn itself runs buckK.compute() before the
+        # check, and in a discount K steps down, so the limit inside the tx
+        # is a step below the one read here.
+        b = int(live * 98 // 100 - used)
         if b < E6:
             return
         for amt in (b, b // 2):

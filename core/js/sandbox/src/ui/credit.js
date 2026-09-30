@@ -136,9 +136,10 @@ export function mountCredit(ctx) {
 
   const activate = h("div", { class: "card form" },
     h("h2", {}, "Activate credit"),
-    h("p", { class: "hint" }, "The owner draws on their insured value: BUCK_K of it becomes credit ",
-      "they can spend.  Its premium deposit goes to the insurance pool now, and the funding gate ",
-      "lets that through only once the owner already holds as much."),
+    h("p", { class: "hint" }, "The owner draws on their insured value: each unit of it activated ",
+      "adds BUCK_K of credit, less its premium deposit, and the amount is the credit they gain to ",
+      "spend.  The deposit goes to the insurance pool now, and the funding gate lets that through ",
+      "only once the owner already holds as much."),
     h("div", { class: "row" }, field("Wallet", who), field("Amount (BUCKs)", amt)),
     quote,
     h("p", { class: "discloses" }, h("b", {}, "Discloses: "), "the amount, the coverage and the ",

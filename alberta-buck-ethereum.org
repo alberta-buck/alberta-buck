@@ -719,11 +719,24 @@ caller's NFT list -- typically a handful) to minimise premium cost; the second f
 caller-supplied order an off-chain optimizer pre-computes against effective rate, depreciation, or
 coverage midpoint.
 
-=burn(uint256 amount)= mirrors the overload pair, but the default selector walks the holder's NFTs
+*=amount= is spendable, at the K the mint runs at.*  =mint(amount)= raises the caller's
+=balanceOf= by =amount=: it activates whatever coverage, and pays whatever deposit, that takes at
+today's =BUCK_K=.  A caller who wants 50,000 to spend asks for 50,000, whatever K is; the coverage
+it activates is the dependent quantity, larger when K is lower.  A mint for more than the listed
+credits can give reverts ("insufficient credit allocation"), with one exception:
+=mint(type(uint256).max)= delivers everything they can give, activating their whole faces.  That
+is how a holder opens all of a credit at once -- a SimLP seeding a pool, or a
+[[#buck-basket-equity][BuckBasketEquity]] opening its marked credit -- without computing
+~K x face~ first and racing K to the block.
+
+=burn(uint256 amount)= mirrors the overload pair: it lowers the caller's spendable by =amount= at
+the K it runs at, releasing coverage and refunding its deposit.  It moves no held BUCK; the
+caller must still be within their limit afterwards.  The default selector walks the holder's NFTs
 *most-expensive-first* -- the dearest insurance is released first, returning the largest pool
-principal per BUCK burned and freeing expensive coverage capacity for re-use.  The asymmetry is
-not arbitrageable: per-NFT inversion is symmetric (same =denom= on both sides), so a mint-burn
-round-trip on the same NFT restores both its =mintsBacked= and =activatedValue= exactly.
+principal per BUCK released and freeing expensive coverage capacity for re-use.  The asymmetry
+is not arbitrageable: at one K the per-NFT inversion is symmetric (the same ~K - e~ on both
+sides), so a mint-burn round-trip on the same NFT restores both its =mintsBacked= and
+=activatedValue=, to rounding.
 
 *** The Per-Credit Inversion
 
@@ -738,34 +751,36 @@ units at the end.
 
 Each credit carries an annual =premiumRate= in basis points, and *the premium is charged on what
 is actually insured* -- the present value, not the face slice.  You pay for the cover you have,
-not for the cover the asset used to be worth.  So, given a target net headroom =amount= and rate
-=r=:
+not for the cover the asset used to be worth.  A unit of present insured value raises the credit
+limit by =K= and costs a deposit of ~e = r * POOL_ROI_INV / BP~, so it yields ~K - e~ of
+spendable.  Given a target spendable =amount=, rate =r= and today's =K=:
 
 #+BEGIN_SRC text
-denom     = BP - r * POOL_ROI_INV          (must be > 0; max effective rate ~1000bp)
-V         = ceil(amount * BP / denom)      present insured value that settles `amount`
-principal = V - amount                     = V * r * POOL_ROI_INV / BP
+e         = r * POOL_ROI_INV / BP          the deposit per unit of cover (K > e, or the credit is skipped)
+V         = ceil(amount / (K - e))         present insured value that yields `amount`
+principal = floor(K * V) - amount          the deposit, ~ e * V
 take      = ceil(V * faceValue / depreciatedFace)     face units that carry V
 #+END_SRC
 
 At ~POOL_ROI_INV = 10~ the pool deposit is ten times the annual premium on =V=, so at the
 insurer's assumed 10 % ROI its yield funds that premium in perpetuity; the insurer keeps any
 return above 10 % as profit.  When ~rho = 1~ the last line is the identity and this reduces
-exactly to the undepreciated case.
+exactly to the undepreciated case; at ~K = 1~ it is ~V = amount / (1 - e)~, ~principal = V -
+amount~.  A credit whose deposit rate reaches K (~e >= K~: a premium of 750bp at K 0.75) can
+deliver nothing and is skipped.
 
 Charging the premium on present value is not merely fairer, it is the only formulation that does
 not fall over.  Charge on the face slice instead and the inversion becomes
-~take = amount * BP / (rho * BP - effRate)~, which is unsatisfiable once ~rho * BP <= effRate~:
-a 200bp credit would become unmintable at /any/ price below 20 % of face, because depreciation
-had eaten the premium margin.  With the premium on =V=, =denom= is independent of =rho=, every
-credit with a non-zero appraisal still works, and the cost per BUCK delivered stays
-~amount * effRate / denom~ however old the asset is.  That last property is why cheapest-first by
-=premiumRate= remains the correct selector: depreciation changes how much *capacity* a draw
-consumes, never how much it *costs*.
+~take = amount / (rho * K - e)~, which is unsatisfiable once ~rho * K <= e~: a 200bp credit would
+become unmintable at /any/ price below 20 % of face at K = 1, because depreciation had eaten the
+premium margin.  With the premium on =V=, ~K - e~ is independent of =rho=, every credit with a
+non-zero appraisal still works, and the cost per BUCK delivered stays ~e / (K - e)~ however old
+the asset is.  That last property is why cheapest-first by =premiumRate= remains the correct
+selector: depreciation changes how much *capacity* a draw consumes, never how much it *costs*.
 
 The allocator (=_allocateMint=) walks =BuckCredit.batchCreditInfo(tokenIds)= once, then iterates
 in memory.  Per credit the available present value is ~capV = (faceValue - mintsBacked) * rho~
-and the net it can settle is ~capV * denom / BP~; the credit is either fully consumed or
+and the spendable it can yield is ~capV * (K - e)~; the credit is either fully consumed or
 partially consumed via the closed form above to land exactly on =remaining=.  A credit whose
 appraisal has reached zero insures nothing and is skipped.  For each credit touched,
 =_allocateMint= calls =BuckCredit.activateFromBuck(tid, holder, take_i)= to grow
@@ -782,7 +797,7 @@ carrying, pro rata on the face units let go:
 
 #+BEGIN_SRC text
 capV   = mintsBacked * rho                     present value of the outstanding cover
-netCap = capV - mintsPrincipal                 net spendable it can release
+netCap = K * capV - mintsPrincipal             spendable it can release: its limit less the deposit
 units  = ceil(amount * mintsBacked / netCap)   face units to deactivate
 refund = mintsPrincipal * units / mintsBacked  the deposit those units carry
 #+END_SRC
@@ -804,8 +819,8 @@ recovered from present-day state: it is the sum over past draws of ~V_i * effRat
 both the appraisal and the premium rate may have moved between them, so ~mintsPrincipal /
 mintsBacked~ is a weighted average with no closed form.
 
-Two properties fall out.  ~capV <= mintsPrincipal~ means the position has no spendable left in
-it -- the holder is underwater and must repay before releasing, which is the same rule the
+Two properties fall out.  ~K * capV <= mintsPrincipal~ means the position has no spendable left
+in it -- the holder is underwater and must repay before releasing, which is the same rule the
 post-burn solvency check enforces, reached from the other direction.  And when the holder holds
 no loose BUCK, ~netCap == creditLimit - used == balanceOf~: *burning exactly their spendable
 closes the position and squares the deposit*.  A mint and an immediate burn of the same amount
@@ -819,8 +834,8 @@ at every observation point, kept by two rules: activation happens only inside =_
 activated coverage.  They grow together on mint and shrink together on burn.  The burn allocator
 sizes its unwind from ~min(mintsBacked, activatedValue)~ anyway -- with the rules above they
 cannot differ, and the clamp is there so that any future divergence costs the system a rounding
-rather than costing a holder their exit.  A mint-burn round-trip on the same NFT order is
-rate-neutral and not arbitrageable -- both sides hit the same =denom=.
+rather than costing a holder their exit.  A mint-burn round-trip on the same NFT order at one K
+is rate-neutral and not arbitrageable -- both sides hit the same ~K - e~.
 
 The shipped =mint= sequence:
 
@@ -830,7 +845,7 @@ The shipped =mint= sequence:
 3. Capture =fundingFactor= and -- when it is non-zero -- the minter's *pre-activation*
    =balanceOf=.  The reserve is measured before this mint activates the credit it pledges, so
    the freshly-activated headroom cannot satisfy its own reserve.
-4. =_allocateMint(amount, tokenIds)= reads =BuckCredit.batchCreditInfo(tokenIds)= once, walks
+4. =_allocateMint(amount, tokenIds, K)= reads =BuckCredit.batchCreditInfo(tokenIds)= once, walks
    the slice array, calls =BuckCredit.activateFromBuck(tid, holder, take_i)= per NFT (grows
    =activatedValue= and =mintsBacked= in lockstep), returns =(totalCoverage, poolPrincipal)=.
 5. *Counter-cyclical funding-factor reserve*, enforced now that =poolPrincipal= is known:
@@ -859,45 +874,47 @@ The shipped =mint= sequence:
 7. Emit =Transfer(0, insurancePool, poolPrincipal)=,
    =Minted(sender, totalCoverage, poolPrincipal, creditValue, buckKValue, newLimit)=.
 
-End-state arithmetic for a fresh mint against a zero-balance, non-credit-using holder, where
-every credit drawn on is *undepreciated*:
+End-state arithmetic for a fresh mint against a zero-balance, non-credit-using holder:
 
 #+BEGIN_SRC text
 signedRawBalanceOf(holder) = -poolPrincipal       (used = principal paid to pool)
-creditLimit(holder)        = sum take_i           (= activatedValue * BUCK_K / UNIT)
-balanceOf(holder)          = creditLimit - used   = sum take_i - sum principal_i
+creditLimit(holder)        = K * sum V_i          (= K x the activated cover's present value)
+balanceOf(holder)          = creditLimit - used   = sum (K * V_i - principal_i)
                                                   = sum amount_i
                                                   = amount               (modulo rounding)
 totalSupply                += poolPrincipal       (only the pool's positive contribution grows)
 #+END_SRC
 
-*A depreciated credit delivers in full.*  The allocator inverts in present insured value and
-grosses the face units back up by ~faceValue / depreciatedFace~, so the last line above holds
-whatever the appraisal has done.  Depreciation costs the holder /capacity/ on the credit -- the
-same headroom consumes more face units -- never headroom on the mint.
+*A depreciated credit delivers in full, and so does a low K.*  The allocator inverts in present
+insured value at today's K and grosses the face units back up by ~faceValue / depreciatedFace~,
+so the last line above holds whatever the appraisal and the controller have done.  Depreciation
+and a low K cost the holder /capacity/ on the credit -- the same spendable consumes more face
+units -- never spendable on the mint.
 
 Worked through on a 300,000 structure, LINEAR 200bp/yr on a 60,000 floor, three years in
-(appraisal 285,600, so rho = 0.952), premium 200bp:
+(appraisal 285,600, so rho = 0.952), premium 200bp (e = 0.2), at K = 0.75:
 
 #+BEGIN_SRC text
-mint(50,000)  ->  V         = 62,500          present insured value, ceil(50,000 * 10000/8000)
-                  principal = 12,500          = V * 2000/10000
-                  take      = 65,651.260505   face units, ceil(V * 300,000/285,600)
+mint(50,000)  ->  V         = 90,909.090910   present insured value, ceil(50,000 / (0.75 - 0.2))
+                  principal = 18,181.818182   = floor(0.75 * V) - 50,000  (= 0.2 * V)
+                  take      = 95,492.742553   face units, ceil(V * 300,000/285,600)
                   balanceOf = 50,000          exactly what was asked for
 #+END_SRC
 
-The premium is charged on the 62,500 actually insured, not on the 65,651 face slice that carries
-it: at the assumed 10 % ROI the 12,500 deposit yields 1,250/yr, which is 200bp of 62,500.  Charged
-on the face slice it would have been 1,313/yr, and the holder would have been paying for cover the
+The premium is charged on the 90,909 actually insured, not on the 95,493 face slice that carries
+it: at the assumed 10 % ROI the 18,182 deposit yields 1,818/yr, which is 200bp of 90,909.  Charged
+on the face slice it would have been 1,910/yr, and the holder would have been paying for cover the
 asset no longer has.
 
-=burn(amount[, tokenIds])= mirrors the math but with the most-expensive-first default selector:
-unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
+=burn(amount[, tokenIds])= mirrors the math -- spendable falls by =amount= at the K it runs at --
+but with the most-expensive-first default selector: unwind dearest NFT first, call =BuckCredit.deactivateFromBuck(tid, holder, unwind_i)= which
 shrinks =activatedValue= and =mintsBacked= in lockstep, debit =poolRefund= from =insurancePool=,
 credit =poolRefund= to the holder's signed raw (climbs toward zero from used credit, or further
 positive from a positive balance).  =quoteMint= and =quoteBurn= are read-only views that return
-=(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same allocator math, so
-an off-chain optimizer can size required limits and refunds before submitting.
+=(totalCoverage, poolPrincipal)= or =(totalUnwind, poolRefund)= for the same allocator math at
+today's stored K, so an off-chain optimizer can size required limits and refunds before
+submitting.  (The mint itself runs at the K =compute()= returns, which can step if a PID
+interval has elapsed.)
 
 *** The Funding-Factor Reserve, and Its Precedents
     :PROPERTIES:
@@ -1847,10 +1864,11 @@ writing BUCK amounts rather than raw 6-decimal units:
 
 1. =buckK.compute()= runs the PID cadence.  The static controller returns =fundingFactor() == 0=,
    so the counter-cyclical reserve gate is disabled and no pre-mint balance is captured.
-2. The allocator walks #42 first: ~denom = 10000 - 50*10 = 9500~, ~avail = 200,000 - 0~,
-   ~netCap = avail * 9500 / 10000 = 190,000~.  Since ~netCap >= 50,000~ the closed-form partial
-   fill lands it in one credit: ~take = ceil(50,000 * 10000 / 9500) = 52,631.578948~,
-   ~principal = take - 50,000 = 2,631.578948~.  #43 is never touched.
+2. The allocator walks #42 first: ~e = 50bp * 10 = 0.05~, ~K - e = 0.95~, ~avail = 200,000 - 0~,
+   ~netCap = avail * 0.95 = 190,000~.  Since ~netCap >= 50,000~ the closed-form partial fill
+   lands it in one credit: ~take = ceil(50,000 / 0.95) = 52,631.578948~, ~principal = take -
+   50,000 = 2,631.578948~.  #43 is never touched.  (At K = 0.75 the same mint would take
+   ~50,000 / 0.70 = 71,428.571429~ of #42 and deposit 3,571.428571: Alice still gets 50,000.)
 3. =activateFromBuck(#42, alice, take)= grows =activatedValue= to =take=, and
    =mintsBacked[#42]= with it.  From this moment #42 cannot be transferred.
 4. =insurancePool= is credited the principal and Alice's signed raw is debited the same: the

@@ -339,6 +339,10 @@ export const DEPRECIATION = { NONE: 0, LINEAR: 1, DECLINING_BALANCE: 2 };
 // A holder handle (from onboard/registerWallet) or a bare viem account.
 const acctOf = (who) => who.account ?? who;
 
+/** Buck.mint(MINT_MAX) delivers all the listed credits can give, activating
+ *  their whole faces; any other amount is the spendable it delivers. */
+export const MINT_MAX = (1n << 256n) - 1n;
+
 /**
  * Insure an asset: the holder accepts the insurer (BuckCredit's recipient
  * opt-in, skipped when already given), then the insurer issues the
@@ -373,10 +377,13 @@ export async function insureAsset(world, insurer, holder, terms) {
 }
 
 /**
- * Activate `amount` of the holder's insured credit: Buck.mint, which walks
- * the holder's credits cheapest-first (or `opts.tokenIds`).  A zero-premium
- * credit activates headroom only; a premium pays its principal into the
- * insurance pool from the holder's balance.
+ * Raise the holder's spendable by `amount` (at the K the mint runs at):
+ * Buck.mint, which activates coverage on the holder's credits
+ * cheapest-first (or `opts.tokenIds`) -- amount / (K - e) of it, e the
+ * premium's deposit rate -- and reverts when they cannot give that much.
+ * `amount` = MINT_MAX activates their whole faces.  A zero-premium credit
+ * activates headroom only; a premium pays its principal into the insurance
+ * pool from the holder's balance.
  *
  * @returns what the Minted event reports: {coverage (face activated -- a
  *          depreciating credit needs a little more face than the present
@@ -395,14 +402,15 @@ export async function activateCredit(world, holder, amount, opts = {}) {
 }
 
 /**
- * Create a BuckCredit NFT for `holder` and activate its face through
- * Buck.mint (zero premium: activates credit headroom; BUCK circulates
- * when the holder draws by transferring).  The deployer insures.
+ * Create a BuckCredit NFT for `holder` and activate its whole face through
+ * Buck.mint(MINT_MAX) (zero premium: activates credit headroom, K x face;
+ * BUCK circulates when the holder draws by transferring).  The deployer
+ * insures.
  */
 export async function createCredit(world, holder, face, opts = {}) {
   const tokenId = await insureAsset(world, world.session.account, holder,
     { ...opts, face });
-  await activateCredit(world, holder, face);
+  await activateCredit(world, holder, MINT_MAX, { tokenIds: [tokenId] });
   return tokenId;
 }
 
@@ -441,7 +449,8 @@ export async function cheapestFirst(world, owner) {
 }
 
 /**
- * What activating `amount` would take (Buck.quoteMint), and whether the
+ * What raising the holder's spendable by `amount` would take (Buck.quoteMint:
+ * the coverage it activates and the deposit it pays), and whether the
  * funding gate lets it through: the premium's pool principal times the
  * controller's funding factor must already be covered by the holder's
  * balance (held BUCK plus unused credit) before the mint.
