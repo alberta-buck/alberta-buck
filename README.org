@@ -101,17 +101,17 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
 - [[file:alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]]
   ([[file:images/alberta-buck-demurrage.pdf][pdf]]) -- why held money pays, and where it goes.
 - [[file:alberta-buck-ethereum-basket.org][The BuckBasket]]
-  ([[file:images/alberta-buck-ethereum-basket.pdf][pdf]]) -- the commodity anchor, and why it must
-  be heavy.
+  ([[file:images/alberta-buck-ethereum-basket.pdf][pdf]]) -- the commodity anchor, why it must be
+  heavy, and how a shared pantry of basics earns for its savers.
+- [[file:alberta-buck-ethereum-wheel.org][The BasketWheel]]
+  ([[file:images/alberta-buck-ethereum-wheel.pdf][pdf]]) -- how the basket earns: its credit, its
+  own arbitrage, its timing, its desk, and the wheel that turns them.
 - [[file:alberta-buck-operations.org][Basket Operations]]
   ([[file:images/alberta-buck-operations.pdf][pdf]]) -- how the basket reads its pools and moves
   value from rich constituents to poor.
 - [[file:alberta-buck-rebalance.org][Rebalancing the BuckBasket]]
   ([[file:images/alberta-buck-rebalance.pdf][pdf]]) -- using timing, the one thing the basket's free
   balancing leaves unused.
-- [[file:alberta-buck-ethereum-direct.org][The Direct Embodiment]]
-  ([[file:images/alberta-buck-ethereum-direct.pdf][pdf]]) -- measuring BUCKs against its basket
-  directly, not in dollars.
 
 *Identity, receipts and Notes*
 - [[file:alberta-buck-identity.org][Identity and Receipts]]
@@ -137,9 +137,6 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
 - [[file:alberta-buck-platform.org][Platform Architecture]]
   ([[file:images/alberta-buck-platform.pdf][pdf]]) -- the shared core behind the simulations and
   demos.
-- [[file:alberta-buck-ethereum-routing.org][The Routing Simulation]]
-  ([[file:images/alberta-buck-ethereum-routing.pdf][pdf]]) -- the real contracts and Uniswap on
-  anvil, driven by a Python economy.
 - [[file:alberta-buck-deployment.org][Publication and Deployment]]
   ([[file:images/alberta-buck-deployment.pdf][pdf]]) -- publishing the packages and deploying the
   contracts: the release book.

@@ -4,16 +4,16 @@
 # (yet) placed under an open licence -- see LICENSING.md, "Design
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
-#+title: The Alberta Buck - The BuckBasket (v2)
+#+title: The Alberta Buck - The BuckBasket (v3)
 #+SUBTITLE: A High-Inertia Anchor for Generational Value
 #+author: Perry Kundert
-#+date: 2026-06-20
+#+date: 2026-09-30
 #+category: Alberta Buck
 #+series_order: 21
 #+weight: 22
 #+draft: false
 #+bucky: true
-#+description: Why a stable currency needs a heavy, physical anchor -- and how the BuckBasket builds one out of base commodities, the laws of thermodynamics, and the planet's collective arbitrage appetite.  A liquid savings facility that harvests reversion-to-the-mean instead of promising it.
+#+description: Why a stable currency needs a heavy, physical anchor, and how the BuckBasket builds one out of the commodities civilization cannot do without.  A shared pantry of basics that anyone can put into and take out of, that earns from the world's appetite for arbitrage and from the one thing base commodities reliably do: come back.
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-ethereum-basket
 #+STARTUP: org-startup-with-inline-images inlineimages
@@ -26,398 +26,277 @@
 [[https://perry.kundert.ca/images/dominion-logo.png]]
 
 #+BEGIN_ABSTRACT
-A currency is only as stable as the thing it is anchored to.  Fiat money
-is anchored to policy, and policy drifts.  The Alberta Buck (BUCK) is
-anchored instead to a basket of base commodities -- and the value of base
-commodities is pinned, in the long run, not by anyone's promise but by the
-crust of the Earth and the laws of thermodynamics.  This article explains
-why such an anchor must be /heavy/ -- high in inertia, deep in liquidity,
-and disciplined in what it admits -- and how the *BuckBasket* assembles
-one on-chain.
+A currency is only as steady as what it is tied to.  The Alberta Buck (BUCK) is tied to a basket of
+base commodities -- energy, metals, food -- whose prices are held in place, over the long run, by
+physics and by human ingenuity rather than by anyone's promise.  This article is about that
+basket: why it has to be heavy, why the things in it keep coming back, and how the *BuckBasket*
+turns their coming back into a return for anyone who parks savings in it.
 
-The basket does something a central bank cannot: it lets idle balances earn a
-return by harvesting the volatility of mean-reverting commodities, using fees
-paid by the world's own arbitrageurs, while remaining fully liquid.  It is not a
-managed fund and it makes no forecasts.
-
-It is a facility -- a savings account whose yield comes from physics and
-arbitrage rather than a counterparty's good intentions -- and its single real
-risk is precisely characterised: an asset that deflates forever and never
-reverts.  The discipline that follows from that risk is the heart of the design.
+It is written for everyone.  The machinery, and the arithmetic behind each claim, is in the
+companion paper, [[file:alberta-buck-ethereum-wheel.org][The BasketWheel]].
 ([[https://perry.kundert.ca/images/alberta-buck-ethereum-basket.pdf][PDF]], [[https://perry.kundert.ca/images/alberta-buck-ethereum-basket.txt][Text]])
 #+END_ABSTRACT
 
 #+LATEX: \clearpage
-#+TOC: headlines 2
+#+TOC: headlines 1
 
 #+LATEX: \clearpage
-* The problem: money needs a heavy anchor
+* Anchored to what?
 :PROPERTIES:
 :CUSTOM_ID: heavy-anchor
 :END:
 
-Every monetary design eventually answers one question: /anchored to what?/
-Gold standards anchored paper to a metal.  Modern fiat anchors a number to
-a committee's judgement.  Stablecoins anchor a token to a dollar, which
-anchors to that same committee.  Each anchor is only as good as the mass
-behind it -- its resistance to being moved.
+Every kind of money eventually has to answer one question: /anchored to what?/  Gold standards
+tied paper to a metal.  Modern money is tied to a committee's judgement.  Stablecoins are tied to
+the dollar, which is tied to the same committee.
 
-The Alberta Buck takes its anchor from a basket of base commodities (see
-the companion /Direct Embodiment/, which defines the BUCK directly against
-commodity/BUCK pools with no dollar intermediary).  The on-chain
-=BuckKController= reads the basket's value as its process variable and
-nudges BUCK's supply to track it.  The basket /is/ the reference mass.
+The BUCK is tied to a basket of the things every economy runs on, and it is measured against that
+basket /directly/: one BUCK is, by definition, one basket's worth.  There is no dollar in between.
+That matters more than it sounds.  Measure yourself with a tape measure that shrinks a little every
+year and you will conclude that you are growing.  Measure a currency in dollars and it inherits the
+dollar's shrinkage without anyone noticing.  So the BUCK measures itself against the basket, and a
+slow on-chain controller adjusts how much BUCK the system lets people draw, so that the two stay
+together.
 
-For that to work, the mass has to be *heavy*.  A light anchor is worse
-than none: it can be dragged by a single large trade, a thin market, a
-manipulated oracle, a passing fashion.  A heavy anchor -- a deep, wide,
-continuously-arbitraged pool of real commodity value -- resists all of
-these.  Inertia is not a side effect of the design; it is the product.
-The whole point of the BuckBasket is to manufacture inertia and then to
-let that inertia do useful work.
+For that to work the basket has to be *heavy*.  A light anchor is worse than none: one big trade,
+a thin market or a passing fashion could drag it.  A heavy one -- deep, wide, and constantly traded
+against the rest of the world -- barely moves.  Its weight is not a side effect.  It is the
+product.
 
-Two things follow, and they are the subject of this article:
-
-1. *Where the inertia comes from.*  Base commodities are mean-reverting
-   for reasons no market can repeal, and the planet's arbitrageurs keep the
-   basket pinned to global prices for free.
-
-2. *How the inertia pays.*  A continuously-rebalanced basket of volatile,
-   reverting assets does not merely preserve capital -- it /earns/, turning
-   volatility itself into yield.  The BuckBasket lets a passive holder
-   collect that yield without ever managing a position.
-
-* Why base commodities revert: an argument from physics
+* Why basics come back
 :PROPERTIES:
 :CUSTOM_ID: argument-from-physics
 :END:
 
-Financial assets can drift anywhere.  A stock can compound to the moon or
-fall to zero; nothing in nature forbids either.  *Civilizationally-basic
-commodities are different*, and the difference is physical, not financial.
+A share can compound to the moon or fall to zero; nothing in nature forbids either.  A bushel of
+wheat is different, and the difference is physical.
 
-Consider what sets the price of a basic commodity -- energy, a structural
-metal, a staple grain.  Its cost has a *floor* and a *ceiling* that human
-markets cannot durably escape:
+The price of a basic commodity lives between a floor and a ceiling that markets cannot escape for
+long:
 
-- *The floor is thermodynamic.*  You cannot extract copper, smelt iron, or
-  grow wheat for less than the energy it physically takes.  Crustal
-  abundance sets how much ore must be moved; the enthalpy of reduction sets
-  how much energy a tonne of metal costs; photosynthesis and arable land
-  set the calorie budget of a harvest.  When the price falls below that
-  floor, production stops, supply contracts, and the price is pushed back
-  up.  The floor is enforced by the periodic table.
+- *The floor is thermodynamic.*  You cannot mine copper, smelt iron or grow wheat for less than the
+  energy it physically takes.  Sell below that and production stops, supply shrinks, and the price
+  climbs back.  The periodic table enforces the floor.
+- *The ceiling is substitution.*  When a basic gets dear, people switch (aluminium for copper, gas
+  for oil), conserve, recycle, or do without.  Demand bends.  Human ingenuity, which is plentiful
+  and impatient, enforces the ceiling.
 
-- *The ceiling is substitution.*  When a basic good gets expensive,
-  civilization adapts: it substitutes (aluminium for copper, gas for oil),
-  conserves, recycles, or simply uses less.  Demand bends.  The ceiling is
-  enforced by human ingenuity, which is abundant and impatient.
+Between them the real price of a basic -- in hours of work, or joules of energy -- wanders but does
+not run away.  Over years it is noisy.  Over generations it is remarkably flat: a barrel of oil, a
+bushel of wheat and an ounce of silver have bought roughly the same amount of human effort for a
+very long time.
 
-Between a floor set by physics and a ceiling set by substitution, a basic
-commodity's /real/ price -- its price in hours of labour or joules of
-energy -- *oscillates but cannot run away*.  It is mean-reverting by
-construction.  Over years it is noisy; over generations it is remarkably
-flat.  A barrel of oil, a bushel of wheat, an ounce of silver have bought
-roughly the same basket of human effort for a very long time.
+Three things can break this: acts of God, war, and autocrats who seize a market by force.  All
+three are real, and all three are historically local and temporary.  A /wide/ basket of
+independent basics is diversified against each.  Coming back is not a hope about the future; it is
+what the physical economy does unless someone is shooting at it.
 
-This is the deepest anchor available to any currency.  Not a bank's
-solvency, not a state's credit, not a protocol's tokenomics -- the crustal
-density of the elements and the energy budget of extraction.  It is the
-one collateral that cannot be printed, defaulted, or voted away.
-
-There are exactly three forces that can break it, and they are worth naming
-because they bound the entire thesis: *acts of God* (a geology- or
-climate-scale shock), *war*, and *autocratic capture* (a regime that seizes
-or distorts a market by force).  Each is real; each is, historically,
-temporary and local; and a /wide/ basket of independent basics is
-diversified against all three.  Reversion to the mean is not a hope about
-the future.  It is the default behaviour of the physical economy, and only
-violence suspends it.
-
-* From reversion to return: the rebalancing premium
-:PROPERTIES:
-:CUSTOM_ID: shannons-demon
-:END:
-
-Here is the part that surprises people.  Mean reversion is usually sold as
-/capital preservation/ -- a way to not lose.  But a basket of volatile,
-reverting, imperfectly-correlated assets, *continuously rebalanced to fixed
-weights*, does something stronger: it earns a positive return that can
-exceed the return of any single component.  Volatility, normally the enemy,
-becomes the source of yield.
-
-The mechanism is old and well understood -- Claude Shannon described it in
-lectures decades ago, and it travels under names like /Shannon's demon/,
-/volatility harvesting/, and the /rebalancing premium/.  The intuition:
-
-#+BEGIN_SRC text
-  Two assets, each just oscillating around a flat mean (no trend at all):
-
-     hold either one alone .................. you end where you started
-     hold a 50/50 mix, rebalanced ........... you end UP
-
-  Why?  Rebalancing forces you to SELL whatever just rose (trim the
-  overweight) and BUY whatever just fell (top up the underweight).
-  Buy-low / sell-high, executed mechanically, on every wiggle.
-  The wiggles -- not any trend -- are converted into compounding gains.
-#+END_SRC
-
-The premium grows with the /volatility/ of the components and shrinks with
-their /correlation/.  That is precisely the profile of a basket of base
-commodities: individually volatile (energy and metals swing hard),
-collectively reverting (none runs away), and weakly correlated (an oil
-shock is not a wheat shock is not a copper shock).  A commodity basket is
-close to an ideal substrate for volatility harvesting -- and the harvest is
-paid out of the same oscillations that the physics of Section 2 guarantees
-will keep happening.
-
-The BuckBasket is, at bottom, an engine for capturing this premium and
-handing it to passive depositors.  Everything in the implementation -- the
-pools, the direct mint, the sell-high redemption, the buy-low treasury --
-is machinery for rebalancing a commodity basket continuously and cheaply.
-
-* The engine: the world's arbitrageurs, working for free
-:PROPERTIES:
-:CUSTOM_ID: arbitrage-engine
-:END:
-
-Rebalancing has to be /done/ by someone, and trading costs money.  A
-managed fund pays a desk to rebalance.  The BUCK system has no desk and
-wants none.  So who turns the crank?
-
-*Everyone else does -- and they have no idea they are doing it.*
-
-Each basket constituent lives in a TOKEN/BUCK Uniswap pool.  Those pools
-sit in the open sea of decentralised finance, wired to global markets
-through ordinary routing.  An arbitrageur scanning for mispricings does not
-know or care what a BUCK is.  They see that a commodity token is a hair
-cheaper inside a BUCK pool than on the wider market, and they route flow
-through it to pocket the difference:
-
-#+BEGIN_SRC text
-        a BUCK-unaware arbitrage cycle (one of many)
-
-   USDC --> TOKEN_x --> BUCK --> TOKEN_y --> USDC
-            (pool x)   (route)   (pool y)
-            \________________________________/
-                 closes a price gap; pays a
-                 fee to the pool's LP = the
-                 BuckBasket; nudges both pools
-                 back toward global price
-#+END_SRC
-
-Every such cycle does two things for the basket at once.  It *pays a fee*
-(the arbitrageur's toll for using the pool), and it *rebalances the pool*
-toward the true global price (that is what closing a mispricing /means/).
-The basket monetises the planet's collective, tireless, self-interested
-appetite for free money.  The arbitrageurs think they are skimming a spread.
-They are also, as a side effect, performing the basket's rebalancing and
-paying the basket for the privilege.
-
-This is why /inertia/ and /flow/ reinforce each other.  The deeper and
-wider the basket, the more arbitrage routes pass through it, the more flow
-it attracts, the more fees it earns, and the harder it is to push off its
-anchor.  A heavy basket is a busy basket, and a busy basket is a paying
-basket.  The BUCK system's contribution is not to trade -- it is to *exist
-as deep, honest, well-connected liquidity* that the rest of DeFi cannot
-help but use.
-
-* A facility, not a fund
+* A pantry, not a portfolio
 :PROPERTIES:
 :CUSTOM_ID: facility-not-fund
 :END:
 
-It must be said plainly: *the BUCK system cannot offer professional asset
-management, and should never pretend to.*  There is no portfolio manager,
-no discretion, no market view, no fiduciary making calls.  Anyone promising
-that on a public protocol is either mistaken or lying.
+The simplest way to picture the BuckBasket is as a shared pantry.
 
-What the system /can/ offer is a *facility* -- a transparent, mechanical,
-fully on-chain process that any holder can use without trusting a manager:
+You bring something to it -- a commodity token, or BUCK -- and you are given a share of the whole
+pantry for it.  From then on your share rises and falls with everything in the pantry together, not
+just with what you brought.  When you want out, you hand back your share and receive its worth in
+BUCK, whenever you like (or, on a day the basket is short of BUCK, your slice of what it holds).
+There is no lock-up, no notice period, and nobody to ask.
 
-- *Deposit* a base commodity token (or idle BUCKs) and receive a
-  redemption receipt.
-- Your capital is put to work as full-range liquidity, doubled by
-  system-minted BUCKs (Section 6), earning fees and the rebalancing premium.
-- *Redeem* whenever you like.  The position is always liquid and always
-  solvent; there is no lockup and no gate.
+Two small rules keep it fair to the people already inside:
 
-No one is managing your money.  A published, auditable mechanism is /tending/
-it, the way a millrace tends a wheel: the water (arbitrage flow) does the
-work, the wheel (your position) turns, and the design only has to keep the
-channel open and the bearings honest.  The yield is not a promise from a
-counterparty; it is a share of fees and volatility harvest that physics and
-arbitrage produce whether or not anyone is watching.
+- *You can't buy into yesterday's harvest.*  A newcomer's goods are valued at the cautious end of
+  the market and the pantry at the generous end, so nobody joins at a price that quietly takes a
+  slice of what others have earned.  Leaving works the same way in mirror.  The difference is a
+  small fee, about what it costs to trade.
+- *The house takes a quarter of your winnings and none of your losses.*  When you leave with more
+  than you brought, a quarter of the gain goes to the basket's treasury.  If you leave with less,
+  it takes nothing.
 
-That distinction -- facility, not fund -- is what makes the BuckBasket
-appropriate as *base-layer infrastructure* for the BUCK economy rather than
-a product sold by a sponsor.
+There is no fund manager, no forecast and no opinion about the market.  The BUCK system cannot
+offer professional asset management and should never pretend to.  What it offers is a published,
+mechanical process that anyone can inspect: less a fund than a mill, whose wheel turns because the
+water runs.
 
-* How the BuckBasket works
+* Where the return comes from
+:PROPERTIES:
+:CUSTOM_ID: shannons-demon
+:END:
+
+Here is the part that surprises people.  A basket of things that wander but come back does not
+merely hold its value.  Kept in balance, it /earns/.
+
+#+BEGIN_SRC text
+  Two assets, each just wobbling around a flat average (no trend at all):
+
+     hold either one alone ................ you end where you started
+     hold half of each, kept at half ...... you end UP
+
+  Keeping the halves even means selling a little of whatever just rose
+  and buying a little of whatever just fell: buy low, sell high, done
+  mechanically on every wobble.  The wobbles themselves pay.
+#+END_SRC
+
+Claude Shannon described this decades ago, and it has gone by many names since: /Shannon's demon/,
+/volatility harvesting/, /the rebalancing premium/.  It pays most when the parts are volatile, keep
+coming back, and do not move together -- which is a fair description of energy, metals and food.
+An oil shock is not a wheat shock is not a copper shock.
+
+The BuckBasket earns from three places:
+
+1. *Tolls.*  Each commodity in the basket sits in a public trading pool, paired with BUCK.  Anyone
+   in the world who trades through it pays a small fee, and the fee is the basket's.
+2. *Keeping its own prices straight.*  Every time a commodity's price moves elsewhere, the basket's
+   pool is briefly out of date.  Early in this design we believed the world's arbitrageurs fixed
+   that for free.  They do fix it, but not for free: whoever brings a stale pool back to the market
+   price pockets the difference, and in a market that keeps coming back that difference is almost
+   exactly the rebalancing premium above.  The demon works for whoever gets there first.  So the
+   basket goes for it too: it corrects its own pools, through a loop of three trades that needs no
+   money up front and cannot lose, and keeps the change.
+3. *Timing the tides.*  A trading pool harvests the chop, the day-to-day wobbles.  It cannot harvest
+   a slow tide at all: a commodity that drifts up for a year and back down the next leaves a pool
+   almost nothing.  Only deliberate timing can -- trimming a commodity that is rich against its own
+   long memory, adding to one that is cheap, and never trimming one that is still rising.  /Let a
+   run run/, then lean against it once it turns.  An optional /director/ does exactly that, and
+   nothing more clever.
+
+The details -- how the three trades close a gap, how the director decides a tide has turned, and
+the simulations behind every claim here -- are in [[file:alberta-buck-ethereum-wheel.org][The BasketWheel]].
+
+* The world's traders, working for the basket
+:PROPERTIES:
+:CUSTOM_ID: arbitrage-engine
+:END:
+
+The basket's pools sit in the open sea of decentralised finance.  A trader hunting for a cheaper
+route from dollars to gold neither knows nor cares what a BUCK is.  If the cheapest route runs
+dollars to BUCK to gold, they take it, and pay the basket's toll on the way.  In our simulations
+such BUCK-unaware traders route through the basket's pools as a matter of course.
+
+That is why weight and traffic reinforce each other.  The deeper and wider the basket, the more
+routes run through it, the more tolls it collects, and the harder it is to push.  A heavy basket is
+a busy basket, and a busy basket pays.
+
+* The basket is a customer too
 :PROPERTIES:
 :CUSTOM_ID: how-it-works
 :END:
 
-The mechanism is deliberately simple, because simplicity is what makes
-"no manager required" credible.
+Everyone in the Alberta Buck system draws BUCK the same way: against something of value, up to a
+fraction of it.  That fraction is called =K=, and it is the one number the on-chain controller
+moves to keep BUCK steady against the basket.
 
-*Direct mint, 2x liquidity.*  Deposit a commodity TOKEN worth /P/ in BUCKs.
-The basket mints /P/ BUCKs to pair with it and provides both, full-range,
-into that token's TOKEN/BUCK pool.  Your /P/ of commodity now backs *2P* of
-working liquidity -- the system's freshly-minted BUCKs is the other half.
-That doubled depth is what earns the fees, and it is the depositor's reward.
+The basket gets no special privileges.  It is an ordinary account drawing on a credit like
+anyone else's, and its collateral is its depositors' share of everything it holds.  It may draw up to =K= times that
+worth of BUCK, and it uses the BUCK to pair its commodities in their trading pools.  When =K= falls,
+the offer shrinks; nothing already drawn is called back.  There are no margin calls, in the basket
+or anywhere else in the system.
 
-*Rebalancing in two directions.*  Redemption is /sell-high/: it draws a
-departing holder's claim preferentially from the pools that are currently
-/overweight/ (commodity-rich, above their target share), nudging the basket
-back toward balance as people leave.  The treasury's accrued profit is
-recycled /buy-low/: re-deposited into the most /underweight/ pool.
-Together with the external arb flow of Section 5, these keep the basket
-self-balancing without any optimiser.  At equilibrium, redemption degrades
-gracefully to a plain pro-rata exit.
+The upkeep -- placing new deposits in the pools, collecting tolls, trimming and topping up --
+happens on a /work wheel/: a small machine that anyone may turn with a transaction, and that pays
+whoever turns it out of what the turning captures.  There is no keeper on a salary.  If nobody
+turns it, new deposits wait in the basket's wallet and it earns less; nothing already in it is put
+at risk.
 
-*The depositor keeps the TOKEN; the basket keeps the BUCKs.*  At redemption
-the depositor is paid in commodity TOKEN only -- their asset back, plus its
-price change, plus the fees the doubled depth captured -- and *never in
-BUCKs*.  The BUCKs that were minted (and are burned again on exit) were the
-system's own seigniorage; it provided half the liquidity on the depositor's
-behalf, and it rightly returns to the system as treasury equity.  A neat
-practical consequence falls out: because no BUCKs are ever paid to a
-depositor, a commodity LP *needs no identity credentials at all* to
-participate.  Anyone can deposit a commodity and harvest the premium.
+Next to the basket there may also be a /monetary desk/, which buys and sells BUCK to steady its
+price.  It is a separate machine with its own account, its own credit and its own wheel.  Two
+households, two sets of books: we learned that one the honest way, when a simulated desk's capital
+briefly counted toward the depositors' borrowing, and a test now guards the wall between them.
 
-*Always redeemable.*  The exit is /thin-funding-proof/: a holder can always
-burn their share and recover their value, no matter how thin any individual
-pool is, because the claim is allocated by value and the allocation
-conserves value -- so the basket that was solvent before a redemption is
-solvent after it, for everyone who remains.
-
-The user-facing behaviour is exactly what a savings facility should be:
-*deposit, earn, withdraw,* with no trust in a manager and no forecast required.
-
-* Yield against demurrage; liquidity without lockup
+* Yield against demurrage
 :PROPERTIES:
 :CUSTOM_ID: yield-vs-demurrage
 :END:
 
-The BUCK is designed to /circulate/.  Idle balances carry *demurrage* -- a
-small, deliberate holding cost that discourages hoarding or idleness and keeps
-money moving (see the companion /Demurrage/ note).  Demurrage is good for the
-economy and irritating for the saver, who would like their rainy-day fund to at
-least hold its ground.
+The BUCK is designed to /circulate/.  Idle balances pay a small holding fee, demurrage, which keeps
+money moving (see [[file:alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]]).  That is good
+for the economy and mildly annoying for a saver, who would like a rainy-day fund to at least hold
+its ground.
 
-The BuckBasket is the answer the saver is looking for.  Idle BUCKs -- or an
-idle commodity holding -- placed in the basket earns the fee-and-rebalancing
-premium, which has *historically preserved capital* and is *likely to
-outpace demurrage* over a mid-to-long horizon, *while remaining completely
-liquid*.  You are not locking money away to earn a return; you are parking
-it somewhere it works, and you can pull it out the moment you need it.
+The BuckBasket is the saver's answer.  Savings parked in it earn the tolls and the harvest instead
+of paying demurrage, and remain available on demand.  In simulation the harvest has run at roughly
+one to three percent a year over simply holding the same commodities, and less when prices wander
+off and do not come back.  Treat those as a simulation's numbers, not a promise.
 
-This is a /mid-to-long-term/ proposition.  *Short-term losses are possible* -- a
-constituent commodity asset can be below its mean on the day you redeem, and you
-will get back what the basket is worth that day, not its long-run average.  But
-two forces shrink that risk: *time*, because reversion is the physical default
-(Section 2), and *width*, because the more independent basics the basket holds,
-the lower the odds that the aggregate is depressed all at once.  *As the basket
-widens, the short-term risk falls.* The BuckBasket rewards patience and
-diversification, which is exactly the behaviour a stable monetary base should
-encourage.
+It is a medium-to-long-term proposition.  On the day you leave, a commodity may be below its
+average, and you get what the basket is worth that day.  Two things shrink that risk: *time*,
+because coming back is the physical default, and *width*, because the more independent basics the
+basket holds, the smaller the chance that they are all down at once.  The basket rewards patience
+and diversification -- exactly the habits a stable money should encourage.
 
 * What it is for
 :PROPERTIES:
 :CUSTOM_ID: what-its-for
 :END:
 
-Because the facility is permissionless, liquid, and mechanical, it slots
-naturally into the places an economy keeps capital that must stay available
-but should not sit idle:
+Anywhere money has to stay available but should not sit idle:
 
-- *A savings account equivalent* -- the default home for a household's
-  reserve, earning the commodity-basket premium instead of leaking
-  demurrage, redeemable on demand.
-- *Idle-balance ROI for citizens* on either BUCKs or commodity holdings --
-  put your buffer to work without surrendering access to it.
-- *Treasury management for businesses* -- operating cash that must stay
-  liquid for payroll and suppliers, parked productively between uses.
-- *Reserve management for insurers* -- capital that regulation and prudence
-  require to be both /available/ and /preserved/, two demands the basket is
-  built to satisfy simultaneously.
+- *a household's savings account*, earning the basket's harvest instead of paying demurrage;
+- *a business's working cash*, kept liquid for payroll and suppliers, and working in between;
+- *an insurer's reserves*, which prudence requires to be both available and preserved -- the two
+  things the basket is built to be at once.
 
-In each case the value proposition is the same: a fully-liquid place for
-otherwise-idle value to harvest the inertia of the physical economy and the
-flow of global arbitrage, with no manager to trust and no lockup to fear.
-
-* The one real risk: the asset that never reverts
+* The one real risk: the asset that never comes back
 :PROPERTIES:
 :CUSTOM_ID: the-asset-that-never-reverts
 :END:
 
-Every honest design states the case in which it loses, and the BuckBasket's
-is sharp and singular.
+Every honest design names the case in which it loses.  The BuckBasket's is simple.
 
-Rebalancing -- the source of all the yield -- works /because/ the
-components revert.  Sell-high, buy-low compounds the oscillations into gain
-only when what rose will later fall and what fell will later rise.  *If a
-constituent simply deflates forever* -- becomes monotonically more valuable
-and never comes back -- then rebalancing becomes a trap.  The basket keeps
-dutifully *selling the asset that keeps appreciating*, trimming the very
-position it should have ridden.  A holder of that single asset (or of raw
-BUCKs, if BUCK tracks it) would have done strictly better.  The basket
-*permanently underperforms* a buy-and-hold of the runaway.
+Rebalancing pays /because/ things come back.  If something in the basket simply rises forever, the
+basket keeps dutifully trimming the one thing it should have held, and a plain holder of that asset
+does better, permanently.
 
-This is not a hypothetical; it is the explicit thesis of an entire asset class.
-*A fixed-supply, designed-to-be-scarce asset like Bitcoin is built to deflate
-and not revert* -- "number go up" is the whole pitch.  Putting a meaningful
-weight of such an asset into the BuckBasket is therefore *dangerous*: it imports
-a non-reverting component into a machine whose every gear assumes reversion, and
-it would drag the basket's return below a naive holder's for as long as the
-deflation persisted.  The rebalancing premium and the deflationary-store thesis
-are *mathematically opposed*; the basket must not bet against the very behaviour
-that funds it[fn::The BUCK is the Bitcoin Maxi's best friend; accumulate BTC and issue BUCK credit against it to pay expenses and accumulate /more/ Bitcoin].
+This is not hypothetical; it is the explicit pitch of an entire asset class.  An asset designed to
+be scarce, like Bitcoin, is built to rise and not come back -- "number go up" is the whole idea.
+Put much of it in the basket and you have installed a gear that turns the wrong way in a machine
+whose every gear assumes coming back.  The rebalancing premium and the ever-scarcer store of value
+are mathematically opposed.[fn::None of which makes BUCK Bitcoin's enemy.  Quite the reverse: hold
+your Bitcoin, draw BUCK credit against it to pay your bills, and keep accumulating.  The BUCK is the
+Bitcoin maximalist's best friend -- just not a basket ingredient.]
 
-* The discipline: only civilizational basics
+* The discipline: only civilization's basics
 :PROPERTIES:
 :CUSTOM_ID: civilizational-basics
 :END:
 
-The risk above dictates the membership rule, and the rule is strict.
+So the rule is strict.  *The BuckBasket admits only low-level, civilizationally basic commodities*
+-- energy, labour, structural materials, staple foods: the raw inputs every society needs and
+physics forces back toward their costs.  It excludes anything whose value rests on scarcity by
+design, a network effect or speculation.  Not because those things are bad, but because they are
+the wrong ingredients for this recipe.
 
-*The BuckBasket admits only low-level, civilizationally-basic commodities* --
-energy, labour, structural materials, staple foods, the raw inputs every society
-needs and physics forces to revert (Section 2).  It excludes anything whose
-value rests on /scarcity by design/, /network effect/, /speculation/, or a
-/non-reversion thesis/.  Not because those assets are bad, but because they are
-*the wrong substrate for this machine*.  A volatility-harvesting, mean-reverting
-anchor must be built from things that mean-revert, and only from those things.
+The reward for the discipline is the BUCK's whole reason for being: value that holds across
+generations.  A unit of money your grandchildren will recognise has to be tied to something with the
+weight of the physical economy, not to the fashion of a decade or the supply schedule of a
+protocol.  The basket gives up the spectacular upside of speculative assets for the one thing a
+monetary base must have and a speculative asset can never offer: the near certainty of coming back.
 
-The reward for that discipline is the BUCK's actual goal: *laser-level,
-generational value stability*.  A unit of money your grandchildren will
-recognise has to be anchored to something with the inertia of the physical
-economy and the predictability of the periodic table -- not to the fashion
-of a decade or the supply schedule of a protocol.  By admitting only
-civilizational basics, the BuckBasket trades away the spectacular,
-non-reverting upside of speculative assets in exchange for the one thing a
-monetary base must have and a speculative asset can never offer: *the near
-certainty of coming back*.
+* Try it
+:PROPERTIES:
+:CUSTOM_ID: try-it
+:END:
+
+A simulated economy runs the real contracts at [[https://savings-sandbox.albertabuck.ca/][savings-sandbox.albertabuck.ca]]:
+commodities on their real price histories, traders, savers, households refinancing their mortgages
+into BUCK, the controller, and the basket with its wheel.  Deposit, watch your share, and leave when
+you like.  It is play money, and it is the same machine.
 
 * Conclusion: an anchor of stone, kept honest by the crowd
 :PROPERTIES:
 :CUSTOM_ID: anchor-of-stone
 :END:
 
-The BuckBasket is, in one sentence, a *heavy, transparent, liquid,
-self-rebalancing mass of civilizational basics, kept pinned to global
-prices by the whole world's arbitrage flow, that pays its depositors the
-volatility premium of reversion to the mean.*
+The BuckBasket is a heavy, open, liquid pantry of civilization's basics.  The whole world's
+trading keeps it priced, it corrects its own prices before strangers can profit from them, and it
+pays its depositors what reversion to the mean has always paid the patient.
 
-It gives the BUCK the high-inertia anchor a generational currency needs.
-It gives savers, businesses, and insurers a fully-liquid place for idle
-value to earn rather than decay.  It does all of this with *no manager, no
-forecast, and no promise* -- only a published mechanism, the arbitrage
-appetite of strangers, and the fact that the crust of the Earth and the
-laws of thermodynamics will not, absent catastrophe, let base commodities
+It gives the BUCK the heavy anchor a generational currency needs, and savers, businesses and
+insurers a place for idle value to earn rather than decay.  It needs no manager, no forecast and no
+promise -- only a published mechanism, the appetite of strangers for a bargain, and the fact that
+the crust of the Earth and the laws of thermodynamics will not, short of catastrophe, let the basics
 run away.
 
-It cannot manage your portfolio.  It was never meant to.  It can do
-something rarer: stand still, under the entire weight of the physical
-economy, and let you lean on it.
+It cannot manage your portfolio, and was never meant to.  It does something rarer: it stands still
+under the weight of the physical economy, and lets you lean on it.
