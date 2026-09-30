@@ -8,7 +8,7 @@ import {IBuckKController}   from "../IBuckKController.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
-import {BuckBasketEquityStorage, IEquityDeskPosition, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
+import {BuckBasketEquityStorage, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
 
 /// @notice The components facet's entry points (BuckBasketEquityWheel).
 interface IEquityWheel {
@@ -54,7 +54,7 @@ interface IEquityWheel {
 ///         (`equityWheel`: wheelDue / wheelStep) and the AMM venue (every
 ///         other selector, the V3 callbacks included), as the pro-rata shell
 ///         does.
-contract BuckBasketEquity is BuckBasketEquityStorage, IEquityDeskPosition {
+contract BuckBasketEquity is BuckBasketEquityStorage {
 
     constructor(
         address _buck,
@@ -315,9 +315,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IEquityDeskPosition {
         pay = value * (1e18 - _chargeBuck(sn.k)) / 1e18;
 
         // Mark the equity that stays, then pay from what Buck lets it spend.
-        (, int256 deskValue) = _desk(sn.relief, sn.lien);
-        int256 stays = int256(eLow - pay) + deskValue;
-        _markAt(stays > 0 ? uint256(stays) : 0);
+        _markAt(eLow - pay);
         if (pay <= _bk().balanceOf(address(this))) {
             totalShares = S - out;
             IERC20(address(buck)).transfer(to, pay);
@@ -470,22 +468,6 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IEquityDeskPosition {
             tot += w[i];
         }
         for (uint256 i = 0; i < n; i++) w[i] = tot == 0 ? 0 : w[i] * 10000 / tot;
-    }
-
-    // --- The desk's book (none here; BuckBasketEquityOps answers) ------------- //
-
-    function deskPosition(uint256 relief, uint256 lien_)
-        external view virtual returns (int256, int256)
-    {
-        relief; lien_;
-        return (0, 0);
-    }
-
-    /// @notice Assign the desk its share of relief just paid.  Only the basket
-    ///         itself (the components facet, on its Daily).
-    function deskRelief(uint256 relief, uint256 lien_) external virtual {
-        if (msg.sender != address(this)) revert NotSelf();
-        relief; lien_;
     }
 
     // --- Dispatch: the components facet, else the venue ------------------------- //

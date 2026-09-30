@@ -530,8 +530,13 @@ issuance ("Demurrage and Jubilee"), marked credits ("Marked Credits"), and the e
   release burn keeps 2% of the limit (not of the draw) against K stepping inside the tx.
 - 6.1.6: rerun or annotate the T15 retiree cells and the octl debtors' close decisions, which
   used coverage-based relief -- and, since mint B, a different tranche activation (above).
-- =BuckBasketEquityOps= is 24,131 bytes (445 under the limit): move =_exitInKind= to the
-  components facet before adding to the shell or the desk.
+- DONE (2026-09-29): the desk is its own credit holder.  =BuckBasketEquityOps= marked the
+  basket's one credit at its equity /plus/ the desk's book, so the desk's founding grant raised
+  the depositors' limit (the savings world: a lien of 6.3M on 5.8M of equity).  Ruled: two
+  contracts, two accounts, two wheels -- =EquityDesk= beside =BuckBasketEquity=, each marked at
+  its own value, Buck enforcing each limit; =BuckBasketEquityOps= deleted (and with it the size
+  concern).  Pinned by =test_desk_grantIsNotTheDepositorsCollateral= (test/basket/EquityDesk.t.sol),
+  which failed before the change.
 - The contracts outside this work still cite doc/ files: Notes, IdentityRegistry, the verifier
   interfaces and adapters (doc/review/notes-receiving-key.org), IAccumulatorRegistry
   (doc/review/accumulator-spec.org), the shadow controller and observer, IStabilizer,

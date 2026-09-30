@@ -234,13 +234,11 @@ contract BuckBasketEquityTest is Test {
     }
 
     /// @dev The books: equity is the gross, plus the account at Buck and the
-    ///      relief accrued on it, less the desk's position; the wallet's TOKEN
-    ///      is backed.
+    ///      relief accrued on it (E1); the wallet's TOKEN is backed (E5).
     function _books() internal view {
         int256 signed = buck.signedBalanceOf(address(b));
         uint256 relief = buck.reliefOf(address(b));
-        (int256 deskBuck,) = b.deskPosition(relief, _lien());
-        int256 e = int256(b.gross()) + signed + int256(relief) - deskBuck;
+        int256 e = int256(b.gross()) + signed + int256(relief);
         assertEq(b.equity(), e > 0 ? uint256(e) : 0, "equity = gross + the account + relief");
         for (uint256 j = 0; j < 3; j++) {
             assertGe(tok[j].balanceOf(address(b)), b.idleToken(j), "the wallet is backed");
@@ -442,8 +440,7 @@ contract BuckBasketEquityTest is Test {
         // what was: the limit must not outlive the collateral.
         int256 eLow = int256(b.grossAt(2)) + buck.signedBalanceOf(address(b))
                     + int256(buck.reliefOf(address(b)));
-        (, int256 deskValue) = b.deskPosition(buck.reliefOf(address(b)), _lien());
-        assertEq(b.markNow(), uint256(eLow + deskValue), "marked at the equity that stays");
+        assertEq(b.markNow(), uint256(eLow), "marked at the equity that stays");
         _books();
     }
 

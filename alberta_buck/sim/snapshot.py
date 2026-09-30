@@ -52,14 +52,16 @@ def _wp13_frame(d) -> dict:
          "pid_up": None, "pid_ui": None, "pid_ud": None,
          "pid_q": None, "pid_qi": None, "pid_qd": None}
     if getattr(d, "basket_impl", "") in ("ops", "equity-ops"):
+        # The desk: the ops shell, or the EquityDesk beside an equity basket.
+        dk = d.desk if getattr(d, "desk", None) is not None else d.basket
         try:
-            f["sh_held"] = int(d.basket.functions.monetaryBuckHeld().call())
-            f["sh_outstanding"] = int(d.basket.functions.monetaryOutstanding().call())
-            f["sh_net"] = int(d.basket.functions.netInventory().call())
+            f["sh_held"] = int(dk.functions.monetaryBuckHeld().call())
+            f["sh_outstanding"] = int(dk.functions.monetaryOutstanding().call())
+            f["sh_net"] = int(dk.functions.netInventory().call())
         except Exception:
             pass
         try:                                   # reverts NavUnreadable on a guard trip
-            f["sh_cap"] = int(d.basket.functions.positionCap().call())
+            f["sh_cap"] = int(dk.functions.positionCap().call())
         except Exception:
             f["sh_cap"] = None
     obs = getattr(d, "observer", None)

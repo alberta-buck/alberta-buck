@@ -16,15 +16,16 @@ interface IMonetaryDirector {
 ///        commodity rebalancing on the DIFFERENTIAL mode, monetary operations
 ///        on the COMMON mode.
 ///
-/// @notice Shared by BuckBasketOps (the pro-rata basket plus the desk) and
-///         BuckBasketEquityOps (the equity basket plus the desk).  A shell
-///         supplies the three things the desk reads from it: its NAV
-///         (`_deskNav`, and `_deskNavSafe` that never reverts) and each
-///         constituent's price (`_deskPrices`).  Everything else -- the
-///         quadrants, the bounds, the book, the stabilizer seam -- is the
-///         desk's own, and its book (`monetaryBuckHeld`, `monetaryTokenHeld`)
-///         is plain balances: outside the pro-rata claim (never LP'd) and
-///         outside the equity basket's explicit books (never counted).
+/// @notice Shared by BuckBasketOps (the pro-rata basket plus the desk, in one
+///         contract) and EquityDesk (the desk as its own credit holder beside
+///         the equity basket: its own contract, account, mark and wheel).  The
+///         host supplies the three things the desk reads: a NAV to size its
+///         bounds (`_deskNav`, and `_deskNavSafe` that never reverts) and each
+///         constituent's price (`_deskPrices`), and how it issues and retires
+///         (`_deskIssue` / `_deskRetire`).  Everything else -- the quadrants,
+///         the bounds, the book, the stabilizer seam -- is the desk's own, and
+///         its book (`monetaryBuckHeld`, `monetaryTokenHeld`) is plain
+///         balances, outside the pro-rata claim (never LP'd).
 ///
 /// @notice The `pairs` director reads a seven-scale filter bank over the pool
 ///         ticks.  A tick is a log price, so the DIFFERENCES between legs say

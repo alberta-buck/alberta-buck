@@ -161,8 +161,9 @@ class PusherAgent(_ProxyAgent):
             pass
 
     def _cap_reverts(self, d) -> bool:
+        dk = d.desk if getattr(d, "desk", None) is not None else d.basket
         try:
-            d.basket.functions.positionCap().call()
+            dk.functions.positionCap().call()
             return False
         except Exception:
             return True

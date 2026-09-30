@@ -104,7 +104,10 @@ class DirectorKeeperAgent(Agent):
 
 @_register
 class MonetaryKeeperAgent(Agent):
-    """Drives BuckBasketOps.monetaryOperation() -- the desk's only trigger.
+    """Drives monetaryOperation() -- the desk's only trigger: on the ops shell
+    (the pro-rata basket with the desk inside it), or on the EquityDesk beside
+    an equity basket ("equity-ops": the desk's own contract and account, and
+    this agent its own invoker).
 
     The basket is the actor here; this agent just turns the crank, exactly as
     DirectorKeeperAgent does for the rebalancer.  Everything that decides what
@@ -139,17 +142,23 @@ class MonetaryKeeperAgent(Agent):
     # Quadrant index -> counter suffix, matching the article's numbering.
     QUADRANT = {1: "mkQ1", 2: "mkQ2", 3: "mkQ3", 4: "mkQ4"}
 
+    @staticmethod
+    def _desk(d):
+        """The desk's contract: the EquityDesk when there is one, else the
+        ops shell."""
+        return d.desk if getattr(d, "desk", None) is not None else d.basket
+
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or getattr(d, "basket_impl", "") not in ("ops", "equity-ops"):
             return
         try:
-            q = d.basket.functions.monetaryOperation().call(
+            q = self._desk(d).functions.monetaryOperation().call(
                 {"from": self.address})
         except Exception as e:
             self._classify(ctr, e)
             return
         try:
-            d.chain.send(d.basket.functions.monetaryOperation(),
+            d.chain.send(self._desk(d).functions.monetaryOperation(),
                          sender=self.account, gas=6_000_000)
         except Exception as e:
             self._classify(ctr, e)
@@ -167,22 +176,22 @@ class MonetaryKeeperAgent(Agent):
         wrong readings."""
         try:
             ctr["mkOutstanding"] = int(
-                d.basket.functions.monetaryOutstanding().call())
+                self._desk(d).functions.monetaryOutstanding().call())
             ctr["mkBuckHeld"] = int(
-                d.basket.functions.monetaryBuckHeld().call())
+                self._desk(d).functions.monetaryBuckHeld().call())
             # What the desk's own inventory has taken out of the deviation K
             # measures.  If this grows while K stops moving, the desk is
             # suppressing the very forcing its position is a bet on.
             ctr["mkOffset"] = int(
-                d.basket.functions.monetaryDeviationOffset().call())
+                self._desk(d).functions.monetaryDeviationOffset().call())
             # The desk's remaining ammunition, per pool.  Q1/Q2 spend TOKEN,
             # and "how much is left" is the difference between a desk that is
             # holding station and one that has been spent out.
             ctr["mkTokHeld"] = [
-                int(d.basket.functions.monetaryTokenHeld(i).call())
+                int(self._desk(d).functions.monetaryTokenHeld(i).call())
                 for i in range(len(d.tokens))]
             ctr["mkNavBuck"] = int(
-                d.basket.functions.monetaryTokenValue().call())
+                self._desk(d).functions.monetaryTokenValue().call())
         except Exception as e:
             ctr["mk_err"] = repr(e)[:160]
 

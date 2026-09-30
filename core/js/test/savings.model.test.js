@@ -106,7 +106,7 @@ const ARTIFACTS = {
   ERC20: ["MockERC20.sol/MockERC20.json"],
   BASKET: ["BuckBasketOps.sol/BuckBasketOps.json", "BuckBasketProRata.sol/BuckBasketProRata.json",
            "BuckBasketUniswapV3.sol/BuckBasketUniswapV3.json",
-           "BuckBasketEquityOps.sol/BuckBasketEquityOps.json"],
+           "BuckBasketEquity.sol/BuckBasketEquity.json"],
   POOL: ["UniswapV3Pool.sol/UniswapV3Pool.json"],
   RECEIPT: ["BuckBasketReceipt.sol/BuckBasketReceipt.json"],
   DIRECTOR: ["PairsRebalanceDirector.sol/PairsRebalanceDirector.json"],

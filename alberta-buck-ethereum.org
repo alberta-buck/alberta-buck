@@ -1467,11 +1467,21 @@ are the *supply regulator* (BUCK going out).
   :END:
 
 The production basket holds shares of equity, one pooled lien, and a wallet its work wheel
-places.  Four contracts share one storage layout: the shell =BuckBasketEquity= (deposit, redeem,
-the treasury, views), the components facet =BuckBasketEquityWheel= (the wheel's steps), the venue
-facet =BuckBasketUniswapV3= (the pools), and optionally =BuckBasketEquityOps= (the shell plus the
-monetary desk).  The shell delegatecalls the facets: =wheelDue= / =wheelStep= to the components,
-every other unknown selector to the venue.
+places.  Three contracts share one storage layout: the shell =BuckBasketEquity= (deposit, redeem,
+the treasury, views), the components facet =BuckBasketEquityWheel= (the wheel's steps), and the
+venue facet =BuckBasketUniswapV3= (the pools).  The shell delegatecalls the facets: =wheelDue= /
+=wheelStep= to the components, every other unknown selector to the venue.  A monetary desk, when
+there is one, is a separate contract beside it ([[#equity-desk][The Desk: Its Own Credit
+Holder]]).
+
+The rule the layout follows: *independent machines get independent accounts and independent
+wheels*.  Buck keys everything by address -- one signed balance, one lien, one limit, one relief
+quote per address -- so bookkeeping "sub-accounts" inside one contract are invisible to it, and
+it cannot hold one party within its own collateral.  The basket's depositors and the desk are two
+parties with two books of collateral, so they are two contracts, two BUCK accounts, two marked
+credits, and two work wheels (one engine, =BasketWheel=, instantiated per machine with only that
+machine's kinds, and its own reserve and callers).  A caller who wants both turned in one
+transaction batches the calls; nothing is shared to do it.
 
 ** The Account and the Credit
 
@@ -1479,8 +1489,8 @@ The basket is an ordinary BUCK account -- bound public and non-Carrying -- and a
 holder.  =openCredit= (governance, once) has it issue itself one [[#marked-credits][marked
 credit]]: the basket is its insurer, the premium is zero, and the face caps all it may ever draw
 at =K x face=.  Before anything that spends -- a deposit, an exit, every wheel step -- the basket
-marks the credit at its equity at the exit marks (plus the desk's book, when there is one), so
-Buck enforces =creditLimit(basket) = K x equity=.  The credit is activated, with one =Buck.mint=,
+marks the credit at its equity at the exit marks, and nothing else, so Buck enforces
+=creditLimit(basket) = K x equity= -- the depositors' equity.  The credit is activated, with one =Buck.mint=,
 at the first mark above zero.
 
 It never mints or burns.  Spending past its held BUCK (placing a position, buying TOKEN, paying
@@ -1496,11 +1506,10 @@ entry) and LOW (the lower -- their side of an exit).
 
 #+BEGIN_SRC text
 gross(mark)  = sum over pools (position value at mark + idle TOKEN at mark)
-equity(mark) = gross(mark) + signedBalance(basket) + reliefAccrued(basket) - deskBuck
+equity(mark) = gross(mark) + signedBalance(basket) + reliefAccrued(basket)
 #+END_SRC
 
-where =signedBalance= is negative by the lien (or positive by BUCK held, net of its fee), and
-=deskBuck= is the monetary desk's net position inside the shared account (0 without a desk).
+where =signedBalance= is negative by the lien (or positive by BUCK held, net of its fee).
 =liquidity= is what Buck lets the account spend -- held BUCK plus headroom under the limit.  Its
 target is the larger of 1% of the gross and enough that half the target covers two sigma of the
 daily net flow times =1 + K=, capped at 20% of the gross.
@@ -1561,29 +1570,50 @@ rebalance policy]], "The quorum turn detector"):
 With no director, the basket keeps its declared targets and trims or funds only beyond a plain
 weight band.
 
-** The Desk as a Sub-Account
+** The Desk: Its Own Credit Holder
+   :PROPERTIES:
+   :CUSTOM_ID: equity-desk
+   :END:
 
-=BuckBasketEquityOps= keeps the monetary desk's BUCK as explicit counters inside the shared
-account -- =monetaryBuckHeld= (bought and held: those BUCK repaid the lien on arrival) and
-=monetaryOutstanding= (issued, net of retired: selling spent the credit) -- so equity's BUCK is
-the account less that position.  Its issuance spends the basket's credit, at most what the
-account can spend beyond the liquidity target; its purchases book the BUCK that actually arrived
-(their fee on arrival is the desk's); and it keeps its own relief accumulator on its own net
-issuance, folded at every desk swap.  The components facet reads the desk's position by a
-self-call (=deskPosition=), since it runs its own code under delegatecall.
+The monetary desk (=MonetaryDesk=: the four quadrants, the bounds, the stabilizer seam;
+[[https://perry.kundert.ca/images/alberta-buck-operations.pdf][alberta-buck-operations.org]]) beside
+an equity basket is =EquityDesk=: its own contract, so its own account at Buck -- bound public and
+non-Carrying -- and its own self-issued marked credit, marked before every operation at its own
+net value: its TOKEN at the pools' low marks, plus its account and the relief accrued on it.  Its
+founding grant (=capitalizeMonetary=) is its own TOKEN, in its own contract, collateral for it
+alone.  It issues by spending its own credit, so Buck holds its lien within =K x= its own value;
+BUCK it buys repay that lien (their fee on arrival is its own); the relief on its lien is its own,
+collected before each operation, and melts its outstanding issuance.
+
+From the basket it reads two things: its equity, which sizes the desk's bounds (as the ops shell's
+NAV sized them), and its constituents, mirrored so the desk trades in the same pools through the
+same venue facet (the desk's fallback delegatecalls to it).  Nothing the desk holds or owes enters
+the basket's books, mark, or limit.  Its invoker is its own: =monetaryOperation= once per director
+epoch, from a =BasketWheel= carrying only the ops kind (pointed at the desk) or a keeper.
+
+(It was first built as a sub-account of the basket's one account, marked at the basket's equity
+/plus/ the desk's book.  The desk's founding grant then raised the depositors' limit, and the
+savings world levered its depositors to a lien of 6.3M on 5.8M of equity at =K = 0.75=.  The
+separation above is structural for that reason: two accounts, so Buck enforces each limit.)
 
 ** Invariants
 
-- E1: =equity = gross + signedBalance + reliefAccrued - deskBuck= (clamped at zero), at any mark.
-- E2: every issuance is within =K x equity(LOW)=: the credit is marked before any spend, and Buck
-  enforces the limit.
+- E1: =equity = gross + signedBalance + reliefAccrued= (clamped at zero), at any mark.
+- E2: every issuance is within =K x equity(LOW)= of the depositors alone: the credit is marked at
+  that equity, and nothing else, before any spend, and Buck enforces the limit.
 - E3: no margin calls: a K cut changes no lien; only the wheel's paced Trim repays.
 - E4: an exit takes no more than its fraction: in BUCK, at most its value at the LOW marks less
   the charge; in kind, exactly =f= of the positions and TOKEN with its lien share repaid; the
   remaining holders' share price is whole, to rounding.
-- E5: the wallet's TOKEN is backed: =token.balanceOf(basket) >= idleToken= (the desk's TOKEN is
-  held beside it, outside the equity books).
+- E5: the wallet's TOKEN is backed: =token.balanceOf(basket) >= idleToken=.
 - E6: the mark after an exit is the equity that stays, read after its positions are burned.
+
+And for the desk beside it:
+
+- D1: the desk spends only after a mark at its own net value, so its lien stays within =K x= that
+  value (Buck enforces it on the desk's own account).
+- D2: nothing the desk holds or owes enters the basket's books, mark or limit.
+- D3: the relief on the desk's lien is the desk's, and melts its outstanding issuance.
 
 * BUCK_K: Value Stabilization Controller
   :PROPERTIES:

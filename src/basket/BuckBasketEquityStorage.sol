@@ -38,20 +38,6 @@ interface IMarkedCredit {
     function markOf(uint256 tokenId) external view returns (uint256);
 }
 
-/// @notice The desk's book, as the shell reports it (BuckBasketEquityOps
-///         answers; the plain shell reports none).  A self-call, so the
-///         components facet -- which runs its own code under delegatecall and
-///         cannot see the shell's overrides -- reads the same numbers.
-interface IEquityDeskPosition {
-    /// @return buck  the desk's net BUCK inside the shared account (held
-    ///               less issued), plus its share of the accrued relief
-    /// @return value the desk's whole book at the TWAP (TOKEN and BUCK)
-    function deskPosition(uint256 relief, uint256 lien)
-        external view returns (int256 buck, int256 value);
-    /// @notice Assign the desk its share of relief just paid (self only).
-    function deskRelief(uint256 relief, uint256 lien) external;
-}
-
 /// @title BuckBasketEquityStorage -- the equity basket's books, appended to the
 ///        shared basket layout, and the valuation both of its contracts use.
 ///
@@ -71,16 +57,18 @@ interface IEquityDeskPosition {
 ///         The TOKEN books are explicit: the wallet (`idleToken`) and each
 ///         pool's liquidity (`liquidityOf`) are the basket's own counters,
 ///         never its balances or its V3 position.  Its BUCK is one signed
-///         account at Buck, shared with the monetary desk when there is one:
-///         equity's BUCK is that balance plus the relief accrued on it, less
-///         the desk's net position (`_desk`, a self-call the facet can make).
+///         account at Buck, the depositors' alone: equity's BUCK is that
+///         balance plus the relief accrued on it.  Nothing else spends from
+///         it -- a monetary desk is its own credit holder (`EquityDesk`),
+///         with its own account, mark and wheel -- so its limit is the
+///         depositors' K x equity and no one else's collateral.
 ///
-///         Invariants (the tests check E1, E4, E5 and E6 directly):
-///           E1  equity(mark) = gross(mark) + signedBalance + reliefAccrued
-///               - deskBuck, clamped at zero (`_equityS`)
-///           E2  every spend is preceded by a mark at equity(LOW) + the desk's
-///               book (`_markS` / `_markAt`), so Buck holds every issuance
-///               within K x that equity
+///         Invariants (the tests check E1, E2, E4, E5 and E6 directly):
+///           E1  equity(mark) = gross(mark) + signedBalance + reliefAccrued,
+///               clamped at zero (`_equityS`)
+///           E2  every spend is preceded by a mark at equity(LOW) and nothing
+///               else (`_markS` / `_markAt`), so Buck holds every issuance
+///               within K x the depositors' equity
 ///           E3  the lien moves only by the basket's own spends, BUCK it
 ///               receives, and relief collected: a K cut calls nothing back
 ///           E4  an exit takes at most its fraction: in BUCK, its value at
@@ -155,12 +143,6 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return IBuckHolder(address(buck));
     }
 
-    /// @dev The monetary desk's net BUCK inside the shared account, and its
-    ///      whole book (which backs its issuance in the mark).
-    function _desk(uint256 relief, uint256 lien) internal view returns (int256, int256) {
-        return IEquityDeskPosition(address(this)).deskPosition(relief, lien);
-    }
-
     // --- Valuation ----------------------------------------------------------- //
 
     uint8 internal constant MARK_TWAP = 0;
@@ -173,7 +155,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     struct Snap {
         IBuckBasketVenue.Marks[] m;
         uint256 k;
-        int256  buckEq;                  // equity's BUCK: the account + relief - the desk's
+        int256  buckEq;                  // equity's BUCK: the account + relief
         uint256 lien;                    // the basket's lien (0 when it holds BUCK)
         uint256 relief;                  // relief accrued on the lien, unpaid
         uint256 spend;                   // what the account can spend: held + headroom
@@ -193,8 +175,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         int256 signed = b.signedBalanceOf(address(this));
         s.lien   = signed < 0 ? uint256(-signed) : 0;
         s.relief = b.reliefOf(address(this));
-        (int256 deskBuck,) = _desk(s.relief, s.lien);
-        s.buckEq = signed + int256(s.relief) - deskBuck;
+        s.buckEq = signed + int256(s.relief);
         s.spend  = b.balanceOf(address(this));
     }
 
@@ -267,14 +248,12 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return g > 1e3 ? g : 1e3;                       // a floor tiny at any BUCK decimals
     }
 
-    /// @notice Mark the credit at the basket's equity (the exiters' LOW marks)
-    ///         plus the desk's book, activating it the first time the mark is
-    ///         above zero, then re-read what the account can spend.  Every verb
-    ///         and wheel step marks before it spends.
+    /// @notice Mark the credit at the basket's equity (the exiters' LOW
+    ///         marks), activating it the first time the mark is above zero,
+    ///         then re-read what the account can spend.  Every verb and wheel
+    ///         step marks before it spends (E2).
     function _markS(Snap memory s) internal {
-        (, int256 deskValue) = _desk(s.relief, s.lien);
-        int256 v = int256(_equityS(s, MARK_LOW)) + deskValue;
-        _markAt(v > 0 ? uint256(v) : 0);
+        _markAt(_equityS(s, MARK_LOW));
         s.spend = _bk().balanceOf(address(this));
     }
 

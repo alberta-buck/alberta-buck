@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
-import {BuckBasketEquityStorage, IEquityDirector, IEquityDeskPosition} from "./BuckBasketEquityStorage.sol";
+import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorage.sol";
 
 /// @title BuckBasketEquityWheel -- the equity basket's components, a facet.
 ///
@@ -85,13 +85,9 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         dayFlow = 0;
         lastDay = today;
         // The Jubilee relief on the lien: collected daily, so the share price
-        // (which counts it accrued) and the lien stay in step.  The desk's
-        // share of it goes to the desk's book.
-        int256 signed = _bk().signedBalanceOf(address(this));
-        if (signed < 0 && _bk().reliefOf(address(this)) > 0) {
+        // (which counts it accrued) and the lien stay in step.
+        if (_bk().signedBalanceOf(address(this)) < 0 && _bk().reliefOf(address(this)) > 0) {
             _bk().settleRelief();
-            uint256 r = uint256(_bk().signedBalanceOf(address(this)) - signed);
-            IEquityDeskPosition(address(this)).deskRelief(r, uint256(-signed));
         }
         address d = equityDirector;
         if (d != address(0)) { try IEquityDirector(d).observe() {} catch {} }

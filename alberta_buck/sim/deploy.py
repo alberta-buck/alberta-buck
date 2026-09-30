@@ -187,6 +187,7 @@ class Deployment:
     director_impl: str = "pairs"  # "pairs" (default) | "vrate"
     controller_impl: str = "direct"   # "direct" (default) | "shadow"  (WP-3a)
     observer: Any = None          # ShadowObserver (shadow controller on ops only)
+    desk: Any = None              # EquityDesk ("equity-ops": the desk, its own credit holder)
     equity_director: Any = None   # EquityTurnDirector (equity baskets)
     wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
     deposited_topic: bytes = DEPOSITED_TOPIC
@@ -322,7 +323,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # lien, BUCK payouts, a wallet its work wheel places.  Two facets:
         # the venue and the components; the shell emits the pro-rata
         # shells' Deposited / Redeemed, so the topics are theirs.
-        name = "BuckBasketEquityOps" if basket_impl == "equity-ops" else "BuckBasketEquity"
+        # "equity-ops" adds the monetary desk BESIDE the basket (EquityDesk,
+        # below): the basket itself is the same shell either way.
+        name = "BuckBasketEquity"
         basket = chain.deploy(name, *ctor)
         venue = chain.deploy("BuckBasketUniswapV3")
         chain.send(basket.functions.setVenue(venue.address), sender=gov)
@@ -349,7 +352,30 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # issue at K x face; 1e23 raw (1e17 BUCK) is no practical cap.
         idmod.bind_as_operator(chain, reg, basket.address, True, False, sender=deployer)
         chain.send(basket.functions.openCredit(credit.address, 10**23), sender=gov)
-    else:
+    desk = None
+    if basket_impl == "equity-ops":
+        # The monetary desk is its own credit holder beside the basket: its
+        # own contract, account at Buck, MARKED credit and invoker (the
+        # MonetaryKeeperAgent), trading in the basket's pools through the same
+        # venue facet.  Nothing it holds or owes enters the basket's mark.
+        # Its constituents are mirrored, and its policy and founding grant
+        # set, once the basket has its pools (the desk block below).
+        desk = chain.deploy("EquityDesk", buck.address, kctrl.address,
+                            basket.address, gov)
+        idmod.bind_as_operator(chain, reg, desk.address, True, False, sender=deployer)
+        chain.send(desk.functions.setVenue(venue.address), sender=gov)
+        chain.send(desk.functions.openCredit(credit.address, 10**23), sender=gov)
+        desk_union, seen = [], set()
+        for art in ("EquityDesk", "BuckBasketUniswapV3"):
+            abi, _ = load_artifact(art)
+            for e in abi:
+                key = (e.get("type"), e.get("name"),
+                       tuple(i.get("type") for i in e.get("inputs", [])))
+                if key not in seen:
+                    seen.add(key)
+                    desk_union.append(e)
+        desk = w3.eth.contract(address=desk.address, abi=desk_union)
+    if not credit_holder:
         chain.send(pool.functions.exec(
             buck.address, buck.encode_abi("setBasket", args=[basket.address])),
             sender=deployer)
@@ -368,8 +394,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     if controller_impl == "shadow" and basket_impl in ("ops", "equity-ops"):
         shadow_lambda = int(float(os.environ.get("SIM_SHADOW_LAMBDA", "0")) * E18)
         shadow_gamma = int(float(os.environ.get("SIM_SHADOW_GAMMA", "0")) * E18)
-        observer = chain.deploy("ShadowObserver", basket.address, gov)
-        chain.send(observer.functions.addStabilizer(basket.address, shadow_lambda),
+        # The desk is the stabilizer: the ops shell itself, or the EquityDesk
+        # beside an equity basket (its venue answers bvib from the same pools).
+        stab = desk if desk is not None else basket
+        observer = chain.deploy("ShadowObserver", stab.address, gov)
+        chain.send(observer.functions.addStabilizer(stab.address, shadow_lambda),
                    sender=gov)
         chain.send(observer.functions.setShadowLambda(shadow_lambda), sender=gov)
         chain.send(kctrl.functions.setObserver(observer.address), sender=gov)
@@ -518,7 +547,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                    reg, buck, credit, kctrl, basket, router, simlp, usdc,
                    erc20_abi, tok, dec,
                    basket_impl=basket_impl, venue=venue,
-                   controller_impl=controller_impl, observer=observer,
+                   controller_impl=controller_impl, observer=observer, desk=desk,
                    deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
@@ -774,9 +803,14 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             leg_bp  = int(os.environ.get("SIM_OPS_LEG_BP", "40"))
             pos_bp  = int(os.environ.get("SIM_OPS_POSITION_BP", "1000"))
             out_bp  = int(os.environ.get("SIM_OPS_OUTRIGHT_BP", "1000"))
-            chain.send(basket.functions.setMonetaryDirector(
+            # The desk: the ops shell itself, or the EquityDesk beside an
+            # equity basket, which first mirrors the basket's pools.
+            mon = desk if desk is not None else basket
+            if desk is not None:
+                chain.send(desk.functions.mirrorConstituents(), sender=gov)
+            chain.send(mon.functions.setMonetaryDirector(
                 director.address), sender=gov)
-            chain.send(basket.functions.setOpsParams(
+            chain.send(mon.functions.setOpsParams(
                 (leg_bp, pos_bp, out_bp, True)), sender=gov)
             # Founding reserves.  Without them the desk is inert in exactly
             # the regime it exists for: Q1/Q2 are TOKEN-funded and it may not
@@ -794,8 +828,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                 if amt <= 0:
                     continue
                 chain.send(tc.functions.mint(gov, amt))
-                chain.send(tc.functions.approve(basket.address, amt), sender=gov)
-                chain.send(basket.functions.capitalizeMonetary(i, amt), sender=gov)
+                chain.send(tc.functions.approve(mon.address, amt), sender=gov)
+                chain.send(mon.functions.capitalizeMonetary(i, amt), sender=gov)
             if verbose:
                 print(f"[deploy] monetary desk capitalized "
                       f"${cap_usd:,}/token across {len(tok)} tokens")
