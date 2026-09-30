@@ -328,6 +328,10 @@ ul.receipts { list-style: none; margin: .6rem 0 0; padding: 0; display: flex; fl
 .plot .line { stroke-width: 1.6; }
 .plot .grid { stroke: var(--line); stroke-width: 1; }
 .plot .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.plot .guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--muted);
+               pointer-events: none; }
+.plot .guide[hidden] { display: none; }
+.legend .key.at { color: var(--muted); font-variant-numeric: tabular-nums; }
 .plot .ylab, .plot .xlab {
   position: absolute; font: .68rem var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none;
 }

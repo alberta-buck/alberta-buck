@@ -34,6 +34,7 @@ ArrivingDMAgent = 0
 ExcursionArbAgent = 3
 ExcursionCreditArbAgent = 1
 UndertakingAgent = 1
+MonetaryKeeperAgent = 1     # turns the EquityDesk beside the basket (its own account and credit)
 ExternalDebtRetireeAgent = 10
 BasketWheelAgent = 1
 ShockAgent = 1             # the page's demand / supply shock buttons arm it

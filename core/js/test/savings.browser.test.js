@@ -67,6 +67,20 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
       "the savings world runs the equity basket");
     await nextDay();
     assert.ok(await page.locator("#panel-savings .chart path.line").count() > 10, "the charts draw");
+    const panelText = await page.textContent("#panel-savings");
+    for (const title of ["The basket's credit (BUCK)", "What the basket's wheel did", "The director's lean",
+                         "The desk's signal", "The desk's operations", "The desk's return", "The undertakings' return"]) {
+      assert.ok(panelText.includes(title), `the ${title} chart is on the page`);
+    }
+    assert.equal(await page.locator("#panel-savings .chart-grid.small").count(), 2,
+      "the director's lean and the commodities, one small chart per commodity");
+    // Hover: a guide at the nearest day, and the legend reads that day.
+    const plot = page.locator("#panel-savings .chart .plot").first();
+    const box = await plot.boundingBox();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    assert.match(await page.locator("#panel-savings .chart .legend").first().textContent(), /day \d+/,
+      "hovering reads the hovered day");
+    await page.mouse.move(0, 0);
 
     // Save: the basket's choice, retried a day at a time while every pool is
     // past the deposit guard (the world's first days move the pools a lot).

@@ -26,7 +26,8 @@ function niceStep(lo, hi, n = 3) {
 /** A chart: `series` [{label, color (a CSS colour or var), dash}], `fmt`
  *  for its axis and legend values, `ref` a y worth a guide line (1 for an
  *  index).  update(xs, ys) redraws: ys[k] the k-th series' values (null
- *  where it has none). */
+ *  where it has none).  The legend reads the latest day; hovering the plot
+ *  moves a guide to the nearest day and the legend reads that day. */
 export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = null, height = 130,
                             note }) {
   const legend = h("div", { class: "legend" });
@@ -36,8 +37,33 @@ export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = 
   const el = h("figure", { class: "chart" },
     h("figcaption", {}, h("span", { class: "chart-title" }, title), legend), plot,
     note ? h("div", { class: "hint" }, note) : null);
+  const guide = h("div", { class: "guide", hidden: true });
+  plot.append(guide);
+  let shown = { xs: [], ys: [] };
+  let hover = null;                     // the hovered index, or null: the latest
+
+  plot.addEventListener("pointermove", (e) => {
+    const { xs } = shown;
+    if (xs.length < 2) return;
+    const r = plot.getBoundingClientRect();
+    const x = xs[0] + ((e.clientX - r.left) / (r.width || 1)) * (xs[xs.length - 1] - xs[0]);
+    let lo = 0;
+    let hi = xs.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xs[m] < x) lo = m; else hi = m; }
+    hover = Math.abs(xs[lo] - x) <= Math.abs(xs[hi] - x) ? lo : hi;
+    guide.hidden = false;
+    guide.style.left = `${((xs[hover] - xs[0]) / (xs[xs.length - 1] - xs[0] || 1)) * 100}%`;
+    fillLegend(shown.ys);
+  });
+  plot.addEventListener("pointerleave", () => {
+    hover = null;
+    guide.hidden = true;
+    fillLegend(shown.ys);
+  });
 
   function update(xs, ys) {
+    shown = { xs, ys };
+    if (hover !== null && hover >= xs.length) hover = null;
     box.replaceChildren();
     for (const lab of plot.querySelectorAll(".ylab, .xlab, .nodata")) lab.remove();
     const vals = ys.flat().filter((v) => v !== null && Number.isFinite(v));
@@ -99,14 +125,18 @@ export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = 
   }
 
   function fillLegend(ys) {
-    legend.replaceChildren(...series.map((s, k) => {
+    const at = hover;
+    const keys = series.map((s, k) => {
       const col = ys[k] ?? [];
-      let last = null;
-      for (let i = col.length - 1; i >= 0; i--) if (col[i] !== null && Number.isFinite(col[i])) { last = col[i]; break; }
+      let v = null;
+      if (at !== null) v = Number.isFinite(col[at]) ? col[at] : null;
+      else for (let i = col.length - 1; i >= 0; i--) if (col[i] !== null && Number.isFinite(col[i])) { v = col[i]; break; }
       return h("span", { class: "key" },
         h("span", { class: `swatch${s.dash ? " dash" : ""}`, style: `border-color:${s.color}` }),
-        s.label, last === null ? null : h("span", { class: "num" }, ` ${fmt(last)}`));
-    }));
+        s.label, v === null ? null : h("span", { class: "num" }, ` ${fmt(v)}`));
+    });
+    if (at !== null && shown.xs[at] !== undefined) keys.unshift(h("span", { class: "key at" }, `day ${shown.xs[at]}`));
+    legend.replaceChildren(...keys);
   }
 
   update([], series.map(() => []));

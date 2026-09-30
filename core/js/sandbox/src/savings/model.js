@@ -39,6 +39,14 @@ export function newSid(rand = (n) => crypto.getRandomValues(new Uint8Array(n))) 
 
 const big = (v) => (v === null || v === undefined ? 0n : BigInt(v));
 const e18 = (v) => Number(big(v)) / 1e18;
+/** BUCK base units (6 decimals) as BUCK; null stays null (no source). */
+const bk = (v) => (v === null || v === undefined ? null : Number(big(v)) / 1e6);
+
+/** A growth from `a` to `b` over `days`, a year's worth (compounded). */
+export function annualized(a, b, days) {
+  if (!(a > 0) || !(b > 0) || !(days > 0)) return null;
+  return (b / a) ** (365 / days) - 1;
+}
 
 /** One frame, cut down to what the tab draws (a few dozen numbers). */
 export function row(f) {
@@ -60,6 +68,21 @@ export function row(f) {
     cycles: f.wh_sol_cycles ?? 0,
     utIssued: Number(f.ut_issued_open ?? 0) / 1e6,
     utAbsorbed: Number(f.ut_absorbed_open ?? 0) / 1e6,
+    // The equity basket's decisions and its credit (BUCK), and its day-0
+    // weights simply held (an index from 1): snapshot.py _eqsave_frame.
+    E: bk(sv.E), L: bk(sv.L), Q: bk(sv.Q),
+    hold: f.eq_hold ?? null,
+    lean: f.eq_lean ?? null, w: f.eq_w ?? null, decl: f.eq_decl ?? null,
+    eqSync: bk(f.wh_eq_sync), eqDeploy: bk(f.wh_eq_deploy), eqFund: bk(f.wh_eq_fund), eqTrim: bk(f.wh_eq_trim),
+    // The monetary desk (the EquityDesk): BUCK moved per quadrant, its book,
+    // its net value against its founding grant held, and its signal --
+    // BUCK's premium over its basket, % (the common mode, sign flipped).
+    dkQ: [1, 2, 3, 4].map((q) => bk(f[`dk_q${q}`]) ?? 0),
+    deskNav: bk(f.desk_nav), deskHold: bk(f.desk_hold),
+    deskHeld: bk(f.sh_held), deskOut: bk(f.sh_outstanding),
+    premium: f.mk_cm === undefined || f.mk_cm === null ? null : -Number(f.mk_cm) / 1e11,
+    // The undertakings' book, marked, against their opening book held.
+    utNw: bk(f.ut_nw), utHold: bk(f.ut_hold),
     shockBought: f.shk_bought_usd ?? 0,
     shockSold: f.shk_sold_usd ?? 0,
     shockActive: f.shk_active ?? 0,

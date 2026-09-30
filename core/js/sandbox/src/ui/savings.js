@@ -12,8 +12,8 @@ import { lineChart } from "./chart.js";
 import { fill, h, prefs } from "./dom.js";
 import { SimLink } from "../savings/link.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
-import { channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices, receiptWorth, row,
-         serverBase, tokenFor, usd } from "../savings/model.js";
+import { annualized, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
+         receiptWorth, row, serverBase, tokenFor, usd } from "../savings/model.js";
 
 const S1 = "var(--s1)";
 const S2 = "var(--s2)";
@@ -31,6 +31,10 @@ const jsonPref = (k, dflt) => {
 const f3 = (v) => v.toFixed(3);
 const f4 = (v) => v.toFixed(4);
 const dollars = (v) => `$${compact(v)}`;
+const bucks = (v) => compact(v);
+const pct1 = (v) => `${v.toFixed(1)}%`;
+const pct2 = (v) => `${v.toFixed(2)}%`;
+const signed = (v, f) => (v === null || v === undefined ? "–" : `${v >= 0 ? "+" : ""}${f(v)}`);
 const priceFmt = (v) => (v >= 1000 ? compact(v, 4) : v >= 10 ? v.toFixed(1) : v.toFixed(3));
 
 export function mountSavings(ctx) {
@@ -148,24 +152,56 @@ export function mountSavings(ctx) {
       note: "K steers the basket's BUCK price to 1; the BUCK/USDC pool says what a BUCK fetches." }),
     k: lineChart({ title: "K: credit per unit of insured value", fmt: f4, series: [{ label: "K", color: S3 }] }),
     index: lineChart({ title: "The savings index", ref: 1, fmt: f4, series: [
-      { label: "paid per BUCK saved", color: S1 }],
-      note: "What a saving is worth, in BUCK value, per BUCK deposited (the equity basket: its share "
-        + "price): 1 at the start, raised by the wheel's credits and the pools' harvest of the "
-        + "commodities' cycles." }),
+      { label: "paid per BUCK saved", color: S1 }, { label: "its commodities, held", color: S4, dash: true }],
+      note: "What a saving is worth, in BUCK value, per BUCK deposited (the basket's share price), against "
+        + "the basket's day-0 commodities simply held: the gap is what the basket's work has added -- "
+        + "the pools' fees, the wheel's captures, the director's timing -- or cost." }),
     wheel: lineChart({ title: "The work wheel (cumulative)", fmt: dollars, series: [
       { label: "to depositors", color: S1 }, { label: "to callers", color: S2 }, { label: "gas", color: S4 }],
       note: "Consistency cycles through TOKEN/USDC, TOKEN/BUCK and BUCK/USDC: the harvest reaches the depositors." }),
-    ops: lineChart({ title: "The undertakings' open books (BUCK)", fmt: (v) => compact(v), series: [
-      { label: "issued", color: S1 }, { label: "absorbed", color: S2 }] }),
+    ops: lineChart({ title: "The undertakings' open books (BUCK)", fmt: bucks, series: [
+      { label: "issued", color: S1 }, { label: "absorbed", color: S2 }],
+      note: "BUCK the undertakings have issued at a premium and not yet bought back, and BUCK bought at a "
+        + "discount and not yet sold back." }),
+    utRet: lineChart({ title: "The undertakings' return (BUCK)", fmt: bucks, series: [
+      { label: "their book now", color: S1 }, { label: "their opening book, held", color: S4, dash: true }],
+      note: "What the undertakings own less what they have drawn, against the commodities they started with "
+        + "simply held: the gap is what their operations have earned." }),
+    credit: lineChart({ title: "The basket's credit (BUCK)", fmt: bucks, series: [
+      { label: "equity", color: S1 }, { label: "lien", color: S2 }, { label: "liquidity", color: S3 }],
+      note: "The depositors' equity; the BUCK the basket has drawn (at most K times that equity) to pair "
+        + "its commodities in the pools; the BUCK it keeps ready for exits." }),
+    steps: lineChart({ title: "What the basket's wheel did (cumulative BUCK)", fmt: bucks, series: [
+      { label: "placed", color: S1 }, { label: "bought for the director", color: S2 },
+      { label: "trimmed", color: S3 }, { label: "fees collected", color: S4 }],
+      note: "Deploy pairs new deposits with BUCK in the pools; Fund buys the director's pick; Trim unwinds a "
+        + "position (the most overweight, or the director's pick) to refill liquidity; Sync collects fees." }),
+    deskOps: lineChart({ title: "The desk's operations (cumulative BUCK)", fmt: bucks, series: [
+      { label: "absorbed (Q1)", color: S1 }, { label: "retired (Q2)", color: S2 },
+      { label: "supplied (Q3)", color: S3 }, { label: "issued (Q4)", color: S4 }],
+      note: "Q1 buys cheap BUCK with the desk's reserve, Q3 sells it back when BUCK is dear: supply "
+        + "unchanged.  Q4 issues when BUCK stays dear, Q2 retires when it stays cheap." }),
+    deskSignal: lineChart({ title: "The desk's signal: BUCK over its basket (%)", ref: 0, fmt: pct2, series: [
+      { label: "premium (20-day)", color: S1 }],
+      note: "Above zero BUCK is dear, and the desk supplies or issues; below, cheap, and it absorbs or "
+        + "retires.  It acts only past a dead-band, and outright only after the push persists." }),
+    deskRet: lineChart({ title: "The desk's return (BUCK)", fmt: bucks, series: [
+      { label: "its book now", color: S1 }, { label: "its grant, held", color: S4, dash: true },
+      { label: "BUCK it holds", color: S2 }, { label: "BUCK it has issued", color: S3 }],
+      note: "Everything the desk owns less what it has drawn, against its founding grant of commodities "
+        + "simply held: the gap is what operating has earned.  Beside it, its inventory: never judge a "
+        + "desk by its return alone." }),
   };
+  const leanGrid = h("div", { class: "chart-grid small" });
+  S.lean = [];
   const commodityGrid = h("div", { class: "chart-grid small" });
   S.commodity = [];
 
   fill(panel,
     h("p", { class: "intro" }, "A whole Alberta Buck economy runs on a server: five years of real commodity ",
       "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and ",
-      "its work wheel, the undertakings, K, arbitrageurs pinning every TOKEN to its commodity, depositors ",
-      "and retirees.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
+      "its work wheel, the monetary desk and the undertakings, K, arbitrageurs pinning every TOKEN to its ",
+      "commodity, depositors and retirees.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
       "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.",
       ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', which runs in your browser on a "
         + "clock of its own."),
@@ -176,8 +212,15 @@ export function mountSavings(ctx) {
     h("div", { class: "cols savings-cols" },
       h("div", { class: "stack" }, worldCard, walletCard),
       h("div", { class: "stack" },
-        h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el,
-          charts.ops.el),
+        h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el),
+        h("h3", { class: "grid-title" }, "The basket: its credit, and what its wheel did"),
+        h("div", { class: "chart-grid" }, charts.credit.el, charts.steps.el),
+        h("h3", { class: "grid-title" }, "The director's lean: each commodity's weight, % (actual, leaned "
+          + "target, declared)"),
+        leanGrid,
+        h("h3", { class: "grid-title" }, "The desks: what they did, and what it earned"),
+        h("div", { class: "chart-grid" }, charts.deskSignal.el, charts.deskOps.el, charts.deskRet.el,
+          charts.ops.el, charts.utRet.el),
         h("h3", { class: "grid-title" }, "Commodities: the real price, the TOKEN/USDC pool, and via BUCK"),
         commodityGrid)));
 
@@ -204,6 +247,8 @@ export function mountSavings(ctx) {
     S.holdings = null;
     S.commodity = [];
     commodityGrid.replaceChildren();
+    S.lean = [];
+    leanGrid.replaceChildren();
     S.base = serverBase({ param: q.get("sim"), configured: ctx.simServer, saved: prefs.get("savings:server", ""),
                           location });
     serverIn.value = S.base;
@@ -367,6 +412,9 @@ export function mountSavings(ctx) {
     S.commodity = S.info.tokens.map((t) => lineChart({ title: t.symbol, fmt: priceFmt, height: 100, series: [
       { label: "real", color: S4, dash: true }, { label: "TOKEN/USDC", color: S1 }, { label: "via BUCK", color: S2 }] }));
     commodityGrid.replaceChildren(...S.commodity.map((c) => c.el));
+    S.lean = S.info.tokens.map((t) => lineChart({ title: t.symbol, fmt: pct1, height: 90, series: [
+      { label: "actual", color: S1 }, { label: "leaned", color: S2 }, { label: "declared", color: S4, dash: true }] }));
+    leanGrid.replaceChildren(...S.lean.map((c) => c.el));
     fill(tokenSel, h("option", { value: "hint" }, "the basket's choice"),
       S.info.tokens.map((t, i) => h("option", { value: String(i) }, t.symbol)));
   }
@@ -391,6 +439,12 @@ export function mountSavings(ctx) {
       stat("Basket", `${last.bv.toFixed(4)} BUCK`, "What the basket costs in BUCK (K steers it to 1)"),
       stat("K", last.k.toFixed(4)),
       stat("Savings index", last.D === null ? "–" : last.D.toFixed(4), "Paid per BUCK saved, in BUCK value"),
+      stat("A year", signed(yearly(rows), (v) => `${(v * 100).toFixed(2)}%`),
+        "The savings index's growth, compounded to a year"),
+      stat("Over holding", last.D === null || !last.hold ? "–" : signed(last.D / last.hold - 1, (v) => `${(v * 100).toFixed(2)}%`),
+        "The savings index against the basket's day-0 commodities simply held"),
+      stat("Desk", last.deskNav === null || last.deskHold === null ? "–"
+        : signed(last.deskNav - last.deskHold, bucks), "The monetary desk's book against its grant held, BUCK"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
       stat("Pace", last.pace > 0 ? `${(1 / last.pace).toFixed(1)} s/day` : "–"),
       stat("Prices", !S.info ? "–" : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
@@ -401,7 +455,19 @@ export function mountSavings(ctx) {
     const xs = rows.map((r) => r.day);
     charts.buck.update(xs, [rows.map((r) => r.bu || null), rows.map((r) => r.bv || null)]);
     charts.k.update(xs, [rows.map((r) => r.k || null)]);
-    charts.index.update(xs, [rows.map((r) => r.D)]);
+    charts.index.update(xs, [rows.map((r) => r.D), rows.map((r) => r.hold)]);
+    charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
+    charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim),
+      rows.map((r) => r.eqSync)]);
+    charts.deskSignal.update(xs, [rows.map((r) => r.premium)]);
+    charts.deskOps.update(xs, [0, 1, 2, 3].map((q) => rows.map((r) => r.dkQ[q])));
+    charts.deskRet.update(xs, [rows.map((r) => r.deskNav), rows.map((r) => r.deskHold), rows.map((r) => r.deskHeld),
+      rows.map((r) => r.deskOut)]);
+    charts.utRet.update(xs, [rows.map((r) => r.utNw), rows.map((r) => r.utHold)]);
+    S.lean.forEach((c, i) => {
+      const at = (v) => (v && v[i] !== undefined ? v[i] / 100 : null);
+      c.update(xs, [rows.map((r) => at(r.w)), rows.map((r) => at(r.lean)), rows.map((r) => at(r.decl))]);
+    });
     charts.wheel.update(xs, [rows.map((r) => r.credited), rows.map((r) => r.callers), rows.map((r) => r.gasUsd)]);
     charts.ops.update(xs, [rows.map((r) => r.utIssued), rows.map((r) => r.utAbsorbed)]);
     S.commodity.forEach((c, i) => {
@@ -511,6 +577,14 @@ export function mountSavings(ctx) {
   const choice = (last) => chooseIndex(S.holdings?.hint, last.weights, devs(), MAX_DEVIATION_BP);
 
   const pct = (x) => h("span", { class: x >= 0 ? "good" : "bad" }, `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`);
+
+  // The savings index's growth, compounded to a year, from its first day.
+  const yearly = (rows) => {
+    const first = rows.find((r) => r.D !== null && r.D > 0);
+    const last = rows[rows.length - 1];
+    if (!first || !last || last.D === null || last.day - first.day < 30) return null;   // too short to say
+    return annualized(first.D, last.D, last.day - first.day);
+  };
 
   S.activate = () => {
     if (S.started) return;

@@ -9,8 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { BASKET, DIRECTOR, ERC20, POOL, RECEIPT } from "../sandbox/src/savings/abi.js";
-import { channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices, receiptWorth, row,
-         serverBase, tokenFor } from "../sandbox/src/savings/model.js";
+import { annualized, channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices, receiptWorth,
+         row, serverBase, tokenFor } from "../sandbox/src/savings/model.js";
 
 const loc = (href) => new URL(href);
 
@@ -48,6 +48,31 @@ test("a frame cut down to what the tab draws", () => {
   assert.equal(p.ref, 2);
   assert.equal(p.usdc, 2.01);
   assert.ok(Math.abs(p.viaBuck - 1.9 * 1.05) < 1e-12);
+});
+
+test("a frame's basket and desks: decisions in BUCK, books against holding, the desk's signal", () => {
+  const r = row({ day: 40, sv: { E: "5000000000000", L: "3000000000000", Q: "100000000000", D: 1.01 },
+                  eq_hold: 1.004, eq_lean: [3400, 3300, 3300], eq_w: [3333, 3333, 3334], eq_decl: [3333, 3333, 3334],
+                  wh_eq_deploy: "2500000000", wh_eq_trim: 750_000_000, dk_q1: "1000000", dk_q4: 4_000_000,
+                  desk_nav: "2000000000000", desk_hold: "1990000000000", sh_held: 1_000_000, sh_outstanding: 4_000_000,
+                  mk_cm: -191_837_923_414, ut_nw: 7_000_000, ut_hold: 6_500_000 });
+  assert.deepEqual([r.E, r.L, r.Q], [5_000_000, 3_000_000, 100_000]);
+  assert.equal(r.hold, 1.004);
+  assert.deepEqual(r.lean, [3400, 3300, 3300]);
+  assert.deepEqual([r.eqDeploy, r.eqFund, r.eqTrim, r.eqSync], [2500, null, 750, null]);
+  assert.deepEqual(r.dkQ, [1, 0, 0, 4]);
+  assert.deepEqual([r.deskNav, r.deskHold, r.deskHeld, r.deskOut], [2_000_000, 1_990_000, 1, 4]);
+  assert.ok(Math.abs(r.premium - 1.918) < 1e-3, "the common mode below par: BUCK at a premium");
+  assert.deepEqual([r.utNw, r.utHold], [7, 6.5]);
+  const bare = row({ day: 1 });
+  assert.deepEqual([bare.hold, bare.deskNav, bare.premium, bare.utNw], [null, null, null, null],
+    "no source, no number (a pro-rata world draws nothing)");
+});
+
+test("a growth compounded to a year", () => {
+  assert.ok(Math.abs(annualized(1, 1.01, 90) - (1.01 ** (365 / 90) - 1)) < 1e-12);
+  assert.equal(annualized(1, 1.01, 0), null);
+  assert.equal(annualized(0, 1, 30), null);
 });
 
 test("a receipt pays the TOKEN side of its claim (BuckBasketProRata._redeem)", () => {
