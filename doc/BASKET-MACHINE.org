@@ -1,0 +1,2195 @@
+#+TITLE: Two machines for the equity basket: a shared filter bank, and a response that deposits cannot stop
+#+AUTHOR: Perry Kundert (design owner)
+#+DATE: 2026-10-01
+#+OPTIONS: ^:nil toc:2 num:t
+
+| Author       | Perry Kundert (design owner)                                                                                  |
+| Date         | 2026-09-30                                                                                                    |
+| Status       | Draft. Approved 2026-09-30. Refinements below were raised 2026-10-01 and are not ruled.                       |
+| Branch       | =feature/carry-convexity=                                                                                     |
+| Repository   | =/home/perry/src/alberta-buck=                                                                                |
+| Working copy | =doc/BASKET-MACHINE.org= is the copy to edit. This markdown matches it as of the commit that introduced both. |
+
+* Overview
+
+The equity basket is one Buck credit holder (=BuckBasketEquity=) and the
+monetary desk is a second (=EquityDesk=). Each has its own account and its
+own marked =BuckCredit=. The wheel paper describes a work wheel per machine.
+What this tree actually deploys is one wheel. =alberta_buck/sim/deploy.py=,
+for =equity= and =equity-ops=, deploys one =BasketWheel=, then =setWheel=
+and =setEquity= on the basket. It never deploys a second wheel and never
+calls =setOps= on =EquityDesk=. =EquityDesk= has no wheel. The desk runs
+because =MonetaryKeeperAgent= calls =monetaryOperation=
+(=alberta_buck/sim/director_agent.py=).
+
+What the two machines also do not have is one signal. The basket's turn
+detector (=EquityTurnDirector=) and the desk's common-mode reading
+(=PairsRebalanceDirector.commonMode= / =monetaryEffort=, the sim's =mk_cm=)
+are two filter banks, updated by two different callers, and neither answers
+the other's question.
+
+On the basket side the response is starved. =deposit= books a TOKEN deposit
+as =idleToken= and does not mint a position. =_fundPlan= and =_trimPlan=
+then return =(NONE, 0)= while any pool's idle TOKEN is above the grain.
+Deploy is not under that veto: it is due when that pool's idle TWAP value
+exceeds the grain, and it can clear the idle by at most =swapCapBp= (1% of
+pool BUCK depth) per step. Fund and Trim therefore do not run on a basket
+that is still receiving deposits, including a leg the leash has already
+released. Section 14 of =doc/BASKET-EQUITY.org= records the savings world
+placing 1.49M BUCK of deposits in 45 days with Fund and Trim never once due,
+and with legs past the 30% leash (cbBTC 13.8% vs 6%, PAXG 15.3% vs 8%, LABR
+19.0% vs 24%).
+
+This design splits the work into two machines, and names the contract
+boundary between them.
+
+Machine A is the signal. It samples pool TWAP ticks once a day, keeps one
+differential ladder per leg and a separate common-mode ladder, and publishes
+readings. It holds no TOKEN, no LP, and no BUCK, and it does not set =K=.
+Machine B is the basket's response. It reads those per-leg readings plus how
+far each pool's response weight sits from its leaned target, and it does one
+paced action: sell one pool and buy another, sell only, buy only, or hold.
+The step is specified below as balance deltas. A buy draws credit headroom
+under =K= times the mark and mints liquidity on the existing full-range
+position. A sell unwinds liquidity and sells TOKEN; the BUCK that comes out
+is measured as the increase in =balanceOf=. Idle TOKEN is inventory that
+action may use. It is not a state that disables the machine.
+
+The credit mark is a third, smaller step. A Respond that trades marks on the
+opening snap, then again from a new =_snap()= after the sell is booked, and
+again from a new =_snap()= after the buy is booked. A second =_markS= on the
+opening snap is not a re-mark: =s.m= and =s.lien= stay at their pre-trade
+values, and =_markS= refreshes only =s.spend=. A Respond with nothing to
+trade marks when =|equity(LOW) - markOf| > grain=. The owner's equity is
+"the total value of all TOKEN and BUCK in all the pools, minus the BUCK
+issued into existence against the basket's BuckCredit NFT." The code's
+=_equityS= is wider than that sentence. The difference (idle wallet TOKEN,
+the wallet's BUCK, relief, owed fees, LOW versus TWAP) is written down below
+as a decision. Including idle TOKEN in the mark is a confirmation of today's
+=_equityS=, not a new formula.
+
+* Background & Motivation
+
+** What is built
+
+=BuckBasketEquity= is the shell. It is not proxied. =setEquityWheel=,
+=setWheel=, and =setEquityDirector= replace the facet, the wheel, and the
+director. They do not replace the shell. =BuckBasketEquityWheel= is the
+components facet, reached by delegatecall for =wheelDue= / =wheelStep=.
+Kinds, fixed in =EquityKind._equityOf= (=src/wheel/UpkeepKinds.sol=), are
+Daily (0), Sync × N (1), Deploy × N (2), Fund (3), Trim (4): =2N + 3= slots.
+=WorkWheel.tick= walks them round-robin and skips a slot that is not due. A
+bare revert inside =_run= aborts the tick without advancing the cursor; the
+try/catch lives in the kind, not in =tick=.
+
+=BasketWheel='s base order is the slot order (=src/wheel/BasketWheel.sol=):
+Compute, Director, Sweep, Ops, Equity, then Arb. A kind whose target is
+unset has no slots. On the equity deployment Ops is unset, so =OpsKind=
+contributes zero slots. The equity basket has no =monetaryOperation=; the
+shell's fallback delegatecalls the venue and reverts, and =OpsKind._run=
+swallows that revert. =BasketWheelAgent= calls
+=setOps(d.basket, d.director)= only when the kinds list contains ="ops"=
+(=alberta_buck/sim/basket_wheel_agent.py=). The equity wheel's kinds list
+does not.
+
+=EquityTurnDirector= is a separate contract the basket names with
+=setEquityDirector=. It holds no balances. The basket's Daily step calls
+=observe()=; anyone else may too. The desk does not call it and does not
+read =mayTrim= / =mayFund=.
+
+=EquityDesk= inherits =MonetaryDesk= and is its own credit holder
+(=doc/DESK-LP-RESERVE.org= states the same; =doc/BASKET-EQUITY.org= §13.8
+recorded an earlier mixin shape, =BuckBasketEquityOps=, which is not in this
+tree). =monetaryOperation= requires =IMonetaryDirector.epochNow()= and
+stores =lastMonetaryEpoch = e + 1= before it reads =monetaryEffort()=
+(=src/basket/MonetaryDesk.sol=). Zero effort reverts =NoAdvice=. That effort
+is produced today by =PairsRebalanceDirector._updateMonetary=, from a ladder
+of =log(basketValueInBuck)= against par. The sim snapshots that rung as
+=mk_cm=. =MonetaryKeeperAgent.act= reads
+=d.director.functions.commonMode(2)=, not =monetaryDirector=.
+=DirectorKeeperAgent= does not poke equity baskets. The keeper pokes the
+pairs director itself; the comment dated 2026-09-30 records that before that
+poke the equity desk read an unsampled director and got =NoAdvice= every
+day.
+
+=MonetaryDesk= is the mixin of =EquityDesk= and of the pro-rata ops basket
+(=BuckBasketOps=). Editing =monetaryOperation= couples both. The desk is
+re-pointed through an adapter that implements today's =IMonetaryDirector=.
+The mixin is not edited.
+
+** Why rebalancing does not run
+
+=_fundPlan= (=BuckBasketEquityWheel=) returns =(NONE, 0)= when
+=_anyTokenWaiting= is true: any pool with =_tokenValue(s, i) > _grainS(s)=.
+=_grainS= is =gross(TWAP) * grainPpm / 1e6=, and =grainPpm= is 100, so 0.01%
+of gross, with a floor of =1e3= raw units. =_trimPlan= returns none on the
+same test, and also when =_fundPlan= itself returns a pool. =mayTrim= is
+consulted only after both vetoes, inside the loop that picks a pool. A leg
+past the leash never gets that far while any idle TOKEN exceeds the grain.
+Deploy is not inside that veto.
+
+The veto stays closed for three reasons, all in the current facet:
+
+1. =deposit= (=BuckBasketEquity.deposit=) does =idleToken[idx] += amount=
+   for TOKEN and then =_markS=. It does not mint. A depositor population
+   keeps some pool over the grain on most days (=doc/BASKET-EQUITY.org=
+   §14.1). The mark already includes the deposit, because =_grossS= reads
+   =idleToken= from storage and =_markS= runs after the increment.
+2. Deploy is paced. =_deploy= pairs pool =i='s idle TOKEN with that pool's
+   pro-rata share of =_usableS= (spend above the liquidity target) and, if
+   still short of BUCK, sells TOKEN of at most =_swapCap= =
+   =depth * swapCapBp / 10000= (100 bp, 1% of the pool's virtual BUCK depth,
+   all LPs). =positionMint= takes the scarcer side (=_liquidityForAmounts=
+   is the min of the two amounts; one side zero returns 0 liquidity). A
+   deposit that is large against its pool stays above the grain for many
+   steps.
+3. Sync writes fee TOKEN back into =idleToken= (=_sync=:
+   =idleToken[i] += t=). Fund does the same on purpose: =_fund= swaps half
+   the planned BUCK for TOKEN and leaves it in =idleToken= for a later
+   Deploy, which re-closes the gate. Trim can too: TOKEN that =monetaryLeg=
+   does not sell is added back to =idleToken=.
+
+There is a second ordering even after the wallet is empty. While Fund has a
+plan, Trim does not run. A basket with spare credit and a weight gap funds
+and does not trim. The wheel paper's sentence that a leg more than 30% off
+its declared weight trades regardless (=alberta-buck-ethereum-wheel.org=,
+"The director") is true of =EquityTurnDirector.mayTrim= only. It is not true
+of =_trimPlan=.
+
+Section 7 of =doc/BASKET-EQUITY.org= is the prototype, where the same idea
+is named "settled": Rebalance is due only when nothing worth placing waits
+in the wallet. The Solidity gate is the descendant of that rule. It is the
+rule this design removes. Section 14.2 mitigations 1 and 2 (a per-pool gate,
+and letting the leash through) are a patch to that rule. They are not this
+design. Mitigation 4, placing a deposit's value toward the leaned targets,
+is adopted below as part of the response, with the signal gate kept.
+
+** Why the signal is not already shared
+
+=alberta-buck-ethereum-wheel.org=, "One filter bank, two modes", splits one
+vector of log prices:
+
+#+begin_example
+differential:  c_i - mean(c)        which commodity is rich against which
+common:        log(basket in BUCK)  what the whole basket costs, against par
+#+end_example
+
+The differential mode is the director's signal. The common mode is the
+desk's signal and the K controller's process variable. The same section, and
+=PairsRebalanceDirector.commonMode=, record why the common mode is not the
+mean of the legs: an equal-weighted mean of log moves drifted from the
+basket by +1,000 to +1,700 bp over two years (=doc/CONVERGENCE.org= 5.1,
+cited in that function's notice). The common mode is a ladder of
+=basketValueInBuck()= against par. It is not =equity()=.
+
+The two ladders are not one window vector. =EquityTurnDirector= uses
+=[5, 10, 20, 40, 80, 160, 1280]=, last rung the anchor.
+=PairsRebalanceDirector.WINDOWS= is =[5, 10, 20, 40, 80, 160, 320]=. Index 2
+is 20 on both, which is why the deployed measuring rung matches. Sharing the
+array would retune every other common-mode EMA, and 1280 is not the common
+mode's long window.
+
+=EquityTurnDirector.observe= implements only the differential half, as a
+deviation from the legs' mean. It has no =basketValueInBuck= ladder, no
+deadband, and no persistence counter. Its =turned= is a quorum of velocities
+toward the anchor. The desk must not use that test for its outright
+quadrants. The wheel paper ("The four quadrants") and
+=PairsRebalanceDirector._updateMonetary= both say persistence is a duration
+past the leash, because a velocity test changes sign on noise and, in the
+earlier model, never once reported "persisting", leaving Q2 and Q4 inert.
+
+So the existing director is the basket's half of the filter bank. It is not
+the machine both consumers can read. The desk's half is a different
+contract, with a different window vector, poked by the keeper on equity-ops
+(and by =DirectorKind= on a pro-rata wheel). It still also computes a
+pairwise differential the equity basket does not use.
+
+* Goals & Non-Goals
+
+** Goals
+
+- Document the machines that exist, including the starvation transition,
+  before describing the ones proposed.
+- One signal contract, read by the basket per leg and by the desk on the
+  common mode, matching the paper's two modes without collapsing the two
+  turn tests into one boolean.
+- A basket response that sells, buys, or transfers weight in one paced step,
+  written as balance deltas, sized by the expressions in §5, and that treats
+  a deposit as equity and as inventory.
+- Recompute equity from prices and write the mark on the rule in §6, so
+  headroom tracks the book, including on a price move that does not trade.
+- Remove the global idle-TOKEN veto. A deposit or a newly minted position
+  increases what the response can do. It cannot switch the response off.
+- Keep one credit holder for the basket, one for the desk, and none for the
+  signal. Keep the no-margin-call rule. Do not move =K= into the signal.
+
+** Non-goals
+
+- Redesigning the desk's four quadrants, its three bounds (=maxLegBp= 40,
+  =maxPositionBp= 1000, =maxOutrightBp= 1000, =enabled= false until
+  =setOpsParams=), or its book (=monetaryBuckHeld=, =monetaryTokenHeld=,
+  =monetaryOutstanding=).
+- A new AMM, or the better-route swap (TOKEN/USDC then BUCK/USDC). That
+  route is named in =doc/BASKET-EQUITY.org= §13.8 departure 2 as not built.
+  Pacing stays on the basket's own pools, capped, with the wheel's existing
+  arbitrage re-pinning them between steps.
+- Changing redemption, the 25% treasury cut, the entry charge, or Jubilee
+  relief.
+- Changing =ArbKind='s cycle or its credit call. =creditDepositors=
+  (=BuckBasketEquity.creditDepositors=) still does =idleToken[i] += amount=.
+  Its comment says Deploy places that TOKEN. After Deploy is gone the
+  capture is response inventory and the response may sell it out of the pool
+  it was captured in. "Arb unchanged" means the kind's code, not the pool
+  the TOKEN ends in.
+- Fitting Bertram thresholds. Quorum stays 4 of 6 and =leashBp= stays 3000,
+  both ruled by the owner on 2026-09-30. This design does not retune them.
+  The band-versus-leash rule is the one in §5.
+- Starting, restarting, or retargeting experiments E2--E4, including the
+  equity twins running outside this worktree. This document authorizes no
+  campaign.
+
+* Proposed Design
+
+Three contracts after this ships, and no fourth credit holder. No second
+wheel.
+
+| Contract                                              | Holds                                              | Decides                                 | Advanced by                                                                                                                                                                                |
+|-------------------------------------------------------+----------------------------------------------------+-----------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Signal (evolved =EquityTurnDirector=, new deployment) | Ladder state only. Two window vectors.             | Nothing about trades or =K=             | =observe()=, idempotent per day. Callers: =SampleKind= on the one =BasketWheel= when a signal address is set; =MonetaryKeeperAgent= immediately before =monetaryOperation=; Daily; anyone. |
+| =BuckBasketEquity= + wheel facet                      | Depositor TOKEN, LP, one marked credit             | The response: sell, buy, transfer, hold | The one =BasketWheel= =deploy.py= deploys (=EquityKind=)                                                                                                                                   |
+| =EquityDesk=                                          | The desk's TOKEN, held BUCK, its own marked credit | The four quadrants, unchanged           | =MonetaryKeeperAgent= calls =monetaryOperation=. This design does not add a desk wheel.                                                                                                    |
+
+=PairsRebalanceDirector= stays in the tree. The pro-rata basket and any cell
+still pointed at it keep using it. An equity-ops cell stops using it as the
+desk's signal source once =setMonetaryDirector= points at the adapter. It is
+not deleted by this design. Cells that have not re-pointed keep the keeper's
+=pokeAll= of the pairs director. Re-pointed equity-ops cells stop that poke.
+
+** Contract boundary
+
+The owner's suggestion is a third wheel-based contract whose only job is to
+look for signals in the pricing noise, which both the desk and the basket
+read. Evaluated against the code, the suggestion is right about the contract
+and wrong about a private wheel.
+
+It is right about the contract because the two readings already live in two
+contracts, and the basket's contract is missing the reading the desk uses.
+Extending =EquityTurnDirector= and deploying that new bytecode at its own
+address gives one sample and two views, without forking a second
+differential ladder and without leaving the desk on
+=PairsRebalanceDirector=. A "satellite the desk is also allowed to read"
+would mean pointing =monetaryDirector= at today's =EquityTurnDirector=. That
+contract cannot answer cheap/dear: it never reads =basketValueInBuck=, and
+its =turned= is the velocity quorum the desk's outright quadrants were built
+to avoid.
+
+It is wrong about a private wheel because =observe= is already
+permissionless and idempotent per day, and the catch-up is closed form
+(=e' = x + (e - x) q^n=, gap capped at 3650). The sample captures nothing,
+so a third =WorkWheel= would need a third reserve to pay a caller, or it
+would not be called. =DirectorKind= already shows the pattern the basket
+side uses: a slot on an existing wheel calls a contract that holds no funds,
+and =_run= try/catches the call the way =DirectorKind= try/catches =poke=.
+The signal gets one =SampleKind= slot on the one =BasketWheel=, placed after
+=ArbKind= so arbitrage triangle indexes do not move, and only when a signal
+address is set. An unset signal adds zero slots, the existing "unset kind
+has no slots" rule.
+
+The desk side has no wheel to put a slot on. =deploy.py= does not deploy
+one, and =EquityDesk= is not an =OpsKind= target. =MonetaryKeeperAgent=
+calls =signal.observe()= and then =monetaryOperation=. That is the sample. A
+day on which the basket wheel is idle is still sampled when the keeper runs,
+and =observe='s catch-up repairs a gap in one call, which is the property
+the wheel paper states under "Time without a scheduler." The signal contract
+holds no reserve and no credit.
+
+What the signal owns:
+
+- The daily sample of each constituent's TWAP tick, oriented as BUCK per
+  TOKEN (=EquityTurnDirector._tick=, the same orientation as today).
+- Per leg, the differential ladder on windows
+  =[5, 10, 20, 40, 80, 160, 1280]=: deviation from the mean, seven EMAs,
+  seven velocities, the 1280-day anchor, the excursion, the vote count,
+  =turned= / =running=.
+- The common-mode ladder on its own windows =[5, 10, 20, 40, 80, 160, 320]=,
+  copied from =PairsRebalanceDirector.WINDOWS=. EMAs of
+  =log(basketValueInBuck())= against par, the measuring rung, the deadband
+  comparison, the persistence counter. The two vectors are not aliased.
+  Index 2 is 20 on both by coincidence.
+- The sample clock (=lastDay=) and the published views below. The signal's
+  day is =uint32(block.timestamp / 1 days)=, the day =observe= already uses.
+
+What the signal must not own:
+
+- TOKEN, LP, BUCK, a =BuckCredit=, a mark, or =K=. No =openCredit=, no
+  =transfer=, no approval.
+- =idleToken=, =liquidityOf=, the lien, or the response's step size in BUCK.
+  It publishes strength (vote count, excursion, common-mode magnitude). The
+  consumer sizes the trade.
+- The desk's quadrant. =kappa= and =capBpPerEpoch= live on the adapter, not
+  on the signal and not inside =MonetaryDesk=. The basket's lean and leash
+  live on the basket. Today =mayTrim=, =mayFund=, =targetsBp=, and
+  =_leashed= live inside =EquityTurnDirector= and read =weightsBp()= and
+  =targetWeightBp= off the basket. They move to the basket. The new basket
+  calls =IFilterBank= and does not call =mayTrim= / =mayFund=. The old
+  deployment keeps those three functions so a basket still pointed at it
+  does not break.
+- The decision that the common mode has "turned" in the velocity-quorum
+  sense. The desk's reverting/persistent bit stays a duration past the
+  leash, computed in =observe= from the common-mode rung, and published as a
+  flag. It is not =EquityTurnDirector.turned=.
+
+The basket pulls the sample out of Daily's exclusive ownership. Daily may
+still call =observe= (it is idempotent). It must not be the only caller. The
+basket reads =running=, =votes=, and =excursion=, and applies the leash and
+the lean itself, because both compare against the basket's weights and its
+declared targets.
+
+The desk reads the common-mode view through an adapter that implements
+today's =IMonetaryDirector=: =epochNow()= is the signal's day, and
+=monetaryEffort()= is built from =monetaryReading()= with the adapter's
+=kappa= and cap. =MonetaryDesk.monetaryOperation= is not edited. Its
+quadrant branches stay. The desk does not read =targetsBp=, =mayFund=,
+=mayTrim=, or per-leg =turned=.
+
+=epochNow= on =RebalanceDirectorBase= is
+=(block.timestamp - genesisTime) / epochSeconds=. A calendar-day sample
+equals that epoch only while =epochSeconds= is 86400 and =genesisTime= is
+aligned to a day boundary. Deployed pairs directors use =epochSeconds= 86400
+(=deploy.py=). The adapter does not assume the equality in general. Its
+=epochNow= is the signal's day, the same clock =observe= uses. This design
+does not =setOps= the equity desk. If a later deployment does, that
+=OpsKind= epoch source is the adapter, so the desk does not carry two
+clocks. Leaving =opsDirector= on the pairs director while =monetaryDirector=
+is the adapter is the two-clock bug.
+
+=basketValueInBuck()= on the venue (=BuckBasketUniswapV3.basketValueInBuck=)
+is the declared basket amounts times TWAP prices, the controller's process
+variable, centred near =1e18= at par. It is not =equity()=. Marking the
+monetary signal off equity would fold the lien into cheap/dear: a draw would
+look like a move in BUCK. The common mode stays =log(basketValueInBuck)=
+against par, in tick·1e9, the same =_logTick1e9= the pairs director uses.
+Positive =cm= means the basket costs more BUCK, so BUCK is cheap. The
+shell's fallback already sends =basketValueInBuck= to the venue, so the
+signal reads it from the basket address the same way
+=PairsRebalanceDirector= reads =IBasketValue=.
+
+** 1. Current signal: =EquityTurnDirector=
+
+Purpose.* Once a day, turn each leg's TWAP into a lean and two gates.
+
+Callers: the basket's Daily step (=_daily= calls =IEquityDirector.observe=),
+or anyone. The gates are consulted by =_mayFund= / =_mayTrim= during Fund
+and Trim planning. The director never moves tokens.
+
+State it owns.* =primed=, =lastDay=, and per leg =deviation=, =_ema[7]=,
+
+=_vel[7]=. Parameters: =windows = [5, 10, 20, 40, 80, 160, 1280]= days (last
+is the anchor), =quorum = 4=, =tiltWad = 1e18=, =leashBp = 3000=. No
+balances.
+
+Inputs and the mark.* For each pool, =IV3Observe.observe= over
+
+=basket.twapWindow()=; on failure, =slot0='s spot tick. The tick is negated
+when =buckIsToken0= so the sign is BUCK per TOKEN. The input is a TWAP tick
+when the pool can report one, otherwise spot. There is no LOW/HIGH in this
+contract. The sample then subtracts the equal-weighted mean of those ticks.
+That mean is the differential's numeraire cancellation. It is not the desk's
+common mode.
+
+Transitions.*
+
+| From                                         | When               | Effect on the ladder                                                                                                                                                    | Effect on idle TOKEN, positions, lien, mark |
+|----------------------------------------------+--------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------|
+| Unprimed                                     | =observe=, any day | Each EMA seeded to today's deviation =x=; velocity 0; =primed = true=                                                                                                   | None                                        |
+| Primed, same day                             | =today <= lastDay= | Return. Do nothing                                                                                                                                                      | None                                        |
+| Primed, gap of =n= days (=n= capped at 3650) | =today > lastDay=  | For each rung, =e' = x + (e - x) q^n= and =v' = a q^(n-1) (x - e)=, with =a = 2/(w+1)= and =q = 1 - a=. One day apart this is the plain step =e += (x - e) * 2 / (w+1)= | None                                        |
+
+=turned=, =running=, =targetsBp=, =mayTrim=, and =mayFund= are views over
+that state. They are not transitions and they do not write.
+
+A leg's reading, once primed:
+
+- Excursion =e = deviation - ema[anchor]=. Zero excursion is not a turn
+  (=turned= returns false when =e == 0=).
+- Each of the six shorter rungs votes when its velocity points back toward
+  the anchor: =v < 0= while =e > 0=, or =v > 0= while =e < 0=.
+  =votes >= quorum= is a turn. A leg not turned is still running
+  (=alberta-buck-ethereum-wheel.org=, "The director": "A leg not turned is
+  still running, and a run is let run").
+- =running(i, +1)= is excursion above the anchor and not turned (still
+  running up). =running(i, -1)= is the mirror (still running down).
+- =mayTrim= is =!running(i, +1)= or the weight leash. =mayFund= is
+  =!running(i, -1)= or the leash. The leash reads =basket.weightsBp()=
+  against =targetWeightBp=: over-weight if
+  =w > declared + declared * leashBp / 10000=, under-weight if
+  =w + declared * leashBp / 10000 < declared=. =weightsBp()= sums =posTwap=
+  only. Idle TOKEN is invisible to the leash.
+- =targetsBp= scales each declared weight by =exp(-tilt * excursion)= (the
+  excursion converted through =ln(1.0001)=) and renormalizes. That is the
+  lean. It is a target, not a gate.
+- =_mayFund= returns false when =equityDirector= is unset. Fund then runs
+  only through the parking fallback. The proposed response does not keep
+  that fallback, and its unset-signal behaviour is stated in §5 so it is not
+  read as this one.
+
+#+begin_src mermaid
+stateDiagram-v2
+  [*] --> Unprimed
+  Unprimed --> Seeded: observe seeds every rung to x, vel = 0
+  Seeded --> Seeded: same day, observe returns
+  Seeded --> Updated: a later day, catch-up e' = x + (e-x) q^n
+  Updated --> Reading
+  state Reading {
+    [*] --> Flat: excursion = 0
+    Flat --> RunningUp: excursion > 0 and votes < quorum
+    Flat --> RunningDown: excursion < 0 and votes < quorum
+    RunningUp --> Turned: votes >= quorum
+    RunningDown --> Turned: votes >= quorum
+    Turned --> RunningUp: votes fall below quorum, excursion still > 0
+    Turned --> RunningDown: votes fall below quorum, excursion still < 0
+    RunningUp --> Flat: excursion returns to 0
+    RunningDown --> Flat: excursion returns to 0
+  }
+#+end_src
+
+The do-nothing transition is the same-day return, and also a reading of
+Flat, or of Running in the direction the gate forbids. Neither writes the
+basket.
+
+** 2. Current basket wheel
+
+Purpose.* Place deposits, collect fees, and (when the veto allows) move
+
+weight. Caller: =BasketWheel= via =EquityKind._run=, which delegatecalls
+=wheelStep(kind, i)= on the shell. =wheelStep= reverts unless
+=msg.sender == wheel=. A user never calls a component. =deposit= and
+=redeem= are the shell's verbs and are not wheel kinds.
+
+State it owns.* On the shell, through the shared storage in
+
+=BuckBasketEquityStorage=: =idleToken=, =liquidityOf=, =flowMs=, =dayFlow=,
+=lastDay=, =lastSyncDay=, =creditId=, =creditLive=, the receipt books, and
+=eq=. The lien is not a basket variable. It is
+=max(0, -signedBalanceOf(basket))= at =Buck=. The mark is
+=BuckCredit.markOf(creditId)=.
+
+Inputs and the mark.* =_snap= reads every pool's
+
+=marks(i, liquidityOf[i])=, =K= from =controller.currentBuckK()=, and the
+account. =IBuckBasketVenue.Marks= carries =posLow= / =posTwap= / =posHigh=,
+the three prices, and =depth=. Position value is twice the BUCK side of the
+basket's own full-range liquidity at that price
+(=BuckBasketUniswapV3.marks=: =posTwap = 2 * _buckSideAt(...)=). Spot and
+TWAP are both read; HIGH is the greater position value, LOW the lesser. TWAP
+is the price input to gross for the grain and the liquidity target. LOW is
+the price input to the mark.
+
+The equity step the components already run.* Deploy, Fund, and Trim call
+
+=_markS= before spending. =_markS= marks at =_equityS(s, MARK_LOW)= and
+re-reads =balanceOf= into =s.spend=. Daily marks at the end. Sync does not
+mark. =_markAt= writes =credit.mark= when the value changed. The first time
+the value is above zero it calls =Buck.mint(type(uint256).max, [creditId])=
+once and sets =creditLive=. That mint activates the whole face (zero
+premium, so no deposit). Later marks do not mint. =Buck.creditLimit= is
+=totalCurrentValue * currentBuckK / 1e18=. For a MARKED credit
+=depreciatedFaceValue= is =min(markOf, face)= (=BuckCredit.currentValue=,
+=BuckCredit.mark=). =balanceOf= for this non-Carrying account is held BUCK
+plus unused credit (=creditLimit - lien=) (=Buck.balanceOf=). Incoming BUCK
+that only repays a lien increases =balanceOf= by the full amount when the
+lien was already inside the limit, because a smaller lien frees an equal
+amount of credit. When the lien is still over the limit after the receipt,
+unused credit stays zero and =balanceOf= does not rise. =_deploy= records
+that case: after the sale it clamps =have= to =balanceOf= ("under water:
+nothing"). Spending past held BUCK is what issues. One account. A mark
+change moves the limit because =creditLimit= reads =markOf= live. It does
+not open a second account, and it does not call the lien back. =K= moving
+changes =creditLimit= on the next =Buck= read with no NFT write. The lien
+does not move. There is no margin call.
+
+Transitions.* =NONE= is =type(uint256).max=. Grain =g = _grainS(s)=.
+
+| Kind      | Due                                  | Do-nothing                                                                               | What a real step does                                                                                                                                                                                                                                                                                            |
+|-----------+--------------------------------------+------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Daily     | =block.timestamp / 1 days > lastDay= | =today <= lastDay= returns 0                                                             | Folds =dayFlow^2= into =flowMs= (span =flowDays + 1=, default 30), clears =dayFlow=. If the account is negative and =reliefOf > 0=, =settleRelief()=. Calls =observe()=. =_markS=. No idle and no position change. Relief paid in reduces the lien.                                                              |
+| Sync(i)   | =liquidityOf[i] > 0= and a new day   | otherwise not due                                                                        | =positionSync=: fee TOKEN added to =idleToken[i]=; fee BUCK arrives at the account and repays the lien or is held. Sets =lastSyncDay=. Does not mark.                                                                                                                                                            |
+| Deploy(i) | idle TOKEN value at =pTwap= => g=    | value =≤ g=, or =pTwap == 0=, or =positionMint= returns 0 liquidity                      | Marks first. Pairs idle with pro-rata =_usableS=. Sells TOKEN of at most one =swapCap= if the pair is short. =positionMint= into pool =i= only. =liquidityOf[i]= increases; =idleToken[i]= decreases by what was used; BUCK spent increases the lien or spends held BUCK. The waiting-TOKEN veto does not apply. |
+| Fund      | =_fundPlan= returns a pool           | veto, or =usable ≤ g=, or no gap above the band the director allows, or the amount =≤ g= | Marks first. Buys TOKEN of pool =j= with half the planned BUCK, capped at one =swapCap=. Adds the TOKEN to =idleToken[j]=. Does not mint. The buy increases the lien.                                                                                                                                            |
+| Trim      | =_trimPlan= returns a pool           | veto, or Fund has a plan, or the step =≤ g=                                              | Marks first. Burns =liquidityOf[t] * value / posTwap=. Sells the TOKEN. Unsold TOKEN returns to =idleToken[t]=. BUCK from the burn and the sale repays the lien.                                                                                                                                                 |
+
+=_fundPlan='s veto and the parking fallback are part of the current machine,
+so they are stated exactly. After the waiting-TOKEN veto and the
+=usable > g= test, the plan picks the largest gap past =weightBandBp= (200
+bp of =positions + spare=) among legs =_mayFund= accepts. If none, and spare
+exceeds the parking room (=parkBp= 30000, that is 3× the liquidity target;
+=bandBp= if no director is set), it picks the largest gap *without*
+=mayFund=. That fallback can buy a leg the director says is still running
+down. The new response does not keep it.
+
+=_trimPlan='s real step, when it is allowed to exist, refills liquidity
+below =target * (1 - bandBp)= (and adds the underwater shortfall =-headroom=
+when headroom is negative), or unwinds the director's overweight leg. The
+size is =min(need, pos * stepBp / 10000, 2 * swapCap)=. =stepBp= is 500. The
+factor of two is because the TOKEN half of the unwind is what gets sold.
+That size is the precedent the response keeps, typed out in §5.
+
+=_usableS= is =spend - target= when spend is larger, else 0. =spend= is
+=balanceOf= after the mark: held BUCK plus unused credit. The target is the
+larger of =floorBp= (100, 1% of gross at TWAP) and a flow target =z=
+standard deviations of daily net flow times =(1+K)=, capped at =ceilBp=
+(2000, 20% of gross). =_headroomS= is =s.k * markOf / 1e18 - lien=. That
+target is the BUCK kept so exits can be paid. It is not, in this design, a
+reason to refuse every trade.
+
+#+begin_src mermaid
+stateDiagram-v2
+  [*] --> Marked: Deploy, Fund, Trim call _markS first
+  Marked --> Waiting: any idle TOKEN value > grain
+  Waiting --> Waiting: Deploy sells at most swapCapBp and mints the scarcer side
+  Waiting --> Waiting: Sync or Fund or an unsold Trim adds idle TOKEN
+  Waiting --> Clear: every pool's idle TOKEN value <= grain
+  Clear --> Funding: usable > grain and a gap
+  Funding --> Waiting: Fund's TOKEN lands in idleToken
+  Clear --> Trimming: Fund has no plan, and a trim is large enough
+  Trimming --> Waiting: unsold TOKEN left above the grain
+  Clear --> Clear: nothing due, tick skips the slot
+  note right of Waiting
+    Fund and Trim return NONE.
+    Deploy stays due on its own idle.
+    mayTrim is not consulted.
+    The leash cannot fire on Fund or Trim.
+  end note
+#+end_src
+
+The starvation transition is =Waiting → Waiting=, and the skip the wheel
+performs while Fund and Trim are not due. =WorkWheel.tick= does not stall
+the cursor: a not-due slot is counted idle and the cursor moves on. Daily,
+Sync, and Deploy still run. The veto suppresses Fund and Trim, and therefore
+the underwater refill. It does not suppress Deploy. The basket keeps placing
+deposits into the pool they arrived in, which moves =weightsBp= toward
+whatever was deposited, and never runs the two kinds that would move it
+back.
+
+Under water (=_headroomS < 0=, lien above =K * mark= by the division above),
+Fund's usable is zero because =balanceOf= has no unused credit, so Fund is
+not due. Trim's refill is the path that sells and repays the lien, at most
+=2 * swapCap= a step, but only after the waiting-TOKEN veto. While the veto
+holds, the underwater basket does not refill either. Exits that =balanceOf=
+cannot pay go in kind (=_exit= / =_exitInKind=). That split --- buys stop,
+sells that repay may continue, no margin call --- is the ruled behaviour
+(=doc/BASKET-EQUITY.org= §13.3, =doc/JUBILEE-ISSUANCE.org= 8b.2). The veto
+blocking the refill is not part of the ruling. The response keeps the split
+and drops the veto.
+
+** 3. Current desk, only as far as the signal
+
+Purpose.* One monetary operation per director epoch, on the common mode.
+
+Caller on equity-ops: =MonetaryKeeperAgent=, which =pokeAll=s =d.director=
+and then calls =monetaryOperation= on =d.desk=. =OpsKind= is not that caller
+in this deployment. =monetaryOperation= reads
+=IMonetaryDirector.epochNow()=, stores =lastMonetaryEpoch = e + 1= before
+reading effort, and reverts =NoAdvice= when effort is 0. =EquityDesk= marks
+its *own* credit at =netValue()= before it trades (=_mark= from
+=_swapAcross= and from =_deskIssue=). Nothing it holds is in the basket's
+=_equityS= (invariant D2 in the contract notice and in the wheel paper, "A
+separate machine"). =_deskNav= is =basket.equity()=, which is
+=_equity(MARK_TWAP)=, and that sizes =maxPositionBp= and =maxOutrightBp=. It
+is not the basket's credit mark. =_mark=, =netValue=, and =_deskNav= stay as
+they are.
+
+State it owns.* =opsParams=, =monetaryBuckHeld=, =monetaryTokenHeld=,
+
+=monetaryOutstanding=, =lastMonetaryEpoch=. The signal it acts on is *not*
+its state. =effortBp= and =outright= are stored on =PairsRebalanceDirector=
+(=monEffortBp=, =monOutright=, =monOverEpochs=).
+
+Inputs and the mark.* =monetaryEffort()= returns =(effortBp, outright)=.
+
+Sign: =effortBp < 0= means BUCK is cheap (common mode at =measIdx= is
+positive: the basket costs more than a BUCK). =effortBp > 0= means BUCK is
+dear. =outright= is =monOverEpochs >= persistEpochs=. The rung is warmed for
+=WINDOWS[measIdx]= epochs before any effort is published; until then the
+effort is 0 and =monOverEpochs= is not touched. =capBpPerEpoch == 0= returns
+from =_updateMonetary= before any write. The desk's own mark is LOW prices
+of the TOKEN it holds, plus its signed balance, plus relief
+(=EquityDesk.netValue=). That mark is not the basket's mark and not the
+signal.
+
+Transitions.* Disabled, already-done this epoch, or zero effort: revert, no
+
+trade. Otherwise =_absorb= (cheap) or =_supply= (dear). Quadrants, matching
+=_absorb= / =_supply= and =EquityDesk= because =_deskRetire= is empty ---
+BUCK that arrives while the account is drawn repays the lien on arrival, and
+the book entry is separate from that repayment:
+
+|                              | BUCK cheap (=effortBp < 0=)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BUCK dear (=effortBp > 0=)                                                                                             |
+|------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------|
+| Reverting (=outright= false) | Q1. Sell reserve TOKEN for BUCK and hold it (=monetaryBuckHeld += bought=). Supply unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Q3. Sell held BUCK for TOKEN. Supply unchanged. Q3 runs before Q4.                                                     |
+| Persistent (=outright= true) | Q2, two paths, and the first one does not swap. *Inventory:* if =outright && room && monetaryBuckHeld > 0=, call =_deskRetire= (empty on =EquityDesk=), then subtract the amount from =monetaryBuckHeld= and from =monetaryOutstanding=. The BUCK stays in the account. That is an inventory reclassify. Supply falls by the book amount. *Fresh purchase:* otherwise swap TOKEN for BUCK, and if still outright and =room=, call =_deskRetire= again (still empty on =EquityDesk=) and decrease =monetaryOutstanding= without adding =monetaryBuckHeld=. Supply falls only by the book amount. The bought BUCK repays a drawn lien because it arrives at the account. | Q4. Draw the desk's own credit (=_deskIssue= → =_mark=, then spend =balanceOf=) and sell BUCK for TOKEN. Supply rises. |
+
+=room= is =-monetaryOutstanding < nav * maxOutrightBp / 10000=. Priority,
+which this design does not change: on the cheap side, a persistent desk
+reclassifies inventory before it buys more; on the dear side, it sells
+inventory before it issues. Q1 needs TOKEN the desk already holds
+(=capitalizeMonetary= or a prior Q4). The basket's TOKEN is not that
+reserve. Bounds stay =maxLegBp= 40, =maxPositionBp= 1000,
+=maxOutrightBp= 1000.
+
+#+begin_src mermaid
+stateDiagram-v2
+  [*] --> Hold: disabled, epoch already done, or effort = 0
+  Hold --> Q1: cheap, not the inventory path, TOKEN swapped and held
+  Hold --> Q2Inventory: cheap, persistent, room, monetaryBuckHeld > 0
+  Hold --> Q2Fresh: cheap, persistent, room, inventory empty, TOKEN swapped
+  Hold --> Q3: dear, and BUCK is held
+  Hold --> Q4: dear, persistent, inventory empty, credit room remains
+  Q1 --> Hold: one epoch, one operation
+  Q2Inventory --> Hold: no swap; book reclassified; BUCK stays in the account
+  Q2Fresh --> Hold: swap, then outstanding falls; held book does not rise
+  Q3 --> Hold: one epoch, one operation
+  Q4 --> Hold: one epoch, one operation
+#+end_src
+
+The do-nothing transition is =Hold=. The signals that choose the row and the
+column are the common-mode sign, the deadband (inside it, effort is 0 and
+the operation does not run), and the persistence flag. Per-leg =turned= is
+not an input. Copying the Q2 cell into an adapter test as one "buy BUCK and
+repay the lien" asserts a swap the inventory path does not perform.
+
+** 4. Proposed signal: one sample, two views
+
+Purpose.* Publish the differential reading the basket's response uses and
+
+the common-mode reading the desk uses, from one sample. Callers:
+=SampleKind= on the basket's one wheel when a signal address is set;
+=MonetaryKeeperAgent= before =monetaryOperation=; Daily (idempotent);
+anyone. The first call on a day does the work. A later call the same day
+returns. There is no desk-wheel sample slot, because there is no desk wheel.
+
+State it owns.* Everything =EquityTurnDirector= owns for the differential
+
+ladder, plus a common-mode ladder copied from =PairsRebalanceDirector=:
+=bvM= over the common-mode windows, =bvFirstEpoch=, =bvLastEpoch=,
+=monOverEpochs=, and the last common-mode sample. The differential windows
+stay =[5, 10, 20, 40, 80, 160, 1280]=, anchor 1280, quorum 4. The
+common-mode windows are =[5, 10, 20, 40, 80, 160, 320]=. They are a second
+constant. They are not the differential array with 1280 swapped out, and
+they are not a shared storage vector.
+
+Parameters that define a *reading* stay here, with the guards =setMonParams=
+already enforces (=measIdx > 3= reverts; =leash1e9 < deadband1e9= reverts).
+Rung 3 (40 days) is the last safe measurement: past the 80-day rung the
+outright quadrants invert. Rung 4 and above is not a published measurement.
+Defaults are the deployed =MonParams= from =deploy.py= (the
+=director_impl == "pairs"= block, used for ops and equity-ops), so the four
+ported tests run against the numbers a wired desk already uses:
+
+| Parameter       | Default                                       | Where it lives |
+|-----------------+-----------------------------------------------+----------------|
+| =deadband1e9=   | =100e9= (100 bp)                              | signal         |
+| =leash1e9=      | =200e9= (200 bp)                              | signal         |
+| =persistEpochs= | 30                                            | signal         |
+| =measIdx=       | 2 (the 20-day rung on the common-mode vector) | signal         |
+| =kappa1e9=      | =250_000_000= (0.25)                          | adapter        |
+| =capBpPerEpoch= | =SIM_OPS_CAP_BP=, default 40                  | adapter        |
+
+The defaults in the table are the deployed nonzero =MonParams=, and those
+are the numbers the signal and the adapter are constructed with.
+=setMonParams= reverts when =leash1e9 < deadband1e9=. =leash == deadband= is
+legal, including =(0, 0)=, so a later zero does replace a stored zero.
+=insideDeadband= follows =_updateMonetary='s =absCm < deadband=. A zero
+deadband contains no nonzero =cm=, so once the rung is warm the adapter
+publishes a nonzero effort on every move. That is a live desk. Cap 0 on the
+adapter forces effort 0. That is the off switch, and it does not suppress
+=observe=. Turning the desk off must not freeze the ladder. The adapter's
+constructor sets =kappa1e9 = 250_000_000= and =capBpPerEpoch = 40=.
+Governance can set the cap to 0.
+
+Parameters that size a basket trade do not stay here. =tiltWad= and the
+basket =leashBp= move to the basket.
+
+Inputs and the mark.* Same TWAP tick sample as today, plus one
+
+=basketValueInBuck()= read, converted with =_logTick1e9= (a tick is =log=
+base 1.0001, about 1 bp; the common mode is stored in tick·1e9). The
+differential excursion stays in tick·1e18, as today. No LOW and no HIGH. The
+signal does not read =idleToken=, =weightsBp=, or the lien. A pushed spot
+moves it only to the extent the TWAP window admits, which is the existing
+director's exposure.
+
+Transitions of one leg* are the current director's transitions. =observe=
+
+additionally folds the common-mode ladder with the same sample-and-hold,
+once per day. Persistence matches =_updateMonetary='s order, with one
+relocation: =capBpPerEpoch == 0= is the adapter's early return (effort 0, no
+ladder write skipped), not a reason for =observe= to return before sampling.
+
+On the signal, after the fold:
+
+- If the measuring rung is not warm (=WINDOWS_CM[measIdx]= epochs since
+  =bvFirstEpoch=, the same =e + 1 < bvFirstEpoch + w= test), publish a cold
+  reading: effort will be 0, =persistent= is false, and =monOverEpochs= is
+  not written.
+- Else if =|cm| > leash=, increment =monOverEpochs= by one. Otherwise zero
+  it.
+- The deadband comparison is a view over =cm=. It does not itself clear the
+  counter. A dip through the deadband is also at or below the leash, so the
+  leash test does reset the counter. =Persistent → Deadband= is that edge.
+- Catch-up of either ladder uses =q^n= across a gap. The persistence counter
+  increments once per =observe= that lands on a new day, not once per missed
+  day inside the fold. A gap is one sample, and the counter moves by one.
+  That matches =_updateMonetary=, which runs once per poke epoch, not once
+  per elapsed day inside =_foldBasket=. A later change must not "fix" the
+  counter into counting the gap.
+
+Two views of one sample.* One =observe= reads the pools once and
+
+=basketValueInBuck= once. The differential view is
+=x_i = tick_i - mean(tick)=, then the ladder, the excursion against the
+1280-day anchor, and the six-rung vote. The common view is not that mean and
+not the anchor residual. It is the separate ladder of
+=log(basketValueInBuck)= against 0, on the 5..320 vector. The paper's phrase
+"one filter bank, two modes" is this split. The later correction --- common
+mode is the basket's own value, not the mean of the legs --- is part of the
+same machine, not a second bank.
+
+#+begin_src mermaid
+stateDiagram-v2
+  [*] --> Unsampled
+  Unsampled --> Sampled: observe, first day, seed both ladders
+  Sampled --> Sampled: same day, return
+  Sampled --> Sampled: new day, catch-up both ladders; persistence += 1 or reset once
+
+  state "Differential view, per leg" as Diff {
+    [*] --> DFlat
+    DFlat --> DRunning: excursion != 0 and votes < quorum
+    DRunning --> DTurned: votes >= quorum
+    DTurned --> DRunning: votes fall below quorum
+  }
+
+  state "Common view, one number" as Com {
+    [*] --> Cold: measuring rung not warm
+    Cold --> Cold: early return, monOverEpochs untouched
+    Cold --> Deadband: rung warms inside the deadband
+    Cold --> Reverting: rung warms outside the deadband, epochs past leash < persistEpochs
+    Deadband --> Reverting: |cm| leaves the deadband and is still within the leash count
+    Reverting --> Persistent: monOverEpochs >= persistEpochs
+    Persistent --> Deadband: |cm| falls to the leash or below, counter resets
+    Reverting --> Deadband: |cm| falls to the leash or below
+    Persistent --> Reverting: counter reset and |cm| still outside the deadband
+  }
+#+end_src
+
+=DRunning= carries a sign (up or down), as =running(i, side)= does today.
+=Reverting= and =Persistent= carry a sign (cheap or dear) from the sign of
+=cm=. The desk's "turned / still running" question is =Reverting= versus
+=Persistent= on this common view. It is not =DTurned=. The basket's question
+is =DTurned= versus =DRunning= per leg. Both are views. Neither view writes
+a balance, a position, a lien, or a mark.
+
+The do-nothing transitions are the same-day return, the cold early-return
+that does not touch =monOverEpochs=, a common mode inside the deadband, and
+a leg whose excursion is zero.
+
+Strength, as a number rather than a boolean.* =votes(i)= in =0..6= and
+
+=excursion(i)= in tick·1e18 are part of the differential view. The response
+uses them in the expressions in §5. A deposit does not enter this contract,
+so a deposit cannot clear a turn, reset a vote, or move =lastDay=.
+
+Effort, on the adapter, not in this contract.* =monetaryReading()= returns
+
+=(cm, cheap, persistent, insideDeadband, cold)=. The adapter turns that into
+today's =(int32 effortBp, bool outright)=:
+
+#+begin_example
+if capBpPerEpoch == 0 or cold or insideDeadband:
+    effort = 0
+else:
+    bp = kappa1e9 * abs(cm) / 1e9 / 1e9
+    if bp > capBpPerEpoch: bp = capBpPerEpoch
+    effort = cm > 0 ? -bp : +bp
+outright = persistent          // monOverEpochs >= persistEpochs, false while cold
+#+end_example
+
+The sign is the one =_updateMonetary= uses today: positive common mode, BUCK
+cheap, negative effort, =_absorb=. =kappa * |cm|= without the two =/ 1e9= is
+a different unit and is not this formula. The four tests ported against
+these defaults, not against a freshly chosen deadband, are
+=test_commonMode_isTheBasketAgainstPar_notTheLegsOpening=,
+=test_commonMode_tracksLogBvib=,
+=test_monetaryEffort_signDeadbandAndPersistence=, and
+=test_monetaryEffort_waitsForTheRungToWarm=.
+
+** 5. Proposed basket response
+
+Purpose.* One paced change to the basket's positions, or a hold that still
+
+refreshes the mark when the mark is stale by more than the grain. Caller:
+the basket's wheel, one slot, =wheelStep= of a single Respond kind. Deploy,
+Fund, and Trim cease to be kinds. Sync and Daily stay. The slot layout
+changes once, in the same PR as the shell. See Data Model.
+
+State it owns.* No new books. It reads =idleToken=, =liquidityOf=, the
+
+signal's views, =eq= (including =tiltWad= and =leashBp=), and the snap. It
+writes the same fields Deploy, Fund, and Trim write today: =idleToken=,
+=liquidityOf=, and, through =_markAt=, the credit mark.
+
+Inputs and the mark.* A step that will trade calls =_markS= first, so the
+
+mark is LOW equity and the assets about to move are still in the mark.
+Weights for the decision are not today's =weightsBp()=. Today's
+=weightsBp()= is positions only (=BuckBasketEquity.weightsBp= sums
+=posTwap=), so a deposit does not look overweight until something mints it.
+The response weight includes idle at TWAP. The lien is not in the weight.
+
+Let =dec_i= be the constituent's decimals. Define, in BUCK:
+
+#+begin_example
+value_i = posTwap_i + idleToken_i * pTwap_i / 10**dec_i
+B       = Σ_i value_i
+#+end_example
+
+If =B == 0= there are no weights. The step holds. It may still mark under
+the stale-mark rule in §6. It does not divide.
+
+=responseWeightsBp()= is the integer analogue of =weightsBp()=:
+
+#+begin_example
+q_i = value_i * 10000 / B          // integer division
+#+end_example
+
+The remainder =10000 - Σ q_i= is dealt out one basis point at a time to the
+legs with the largest =value_i * 10000 % B=, and on a tie to the lowest
+index, so the vector sums to 10000. The leash and the band read this vector.
+They do not read a 0--1 ratio, and they do not read =weightsBp()=.
+
+The leaned target is the basket's: declared weight times
+=exp(-tiltWad * excursion)=, renormalized, the same function as
+=EquityTurnDirector.targetsBp=, computed here from =excursion(i)=. =tiltWad=
+lives on the basket. Write =T_i = leanedBp_i * B / 10000= for the leaned
+target in BUCK, and =D_i = declaredBp_i * B / 10000= for the declared weight
+in BUCK.
+
+The leash and the band are different units, and the leash wins inside the
+
+band.* =weightBandBp= 200 is 2 percentage points of the whole book:
+=band = B * weightBandBp / 10000=. =leashBp= 3000 is 30% of that leg's
+declared weight, in the same integer basis points as =responseWeightsBp()=:
+
+#+begin_example
+leashedOver  = wBp_i > declaredBp_i + declaredBp_i * leashBp / 10000
+leashedUnder = wBp_i + declaredBp_i * leashBp / 10000 < declaredBp_i
+#+end_example
+
+On the savings basket cbBTC is declared at 600 bp (6%). The leash opens at
+780 bp, 7.8% of the book, a 1.8 pp gap, which is inside the 2 pp band. A 200
+bp leg (2%) is leashed at 260 bp, a 0.6 pp gap, and stays inside the band
+until it is a full 2 pp off --- 100% of declared, not 30%. Section 14's
+prints (13.8% vs 6%, 15.3% vs 8%, LABR 19.0% vs 24%) are outside the band,
+so those days trade under either rule. The day the 6% leg first crosses 7.8%
+does not. A rule that says "the band wins even if leashed" would leave that
+leg untraded at the moment the leash opens. That is the opposite of the
+mandate this design keeps: a leg that has left the declared basket trades.
+
+The lean makes the two regions able to disagree. The band sits around the
+leaned target. The leash sits around the declared weight. A leg can be
+leashed against the mandate and inside the band, or outside the band and not
+leashed. The rule is one sentence. A leashed leg trades even inside the
+weight band. When the leg is leashed, the step aims at the declared weight
+(=D_i=), and that aim may lie inside the band. When the leg is not leashed,
+the step aims at the band edge only, the Davis and Norman (1990) form: trade
+to the boundary of the no-trade region, not through it, and not to the point
+target. The pairs director's measurement that =boundaryBp = 0= won at a 30
+bp cost is not imported. Whether =weightBandBp= should later be a Bertram
+(2010) threshold is open question 8 in the wheel paper and stays open.
+
+Per-leg eligibility*, not a stored state. =running= and =turned= come from
+
+the signal. An unset signal is the triple in "Unset signal" below, not a
+silent false from =_mayFund=.
+
+|                     | Sell                                                                  | Buy                                                                     |
+|---------------------+-----------------------------------------------------------------------+-------------------------------------------------------------------------|
+| Forbidden when      | =running(i, +1)= and not =leashedOver=                                | =running(i, -1)= and not =leashedUnder=                                 |
+| Also forbidden when | inside the band and not =leashedOver=                                 | inside the band and not =leashedUnder=                                  |
+| Therefore a sell    | =leashedOver=, or (overweight past the band and not =running(i, +1)=) |                                                                         |
+| Therefore a buy     |                                                                       | =leashedUnder=, or (underweight past the band and not =running(i, -1)=) |
+
+A running-up leg has =running(i, +1)= and not =running(i, -1)=. If it is
+underweight past the band, it is a buy. Positive excursion leans the target
+down and does not make underweight impossible. There is no "in practice this
+class is not a buy." A running-down leg that is overweight past the band is
+a sell, because =running(i, +1)= is false. Inside the band and not leashed,
+neither side, including a turned leg: the turn does not punch through the
+band. The leash does. A turned leg is not running, so outside the band a
+turn opens the corresponding side.
+
+Aim and the step*, in BUCK. One sell leg and one buy leg: the eligible sell
+
+with the largest aim, then the lowest index; the same tie-break on the buy.
+
+#+begin_example
+// Leashed: aim at the declared weight, even inside the band.
+// Not leashed: aim at the band edge.
+aimSell = leashedOver  ? (value_i - D_i) : (value_i - (T_i + band))
+aimBuy  = leashedUnder ? (D_j - value_j) : ((T_j - band) - value_j)
+
+// Turned: scale by votes/6. Not turned: full step.
+// A failed vote is not a multiplier. Do not write votes/6 on a leg that is not turned.
+sellStep = turned_i ? value_i * stepBp * votes_i / 10000 / 6
+                    : value_i * stepBp / 10000
+buyStep  = turned_j ? value_j * stepBp * votes_j / 10000 / 6
+                    : value_j * stepBp / 10000
+
+sellCap = min(aimSell, sellStep, 2 * swapCap_i)
+buyCap  = min(aimBuy,  buyStep,      swapCap_j)
+#+end_example
+
+=swapCap_i= is =_swapCap= of that pool (1% of its virtual BUCK depth, all
+LPs). The buy-side base is =value_j=, that leg's position plus idle at
+=pTwap=. There is no =buyBook=. =stepBp= is 500, the current default. The
+=2 *= on the sell cap is the unwind precedent: the TOKEN half of a position
+is what gets sold, so a position of value =2 * swapCap= yields one =swapCap=
+of TOKEN. A side whose cap is =<= grain= is dropped. The other side may
+still run. Both sides dropped is a hold.
+
+Unset signal.* This is explicit, and it differs from today. Today
+
+=_mayFund= returns false when =equityDirector= is unset, and Fund runs only
+through the parking fallback. That fallback is deleted. With
+=equityDirector == address(0)= the response uses:
+
+- =excursion(i) = 0=, =votes(i) = 0=, =turned(i) = false=,
+  =running(i, +1) = false=, =running(i, -1) = false=
+- leaned target = declared weight (=T_i = D_i=)
+- the full-step formula (=value * stepBp / 10000=), not =votes/6=
+- sells and buys are the band plus the leash, under the predicates above
+
+An unset signal does not freeze the basket. Turn-scaled trades require a
+signal. =B == 0= is still a hold.
+
+The sell, as one swap.* Idle TOKEN of the sell leg is sold first. Burn LP
+
+only for the TOKEN that idle did not cover. Burn cannot exceed
+=liquidityOf=. One =monetaryLeg(sell, false, dx)= sells the TOKEN. There is
+no second swap and no reserved-proceeds primitive.
+
+The TOKEN value sent to that one swap is at most one =swapCap_i=. Idle fills
+that budget first. The position value burned is =2 *= the TOKEN value still
+needed after idle, because the TOKEN half is what is sold, and that burn is
+also capped by =sellCap= and by =liquidityOf=. Concretely, with
+=one = 10**dec_i= and =p = pTwap=:
+
+#+begin_example
+tokenBudget = swapCap_i                         // BUCK value of TOKEN sold
+idleVal     = min(value of idleToken_i, tokenBudget, sellCap)
+dxIdle      = idleVal * one / p                 // counted into dx; not a storage write yet
+still       = min(tokenBudget, sellCap) - idleVal
+burnVal     = min(2 * still, posTwap_i, sellCap - idleVal)
+burned      = min(liquidityOf_i, liquidityOf_i * burnVal / posTwap_i)
+#+end_example
+
+When idle is zero this is the existing trim: position value up to
+=2 * swapCap=, TOKEN sold up to one =swapCap=. When idle covers the whole
+=swapCap=, nothing is burned. The burn's BUCK and the swap's BUCK both land
+in the same account. They are not tracked separately. =positionBurn= pays
+the position's BUCK side into the account before =monetaryLeg= sells the
+TOKEN.
+
+What a snap freezes.* =_markS= marks =_equityS= of the =Snap= it is given.
+
+=s.m[i]= is =marks(i, liquidityOf[i])= from the moment =_snap()= ran
+(=_marks=). =s.buckEq= and =s.lien= are =_account= at that same moment.
+=_grossS= reads =idleToken= from storage, so a later idle write is visible
+to gross and invisible to =s.m=. =_markS= then writes the mark and refreshes
+=s.spend= only. =_headroomS= subtracts =s.lien=, which =_markS= does not
+refresh. The only post-trade marks in the wheel today are fresh snaps:
+=_daily= calls =_markS(_snap())=, and =redeem= does the same after the
+positions are gone. A second =_markS= on the step's opening snap still
+includes the burned position and the pre-sale lien, while =balanceOf= has
+risen by the proceeds. The buy would then spend the proceeds and the credit
+that was backed by the assets just sold.
+
+The step as balance deltas.* This is the order. A step that is due for a
+
+trade runs it even when the mark moved by less than the grain. A step that
+is not due does not run and does not mark; the wheel skips the slot. Every
+mark after the opening one is =_markS(_snap())= taken after the storage
+write-backs. The opening snap is not marked a second time.
+
+1. =s0 = _snap(); _markS(s0)=. Equity is LOW. Idle and positions about to
+   move are still inside =s0.m= and in storage. Record =spend0 = s0.spend=
+   (=balanceOf= after the mark), =usable0 = max(0, spend0 - _targetS(s0))=,
+   and =headroom0 = s0.k * markOf / 1e18 - s0.lien= (=_headroomS(s0)=).
+2. If a sell leg survived the grain test, burn, swap once, and book storage
+   the way =_trim= does, with the idle that entered the same swap subtracted
+   once:
+
+#+begin_example
+(tokenOut, ) = positionBurn(sell, burned)          // skip the call when burned == 0
+liquidityOf[sell] -= burned
+dx = tokenOut + dxIdle
+(spent, ) = monetaryLeg(sell, false, dx)           // exact input; spent <= dx; skip when dx == 0
+idleToken[sell] = idleToken[sell] - dxIdle + (tokenOut + dxIdle - spent)
+#+end_example
+
+=monetaryLeg= returns =spent=, which is below =dx= when the swap stops short
+of the requested input. The unspent TOKEN, from idle and from the burn
+together, is back in =idleToken=. When =dxIdle= is 0 this is =_trim=:
+=liquidityOf -= burned=, then =idleToken += tokenOut - spent=.
+=proceeds = max(0, balanceOf_after - balanceOf_before)=, measured across the
+burn and that one =monetaryLeg=. =proceeds= is 0 when the sale only repays a
+lien that is still over the limit: =balanceOf= is unchanged, which is
+=_deploy='s "under water: nothing." 3. =s1 = _snap(); _markS(s1)=, before
+any new credit is drawn. =s1.m= is valued at the post-burn =liquidityOf=.
+=s1.lien= is the post-sale lien. Headroom and =balanceOf= for the buy are
+=_headroomS(s1)= and =s1.spend=. Do not call =_markS(s0)=. 4. Buy budget. If
+=headroom0 < 0=, the budget is 0: the basket started under water, so it does
+not buy. Otherwise =buyBudget = min(proceeds, buyCap)=. If
+=_headroomS(s1) >= 0=, add at most the pre-trade =usable0= that still fits
+inside =buyCap= (=min(usable0, buyCap - buyBudget)=). Then
+=buyBudget = min(buyBudget, s1.spend)=. If headroom on =s1= is negative, do
+not add =usable0=. That is "already under water before the buy, so do not
+draw." It is not a mid-step state that reserves proceeds to the lien. 5. The
+buy runs only when =buyBudget > 0= and a buy leg survived. Split that budget
+in half, the Fund precedent, so =positionMint= receives both sides. Book the
+mint the way =_deploy= does:
+
+#+begin_example
+half = buyBudget / 2
+(, received) = monetaryLeg(buy, true, half)
+idleToken[buy] += received
+(liquidity, tokenUsed, ) = positionMint(buy, idleToken[buy], buyBudget - half)
+idleToken[buy] -= tokenUsed
+liquidityOf[buy] += liquidity
+#+end_example
+
+=_liquidityForAmounts= is the min of the two amounts. One side zero makes
+=positionMint= return =(0, 0, 0)=, so the last two writes are zero and the
+TOKEN stays in =idleToken=. That is =_deploy='s =l == 0= return, written
+out. Swapping the whole =buyBudget= leaves the kept half at 0 and mints
+nothing, which is Fund's behaviour, and this design deletes it. Pre-existing
+idle on the buy leg is paired with the kept half, beside =received=. Idle
+alone is not a budget: =buyBudget == 0= does not call =positionMint=, and
+that idle is not sold into the buy pool. Leftover BUCK stays on the account.
+The step does not loop. 6. If step 5 ran, =s2 = _snap(); _markS(s2)=. =s2.m=
+sees the new =liquidityOf=, and =_grossS= reads =idleToken= after
+=tokenUsed= was subtracted, so the minted TOKEN is not in the mark twice. If
+step 5 did not run, =s1= is the end mark.
+
+No-sell (buy only) uses the same sequence with =proceeds = 0=. The opening
+mark is the pre-buy mark, because nothing has been burned. The budget is the
+=usable0= term, and the mint runs only when that budget is positive. No-buy
+(sell only) books the sell and stops on =s1=. Hold is a step that ran
+because the mark was stale: =_markS= on the snap just taken, no swap, no
+second call on that snap.
+
+The post-trade test.* Two checks, and no third. A step with =headroom0 < 0=
+
+does not increase the lien. The BUCK spent on the buy is at most =s1.spend=,
+the post-remark =balanceOf=, and at most =buyBudget=. The end mark does not
+pull a lien back. A fresh snap before the spend keeps the buy inside the
+limit that existed at =s1=. It does not keep the lien inside
+=K * equity(LOW)= of the book after the fee. =deploy.py= sets
+=FEE_BUCK = 3000=, a 30 bp TOKEN/BUCK fee, taken from the swap input. BUCK
+has 6 decimals, so a 30 bp fee on 1 BUCK (=1e6= raw) is 3000 raw units.
+=_grainS='s floor of =1e3= is 0.001 BUCK and is the least-work floor. It is
+not a slack on this test, and the test does not use it.
+
+| Action    | When                                                                                       | Effect                                                                                                                                                                                                                                                                                      |
+|-----------+--------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Transfer  | A sell leg and a buy leg both survived, =headroom0 >= 0=, and step 4's =buyBudget > 0=     | Book the sell as =_trim= does, =_markS(_snap())=, then book the buy as =_deploy= does. Proceeds fund the buy up to =buyCap=. Pre-trade =usable0= funds only the shortfall, and only when headroom on =s1= is still =>= 0=. Half the buy's BUCK is swapped, half is kept for =positionMint=. |
+| Sell only | A sell leg survived, and either no buy leg did or =headroom0 < 0= or =buyBudget= is 0      | Book the sell. BUCK repays the lien or is held. Do not buy. =s1= is the end mark.                                                                                                                                                                                                           |
+| Buy only  | A buy leg survived, no sell leg did, =headroom0 >= 0=, and step 4's =buyBudget > 0=        | Spend that budget with =proceeds = 0=. Pre-existing idle is paired with the kept half. Idle alone does not mint, and it is not sold into the buy pool.                                                                                                                                      |
+| Hold      | Nothing survived the grain test, and the step ran because =|equity(LOW) - markOf| > grain= | No swap and no mint. =_markS= on the snap just taken writes if unequal.                                                                                                                                                                                                                     |
+
+#+begin_src mermaid
+stateDiagram-v2
+  [*] --> Mark: Respond is due for a trade, or the mark is stale by more than grain
+  Mark --> Hold: no side above the grain
+  Mark --> SellOnly: sell cap above the grain, and no buy, or headroom0 < 0
+  Mark --> BuyOnly: no sell, headroom0 >= 0, buyBudget > 0
+  Mark --> Transfer: both caps above the grain, headroom0 >= 0
+  Transfer --> Remark: book liquidityOf and idleToken, then _markS of a new snap
+  Remark --> Mint: buyBudget > 0; usable0 is added only while headroom on s1 >= 0
+  Remark --> EndMark: buyBudget == 0, nothing drawn
+  Mint --> EndMark: book idleToken -= tokenUsed and liquidityOf += liquidity, then _markS(_snap())
+  SellOnly --> EndMark: book the sell, _markS(_snap()), no buy
+  BuyOnly --> EndMark: kept half pairs idle already held; idle alone does not mint
+  Hold --> EndMark: _markS on the opening snap, no token move
+  EndMark --> [*]
+#+end_src
+
+There is no =Transfer --> SellOnly= edge. A sale reduces the lien. Headroom
+gets worse on the buy, or was already negative before the step. The
+underwater case is =headroom0 < 0= at the start, or =headroom < 0= after the
+re-mark, and in both the response does not draw new credit.
+
+The do-nothing transition of the wheel is a slot that is not due: =tick=
+skips it, emits nothing, and does not call =wheelStep=. A Respond that runs
+and holds emits =Responded= with =action = hold=. That event means the step
+ran because the mark was stale. It does not mean every skipped slot.
+
+A deposit that arrives mid-way.* =deposit= is unchanged in what it books:
+
+shares at the high equity, TOKEN into =idleToken= (BUCK straight onto the
+account), =dayFlow += value=, =_markS=. The mark rises on the deposit's LOW
+value before any placement, because idle TOKEN is already in =_grossS=.
+There is no Deploy after this design. On a later Respond the deposit's TOKEN
+is part of =value_i=. If that leg is a sell, the TOKEN is sold, idle first,
+inside the one =swapCap=, and the proceeds buy an underweight leg the
+predicates allow. If that leg is a buy, the TOKEN is the TOKEN side of
+=positionMint=, paired with the buy budget. If that leg is still running
+down and not =leashedUnder=, the TOKEN is not bought and not minted into it.
+It waits as idle, and the rest of the machine keeps trading other legs.
+Waiting in one pool does not veto another.
+
+That is mitigation 4 of =doc/BASKET-EQUITY.org= §14.2, with the gate the
+section already required: do not buy a leg that is still running down,
+unless =leashedUnder=. The arrival pool is not privileged. The entry charge
+still only partly covers the extra swap (§14.2.4). The cap is what keeps one
+deposit from moving the pool. Pricing the mix into the entry charge
+(mitigation 5) is not part of this machine.
+
+Why the new position and the new credit are the ammunition.* A buy draws
+
+=balanceOf= after the re-mark, which rose when the deposit raised LOW
+equity, by about =K= times the deposit, subject to the face cap and to
+=usable0=. A sell's step is the expression above. Minting LP raises =pos= on
+the next snap, which raises the next step's =value_i=, and raises =depth= if
+the basket is the LP in that pool, which raises =swapCap=. The machine uses
+both on the next step. Nothing in the classification looks at whether other
+pools still hold idle TOKEN.
+
+The liquidity target is not a settled-wallet gate.*
+
+=usable0 = max(0, spend0 - target)= remains the ceiling on *new* credit
+drawn to mint LP, so a buy does not spend the BUCK the exit path keeps
+(=doc/BASKET-EQUITY.org= §13.6: liquidity is what pays a BUCK redemption).
+It is taken from the pre-trade snap and added only when headroom after the
+re-mark is =>= 0=, and only inside =buyCap=. A sell does not consult
+=usable=. A transfer spends the sale's proceeds first. Idle TOKEN of a leg
+the predicates allow does not need =usable0 > 0= to be sold. Sync's fee
+TOKEN lands in =idleToken= as today and is classified on the next response.
+It does not close a gate.
+
+Under water.* If =headroom0 < 0=, the buy budget is 0. Sell-only runs, and
+
+the BUCK repays the lien. The mark has already fallen with LOW equity. The
+lien is not recalled. =K= is read from the controller inside =_snap=. The
+signal does not set it. This is the existing rule (=doc/BASKET-EQUITY.org=
+§13.3, =doc/JUBILEE-ISSUANCE.org= 8b.2). It is not re-opened.
+
+** 6. Equity and the mark
+
+Purpose.* Keep the single =BuckCredit= equal to equity at LOW, so headroom
+
+tracks the book between trades as well as inside them. Callers that mark,
+and the test each one uses:
+
+- A Respond due for a trade marks on the opening snap, then
+  =_markS(_snap())= after the sell is booked, and =_markS(_snap())= again
+  after the buy is booked, regardless of grain. =_markAt= writes when
+  =equity(LOW)= is unequal to =markOf= and has no grain of its own. The
+  later snaps are new. The opening snap is not passed to =_markS= again.
+- =wheelDue= for a trade-less Respond is =|equity(LOW) - markOf| > grain=.
+  That step calls =_markS= once. =Responded(action = hold)= is emitted only
+  in this case.
+- A slot that is not due emits nothing and does not write. The wheel skips
+  it. There is no running step that snaps and then refuses to mark.
+- Daily, =deposit=, and =redeem= mark as they do today. =deposit=, =redeem=,
+  and =_daily= call =_markS= even when the move is below the grain.
+
+The first mark above zero calls =Buck.mint(type(uint256).max)= once (the
+whole face, zero premium) and sets =creditLive=. Later marks only write
+=credit.mark=.
+
+Today a price move re-marks when Daily runs, when Deploy, Fund, or Trim are
+actually due, and when =deposit= or =redeem= runs. The waiting-TOKEN veto
+can suppress Fund and Trim. It cannot suppress Deploy, which is due whenever
+that pool's idle TWAP value exceeds the grain and which marks. The veto
+therefore blocks the underwater refill. It does not block Deploy's mark.
+
+State it owns.* =credit.markOf(creditId)= and the cached =creditLive= flag.
+
+Equity itself is not stored. It is recomputed from the snap.
+
+Inputs and the mark.* The snap's three prices. The mark *written* is LOW.
+
+Response weights, the grain, and the liquidity target use TWAP. HIGH remains
+the incumbents' side of an entry (=deposit= prices shares off
+=_equityS(sn, MARK_HIGH)=).
+
+Three sums, already different in the code.*
+
+#+begin_example
+gross(mark)   = Σ_i pos(mark, i) + Σ_i idleToken_i * p(mark, i) / 10**dec_i
+buckEq        = signedBalanceOf(basket) + reliefOf(basket)
+equity(mark)  = max(0, gross(mark) + buckEq)
+lien          = max(0, -signedBalanceOf(basket))
+mark written  = equity(LOW)                         // argument to _markAt
+headroom      = s.k * markOf / 1e18 - lien          // _headroomS
+spend         = balanceOf = held + max(creditLimit - lien, 0)
+creditLimit   = K * min(markOf, face) / 1e18        // once the whole face is activated
+usable        = max(0, spend - liquidityTarget)
+#+end_example
+
+=pos= is twice the BUCK side of *the basket's* liquidity (=marks=:
+=posTwap = 2 * _buckSideAt=). It is not =token.balanceOf(pool)= and not
+=buck.balanceOf(pool)=. Those balances include every other LP. Counting them
+as the basket's equity would mark the credit on assets the basket does not
+hold. =depth= is the pool's virtual BUCK reserve, all LPs, and it is an
+impact cap for =swapCap=. It is not an asset.
+
+| Sum                      | Function                                                                        | Price | Idle TOKEN        | Lien                    | Who reads it                                                                         |
+|--------------------------+---------------------------------------------------------------------------------+-------+-------------------+-------------------------+--------------------------------------------------------------------------------------|
+| Collateral mark          | =_equityS(s, MARK_LOW)=, passed to =_markAt=                                    | LOW   | In, via =_grossS= | In, via =signedBalance= | The NFT. =creditLimit=. Headroom.                                                    |
+| Desk NAV and share price | =equity()= = =_equity(MARK_TWAP)=; =sharePrice()= divides that by =totalShares= | TWAP  | In                | In                      | =EquityDesk._deskNav=, so =maxPositionBp= and =maxOutrightBp=. Holders' share price. |
+| Response weight          | =responseWeightsBp()=                                                           | TWAP  | In                | Out                     | The leash, the band, the aim, the step.                                              |
+
+Including idle in the mark confirms today's =_equityS=. =deposit= adds to
+=idleToken= and then calls =_markS=, and =_grossS= reads idle from storage.
+It is not a formula change, and it does not wait on a shell that marks on a
+new formula. The owner's sentence ("TOKEN and BUCK in all the pools") is
+narrower than the code. The confirmation is deliberate: a TOKEN deposit has
+to raise the mark, because the depositor has already been minted shares
+against it, and because a deposit is equity immediately.
+
+The owner ruled on 2026-09-30 that idle TOKEN stays in the credit mark. That
+confirms today's =_equityS=. It is not excluded from the argument passed to
+=_markAt=. =_grossS=, =basket.equity()=, =sharePrice()=, the grain, the
+liquidity target, and =EquityDesk._deskNav= keep including idle.
+
+Decisions, each one a difference from the owner's sentence.*
+
+| Item                                        | Where it sits                                                                   | In the code today                                                                   | Decision                                                                                                                                                                            |
+|---------------------------------------------+---------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| TOKEN and BUCK inside the basket's position | =liquidityOf[i]=, valued by =marks= as =pos=                                    | In =gross= at the chosen mark                                                       | Keep. This is the owner's pool inventory.                                                                                                                                           |
+| Idle wallet TOKEN                           | =idleToken[i]=. Invariant E5: =token.balanceOf(basket) >= idleToken[i]=.        | In =_grossS= at =p(mark)=. The mark already includes it.                            | Keep. The owner ruled on 2026-09-30 that it stays in the credit mark, confirming =_equityS=. The response weight includes it too.                                                   |
+| Wallet BUCK, positive =signedBalance=       | The basket's one account at =Buck=                                              | In =buckEq=                                                                         | Keep. A BUCK deposit lands here. A sale's residual lands here.                                                                                                                      |
+| BUCK issued                                 | The negative side of that account, the lien                                     | Subtracted, via =buckEq=                                                            | Keep. It moves when the basket spends, receives BUCK, or collects relief (invariant E3). A =K= cut does not change it.                                                              |
+| Relief accrued, not yet paid                | =Buck.reliefOf(basket)=                                                         | Added, so equity sees the lien net of relief                                        | Keep. Daily collects it with =settleRelief=.                                                                                                                                        |
+| Owed fees                                   | Uncollected V3 =tokensOwed=. =marks= values principal. =positionSync= collects. | Out until Sync. After Sync, TOKEN fees are idle and BUCK fees have hit the account. | Keep the lag. Sync is due once a day per pool with liquidity.                                                                                                                       |
+| Outsider LP                                 | Pool balances, and =depth=                                                      | Out of =pos=. =depth= is the impact cap.                                            | Keep them out.                                                                                                                                                                      |
+| LOW vs TWAP vs spot                         | HIGH/LOW are max/min of spot value and TWAP value, per pool                     | The NFT is marked at LOW. Grain, target, and =weightsBp= use TWAP. Entry uses HIGH. | Keep. Response weights use TWAP. A spot push up cannot raise =creditLimit= above TWAP equity. A spot crash marks the limit down at once. That is the direction E2 already requires. |
+
+Transitions.*
+
+| When                                                      | What changes                                                                                                                                                                                        |
+|-----------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Respond due for a trade                                   | =_markS= on the opening snap. After =liquidityOf= and =idleToken= are written, =_markS(_snap())= before the buy and, if the buy ran, =_markS(_snap())= again. Grain does not suppress these writes. |
+| Respond due only because =|equity(LOW) - markOf| > grain= | =_markS= once. =Responded(hold)=.                                                                                                                                                                   |
+| Slot not due                                              | No snap from this step, no =mark=, no event.                                                                                                                                                        |
+| Daily, deposit, redeem                                    | =_markS= as today, including a move below the grain.                                                                                                                                                |
+| First mark above zero                                     | =mint(max)= once. Face activates. Later marks do not mint.                                                                                                                                          |
+| A spend after the pre-buy mark                            | The lien rises or held BUCK falls, inside the limit =Buck= observed at that mark. The end mark records the post-trade book. It does not pull a lien back.                                           |
+| =K= changes                                               | =creditLimit= moves on the next =Buck= read with no write to the NFT. Headroom moves. The lien does not.                                                                                            |
+
+#+begin_src mermaid
+stateDiagram-v2
+  [*] --> Fresh: markOf == equity(LOW)
+  Fresh --> Stale: |equity(LOW) - markOf| > grain, or a trade is due
+  Stale --> Fresh: the due Respond, Daily, deposit, or redeem writes mark(equity LOW)
+  Fresh --> Fresh: slot not due, tick skips, no mark call
+  Fresh --> Underwater: lien > K * mark after a fall or a K cut
+  Underwater --> Underwater: buys not drawn; a sell repays the lien; the mark stays at the fallen equity
+  Underwater --> Fresh: sales and price recovery bring the lien under K * mark
+#+end_src
+
+The do-nothing transition is the skipped slot. A Respond whose mark is
+within the grain and whose caps are within the grain is not due, so it does
+not snap and does not mark.
+
+** How a deposit becomes a transfer
+
+#+begin_src mermaid
+sequenceDiagram
+  participant U as Depositor
+  participant B as BuckBasketEquity
+  participant C as BuckCredit
+  participant S as Signal
+  participant W as Basket wheel
+  U->>B: deposit(TOKEN_i)
+  B->>B: idleToken[i] += amount, mint shares at HIGH
+  B->>C: _markS, idle already in _grossS
+  Note over C: headroom rises by about K times the deposit
+  W->>S: SampleKind observe, if this day is not sampled
+  S-->>W: votes, running, excursion per leg
+  W->>B: Respond, due because a cap exceeds grain
+  B->>C: _markS(s0), record spend0, usable0, headroom0
+  alt headroom0 < 0
+    B->>B: sell only if a sell cap remains; book like _trim; lien does not rise
+    B->>C: _markS(_snap())
+  else a sell leg survives
+    B->>B: burn, one monetaryLeg, idleToken = idle - dxIdle + (tokenOut + dxIdle - spent)
+    Note over B: proceeds = increase in balanceOf, else 0
+    B->>C: s1 = _snap(); _markS(s1), before any new credit
+    B->>B: buyBudget = min(proceeds, buyCap)
+    B->>B: if headroom on s1 >= 0, buyBudget += min(usable0, buyCap - buyBudget)
+    B->>B: buyBudget = min(buyBudget, s1.spend)
+    alt buyBudget == 0
+      B->>B: do not buy; s1 is the end mark
+    else buyBudget > 0 and a buy leg survived
+      B->>B: swap half, positionMint, idleToken -= tokenUsed, liquidityOf += liquidity
+      B->>C: _markS(_snap())
+    end
+  else leg i still running down, not leashedUnder
+    B->>B: leave idleToken[i], trade some other eligible leg
+  end
+#+end_src
+
+* API / Interface Changes
+
+=IEquityDirector= (=BuckBasketEquityStorage=) today is =observe=,
+=targetsBp=, =mayTrim=, =mayFund=. The new deployment keeps =observe= and
+adds the views below. =targetsBp=, =mayTrim=, and =mayFund= remain on the
+old deployment so a basket still pointed at the old director does not break.
+They are not what the new basket calls.
+
+#+begin_src solidity
+interface IFilterBank {
+    /// Idempotent per day. Catch-up is e' = x + (e - x) q^n, gap capped at 3650.
+    function observe() external;
+
+    /// Differential view. excursion and the ladder stay in tick * 1e18.
+    /// side > 0: still running up. side < 0: still running down.
+    function excursion(uint256 i) external view returns (int256);
+    function votes(uint256 i) external view returns (uint256);   // 0..6
+    function turned(uint256 i) external view returns (bool);
+    function running(uint256 i, int256 side) external view returns (bool);
+
+    /// Common view. cm is the measuring rung in tick*1e9, windows [5..320].
+    /// cheap: cm > 0 (basket costs more BUCK). persistent: duration past the leash.
+    /// insideDeadband: the adapter publishes effort 0. cold: the rung is not warm,
+    /// and monOverEpochs was not touched.
+    function monetaryReading() external view returns (
+        int256 cm, bool cheap, bool persistent, bool insideDeadband, bool cold
+    );
+}
+#+end_src
+
+=IMonetaryDirector= (=MonetaryDesk.sol=) stays:
+
+#+begin_src solidity
+interface IMonetaryDirector {
+    function monetaryEffort() external view returns (int32 effortBp, bool outright);
+    function epochNow() external view returns (uint32);
+}
+#+end_src
+
+=monetaryOperation= is not edited. It still does:
+
+#+begin_src solidity
+uint32 e = IMonetaryDirector(dir).epochNow();
+if (lastMonetaryEpoch == e + 1) revert StepAlreadyDone();
+lastMonetaryEpoch = e + 1;
+(int32 effortBp, bool outright) = IMonetaryDirector(dir).monetaryEffort();
+if (effortBp == 0) revert NoAdvice();
+#+end_src
+
+A new adapter implements that interface against =IFilterBank=. =epochNow=
+returns =uint32(block.timestamp / 1 days)=, the signal's day.
+=monetaryEffort= is the formula in §4, using the adapter's =kappa1e9=
+(default =250_000_000=) and =capBpPerEpoch= (default 40). Cap 0 returns
+effort 0. The quadrant code below the call does not change. Pro-rata
+=BuckBasketOps= keeps compiling against =monetaryEffort= and is not
+re-pointed.
+
+=EquityKind= after the one cut. Kind numbers =wheelDue= / =wheelStep= switch
+on:
+
+| =EquityKind= slot =j= | Kind number | Meaning                                 |
+|-----------------------+-------------+-----------------------------------------|
+| 0                     | 0           | Daily, due on a new day, as now         |
+| 1..N                  | 1           | Sync(i), as now                         |
+| N+1                   | 2           | Respond. *Kind 2 stops meaning Deploy.* |
+
+=_equitySlots= returns =N + 2= when the basket is set, and 0 when it is
+unset. Kinds 3 and 4 are retired. =WheelWork='s =kind= field for an equity
+step follows this table: a snapshot that counts kind 2 as Deploy is counting
+a different machine. =EQ_KINDS= in =basket_wheel_agent.py= is updated in the
+instrumentation PR from ={1: sync, 2: deploy, 3: fund, 4: trim}= to
+={1: sync, 2: respond}=. Fund and Trim counters go.
+
+=SampleKind= is not an =EquityKind= index. It is its own mixin, the last
+base of =BasketWheel=, after =ArbKind=, so the C3 slot order stays Compute,
+Director, Sweep, Ops, Equity (=N+2=), Arb, and then one Sample slot. Arb
+triangle indexes do not move. The mixin adds that slot only when a signal
+address is set, and zero slots when it is unset. =_run= try/catches
+=observe= the way =DirectorKind= try/catches =poke=. A bare revert in a kind
+aborts =WorkWheel.tick= without advancing the cursor, so the try/catch is
+mandatory. Sample is not also a slot inside =EquityKind=. The desk's wheel
+does not gain a Sample slot. There is no desk wheel in this design.
+
+Respond is due when some surviving cap exceeds the grain, or when there is
+no trade and =|equity(LOW) - markOf| > grain=. Sample is due when the
+signal's =lastDay= is behind =block.timestamp / 1 days=.
+
+=weightsBp()= stays positions-only. =responseWeightsBp()= is the view in §5.
+The leash in the old director is not reused.
+
+No new user-facing verb. =deposit= and =redeem= keep their signatures.
+
+=setEquityParams= rejects =leashBp == 0=. Leash 0 makes every non-exact
+weight leashed, the turn gate never binds, and the step is the full
+=stepBp=. The constructor sets =tiltWad = 1e18= and =leashBp = 3000=,
+today's director defaults, and the existing =EquityParams= defaults
+(=floorBp= 100, =flowZx100= 200, =bandBp= 5000, =parkBp= 30000, =flowDays=
+30, =stepBp= 500, =weightBandBp= 200, =grainPpm= 100, =exitFeeBp= 0,
+=swapCapBp= 100, =ceilBp= 2000).
+
+* Data Model Changes
+
+=idleToken=, =liquidityOf=, =flowMs=, the credit id, and the receipt books
+stay where they are. =EquityParams= is packed into the one storage slot =eq=
+(24 bytes used, 8 free). =eq= is the last variable in
+=BuckBasketEquityStorage=, so an extra slot is an append. A =uint16 leashBp=
+fits in the 8 free bytes. An =int256 tiltWad= occupies the next slot.
+=setEquityParams= already replaces =eq= in one assignment; the setter writes
+the whole struct, including the new fields, and reverts when =leashBp == 0=.
+
+The shell is not proxied. A facet against an old shell would read
+=tiltWad = 0= and =leashBp = 0=. The shell, the setter, the facet, and the
+wheel ship in one PR. A newly deployed shell is a different basket. Pointing
+=setWheel= / =setEquityWheel= / =setEquityDirector= back at old bytecode
+restores an old facet on an old shell. It does not roll back a new shell.
+Running experiments keep the old shell, the old facet, and the old director.
+They are not migrated.
+
+Signal state lives entirely in the new signal deployment: the existing
+director mappings, the differential windows, the separate common-mode
+windows, and =monOverEpochs=. Nothing is copied out of a live
+=PairsRebalanceDirector=. The equity desk is pointed at the adapter, and the
+adapter is pointed at the new signal. The old director's storage is
+abandoned with the old address. A ladder seeded on a different basket is not
+this machine's history. The new differential ladder warms for 1280 days
+before the anchor means what the paper says it means; until then the
+excursion is against a short history, which is the existing director's
+behaviour from =primed= onward (the anchor starts equal to the first sample,
+so the first day's excursion is zero). The common-mode rung stays cold until
+it has =WINDOWS_CM[measIdx]= days (20 at the default), and while it is cold
+the adapter publishes effort 0 and the signal does not touch
+=monOverEpochs=.
+
+The lien, the mark, and the receipt books are not migrated.
+
+=kappa1e9= and =capBpPerEpoch= are storage on the adapter, not on the signal
+and not in =MonetaryDesk=. The adapter's constructor writes the deployed
+defaults. Governance can set the cap to 0.
+
+* Alternatives Considered
+
+** 1. Delete the idle-TOKEN veto and keep the rest
+
+Section 14.2 mitigations 1 and 2: gate Trim on =idleToken= of the leg being
+trimmed, let Fund spend =usable= minus the BUCK needed to pair waiting
+TOKEN, and let the leash through the gate. This is the smallest code change.
+It is rejected as the architecture, not as a false description of the bug.
+
+It leaves the desk and the basket on two signals. =EquityTurnDirector= still
+has no common mode, and =PairsRebalanceDirector= is still what the desk's
+=mk_cm= is. It leaves placement in Deploy, which mints the deposited TOKEN
+into the pool it arrived in, so a deposit still pushes the weight toward the
+depositor's mix and only later, if Trim is allowed to run, unwinds it. The
+deposit is not ammunition for the underweight leg. It is a queue. Fund and
+Trim remain two steps ordered against each other: =_trimPlan= returns none
+while =_fundPlan= has a pool, and =_fund= writes the idle TOKEN that
+re-closes =_anyTokenWaiting=. A leash that can fire is necessary and is not
+sufficient for the machine the owner described, which sells one pool and
+buys another in one step, and places a deposit toward the legs the signal
+allows.
+
+Mitigation 1 is also the wrong end state for a different reason. "Reserve
+pairing BUCK for waiting TOKEN, then let Fund spend what remains" still
+treats the arrival pool as the destination. The response treats the arrival
+pool as a candidate sell or a candidate buy, depending on the response
+weight and the predicates.
+
+** 2. A third signal contract on its own wheel, versus the director as a basket satellite the desk may read
+
+|                    | Satellite: desk reads today's director                                                                                                    | This design: evolved director, one sample slot, keeper calls =observe=                                                  |
+|--------------------+-------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------|
+| Common mode        | Absent. The desk cannot decide cheap/dear.                                                                                                | Present, as =log(basketValueInBuck)= against par, on windows =[5..320]=, separate from the 1280-day anchor.             |
+| Desk's persistence | Would be tempted to reuse =turned=, which is a velocity quorum. That is the test the wheel paper says never fired the outright quadrants. | Duration past the leash, copied from =_updateMonetary=, including the cold early-return.                                |
+| Who samples        | Daily, inside the basket wheel. A stalled basket wheel freezes the desk's signal.                                                         | =SampleKind= on the one deployed wheel, the keeper before =monetaryOperation=, Daily, and anyone. Catch-up is one call. |
+| What it can steal  | Nothing today, and nothing after.                                                                                                         | Nothing. No tokens, no credit.                                                                                          |
+| Cost               | No new address. Does not work.                                                                                                            | One new signal deployment and one adapter. No new reserve. =PairsRebalanceDirector= remains for the pro-rata path.      |
+
+The own-wheel variant with a private reserve was considered and rejected. A
+=WorkWheel= that captures nothing does not get called unless a reserve pays
+=kappa=. The sample does not need to be the only thing in its block. Putting
+a Sample slot on a desk wheel would describe the paper. =deploy.py= does not
+deploy that wheel, and this design does not add one.
+
+Leaving the lean, the leash, and =mayTrim= inside the signal was considered
+and rejected. They read the basket's weights. Putting them in the shared
+contract would make the desk's process depend on a function that answers a
+basket question, and it would keep the leash on =weightsBp()=, which ignores
+the idle TOKEN the response has to see. The signal publishes prices. The
+basket applies its mandate to =responseWeightsBp()=.
+
+** 3. Trim and fund the current pools, versus mint new LP with drawn credit
+
+These are the two halves of one action. The current facet already does both,
+in the wrong order, with a veto between them, and with Fund's swap leaving
+=positionMint= nothing to pair.
+
+- Selling is an unwind. =positionBurn= returns TOKEN and pays the position's
+  BUCK into the account; one =monetaryLeg(i, false, dx)= sells the TOKEN,
+  idle first; =liquidityOf= and =idleToken= are booked as =_trim= books
+  them; =proceeds= is the increase in =balanceOf=. That is Trim, typed as
+  the sell in §5.
+- Buying is a draw, after =_markS(_snap())= on the post-sale book.
+  =s1.spend= is unused credit under =K * mark= plus held BUCK, computed on
+  that snap. Half of the buy budget is swapped for TOKEN. =positionMint=
+  adds liquidity to the existing full-range position, and
+  =idleToken -= tokenUsed=, =liquidityOf += liquidity=, as =_deploy= does.
+  It does not require the wallet to be empty first.
+- A transfer is that sell, then the fresh snap, then that buy funded by
+  =min(proceeds, buyCap)= plus pre-trade =usable0= only when headroom on
+  =s1= is still non-negative, clamped to =s1.spend=. Neither half waits for
+  another kind to become due.
+
+Minting a second position per pool is not what "mint new LP" means here. The
+basket's book is one =liquidityOf[i]= per constituent, full range
+(=doc/BASKET-EQUITY.org= §3.1, and =marks= valued on that liquidity). New LP
+is more of that position, funded by the credit the mark just rose to allow.
+
+What is rejected is the current split into three kinds. Deploy can only mint
+into the deposited commodity's pool. Fund swaps the whole planned BUCK,
+leaves TOKEN in the wallet, and mints nothing. Trim refuses to run while
+either of those is true, and also while Fund has a plan. The response is one
+kind so those three cannot veto each other.
+
+* Security & Privacy Considerations
+
+The signal holds no assets. A compromised or merely wrong signal can
+mis-time trades inside =swapCapBp= and inside =stepBp=. It cannot withdraw,
+cannot mark either credit, and cannot set =K=. That is the bound the wheel
+paper already states for the director ("Its outputs are hints, not
+authority"). Governance points the basket at it with =setEquityDirector= and
+points the adapter at it; the desk's =setMonetaryDirector= points at the
+adapter. Changing those pointers is the same authority as changing the
+director today. The signal must not be passed to =openCredit=.
+
+=observe= is permissionless. A second call on the same day returns. The
+catch-up exponent is capped at 3650. There is no value to extract by calling
+it, and no way to move =lastDay= backward.
+
+The mark is LOW. A spot push up does not raise =creditLimit= above TWAP
+equity. A spot push down can shrink headroom and stop buys. It cannot pull
+the lien back, and it cannot move tokens out. That is the existing E2
+direction. The response's re-mark between sell and buy is =_markS(_snap())=
+after =liquidityOf= and =idleToken= are written. That is what keeps a
+transfer from issuing against assets the sell just removed. A second
+=_markS= on the opening snap does not.
+
+The response runs only from the wheel (=msg.sender == wheel=), inside the
+facet, as Deploy, Fund, and Trim do. Pool callbacks stay in the venue
+(=onlySelf= on =positionMint= / =monetaryLeg=). This design adds no entry
+point that pulls BUCK to an arbitrary address. The BUCK spent on the buy is
+at most the post-remark =balanceOf= and at most =buyBudget=. A step that
+started under water does not increase the lien. The end mark is not asked to
+pull that lien back inside =K= times the post-fee book.
+
+A depositor can no longer freeze Trim by leaving dust above the grain. They
+can still deposit a large amount of one TOKEN. The response will sell it
+toward the aim at one =swapCap= per step when the predicates allow, which is
+the intended flow rebalance, and will not buy a leg that is still running
+down unless =leashedUnder=. The entry charge is unchanged and only partly
+covers that sell. The loss from selling a depositor's mix sits on the book,
+as §14.2.4 already says, and is capped per step by the same 1% depth cap
+that bounds every other wheel swap.
+
+The basket and the desk remain two accounts. A test that the signal's TOKEN
+and BUCK balances stay zero, and that it has no credit id, belongs in the
+signal's forge suite. The desk's existing wall (D2, and
+=test/basket/EquityDeskInvariant.t.sol= as the wheel paper cites it) stays:
+inflating the basket's mark must not move the desk's limit.
+=EquityDesk._mark= / =netValue= / =_deskNav= are not edited. =_deskNav=
+remains =basket.equity()= at TWAP, idle included.
+
+No new personal data. The signal stores prices and EMAs. Receipts, identity,
+and the approve-before-exit path are untouched (=doc/BASKET-EQUITY.org=
+§13.8, "Identity").
+
+* Observability
+
+Existing events stay: =WheelWork(kind, i, amount)=, =Deposited=,
+=CreditMarked= / the desk's =DeskMarked=, =MonetaryOperation=. After the
+cut, equity =WheelWork= kind 2 is Respond. Kinds 3 and 4 are not emitted.
+
+Add one event on the signal, which today emits nothing from =observe=:
+
+#+begin_src solidity
+event Sampled(uint64 day, uint256 legs, int256 commonModeTick1e9, uint32 epochsPastLeash);
+#+end_src
+
+Add one event on the response, beside =WheelWork=:
+
+#+begin_src solidity
+event Responded(
+    uint8 action,          // 0 hold, 1 sell, 2 buy, 3 transfer
+    uint256 sellLeg,       // NONE if unused
+    uint256 buyLeg,
+    uint256 votesSell,
+    uint256 votesBuy,
+    uint256 buckMoved,
+    uint256 markAfter
+);
+#+end_src
+
+=action = hold= is emitted only when the step ran because
+=|equity(LOW) - markOf| > grain=. A skipped slot emits nothing. =wheelDue=
+is false and =tick= does not count it as work.
+
+The sim's snapshot already stores =mk_cm=. After the desk is re-pointed,
+=mk_cm= is the signal's measuring rung (=monetaryReading='s =cm=,
+common-mode index 2), not =d.director.commonMode(2)=. That change is in
+=MonetaryKeeperAgent= and ships with the adapter PR. Reading =commonMode(2)=
+on the pairs director after =setMonetaryDirector= would keep the column on
+the old bank.
+
+Counters worth plotting, not new on-chain storage: Respond actions per day
+by kind, days a leg spends past the leash, days =headroom < 0=, max idle
+TOKEN value as a fraction of gross (it may be large; it is inventory, and
+Fund/Trim are gone), and =markOf= against =equity(LOW)=. The section 14.3
+diagnostic --- waiting TOKEN, which kinds were due, weights, targets,
+=mayTrim= --- is the list to extend, not a campaign to start.
+
+Alerts, off-chain, from those counters:
+
+- Signal =lastDay= more than two days behind the chain. Catch-up repairs the
+  ladder. It does not repair a desk that traded on a stale sign. The
+  keeper's =observe= before =monetaryOperation=, and the one =SampleKind=
+  slot, are what make a stale day rare.
+- A leg past the leash for more than a day while the basket wheel's =tick=
+  is landing and Respond is due and not succeeding. That is the section 14
+  failure mode returning.
+- =headroom < 0= persisting. This is the ruled underwater state, not a page.
+  The alert distinguishes a prolonged outage (sells also not running) from
+  the rule (sells running, buys not).
+
+* Rollout Plan
+
+There is no feature flag in these contracts. The order is the PR plan. Each
+step is independently deployable. Running experiments are not migrated.
+
+1. Land the state-machine chapter in the repo. No contract change. Running
+   cells are unaffected.
+2. Deploy the signal beside the old director. Do not point the equity basket
+   or the desk at it. The forge tests include the four common-mode tests
+   ported onto the deployed =MonParams= (deadband =100e9=, leash =200e9=,
+   kappa =250_000_000=, cap 40, =persistEpochs= 30, =measIdx= 2) and onto
+   the separate window vectors. The old director remains the address the
+   running experiments call. =targetsBp= / =mayTrim= / =mayFund= stay on
+   that old bytecode.
+3. Deploy a new shell, the new facet, and the new wheel together.
+   =EquityKind= is Daily, Sync × N, Respond (kind 2). =SampleKind= sits
+   after =ArbKind=. =EquityParams= carries =leashBp= and =tiltWad=, the
+   constructor sets =1e18= and =3000=, and =setEquityParams= rejects
+   =leashBp == 0=. This basket is a new deployment. Running experiments keep
+   the old shell, the old facet, and the old director. Rolling back the new
+   shell is deploying or retaining the old basket. It is not three pointer
+   writes. Do not point the new facet at an old shell, and do not run the
+   old wheel against the new facet: the old wheel sends kind 2 as Deploy,
+   and the new facet reads kind 2 as Respond.
+4. Deploy the adapter with the constructor defaults. =setMonetaryDirector=
+   on the equity desk points at the adapter. =monetaryOperation= is
+   unchanged. The keeper calls =signal.observe()= before =monetaryOperation=
+   and reads =mkCm= from the signal's measuring rung. Re-pointed equity-ops
+   cells stop poking the pairs director. Cells that have not re-pointed keep
+   that poke. Pro-rata desks stay on =PairsRebalanceDirector=. Pointing
+   =setMonetaryDirector= back at the pairs director restores today's =mk_cm=
+   for that cell.
+5. Sim snapshot counters for the response. Still no campaign.
+
+Bytecode pressure is a check, not a redesign. §13.8 measured the wheel facet
+at 9.0 KB and the shell at 16.7 KB. The response replaces three external
+flows with one; the common-mode math moves into the signal, which has no 24
+KB problem of its own (=EquityTurnDirector= is not the contract that was
+tight). If the facet crosses the limit, the split is still one Respond
+function in the facet, not a return to three kinds.
+
+Experiments.* E2--E4 are the 31 two-year cells under
+
+=build/sim/conv/conv-e{2,3,4}/=, recorded in =doc/CONVERGENCE.org=, plus the
+equity-basket twins of that series run elsewhere. This document does not
+start them, restart them, or add a toml.
+
+Cells that become invalid *if* the corresponding PR ships, and that must not
+be relaunched to finish this design:
+
+- Any cell on =BuckBasketEquity= whose score is weights, Fund or Trim
+  counts, the director's harvest, or time-to-rebalance under a depositor
+  population. Section 14 already says those cells measure a basket that
+  could not rebalance, and names E3's director leg in particular. The
+  response machine makes them incomparable with a later run. Let them finish
+  where they are running. Do not restart them from here.
+- Cells that score the desk's =mk_cm= or =monetaryEffort= off
+  =PairsRebalanceDirector= become invalid only when the adapter PR re-points
+  =monetaryDirector=. Until that pointer moves, those cells are still
+  measuring the contract they were aimed at. Do not relaunch them as part of
+  landing the signal.
+
+Cells that do not become invalid: pro-rata composition runs that never call
+=BuckBasketEquityWheel=, for as long as their director address is unchanged.
+A pro-rata =BuckBasketOps= is not re-pointed by the adapter PR.
+
+* Open Questions
+
+The owner ruled all four on 2026-09-30. None is open.
+
+1. *Quorum.* Ruled by the owner on 2026-09-30: quorum stays 4 of 6, and this
+   change does not retune it.
+2. *Basket leash.* Ruled by the owner on 2026-09-30: =leashBp= stays 3000
+   (30% of declared weight); a leashed leg trades even inside the 2% band
+   and aims at the declared weight, and a leg that is not leashed aims at
+   the band edge.
+3. *Idle TOKEN in the credit mark.* Ruled by the owner on 2026-09-30: idle
+   TOKEN stays in the credit mark, confirming today's =_equityS=, and it is
+   not excluded.
+4. *Shared signal.* Ruled by the owner on 2026-09-30: the shared signal is a
+   new deployment of =EquityTurnDirector= extended with the common-mode
+   ladder, with no private wheel, and the old director stays for anything
+   still pointed at it.
+
+Already ruled, and not reopened by those four: two machines; one shared turn
+signal; equity marks the credit as prices move; available credit mints LP to
+rebalance; a deposit must not stop that; no margin call; =K= stays on the
+controller; the desk's quadrants stay; the signal holds no tokens. The
+common mode is =log(basketValueInBuck)= against par, on
+=[5, 10, 20, 40, 80, 160, 320]=, not the mean of the legs, not =equity()=,
+and not the differential windows. Persistence is a duration, not =turned()=.
+=measIdx= stays ≤ 3. =kappa= and =capBpPerEpoch= live on the adapter. The
+liquidity target caps new credit drawn for a buy and does not gate sells.
+LOW remains the mark. Idle remains in =_grossS=. The better-route swap is
+still not designed.
+
+* References
+
+- =alberta-buck-ethereum-wheel.org=: "One filter bank, two modes"; "The
+  director: timing the tides"; "The four quadrants"; "Measure fast enough,
+  or become the destabilizer"; "A separate machine"; "The work wheel"; "Time
+  without a scheduler"; open questions 7 and 8. The public voice. This
+  design does not replace it. The desk wheel in that paper is not what
+  =deploy.py= runs.
+- =doc/BASKET-EQUITY.org= §§3, 7, 13.3, 13.6, 13.8, 14. The component
+  machine, the ruled credit, the starvation, mitigation 4. Section 15 is
+  where the state-machine chapter lands.
+- =doc/DESK-LP-RESERVE.org=: the quadrant table in the credit-holder
+  wording. The reserve-as-shares idea in that note is not this design.
+- =doc/JUBILEE-ISSUANCE.org= 8b.2: after a =K= cut, sells that repay
+  continue; no second account; no margin call.
+- =doc/CONVERGENCE.org= §5.1, and the notice on
+  =PairsRebalanceDirector.commonMode=: why the common mode is the basket's
+  value against par.
+- =doc/BASKET-WHEEL.org=: intro only. Not the home of the state-machine
+  chapter.
+- =src/basket/EquityTurnDirector.sol=: =observe=, =excursion=, =turned=,
+  =running=, =targetsBp=, =mayTrim=, =mayFund=, =_leashed=. Windows
+  =[5, 10, 20, 40, 80, 160, 1280]=.
+- =src/basket/BuckBasketEquityWheel.sol=: =wheelDue=, =wheelStep=,
+  =_fundPlan=, =_trimPlan=, =_anyTokenWaiting=, =_deploy=, =_fund=, =_trim=,
+  =_daily=, =_sync=.
+- =src/basket/BuckBasketEquityStorage.sol=: =_grossS=, =_equityS=,
+  =_headroomS=, =_usableS=, =_markS=, =_markAt=, =EquityParams=.
+  =src/basket/BuckBasketEquity.sol=: =deposit=, =equity=, =sharePrice=,
+  =weightsBp=, =creditDepositors=.
+- =src/basket/BuckBasketUniswapV3.sol=: =marks=, =basketValueInBuck=,
+  =positionMint=, =positionBurn=, =positionSync=, =_liquidityForAmounts=.
+- =src/basket/MonetaryDesk.sol=: =IMonetaryDirector=, =monetaryOperation=,
+  =_absorb=, =_supply=. =src/basket/EquityDesk.sol=: =_mark=, =netValue=,
+  =_deskNav=, =_deskRetire=, =_deskIssue=.
+- =src/basket/PairsRebalanceDirector.sol=: =WINDOWS=
+  =[5, 10, 20, 40, 80, 160, 320]=, =commonMode=, =_foldBasket=,
+  =_updateMonetary=, =setMonParams=.
+- =src/basket/RebalanceDirectorBase.sol=: =epochNow=.
+- =src/wheel/UpkeepKinds.sol=: =EquityKind._equityOf=, =OpsKind=,
+  =DirectorKind=. =src/wheel/WorkWheel.sol=: =tick=.
+  =src/wheel/BasketWheel.sol=: the kind order, Arb last.
+- =src/Buck.sol=: =balanceOf=, =signedBalanceOf=, =creditLimit=, =mint=.
+  =src/BuckCredit.sol=: =mark=, =markOf=, =currentValue=,
+  =depreciatedFaceValue= for =DepreciationType.MARKED=.
+- =alberta_buck/sim/deploy.py=: one =BasketWheel= for equity and equity-ops;
+  =setMonParams= defaults; =setMonetaryDirector=; no =setOps= on
+  =EquityDesk=.
+- =alberta_buck/sim/director_agent.py=: =MonetaryKeeperAgent=, =mkCm= from
+  =commonMode(2)=, the 2026-09-30 poke comment.
+- =alberta_buck/sim/basket_wheel_agent.py=: =EQ_KINDS=, =setOps= only when
+  ="ops"= is in the kinds list.
+- M. H. A. Davis and A. R. Norman, /Portfolio Selection with Transaction
+  Costs/, Mathematics of Operations Research, 1990. Cited from the wheel
+  paper's open question 8 and from =_pairEffort=. Not refitted here.
+- W. K. Bertram, /Analytic Solutions for Optimal Statistical Arbitrage
+  Trading/, Physica A, 2010. Same. The band is where a threshold would later
+  go.
+
+* Key Decisions
+
+1. *The signal is a third contract, evolved from =EquityTurnDirector=, not a
+   satellite and not a new ladder.* The current director is only the
+   differential half, on =[5, 10, 20, 40, 80, 160, 1280]=. The desk's common
+   mode lives in =PairsRebalanceDirector= on =[5, 10, 20, 40, 80, 160, 320]=
+   and is a different turn test. One new deployment carries both views, on
+   those two vectors, with =measIdx <= 3= and =leash >= deadband=. The old
+   director stays for anything already pointed at it. =targetsBp= /
+   =mayTrim= / =mayFund= stay on the old interface.
+
+2. *No private wheel and no third reserve.* =deploy.py= deploys one
+   =BasketWheel=. =SampleKind= is one mixin slot on that wheel, after
+   =ArbKind=, try/catch around =observe=, and only when a signal address is
+   set. An unset signal adds zero slots. The desk is advanced by
+   =MonetaryKeeperAgent= calling =observe= and then =monetaryOperation=.
+   This design does not add a desk wheel, and it does not put a Sample slot
+   on a second wheel.
+
+3. *The two turn tests stay different.* The basket uses the six-rung
+   velocity quorum (=turned= / =running=) against the 1280-day anchor. The
+   desk uses the sign of the 20-day common-mode rung on its own =[5..320]=
+   vector, a deadband, and a duration past the leash. Unifying them
+   reintroduces the bug the wheel paper documents: a velocity test that
+   never reports persistence. Index 2 is 20 on both ladders by coincidence.
+   The vectors are not shared.
+
+4. *The signal is price-only.* The lean, the basket leash, and the step size
+   live on the basket. =kappa1e9= and =capBpPerEpoch= live on the
+   =IMonetaryDirector= adapter, not on the signal and not inside
+   =MonetaryDesk=. The signal does not hold tokens and does not set =K=.
+   =monetaryOperation= is not edited.
+
+5. *One response kind replaces Deploy, Fund, and Trim.* Kind 2 becomes
+   Respond. The transfer is the balance-delta procedure in §5: mark the
+   opening snap, one sell (idle first, one =swapCap=, one =monetaryLeg=),
+   book =liquidityOf= and =idleToken= the way =_trim= does, then
+   =_markS(_snap())= and read headroom from that snap. Never a second
+   =_markS= on the pre-trade snap. The buy budget is =min(proceeds, buyCap)=
+   plus pre-trade =usable0= only when headroom on the new snap is still
+   non-negative, clamped to that snap's =balanceOf=. Half the buy's BUCK is
+   swapped and half is kept for =positionMint=, then
+   =idleToken -= tokenUsed= and =liquidityOf += liquidity= the way =_deploy=
+   does, then =_markS(_snap())= again. The global =_anyTokenWaiting= veto,
+   the "Trim yields to Fund" ordering, and the parking fallback are removed.
+
+6. *Idle TOKEN in the mark confirms today's =_equityS=.* It is not a formula
+   change. Three sums stay distinct: the collateral mark is =equity(LOW)=
+   via =_markAt=; desk NAV and =sharePrice()= are =equity()= at TWAP; the
+   response weight is =responseWeightsBp()= at TWAP with the lien left out.
+   All three include idle. The owner ruled on 2026-09-30 that idle stays in
+   the mark and is not excluded. Wallet BUCK and unpaid relief stay in
+   equity. Owed fees stay out until Sync. The mark stays LOW. Outsider pool
+   balances stay out.
+
+7. *The liquidity target caps new credit drawn for a buy. It does not gate
+   sells, and it does not gate the machine.* =usable0= is the pre-trade
+   value. It is added to the buy budget only when headroom on the post-sale
+   snap is =>= 0=, and only inside =buyCap=. Under water at the start, the
+   buy budget is 0 and sells that repay the lien continue. That rule is
+   unchanged. The checks are: a step that started under water does not
+   increase the lien, and the BUCK spent on the buy is at most the
+   post-remark =balanceOf= and at most =buyBudget=. There is no end-of-step
+   test that the lien is within =K * equity(LOW)=. The grain floor =1e3= is
+   not a slack on that test.
+
+8. *Step size is the integer expression in §5, in BUCK.* With
+   =value_i = posTwap_i + idle_i * pTwap_i / 10**dec_i= and =B = Σ value_i=:
+   if =B == 0=, hold. Otherwise =wBp_i = value_i * 10000 / B=, remainder
+   assigned so the sum is 10000. A turned leg steps
+   =value * stepBp * votes / 10000 / 6=. A leg that is not turned steps
+   =value * stepBp / 10000=. A leashed leg aims at the declared weight, even
+   inside the band. A leg that is not leashed aims at the band edge.
+   =sellCap = min(aimSell, sellStep, 2 * swapCap_i)= and
+   =buyCap = min(aimBuy, buyStep, swapCap_j)=. A side =<= grain= drops only
+   that side. Tie-break is the largest aim, then the lowest index. The buy
+   splits its BUCK in half before =positionMint=.
+
+9. *Flow rebalancing is mitigation 4 with the signal gate.* A deposit is
+   placed toward the underweight leg the predicates allow, not into the pool
+   it arrived in. A leg still running down is not bought unless
+   =leashedUnder=. The arrival pool is not privileged. Arb captures that
+   =creditDepositors= parks in =idleToken= are the same inventory.
+
+10. *This document does not start E2--E4.* Equity cells that score the
+    starved wheel become invalid when the response ships. Desk cells that
+    score =mk_cm= become invalid only when the adapter PR moves
+    =monetaryDirector=. Pro-rata cells that never call
+    =BuckBasketEquityWheel= stay valid while their director address is
+    unchanged. None of them is relaunched from here.
+
+* PR Plan
+
+** PR 1 --- State-machine chapter in the design record
+
+- *Title:* Document the equity basket's signal, wheel, and credit machines
+- *Files:* =doc/BASKET-EQUITY.org= (new section 15, the state-machine
+  chapter: the current director, the current components and the starvation
+  transition, the desk's signal inputs including the two Q2 paths, the
+  proposed split, the balance-delta step, the one slot cut). One sentence at
+  the end of open question 7 in =alberta-buck-ethereum-wheel.org=, pointing
+  at that section. The wheel paper stays the public voice of the filter bank
+  and the quadrants. Nothing in it is deleted or rewritten.
+  =doc/BASKET-WHEEL.org= is not the home of this chapter.
+- *Depends on:* none
+- *Description:* Land the machines from this design into the repo's design
+  record so later PRs review against a text that lives next to the code. No
+  Solidity. No campaign. No parameter change.
+
+** PR 2 --- Shared filter bank as a new deployment of the director
+
+- *Title:* Add the common-mode ladder to the equity signal contract
+- *Files:* =src/basket/EquityTurnDirector.sol= (separate common-mode windows
+  =[5, 10, 20, 40, 80, 160, 320]=, differential windows unchanged,
+  =monetaryReading=, =votes=; =observe= folds both ladders; cold rung does
+  not touch =monOverEpochs=; persistence increments once per landed day;
+  =setMonParams= guards =measIdx > 3= and =leash < deadband=; defaults
+  deadband =100e9=, leash =200e9=, =persistEpochs= 30, =measIdx= 2).
+  =src/basket/BuckBasketEquityStorage.sol= only if =IFilterBank= is declared
+  beside =IEquityDirector=. =test/basket/EquityTurnDirector.t.sol= and a
+  port of =test_commonMode_isTheBasketAgainstPar_notTheLegsOpening=,
+  =test_commonMode_tracksLogBvib=,
+  =test_monetaryEffort_signDeadbandAndPersistence=,
+  =test_monetaryEffort_waitsForTheRungToWarm= from
+  =test/basket/PairsRebalanceDirector.t.sol=, against those deployed
+  numbers.
+- *Depends on:* PR 1
+- *Description:* Extend the director in a new deployment. Do not point the
+  basket or the desk at the new bytecode. Do not remove =targetsBp= /
+  =mayTrim= / =mayFund= from the old interface. Do not edit
+  =PairsRebalanceDirector=. The new =observe= is still idempotent per day
+  and still holds no tokens. =kappa= and the cap are not in this contract.
+
+** PR 3 --- One slot cut, the shell, and the response
+
+- *Title:* Replace Deploy, Fund, and Trim with one response step, and ship
+  the shell with it
+- *Files:* =src/basket/BuckBasketEquityWheel.sol= (delete =_fundPlan=,
+  =_trimPlan=, =_deploy=, and =_anyTokenWaiting= as the planners; add the
+  classification, the balance-delta step, the end mark).
+  =src/basket/BuckBasketEquityStorage.sol= (=EquityParams= appends
+  =uint16 leashBp= in the free bytes of =eq= and =int256 tiltWad= in the
+  next slot; =responseWeightsBp=). =src/basket/BuckBasketEquity.sol=
+  (=setEquityParams= reverts on =leashBp == 0=; constructor sets
+  =tiltWad = 1e18= and =leashBp = 3000=; =deposit= unchanged).
+  =src/wheel/UpkeepKinds.sol= and =src/wheel/BasketWheel.sol= (=EquityKind=
+  slots are Daily 0, Sync × N kind 1, Respond kind 2, =N+2= slots;
+  =SampleKind= after =ArbKind=, try/catch =observe=, zero slots when the
+  signal is unset). =test/basket/BuckBasketEquity.t.sol=,
+  =test/wheel/BasketWheelEquity.t.sol=.
+- *Depends on:* PR 2
+- *Description:* One behaviour cut. Kind 2 stops meaning Deploy. Kinds 3 and
+  4 are gone. Sample is not an =EquityKind= index. The response reads
+  =IFilterBank=. With no signal, the unset triple in §5 applies (full step,
+  band plus leash, mark still updates). Tests: a leashed leg trims while
+  another pool holds idle above the grain; a TOKEN deposit into an
+  overweight turned leg is sold toward an underweight leg that is not
+  running down; an underwater basket (=headroom0 < 0=) sells and the lien
+  does not rise; the BUCK spent on a buy is at most the post-remark
+  =balanceOf= and at most =buyBudget=; =positionMint= receives both sides,
+  and the end snap does not count minted TOKEN as idle. Ship the facet, the
+  wheel, and the shell together. A new shell is a different basket. Running
+  experiments keep the old bytecode. Do not retune quorum, =leashBp=,
+  =swapCapBp=, or =stepBp=. =monetaryOperation= is not in this PR.
+
+** PR 4 --- IMonetaryDirector adapter
+
+- *Title:* Drive EquityDesk from the shared reading through an adapter
+- *Files:* a new adapter contract implementing =IMonetaryDirector=
+  (=epochNow= = the signal's day; =monetaryEffort= from =monetaryReading=
+  with the formula in §4; constructor defaults =kappa1e9 = 250_000_000=,
+  =capBpPerEpoch = 40=). =test/basket/EquityDesk.t.sol= (Q2 inventory does
+  not swap; Q2 fresh purchase decreases =monetaryOutstanding= without adding
+  =monetaryBuckHeld=; pro-rata =BuckBasketOps= still compiles against
+  =monetaryEffort= and is not re-pointed).
+  =alberta_buck/sim/director_agent.py=: =MonetaryKeeperAgent= calls
+  =signal.observe()= before =monetaryOperation=; =mkCm= is the signal's
+  measuring rung; stop =pokeAll= of the pairs director on equity-ops cells
+  that have re-pointed; the poke stays for cells that have not.
+  =EquityDesk._mark=, =netValue=, and =_deskNav= are not edited.
+  =MonetaryDesk.monetaryOperation= is not edited.
+- *Depends on:* PR 2. Does not depend on PR 3.
+- *Description:* The equity desk's =setMonetaryDirector= targets the
+  adapter. Quadrants, bounds, and =capitalizeMonetary= are unchanged. The
+  adapter and any future =OpsKind= epoch source share the signal's day. This
+  PR does not =setOps= the equity desk and does not deploy a desk wheel.
+  Pro-rata deployments are not re-pointed. =PairsRebalanceDirector= stays.
+
+** PR 5 --- Instrumentation for the section 14 diagnostic
+
+- *Title:* Emit Responded and record idle, headroom, and the mark
+- *Files:* the =Responded= event if PR 3 did not already emit it.
+  =alberta_buck/sim/basket_wheel_agent.py=: =EQ_KINDS= becomes
+  ={1: "sync", 2: "respond"}=; fund and trim counters go. Snapshot counters
+  (actions, idle over gross, headroom, =markOf= versus LOW equity) on the
+  equity snapshot path. No toml. No =campaign3.sh=. No star directory.
+- *Depends on:* PR 3. The =mk_cm= source change is PR 4 and is not repeated
+  here.
+- *Description:* Make the starvation visible if it ever returns (a leash
+  leg, Respond due, no =Responded= sell). Kind 2 in =WheelWork= is Respond.
+  Does not run E2, E3, E4, or the equity twins.
+
+* Refinements raised 2026-10-01
+
+The owner raised four questions against the machines above. None is ruled.
+The PR plan does not grow a PR for any of them. What follows is the reading
+of the current text, and the condition under which each would become a
+design.
+
+** Arb stays a kind on the wheel
+
+This design does not fold =ArbKind= into the response. =BasketWheel='s slot
+order is Compute, Director, Sweep, Ops, Equity, Arb, and the slot cut
+appends Sample after Arb so the triangle indexes stay where they are.
+Changing =ArbKind='s cycle is a non-goal.
+
+=doc/BASKET-EQUITY.org= §13.8 departure 1 already placed the profit in the
+basket and left the code on the wheel. The cycle needs no float: the V3
+callback funds it, and the profit is credited through =creditDepositors= /
+=creditTreasury=. "In the basket" is where the TOKEN lands, not where the
+kind runs. The one new coupling is a consequence of deleting Deploy.
+=creditDepositors= does =idleToken[i] += amount=. That TOKEN becomes
+response inventory, and the response may sell it out of the pool it was
+captured in. The cycle itself is unchanged.
+
+** The signal does not price the outside route
+
+The better-route swap is a named non-goal. Respond sells and buys with one
+=monetaryLeg= on the basket's own TOKEN/BUCK pool. The signal reads those
+pools' TWAP ticks and one =basketValueInBuck()=. It does not read TOKEN/USDC
+or BUCK/USDC, and it does not compare the cost of acquiring a TOKEN, or the
+proceeds of divesting it, against the two-hop route through USDC.
+
+=ArbKind= does read all three pools. It takes a cycle whose direct profit is
+positive, in whichever direction pays, with USDC existing only between two
+of the swaps (=src/wheel/ArbKind.sol=). That search is a consistency trade.
+It is not a quote the response consults before it sizes a sell or a buy.
+
+§13.8 departure 2 deferred the route for a different reason: the wheel's
+arbitrage re-pins the basket's pools between capped steps, so an own-pool
+trade is priced near what the outside route would have cost. That is an
+argument about the pool being pulled back between steps. It is not a
+comparison, inside one step, of which path is cheaper while the gap is still
+open.
+
+Open, and not designed here. A route comparison would be a third reading
+beside the two ladders. For each leg, the BUCK cost of buying its TOKEN on
+the own pool against the cost of BUCK to USDC to TOKEN, and the BUCK
+proceeds of the reverse. The response would send that step's sell or buy
+down the better path, inside the same =sellCap= and =buyCap=. The signal is
+the place that already samples once a day and holds no inventory, so it is
+the place that would publish the two quotes. =ArbKind='s triangle search
+stays a different function. Departure 2 remains the record that the route is
+unbuilt.
+
+** The desk's reserve, and whether the basket runs a quadrant
+
+=doc/DESK-LP-RESERVE.org= (2026-09-30) is the existing discussion of the
+desk saving its grant in the basket. This design does not adopt it. The desk
+remains its own credit holder. =monetaryOperation= stays on =EquityDesk=.
+The equity desk is not =setOps='d. Invariant D2 stands: nothing the desk
+holds is in the basket's =_equityS=.
+
+The question splits in two.
+
+The desk deposits the grant, holds the receipt's shares, and its own
+BuckCredit is marked at a net value that includes that receipt at the
+basket's LOW share price. The note's assessment: promising as the place the
+reserve waits, because the shares earn, a cheap BUCK makes the shares buy
+more BUCK, and an in-kind exit delivers the TOKEN Q1 sells. Weak as the
+issue and retire lever itself, because a deposit and an exit change pool
+depth and do not move BUCK's price, and an exit during an inflation attack
+thins the pools the desk is supposed to be defending. The spiral bound in
+that note is the one that applies to any loop of this shape: a mark at
+gross, drawing, buying TOKEN and depositing it again, grows as
+=K / (1 - K)=, three times at =K = 0.75=. A mark at net does not grow. The
+four questions at the end of that note --- the treasury cut on the desk's
+receipt, how much of the reserve stays plain TOKEN, whether the desk's exit
+queues behind depositors, and the size of a standing book --- are still
+open.
+
+The basket performing a quadrant is the other half, and it is a different
+machine. Respond already draws the basket's own credit to mint LP, and sells
+TOKEN to repay the basket's own lien. That step is paced by =stepBp= and
+=swapCapBp=, and it is sized to a weight gap. It is not Q1--Q4, and it is
+not sized to move bvib. Handing the basket a quadrant would turn a weight
+trade into a supply trade, and it would make the basket's TOKEN the desk's
+reserve. The quadrant table refuses that: Q1 spends TOKEN the desk already
+holds, and the basket's TOKEN is not that reserve. PR 4 re-points the desk's
+reading. It does not move the operation.
+
+** A BuckCredit on LP, drawn while K is quenching
+
+The basket's one BuckCredit is already a mark on its LP. =equity(LOW)= is
+the positions plus idle TOKEN, minus the lien, and =_markS= writes that to
+the NFT. A second NFT marked on those same positions counts them twice.
+
+The loop used by lending platforms --- borrow against an asset, post what
+was borrowed, borrow again --- is the gross mark =DESK-LP-RESERVE.org=
+refuses. Each new NFT is another turn of =K / (1 - K)= when the collateral
+it marks is still inside a position the basket's mark includes.
+
+An NFT on LP that has left the basket is a relocation, not a loop. Moving
+the position out drops the basket's equity, and its line, by about =K= times
+the value moved. The new holder marks what it received. When both marks use
+the same =K= and the same LOW value, system-wide credit capacity moves from
+one account to the other. It increases only if the new mark is gross, or
+uses a higher factor, or the LP never left =_equityS=.
+
+The case where a relocation does something the basket cannot: under water
+the basket's buy budget is zero and sells that repay continue. While BUCK is
+cheap (=basketValueInBuck= above par, the inflation K exists to quench) the
+basket's headroom can be exhausted and K can still be moving. A holder of
+segregated LP, with its own line and the same no-margin-call rule, could
+draw and acquire through that stretch, and unwind after the persistent error
+has been quenched and the basket's headroom has returned. A price fall may
+leave that holder's lien above =K= times its mark. Buys stop. Sells that
+repay continue. That holder is a third credit account. It is not the signal.
+It is the desk only if the desk is the holder, which is the standing book
+already asked in =DESK-LP-RESERVE.org=.
+
+Open. The condition for it becoming a design: the LP inside the new NFT is
+absent from the basket's =_equityS=. Until that is true, the NFT is a second
+mark on the basket's own positions.
+
+** The residual bvib K's integral needs
+
+K is a PID on raw bvib (=doc/K-AND-OPS.org=, decision 10). The proportional
+term is that error. The integral time in the sim defaults is 90 days, with
+=e_max= 0.10, =dk_rail= 0.5 and =kp_frac= 0.02
+(=alberta_buck/sim/experiment.py=). Held for one integral time, a constant
+error =e= moves K by about =5 e=: a 1% error moves K by about 0.05, and a 2%
+error by about 0.10. The proportional term on the same error is about
+=0.1 e=, so 0.001 at 1%. The authority is the integral. A residual of 2--4
+bp, which is where the calm pro-rata E3 sat (=doc/CONVERGENCE.org=: bvib
+mean 1.0002--1.0004, inside the 100 bp deadband, the desk publishing no
+advice for 731 days), moves K by about 0.0015 over a season.
+
+The equity calm twins on record at =star-71ccec2= =conv-e3-eq= (all four
+cells FAIL) sit in a different place. The tail bvib is 0.9805--0.9826 and K
+is 0.950, the rail, for 93--98% of that tail. A residual near 2% is the
+desk's leash (=leash1e9= 200e9). It is large enough for the integral to have
+wound, and K is already at =kmax=, where conditional integration stops.
+
+=doc/K-AND-OPS.org= §2 and F3 are the other half of the same observation.
+The desk's job is to hold the price inside its band on a timescale of days,
+so the flow sits in the desk's inventory and the price gauge reads what the
+desk did not take. K reads raw bvib, not the desk's book. While the desk
+holds the price, K's error is the residual. One lever zeros one of the two
+integrals.
+
+This design copies the deployed band onto the new signal and the adapter:
+deadband =100e9= (100 bp), leash =200e9=, =persistEpochs= 30, =measIdx= 2,
+=kappa1e9= =250_000_000=, cap 40 bp per epoch. Inside the deadband the
+adapter publishes effort 0. Outside it, 40 bp a day is fast beside a 90-day
+integral. The owner asks whether that band is too tight. Some error has to
+remain, large enough and long enough that K's proportional term is not
+nothing and the integral winds, and the runs are not showing that wind.
+
+Widening the deadband, the leash, or the cap is a retune of the desk. PR 2
+ports these numbers so the four common-mode tests match a desk that is
+already deployed, and that port stands. The question is a later ruling. It
+is the seam in K-AND-OPS: how much of the error the fast actuator is allowed
+to remove before the slow one can see it.
