@@ -56,7 +56,7 @@ contract BuckBasketUniswapV3 is
 
     // --- Value reads ------------------------------------------------------ //
 
-    function basketValueInBuck() external view override returns (int256) {
+    function basketValueInBuck() public view virtual override returns (int256) {
         if (constituents.length == 0) return int256(1e18);
         int256 total = 0;
         for (uint256 i = 0; i < constituents.length; i++) {
@@ -261,9 +261,7 @@ contract BuckBasketUniswapV3 is
     {
         Constituent storage c = constituents[i];
         (uint160 sSpot, int24 tSpot,,,,,) = IUniswapV3Pool(c.pool).slot0();
-        int24 tTwap = tSpot;
-        try this.consultTickExternal(c.pool, twapWindow) returns (int24 t) { tTwap = t; }
-        catch {}
+        int24 tTwap = _valuationTick(c, tSpot);
         uint160 sTwap = UniswapV3OracleLib.getSqrtRatioAtTick(tTwap);
         uint128 one = uint128(10 ** c.decimals);
         uint256 pSpot = UniswapV3OracleLib.getQuoteAtTick(tSpot, one, c.token, address(buck));
@@ -284,8 +282,15 @@ contract BuckBasketUniswapV3 is
         return IUniswapV3Pool(constituents[i].pool).liquidity() > 0;
     }
 
+    /// @dev Legacy deployments permit cold-pool marks. The validated venue
+    ///      overrides this hook and requires the complete TWAP history.
+    function _valuationTick(Constituent storage c, int24 spot) internal view virtual returns (int24) {
+        try this.consultTickExternal(c.pool, twapWindow) returns (int24 t) { return t; }
+        catch { return spot; }
+    }
+
     function positionMint(uint256 i, uint256 tokenAmount, uint256 buckAmount)
-        external override onlySelf
+        public virtual override onlySelf
         returns (uint128 liquidity, uint256 tokenUsed, uint256 buckUsed)
     {
         Constituent storage c = constituents[i];
@@ -505,7 +510,7 @@ contract BuckBasketUniswapV3 is
     ///      exit until the window caught up.  The basket must not be able to
     ///      brick its own redemption path.
     function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
-        external override onlySelf returns (uint256 spent, uint256 received)
+        public virtual override onlySelf returns (uint256 spent, uint256 received)
     {
         if (amountIn == 0) return (0, 0);
         Constituent storage c = constituents[i];
@@ -616,7 +621,7 @@ contract BuckBasketUniswapV3 is
     }
 
     function _readPoolPrice(Constituent storage c, uint32 secondsAgo)
-        internal view returns (uint256 priceInBuck)
+        internal view virtual returns (uint256 priceInBuck)
     {
         int24 tick;
         if (secondsAgo == 0) {

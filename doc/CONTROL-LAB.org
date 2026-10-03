@@ -1,0 +1,303 @@
+#+TITLE: Watching the BUCK machine acquire its feedback loops
+#+DATE: 2026-10-03
+#+OPTIONS: ^:nil toc:2 num:t
+#+HTML_HEAD: <style>body{font-family:system-ui;line-height:1.55}#content{max-width:1100px;margin:auto;padding:1rem}img{max-width:100%;height:auto}pre{overflow:auto}table{font-size:.9em}</style>
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+
+* Start with three prices
+
+This is a sequence of small, reproducible experiments on the actual Solidity
+contracts in pyrevm. Each arm lasts 120 days, with three TOKENs, one external
+feed driver, and at most one actor of each enabled type. The aim is to see
+what each mechanism does before trying to judge the complete system.
+
+The initial feed resembles three-phase voltage, with a positive DC offset
+because a TOKEN price cannot be negative:
+
+\[
+ p_i(t) = p_{i,0}\left[1 + 0.12\sin\left(2\pi t/30 + 2\pi i/3\right)\right],
+ \qquad i=0,1,2.
+\]
+
+The base prices are all 100 USDC, the period is 30 days, and the phases differ
+by 120 degrees. The sum of the three sine components is zero. With equal
+reference quantities, this is a useful *differential-mode control*: the
+individual constituents move while the external basket index stays at one.
+It should not be made to produce a large monetary error just for a graph.
+
+The =mixed= profile adds two common triangular pulses, a lasting ramp in
+TOKEN C, and small independent seeded noise. The =shock= profile adds a
+30% step to TOKEN A. These are selectable inputs, not separate economic
+policies. The same input sequence is used in every arm of a profile.
+
+* Bootstrap from known history
+
+Every monitored arm starts with 1280 daily baseline observations, from
+day -1280 through day -1. The calculation begins from the known mean prices
+(100 USDC for each TOKEN here), then processes the past three-phase signal
+to initialize all seven EMA levels. This supplies both a long anchor near
+the known mean and the appropriate shorter trends at the experiment's
+starting phase. It does not treat the first live price as equilibrium.
+
+The selected triangles, ramps, steps and noise are excluded from this
+history. All profiles share the same historical input for the same baseline
+feed. Nothing from day zero or later is used. =bootstrap.history_days=
+controls the history length, with a minimum of 1280 days in this lab.
+
+Only the resulting historical filter state is imported into the contract;
+the experiment's credit books and agents are not aged through those years.
+The JSON retains the complete historical prices, means, integer filter
+levels and source digest. Governance accepts the import before the first
+live publication. The digest identifies the calculation; it does not prove
+that historical prices were authentic. Imported history grants neither
+current price freshness nor observed-day credit toward desk persistence.
+
+Rejected samples and observation gaps preserve these levels. On recovery,
+the monitor applies at most one daily update and clears velocity evidence
+when continuity is missing. It never resets its anchor to a disturbed spot
+price. The filter plots place the known historical mean at zero so the
+three phases can be compared directly.
+
+* Read the two price panes separately
+
+The first pane puts everything in USD: external target prices are dashed,
+actual TOKEN/USDC pool prices are dotted, and TOKEN/BUCK prices multiplied by
+BUCK/USDC are solid. All are divided by the corresponding base price.
+This pane shows whether the routes agree about the TOKEN's external value.
+
+Starting with the monitor arm, the second pane shows the three native
+TOKEN/BUCK price indices. This is where the monetary response is easiest to
+see. The difference between the first two panes is the changing value of
+BUCK in USDC; it is not automatically an arbitrage opportunity.
+
+The subsequent panes add the reference basket cost, sensor excursions,
+K and its P/I contributions, the desk's account and limits, private flow,
+and finally basket allocation. The price and common-mode axis ranges are
+fixed within each profile so a quiet stage cannot look dramatic merely
+because its plot was rescaled.
+
+The basket reference has fixed quantities. An increase in its USD cost
+therefore does not imply that BUCK should still cost one USDC. The private
+agents compare BUCK/USDC with that changing external basket value.
+
+* The sequence and its controlled branches
+
+| Stage | Direct TOKEN/BUCK replay | Monitor | Consistency arb | K | Desk | Buyer | Issuer | Basket response |
+|-------+-------------------------+---------+-----------------+---+------+-------+--------+-----------------|
+| feeds | no | no | no | fixed | no | no | no | no |
+| monitor | yes | yes | no | fixed | no | no | no | no |
+| linked | no | yes | yes | fixed | no | no | no | no |
+| k | no | yes | yes | live | no | no | no | no |
+| desk | no | yes | yes | live | yes | no | no | no |
+| demand | no | yes | yes | live | no | yes | no | no |
+| supply | no | yes | yes | live | no | no | yes | no |
+| both | no | yes | yes | live | no | yes | yes | no |
+| all | no | yes | yes | live | yes | yes | yes | no |
+| basket | no | yes | yes | live | yes | yes | yes | yes |
+
+The monitor arm is explicitly a replay experiment. The feed driver moves
+TOKEN/BUCK using real swaps, so the sensor sees a known trace without an
+arbitrage agent. This is different from the later market experiments: there,
+only TOKEN/USDC is externally driven, and TOKEN/BUCK and BUCK/USDC float.
+No driver resets those internal pools after a desk or agent trade.
+
+The buyer and issuer arms branch from =k= independently. Compare =both=
+with those branches, then =all= with =both= to add the desk. The final
+=basket= arm adds the replacement portfolio response; it is kept separate
+so its liquidity placement and borrowing do not confound the earlier steps.
+
+* The small world and its clock
+
+All arms start with 1 million units of quote-side active liquidity in each
+pool, a passive 1 million USD TOKEN basket, and a separate desk with
+400,000 USD of each TOKEN. Bootstrap liquidity belongs to an external LP;
+it is not created by the basket response being tested. Unused actors can be
+deployed and funded without being scheduled. This preserves the same
+initial pools and contract addresses across the controlled branches.
+
+The private buyer starts with 1 million USDC. The issuer has 1 million BUCK
+of fixed-face activated credit, whose available amount depends on K. They
+each have a 25,000-native-unit daily flow cap, divided by ticks per day;
+actual flow also scales with the excess price discrepancy beyond 50 bp.
+The buyer holds its purchases. The issuer only issues and sells; automatic
+repayment, refinancing, insolvency and liquidation are outside this small
+actor's model. Buying BUCK to hold it is not an accounting burn.
+
+There are four market steps per day. At each step:
+
+1. Advance the clock and move the external TOKEN/USDC pools to the new feed.
+2. Run the bounded arbitrage actor, then the enabled private actors, then
+   another bounded arbitrage pass. Buyer/issuer order alternates by step.
+3. Probe the actual sensor immediately. A failed read is recorded and
+   published as unavailable; a successful probe does not preempt the day's
+   scheduled observation with the old TWAP.
+4. Advance another 601 seconds, allowing the 600-second TWAP to cover the
+   resulting market. Turn the policy wheel: K, desk, optional basket work,
+   and the shared sensor, with their real scheduling/dependency checks.
+5. Run a bounded arbitrage pass and record the pool prices, publications,
+   controller state, accounts, flows and gas in JSON.
+
+The JSON includes a starting sample and the 120-day endpoint: 481 frames.
+Time labels identify the market step; the final snapshot is taken 601
+seconds later. A just-completed desk trade has immediate spot impact but
+does not instantly rewrite the historical TWAP. Its feedback into K is
+therefore visible on subsequent steps.
+
+K's integration horizon is explicitly one market step (six hours here),
+identical across arms. This is a deliberate laboratory configuration; it
+does not inherit the earlier simulation's one-hour catch-up clamp. The
+monitor itself retains its 30-minute eligibility and one-hour freshness
+settings. A six-hour calling schedule leaves it stale between calls; the
+wheel must satisfy its observation dependency before using it.
+
+Gas is recorded from EVM receipts, but transactions have no economic gas
+price in this backend. The external driver has ample fixture funding and
+represents an imposed outside market. Its capital is not a profitability
+claim about the system under test.
+
+* Rejected valuations can still be arbitrage opportunities
+
+An excessive spot/TWAP difference rejects a price as a trusted valuation
+input. It does not suppress arbitrage. The separate arbitrage executor
+reads current pool prices, attempts a bounded cycle, and requires positive
+realized profit after pool fees within the same atomic transaction. A
+displaced TOKEN/BUCK or TOKEN/USDC pool can therefore be traded immediately,
+even while the shared valuation sensor is unavailable. The regression tests
+exercise both cases with real swaps and verify positive BUCK receipts.
+
+The sensor currently validates TOKEN/BUCK pools; TOKEN/USDC disturbances
+reach it through market transmission, while the arbitrage executor reads
+both venues directly. The lab records completed cycles and their BUCK
+profit. These receipts exclude gas costs and do not model competition for
+the same opportunity.
+
+The desk takes a directional position instead of closing a profitable
+cycle. It therefore keeps its live valuation, depth and capital checks.
+Whether a large price move is a fleeting dislocation or a lasting repricing
+matters to that position. Future work can add an explicit dislocation signal
+or scheduling priority without pretending a rejected price is reliable
+monetary-policy evidence.
+
+* Select inputs, compute in parallel, render from JSON
+
+Edit [[file:control-lab.toml][control-lab.toml]]. Perturbations select TOKEN indices =[0,1,2]=,
+and support =sine=, =triangle=, =ramp=, =step= and =noise=. Amplitudes are
+fractions of the base price and add to the three-phase signal. A ramp holds
+its final offset; a triangle returns to zero; a step ends at its duration.
+Noise is Gaussian with the specified standard deviation. =independent=true=
+gives each selected TOKEN its own draw; otherwise they share a common draw.
+The seed, profile and complete configuration are retained with the results.
+Nonpositive prices are rejected rather than silently clipped.
+
+Run from the repository root, in its Python environment with the =sim= and
+=plots= dependencies and freshly compiled Foundry artifacts:
+
+#+begin_src sh :eval never-export
+forge build --offline -q
+python -m alberta_buck.sim.control_lab --jobs 4
+#+end_src
+
+The default computes all ten stages for =three-phase= and =mixed=. Each
+stage is an independent pyrevm world in its own worker process. To select
+the shock profile or run only selected stages:
+
+#+begin_src sh :eval never-export
+python -m alberta_buck.sim.control_lab --profiles shock --stages monitor,k,desk --jobs 3 --out /tmp/buck-shock/results
+python -m alberta_buck.sim.control_lab --days 3 --stages monitor,k --out /tmp/buck-smoke/results
+#+end_src
+
+Results are immutable, content-addressed JSON files under
+=doc/control-lab/results/=. A manifest selects the current experiment set.
+The cache key includes the relevant input knobs, simulator source,
+compiled contract artifacts, and EVM library versions. Changing desk gains
+invalidates the desk-bearing arms; changing a feed invalidates every arm
+using that feed. A different worker count does not invalidate anything.
+The manifest is replaced only after the selected runs finish successfully.
+The earlier first-observation-bootstrap results are retained under
+[[file:control-lab/results/manifest-first-observation.json][their original manifest]] for comparison; =manifest.json= selects the corrected
+historical-bootstrap results rendered below.
+
+Rendering is a separate, EVM-free operation:
+
+#+begin_src sh :eval never-export
+python -m alberta_buck.sim.control_lab --render-only
+#+end_src
+
+This reads the manifest and JSON, then writes Org prose/tables, PNG and SVG
+figures, and a small [[file:control-lab/index.html][local HTML figure selector]]. Selecting an existing figure
+does not recompute anything. Plotting changes do not invalidate simulations.
+The first version does not run tevm in the browser; the saved trace and
+rendering boundary leave room for a later interactive frontend.
+
+Export this complete walkthrough to HTML while keeping links to Org sources:
+
+#+begin_src sh :eval never-export
+emacs --batch -Q --eval '(progn
+  (require (quote ox-html))
+  (setq org-export-use-babel nil org-html-htmlize-output-type nil
+        org-html-link-org-files-as-html nil)
+  (find-file "doc/CONTROL-LAB.org")
+  (org-html-export-to-html))'
+#+end_src
+
+* What the baseline runs establish
+
+Historical initialization removes the arbitrary phase bias. In the pure
+three-phase monitor, the initial long anchors are approximately
+-0.094%, +0.045% and +0.049% from the known centered means, in log units.
+The previous first-observation initialization placed them at +0.36%,
++10.25% and -10.61%. Over the corrected run, all three excursion ranges
+are close to -12.34% through +11.63% in log units, instead of assigning
+TOKEN B a predominantly negative excursion and TOKEN C a positive one.
+
+This correction does not remove the EMA quorum's lag. TOKEN A's first
+four-of-six turn confirmation is at day 15, after its day-7.5 price peak.
+The remaining delay is a filter/policy question, now distinguishable from
+the initialization artifact. No timing optimization is included in this
+baseline.
+
+The controlled =linked= and =k= arms have *identical pool-price histories*
+in both default profiles, even though K changes. This demonstrates the
+missing actuator: changing credit capacity alone does not place a trade.
+
+In the mixed profile, the desk-only monetary arm executes ten operations.
+With both private agents, the desk executes none in this run. Private
+responses keep the error below the desk's actionable region sufficiently
+that adding it has no effect on the recorded price path. That outcome is
+visible evidence about this parameterization, not a missing plotted trace.
+
+The measured mean absolute parity errors for the mixed profile are about
+1.15% with linked markets and K alone, 1.15% with the desk, 1.84% with only
+the buyer, 1.19% with only the issuer, and 0.89% with both private actors.
+Adding basket response gives 0.90% with historical initialization (1.07%
+in the retained first-observation run). These are diagnostic comparisons on one
+synthetic feed and seed, not an equilibrium-superiority or ROI acceptance
+test. There are no depositor entry/exit populations in this lab.
+
+The complete generated sequence follows. For browsing the generated Org
+alone, open [[file:control-lab/results.org][the result document]].
+
+#+INCLUDE: "control-lab/results.org" :lines "4-" :minlevel 1
+
+* Next experiment: sudden pool disturbances with all actors active
+
+This section is planned; the figures above do not yet include a dedicated
+all-agents pool-shock campaign. The design document now contains
+[[file:OPTIMAL-CONTROL-BIG-PICTURE.org::#shock-capture-experiment][the shock-capture experiment and its acceptance criteria]], followed by the
+optimization checklist.
+
+Extend the final =basket= arm, keeping K, arb, buyer, issuer, desk and basket
+response active. Compare an undisturbed run with runs receiving one funded
+swap at day 45 in TOKEN A/BUCK or TOKEN A/USDC, initially in both price
+directions. Keep the external baseline feed unchanged. This differs from
+the existing =shock= profile, which changes the external target itself.
+
+Reuse the same price and controller panes. Add event-time insets showing
+the shock, each bounded arb response, rejected valuation intervals and
+signal recovery. Add realized arb receipts after pool fees, explicit gas
+cost assumptions, and changes in basket/desk wealth against the undisturbed
+control. Separate transient capture from the risk of holding inventory
+through lasting repricing. A rejected valuation should remain compatible
+with profitable atomic capture; it should not authorize an unvalidated
+directional desk position.

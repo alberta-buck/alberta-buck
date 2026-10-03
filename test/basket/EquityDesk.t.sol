@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BuckBasketEquityTest} from "./BuckBasketEquity.t.sol";
 import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
+import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
 import {EquityDesk} from "../../src/basket/EquityDesk.sol";
 import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
@@ -32,12 +33,13 @@ contract EquityDeskTest is BuckBasketEquityTest {
         desk = new EquityDesk(address(buck), address(ctrl), address(b), GOV);
         _bind(address(desk), false);                      // its own account: non-Carrying
         vm.startPrank(GOV);
-        desk.setVenue(address(new BuckBasketUniswapV3()));
+        desk.setVenue(address(new ValidatedBasketVenue()));
         desk.mirrorConstituents();
         desk.openCredit(address(credit), FACE);
         desk.setMonetaryDirector(address(md));
         desk.setOpsParams(MonetaryDesk.OpsParams({maxLegBp: 40, maxPositionBp: 1000,
                                                   maxOutrightBp: 1000, enabled: true}));
+        desk.setRiskBudget(10_000_000 * B, 0, 500);
         vm.stopPrank();
     }
 
@@ -186,10 +188,11 @@ contract EquityDeskTest is BuckBasketEquityTest {
         assertGt(r, 0, "the desk's lien earned relief");
         uint256 basketRelief = buck.reliefOf(address(b));
         md.set(-50, false);                                 // an absorb: collects, then buys
-        assertEq(desk.monetaryOperation(), 1, "Q1");
+        assertEq(desk.monetaryOperation(), 2, "receipts repay actual debt");
         assertEq(buck.reliefOf(address(desk)), 0, "collected");
-        assertApproxEqAbs(desk.monetaryOutstanding(), out0 - int256(r), 1,
-                          "the relief melted the desk's outstanding issuance");
+        assertLt(desk.monetaryOutstanding(), out0 - int256(r),
+                 "relief and purchased BUCK both reduce debt");
+        assertEq(desk.monetaryOutstanding(), int256(_deskLien()), "actual lien");
         assertEq(buck.reliefOf(address(b)), basketRelief, "the basket's relief is its own");
     }
 }

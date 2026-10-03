@@ -170,6 +170,10 @@ class MonetaryKeeperAgent(Agent):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if tick != 0 or getattr(d, "basket_impl", "") not in ("ops", "equity-ops"):
             return
+        if getattr(d, "equity_machine", False):
+            # Sampling and desk work are both in the replacement wheel.
+            # Keep a single source of pacing and operation accounting.
+            return
         if getattr(d, "director", None) is not None and not self._signal_driven(d, scenario):
             try:
                 d.chain.send(d.director.functions.pokeAll(),

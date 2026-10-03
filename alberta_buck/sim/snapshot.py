@@ -135,7 +135,12 @@ def _eqsave_frame(d, ctr) -> dict:
         p_low = None
     try:
         f["eq_decl"] = [int(b.functions.constituents(i).call()[9]) for i in range(n)]
-        f["eq_w"] = [int(x) for x in b.functions.weightsBp().call()]
+        weights = b.functions.responseWeightsBp if getattr(d, "equity_machine", False) else b.functions.weightsBp
+        f["eq_w"] = [int(x) for x in weights().call()]
+        f["eq_response_w"] = [int(x) for x in b.functions.responseWeightsBp().call()]
+        f["eq_equity"] = int(b.functions.equity().call())
+        f["eq_share_price"] = int(b.functions.sharePrice().call())
+        f["eq_idle"] = [int(b.functions.idleToken(i).call()) for i in range(n)]
     except Exception:
         pass
     eqd = getattr(d, "equity_director", None)
@@ -151,9 +156,17 @@ def _eqsave_frame(d, ctr) -> dict:
         tot = sum(st["w0"]) or 1
         f["eq_hold"] = sum(w * p / p0 for w, p, p0 in zip(st["w0"], p_low, st["p0"])) / tot
     desk = getattr(d, "desk", None)
+    if getattr(d, "signals", None) is not None:
+        f["eq_signal_fresh"] = bool(d.signals.functions.fresh().call())
+        f["eq_signal_history_ready"] = bool(d.signals.functions.historyReady().call())
+        f["eq_signal_at"] = int(d.signals.functions.lastSampleAt().call())
+        f["eq_signal_raw"] = int(d.signals.functions.rawValue().call())
     if desk is not None:
         try:
             f["desk_nav"] = int(desk.functions.netValue().call())
+            f["desk_budget"] = int(desk.functions.turnoverRemaining().call())
+            f["mk_outstanding"] = int(desk.functions.monetaryOutstanding().call())
+            f["mk_buck_held"] = int(desk.functions.monetaryBuckHeld().call())
         except Exception:
             pass
         grant = getattr(d, "desk_grant", None)

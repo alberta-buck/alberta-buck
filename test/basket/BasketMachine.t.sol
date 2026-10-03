@@ -1,0 +1,214 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.20;
+
+import {BuckBasketEquityTest, IEquityWheel} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityResponse} from "../../src/basket/BuckBasketEquityResponse.sol";
+import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
+import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
+import {BasketSignals} from "../../src/basket/BasketSignals.sol";
+import {OuterBandMonetaryDirector} from "../../src/basket/OuterBandMonetaryDirector.sol";
+import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
+import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
+
+contract BasketMachineTest is BuckBasketEquityTest {
+    BasketSignals internal signals;
+
+    function _replace(bool withSignal) internal {
+        vm.startPrank(GOV);
+        b.setVenue(address(new ValidatedBasketVenue()));
+        b.setEquityWheel(address(new BuckBasketEquityResponse()));
+        vm.stopPrank();
+        if (withSignal) {
+            signals = new BasketSignals(address(b), 1800, 3600, 500);
+            signals.observe();
+            vm.prank(GOV);
+            b.setResponse(address(signals), BuckBasketEquityStorage.ResponseParams(3000, 1800, 1e18));
+        }
+    }
+
+    function _response() internal returns (uint256) {
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
+        if (address(signals) != address(0)) signals.observe();
+        return IEquityWheel(address(b)).wheelStep(2, 0);
+    }
+
+    function _freshMark() internal view {
+        int256 net = int256(b.grossAt(2)) + buck.signedBalanceOf(address(b)) + int256(buck.reliefOf(address(b)));
+        assertEq(b.markNow(), net > 0 ? uint256(net) : 0, "post-trade mark matches the new book");
+        for (uint256 i; i < 3; ++i) assertGe(tok[i].balanceOf(address(b)), b.idleToken(i), "wallet accounted");
+    }
+
+    function test_machine_cashOnlyDepositBootstrapsEmptyLegs() public {
+        _replace(false);
+        _deposit(alice, address(buck), 300_000 * B);
+        for (uint256 j; j < 20; ++j) { _response(); for (uint256 i; i < 3; ++i) _repin(i); }
+        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), 0, "an empty leg is reachable");
+        _response(); _freshMark();
+    }
+
+    function test_machine_waitingDepositDoesNotBlockOtherLegs() public {
+        _replace(false);
+        _deposit(alice, address(tok[0]), 100_000e18);
+        uint256 idle = b.idleToken(0);
+        assertEq(_response(), 1);
+        assertLt(b.idleToken(0), idle, "sell idle first");
+        assertGt(b.liquidityOf(1) + b.liquidityOf(2), 0, "proceeds buy an empty underweight leg");
+        assertEq(b.liquidityOf(0), 0, "arrival pool is not privileged");
+        _freshMark();
+    }
+
+    function test_machine_balancedIdleCanBecomeLpWithoutASecondSwap() public {
+        _replace(false);
+        for (uint256 i; i < 3; ++i) _deposit(alice, address(tok[i]), 30_000e18 / (i + 1));
+        uint256[] memory weights = b.responseWeightsBp();
+        assertEq(weights[0] + weights[1] + weights[2], 10000);
+        assertEq(_response(), 1);
+        assertGt(b.liquidityOf(0) + b.liquidityOf(1) + b.liquidityOf(2), 0);
+        _freshMark();
+    }
+
+    function test_machine_underwaterResponseNeverDrawsNewDebt() public {
+        _placed(); _replace(false);
+        ctrl.setK(0);
+        int256 account = buck.signedBalanceOf(address(b));
+        assertLt(account, 0);
+        assertEq(_response(), 1);
+        assertGt(buck.signedBalanceOf(address(b)), account, "cash need reduces balanced book's debt");
+        _freshMark();
+    }
+
+    function test_machine_responseIsPacedAndOldKindsAreRetired() public {
+        _replace(false); _deposit(alice, address(tok[0]), 100_000e18);
+        assertEq(_response(), 1);
+        assertEq(IEquityWheel(address(b)).wheelStep(2, 0), 0);
+        assertFalse(IEquityWheel(address(b)).wheelDue(2, 0));
+        assertEq(IEquityWheel(address(b)).wheelStep(3, 0), 0);
+        assertEq(IEquityWheel(address(b)).wheelStep(4, 0), 0);
+    }
+
+    function test_machine_configuredStaleSignalStopsTrades() public {
+        _replace(true); _deposit(alice, address(tok[0]), 100_000e18);
+        uint256 idle = b.idleToken(0);
+        vm.warp(vm.getBlockTimestamp() + 3601); vm.roll(vm.getBlockNumber() + 1);
+        vm.mockCall(address(signals), abi.encodeWithSelector(signals.observe.selector), bytes(""));
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertEq(b.idleToken(0), idle);
+        assertEq(b.liquidityOf(1), 0);
+    }
+
+    function test_machine_signalDoesNotInventSamplesAcrossGap() public {
+        _replace(true);
+        assertTrue(signals.fresh());
+        assertApproxEqAbs(signals.rawValue(), 1e18, 0.001e18);
+        vm.warp(vm.getBlockTimestamp() + 8 days); vm.roll(vm.getBlockNumber() + 1);
+        signals.observe();
+        assertEq(signals.consecutiveDays(), 1);
+        (int256[7] memory ema, int256[7] memory velocity) = signals.ladder(0);
+        for (uint256 i; i < 7; ++i) { assertEq(velocity[i], 0); assertEq(ema[i], ema[0]); }
+    }
+
+    function test_machine_signalInvalidatesOnManipulatedSpot() public {
+        _replace(true);
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
+        _push(0, true, 200_000 * B);
+        signals.observe();
+        assertFalse(signals.fresh());
+        assertFalse(signals.valid());
+        assertEq(signals.consecutiveDays(), 0);
+    }
+
+    function test_machine_missingHistoryNeverFallsBackToSpot() public {
+        _replace(true);
+        int256 oldRaw = signals.rawValue();
+        uint64 sampled = signals.lastSampleAt();
+        vm.mockCallRevert(pools[1], abi.encodeWithSelector(bytes4(keccak256("observe(uint32[])"))), bytes("no history"));
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
+        signals.observe();
+        assertFalse(signals.fresh());
+        assertEq(signals.rawValue(), oldRaw, "no partly refreshed publication");
+        assertEq(signals.lastSampleAt(), sampled, "failed read does not freshen the old price");
+        vm.expectRevert(); IBuckBasketVenue(address(b)).basketValueInBuck();
+    }
+
+    function test_machine_runningDownLegWaitsButLeashCanOverride() public {
+        _replace(true);
+        for (uint256 i; i < 3; ++i) _deposit(alice, address(tok[i]), 30_000e18 / (i + 1));
+        vm.mockCall(address(signals), abi.encodeWithSelector(signals.excursion.selector, uint256(2)), abi.encode(int256(-2000e18)));
+        vm.mockCall(address(signals), abi.encodeWithSelector(signals.running.selector, uint256(2), int256(-1)), abi.encode(true));
+        uint256 idle = b.idleToken(2);
+        _response();
+        assertEq(b.liquidityOf(2), 0, "do not buy a running-down leg inside its leash");
+        assertEq(b.idleToken(2), idle);
+        _deposit(alice, address(tok[0]), 80_000e18); // Leg 2 becomes leashed underweight.
+        _response();
+        assertGt(b.liquidityOf(2), 0, "mandate leash can override the trend gate");
+        _freshMark();
+    }
+
+    function test_machine_policyWillNotExecuteOldDirectionAfterSpotReverts() public {
+        _replace(true);
+        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        for (uint256 i; i < 3; ++i) _push(i, true, 25_000 * B);
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1); policy.observe();
+        (int32 e,) = policy.monetaryEffort(); assertLt(e, 0);
+        for (uint256 i; i < 3; ++i) _repin(i);
+        (e,) = policy.monetaryEffort();
+        assertEq(e, 0, "live spot vetoes lagged advice");
+    }
+
+    function test_machine_outerBandLeavesPersistentInnerErrorForK() public {
+        _replace(true);
+        // All prices about 1% higher: beyond parity, inside the desk's 3% entry.
+        for (uint256 i; i < 3; ++i) _push(i, true, 5_000 * B);
+        _age();
+        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1); policy.observe();
+        (int32 effort,) = policy.monetaryEffort();
+        assertEq(effort, 0, "desk leaves the inner error visible");
+        BuckKControllerDirect k = new BuckKControllerDirect(1e7, 100, 0, 1800, 0, 0.95e18, 0.75e18, address(this));
+        k.setBasket(address(signals));
+        vm.warp(vm.getBlockTimestamp() + 1800);
+        k.compute();
+        assertLt(k.P(), 0, "raw inflation error");
+        assertLt(k.I(), 0, "integral counters persistent inflation");
+    }
+
+    function test_machine_policyReversalAndGapResetPersistence() public {
+        _replace(true);
+        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        for (uint256 i; i < 3; ++i) _push(i, true, 25_000 * B);
+        _age();
+        for (uint256 day; day < 3; ++day) {
+            vm.warp(vm.getBlockTimestamp() + 1 days); vm.roll(vm.getBlockNumber() + 1); policy.observe();
+        }
+        (int32 e, bool outright) = policy.monetaryEffort();
+        assertLt(e, 0); assertTrue(outright);
+        uint256 daysSeen = policy.overDays(); policy.observe(); assertEq(policy.overDays(), daysSeen);
+        vm.warp(vm.getBlockTimestamp() + 3 days); vm.roll(vm.getBlockNumber() + 1); policy.observe();
+        (, outright) = policy.monetaryEffort(); assertFalse(outright); assertEq(policy.overDays(), 1);
+        for (uint256 i; i < 3; ++i) { _repin(i); _push(i, false, 30_000e18 / (i + 1)); }
+        _age(); vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1); policy.observe();
+        (e, outright) = policy.monetaryEffort(); assertGt(e, 0); assertFalse(outright); assertEq(policy.overDays(), 1);
+    }
+
+    function test_machine_policyCannotReusePersistenceAfterIndependentSensorRecovery() public {
+        _replace(true);
+        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        for (uint256 i; i < 3; ++i) _push(i, true, 25_000 * B);
+        for (uint256 day; day < 3; ++day) {
+            vm.warp(vm.getBlockTimestamp() + 1 days); vm.roll(vm.getBlockNumber() + 1); policy.observe();
+        }
+        (, bool outright) = policy.monetaryEffort(); assertTrue(outright);
+        // Another caller samples the shared service while the adapter is
+        // idle. A failed read and recovery cannot revive its old persistence.
+        vm.mockCallRevert(pools[1], abi.encodeWithSelector(bytes4(keccak256("observe(uint32[])"))), bytes("no history"));
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1); signals.observe();
+        assertFalse(signals.fresh());
+        vm.clearMockedCalls();
+        vm.roll(vm.getBlockNumber() + 1); signals.observe();
+        assertTrue(signals.fresh()); assertEq(signals.consecutiveDays(), 1);
+        (, outright) = policy.monetaryEffort(); assertFalse(outright);
+        policy.observe(); policy.observe();
+        assertEq(policy.overDays(), 1, "repeated same-timestamp calls do not invent days");
+    }
+}

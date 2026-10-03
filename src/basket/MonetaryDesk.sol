@@ -247,7 +247,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         Mirrors `rebalanceStep`: once per director epoch, advisory
     ///         signal in, bounded action out.
     /// @return quadrant 0 = nothing done, else 1..4
-    function monetaryOperation() external returns (uint8 quadrant) {
+    function monetaryOperation() external virtual returns (uint8 quadrant) {
         OpsParams memory op = opsParams;
         if (!op.enabled) revert MonetaryIdle();
         address dir = _monDir();
@@ -261,7 +261,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         if (effortBp == 0) revert NoAdvice();
 
         uint256 nav = _deskNav();
-        uint256 size = nav * uint256(uint32(effortBp < 0 ? -effortBp : effortBp)) / 10000;
+        uint256 size = nav * uint256(effortBp < 0 ? -int256(effortBp) : int256(effortBp)) / 10000;
         if (size == 0) revert NoValue();
 
         quadrant = effortBp < 0
@@ -273,8 +273,9 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
 
     function _absorb(uint256 size, bool outright, OpsParams memory op,
                      uint256 nav, int32 effortBp) internal returns (uint8) {
-        bool room = -monetaryOutstanding
-            < int256(nav * op.maxOutrightBp / 10000);
+        int256 remaining = int256(nav * op.maxOutrightBp / 10000) + monetaryOutstanding;
+        bool room = remaining > 0;
+        if (outright && room && size > uint256(remaining)) size = uint256(remaining);
 
         // Q2 RETIRE, out of INVENTORY first.  Burning what the desk already
         // holds turns a temporary position into a permanent one, which is
@@ -307,6 +308,10 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         // Position limit.  Inventory is the one signal the desk's own action
         // cannot suppress, because it IS the desk's own action.
         if (monetaryBuckHeld >= nav * op.maxPositionBp / 10000) revert MonetaryBound();
+        if (!outright || !room) {
+            uint256 available = nav * op.maxPositionBp / 10000 - monetaryBuckHeld;
+            if (size > available) size = available;
+        }
 
         // Nothing left to spend is an ordinary state, not an error in the
         // signal: the desk funds Q1/Q2 from the TOKEN its own issuance
@@ -315,6 +320,9 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         // empty basket) so a keeper can count it.
         uint256 bought = _swapAcross(false, size, op);
         if (bought == 0) revert MonetaryIdle();
+        if (outright && room) {
+            if (bought > uint256(remaining)) revert MonetaryBound();
+        } else if (monetaryBuckHeld + bought > nav * op.maxPositionBp / 10000) revert MonetaryBound();
 
         // Q2 on a FRESH purchase.  Unlike an agent -- which can only retire
         // float it issued itself, because supply is
@@ -355,6 +363,8 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         if (monetaryOutstanding >= int256(nav * op.maxOutrightBp / 10000)) {
             revert MonetaryBound();
         }
+        uint256 remaining = uint256(int256(nav * op.maxOutrightBp / 10000) - monetaryOutstanding);
+        if (size > remaining) size = remaining;
         // Q4 ISSUE: issue against the basket's own TOKEN reserves and sell into
         // the bid, acquiring real assets with money the market has over-valued.
         size = _deskIssue(size);
@@ -463,7 +473,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         unchanged); Q2 burn the 100 held -> held 0, outstanding 0 ->
     ///         0; Q2 burn a further 50 bought fresh -> outstanding -50 -> 0:
     ///         permanent, K sees the real bvib, no double count.
-    function netInventory() public view override returns (int256) {
+    function netInventory() public view virtual override returns (int256) {
         int256 issued = monetaryOutstanding > 0 ? monetaryOutstanding : int256(0);
         return int256(monetaryBuckHeld) - issued;
     }
@@ -480,7 +490,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         `maxLegBp` is a per-operation pacing limit, not a book bound,
     ///         and TOKEN-reserve exhaustion is an ordinary state the desk
     ///         refills by issuing; neither enters capacity.
-    function capacity() public view override returns (uint256) {
+    function capacity() public view virtual override returns (uint256) {
         OpsParams memory op = opsParams;
         if (!op.enabled) return 0;
         uint256 nav = _deskNavSafe();

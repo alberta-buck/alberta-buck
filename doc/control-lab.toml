@@ -1,0 +1,60 @@
+# All prices are positive: a DC level plus the three phases, 120 degrees apart.
+days = 120
+ticks_per_day = 4
+seed = 41404
+
+[feed]
+base = [100.0, 100.0, 100.0]
+amplitude = 0.12
+period_days = 30.0
+
+# Historical EMA state is built from these pre-day-zero baseline observations.
+# Profile perturbations (including noise) never enter this history.
+[bootstrap]
+history_days = 1280
+
+[[profiles]]
+name = "three-phase"
+
+[[profiles]]
+name = "mixed"
+
+# Common positive and negative pulses exercise both sides of monetary policy.
+[[profiles.perturbations]]
+kind = "triangle"
+tokens = [0, 1, 2]
+start = 15
+duration = 40
+amplitude = 0.15
+
+[[profiles.perturbations]]
+kind = "triangle"
+tokens = [0, 1, 2]
+start = 65
+duration = 40
+amplitude = -0.15
+
+# A lasting relative-price change in TOKEN C.
+[[profiles.perturbations]]
+kind = "ramp"
+tokens = [2]
+start = 35
+duration = 30
+amplitude = 0.10
+
+[[profiles.perturbations]]
+kind = "noise"
+tokens = [0, 1, 2]
+independent = true
+amplitude = 0.002
+
+[[profiles]]
+name = "shock"
+
+# Select this separately with --profiles shock to inspect invalid samples.
+[[profiles.perturbations]]
+kind = "step"
+tokens = [0]
+start = 45
+duration = 10
+amplitude = 0.30

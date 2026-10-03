@@ -35,7 +35,7 @@ import alberta_buck.sim.shock_agent  # noqa: F401  CONVERGENCE 7a  @_register Sh
 E6 = 10 ** 6
 
 
-def turn_wheel(d, rounds: int = 1, max_work: int = 12) -> int:
+def turn_wheel(d, rounds: int = 1, max_work: int = 12, ctr=None) -> int:
     """Tick the equity basket's work wheel as the deployer, up to `rounds`
     times or until a tick finds nothing to do; return the work done."""
     from web3.logs import DISCARD
@@ -43,6 +43,9 @@ def turn_wheel(d, rounds: int = 1, max_work: int = 12) -> int:
     for _ in range(rounds):
         d.chain.send(d.wheel.functions.rearm())
         rc = d.chain.send(d.wheel.functions.tick(max_work, 0))
+        if ctr is not None:
+            from alberta_buck.sim.basket_machine import book_receipt
+            book_receipt(d, rc, ctr)
         w = sum(int(ev["args"]["work"])
                 for ev in d.wheel.events.Ticked().process_receipt(rc, errors=DISCARD))
         work += w
@@ -126,6 +129,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
     if d.wheel is not None:
         from alberta_buck.sim.deploy import equity_arb_on
         placed = turn_wheel(d, rounds=2)
+        from alberta_buck.sim.basket_machine import activate
+        activate(d)
         equity_arb_on(d)
         if verbose:
             print(f"[sim] equity basket: the wheel made the pools' first "
@@ -265,7 +270,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
                                       bvib_now)
                     reserves = after
             if builtin_wheel:
-                turn_wheel(d, rounds=1)
+                turn_wheel(d, rounds=1, ctr=ctr)
         # WP-13: book the agent stand-ins' net inventory (the undertakings'
         # open books, the facility's drawn lines) into the observer's
         # pseudo-stabilizer before K's cycle; a no-op without an observer.

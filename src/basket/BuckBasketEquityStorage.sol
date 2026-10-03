@@ -122,6 +122,16 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     }
     EquityParams public eq;
 
+    // Replacement response configuration; append-only. Legacy facets ignore it.
+    struct ResponseParams {
+        uint16 leashBp;                  // relative to the leg's declared weight
+        uint32 interval;                 // minimum seconds between responses
+        int256 tiltWad;                  // lean per log-price excursion
+    }
+    ResponseParams public response;
+    address public responseSignals;
+    uint64 public lastResponseAt;
+
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
 

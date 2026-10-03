@@ -1,0 +1,668 @@
+#+TITLE: Optimal control of Alberta Buck: a big picture from doc/basket-machine
+#+AUTHOR: research note (not a design ruling)
+#+DATE: 2026-10-01
+#+OPTIONS: ^:nil toc:2 num:t
+
+| Source tree | =/workspace/alberta-buck= |
+| Branch      | =doc/basket-machine= |
+| Commit read | =16c3ded= ("Notes: the equity basket's two machines") |
+| This file   | =/workspace/OPTIMAL-CONTROL-BIG-PICTURE.org= |
+| New sim     | =/workspace/alberta-buck-sims/pid_and_wheel.py= |
+
+This note only uses mechanisms that are in that tree. Where a number comes
+from an older campaign written up in the docs, it is quoted as that
+document's report. It was not re-run here. The new Python run is
+open-loop: a prescribed =basketValueInBuck= path through the direct PID's
+integer algebra, and a toy work-wheel cursor. It is not an economy.
+
+The original review below describes commit =16c3ded=. The dated implementation
+and optimization section at the end records subsequent work; its linked
+implementation report and control lab describe the current replacement.
+
+The phrase "credit disk" does not appear in this branch. The credit
+actuator is =BuckCredit=: a holder's limit is K times the sum of its
+credits' current values (=src/BuckCredit.sol= file comment). K is
+=buckK= on the PID.
+
+* What the control problem actually is
+
+The parity the controller is built to hold is one basket equal to one
+BUCK. In the direct embodiment the setpoint is the constant 1.0 BUCK and
+the process variable is =basketValueInBuck()= (=src/BuckKControllerDirect.sol=).
+Error is =1.0 - basketValue=. Basket above par means BUCK is cheap
+(inflation in the controller's words); K is decreased. Basket below par
+means BUCK is dear; K is increased.
+
+=basketValueInBuck= is the declared basket amounts times TWAP prices in
+the TOKEN/BUCK pools, centred near =1e18= at par
+(=doc/BASKET-MACHINE.org=, contract boundary; =IBuckBasketRef=). It is
+not =equity()=. Marking the monetary signal off equity would fold the
+lien into cheap/dear. A move in TOKEN prices moves this gauge even when
+nobody trades BUCK. That is the disturbance: the target "1 basket" is a
+moving bundle of token values, while the setpoint in BUCK stays 1.
+
+K is the credit factor, not a price. =BuckCredit='s limit is K times
+marked current value. =EQUILIBRIUM.md= states the same relation as
+=creditLimit = collateralValue * K / 1e18=, with the sim default
+=k0 = 0.75= and rails =(0, 0.95)= (=alberta_buck/sim/experiment.py=
+=DEFAULTS["deploy"]=). A rise offers more credit. A cut withdraws the
+offer. Nothing is margin-called (=doc/K-AND-OPS.org= F4, corrected
+2026-09-26; =test_a_K_cut_is_no_margin_call= in
+=alberta_buck/test/test_equity_basket.py=). Supply answers only if
+borrowers take the offer, and the arrival hazard in the sim is an
+assumed function of K and bvib, not a measured economy (F4, F10).
+
+The direct PID (=BuckKControllerDirect.compute=) is integral-dominant on
+raw bvib. Defaults (=experiment.derive_gains=):
+
+#+begin_example
+Kp_real = kp_frac * dk_rail / e_max          = 0.02 * 0.5 / 0.10 = 0.1
+Ki_real = dk_rail / (e_max * tau_I * 86400)  = 0.5 / (0.10 * 90 * 86400)
+Kd      = 0
+#+end_example
+
+Stored gains are =real * 1e12=. =derive_gains()= on this tree returns
+=(100000000000, 643004, 0)=. Output is
+
+#+begin_example
+buckK = clamp(buckK0 + Kp*err + Ki*I + Kd*dErr/dt, buckKMin, buckKMax)
+#+end_example
+
+with =err= in ppm and =I= in ppm·seconds. At a rail the integrator may
+only step back toward the band. =doc/BASKET-MACHINE.org= ("The residual
+bvib K's integral needs") states the consequence of this Ki: held for one
+integral time, a constant fractional error =e= moves K by about =5 e=.
+A 1% error is about 0.05 on K. The proportional term on the same error
+is about =0.1 e=.
+
+So the problem is not "drive bvib to 1 with K." K is a slow stock lever
+on credit capacity. Fast price-holding has to be done by someone else,
+or K integrates whatever residual those actors leave, including a
+residual that TOKEN-price moves keep shifting. If the fast actors remove
+the error, K's integral sees almost nothing (F3, F9: a defended world
+hides the controller's own law). =BASKET-MACHINE= raises that as an open
+question, not a ruling: the copied desk band may be too tight for the
+integral to wind, and the equity calm twins on record did the opposite
+(tail bvib about 1.7--2% rich in BUCK, K on the 0.95 rail).
+
+* Inventory of machines and agents on this branch
+
+** Contracts that hold a decision
+
+| Piece | What it controls | What it must not do, on this branch |
+|-------+------------------+--------------------------------------|
+| =BuckKControllerDirect= | K from raw bvib. Controller of record (=K-AND-OPS= 5.3, design A). =ComputeKind= calls =compute()=. | Does not trade. Does not read the desk's book. |
+| =BuckKControllerBase= | Legacy 1e18 PID, =fundingFactor()=, dS-stripped derivative. Direct mode overrides =compute= because that dS would pin D at 0. | =fundingFactor= is an insurance toll, not the parity loop. |
+| =BuckKControllerShadow= | Optional second PID on an aggregate position (D7). Gains at zero are an identity with Direct (forge tests, cited in =K-AND-OPS= 5.3). | Position coupling is retired as the intended design. It railed K on the cycle-1 grid. |
+| =BuckCredit= + =Buck= | How much BUCK a marked asset supports, at the current K. No-margin-call. | Not a price controller. |
+| =BuckBasketEquity= + =BuckBasketEquityWheel= | Depositor TOKEN, LP, one marked credit. Kinds today: Daily, Sync×N, Deploy×N, Fund, Trim (=EquityKind=). | Does not set K. Fund/Trim are vetoed while any pool's idle TOKEN exceeds the grain. |
+| =EquityTurnDirector= | Per-leg differential ladder, windows =[5,10,20,40,80,160,1280]=, quorum 4, =leashBp= 3000, =tiltWad=. =mayTrim= / =mayFund=. Holds no balances. | No =basketValueInBuck= ladder. =turned= is a velocity quorum, which the desk's outright quadrants were built to avoid. |
+| =PairsRebalanceDirector= | Pairwise rebalance, and the common-mode ladder =[5,10,20,40,80,160,320]= of =log(basketValueInBuck)= against par. =monetaryEffort= is signed bp of NAV. | Not =equity()=. Positive common mode means the basket costs more BUCK, so BUCK is cheap, and effort is negative (retire). |
+| =EquityDesk= / =MonetaryDesk= | Four quadrants. Own credit holder. =monetaryOperation= reads =monetaryEffort= after storing the epoch. Zero effort reverts =NoAdvice=. | Equity deployment is not =setOps='d. =MonetaryKeeperAgent= calls it. Editing the mixin also edits =BuckBasketOps=. |
+| =BasketWheel= / =WorkWheel= | One cursor. Slot order: Compute, Director, Sweep, Ops, Equity, Arb. Unset kind: zero slots. =tick(maxWork, maxScan)= runs due slots round-robin. | Does not decide policy. A bare revert inside =_run= is the kind's problem; =ComputeKind= try/catches =compute=. |
+| =ArbKind= | Atomic TOKEN/BUCK vs TOKEN/USDC vs BUCK/USDC cycle when direct profit is positive. Profit credited via =creditDepositors= / =creditTreasury=. | Not a quote the basket response consults. Not sized to bvib. |
+| Signal proposed in =BASKET-MACHINE= | One =observe()= per day, two views: the differential ladder and the common-mode ladder. No TOKEN, LP, BUCK, credit, or K. | Not built in this commit. =SampleKind= would be one slot after Arb. The desk would read it through an =IMonetaryDirector= adapter. =MonetaryDesk= itself is not edited. |
+| Basket response proposed there | One paced sell, buy, transfer, or hold. Replaces Deploy, Fund, Trim. Aims at declared weight if leashed, else at the band edge (Davis and Norman form, as that doc states it). =stepBp= 500, =weightBandBp= 200, =swapCap= 1% of virtual BUCK depth. | Explicitly not Q1--Q4 and not sized to move bvib. |
+
+** Agents in the Python sim (tools, not the law)
+
+| Agent / module | Role relative to bvib |
+|----------------+------------------------|
+| =PidKeeperAgent= | Calls =compute()= (=EQUILIBRIUM.md=). |
+| =BasketWheelAgent= | Calls =tick=. Defaults =max_work= 3 in one class and 12 in the other (=basket_wheel_agent.py=). |
+| =MonetaryKeeperAgent= | On equity-ops, pokes the pairs director then calls =monetaryOperation= (=BASKET-MACHINE= "What is built"). |
+| =FatCreditBorrowerAgent= | Issues and retires against K. The endogenous arrival clock is a formula of K and bvib. |
+| =SaverAgent= | Buys when bvib > 1, sells when bvib < 1. The fast price response traced in F4 was this cast, not a protocol margin call. |
+| Anonymous arb / =TokenAccumulator= | Propagate TOKEN/USDC into TOKEN/BUCK and BUCK/USDC. Take gaps the basket leaks (~120 bp in =CONVERGENCE= 2.2, a sim report). |
+| Undertakings, ladder, facility, seeder | Fast inventory against an edge. Ladder: =alberta_buck/sim= and =test_ladder.py=. Convertibility undertakings are Python (WP-2), not the equity desk. |
+| =ShadowObserver= / =IStabilizer= | Position, cap, saturation, staleness. Kept as instrumentation. Not a gain into K. |
+
+** The layering the evidence documents already use
+
+=doc/CONVERGENCE.org= §3, which follows =doc/K-AND-OPS.org= §2 and §5:
+
+| Layer | Mechanism | Timescale | Sees |
+|-------+-----------+-----------+------|
+| L0 | consistency wheel (=ArbKind=) | blocks | three pools of a triangle |
+| L1 | undertakings, stress fee, facility; the desk's temporary quadrants | ticks to days | bvib against that actuator's own edge |
+| L2 | persistence seam: dwell, then Q2 burn or Q4 acknowledge | weeks | its own dwell |
+| L3 | K, price-only | months (tau_I = 90 days, plus uptake lag) | raw bvib |
+
+L2 is designed, not built (=CONVERGENCE= §3). D4's shadow term and D7's
+position loop are the continuous alternative, and cycle 1 rejected them.
+
+* How BASKET-MACHINE sits against the other optimal-control ideas
+
+** Agreements
+
+- One signal, two modes. The wheel paper ("One filter bank, two modes")
+  splits differential =c_i - mean(c)= from common =log(basket in BUCK)=.
+  =BASKET-MACHINE= keeps them on two window vectors that are not aliased.
+  Index 2 is 20 on both only by coincidence. The common mode stays
+  =log(basketValueInBuck)= against par, which is K's process variable and
+  the desk's signal. It is not the mean of the legs. =CONVERGENCE= 5.1
+  is cited in the director for a +1,000 to +1,700 bp drift of an
+  equal-weighted mean over two years.
+- K is not moved into the signal, the basket response, or the desk.
+  =BASKET-MACHINE= non-goals match =K-AND-OPS= decision 10: the price loop
+  reads raw bvib.
+- The basket response is a relative-value trade (weights), which
+  =CONVERGENCE= §4 calls harvest leg 2. The desk and the undertakings are
+  leg 3 (bvib vs par). The wheel's cycles are leg 1 (venue inconsistency).
+  =BASKET-MACHINE= does not fold =ArbKind= into the response, and it does
+  not hand the basket a quadrant.
+- Turn tests stay different. Basket: velocity quorum, 4 of 6, ruled
+  2026-09-30. Desk: duration past the leash, because a velocity test left
+  Q2 and Q4 inert. =BASKET-MACHINE= refuses to collapse those into one
+  boolean.
+- Idle TOKEN must not switch the basket's response off. That is a local
+  fix to Fund/Trim starvation. It is not a new bvib law. Section 14 of
+  =doc/BASKET-EQUITY.org= is the evidence the design cites: deposits with
+  Fund and Trim never due.
+- The 2026-10-01 refinements line up with =K-AND-OPS= on the residual.
+  While the desk holds price, K's error is whatever is left inside or at
+  the band. One lever zeros one integral (F3, proved as a conserved
+  direction in =kdesign.py= and =test_joint_plant_has_a_conserved_direction=).
+
+** Gaps
+
+- =BASKET-MACHINE= copies the deployed monetary band onto the new signal
+  and the adapter: deadband =100e9= (100 bp), leash =200e9=,
+  =persistEpochs= 30, =measIdx= 2, =kappa1e9 = 250_000_000=, cap 40 bp
+  per epoch. It says 40 bp a day is fast beside a 90-day integral. In
+  =PairsRebalanceDirector= that cap is *bp of NAV*, and =monetaryEffort=
+  is =min(cap, kappa * |cm| / 1e9 / 1e9)= with sign. At |cm| = 100e9 the
+  formula yields 25 bp of NAV; at 200e9 it yields 50, then the cap binds
+  at 40. A NAV-sized trade is not a bvib increment. The note compares
+  them as if they shared units. This tree does not contain the price
+  impact that would convert one into the other.
+- The persistence seam (level 2) is not in the basket-machine design.
+  The adapter still publishes =outright= from =persistEpochs=, and the
+  desk's quadrant branches stay. That is the existing outright bit, not
+  the K-AND-OPS rule that K carries only a converted stock.
+- The estimator in =K-AND-OPS= §5.4 (persistent vs transient flow, then
+  =K = K0 + clip(-F_p / g) + Kp e + Ki Int(e)=) is not in
+  =BASKET-MACHINE= and is not a contract. =g= in F4 (~50k BUCK/day per
+  unit K, and the other step-test figures) is marked thin-cast and not
+  to be re-quoted until re-identified. This note does not simulate that
+  law.
+- LQR position gains, lambda 24, and gamma are retired or demoted
+  (=K-AND-OPS= 5.3). =BASKET-MACHINE= does not revive them. It also does
+  not use them. The optimal-control content it does use is the no-trade
+  band: trade to the boundary, not to the point target, citing Davis and
+  Norman (1990). Bertram (2010) thresholds stay open, as in the wheel
+  paper.
+- The equity desk has no wheel. =deploy.py= deploys one =BasketWheel=
+  and does not call =setOps= on =EquityDesk=. Sampling depends on
+  =MonetaryKeeperAgent=. A day the wheel is idle is sampled only if that
+  keeper runs. =observe='s catch-up is closed form, which is why the
+  design refuses a third wheel.
+- =creditDepositors= still does =idleToken[i] += amount=. After Deploy
+  is deleted, that TOKEN is response inventory and may be sold. Arb's
+  code is unchanged; the pool the TOKEN ends in is not.
+
+** Conflicts, or tensions that are not yet rulings
+
+- Tight desk band vs K's integral. Pro-rata E3, as quoted in
+  =BASKET-MACHINE=: bvib mean 1.0002--1.0004, inside the 100 bp deadband,
+  no advice for 731 days, so the integral barely moves. Equity twins at
+  =conv-e3-eq=: tail bvib 0.9805--0.9826, K at 0.950 for 93--98% of that
+  tail. Same K, two gauges. The design does not say which world the new
+  signal is for. Widening the band is explicitly "a later ruling."
+- Weight trades move the TOKEN/BUCK pools that define bvib.
+  =CONVERGENCE= E3's question ("do the harvest legs add?") is exactly
+  this coupling. =BASKET-MACHINE= says the response is not sized to move
+  bvib. It can still move bvib. The wheel then re-pins the same pools.
+  Nothing in the proposed step limits that side effect.
+- =K-AND-OPS= says K must never see a signal the fast actuators can
+  suppress, at a gain. =BASKET-MACHINE= leaves K on raw bvib, which is
+  correct under decision 10, and then asks whether the desk should leave
+  a larger residual on purpose so the integral can see it. Those are the
+  same seam, stated from opposite ends. Neither document builds the
+  discrete escalation that was supposed to resolve it.
+- A second credit on the same LP is refused as =K / (1 - K)= (three times
+  at K = 0.75) if the mark is gross. =DESK-LP-RESERVE.org= is discussion,
+  not built. =BASKET-MACHINE= does not adopt the desk depositing its
+  grant into the basket.
+- Cycle 1's position-coupled designs are not a candidate implementation
+  of "better optimal control." At the derived knee the x4 dump paid the
+  attacker $3.14M where design A paid $0 (=K-AND-OPS= F2). Any continuous
+  high-gain path from an adversary-visible inventory into K is treated
+  there as an attack surface.
+
+* A proposed big-picture architecture
+
+This is a reading of the documents that already agree, not a new
+controller. Each actuator gets one job. They coordinate by what they are
+allowed to see and by time scale, not by sharing a gain.
+
+** Setpoint, sensor, disturbance
+
+- Setpoint: bvib = 1. One declared basket bundle priced at one BUCK.
+- Sensor for K and for the desk: =basketValueInBuck()=, TWAP, not spot,
+  not =equity()=, not a reserve ratio (F9: reserve-ratio pricing made a
+  concentrated position look like a price).
+- Sensor for the basket response: per-leg differential of TWAP ticks
+  versus the legs' mean, plus the basket's own weights including idle at
+  TWAP (=responseWeightsBp= in the proposal). Not bvib.
+- Sensor for arb: the three-pool cycle's direct profit. Not a daily
+  ladder.
+- Disturbance: TOKEN prices (and flow that trades the TOKEN/BUCK pools).
+  Both move bvib. A constituent added to the basket jumps bvib;
+  =reprime()= exists so that jump is not one PID spike. The proposal
+  does not change =reprime=.
+- Disturbance the controller must not treat as a gain: anyone's inventory.
+  Fills, desk books, and loaded positions reach K only through the
+  residual they leave in raw bvib, or through a discrete outright act
+  that is still the desk's, not a proportional term.
+
+** Who actuates what
+
+| Actuator | Moves | Does not move | Cadence |
+|----------+-------+---------------+---------|
+| Private arbs and savers | TOKEN/BUCK and BUCK/USDC toward outside venues, inside their own edge | K | blocks to a day |
+| =ArbKind= | the same gaps, when the cycle pays, profit to depositors/treasury | K, weights | a wheel slot, when due |
+| Basket response (proposed) | one leg's weight toward the leash or the band edge, paced by =stepBp= and =swapCap= | K; not a bvib target | one wheel slot |
+| Desk quadrants | the desk's own TOKEN and BUCK, and its own lien, by =monetaryEffort= in bp of NAV | the basket's =_equityS= (invariant D2); K's gains | keeper, once per epoch, after =observe= |
+| Undertakings / ladder / facility (Python) | inventory at their own edge | K, if decision 10 holds | ticks to days |
+| K | every credit limit | no price directly; a cut moves price only if someone sells into the premium | =ComputeKind=, =dT= (sim default 1800 s) |
+
+** So they do not fight
+
+1. Relative value and parity stay on different sensors. The response
+   may trade a rich leg for a cheap leg while bvib is anywhere. That
+   trade is allowed to change bvib as a side effect; it is not allowed
+   a second objective of pushing bvib to 1. Giving it that objective
+   would duplicate the desk inside the basket's TOKEN, which
+   =BASKET-MACHINE= refuses.
+2. The desk does not read =mayTrim=, =mayFund=, or per-leg =turned=.
+   The basket does not read =monetaryEffort=. The shared contract
+   publishes both views and decides neither trade. That is the whole
+   of the =BASKET-MACHINE= contract boundary.
+3. K does not read the desk's book and the desk does not read K's
+   gains. The only coupling is the gauge. If the desk pins bvib inside
+   the deadband, K integrates a small error and mostly stays at =buckK0=.
+   If the desk is silent (equity twins; =NoAdvice= when effort is 0 or
+   the director was not poked), K integrates the raw gauge and will
+   rail on a residual of a couple of percent. That is not a fight
+   between two laws. It is one law looking at a gauge the other law
+   did not move.
+4. Anti-windup is the rail protocol, not a second optimizer. Once K is
+   at 0 or 0.95, further error in the same direction does not wind I.
+   A later release is then only the opposite error. =K-AND-OPS= §5.4's
+   "release when the pipe equals the remaining flow" is not implemented;
+   do not describe the rail as that landing.
+5. The wheel is a scheduler. Kinds that are all due compete for
+   =maxWork=. Compute is the first slot, which helps, but a cursor
+   left in the Arb range with =maxWork= smaller than the due set
+   defers =compute= until a later tick. See the sim. Coordination here
+   is "the keeper's =max_work= covers the due set often enough that
+   =dT= is actually met," not a new kind.
+6. Do not add a proportional gain from desk inventory, wheel profit, or
+   idle TOKEN into K. Cycle 1 is the measurement that this coupling
+   rails the lever and can pay a book-loader.
+
+What this picture does *not* include, because the branch does not have
+it: an on-chain Kalman split, a feedforward =F_p / g=, a joint LQR, a
+second credit NFT on basket LP, the desk's reserve inside the basket,
+and a route comparison of TOKEN/BUCK versus TOKEN/USDC/BUCK inside the
+response. The last is an explicit open note in the 2026-10-01
+refinements.
+
+* Work-wheel / EVM state machines that match the code
+
+The understandable implementation is the one the contracts already are:
+a slot table, one transition per slot, no hidden continuous controller.
+
+** Machine 1 --- =BuckKControllerDirect= (exists)
+
+State: =buckK0=, =buckK=, =P=, =I=, =D=, =lastUpdate=, =lastBasketCost=,
+=lastBuckPrice=. Input: =basket.basketValueInBuck()=. Transition:
+=compute()= if =block.timestamp - lastUpdate >= dT=, else return the
+cached K. The integral step is =err * dt= (=_integralStep=). Shadow may
+override that step; Direct does not. =reprime()= is only the basket,
+after =addBasketToken=. =setBuckK0= and =retune= re-derive I so the
+output does not step (bumpless). That is the whole law. A work-wheel
+implementation is =ComputeKind=: one slot, try/catch, return 1 if
+=compute= did not revert.
+
+** Machine 2 --- the wheel cursor (exists)
+
+State: =cursor=, =idleClock=, =scannedIdle=, =reserve=. Transition:
+=tick=. From the cursor, examine at most =maxScan= slots, run at most
+=maxWork= that are due, pay =kappaBp= of the reserve only if work > 0.
+Idle block: one storage read until =rearm=. Kinds compose by C3 order
+in =BasketWheel=. Equity today is not one slot: =EquityKind= is
+=2N+3=. The proposal cuts Deploy, Fund, and Trim down to one Respond,
+and appends Sample after Arb so triangle indexes do not move.
+
+** Machine 3 --- the signal (proposed, not in the bytecode)
+
+State: per-leg deviation, seven EMAs, seven velocities; a separate
+common-mode ladder; =lastDay=; persistence counter. Transition:
+=observe()=, idempotent per calendar day, catch-up
+=e' = x + (e - x) q^n= with the gap capped at 3650. No balances. Callers
+named in the design: =SampleKind=, =MonetaryKeeperAgent= immediately
+before =monetaryOperation=, Daily, and anyone. Publishing views is not
+a trade.
+
+** Machine 4 --- the basket response (proposed)
+
+One slot. Read =running=, =votes=, =excursion=, and
+=responseWeightsBp=. Apply leash and band locally. One sell leg and one
+buy leg, or one side, or a hold that may still mark. The step is
+specified as balance deltas in =BASKET-MACHINE= §5 (idle sold before
+LP is burned, fresh =_snap= before each post-trade mark). This note
+does not re-derive those formulas and does not simulate them: they
+move weights, and the doc says they are not a bvib controller. A sim
+that turned =sellCap= into a bvib change would be inventing impact.
+
+** Machine 5 --- the desk (exists; the adapter does not)
+
+=MonetaryDesk.monetaryOperation= already requires an epoch and an
+effort. The proposal only re-points =monetaryDirector= at an adapter
+whose =epochNow= is the signal's day and whose =monetaryEffort= is
+built from =monetaryReading= with the adapter's kappa and cap. Leaving
+=opsDirector= on the pairs director while =monetaryDirector= is the
+adapter is called out as a two-clock bug. The equity desk is not given
+=setOps= by this design.
+
+** What would make a "better" strategy still look like a wheel
+
+If a later ruling adopts the =K-AND-OPS= seam, the on-chain shape that
+stays understandable is still a slot, not a solver:
+
+- a level-2 slot that increments a dwell counter when the desk's book
+  is past a threshold for a day, and that calls the existing outright
+  path (Q2 / Q4) once, as a logged state change;
+- K's slot unchanged, still raw bvib, still one integrator;
+- no new gain. =K-AND-OPS= allows two further uses of position only as
+  experiments: a one-sided rate limit that can only slow K, and a
+  saturation flag with gamma left at 0. Neither is to be scheduled as
+  a proportional term.
+
+Explicit MPC is dismissed there for this plant: a box-constrained
+scalar with anti-windup is already the piecewise-affine law. The
+branch's own LQR answer was that the useful term was feedforward of
+the disturbance, and that the position feedback gains railed the
+lever. Feedforward needs an identified =g= this tree says not to quote.
+
+* What the existing tests and sims show, and what the new run shows
+
+** Existing Python checks (not executed for this note)
+
+Read as file names and, where the docs already state the result, as
+those statements. The pytest suite was not run here. The cycle-1 grid
+is not in this clone (=K-AND-OPS= points at =../alberta-buck-grid=).
+
+| Location | What it is for |
+|----------+----------------|
+| =alberta_buck/sim/kdesign.py= | Offline plant, LQR, SIMC. Documents the conserved direction and that the Ki anchor equals =dk_rail / (e_max * tau_I)=. |
+| =alberta_buck/test/test_kdesign.py= | Unit checks of that algebra: conserved direction, unit eigenvalue of the joint loop, Ki anchor independent of the plant, identification on synthetic series. Not a bvib campaign. |
+| =alberta_buck/sim/EQUILIBRIUM.md= | Closed-loop narrative. The rolling-reserve 1-year table and the legacy-vs-prorata 5-year table live here, with the accounting caveat of 2026-09-29. Acceptance gate: tail bvib within 1% (the 5-year section says ±0.02; the earlier paragraph says ±2%). Quoted, not reproduced. |
+| =alberta_buck/test/test_work_wheel.py= | Cursor, idle block, reserve pay, fee band. The Python mirror of the chassis (=BASKET-WHEEL= §8.5). |
+| =alberta_buck/test/test_equity_basket.py= | Deposits book equity, K credit deploys, a K cut is not a margin call, rebalancing moves value toward an underweight pool. |
+| =alberta_buck/test/test_rebalancing_sim_invariants.py= | Frame invariants: solvency, K inside its clamp, weights, arbs tracking. Needs vectors. |
+| =alberta_buck/test/test_ladder.py= | Undertaking ladder: edge vs tranche, fill accounting. |
+| =alberta_buck/test/test_monetary_keeper.py= | Equity desk samples its director before =monetaryOperation=. |
+| =doc/K-AND-OPS.org= F1--F2 | Cycle 1, 66 cells: design A (price-only) 6 of 6 arms, rail 0%; coupled designs rail. x4 dump attacker $0 under A, +$3.14M under S0k. |
+| =doc/CONVERGENCE.org= | E1 reported truer gauge (error −34% median, −43% p90) with noisier bvib sd. E2--E4 judged 2026-09-28 in that file. Not re-run. |
+| =doc/BASKET-WHEEL.org= §7 | Wheel prototype measurements (harvest, bvib sd). Chassis, not the PID. |
+
+** The new run
+
+Code: =/workspace/alberta-buck-sims/pid_and_wheel.py=. It imports
+=derive_gains= from this tree. PID arithmetic is the integer formula in
+=BuckKControllerDirect.compute= with =Kd = 0=, =dt = 86400=, one step
+per day, =k0 = 0.75e18=, rails 0 and =0.95e18=. Solidity's truncating
+division is used for ppm (=basket / 1e12=).
+
+These bvib paths are inputs. They are not the output of a pool, a desk,
+or a borrower. The 3 bp and 185 bp cases are constant levels inside
+bands the docs quote (E3 mean about 1.0003; equity-twin tail
+0.9805--0.9826). The 100 bp case is the deadband edge. The 800 bp case
+is an arbitrary held shock, not a reported run.
+
+Actual printout, 365 daily steps:
+
+| scenario | bvib | err ppm | K day 1 | K day 90 | K day 365 | first day on a rail |
+|----------+------+---------+---------+----------+-----------+---------------------|
+| calm 3 bp, basket rich | 1.0003 | −300 | 0.749953 | 0.748470 | 0.743887 | none |
+| deadband edge | 1.01 | −10000 | 0.748444 | 0.699000 | 0.546222 | none |
+| equity-tail midpoint, constant | 0.9815 | +18500 | 0.752878 | 0.844350 | 0.950000 | day 193 (high) |
+| held 8% rich basket | 1.08 | −80000 | 0.737556 | 0.342000 | 0.000000 | day 167 (low) |
+
+Prescribed 400-day paths, same controller:
+
+- Parked at 1.08 on day 1 and at 1.01 thereafter (a gauge someone else
+  already parked on the deadband edge, not a NAV-bp desk model): no
+  rail, K ends at 0.522889.
+- 1.08 held all 400 days: rail at 0 on day 167, still 0 at day 400.
+  Anti-windup stops further negative wind; the print's =high_steps= on
+  that row is 0.
+- 200 days at 1.02 then 200 days at 0.98: no rail. K is 0.548000 at
+  day 180 and 0.752000 at day 400. The two stretches are equal and
+  neither rail binds, so the integrator is back to zero. The end value
+  is =buckK0= plus the proportional term on the current +2% error
+  (=0.1 * 0.02 = 0.002=). Both printed figures are the integer machine
+  divided by 1e18.
+
+Wheel cursor, toy table, 30 calls, =maxScan= = all slots. Slots:
+Compute, Director, Sweep, one Respond, six Arb, Sample. Only Compute
+and the first =n= Arb slots are due, and they are due on every call.
+That due-set is assumed. Real =ArbKind= is due only when a cycle pays,
+and the live equity kind is =2N+3= slots, not one Respond.
+
+| arb slots due | maxWork | Compute runs out of 30 | mean gap between Compute runs (calls) |
+|---------------+---------+------------------------+----------------------------------------|
+| 0 | 1 | 30 | 1 |
+| 6 | 1 | 5 | 7 |
+| 6 | 3 | 13 | 2.33 |
+| 6 | 12 | 30 | 1 |
+
+With the sim's own default =max_work= of 12, this toy due-set does not
+delay Compute. With =max_work= 1 and six always-due arb slots, Compute
+runs once every seven calls. If the keeper only called once a day, that
+would stretch the 90-day integral's sampling. The contracts do not
+require a single daily call; =dT= default in =experiment.py= is 1800
+seconds, and =BasketWheelAgent= may tick with =max_work= 3 or 12.
+Headline of the cursor run: the chassis can defer =compute= when
+=maxWork= is smaller than a chronically due table, and the default of
+12 does not, on this 7-due-slot toy.
+
+** Limitations of the new run
+
+- No price impact, no AMM, no borrower uptake, no =g=. A railed K here
+  does not move the next day's bvib. In the real system it would, with
+  the sign in =BuckKControllerDirect= and with a lag F4 says is a ramp,
+  not a same-day price fix (full-authority price shift was reported as
+  0.2--0.4% of bvib, thin-cast).
+- Constant-error rows match "about =5 e= per integral time" only as an
+  average rate. Day 90 at 3 bp is −0.00153 from 0.75, in the
+  neighbourhood of the "about 0.0015 over a season" sentence for a
+  2--4 bp residual. The year row is larger because the integral keeps
+  going. The sentence was about one season, not 365 days.
+- The 185 bp row is a constant, not the equity twin's path. It shows
+  that a residual of that size, if it does not go away, puts this Ki
+  on the 0.95 rail in about half a year from 0.75. It does not show
+  that those cells failed for that reason. The doc already says K was
+  on the rail for most of the tail.
+- Desk effort in bp of NAV was not turned into a bvib path. Doing so
+  would invent depth and impact.
+- =dt = 86400= is one sample a day. For =Kd = 0= and a piecewise-constant
+  bvib it matches finer sampling of the same held value, because
+  =I += err * dt= is linear and anti-windup compares the same raw output.
+  It does not match a bvib that moves inside the day. F4 says the daily
+  price error is noise (std 0.70% open-loop in that writeup) and that a
+  derivative term would amplify it. This run sets =Kd = 0=, which is the
+  default.
+
+* Open questions and what not to claim
+
+** Open, already named in the tree
+
+- Is the 100 bp deadband too tight for K's integral, or is a near-zero
+  residual the correct mid-ranging outcome? =BASKET-MACHINE= leaves it
+  as a later ruling. =K-AND-OPS= says the seam is persistence, and that
+  the continuous alternative failed.
+- Level 2 is not built. Until it is, "optimal control" on this branch
+  is price-only K plus whatever fast books exist, not a finished cascade.
+- =g=, both signs, is unidentified on the merged economics. F10 says the
+  insurance-pool change should raise credit demand and that the sim's
+  hazard does not read the premium, so the plant cannot show it.
+- Do weight trades and arb cycles add or cancel? E3's question.
+  =BASKET-MACHINE= removes the idle veto so weight trades can run during
+  deposits. It does not measure the bvib side effect.
+- Bertram thresholds vs the ruled quorum and =leashBp= 3000. Not retuned.
+- Outside route (TOKEN/USDC then BUCK/USDC) inside one response step.
+  Named, not designed. =ArbKind= already searches that triangle for a
+  profitable cycle. That is a different function.
+- Desk reserve as basket shares; a third credit holder of segregated LP
+  while K is quenching. Both open, with the gross-mark spiral written
+  down as the thing not to build.
+- E2--E4 are not authorized by =BASKET-MACHINE=.
+
+** What not to claim
+
+- Do not claim a credit-disk state machine. The repo has no such object.
+- Do not claim the new sim predicts depositors' P&L, rail frequency in
+  a live economy, or that the desk moves bvib by 40 bp a day.
+- Do not claim cycle-1 or E1 numbers as fresh results. They are
+  citations of =K-AND-OPS= and =CONVERGENCE=.
+- Do not claim the position-coupled LQR is the optimal law to implement.
+  The same derivation says the joint plant is not stabilizable and that
+  those gains rail K.
+- Do not claim Fund/Trim, or the proposed Respond step, are bvib
+  controllers. Respond is a weight machine. K is the bvib machine. The
+  desk is the NAV-effort machine. Arb is the triangle machine.
+- Do not claim the equity basket and the desk already share one filter
+  bank. That is the design. Today they are =EquityTurnDirector= and
+  =PairsRebalanceDirector=, different windows, different callers.
+- =BASKET-MACHINE='s status line says the 2026-10-01 refinements are
+  not ruled. This note does not rule them.
+
+* Implementation baseline and optimization checklist (2026-10-03)
+
+The opt-in replacement and its constraints are documented in
+[[file:BASKET-MACHINE-IMPLEMENTATION.org][the implementation report]]. The [[file:CONTROL-LAB.org][control lab]] now supplies real pyrevm
+market experiments: ten stages, each run for 120 days, on two shared input
+profiles. Legacy implementations remain available until controlled economic
+comparisons support retirement. Correct books and passing tests are necessary
+but do not establish superior equilibrium or savings returns.
+
+** Baseline findings
+
+- [X] Implement a shared wheel-serviced sensor, bounded basket response,
+  outer-band desk, actual signed credit accounting and finite desk budgets.
+- [X] Bootstrap all EMA levels from accepted pre-run history and known mean
+  prices; exclude selected experiment perturbations. Preserve levels through
+  rejected samples and gaps, and keep desk persistence based on live days.
+- [X] Separate market transmission from observation. The linked-market and
+  K-only arms have identical pool prices: changing a limit needs an actor
+  to turn it into market flow.
+- [X] Confirm in real-EVM regression tests that a displaced TOKEN/BUCK or
+  TOKEN/USDC pool can produce positive atomic arb receipts independently
+  of sensor validity. This is not yet an all-agents shock campaign.
+- [X] Preserve both initial and corrected-bootstrap JSON evidence. Corrected
+  anchors begin within 0.1% of their known means; the four-of-six turn quorum
+  still lags. TOKEN A confirms at day 15 after its day-7.5 peak.
+
+** Final lab experiment: capture a sudden pool disturbance
+:PROPERTIES:
+:CUSTOM_ID: shock-capture-experiment
+:END:
+
+Add this after the existing ten-stage progression. Start from the =basket=
+arm with the sensor, live K, basket response, arb, buyer, issuer and desk
+all active. Run each case for 120 days using the same historical bootstrap,
+baseline feed and funding. Pair every disturbed run with an undisturbed run
+from the same configuration. Actors remain enabled even if a particular
+case gives the desk or a private actor no reason to trade.
+
+The existing =shock= feed profile changes the external target for a period.
+That is a repricing experiment. The new experiment needs a separate pool
+event: one actual funded swap moves a named pool at day 45, while the
+external fair-value feed stays unchanged. Do not keep pinning the disturbed
+pool or reset it after each agent action. Book the disturbing actor's input,
+output and residual inventory, and record subsequent feed-driver flow
+separately so neither is mistaken for system-generated profit.
+
+| Case | Controlled disturbance | Purpose |
+|------+------------------------+---------|
+| TOKEN A/BUCK up and down | One swap targets +10% or -10% from the pre-event spot; separate runs | Capture either cycle direction while TOKEN valuation may be unavailable |
+| TOKEN A/USDC up and down | The same one-pool disturbances; separate runs | Capture the outside-venue opportunity and trace its transmission |
+| Larger displacement | Repeat at +30% and -30%, within available active liquidity | Exercise sizing limits, multiple bounded cycles and rejected valuations |
+| BUCK/USDC | A separate cross-pool shock | Observe common monetary effects across all three triangles |
+| Lasting external repricing | Move the feed and maintain its new level | Distinguish dislocation recovery from exposure to a genuine new price |
+| Liquidity removal | Withdraw LP liquidity without treating it as a swap | Test depth loss and unavailable execution; removing liquidity need not itself change spot |
+
+The first implementation can start with the TOKEN A/BUCK and TOKEN A/USDC
+cases in both directions, then extend the matrix. A six-hour snapshot would
+hide immediate capture. Retain the normal 120-day panes and add an event
+inset with observations immediately before the shock, after the shock,
+after each bounded wheel/arb service, and after the next TWAP update. Record
+actual timestamps and transaction order; same-block and sparse-service cases
+must obey the wheel's real eligibility rules.
+
+The additional panes should show:
+
+1. Route discrepancies and active depth, with rejected valuation intervals
+   and completed arb cycles marked on the existing price pane.
+2. Cumulative realized arb BUCK receipts after pool fees, an explicit gas
+   cost scenario, and the beneficiary split between depositors and treasury
+   where configured. Keep arb receipts separate from basket rebalancing P&L
+   and desk inventory marks.
+3. Shock-minus-control changes in basket equity versus holding, desk capital
+   and remaining budget, raw bvib, K's P/I contributions and actual issuance
+   or repayment. Mark holdings at independent external prices as well as in
+   BUCK so a moved local quote cannot manufacture apparent return.
+
+Acceptance requires positive receipts from completed profitable cycles,
+reconciled accounts, respected capital/execution limits, and no requirement
+for a fresh valuation to attempt atomic arb. An unavailable price must still
+block exposure that requires it. Do not require an exact price restoration:
+fees, depth, work bounds and competing flows leave residual discrepancies.
+Measure time to the executable no-profit band, remaining opportunity after
+each service, and recovery of the valuation signal. Compare opportunities
+with net capture after gas; a profitable token cycle can be uneconomic to
+execute. No finite book is expected to absorb arbitrary unbounded shocks.
+
+** Optimization and improvement queue
+
+- [ ] Add pool-event configuration and cache dependencies, then implement
+  the final all-agents shock section above with paired controls and event
+  snapshots. Keep feed perturbations and pool disturbances separately named.
+- [ ] Measure arb sizing, route order and service priority during shocks.
+  Vary =maxWork=, =maxScan=, competing cycles and transaction cadence; quantify
+  capture forgone while protecting K and sample service from starvation.
+- [ ] Measure turn-quorum lag and missed rebalancing returns against plain
+  bands and a small set of faster policies. Compare equal books, fees and
+  turnover limits before changing windows or quorum. Bootstrap is fixed;
+  timing and profitability remain open.
+- [ ] Sweep desk entry/release bands, gain, persistence and daily/total
+  budgets. Measure residual P error, integral movement, actual credit uptake
+  and desk wealth against holding its initial grant. Preserve the intended
+  residual error without buying temporary parity by exhausting the desk.
+- [ ] Add bounded borrower repayment/deleveraging behavior as a separate
+  agent variant. Identify responses to K increases and cuts independently;
+  credit capacity alone is not issuance or withdrawal.
+- [ ] Exercise missed observations, sparse wheel calls, changing liquidity,
+  monotone repricing and randomized actor order across multiple seeds.
+  Include worst-case gas for the largest admitted basket and filter bank.
+- [ ] Add depositor entry/exit and return accounting to economic acceptance
+  runs: rebalancing gains, fees, arb receipts, credit costs and exit costs
+  versus holding, rather than allocation tracking or bvib error alone.
+- [ ] Establish matched legacy/replacement acceptance runs and explicit
+  retirement criteria. Keep the legacy path until equilibrium, capital
+  preservation and depositor outcomes justify replacement.
+- [ ] Add isolated stablecoin segments with per-segment exposure limits and
+  circuit breakers. Test one-coin depegs, correlated depegs, stale feeds and
+  attempted draining through a failed BUCK/stablecoin interface.
+- [ ] Evaluate EMA differences, selected frequency channels and a small
+  observer in diagnostic mode. Include phase/delay, irregular sampling,
+  aliasing, amortized computation and coherent publication. Only give a
+  feature execution authority after it improves the same economic controls.
+
+Items are ordered to establish measurable behavior before tuning or adding
+control complexity. Keep saved configurations, source/bytecode fingerprints,
+JSON traces and rendered panes for each accepted comparison.

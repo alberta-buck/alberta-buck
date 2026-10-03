@@ -4,8 +4,9 @@ pragma solidity ^0.8.20;
 import {IBuckKController}   from "../IBuckKController.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IBuckMintBurn}      from "./BuckBasketStorage.sol";
-import {IBuckHolder, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
+import {IBuckHolder, IMarkedCredit, IBuckKSource} from "./BuckBasketEquityStorage.sol";
 import {MonetaryDesk}       from "./MonetaryDesk.sol";
+import {IMonetaryDirector}  from "./MonetaryDesk.sol";
 
 /// @notice What the desk reads from the equity basket it runs beside.
 interface IEquityBasketView {
@@ -18,11 +19,16 @@ interface IEquityBasketView {
         uint256 targetWeightBp, uint128 treasuryLiquidity);
 }
 
+interface IMonetaryExecutionGuard {
+    function executionAllowed(int32 effort) external view returns (bool);
+}
+
 /// @title EquityDesk -- the monetary desk as its own BUCK credit holder,
 ///        beside the equity basket.
 ///
-/// @notice The desk (MonetaryDesk: the four quadrants, the bounds, the
-///         stabilizer seam; alberta-buck-ethereum-wheel.org, "The desk") runs beside a
+/// @notice The desk reuses MonetaryDesk's configuration and stabilizer views,
+///         and replaces its privileged mint/burn operations with actual
+///         credit-holder accounting. It runs beside a
 ///         BuckBasketEquity and shares nothing with it but the pools it
 ///         trades in:
 ///
@@ -58,10 +64,19 @@ contract EquityDesk is MonetaryDesk {
     uint256           public creditId;
     bool              public creditLive;
 
+    /// @notice Finite gross intervention programme, in native BUCK units.
+    ///         Neither repayments nor opposite-side trades replenish it.
+    ///         Off until governance allocates a programme and a capital floor.
+    uint256 public turnoverRemaining;
+    uint256 public capitalFloor;
+    address public executionGuard;
+
     uint8 internal constant DEP_MARKED = 3;              // BuckCredit.DepreciationType.MARKED
 
     event CreditOpened(address indexed credit, uint256 indexed tokenId, uint256 face);
     event DeskMarked(uint256 value);
+    event RiskBudgetSet(uint256 turnover, uint256 capitalFloor, uint256 executionDeviationBp);
+    event ExecutionGuardSet(address indexed guard);
 
     constructor(address _buck, address _controller, address _basket, address _governance) {
         buck       = IBuckMintBurn(_buck);
@@ -75,6 +90,19 @@ contract EquityDesk is MonetaryDesk {
     function setVenue(address v) external onlyGov {
         venue = IBuckBasketVenue(v);
         emit VenueSet(v);
+    }
+
+    function setRiskBudget(uint256 turnover, uint256 floor, uint256 executionDeviationBp) external onlyGov {
+        require(executionDeviationBp > 0 && executionDeviationBp <= 1000, "execution band");
+        turnoverRemaining = turnover;
+        capitalFloor = floor;
+        defaultMaxDeviationBp = executionDeviationBp;
+        emit RiskBudgetSet(turnover, floor, executionDeviationBp);
+    }
+
+    function setExecutionGuard(address guard) external onlyGov {
+        executionGuard = guard;
+        emit ExecutionGuardSet(guard);
     }
 
     /// @notice Mirror the basket's constituents (the same tokens and pools)
@@ -155,11 +183,127 @@ contract EquityDesk is MonetaryDesk {
         int256 s0 = _bh().signedBalanceOf(address(this));
         if (s0 >= 0 || _bh().reliefOf(address(this)) == 0) return;
         _bh().settleRelief();
-        int256 paid = _bh().signedBalanceOf(address(this)) - s0;
-        if (paid <= 0) return;
-        int256 o = monetaryOutstanding;
-        monetaryOutstanding = o > paid ? o - paid : (o > 0 ? int256(0) : o);
     }
+
+    /// @notice Publish the actual account: receipts first repay a lien, then
+    ///         become held BUCK. An ordinary credit holder cannot burn a
+    ///         positive balance by changing an auxiliary counter.
+    function _syncAccount() internal {
+        int256 s = _bh().signedBalanceOf(address(this));
+        monetaryBuckHeld = s > 0 ? uint256(s) : 0;
+        monetaryOutstanding = s < 0 ? -s : int256(0);
+    }
+
+    function refresh() external {
+        _collectRelief();
+        _syncAccount();
+        _mark();
+    }
+
+    function netInventory() public view override returns (int256) {
+        return _bh().signedBalanceOf(address(this));
+    }
+
+    function capacity() public view override returns (uint256) {
+        if (turnoverRemaining == 0) return 0;
+        try this.netValue() returns (uint256 value) {
+            if (value <= capitalFloor) return 0;
+        } catch { return 0; }
+        return super.capacity();
+    }
+
+    /// @notice The credit-holder implementation replaces the legacy mint/burn
+    ///         quadrants. Buy receipts retire only debt that actually exists;
+    ///         positive receipts are held even when the policy is persistent.
+    ///         Sell held BUCK first; draw credit only on persistent advice.
+    function monetaryOperation() external override returns (uint8 quadrant) {
+        OpsParams memory op = opsParams;
+        if (!op.enabled || turnoverRemaining == 0) revert MonetaryIdle();
+        address dir = _monDir();
+        if (dir == address(0)) revert DirectorUnset();
+        uint32 epoch = IMonetaryDirector(dir).epochNow();
+        if (lastMonetaryEpoch == epoch + 1) revert StepAlreadyDone();
+        (int32 effort, bool outright) = IMonetaryDirector(dir).monetaryEffort();
+        if (effort == 0) revert NoAdvice();
+        uint256 nav = _deskNav();
+        uint256 size = nav * uint256(effort < 0 ? -int256(effort) : int256(effort)) / 10000;
+        _collectRelief();
+        _syncAccount();
+        _mark();
+        if (netValue() < capitalFloor) revert MonetaryBound();
+        uint256 positionCap = nav * op.maxPositionBp / 10000;
+        uint256 debtCap = nav * op.maxOutrightBp / 10000;
+        int256 beforeAccount = _bh().signedBalanceOf(address(this));
+        bool selling = effort > 0;
+        uint256 room;
+        if (selling) {
+            // Each operation either sells inventory or draws credit. Never
+            // cross through zero merely because advice asked for more.
+            if (monetaryBuckHeld > 0) { room = monetaryBuckHeld; quadrant = 3; }
+            else {
+                if (!outright) revert MonetaryIdle();
+                uint256 debt = uint256(monetaryOutstanding);
+                room = debtCap > debt ? debtCap - debt : 0;
+                quadrant = 4;
+            }
+            room = _min(room, _bh().balanceOf(address(this)));
+        } else {
+            uint256 held = monetaryBuckHeld;
+            room = uint256(monetaryOutstanding) + (positionCap > held ? positionCap - held : 0);
+            quadrant = beforeAccount < 0 ? 2 : 1;
+        }
+        size = _min(size, _min(room, turnoverRemaining));
+        if (size == 0) revert MonetaryBound();
+        lastMonetaryEpoch = epoch + 1;
+        uint256 cost = _trade(selling, size, op);
+        if (cost == 0) revert MonetaryIdle();
+        if (executionGuard != address(0)
+            && !IMonetaryExecutionGuard(executionGuard).executionAllowed(effort)) revert MonetaryBound();
+        turnoverRemaining -= cost;
+        _syncAccount();
+        _mark();
+        // Postconditions use actual receipts (including BUCK's arrival fee),
+        // not swap return values or intended operation sizes.
+        if ((!selling && monetaryBuckHeld > positionCap)
+            || (selling && uint256(monetaryOutstanding) > debtCap && quadrant == 4)
+            || netValue() < capitalFloor) revert MonetaryBound();
+        if (quadrant == 4 && uint256(monetaryOutstanding) > _kLimit()) revert MonetaryBound();
+        int256 delta = _bh().signedBalanceOf(address(this)) - beforeAccount;
+        uint256 actual = uint256(delta < 0 ? -delta : delta);
+        emit MonetaryOperation(quadrant, effort, outright, actual, monetaryOutstanding, monetaryBuckHeld);
+    }
+
+    function _kLimit() private view returns (uint256) {
+        return IBuckKSource(address(controller)).currentBuckK() * credit.markOf(creditId) / 1e18;
+    }
+
+    /// @dev Active V3 depth and price marks size the trade; ERC20 pool
+    ///      balances include inactive liquidity and are not V3 reserves.
+    function _trade(bool sellBuck, uint256 size, OpsParams memory op) private returns (uint256 cost) {
+        uint256 n = constituents.length;
+        if (n == 0) return 0;
+        uint256 share = size / n;
+        for (uint256 i; i < n; ++i) {
+            IBuckBasketVenue.Marks memory m = _venueMarks(i);
+            uint256 want = _min(share, m.depth * op.maxLegBp / 10000);
+            if (want == 0) continue;
+            if (sellBuck) {
+                (uint256 spent, uint256 got) = _dv().monetaryLeg(i, true, want);
+                monetaryTokenHeld[i] += got;
+                cost += spent;
+            } else {
+                uint256 one = 10 ** constituents[i].decimals;
+                uint256 tokens = _min(monetaryTokenHeld[i], want * one / m.pHigh);
+                if (tokens == 0) continue;
+                (uint256 spent,) = _dv().monetaryLeg(i, false, tokens);
+                monetaryTokenHeld[i] -= spent;
+                // Round cost up: splitting work must not mint free budget.
+                cost += (spent * m.pHigh + one - 1) / one;
+            }
+        }
+    }
+
+    function _min(uint256 a, uint256 b) private pure returns (uint256) { return a < b ? a : b; }
 
     // --- MonetaryDesk's hooks -------------------------------------------------- //
 
@@ -178,33 +322,6 @@ contract EquityDesk is MonetaryDesk {
         uint256 n = constituents.length;
         prices = new uint256[](n);
         for (uint256 i = 0; i < n; i++) prices[i] = _venueMarks(i).pTwap;
-    }
-
-    /// @dev Issue by spending the desk's own credit: at most what its account
-    ///      can spend after a mark (D1).
-    function _deskIssue(uint256 size) internal override returns (uint256) {
-        _mark();
-        uint256 room = _bh().balanceOf(address(this));
-        return size < room ? size : room;
-    }
-
-    /// @dev Nothing to retire: BUCK the desk receives repay its lien.
-    function _deskRetire(uint256) internal override {}
-
-    /// @dev Every operation collects the desk's relief and marks before it
-    ///      trades; BUCK bought arrive carrying their age and, into an account
-    ///      below zero, pay its fee on arrival -- book what arrived.
-    function _swapAcross(bool sellBuck, uint256 sizeBuck, OpsParams memory op)
-        internal override returns (uint256 amount)
-    {
-        _collectRelief();
-        _mark();
-        int256 s0 = _bh().signedBalanceOf(address(this));
-        amount = super._swapAcross(sellBuck, sizeBuck, op);
-        if (!sellBuck) {
-            int256 d = _bh().signedBalanceOf(address(this)) - s0;
-            amount = d > 0 ? uint256(d) : 0;
-        }
     }
 
     // --- Dispatch: the venue facet (its swaps, callbacks and marks) ------------- //

@@ -9,6 +9,7 @@ import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
 import {BuckBasketEquityStorage, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
+import {PortfolioMath} from "./PortfolioMath.sol";
 
 /// @notice The components facet's entry points (BuckBasketEquityWheel).
 interface IEquityWheel {
@@ -81,6 +82,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         eq = EquityParams({floorBp: 100, flowZx100: 200, bandBp: 5000, parkBp: 30000,
                            flowDays: 30, stepBp: 500, weightBandBp: 200, grainPpm: 100,
                            exitFeeBp: 0, swapCapBp: 100, ceilBp: 2000});
+        response = ResponseParams({leashBp: 3000, interval: 1800, tiltWad: 1e18});
         receipt = new BuckBasketReceipt(address(this));
     }
 
@@ -105,6 +107,16 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     function setEquityDirector(address d) external onlyGov {
         equityDirector = d;
         emit DirectorSet(d);
+    }
+
+    event ResponseConfigured(address indexed signals, ResponseParams params);
+
+    function setResponse(address signals, ResponseParams calldata p) external onlyGov {
+        require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0
+                && p.tiltWad >= 0 && p.tiltWad <= 4e18, "response params");
+        responseSignals = signals;
+        response = p;
+        emit ResponseConfigured(signals, p);
     }
 
     function setEquityParams(EquityParams calldata p) external onlyGov {
@@ -468,6 +480,16 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
             tot += w[i];
         }
         for (uint256 i = 0; i < n; i++) w[i] = tot == 0 ? 0 : w[i] * 10000 / tot;
+    }
+
+    /// @notice The allocation including waiting deposits and harvested TOKEN.
+    function responseWeightsBp() external view returns (uint256[] memory) {
+        Snap memory s = _snap();
+        uint256[] memory values = new uint256[](s.m.length);
+        for (uint256 i; i < values.length; ++i) {
+            values[i] = s.m[i].posTwap + idleToken[i] * s.m[i].pTwap / (10 ** constituents[i].decimals);
+        }
+        return PortfolioMath.weights(values);
     }
 
     // --- Dispatch: the components facet, else the venue ------------------------- //

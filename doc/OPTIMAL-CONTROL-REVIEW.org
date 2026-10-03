@@ -1,0 +1,639 @@
+#+TITLE: Review: a minimal wheel-driven basket and desk, with a path to joint control
+#+DATE: 2026-10-02
+#+OPTIONS: ^:nil toc:2 num:t
+
+* Recommendation and scope
+
+Build the simple system first: a shared, quality-aware price reader and EMA
+service; the proposed paced basket response; a separately capitalized desk
+that intervenes outside a meaningful parity band; the existing direct K
+controller; and atomic consistency arbitrage. Make the accounting, sampling,
+execution bounds and wheel liveness correct before adding predictors.
+
+The user's clarified objective is the design criterion: harvest relative
+reversion and rebalancing returns, while the desk leaves enough persistent
+error for K's integral to move, without spending the desk into exhaustion.
+The longer-term objective is coordinated estimation and control of all three
+trading mechanisms and the slow credit lever.
+
+This review reads branch =doc/basket-machine= at =16c3ded=, including the
+working-copy =OPTIMAL-CONTROL-BIG-PICTURE.org= and relevant portions of
+=BASKET-MACHINE=, =K-AND-OPS=, =alberta-buck-ethereum-wheel.org=,
+=alberta-buck-ethereum-basket.org= and =alberta-buck-ethereum.org=.
+Recommendations below are proposals, not changes to the existing rulings.
+The initial review made no production changes and did not rerun the reported
+historical economy experiments. The subsequently authorized implementation,
+tests and new comparison runs are recorded separately in
+[[file:BASKET-MACHINE-IMPLEMENTATION.org][BASKET-MACHINE-IMPLEMENTATION.org]].
+
+* What the big-picture note gets right
+
+The monetary reference is the declared basket quantity valued in BUCK,
+=bvib = basketValueInBuck()=, with parity at 1. It is neither depositor equity
+nor an average of constituent log prices. The direct controller's error is
+=e = 1 - bvib=. Positive error raises K; negative error lowers K.
+
+There are three distinct sources of trading opportunity: inconsistency
+between venues, relative commodity movements, and BUCK's deviation from
+basket parity. Keeping separate books and policies for these is a useful
+starting point. The basket's equity belongs to depositors; the monetary desk
+has its own capital and credit. A shared observation service need not own
+funds or choose any trades.
+
+The note is appropriately explicit that the shared signal, replacement
+Respond step, and broader persistence/stock-transfer mechanism are not all
+implemented. It also correctly refuses to promote the failed position-to-K
+feedback experiments into a recommended controller.
+
+Several interpretations need tightening:
+
+- Separate objectives do not decouple the plant. Basket, desk, arb and
+  external traders alter the same pools. Desk trades change the basket's
+  market value without touching its accounting records. Arb profits credited
+  as idle TOKEN also affect weights. Stability is a property of their joint
+  dynamics, delays and constraints.
+- Small error does not return K to =buckK0=. At zero error the existing
+  integral normally retains its learned adjustment. This memory is desirable.
+- K changes available credit, not outstanding debt by decree. A cut imposes
+  no margin call. New issuance, repayment, demurrage, Jubilee relief, and
+  basket deleveraging must be distinguished in the supply response.
+- A NAV-sized trade is not a price change. Equal BUCK notional across pools
+  is not equal price impact when active liquidity differs. The desk's
+  =_swapAcross= comment overstates its common-mode purity.
+- Conditional integration limits windup; it does not prove economic
+  controllability, adequate borrower response, or joint stability. Even the
+  note's claim that only opposite error can release a rail is too strong:
+  changes in the proportional/derivative contributions can change saturation.
+- Commodity reversion is a hypothesis about a horizon and regime. Physical
+  production constraints do not establish a stationary token price, a fixed
+  mean, or recovery before the desk's budget expires. Permanent repricing and
+  token/issuer failure belong in the validation set.
+
+* Implementation findings that precede tuning
+
+** Confirmed: Q2 can change the book without retiring held BUCK
+
+[[file:../src/basket/EquityDesk.sol::function _deskRetire][EquityDesk._deskRetire]]
+is an empty override. That is appropriate for BUCK that already repaid the
+desk's lien on receipt. However,
+[[file:../src/basket/MonetaryDesk.sol::if (outright && room && monetaryBuckHeld > 0)][MonetaryDesk._absorb]]
+calls it on previously held inventory, decreases =monetaryBuckHeld=, and
+decreases =monetaryOutstanding= as if a new retirement occurred.
+
+A temporary Foundry probe capitalized a desk, executed Q1 into a positive
+BUCK balance, then executed Q2. The held book decreased and outstanding
+became negative, while the actual signed balance and =totalSupply= were
+unchanged. This is a reproduced accounting/semantic mismatch, not a claim
+of a demonstrated profitable exploit.
+
+For the minimal equity desk, derive held BUCK and lien from the actual
+account. A purchase into debt repays debt immediately; a purchase beyond
+that holds BUCK. Persistence alone cannot turn already-held BUCK into a
+permanent burn. Q3 spending after repayment can draw credit again. Reconcile
+the operation classification with actual balance changes, relief and
+demurrage. Do not import the legacy pro-rata mint/burn semantics.
+
+** Confirmed: position and outright caps are entry tests, not hard final bounds
+
+=_absorb= checks whether existing held inventory is at its cap; =_supply=
+checks existing outstanding issuance. The next action is not consistently
+clipped to the remaining room. Temporary probes setting each cap to 1 bp of
+basket equity and requesting a 50 bp operation reproduced one-trade
+overshoots, including with the existing pool-leg cap enabled.
+
+Clip the authorized amount against every remaining budget before execution
+and enforce conservative postconditions afterward. Define whether a cap
+uses opening NAV, a committed valuation, or a changing NAV. Repricing can
+make an existing position exceed a percentage cap without a new trade; the
+required invariant is then no further increase, not a forced liquidation.
+
+** Confirmed: a failed Ops attempt consumes the wheel's epoch
+
+[[file:../src/wheel/UpkeepKinds.sol::abstract contract OpsKind][OpsKind._run]]
+sets =opsEpochSeen= before the external call and catches its revert. A probe
+made that call fail, made advice available, and advanced a block within the
+same epoch. The wheel still reported no pending operation and did not retry.
+
+The assignment inside =MonetaryDesk.monetaryOperation= itself rolls back on
+=NoAdvice=; the wrapper's assignment does not. This distinction should be
+explicit in the big-picture note. Key completion to a successfully consumed
+advice version; apply bounded retry/backoff for unavailable advice or a
+temporary venue failure. A completed valid HOLD can be memoized separately.
+
+** Source-confirmed: oracle failures can become apparently valid spot readings
+
+[[file:../src/basket/BuckBasketUniswapV3.sol::function _readPoolPrice][The venue's price reader]],
+its =marks= function, and
+[[file:../src/basket/EquityTurnDirector.sol::function _tick][EquityTurnDirector._tick]]
+fall back to =slot0= when history cannot be consulted. In =marks=, this can
+make LOW, HIGH and TWAP identical during precisely the failure that removed
+the independent comparison. The direct K controller can therefore consume
+spot under a TWAP-labelled interface.
+
+Publish =valid=, interval, timestamp and history coverage explicitly. Missing
+history should prevent new risk based on that reading. Bootstrap should be
+an explicit limited mode. Do not silently omit a failed constituent and
+renormalize the basket, since that changes the monetary reference. Preserve
+repayment and appropriately specified in-kind exits independently.
+
+** Source-confirmed: advice freshness and persistence are underspecified
+
+=monetaryEffort()= returns only effort and an outright bit.
+=monetaryOperation()= checks the director's current epoch, not the age of
+the observation that produced that effort. =_foldBasket= may retain an old
+ladder after a failed read. =monOverEpochs= increments once on a processed
+epoch, without requiring adjacency or the same sign of the deviation.
+
+Attach an observation/advice version and validity interval. Count persistence
+only from valid observations of the same side. A gap or side reversal should
+reset or explicitly degrade the evidence. Elapsed time is not evidence that
+an unobserved price stayed past the leash.
+
+** Source-confirmed: the harvest response still has the idle-TOKEN veto
+
+[[file:../src/basket/BuckBasketEquityWheel.sol::function _fundPlan][Fund]] and
+[[file:../src/basket/BuckBasketEquityWheel.sol::function _trimPlan][Trim]]
+return no plan while any idle TOKEN exceeds the grain. Trim also defers to
+Fund. This confirms =BASKET-MACHINE='s diagnosis: a constant deposit stream
+can disable the intended rebalancing, including a leashed leg.
+
+Implement the unified response described there: count idle TOKEN in weights,
+use it as sell inventory, and let deposits supply underweight positions.
+Re-snapshot and re-mark after a sale before a subsequent credit-funded buy.
+Risk-reducing liquidity/underwater actions must not depend on a harvest vote.
+
+** Source-confirmed: execution limits need to be expressed in executable liquidity
+
+[[file:../src/basket/MonetaryDesk.sol::function _swapAcross][The desk]] sizes
+using pool ERC-20 balances and their ratio. In V3 these are not the active
+virtual reserves or marginal exchange rate. The basket's =Marks.depth= and
+=CycleMath.reserves= already use active liquidity and sqrt price.
+
+The shared =monetaryLeg= swap helpers use the extreme sqrt-price limits and
+have no caller-specific =minOut=. Small notional relative to token balances
+does not establish small price impact. Add explicit execution price bounds,
+minimum output and live validation. Even active virtual-reserve sizing is
+only local between liquidity changes; tick crossings must be bounded.
+
+At constant liquidity and zero fees, selling BUCK equal to 1% of its virtual
+reserve raises the TOKEN price in BUCK by =(1.01)^2 - 1=, about 201 bp.
+Thus a 1% depth cap is not intrinsically small relative to a 100 bp
+monetary band. Repeated allowed steps can compound it further.
+
+** Source-confirmed: wheel scheduling is only partially wired for this economy
+
+The equity deployment in [[file:../alberta_buck/sim/deploy.py::# --- The equity basket's director and work wheel][deploy.py]]
+wires basket Equity and Arb work. The equity desk is driven by
+=MonetaryKeeperAgent= rather than its own configured Ops slot. Some other
+configuration paths wire Compute/Director kinds, but that is not automatic
+for every equity deployment.
+
+Choose one explicit deployment topology. A single wheel may schedule both
+accounts; separate wheels are also possible. Account isolation does not
+require separate schedulers. Sampling dependencies must be checked at the
+consumer, since round-robin order alone cannot ensure Sample precedes Desk
+when a tick begins halfway through the slot table.
+
+* Minimal implementable architecture
+
+#+begin_example
+pool observations + actual account state
+                  |
+          validated price snapshot
+                  |
+          +-------+------------------+
+          |                          |
+  differential EMA ladder       raw bvib + desk filters
+          |                          |
+     basket Respond            bounded desk / direct K
+          |                          |
+          +-------- pools -----------+
+                      ^
+             arb + external traders
+
+WorkWheel schedules bounded steps. Each consumer checks its own prerequisites.
+#+end_example
+
+Start with a small bounded set of assets and features. Use one validated
+price reader, with a fast raw-bvib path appropriate to K's cadence and a
+daily ladder path for the basket. Do not make a 30-minute K cycle depend on
+an unlabeled daily cached price. For a small explicitly capped asset set,
+one atomic daily sample is simpler than a resumable general analytics engine.
+
+Publish per-leg normalized prices, raw bvib, differential and common-mode
+ladders, observation time, coverage and validity. Preserve the different
+window vectors: the equity anchor is 1280 days; the existing common ladder
+ends at 320. Keep transaction-time account marks and live execution checks
+outside stale analytical caches.
+
+For larger jobs, collect against one fixed historical cutoff, compute into
+a staging version, and commit only a complete required snapshot. V3's
+=observe= can query past intervals while retained history covers them.
+Expire a job if that history disappears. Optional spectral features can
+publish independently with their own age, rather than delaying critical
+price or safety observations. See [[https://developers.uniswap.org/docs/protocols/v3/concepts/price-oracles][Uniswap's oracle documentation]].
+
+Basket Respond should execute one bounded sell, buy, matched pair, or HOLD.
+Keep the current understandable excursion/turn rule initially; compare it
+against a plain declared-weight no-trade band. A harvest gate may postpone a
+discretionary mean-reversion trade, but must not defeat a hard mandate or
+risk-reducing action. There is no unconditional positive-ROI promise: retain
+trends, structural breaks, fees, gas, demurrage and external arb competition
+in the comparison.
+
+* An outer desk band that leaves K room to work
+
+Let =b=bvib=, =z=b-1=, and let positive =u= mean selling/issuing BUCK.
+The desk absorbs BUCK for positive z and supplies it for negative z.
+K continues to use =e=-z=, independently of whether the desk is active.
+
+Use separate entry and release distances:
+
+#+begin_example
+0 < b_release < b_enter
+
+WAIT:   enter ABSORB if z >= b_enter; enter SUPPLY if z <= -b_enter
+ABSORB: buy bounded BUCK while z > b_release and budgets permit
+SUPPLY: sell bounded BUCK while z < -b_release and budgets permit
+HOLD:   no valid advice, insufficient edge, exhausted budget, or unsafe venue
+#+end_example
+
+The thresholds may be asymmetric. Require a timely validated reading to
+agree with the filtered direction, so an old EMA cannot authorize a trade
+after the market has reversed. Time spent outside a wider threshold may
+permit a bounded credit draw or other explicitly defined persistent action;
+it must not manufacture a retirement that the account did not perform.
+
+Size effort from excess beyond the release boundary, not the full distance
+to parity. Conceptually:
+
+#+begin_example
+u_requested = -sign(z) * k_d * max(abs(z) - b_release, 0)
+u_allowed   = clip by remaining inventory, capital, credit, rate,
+              execution-price and liquidity budgets
+#+end_example
+
+The gain's units must be explicit: BUCK per unit deviation, or a defined
+NAV fraction per unit deviation. A live pool-impact bound should prevent an
+operation from intentionally trading through the release band. Current
+TWAP will not immediately reveal the trade's full effect, so the check
+needs executable spot/liquidity geometry as well as the slower observation.
+
+An illustrative testing configuration is entry at 3% and release at 2%; this
+is a hypothesis to test, not a deployment recommendation. Compare several
+bands with identical exogenous flows and capital. Do not widen a band merely
+to force K to move if the actual economy is already at parity without the
+desk accumulating risk.
+
+With the current stored =Ki=643004= and daily elapsed seconds, the unsaturated
+integral contribution changes as follows over 90 days of constant error:
+
+| bvib | e | Change in K from the integral |
+|------+----+-------------------------------|
+| 1.01 | -1% | approximately -0.05 |
+| 1.02 | -2% | approximately -0.10 |
+| 1.03 | -3% | approximately -0.15 |
+| 0.99 | +1% | approximately +0.05 |
+| 0.98 | +2% | approximately +0.10 |
+
+These are arithmetic consequences of the controller, not predictions of
+market recovery. K starts at 0.75 with an upper rail of 0.95 in the default
+experiment; equal opposite errors therefore have unequal remaining rail
+authority. The proportional contribution at 1% error is only about 0.001.
+The integral consumes the raw error; it does not require a larger Kp.
+
+Select desk capital and pacing together with the residual band. A budget of
+10% of NAV spent at 40 bp of NAV each day lasts 25 days, before costs and
+valuation changes. A 90-day integral timescale does not make that budget
+sufficient. Measure the actual borrowing/repayment response and its lag in
+both directions, including an unresponsive population.
+
+The desk needs an explicit reserved-capital floor and an intervention budget
+that cannot reset merely because a timer elapsed or a book entry changed.
+Net inventory alone misses repeated buy-high/sell-low losses. Track turnover,
+actual spending and drawdown using a specified valuation basis. At exhaustion
+the desk must stop increasing exposure and allow a wider price departure;
+it cannot promise both indefinite parity and finite reserves against
+unbounded external selling. Market losses can still reduce capital even
+while the desk is inactive.
+
+* The EMA quorum, Fourier buckets and phase
+
+The connection is real, but the current ladder is not a DFT. With regular
+daily sampling, each rung implements
+
+#+begin_example
+m_w[n] = alpha_w x[n] + (1-alpha_w) m_w[n-1]
+alpha_w = 2/(w+1)
+H_w(z) = alpha_w / (1 - (1-alpha_w) z^(-1))
+#+end_example
+
+This is a one-pole low-pass filter. Every rung passes slow movement; each
+has different attenuation and phase delay. The six shorter rungs are thus
+correlated measurements, not independent frequency buckets or independent
+statistical votes. The equity director votes when the sign of its rung's
+daily step opposes the current excursion from the anchor. It discards
+amplitude and almost all phase information. The pairs director additionally
+smooths velocity, so its delay differs from the equity director's.
+
+The spans are not oscillation periods. Calculating the half-power frequency
+from the transfer function gives:
+
+| EMA span, daily samples | Half-power oscillation period, days |
+|------------------------+-------------------------------------|
+| 5 | 15.3 |
+| 10 | 31.2 |
+| 20 | 62.7 |
+| 40 | 125.6 |
+| 80 | 251.3 |
+| 160 | 502.6 |
+| 1280 | 4021.2 |
+
+The 1280-day rung is intentionally an anchor, not a well-resolved
+1280-day spectral channel. For slowly varying signals, the 20-day rung's
+group delay approaches 9.5 days. Frequency-dependent delay matters to
+monetary action even if a backtest finds the same filter profitable.
+
+Adjacent differences =m_5-m_10=, =m_10-m_20=, and so on suppress the shared
+slow component and form broad overlapping bands. They are inexpensive
+derived features of the existing state. Geometrically spaced bands have a
+closer relationship to logarithmic multiresolution analysis than to a single
+uniform DFT grid; this particular ladder is not an orthogonal wavelet transform.
+
+Explicit complex channels would expose amplitude and phase at chosen
+frequencies. One option mixes the signal with a fixed sine/cosine oscillator
+and smooths both components; another uses damped complex resonators. These
+give recursive, exponentially weighted spectral measurements without a full
+FFT. A sliding DFT instead maintains a specified finite window, usually
+requiring an outgoing sample and a ring buffer.
+
+For a clean narrowband component, phase can distinguish a peak, a trough and
+the two directions between them. In mixed, drifting market signals, phase
+must be qualified by amplitude, coherence, bandwidth, filter delay and age.
+A level shift also produces spectral energy. No transform alone establishes
+that a past cycle will continue. Keep a separate level/trend component: a
+bank that removes DC would discard the persistent monetary error K needs.
+
+The exact Fourier/filter-bank duality is described in Julius O. Smith's
+[[https://www.dsprelated.com/freebooks/sasp/Dual_Views_Short_Time.html][STFT filter-bank interpretation]],
+and the EMA transfer function in his
+[[https://www.dsprelated.com/freebooks/filters/Elementary_Filter_Sections.html][one-pole filter treatment]].
+Lindeberg's [[https://arxiv.org/abs/1504.02648][time-causal, recursive scale-space research]]
+is relevant to efficient multiscale derivatives and delay; it studies
+cascaded filters and is not a proof of this parallel quorum's trading rule.
+
+[[file:review/control-filter-bank.svg][Frequency and phase illustration]] is
+generated by [[file:review/control-filter-bank.py][control-filter-bank.py]].
+It includes a warmed-up synthetic 80-day sinusoid to show what the quorum
+actually gates. This is a regular-sampling floating-point calculation, not
+a contract simulation or evidence of economic return.
+
+* What the wheel makes feasible, and what it does not
+
+| Calculation | Plausible bounded implementation | Main qualification |
+|-------------+----------------------------------+--------------------|
+| EMAs, variances, residuals | O(number of features) per accepted sample | Correct elapsed time and quality metadata |
+| EMA differences | Subtract already stored rungs | Overlapping bands, no explicit quadrature |
+| Selected Fourier channels | Fixed number of complex recurrences per sample | Sampling, leakage, drift and fixed-point stability |
+| Small Kalman observer | Two-to-four-state blocks; scalar sequential measurements | Identified model, uncertainty, adversarial outliers |
+| Full-window DFT/FFT | Frozen ring-buffer version, resumable stages | More state writes and completion latency |
+| Small neural model | Fixed quantized weights, bounded inference | Must outperform simple baselines under regime changes |
+
+Amortization distributes cost; it does not remove total gas, persistent
+storage writes, data availability or completion latency. A wheel scans a
+bounded number of slots, but a slot can still contain an O(N) sample or a
+much more expensive calculation. Give each task an explicit worst-case work
+bound, deadline and failure behavior. Admission of a large asset/feature set
+must not silently destroy those bounds.
+
+Neither user transactions nor keeper rewards guarantee a maximum response
+time. Voluntary calls may disappear during stress. Safety checks belong at
+every operation that can increase exposure; expensive analysis should not
+be a prerequisite for a basic stop. A clock adapter, timestamp semantics,
+sequencer availability and transaction ordering must be validated per chain.
+
+The current EMA gap catch-up substitutes today's reading across missed days.
+It is algebraically exact for that assumed held input, not a recovery of
+the actual missing path. This distinction is especially important for phase
+and persistence. Query retained historical observations where available;
+otherwise label the gap, increase uncertainty, or re-prime according to a
+specified recovery policy. Setting =dTMax= bounds a K jump after silence but
+does not reconstruct the missing integral. The default experiment leaves
+that cap unset.
+
+The reserve reward is per working tick, not per completed analysis. Splitting
+identical work into many rewarded calls changes payout. Future analytics
+need payment tied to unique progress or completion and a total job budget,
+so publishing unnecessary tiny stages cannot consume the upkeep reserve.
+
+ANN inference is computationally possible; a large language model currently
+has no identified advantage for these numerical control decisions. A useful
+learned model would predict a narrowly specified quantity, such as short-term
+impact or borrower uptake, with immutable versioned weights and bounded
+authority. Proof of correct inference would not prove the prediction correct.
+
+* Stablecoin channels and circuit breakers
+
+Use three or more observation/execution channels around one basket reference
+and one monetary authority for a fungible BUCK. Three independent K
+controllers writing policy for that same BUCK would create another coupling
+problem. Fully separate currencies are a different architecture and would
+need conversion and liability rules.
+
+Normalize decimals and quotation direction. Observe stablecoin cross-rates,
+multiple TOKEN/stablecoin routes, BUCK/stablecoin routes, depth, age and
+where appropriate an external redemption/USD reference. Bound each source's
+influence; liquidity weights alone can reward an adversary for temporarily
+supplying liquidity. Group venues by issuer, collateral, bridge and oracle
+dependencies rather than treating every pool as an independent vote.
+
+There is a fundamental observability limitation:
+
+#+begin_example
+(TOKEN priced in S_j) / (BUCK priced in S_j) = TOKEN priced in BUCK
+#+end_example
+
+A consistent depeg of S_j can cancel out of that ratio. Every triangular
+cycle can remain consistent while the stablecoin fails. Cycle residuals
+detect inconsistent prices, not the truth of a dollar peg. Cross-stablecoin
+prices can reveal relative disagreement, but cannot determine an absolute
+common depeg without an additional trusted anchor or redemption evidence.
+
+DAI and USDS are one dependency family for this purpose: Sky's
+[[https://github.com/sky-ecosystem/usds/blob/master/README.md][contracts provide a 1:1 converter]].
+Sky's [[https://github.com/sky-ecosystem/dss-lite-psm][USDC LitePSM]] also
+illustrates a dependency connecting nominally separate channels. This does
+not quantify today's collateral exposure; it shows why a naive majority
+of ticker symbols is not a fault-tolerance argument.
+
+A segment state machine can be =HEALTHY -> SUSPECT -> ISOLATED -> RECOVERY=.
+Use a fast disagreement/invalidity test and hard flow limits to stop new
+exposure, followed by persistent evidence and hysteresis for isolation and
+slow recovery. A slower TWAP or statistical alarm can corroborate the event;
+it cannot protect against an arbitrarily large first transaction by itself.
+No finite detector lag can guarantee zero loss under arbitrary shocks.
+
+Enforcement must cover every protocol-controlled path: accepting stablecoin
+collateral/deposits, issuing BUCK, subsidizing arb, routing treasury trades,
+valuing backing, transferring capital between segments, and providing or
+replenishing LP. Segment exposure and gross outflow limits must be enforced
+where assets leave or credit is granted, not just in a user interface.
+Do not lend the same backing to several segment accounts without a global
+exposure constraint.
+
+An existing Uniswap V3 pool cannot be paused by disabling this wheel or
+router. Direct third-party swaps continue. The protocol can stop its own
+support and withdraw its own liquidity, but that withdrawal requires a
+transaction and cannot reverse a completed drain. If pre-swap rejection is
+required, the interface needs an enforceable adapter, controlled venue or
+appropriate hook. Even then other external venues remain outside its remit.
+
+For the short-term system, include a segment enable/disable guard and
+capital limits now; introduce cross-channel diagnosis once multiple channels
+exist. Recovery must preserve the original basket reference and use explicit
+valuation/re-prime rules, rather than quietly redefining parity. Across L1
+and L2, cross-chain observations also need authenticated delivery and their
+own freshness limits; they are not a synchronous shared sensor.
+
+* Longer-term alternatives grounded in related work
+
+** A. Bounded hybrid rules with a shared observer (recommended first)
+
+The proposed outer-band desk, direct PI controller, basket no-trade bands,
+and atomically profitable arb form a hybrid feedback system: continuous
+prices/accounts plus discrete modes and transaction-triggered actions.
+It is economical to audit and implement. It needs explicit budgets and
+scenario validation rather than an unsupported claim of optimality.
+
+[[https://pubsonline.informs.org/doi/abs/10.1287/moor.15.4.676][Davis and Norman (1990)]]
+establish no-trade regions under proportional transaction costs in their
+investment model. That supports the policy shape, not these particular
+weights, EMA thresholds or guaranteed ROI. EVM gas includes fixed costs;
+minimum trade sizes and hysteresis may be preferable to repeated tiny
+trades exactly to the boundary.
+
+[[https://docs.reflexer.finance/risk/pid-failure-modes-and-responses][Reflexer's documented PID failure modes]]
+are a close monetary precedent: liquidity, manipulated observations and
+ineffective market incentives matter alongside gains. RAI's redemption-rate
+actuator differs from BUCK's credit factor, so gains and response times do
+not transfer directly.
+
+** B. Small robust observer plus constrained action selection
+
+Estimate a small state: basket parity error, persistent net flow, temporary
+inventory imbalance and realized credit uptake. Include actual protocol
+actions as known inputs, so a desk's own purchase is not automatically
+interpreted as exogenous demand. Unknown external flows remain disturbances;
+an observer cannot perfectly separate causes from price alone.
+
+Evaluate a small fixed menu of allowable actions and sizes, or use an
+explicit precomputed MPC policy. Penalize parity error, inventory risk,
+turnover and credit changes, with hard capital and execution constraints.
+Freeze or fall back when estimates are unreliable. Neither approach needs
+a generic on-chain nonlinear solver.
+
+[[https://sites.engineering.ucsb.edu/~jbraw/mpc/][Rawlings, Mayne and Diehl's MPC text]]
+provides the framework for constrained and robust predictive control.
+[[https://arxiv.org/abs/1609.06408][Ames et al.'s control-barrier-function work]]
+motivates separating safety constraints from performance optimization.
+Applying either to BUCK requires a fitted model, explicit disturbance bounds
+and allowance for inter-transaction delay; the cited guarantees do not
+automatically cover strategic market participants.
+
+** C. Off-chain optimization with on-chain bounded execution
+
+Allow competitive solvers to propose routes or short-horizon actions against
+a committed observation version. On-chain logic checks freshness, available
+capital, price bounds, segment status and minimum realized outcome, then
+executes atomically. The wheel maintains observations and settlement.
+
+[[https://stanford.edu/~boyd/papers/cfmm_routing.html][Angeris et al. (2022)]]
+formulate multi-CFMM routing and arbitrage as convex optimization when fixed
+execution costs are ignored; including them introduces mixed-integer choices.
+This is directly relevant to joint route selection. Feasibility or a
+computation proof does not certify fair observations, economic optimality
+under omitted costs, or future stability. Always retain a simple fallback.
+
+** Research common to all three
+
+[[https://arxiv.org/abs/2208.06046][Milionis et al., Loss-Versus-Rebalancing]]
+explains why LP fees and recovered arbitrage must be assessed together with
+adverse selection. A profitable arb cycle in one token does not establish
+positive combined basket/desk return. Avoid counting the same internal
+transfer as two independent sources of profit.
+
+[[https://people.kth.se/~kallej/papers/cdc12_tutorial_tabuada.pdf][Tabuada's event/self-triggered control tutorial]]
+connects scheduling and control design. A wheel is an execution mechanism;
+a controller still needs acceptable bounds on observation/action delay.
+
+[[https://people.eecs.berkeley.edu/~sastry/pubs/PDFs%20of%20Pubs2000-2005/Publications%20of%20Grad%20Students%2020042005/Sinopoli/SinopoliKalmanFiltering2004.pdf][Sinopoli et al. (2004)]]
+analyze Kalman estimation with intermittent observations. Their results make
+observation availability part of estimation performance. They concern
+specified stochastic models, not arbitrary adversarial oracle manipulation;
+BUCK would additionally need robust residual tests and isolation.
+
+The general formulation is
+=x_next = f(x, protocol_actions, external_actions, elapsed_time)= with
+=observations = h(x) + measurement_error=. External agents may respond to
+the published policy. A realistic long-term target is bounded loss and
+recovery within a specified disturbance/market regime, with safe degradation
+outside it; no finite-capital design can force equilibrium against arbitrary
+unbounded inputs.
+
+* Implementation order and acceptance criteria
+
+1. Reconcile equity-desk inventory, debt repayment and persistent-operation
+   semantics; enforce remaining-room caps and execution prices. Keep basket
+   and desk accounts separate.
+2. Add validated, timestamped price/advice interfaces; remove silent spot
+   fallback for risk-bearing decisions; make persistence and failure retry
+   correct. Wire the intended wheel topology explicitly.
+3. Implement the unified basket response and outer-band desk. Preserve
+   direct K, integral memory, rails and a deliberate missed-sample policy.
+4. Run closed-loop comparisons with identical shocks: static K; K alone;
+   K plus basket/arb; K plus basket/arb/desk. Sweep desk bands and budgets
+   together, and identify credit response separately for increases and cuts.
+5. Add multiple stablecoin channels and enforced segment limits. Then test
+   EMA differences, selected spectral channels and a small observer in
+   diagnostic mode before they receive execution authority.
+
+Required checks include constant deposits not starving rebalancing; actual
+holdings reconciling with desk books across all operation sequences; no
+new overshoot of action budgets; stale/partial observations authorizing no
+new exposure; no price-invalid trade after a delayed sample; and bounded
+gas with the largest admitted configuration.
+
+Economic tests need transient shocks, sustained flow, permanent repricing,
+no borrower response, K at both rails, liquidity withdrawal, a depeg and
+correlated depegs, missing oracle history, keeper outages, and an attacker
+placing trades before and after every predictable action. Randomize caller
+order and tick budgets; a simulator that always services every due task
+before users trade can hide the relevant failure.
+
+Measure integrated and tail parity error, K trajectory and rail time, actual
+issuance/repayment, desk capital and exhaustion time, basket return relative
+to hold and a plain-band baseline, net arb recovery, costs, signal age and
+worst-case gas. Value strategy return independently of the pool movement
+the strategy itself caused. Profitability and monetary stabilization are
+separate outcomes.
+
+* Verification performed for this review
+
+- Foundry 1.7.1, offline, compiler 0.8.28: selected equity basket, equity
+  desk, desk invariant, both relevant directors and all wheel suites passed.
+  The matching test enumeration contains 147 tests/invariants across eight
+  suites, including inherited tests.
+- =BuckKControllerDirectTest=: 13 passed, zero failed.
+- Four temporary diagnostic probes passed their assertions of the observed
+  problems: held Q2 without actual retirement; position-cap overshoot;
+  outright-cap overshoot; and no same-epoch retry after a failed Ops call.
+  These probes were removed after diagnosis because they assert the
+  problematic behavior, not desired regression invariants.
+- The K/error arithmetic and the EMA transfer-function table were computed
+  directly. The attached plot script makes the spectral calculation
+  reproducible. No new economy-level performance or stability claim is made.
+
+The minimal design is therefore a viable next implementation target, but
+the current code should not yet be characterized as that complete bounded
+desk-and-basket controller. Its immediate missing pieces are correctness
+and executable limits, followed by calibrated residual-band behavior.

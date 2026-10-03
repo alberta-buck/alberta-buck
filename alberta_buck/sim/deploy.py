@@ -191,6 +191,9 @@ class Deployment:
     equity_director: Any = None   # EquityTurnDirector (equity baskets)
     desk_grant: Any = None        # the desk's founding grant, TOKEN base units per constituent
     wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
+    equity_machine: bool = False  # replacement, activated after identical bootstrap
+    signals: Any = None
+    monetary_policy: Any = None
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC
     # WP-14: the per-class sim-only stabilizers (SimStabilizer per agent
@@ -270,6 +273,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # baskets mint and burn through the hooks, so for them the sim deploys the
     # hooked subclass (src/legacy/BuckWithBasketHooks.sol).
     credit_holder = basket_impl in ("equity", "equity-ops")
+    machine = os.environ.get("SIM_EQUITY_MACHINE", "0") == "1"
+    if machine and (not credit_holder or controller_impl != "direct"):
+        raise ValueError("SIM_EQUITY_MACHINE requires an equity basket and the direct K controller")
     buck = chain.deploy("Buck" if credit_holder else "BuckWithBasketHooks",
                         credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
@@ -550,6 +556,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                    basket_impl=basket_impl, venue=venue,
                    controller_impl=controller_impl, observer=observer, desk=desk,
                    deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
+    d.equity_machine = machine
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
     pool_v3_abi, _ = load_artifact("UniswapV3Pool")
@@ -809,6 +816,12 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             mon = desk if desk is not None else basket
             if desk is not None:
                 chain.send(desk.functions.mirrorConstituents(), sender=gov)
+                # Every credit-holder desk uses a finite gross programme.
+                # Reversing direction does not replenish this allowance.
+                capital_per_leg = int(os.environ.get("SIM_OPS_CAPITAL_USD", "400000"))
+                budget = int(os.environ.get("SIM_OPS_TURNOVER_BUCK", str(capital_per_leg * len(tok))))
+                floor = int(os.environ.get("SIM_OPS_CAPITAL_FLOOR_BUCK", "0"))
+                chain.send(desk.functions.setRiskBudget(budget * E6, floor * E6, 500), sender=gov)
             chain.send(mon.functions.setMonetaryDirector(
                 director.address), sender=gov)
             chain.send(mon.functions.setOpsParams(

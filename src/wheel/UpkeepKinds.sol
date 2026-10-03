@@ -119,34 +119,49 @@ abstract contract SweepKind is WorkWheel {
 
 /// @title OpsKind -- the desk's quadrant operation, once per monetary epoch.
 ///        The shell guards the epoch itself; the kind keeps its own memo so a
-///        refused or already-done epoch is not rescanned.
+///        successful epoch is not rescanned. A refusal can be retried when
+///        a sample or the market changes in the same epoch.
 abstract contract OpsKind is WorkWheel {
     address public opsBasket;
     address public opsDirector;             // the epoch clock the shell uses
-    uint32  public opsEpochSeen;            // 1 + the last epoch attempted
+    uint32  public opsEpochSeen;            // 1 + the last successful epoch
+    uint256 public opsAttemptBlock;
 
     function setOps(address basket, address epochSource) external onlyGov {
         opsBasket = basket;
         opsDirector = epochSource;
+        opsEpochSeen = 0;
+        opsAttemptBlock = 0;
+        _markDirty();
     }
 
     function _slotCount() internal view virtual override returns (uint256) {
         return super._slotCount() + (opsBasket == address(0) ? 0 : 1);
     }
 
+    /// @dev A composed wheel may publish the observation dependency here.
+    ///      It survives a caught refusal by the desk (unlike a desk self-call).
+    function _prepareOps() internal virtual {}
+
     function _due(uint256 s) internal view virtual override returns (bool) {
         uint256 b = super._slotCount();
         if (s < b) return super._due(s);
         try IWheelEpoch(opsDirector).epochNow() returns (uint32 e) {
-            return opsEpochSeen != e + 1;
+            return opsEpochSeen != e + 1 && opsAttemptBlock != block.number;
         } catch { return false; }
     }
 
     function _run(uint256 s) internal virtual override returns (uint256) {
         uint256 b = super._slotCount();
         if (s < b) return super._run(s);
-        opsEpochSeen = IWheelEpoch(opsDirector).epochNow() + 1;
-        try IWheelOps(opsBasket).monetaryOperation() { return 1; } catch { return 0; }
+        opsAttemptBlock = block.number;
+        _prepareOps();
+        uint32 epoch = IWheelEpoch(opsDirector).epochNow();
+        try IWheelOps(opsBasket).monetaryOperation() returns (uint8 action) {
+            if (action == 0) return 0;
+            opsEpochSeen = epoch + 1;
+            return 1;
+        } catch { return 0; }
     }
 }
 
@@ -157,19 +172,29 @@ abstract contract OpsKind is WorkWheel {
 ///        (=setWheel=) for its steps to be accepted.
 abstract contract EquityKind is WorkWheel {
     address public equityBasket;
+    bool public responseMode;
+
+    /// @notice Comparison/rollout switch; install the matching components
+    ///         facet before ticking. Default retains the legacy slot ABI.
+    function setResponseMode(bool enabled) external onlyGov { responseMode = enabled; _markDirty(); }
 
     function setEquity(address basket) external onlyGov { equityBasket = basket; }
 
     function _equitySlots() internal view returns (uint256) {
         if (equityBasket == address(0)) return 0;
         try IWheelEquity(equityBasket).constituentsLength() returns (uint256 n) {
-            return 2 * n + 3;
+            return responseMode ? n + 2 : 2 * n + 3;
         } catch { return 0; }
     }
 
     /// @dev Slot j of the kind: 0 Daily; 1..N Sync(i); N+1..2N Deploy(i);
     ///      2N+1 Fund; 2N+2 Trim.
     function _equityOf(uint256 j) internal view returns (uint8 kind, uint256 i) {
+        if (responseMode) {
+            if (j == 0) return (0, 0);
+            if (j == _equitySlots() - 1) return (2, 0);
+            return (1, j - 1);
+        }
         uint256 n = (_equitySlots() - 3) / 2;
         if (j == 0) return (0, 0);
         if (j <= n) return (1, j - 1);

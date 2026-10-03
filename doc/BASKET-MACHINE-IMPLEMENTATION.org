@@ -1,0 +1,295 @@
+#+TITLE: Minimal basket machine: implementation and comparison status
+#+DATE: 2026-10-03
+#+OPTIONS: ^:nil toc:2 num:t
+
+* Status and decision
+
+The first implementation is available as an opt-in replacement. Keep the
+legacy basket response and directors for comparison. Correct accounting and
+bounded execution are acceptance requirements; superior equilibrium and
+depositor returns remain an experimental acceptance requirement, not a
+property established by these changes.
+
+This follows [[file:OPTIMAL-CONTROL-REVIEW.org][the control review]] and the user's clarified short-term objective.
+The implementation combines new small modules with corrections to existing
+ones. The existing account/credit model, receipts, direct K controller and
+atomic arbitrage remain the foundations. No DFT, Kalman filter, neural model,
+multi-stablecoin arbitration or stablecoin segment breaker is implemented in
+this first cut.
+
+* What changed
+
+| Module | Role |
+|--------+------|
+| =BasketSignals= | Shared validated observations, daily differential/common EMA ladders, freshness and gap handling |
+| =OuterBandMonetaryDirector= | Outer-band hysteresis, same-side persistence, bounded advice and a terminal execution guard |
+| =BuckBasketEquityResponse= | New Daily / Sync / Respond facet, replacing Deploy / Fund / Trim on selected deployments |
+| =ValidatedBasketVenue= | Strict TWAP reads, active-depth sizing support, bounded swap execution and guarded LP placement |
+| =EquityDesk= | Correct ordinary-credit-holder accounting, remaining-cap clipping, finite turnover programme and capital floor |
+| =BasketMachineWheel= | Standalone replacement wheel: Compute, Ops, Respond components, Arb, Sample |
+| =BasketWheel= | Comparison wheel retained; explicit response mode and optional Sample slot added |
+
+The shell's existing equity storage is preserved, with response configuration
+appended. =EquityParams= retains its ABI. =ResponseParams= contains leash,
+minimum response interval and tilt. The old components facet and
+=EquityTurnDirector= are retained. The legacy shared monetary desk also clips
+operations to remaining caps and checks actual receipts against those caps.
+
+These are source changes for new deployments. The shell is not a proxy:
+installing the response facet on an already deployed old shell would not add
+the new storage initializers or configuration methods. The simulation switch
+operates on shells deployed from the new sources; it is not a live migration
+procedure.
+
+* Observations and control
+
+=BasketSignals= publishes every constituent together. Missing pool TWAP history, absent
+active liquidity, or an excessive spot/TWAP difference makes that attempted
+publication invalid. Neither a partial vector nor a spot fallback freshens
+the old observation. The last good values remain available for diagnostics.
+
+The fast publication contains raw =bvib=. Daily differential filters use
+oriented log-price ticks less their cross-sectional mean, with windows
+5/10/20/40/80/160/1280 days. The last rung is the anchor. Four of the six
+faster velocities must oppose the excursion to count as a turn. Common-mode
+EMAs use =bvib - 1= in 1e18 units, with windows 5/10/20/40/80/160/320 days.
+They are diagnostic views in this first policy, not K's input.
+
+Before the first successful live publication, governance imports historical
+EMA levels for every constituent and the common reference through
+=initializeHistory=. The source digest identifies the off-chain data and
+calculation; the contract does not prove their authenticity. The import does
+not publish a fresh price or advance the desk's live persistence counter.
+No filter is initialized from the first live price. Without an import,
+validated raw prices remain available, but excursions and turn votes are
+zero; basket response then uses its ordinary bands and leash without trend
+lean or trend gating.
+
+An unavailable sample or missing day preserves historical filter levels and
+clears continuity evidence. On recovery the filters take at most one actual
+daily step; a same-day retry does not advance them again. There is no
+catch-up loop pretending that today's price was observed on every missed
+day. A constituent-count change disables the imported history and requires
+a newly configured signal service. Multiple calls in one day do not
+manufacture daily votes or persistence.
+
+The valuation guard does not disable atomic arbitrage. That executor reads
+current pools and requires a profitable completed cycle after pool fees,
+independently of this signal's availability. A one-way desk trade cannot
+rely on the same round-trip proof and retains its valuation and capital
+checks. Gas costs and competing transactions are separate from the cycle's
+on-chain gross profit check.
+
+The desk policy defaults in the simulation are:
+
+| Parameter | Default | Meaning |
+|-----------+---------+---------|
+| entry | 300 bp | Enter ABSORB above 1.03 or SUPPLY below 0.97 |
+| release | 200 bp | Stop at the corresponding outer edge of the inner band |
+| proportional gain | 2500 bp | 0.25 times the excess deviation, sized against basket equity |
+| action cap | 40 bp/day | Maximum requested daily notional as a fraction of basket equity |
+| persistence | 30 observed days | Same side, outside entry, before new credit issuance is allowed |
+| sample / response interval | 1800 seconds | Pace observation and response work |
+| sample maximum age | 3600 seconds | Cached observation freshness |
+
+These are explicit starting parameters, not optimized gains. Persistent
+observations must remain outside the entry band on the same side. A reversal,
+return inside entry, invalid observation, or missing day clears persistence.
+
+Advice also checks current TWAP and spot against the last observed direction.
+After execution, the desk's configured guard requires both current values to
+remain outside the release band on that side. A trade crossing that boundary
+rolls back in full. A lagging TWAP alone cannot authorize spending through
+parity. Small residual error remains for K to integrate.
+
+K continues to read the raw basket reference, with no inventory offset and no
+EMA substitution. The strict venue makes unavailable TWAPs fail the compute
+rather than become spot observations. Simulation activation preserves an
+explicit =dTMax=; if previously unlimited, it sets a default of two sample
+intervals (at least K's =dT=). =SIM_MACHINE_DT_MAX= overrides that setting.
+This bounds catch-up after outages. Sparse calls consequently integrate less
+time than a continuously serviced controller, which must be included in
+cadence comparisons.
+
+* Basket response
+
+Allocation value includes both LP and idle TOKEN, valued at TWAP. Reported
+weights use largest-remainder rounding and sum to 10000 when the book is
+nonempty. Lean is computed by the basket from the sensor's excursion; the
+sensor owns no position targets.
+
+A running-up leg is not sold merely for crossing the leaned band; a
+running-down leg is not bought. A declared-weight leash can override these
+gates. Non-leashed trades aim at the band edge; leashed trades aim at the
+declared weight. A response has at most one selling leg and one buying leg.
+Waiting TOKEN never blocks an unrelated leg.
+
+The sell consumes idle TOKEN first, burns LP only for the remainder, then
+makes one TOKEN-to-BUCK swap. Actual swap input is capped even when a burn at
+spot releases more TOKEN than its TWAP half. After writing the TOKEN/LP
+books, the response takes a new snapshot and marks before any buy. Its buy
+budget is limited by actual freed spending capacity, original usable credit,
+the buy cap and current spendability. It takes another fresh mark after the
+buy and LP mint. A basket that started over its limit never buys in that
+response.
+
+Three necessary refinements to the earlier response sketch are explicit:
+
+1. An empty leg uses its declared allocation as the base for its first buy
+   step. A BUCK-only deposit can therefore create its first TOKEN position.
+2. A liquidity shortfall or excess lien can force a bounded sale even when
+   weights are balanced. These responses do not simultaneously draw credit.
+3. Balanced idle TOKEN can be paired without another swap, within the
+   expanded-book target and usable credit. Otherwise balanced initial
+   deposits could wait forever without supplying any LP. Running-down legs
+   are excluded from this pairing fallback.
+
+The replacement uses kinds 0=Daily, 1=Sync(i), 2=Respond. Kinds 3 and 4 do
+nothing. The slot count is N+2, instead of 2N+3. An ordinary skip is not a
+successful response. =Responded= distinguishes mark-only, sell, buy, transfer
+and pairing work, and records proceeds and actual buy spending.
+
+* Desk accounting and limits
+
+An ordinary credit holder does not have the legacy basket's privileged burn
+operation. The equity desk therefore reports the actual signed BUCK
+account: positive value is held inventory; negative value is outstanding
+credit. Incoming BUCK first repay actual debt, then become positive holdings.
+Persistent advice cannot burn held BUCK by subtracting an auxiliary counter.
+Relief and receipts both reduce the reported lien.
+
+A supply operation sells existing positive holdings first. Only persistent
+advice may draw new credit, and then only inside the remaining debt cap and
+freshly marked spending capacity. Absorption is bounded by the debt that can
+be repaid plus the remaining positive-inventory cap. Per-leg sizes use V3's
+active virtual depth and price marks, not ERC20 balances that can include
+inactive liquidity. Postconditions check actual accounts and capital.
+
+=setRiskBudget(turnover, floor, executionDeviationBp)= allocates a finite
+gross programme in native BUCK units. Reversing a trade, buying BUCK or
+collecting relief never replenishes the programme. The capital floor is
+checked before and after execution. Governance must explicitly allocate
+another programme after exhaustion; the default newly deployed desk has no
+spending programme.
+
+The replacement simulation allocates turnover equal to the initial grant's
+nominal BUCK value and retains a capital floor of one quarter of that value.
+Both are explicit environment knobs. A constant BUCK-denominated floor is
+not a guarantee about USD purchasing power or permanently repriced TOKENs.
+=monetaryBuckHeld= and =monetaryOutstanding= are snapshots at the last desk
+operation/refresh; =netInventory()= reads the live signed account.
+
+* Wheel dependencies and deployment
+
+Ops memoizes successful work, not a refused epoch. A refusal can be retried
+in a later block of the same epoch; repeated attempts within one block are
+suppressed. The wheel publishes its configured observation dependency before
+attempting desk work, so an observation update survives a caught =NoAdvice=.
+The response can refresh its observation dependency too. Sample is also a
+separate slot, after arbitrage. A failed or repeated sample is not rewarded.
+
+For a new deployment, wire the response facet and validated venue to the
+new shell; open and fund the separate desk credit; configure the signal,
+policy, execution guard, capital floor and budget; point Ops at the desk and
+policy; point Sample at the policy (or at the sensor when there is no desk).
+The policy's observation call advances the sensor as well as policy state.
+Seed and age every price pool, and import accepted historical filter state
+before the first live signal observation.
+
+The simulator keeps a common legacy bootstrap to create the first LPs, ages
+the pools through a complete TWAP window, then activates the replacement
+before market trading. =BasketWheel.setResponseMode(true)= selects the new
+component layout. The standalone =BasketMachineWheel= has that layout by
+construction. No external deployment or live governance transaction was
+performed as part of this work.
+
+Select the replacement with:
+
+#+begin_src sh
+SIM_EQUITY_MACHINE=1 python -m alberta_buck.sim \
+  --scenario rebalancing-revert --basket equity-ops --backend pyrevm \
+  --days 30 --ticks-per-day 4 --out /tmp/basket-machine.json
+#+end_src
+
+Use =SIM_EQUITY_MACHINE=0= for the existing basket/director path, with the
+desk accounting corrections shared by both. Important knobs are
+=SIM_MACHINE_INTERVAL=, =SIM_MACHINE_MAX_AGE=, =SIM_MACHINE_LEASH_BP=,
+=SIM_MACHINE_TILT=, =SIM_MACHINE_DT_MAX=, =SIM_OPS_ENTER_BP=,
+=SIM_OPS_RELEASE_BP=, =SIM_OPS_GAIN_BP=, =SIM_OPS_CAP_BP=,
+=SIM_OPS_PERSIST=, =SIM_OPS_TURNOVER_BUCK= and
+=SIM_OPS_CAPITAL_FLOOR_BUCK=. The replacement selects the direct K controller.
+
+=SIM_MACHINE_HISTORY= optionally names a JSON file with =mean_prices= and
+=rows=, each row containing =day= and the full =prices= vector. Days must be
+consecutive negative integers ending at -1. Prices share a common numeraire;
+common-mode initialization assumes one unit of that numeraire per BUCK.
+Without this file the general simulator supplies raw observations but leaves
+historical trend policy unavailable. The dedicated [[file:CONTROL-LAB.org][control lab]] always builds
+1280 days of baseline history by default, excluding selected perturbations.
+
+Telemetry includes allocation with idle holdings, equity, share price,
+idle amounts, sample validity/time/raw value, desk capital/budget and
+wheel-driven monetary operation counts. LP-only NAV is not total basket
+equity and must not be used as the replacement's return measure.
+
+* Verification and experiment interpretation
+
+The basket/wheel suite passes 374 tests, including the new regression and
+integration cases. The response sequence fuzz case was run with 128 inputs,
+each applying eight external-price/K changes. Existing equity-desk
+stateful invariants also pass. The direct K suite passes 13 tests. An
+in-process EVM simulator integration test exercises deployment, sampling,
+wheel/desk wiring, telemetry and the finite programme. The control-lab and
+simulator Python suite passes 11 tests, including historical initialization,
+causal controls and profitable arbitrage through a rejected spot disturbance.
+
+Regression coverage includes actual debt repayment versus fictitious burns,
+remaining-cap clipping, capital-floor rollback, irreversible turnover budget
+consumption, missing TWAP history, stale publications, trend/leash gates,
+empty-leg/bootstrap liveness, fresh post-trade marks, underwater sales, sparse
+wheel calls, same-epoch retries, crossing the desk's terminal release band,
+governance-only history imports, and preserving anchors across rejected or
+missing observations.
+
+All new deployed modules and the modified shell fit EIP-170. A three-leg
+integration tick in the earlier first-observation-bootstrap fixture,
+including its initial signal publication and desk/basket work, measured
+about 2.76 million gas inside the test transaction. That is
+not a cold mainnet transaction estimate, and the fixture does not enable
+arbitrage triangles. A whole tick is still bounded by its requested work and
+scan counts, not by a universal gas promise.
+
+The initial 30-day, four-ticks/day reverting-price comparison predates the
+historical-bootstrap correction and did not establish superiority. The
+[[file:review/basket-machine-30d.json][saved comparison]] records seed 41404, commands, daily observations
+and these results:
+
+| Metric | Existing response | Replacement |
+|--------+-------------------+-------------|
+| Mean absolute parity error | 5.77% | 7.15% |
+| Terminal absolute parity error | 1.77% | 3.84% |
+| Mean allocation distance, percentage points | 3.55 | 2.65 |
+| Remaining desk turnover budget, BUCK | 971,087 | 897,554 |
+| Desk operations | 10 | 30 |
+| Realized depositor USD P&L after forced exits | -61,747 | -106,525 |
+
+Allocation distance is half the L1 distance from declared weights, including
+idle TOKEN in both arms. The forced-exit results cover 44 completed deposit
+round trips and are rounded console totals. Better allocation tracking did
+not translate into better parity or realized depositor returns in this run.
+
+Retain that evidence; do not retire the baseline or describe this first
+parameterization as optimized. Both arms include the desk accounting fixes.
+The comparison changes the response, signal, execution guards and desk policy
+together. The baseline uses an unlimited integration horizon and zero capital
+floor; the replacement uses 3600 seconds and one quarter of the initial grant.
+Its common bootstrap still has an initial parity excursion. This single-seed,
+sparse-cadence experiment is not a single-variable ablation.
+
+The next economic acceptance experiment should use the same initial books,
+capital budgets, controller gains/horizon and transaction schedules; run
+multiple seeds and include monotone repricing, oscillation, missed calls,
+liquidity withdrawal and persistent monetary imbalance. Report parity error,
+K rail time, receipt returns, desk wealth against holding its grant, remaining
+capital/budget, turnover and gas. Separate basket/arb-only, desk-only and joint
+arms before attributing an improvement to any one mechanism.

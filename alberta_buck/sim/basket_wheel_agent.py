@@ -198,6 +198,8 @@ class BasketWheelAgent(_ProxyAgent):
         self.share_bp = int(sp("share_bp", 1000))
         gov = d.gov
         self.equity = getattr(d, "wheel", None) is not None
+        if getattr(d, "equity_machine", False):
+            self.EQ_KINDS = {1: "sync", 2: "respond"}
         if self.equity:
             # The equity basket's wheel is deployed with it (it places the
             # deposits); this agent adds its kinds and calls it.
@@ -239,7 +241,9 @@ class BasketWheelAgent(_ProxyAgent):
         if "sweep" in kinds and not self.equity:     # the equity basket has no treasury BUCK
             d.chain.send(wheel.functions.setSweep(d.basket.address, 10 ** 15), sender=gov)
         if "ops" in kinds and d.director is not None:
-            d.chain.send(wheel.functions.setOps(d.basket.address, d.director.address),
+            desk = d.desk if getattr(d, "desk", None) is not None else d.basket
+            policy = getattr(d, "monetary_policy", None) or d.director
+            d.chain.send(wheel.functions.setOps(desk.address, policy.address),
                          sender=gov)
         self.sol = wheel
         self._bind_proxy(d)
@@ -306,6 +310,8 @@ class BasketWheelAgent(_ProxyAgent):
             ctr["wh_sol_err"] = repr(e)[:200]
             return
         c["wh_sol_ticks"] += 1
+        from alberta_buck.sim.basket_machine import book_receipt
+        book_receipt(d, rcpt, ctr)
         gas = int(rcpt.get("gasUsed", 0) or 0)
         c["wh_sol_gas"] += gas
         c["wh_sol_gas_usd"] += self.profile.usd(gas)
