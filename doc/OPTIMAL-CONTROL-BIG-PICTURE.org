@@ -545,8 +545,8 @@ Headline of the cursor run: the chassis can defer =compute= when
 
 The opt-in replacement and its constraints are documented in
 [[file:BASKET-MACHINE-IMPLEMENTATION.org][the implementation report]]. The [[file:CONTROL-LAB.org][control lab]] now supplies real pyrevm
-market experiments: ten stages, each run for 120 days, on two shared input
-profiles. Legacy implementations remain available until controlled economic
+market experiments: initially ten stages, now eleven with the replay-K
+calibration, each run for 120 days on two shared input profiles. Legacy implementations remain available until controlled economic
 comparisons support retirement. Correct books and passing tests are necessary
 but do not establish superior equilibrium or savings returns.
 
@@ -566,6 +566,26 @@ but do not establish superior equilibrium or savings returns.
 - [X] Preserve both initial and corrected-bootstrap JSON evidence. Corrected
   anchors begin within 0.1% of their known means; the four-of-six turn quorum
   still lags. TOKEN A confirms at day 15 after its day-7.5 peak.
+- [X] Remove the day-zero venue mismatch by establishing the unperturbed
+  phase before live observation. Normalize reference quantities to the same
+  rounded weights as the declared basket, using original price anchors.
+- [X] Add =monitor-k= to isolate the real controller's response to replay
+  precision. Record actual BUCK custody and active depth: in the committed
+  K-only baseline, retained arb profit and uncollected fees explain the
+  persistent contraction despite a steady external index.
+- [X] Give the buyer and issuer a steady accumulation/divestment intent,
+  positive at par and damped exponentially through adverse prices, with
+  finite funding and daily caps. Keep two simple actors without a debt
+  lifecycle model.
+- [X] Add Makefile targets for cached generation, forced regeneration,
+  rendering from JSON and the complete HTML walkthrough.
+- [X] Add an offline HTML/JavaScript presentation with per-test feed,
+  random-walk and buyer/seller selectors, shared scales, zoom and linked
+  inspection. The first grid covers 891 choices through 351 distinct
+  120-day worlds, reusing absent-actor variants. Random walks share seeded
+  innovations, start at zero and never enter historical initialization.
+  K and desk parameters remain fixed; see [[file:CONTROL-LAB.org][the control-lab walkthrough]]
+  for regeneration and the campaign manifest for completion status.
 
 ** Final lab experiment: capture a sudden pool disturbance
 :PROPERTIES:
@@ -629,6 +649,26 @@ execute. No finite book is expected to absorb arbitrary unbounded shocks.
 
 ** Optimization and improvement queue
 
+- [ ] Remove the independent white-noise perturbation from =mixed=. Add a
+  seeded random-walk variant constrained to return to zero displacement
+  at every 30-day boundary (a 30-day Brownian bridge), scaled by the existing
+  0 / 0.5 / 1 selector. Keep the conditioning explicit: an endpoint of zero
+  does not imply a zero time average. Apply it to the exogenous feed only;
+  controllers must still see only observations available at execution time.
+  Preserve the present unconstrained-walk datasets as the prior baseline.
+- [ ] Overlay executed desk and basket TOKEN buys/sells and triangle-arbitrage
+  cycles on the token-price panes. Decode transaction receipts, distinguishing
+  TOKEN direction from the opposite BUCK direction and LP pairing from a
+  swap. Include event counts and an inspectable execution log so an inactive
+  policy is distinguishable from missing telemetry.
+- [ ] Compare explicit profit destinations and fee spending/reinvestment
+  policies. Holding arb profit in BUCK and leaving LP fees uncollected is a
+  monetary flow assumption, even with an unperturbed three-phase feed. Keep
+  the replay calibration separate and reconcile all recycled value before
+  treating a market arm as flow-neutral.
+- [ ] Bound oracle quantization bias and its accumulated effect on K over
+  long runs, including opposite token orderings. Keep this separate from
+  reference-weight normalization and actual monetary disturbances.
 - [ ] Add pool-event configuration and cache dependencies, then implement
   the final all-agents shock section above with paired controls and event
   snapshots. Keep feed perturbations and pool disturbances separately named.

@@ -85,7 +85,7 @@ def evm_controls():
     cfg["days"] = 3
     # Make the short smoke case exercise a large disturbance immediately.
     profile = dict(name="step", perturbations=[dict(kind="step", start=0, duration=10, amplitude=.12)])
-    return {stage: simulate(cfg, profile, stage) for stage in ("monitor", "linked", "k", "all")}
+    return {stage: simulate(cfg, profile, stage) for stage in ("monitor", "monitor-k", "linked", "k", "all")}
 
 
 def test_sensor_replay_has_no_arbitrage_or_policy(evm_controls):
@@ -143,6 +143,65 @@ def test_k_without_actuators_does_not_move_pool_prices(evm_controls):
     for fa, fb in zip(a["frames"], b["frames"]):
         for key in ("token_buck", "token_usdc", "buck_usdc"):
             assert fa[key] == fb[key]
+
+
+@pytest.mark.parametrize("amplitude", [0., .12])
+def test_unperturbed_replay_has_only_bounded_oracle_precision_error(amplitude):
+    pytest.importorskip("pyrevm")
+    from alberta_buck.sim.control_lab.engine import simulate
+    cfg = load_config(CONFIG)
+    cfg["days"] = 30
+    cfg["feed"]["amplitude"] = amplitude
+    r = simulate(cfg, cfg["profiles"][0], "monitor-k")
+    assert r["bootstrap"]["reference_at_means"] == pytest.approx(1., abs=1e-15)
+    assert r["summary"]["arb_cycles"] == 0
+    for f in r["frames"]:
+        # Declared integer-bp weights differ by 1 bp between constituents;
+        # the resulting common-mode ripple is at most 0.12 bp here.
+        assert abs(f["reference"]["target_usd"] - 1) <= .00001201
+        assert abs(f["bvib"] - f["reference"]["spot_buck"]) < .000101
+        assert abs(f["k"] - .75) < .00025
+        assert f["buck_usdc"] == 1.
+
+
+def test_phase_ready_start_has_no_fabricated_arbitrage_and_reconciles_custody():
+    pytest.importorskip("pyrevm")
+    from alberta_buck.sim.control_lab.engine import simulate
+    cfg = load_config(CONFIG)
+    cfg["days"] = 3
+    r = simulate(cfg, cfg["profiles"][0], "linked")
+    first = r["frames"][0]
+    assert first["cumulative"]["arb_cycles"] == 0
+    assert first["buck_usdc"] == 1.
+    assert not first["signal"]["invalid_after_move"]
+    assert first["token_buck"] == pytest.approx(first["target_usd"], rel=1e-9)
+    initial = r["bootstrap"]["market"]["pool_buck"]
+    for f in r["frames"]:
+        assert f["market"]["arb_held_buck"] == pytest.approx(f["cumulative"]["arb_profit_buck"], abs=1e-6)
+        assert f["market"]["pool_buck"] + f["market"]["arb_held_buck"] == pytest.approx(initial, abs=1e-5)
+
+
+@pytest.mark.parametrize("stage,quote", [("demand", 1.01), ("supply", .99)])
+def test_private_intent_trades_through_a_modestly_adverse_price(stage, quote):
+    pytest.importorskip("pyrevm")
+    from alberta_buck.sim.control_lab.engine import World, isolated_environment
+    from alberta_buck.sim.router import sqrt_price_x96
+    cfg = load_config(CONFIG)
+    with isolated_environment(cfg):
+        w = World(cfg, stage)
+        try:
+            d = w.d
+            current = w.pools[d.pool_ub].functions.slot0().call()[0]
+            target = sqrt_price_x96(d.buck.address, 10**6, d.usdc.address, round(quote * 10**6))
+            w.chain.send(d.simlp.functions.swap(d.pool_ub, d.simlp.address, target < current,
+                (1 << 127) - 1, target, *w.pairs[d.pool_ub]))
+            w.step = 0
+            w.agents()
+            amount = w.counters["demand_usdc" if stage == "demand" else "supply_buck"]
+            assert 0 < amount < cfg[stage]["rate_at_par_per_day"] / cfg["ticks_per_day"]
+            assert w.counters[stage + "_trades"] == 1
+        finally:
+            w.close()
 
 
 def test_private_response_and_desk_accounting_are_real(evm_controls):

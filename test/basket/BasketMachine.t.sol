@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityTest, IEquityWheel} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityTest, IEquityWheel, EqToken} from "./BuckBasketEquity.t.sol";
 import {BuckBasketEquityResponse} from "../../src/basket/BuckBasketEquityResponse.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
@@ -12,6 +12,31 @@ import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
 
 contract BasketMachineTest is BuckBasketEquityTest {
     BasketSignals internal signals;
+
+    function _assertReferenceNormalization() internal view {
+        uint256 sum;
+        for (uint256 i; i < b.constituentsLength(); ++i) {
+            (,, uint256 amount, uint256 initialPrice,,,,,, uint256 weight,) = b.constituents(i);
+            uint256 value = amount * initialPrice / 1e18;
+            assertApproxEqAbs(value, weight * 1e14, 1, "quantity matches rounded declared weight");
+            sum += value;
+        }
+        assertApproxEqAbs(sum, 1e18, b.constituentsLength(), "reference at its anchor prices is one BUCK");
+    }
+
+    function test_machine_referenceWeightsDoNotAddACommonModeOffset() public view {
+        _assertReferenceNormalization();
+    }
+
+    function test_machine_addingAConstituentPreservesOriginalPriceAnchors() public {
+        _push(0, true, 50_000 * B);
+        EqToken fourth = new EqToken("Fourth", "D", 18);
+        vm.prank(GOV);
+        b.addBasketToken(address(fourth), 18, 4 * B, 1750, 3000);
+        (,,, uint256 initialPrice,,,,,,,) = b.constituents(0);
+        assertEq(initialPrice, price[0], "current market price is not a new anchor");
+        _assertReferenceNormalization();
+    }
 
     function _replace(bool withSignal) internal {
         vm.startPrank(GOV);

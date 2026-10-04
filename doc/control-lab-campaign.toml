@@ -1,0 +1,12 @@
+# Full Cartesian product. Inactive controls reuse identical cached EVM runs.
+# 3 profiles × 3 walks × 3 buyers × 3 sellers × 11 stages = 891 choices,
+# requiring 351 distinct 120-day simulations (4 observations per day).
+profiles = ["three-phase", "mixed", "shock"]
+walk = [0, 0.5, 1]
+
+# Desired amount per day at fair value. Buyer units: USDC; seller units: BUCK.
+# Exponential backoff, maximum rates and finite funding stay in control-lab.toml.
+[flows]
+low = 2500
+medium = 5000
+high = 10000

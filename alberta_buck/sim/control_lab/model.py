@@ -13,19 +13,21 @@ from pathlib import Path
 STAGES = {
     "feeds": dict(title="01 · External prices only"),
     "monitor": dict(title="02 · Monitor a replayed price trace", monitor=True, replay=True),
-    "linked": dict(title="03 · Link the markets", monitor=True, arb=True),
-    "k": dict(title="04 · Let K move", monitor=True, arb=True, k=True),
-    "desk": dict(title="05 · Add the desk", monitor=True, arb=True, k=True, desk=True),
-    "demand": dict(title="06 · Demand, without a supplier", monitor=True, arb=True, k=True, demand=True),
-    "supply": dict(title="07 · Supply, without a buyer", monitor=True, arb=True, k=True, supply=True),
-    "both": dict(title="08 · Both private responses", monitor=True, arb=True, k=True, demand=True, supply=True),
-    "all": dict(title="09 · Private responses and desk", monitor=True, arb=True, k=True, demand=True, supply=True, desk=True),
-    "basket": dict(title="10 · Also enable basket rebalancing", monitor=True, arb=True, k=True, demand=True, supply=True, desk=True, basket=True),
+    "monitor-k": dict(title="03 · Check K against the replay", monitor=True, replay=True, k=True),
+    "linked": dict(title="04 · Link the markets", monitor=True, arb=True),
+    "k": dict(title="05 · Let K move", monitor=True, arb=True, k=True),
+    "desk": dict(title="06 · Add the desk", monitor=True, arb=True, k=True, desk=True),
+    "demand": dict(title="07 · Demand, without a supplier", monitor=True, arb=True, k=True, demand=True),
+    "supply": dict(title="08 · Supply, without a buyer", monitor=True, arb=True, k=True, supply=True),
+    "both": dict(title="09 · Both private responses", monitor=True, arb=True, k=True, demand=True, supply=True),
+    "all": dict(title="10 · Private responses and desk", monitor=True, arb=True, k=True, demand=True, supply=True, desk=True),
+    "basket": dict(title="11 · Also enable basket rebalancing", monitor=True, arb=True, k=True, demand=True, supply=True, desk=True, basket=True),
 }
 
 DEFAULTS = {
     "days": 120, "ticks_per_day": 4, "seed": 41404,
-    "feed": {"base": [100., 100., 100.], "amplitude": .12, "period_days": 30.},
+    "feed": {"base": [100., 100., 100.], "amplitude": .12, "period_days": 30.,
+             "walk_amplification": 0., "walk_daily_sigma": .01},
     "bootstrap": {"history_days": 1280},
     "market": {"depth_usd": 1_000_000, "basket_equity_usd": 1_000_000,
                "arb_rounds": 2, "arb_cap_bp": 200},
@@ -36,9 +38,9 @@ DEFAULTS = {
              "capital_floor_buck": 300_000, "enter_bp": 300, "release_bp": 200,
              "gain_bp": 2500, "cap_bp": 40, "persist_days": 30},
     "demand": {"budget_usdc": 1_000_000, "max_per_day": 25_000,
-               "gain": .25, "threshold_bp": 50},
+               "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     "supply": {"credit_face_buck": 1_000_000, "max_per_day": 25_000,
-               "gain": .25, "threshold_bp": 50},
+               "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     "basket": {"leash_bp": 3000, "tilt": 1.},
     "profiles": [{"name": "three-phase", "perturbations": []}],
 }
@@ -72,6 +74,9 @@ def validate(cfg: dict) -> None:
         raise ValueError("exactly three positive base prices are required")
     if not 0 <= feed["amplitude"] < 1 or feed["period_days"] <= 0:
         raise ValueError("invalid sine amplitude or period")
+    if any(not math.isfinite(feed[k]) or feed[k] < 0
+           for k in ("walk_amplification", "walk_daily_sigma")):
+        raise ValueError("random walk amplification and daily sigma must be finite and nonnegative")
     history_days = cfg["bootstrap"]["history_days"]
     if not isinstance(history_days, int) or not 1280 <= history_days <= 20000:
         raise ValueError("bootstrap.history_days must be in 1280..20000")
@@ -82,6 +87,10 @@ def validate(cfg: dict) -> None:
         raise ValueError("pool depth and basket capital must be positive")
     if not 1 <= cfg["market"]["arb_rounds"] <= 20 or not 0 < cfg["market"]["arb_cap_bp"] <= 1000:
         raise ValueError("invalid arbitrage work bound")
+    for name in ("demand", "supply"):
+        a = cfg[name]
+        if not 0 <= a["rate_at_par_per_day"] <= a["max_per_day"] or not a["backoff_bp"] > 0:
+            raise ValueError(f"invalid {name} desired flow, daily cap or backoff")
     names = [p["name"] for p in cfg["profiles"]]
     if not names or len(names) != len(set(names)):
         raise ValueError("profile names must be nonempty and unique")
@@ -113,8 +122,18 @@ def feed_rows(cfg: dict, profile: dict) -> list[dict]:
     actor order or the number of workers. A common perturbation shares a
     noise draw across its selected tokens; independent=true splits it.
     """
+    # Independent Brownian log-price walks, with no drift in log space. The
+    # seed excludes stage/profile/amplification, pairing all comparisons.
+    # No day-zero shock; no walk enters the separate bootstrap history.
+    walks = [0.] * 3
+    streams = [random.Random(digest([cfg["seed"], "log-walk-v1", i])) for i in range(3)]
+    sigma = cfg["feed"]["walk_daily_sigma"] / math.sqrt(cfg["ticks_per_day"])
+    amplification = cfg["feed"]["walk_amplification"]
     rows = []
     for step in range(cfg["days"] * cfg["ticks_per_day"] + 1):
+        if step:
+            for i in range(3):
+                walks[i] += sigma * streams[i].gauss(0., 1.)
         day = step / cfg["ticks_per_day"]
         values = [1 + cfg["feed"]["amplitude"] * math.sin(
             2 * math.pi * day / cfg["feed"]["period_days"] + i * 2 * math.pi / 3)
@@ -150,7 +169,8 @@ def feed_rows(cfg: dict, profile: dict) -> list[dict]:
                     seed = digest([cfg["seed"], j, stream, step])
                     shape = random.Random(seed).gauss(0., 1.)
                 values[i] += a * shape
-        prices = [round(cfg["feed"]["base"][i] * values[i], 6) for i in range(3)]
+        prices = [round(cfg["feed"]["base"][i] * values[i] * math.exp(amplification * walks[i]), 6)
+                  for i in range(3)]
         if any(not math.isfinite(p) or p <= 0 for p in prices):
             raise ValueError(f"nonpositive/nonfinite price in {profile['name']} at day {day}")
         rows.append({"day": day, "target_usd": prices})

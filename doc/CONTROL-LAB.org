@@ -5,6 +5,10 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
+For selectable price disturbances, buyer/seller quantities and JavaScript
+graphs, open [[file:control-lab/interactive/index.html][the interactive control lab]]. The Org walkthrough below keeps
+the original matched figures and explains the staged construction.
+
 * Start with three prices
 
 This is a sequence of small, reproducible experiments on the actual Solidity
@@ -21,13 +25,19 @@ because a TOKEN price cannot be negative:
 \]
 
 The base prices are all 100 USDC, the period is 30 days, and the phases differ
-by 120 degrees. The sum of the three sine components is zero. With equal
-reference quantities, this is a useful *differential-mode control*: the
-individual constituents move while the external basket index stays at one.
-It should not be made to produce a large monetary error just for a graph.
+by 120 degrees. The sum of the three sine components is zero. With exactly
+equal reference quantities, the external basket index would stay at one.
+The contract's integer weights are 3333/3333/3334 bp: their actual reference
+has a small ripple of at most 0.12 bp and a mean of one. Plots and agents
+use the contract's actual quantities. This is a useful *differential-mode
+control*, with a stated precision bound rather than a fabricated monetary
+disturbance.
 
 The =mixed= profile adds two common triangular pulses, a lasting ramp in
-TOKEN C, and small independent seeded noise. The =shock= profile adds a
+TOKEN C, and independent seeded Gaussian white noise with a standard deviation
+of 0.2% of each token's baseline mean per observation. This noise remains
+active even when the separate random-walk selector is zero. Use =three-phase=
+with random walk zero for the clean baseline. The =shock= profile adds a
 30% step to TOKEN A. These are selectable inputs, not separate economic
 policies. The same input sequence is used in every arm of a profile.
 
@@ -87,6 +97,7 @@ agents compare BUCK/USDC with that changing external basket value.
 |-------+-------------------------+---------+-----------------+---+------+-------+--------+-----------------|
 | feeds | no | no | no | fixed | no | no | no | no |
 | monitor | yes | yes | no | fixed | no | no | no | no |
+| monitor-k | yes | yes | no | live | no | no | no | no |
 | linked | no | yes | yes | fixed | no | no | no | no |
 | k | no | yes | yes | live | no | no | no | no |
 | desk | no | yes | yes | live | yes | no | no | no |
@@ -96,11 +107,17 @@ agents compare BUCK/USDC with that changing external basket value.
 | all | no | yes | yes | live | yes | yes | yes | no |
 | basket | no | yes | yes | live | yes | yes | yes | yes |
 
-The monitor arm is explicitly a replay experiment. The feed driver moves
+The monitor and monitor-k arms are explicitly replay experiments. The feed driver moves
 TOKEN/BUCK using real swaps, so the sensor sees a known trace without an
 arbitrage agent. This is different from the later market experiments: there,
 only TOKEN/USDC is externally driven, and TOKEN/BUCK and BUCK/USDC float.
 No driver resets those internal pools after a desk or agent trade.
+
+=monitor-k= is the additional calibration control: the same near-unit
+reference is passed to the real K controller before market transmission is
+enabled. Its only small drift comes from integer-weight and V3-tick
+precision. The larger drift in the linked market must be assessed against
+actual BUCK flows and balances, rather than blamed on the EMA anchor.
 
 The buyer and issuer arms branch from =k= independently. Compare =both=
 with those branches, then =all= with =both= to add the desk. The final
@@ -109,17 +126,40 @@ so its liquidity placement and borrowing do not confound the earlier steps.
 
 * The small world and its clock
 
-All arms start with 1 million units of quote-side active liquidity in each
-pool, a passive 1 million USD TOKEN basket, and a separate desk with
-400,000 USD of each TOKEN. Bootstrap liquidity belongs to an external LP;
+All arms seed 1 million units of quote-side active liquidity in each pool
+at the known mean prices. Before observation begins, funded bootstrap swaps
+put both TOKEN/USDC and TOKEN/BUCK at the same unperturbed day-zero phase:
+100, approximately 110.39, and approximately 89.61. BUCK/USDC starts at one.
+The pools then age through the TWAP window. Thus the first experiment step
+does not manufacture an arb opportunity by suddenly moving only one venue
+from three identical prices. Bootstrap swaps and their fees are excluded
+from experiment flow totals but retained in the initial balance snapshot.
+
+The passive basket receives TOKEN quantities worth 1 million USD at the
+known means; the separate desk receives 400,000 USD of each TOKEN on the
+same basis. Bootstrap liquidity belongs to an external LP;
 it is not created by the basket response being tested. Unused actors can be
 deployed and funded without being scheduled. This preserves the same
 initial pools and contract addresses across the controlled branches.
 
 The private buyer starts with 1 million USDC. The issuer has 1 million BUCK
 of fixed-face activated credit, whose available amount depends on K. They
-each have a 25,000-native-unit daily flow cap, divided by ticks per day;
-actual flow also scales with the excess price discrepancy beyond 50 bp.
+each have a desired flow of 5,000 native units per day at fair value, with
+a 25,000-unit daily cap, divided by ticks per day. Buyer units are USDC spent;
+issuer units are BUCK sold. Let =premium = BUCK/USDC / external_basket - 1=.
+The buyer's adverse deviation is =premium= and the seller's is =-premium=:
+
+\[
+ R_{day}=\min(R_{max},R_{par}\exp(-adverse/b)),\qquad b=0.01.
+\]
+
+Thus a buyer facing a 1% premium still buys at about 37% of its normal rate;
+a seller facing a 1% discount still sells at about 37%. A favourable price
+increases the rate up to the cap. Each swap is also limited by actual
+remaining cash or spendable credit. The configuration exposes
+=rate_at_par_per_day=, =backoff_bp= and =max_per_day= for each agent.
+These agents create understandable accumulation/divestment pressure without
+modelling a mortgage, investment return or alternating debt lifecycle.
 The buyer holds its purchases. The issuer only issues and sells; automatic
 repayment, refinancing, insolvency and liquidation are outside this small
 actor's model. Buying BUCK to hold it is not an accounting burn.
@@ -156,6 +196,39 @@ price in this backend. The external driver has ample fixture funding and
 represents an imposed outside market. Its capital is not a profitability
 claim about the system under test.
 
+* Account for monetary flow even in the unperturbed price experiment
+
+The synthetic three-phase feed has no imposed common monetary shock. That
+does not make the freely trading market flow-neutral. The arb is configured
+to retain profit in BUCK; it has no spender or reinvestment rule in this
+lab. V3 fees also accumulate outside active liquidity until collected.
+Both can make BUCK dear and lower bvib while the external basket is steady.
+The new balance pane shows arb custody, changes in pool BUCK outside active
+depth, and the decrease in active BUCK reserves. At fixed liquidity the
+pool-minus-virtual change is uncollected BUCK fees; changing LP positions
+also changes the finite-range virtual offset.
+
+In the original =5236410= K-only run, arb custody reached 16,781.89 BUCK and
+uncollected BUCK fees increased by 4,925.85 over 120 days. Actual pool BUCK
+fell by exactly the arb custody increase. This accounted for the apparent
+unexplained contraction. K moved from 0.75 to 0.78385 in response to raw
+bvib averaging 0.99507. Its integral did not cause that price path: the
+fixed-K linked arm had the same prices.
+
+Two startup defects were separate from this continuing flow: all venues
+now start at the correct phase, and reference quantities now match their
+rounded declared weights. Previously the quantity rescaling plus the new
+leg's rounding remainder made the reference cost 1.0001 at the supplied
+mean prices. The correction uses the original anchor prices, never current
+spot prices. The old and new manifests preserve this distinction.
+
+V3's oracle still quotes integer ticks. The replay's raw bvib can therefore
+differ from its exact spot reference by less than about one basis point;
+K integrates that small measured error. This quantization is recorded and
+bounded by regression tests. No normalization of the plotted bvib or
+resetting of K is used to hide it. Profit spending, fee collection and
+reinvestment are explicit future model variants, not implicit money flows.
+
 * Rejected valuations can still be arbitrage opportunities
 
 An excessive spot/TWAP difference rejects a price as a trusted valuation
@@ -181,6 +254,137 @@ monetary-policy evidence.
 
 * Select inputs, compute in parallel, render from JSON
 
+** Interactive HTML and JavaScript campaign
+
+Open [[file:control-lab/interactive/index.html][the interactive control lab]]. Each of the eleven tests has selectors
+for its price profile, random-walk strength and active buyer/seller flows.
+The graphs are drawn from cached EVM observations in JavaScript. Hover or
+use arrow keys to inspect a common day across a test's panes; use the day
+sliders to zoom and click legend entries to hide lines. Expand the sensor
+details to inspect quality flags, turn votes and all seven EMA levels.
+
+The default keeps vertical scales common across stages and flow quantities
+with the same profile and walk. Switching off =Compare on shared scales=
+fits the visible window instead. =Use these settings for all tests= creates
+a matched comparison and records those selections in the page URL. Controls
+for absent actors are disabled. Opening the HTML directly from disk works:
+plot payloads load locally without a web server or third-party service.
+
+The campaign configuration is [[file:control-lab-campaign.toml][control-lab-campaign.toml]]:
+
+| Selector | Values | Meaning |
+|----------+--------+---------|
+| Profile | three-phase, mixed, shock | Existing baseline; pulses/ramp/noise; temporary external repricing |
+| Random walk | 0, 0.5, 1 | Amplification of the same seeded independent walk for each TOKEN |
+| Buyer flow | low, medium, high | 2,500 / 5,000 / 10,000 USDC per day at fair value |
+| Seller flow | low, medium, high | 2,500 / 5,000 / 10,000 BUCK per day at fair value |
+
+For each token, the walk evolves as =W[n] = W[n-1] + sigma * sqrt(dt) * Z[n]=,
+with =W[0] = 0=, independent standard-normal innovations and =dt= in days.
+The feed is multiplied by =exp(amplification * W[n])=. At full strength,
+=sigma = 0.01=: daily log-price volatility is 1%. This is a driftless walk in
+log space; exponentiation gives price levels a small positive expectation
+drift. It is not a mean-reverting disturbance. The seed and innovations are
+shared across all stages, profiles and amplifications. Bootstrap history
+excludes the walk, and amplification zero exactly retains the original feed.
+Mixed-profile white noise remains a separate, non-cumulative perturbation.
+
+The distinction matters when interpreting parity. Both kinds of randomness
+use signed Gaussian draws; no positive-only noise is subtracted. White noise
+is a fresh displacement at each observation. A walk accumulates its draws,
+so a negative displacement persists until later increments reverse it.
+Zero expected log drift does not require any particular path, its time
+average, or the three-token basket to stay at its initial level. Independent
+walks also break the cancellation of the three unperturbed sine waves.
+
+For the saved seed =41404=, full-strength walk multipliers at day 120 are
+1.007334, 0.868639 and 1.000700 for TOKENs A, B and C respectively. TOKEN B's
+13.14% decline relative to its clean path dominates the basket's endpoint.
+The saved three-phase runs give these means over all 481 observations:
+
+| Walk | External reference basket, USD | Replay + K bvib | All actors + desk bvib |
+|------+--------------------------------+-----------------+-----------------------|
+|    0 |                       1.000000 |        0.999947 |              0.999637 |
+|  0.5 |                       0.978617 |        0.978568 |              0.999408 |
+|    1 |                       0.958608 |        0.958560 |              0.999113 |
+
+The last column uses medium buyer and seller flows. In replay, BUCK/USDC
+is held at one, so bvib inherits the falling reference dollar value. With
+both private flows and the desk available, BUCK's dollar price follows that
+reference much more closely and bvib remains near one. The external basket's
+dollar value and its cost in BUCK are different quantities.
+
+For a future experiment asking specifically for random fluctuations around
+an unchanged baseline, use white noise or a mean-reverting process as an
+explicit alternative. Keep the walk as a persistent-displacement test.
+Subtracting this complete run's average would use future observations and
+artificially remove the monetary disturbance being tested. Multiple seeds
+are needed to distinguish a systematic response from this particular path.
+
+These quantities retain the same exponential price backoff, 25,000-unit
+daily caps and finite initial cash/credit as the original lab. K gains and
+desk policy remain fixed in this first campaign. A high desired rate can
+exhaust an actor's resources during the run; the private-flow pane makes
+that visible. No funding is silently replenished.
+
+The full Cartesian product has =3 × 3 × 3 × 3 × 11 = 891= choices. Deduplicating
+only inputs belonging to absent actors leaves 351 distinct 120-day worlds:
+54 runs in the six stages with no private actors, 27 each for demand and
+supply, and 81 each for both, all and basket. At the earlier measured
+approximately 40 seconds per run under four-way concurrency, the planning
+estimate is about one hour and roughly 0.5 GB of raw JSON. The completed
+manifest records the actual elapsed time. This leaves room within an
+overnight budget for later controller/desk sweeps and multiple seeds.
+
+The first complete campaign (source/bytecode fingerprint beginning
+=489f145bb815=) took *66.8 minutes with four workers*. Its 351 worlds contain
+168,831 observations and 2,674,190 simulated transactions. The complete
+directory occupies about 558 MiB, including raw JSON and browser plot data.
+[[file:control-lab/interactive/audit.json][The recorded audit]] verifies all 891 selector mappings and all nine paired
+feed paths; all 18 fixed-K/moving-K control pairs retain identical pool-price
+traces. All 22 zero-walk, medium-flow cases match the original baseline frame
+for frame. The 21 Python checks and browser checks across every stage and
+all three profiles pass. Re-running the Makefile target reused all 351 runs
+and preserved the original execution timing.
+
+#+begin_src sh :eval never-export
+make control-lab-plan                   # count cases; no EVM needed
+make control-lab-interactive            # compile, compute missing cases, render
+make control-lab-interactive-render     # rebuild HTML/JS from saved JSON only
+make control-lab-verify                 # audit all traces, inputs and accounts
+make control-lab-serve                  # optional localhost:8000/control-lab/interactive/
+#+end_src
+
+=CONTROL_LAB_GRID= selects the grid; =CONTROL_LAB_CAMPAIGN_OUT= selects the
+output directory; =CONTROL_LAB_JOBS= bounds parallel workers. The existing
+=CONTROL_LAB_CONFIG=, =CONTROL_LAB_STAGES= and executable overrides also apply.
+Omit =CONTROL_LAB_STAGES= for the complete presentation. Re-running resumes
+completed content-addressed results. Source, bytecode or active-input changes
+invalidate a run; presentation changes do not. Failures are recorded in
+=progress.json= and never marked as successful cache entries. The completed
+=manifest.json= is replaced only after every requested run succeeds.
+Generation also audits selector coverage, cache provenance, sample counts,
+paired feed paths, K limits, absent-actor inactivity, buyer cash conservation,
+retained arb profit and nonincreasing desk budgets. =audit.json= records the
+counts and per-run summaries; a cached rerun preserves the original measured
+execution duration.
+
+Each result retains its full raw JSON, while the browser lazily loads
+smaller plot columns. Display columns use ten significant digits; downloads
+preserve the original values. These files live under =control-lab/interactive=
+separately from the original Org/PNG/SVG baseline. During generation,
+=control-lab-interactive-render= can show a first campaign's completed subset;
+unfinished combinations are explicitly unavailable. Shared scales become
+final when the complete campaign has rendered.
+
+The current =shock= selector adds 30% of TOKEN A's baseline mean to its
+external feed for ten days, before multiplying by the random walk.
+It does not implement the separately planned one-pool disturbance/capture
+experiment. Neither a single random seed nor this small set of flow levels
+establishes stability against arbitrary disturbances.
+
+** Original Org / static-figure workflow
+
 Edit [[file:control-lab.toml][control-lab.toml]]. Perturbations select TOKEN indices =[0,1,2]=,
 and support =sine=, =triangle=, =ramp=, =step= and =noise=. Amplitudes are
 fractions of the base price and add to the three-phase signal. A ramp holds
@@ -194,11 +398,28 @@ Run from the repository root, in its Python environment with the =sim= and
 =plots= dependencies and freshly compiled Foundry artifacts:
 
 #+begin_src sh :eval never-export
-forge build --offline -q
-python -m alberta_buck.sim.control_lab --jobs 4
+make control-lab
 #+end_src
 
-The default computes all ten stages for =three-phase= and =mixed=. Each
+This stages the Uniswap artifacts, compiles the contracts, computes missing
+datasets, renders the figures and exports this complete HTML walkthrough.
+Use =make nix-venv-control-lab= to enter the repository's Nix/venv environment.
+
+| Make target | Operation |
+|-------------+-----------|
+| =control-lab-data= | Compile and compute selected datasets, reusing matching JSON |
+| =control-lab-render= | Regenerate Org results, PNG/SVG figures and the HTML selector from JSON only |
+| =control-lab-html= | Render from JSON, then export =doc/CONTROL-LAB.html= |
+| =control-lab= | Generate datasets, then render and export in that order |
+| =control-lab-regenerate= | Force fresh EVM runs, then render and export; preserve archived results |
+
+Select workers, profiles and stages with =CONTROL_LAB_JOBS=,
+=CONTROL_LAB_PROFILES= and =CONTROL_LAB_STAGES=. =CONTROL_LAB_CONFIG= selects
+the configuration. =CONTROL_LAB_PYTHON= and =CONTROL_LAB_EMACS= override
+executables; =FORGE_OPTS=--offline= selects an offline build. The combined
+targets preserve run-before-render ordering even under =make -j=.
+
+The default computes all eleven stages for =three-phase= and =mixed=. Each
 stage is an independent pyrevm world in its own worker process. To select
 the shock profile or run only selected stages:
 
@@ -216,7 +437,8 @@ using that feed. A different worker count does not invalidate anything.
 The manifest is replaced only after the selected runs finish successfully.
 The earlier first-observation-bootstrap results are retained under
 [[file:control-lab/results/manifest-first-observation.json][their original manifest]] for comparison; =manifest.json= selects the corrected
-historical-bootstrap results rendered below.
+results rendered below. [[file:control-lab/results/manifest-baseline-5236410.json][The committed 5236410 experiment set]] preserves the historical-bootstrap
+baseline before the venue-start, weight-normalization and private-agent changes.
 
 Rendering is a separate, EVM-free operation:
 
@@ -261,17 +483,39 @@ The controlled =linked= and =k= arms have *identical pool-price histories*
 in both default profiles, even though K changes. This demonstrates the
 missing actuator: changing credit capacity alone does not place a trade.
 
-In the mixed profile, the desk-only monetary arm executes ten operations.
+The unperturbed =monitor-k= calibration averages bvib 0.99994666, with a
+mean oracle-minus-spot difference of -0.5332 bp. Its terminal K is 0.75035783
+from an initial 0.75. The reference is now normalized; the remaining small
+integral movement is the measured V3 tick bias. With arb enabled and no
+private response, terminal K is 0.78245 because profit custody and LP fees
+keep removing BUCK from active trading depth.
+
+The intent-driven private agents produce opposite monetary pressures in
+the pure three-phase case:
+
+| Private actors | Mean bvib | Terminal K | USDC spent buying | BUCK sold |
+|----------------+-----------+------------+-------------------+-----------|
+| Buyer only | 0.97235 | 0.93854 | 60,584 | 0 |
+| Issuer only | 1.02354 | 0.58964 | 0 | 79,445 |
+| Both | 0.99964 | 0.75245 | 682,181 | 699,409 |
+
+The buyer accumulates even after BUCK becomes dear, at a reduced rate; the
+issuer keeps selling after BUCK becomes cheap. K responds with the intended
+sign. Both actors together transact much more while keeping prices closer
+to the reference. This demonstrates the apparatus's response to specified
+flows, not a financial model of either actor's motivation.
+
+In the mixed profile, the desk-only monetary arm executes eleven operations.
 With both private agents, the desk executes none in this run. Private
 responses keep the error below the desk's actionable region sufficiently
 that adding it has no effect on the recorded price path. That outcome is
 visible evidence about this parameterization, not a missing plotted trace.
 
 The measured mean absolute parity errors for the mixed profile are about
-1.15% with linked markets and K alone, 1.15% with the desk, 1.84% with only
-the buyer, 1.19% with only the issuer, and 0.89% with both private actors.
-Adding basket response gives 0.90% with historical initialization (1.07%
-in the retained first-observation run). These are diagnostic comparisons on one
+1.14% with linked markets and K alone, 1.15% with the desk, 3.50% with only
+the buyer, 2.78% with only the issuer, and 0.23% with both private actors.
+Adding basket response gives 0.29%. The mixed buyer-only arm reaches K's
+0.95 rail: it has no issuer to use the enlarged capacity. These are diagnostic comparisons on one
 synthetic feed and seed, not an equilibrium-superiority or ROI acceptance
 test. There are no depositor entry/exit populations in this lab.
 

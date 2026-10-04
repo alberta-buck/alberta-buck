@@ -276,6 +276,69 @@ doc-privacy:
 
 docs: doc-proofs doc-receipt doc-paper doc-flow doc-identity-example doc-privacy
 
+# The staged control lab: cached pyrevm datasets, then EVM-free rendering.
+# These also work through nix-venv- (for example make nix-venv-control-lab).
+# Keep generation and rendering sequential even when make runs with -j.
+CONTROL_LAB_PYTHON	?= python
+CONTROL_LAB_EMACS	?= emacs
+CONTROL_LAB_CONFIG	?= doc/control-lab.toml
+CONTROL_LAB_JOBS		?= 4
+CONTROL_LAB_PROFILES	?= three-phase,mixed
+CONTROL_LAB_STAGES	?=
+CONTROL_LAB_FORCE	?=
+CONTROL_LAB_ARGS		= --config "$(CONTROL_LAB_CONFIG)" --jobs $(CONTROL_LAB_JOBS) \
+			  --profiles "$(CONTROL_LAB_PROFILES)" \
+			  $(if $(CONTROL_LAB_STAGES),--stages "$(CONTROL_LAB_STAGES)")
+CONTROL_LAB_HTML_EVAL	= (progn (require (quote ox-html)) \
+			  (setq org-export-use-babel nil org-html-htmlize-output-type nil \
+			        org-html-link-org-files-as-html nil) \
+			  (find-file "doc/CONTROL-LAB.org") (org-html-export-to-html))
+
+.PHONY: control-lab control-lab-data control-lab-regenerate control-lab-render control-lab-html
+control-lab-data: stage-uniswap
+	forge build $(FORGE_OPTS) -q
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab $(CONTROL_LAB_ARGS) $(CONTROL_LAB_FORCE) --no-render
+
+control-lab-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab --render-only
+
+control-lab-html: control-lab-render
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '$(CONTROL_LAB_HTML_EVAL)'
+
+control-lab: control-lab-data
+	$(MAKE) control-lab-html
+
+# Force recomputation of the selected dataset set; ordinary generation
+# reuses matching JSON. Neither target removes archived baseline results.
+control-lab-regenerate: CONTROL_LAB_FORCE = --force
+control-lab-regenerate: control-lab
+
+# Interactive JavaScript presentation and its full selector campaign.
+# Raw EVM JSON and offline plot payloads live together in CONTROL_LAB_CAMPAIGN_OUT.
+CONTROL_LAB_GRID		?= doc/control-lab-campaign.toml
+CONTROL_LAB_CAMPAIGN_OUT	?= doc/control-lab/interactive
+CONTROL_LAB_CAMPAIGN_ARGS = --config "$(CONTROL_LAB_CONFIG)" --grid "$(CONTROL_LAB_GRID)" \
+			   --out "$(CONTROL_LAB_CAMPAIGN_OUT)" --jobs $(CONTROL_LAB_JOBS) \
+			   $(if $(CONTROL_LAB_STAGES),--stages "$(CONTROL_LAB_STAGES)")
+
+.PHONY: control-lab-plan control-lab-interactive control-lab-interactive-render control-lab-verify control-lab-serve
+control-lab-plan:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.campaign $(CONTROL_LAB_CAMPAIGN_ARGS) --plan
+
+control-lab-interactive: stage-uniswap
+	forge build $(FORGE_OPTS) -q
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.campaign $(CONTROL_LAB_CAMPAIGN_ARGS) $(CONTROL_LAB_FORCE)
+
+control-lab-interactive-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.campaign --out "$(CONTROL_LAB_CAMPAIGN_OUT)" --render-only
+
+control-lab-verify:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.audit --out "$(CONTROL_LAB_CAMPAIGN_OUT)"
+
+# Opening interactive/index.html directly also works; serving is optional.
+control-lab-serve:
+	$(CONTROL_LAB_PYTHON) -m http.server 8000 --bind 127.0.0.1 --directory doc
+
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────
 #

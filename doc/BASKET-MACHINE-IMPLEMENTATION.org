@@ -43,6 +43,15 @@ procedure.
 
 * Observations and control
 
+Reference quantities in the equity shell now use the same rounded declared
+weights for every constituent. Previously old quantities were scaled by an
+unrounded proportion while the new leg received the weight-rounding
+remainder: three nominally equal components cost 1.0001 at their known
+anchor prices. Recomputing quantities from the rounded weights and original
+anchor prices removes that offset without resetting to current pool prices.
+This correction is in the equity shell used by the lab; the separate legacy
+=BuckBasket= and =BuckBasketProRata= normalization paths remain unchanged.
+
 =BasketSignals= publishes every constituent together. Missing pool TWAP history, absent
 active liquidity, or an excessive spot/TWAP difference makes that attempted
 publication invalid. Neither a partial vector nor a spot fallback freshens
@@ -234,14 +243,16 @@ equity and must not be used as the replacement's return measure.
 
 * Verification and experiment interpretation
 
-The basket/wheel suite passes 374 tests, including the new regression and
+The basket/wheel suite passes 376 tests, including the new regression and
 integration cases. The response sequence fuzz case was run with 128 inputs,
 each applying eight external-price/K changes. Existing equity-desk
 stateful invariants also pass. The direct K suite passes 13 tests. An
 in-process EVM simulator integration test exercises deployment, sampling,
 wheel/desk wiring, telemetry and the finite programme. The control-lab and
-simulator Python suite passes 11 tests, including historical initialization,
-causal controls and profitable arbitrage through a rejected spot disturbance.
+simulator Python suite passes 16 tests, including historical initialization,
+phase-consistent startup, reference normalization, causal controls, profitable
+arbitrage through a rejected spot disturbance and private flow at modestly
+adverse prices.
 
 Regression coverage includes actual debt repayment versus fictitious burns,
 remaining-cap clipping, capital-floor rollback, irreversible turnover budget

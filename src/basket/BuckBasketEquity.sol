@@ -161,7 +161,12 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
             c.targetWeightBp = UniswapV3OracleLib.mulDiv(c.targetWeightBp, oldW, 10000);
             if (!(c.targetWeightBp > 0 && c.targetWeightBp < 10000)) revert InvalidRescale();
             oldSumW += c.targetWeightBp;
-            c.basketAmount = UniswapV3OracleLib.mulDiv(c.basketAmount, oldW, 10000);
+            // Quantities must use the same rounded weights as the new leg.
+            // Scaling the old quantity by oldW while assigning the rounding
+            // remainder to newW makes the reference cost exceed one BUCK.
+            // Retain the original anchor price, never today's pool price.
+            c.basketAmount = UniswapV3OracleLib.mulDiv(
+                c.targetWeightBp * 1e14, 1e18, c.initialPriceInBuck);
         }
         if (constituents.length > 0) newW = 10000 - oldSumW;
 

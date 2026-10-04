@@ -7,11 +7,30 @@ seed = 41404
 base = [100.0, 100.0, 100.0]
 amplitude = 0.12
 period_days = 30.0
+# The interactive campaign overrides amplification with 0, 0.5 and 1.
+# Independent log-price Brownian walks begin at zero, never in bootstrap.
+walk_amplification = 0.0
+walk_daily_sigma = 0.01
 
 # Historical EMA state is built from these pre-day-zero baseline observations.
 # Profile perturbations (including noise) never enter this history.
 [bootstrap]
 history_days = 1280
+
+# Private actors have an accumulation/divestment intent even at fair value.
+# A 1% adverse price multiplies the desired rate by exp(-1); favourable
+# prices increase it, bounded by max_per_day and available cash/credit.
+[demand]
+budget_usdc = 1000000
+rate_at_par_per_day = 5000
+backoff_bp = 100
+max_per_day = 25000
+
+[supply]
+credit_face_buck = 1000000
+rate_at_par_per_day = 5000
+backoff_bp = 100
+max_per_day = 25000
 
 [[profiles]]
 name = "three-phase"

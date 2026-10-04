@@ -6,11 +6,12 @@ also drives TOKEN/BUCK explicitly; in market mode those pools float freely.
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import time
 from types import SimpleNamespace
 
-from .model import DEFAULTS, STAGES, feed_rows, history_rows
+from .model import DEFAULTS, STAGES, baseline_prices, feed_rows, history_rows
 
 E6, E18, Q96 = 10**6, 10**18, 1 << 96
 ZERO = "0x" + "0" * 40
@@ -95,7 +96,12 @@ class World:
             depth = cfg["market"]["depth_usd"] * E6
             liquidity = depth * sp // Q96 if t0 == d.buck.address else depth * Q96 // sp
             self.chain.send(d.simlp.functions.mint(addr, lo, hi, liquidity, t0, t1))
+        # Start every venue at the same unperturbed phase, using funded swaps
+        # before the live experiment. The known mean defines the reference
+        # quantities; it is not the first instantaneous price of all tokens.
+        self.drive(baseline_prices(cfg, 0), replay=True)
         self.warp(int(d.w3.eth.get_block("latest")["timestamp"]) + 601)
+        self.reference_amounts = [int(d.basket.functions.constituents(i).call()[2]) for i in range(3)]
         venue = self.chain.deploy("ValidatedBasketVenue")
         self.chain.send(d.basket.functions.setVenue(venue.address), sender=d.gov)
         self.chain.send(d.desk.functions.setVenue(venue.address), sender=d.gov)
@@ -155,6 +161,11 @@ class World:
         self.start = (int(d.w3.eth.get_block("latest")["timestamp"]) // 86400 + 1) * 86400
         self.bootstrap_gas = self.gas
         self.bootstrap_transactions = self.transactions
+        self.initial_market_book = self.market_book()
+        self.bootstrap = dict(prices=self.prices(), market=self.initial_market_book,
+            reference_amounts=[str(x) for x in self.reference_amounts],
+            reference_at_means=self.reference_cost(cfg["feed"]["base"]),
+            reference_at_start=self.reference_cost(baseline_prices(cfg, 0)))
 
     def close(self):
         self.evm.__exit__(None, None, None)
@@ -191,11 +202,36 @@ class World:
                 "token_buck": [self.price(a, t.address, 18) for a, t in zip(d.pool_buck, d.tokens)],
                 "buck_usdc": self.price(d.pool_ub, d.buck.address, 6)}
 
-    def drive(self, target):
+    def reference_cost(self, prices):
+        return sum(a * round(p * E6) // E18 for a, p in zip(self.reference_amounts, prices)) / E18
+
+    def market_book(self):
+        """Actual BUCK custody versus active V3 depth; no inferred burns.
+
+        At fixed liquidity the change in pool-minus-virtual reserves is
+        uncollected BUCK fees. When LP positions change it also includes
+        changes in the finite-range virtual offset; retain the raw quantity.
+        """
+        d = self.d
+        active = held = 0
+        for addr in [*d.pool_buck, d.pool_ub]:
+            pool = self.pools[addr]
+            sp = int(pool.functions.slot0().call()[0])
+            liquidity = int(pool.functions.liquidity().call())
+            active += (liquidity * Q96 // sp if self.pairs[addr][0] == d.buck.address
+                       else liquidity * sp // Q96)
+            held += int(d.buck.functions.signedBalanceOf(addr).call())
+        return dict(active_buck=active / E6, pool_buck=held / E6,
+            pool_minus_virtual_buck=(held - active) / E6,
+            arb_held_buck=int(d.buck.functions.signedBalanceOf(self.arb.address).call()) / E6)
+
+    def drive(self, target, *, replay=None):
         from alberta_buck.sim.router import sqrt_price_x96
         d = self.d
         groups = [(d.pool_usdc, d.usdc)]
-        if self.flags.get("replay"):
+        if replay is None:
+            replay = self.flags.get("replay", False)
+        if replay:
             groups.append((d.pool_buck, d.buck))
         for pools, quote in groups:
             for i, addr in enumerate(pools):
@@ -228,11 +264,18 @@ class World:
             if not self.flags.get(name):
                 continue
             p = self.prices()
-            fair = sum(p["token_usdc"][i] / cfg["feed"]["base"][i] for i in range(3)) / 3
-            edge = (fair / p["buck_usdc"] - 1) if name == "demand" else (p["buck_usdc"] / fair - 1)
+            fair = self.reference_cost(p["token_usdc"])
             ac = cfg[name]
-            excess = max(0., edge - ac["threshold_bp"] / 10000)
-            value = min(ac["max_per_day"], ac["gain"] * excess * cfg["market"]["depth_usd"])
+            if ac["rate_at_par_per_day"] == 0:
+                continue
+            premium = p["buck_usdc"] / fair - 1
+            adverse = premium if name == "demand" else -premium
+            # Intent exists at par and through a modest adverse price. A
+            # favourable price increases the rate, up to the same daily cap.
+            # Bound the exponent before exp so extreme quotes cannot overflow.
+            exponent = min(-adverse / (ac["backoff_bp"] / 10000),
+                           math.log(ac["max_per_day"] / ac["rate_at_par_per_day"]))
+            value = ac["rate_at_par_per_day"] * math.exp(exponent)
             value /= cfg["ticks_per_day"]
             proxy, asset = (self.buyer, d.usdc) if name == "demand" else (self.supplier, d.buck)
             amount = min(round(value * E6), int(asset.functions.balanceOf(proxy.address).call()))
@@ -252,6 +295,10 @@ class World:
                  "gas": self.gas - self.bootstrap_gas,
                  "transactions": self.transactions - self.bootstrap_transactions}
         frame["bvib"] = int(d.basket.functions.basketValueInBuck().call()) / E18
+        frame["reference"] = dict(target_usd=self.reference_cost(row["target_usd"]),
+            market_usd=self.reference_cost(p["token_usdc"]),
+            spot_buck=self.reference_cost(p["token_buck"]))
+        frame["market"] = self.market_book()
         frame["k"] = int(d.kctrl.functions.buckK().call()) / E18
         frame["p_error"] = int(d.kctrl.functions.P().call()) / 1e6
         frame["p_contribution"] = int(d.kctrl.functions.P().call()) * int(d.kctrl.functions.Kp().call()) / E18
@@ -336,7 +383,8 @@ def simulate(cfg, profile, stage):
             runtime = time.perf_counter() - started
             errors = [abs(f["bvib"] - 1) for f in frames]
             return {"schema": 1, "backend": "pyrevm", "stage": stage, "flags": STAGES[stage],
-                    "profile": profile, "config": cfg, "history": world.history, "frames": frames,
+                    "profile": profile, "config": cfg, "history": world.history,
+                    "bootstrap": world.bootstrap, "frames": frames,
                     "summary": {"seconds": round(runtime, 3), "samples": len(frames),
                         "mean_abs_parity_error": sum(errors) / len(errors),
                         "end_abs_parity_error": errors[-1],
