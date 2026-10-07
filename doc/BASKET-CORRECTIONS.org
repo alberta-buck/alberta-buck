@@ -74,3 +74,21 @@ However, the mature allocation remains asymmetric: A is only bought, B is
 only sold. Mean allocation error rises to 4.224 points. This confirms the
 direction correction, not a completed rebalancing strategy. Next test the
 independent two-sided band and band-edge sizing defect.
+
+* Correction 2: separate the trigger band from capacity to target
+
+One material allocation error now opens consideration of a paired transfer.
+Both legs must improve their own allocations, but the counterpart need not
+also exceed its band. Size uses the actual distances to target, subject to
+the same time, depth, step, shared-budget and minimum-size limits. Two
+inside-band allocations still cannot authorize a discretionary swap.
+
+All nine response tests pass, including the two one-sided material-gap
+cases, refusal rollback, no fresh draw, no overweight recipient, quenched
+intent and preserved elapsed allowance. The [[file:control-lab/basket-first/02-allocation-capacity/results.org][120-day clean confirmation]] has
+200 transfers (45, 60, 48, 47), zero wrong-side legs, and 481 of 481 response
+traces. Every proposed leg appears in the swap receipts. Mean allocation
+error improves from 4.224 to 4.020 points, but A remains persistently
+underweight. This is confirmation of usable counterpart capacity, not
+confirmation of symmetric cycle harvesting. Inventory and independent LP
+placement need the next isolated examination.

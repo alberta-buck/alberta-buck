@@ -13,12 +13,16 @@ contract ControlledPairIntent {
     uint256 public rate = 1e18;
     uint256 public impacts;
     uint64 public lastExecutionAt;
+    uint256 public onlyRecipient = type(uint256).max;
     constructor(address basket_) { basket = basket_; }
     function signals() external view returns (address) { return address(this); }
     function isDue() external pure returns (bool) { return true; }
     function observe() external {}
     function setRate(uint256 r) external { rate = r; }
-    function desire(uint256, uint256) external view returns (uint256) { return rate; }
+    function setRecipient(uint256 j) external { onlyRecipient = j; }
+    function desire(uint256, uint256 j) external view returns (uint256) {
+        return onlyRecipient == type(uint256).max || onlyRecipient == j ? rate : 0;
+    }
     function fraction(uint256 r, uint256 elapsed) external pure returns (uint256) {
         if (elapsed > 1 days) elapsed = 1 days;
         uint256 u = r * elapsed / 1 days;
@@ -32,9 +36,13 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
     ControlledPairIntent intent;
     function _install() private {
         // One overweight donor and two equally underweight recipients.
-        _deposit(alice, address(tok[0]), 40_000e18);
-        _deposit(alice, address(tok[1]), 15_000e18);
-        _deposit(alice, address(tok[2]), 10_000e18);
+        _installValues(40_000e18, 30_000e18, 30_000e18);
+    }
+
+    function _installValues(uint256 a, uint256 c1, uint256 c2) private {
+        _deposit(alice, address(tok[0]), a);
+        _deposit(alice, address(tok[1]), c1 / 2);
+        _deposit(alice, address(tok[2]), c2 / 3);
         intent = new ControlledPairIntent(address(b));
         vm.startPrank(GOV);
         b.setVenue(address(new ValidatedBasketVenue()));
@@ -110,5 +118,44 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
         assertLt(b.idleToken(0), idle, "one day's released gap now clears the minimum size");
         assertEq(intent.lastExecutionAt(), vm.getBlockTimestamp());
         _books();
+    }
+
+    function test_pair_oneMaterialRecipientCanUseADonorInsideItsBand() public {
+        _installValues(35_000e18, 31_000e18, 34_000e18);
+        uint256 idle = b.idleToken(0);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertLt(b.idleToken(0), idle, "+1.67pp donor can fund -2.33pp recipient");
+        assertGt(b.liquidityOf(1), 0); assertEq(b.liquidityOf(2), 0);
+        uint256[] memory weights = b.responseWeightsBp();
+        assertGe(weights[0], 3333); assertLe(weights[1], 3333);
+        _books();
+    }
+
+    function test_pair_oneMaterialDonorCanFundRecipientsInsideTheirBands() public {
+        _installValues(36_000e18, 32_000e18, 32_000e18);
+        uint256 idle = b.idleToken(0);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertLt(b.idleToken(0), idle);
+        assertGt(b.liquidityOf(1), 0); assertGt(b.liquidityOf(2), 0);
+        uint256[] memory weights = b.responseWeightsBp();
+        assertGe(weights[0], 3333); assertLe(weights[1], 3333); assertLe(weights[2], 3334);
+        _books();
+    }
+
+    function test_pair_noMaterialGapCannotAuthorizeATokenSwap() public {
+        _installValues(34_500e18, 32_500e18, 33_000e18);
+        (uint160 beforeSpot,,,,,,) = IPool(pools[0]).slot0();
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0();
+        assertEq(afterSpot, beforeSpot);
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+    }
+
+    function test_pair_intentCannotBuyAnAlreadyOverweightRecipient() public {
+        _installValues(40_000e18, 36_000e18, 24_000e18);
+        intent.setRecipient(1);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        assertEq(b.liquidityOf(1), 0, "at least one error does not justify worsening the other leg");
     }
 }

@@ -41,6 +41,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
         }
         uint256[] memory excess = new uint256[](n);
         uint256[] memory deficit = new uint256[](n);
+        bool[] memory material = new bool[](n);
         uint256 band = total * eq.weightBandBp / 10000;
         bool outside;
         for (uint256 i; i < n; ++i) {
@@ -50,10 +51,14 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             if (gap * 10000 > total * weight * response.leashBp / 10000) {
                 a.fallbackRequired = true; return a;
             }
-            if (gap <= band || s.m[i].depth == 0) continue;
-            outside = true;
-            if (value[i] > target) excess[i] = gap - band;
-            else deficit[i] = gap - band;
+            if (s.m[i].depth == 0) continue;
+            material[i] = gap > band;
+            if (material[i]) outside = true;
+            // The band triggers consideration; capacity is the safe distance
+            // to target. Requiring two independent band excursions starves
+            // useful counter-legs, and subtracting both bands starves size.
+            if (value[i] > target) excess[i] = gap;
+            else deficit[i] = gap;
         }
         if (!outside) { a.fallbackRequired = true; return a; }
         uint256 elapsed = block.timestamp - pairPolicy.lastExecutionAt();
@@ -62,7 +67,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             uint256 eligible;
             uint256 weightedRate;
             for (uint256 j; j < n; ++j) {
-                if (deficit[j] == 0) continue;
+                if (deficit[j] == 0 || (!material[i] && !material[j])) continue;
                 uint256 rate = pairPolicy.desire(i, j);
                 if (rate == 0) continue;
                 eligible += deficit[j]; weightedRate += deficit[j] * rate;
@@ -74,7 +79,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             uint256[] memory recipients = new uint256[](n);
             uint256 executable;
             for (uint256 j; j < n; ++j) {
-                if (deficit[j] == 0 || pairPolicy.desire(i, j) == 0) continue;
+                if (deficit[j] == 0 || (!material[i] && !material[j]) || pairPolicy.desire(i, j) == 0) continue;
                 uint256 part = amount * deficit[j] / eligible;
                 // One common scale is used below for depth/step constraints;
                 // do not separately overfill a small recipient.

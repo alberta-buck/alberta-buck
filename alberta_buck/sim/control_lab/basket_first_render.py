@@ -21,6 +21,8 @@ def render(root):
         s=metrics(r);s["wrong_side_pair_legs"]=0;s["paired_legs"]=0
         for f in r["frames"]:
             traces=f.get("pair_decisions",[])
+            if r["basket_mode"] == "pair":
+                assert len(traces)==1, f"Missing or duplicate response trace at day {f['day']}"
             if not traces or traces[0]["proposed"]["fallbackRequired"]: continue
             assert len(traces)==1
             proposal=traces[0]["proposed"]
