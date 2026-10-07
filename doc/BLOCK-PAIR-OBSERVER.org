@@ -33,6 +33,10 @@ changing the rate estimates. The original datasets remain in
 =baseline-v1-manifest.json=. This supports a separate bounded basket
 experiment, not a general claim about profitable trading or arbitrary shocks.
 
+The following basket results describe the retained first experiment. The
+[[file:BASKET-CORRECTIONS.org][basket-first correction log]] records the subsequent isolated runs and
+tested changes, with the basket enabled before K, desk and private agents.
+
 The [[file:../src/basket/PairRebalancePolicy.sol][graded policy]] and
 [[file:../src/basket/PairBasketEquityResponse.sol][paired response facet]] now implement that basket experiment. The
 [[file:control-lab/pair-basket/index.html][eight matched 120-day runs]] and
@@ -61,10 +65,11 @@ There is also a directional interpretation error in the consumer. Ten of
 45 clean-run fills sell the relatively cheaper TOKEN after the normalized
 ratio has crossed its known historical reference. A negative A/B rate is
 not always closure: for signed relative displacement =z=, closure requires
-=z * dz/dt < 0=. The observer supplies motion; the consumer currently has
-no separation/reference term. Defining that reference belongs to the
-reversion policy, and must not turn the first observed price into an anchor.
-The audit proposes corrections without changing the trading policy.
+=z * dz/dt < 0=. The observer supplies motion; the audited consumer lacked
+a separation/reference term. The corrected policy now receives accepted
+historical log-price means and checks both filtered and live displacement
+on every quote route. The lab uses configured means without perturbations.
+It never turns the first observed price into an equilibrium anchor.
 
 The smallest useful implementation does not need a fair-price forecast,
 commodity period, acceleration state, DFT, dense covariance matrix, or
@@ -197,11 +202,14 @@ Use one common set of venue weights for the whole vector when publishing a
 consensus point estimate. Independently choosing a preferred venue for every
 pair can destroy that identity.
 
-No historical mean or pair price of 1 is needed to decide trade direction.
-If A is overweight and B underweight, positive d(log(PA/PB))/dt means the
-relative run is still outward; slowing or negative motion releases the
-desire to transfer A into B. Allocation error belongs to the actual basket
-book. A high nominal unit price alone never makes A overweight.
+Measuring motion does not require a historical mean; classifying that motion
+as reversion does. For the current consumer, A must be dearer than B relative
+to their accepted historical means. Positive d(log(PA/PB))/dt then means
+departure; slowing or negative motion releases the desire to transfer A
+into B. After crossing the reference, negative velocity means departure in
+the opposite direction and no longer authorizes this sale. Allocation error
+belongs to the actual basket book. A high nominal unit price alone never
+makes A overweight.
 
 At initialization an observed level may seed /current state/, with zero
 assumed velocity and an unready status. It is not an equilibrium anchor.
@@ -308,7 +316,8 @@ them in that mean. A quote-route change invalidates continuity evidence
 until re-established; it must not manufacture a turn. With one surviving
 route, mark the loss of corroboration and retain an uncertainty allowance.
 
-For A overweight and B underweight:
+For A overweight, B underweight, and A relatively dearer than B beyond the
+policy's 100-tick minimum separation on the filtered and all live routes:
 
 - Clearly positive A/B rate, sustained or increasing: quench discretionary
   transfer. Hard exposure or credit limits remain separate overrides.
@@ -325,6 +334,9 @@ with conflicting routes warrant less size than the same decline with route
 agreement and small prediction residuals.
 
 First size a seller's total release from its remaining excess allocation.
+At least one leg must exceed the 2-percentage-point trigger band. The
+counterpart need not independently exceed that band; both legs must move
+toward their targets. Size against their full remaining gaps to target.
 Split that release among eligible underweight recipients in proportion to
 their deficits. Their pair rates affect eligibility and total urgency; they
 must not independently authorize selling the same excess several times.
@@ -531,10 +543,11 @@ phase deliberately grants no such execution authority.
 - [X] Record exact pre-trade gaps, candidate amounts and binding constraints
   in a test-only facet. Reconstruct every non-fallback plan with integer
   arithmetic and match its legs to receipts; preserve economic outcomes.
-- [ ] Define relative displacement against a known/adaptive historical
-  reference and distinguish closing from separating after a crossing.
-  Include separation magnitude in reversion intent; keep bootstrap/risk
-  repair as separate work.
+- [X] Define relative displacement against accepted historical means and
+  distinguish closing from separating after a crossing, including a live
+  crossing in the same block. Apply an explicit minimum spread floor.
+- [ ] Test continuous scaling with separation magnitude and reference
+  adaptation; keep bootstrap/risk repair as separate work.
 - [ ] Reconcile the two-sided 2-point band, 100 ppm minimum leg, one-day
   catch-up cap and weaker price sensitivity of LP holdings. Test each choice
   on clean, noisy-cycle and noisy-flat paths before changing defaults.

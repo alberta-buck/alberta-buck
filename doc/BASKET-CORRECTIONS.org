@@ -92,3 +92,27 @@ error improves from 4.224 to 4.020 points, but A remains persistently
 underweight. This is confirmation of usable counterpart capacity, not
 confirmation of symmetric cycle harvesting. Inventory and independent LP
 placement need the next isolated examination.
+
+* Correction 3: place owned inventory by allocation shortage
+
+The opening trace shows B receiving LP funding repeatedly before pair
+signals are ready: its weight rises above 42% while C stays near 27%.
+The legacy LP choice compares capped step sizes and can veto an existing
+TOKEN's LP placement with its falling-price EMA signal. This concentrates
+the new book in the larger eligible leg.
+
+Independent LP placement now chooses the largest shortage against the
+funded target allocation. It retains inventory, credit, liquidity, step and
+depth limits, makes no TOKEN swap and does not consume the pair execution
+clock. A TOKEN turn is no longer required to pair inventory already owned.
+The legacy risk response remains a separate override.
+
+All 12 focused response tests pass, including 40 balanced bootstrap steps
+and a price-turn veto that cannot block LP placement. In the [[file:control-lab/basket-first/03-balanced-placement/results.org][clean 120-day
+confirmation]], mean allocation error falls from 4.020 to 1.718 points and
+wrong-side paired legs remain zero. It is still not the final cycle result.
+The trace coverage check also exposes three missing responses (days 28,
+34.75 and 111.25); read-only replay reports a revert. The report lists them
+explicitly instead of counting them as absent opportunities. Investigate
+the minimum-size boundary next, then test the allocation-band compatibility
+with the smaller price sensitivity of funded LP positions.

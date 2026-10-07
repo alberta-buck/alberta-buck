@@ -19,10 +19,15 @@ def render(root):
         assert r["config"]==control["config"] and r["bootstrap"]==control["bootstrap"]
         assert [f["target_usd"] for f in r["frames"]]==[f["target_usd"] for f in control["frames"]]
         s=metrics(r);s["wrong_side_pair_legs"]=0;s["paired_legs"]=0
+        s["missing_responses"]=[]
         for f in r["frames"]:
             traces=f.get("pair_decisions",[])
             if r["basket_mode"] == "pair":
-                assert len(traces)==1, f"Missing or duplicate response trace at day {f['day']}"
+                assert len(traces)<=1, f"Duplicate response trace at day {f['day']}"
+                if not traces:
+                    check=f.get("pair_response_check")
+                    assert check is not None, f"Unexplained missing response trace at day {f['day']}"
+                    s["missing_responses"].append(dict(day=f["day"],**check))
             if not traces or traces[0]["proposed"]["fallbackRequired"]: continue
             assert len(traces)==1
             proposal=traces[0]["proposed"]
@@ -54,6 +59,13 @@ def render(root):
     for s in sorted(rows,key=lambda s:(s["profile"],s["mode"])):
         report.append(f"| {s['profile']} | {s['mode']} | {s['pair_transfers']} | {', '.join(str(p['pair_transfers']) for p in s['periods'])} | {s['wrong_side_pair_legs']} | {s['mature_both_sides_each_token_each_cycle']} | {s['mean_weight_error_pp']:.3f} | {s['equity_usd']:,.2f} | {s['lien_buck']:,.2f} |")
     report += ["", "Wrong-side counts apply to graded paired transfers: the sold TOKEN's pre-policy normalized BUCK-pool price must exceed its recipient's. Legacy risk/bootstrap work is separate. Marked equity includes inventory and leverage; it is not liquidation proceeds or realized net ROI. Pool fees affect outcomes; caller gas is not subtracted. Source fingerprints and all pre-response books remain in JSON.", ""]
+    for s in rows:
+        if s["missing_responses"]:
+            report += [f"* Missing response traces: {s['profile']} / {s['mode']}", "",
+                "The wheel catches component reverts. These read-only replays from its address expose the post-tick outcome; they do not substitute for a successful execution trace.", ""]
+            for c in s["missing_responses"]:
+                report.append(f"- Day {c['day']}: {c['error'] or ('replay work '+str(c['work']))}")
+            report.append("")
     os.environ.setdefault("MPLCONFIGDIR",str(Path(tempfile.gettempdir())/"alberta-buck-matplotlib"))
     import matplotlib
     matplotlib.use("Agg")

@@ -42,12 +42,14 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
             self.pair_policy = None
             self.pair_plans = []
             self.pair_decisions = []
+            self.pair_response_check = None
             if basket_mode:
                 self.chain.send(d.basket.functions.setResponse(self.signals.address,
                     (config["basket"]["leash_bp"], config["monitor"]["interval"], 0)), sender=d.gov)
                 if basket_mode == "pair":
                     from alberta_buck.sim.chain import load_artifact
                     from web3.logs import DISCARD
+                    from web3.exceptions import ContractLogicError, Web3RPCError
                     # Accepted historical means, never the first live price or
                     # any selected perturbation. Observer levels normalize decimals.
                     reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
@@ -69,6 +71,16 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
                                     if isinstance(x, (list, tuple)): return [plain(v) for v in x]
                                     return {k: plain(v) for k,v in x.items()}
                                 self.pair_decisions.extend(plain(e["args"]) for e in events.PairDecision().process_receipt(rc, errors=DISCARD))
+                                if not self.pair_decisions:
+                                    # The wheel catches component reverts. Replay
+                                    # read-only from its address so a missing
+                                    # trace cannot silently look like no intent.
+                                    probe = d.w3.eth.contract(address=d.basket.address, abi=abi)
+                                    try:
+                                        work = probe.functions.wheelStep(2, 0).call({"from":d.wheel.address})
+                                        self.pair_response_check = dict(work=int(work), error=None)
+                                    except (ContractLogicError, Web3RPCError) as exc:
+                                        self.pair_response_check = dict(work=None, error=str(exc))
                         return rc
                     self.chain.send = send
 
@@ -80,6 +92,7 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
             if basket_mode:
                 self.pair_plans = []
                 self.pair_decisions = []
+                self.pair_response_check = None
                 self.observe_pairs()
 
         def arbitrage(self, phase):
@@ -141,6 +154,7 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
                     own_impact_ticks=[int(self.pair_policy.functions.remainingImpact(i).call()) / 1e18 for i in range(3)])
                 if diagnostics:
                     frame["pair_decisions"] = self.pair_decisions
+                    frame["pair_response_check"] = self.pair_response_check
             return frame
 
     world = ObserverWorld if enabled else engine.World

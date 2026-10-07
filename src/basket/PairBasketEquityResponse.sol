@@ -60,7 +60,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             if (value[i] > target) excess[i] = gap;
             else deficit[i] = gap;
         }
-        if (!outside) { a.fallbackRequired = true; return a; }
+        if (!outside) return a;
         uint256 elapsed = block.timestamp - pairPolicy.lastExecutionAt();
         for (uint256 i; i < n; ++i) {
             if (excess[i] == 0) continue;
@@ -104,14 +104,37 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
         }
     }
 
+    /// @dev Pair inventory already owned by the basket. Adding BUCK expands
+    /// the book, so rank shortages in the funded allocation, not capped step
+    /// sizes (which repeatedly favour the largest leg). No TOKEN is swapped;
+    /// a price-turn veto has no role in this independent placement operation.
+    function _idlePlacement(Snap memory s) internal view returns (Plan memory p) {
+        p.sell = NONE; p.buy = NONE; p.pairOnly = true;
+        uint256 usable = _usableS(s);
+        uint256 grain = _grainS(s);
+        if (usable <= grain) return p;
+        uint256 expanded = _grossS(s, MARK_TWAP) + usable;
+        uint256 best;
+        for (uint256 i; i < s.m.length; ++i) {
+            uint256 idle = _tokenValue(s, i);
+            uint256 value = s.m[i].posTwap + idle;
+            uint256 target = expanded * constituents[i].targetWeightBp / 10000;
+            if (target <= value) continue;
+            uint256 gap = target - value;
+            uint256 cap = PM.min(idle, PM.min(gap, usable));
+            cap = PM.min(cap, PM.min(value * eq.stepBp / 10000, _swapCap(s.m[i])));
+            if (gap > best && cap > grain) { best = gap; p.buy = i; p.buyCap = cap; }
+        }
+    }
+
     function wheelDue(uint8 kind, uint256 i) public view override returns (bool) {
         if (kind != 2) return super.wheelDue(kind, i);
         if (block.timestamp < uint256(lastResponseAt) + response.interval) return false;
         if (pairPolicy.signals().isDue()) return true;
         Snap memory s = _snap();
         Allocation memory a = _allocation(s);
-        if (a.fallbackRequired || (a.donor == NONE && super._plan(s).pairOnly)) return super.wheelDue(kind, i);
-        return a.donor != NONE || _staleMark(s);
+        if (a.fallbackRequired) return super.wheelDue(kind, i);
+        return a.donor != NONE || _idlePlacement(s).buy != NONE || _staleMark(s);
     }
 
     function _spotTicks() private view returns (int24[] memory ticks) {
@@ -131,15 +154,24 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
         Snap memory s = _snap();
         Allocation memory a = _allocation(s);
         int24[] memory beforeTicks = _spotTicks();
-        // LP placement is independent work, not a reason to wait for a TOKEN
-        // turn. Preserve it when no discretionary pair transfer is ready.
-        if (a.fallbackRequired || (a.donor == NONE && super._plan(s).pairOnly)) {
+        if (a.fallbackRequired) {
             uint256 work = super._respond();
             _record(beforeTicks);
             return work;
         }
         bool stale = _staleMark(s); _markS(s);
         if (a.donor == NONE) {
+            Plan memory p = _idlePlacement(s);
+            if (p.buy != NONE && _headroomS(s) >= 0) {
+                uint256 placed = _buy(p.buy, PM.min(p.buyCap, s.spend), true);
+                if (placed > 0) {
+                    _markS(_snap());
+                    lastResponseAt = uint64(block.timestamp);
+                    emit Responded(4, NONE, p.buy, 0, placed);
+                    emit WheelWork(2, 0, placed);
+                    return 1;
+                }
+            }
             if (!stale) return 0;
             lastResponseAt = uint64(block.timestamp);
             emit Responded(0, NONE, NONE, 0, 0);

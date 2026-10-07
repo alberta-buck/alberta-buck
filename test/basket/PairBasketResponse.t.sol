@@ -158,4 +158,39 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
         assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
         assertEq(b.liquidityOf(1), 0, "at least one error does not justify worsening the other leg");
     }
+
+    function test_pair_idlePlacementChoosesLargestShortageNotLargestCappedLeg() public {
+        _installValues(33_333e18, 36_700e18, 29_967e18); intent.setRate(0);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertEq(b.liquidityOf(0), 0); assertEq(b.liquidityOf(1), 0);
+        assertGt(b.liquidityOf(2), 0, "fund the smallest allocation first");
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        _books();
+    }
+
+    function test_pair_balancedBootstrapDoesNotConcentrateTheNewBook() public {
+        _installValues(33_333e18, 33_333e18, 33_334e18); intent.setRate(0);
+        for (uint256 k; k < 40; ++k) {
+            IEquityWheel(address(b)).wheelStep(2, 0);
+            uint256[] memory weights = b.responseWeightsBp();
+            for (uint256 i; i < 3; ++i) {
+                if (k >= 2) assertGt(b.liquidityOf(i), 0);
+                assertApproxEqAbs(weights[i], i == 2 ? 3334 : 3333, 120);
+            }
+            vm.warp(vm.getBlockTimestamp() + 6 hours);
+        }
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        _books();
+    }
+
+    function test_pair_priceTurnVetoCannotBlockPlacementOfOwnedInventory() public {
+        _installValues(33_333e18, 36_700e18, 29_967e18); intent.setRate(0);
+        vm.prank(GOV);
+        b.setResponse(address(intent), BuckBasketEquityStorage.ResponseParams(3000, 1800, 0));
+        vm.mockCall(address(intent), abi.encodeWithSignature("fresh()"), abi.encode(true));
+        vm.mockCall(address(intent), abi.encodeWithSignature("running(uint256,int256)", uint256(2), int256(-1)), abi.encode(true));
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertGt(b.liquidityOf(2), 0);
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+    }
 }
