@@ -46,7 +46,12 @@ and matched outcomes; terminal equity is not liquidation ROI.
 
 * Reproduction
 
-=make control-lab-basket-first= runs the clean case. Select noise profiles
+=make control-lab-basket-first= runs the clean case with a common 120-day
+mean-price LP prelude followed by 120 live days. Set
+=CONTROL_LAB_BASKET_FIRST_WARMUP_DAYS=0= to retain the cold-start experiment.
+The allocation band remains 200 bp; override
+=CONTROL_LAB_BASKET_FIRST_BAND_BP= for explicit sensitivity experiments.
+Select noise profiles
 with =CONTROL_LAB_BASKET_FIRST_PROFILES= and keep each confirmed revision in
 its own =CONTROL_LAB_BASKET_FIRST_OUT= directory. The =-render= target uses
 cached JSON only. Each correction is committed after its tests and runs.
@@ -133,3 +138,43 @@ disappear. Note a diagnostic limitation in correction 3: pyrevm rejects an
 cannot establish the individual failures' reasons. The focused failing test
 and the complete corrected run establish the minimum-budget defect and its
 correction; future missing-response probes must avoid that RPC limitation.
+
+* Confirmation 5: separate bootstrap from recurring cycle behavior
+
+The [[file:control-lab/basket-first/05-one-point-band/results.org][one-point-band sensitivity run]] does not repair the cold-start asymmetry.
+It raises transfer count but does not make every TOKEN trade both ways in
+each cycle. The production default therefore remains two points. Merely
+lowering a threshold is not the answer to that startup result.
+
+The [[file:control-lab/basket-first/06-settled-book/results.org][settled-book comparison]] instead prepares both arms identically through
+the corrected production LP placement at known mean prices for 120 days.
+This prelude excludes all selected live perturbations, keeps K and private
+actors idle, and allows the initial deposit-flow reserve estimate to settle.
+Both arms then run 120 live days with identical feeds and opening books.
+Opening weights are 33.36%, 33.33%, 33.31%; equity is 1,002,936.95 BUCK and
+lien 712,549.39 BUCK. Prelude costs/flows are part of that disclosed opening
+book, not credited to the live strategy's return.
+
+With the original two-point band, the pair response executes 26, 31, 35, 35
+transfers across four cycles. Every TOKEN is bought and sold in every cycle,
+including all three mature cycles. There are 133 paired legs, zero wrong-side
+legs and all 481 response traces. Every planned leg improves both weights,
+has at least one material gap, stays within its shared capacities and appears
+in the actual receipts. Twenty legs have a closing-side error envelope; 113
+use the smaller cessation/braking release. This is primarily bounded
+participation in slowing departure, consistent with the stated objective.
+
+Mean allocation error is 1.436 points versus 1.448 for the matched legacy
+response. Terminal marked equity is 1,013,727.68 USD versus 1,009,772.74 USD;
+the pair arm has slightly less lien. These marks do not establish net ROI
+after liquidation or caller gas. The cold-start runs remain important:
+their first cycles are dominated by changing LP composition, and they do
+not pass the same repeat-cycle criterion. The settled baseline isolates
+recurring rebalancing; it does not certify arbitrary startup conditions.
+
+The lab now exposes both the band and common prelude explicitly. Missing
+response diagnostics replay through a temporary EOA wheel inside a discarded
+EVM snapshot, rather than using a contract-code transaction sender. Python
+causal checks were updated for the new stage order: the K-without-actuators
+comparison is monitor versus monitor-K, since the later K stage includes
+the basket. All 24 control-lab Python tests and 397 basket Solidity tests pass.

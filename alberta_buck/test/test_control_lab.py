@@ -46,9 +46,9 @@ def test_cache_invalidation_tracks_enabled_mechanisms():
     profile = cfg["profiles"][1]
     changed = copy.deepcopy(cfg)
     changed["desk"]["gain_bp"] += 100
-    for stage in ("feeds", "monitor", "linked", "k", "demand", "supply", "both"):
+    for stage in ("feeds", "monitor", "linked", "basket", "k", "demand", "supply", "both"):
         assert digest(dependencies(cfg, profile, stage)) == digest(dependencies(changed, profile, stage))
-    for stage in ("desk", "all", "basket"):
+    for stage in ("desk", "all"):
         assert digest(dependencies(cfg, profile, stage)) != digest(dependencies(changed, profile, stage))
     changed = copy.deepcopy(cfg)
     changed["demand"]["budget_usdc"] += 1
@@ -137,8 +137,8 @@ def test_spot_dislocation_does_not_disable_profitable_arbitrage(venue):
 
 
 def test_k_without_actuators_does_not_move_pool_prices(evm_controls):
-    a, b = evm_controls["linked"], evm_controls["k"]
-    assert a["summary"]["arb_cycles"] > 0
+    a, b = evm_controls["monitor"], evm_controls["monitor-k"]
+    assert a["summary"]["arb_cycles"] == b["summary"]["arb_cycles"] == 0
     assert any(f["k"] != .75 for f in b["frames"])
     for fa, fb in zip(a["frames"], b["frames"]):
         for key in ("token_buck", "token_usdc", "buck_usdc"):

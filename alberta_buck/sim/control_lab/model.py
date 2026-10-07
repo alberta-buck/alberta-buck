@@ -41,7 +41,7 @@ DEFAULTS = {
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     "supply": {"credit_face_buck": 1_000_000, "max_per_day": 25_000,
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
-    "basket": {"leash_bp": 3000, "tilt": 1.},
+    "basket": {"leash_bp": 3000, "tilt": 1., "weight_band_bp": 200},
     "profiles": [{"name": "three-phase", "perturbations": []}],
 }
 
@@ -87,6 +87,9 @@ def validate(cfg: dict) -> None:
         raise ValueError("pool depth and basket capital must be positive")
     if not 1 <= cfg["market"]["arb_rounds"] <= 20 or not 0 < cfg["market"]["arb_cap_bp"] <= 1000:
         raise ValueError("invalid arbitrage work bound")
+    band = cfg["basket"]["weight_band_bp"]
+    if not isinstance(band, int) or not 0 <= band <= 1000:
+        raise ValueError("basket.weight_band_bp must be an integer in 0..1000")
     for name in ("demand", "supply"):
         a = cfg[name]
         if not 0 <= a["rate_at_par_per_day"] <= a["max_per_day"] or not a["backoff_bp"] > 0:

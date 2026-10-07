@@ -19,12 +19,19 @@ def main(argv=None):
     ap.add_argument("--stage",choices=("basket","k","all"),default="basket")
     ap.add_argument("--jobs",type=int,default=2)
     ap.add_argument("--seed",type=int)
+    ap.add_argument("--weight-band-bp",type=int,help="Allocation trigger band; default is the config value (200 bp)")
+    ap.add_argument("--warmup-days",type=int,default=0,help="Common basket LP prelude at known means; excluded from the 120 live days")
     ap.add_argument("--render-only",action="store_true")
     args=ap.parse_args(argv); root=Path(args.out);root.mkdir(parents=True,exist_ok=True)
     if args.jobs<1: ap.error("jobs must be positive")
+    if not 0 <= args.warmup_days <= 365: ap.error("warmup must be in 0..365 days")
     if args.render_only: return render(root)
     from alberta_buck.sim.chain import load_artifact
     cfg=load_config(args.config);cfg["basket"]["tilt"]=0;cfg["feed"]["walk_amplification"]=0
+    cfg["bootstrap"]["basket_warmup_days"]=args.warmup_days
+    if args.weight_band_bp is not None:
+        if not 0 <= args.weight_band_bp <= 1000: ap.error("weight band must be in 0..1000 bp")
+        cfg["basket"]["weight_band_bp"]=args.weight_band_bp
     if args.seed is not None: cfg["seed"]=args.seed
     names=args.profiles.split(","); profiles=[p for p in PROFILES if p["name"] in names]
     if len(profiles)!=len(names): ap.error("unknown or duplicate profile")

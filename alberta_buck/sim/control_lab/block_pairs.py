@@ -44,12 +44,15 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
             self.pair_decisions = []
             self.pair_response_check = None
             if basket_mode:
+                warm_days = config["bootstrap"].get("basket_warmup_days",0)
+                if warm_days:
+                    self.warm_basket(warm_days)
                 self.chain.send(d.basket.functions.setResponse(self.signals.address,
                     (config["basket"]["leash_bp"], config["monitor"]["interval"], 0)), sender=d.gov)
                 if basket_mode == "pair":
                     from alberta_buck.sim.chain import load_artifact
                     from web3.logs import DISCARD
-                    from web3.exceptions import ContractLogicError, Web3RPCError
+                    from eth_utils import keccak
                     # Accepted historical means, never the first live price or
                     # any selected perturbation. Observer levels normalize decimals.
                     reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
@@ -72,17 +75,62 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
                                     return {k: plain(v) for k,v in x.items()}
                                 self.pair_decisions.extend(plain(e["args"]) for e in events.PairDecision().process_receipt(rc, errors=DISCARD))
                                 if not self.pair_decisions:
-                                    # The wheel catches component reverts. Replay
-                                    # read-only from its address so a missing
-                                    # trace cannot silently look like no intent.
+                                    # pyrevm rejects contract-code callers. In a
+                                    # discarded snapshot only, authorize the EOA
+                                    # governor as wheel and replay that component.
+                                    # No simulated receipt, gas or book survives.
                                     probe = d.w3.eth.contract(address=d.basket.address, abi=abi)
+                                    checkpoint = self.evm.evm.snapshot()
                                     try:
-                                        work = probe.functions.wheelStep(2, 0).call({"from":d.wheel.address})
-                                        self.pair_response_check = dict(work=int(work), error=None)
-                                    except (ContractLogicError, Web3RPCError) as exc:
+                                        setter = keccak(text="setWheel(address)")[:4] + d.w3.codec.encode(["address"], [d.gov])
+                                        self.evm.evm.message_call(d.gov, d.basket.address, calldata=setter)
+                                        output = self.evm.evm.message_call(d.gov, d.basket.address,
+                                            calldata=bytes.fromhex(probe.functions.wheelStep(2, 0)._encode_transaction_data()[2:]))
+                                        self.pair_response_check = dict(work=int.from_bytes(output,"big"), error=None)
+                                    except RuntimeError as exc:
                                         self.pair_response_check = dict(work=None, error=str(exc))
+                                    finally:
+                                        self.evm.evm.revert(checkpoint)
+                                    self.pair_response_check["method"] = "discarded EOA-wheel replay"
                         return rc
                     self.chain.send = send
+
+        def warm_basket(self, days):
+            """Identical funded starting book, with no knowledge of live prices.
+
+            Use the corrected response's actual LP placement at accepted mean
+            prices, before either experimental response is installed. Daily
+            deposit-flow accounting settles too; K and private actors are idle.
+            """
+            from alberta_buck.sim.chain import load_artifact
+            d = self.d; old_facet = d.basket.functions.equityWheel().call()
+            venue = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("ValidatedBasketVenue")[0])
+            references = [round(math.log(p)/LOG_TICK*1e18) for p in self.cfg["feed"]["base"]]
+            policy = self.chain.deploy("PairRebalancePolicy",self.pair_observer.address,d.basket.address,references)
+            facet = self.chain.deploy("PairBasketEquityResponse",policy.address)
+            response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("PairBasketEquityResponse")[0])
+            self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)
+            self.chain.send(d.basket.functions.setResponse(engine.ZERO,
+                (self.cfg["basket"]["leash_bp"],self.cfg["monitor"]["interval"],0)),sender=d.gov)
+            self.chain.send(venue.functions.setWheel(d.gov),sender=d.gov)
+            self.drive(self.cfg["feed"]["base"],replay=True)
+            start = int(d.w3.eth.get_block("latest")["timestamp"]) + 601
+            for day in range(days):
+                self.warp(start + day*86400)
+                self.chain.send(response.functions.wheelStep(0,0),sender=d.gov)
+                for i in range(3): self.chain.send(response.functions.wheelStep(1,i),sender=d.gov)
+                self.chain.send(response.functions.wheelStep(2,0),sender=d.gov)
+            self.chain.send(venue.functions.setWheel(d.wheel.address),sender=d.gov)
+            self.chain.send(d.basket.functions.setEquityWheel(old_facet),sender=d.gov)
+            self.start = (int(d.w3.eth.get_block("latest")["timestamp"])//86400+1)*86400
+            self.initial_market_book = self.market_book()
+            self.bootstrap.update(prices=self.prices(),market=self.initial_market_book,
+                basket_prelude=dict(days=days,prices=self.cfg["feed"]["base"],
+                    equity_buck=int(d.basket.functions.equity().call())/1e6,
+                    account_buck=int(d.buck.functions.signedBalanceOf(d.basket.address).call())/1e6,
+                    weights=list(d.basket.functions.responseWeightsBp().call()),
+                    idle=[str(d.basket.functions.idleToken(i).call()) for i in range(3)],
+                    liquidity=[str(d.basket.functions.liquidityOf(i).call()) for i in range(3)]))
 
         def observe_pairs(self):
             rc = self.chain.send(self.pair_wheel.functions.tick(1, 0))

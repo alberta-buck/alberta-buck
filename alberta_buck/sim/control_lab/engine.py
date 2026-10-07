@@ -115,6 +115,10 @@ class World:
         response = self.chain.deploy("BuckBasketEquityResponse")
         self.chain.send(d.basket.functions.setEquityWheel(response.address), sender=d.gov)
         rp = cfg["basket"] if self.flags.get("basket") else DEFAULTS["basket"]
+        equity_params = list(d.basket.functions.eq().call())
+        if equity_params[6] != rp["weight_band_bp"]:
+            equity_params[6] = rp["weight_band_bp"]
+            self.chain.send(d.basket.functions.setEquityParams(tuple(equity_params)), sender=d.gov)
         self.chain.send(d.basket.functions.setResponse(self.signals.address,
             (rp["leash_bp"], mon["interval"], round(rp["tilt"] * E18))), sender=d.gov)
         self.chain.send(d.wheel.functions.setResponseMode(True), sender=d.gov)
