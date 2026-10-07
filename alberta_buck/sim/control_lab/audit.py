@@ -24,6 +24,7 @@ def audit(root, partial=False):
     expected, _ = plan(manifest['requested_config'], manifest['grid'], manifest['implementation'], list(manifest['stages']))
     assert expected['cases'] == cases, 'selectors do not resolve to their active inputs'
     feeds, market_paths, samples, transactions, summary = {}, {}, 0, 0, []
+    recorded_runs = recorded_cycles = recorded_desk_ops = recorded_basket_swaps = 0
     for key, entry in entries.items():
         result = json.loads((root / entry['file']).read_text())
         cfg, flags, frames = result['config'], result['flags'], result['frames']
@@ -48,6 +49,7 @@ def audit(root, partial=False):
             market_paths[feed_key, result['stage']] = [
                 [*f['token_usdc'], *f['token_buck'], f['buck_usdc']] for f in frames]
         previous_budget = math.inf
+        event_cycles = event_desk = 0
         for f in frames:
             assert all(math.isfinite(v) and v > 0 for v in [f['bvib'], f['buck_usdc'], *f['token_usdc'], *f['token_buck'], *f['target_usd']]), context
             assert cfg['controller']['kmin'] - 1e-12 <= f['k'] <= cfg['controller']['kmax'] + 1e-12, context
@@ -63,6 +65,33 @@ def audit(root, partial=False):
             previous_budget = f['desk']['budget']
             if flags.get('basket'):
                 assert sum(f['basket']['weights']) == 10000, context
+            if 'events' in frames[0]:
+                assert 'events' in f, ('missing execution records', context)
+                for e in f['events']:
+                    assert flags.get(e['actor']), ('inactive actor executed', e['actor'], context)
+                    assert e['phase'] in ('after-feed', 'after-agents', 'policy', 'after-policy'), context
+                    assert 0 < e['transaction'] <= f['transactions'], context
+                    event_cycles += e['actor'] == 'arb'
+                    event_desk += e['actor'] == 'desk'
+                    if e['actor'] == 'arb':
+                        assert len(e['trades']) == 2 and e['profit_buck'] > 0, context
+                        assert {t['token'] for t in e['trades']} == {e['token']}, context
+                        assert {t['quote'] for t in e['trades']} == {'BUCK', 'USDC'}, context
+                        assert {t['side'] for t in e['trades']} == {'buy', 'sell'}, context
+                    if e['actor'] == 'basket':
+                        recorded_basket_swaps += len(e['trades'])
+                        if e['action'] in ('pair', 'mark'):
+                            assert not e['trades'], ('LP pairing or valuation mislabeled as a trade', context)
+                    for t in e['trades']:
+                        assert t['side'] in ('buy', 'sell') and 0 <= t['token'] < 3, context
+                        assert int(t['token_raw']) > 0 and int(t['quote_raw']) > 0, context
+                        assert math.isclose(t['token_amount'] * t['price_quote'], t['quote_amount'], rel_tol=1e-12), context
+                assert event_cycles == f['cumulative']['arb_cycles'], ('missing arb event', context)
+                assert event_desk == f['cumulative']['desk_ops'], ('missing desk event', context)
+        if 'events' in frames[0]:
+            recorded_runs += 1
+            recorded_cycles += event_cycles
+            recorded_desk_ops += event_desk
         samples += len(frames)
         transactions += result['summary']['transactions']
         summary.append(dict(profile=entry['profile'], stage=entry['stage'],
@@ -80,6 +109,8 @@ def audit(root, partial=False):
                   identical_fixed_vs_moving_k_pairs=control_pairs,
                   raw_bytes=sum((root / e['file']).stat().st_size for e in entries.values()),
                   source_sha256=manifest['implementation']['sha256'], summaries=summary)
+    report['executions'] = dict(recorded_runs=recorded_runs, arb_cycles=recorded_cycles,
+                                desk_operations=recorded_desk_ops, basket_swaps=recorded_basket_swaps)
     return report
 
 

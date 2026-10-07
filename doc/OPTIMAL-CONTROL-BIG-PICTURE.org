@@ -550,6 +550,11 @@ calibration, each run for 120 days on two shared input profiles. Legacy implemen
 comparisons support retirement. Correct books and passing tests are necessary
 but do not establish superior equilibrium or savings returns.
 
+Commit =7554cc4= records the second baseline: the full 351-run interactive
+campaign, corrected normalization/bootstrap, finite intent-driven private
+flows and the future noise/30-day-bridge task. Execution telemetry was then
+added without changing any of those 351 market/account traces.
+
 ** Baseline findings
 
 - [X] Implement a shared wheel-serviced sensor, bounded basket response,
@@ -586,6 +591,177 @@ but do not establish superior equilibrium or savings returns.
   innovations, start at zero and never enter historical initialization.
   K and desk parameters remain fixed; see [[file:CONTROL-LAB.org][the control-lab walkthrough]]
   for regeneration and the campaign manifest for completion status.
+
+** Allocation distance and graded turn evidence (2026-10-05)
+:PROPERTIES:
+:CUSTOM_ID: graded-turn-response
+:END:
+
+The clarified objective is to let a reliable outward run continue, then
+rebalance a fraction of the remaining allocation error as evidence of an
+inward turn strengthens. An overweight TOKEN rising relative to the basket
+is allowed to run within its risk limits; a subsequent downward turn makes
+selling appropriate. An underweight TOKEN falling is the mirror case:
+accumulate as upward-turn evidence develops. This is a proposed policy to
+test, not a claim that reversals or rebalancing profits can be guaranteed.
+
+The subsequent clarification makes /cessation of departure/ the start of
+participation: release quenching while outward motion slows, before requiring
+a sign reversal. The [[file:PAIR-OBSERVER.org][pairwise multi-venue observer experiment]] explored
+this rule, proportional counter-token allocation and historical cycle scaling
+alongside the existing EMAs. Its measured uncertainty failures remain explicit.
+
+The [[file:BLOCK-PAIR-OBSERVER.org][current per-block EVM specification]] shelves historical commodity-cycle
+analysis. It proposes a two-state tracker with route disagreement and measured
+prediction-error diagnostics, a complete per-block publication, and separate
+basket/arb/desk execution conditions. Full-block service requires an ordered
+coordinator and an included caller transaction, not merely a larger round-robin
+wheel budget.
+
+The observation phase is implemented as =BlockPairSignals= and displayed in
+[[file:control-lab/block-pairs/index.html][the EVM pair-observation lab]]. Matched observer-off worlds retain identical
+economic results. The first campaign exposed missing deterministic lag in
+the rate allowance. Deriving its response timescale raised clean-cycle
+reference coverage from 57.45% to 99.17%, without changing the estimated rate.
+See the [[file:control-lab/block-pairs/results.org][observer measurements]].
+
+The subsequent [[file:control-lab/pair-basket/results.org][graded basket comparison]] implements paired transfers with
+proportional recipients, atomic execution and own-impact uncertainty. It
+fixed a bookkeeping clock that discarded unspent trade time and a gate
+that blocked independent LP placement. However, clean-cycle activity still
+nearly stops after the first month, and noisy-flat allocation error worsens.
+Higher terminal equity marks are not evidence of repeatable harvesting.
+The [[file:BLOCK-PAIR-OBSERVER.org][implementation checklist]] therefore keeps the basket experiment under
+review before standalone cash legs and the separate arb/desk phases.
+
+The present implementation does not express this objective fully:
+
+- =BasketSignals.votes()= counts signs of six EMA increments opposing the
+  long-anchor excursion. Magnitude and uncertainty are discarded, and the
+  direction is relative to the anchor rather than the actual allocation gap.
+- =BuckBasketEquityResponse._plan()= caps a band-edge allocation gap by a
+  per-position step and depth. Its =votes / 6= size adjustment applies only
+  after =turned()=. This is neither a continuous evidence score nor a
+  uniformly increasing participation rule. In the experimental fast-gate
+  adapter, a permitted trade can receive the full step before four votes,
+  then a two-thirds step when the fourth vote appears.
+- The fast-gate experiment demonstrates that the old veto misses available
+  opportunities. It does not establish the desired graded replacement.
+
+*** Separate the book, the observer and the execution rule
+
+For a candidate implementation, let =g = currentWeight - targetWeight=,
+=D = bookValue * max(abs(g) - band, 0)=, and =C= be an inward-turn evidence
+score between zero and one. Sell for positive =g=, buy for negative =g=.
+A simple bounded participation law is:
+
+#+begin_example
+requested notional = D * (1 - exp(-lambda * C * elapsedDays))
+executed notional  <= min(requested notional, inventory/cash/credit/depth limits)
+#+end_example
+
+Here =lambda= sets the maximum response rate. For small intervals this is
+approximately =D * lambda * C * elapsedDays=: more imbalance or stronger
+evidence increases the opportunity taken, holding other inputs fixed.
+The response shrinks as either market motion or our trades close the gap.
+An economic minimum size prevents tiny fee-dominated fills. Leash and
+liquidity/deleveraging actions remain separately reasoned overrides.
+
+Service frequency must not manufacture extra participation. Consume each
+elapsed-time allowance once, recompute from the remaining book, and bound
+catch-up after gaps. Repeated wheel calls on the same observation cannot
+each spend a fresh full-size opportunity. The no-trade band, rate and
+execution limits must be identical when comparing observers.
+
+Keep the declared allocation and any excursion-dependent target lean
+visible separately. The current lean itself increases the imbalance when
+a TOKEN appreciates; changing it while changing the observer would confound
+the comparison. Neither a target update nor our own inventory adjustment is
+evidence of a market turn. Begin with relative-price motion as the observer
+input and calculate allocation pressure separately from the current book.
+For a direct estimate of price-driven weight motion, revalue fixed positions
+with the target held fixed; include the LP valuation response. Pool prices
+can still contain our own execution impact, so retain intervention markers
+and compare outside-venue evidence where available.
+
+*** Two small observers worth comparing
+
+An EMA version can retain continuous, signed slopes rather than votes.
+Orient each slope toward closing the actual gap, express it per unit time,
+and normalize by a causal noise scale appropriate to its horizon, with a
+nonzero floor. A strong short-horizon reversal can then contribute heavily;
+weaker sustained agreement across short and medium horizons can also build
+the score. Long horizons describe the preceding run rather than vetoing its
+end until they reverse too. The filters share observations: agreement is
+not independent confirmation, and the score must not be labelled a calibrated
+probability. Cap contributions from neighboring horizons and validate false
+starts on held-out paths. Deceleration while still moving outward provides
+weaker evidence than an observed inward slope; the latest response proposal
+releases a bounded amount of participation during that deceleration, then
+increases its rate once closure begins.
+
+A two-state Kalman alternative estimates relative-price level and velocity,
+and their covariance. A local linear model advances level by velocity times
+elapsed time, allows velocity to change, and observes a noisy level. This is
+a standard state-space construction; see the
+[[https://www.statsmodels.org/stable/examples/notebooks/generated/statespace_local_linear_trend.html][local linear trend model and implementation]]. For the proposal here, orient
+estimated velocity toward closing =g= and compare it with its estimated
+standard error and a noise floor. Map evidence beyond a minimum meaningful
+inward speed continuously onto =C=. The resulting score describes the
+model's evidence for present motion, not the probability of profitable
+execution or of reaching the allocation target.
+
+Kalman filtering estimates state and error covariance under a specified
+model; see [[https://www.cs.cmu.edu/~./motionplanning/papers/sbp_papers/k/Kalman1960.pdf][Kalman's original paper]]. It does not remove the responsiveness
+versus noise trade-off. With a scalar random-walk state, direct observations
+and a converged constant gain =a=, its update is simply
+=level = (1-a)*level + a*observation=: an EMA. The useful additional structure
+here is velocity and uncertainty, not the name of the filter. Misspecified
+process or observation noise can make its confidence misleading.
+
+Use historical initialization of state and covariance, causal noise
+estimates, uncertainty floors and elapsed-time-aware propagation. Do not
+count overlapping TWAP observations as independent new evidence. Large
+innovations can indicate a real jump as well as bad data: flag them for
+diagnosis rather than automatically rejecting every exploitable displacement.
+Atomic arb remains independent of a directional turn estimate. Only filtered
+estimates available at execution time may drive actions; retrospective
+smoothing is a separate diagnostic. These distinctions are developed in
+[[https://users.aalto.fi/~ssarkka/pub/cup_book_online_20131111.pdf][Sarkka's Bayesian Filtering and Smoothing]].
+
+A two-state, scalar-observation filter has bounded work per TOKEN: two state
+values, three independent covariance entries, and scalar innovation division.
+It is a plausible EVM candidate, subject to fixed-point/covariance tests and
+gas measurement. The wheel can service constituents incrementally and publish
+coherent dated observations. Acceleration and switching-regime models are
+later comparisons if measured errors justify their extra assumptions.
+
+The related trading-control literature also separates signal estimation
+from how quickly to trade. [[https://w4.stern.nyu.edu/facdir/lpederse/papers/DynamicTrading.pdf][Garleanu and Pedersen (2013)]] derive partial
+adjustment with signals of different persistence and transaction costs.
+That supports studying graded adjustment and signal horizons, but their
+objective and market model do not establish optimality for our LP, credit,
+desk and endogenous BUCK-price system.
+
+*** Evidence required before promotion
+
+Retain the original quorum and fast-gate runs as controls. Compare a graded
+EMA observer and a two-state Kalman observer with the same allocation target
+and graded actuator. First replay identical histories diagnostically, then run separate
+closed-loop pyrevm worlds: trades change later inputs. Add panes for actual
+and target weights, price velocity/uncertainty, evidence score, requested and
+executed size, and the reason for an override or a blocked execution.
+
+The clean three-phase case should show repeated, mirrored opportunities
+after highs and lows while the allocation gap remains outside its band.
+Do not fit or disclose its known phase or period to either observer. Include
+monotone ramps, persistent repricing, small false reversals, shocks, different
+cycle lengths, noisy held-out seeds and sparse service. Assess false-start
+cost, missed opportunity, turnover, exposure and independently marked wealth
+against holding, alongside bvib, K, desk capital and private credit flows.
+Use the shared historical bootstrap; never fit parameters on the future
+120-day evaluation interval. A prettier turning-point trace alone is not an
+acceptance criterion.
 
 ** Final lab experiment: capture a sudden pool disturbance
 :PROPERTIES:
@@ -656,11 +832,13 @@ execute. No finite book is expected to absorb arbitrary unbounded shocks.
   does not imply a zero time average. Apply it to the exogenous feed only;
   controllers must still see only observations available at execution time.
   Preserve the present unconstrained-walk datasets as the prior baseline.
-- [ ] Overlay executed desk and basket TOKEN buys/sells and triangle-arbitrage
+- [X] Overlay executed desk and basket TOKEN buys/sells and triangle-arbitrage
   cycles on the token-price panes. Decode transaction receipts, distinguishing
   TOKEN direction from the opposite BUCK direction and LP pairing from a
   swap. Include event counts and an inspectable execution log so an inactive
-  policy is distinguishable from missing telemetry.
+  policy is distinguishable from missing telemetry. All 351 instrumented
+  runs match the prior frame values exactly; the receipt audit reconciles
+  987,604 arb cycles, 11 desk operations and 2,133 basket TOKEN swaps.
 - [ ] Compare explicit profit destinations and fee spending/reinvestment
   policies. Holding arb profit in BUCK and leaving LP fees uncollected is a
   monetary flow assumption, even with an unperturbed three-phase feed. Keep
@@ -678,7 +856,30 @@ execute. No finite book is expected to absorb arbitrary unbounded shocks.
 - [ ] Measure turn-quorum lag and missed rebalancing returns against plain
   bands and a small set of faster policies. Compare equal books, fees and
   turnover limits before changing windows or quorum. Bootstrap is fixed;
-  timing and profitability remain open.
+  timing and profitability remain open. The clean 30-day three-phase case
+  currently makes all 12 active basket swaps by day 20.25 and none thereafter:
+  the quorum opens near the mean crossing, after allocation errors have
+  fallen inside the 2 pp band. Require recurring opportunity capture after
+  deployment settles; distinguish passive LP activity, pairing, separate
+  arb receipts and active basket swaps in the return comparison. The first
+  controlled comparison now exists in [[file:control-lab/gate-comparison/results.org][the gate experiment]]: the 5-day EMA
+  velocity gate restores recurring trades with far less turnover in trade
+  count than removing the veto entirely. Ending marked equity improves on
+  this signal, while bvib error and K movement increase. Validate additional
+  disturbances, cost/return attribution and monetary flows before promoting
+  a replacement gate to the main campaign.
+- [ ] Implement the [[#graded-turn-response][allocation-distance and turn-evidence comparison]]:
+  normalized EMA evidence and a two-state Kalman observer feeding the same
+  bounded participation law. Record strength, uncertainty, remaining gap,
+  requested/executed size and override reasons; test false turns, reliable
+  runs and wheel-cadence invariance before choosing a production policy.
+- [X] Build the [[file:PAIR-OBSERVER.org][offline pair-observer lab]]: BUCK/USDC route fusion,
+  coherent TOKEN-pair level/velocity/acceleration and covariance, uncertain
+  own-impact inputs, cessation-based requests and proportional counter-token
+  allocation. Test fixed versus historical spectral response scales on 99
+  runs, including the existing lagged-commodity generator. These are sensor
+  and hypothetical-allocation results, not executed returns; interval
+  calibration fails on rough commodity motion and needs further work.
 - [ ] Sweep desk entry/release bands, gain, persistence and daily/total
   budgets. Measure residual P error, integral movement, actual credit uptake
   and desk wealth against holding its initial grant. Preserve the intended

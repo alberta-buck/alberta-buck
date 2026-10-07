@@ -8,6 +8,7 @@ import shutil
 
 from .cli import atomic_json
 from .render import EXPLANATIONS
+from .event_view import MARKER_NOTE, execution_counts, execution_log, price_markers
 
 COLORS = ["#2463c4", "#b86107", "#158067"]
 
@@ -36,10 +37,16 @@ def plot_data(result):
         ])
     pane("price", "Token prices in dollars", "USD / baseline mean", lines,
          "Solid: TOKEN/BUCK × BUCK/USDC. Dashed: external feed. Dotted: TOKEN/USDC spot. Overlapping lines mean the markets agree.")
+    panes[-1]["markers"] = price_markers(result)
+    if panes[-1]["markers"]:
+        panes[-1]["note"] += " " + MARKER_NOTE
     if flags.get("monitor"):
         pane("native", "Token prices in BUCK", "BUCK / baseline mean", [
             line(f"TOKEN {'ABC'[i]}", color, lambda f: f["token_buck"][i] / base[i]) for i, color in enumerate(COLORS)],
             "Native pool quotes expose the monetary response before conversion into dollars.")
+        panes[-1]["markers"] = price_markers(result, native=True)
+        if panes[-1]["markers"]:
+            panes[-1]["note"] += " " + MARKER_NOTE
         pane("reference", "Reference value and BUCK price", "Reference costs / USD per BUCK", [
             line("Live bvib", "#172d39", lambda f: f["bvib"]),
             line("Published bvib", "#b63e45", lambda f: f["signal"]["raw"] if f["signal"]["fresh"] else None, "3 3"),
@@ -103,7 +110,47 @@ def plot_data(result):
         pane("allocation", "Basket allocation", "Percent", [
             line(f"TOKEN {'ABC'[i]}", color, lambda f: f["basket"]["weights"][i] / 100) for i, color in enumerate(COLORS)],
             "Allocation follows the replacement basket’s bounded Daily / Sync / Respond work.")
+    if "pair_signal" in frames[0]:
+        pane("pair-quality", "Pair observer readiness and cost", "Indicator / millions of gas", [
+            line("Ready BUCK route", COLORS[0], lambda f: int(bool(f["pair_signal"]["ready_mask"] & 1))),
+            line("Ready USDC route", COLORS[1], lambda f: int(bool(f["pair_signal"]["ready_mask"] & 2)), "3 3"),
+            line("Observation wheel gas / 1M", "#7653ab", lambda f: f["pair_signal"]["gas"] / 1e6),
+        ], "Readiness requires aligned elapsed samples and two days of warmup. Gas is the actual pyrevm transaction receipt, including the observation wheel.")
+        for pair_number, (i, j) in enumerate(((0, 1), (0, 2), (1, 2))):
+            name = f"{'ABC'[i]}/{'ABC'[j]}"
+            def pair(f, p=pair_number):
+                return f["pair_signal"]["pairs"][p]
+            pane(f"pair-level-{pair_number}", f"{name} · relative price", "Log basis points from baseline ratio", [
+                *[line(label, color, lambda f, key=key: 10000 * math.log((f[key][i] / f[key][j]) / (base[i] / base[j])), dash)
+                  for key, label, color, dash in (("token_buck", "BUCK spot route", COLORS[0], "3 3"),
+                    ("token_usdc", "USDC spot route", COLORS[1], "7 4"))],
+                line("Filtered consensus", "#172d39", lambda f: 10000 * (pair(f)["level_log"] - math.log(base[i]/base[j])) if pair(f)["ready_mask"] else None),
+            ], "A common movement of the quote currency cancels in each TOKEN ratio. The known baseline ratio only centers this drawing; the contract has no equilibrium price anchor.")
+            pane(f"pair-rate-{pair_number}", f"{name} · departure and closure rate", "Log basis points per day", [
+                line("Estimated rate", "#172d39", lambda f: pair(f)["rate_bp_day"] if pair(f)["ready_mask"] else None),
+                *[line(label, color, lambda f, q=q: pair(f)["routes"][q]["rate_bp_day"] if pair(f)["ready_mask"] & (1 << q) else None, "3 3")
+                  for q, label, color in ((0, "BUCK route", COLORS[0]), (1, "USDC route", COLORS[1]))],
+                *[line(label, "#af7278", lambda f, key=key: pair(f)[key] if pair(f)["ready_mask"] else None, "2 4")
+                  for key, label in (("low_bp_day", "Allowance lower"), ("high_bp_day", "Allowance upper"))],
+                line("Smooth input reference at interval midpoint", "#87949c", lambda f: pair(f)["truth_bp_day"], "7 4"),
+                line("Zero rate", "#a1a9ad", lambda f: 0., "2 4"),
+            ], "Positive means the numerator gains relative to the denominator. For an overweight numerator this is departure; falling positive values show cessation before negative closure. Allowances are empirical and not confidence intervals. The reference is scoring-only, available in replay arms.")
+            pane(f"pair-error-{pair_number}", f"{name} · prediction error and route disagreement", "Log basis points", [
+                line("Mean absolute prediction error", "#b63e45", lambda f: pair(f)["error_bp"] if pair(f)["ready_mask"] else None),
+                line("Filtered route level spread", "#7653ab", lambda f: pair(f)["level_spread_bp"] if pair(f)["ready_mask"] else None),
+            ], "Prediction error includes noise, real news and model lag. Agreement between venues does not remove shared noise.")
+    if "pair_policy" in frames[0]:
+        pane("pair-intent", "Pair participation after the current actions", "Fraction of eligible gap per day", [
+            line(f"{'ABC'[i]} → {'ABC'[j]}", color, lambda f, i=i, j=j: f["pair_policy"]["desire"][i][j], dash)
+            for (i,j),color,dash in zip(((0,1),(0,2),(1,0),(1,2),(2,0),(2,1)),
+                (COLORS[0],COLORS[0],COLORS[1],COLORS[1],COLORS[2],COLORS[2]), (None,"4 4",None,"4 4",None,"4 4"))],
+            "These are post-action directional rates before allocation/depth caps. Own-impact uncertainty can reduce them after a fill. Executed requests are recorded separately in JSON and price markers.")
+        pane("pair-impact", "Basket's remaining own-impact allowance", "Log basis points", [
+            line(f"TOKEN {'ABC'[i]}", color, lambda f: f["pair_policy"]["own_impact_ticks"][i] * math.log(1.0001) * 10000)
+            for i,color in enumerate(COLORS)],
+            "Measured immediate tick movement from this basket's operations, accumulated and linearly decayed over two days. It widens uncertainty; it is not subtracted as a known counterfactual price path.")
     return dict(days=[f["day"] for f in frames], panes=panes, summary=result["summary"],
+                execution_counts=execution_counts(frames), executions=execution_log(result),
                 mean_bvib=sum(f["bvib"] for f in frames) / len(frames),
                 config={k: cfg[k] for k in ("feed", "controller", "desk", "demand", "supply")},
                 stage=result["stage"], profile=result["profile"]["name"], cache_key=result["cache_key"])
@@ -131,22 +178,26 @@ def render(root):
         group_limits = limits.setdefault(group, {})
         for pane in data["panes"]:
             values = [v for line in pane["lines"] for v in line["values"] if v is not None]
+            values.extend(p["value"] for group in pane.get("markers", []) for p in group["points"])
             if not values:
                 continue
             lo, hi = min(values), max(values)
             prior = group_limits.get(pane["id"], (lo, hi))
             group_limits[pane["id"]] = [min(lo, prior[0]), max(hi, prior[1])]
     public = {k: manifest[k] for k in ("schema", "status", "axes", "stages", "cases", "unique_runs", "visible_cases", "implementation")}
-    public.update(entries=entries, limits=limits, explanations=EXPLANATIONS,
+    public.update(entries=entries, limits=limits, explanations=manifest.get("explanations", EXPLANATIONS),
                   days=manifest["requested_config"]["days"],
                   seed=manifest["requested_config"]["seed"],
                   walk_daily_sigma=manifest["requested_config"]["feed"]["walk_daily_sigma"],
                   elapsed_seconds=manifest.get("elapsed_seconds", 0))
+    if "method" in manifest:
+        public["method"] = manifest["method"]
     (root / "manifest.js").write_text("window.controlLabManifest=" + json.dumps(public, ensure_ascii=True, separators=(",", ":")) + ";\n")
     web = Path(__file__).with_name("web")
     for name in ("index.html", "app.js", "style.css"):
         if name == "index.html":
-            (root / name).write_text((web / name).read_text().replace("manifest.json", source.name))
+            template = manifest["kind"] + ".html" if manifest.get("kind") in ("block-pairs", "pair-basket") else name
+            (root / name).write_text((web / template).read_text().replace("manifest.json", source.name))
         else:
             shutil.copyfile(web / name, root / name)
     atomic_json(root / "render-summary.json", dict(runs=len(entries), status=manifest["status"],

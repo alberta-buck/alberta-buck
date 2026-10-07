@@ -166,6 +166,9 @@ class World:
             reference_amounts=[str(x) for x in self.reference_amounts],
             reference_at_means=self.reference_cost(cfg["feed"]["base"]),
             reference_at_start=self.reference_cost(baseline_prices(cfg, 0)))
+        from .events import ExecutionRecorder
+        self.recorder = ExecutionRecorder(self)
+        self.events = []
 
     def close(self):
         self.evm.__exit__(None, None, None)
@@ -241,7 +244,7 @@ class World:
                     self.chain.send(d.simlp.functions.swap(addr, d.simlp.address, sp < current,
                         (1 << 127) - 1, sp, *self.pairs[addr]))
 
-    def arbitrage(self):
+    def arbitrage(self, phase="arbitrage"):
         if not self.flags.get("arb"):
             return
         from web3.logs import DISCARD
@@ -251,6 +254,7 @@ class World:
             events = self.arb.events.Cycled().process_receipt(rc, errors=DISCARD)
             self.counters["arb_cycles"] += len(events)
             self.counters["arb_profit_buck"] += sum(int(e["args"]["profit"]) for e in events) / E6
+            self.events.extend(self.recorder.capture(rc, phase))
             if not events:
                 break
 
@@ -291,7 +295,7 @@ class World:
     def snapshot(self, row, before, invalid_after_move):
         d, sig = self.d, self.signals
         p = self.prices()
-        frame = {**row, **p, "before_policy": before, "cumulative": dict(self.counters),
+        frame = {**row, **p, "before_policy": before, "cumulative": dict(self.counters), "events": self.events,
                  "gas": self.gas - self.bootstrap_gas,
                  "transactions": self.transactions - self.bootstrap_transactions}
         frame["bvib"] = int(d.basket.functions.basketValueInBuck().call()) / E18
@@ -331,6 +335,9 @@ class World:
             account=int(d.buck.functions.signedBalanceOf(d.basket.address).call()) / E6)
         return frame
 
+    def before_policy(self):
+        """Optional experiment instrumentation after the oracle settling window."""
+
     def run(self, rows):
         from web3.logs import DISCARD
         from web3.exceptions import ContractLogicError, Web3RPCError
@@ -345,12 +352,13 @@ class World:
         self.bootstrap_transactions = self.transactions
         frames = []
         for self.step, row in enumerate(rows):
+            self.events = []
             stamp = self.start + self.step * (86400 // self.cfg["ticks_per_day"])
             self.warp(stamp)
             self.drive(row["target_usd"])
-            self.arbitrage()
+            self.arbitrage("after-feed")
             self.agents()
-            self.arbitrage()
+            self.arbitrage("after-agents")
             invalid_after_move = False
             if self.flags.get("monitor"):
                 # Probe quality immediately, without letting a pre-move TWAP
@@ -364,11 +372,13 @@ class World:
                     self.chain.send(self.signals.functions.observe())
             self.warp(stamp + 601)
             before = self.prices()
+            self.before_policy()
             if self.flags.get("monitor"):
                 self.chain.send(self.d.wheel.functions.rearm())
                 rc = self.chain.send(self.d.wheel.functions.tick(12, 32))
                 self.counters["desk_ops"] += len(self.d.desk.events.MonetaryOperation().process_receipt(rc, errors=DISCARD))
-            self.arbitrage()
+                self.events.extend(self.recorder.capture(rc, "policy"))
+            self.arbitrage("after-policy")
             frames.append(self.snapshot(row, before, invalid_after_move))
         return frames
 

@@ -8,6 +8,14 @@
   --white:#fff;
   --blue:#2463c4
 }
+.marker-swatch{font-size:17px;line-height:1}
+.execution-marker{cursor:pointer}
+.execution-details{margin:16px 0;border:1px solid var(--line);border-radius:6px;padding:12px}
+.execution-details summary{cursor:pointer;font-weight:600}
+.execution-body{overflow-x:auto}
+.execution-body table{border-collapse:collapse;width:100%;font-size:12px}
+.execution-body th,.execution-body td{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid var(--line)}
+.execution-body td div{min-width:240px}
 *{
   box-sizing:border-box
 }

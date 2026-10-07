@@ -339,6 +339,77 @@ control-lab-verify:
 control-lab-serve:
 	$(CONTROL_LAB_PYTHON) -m http.server 8000 --bind 127.0.0.1 --directory doc
 
+# Isolated test-adapter comparison; does not replace the production gate.
+CONTROL_LAB_GATES_OUT ?= doc/control-lab/gate-comparison
+.PHONY: control-lab-gates control-lab-gates-render
+control-lab-gates: stage-uniswap
+	forge build $(FORGE_OPTS) -q test/harness/BasketGateComparison.sol
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.gate_comparison --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_GATES_OUT)"
+	$(MAKE) control-lab-gates-render
+
+control-lab-gates-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.gate_render --out "$(CONTROL_LAB_GATES_OUT)"
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_GATES_OUT)/results.org" --funcall org-html-export-to-html
+
+# Fast Python sensor comparison, separate from EVM campaign fingerprints.
+PAIR_OBSERVER_OUT ?= doc/control-lab/pair-observer
+PAIR_OBSERVER_ARGS ?=
+.PHONY: pair-observer-lab pair-observer-data pair-observer-render pair-observer-test
+pair-observer-data:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.pair_observer_lab --out "$(PAIR_OBSERVER_OUT)" --jobs $(CONTROL_LAB_JOBS) $(PAIR_OBSERVER_ARGS) --no-render
+
+pair-observer-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.pair_observer_lab --out "$(PAIR_OBSERVER_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit doc/PAIR-OBSERVER.org --funcall org-html-export-to-html
+
+pair-observer-lab: pair-observer-data
+	$(MAKE) pair-observer-render
+
+pair-observer-test:
+	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_pair_observer.py -q
+
+# Passive Solidity observer: isolated paired runs, without replacing trading policy.
+CONTROL_LAB_BLOCK_PAIRS_OUT ?= doc/control-lab/block-pairs
+.PHONY: control-lab-block-pairs control-lab-block-pairs-render control-lab-block-pairs-test
+control-lab-block-pairs: stage-uniswap
+	forge build $(FORGE_OPTS) -q
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.block_pairs --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BLOCK_PAIRS_OUT)" --jobs $(CONTROL_LAB_JOBS)
+	$(MAKE) control-lab-block-pairs-render
+
+control-lab-block-pairs-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.block_pairs --out "$(CONTROL_LAB_BLOCK_PAIRS_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_BLOCK_PAIRS_OUT)/results.org" --funcall org-html-export-to-html
+
+control-lab-block-pairs-test:
+	forge test $(FORGE_OPTS) --match-path test/basket/BlockPairSignals.t.sol
+
+# Matched basket responses: keep the observer, arb, desk and private agents fixed.
+CONTROL_LAB_PAIR_BASKET_OUT ?= doc/control-lab/pair-basket
+.PHONY: control-lab-pair-basket control-lab-pair-basket-render control-lab-pair-basket-test
+control-lab-pair-basket: stage-uniswap
+	forge build $(FORGE_OPTS) -q
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.pair_basket --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_PAIR_BASKET_OUT)" --jobs $(CONTROL_LAB_JOBS)
+	$(MAKE) control-lab-pair-basket-render
+
+control-lab-pair-basket-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.pair_basket --out "$(CONTROL_LAB_PAIR_BASKET_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_PAIR_BASKET_OUT)/results.org" --funcall org-html-export-to-html
+
+control-lab-pair-basket-test:
+	forge test $(FORGE_OPTS) --match-contract 'PairBasketResponseTest|PairRebalancePolicyTest'
+
+# Explain saved basket outcomes with pre-response events from a lab-only facet.
+CONTROL_LAB_PAIR_OPPORTUNITIES_OUT ?= doc/control-lab/pair-opportunities
+.PHONY: control-lab-pair-opportunities control-lab-pair-opportunities-render
+control-lab-pair-opportunities: stage-uniswap
+	forge build $(FORGE_OPTS) -q test/harness/PairBasketDecisionTrace.sol
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.pair_opportunities --source "$(CONTROL_LAB_PAIR_BASKET_OUT)" --out "$(CONTROL_LAB_PAIR_OPPORTUNITIES_OUT)" --jobs $(CONTROL_LAB_JOBS)
+	$(MAKE) control-lab-pair-opportunities-render
+
+control-lab-pair-opportunities-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.pair_opportunities --out "$(CONTROL_LAB_PAIR_OPPORTUNITIES_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_PAIR_OPPORTUNITIES_OUT)/results.org" --funcall org-html-export-to-html
+
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────
 #

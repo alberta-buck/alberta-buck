@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 
 from .model import STAGES
+from .event_view import price_markers
 
 
 EXPLANATIONS = {
@@ -24,6 +25,22 @@ EXPLANATIONS = {
     "all": "Add the same desk to the two-sided private market. Compare both versus all for its incremental effect, and desk versus all for the private agents' effect. Every arm uses the same feed, pool liquidity, starting K and passive basket. The actors trade against current external basket value, not an assumed permanent USDC peg.",
     "basket": "Finally enable the replacement basket's Daily/Sync/Respond work as well. Its initially idle TOKEN can be paired and rebalanced; changes in liquidity and basket credit now join the feedback loop. This additional arm separates the basket response from the earlier monetary experiments. Allocation and equity appear in the last pane.",
 }
+
+
+def _execution_markers(ax, result, native=False):
+    markers = price_markers(result, native)
+    for group in sorted(markers, key=lambda g: not g["id"].startswith("arb")):
+        points = group["points"]
+        ax.scatter([result["frames"][p["index"]]["day"] for p in points], [p["value"] for p in points],
+            marker={"up": "^", "down": "v", "diamond": "D"}[group["shape"]],
+            s=8 if group["id"].startswith("arb") else 25, color=group["color"],
+            alpha=.4 if group["id"].startswith("arb") else .9, zorder=4,
+            label=f"{group['label']} ({sum(p['count'] for p in points)})")
+    if markers:
+        lo, hi = ax.get_ylim()
+        values = [p["value"] for g in markers for p in g["points"]]
+        ax.set_ylim(min(lo, min(values) - .005), max(hi, max(values) + .005))
+    ax.legend(loc="upper right", ncol=3, fontsize=6 if markers else 8)
 
 
 def plot_case(result, dest, price_limits, common_limits, k_limits):
@@ -48,7 +65,7 @@ def plot_case(result, dest, price_limits, common_limits, k_limits):
                 color=color, lw=1.4, label=f"TOKEN {'ABC'[i]}")
     ax.set(ylim=price_limits, ylabel="TOKEN price in USD\n/ initial base price")
     ax.set_title("Solid: TOKEN/BUCK × BUCK/USDC   ·   dashed: target   ·   dotted: TOKEN/USDC", fontsize=9, loc="left")
-    ax.legend(loc="upper right", ncol=3, fontsize=8)
+    _execution_markers(ax, result)
     if monitored:
         ax = axes.pop(0)
         for i, color in enumerate(colors):
@@ -56,7 +73,7 @@ def plot_case(result, dest, price_limits, common_limits, k_limits):
             ax.plot(day, [x["token_buck"][i] / base for x in f], color=color, label=f"TOKEN {'ABC'[i]}")
         ax.set(ylim=price_limits, ylabel="TOKEN price in BUCK\n/ initial base price")
         ax.set_title("Native TOKEN/BUCK prices: the monetary response is visible here before USD conversion", fontsize=9, loc="left")
-        ax.legend(loc="upper right", ncol=3, fontsize=8)
+        _execution_markers(ax, result, native=True)
         ax = axes.pop(0)
         ax.plot(day, [x["bvib"] for x in f], color="#111827", label="Live basket TWAP (BUCK)")
         ax.plot(day, [x["signal"]["raw"] if x["signal"]["fresh"] else math.nan for x in f],
@@ -168,6 +185,45 @@ def plot_ladders(result, dest):
     plt.close(fig)
 
 
+def plot_response_diagnostic(result, dest):
+    """Show why a clean recurring opportunity can disappear before admission."""
+    import matplotlib.pyplot as plt
+    frames = [f for f in result["frames"] if 30 <= f["day"] <= 60]
+    if not frames:
+        return
+    days = [f["day"] for f in frames]
+    targets = []
+    for f in frames:
+        raw = [w * math.exp(-e * math.log(1.0001) * result["config"]["basket"]["tilt"])
+               for w, e in zip((3333, 3333, 3334), f["signal"]["excursion"])]
+        targets.append(100 * raw[0] / sum(raw))
+    fig, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True, constrained_layout=True)
+    axes[0].plot(days, [f["target_usd"][0] for f in frames], color="#2463c4", label="TOKEN A external price")
+    axes[0].axhline(100, color="#8b969b", ls="--", lw=.8)
+    axes[0].set_ylabel("USD / TOKEN A")
+    axes[1].plot(days, [f["basket"]["weights"][0] / 100 for f in frames], color="#172d39", label="Actual portfolio weight")
+    axes[1].plot(days, targets, color="#b86107", label="Leaned target (reconstructed)")
+    # The lab currently inherits weightBandBp=200 from the equity constructor.
+    axes[1].fill_between(days, [v-2 for v in targets], [v+2 for v in targets], color="#b86107", alpha=.14, label="Target ± 2 percentage points")
+    axes[1].set_ylabel("TOKEN A allocation (%)")
+    axes[2].step(days, [f["signal"]["votes"][0] for f in frames], where="post", color="#7155b6", label="Reversal votes")
+    axes[2].axhline(4, color="#b52b40", ls="--", lw=1, label="Four-vote quorum")
+    axes[2].set(ylabel="Votes", ylim=(-.3, 6.3), xlabel="Elapsed days")
+    for ax in axes:
+        for day in (37.5, 52.5):
+            ax.axvline(day, color="#2463c4", alpha=.35, ls=":")
+        for day in (45, 60):
+            ax.axvline(day, color="#b52b40", alpha=.5, ls="--")
+        ax.grid(alpha=.15)
+        ax.legend(loc="upper left", fontsize=8)
+        ax.set_xlim(30, 60)
+    axes[0].set_title("Dotted: price extrema · Dashed red: quorum near mean crossing · No basket TOKEN swaps in this interval", fontsize=10)
+    fig.suptitle("Clean three-phase basket · TOKEN A · opportunity versus execution gate", fontsize=13)
+    fig.savefig(dest.with_suffix(".png"), dpi=135)
+    fig.savefig(dest.with_suffix(".svg"))
+    plt.close(fig)
+
+
 def render(manifest_path):
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "alberta-buck-matplotlib"))
     import matplotlib
@@ -210,6 +266,8 @@ def render(manifest_path):
         for r in cases:
             stem = f"{profile}-{r['stage']}"
             plot_case(r, plots / stem, price_limits, common_limits, k_limits)
+            if profile == "three-phase" and r["stage"] == "basket":
+                plot_response_diagnostic(r, plots / "three-phase-basket-policy-diagnostic")
             entry = next(e for e in manifest["entries"] if e["profile"] == profile and e["stage"] == r["stage"])
             report += [f"** {r['flags']['title']}", "", EXPLANATIONS[r["stage"]], "",
                        f"[[file:results/{entry['file']}][Output JSON]] · [[file:plots/{stem}.svg][Vector figure]]", "",

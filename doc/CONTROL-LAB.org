@@ -9,6 +9,33 @@ For selectable price disturbances, buyer/seller quantities and JavaScript
 graphs, open [[file:control-lab/interactive/index.html][the interactive control lab]]. The Org walkthrough below keeps
 the original matched figures and explains the staged construction.
 
+The new [[file:control-lab/block-pairs/index.html][TOKEN-pair observation experiment]] adds the on-chain observer beside
+the existing EMAs, with graphs of relative prices, estimated departure/closure
+rates, prediction errors, route disagreement and readiness. Its
+[[file:control-lab/block-pairs/results.org][results and static figures]] include matched observer-off controls. Existing
+basket, arb and desk policies retain trading authority during this phase.
+Regenerate with =make control-lab-block-pairs=; render cached JSON with
+=make control-lab-block-pairs-render=; run the Solidity checks with
+=make control-lab-block-pairs-test=.
+
+The next [[file:control-lab/pair-basket/index.html][graded pair-basket experiment]] compares two responses under the same
+declared targets, feeds, capital and agent rules. Its
+[[file:control-lab/pair-basket/results.org][report]] adds executed transfer markers, allocation, debt and equity panes.
+It remains experimental: clean-cycle activity nearly stops after month one,
+and noisy-flat allocation control deteriorates despite higher terminal marks.
+Those findings pause further arb/desk changes while the basket's sizing and
+bootstrap assumptions are reviewed. Regenerate with
+=make control-lab-pair-basket=, render with =make control-lab-pair-basket-render=,
+and test with =make control-lab-pair-basket-test=. The
+[[file:BLOCK-PAIR-OBSERVER.org][design and implementation checklist]] tracks the remaining work.
+
+The [[file:control-lab/pair-opportunities/results.org][opportunity audit]] follows each relative-price turn through the exact
+pre-response allocation, sizing and receipts. Its three pair plots show
+why positive signals usually do not become transfers, and identify trades
+that continue after prices cross their relative reference. Regenerate with
+=make control-lab-pair-opportunities=; render cached traces with
+=make control-lab-pair-opportunities-render=.
+
 * Start with three prices
 
 This is a sequence of small, reproducible experiments on the actual Solidity
@@ -376,6 +403,148 @@ separately from the original Org/PNG/SVG baseline. During generation,
 =control-lab-interactive-render= can show a first campaign's completed subset;
 unfinished combinations are explicitly unavailable. Shared scales become
 final when the complete campaign has rendered.
+
+** Executed trades on the price panes
+
+The triangle convention follows the project's earlier
+[[file:../alberta_buck/sim/plot_rebalancing.py][rebalancing simulation plots]]: an upward triangle means an executed TOKEN
+buy and a downward triangle means an executed TOKEN sell. Desk buys/sells
+are green/red, basket buys/sells are teal/orange, and arbitrage buys/sells
+are purple/pink. A grey diamond means the basket paired existing TOKEN
+with BUCK into liquidity; that operation does not include a TOKEN swap.
+Sensor votes and portfolio valuation updates are not trade markers.
+
+Markers appear on both the USD and native-BUCK token price panes. Each
+marker combines fills in the same observation, token, actor and direction,
+at their volume-weighted execution price. The USD pane converts that price
+using the observation's closing BUCK/USDC quote; it is not an additional
+USD trade. Arbitrage markers show the TOKEN/BUCK leg. The opposite
+TOKEN/USDC leg appears in the execution log. The six-hour observation
+resolution does not imply simultaneous transactions: the log retains
+=after-feed=, =after-agents=, =policy= and =after-policy= phases and transaction
+ordering. Raw JSON also retains log indices and exact integer trade amounts.
+
+Click a legend item to hide dense arbitrage markers while inspecting the
+desk or basket. Hover a marker for the token, fill count and quantities;
+click it to select the observation and open the execution log. The chart's
+arrow-key cursor also selects the log's day. Run totals distinguish zero
+operations from old datasets that did not record executions.
+
+The records come from successful transaction receipts: =MonetaryOperation=,
+=Responded=, =Cycled= and each constituent pool's =Swap=. Buy/sell directions
+come from actual signed pool amounts, not the proposed operation or sensor
+signal. In particular, the desk supplies BUCK by buying TOKEN, and absorbs
+BUCK by selling TOKEN. LP pairing and valuation-only response events are
+recorded separately from swaps.
+
+The initial mixed, zero-walk, medium-flow runs illustrate the distinction:
+the desk-only arm executes 11 monetary operations containing 12 TOKEN buys
+and 21 TOKEN sells. The basket arm executes 12 TOKEN buys, 10 TOKEN sells,
+99 LP pairings and 3,046 triangle-arbitrage cycles; its desk executes zero
+operations. The two private flows keep the desk mostly inside its 3% entry
+band. These are measured executions, not missing graph activity. Receipt
+instrumentation leaves the original price paths and account balances intact.
+
+The instrumented campaign completed in 29.5 minutes with ten workers.
+All 351 runs match baseline =7554cc4= frame-for-frame after excluding the
+new event records. The receipt audit accounts for 987,604 arbitrage cycles,
+11 desk operations and 2,133 basket TOKEN swaps across the complete selector
+grid. All 24 Python checks and browser checks for all three profiles pass.
+
+*** Clean three-phase case: the recurring harvest is missing
+
+With zero walk and medium private flows, the basket makes six TOKEN buys
+and six TOKEN sells in 120 days. All twelve swaps occur by day 20.25:
+
+| TOKEN | Actual buy days | Actual sell days |
+|-------+-----------------+------------------|
+| A | none | 15, 15.5 |
+| B | 20, 20.25 | 5, 5.25, 5.5, 5.75 |
+| C | 10, 10.25, 10.5, 10.75 | none |
+
+There are also 92 LP pairings, 3,197 arb cycles and zero desk operations.
+These swaps are concentrated in the initial deployment/allocation transient;
+the later repeating signal does not produce repeating active rebalancing.
+Passive LP inventory changes and fees are separate from this active policy.
+
+TOKEN A illustrates why. It peaks at days 7.5, 37.5, 67.5 and 97.5, and
+troughs at 22.5, 52.5, 82.5 and 112.5. The daily four-of-six EMA quorum
+confirms reversals around the following mean crossing, about 7.5 days
+after the extremum. The following values use saved observations; leaned
+targets are reconstructed from the recorded excursions and declared weights:
+
+| Day | A feed, USD | Actual weight | Leaned target | Weight minus target | Gate |
+|-----+-------------+---------------+---------------+---------------------+------|
+| 37.5 | 112.00 | 36.49% | 29.75% | +6.74 pp | sell blocked, 0 votes |
+| 44 | 102.49 | 34.25% | 31.90% | +2.35 pp | sell blocked, 3 votes |
+| 45 | 100.00 | 33.73% | 32.63% | +1.10 pp | gate opens; inside 2 pp band |
+| 52.5 | 88.00 | 30.91% | 37.34% | -6.43 pp | buy blocked, 0 votes |
+| 60 | 100.00 | 33.86% | 33.55% | +0.31 pp | gate opens; inside band |
+
+#+ATTR_ORG: :width 1100
+[[file:control-lab/plots/three-phase-basket-policy-diagnostic.png]]
+
+After day 30, the largest ungated absolute target gaps observed are only
+1.10, 1.28 and 1.63 percentage points for A/B/C, respectively: all are below
+the 2 pp trading band. Larger gaps occur while the trend gate forbids the
+corresponding trade. The 30%-of-declared-weight leash is about 10 pp wide,
+while observed deviations from declared weights are at most 3.2 pp, so
+it does not override that gate. Credit constraints need not be invoked
+to explain this lack of allocation-driven trades.
+
+This behavior follows the present policy rules, but it does not demonstrate
+the intended repeated reversion-to-the-mean harvest. A clean periodic
+acceptance experiment should compare recurring sell-high/buy-low behavior
+after deployment settles, with fills, fees and inventory returns against
+a matched passive LP and holding benchmark. An exact trade at each price
+extremum is not a requirement for a causal controller. Waiting until the
+excursion has mostly disappeared is nevertheless too late for this signal.
+The filter/gate/band combination needs a measured comparison before tuning;
+the baseline remains unchanged for that comparison.
+
+*** Controlled comparison: remove the veto or shorten its memory
+
+[[file:control-lab/gate-comparison/results.html][The gate-comparison report]] contains three further 120-day EVM runs with the
+same clean feed, starting books, medium buyer/seller rates, leaned targets,
+2 pp band and execution caps. A test-only adapter changes =running(i, side)=
+for the basket. The original adapter reproduces the main baseline's full
+frames exactly except for its additional gas. The main campaign's policy
+has not been changed.
+
+| Gate | TOKEN buys | TOKEN sells | Swaps from day 30 onward | Ending marked equity, USD | Mean absolute bvib error | Final K |
+|------+------------+-------------+--------------------------+---------------------------+--------------------------+---------|
+| Original four-of-six | 6 | 6 | 0 | 996,226 | 0.165% | 0.7537 |
+| Band only; no trend veto | 329 | 299 | 465 | 1,063,278 | 1.353% | 0.8361 |
+| Fast EMA velocity | 73 | 91 | 100 | 1,069,877 | 0.945% | 0.8040 |
+
+#+ATTR_ORG: :width 1300
+[[file:control-lab/gate-comparison/gate-trades.png]]
+
+The fast candidate defers selling an above-anchor token only while the
+existing 5-day EMA velocity remains positive; it defers buying a below-anchor
+token while that velocity remains negative. The original six-window quorum
+still has its existing effect on response sizing, but no longer vetoes
+these trades. TOKEN A's first sale moves from day 15 to day 11, and buys
+appear at day 26, then recur across later cycles. Every token now has both
+buy and sell executions. The band-only comparison retains leaned targets;
+it removes only the trend veto, rather than changing to fixed targets.
+
+This supports separating an actionable reversal gate from long-window
+consensus. The fast candidate trades substantially less than the ungated
+one while capturing recurring opportunities. The equity numbers are marks
+including inventory/LP, with swap costs reflected in balances and gas
+excluded; they are not realized or liquidation returns. The policies also
+change credit use and private flows. Ending basket liens are approximately
+712,228 / 158,474 / 401,473 BUCK respectively, and both alternatives nearly
+exhaust the private issuer's spendable BUCK. Their larger bvib errors and K
+changes therefore need joint analysis with issuance and deleveraging before
+claiming superior whole-system equilibrium. No default gate is silently
+selected from this one clean signal.
+
+#+begin_src sh :eval never-export
+make control-lab-gates         # compile test adapter, cached EVM runs, plots + HTML
+make control-lab-gates-render  # saved JSON → plots, Org and HTML
+#+end_src
 
 The current =shock= selector adds 30% of TOKEN A's baseline mean to its
 external feed for ten days, before multiplying by the random walk.

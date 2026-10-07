@@ -1,0 +1,324 @@
+#+title: TOKEN-pair observer and cessation-of-departure experiment
+#+date: 2026-10-05
+#+options: toc:2 num:nil
+
+* Status and entry points
+
+The current direction is specified in [[file:BLOCK-PAIR-OBSERVER.org][the minimal per-block EVM design]].
+Historical cyclicality and spectral response fitting are shelved. The results
+below remain an archived experiment, including their failed uncertainty checks;
+the spectral arm is not the proposed production estimator.
+
+This is a Python reference experiment running beside the existing EMA
+design. It estimates relative motion from TOKEN/BUCK and TOKEN/USDC pools,
+then produces hypothetical allocation requests. It does not execute trades,
+change the Solidity sensor, replace the basket gate, or establish ROI.
+
+- [[file:control-lab/pair-observer/index.html][Interactive scenario/noise selector and seven aligned panes]]
+- [[file:control-lab/pair-observer/results.org][Generated results and all figures]]
+- [[file:control-lab/pair-observer/summary.json][Aggregate measured results]] and
+  [[file:control-lab/pair-observer/manifest.json][source fingerprint and individual compressed JSON datasets]]
+- [[file:../alberta_buck/sim/pair_observer.py][Estimator and diagnostic allocation machinery]],
+  [[file:../alberta_buck/sim/pair_spectrum.py][historical spectra]],
+  [[file:../alberta_buck/sim/pair_observer_lab.py][experiment runner]], and
+  [[file:../alberta_buck/sim/pair_observer_render.py][JSON-only renderer]].
+
+#+begin_src sh :eval never
+make pair-observer-lab             # cached generation, figures, design HTML
+make pair-observer-data            # Python only; no forge or pyrevm needed
+make pair-observer-render          # renders entirely from cached JSON
+make pair-observer-test
+# Override CONTROL_LAB_PYTHON / CONTROL_LAB_EMACS if needed.
+# Select a longer experiment without changing the normal control-lab grid:
+make pair-observer-lab PAIR_OBSERVER_OUT=/tmp/pair-long \
+  PAIR_OBSERVER_ARGS='--days 720 --cases changing-cycles,lagged-commodities'
+#+end_src
+
+The default grid contains 11 cases, three quote-noise levels (0, 20, 80 bp
+standard deviation per observation) and three seeds: 99 runs of 120 days.
+Each run has 481 live observations. The scalar daily EMA bank gets 1280
+historical days; the new observer gets 128 pre-run days at its live six-hour
+cadence. Reference prices are supplied baseline means, not the first live
+observation. Historical spectra use only days -1280 through -1.
+
+* Existing work used and reviewed
+
+| Existing component | Reuse or finding |
+|--------------------+------------------|
+| =sim/rebalance_policy.py: PairsPolicy= | Already uses cross-commodity log ratios and EMA velocity/curvature. Reuse its =_EmaLadder= for the daily comparator. Its first-sample =p0= and binary quorum are not adopted as the new observer's reference or policy. |
+| =sim/rebalance_policy.py: ModesPolicy= | Already removes the common numeraire and studies a covariance basis. Here the contrast basis is fixed; covariance remains explicit. Orthogonality alone is not statistical independence. |
+| =sim/rebalance_policy.py: synth_prices= | Reused intact for six lagged commodities with common monetary forcing and individual OU fluctuations. These are stress assumptions, not verified commodity production laws. |
+| =sim/rebalance_policy.py: VRatePolicy= | Prior departure/level/closure and rate-matching work. Its weight derivative can include its own actions; the new observer has no allocation input. |
+| =sim/signal_history.py= | Reuse the established EMA windows and known-mean bootstrap convention. |
+| =sim/control_lab/model.py: baseline_prices= | Reuse the clean three-phase price generator. |
+| =truthstake.py: KalmanOracle= | Scalar filtering and reporter-weighting precedent; unsuitable as-is for a joint relative-motion/covariance state. Its smoothing/reputation machinery is not imported. |
+| =doc/review/control-filter-bank.py= | Existing EMA frequency/phase illustration; EMA channels overlap and delay signals. |
+
+* What is observed
+
+Write a pool's quote as =P[i,q]= units of quote currency =q= per TOKEN =i=.
+For synchronized quotes through the same currency:
+
+#+begin_example
+z[i,j,q] = log(P[i,q]) - log(P[j,q])
+         = log(V[i]) - log(V[j]) + venue_error[i,q] - venue_error[j,q]
+#+end_example
+
+The quote currency's common value cancels. A fall in USDC that raises both
+TOKEN/USDC quotations equally is not a relative TOKEN gain. Local pool
+dislocations, different effective timestamps, stale quotes, or differing
+TWAP windows do not cancel merely because the pool labels share a currency.
+The prototype therefore requires a complete coherent snapshot for a venue;
+a missing venue is omitted. Partial connected subgraphs are future work.
+
+The displayed spread subtracts =log(meanPrice[i]/meanPrice[j])=. Zero means
+the historical normalized ratio, not equal absolute TOKEN unit prices.
+Neither that reference nor a spectral cycle proves eventual convergence.
+Actual over/under-weight determines permissible transfer direction.
+
+There are N(N-1)/2 pair outputs but N-1 independent relative coordinates:
+=z[A,C] = z[A,B] + z[B,C]=. Assimilating all pair measurements as independent
+would count the same pool errors repeatedly. A fixed orthonormal Helmert
+basis removes the common component once. The filter keeps the covariance
+between the remaining coordinates and projects it onto every pair.
+Consequently all published pair estimates obey the same graph identities.
+
+This is related to estimation from relative measurements on graphs;
+[[https://web.ece.ucsb.edu/~hespanha/published/tr-analogyrep.pdf][Barooah and Hespanha]] describe the additive-reference ambiguity and the
+role of measurement-graph covariance. Their static sensor-network results
+do not establish the financial dynamics or independence of our pool errors.
+
+BUCK and USDC routes offer redundant measurements of the same relative
+state. They are additional information only to the extent their errors
+differ. Arbitrage can correlate them. The observer retains cross-route
+covariance; it does not assign two independent votes automatically.
+Disagreement identifies a conflict, not which of two venues is correct.
+Pairwise cancellation deliberately loses common TOKEN appreciation and
+absolute currency value: K, monetary diagnostics and stablecoin-breaker
+logic still need separate common-mode observations. Two quotes alone cannot
+identify which currency lost an external peg.
+
+* Observer state, uncertainty and known interventions
+
+Each independent coordinate has level, velocity and acceleration. For a
+time increment =dt=, level advances by =v*dt + a*dt^2/2= and velocity by
+=a*dt=. Integrated white jerk supplies process uncertainty. There is no
+assumed 30-day cycle or mean-reversion force in this motion model.
+
+Measurements observe levels. A joint Kalman update uses the full venue
+measurement covariance and a Joseph-form state-covariance update. Every
+pair exposes spread, velocity, acceleration, their standard deviations,
+closure speed, change in closure speed, freshness and a descriptive regime.
+Acceleration opposing outward velocity identifies slowing departure before
+velocity reaches zero. That is different from confirmed closure.
+
+The noise estimator uses past third differences of the corrected relative
+measurements. For temporally white noise, the coefficients 1,-3,3,-1 give a
+variance multiplier of 20; a causal EWMA estimates the full covariance.
+Its eigenvalues have a nonzero floor. A sample changes this covariance only
+after its own assimilation. Gaps reset the difference history. Noise priors
+and process parameters are fixed across the grid; the simulator's true noise
+level, truth prices and derivatives never enter the observer.
+
+This noise decomposition is a hypothesis. Genuine rapid motion can enter
+the estimated measurement noise; serially correlated errors or overlapping
+TWAPs violate the white-noise assumption. The lab measures interval coverage
+instead of calling these intervals calibrated confidence. Innovations and
+route disagreement remain visible, including when the model fits poorly.
+No sample is automatically rejected for being far from the estimate.
+
+An intervention input is a predicted /current log-price offset/ for each
+affected pool, plus its uncertainty. It is subtracted from that measurement,
+not repeatedly from returns. The ideal experiment uses fee-free constant
+product marginal impact from known trade/reserve ratios and a known decay.
+The mismatch experiment deliberately uses the wrong magnitude and decay,
+with additional observation uncertainty. A third arm omits impact correction.
+Actual post-trade pool state can inform immediate impact; later arbitrage
+transmission and recovery are uncertain. A real implementation must expire
+or revise this model rather than permanently subtract a supposed price
+effect. Unattributed venue shocks and genuine repricing receive no own-trade
+offset. Atomic route arbitrage remains a separate decision.
+
+* Rebalance on cessation, then accelerate on closure
+
+The desired progression is:
+
+1. Reliable continuing departure quenches discretionary rebalancing.
+2. Credible braking releases that quench before prices reverse.
+3. Near a stall, small participation remains possible even if acceleration
+   also settles toward zero.
+4. Closure adds a stronger rate contribution proportional to closure speed.
+5. Remaining allocation excess/shortfall limits the amount available.
+
+For each potential overweight seller and underweight buyer, orient velocity
+so that positive =v= means outward departure. The prototype uses:
+
+#+begin_example
+release = exp(-max(v + z*sigma_v, 0) / release_speed)
+          * max(braking_evidence, near_stall_evidence)
+closure = max(-v - z*sigma_v, 0)
+rate    = release_rate * release + closure_gain * closure
+#+end_example
+
+Braking evidence requires inward acceleration beyond its uncertainty;
+near-stall evidence decays rapidly with outward speed. Small release below
+a threshold gives zero rate unless closure is already resolved. These are
+explicit heuristic factors to test, not probabilities or an optimal law.
+The z multiplier is not a guarantee when the observer is miscalibrated.
+
+Each overweight TOKEN first gets a sale budget from its excess allocation,
+the shortfall-weighted average rate across eligible counter-tokens, and
+=1-exp(-rate*dt)=. It distributes that budget among eligible underweights
+in proportion to their remaining shortfalls. Thus a stronger pair changes
+the total urgency, while the destination split obeys the requested allocation
+rule. A final common scale prevents combined sellers exceeding any buyer's
+shortfall and preserves each seller's destination proportions. This is
+conservative and may leave capacity unused.
+
+The diagnostic book holds fixed initial TOKEN quantities and is marked
+using the observer. Candidate requests are never executed, so their sums
+are neither turnover nor return. A deployed allocator additionally needs
+fees, pool depth, liquidity/credit limits and once-consumed elapsed-time
+budgets. Emergency deleveraging is a distinct reason to trade.
+
+* Commodity time scales from historical frequency content
+
+The second response arm estimates spectra from the /past observations/,
+without using the generator's periods or live-run data. It removes a linear
+trend, applies a Hann window, computes a one-sided periodogram, estimates
+a high-frequency white-noise floor, and examines periods from 8 to 640 days.
+The [[https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.periodogram.html][periodogram documentation]] describes the underlying spectrum and
+normalization choices; this implementation uses NumPy directly.
+
+For a resolved spectrum, a power-weighted geometric period and spectral
+moments provide typical spread, velocity and acceleration. These set a
+candidate release-speed scale, a slower baseline response for longer periods,
+and a closure gain scaled by historical spread amplitude. Unresolved spectra
+fall back to the fixed response configuration. Both arms use the same
+observer, book and allocation rule. The constants and all derived parameters
+are included in JSON; no parameters are selected from the measured outcome.
+
+Frequency content alone does not identify gestation time, shipping delay,
+construction time or monetary transmission lag. A pair contains both TOKENs'
+dynamics; a centered TOKEN contains part of every other TOKEN's motion.
+Broad spectra, structural breaks and only a few observed long cycles weaken
+the interpretation further. Physical supply-cycle information can be an
+external prior, tested against observed dynamics. Keep multiple bands and
+their uncertainty as a later extension rather than treating one dominant
+period as a permanent property of the commodity.
+
+* Experiments and how to read their panes
+
+| Case | Purpose |
+|------+---------|
+| three-phase | Existing ±12%, 30-day calibration signal |
+| changing-cycles | Three different periods drift from 18/45/80 to 55/22/120 days; amplitudes change too |
+| numeraire-only | Constant TOKEN values; BUCK varies and USDC loses 20% at day 40 |
+| own-impact | Known local TOKEN A sale / TOKEN B buy impact, perfectly specified offset as an ideal ablation |
+| impact-mismatch | Wrong impact magnitude and decay; uncertain correction |
+| venue-dislocation | Unattributed transient displacement of one TOKEN/BUCK pool |
+| genuine-repricing | TOKEN A rises permanently by 0.10 log units at day 45 in both routes |
+| persistent-trend | Sustained unequal TOKEN growth/decline without a return cycle |
+| shared-noise | Cross-route error correlation 0.9 instead of 0.25 |
+| missing-venue | One route unavailable for ten days, then both unavailable for three days |
+| lagged-commodities | Existing six-commodity lag/OU generator, unchanged |
+
+The same seven panes are rendered from JSON for every case/noise choice:
+
+1. Raw TOKEN A quotes in BUCK and USDC, with simulated currency truth.
+2. Normalized TOKEN-pair spreads: observer versus latent truth.
+3. Pair velocity versus the daily EMA, a six-hour two-route EMA, and the
+   BUCK-only observer. Impact cases also show the uncorrected observer.
+4. Pair acceleration with model uncertainty; look for departure slowing.
+5. Release of departure quenching, closure evidence, and the old vote count.
+6. Innovation and route-disagreement diagnostics; large values expose conflict.
+7. Allocation gaps and fixed/history-scaled hypothetical transfer requests.
+
+Historical frequency graphs are available beside each case. All N(N-1)/2
+pairs are recorded and scored; plots show only the first three spreads and
+the first pair's detailed motion to remain legible.
+
+Truth derivatives use finite differences of the simulated latent path and
+are used only for retrospective scoring/figures. Hyperparameters stay fixed.
+The six-hour matched EMA uses equal route weights; the Kalman observer uses
+covariance weights, so that comparison changes weighting as well as filtering.
+The daily EMA comparison also changes sampling cadence. These distinctions
+must accompany any claim about improvement.
+
+* Initial findings and next acceptance checks
+
+The generated report is authoritative for measured numbers. Smooth cycles
+are favorable to the local-acceleration observer. The existing lagged/OU
+generator is a deliberate counterexample: its rough daily innovations can
+make velocity estimates worse than the matched EMA and leave uncertainty
+severely understated. Neither visually early turns nor a good sinusoidal
+fit justify giving this observer execution authority.
+
+At 20 bp quote noise, averaged across the three seeds, the first completed
+grid gives the following velocity errors (bp/day):
+
+| Case | Two-route observer | BUCK-only observer | Six-hour two-route EMA5 | Observer ±2 sigma coverage |
+|------+--------------------+--------------------+------------------------+----------------------------|
+| Three-phase | 26.48 | 30.91 | 142.80 | 87.0% |
+| Changing cycles | 23.81 | 27.55 | 100.92 | 89.7% |
+| Lagged commodities + OU | 255.17 | 257.14 | 197.94 | 20.3% |
+| Constant TOKENs, moving numeraires | 15.87 | 17.36 | 8.96 | 98.3% |
+
+These results support further investigation of early motion estimates;
+they do not support treating their model uncertainty as reliable throughout
+the commodity universe. In the noiseless numeraire-only arm the relative
+state stays flat and both allocators request zero transfers, including
+through the USDC devaluation. The noisy constant-TOKEN arm also requests
+zero in this grid because the allocation band absorbs the small residuals.
+
+The cessation allocator is not immune to false braking. In the lagged/OU
+case at 20 bp, roughly 28.5% of fixed-scale requested notional occurs while
+the relevant pair is departing, and only about 8.0% of total requests occur
+while it is both departing /and slowing/. This is a substantive failure of
+the present estimator/response combination, not evidence of useful early
+capture. The analogous smooth-cycle shares are both about 0.14%, meaning
+pre-closure participation is currently small. Those factors need calibration
+on held-out paths and subsequent executed-trade comparisons.
+
+- [X] Test exact cancellation under arbitrary synchronous quote-currency
+  changes, graph closure, correlated-route evidence, known-input correction,
+  elapsed-time prediction, stale data, causal prefixes and positive covariance.
+- [X] Test release before reversal, continued quenching of steady departure,
+  accelerated response to closure, and proportional counter-token allocation.
+- [X] Test historical spectral distinction between a 20-day and 180-day
+  signal, and fallback for constant/noise-only history.
+- [ ] Calibrate a model family that handles smooth and rough commodity
+  motion with credible uncertainty. Compare per-commodity process covariance,
+  colored venue noise and small fast/slow observer mixtures on held-out paths.
+  Spectral scaling of the response alone does not solve this estimation issue.
+- [ ] Add gradual online spectral updates with publication generations,
+  uncertainty and a bounded adaptation rate; test regime changes and missing
+  history. Validate multiple periods, amplitudes and longer commodity runs.
+- [ ] Feed actual pyrevm pool observations and execution receipts into the
+  observer in shadow mode; include depth, observation age, overlapping TWAPs,
+  asynchronous updates and uncertain spread of our impact through arbitrage.
+- [ ] Execute matched allocator comparisons with fees, impact, credit and
+  book feedback. Measure false-start costs, missed opportunity, independently
+  marked equity, bvib, K and desk capital. Sensor error is not ROI.
+
+* Eventual wheel implementation
+
+The Python reference uses dense covariance and batch solves. A three-TOKEN
+state has six entries (two relative coordinates times three derivatives);
+six TOKENs have fifteen entries. All pair outputs can be derived on demand.
+Dense covariance storage grows quadratically; matrix factorization is not
+constant-cost. This is a reference for correctness, not an EVM gas estimate.
+
+An EVM design should capture raw observations with effective timestamps,
+decimals, orientation, depth and receipt-linked intervention inputs; transform
+one frozen epoch; perform bounded prediction/measurement work; then publish
+a coherent state/covariance generation with freshness metadata. Correlated
+measurements require whitening or an equivalent joint update, not repeated
+independent scalar updates. Repeated ticks must not repeatedly assimilate the
+same information. Consumers may request pair projections from a completed
+generation and must recheck execution prices and current allocation limits.
+
+The wheel can amortize computation, but information has a deadline. Measure
+gas and worst-case publication delay together, including starvation under
+sparse user activity. A cheaper well-calibrated approximation can outperform
+a sophisticated estimate that arrives after the opportunity has passed.

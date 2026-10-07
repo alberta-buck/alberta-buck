@@ -40,7 +40,8 @@ def fingerprint():
     paths += list((root / "core/python/buck_core").rglob("*.py"))
     paths += [root / "alberta_buck/sim" / n for n in (
         "deploy.py", "chain.py", "identity.py", "experiment.py", "router.py",
-        "gauge.py", "pyrevm_backend.py", "signal_history.py", "control_lab/engine.py", "control_lab/model.py")]
+        "gauge.py", "pyrevm_backend.py", "signal_history.py", "control_lab/engine.py", "control_lab/model.py",
+        "control_lab/events.py")]
     paths += [root / "alberta_buck/sim/artifacts/UniversalRouter.json", root / "foundry.toml"]
     h = hashlib.sha256()
     for p in sorted(paths):

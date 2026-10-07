@@ -75,8 +75,27 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
       await choose(stage,{profile,walk:'1',buyer:'high',seller:'low'});
       assert.equal(await page.$eval(`#${stage} .run-body`,e=>e.hidden),false);
     }
+    // Desk directions come from token swaps, and marker clicks select the
+    // real receipt log, including the opposite leg of triangle arbitrage.
+    await choose('desk', {profile:'mixed',walk:'0',buyer:'medium',seller:'medium'});
+    for (const kind of ['desk-buy','desk-sell','arb-buy','arb-sell']) {
+      assert.ok(await page.$$eval(`#desk [data-pane=price] polygon[data-kind="${kind}"]`, n=>n.length)>0);
+    }
+    const deskPoint = '#desk [data-pane=price] polygon[data-kind="desk-buy"]';
+    await page.$eval(deskPoint,e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+    await page.waitForFunction(()=>document.querySelector('#desk .execution-details').open && document.querySelector('#desk .execution-body table'));
+    assert.match(await page.$eval('#desk .execution-body',e=>e.textContent), /desk · (supply|issue)/);
+    assert.match(await page.$eval('#desk .execution-body',e=>e.textContent), /BUY/);
+    await page.click('#desk [data-pane=price] [aria-label="Toggle Arb TOKEN buys"]');
+    assert.equal(await page.$$eval('#desk [data-pane=price] polygon[data-kind="arb-buy"]',n=>n.length),0);
+    await choose('basket', {profile:'mixed',walk:'0',buyer:'medium',seller:'medium'});
+    for (const kind of ['basket-buy','basket-sell','basket-pair']) {
+      assert.ok(await page.$$eval(`#basket [data-pane=price] polygon[data-kind="${kind}"]`, n=>n.length)>0);
+    }
+    await page.$eval('#basket [data-pane=price] polygon[data-kind="basket-pair"]',e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+    await page.waitForFunction(()=>document.querySelector('#basket .execution-body').textContent.includes('no token swap'));
     await page.setViewport({width:390,height:844});
-    await page.$eval('#all', e=>e.scrollIntoView());
+    await page.$eval('#basket .execution-details', e=>e.scrollIntoView());
     if (process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'control-lab-mobile.png')});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,
       JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1 && e.clientWidth>0).slice(0,12).map(e=>[e.tagName,e.className,e.getBoundingClientRect().width]))));

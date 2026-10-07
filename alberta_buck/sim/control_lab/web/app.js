@@ -24,6 +24,7 @@
   document.querySelector("#campaign-status").textContent = `${M.days} days · ${completed}/${M.unique_runs} distinct runs available · ${M.visible_cases} selector combinations · seed ${M.seed}${M.status === "complete" ? " · Complete" : " · Campaign in progress"}`;
   document.querySelector("#method-details").textContent = `At 1×, each token receives an independent log-price random walk with ${100 * M.walk_daily_sigma}% daily volatility, starting at zero on day 0. Positive and negative Gaussian increments accumulate without a pull back to baseline. The 0.5× path has half its log displacement. Zero expected log drift describes an average over seeds, not a constraint on this path. Exponentiation gives price levels a small positive drift in expectation across seeds. Observations occur four times per day. Code and bytecode fingerprint: ${M.implementation.sha256.slice(0, 16)}.`;
 
+  if (M.method) document.querySelector("#method-details").textContent = M.method;
   const cache = new Map(), pending = new Map();
   window.controlLabReceive = (key, data) => {
     cache.set(key, data);
@@ -51,7 +52,7 @@
 
   class Chart {
     constructor(pane, state, parent) {
-      this.pane = pane; this.state = state; this.hidden = new Set();
+      this.pane = pane; this.state = state; this.hidden = new Set(); this.hiddenMarkers = new Set();
       this.box = $("section", "chart"); this.box.dataset.pane = pane.id;
       const heading = $("div", "chart-header"), title = $("div");
       title.append($("h3", "", pane.title), $("div", "chart-unit", pane.unit));
@@ -70,6 +71,18 @@
         button.onclick = () => { this.hidden.has(i) ? this.hidden.delete(i) : this.hidden.add(i); button.setAttribute("aria-pressed", String(!this.hidden.has(i))); this.draw(); };
         this.legend.append(button);
       });
+      for (const group of pane.markers || []) {
+        const button = $("button"); button.type = "button"; button.setAttribute("aria-pressed", "true");
+        button.setAttribute("aria-label", `Toggle ${group.label}`);
+        const swatch = $("span", "marker-swatch", {up:"▲", down:"▼", diamond:"◆"}[group.shape]);
+        swatch.style.color = group.color;
+        button.append(swatch, $("span", "", `${group.label} (${group.points.reduce((n,p)=>n+p.count,0)})`));
+        button.onclick = () => {
+          this.hiddenMarkers.has(group.id) ? this.hiddenMarkers.delete(group.id) : this.hiddenMarkers.add(group.id);
+          button.setAttribute("aria-pressed", String(!this.hiddenMarkers.has(group.id))); this.draw();
+        };
+        this.legend.append(button);
+      }
       this.box.append(heading, scroll, this.legend, $("p", "chart-note", pane.note)); parent.append(this.box);
       this.svg.addEventListener("pointermove", event => {
         const box = this.svg.getBoundingClientRect();
@@ -92,10 +105,12 @@
     draw() {
       const {pane, state, svg} = this, data = state.data, days = data.days;
       const chosen = pane.lines.filter((_, i) => !this.hidden.has(i));
+      const markers = (pane.markers || []).filter(group => !this.hiddenMarkers.has(group.id));
       const group = `${state.selected.profile}:${Number(state.selected.walk)}`;
       let bounds = state.shared.checked && M.limits[group] && M.limits[group][pane.id];
       if (!bounds) {
         const values = chosen.flatMap(line => line.values.filter((v, i) => v != null && days[i] >= state.start && days[i] <= state.end));
+        values.push(...markers.flatMap(group => group.points.filter(p => days[p.index] >= state.start && days[p.index] <= state.end).map(p => p.value)));
         bounds = values.length ? [Math.min(...values), Math.max(...values)] : [0, 1];
       }
       let [low, high] = bounds;
@@ -134,6 +149,24 @@
         if (line.dash) attrs["stroke-dasharray"] = line.dash;
         lines.append(svgNode("path", attrs));
       });
+      // Dense arbitrage markers go behind the less frequent policy trades.
+      for (const group of [...markers].sort((a,b)=>Number(b.id.startsWith("arb"))-Number(a.id.startsWith("arb")))) {
+        const arb = group.id.startsWith("arb"), r = arb ? 3 : group.shape === "diamond" ? 4 : 5.5;
+        for (const point of group.points) {
+          const day = days[point.index];
+          if (day < state.start || day > state.end) continue;
+          const x = X(day), y = Y(point.value);
+          const vertices = group.shape === "up" ? [[0,-r],[-r,r],[r,r]]
+            : group.shape === "down" ? [[0,r],[-r,-r],[r,-r]] : [[0,-r],[r,0],[0,r],[-r,0]];
+          const marker = svgNode("polygon", {points:vertices.map(([a,b])=>`${x+a},${y+b}`).join(" "),
+            fill:group.color, "fill-opacity":arb ? .45 : .9, stroke:"white", "stroke-width":.6,
+            class:"execution-marker", "data-kind":group.id, "data-index":point.index});
+          const pair = group.shape === "diamond";
+          marker.append(svgNode("title", {}, `Day ${number(day)} · TOKEN ${"ABC"[point.token]} · ${group.label}\n${point.count} ${pair ? "pairings" : "fills"} · ${number(point.token_amount)} TOKEN · ${number(point.buck_amount)} BUCK\n${number(point.value)} ${pane.unit}`));
+          marker.onclick = () => { state.cursor(point.index); if (state.executionDetails) state.executionDetails.open = true; };
+          lines.append(marker);
+        }
+      }
       svg.append(lines);
       this.crosshair = svgNode("line", {y1:15,y2:204,stroke:"#788d88","stroke-width":1,"stroke-dasharray":"3 3"});
       svg.append(this.crosshair); this.inspect(state.index);
@@ -159,11 +192,49 @@
     state.step = data.days.length > 1 ? data.days[1] - data.days[0] : .25;
     state.index = data.days.length - 1;
     const metrics = $("div", "metrics");
+    const counts = data.execution_counts;
     for (const [label, value] of [["Mean bvib", data.mean_bvib.toFixed(6)], ["Final K", data.summary.end_k.toFixed(6)],
-      ["Arbitrage profit · BUCK", number(Math.round(data.summary.arb_profit_buck))], ["Desk operations", data.summary.desk_ops]]) {
+      ["Arbitrage profit · BUCK", number(Math.round(data.summary.arb_profit_buck))], ["Desk operations", data.summary.desk_ops],
+      ["Arbitrage cycles", number(data.summary.arb_cycles)],
+      ["Basket TOKEN buys / sells", counts?.recorded ? `${counts.basket_buys} / ${counts.basket_sells}` : "Not recorded"],
+      ["Basket LP pairings", counts?.recorded ? counts.basket_pairs : "Not recorded"]]) {
       const metric = $("div", "metric"); metric.append($("strong", "", value), $("span", "", label)); metrics.append(metric);
     }
     state.body.append(metrics);
+    const executions = $("details", "execution-details"), executionTitle = $("summary"), executionBody = $("div", "execution-body");
+    executions.append(executionTitle, executionBody); state.body.append(executions); state.executionDetails = executions;
+    const byDay = new Map();
+    for (const event of data.executions || []) {
+      if (event.action === "mark") continue; // valuation-only updates remain in raw JSON
+      if (!byDay.has(event.index)) byDay.set(event.index, []);
+      byDay.get(event.index).push(event);
+    }
+    let lastIndex = -1;
+    state.inspectExecutions = index => {
+      const rows = byDay.get(index) || [];
+      executionTitle.textContent = `Executed operations · day ${number(data.days[index])} · ${rows.length} operations`;
+      if (!executions.open || lastIndex === index) return;
+      lastIndex = index; executionBody.replaceChildren();
+      if (!counts?.recorded) { executionBody.append($("p", "", "This cached run predates execution recording. Regenerate its dataset to see trades.")); return; }
+      if (!rows.length) { executionBody.append($("p", "", "No desk trades, basket trades/LP operations or arbitrage cycles in this observation. Move the chart cursor or click a marker to inspect another day.")); return; }
+      executionBody.append($("p", "", "Buy/sell means TOKEN direction. The desk supplies BUCK by buying TOKEN, and absorbs BUCK by selling TOKEN. Valuation-only basket updates are omitted here; raw JSON retains them."));
+      const table = $("table"), head = $("tr"), body = $("tbody");
+      for (const label of ["Actor / action", "Phase / transaction", "Executed legs or LP allocation", "Cycle profit"]) head.append($("th", "", label));
+      const thead = $("thead"); thead.append(head); table.append(thead, body);
+      for (const event of rows) {
+        const row = $("tr"), trades = $("td");
+        for (const t of event.trades) trades.append($("div", "", `${t.side.toUpperCase()} ${number(t.token_amount)} TOKEN ${"ABC"[t.token]} · ${number(t.quote_amount)} ${t.quote} · fill ${number(t.price_quote)} ${t.quote}/TOKEN`));
+        if (!event.trades.length) trades.textContent = event.action === "pair"
+          ? `Pair existing TOKEN ${"ABC"[event.buy_token]} with ${number(event.spent_buck)} BUCK; no token swap`
+          : `No TOKEN swap; ${number(event.proceeds_buck)} BUCK proceeds, ${number(event.spent_buck)} BUCK deployed`;
+        row.append($("td", "", `${event.actor} · ${event.action}`), $("td", "", `${event.phase} · #${event.transaction}`),
+          trades, $("td", "", event.profit_buck == null ? "—" : `${number(event.profit_buck)} BUCK`));
+        body.append(row);
+      }
+      executionBody.append(table);
+    };
+    executions.ontoggle = () => { if (executions.open) { lastIndex = -1; state.inspectExecutions(state.index); } };
+    state.inspectExecutions(state.index);
     const zoom = $("div", "zoom"), output = $("output");
     const sliders = [];
     for (const [labelText, name] of [["From", "start"], ["To", "end"]]) {
@@ -224,7 +295,7 @@
     const status = $("p", "run-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
     const body = $("div", "run-body");
     const state = {id, section, status, body, selected:defaults(), controls:{}, version:0, charts:[], start:0, end:M.days};
-    state.cursor = index => { state.index = index; state.charts.forEach(c => c.inspect(index)); };
+    state.cursor = index => { state.index = index; state.charts.forEach(c => c.inspect(index)); if (state.inspectExecutions) state.inspectExecutions(index); };
     for (const axis of M.axes) {
       const label = $("label", "", axis.label), select = $("select"); select.name = axis.id;
       select.setAttribute("aria-label", `${axis.label}, ${flags.title}`);

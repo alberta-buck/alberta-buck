@@ -19,7 +19,7 @@ contract BuckBasketEquityResponse is BuckBasketEquityStorage {
 
     function _v() private view returns (IBuckBasketVenue) { return IBuckBasketVenue(address(this)); }
 
-    function wheelDue(uint8 kind, uint256 i) external view returns (bool) {
+    function wheelDue(uint8 kind, uint256 i) public view virtual returns (bool) {
         if (kind == 0) return block.timestamp / 1 days > lastDay;
         if (kind == 1) return i < constituents.length && liquidityOf[i] > 0 && block.timestamp / 1 days > lastSyncDay[i];
         if (kind != 2 || block.timestamp < uint256(lastResponseAt) + response.interval) return false;
@@ -60,18 +60,18 @@ contract BuckBasketEquityResponse is BuckBasketEquityStorage {
         return 1;
     }
 
-    function _tokenValue(Snap memory s, uint256 i) private view returns (uint256) {
+    function _tokenValue(Snap memory s, uint256 i) internal view returns (uint256) {
         return idleToken[i] * s.m[i].pTwap / (10 ** constituents[i].decimals);
     }
 
-    function _staleMark(Snap memory s) private view returns (bool) {
+    function _staleMark(Snap memory s) internal view returns (bool) {
         if (address(credit) == address(0)) return false;
         uint256 value = _equityS(s, MARK_LOW);
         uint256 mark = credit.markOf(creditId);
         return (value > mark ? value - mark : mark - value) > _grainS(s);
     }
 
-    function _plan(Snap memory s) private view returns (Plan memory p) {
+    function _plan(Snap memory s) internal view returns (Plan memory p) {
         p.sell = NONE; p.buy = NONE;
         IBasketSignals signal = IBasketSignals(responseSignals);
         bool directed = address(signal) != address(0);
@@ -153,7 +153,7 @@ contract BuckBasketEquityResponse is BuckBasketEquityStorage {
         }
     }
 
-    function _respond() private returns (uint256) {
+    function _respond() internal virtual returns (uint256) {
         if (responseSignals != address(0)) { try IBasketSignals(responseSignals).observe() {} catch {} }
         Snap memory s = _snap();
         bool stale = _staleMark(s);
@@ -189,7 +189,7 @@ contract BuckBasketEquityResponse is BuckBasketEquityStorage {
         return 1;
     }
 
-    function _sell(Snap memory s, uint256 i, uint256 cap) private returns (bool) {
+    function _sell(Snap memory s, uint256 i, uint256 cap) internal returns (bool) {
         uint256 swapCap = _swapCap(s.m[i]);
         uint256 idleValue = PM.min(_tokenValue(s, i), PM.min(cap, swapCap));
         uint256 dxIdle = idleValue * (10 ** constituents[i].decimals) / s.m[i].pTwap;
@@ -213,7 +213,7 @@ contract BuckBasketEquityResponse is BuckBasketEquityStorage {
         return burn > 0 || spent > 0;
     }
 
-    function _buy(uint256 i, uint256 budget, bool pairOnly) private returns (uint256 used) {
+    function _buy(uint256 i, uint256 budget, bool pairOnly) internal returns (uint256 used) {
         uint256 half = pairOnly ? 0 : budget / 2;
         uint256 spent;
         if (half > 0) {
