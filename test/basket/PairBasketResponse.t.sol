@@ -193,4 +193,24 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
         assertGt(b.liquidityOf(2), 0);
         assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
     }
+
+    function test_pair_minimumBudgetMustSurviveSaleFees() public {
+        _install(); intent.setRecipient(1);
+        uint256 gross = b.equity();
+        uint256 grain = gross / 10000;
+        IBuckBasketVenue.Marks memory m = IBuckBasketVenue(address(b)).marks(1, 0);
+        uint256 gap = gross * 3333 / 10000 - b.idleToken(1) * m.pTwap / 1e18;
+        uint256 requested = grain * 1001 / 1000; // 0.1% margin, smaller than the 0.3% fee.
+        intent.setRate(requested * 1e18 / (gap - requested) + 1);
+        // Nominal request is just over the 10 BUCK minimum. Its sale fees
+        // leave a smaller recipient budget: wait without attempting the swap.
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        intent.setRate(0.1e18);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertGt(intent.impacts(), 0, "larger allowance survives execution costs");
+        assertEq(intent.lastExecutionAt(), vm.getBlockTimestamp());
+        _books();
+    }
 }

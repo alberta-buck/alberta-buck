@@ -116,3 +116,20 @@ The trace coverage check also exposes three missing responses (days 28,
 explicitly instead of counting them as absent opportunities. Investigate
 the minimum-size boundary next, then test the allocation-band compatibility
 with the smaller price sensitivity of funded LP positions.
+
+* Correction 4: minimum requests must leave executable proceeds
+
+A deterministic response test reproduces =pair cash unavailable=: a nominal
+request only 0.1% above the minimum cannot survive the venue's 0.3% sale fee.
+The planner now reserves room for allowed venue-price deviation on input
+and output before accepting each requested leg. Execution retains its actual
+proceeds, minimum-size and credit checks; nothing is forced through a failed
+bound. Small opportunities wait with their elapsed allowance intact.
+
+All 13 focused response tests pass. The [[file:control-lab/basket-first/04-executable-minimum/results.org][120-day confirmation]] has all 481
+response traces and zero wrong-side legs. The three missing responses
+disappear. Note a diagnostic limitation in correction 3: pyrevm rejects an
+=eth_call= sender with contract code, so its saved empty revert messages
+cannot establish the individual failures' reasons. The focused failing test
+and the complete corrected run establish the minimum-budget defect and its
+correction; future missing-response probes must avoid that RPC limitation.

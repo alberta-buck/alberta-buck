@@ -61,6 +61,13 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             else deficit[i] = gap;
         }
         if (!outside) return a;
+        // A nominal request barely above grain can fall below it after the
+        // sale, reverting a predictable dust transfer. Reserve room for the
+        // venue's allowed price band on input and output; execution still
+        // rechecks actual proceeds, credit and each recipient's grain.
+        uint256 tolerance = defaultMaxDeviationBp;
+        if (tolerance >= 10000) return a;
+        uint256 minimum = grain * (10000 + tolerance) / (10000 - tolerance) + 1;
         uint256 elapsed = block.timestamp - pairPolicy.lastExecutionAt();
         for (uint256 i; i < n; ++i) {
             if (excess[i] == 0) continue;
@@ -75,7 +82,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             if (eligible == 0) continue;
             uint256 amount = PM.min(excess[i], eligible) * pairPolicy.fraction(weightedRate / eligible, elapsed) / 1e18;
             amount = PM.min(amount, PM.min(value[i] * eq.stepBp / 10000, _swapCap(s.m[i])));
-            if (amount <= grain || amount <= a.total) continue;
+            if (amount <= minimum || amount <= a.total) continue;
             uint256[] memory recipients = new uint256[](n);
             uint256 executable;
             for (uint256 j; j < n; ++j) {
@@ -97,7 +104,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             for (uint256 j; j < n; ++j) {
                 recipients[j] = recipients[j] * scale / 1e18;
                 // Leave uneconomic dust unrequested rather than forcing a leg.
-                if (recipients[j] <= grain) recipients[j] = 0;
+                if (recipients[j] <= minimum) recipients[j] = 0;
                 executable += recipients[j];
             }
             if (executable > a.total) { a.donor = i; a.total = executable; a.recipients = recipients; }
