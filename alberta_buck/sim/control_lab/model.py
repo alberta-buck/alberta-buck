@@ -15,13 +15,13 @@ STAGES = {
     "monitor": dict(title="02 · Monitor a replayed price trace", monitor=True, replay=True),
     "monitor-k": dict(title="03 · Check K against the replay", monitor=True, replay=True, k=True),
     "linked": dict(title="04 · Link the markets", monitor=True, arb=True),
-    "k": dict(title="05 · Let K move", monitor=True, arb=True, k=True),
-    "desk": dict(title="06 · Add the desk", monitor=True, arb=True, k=True, desk=True),
-    "demand": dict(title="07 · Demand, without a supplier", monitor=True, arb=True, k=True, demand=True),
-    "supply": dict(title="08 · Supply, without a buyer", monitor=True, arb=True, k=True, supply=True),
-    "both": dict(title="09 · Both private responses", monitor=True, arb=True, k=True, demand=True, supply=True),
-    "all": dict(title="10 · Private responses and desk", monitor=True, arb=True, k=True, demand=True, supply=True, desk=True),
-    "basket": dict(title="11 · Also enable basket rebalancing", monitor=True, arb=True, k=True, demand=True, supply=True, desk=True, basket=True),
+    "basket": dict(title="05 · Enable basket rebalancing", monitor=True, arb=True, basket=True),
+    "k": dict(title="06 · Let K move", monitor=True, arb=True, basket=True, k=True),
+    "desk": dict(title="07 · Add the desk", monitor=True, arb=True, basket=True, k=True, desk=True),
+    "demand": dict(title="08 · Demand, without a supplier", monitor=True, arb=True, basket=True, k=True, demand=True),
+    "supply": dict(title="09 · Supply, without a buyer", monitor=True, arb=True, basket=True, k=True, supply=True),
+    "both": dict(title="10 · Both private responses", monitor=True, arb=True, basket=True, k=True, demand=True, supply=True),
+    "all": dict(title="11 · Private responses and desk", monitor=True, arb=True, basket=True, k=True, demand=True, supply=True, desk=True),
 }
 
 DEFAULTS = {

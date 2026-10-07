@@ -49,7 +49,7 @@ def test_receipts_record_desk_basket_and_both_arb_legs():
     c["feed"]["period_days"] = 2
     c["basket"]["leash_bp"] = 100
     c["desk"].update(enter_bp=20, release_bp=10, persist_days=1)
-    result = simulate(c, c["profiles"][0], "basket")
+    result = simulate(c, c["profiles"][0], "all")
     counts = execution_counts(result["frames"])
     assert counts["desk_ops"] == result["summary"]["desk_ops"] > 0
     assert counts["arb_cycles"] == result["summary"]["arb_cycles"] > 0

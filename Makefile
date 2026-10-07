@@ -410,6 +410,18 @@ control-lab-pair-opportunities-render:
 	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.pair_opportunities --out "$(CONTROL_LAB_PAIR_OPPORTUNITIES_OUT)" --render-only
 	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_PAIR_OPPORTUNITIES_OUT)/results.org" --funcall org-html-export-to-html
 
+CONTROL_LAB_BASKET_FIRST_OUT ?= doc/control-lab/basket-first/current
+CONTROL_LAB_BASKET_FIRST_PROFILES ?= three-phase
+.PHONY: control-lab-basket-first control-lab-basket-first-render
+control-lab-basket-first: stage-uniswap
+	forge build $(FORGE_OPTS) -q test/harness/PairBasketDecisionTrace.sol
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_first --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BASKET_FIRST_OUT)" --profiles "$(CONTROL_LAB_BASKET_FIRST_PROFILES)" --jobs $(CONTROL_LAB_JOBS)
+	$(MAKE) control-lab-basket-first-render
+
+control-lab-basket-first-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_first --out "$(CONTROL_LAB_BASKET_FIRST_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_BASKET_FIRST_OUT)/results.org" --funcall org-html-export-to-html
+
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────
 #

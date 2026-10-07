@@ -1,0 +1,52 @@
+#+title: Basket-first corrections and confirmation
+#+date: 2026-10-07
+#+options: toc:2 num:nil
+
+* Baseline and experiment order
+
+=818db7d= preserves the pair observer, basket policy, market comparisons and
+exact opportunity audit before these corrections. Historical cached runs
+retain their original flags and interpretation.
+
+The new progression enables the basket immediately after linking the pools.
+Only then does K move, followed by the desk and persistent buyer/seller arms.
+The fundamental basket arm has fixed K and no desk or private flow. Later
+arms retain the basket. The full selector matrix remains 891 visible cases,
+now sharing 279 distinct active configurations instead of 351.
+
+The [[file:control-lab/basket-first/00-isolated/results.org][isolated baseline]] compares the old EMA response and the original pair
+response for 120 clean days. Assertions verify fixed K, zero desk actions,
+zero private trades, identical initial books/feeds, and agreement between
+proposed pair legs and receipts. Removing the other actors does not cure
+the defects: the pair response makes 46 transfers and 11 wrong-side pair
+legs, and fails the repeat-cycle check.
+
+* Conditions to verify
+
+| Condition | Discretionary paired action |
+|-----------+-----------------------------|
+| Missing/warming route or reference | No trade |
+| Seller relatively cheap, ratio already crossed its reference | No reversion sale |
+| Significant separation, steady/increasing outward motion | Quench |
+| Significant separation, departure braking | Small bounded release |
+| Significant separation, reliable closure | Stronger release |
+| At least one material allocation gap, both legs improve toward targets | Consider transfer; counter-leg need not also cross its band |
+| Both allocations inside the trigger band | No discretionary transfer |
+| Recipient would worsen its allocation | Choose another recipient or explicit cash/risk work |
+| Shared donor or recipient capacity exceeded | Cap jointly |
+| Executable amount below minimum | Wait; do not manufacture repeated budgets |
+| Same-time repeat, stale evidence, or reversal | No fresh turnover from call count |
+| Planned recipient refuses | Roll back every leg |
+| Hard liquidity/credit constraint | Separate risk override, visible in trace |
+
+Relative prices must be normalized to accepted historical references, never
+the first observed price. A trace is not a promise of mean reversion after
+permanent news. These tests check the stated trading behavior, accounting
+and matched outcomes; terminal equity is not liquidation ROI.
+
+* Reproduction
+
+=make control-lab-basket-first= runs the clean case. Select noise profiles
+with =CONTROL_LAB_BASKET_FIRST_PROFILES= and keep each confirmed revision in
+its own =CONTROL_LAB_BASKET_FIRST_OUT= directory. The =-render= target uses
+cached JSON only. Each correction is committed after its tests and runs.

@@ -35,7 +35,7 @@ def test_full_cartesian_grid_reuses_only_inactive_controls():
     grid = load_grid(ROOT / "doc/control-lab-campaign.toml")
     manifest, runs = plan(cfg, grid, {"sha256": "test"})
     assert manifest["visible_cases"] == 891
-    assert len(runs) == manifest["unique_runs"] == 351
+    assert len(runs) == manifest["unique_runs"] == 279
     assert len(manifest["cases"]) == len(STAGES) == 11
     assert all(len(cases) == 81 for cases in manifest["cases"].values())
     used = {k for cases in manifest["cases"].values() for k in cases.values()}
@@ -83,7 +83,7 @@ def test_plot_payload_preserves_series_units_and_gaps():
         market=dict(arb_held_buck=10, pool_minus_virtual_buck=20, active_buck=1000),
         desk=dict(capital=1_200_000, budget=1_000_000, account=-500),
         cumulative=dict(demand_usdc=2500, supply_buck=2490),
-        agents=dict(demand_cash=997500, supply_headroom=740000))
+        agents=dict(demand_cash=997500, supply_headroom=740000), basket=dict(weights=[3333,3333,3334]))
     result = dict(frames=[frame, copy.deepcopy(frame)], flags=STAGES['all'], config=DEFAULTS,
         history=dict(mean_relative_ticks=[0, 0, 0]), bootstrap=dict(market=frame['market']),
         summary={}, stage='all', profile=dict(name='three-phase'), cache_key='test')

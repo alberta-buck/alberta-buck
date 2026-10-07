@@ -196,7 +196,7 @@ def render(root):
     web = Path(__file__).with_name("web")
     for name in ("index.html", "app.js", "style.css"):
         if name == "index.html":
-            template = manifest["kind"] + ".html" if manifest.get("kind") in ("block-pairs", "pair-basket") else name
+            template = manifest["kind"] + ".html" if manifest.get("kind") in ("block-pairs", "pair-basket", "basket-first") else name
             (root / name).write_text((web / template).read_text().replace("manifest.json", source.name))
         else:
             shutil.copyfile(web / name, root / name)

@@ -9,6 +9,11 @@ For selectable price disturbances, buyer/seller quantities and JavaScript
 graphs, open [[file:control-lab/interactive/index.html][the interactive control lab]]. The Org walkthrough below keeps
 the original matched figures and explains the staged construction.
 
+As of 2026-10-07, new simulations put the basket directly after the linked
+markets, before moving K or introducing the desk and persistent agents.
+The [[file:BASKET-CORRECTIONS.org][basket-first correction log]] records isolated runs, verified changes and
+commits. The historical figures below retain their original stage flags.
+
 The new [[file:control-lab/block-pairs/index.html][TOKEN-pair observation experiment]] adds the on-chain observer beside
 the existing EMAs, with graphs of relative prices, estimated departure/closure
 rates, prediction errors, route disagreement and readiness. Its
