@@ -178,3 +178,64 @@ EVM snapshot, rather than using a contract-code transaction sender. Python
 causal checks were updated for the new stage order: the K-without-actuators
 comparison is monitor versus monitor-K, since the later K stage includes
 the basket. All 24 control-lab Python tests and 397 basket Solidity tests pass.
+
+* Confirmation 6: noisy cycles and noisy flat prices
+
+The [[file:control-lab/basket-first/current/index.html][combined cached presentation]] selects the clean case and three
+noise cases, all with the same two-point band and settled opening book.
+The [[file:control-lab/basket-first/07-noise/results.org][first noise campaign]] uses seed 41404; the [[file:control-lab/basket-first/08-noise-second-seed/results.org][second-seed check]] uses 41405.
+Noise is independent per-TOKEN feed noise at each six-hour sample, with
+standard deviations 20 or 80 bp of baseline price. Random walk remains
+zero in these experiments. These are not historical commodity traces.
+
+| Case | Seed | Paired transfers | Every TOKEN both ways each mature cycle | Wrong-side legs | Missing response traces |
+|------+------+------------------+----------------------------------------+-----------------+-------------------------|
+| Clean | 41404 | 127 | Yes | 0 | 0 |
+| Cycle + 20 bp noise | 41404 | 121 | Yes | 0 | 0 |
+| Cycle + 80 bp noise | 41404 | 93 | Yes | 0 | 0 |
+| Cycle + 80 bp noise | 41405 | 89 | Yes | 0 | 0 |
+| Flat + 80 bp noise | 41404 | 0 | Not applicable | 0 | 0 |
+| Flat + 80 bp noise | 41405 | 0 | Not applicable | 0 | 0 |
+
+For seed 41404, closing-side error envelopes back 20 clean legs, 16 with
+20 bp noise, and three with 80 bp noise. Remaining executed legs are the
+smaller cessation/braking releases. Stronger noise reduces that stronger
+evidence rather than manufacturing confident closure. Both flat runs stay
+inside the allocation trigger band; their zero paired turnover verifies
+the combined gate, not the price estimator's accuracy by itself.
+
+The second noisy-cycle seed has mean allocation error 1.452 points versus
+1.446 for legacy. The first seed is slightly better than legacy. These
+small differences do not justify tuning to the seed or claiming uniform
+allocation superiority. There is no clear tested trading defect in these
+noise cases, so no additional policy change is made in response to them.
+
+All six pair runs have 481/481 response traces. Planned capacities, readiness,
+intent, both allocation directions and actual swap receipts are checked.
+The diagnostic EOA-wheel probe was also exercised separately and restored
+the wheel address, observation publication, execution clock, account and
+inventory when its EVM snapshot was discarded.
+
+* Remaining improvements, without conflating them with confirmed fixes
+
+- [ ] Cold-start phase and initial LP/idle composition sensitivity. Retain
+  the failed cold-start cycle criterion beside the settled baseline.
+- [ ] Realized liquidation value and caller gas, with matched leverage and
+  fee attribution; terminal marked equity alone is insufficient.
+- [ ] Adaptive historical references, permanent relative-price changes,
+  wider noise processes and live quote-route dislocations.
+- [ ] Standalone cash divestment/accumulation when no eligible counter-TOKEN
+  exists. This version confirms paired transfers, plus existing risk work.
+- [ ] Then isolate arb shock capture and outer-band desk behavior while
+  preserving the basket baseline and K's proportional error.
+
+To regenerate the combined view:
+
+#+begin_src sh
+make control-lab-basket-first \
+  CONTROL_LAB_BASKET_FIRST_PROFILES=three-phase,noise20,noise80,flat-noise80
+#+end_src
+
+Versioned directories preserve each correction's inputs, bytecode/source
+fingerprints, pre-response decisions and plots. The =current= presentation
+reuses the confirmed clean and first-seed JSON; rendering does not rerun EVMs.

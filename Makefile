@@ -416,7 +416,7 @@ CONTROL_LAB_BASKET_FIRST_WARMUP_DAYS ?= 120
 CONTROL_LAB_BASKET_FIRST_BAND_BP ?= 200
 .PHONY: control-lab-basket-first control-lab-basket-first-render
 control-lab-basket-first: stage-uniswap
-	forge build $(FORGE_OPTS) -q test/harness/PairBasketDecisionTrace.sol
+	forge build $(FORGE_OPTS) -q
 	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_first --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BASKET_FIRST_OUT)" --profiles "$(CONTROL_LAB_BASKET_FIRST_PROFILES)" --warmup-days $(CONTROL_LAB_BASKET_FIRST_WARMUP_DAYS) --weight-band-bp $(CONTROL_LAB_BASKET_FIRST_BAND_BP) --jobs $(CONTROL_LAB_JOBS)
 	$(MAKE) control-lab-basket-first-render
 

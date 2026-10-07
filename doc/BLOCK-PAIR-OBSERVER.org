@@ -36,6 +36,10 @@ experiment, not a general claim about profitable trading or arbitrary shocks.
 The following basket results describe the retained first experiment. The
 [[file:BASKET-CORRECTIONS.org][basket-first correction log]] records the subsequent isolated runs and
 tested changes, with the basket enabled before K, desk and private agents.
+The [[file:control-lab/basket-first/current/index.html][current settled-book experiment]] now passes repeated buy/sell cycles
+in clean and noisy prices, with no wrong-side paired legs. Noisy flat
+prices produce no paired transfers. This is bounded behavioral confirmation;
+startup composition and net realized ROI remain separate open questions.
 
 The [[file:../src/basket/PairRebalancePolicy.sol][graded policy]] and
 [[file:../src/basket/PairBasketEquityResponse.sol][paired response facet]] now implement that basket experiment. The
@@ -538,8 +542,10 @@ phase deliberately grants no such execution authority.
   bookkeeping cannot consume or replenish the execution allowance.
 - [X] Eight paired market runs with the same declared targets, initial books,
   external feeds and unchanged arb, desk and private-agent rules.
-- [ ] Freeze initial LP/idle composition and credit utilization in a follow-up
-  experiment, separating bootstrap allocation from the turn rule.
+- [X] Use an identical settled LP/idle composition and credit utilization in
+  both arms, separating bootstrap allocation from the turn rule.
+- [ ] Test cold starts at multiple phase offsets and capital compositions;
+  the original cold-start case still fails the symmetric-cycle criterion.
 - [X] Record exact pre-trade gaps, candidate amounts and binding constraints
   in a test-only facet. Reconstruct every non-fallback plan with integer
   arithmetic and match its legs to receipts; preserve economic outcomes.
@@ -548,9 +554,11 @@ phase deliberately grants no such execution authority.
   crossing in the same block. Apply an explicit minimum spread floor.
 - [ ] Test continuous scaling with separation magnitude and reference
   adaptation; keep bootstrap/risk repair as separate work.
-- [ ] Reconcile the two-sided 2-point band, 100 ppm minimum leg, one-day
-  catch-up cap and weaker price sensitivity of LP holdings. Test each choice
-  on clean, noisy-cycle and noisy-flat paths before changing defaults.
+- [X] Use one material allocation trigger with full target capacities and
+  executable minimum-size headroom. Test on clean/noisy cycles and noisy
+  flat prices; keep the 2-point band and one-day catch-up limit.
+- [X] Confirm every TOKEN trades both ways in each mature cycle on clean
+  prices and two noise levels, with an additional seed at higher noise.
 - [ ] Isolate stationary rebalancing from noisy cessation evidence. The
   noisy-flat result has more turnover and worse allocation control; it is
   not yet attributable solely to the price estimator.
@@ -560,7 +568,14 @@ phase deliberately grants no such execution authority.
 - [ ] Then isolate arb shock capture, outer-band desk execution and the
   best-effort ordered coordinator, in that order.
 
-Regenerate with =make control-lab-pair-basket=; render existing JSON with
+Regenerate the current isolated experiment with =make control-lab-basket-first=;
+use =CONTROL_LAB_BASKET_FIRST_PROFILES=three-phase,noise20,noise80,flat-noise80=
+for all four cases. The common mean-price prelude defaults to 120 days;
+=CONTROL_LAB_BASKET_FIRST_WARMUP_DAYS=0= restores the cold-start case. Render
+cached data with =make control-lab-basket-first-render=.
+
+The earlier full-market experiment uses =make control-lab-pair-basket=;
+render existing JSON with
 =make control-lab-pair-basket-render=; run response and policy checks with
 =make control-lab-pair-basket-test=. The earlier observation experiment uses
 the analogous =control-lab-block-pairs= targets. The legacy defaults remain
