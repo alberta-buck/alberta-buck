@@ -50,3 +50,27 @@ and matched outcomes; terminal equity is not liquidation ROI.
 with =CONTROL_LAB_BASKET_FIRST_PROFILES= and keep each confirmed revision in
 its own =CONTROL_LAB_BASKET_FIRST_OUT= directory. The =-render= target uses
 cached JSON only. Each correction is committed after its tests and runs.
+
+* Correction 1: orient reversion around accepted relative history
+
+The policy now receives explicit historical whole-TOKEN log-price means at
+deployment. The lab derives them from the configured means, excluding live
+perturbations. Filtered displacement and both live quote routes must place
+the donor above its counter-TOKEN's relative reference. Live pool checks
+also catch a crossing earlier in the same block while the rate still lags.
+
+An explicit 100-tick spread floor (about 1.005%) excludes equality and very
+small relative movements. This is an experimental margin above the two
+0.3% pool fees in this lab, not a claim of positive realized profit or a
+universal setting for other venues. Direction/sizing risk overrides remain
+separate from discretionary reversion transfers.
+
+Six policy tests plus inherited observer tests pass (16 tests in that suite),
+including accelerating departure, braking, stronger closure, wrong-side
+history, sub-minimum separation, same-block live crossing, own impact and
+elapsed-budget authority. The [[file:control-lab/basket-first/01-relative-direction/results.org][120-day clean confirmation]] eliminates all
+11 wrong-side pair legs. Transfers repeat: 41, 40, 38, 41 across four cycles.
+However, the mature allocation remains asymmetric: A is only bought, B is
+only sold. Mean allocation error rises to 4.224 points. This confirms the
+direction correction, not a completed rebalancing strategy. Next test the
+independent two-sided band and band-edge sizing defect.

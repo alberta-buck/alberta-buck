@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {BlockPairSignals} from "./BlockPairSignals.sol";
 import {IEquityBasketView} from "./EquityDesk.sol";
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 /// @notice Graded pair intent. It owns no assets and authorizes no spending.
 /// The basket supplies its actual gaps and enforces its own risk/execution caps.
@@ -12,6 +13,8 @@ contract PairRebalancePolicy {
     BlockPairSignals public immutable signals;
     address public immutable basket;
     uint256 public immutable count;
+    int128[] public referenceLevels; // Accepted historical whole-TOKEN log-price means, fractional ticks.
+    int256 public constant MIN_SEPARATION = 100e18; // ~1%: explicit first-experiment spread floor.
     // Fixed first-experiment parameters, in log returns per day / fractions.
     uint256 public constant RELEASE_SPEED = 2e15; // 20 log bp/day
     uint256 public constant RELEASE_RATE = 1e17; // at most 10% of gap/day before closure
@@ -28,10 +31,14 @@ contract PairRebalancePolicy {
     uint64 public lastExecutionAt;
     event OwnImpact(uint256 indexed token, int256 tickChange);
 
-    constructor(address signals_, address basket_) {
+    constructor(address signals_, address basket_, int128[] memory reference_) {
         signals = BlockPairSignals(signals_); basket = basket_;
         lastExecutionAt = uint64(block.timestamp);
         uint256 n = signals.tokenCount(); count = n;
+        require(reference_.length == n, "reference size");
+        for (uint256 i; i < n; ++i)
+            require(reference_[i] >= -1774544e18 && reference_[i] <= 1774544e18, "reference range");
+        referenceLevels = reference_;
         require(IEquityBasketView(basket_).constituentsLength() == n, "basket size");
         for (uint256 i; i < n; ++i) {
             (address token,,,,, address pool,,,,,) = IEquityBasketView(basket_).constituents(i);
@@ -91,6 +98,26 @@ contract PairRebalancePolicy {
         lastExecutionAt = uint64(block.timestamp);
     }
 
+    function _liveLevel(uint256 q, uint256 i) private view returns (int256) {
+        (address pool, bool token0, int128 offset) = signals.routes(q * count + i);
+        (, int24 tick,,,,,) = IUniswapV3Pool(pool).slot0();
+        return (token0 ? int256(tick) : -int256(tick)) * WAD + offset;
+    }
+
+    /// @notice Reversion is oriented around accepted relative history. A
+    /// negative velocity after crossing that reference is renewed departure,
+    /// not permission to keep selling the now relatively cheaper TOKEN.
+    function separated(uint256 a, uint256 b) public view returns (bool) {
+        BlockPairSignals.Pair memory p = signals.pair(a, b);
+        int256 anchor = int256(referenceLevels[a]) - referenceLevels[b];
+        if (p.level - anchor <= MIN_SEPARATION) return false;
+        // A cached filtered level can lag a crossing, including a pool swap
+        // earlier in this same block. Recheck every live quote route.
+        for (uint256 q; q < signals.venueCount(); ++q)
+            if (_liveLevel(q, a) - _liveLevel(q, b) - anchor <= MIN_SEPARATION) return false;
+        return true;
+    }
+
     /// @return rateWad Fraction of an available allocation gap per day.
     /// Positive A/B velocity is outward for selling A to buy B.
     function desire(uint256 a, uint256 b) public view returns (uint256 rateWad) {
@@ -99,6 +126,7 @@ contract PairRebalancePolicy {
         // The initial experiment requires every registered route. No vote is
         // manufactured on recovery or by observing twice at one timestamp.
         if (p.readyMask != allRoutes || readyMask != p.readyMask || sampledAt != signals.lastSampleAt()) return 0;
+        if (!separated(a, b)) return 0;
         Motion memory m = motion[signals.pairIndex(a, b)];
         int256 change = a < b ? int256(m.change) : -int256(m.change);
         int256 own = int256((remainingImpact(a) + remainingImpact(b)) / signals.responseTime());

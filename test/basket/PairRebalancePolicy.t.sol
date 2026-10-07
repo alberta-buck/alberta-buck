@@ -16,8 +16,12 @@ contract PairBookView {
 }
 
 contract PairRebalancePolicyTest is BlockPairSignalsTest {
+    function _policy(address book, int128 anchorA) private returns (PairRebalancePolicy) {
+        int128[] memory anchors = new int128[](3); anchors[0] = anchorA;
+        return new PairRebalancePolicy(address(s), book, anchors);
+    }
     function test_policy_departureQuenchesBrakingReleasesAndClosureStrengthens() public {
-        PairRebalancePolicy p = new PairRebalancePolicy(address(s), address(new PairBookView(s)));
+        PairRebalancePolicy p = _policy(address(new PairBookView(s)), 0);
         p.observe(); assertEq(p.desire(0, 1), 0, "unready is not stationary");
         warm(); p.observe();
         for (uint256 k = 1; k <= 100; ++k) {
@@ -38,7 +42,7 @@ contract PairRebalancePolicyTest is BlockPairSignalsTest {
 
     function test_policy_ownImpactWidensUncertaintyAndRequiresBasketAuthority() public {
         address book = address(new PairBookView(s));
-        PairRebalancePolicy p = new PairRebalancePolicy(address(s), book);
+        PairRebalancePolicy p = _policy(book, -3000e18);
         warm(); p.observe();
         for (uint256 k = 1; k <= 100; ++k) {
             setTicks(-int24(int256(k * 12)), 0, 0, 0); step(12); p.observe();
@@ -53,7 +57,7 @@ contract PairRebalancePolicyTest is BlockPairSignalsTest {
     }
 
     function test_policy_fractionIsTimeScaledAndCatchUpIsBounded() public {
-        PairRebalancePolicy p = new PairRebalancePolicy(address(s), address(new PairBookView(s)));
+        PairRebalancePolicy p = _policy(address(new PairBookView(s)), 0);
         assertEq(p.fraction(1e18, 0), 0);
         assertLt(p.fraction(1e18, 12), p.fraction(1e18, 3600));
         assertEq(p.fraction(1e18, 1 days), 0.5e18);
@@ -62,7 +66,7 @@ contract PairRebalancePolicyTest is BlockPairSignalsTest {
 
     function test_policy_onlyExecutedTransfersResetElapsedBudget() public {
         address book = address(new PairBookView(s));
-        PairRebalancePolicy p = new PairRebalancePolicy(address(s), book);
+        PairRebalancePolicy p = _policy(book, 0);
         uint64 deployedAt = p.lastExecutionAt();
         warm(); p.observe();
         assertGt(block.timestamp, deployedAt);
@@ -72,5 +76,36 @@ contract PairRebalancePolicyTest is BlockPairSignalsTest {
         vm.expectRevert(bytes("basket only")); p.recordExecution();
         vm.prank(book); p.recordExecution();
         assertEq(p.lastExecutionAt(), block.timestamp);
+    }
+
+    function test_policy_crossedReferenceAndLiveCrossingStopReversionSales() public {
+        PairRebalancePolicy p = _policy(address(new PairBookView(s)), 0);
+        setTicks(3000, 0, 0, 0); warm(); p.observe();
+        for (uint256 k = 1; k <= 100; ++k) {
+            setTicks(3000 - int24(int256(k * 12)), 0, 0, 0); step(12); p.observe();
+        }
+        assertGt(p.desire(0, 1), 0, "dear TOKEN closing toward history can be released");
+        assertEq(p.desire(1, 0), 0, "cheap TOKEN is not a reversion seller");
+        int256 rate = s.pair(0, 1).rate;
+        setTicks(-500, 0, 0, 0); // Same block: filtered prices and velocity still lag.
+        assertEq(s.pair(0, 1).rate, rate);
+        assertEq(p.desire(0, 1), 0, "live crossing vetoes stale filtered closure");
+        for (uint256 k = 1; k <= 100; ++k) {
+            setTicks(-500 - int24(int256(k * 12)), 0, 0, 0); step(12); p.observe();
+        }
+        assertLt(s.pair(0, 1).high, 0);
+        assertEq(p.desire(0, 1), 0, "negative velocity beyond the reference is departure");
+    }
+
+    function test_policy_quietEqualityAndSubMinimumSeparationHaveNoReversionIntent() public {
+        PairRebalancePolicy p = _policy(address(new PairBookView(s)), 0);
+        warm(); p.observe(); assertEq(p.desire(0, 1), 0);
+        setTicks(50, 0, 0, 0);
+        for (uint256 k; k < 100; ++k) { step(12); p.observe(); }
+        assertEq(p.desire(0, 1), 0, "sub-minimum displacement is not a spread opportunity");
+        PairRebalancePolicy normalized = _policy(address(new PairBookView(s)), 2000e18);
+        setTicks(1000, 0, 0, 0);
+        for (uint256 k; k < 100; ++k) { step(12); normalized.observe(); }
+        assertEq(normalized.desire(0, 1), 0, "raw higher price can be below its relative reference");
     }
 }

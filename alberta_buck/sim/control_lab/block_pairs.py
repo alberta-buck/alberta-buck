@@ -48,7 +48,10 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
                 if basket_mode == "pair":
                     from alberta_buck.sim.chain import load_artifact
                     from web3.logs import DISCARD
-                    self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address, d.basket.address)
+                    # Accepted historical means, never the first live price or
+                    # any selected perturbation. Observer levels normalize decimals.
+                    reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
+                    self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address, d.basket.address, reference)
                     response_name = "PairBasketDecisionTrace" if diagnostics else "PairBasketEquityResponse"
                     facet = self.chain.deploy(response_name, self.pair_policy.address)
                     self.chain.send(d.basket.functions.setEquityWheel(facet.address), sender=d.gov)
@@ -146,6 +149,9 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
     result.update(cache_key=key, implementation=code, observer_params=PARAMS, observer_enabled=enabled)
     if basket_mode:
         result.update(basket_mode=basket_mode)
+        if basket_mode == "pair":
+            result["pair_reference"] = dict(source="configured historical baseline means, excluding live perturbations",
+                prices=cfg["feed"]["base"], fractional_ticks=[str(round(math.log(p)/LOG_TICK*1e18)) for p in cfg["feed"]["base"]])
     atomic_json(path, result)
     return dict(profile=profile["name"], stage=stage, cache_key=key, file=Path(path).name, summary=result["summary"])
 
