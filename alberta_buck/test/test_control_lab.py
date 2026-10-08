@@ -83,8 +83,9 @@ def evm_controls():
     from alberta_buck.sim.control_lab.engine import simulate
     cfg = load_config(CONFIG)
     cfg["days"] = 3
-    # Make the short smoke case exercise a large disturbance immediately.
-    profile = dict(name="step", perturbations=[dict(kind="step", start=0, duration=10, amplitude=.12)])
+    # Day-zero prices now settle before sampling. Exercise rejection with a
+    # genuine live disturbance instead of relying on a bootstrap discontinuity.
+    profile = dict(name="step", perturbations=[dict(kind="step", start=1, duration=10, amplitude=.12)])
     return {stage: simulate(cfg, profile, stage) for stage in ("monitor", "monitor-k", "linked", "k", "all")}
 
 

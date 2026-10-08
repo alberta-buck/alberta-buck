@@ -66,7 +66,7 @@ def render(root):
     atomic_json(root/"comparison.json",dict(stage=m["market_stage"],summaries=rows,paired_inputs=True))
     warm=m["requested_config"]["bootstrap"].get("basket_warmup_days",0)
     band=m["requested_config"]["basket"].get("weight_band_bp",200)
-    detail=f" Allocation trigger band: {band/100:g} percentage points. Common mean-price LP prelude: {warm} days, excluded from the 120 live days."
+    detail=f" Allocation trigger band: {band/100:g} percentage points. Common mean-price LP prelude: {warm} days, excluded from the 120 live days. Both quote routes then start at the selected day-zero prices with settled TWAPs; a separate live pair observer warms up from those prices."
     if detail not in m["method"]:
         m["method"]+=detail; atomic_json(root/"manifest.json",m)
     interactive(root)
@@ -89,7 +89,7 @@ def render(root):
     if warm:
         opening=runs[0]["bootstrap"]["basket_prelude"]
         report += ["* Common opening book", "",
-            f"The same production LP placement ran at known mean prices for {warm} days in both arms, before enabling the live signals. K and private actors were idle. Opening weights: {', '.join(str(x/100)+'%' for x in opening['weights'])}; equity {opening['equity_buck']:,.2f} BUCK; account {opening['account_buck']:,.2f} BUCK. Raw inventory and liquidity quantities are in each JSON bootstrap.basket_prelude. This is a settled-book experiment, separate from the retained cold-start runs.", ""]
+            f"The same production LP placement ran at known mean prices for {warm} days in both arms, before enabling the live signals. K and private actors were idle. Prelude-end weights: {', '.join(str(x/100)+'%' for x in opening['weights'])}; equity {opening['equity_buck']:,.2f} BUCK; account {opening['account_buck']:,.2f} BUCK. Raw inventory and liquidity quantities are in each JSON bootstrap.basket_prelude. Both routes are subsequently aligned to bootstrap.opening_target_usd, and their TWAPs settle before live actions. The selected opening phase can change allocation values. This is a settled-book experiment, separate from the retained cold-start runs.", ""]
     for s in rows:
         if s["missing_responses"]:
             report += [f"* Missing response traces: {s['profile']} / {s['mode']}", "",

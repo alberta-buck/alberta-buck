@@ -6,7 +6,7 @@ import json
 import math
 from pathlib import Path
 
-from .model import dependencies, digest
+from .model import STAGES, dependencies, digest
 
 
 def audit(root, partial=False):
@@ -30,6 +30,16 @@ def audit(root, partial=False):
         cfg, flags, frames = result['config'], result['flags'], result['frames']
         context = (entry['profile'], entry['stage'], key[:12])
         assert result['backend'] == 'pyrevm', context
+        assert flags == STAGES[result['stage']], context
+        assert bool(frames[0].get('pair_signal')) == bool(flags.get('monitor')), context
+        if flags.get('basket'):
+            assert result.get('basket_mode') == 'pair' and 'pair_policy' in frames[0], context
+        opening = result['bootstrap']
+        assert opening['opening_twap_settled'], context
+        assert opening['opening_target_usd'] == frames[0]['target_usd'], context
+        for i, price in enumerate(opening['opening_target_usd']):
+            for route in ('token_buck', 'token_usdc'):
+                assert math.isclose(opening['prices'][route][i], price, rel_tol=1e-6), ('opening price', context)
         assert result['cache_key'] == key, context
         deps = dependencies(cfg, result['profile'], result['stage'])
         assert deps == result['dependencies'], context
@@ -100,7 +110,7 @@ def audit(root, partial=False):
             mean_bvib=sum(f['bvib'] for f in frames) / len(frames), **result['summary']))
     control_pairs = 0
     for feed_key in feeds:
-        for fixed, moving in [('monitor', 'monitor-k'), ('linked', 'k')]:
+        for fixed, moving in [('monitor', 'monitor-k')]:
             if (feed_key, fixed) in market_paths and (feed_key, moving) in market_paths:
                 assert market_paths[feed_key, fixed] == market_paths[feed_key, moving], ('K alone changed prices', fixed, moving, feed_key)
                 control_pairs += 1

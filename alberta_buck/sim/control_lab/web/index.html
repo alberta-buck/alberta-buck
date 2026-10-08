@@ -16,7 +16,7 @@
       <h1>Watch the market.<br>Then close the loop.</h1>
       <p class="lede">The same three tokens, from a price trace to a working basket, desk and private market. Change one input. Follow its effect through every pane.</p>
       <p id="campaign-status" role="status">Loading the saved campaign…</p>
-      <p><a href="../block-pairs/index.html">New: TOKEN-pair observer, rate estimates and error diagnostics →</a></p>
+      <p>The TOKEN-pair basket starts immediately after “Link the markets”. Open “Inspect sensor quality…” to compare both quote routes, relative prices, motion estimates and error allowances.</p>
       <div class="guide">
         <div><h2>Paired price paths</h2><p>Mixed includes fixed white noise even at random walk = 0. Three-phase with walk = 0 is the clean baseline. Walks accumulate signed changes and can wander above or below the baseline; they do not revert to it. The selector scales the same seeded path.</p></div>
         <div><h2>Finite private flows</h2><p>Low, medium and high are desired daily amounts at fair value. Adverse prices damp the rate exponentially. Cash and credit can run out.</p></div>
@@ -24,6 +24,7 @@
       </div>
       <details class="method"><summary>How to read and reproduce this experiment</summary><div>
         <p id="method-details"></p>
+        <p>Every stage begins with the same funded basket LP book, settled during a 120-day prelude at historical mean prices. Before live day zero, both TOKEN/BUCK and TOKEN/USDC pools are set to the selected opening feed and their price windows settle. The live pair estimator warms up separately for two days; the fixed-mean prelude does not enter its motion estimates. Historical EMA anchors exclude live perturbations.</p>
         <p>Mixed adds triangular pulses, a lasting TOKEN C ramp, and independent Gaussian white noise with a standard deviation of 0.2% of each token’s baseline mean per observation. That white noise does not accumulate and is separate from the random-walk selector. A zero-mean random increment does not make an accumulated path average zero over these 120 days.</p>
         <p>Drag the day-range controls to zoom; hover or focus a chart and use the arrow keys to inspect values across its panes. Click legend entries to hide or show lines. Shared vertical scales compare all stages and flow quantities for the selected profile and walk. To inspect tiny movements, disable shared scales and hide constant guide lines.</p>
         <p>Price-pane triangles mark executed TOKEN buys (up) and sells (down): green/red for the desk, teal/orange for the basket, purple/pink for arbitrage. Grey diamonds mark liquidity pairing without a token swap. Toggle marker groups in the legend, or click a marker to open the execution log for that observation. The log records both arbitrage venues and separates execution phases within each six-hour observation.</p>

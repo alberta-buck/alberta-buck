@@ -28,7 +28,7 @@ DEFAULTS = {
     "days": 120, "ticks_per_day": 4, "seed": 41404,
     "feed": {"base": [100., 100., 100.], "amplitude": .12, "period_days": 30.,
              "walk_amplification": 0., "walk_daily_sigma": .01},
-    "bootstrap": {"history_days": 1280},
+    "bootstrap": {"history_days": 1280, "basket_warmup_days": 0},
     "market": {"depth_usd": 1_000_000, "basket_equity_usd": 1_000_000,
                "arb_rounds": 2, "arb_cap_bp": 200},
     "monitor": {"interval": 1800, "max_age": 3600, "deviation_bp": 500},
@@ -80,6 +80,9 @@ def validate(cfg: dict) -> None:
     history_days = cfg["bootstrap"]["history_days"]
     if not isinstance(history_days, int) or not 1280 <= history_days <= 20000:
         raise ValueError("bootstrap.history_days must be in 1280..20000")
+    warm_days = cfg["bootstrap"]["basket_warmup_days"]
+    if not isinstance(warm_days, int) or not 0 <= warm_days <= 365:
+        raise ValueError("bootstrap.basket_warmup_days must be in 0..365")
     mon = cfg["monitor"]
     if not 0 < mon["interval"] <= mon["max_age"] <= 86400 or not 0 < mon["deviation_bp"] <= 1000:
         raise ValueError("invalid monitor pacing or tolerance")
@@ -192,6 +195,11 @@ def dependencies(cfg: dict, profile: dict, stage: str) -> dict:
             resolved[key] = cfg[key]
     if flags.get("monitor"):
         resolved["bootstrap"] = cfg["bootstrap"]
+    if cfg["bootstrap"]["basket_warmup_days"]:
+        # All arms start with the same settled LP book, including feeds-only.
+        resolved["basket_prelude"] = dict(days=cfg["bootstrap"]["basket_warmup_days"],
+            leash_bp=cfg["basket"]["leash_bp"], interval=cfg["monitor"]["interval"],
+            weight_band_bp=cfg["basket"]["weight_band_bp"])
     if flags.get("k"):
         resolved["controller"] = cfg["controller"]
     return {"config": resolved, "profile": profile, "stage": stage}

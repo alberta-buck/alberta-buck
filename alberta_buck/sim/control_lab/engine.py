@@ -109,12 +109,13 @@ class World:
             amount = round(cfg["market"]["basket_equity_usd"] / 3 / cfg["feed"]["base"][i] * E18)
             self.execute(d.simlp, token, "approve", [d.basket.address, amount])
             self.execute(d.simlp, d.basket, "depositToken", [token.address, amount, 0])
-        mon = cfg["monitor"] if self.flags.get("monitor") else DEFAULTS["monitor"]
+        warm = bool(cfg["bootstrap"]["basket_warmup_days"])
+        mon = cfg["monitor"] if self.flags.get("monitor") or warm else DEFAULTS["monitor"]
         self.signals = self.chain.deploy("BasketSignals", d.basket.address,
                                         mon["interval"], mon["max_age"], mon["deviation_bp"])
         response = self.chain.deploy("BuckBasketEquityResponse")
         self.chain.send(d.basket.functions.setEquityWheel(response.address), sender=d.gov)
-        rp = cfg["basket"] if self.flags.get("basket") else DEFAULTS["basket"]
+        rp = cfg["basket"] if self.flags.get("basket") or warm else DEFAULTS["basket"]
         equity_params = list(d.basket.functions.eq().call())
         if equity_params[6] != rp["weight_band_bp"]:
             equity_params[6] = rp["weight_band_bp"]
@@ -347,7 +348,18 @@ class World:
         from web3.exceptions import ContractLogicError, Web3RPCError
         from alberta_buck.sim.signal_history import initialize_history
         self.history = None
+        # LP bootstrapping can leave pools at the historical means. Set both
+        # quote routes to the actual opening feed, then mature their TWAPs
+        # before any live arbitrage, observation or monetary action. Historical
+        # EMA anchors still exclude all selected live perturbations.
+        self.drive(rows[0]["target_usd"], replay=True)
+        settled = int(self.d.w3.eth.get_block("latest")["timestamp"]) + 601
+        self.start = (settled // 86400 + 1) * 86400
         self.warp(self.start)
+        self.initial_market_book = self.market_book()
+        self.bootstrap.update(prices=self.prices(), market=self.initial_market_book,
+                              opening_target_usd=rows[0]["target_usd"], opening_twap_settled=True,
+                              reference_at_start=self.reference_cost(rows[0]["target_usd"]))
         if self.flags.get("monitor"):
             self.history = initialize_history(self.chain, self.signals, self.d.basket,
                 self.d.gov, history_rows(self.cfg), self.cfg["feed"]["base"])
@@ -387,11 +399,11 @@ class World:
         return frames
 
 
-def simulate(cfg, profile, stage):
+def simulate(cfg, profile, stage, world_factory=None):
     started = time.perf_counter()
     rows = feed_rows(cfg, profile)
     with isolated_environment(cfg):
-        world = World(cfg, stage)
+        world = (world_factory or World)(cfg, stage)
         try:
             frames = world.run(rows)
             runtime = time.perf_counter() - started

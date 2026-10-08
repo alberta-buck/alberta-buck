@@ -41,7 +41,7 @@ def fingerprint():
     paths += [root / "alberta_buck/sim" / n for n in (
         "deploy.py", "chain.py", "identity.py", "experiment.py", "router.py",
         "gauge.py", "pyrevm_backend.py", "signal_history.py", "control_lab/engine.py", "control_lab/model.py",
-        "control_lab/events.py")]
+        "control_lab/events.py", "control_lab/block_pairs.py", "control_lab/cli.py")]
     paths += [root / "alberta_buck/sim/artifacts/UniversalRouter.json", root / "foundry.toml"]
     h = hashlib.sha256()
     for p in sorted(paths):
@@ -52,7 +52,7 @@ def fingerprint():
                  "BuckBasketEquity", "BuckBasketEquityWheel", "BuckBasketUniswapV3",
                  "EquityDesk", "BasketRebalanceDirector", "BasketWheel", "BasketMachineWheel",
                  "BuckBasketEquityResponse", "BasketSignals", "OuterBandMonetaryDirector",
-                 "ValidatedBasketVenue"):
+                 "ValidatedBasketVenue", "BlockPairSignals", "PairRebalancePolicy", "PairBasketEquityResponse"):
         h.update(digest(load_artifact(name)).encode())
     versions = {n: version(n) for n in ("pyrevm", "web3")}
     h.update(digest(versions).encode())
@@ -60,9 +60,10 @@ def fingerprint():
 
 
 def worker(cfg, profile, stage, key, code, path):
-    from .engine import simulate
-    result = simulate(cfg, profile, stage)
-    result.update(cache_key=key, implementation=code,
+    from .block_pairs import simulate_observed
+    result = simulate_observed(cfg, profile, stage,
+                               basket_mode="pair" if STAGES[stage].get("basket") else None)
+    result.update(cache_key=key, implementation=code, sensor_details=True,
                   dependencies=dependencies(cfg, profile, stage))
     atomic_json(path, result)
     return {"profile": profile["name"], "stage": stage, "cache_key": key,

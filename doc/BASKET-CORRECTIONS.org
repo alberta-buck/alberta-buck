@@ -1,5 +1,5 @@
 #+title: Basket-first corrections and confirmation
-#+date: 2026-10-07
+#+date: 2026-10-08
 #+options: toc:2 num:nil
 
 * Baseline and experiment order
@@ -216,6 +216,45 @@ The diagnostic EOA-wheel probe was also exercised separately and restored
 the wheel address, observation publication, execution clock, account and
 inventory when its EVM snapshot was discarded.
 
+* Correction: restore the opening phase after LP bootstrap
+
+The mean-price LP prelude left all three TOKEN/BUCK pools at their means.
+At live day zero only the external TOKEN/USDC route was driven to the
+selected phases. Arbitrage therefore spent the opening days repairing an
+artificial discrepancy. That is a simulation initialization defect, not
+evidence of slow signal detection or an intended arbitrage opportunity.
+
+After the prelude, the driver now sets both routes to the first selected
+live feed using funded swaps, and lets their TWAP windows settle before
+activating observers or actors. Clean opening prices are 100, 110.392305
+and 89.607695. Noise or an explicit day-zero disturbance also belongs in
+the opening quote; it remains excluded from historical EMA/reference means.
+The bootstrap JSON records the opening target, actual prices and settled
+window separately from the original mean-price LP prelude.
+
+The prelude now has its own observer. The live pair estimator starts with
+an endpoint at the correct opening phase and warms up from live intervals;
+120 days at an artificial constant price cannot seed its rate estimate.
+Regression checks cover both routes, no spurious day-zero arbitrage in
+the isolated basket, unchanged historical anchors, and two-day readiness.
+
+The original interactive walkthrough now uses the same production pair
+response from stage 5 onward. All arms share the LP prelude, preserving
+the comparison when an actuator is enabled. Pair signals are available
+inside “Inspect sensor quality…”, beside the original EMA diagnostics.
+The 891 selector combinations resolve to 279 actual 120-day EVM runs.
+
+Earlier tables above retain their historical results; the regenerated
+=current= report records the corrected opening conditions.
+
+The corrected 120-day pair runs make 133 clean transfers, 127 at 20 bp
+noise, and 94 at 80 bp noise. Every TOKEN still trades both directions in
+each mature cycle; all three runs have zero wrong-side paired legs and
+481/481 response traces. Flat prices with 80 bp noise produce zero paired
+transfers. All eight comparison runs start with exact selected prices on
+both routes and zero day-zero arbitrage cycles. The clean transfer counts
+per 30-day cycle are now 32, 31, 35 and 35.
+
 * Remaining improvements, without conflating them with confirmed fixes
 
 - [ ] Cold-start phase and initial LP/idle composition sensitivity. Retain
@@ -238,4 +277,4 @@ make control-lab-basket-first \
 
 Versioned directories preserve each correction's inputs, bytecode/source
 fingerprints, pre-response decisions and plots. The =current= presentation
-reuses the confirmed clean and first-seed JSON; rendering does not rerun EVMs.
+uses the corrected opening phase; rendering saved JSON does not rerun EVMs.

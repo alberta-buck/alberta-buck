@@ -16,6 +16,12 @@ walk_daily_sigma = 0.01
 # Profile perturbations (including noise) never enter this history.
 [bootstrap]
 history_days = 1280
+# Give every stage the same funded, settled LP book before live day zero.
+# Both quote routes are then aligned to the selected opening TOKEN prices.
+basket_warmup_days = 120
+
+[basket]
+tilt = 0.0
 
 # Private actors have an accumulation/divestment intent even at fair value.
 # A 1% adverse price multiplies the desired rate by exp(-1); favourable

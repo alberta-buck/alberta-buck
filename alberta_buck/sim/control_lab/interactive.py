@@ -125,7 +125,7 @@ def plot_data(result):
                   for key, label, color, dash in (("token_buck", "BUCK spot route", COLORS[0], "3 3"),
                     ("token_usdc", "USDC spot route", COLORS[1], "7 4"))],
                 line("Filtered consensus", "#172d39", lambda f: 10000 * (pair(f)["level_log"] - math.log(base[i]/base[j])) if pair(f)["ready_mask"] else None),
-            ], "A common movement of the quote currency cancels in each TOKEN ratio. The known baseline ratio only centers this drawing; the contract has no equilibrium price anchor.")
+            ], "A common movement of the quote currency cancels in each TOKEN ratio. Levels are centered on the historical mean ratio. The observer estimates motion; the pair basket also uses this historical reference to guard trade direction.")
             pane(f"pair-rate-{pair_number}", f"{name} · departure and closure rate", "Log basis points per day", [
                 line("Estimated rate", "#172d39", lambda f: pair(f)["rate_bp_day"] if pair(f)["ready_mask"] else None),
                 *[line(label, color, lambda f, q=q: pair(f)["routes"][q]["rate_bp_day"] if pair(f)["ready_mask"] & (1 << q) else None, "3 3")
@@ -134,7 +134,8 @@ def plot_data(result):
                   for key, label in (("low_bp_day", "Allowance lower"), ("high_bp_day", "Allowance upper"))],
                 line("Smooth input reference at interval midpoint", "#87949c", lambda f: pair(f)["truth_bp_day"], "7 4"),
                 line("Zero rate", "#a1a9ad", lambda f: 0., "2 4"),
-            ], "Positive means the numerator gains relative to the denominator. For an overweight numerator this is departure; falling positive values show cessation before negative closure. Allowances are empirical and not confidence intervals. The reference is scoring-only, available in replay arms.")
+                line("Route rate spread", "#7653ab", lambda f: pair(f)["rate_spread_bp_day"] if pair(f)["ready_mask"] else None, "7 4"),
+            ], "Positive means the numerator gains relative to the denominator. Above its historical ratio this is departure; negative motion is closure. Below that ratio the directions reverse. Allocation is a separate trade condition. Allowances are empirical, not confidence intervals. The smooth reference is scoring-only, available in replay arms.")
             pane(f"pair-error-{pair_number}", f"{name} · prediction error and route disagreement", "Log basis points", [
                 line("Mean absolute prediction error", "#b63e45", lambda f: pair(f)["error_bp"] if pair(f)["ready_mask"] else None),
                 line("Filtered route level spread", "#7653ab", lambda f: pair(f)["level_spread_bp"] if pair(f)["ready_mask"] else None),
@@ -149,6 +150,10 @@ def plot_data(result):
             line(f"TOKEN {'ABC'[i]}", color, lambda f: f["pair_policy"]["own_impact_ticks"][i] * math.log(1.0001) * 10000)
             for i,color in enumerate(COLORS)],
             "Measured immediate tick movement from this basket's operations, accumulated and linearly decayed over two days. It widens uncertainty; it is not subtracted as a known counterfactual price path.")
+    if result.get("sensor_details"):
+        for item in panes:
+            if item["id"].startswith("pair-"):
+                item["group"] = "monitor-detail"
     return dict(days=[f["day"] for f in frames], panes=panes, summary=result["summary"],
                 execution_counts=execution_counts(frames), executions=execution_log(result),
                 mean_bvib=sum(f["bvib"] for f in frames) / len(frames),

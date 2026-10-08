@@ -9,8 +9,22 @@ For selectable price disturbances, buyer/seller quantities and JavaScript
 graphs, open [[file:control-lab/interactive/index.html][the interactive control lab]]. The Org walkthrough below keeps
 the original matched figures and explains the staged construction.
 
-As of 2026-10-07, new simulations put the basket directly after the linked
-markets, before moving K or introducing the desk and persistent agents.
+As of 2026-10-08, the interactive campaign uses =PairBasketEquityResponse=
+directly after the linked markets, before moving K or introducing the desk
+and persistent agents. Every later stage retains that same basket response.
+The “Inspect sensor quality…” section adds the BUCK and USDC TOKEN-pair
+levels, departure/closure rates, error allowances, route disagreement,
+readiness, observation gas, participation and own-impact allowances.
+
+All stages share a funded LP book settled at historical means. Immediately
+before live day zero, both quote routes are aligned to the actual selected
+opening feed and their TWAP windows settle before actors start. For the
+clean three-phase input, normalized opening prices are 1, 1.10392305 and
+0.89607695. The LP prelude has a separate observer: its constant prices do
+not manufacture a live velocity when the phases begin. The live estimator
+still requires two days of observations. Historical EMA anchors and pair
+reference means continue to exclude live perturbations.
+
 The [[file:BASKET-CORRECTIONS.org][basket-first correction log]] records isolated runs, verified changes and
 commits. The historical figures below retain their original stage flags.
 Open the [[file:control-lab/basket-first/current/index.html][current basket-first plots]] for clean cycles, two noise levels and
@@ -18,7 +32,7 @@ noisy flat prices, with the basket isolated from K, desk and private flow.
 The common opening LP book and cold-start limitations are disclosed in the
 [[file:control-lab/basket-first/current/results.org][results]].
 
-The new [[file:control-lab/block-pairs/index.html][TOKEN-pair observation experiment]] adds the on-chain observer beside
+The earlier [[file:control-lab/block-pairs/index.html][TOKEN-pair observation experiment]] adds the on-chain observer beside
 the existing EMAs, with graphs of relative prices, estimated departure/closure
 rates, prediction errors, route disagreement and readiness. Its
 [[file:control-lab/block-pairs/results.org][results and static figures]] include matched observer-off controls. Existing
@@ -27,7 +41,7 @@ Regenerate with =make control-lab-block-pairs=; render cached JSON with
 =make control-lab-block-pairs-render=; run the Solidity checks with
 =make control-lab-block-pairs-test=.
 
-The next [[file:control-lab/pair-basket/index.html][graded pair-basket experiment]] compares two responses under the same
+The earlier [[file:control-lab/pair-basket/index.html][graded pair-basket experiment]] compares two responses under the same
 declared targets, feeds, capital and agent rules. Its
 [[file:control-lab/pair-basket/results.org][report]] adds executed transfer markers, allocation, debt and equity panes.
 It remains experimental: clean-cycle activity nearly stops after month one,

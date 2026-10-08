@@ -1,4 +1,4 @@
-"""Isolated real-EVM observation phase, with unchanged legacy consumers.
+"""Shared real-EVM pair observer and optional basket response.
 
 This campaign deliberately has its own cache. Its six-hour market driver is
 not a claim to simulate every L1 block. Solidity tests cover 12-second and
@@ -11,7 +11,6 @@ import json
 import math
 import multiprocessing
 from pathlib import Path
-from unittest.mock import patch
 
 from .cli import atomic_json, fingerprint
 from .model import STAGES, digest, load_config, validate
@@ -26,7 +25,8 @@ PROFILES = [dict(name="three-phase", perturbations=[])] + [
     for name, sigma in (("noise20", .002), ("noise80", .008), ("flat-noise80", .008))]
 
 
-def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=None, diagnostics=False):
+def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagnostics=False):
+    """Shared observer/response wiring for the walkthrough and comparisons."""
     from . import engine
 
     class ObserverWorld(engine.World):
@@ -43,10 +43,10 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
             self.pair_plans = []
             self.pair_decisions = []
             self.pair_response_check = None
+            warm_days = config["bootstrap"].get("basket_warmup_days",0)
+            if warm_days:
+                self.warm_basket(warm_days)
             if basket_mode:
-                warm_days = config["bootstrap"].get("basket_warmup_days",0)
-                if warm_days:
-                    self.warm_basket(warm_days)
                 self.chain.send(d.basket.functions.setResponse(self.signals.address,
                     (config["basket"]["leash_bp"], config["monitor"]["interval"], 0)), sender=d.gov)
                 if basket_mode == "pair":
@@ -106,7 +106,13 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
             d = self.d; old_facet = d.basket.functions.equityWheel().call()
             venue = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("ValidatedBasketVenue")[0])
             references = [round(math.log(p)/LOG_TICK*1e18) for p in self.cfg["feed"]["base"]]
-            policy = self.chain.deploy("PairRebalancePolicy",self.pair_observer.address,d.basket.address,references)
+            # The artificial fixed-mean LP prelude is not live price history.
+            # Keep its observer separate so the main estimator starts at the
+            # selected opening phase, without a fictitious mean-to-spot jump.
+            prelude_observer = self.chain.deploy("BlockPairSignals",
+                [t.address for t in d.tokens], [d.buck.address, d.usdc.address],
+                [*d.pool_buck, *d.pool_usdc], *PARAMS.values())
+            policy = self.chain.deploy("PairRebalancePolicy",prelude_observer.address,d.basket.address,references)
             facet = self.chain.deploy("PairBasketEquityResponse",policy.address)
             response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("PairBasketEquityResponse")[0])
             self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)
@@ -122,6 +128,9 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
                 self.chain.send(response.functions.wheelStep(2,0),sender=d.gov)
             self.chain.send(venue.functions.setWheel(d.wheel.address),sender=d.gov)
             self.chain.send(d.basket.functions.setEquityWheel(old_facet),sender=d.gov)
+            self.chain.send(d.basket.functions.setResponse(self.signals.address,
+                (self.cfg["basket"]["leash_bp"],self.cfg["monitor"]["interval"],
+                 round(self.cfg["basket"]["tilt"]*1e18))),sender=d.gov)
             self.start = (int(d.w3.eth.get_block("latest")["timestamp"])//86400+1)*86400
             self.initial_market_book = self.market_book()
             self.bootstrap.update(prices=self.prices(),market=self.initial_market_book,
@@ -137,7 +146,7 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
             self.observation_gas.append(int(rc["gasUsed"]))
 
         def before_policy(self):
-            if basket_mode:
+            if basket_mode and enabled:
                 self.pair_plans = []
                 self.pair_decisions = []
                 self.pair_response_check = None
@@ -145,12 +154,14 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
 
         def arbitrage(self, phase):
             super().arbitrage(phase)
-            if phase == "after-policy" and not basket_mode:
+            if enabled and phase == "after-policy" and not basket_mode and self.flags.get("monitor"):
                 # A separate wheel keeps the legacy slot order unchanged.
                 self.observe_pairs()
 
         def snapshot(self, row, before, invalid_after_move):
             frame = super().snapshot(row, before, invalid_after_move)
+            if not enabled or not self.flags.get("monitor"):
+                return frame
             s = self.pair_observer
             routes = []
             for q in range(2):
@@ -205,15 +216,20 @@ def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=Non
                     frame["pair_response_check"] = self.pair_response_check
             return frame
 
-    world = ObserverWorld if enabled else engine.World
-    with patch.object(engine, "World", world):
-        result = engine.simulate(cfg, profile, stage)
-    result.update(cache_key=key, implementation=code, observer_params=PARAMS, observer_enabled=enabled)
+    # Disabled-observer controls still receive the identical funded LP prelude.
+    result = engine.simulate(cfg, profile, stage, world_factory=ObserverWorld)
+    result.update(observer_params=PARAMS, observer_enabled=enabled)
     if basket_mode:
         result.update(basket_mode=basket_mode)
         if basket_mode == "pair":
             result["pair_reference"] = dict(source="configured historical baseline means, excluding live perturbations",
                 prices=cfg["feed"]["base"], fractional_ticks=[str(round(math.log(p)/LOG_TICK*1e18)) for p in cfg["feed"]["base"]])
+    return result
+
+
+def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=None, diagnostics=False):
+    result = simulate_observed(cfg, profile, stage, enabled, basket_mode, diagnostics)
+    result.update(cache_key=key, implementation=code)
     atomic_json(path, result)
     return dict(profile=profile["name"], stage=stage, cache_key=key, file=Path(path).name, summary=result["summary"])
 
