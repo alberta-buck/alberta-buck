@@ -36,13 +36,26 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     // Replay calibration is a sub-basis-point effect. Local scales must be
     // able to expose it after the constant K rail guides are hidden.
     await choose('monitor-k', {profile:'three-phase',walk:'0',buyer:'medium',seller:'medium'});
-    await page.click('#monitor-k .toolbar input[type=checkbox]');
+    await page.click('#monitor-k input[name=shared-scales]');
     for (const rail of ['Lower rail','Upper rail']) await page.click(`#monitor-k [aria-label="Toggle ${rail}"]`);
     const smallScale = await page.$$eval('#monitor-k [data-pane=k] svg text[x="85"]', nodes=>nodes.map(e=>Number(e.textContent.replaceAll(',',''))));
     assert.equal(smallScale.length,5);
     assert.ok(smallScale[4]-smallScale[0]<.002, 'local scale hides the calibration drift');
     const firstKey = await choose('all', {profile:'three-phase',walk:'0',buyer:'medium',seller:'medium'});
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 9);
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 10);
+    assert.equal(await page.$$eval('#all [data-pane=basket-value] svg path', n=>n.length), 2);
+    assert.equal(await page.$eval('#all [aria-label="Toggle Initial investment"] .value',e=>e.textContent),'1,000,000');
+    const allocationScale = () => page.$$eval('#all [data-pane=allocation] svg text[x="85"]',ns=>ns.map(n=>Number(n.textContent.replaceAll(',',''))));
+    const allocationBounds = await allocationScale();
+    assert.ok(Math.min(...allocationBounds)>20 && Math.max(...allocationBounds)<45,
+      'allocation must fit the data even with shared scales enabled');
+    const allocationSpan = Math.max(...allocationBounds)-Math.min(...allocationBounds);
+    for (const token of ['B','C']) await page.click(`#all [data-pane=allocation] [aria-label="Toggle TOKEN ${token}"]`);
+    await page.$eval('#all .zoom input',e=>{e.value='119';e.dispatchEvent(new Event('input'));});
+    const zoomedAllocation = await allocationScale();
+    assert.ok(Math.max(...zoomedAllocation)-Math.min(...zoomedAllocation)<allocationSpan,
+      'allocation must rescale after zooming and hiding series');
+    await page.click('#all .zoom button');
     const highKey = await choose('all', {profile:'three-phase',walk:'0',buyer:'high',seller:'low'});
     assert.notEqual(highKey, firstKey);
     assert.match(await page.$eval('#all .data-link',e=>e.href), new RegExp(highKey.slice(0,16)));
@@ -55,7 +68,7 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     await page.waitForFunction(key=>document.querySelector('#all').dataset.loadedKey===key, {}, key);
     await page.click('#all .monitor-details>summary');
     await page.waitForSelector('#all [data-pane="ema-2"]');
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 25);
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 26);
     await page.waitForSelector('#all .monitor-details [data-pane="pair-rate-2"]');
     await page.waitForSelector('#all .monitor-details [data-pane="pair-impact"]');
     const before = await page.$eval('#all [data-pane=price] path', e=>e.getAttribute('d'));
@@ -68,9 +81,24 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     assert.equal(await page.$eval('#all [data-pane=k] .chart-day',e=>e.textContent),'Day 30');
     await page.click('#all [data-pane=price] .legend button');
     assert.equal(await page.$$eval('#all [data-pane=price] svg path', n=>n.length),8);
-    await page.click('#all .toolbar button');
+    await page.click('#all input[name=linked-settings]');
     assert.equal(await page.$eval('#monitor select[name=walk]',e=>e.value),'1');
+    assert.ok(await page.$$eval('input[name=linked-settings]',ns=>ns.every(n=>n.checked)));
     await page.waitForFunction(key=>document.querySelector('#feeds').dataset.loadedKey===key,{},manifest.cases.feeds['three-phase:1:high:low']);
+    // Edits from another test continue propagating, including to closed
+    // tests and inactive actor selectors. The change is not a one-shot copy.
+    await page.click('#stage-nav a[href="#monitor"]');
+    await page.select('#monitor select[name=walk]','0.5');
+    await page.waitForFunction(key=>document.querySelector('#all').dataset.loadedKey===key,{},manifest.cases.all['three-phase:0.5:high:low']);
+    assert.equal(await page.$eval('#supply select[name=walk]',e=>e.value),'0.5');
+    assert.equal(await page.$eval('#supply select[name=buyer]',e=>e.value),'high');
+    assert.equal(await page.$eval('#supply',e=>e.open),false);
+    await page.click('#stage-nav a[href="#supply"]');
+    await page.waitForFunction(key=>document.querySelector('#supply').dataset.loadedKey===key,{},manifest.cases.supply['three-phase:0.5:high:low']);
+    await page.click('#supply input[name=linked-settings]');
+    assert.ok(await page.$$eval('input[name=linked-settings]',ns=>ns.every(n=>!n.checked)));
+    await page.select('#all select[name=walk]','0');
+    assert.equal(await page.$eval('#monitor select[name=walk]',e=>e.value),'0.5');
     if (process.env.SCREENSHOT_DIR) {
       await page.$eval('#all [data-pane=price]',e=>e.scrollIntoView());
       await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'control-lab-charts.png')});
@@ -128,6 +156,12 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,
       JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1 && e.clientWidth>0).slice(0,12).map(e=>[e.tagName,e.className,e.getBoundingClientRect().width]))));
     assert.deepEqual(errors,[]);
-    console.log(`Browser checks passed: data loading, selectors, race handling, zoom, keyboard cursor, legends, copy-to-all, EMA details, all stages (${process.env.TEST_PROFILES || 'three-phase,mixed,shock'}) and mobile layout.`);
+    const linkedURL = new URL(url); linkedURL.search='profile=mixed&walk=0.5&buyer=high&seller=low&linked=1';linkedURL.hash='basket';
+    await page.goto(linkedURL.href);await page.waitForSelector('#basket[data-loaded-key]');
+    assert.ok(await page.$$eval('input[name=linked-settings]',ns=>ns.every(n=>n.checked)));
+    await page.select('#basket select[name=walk]','1');
+    assert.equal(await page.$eval('#all select[name=walk]',e=>e.value),'1');
+    assert.deepEqual(errors,[]);
+    console.log(`Browser checks passed: net basket value, allocation autorange, persistent linked settings, selectors, race handling, zoom, cursor, legends, sensor details, all stages (${process.env.TEST_PROFILES || 'three-phase,mixed,shock'}) and mobile layout.`);
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

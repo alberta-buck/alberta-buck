@@ -107,7 +107,9 @@
       const chosen = pane.lines.filter((_, i) => !this.hidden.has(i));
       const markers = (pane.markers || []).filter(group => !this.hiddenMarkers.has(group.id));
       const group = `${state.selected.profile}:${Number(state.selected.walk)}`;
-      let bounds = state.shared.checked && M.limits[group] && M.limits[group][pane.id];
+      // Allocation always follows the visible values, even while price
+      // panes use common scales for comparing different experiments.
+      let bounds = pane.id !== "allocation" && state.shared.checked && M.limits[group] && M.limits[group][pane.id];
       if (!bounds) {
         const values = chosen.flatMap(line => line.values.filter((v, i) => v != null && days[i] >= state.start && days[i] <= state.end));
         values.push(...markers.flatMap(group => group.points.filter(p => days[p.index] >= state.start && days[p.index] <= state.end).map(p => p.value)));
@@ -118,7 +120,7 @@
       // disabled. Use a fallback span only for an exactly constant series.
       const margin = high > low ? (high - low) * .09 : Math.max(Math.abs(high) * .002, .0001);
       low -= margin; high += margin;
-      if (pane.id === "allocation") { low = 0; high = 100; }
+      if (pane.id === "allocation") { low = Math.max(0, low); high = Math.min(100, high); }
       const digits = Math.min(8, Math.max(0, 1 - Math.floor(Math.log10((high - low) / 4))));
       const X = day => 96 + (day - state.start) / (state.end - state.start) * 882;
       const Y = v => 202 - (v - low) / (high - low) * 182;
@@ -181,6 +183,21 @@
   }
 
   const states = new Map(), query = new URLSearchParams(location.search);
+  let linkedSettings = query.get("linked") === "1";
+  function saveSelection(state) {
+    const params = new URLSearchParams(state.selected);
+    if (linkedSettings) params.set("linked", "1");
+    // File URLs may reject replaceState; the toggle still works normally.
+    try { history.replaceState(null, "", `${location.pathname}?${params}#${state.id}`); } catch (_) { /* no navigation required */ }
+  }
+  function syncSelections(source) {
+    for (const target of states.values()) {
+      if (target === source || M.axes.every(axis => target.selected[axis.id] === source.selected[axis.id])) continue;
+      target.selected = {...source.selected};
+      for (const axis of M.axes) target.controls[axis.id].value = target.selected[axis.id];
+      update(target); // Closed tests retain the selection and load on opening.
+    }
+  }
   function defaults() {
     return Object.fromEntries(M.axes.map(axis => {
       const fallback = axis.values.find(v => v.id === "medium") || axis.values[0];
@@ -193,11 +210,18 @@
     state.index = data.days.length - 1;
     const metrics = $("div", "metrics");
     const counts = data.execution_counts;
-    for (const [label, value] of [["Mean bvib", data.mean_bvib.toFixed(6)], ["Final K", data.summary.end_k.toFixed(6)],
+    const metricValues = [["Mean bvib", data.mean_bvib.toFixed(6)], ["Final K", data.summary.end_k.toFixed(6)],
       ["Arbitrage profit · BUCK", number(Math.round(data.summary.arb_profit_buck))], ["Desk operations", data.summary.desk_ops],
       ["Arbitrage cycles", number(data.summary.arb_cycles)],
       ["Basket TOKEN buys / sells", counts?.recorded ? `${counts.basket_buys} / ${counts.basket_sells}` : "Not recorded"],
-      ["Basket LP pairings", counts?.recorded ? counts.basket_pairs : "Not recorded"]]) {
+      ["Basket LP pairings", counts?.recorded ? counts.basket_pairs : "Not recorded"]];
+    if (data.basket_performance) {
+      const p = data.basket_performance;
+      metricValues.push(["Final basket net value · BUCK", number(Math.round(p.final_net_buck * 100) / 100)],
+        ["Net gain / loss · BUCK", number(Math.round(p.gain_buck * 100) / 100)],
+        ["Marked return on initial BUCK", `${p.return_pct >= 0 ? "+" : ""}${p.return_pct.toFixed(3)}%`]);
+    }
+    for (const [label, value] of metricValues) {
       const metric = $("div", "metric"); metric.append($("strong", "", value), $("span", "", label)); metrics.append(metric);
     }
     state.body.append(metrics);
@@ -266,6 +290,7 @@
   }
   async function update(state) {
     const version = ++state.version;
+    delete state.section.dataset.loadedKey;
     const selection = M.axes.map(axis => state.selected[axis.id]).join(":");
     const key = M.cases[state.id][selection];
     state.body.hidden = true; state.status.classList.remove("error");
@@ -304,25 +329,29 @@
       select.disabled = !!axis.requires && !flags[axis.requires];
       label.append(select);
       if (select.disabled) label.append($("span", "control-note", "Actor absent in this test"));
-      select.onchange = () => { state.selected[axis.id] = select.value; update(state); };
+      select.onchange = () => {
+        state.selected[axis.id] = select.value;
+        if (linkedSettings) { syncSelections(state); saveSelection(state); }
+        update(state);
+      };
       controls.append(label); state.controls[axis.id] = select;
     }
-    const copy = $("button", "", "Use these settings for all tests");
-    copy.onclick = () => {
-      for (const target of states.values()) {
-        target.selected = {...state.selected};
-        for (const axis of M.axes) target.controls[axis.id].value = target.selected[axis.id];
-        update(target);
-      }
-      const params = new URLSearchParams(state.selected);
-      // File URLs may reject replaceState; selection still works normally.
-      try { history.replaceState(null, "", `${location.pathname}?${params}#${id}`); } catch (_) { /* no navigation required */ }
+    const linkedLabel = $("label"), linked = $("input");
+    linked.type = "checkbox"; linked.name = "linked-settings"; linked.checked = linkedSettings;
+    linked.setAttribute("role", "switch");
+    linked.onchange = () => {
+      linkedSettings = linked.checked;
+      for (const target of states.values()) target.linked.checked = linkedSettings;
+      if (linkedSettings) syncSelections(state);
+      saveSelection(state);
     };
+    linkedLabel.append(linked, document.createTextNode(" Keep settings linked across tests")); state.linked = linked;
     const sharedLabel = $("label"), shared = $("input"); shared.type = "checkbox"; shared.checked = true;
+    shared.name = "shared-scales";
     shared.onchange = () => { if (state.redraw) state.redraw(); };
     sharedLabel.append(shared, document.createTextNode(" Compare on shared scales")); state.shared = shared;
     const link = $("a", "data-link", "Download raw JSON ↓"); link.download = ""; link.hidden = true; state.link = link;
-    toolbar.append(copy, sharedLabel, link); content.append(status, body); section.append(content);
+    toolbar.append(linkedLabel, sharedLabel, link); content.append(status, body); section.append(content);
     section.ontoggle = () => { if (section.open) update(state); else ++state.version; };
     document.querySelector("#stages").append(section); states.set(id, state);
     const nav = $("a", "", flags.title); nav.href = `#${id}`;

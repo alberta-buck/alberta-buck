@@ -315,10 +315,22 @@ details to inspect quality flags, turn votes and all seven EMA levels.
 
 The default keeps vertical scales common across stages and flow quantities
 with the same profile and walk. Switching off =Compare on shared scales=
-fits the visible window instead. =Use these settings for all tests= creates
-a matched comparison and records those selections in the page URL. Controls
+fits the visible window instead. Basket allocation always fits the visible
+percentages, including after zooming or hiding a series. The
+=Keep settings linked across tests= toggle first copies this test's selectors
+to all tests, then propagates future selector changes from any test. Switch
+it off to resume independent selections. The linked state and selections
+are recorded in the page URL. Controls
 for absent actors are disabled. Opening the HTML directly from disk works:
 plot payloads load locally without a web server or third-party service.
+
+The basket net-value pane compares the contract's recorded equity in BUCK
+with the original 1,000,000 BUCK contribution at bootstrap parity. That
+equity already subtracts issued BUCK liability and includes accrued relief;
+it must not have the lien subtracted a second time. Final net value, gain
+or loss, and percentage return appear above the graphs. This is a marked
+return including the prelude and live run, not proceeds after liquidation
+or caller gas. BUCK/USDC conversion does not enter the calculation.
 
 The campaign configuration is [[file:control-lab-campaign.toml][control-lab-campaign.toml]]:
 

@@ -13,6 +13,19 @@ from .event_view import MARKER_NOTE, execution_counts, execution_log, price_mark
 COLORS = ["#2463c4", "#b86107", "#158067"]
 
 
+def basket_performance(result):
+    """Use the recorded net equity, without subtracting its lien twice.
+
+    The fixture contributes equal TOKEN values at the baseline means while
+    BUCK/USDC is one. Their three-phase sum makes this configured grant its
+    initial BUCK value, before the LP prelude and live perturbations.
+    """
+    initial = result["config"]["market"]["basket_equity_usd"]
+    final = result["frames"][-1]["basket"]["equity"]
+    return dict(initial_buck=initial, final_net_buck=final,
+                gain_buck=final - initial, return_pct=100 * (final / initial - 1))
+
+
 def plot_data(result):
     """Plot-ready columns; raw JSON retains every original value and EVM field."""
     frames, flags, cfg = result["frames"], result["flags"], result["config"]
@@ -109,7 +122,13 @@ def plot_data(result):
     if flags.get("basket"):
         pane("allocation", "Basket allocation", "Percent", [
             line(f"TOKEN {'ABC'[i]}", color, lambda f: f["basket"]["weights"][i] / 100) for i, color in enumerate(COLORS)],
-            "Allocation follows the replacement basket’s bounded Daily / Sync / Respond work.")
+            "Allocation follows the replacement basket’s bounded Daily / Sync / Respond work. The vertical axis fits the visible allocations.")
+        performance = basket_performance(result)
+        initial = performance["initial_buck"]
+        pane("basket-value", "Basket net value versus initial investment", "BUCK", [
+            line("Net basket value", "#158067", lambda f: f["basket"]["equity"]),
+            line("Initial investment", "#87949c", lambda f: initial, "6 4"),
+        ], f"Initial contribution: {initial:,.0f} BUCK, valued at bootstrap parity before the LP prelude. Net value = LP and idle TOKEN value + held BUCK − issued BUCK liability + accrued relief, using the contract’s TWAP equity mark. The liability is already deducted. Returns include bootstrap and live results; this is a mark, not liquidation proceeds, and caller gas is excluded.")
     if "pair_signal" in frames[0]:
         pane("pair-quality", "Pair observer readiness and cost", "Indicator / millions of gas", [
             line("Ready BUCK route", COLORS[0], lambda f: int(bool(f["pair_signal"]["ready_mask"] & 1))),
@@ -157,6 +176,7 @@ def plot_data(result):
     return dict(days=[f["day"] for f in frames], panes=panes, summary=result["summary"],
                 execution_counts=execution_counts(frames), executions=execution_log(result),
                 mean_bvib=sum(f["bvib"] for f in frames) / len(frames),
+                basket_performance=basket_performance(result) if flags.get("basket") else None,
                 config={k: cfg[k] for k in ("feed", "controller", "desk", "demand", "supply")},
                 stage=result["stage"], profile=result["profile"]["name"], cache_key=result["cache_key"])
 

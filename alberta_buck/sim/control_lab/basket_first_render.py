@@ -6,7 +6,7 @@ import tempfile
 
 from .cli import atomic_json
 from .pair_basket_render import metrics
-from .interactive import render as interactive
+from .interactive import basket_performance, render as interactive
 from .event_view import price_markers
 
 
@@ -18,7 +18,7 @@ def render(root):
         control=next(c for c in runs if c["profile"]==r["profile"] and c["basket_mode"]=="legacy")
         assert r["config"]==control["config"] and r["bootstrap"]==control["bootstrap"]
         assert [f["target_usd"] for f in r["frames"]]==[f["target_usd"] for f in control["frames"]]
-        s=metrics(r);s["wrong_side_pair_legs"]=0;s["paired_legs"]=0
+        s=metrics(r);s.update(basket_performance(r));s["wrong_side_pair_legs"]=0;s["paired_legs"]=0
         s["missing_responses"]=[]
         s["material_pair_candidates"]=0; s["detected_material_pair_candidates"]=0
         s["confirmed_closure_legs"]=0; s["braking_release_legs"]=0
@@ -73,10 +73,11 @@ def render(root):
     report=["#+title: Basket before monetary and persistent private actors","#+options: toc:2 num:nil",
         "#+html_head: <style>body{font-family:system-ui;line-height:1.5}#content{max-width:1150px;margin:auto;padding:1rem}img{max-width:100%;height:auto}</style>","",
         "[[file:index.html][Interactive plots]]", "", m["method"],"",
-        "| Profile | Policy | Pair transfers | Transfers per 30-day cycle | Wrong-side pair legs | Both sides of every TOKEN in each mature cycle | Allocation error, pp | End marked equity, USD | End lien, BUCK |",
-        "|---------+--------+----------------+----------------------------+----------------------+-----------------------------------------------+----------------------+------------------------+----------------|" ]
+        "| Profile | Policy | Pair transfers | Transfers per 30-day cycle | Wrong-side pair legs | Both sides of every TOKEN in each mature cycle | Allocation error, pp | Net value, BUCK | Return on initial BUCK, % | End lien, BUCK |",
+        "|---------+--------+----------------+----------------------------+----------------------+-----------------------------------------------+----------------------+-----------------+---------------------------+----------------|" ]
     for s in sorted(rows,key=lambda s:(s["profile"],s["mode"])):
-        report.append(f"| {s['profile']} | {s['mode']} | {s['pair_transfers']} | {', '.join(str(p['pair_transfers']) for p in s['periods'])} | {s['wrong_side_pair_legs']} | {s['mature_both_sides_each_token_each_cycle']} | {s['mean_weight_error_pp']:.3f} | {s['equity_usd']:,.2f} | {s['lien_buck']:,.2f} |")
+        report.append(f"| {s['profile']} | {s['mode']} | {s['pair_transfers']} | {', '.join(str(p['pair_transfers']) for p in s['periods'])} | {s['wrong_side_pair_legs']} | {s['mature_both_sides_each_token_each_cycle']} | {s['mean_weight_error_pp']:.3f} | {s['final_net_buck']:,.2f} | {s['return_pct']:+.3f} | {s['lien_buck']:,.2f} |")
+    report += ["", f"Initial investment: {m['requested_config']['market']['basket_equity_usd']:,.0f} BUCK at bootstrap parity. The contract's equity mark already subtracts issued BUCK and includes accrued relief; the lien shown alongside it must not be deducted again. Return = (net BUCK value / initial investment − 1) × 100%, including the LP prelude and live experiment. No BUCK/USDC conversion enters this return."]
     report += ["", "Wrong-side counts apply to graded paired transfers: the sold TOKEN's pre-policy normalized BUCK-pool price must exceed its recipient's. Legacy risk/bootstrap work is separate. Marked equity includes inventory and leverage; it is not liquidation proceeds or realized net ROI. Pool fees affect outcomes; caller gas is not subtracted. Source fingerprints and all pre-response books remain in JSON.", ""]
     report += ["* Trade conditions and signal strength", "",
         "Every planned pair leg is checked against its exact pre-response book: both allocations improve, at least one exceeds its band, capacities are not exceeded, both quote routes are ready, intent is positive, and the intended swaps appear in receipts. The following counts distinguish conservative braking participation from an error envelope wholly on the closing side.", "",
@@ -118,7 +119,9 @@ def render(root):
             band=r["config"]["basket"].get("weight_band_bp",200)/100
             for y in (100/3-band,100/3,100/3+band):axes[3,col].axhline(y,color="#aaa",ls=":")
             axes[3,col].set_ylabel("Allocation, %");axes[3,col].legend(ncol=3,fontsize=7)
-            axes[4,col].plot(days,[f["basket"]["equity"]*f["buck_usdc"]/1e6 for f in frames],color="#158067");axes[4,col].set_ylabel("Marked equity, M USD")
+            axes[4,col].plot(days,[f["basket"]["equity"]/1e6 for f in frames],color="#158067",label="Net basket value")
+            axes[4,col].axhline(basket_performance(r)["initial_buck"]/1e6,color="#87949c",ls="--",label="Initial investment")
+            axes[4,col].set_ylabel("Net value, M BUCK");axes[4,col].legend(fontsize=7)
             axes[5,col].plot(days,[max(0,-f["basket"]["account"])/1e6 for f in frames],color="#b56c2f");axes[5,col].set_ylabel("Lien, M BUCK");axes[5,col].set_xlabel("Days")
             for ax in axes[:,col]:ax.grid(alpha=.15)
         for row in axes:
