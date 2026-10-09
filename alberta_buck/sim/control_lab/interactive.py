@@ -178,7 +178,8 @@ def render(root):
         # The payload contains numbers/prose, never executable user code.
         payload = json.dumps(data, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
         (data_dir / f"{key[:16]}.js").write_text(f"window.controlLabReceive({json.dumps(key)},{payload});\n")
-        entries[key] = {**entry, "plot_file": f"plots/{key[:16]}.js"}
+        entries[key] = {**entry, "plot_file": f"plots/{key[:16]}.js",
+                        "execution_counts": data["execution_counts"]}
         group = result["profile"]["name"] + ":" + f"{result['config']['feed']['walk_amplification']:g}"
         group_limits = limits.setdefault(group, {})
         for pane in data["panes"]:

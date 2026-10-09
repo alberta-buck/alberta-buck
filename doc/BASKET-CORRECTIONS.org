@@ -1,5 +1,5 @@
 #+title: Basket-first corrections and confirmation
-#+date: 2026-10-08
+#+date: 2026-10-09
 #+options: toc:2 num:nil
 
 * Baseline and experiment order
@@ -254,6 +254,28 @@ each mature cycle; all three runs have zero wrong-side paired legs and
 transfers. All eight comparison runs start with exact selected prices on
 both routes and zero day-zero arbitrage cycles. The clean transfer counts
 per 30-day cycle are now 32, 31, 35 and 35.
+
+In the integrated mixed profile with no random walk, the desk remains idle:
+it begins with TOKEN inventory but no BUCK cash, and the expensive-BUCK
+excursion lasts at most 19 consecutive days outside the entry band. Fresh
+issuance requires 30 days under the existing policy. Browser marker checks
+therefore use actual recorded desk fills from the selector matrix, rather
+than requiring activity in a formerly active legacy case. This integration
+does not retune the desk's bands, persistence or funding.
+
+The full interactive campaign completed all 279 distinct 120-day EVM runs
+(891 selector combinations) in 46.3 minutes with six workers. The saved-data
+audit verifies 134,199 observations, opening prices on both routes, actor
+flags, accounting and execution receipts. All nine fixed-K/moving-K replay
+comparisons preserve identical market prices. The isolated production
+basket agrees with the diagnostic basket on all 481 clean observations:
+prices, allocation book, pair signals and proposed transfers match exactly.
+The nine basket-only profile/walk combinations all make paired transfers.
+Across the entire selector matrix, 14 desk operations occur in the stronger
+mixed and shock cases: all are issuance, comprising 42 TOKEN purchases.
+No desk absorption is recorded in this grid. The browser checks both actual
+fills and the absence of markers for quiet directions; the simulation does
+not manufacture the missing side of the response.
 
 * Remaining improvements, without conflating them with confirmed fixes
 

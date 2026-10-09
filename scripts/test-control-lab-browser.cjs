@@ -77,22 +77,45 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     }
     // Every stage/profile can actually load its selected saved run.
     for (const profile of (process.env.TEST_PROFILES || 'three-phase,mixed,shock').split(',')) for (const stage of Object.keys(manifest.stages)) {
-      await choose(stage,{profile,walk:'1',buyer:'high',seller:'low'});
+      const key = await choose(stage,{profile,walk:'1',buyer:'high',seller:'low'});
       assert.equal(await page.$eval(`#${stage} .run-body`,e=>e.hidden),false);
+      // Quiet directions must have no marker, just as recorded fills must
+      // have one. Market changes need not produce every kind of execution.
+      const counts = manifest.entries[key].execution_counts;
+      for (const [kind,counter] of [['desk-buy','desk_buys'],['desk-sell','desk_sells'],
+          ['basket-buy','basket_buys'],['basket-sell','basket_sells']]) {
+        assert.equal(await page.$$eval(`#${stage} [data-pane=price] polygon[data-kind="${kind}"]`,n=>n.length>0),
+          counts[counter]>0,`${profile}/${stage}/${kind}`);
+      }
     }
     // Desk directions come from token swaps, and marker clicks select the
     // real receipt log, including the opposite leg of triangle arbitrage.
-    await choose('desk', {profile:'mixed',walk:'0',buyer:'medium',seller:'medium'});
-    for (const kind of ['desk-buy','desk-sell','arb-buy','arb-sell']) {
-      assert.ok(await page.$$eval(`#desk [data-pane=price] polygon[data-kind="${kind}"]`, n=>n.length)>0);
+    // Enabling the pair basket changes which cases cross the desk's bands
+    // and funding gates. Select actual recorded fills instead of requiring
+    // both desk directions in one formerly-active legacy case.
+    async function deskFill(side) {
+      const counter = side === 'buy' ? 'desk_buys' : 'desk_sells';
+      for (const stage of ['desk','all']) for (const [selector,key] of Object.entries(manifest.cases[stage])) {
+        if (!manifest.entries[key].execution_counts[counter]) continue;
+        const selection = Object.fromEntries(selector.split(':').map((v,i)=>[manifest.axes[i].id,v]));
+        await choose(stage, selection);
+        for (const kind of [`desk-${side}`,'arb-buy','arb-sell']) {
+          assert.ok(await page.$$eval(`#${stage} [data-pane=price] polygon[data-kind="${kind}"]`, n=>n.length)>0);
+        }
+        return stage;
+      }
+      return null; // A legitimately quiet direction is checked above.
     }
-    const deskPoint = '#desk [data-pane=price] polygon[data-kind="desk-buy"]';
+    await deskFill('sell');
+    const deskStage = await deskFill('buy');
+    assert.ok(deskStage, 'Need at least one recorded desk TOKEN buy to test its execution log');
+    const deskPoint = `#${deskStage} [data-pane=price] polygon[data-kind="desk-buy"]`;
     await page.$eval(deskPoint,e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
-    await page.waitForFunction(()=>document.querySelector('#desk .execution-details').open && document.querySelector('#desk .execution-body table'));
-    assert.match(await page.$eval('#desk .execution-body',e=>e.textContent), /desk · (supply|issue)/);
-    assert.match(await page.$eval('#desk .execution-body',e=>e.textContent), /BUY/);
-    await page.click('#desk [data-pane=price] [aria-label="Toggle Arb TOKEN buys"]');
-    assert.equal(await page.$$eval('#desk [data-pane=price] polygon[data-kind="arb-buy"]',n=>n.length),0);
+    await page.waitForFunction(stage=>document.querySelector(`#${stage} .execution-details`).open && document.querySelector(`#${stage} .execution-body table`),{},deskStage);
+    assert.match(await page.$eval(`#${deskStage} .execution-body`,e=>e.textContent), /desk · (supply|issue)/);
+    assert.match(await page.$eval(`#${deskStage} .execution-body`,e=>e.textContent), /BUY/);
+    await page.click(`#${deskStage} [data-pane=price] [aria-label="Toggle Arb TOKEN buys"]`);
+    assert.equal(await page.$$eval(`#${deskStage} [data-pane=price] polygon[data-kind="arb-buy"]`,n=>n.length),0);
     await choose('basket', {profile:'mixed',walk:'0',buyer:'medium',seller:'medium'});
     for (const kind of ['basket-buy','basket-sell','basket-pair']) {
       assert.ok(await page.$$eval(`#basket [data-pane=price] polygon[data-kind="${kind}"]`, n=>n.length)>0);
