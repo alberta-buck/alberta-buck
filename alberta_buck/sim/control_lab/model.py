@@ -45,8 +45,10 @@ DEFAULTS = {
     # PairRebalancePolicy.Sizing: speeds are log returns/day, rates gap fractions/day.
     # These are the first experiment's values; closure_rate=0 leaves closure to speed alone,
     # and release_speed=0 would scale the braking release by the rate's own allowance.
+    # slack is a share of the book and patience is share-days (0.02: two point-days);
+    # patience=0 leaves eligibility to the basket's fixed weight band.
     "pair": {"release_speed": .002, "release_rate": .1, "closure_gain": 20, "closure_rate": 0.,
-             "max_rate": 1., "impact_share": 1.},
+             "max_rate": 1., "impact_share": 1., "slack": 0., "patience": 0.},
     "profiles": [{"name": "three-phase", "perturbations": []}],
 }
 
@@ -103,8 +105,8 @@ def validate(cfg: dict) -> None:
     pair = cfg["pair"]
     if (not isinstance(pair["closure_gain"], int) or not 0 <= pair["closure_gain"] <= 10_000
             or any(not math.isfinite(pair[k]) or not 0 <= pair[k] <= 18 for k in
-                   ("release_speed", "release_rate", "closure_rate", "max_rate", "impact_share"))
-            or pair["max_rate"] <= 0 or pair["impact_share"] > 1):
+                   ("release_speed", "release_rate", "closure_rate", "max_rate", "impact_share", "slack", "patience"))
+            or pair["max_rate"] <= 0 or pair["impact_share"] > 1 or pair["slack"] >= 1):
         raise ValueError("invalid pair sizing")
     for name in ("demand", "supply"):
         a = cfg[name]
@@ -120,7 +122,8 @@ def validate(cfg: dict) -> None:
 def pair_sizing(pair: dict) -> tuple:
     """The PairRebalancePolicy.Sizing constructor argument."""
     return (round(pair["release_speed"] * 1e18), round(pair["release_rate"] * 1e18), pair["closure_gain"],
-            round(pair["closure_rate"] * 1e18), round(pair["max_rate"] * 1e18), round(pair["impact_share"] * 1e18))
+            round(pair["closure_rate"] * 1e18), round(pair["max_rate"] * 1e18), round(pair["impact_share"] * 1e18),
+            round(pair["slack"] * 1e18), round(pair["patience"] * 1e18))
 
 
 def digest(value) -> str:

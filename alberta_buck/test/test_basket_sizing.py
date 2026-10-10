@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from alberta_buck.sim.control_lab.basket_sizing import AVAILABLE, FLAT, SIZINGS, TWO_STEP, own_scale, score
+from alberta_buck.sim.control_lab.basket_sizing import AVAILABLE, FLAT, SIZINGS, TWO_STEP, own_scale, patient, score
 from alberta_buck.sim.control_lab.book import holdings, recorded, reference_value
 from alberta_buck.sim.control_lab.model import DEFAULTS, dependencies, feed_rows, pair_sizing, validate
 
@@ -53,7 +53,7 @@ def test_frames_saved_before_the_book_was_recorded_are_recognized():
 
 def test_sizings_resolve_to_valid_policy_arguments():
     assert "pair" not in SIZINGS["maintenance"] and SIZINGS["first"]["pair"] == {}
-    assert pair_sizing(DEFAULTS["pair"]) == (2 * 10**15, 10**17, 20, 0, 10**18, 10**18)
+    assert pair_sizing(DEFAULTS["pair"]) == (2 * 10**15, 10**17, 20, 0, 10**18, 10**18, 0, 0)
     assert SIZINGS["own-4-1pt"]["pair"] == SIZINGS["own-4"]["pair"] and SIZINGS["own-4-1pt"]["basket"] == dict(weight_band_bp=100)
     for name, arm in SIZINGS.items():
         if "pair" not in arm:
@@ -62,15 +62,21 @@ def test_sizings_resolve_to_valid_policy_arguments():
         cfg["pair"].update(arm["pair"])
         cfg["basket"].update(arm.get("basket", {}))
         validate(cfg)
-        speed, rate, gain, closure, ceiling, impact = pair_sizing(cfg["pair"])
-        assert all(isinstance(x, int) and 0 <= x < 2**64 for x in (speed, rate, gain, closure, ceiling, impact))
+        speed, rate, gain, closure, ceiling, impact, slack, patience = pair_sizing(cfg["pair"])
+        assert all(isinstance(x, int) and 0 <= x < 2**64 for x in (speed, rate, gain, closure, ceiling, impact, slack, patience))
         assert ceiling >= rate or name == "first" or ceiling == 10**18
+        assert (patience > 0) == name.startswith("own-4-p")
+        assert not (patience and "basket" in arm), "a patient arm has no band to override"
     assert own_scale(4) == dict(release_speed=0., release_rate=4., closure_gain=0, closure_rate=1., max_rate=4.)
     assert own_scale(.5)["max_rate"] == 1
+    # A quarter point of slack and two point-days of patience, as shares of the book.
+    assert pair_sizing({**DEFAULTS["pair"], **patient(2)})[6:] == (25 * 10**14, 2 * 10**16)
+    assert SIZINGS["own-4-p2"]["pair"] == {**own_scale(4), **patient(2)}
 
 
 @pytest.mark.parametrize("change", [dict(max_rate=0.), dict(impact_share=1.5), dict(release_rate=-1.),
-                                    dict(closure_gain=1.5), dict(closure_rate=math.inf)])
+                                    dict(closure_gain=1.5), dict(closure_rate=math.inf),
+                                    dict(slack=1.), dict(patience=-.01), dict(patience=19.)])
 def test_invalid_sizings_are_rejected(change):
     cfg = copy.deepcopy(DEFAULTS)
     cfg["pair"].update(change)

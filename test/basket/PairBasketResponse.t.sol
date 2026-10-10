@@ -30,7 +30,17 @@ contract ControlledPairIntent {
         return u * 1e18 / (1e18 + u);
     }
     function recordImpact(uint256, int24, int24) external { require(msg.sender == basket); ++impacts; }
-    function recordExecution() external { require(msg.sender == basket); lastExecutionAt = uint64(block.timestamp); }
+    function recordExecution(uint256 acted_) external {
+        require(msg.sender == basket); lastExecutionAt = uint64(block.timestamp); acted = acted_;
+    }
+    // Urgency, as the facet sees it: a mask the test sets, and the gaps it was last told.
+    uint256 public patience;
+    uint256 public urgentMask;
+    uint256 public acted;
+    int256[] public reported;
+    function setUrgent(uint256 patience_, uint256 mask) external { patience = patience_; urgentMask = mask; }
+    function urgent(int256[] calldata) external view returns (uint256) { return urgentMask; }
+    function recordGaps(int256[] calldata gaps) external { require(msg.sender == basket); reported = gaps; }
 }
 
 contract PairBasketResponseTest is BuckBasketEquityTest {
@@ -132,7 +142,7 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
 
     function test_pair_markOnlyDoesNotStarveALaterExecutableTransfer() public {
         _install(); intent.setRate(0.01e18);
-        vm.prank(address(b)); intent.recordExecution();
+        vm.prank(address(b)); intent.recordExecution(0);
         uint256 start = vm.getBlockTimestamp();
         uint256 idle = b.idleToken(0);
         // The six-hour request is below the minimum leg size. Bookkeeping
@@ -177,6 +187,34 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
         (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0();
         assertEq(afterSpot, beforeSpot);
         assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+    }
+
+    /// A patient policy replaces the band: a large gap waits for its urgency,
+    /// and the policy is told the gaps and which constituents were worked.
+    function test_pair_patientPolicyDecidesWhichGapsMayBeWorked() public {
+        _install(); intent.setUrgent(0.02e18, 0);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertEq(intent.impacts(), 0, "6.7 points over target, and not yet urgent");
+        // Gaps are reported as signed shares of the book.
+        assertApproxEqAbs(intent.reported(0), 0.0667e18, 0.0005e18);
+        assertApproxEqAbs(intent.reported(1), -0.0333e18, 0.0005e18);
+        intent.setUrgent(0.02e18, 1);
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        assertEq(IEquityWheel(address(b)).wheelStep(2, 0), 1);
+        assertEq(intent.impacts(), 3);
+        assertEq(intent.acted(), 7, "the donor and both recipients start again");
+        _books();
+    }
+
+    function test_pair_urgentGapInsideTheBandCanBeWorked() public {
+        _installValues(34_500e18, 32_500e18, 33_000e18);
+        intent.setUrgent(0.02e18, 1);
+        uint256 idle = b.idleToken(0);
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        assertLt(b.idleToken(0), idle, "+1.17 points is inside the 2-point band, and urgent");
+        assertGt(intent.impacts(), 0);
+        assertEq(intent.acted() & 1, 1);
+        _books();
     }
 
     function test_pair_intentCannotBuyAnAlreadyOverweightRecipient() public {

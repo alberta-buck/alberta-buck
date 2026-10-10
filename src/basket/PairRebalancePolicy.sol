@@ -27,6 +27,8 @@ contract PairRebalancePolicy {
         uint64 closureRate;  // release at full closure confidence: closing at twice its allowance
         uint64 maxRate;      // ceiling on the sum
         uint64 impactShare;  // share of the basket's own measured impact kept as rate allowance
+        uint64 slack;        // share of the book a gap must exceed before it builds urgency
+        uint64 patience;     // urgency, in share-days, at which a gap may be worked; 0: the basket's band decides
     }
     uint256 public immutable releaseSpeed;
     uint256 public immutable releaseRate;
@@ -34,6 +36,8 @@ contract PairRebalancePolicy {
     uint256 public immutable closureRate;
     uint256 public immutable maxRate;
     uint256 public immutable impactShare;
+    uint256 public immutable slack;
+    uint256 public immutable patience;
 
     struct Motion { int128 rate; int128 change; }
     struct Impact { uint128 magnitude; uint64 at; }
@@ -43,6 +47,12 @@ contract PairRebalancePolicy {
     uint64 public sampledMidpoint2;
     uint256 public readyMask;
     uint64 public lastExecutionAt;
+    /// @notice A constituent's built-up urgency: the share of the book it is
+    /// from target beyond the slack, summed over time (share x seconds, 1e18),
+    /// and the side of target it was built on.
+    struct Urgency { uint128 sum; int8 side; }
+    mapping(uint256 => Urgency) public urgency;
+    uint64 public gapsAt;
     event OwnImpact(uint256 indexed token, int256 tickChange);
 
     constructor(address signals_, address basket_, int128[] memory reference_, Sizing memory sizing_) {
@@ -51,7 +61,8 @@ contract PairRebalancePolicy {
         releaseSpeed = sizing_.releaseSpeed; releaseRate = sizing_.releaseRate;
         closureGain = sizing_.closureGain; closureRate = sizing_.closureRate;
         maxRate = sizing_.maxRate; impactShare = sizing_.impactShare;
-        lastExecutionAt = uint64(block.timestamp);
+        slack = sizing_.slack; patience = sizing_.patience;
+        lastExecutionAt = uint64(block.timestamp); gapsAt = uint64(block.timestamp);
         uint256 n = signals.tokenCount(); count = n;
         require(reference_.length == n, "reference size");
         for (uint256 i; i < n; ++i)
@@ -111,9 +122,61 @@ contract PairRebalancePolicy {
 
     /// @notice Only an executed graded transfer consumes its elapsed budget.
     /// Price observations, credit marks and LP placement do not reset it.
-    function recordExecution() external {
+    /// The donor and recipients it names (bit i for constituent i) have been
+    /// worked: their urgency starts again from zero.
+    function recordExecution(uint256 acted) external {
         require(msg.sender == basket, "basket only");
         lastExecutionAt = uint64(block.timestamp);
+        for (uint256 i; i < count; ++i) if ((acted >> i) & 1 == 1) urgency[i].sum = 0;
+    }
+
+    /// @dev Urgency as it stands now for a constituent `gap` over its target
+    /// (signed share of the book, 1e18). The gap is taken to have held since
+    /// the last report, for at most a day: an unobserved stretch earns no more.
+    /// Beyond the slack it builds, up to the full patience; within the slack it
+    /// drains; on the other side of target it starts again.
+    function _grown(uint256 i, int256 gap) private view returns (uint256 sum, int8 side) {
+        Urgency memory u = urgency[i];
+        uint256 elapsed = block.timestamp - gapsAt;
+        if (elapsed > 1 days) elapsed = 1 days;
+        side = gap > 0 ? int8(1) : gap < 0 ? int8(-1) : int8(0);
+        uint256 size = uint256(gap < 0 ? -gap : gap);
+        sum = side == u.side ? u.sum : 0;
+        if (size > slack) {
+            sum += (size - slack) * elapsed;
+            if (sum > patience * 1 days) sum = patience * 1 days;
+        } else {
+            uint256 drain = (slack - size) * elapsed;
+            sum = sum > drain ? sum - drain : 0;
+        }
+    }
+
+    function urgencyOf(uint256 i, int256 gap) external view returns (uint256 sum) {
+        (sum,) = _grown(i, gap);
+    }
+
+    /// @notice Which gaps may be worked: a large one soon, a small one if it
+    /// lasts. Bit i is set once constituent i has built its full patience.
+    /// It decides only whether; desire() still decides when and how fast.
+    function urgent(int256[] calldata gaps) external view returns (uint256 mask) {
+        require(gaps.length == count, "gaps size");
+        if (patience == 0) return 0;
+        for (uint256 i; i < count; ++i) {
+            (uint256 sum,) = _grown(i, gaps[i]);
+            if (sum >= patience * 1 days) mask |= uint256(1) << i;
+        }
+    }
+
+    /// @notice The basket reports its gaps at each response; urgency is
+    /// carried forward to now. A policy with no patience keeps no count.
+    function recordGaps(int256[] calldata gaps) external {
+        require(msg.sender == basket && gaps.length == count, "basket only");
+        if (patience == 0) return;
+        for (uint256 i; i < count; ++i) {
+            (uint256 sum, int8 side) = _grown(i, gaps[i]);
+            urgency[i] = Urgency(uint128(sum), side);
+        }
+        gapsAt = uint64(block.timestamp);
     }
 
     function _liveLevel(uint256 q, uint256 i) private view returns (int256) {

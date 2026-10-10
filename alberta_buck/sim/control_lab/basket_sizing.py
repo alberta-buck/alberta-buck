@@ -30,8 +30,14 @@ def own_scale(rate):
     return dict(release_speed=0., release_rate=float(rate), closure_gain=0, closure_rate=1., max_rate=float(max(rate, 1)))
 
 
+def patient(point_days, slack_points=.25):
+    """Eligibility by urgency: a gap beyond the slack builds it, and so many point-days make it eligible."""
+    return dict(slack=slack_points / 100, patience=point_days / 100)
+
+
 # An arm without `pair` is the maintenance control. `pair = {}` is the first experiment's sizing.
-# `basket` overrides the allocation band, which decides when a gap may be worked at all.
+# Which gaps may be worked at all is decided by the allocation band, which `basket` overrides,
+# or, in a patient arm, by urgency that builds with the gap and time.
 SIZINGS = {
     "maintenance": dict(title="Maintenance only"),
     "first": dict(title="First experiment: 10%/day, halved at 20 bp/day", pair={}),
@@ -41,6 +47,10 @@ SIZINGS = {
     "own-8": dict(title="Release 8/day, own-allowance scale", pair=own_scale(8)),
     "own-4-1pt": dict(title="Release 4/day, own scale, 1-point band", pair=own_scale(4), basket=dict(weight_band_bp=100)),
     "own-4-half": dict(title="Release 4/day, own scale, half-point band", pair=own_scale(4), basket=dict(weight_band_bp=50)),
+    "own-4-p1": dict(title="Release 4/day, own scale, patience 1 point-day", pair={**own_scale(4), **patient(1)}),
+    "own-4-p2": dict(title="Release 4/day, own scale, patience 2 point-days", pair={**own_scale(4), **patient(2)}),
+    "own-4-p4": dict(title="Release 4/day, own scale, patience 4 point-days", pair={**own_scale(4), **patient(4)}),
+    "own-4-p8": dict(title="Release 4/day, own scale, patience 8 point-days", pair={**own_scale(4), **patient(8)}),
 }
 
 
@@ -92,15 +102,21 @@ def render(root):
         "The braking release is =release_rate × release × braking=, where =release= halves at =release_speed= of outward "
         "motion and =braking= compares the rate's change with its allowance. With =release_speed = 0= the allowance "
         "itself is the scale. Closure adds =closure_gain= per unit of confirmed closing speed, or =closure_rate= "
-        "times its confidence. Every other limit (band, step, pool depth, minimum size, credit) is unchanged.", "",
-        "| Sizing | release_rate | release_speed | closure_gain | closure_rate | max_rate | Allocation band, bp |",
-        "|--------+--------------+---------------+--------------+--------------+----------+---------------------|"]
+        "times its confidence. Which gaps may be worked at all is decided by the allocation band or, in a patient "
+        "arm, by urgency: a constituent counts its distance from target beyond the slack over time, is eligible "
+        "once the count reaches the patience, and starts again when it is worked. Every other limit (step, pool "
+        "depth, minimum size, credit) is unchanged.", "",
+        "| Sizing | release_rate | release_speed | closure_gain | closure_rate | max_rate | Allocation band, bp | "
+        "Slack, points | Patience, point-days |",
+        "|--------+--------------+---------------+--------------+--------------+----------+---------------------+"
+        "---------------+----------------------|"]
     for arm in arms:
         if "pair" in SIZINGS[arm]:
             p = {**DEFAULTS["pair"], **SIZINGS[arm]["pair"]}
             band = SIZINGS[arm].get("basket", cfg["basket"])["weight_band_bp"]
+            gate = f"| | {100 * p['slack']:g} | {100 * p['patience']:g}" if p["patience"] else f"| {band} | |"
             report.append(f"| {arm} | {p['release_rate']:g} | {p['release_speed']:g} | {p['closure_gain']} | "
-                          f"{p['closure_rate']:g} | {p['max_rate']:g} | {band} |")
+                          f"{p['closure_rate']:g} | {p['max_rate']:g} {gate} |")
     report += ["", "The band arms are compared with the same maintenance control. Maintenance makes no paired "
         "transfer, so the band can reach it only through the risk fallback."]
     report += ["", "* Ending value against the maintenance control", "",
@@ -110,16 +126,18 @@ def render(root):
         "Differences are against the maintenance arm of the same profile. Where BUCK trades far from the "
         "reference basket's cost, the reference mark favours whichever arm ends with more net BUCK when BUCK is "
         "cheap and penalizes it when BUCK is dear; read the three units together.", "",
-        "| Profile | Sizing | Transfers | TOKEN sold, BUCK | At reference | vs maintenance | USD vs maintenance | "
-        "BUCK vs maintenance | BUCK/USDC | Allocation error, pp |",
-        "|---------+--------+-----------+------------------+--------------+----------------+--------------------+"
-        "---------------------+-----------+----------------------|"]
+        "| Profile | Sizing | Transfers | TOKEN sold, BUCK | At reference | vs maintenance | Per transfer | "
+        "USD vs maintenance | BUCK vs maintenance | BUCK/USDC | Allocation error, pp |",
+        "|---------+--------+-----------+------------------+--------------+----------------+--------------+"
+        "--------------------+---------------------+-----------+----------------------|"]
     for profile, group in scores.items():
         base = group["maintenance"]
         for arm in arms:
             s = group[arm]
+            gain = s["reference"] - base["reference"]
+            each = f"{gain / s['transfers']:+,.0f}" if s["transfers"] else ""
             report.append(f"| {profile} | {arm} | {s['transfers']} | {s['sold']:,.0f} | {s['reference']:,.0f} | "
-                          f"{s['reference'] - base['reference']:+,.0f} | {s['usd'] - base['usd']:+,.0f} | "
+                          f"{gain:+,.0f} | {each} | {s['usd'] - base['usd']:+,.0f} | "
                           f"{s['buck'] - base['buck']:+,.0f} | {s['buck_usdc']:.4f} | {s['error_pp']:.3f} |")
     report += ["", "* What holding still would have done", "",
         "The opening book, never touched, revalued at each profile's ending feed and reference. "

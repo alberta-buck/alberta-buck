@@ -28,6 +28,13 @@ tilt = 0.0
 # braking release and closure against the rate's own allowance, so no speed is
 # fitted to these synthetic cycles. Chosen from control-lab/basket-sizing: the
 # first experiment's values (0.002, 0.1, 20, 0, 1) remain the code defaults.
+#
+# Which gaps may be worked at all is decided by urgency that builds: each
+# constituent counts its distance from target beyond `slack` (a share of the
+# book: 0.0025 is a quarter point) over time, may be rebalanced once the count
+# reaches `patience` (share-days: 0.02 is two point-days), and starts again
+# when it is worked. patience = 0, the code default, uses the basket's fixed
+# weight band instead.
 [pair]
 release_speed = 0.0
 release_rate = 4.0
@@ -35,6 +42,8 @@ closure_gain = 0
 closure_rate = 1.0
 max_rate = 4.0
 impact_share = 1.0
+slack = 0.0025
+patience = 0.02
 
 # Private actors have an accumulation/divestment intent even at fair value.
 # A 1% adverse price multiplies the desired rate by exp(-1); favourable

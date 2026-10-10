@@ -18,7 +18,7 @@ contract PairBookView {
 contract PairRebalancePolicyTest is BlockPairSignalsTest {
     // The first experiment's sizing: 10%/day braking release, closure by speed alone.
     function _first() private pure returns (PairRebalancePolicy.Sizing memory) {
-        return PairRebalancePolicy.Sizing(2e15, 1e17, 20, 0, 1e18, 1e18);
+        return PairRebalancePolicy.Sizing(2e15, 1e17, 20, 0, 1e18, 1e18, 0, 0);
     }
     function _sized(address book, int128 anchorA, PairRebalancePolicy.Sizing memory sizing)
         private returns (PairRebalancePolicy)
@@ -82,8 +82,8 @@ contract PairRebalancePolicyTest is BlockPairSignalsTest {
         assertEq(p.lastExecutionAt(), deployedAt, "sampling preserves unspent elapsed time");
         vm.prank(book); p.recordImpact(0, 0, 40);
         assertEq(p.lastExecutionAt(), deployedAt, "other basket operations preserve the pair clock");
-        vm.expectRevert(bytes("basket only")); p.recordExecution();
-        vm.prank(book); p.recordExecution();
+        vm.expectRevert(bytes("basket only")); p.recordExecution(0);
+        vm.prank(book); p.recordExecution(0);
         assertEq(p.lastExecutionAt(), block.timestamp);
     }
 
@@ -205,5 +205,83 @@ contract PairRebalancePolicyTest is BlockPairSignalsTest {
         assertLt(whole.desire(0, 1), before, "its own impact widens the allowance");
         assertEq(none.desire(0, 1), before, "unless the policy is told to disregard it");
         assertEq(none.remainingImpact(0), 4000e18, "the measurement is kept either way");
+    }
+
+    // A quarter point of slack and two point-days of patience.
+    function _patient(address book) private returns (PairRebalancePolicy) {
+        PairRebalancePolicy.Sizing memory z = _first(); z.slack = 0.0025e18; z.patience = 0.02e18;
+        return _sized(book, 0, z);
+    }
+    function _gaps(int256 a, int256 b, int256 c) private pure returns (int256[] memory gaps) {
+        gaps = new int256[](3); gaps[0] = a; gaps[1] = b; gaps[2] = c;
+    }
+
+    /// A gap of 2.25 points qualifies in a day, 1.25 in two, and one inside
+    /// the slack never does. Working a constituent starts its count again.
+    function test_policy_urgencyBuildsWithGapAndTimeAndRestartsWhenWorked() public {
+        address book = address(new PairBookView(s));
+        PairRebalancePolicy p = _patient(book);
+        assertEq(p.slack(), 0.0025e18); assertEq(p.patience(), 0.02e18);
+        int256[] memory gaps = _gaps(0.0225e18, -0.0125e18, -0.002e18);
+        assertEq(p.urgent(gaps), 0, "nothing is urgent at once, however large");
+        vm.expectRevert(bytes("basket only")); p.recordGaps(gaps);
+        vm.warp(vm.getBlockTimestamp() + 12 hours);
+        vm.prank(book); p.recordGaps(gaps);
+        assertEq(p.urgencyOf(0, gaps[0]), 0.02e18 * 12 hours);
+        assertEq(p.urgent(gaps), 0, "half a day is half the patience for 2.25 points");
+        vm.warp(vm.getBlockTimestamp() + 12 hours);
+        assertEq(p.urgent(gaps), 1, "the view carries the count to the present before any report");
+        vm.prank(book); p.recordGaps(gaps);
+        assertEq(p.urgent(gaps), 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.prank(book); p.recordGaps(gaps);
+        assertEq(p.urgent(gaps), 3, "1.25 points takes two days");
+        assertEq(p.urgencyOf(0, gaps[0]), 0.02e18 * 1 days, "and the count stops at the full patience");
+        assertEq(p.urgencyOf(2, gaps[2]), 0, "a gap inside the slack builds nothing");
+        vm.expectRevert(bytes("basket only")); p.recordExecution(1);
+        vm.prank(book); p.recordExecution(1);
+        assertEq(p.urgent(gaps), 2, "the constituent worked starts again; the other keeps its count");
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        assertEq(p.urgent(gaps), 3, "and a day later the large gap has built it again");
+    }
+
+    function test_policy_urgencyDrainsInsideTheSlackAndRestartsAcrossTarget() public {
+        address book = address(new PairBookView(s));
+        PairRebalancePolicy p = _patient(book);
+        vm.warp(vm.getBlockTimestamp() + 12 hours);
+        vm.prank(book); p.recordGaps(_gaps(0.0225e18, 0, 0));
+        uint256 built = p.urgencyOf(0, 0.0225e18);
+        vm.warp(vm.getBlockTimestamp() + 6 hours);
+        vm.prank(book); p.recordGaps(_gaps(0.0005e18, 0, 0));
+        assertEq(p.urgencyOf(0, 0.0005e18), built - 0.002e18 * 6 hours, "inside the slack it drains at the shortfall");
+        vm.warp(vm.getBlockTimestamp() + 6 hours);
+        assertEq(p.urgencyOf(0, -0.0225e18), 0.02e18 * 6 hours, "across target nothing carries over");
+        vm.prank(book); p.recordGaps(_gaps(-0.0225e18, 0, 0));
+        (uint128 sum, int8 side) = p.urgency(0);
+        assertEq(sum, 0.02e18 * 6 hours); assertEq(side, -1);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
+        vm.prank(book); p.recordGaps(_gaps(0.0005e18, 0, 0));
+        (sum,) = p.urgency(0);
+        assertEq(sum, 0, "a long quiet stretch empties it");
+    }
+
+    function test_policy_urgencyCatchUpIsBoundedAndNoPatienceKeepsNoCount() public {
+        address book = address(new PairBookView(s));
+        PairRebalancePolicy.Sizing memory z = _first(); z.slack = 0.0025e18; z.patience = 0.2e18;
+        PairRebalancePolicy p = _sized(book, 0, z);
+        int256[] memory gaps = _gaps(0.0225e18, -0.0225e18, 0);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
+        assertEq(p.urgencyOf(0, gaps[0]), 0.02e18 * 1 days, "an unobserved month earns one day");
+        vm.prank(book); p.recordGaps(gaps);
+        assertEq(p.gapsAt(), vm.getBlockTimestamp());
+        assertEq(p.urgent(gaps), 0, "twenty point-days are not built in one report");
+        int256[] memory short_ = new int256[](2);
+        vm.expectRevert(bytes("gaps size")); p.urgent(short_);
+        PairRebalancePolicy band = _policy(book, 0);
+        uint64 deployedAt = band.gapsAt();
+        vm.warp(vm.getBlockTimestamp() + 3 days);
+        vm.prank(book); band.recordGaps(gaps);
+        assertEq(band.urgent(gaps), 0, "with no patience the basket's band decides");
+        assertEq(band.gapsAt(), deployedAt); assertEq(band.urgencyOf(0, gaps[0]), 0);
     }
 }

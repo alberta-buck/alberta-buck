@@ -19,6 +19,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
         uint256 total;
         uint256[] recipients;
         bool fallbackRequired;
+        int256[] gaps; // each constituent over (+) or under (-) its target, as a share of the book, 1e18
     }
     event PairResponse(uint256 indexed donor, uint256 planned, uint256 proceeds, uint256 bought);
 
@@ -41,9 +42,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
         }
         uint256[] memory excess = new uint256[](n);
         uint256[] memory deficit = new uint256[](n);
-        bool[] memory material = new bool[](n);
-        uint256 band = total * eq.weightBandBp / 10000;
-        bool outside;
+        a.gaps = new int256[](n);
         for (uint256 i; i < n; ++i) {
             uint256 weight = constituents[i].targetWeightBp;
             uint256 target = total * weight / 10000;
@@ -51,16 +50,29 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             if (gap * 10000 > total * weight * response.leashBp / 10000) {
                 a.fallbackRequired = true; return a;
             }
+            a.gaps[i] = value[i] > target ? int256(gap * 1e18 / total) : -int256(gap * 1e18 / total);
             if (s.m[i].depth == 0) continue;
-            material[i] = gap > band;
-            if (material[i]) outside = true;
-            // The band triggers consideration; capacity is the safe distance
-            // to target. Requiring two independent band excursions starves
-            // useful counter-legs, and subtracting both bands starves size.
             if (value[i] > target) excess[i] = gap;
             else deficit[i] = gap;
         }
-        if (!outside) return a;
+        // Which gaps may be worked at all. With a patient policy, those that
+        // have built their full urgency; with none, those beyond the fixed
+        // band. Either triggers consideration only; capacity is the safe
+        // distance to target. Requiring both legs to qualify starves useful
+        // counter-legs, and subtracting both bands starves size.
+        bool[] memory material = new bool[](n);
+        {
+            bool patient = pairPolicy.patience() != 0;
+            uint256 mask = patient ? pairPolicy.urgent(a.gaps) : 0;
+            uint256 band = total * eq.weightBandBp / 10000;
+            bool outside;
+            for (uint256 i; i < n; ++i) {
+                if (s.m[i].depth == 0) continue;
+                material[i] = patient ? (mask >> i) & 1 == 1 : excess[i] + deficit[i] > band;
+                if (material[i]) outside = true;
+            }
+            if (!outside) return a;
+        }
         // A nominal request barely above grain can fall below it after the
         // sale, reverting a predictable dust transfer. Reserve room for the
         // venue's allowed price band on input and output; execution still
@@ -166,6 +178,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             _record(beforeTicks);
             return work;
         }
+        pairPolicy.recordGaps(a.gaps);
         bool stale = _staleMark(s); _markS(s);
         if (a.donor == NONE) {
             Plan memory p = _idlePlacement(s);
@@ -195,8 +208,10 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
         uint256 budget = PM.min(a.total, PM.min(proceeds, s.spend));
         require(_headroomS(s) >= 0 && budget > _grainS(s), "pair cash unavailable");
         uint256 used;
+        uint256 acted = uint256(1) << a.donor;
         for (uint256 j; j < a.recipients.length; ++j) {
             if (a.recipients[j] == 0) continue;
+            acted |= uint256(1) << j;
             uint256 part = budget * a.recipients[j] / a.total;
             // Every leg rechecks current venue bounds; any refused planned
             // recipient rolls the entire response back, including the sale.
@@ -207,7 +222,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
             require(_headroomS(s) >= 0, "pair credit");
         }
         _record(beforeTicks);
-        pairPolicy.recordExecution();
+        pairPolicy.recordExecution(acted);
         lastResponseAt = uint64(block.timestamp);
         emit Responded(3, a.donor, NONE, proceeds, used);
         emit PairResponse(a.donor, a.total, proceeds, used);
