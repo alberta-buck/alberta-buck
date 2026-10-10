@@ -144,6 +144,16 @@ def test_plot_payload_preserves_series_units_and_gaps():
     price = {p['id']: p for p in plot_data(result)['panes']}['price']
     assert price['lines'][-1]['label'] == 'USD inflation trend' and price['lines'][-1]['values'] == [1., 1.25]
     assert len(price['lines']) == 10 and 'own lag' in price['note']
+    # A patient policy's count is drawn against its patience. A band policy keeps no count to draw.
+    for f, count in zip(result['frames'], ([0., .5, 2.], [.25, 0., 2.])):
+        f['pair_policy'] = dict(desire=[[0.] * 3] * 3, own_impact_ticks=[0.] * 3, urgency_point_days=count)
+    assert 'pair-urgency' not in {p['id'] for p in plot_data(result)['panes']}
+    result['config'] = copy.deepcopy(DEFAULTS)
+    result['config']['pair'].update(slack=.0025, patience=.02)
+    urgency = {p['id']: p for p in plot_data(result)['panes']}['pair-urgency']
+    assert [line['label'] for line in urgency['lines']] == ['TOKEN A', 'TOKEN B', 'TOKEN C', 'Patience']
+    assert urgency['lines'][1]['values'] == [.5, 0.] and urgency['lines'][3]['values'] == pytest.approx([2., 2.])
+    assert '0.25 points' in urgency['note'] and '2 point-days' in urgency['note']
 
 
 def test_cached_campaign_keeps_original_execution_time_and_rejects_partial_json(tmp_path):

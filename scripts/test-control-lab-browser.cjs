@@ -87,9 +87,10 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     await page.waitForFunction(key=>document.querySelector('#all').dataset.loadedKey===key, {}, key);
     await page.click('#all .monitor-details>summary');
     await page.waitForSelector('#all [data-pane="ema-2"]');
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 27);
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 28);   // one more than before: the urgency pane
     await page.waitForSelector('#all .monitor-details [data-pane="pair-rate-2"]');
     await page.waitForSelector('#all .monitor-details [data-pane="pair-impact"]');
+    await page.waitForSelector('#all .monitor-details [data-pane="pair-urgency"]');
     const before = await page.$eval('#all [data-pane=price] path', e=>e.getAttribute('d'));
     await page.$eval('#all .zoom input', e=>{e.value='30';e.dispatchEvent(new Event('input'));});
     const after = await page.$eval('#all [data-pane=price] path', e=>e.getAttribute('d'));

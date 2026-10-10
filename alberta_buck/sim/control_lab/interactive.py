@@ -246,6 +246,17 @@ def plot_data(result):
             line(f"TOKEN {'ABC'[i]}", color, lambda f: f["pair_policy"]["own_impact_ticks"][i] * math.log(1.0001) * 10000)
             for i,color in enumerate(COLORS)],
             "Measured immediate tick movement from this basket's operations, accumulated and linearly decayed over two days. It widens uncertainty; it is not subtracted as a known counterfactual price path.")
+        patience = 100 * result["config"].get("pair", {}).get("patience", 0)
+        if patience and "urgency_point_days" in frames[0]["pair_policy"]:
+            slack = 100 * result["config"]["pair"]["slack"]
+            pane("pair-urgency", "Urgency to rebalance each TOKEN", "Point-days", [
+                *[line(f"TOKEN {'ABC'[i]}", color, lambda f, i=i: f["pair_policy"]["urgency_point_days"][i])
+                  for i, color in enumerate(COLORS)],
+                line("Patience", "#87949c", lambda f: patience, "3 3")],
+                f"Each TOKEN counts how far its share of the book is from target, beyond a slack of {slack:g} points, over "
+                f"time. Once the count reaches the patience of {patience:g} point-days the TOKEN may be rebalanced, and a "
+                "transfer starts its count again. A large gap gets there soon; a small one gets there if it lasts. This "
+                "decides only whether a gap may be worked: pair participation still decides when and how much.")
     if shadow_rows:
         def innovation(f, q):
             s=shadow_by_day.get(f["day"])

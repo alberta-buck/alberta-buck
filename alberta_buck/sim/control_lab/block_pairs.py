@@ -219,7 +219,10 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                 frame["pair_policy"] = dict(plans=self.pair_plans,
                     desire=[[0 if i == j else int(self.pair_policy.functions.desire(i, j).call()) / 1e18
                         for j in range(3)] for i in range(3)],
-                    own_impact_ticks=[int(self.pair_policy.functions.remainingImpact(i).call()) / 1e18 for i in range(3)])
+                    own_impact_ticks=[int(self.pair_policy.functions.remainingImpact(i).call()) / 1e18 for i in range(3)],
+                    # Each constituent's built-up urgency after this step, in point-days of gap beyond the slack.
+                    urgency_point_days=[int(self.pair_policy.functions.urgency(i).call()[0]) / 1e18 / 86400 * 100
+                        for i in range(3)])
                 if diagnostics:
                     frame["pair_decisions"] = self.pair_decisions
                     frame["pair_response_check"] = self.pair_response_check
