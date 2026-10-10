@@ -5,6 +5,39 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
+The new [[file:control-lab/basket-research/current/index.html][basket income and estimator comparison]] runs four matched arms for
+each of five price profiles: maintenance or paired rebalancing, each with
+external or basket-owned arbitrage income. Its [[file:control-lab/basket-research/current/results.org][results report]] separates
+actual credited arb income from other portfolio returns, in BUCK and USD,
+and measures the effect of enabling rebalancing against the maintenance
+control. Market feedback creates an interaction between these effects;
+the report preserves it instead of labelling every residual as trade profit.
+
+Open “Inspect sensor quality…” in that comparison for causal second-difference
+roughness, route disagreement, and a small level/rate Kalman model. These
+Python diagnostics read the EVM observer's exact cumulative-tick intervals;
+the existing Solidity policy retains trading authority. The measurement
+noise proxy and the Kalman covariance are model-dependent estimates, not
+independent votes or calibrated confidence guarantees.
+
+The =historical-bridge= selector uses committed gold, food and energy price
+files. Daily values include generated bridges between historical monthly
+anchors. A linear log-price endpoint correction makes each series end at
+its own opening value. Prior historical means exclude the test window;
+only the scenario generator knows the future endpoint. Raw prices and
+source hashes are retained. Returning to the opening level does not imply
+a zero time average, nor does it remove opening repricing relative to the
+historical mean used to fund the common LP book.
+
+Regenerate all 20 independent 120-day EVM runs with
+=make control-lab-basket-research=. Recompute diagnostics and graphs from
+cached JSON with =make control-lab-basket-research-render=. Run accounting,
+permission, maintenance-control and estimator checks with
+=make control-lab-basket-research-test=. Override
+=CONTROL_LAB_BASKET_RESEARCH_STAGE=k= or =all= and use a different
+=CONTROL_LAB_BASKET_RESEARCH_OUT= for later-stage experiments; the saved
+default isolates the basket before K, the desk and private flows.
+
 For selectable price disturbances, buyer/seller quantities and JavaScript
 graphs, open [[file:control-lab/interactive/index.html][the interactive control lab]]. The Org walkthrough below keeps
 the original matched figures and explains the staged construction.
@@ -324,13 +357,42 @@ are recorded in the page URL. Controls
 for absent actors are disabled. Opening the HTML directly from disk works:
 plot payloads load locally without a web server or third-party service.
 
-The basket net-value pane compares the contract's recorded equity in BUCK
-with the original 1,000,000 BUCK contribution at bootstrap parity. That
-equity already subtracts issued BUCK liability and includes accrued relief;
-it must not have the lien subtracted a second time. Final net value, gain
-or loss, and percentage return appear above the graphs. This is a marked
-return including the prelude and live run, not proceeds after liquidation
-or caller gas. BUCK/USDC conversion does not enter the calculation.
+The basket net-value pane shows the contract's recorded equity in both
+BUCK and USD, against the original 1,000,000 BUCK = $1,000,000 contribution
+at bootstrap parity. That equity already subtracts issued BUCK liability
+and includes accrued relief; it must not have the lien subtracted a second
+time. USD value converts the whole net mark at each sample's BUCK/USDC spot
+price, treating USDC as the simulation's dollar reference. The original
+investment stays fixed in each currency; it is not converted again at the
+ending exchange rate or reset to the first live observation.
+
+The return pane shows =(net value / original investment − 1) × 100%= in
+each currency, with a zero-return guide. Final value, gain or loss, and
+percentage return in both currencies also appear above the graphs. These
+are cumulative marked returns including the prelude and live run, not
+annualized returns or proceeds after liquidation and caller gas. They
+include inventory repricing, fees and relief as well as rebalancing, so
+neither curve isolates trading profit.
+
+The clean three-phase, zero-walk basket stage demonstrates why both units
+matter. K stays at 0.75, and the price of BUCK rises against USDC. The same
+net portfolio can therefore lose value measured in BUCK while gaining
+value measured in dollars:
+
+| Live day | Net BUCK | USD per BUCK | Net USD | BUCK return, % | USD return, % |
+|----------+----------+--------------+---------+----------------+---------------|
+| 0 | 1,001,740.17 | 1.000000000 | 1,001,740.17 | +0.174 | +0.174 |
+| 30 | 999,697.58 | 1.005709651 | 1,005,405.51 | −0.030 | +0.541 |
+| 120 | 994,170.59 | 1.019828580 | 1,013,883.58 | −0.583 | +1.388 |
+
+Across the first live cycle, net value changes by −2,042.59 BUCK or
++$3,665.33. The table's returns instead compare with the original
+investment, including the prelude. This accounting explains the opposite
+return signs; it does not establish that every paired trade is profitable.
+Enabling K alone ends the same clean run at −0.602% in BUCK and +1.344% in
+USD. With both private flows active, the returns are +1.105% and +1.217%.
+The later gain in BUCK should therefore not be attributed to enabling K
+alone: its changing credit limit needs a market response.
 
 The campaign configuration is [[file:control-lab-campaign.toml][control-lab-campaign.toml]]:
 

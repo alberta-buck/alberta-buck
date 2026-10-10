@@ -104,6 +104,13 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
 
     function setEquityWheel(address w) external onlyGov { equityWheel = w; }
 
+    event ArbitrageCreditorSet(address indexed creditor);
+
+    function setArbitrageCreditor(address source) external onlyGov {
+        arbitrageCreditor = source;
+        emit ArbitrageCreditorSet(source);
+    }
+
     function setEquityDirector(address d) external onlyGov {
         equityDirector = d;
         emit DirectorSet(d);
@@ -425,7 +432,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     ///         holder; Deploy places it).  The pro-rata shell's name, so the
     ///         wheel's arbitrage kind needs no change.
     function creditDepositors(uint256 i, uint256 amount) external returns (uint128, uint256) {
-        if (msg.sender != wheel || wheel == address(0)) revert NotWheel();
+        _requireIncomeSource();
         IERC20(constituents[i].token).transferFrom(msg.sender, address(this), amount);
         idleToken[i] += amount;
         emit WalletCredited(constituents[i].token, amount);
@@ -434,9 +441,13 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
 
     /// @notice BUCK the wheel captured, into the basket's account.
     function creditTreasury(uint256 amount) external {
-        if (msg.sender != wheel || wheel == address(0)) revert NotWheel();
+        _requireIncomeSource();
         IERC20(address(buck)).transferFrom(msg.sender, address(this), amount);
         emit WalletCredited(address(buck), amount);     // repays the lien, or is held
+    }
+
+    function _requireIncomeSource() private view {
+        if (msg.sender == address(0) || (msg.sender != wheel && msg.sender != arbitrageCreditor)) revert NotWheel();
     }
 
     // --- Views ------------------------------------------------------------------ //

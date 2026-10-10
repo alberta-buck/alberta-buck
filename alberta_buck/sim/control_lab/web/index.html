@@ -17,6 +17,7 @@
       <p class="lede">The same three tokens, from a price trace to a working basket, desk and private market. Change one input. Follow its effect through every pane.</p>
       <p id="campaign-status" role="status">Loading the saved campaign…</p>
       <p>The TOKEN-pair basket starts immediately after “Link the markets”. Open “Inspect sensor quality…” to compare both quote routes, relative prices, motion estimates and error allowances.</p>
+      <p>New comparison: <a href="../basket-research/current/index.html">basket-owned arb income, separate rebalancing effects, noise estimators and historical prices</a>.</p>
       <div class="guide">
         <div><h2>Paired price paths</h2><p>Mixed includes fixed white noise even at random walk = 0. Three-phase with walk = 0 is the clean baseline. Walks accumulate signed changes and can wander above or below the baseline; they do not revert to it. The selector scales the same seeded path.</p></div>
         <div><h2>Finite private flows</h2><p>Low, medium and high are desired daily amounts at fair value. Adverse prices damp the rate exponentially. Cash and credit can run out.</p></div>
@@ -27,7 +28,7 @@
         <p>Every stage begins with the same funded basket LP book, settled during a 120-day prelude at historical mean prices. Before live day zero, both TOKEN/BUCK and TOKEN/USDC pools are set to the selected opening feed and their price windows settle. The live pair estimator warms up separately for two days; the fixed-mean prelude does not enter its motion estimates. Historical EMA anchors exclude live perturbations.</p>
         <p>Mixed adds triangular pulses, a lasting TOKEN C ramp, and independent Gaussian white noise with a standard deviation of 0.2% of each token’s baseline mean per observation. That white noise does not accumulate and is separate from the random-walk selector. A zero-mean random increment does not make an accumulated path average zero over these 120 days.</p>
         <p>Drag the day-range controls to zoom; hover or focus a chart and use the arrow keys to inspect values across its panes. Click legend entries to hide or show lines. Shared vertical scales compare stages and flow quantities for the selected profile and walk. Basket allocation always fits the visible percentages. To inspect tiny movements in other panes, disable shared scales and hide constant guide lines.</p>
-        <p>Basket net value is measured in BUCK: LP and idle TOKEN value plus held BUCK, less issued BUCK liability, plus accrued relief. The initial-investment line is the original contribution at bootstrap parity. The reported return includes the prelude and live run, uses the contract’s equity mark, and excludes caller gas and liquidation costs.</p>
+        <p>Basket net value and return are shown in both BUCK and USD. Net BUCK value is LP and idle TOKEN value plus held BUCK, less issued BUCK liability, plus accrued relief. USD value converts that net mark at each sample’s BUCK/USDC spot price, treating USDC as the dollar reference. Both compare with the fixed original contribution at bootstrap parity. An appreciating BUCK can mean a loss in BUCK alongside a gain in USD. These marked returns include the prelude and live run, exclude caller gas and liquidation costs, and do not isolate rebalancing profit.</p>
         <p>Price-pane triangles mark executed TOKEN buys (up) and sells (down): green/red for the desk, teal/orange for the basket, purple/pink for arbitrage. Grey diamonds mark liquidity pairing without a token swap. Toggle marker groups in the legend, or click a marker to open the execution log for that observation. The log records both arbitrage venues and separates execution phases within each six-hour observation.</p>
         <p>The desk begins with TOKEN inventory and no BUCK cash. It can sell TOKEN to absorb BUCK, but fresh BUCK issuance requires 30 consecutive days beyond its entry band. A brief excursion can therefore produce a policy signal without a desk fill; enabling the desk does not guarantee an operation in every selected case.</p>
         <p>These are precomputed 120-day pyrevm experiments. Changing a selector loads an actual saved run; the browser does not approximate or interpolate a new experiment. A shared run is reused only when a control belongs to an actor absent from that stage.</p>
@@ -36,7 +37,7 @@
       </div></details>
     </section>
     <div class="workspace"><nav id="stage-nav" aria-label="Experiment stages"></nav><div id="stages"></div></div>
-    <footer>BUCK control lab · Cached EVM observations, plotted in JavaScript · <a href="manifest.json">Campaign manifest</a></footer>
+    <footer>BUCK control lab · Cached EVM observations, plotted in JavaScript · <a href="manifest.json">Campaign manifest</a> · <a href="../basket-research/current/index.html">Basket ROI, arb income and noise estimators</a></footer>
   </main>
   <noscript>This presentation needs JavaScript to draw charts and select cached experiments. Raw data is available in manifest.json.</noscript>
 </body>

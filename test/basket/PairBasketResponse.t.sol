@@ -6,6 +6,7 @@ import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.
 import {PairBasketEquityResponse} from "../../src/basket/PairBasketEquityResponse.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
+import {PairBasketMaintenanceControl} from "../harness/PairBasketMaintenanceControl.sol";
 
 contract ControlledPairIntent {
     address public basket;
@@ -91,6 +92,33 @@ contract PairBasketResponseTest is BuckBasketEquityTest {
         assertEq(afterSpot, spot, "LP pairing can move inventory but does not trade TOKEN");
         assertEq(intent.impacts(), 0);
         assertEq(intent.lastExecutionAt(), 0, "bookkeeping/LP work does not consume pair budget");
+    }
+
+    function test_maintenanceControlSuppressesTradesButRetainsLPPlacement() public {
+        _install(); // Positive intent would normally exchange the overweight TOKEN.
+        vm.startPrank(GOV);
+        b.setEquityWheel(address(new PairBasketMaintenanceControl(address(intent))));
+        vm.stopPrank();
+        (uint160 spot,,,,,,) = IPool(pools[0]).slot0();
+        IEquityWheel(address(b)).wheelStep(2, 0);
+        (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0();
+        assertEq(afterSpot, spot);
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        assertGt(b.liquidityOf(1) + b.liquidityOf(2), 0);
+        _books();
+    }
+
+    function test_maintenanceControlRetainsLiquidityOverride() public {
+        _install();
+        vm.startPrank(GOV);
+        b.setEquityWheel(address(new PairBasketMaintenanceControl(address(intent))));
+        vm.stopPrank();
+        ctrl.setK(0);
+        int256 account = buck.signedBalanceOf(address(b));
+        assertEq(IEquityWheel(address(b)).wheelStep(2, 0), 1);
+        assertGe(buck.signedBalanceOf(address(b)), account);
+        assertEq(b.liquidityOf(1) + b.liquidityOf(2), 0);
+        _books();
     }
 
     function test_pair_liquidityOverrideDoesNotRequireAClosureSignal() public {

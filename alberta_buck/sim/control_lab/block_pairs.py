@@ -25,7 +25,7 @@ PROFILES = [dict(name="three-phase", perturbations=[])] + [
     for name, sigma in (("noise20", .002), ("noise80", .008), ("flat-noise80", .008))]
 
 
-def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagnostics=False):
+def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagnostics=False, maintenance_only=False):
     """Shared observer/response wiring for the walkthrough and comparisons."""
     from . import engine
 
@@ -36,6 +36,8 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
             self.pair_observer = self.chain.deploy("BlockPairSignals",
                 [t.address for t in d.tokens], [d.buck.address, d.usdc.address],
                 [*d.pool_buck, *d.pool_usdc], *PARAMS.values())
+            self.route_metadata = [dict(token0=bool(r[1]), decimal_offset_ticks=int(r[2])/1e18)
+                for r in (self.pair_observer.functions.routes(i).call() for i in range(6))]
             self.pair_wheel = self.chain.deploy("BasketMachineWheel", d.buck.address, d.usdc.address, d.gov, 0, 0)
             self.chain.send(self.pair_wheel.functions.setSample(self.pair_observer.address), sender=d.gov)
             self.observation_gas = []
@@ -57,7 +59,8 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                     # any selected perturbation. Observer levels normalize decimals.
                     reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
                     self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address, d.basket.address, reference)
-                    response_name = "PairBasketDecisionTrace" if diagnostics else "PairBasketEquityResponse"
+                    response_name = ("PairBasketMaintenanceControl" if maintenance_only else
+                                     "PairBasketDecisionTrace" if diagnostics else "PairBasketEquityResponse")
                     facet = self.chain.deploy(response_name, self.pair_policy.address)
                     self.chain.send(d.basket.functions.setEquityWheel(facet.address), sender=d.gov)
                     abi, _ = load_artifact(response_name)
@@ -206,6 +209,8 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                 gas=self.observation_gas[-1],
                 pool_samples=[dict(cumulative=str(p[0]), tick=int(p[1]), sqrt_price_x96=str(p[2]), liquidity=str(p[3]))
                     for p in (s.functions.spots(k).call() for k in range(6))])
+            if self.step == 0:
+                frame["pair_signal"]["route_metadata"] = self.route_metadata
             if self.pair_policy is not None:
                 frame["pair_policy"] = dict(plans=self.pair_plans,
                     desire=[[0 if i == j else int(self.pair_policy.functions.desire(i, j).call()) / 1e18
@@ -219,6 +224,8 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
     # Disabled-observer controls still receive the identical funded LP prelude.
     result = engine.simulate(cfg, profile, stage, world_factory=ObserverWorld)
     result.update(observer_params=PARAMS, observer_enabled=enabled)
+    if "pair_signal" in result["frames"][0]:
+        result["observer_routes"] = result["frames"][0]["pair_signal"].pop("route_metadata")
     if basket_mode:
         result.update(basket_mode=basket_mode)
         if basket_mode == "pair":

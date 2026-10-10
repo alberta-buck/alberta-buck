@@ -208,6 +208,8 @@
     state.data = data; state.body.hidden = false; state.body.replaceChildren(); state.charts = [];
     state.step = data.days.length > 1 ? data.days[1] - data.days[0] : .25;
     state.index = data.days.length - 1;
+    if (data.feed_source) state.body.append($("p", "explanation",
+      `Historical inputs: ${data.feed_source.labels.map((label,i)=>`${"ABC"[i]} = ${label}`).join("; ")}. Each ends at its opening price after a log-price endpoint adjustment. Historical means use preceding data only. Stored daily quotes include generated texture between monthly anchors.`));
     const metrics = $("div", "metrics");
     const counts = data.execution_counts;
     const metricValues = [["Mean bvib", data.mean_bvib.toFixed(6)], ["Final K", data.summary.end_k.toFixed(6)],
@@ -219,7 +221,15 @@
       const p = data.basket_performance;
       metricValues.push(["Final basket net value · BUCK", number(Math.round(p.final_net_buck * 100) / 100)],
         ["Net gain / loss · BUCK", number(Math.round(p.gain_buck * 100) / 100)],
-        ["Marked return on initial BUCK", `${p.return_pct >= 0 ? "+" : ""}${p.return_pct.toFixed(3)}%`]);
+        ["Marked return on initial BUCK", `${p.return_pct >= 0 ? "+" : ""}${p.return_pct.toFixed(3)}%`],
+        ["Final basket net value · USD", number(Math.round(p.final_net_usd * 100) / 100)],
+        ["Net gain / loss · USD", number(Math.round(p.gain_usd * 100) / 100)],
+        ["Marked return on initial USD", `${p.return_usd_pct >= 0 ? "+" : ""}${p.return_usd_pct.toFixed(3)}%`]);
+      if (p.arb_beneficiary === "basket") metricValues.push(
+        ["Arb income received · BUCK", number(Math.round(p.arb_income_buck*100)/100)],
+        ["Other basket gain · BUCK", number(Math.round(p.other_gain_buck*100)/100)],
+        ["Arb income received · USD", number(Math.round(p.arb_income_usd*100)/100)],
+        ["Other basket gain · USD", number(Math.round(p.other_gain_usd*100)/100)]);
     }
     for (const [label, value] of metricValues) {
       const metric = $("div", "metric"); metric.append($("strong", "", value), $("span", "", label)); metrics.append(metric);

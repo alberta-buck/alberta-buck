@@ -149,7 +149,11 @@ class World:
         # One consistency arbitrage actor, with a separate wheel so its
         # before/after-policy turns have explicit, reproducible timing.
         self.arb = self.proxy("BasketMachineWheel", d.buck.address, d.usdc.address, d.gov, 0, 0, carrying=True)
-        self.chain.send(self.arb.functions.setArb(d.pool_ub, ZERO, 0, cfg["market"]["arb_cap_bp"], 1), sender=d.gov)
+        self.basket_arb = cfg["market"].get("arb_beneficiary", "external") == "basket"
+        if self.basket_arb:
+            self.chain.send(d.basket.functions.setArbitrageCreditor(self.arb.address), sender=d.gov)
+        self.chain.send(self.arb.functions.setArb(d.pool_ub, d.basket.address if self.basket_arb else ZERO,
+            0, cfg["market"]["arb_cap_bp"], 1), sender=d.gov)
         self.chain.send(self.arb.functions.setStartMode(1), sender=d.gov)
         for i in range(3):
             self.chain.send(self.arb.functions.setTriangle(i,
@@ -162,6 +166,7 @@ class World:
         self.credit(self.supplier, sup["credit_face_buck"])
         self.counters = dict(arb_cycles=0, arb_profit_buck=0., desk_ops=0, demand_usdc=0., supply_buck=0.,
                              demand_trades=0, supply_trades=0)
+        self.arb_income = dict(nominal_buck=0., net_buck=0., net_usd=0., arrival_fees_buck=0.)
         # Start on a UTC boundary after every oracle has sufficient history.
         self.start = (int(d.w3.eth.get_block("latest")["timestamp"]) // 86400 + 1) * 86400
         self.bootstrap_gas = self.gas
@@ -253,12 +258,29 @@ class World:
         if not self.flags.get("arb"):
             return
         from web3.logs import DISCARD
+        def account():
+            # Accrued relief is already an asset. Settling it is not arb income.
+            return (int(self.d.buck.functions.signedBalanceOf(self.d.basket.address).call())
+                    + int(self.d.buck.functions.reliefOf(self.d.basket.address).call()))
         for _ in range(self.cfg["market"]["arb_rounds"]):
             self.chain.send(self.arb.functions.rearm())
+            before = account() if self.basket_arb else 0
             rc = self.chain.send(self.arb.functions.tick(3, 12))
             events = self.arb.events.Cycled().process_receipt(rc, errors=DISCARD)
             self.counters["arb_cycles"] += len(events)
             self.counters["arb_profit_buck"] += sum(int(e["args"]["profit"]) for e in events) / E6
+            if self.basket_arb:
+                nominal = sum(int(e["args"]["credited"]) for e in events)
+                profit = sum(int(e["args"]["profit"]) for e in events)
+                if nominal != profit:
+                    raise AssertionError("Basket-owned arb failed to credit its whole profit")
+                net = account() - before
+                if not 0 <= net <= nominal + 1:
+                    raise AssertionError(f"Arb credit accounting mismatch: {net=} {nominal=}")
+                self.arb_income["nominal_buck"] += nominal / E6
+                self.arb_income["net_buck"] += net / E6
+                self.arb_income["net_usd"] += net / E6 * self.prices()["buck_usdc"]
+                self.arb_income["arrival_fees_buck"] += (nominal - net) / E6
             self.events.extend(self.recorder.capture(rc, phase))
             if not events:
                 break
@@ -338,6 +360,7 @@ class World:
         frame["basket"] = dict(equity=int(d.basket.functions.equity().call()) / E6,
             weights=list(d.basket.functions.responseWeightsBp().call()),
             account=int(d.buck.functions.signedBalanceOf(d.basket.address).call()) / E6)
+        frame["basket"]["arb_income"] = dict(beneficiary="basket" if self.basket_arb else "external", **self.arb_income)
         return frame
 
     def before_policy(self):
@@ -362,7 +385,7 @@ class World:
                               reference_at_start=self.reference_cost(rows[0]["target_usd"]))
         if self.flags.get("monitor"):
             self.history = initialize_history(self.chain, self.signals, self.d.basket,
-                self.d.gov, history_rows(self.cfg), self.cfg["feed"]["base"])
+                self.d.gov, history_rows(self.cfg, getattr(self, "profile", None)), self.cfg["feed"]["base"])
             self.history["perturbations_included"] = False
         self.bootstrap_gas = self.gas
         self.bootstrap_transactions = self.transactions
@@ -405,10 +428,11 @@ def simulate(cfg, profile, stage, world_factory=None):
     with isolated_environment(cfg):
         world = (world_factory or World)(cfg, stage)
         try:
+            world.profile = profile
             frames = world.run(rows)
             runtime = time.perf_counter() - started
             errors = [abs(f["bvib"] - 1) for f in frames]
-            return {"schema": 1, "backend": "pyrevm", "stage": stage, "flags": STAGES[stage],
+            result = {"schema": 1, "backend": "pyrevm", "stage": stage, "flags": STAGES[stage],
                     "profile": profile, "config": cfg, "history": world.history,
                     "bootstrap": world.bootstrap, "frames": frames,
                     "summary": {"seconds": round(runtime, 3), "samples": len(frames),
@@ -418,5 +442,9 @@ def simulate(cfg, profile, stage, world_factory=None):
                         "gas": world.gas - world.bootstrap_gas,
                         "bootstrap_gas": world.bootstrap_gas,
                         "transactions": world.transactions - world.bootstrap_transactions}}
+            if "history" in profile:
+                from .historical import historical_inputs
+                result["feed_source"] = historical_inputs(cfg, profile)["provenance"]
+            return result
         finally:
             world.close()

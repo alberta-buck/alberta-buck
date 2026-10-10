@@ -282,7 +282,7 @@ docs: doc-proofs doc-receipt doc-paper doc-flow doc-identity-example doc-privacy
 CONTROL_LAB_PYTHON	?= python
 CONTROL_LAB_EMACS	?= emacs
 CONTROL_LAB_CONFIG	?= doc/control-lab.toml
-CONTROL_LAB_JOBS		?= 4
+CONTROL_LAB_JOBS	?= 6
 CONTROL_LAB_PROFILES	?= three-phase,mixed
 CONTROL_LAB_STAGES	?=
 CONTROL_LAB_FORCE	?=
@@ -423,6 +423,24 @@ control-lab-basket-first: stage-uniswap
 control-lab-basket-first-render:
 	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_first --out "$(CONTROL_LAB_BASKET_FIRST_OUT)" --render-only
 	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_BASKET_FIRST_OUT)/results.org" --funcall org-html-export-to-html
+
+# Four matched basket/arb arms, with render-only shadow noise estimators.
+CONTROL_LAB_BASKET_RESEARCH_OUT ?= doc/control-lab/basket-research/current
+CONTROL_LAB_BASKET_RESEARCH_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge
+CONTROL_LAB_BASKET_RESEARCH_STAGE ?= basket
+.PHONY: control-lab-basket-research control-lab-basket-research-render control-lab-basket-research-test
+control-lab-basket-research: stage-uniswap
+	forge build $(FORGE_OPTS) -q
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_research --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BASKET_RESEARCH_OUT)" --profiles "$(CONTROL_LAB_BASKET_RESEARCH_PROFILES)" --stage "$(CONTROL_LAB_BASKET_RESEARCH_STAGE)" --jobs $(CONTROL_LAB_JOBS)
+	$(MAKE) control-lab-basket-research-render
+
+control-lab-basket-research-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_research --out "$(CONTROL_LAB_BASKET_RESEARCH_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "$(abspath $(CONTROL_LAB_BASKET_RESEARCH_OUT))/results.org") (org-html-export-to-html))'
+
+control-lab-basket-research-test:
+	forge test $(FORGE_OPTS) --match-contract 'BasketArbIncomeTest|PairBasketResponseTest'
+	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_research.py alberta_buck/test/test_control_lab_campaign.py -q
 
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────

@@ -4,6 +4,7 @@
  * The full campaign must have rendered; screenshots are optional via SCREENSHOT_DIR.
  */
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
@@ -42,9 +43,18 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     assert.equal(smallScale.length,5);
     assert.ok(smallScale[4]-smallScale[0]<.002, 'local scale hides the calibration drift');
     const firstKey = await choose('all', {profile:'three-phase',walk:'0',buyer:'medium',seller:'medium'});
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 10);
-    assert.equal(await page.$$eval('#all [data-pane=basket-value] svg path', n=>n.length), 2);
-    assert.equal(await page.$eval('#all [aria-label="Toggle Initial investment"] .value',e=>e.textContent),'1,000,000');
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 11);
+    assert.equal(await page.$$eval('#all [data-pane=basket-value] svg path', n=>n.length), 3);
+    assert.equal(await page.$$eval('#all [data-pane=basket-return] svg path', n=>n.length), 3);
+    assert.equal(await page.$eval('#all [aria-label="Toggle Initial investment · BUCK / USD"] .value',e=>e.textContent),'1,000,000');
+    const returnMetrics = await page.$$eval('#all .metric', nodes=>Object.fromEntries(nodes.map(n=>[n.querySelector('span').textContent,n.querySelector('strong').textContent])));
+    const rawURL = new URL(manifest.entries[firstKey].file, url);
+    const raw = rawURL.protocol === 'file:' ? JSON.parse(fs.readFileSync(rawURL, 'utf8')) : await (await fetch(rawURL)).json();
+    const end = raw.frames.at(-1), initial = raw.config.market.basket_equity_usd;
+    for (const [currency, rate] of [['BUCK', 1], ['USD', end.buck_usdc]]) {
+      const roi = 100 * (end.basket.equity * rate / initial - 1);
+      assert.equal(returnMetrics[`Marked return on initial ${currency}`], `${roi >= 0 ? '+' : ''}${roi.toFixed(3)}%`);
+    }
     const allocationScale = () => page.$$eval('#all [data-pane=allocation] svg text[x="85"]',ns=>ns.map(n=>Number(n.textContent.replaceAll(',',''))));
     const allocationBounds = await allocationScale();
     assert.ok(Math.min(...allocationBounds)>20 && Math.max(...allocationBounds)<45,
@@ -68,7 +78,7 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     await page.waitForFunction(key=>document.querySelector('#all').dataset.loadedKey===key, {}, key);
     await page.click('#all .monitor-details>summary');
     await page.waitForSelector('#all [data-pane="ema-2"]');
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 26);
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 27);
     await page.waitForSelector('#all .monitor-details [data-pane="pair-rate-2"]');
     await page.waitForSelector('#all .monitor-details [data-pane="pair-impact"]');
     const before = await page.$eval('#all [data-pane=price] path', e=>e.getAttribute('d'));
@@ -162,6 +172,6 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     await page.select('#basket select[name=walk]','1');
     assert.equal(await page.$eval('#all select[name=walk]',e=>e.value),'1');
     assert.deepEqual(errors,[]);
-    console.log(`Browser checks passed: net basket value, allocation autorange, persistent linked settings, selectors, race handling, zoom, cursor, legends, sensor details, all stages (${process.env.TEST_PROFILES || 'three-phase,mixed,shock'}) and mobile layout.`);
+    console.log(`Browser checks passed: BUCK and USD basket value/return, allocation autorange, persistent linked settings, selectors, race handling, zoom, cursor, legends, sensor details, all stages (${process.env.TEST_PROFILES || 'three-phase,mixed,shock'}) and mobile layout.`);
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

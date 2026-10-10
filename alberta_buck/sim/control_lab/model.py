@@ -30,7 +30,7 @@ DEFAULTS = {
              "walk_amplification": 0., "walk_daily_sigma": .01},
     "bootstrap": {"history_days": 1280, "basket_warmup_days": 0},
     "market": {"depth_usd": 1_000_000, "basket_equity_usd": 1_000_000,
-               "arb_rounds": 2, "arb_cap_bp": 200},
+               "arb_rounds": 2, "arb_cap_bp": 200, "arb_beneficiary": "external"},
     "monitor": {"interval": 1800, "max_age": 3600, "deviation_bp": 500},
     "controller": {"k0": .75, "kmin": .20, "kmax": .95,
                    "tau_i_days": 90., "kp_frac": .02},
@@ -90,6 +90,8 @@ def validate(cfg: dict) -> None:
         raise ValueError("pool depth and basket capital must be positive")
     if not 1 <= cfg["market"]["arb_rounds"] <= 20 or not 0 < cfg["market"]["arb_cap_bp"] <= 1000:
         raise ValueError("invalid arbitrage work bound")
+    if cfg["market"].get("arb_beneficiary", "external") not in ("external", "basket"):
+        raise ValueError("arb_beneficiary must be external or basket")
     band = cfg["basket"]["weight_band_bp"]
     if not isinstance(band, int) or not 0 <= band <= 1000:
         raise ValueError("basket.weight_band_bp must be an integer in 0..1000")
@@ -115,8 +117,11 @@ def baseline_prices(cfg: dict, day: float) -> list[float]:
         for i, base in enumerate(cfg["feed"]["base"])]
 
 
-def history_rows(cfg: dict) -> list[dict]:
-    """Strictly past, unperturbed history; deliberately accepts no profile."""
+def history_rows(cfg: dict, profile: dict | None = None) -> list[dict]:
+    """Strictly past history; synthetic disturbances and live endpoint pins stay out."""
+    if profile and "history" in profile:
+        from .historical import historical_inputs
+        return historical_inputs(cfg, profile)["history"]
     return [{"day": day, "prices": baseline_prices(cfg, day)}
             for day in range(-cfg["bootstrap"]["history_days"], 0)]
 
@@ -128,6 +133,11 @@ def feed_rows(cfg: dict, profile: dict) -> list[dict]:
     actor order or the number of workers. A common perturbation shares a
     noise draw across its selected tokens; independent=true splits it.
     """
+    if "history" in profile:
+        from .historical import historical_inputs
+        if profile.get("perturbations") or cfg["feed"]["walk_amplification"]:
+            raise ValueError("pinned historical comparison currently requires no extra disturbances")
+        return historical_inputs(cfg, profile)["rows"]
     # Independent Brownian log-price walks, with no drift in log space. The
     # seed excludes stage/profile/amplification, pairing all comparisons.
     # No day-zero shock; no walk enters the separate bootstrap history.
@@ -202,4 +212,8 @@ def dependencies(cfg: dict, profile: dict, stage: str) -> dict:
             weight_band_bp=cfg["basket"]["weight_band_bp"])
     if flags.get("k"):
         resolved["controller"] = cfg["controller"]
-    return {"config": resolved, "profile": profile, "stage": stage}
+    inputs = {"config": resolved, "profile": profile, "stage": stage}
+    if "history" in profile:
+        from .historical import historical_inputs
+        inputs["historical_source"] = historical_inputs(cfg, profile)["provenance"]
+    return inputs

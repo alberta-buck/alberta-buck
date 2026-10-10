@@ -18,17 +18,31 @@ def basket_performance(result):
 
     The fixture contributes equal TOKEN values at the baseline means while
     BUCK/USDC is one. Their three-phase sum makes this configured grant its
-    initial BUCK value, before the LP prelude and live perturbations.
+    initial BUCK and USD value, before the LP prelude and live perturbations.
+    Dollar marks convert net equity at the sample's BUCK/USDC spot price;
+    USDC is the simulation's dollar reference. return_pct remains in BUCK.
     """
     initial = result["config"]["market"]["basket_equity_usd"]
-    final = result["frames"][-1]["basket"]["equity"]
+    end = result["frames"][-1]
+    final = end["basket"]["equity"]
+    final_usd = final * end["buck_usdc"]
+    income = end["basket"].get("arb_income", {})
+    arb_buck, arb_usd = income.get("net_buck", 0.), income.get("net_usd", 0.)
     return dict(initial_buck=initial, final_net_buck=final,
-                gain_buck=final - initial, return_pct=100 * (final / initial - 1))
+                gain_buck=final - initial, return_pct=100 * (final / initial - 1),
+                initial_usd=initial, final_net_usd=final_usd,
+                gain_usd=final_usd - initial, return_usd_pct=100 * (final_usd / initial - 1),
+                arb_beneficiary=income.get("beneficiary", "external"),
+                arb_income_buck=arb_buck, arb_income_usd=arb_usd,
+                other_gain_buck=final-initial-arb_buck, other_gain_usd=final_usd-initial-arb_usd)
 
 
 def plot_data(result):
     """Plot-ready columns; raw JSON retains every original value and EVM field."""
     frames, flags, cfg = result["frames"], result["flags"], result["config"]
+    shadow_rows = result.get("shadow_diagnostics", {}).get("frames", [])
+    shadow_by_day = {f["day"]:s for f,s in zip(frames,shadow_rows)}
+    owned_arb = cfg["market"].get("arb_beneficiary", "external") == "basket"
     panes = []
 
     def line(label, color, fn, dash=None):
@@ -99,10 +113,12 @@ def plot_data(result):
     if flags.get("arb"):
         initial = result["bootstrap"]["market"]
         pane("custody", "Where the market’s BUCK goes", "Thousands of BUCK", [
-            line("Arbitrage profit held", "#7653ab", lambda f: f["market"]["arb_held_buck"] / 1000),
+            line("Arb cash awaiting credit" if owned_arb else "Arbitrage profit held", "#7653ab", lambda f: f["market"]["arb_held_buck"] / 1000),
             line("Δ pool BUCK outside active depth", "#b86107", lambda f: (f["market"]["pool_minus_virtual_buck"] - initial["pool_minus_virtual_buck"]) / 1000),
             line("Decrease in active reserves", "#172d39", lambda f: (initial["active_buck"] - f["market"]["active_buck"]) / 1000, "3 4"),
-        ], "The arbitrage actor retains its receipts after pool fees; gas costs are excluded. At fixed liquidity, the second line records uncollected BUCK fees; changing LP positions also changes the reserve offset.")
+        ], ("Arb income is credited to the basket; the arb wallet should retain no distributable profit. " if owned_arb else
+            "The external arbitrage actor retains its receipts; they are excluded from basket ROI. ") +
+            "Gas costs are excluded. At fixed liquidity, the second line records uncollected BUCK fees; changing LP positions also changes the reserve offset.")
     if flags.get("desk"):
         pane("desk", "Desk capital and spending authority", "Millions of BUCK", [
             *[line(label, color, lambda f, key=key: f["desk"][key] / 1e6) for key, label, color in
@@ -125,10 +141,39 @@ def plot_data(result):
             "Allocation follows the replacement basket’s bounded Daily / Sync / Respond work. The vertical axis fits the visible allocations.")
         performance = basket_performance(result)
         initial = performance["initial_buck"]
-        pane("basket-value", "Basket net value versus initial investment", "BUCK", [
-            line("Net basket value", "#158067", lambda f: f["basket"]["equity"]),
-            line("Initial investment", "#87949c", lambda f: initial, "6 4"),
-        ], f"Initial contribution: {initial:,.0f} BUCK, valued at bootstrap parity before the LP prelude. Net value = LP and idle TOKEN value + held BUCK − issued BUCK liability + accrued relief, using the contract’s TWAP equity mark. The liability is already deducted. Returns include bootstrap and live results; this is a mark, not liquidation proceeds, and caller gas is excluded.")
+        pane("basket-value", "Basket net value in BUCK and USD", "BUCK / USD", [
+            line("Net value · BUCK", "#158067", lambda f: f["basket"]["equity"]),
+            line("Net value · USD", "#7653ab", lambda f: f["basket"]["equity"] * f["buck_usdc"], "7 4"),
+            line("Initial investment · BUCK / USD", "#87949c", lambda f: initial, "6 4"),
+        ], f"Initial contribution: {initial:,.0f} BUCK = ${initial:,.0f} at bootstrap parity before the LP prelude. Net BUCK value = LP and idle TOKEN value + held BUCK − issued BUCK liability + accrued relief, using the contract’s TWAP equity mark. The liability is already deducted. USD value multiplies this net mark by each sample’s BUCK/USDC spot price, treating USDC as the dollar reference. The initial investment stays fixed in each currency.")
+        pane("basket-return", "Basket return on initial investment", "Percent", [
+            line("Return · BUCK", "#158067", lambda f: 100 * (f["basket"]["equity"] / initial - 1)),
+            line("Return · USD", "#7653ab", lambda f: 100 * (f["basket"]["equity"] * f["buck_usdc"] / performance["initial_usd"] - 1), "7 4"),
+            line("Break-even", "#87949c", lambda f: 0., "6 4"),
+        ], "Return = (net value / original investment − 1) × 100% in the same currency. An appreciating BUCK can produce a negative BUCK return alongside a positive USD return. Both include the LP prelude and live run, inventory repricing, fees and accrued relief; neither isolates rebalancing profit. These are marked returns, excluding caller gas and liquidation costs.")
+        if owned_arb:
+            for currency in ("buck", "usd"):
+                def total_return(f, c=currency):
+                    return 100*(f["basket"]["equity"]*(f["buck_usdc"] if c=="usd" else 1)/initial-1)
+                def arb_return(f, c=currency):
+                    return 100*f["basket"]["arb_income"]["net_"+c]/initial
+                pane("basket-income-"+currency, "Return components · "+currency.upper(), "Percent of initial investment", [
+                    line("Total basket return", "#172d39", total_return),
+                    line("Arb income received", "#7653ab", arb_return, "7 4"),
+                    line("Other portfolio return", "#158067", lambda f: total_return(f)-arb_return(f), "3 3"),
+                    line("Break-even", "#87949c", lambda f: 0., "6 4"),
+                ], "Arb receipts already enter the basket's actual equity: total = arb income + other return, with no second addition. Credits are net of BUCK arrival fees; USD credits use receipt-time prices. Other return includes inventory repricing, LP fees, relief and rebalancing. The matched four-arm comparison separately measures the effect of enabling rebalancing.")
+        comparison = result.get("research_comparison")
+        if comparison:
+            by_day = {f["day"]:f for f in comparison["frames"]}
+            for currency in ("buck", "usd"):
+                pane("basket-effects-"+currency, "Matched strategy effects · "+currency.upper(), "Percentage points of initial investment", [
+                    line(label, color, lambda f,k=key,c=currency: 100*by_day[f["day"]][c][k]/comparison["initial"],dash)
+                    for key,label,color,dash in (("baseline","Maintenance baseline", "#87949c","3 3"),
+                        ("rebalancing","Effect of rebalancing", "#158067",None),
+                        ("arb_ownership","Effect of owning arb income", "#7653ab","7 4"),
+                        ("interaction","Interaction", "#b86107","3 3"),
+                        ("total","Combined gain", "#172d39",None))], comparison["method"])
     if "pair_signal" in frames[0]:
         pane("pair-quality", "Pair observer readiness and cost", "Indicator / millions of gas", [
             line("Ready BUCK route", COLORS[0], lambda f: int(bool(f["pair_signal"]["ready_mask"] & 1))),
@@ -155,6 +200,22 @@ def plot_data(result):
                 line("Zero rate", "#a1a9ad", lambda f: 0., "2 4"),
                 line("Route rate spread", "#7653ab", lambda f: pair(f)["rate_spread_bp_day"] if pair(f)["ready_mask"] else None, "7 4"),
             ], "Positive means the numerator gains relative to the denominator. Above its historical ratio this is departure; negative motion is closure. Below that ratio the directions reverse. Allocation is a separate trade condition. Allowances are empirical, not confidence intervals. The smooth reference is scoring-only, available in replay arms.")
+            if shadow_rows:
+                def shadow(f, p=pair_number):
+                    s=shadow_by_day.get(f["day"])
+                    return s["pairs"][p] if s and s["ready"] else {}
+                panes[-1]["lines"].extend([
+                    line(label,color,lambda f,key=key: shadow(f).get(key),dash)
+                    for key,label,color,dash in (("rate_bp_day","Kalman rate · shadow","#158067","7 4"),
+                        ("low_bp_day","Kalman lower envelope","#8aae9c","2 4"),
+                        ("high_bp_day","Kalman upper envelope","#8aae9c","2 4"))])
+                panes[-1]["note"] += " Shadow Kalman estimates use the same interval observations; the envelope spans both routes' model ±2σ bounds without assuming independence. They do not authorize trades. The active basket adds its own-impact allowance separately."
+                pane(f"pair-noise-{pair_number}", f"{name} · price-noise proxies and model error", "Log basis points", [
+                    line("Current absolute prediction error", "#b63e45", lambda f: pair(f)["error_bp"] if pair(f)["ready_mask"] else None),
+                    line("Second-difference roughness σ", "#2463c4", lambda f: shadow(f).get("roughness_bp")),
+                    line("Cross-route disagreement proxy", "#b86107", lambda f: shadow(f).get("disagreement_bp"), "7 4"),
+                    line("Kalman adaptive measurement σ", "#158067", lambda f: shadow(f).get("measurement_bp"), "3 3"),
+                ], "Roughness estimates noise only under locally linear motion and white observation errors; curvature and jumps also contribute. Route disagreement cannot detect shared noise. Kalman measurement covariance adapts from bounded prior roughness, so these are related diagnostics, not independent votes. Prediction error is an absolute residual, not a standard deviation. All diagnostics are causal Python calculations with no trading authority.", "monitor-detail")
             pane(f"pair-error-{pair_number}", f"{name} · prediction error and route disagreement", "Log basis points", [
                 line("Mean absolute prediction error", "#b63e45", lambda f: pair(f)["error_bp"] if pair(f)["ready_mask"] else None),
                 line("Filtered route level spread", "#7653ab", lambda f: pair(f)["level_spread_bp"] if pair(f)["ready_mask"] else None),
@@ -169,6 +230,15 @@ def plot_data(result):
             line(f"TOKEN {'ABC'[i]}", color, lambda f: f["pair_policy"]["own_impact_ticks"][i] * math.log(1.0001) * 10000)
             for i,color in enumerate(COLORS)],
             "Measured immediate tick movement from this basket's operations, accumulated and linearly decayed over two days. It widens uncertainty; it is not subtracted as a known counterfactual price path.")
+    if shadow_rows:
+        def innovation(f, q):
+            s=shadow_by_day.get(f["day"])
+            return s["innovation_nis"][q] if s and s["ready"] else None
+        pane("pair-innovation", "Kalman model checks · shadow only", "Normalized squared innovation per coordinate", [
+            line("BUCK route", COLORS[0], lambda f: innovation(f,0)),
+            line("USDC route", COLORS[1], lambda f: innovation(f,1), "7 4"),
+            line("Model reference", "#87949c", lambda f: 1., "3 3"),
+        ], "Values near one are a model-based reference, not a guaranteed calibration. Large innovations expose surprise before the sample can adjust its own noise estimate. Sustained departures can reveal wrong dynamics, correlated errors or misestimated noise.", "monitor-detail")
     if result.get("sensor_details"):
         for item in panes:
             if item["id"].startswith("pair-"):
@@ -177,6 +247,7 @@ def plot_data(result):
                 execution_counts=execution_counts(frames), executions=execution_log(result),
                 mean_bvib=sum(f["bvib"] for f in frames) / len(frames),
                 basket_performance=basket_performance(result) if flags.get("basket") else None,
+                feed_source=result.get("feed_source"),
                 config={k: cfg[k] for k in ("feed", "controller", "desk", "demand", "supply")},
                 stage=result["stage"], profile=result["profile"]["name"], cache_key=result["cache_key"])
 
@@ -193,6 +264,10 @@ def render(root):
     entries = {}
     for key, entry in manifest["entries"].items():
         result = json.loads((root / entry["file"]).read_text())
+        if key in manifest.get("diagnostics", {}):
+            result["shadow_diagnostics"] = json.loads((root / manifest["diagnostics"][key]).read_text())
+        if key in manifest.get("comparisons", {}):
+            result["research_comparison"] = json.loads((root / manifest["comparisons"][key]).read_text())
         data = plot_data(result)
         # Script transport makes the presentation work from file:// too.
         # The payload contains numbers/prose, never executable user code.
@@ -222,7 +297,7 @@ def render(root):
     web = Path(__file__).with_name("web")
     for name in ("index.html", "app.js", "style.css"):
         if name == "index.html":
-            template = manifest["kind"] + ".html" if manifest.get("kind") in ("block-pairs", "pair-basket", "basket-first") else name
+            template = manifest["kind"] + ".html" if manifest.get("kind") in ("block-pairs", "pair-basket", "basket-first", "basket-research") else name
             (root / name).write_text((web / template).read_text().replace("manifest.json", source.name))
         else:
             shutil.copyfile(web / name, root / name)

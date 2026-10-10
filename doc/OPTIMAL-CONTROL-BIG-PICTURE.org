@@ -907,3 +907,386 @@ execute. No finite book is expected to absorb arbitrary unbounded shocks.
 Items are ordered to establish measurable behavior before tuning or adding
 control complexity. Keep saved configurations, source/bytecode fingerprints,
 JSON traces and rendered panes for each accepted comparison.
+
+* 2026-10-09: simplify around the working pair basket
+:PROPERTIES:
+:CUSTOM_ID: current-machine-review
+:END:
+
+This review reads the implementation at =29ed237= and the current cached
+control-lab campaigns, including the pending presentation of returns in
+both BUCK and USD. It proposes the next experiments; it does not change
+trading authority or declare the legacy contracts ready for retirement.
+
+** What the evidence supports
+
+The separation between observation, intent and bounded execution is worth
+keeping. Pair rebalancing now uses declared allocation gaps, recognizes
+braking and closure, rechecks live relative prices, transfers actual sale
+proceeds, and rolls back all legs if a recipient cannot execute. Those are
+concrete improvements over the earlier stalled turn gate.
+
+In [[file:control-lab/basket-first/current/results.org][the current matched basket comparison]], the pair policy makes 133 clean
+transfers over 120 days, versus zero discretionary TOKEN transfers by the
+EMA response. The pair counts are 127 with 20 bp noise and 94 with 80 bp
+noise; the flat 80 bp case has zero. The recorded paired legs have zero
+wrong-side sales under the live normalized-price test. This establishes
+recurring, correctly oriented execution on these inputs, not profitable
+round trips under every possible disturbance.
+
+The clean pair arm ends at +1.388% in USD versus +0.977% for the EMA arm,
+but at -0.583% in BUCK versus -0.170%. Allocation error improves only from
+1.448 to 1.437 percentage points. Each arm changes its own BUCK exchange
+rate. Neither a larger trade count nor the dollar result alone establishes
+uniform superiority. The comparator called =legacy= here is the prior EMA
+response on the shared equity book, not every historical basket or master.
+
+The full 279-run walkthrough records 14 desk operations; it is mostly an
+experiment in basket and private-agent behavior, with a largely inactive
+desk. Its 120-day paths have four price updates per day. Separate Solidity
+tests cover short/irregular cadence, but this is not an economic acceptance
+test with arbitrary ordering in every L1 block, competing arbitrageurs,
+depositor exits, stablecoin failures and caller gas charged to returns.
+
+** Arbitrage is a separate operation and a separate profit destination
+
+[[file:../src/wheel/ArbKind.sol][ArbKind]] already implements atomic three-pool cycles with fee-aware sizing
+and a realized increase in the starting asset as a postcondition. It can
+credit the basket, fund the wheel reserve or retain profit, according to
+configuration. It does not use the pair-turn policy.
+
+The current [[file:../alberta_buck/sim/control_lab/engine.py][control-lab wiring]] gives the consistency arb a separate wheel,
+=creditee = 0= and BUCK start mode. Its receipts remain with that actor.
+For the clean basket run, 3,609 cycles report 18,620.95 BUCK of arb profit
+before caller gas; that amount is not credited to basket equity. Purple
+price markers, the execution log and the custody pane already expose
+these external operations. They do not yet demonstrate the economics of
+the basket capturing the same opportunities for its own depositors.
+
+Add an explicit profit-destination comparison before attributing those
+receipts to the basket. Keep the actor/beneficiary on each event. Account
+separately for external arb, basket-credited arb, LP fees, relief, ordinary
+rebalancing and risk-driven trades. Arb captured from a pool partly owned
+by the same basket must be evaluated on the consolidated book, including
+that LP position; its cycle receipt alone is not the total wealth change.
+
+** Existing error estimates are useful, but are not measurement noise
+
+[[file:../src/basket/BlockPairSignals.sol][BlockPairSignals]] is a two-state alpha-beta tracker of relative level and
+rate. It already maintains per-pair EWMA absolute prediction error and
+absolute rate acceleration. Its rate allowance is:
+
+#+begin_example
+rate floor + prediction error / response time + acceleration lag allowance
+#+end_example
+
+It also publishes disagreement between quote routes. The basket widens
+the allowance for its own measured immediate price impact. Smooth motion
+and noisy motion can therefore already receive different treatment.
+However, the residual mixes measurement noise, genuine news, deterministic
+curvature, stale sampling and model lag. Its acceleration statistic is
+unsigned and is not an estimated acceleration state with a calibrated
+uncertainty. A smooth curve can generate large residuals when the model
+lags it. Calling this quantity /noise/ would obscure that distinction.
+
+There is a specific gate issue to examine before adding a new estimator.
+In [[file:../src/basket/PairRebalancePolicy.sol][PairRebalancePolicy.desire]], the near-zero-rate branch sets braking to
+=1/5= without testing the uncertainty width. With rate zero, both routes
+ready and a sufficient historical/live separation, this gives a 2%-of-gap
+daily participation rate even if the rate interval is extremely wide.
+Allocation, minimum-size and execution constraints still apply. This is
+a code-level counterexample to /uncertain stationary estimates receive
+less participation/; it is not evidence that an incorrect fill occurred
+in the saved flat-price run. That run also lacks a substantial historical
+separation, so it does not test this case.
+
+First add a deliberately overweight, historically separated stationary
+pair with progressively greater shared and independent route noise. The
+stall/braking path should lose confidence as uncertainty increases, while
+retaining modest participation for a demonstrably quiet stall. The closure
+term already requires the upper rate allowance to be below zero. A useful
+candidate is to use the conservative outward bound in the release factor
+as well, with a separate uncertainty-sensitive stall factor. Measure the
+tradeoff against delayed capture; do not merely tighten every threshold.
+
+** A small Kalman kernel is a candidate, not an automatic noise oracle
+
+A level/rate Kalman model can expose estimated level and velocity
+covariance and adjust measurement gains. The distinction is between:
+
+- =R=: uncertainty in a price observation under an assumed measurement model;
+- =Q=: unpredicted changes in the underlying price motion;
+- =P=: uncertainty in the estimated state after prediction and observation.
+
+A standard Kalman filter requires =Q= and =R=; it does not identify them
+automatically. Adaptive covariance estimation adds assumptions and its own
+failure modes. [[https://pmc.ncbi.nlm.nih.gov/articles/PMC8638515/][Zhang et al., 2020]] examine identifiability and estimation of
+those matrices for a given dynamic model. [[https://arxiv.org/abs/2209.07104][Kong et al., 2022]] examine the
+additional limitations with unknown inputs. Arbitrary external trades and
+correlated venues make these cautions directly relevant here. A price-only
+observer cannot always distinguish a permanent repricing from noise.
+
+The repository already has a larger [[file:../alberta_buck/sim/pair_observer.py][Python Kalman prototype]], with relative
+level/rate/acceleration, covariance, route correlation and estimated
+measurement noise. Its [[file:control-lab/pair-observer/results.org][99 saved sensor experiments]] are useful counterexamples:
+on three-phase prices with 20 bp noise, its nominal +/-2-sigma rate interval
+covers 87.0% of observations. On the rough lagged-commodity case it covers
+only 13.6--34.1%, with 32.2--36.8% wrong closure declarations. These are
+archived sensor results, not results from the current Solidity policy.
+They are sufficient reason not to port that prototype unchanged.
+
+The next minimal experiment should keep the current observer as the
+control and run a level/rate kernel beside it on identical causal inputs:
+
+1. Preserve the current aligned interval observations and timestamps.
+   Propagate covariance using actual elapsed time; a second call at the
+   same timestamp adds no temporal evidence. Treat an interval mean at its
+   midpoint, or model the averaging interval explicitly. Quantization and
+   oracle averaging enter the measurement model.
+2. Keep only =N-1= independent relative coordinates. For three TOKENs,
+   levels =A/C= and =B/C= and their rates form four state entries per route.
+   Derive =A/B= and every covariance from that same state. Its symmetric
+   state covariance has ten entries. Keep the off-diagonal terms: sharing
+   C makes the observations correlated. Independent filters for every
+   pair can lose the graph identities and invent corroboration.
+3. Start with bounded, explicit process and measurement parameters and
+   record innovations. Compare a separately estimated, slowly adapting
+   =R= only after the fixed model has been scored. Bound adaptation and
+   update its statistics after the current observation's decision, so a
+   shock cannot instantly relabel itself as harmless noise.
+4. Initially keep route filters separate and retain a conservative envelope
+   across routes. Do not shrink covariance as if arbitrage-linked BUCK and
+   USDC observations were independent. Disagreement cannot identify the
+   trustworthy route when there are only two. A later joint fusion model
+   must explicitly handle their correlation.
+5. Publish level/rate uncertainty, normalized innovation, route disagreement,
+   known intervention allowance and freshness separately. A level/rate
+   filter does not directly estimate acceleration uncertainty: retain a
+   conservatively assessed braking statistic until a third state earns its
+   cost. Consecutive filtered velocities are correlated too.
+6. Use fixed-point arithmetic, bounded dimensions and numerically stable
+   covariance updates, with nonnegative-variance/positive-semidefinite
+   checks and gap reinitialization. Benchmark the complete wheel cycle.
+   The existing six-pool observation costs about 160k gas on average in
+   the archived observer campaign; this is not a gas estimate for a Kalman
+   replacement or the largest admitted eight-TOKEN configuration.
+
+This is small enough to prototype without DFTs, matrix eigendecompositions
+or a general model interpreter on-chain. Feasibility and improvement still
+require measurement. A covariance label must not become a claim of a
+95% confidence interval without demonstrated coverage.
+
+** Give each consumer the observations its decision actually needs
+
+| Consumer | Required information | Decision boundary |
+|----------+----------------------+-------------------|
+| Basket rebalancing | Historical relative displacement, closure/braking and their uncertainty; current allocation gaps; live execution cost/depth | Evidence changes participation and size; actual gaps bound transfers |
+| Atomic arb | Live prices, pool liquidity and fees across the whole cycle; actual starting-asset receipts | Require net cycle gain and bounded size; do not wait for a statistical turn |
+| Desk | Raw common-mode bvib, spot/TWAP quality, persistence and available capital | Outer entry/release bands, actual cash/credit, post-trade parity and capital guards |
+| K controller | Valid raw reference-basket error and elapsed time | Preserve proportional error inside the desk's dead band; avoid relative-motion offsets |
+| Segment breaker | Absolute quote/peg evidence, exposure, venue health and disagreement | Relative TOKEN ratios alone cannot detect a common stablecoin depeg |
+
+Measurement noise may change how much evidence is needed to authorize a
+discretionary trade. It must not automatically loosen maximum slippage,
+credit, capital or desk dead-band limits. Keep abnormal executable prices
+visible for arb even when a smoothed estimate has low confidence. A missing
+quote is different from a large but valid dislocation.
+
+** Simplify responsibilities before consolidating contracts
+
+The code remains a transition: the pair response inherits the entire EMA
+response for risk/bootstrap fallback, observes the old sensor as well,
+and stores some motion state in the policy rather than the observer.
+The control lab uses the compatibility =BasketWheel= plus separate observer
+and arb wheels. =BasketMachineWheel= exists, but the campaign is not evidence
+that one fully integrated replacement scheduler has equivalent behavior.
+
+Refine this into one observation publication, three distinct policies,
+separate basket/desk books, and one bounded scheduler:
+
+#+begin_example
+Pools -> aligned observations -> relative motion -> rebalance intent -> basket
+                             -> common bvib     -> K / desk policy -> desk
+Pools -> fresh cycle quotes   -> atomic arb      -> explicit beneficiary
+Executions -> measured impact / receipts -> observations and accounting
+Wheel -> schedules each operation; it does not own its economic policy
+#+end_example
+
+The observation publication should carry an epoch, effective time and
+availability. Reuse derived pair calculations within that epoch, but
+re-read executable spot state before each trade: another transaction may
+change a pool later in the same block. Preserve each estimator's actual
+window; sharing observations does not mean silently replacing K's
+600-second reference mark with a variable-duration motion sample.
+
+Extract =Daily=, fee collection, liquidity placement, capital marking and
+emergency risk reduction into a small explicit maintenance/execution layer.
+Then make the pair planner a deterministic consumer of a snapshot and book.
+In particular, the current inherited planner checks legacy signal freshness
+before even considering its risk branches. Separate trend permission from
+the conservative price validity genuinely required for safe deleveraging.
+Missing trustworthy marks must still fail safely.
+
+The basket currently reinvests a recipient budget half into a TOKEN buy and
+half into TOKEN/BUCK LP funding. That is intentional LP inventory management,
+not a pure TOKEN-for-TOKEN wallet exchange. Keep the accounting distinction
+explicit while extracting execution helpers; changing LP exposure is a
+separate strategy experiment, not a behavior-preserving cleanup.
+
+Keep the basket and desk capital accounts distinct, and keep the arb
+profit rule explicit. A single shared execution library can enforce
+consistent venue checks without combining spending authority. Consolidate
+the three simulation wheels only after preserving service order, failure
+isolation and one-consumption-per-epoch rules. Sampling schedules do not
+guarantee inclusion or transaction ordering in a block.
+
+** Next acceptance steps
+
+- [ ] Expose existing uncertainty components and per-operation accounting
+  before changing the policy; distinguish requested, executed, vetoed and
+  risk-override actions, and include the observation epoch.
+- [ ] Test the uncertain-stall counterexample with material allocation and
+  historical separation, then make the smallest justified gate correction.
+- [ ] Shadow-test the small level/rate covariance model against the current
+  observer, using matched cadence and turnover, smooth turns, noisy stalls,
+  persistent trends, abrupt repricing, shared noise, route failure and
+  deliberate own-impact mismatch. Score false turns and delay together.
+- [ ] Extract maintenance and policy responsibilities with unchanged frame
+  and receipt outcomes before combining schedulers. Benchmark whole-cycle
+  gas and failures, including the admitted maximum dimensions.
+- [ ] Compare basket-credited arb with the current external recipient, then
+  add a competing external arb and one-pool shocks. Measure consolidated
+  wealth, capture after costs and the effect of service order.
+- [ ] Exercise both desk directions, reserve exhaustion and recovery under
+  matched old/new runs. Include deposits/exits, missed ticks, monotone price
+  changes and stablecoin failures before deciding what legacy code to retire.
+
+Promotion should mean measured improvement on a declared set of objectives:
+net BUCK and USD outcomes, drawdown, allocation error, parity recovery,
+desk capital, fees/gas and liveness. The current pair basket is the stronger
+development baseline for the tested rebalancing problem. Uniform superiority
+of the whole basket/arb/desk system has not been established.
+
+* 2026-10-09: measure owned arb income and shadow price noise
+:PROPERTIES:
+:CUSTOM_ID: basket-income-noise-experiment
+:END:
+
+The [[file:control-lab/basket-research/current/index.html][new four-arm comparison]] implements the accounting and estimator
+experiments above without changing the rebalancing gate. The default is
+20 independent 120-day EVM runs: four arms across clean three-phase, 20 bp
+noise, 80 bp noise, flat 80 bp noise, and a historical endpoint-adjusted
+profile. K, the desk and private flows remain disabled in this first comparison.
+
+** Consolidated returns, not a second addition of cycle receipts
+
+The equity basket now accepts an optional, governance-appointed
+=arbitrageCreditor=. This identity can transfer captured TOKEN or BUCK into
+the existing income entry points; it cannot tick the equity wheel, spend
+the basket's funds or change its configuration. Zero revokes it. The
+existing wheel retains its income authority. The separate arb actor still
+uses its original atomic cycle execution, sizing and scheduling.
+
+In the owned arms, the cycle credits its realized BUCK profit directly to
+the basket's actual account. This can reduce outstanding liability or fund
+later LP placement. The resulting net equity already includes that credit,
+and also includes any damage or gain to LP positions during the cycle.
+Adding the cycle profit again would double-count it.
+
+The simulator measures each receipt as the change in signed BUCK balance
+plus accrued relief across the arb transaction. This excludes settlement
+of already-earned relief from new income. It records nominal cycle profit,
+net account credit and their difference (BUCK arrival fees), and values
+USD receipts at their arrival-time exchange rate. Total marked gain equals
+net arb income plus /other portfolio gain/. The latter still contains
+inventory marks, LP fees, relief and rebalancing. Gas and liquidation costs
+remain outside these marked returns.
+
+For economic attribution, independently enable discretionary paired
+rebalancing and basket ownership of arb. The maintenance control retains
+LP placement, daily bookkeeping and risk overrides; it suppresses only
+discretionary pair transfers. Compare common feeds and opening books:
+
+#+begin_example
+maintenance baseline gain
+  + effect of enabling rebalancing with external arb
+  + effect of owning arb with maintenance only
+  + interaction between rebalancing and arb ownership
+  = combined portfolio gain
+#+end_example
+
+This is an exact additive counterfactual decomposition in both BUCK and
+USD, including endogenous prices and reinvestment. It is not a claim to
+know realized rebalancing P&L from a missing cost basis.
+
+** Compare estimators on identical observations
+
+Render-time Python reads the same aligned cumulative-tick intervals as
+=BlockPairSignals=, including token orientation and decimal offsets.
+Post-execution spot quotes are not substituted for those intervals.
+Missing/stale routes reset the diagnostics, repeated endpoints do not
+create new observations, and the same readiness/warmup requirement gates
+the published curves. Diagnostics never feed the execution policy.
+
+Two simple quantities precede any policy experiment:
+
+- EWMA squared relative-price second differences, normalized for unequal
+  sample spacing. Under locally linear motion and independent white price
+  errors this estimates measurement variance; curvature and jumps also
+  contribute, so the pane calls it /roughness/.
+- EWMA squared disagreement between the two quote routes. Shared movement
+  or shared contamination cancels; agreement alone cannot certify a quiet
+  or trustworthy underlying signal.
+
+The Kalman comparison uses two independent relative coordinates for three
+TOKENs, each with a level and velocity, and a full 4-by-4 state covariance
+per route. A fixed process variance allows motion to change; bounded prior
+roughness adapts the 2-by-2 measurement covariance after the current update.
+Only a 2-by-2 innovation matrix is solved. Pair estimates are projections
+of those coordinates, so their levels and rates obey the graph identities.
+The envelope spans both routes' model-based ±2-sigma rate bounds and does
+not pretend the linked venues are independent measurements.
+
+The panes compare current prediction error, roughness, disagreement,
+adaptive measurement uncertainty, velocity envelopes and normalized
+innovations. No curve is declared calibrated confidence. This machinery
+is deliberately Python-only until it demonstrates information worth its
+EVM state and gas. Own-impact subtraction, learned process noise and
+historical cyclicality fitting are not part of this experiment.
+
+** A closed historical path with honest provenance
+
+TOKEN A/B/C replay the canonical =hist-paxg.csv=, =hist-food.csv= and
+=hist-nrgc.csv= files: gold, food and energy. Their daily paths contain
+generated bridges between historical monthly anchors. Days 1706–1826 are
+the live window; the preceding 1280 days establish historical mean prices.
+For each normalized price series, the scenario generator applies:
+
+#+begin_example
+log adjusted_price(t) = log raw_price(t) - (t/T) log(raw_price(T)/raw_price(0))
+#+end_example
+
+This makes each end at its own opening level, without forcing the time
+average to the historical reference or removing opening repricing.
+Future endpoint knowledge constructs the scenario only: observation and
+filter updates remain causal. JSON retains unadjusted prices, CSV hashes,
+window indices, reference means and removed endpoint drift.
+
+** Acceptance checklist
+
+- [X] Keep separate authority for depositing income and spending/upkeep;
+  verify authorization, revocation, backing and net-equity accounting.
+- [X] Run maintenance/rebalancing × external/owned arb controls and preserve
+  both the direct receipts and the market-feedback interaction.
+- [X] Add causal simple and Kalman diagnostics beside the current mechanism;
+  test common-noise blindness, covariance, pair identities and interval use.
+- [X] Add a reproducible, endpoint-adjusted historical price selector with
+  strictly prior bootstrap means and explicit data provenance.
+- [ ] Score false turns, capture delay and turnover before granting the new
+  estimates any trading authority; include historically separated noisy stalls.
+- [ ] Extend the owned-income comparison through moving K, both desk
+  directions, competing arb and funded single-pool shocks, including gas.
+
+Use =make control-lab-basket-research= to regenerate the runs and
+=make control-lab-basket-research-render= to recompute diagnostics and
+plots from their saved JSON. The [[file:control-lab/basket-research/current/results.org][generated results]] are the numerical record.

@@ -91,6 +91,7 @@ def test_plot_payload_preserves_series_units_and_gaps():
     result['frames'][1]['day'] = .25
     result['frames'][1]['signal']['fresh'] = False
     result['frames'][1]['basket'].update(equity=980_000, account=-750_000)
+    result['frames'][1]['buck_usdc'] = 1.05
     data = plot_data(result)
     panes = {p['id']: p for p in data['panes']}
     assert data['days'] == [0, .25]
@@ -101,13 +102,23 @@ def test_plot_payload_preserves_series_units_and_gaps():
     assert panes['actors']['lines'][0]['values'][1] == pytest.approx(result['frames'][1]['cumulative']['demand_usdc'] / 1000)
     assert {'ema-0','ema-1','ema-2','votes','k','desk','custody'} <= panes.keys()
     assert len(panes['ema-0']['lines']) == 8
-    # The cached equity already nets the lien. Neither another subtraction,
-    # a BUCK/USD conversion, nor the first live mark defines this return.
-    assert panes['basket-value']['unit'] == 'BUCK'
+    # Net equity already deducts the lien. Keep the original investment
+    # fixed, and convert each net mark at its own exchange rate. A native
+    # loss can coexist with a dollar gain as BUCK appreciates.
+    assert panes['basket-value']['unit'] == 'BUCK / USD'
     assert panes['basket-value']['lines'][0]['values'] == [1_010_000, 980_000]
-    assert panes['basket-value']['lines'][1]['values'] == [1_000_000, 1_000_000]
+    assert panes['basket-value']['lines'][1]['values'] == [1_030_200, 1_029_000]
+    assert panes['basket-value']['lines'][2]['values'] == [1_000_000, 1_000_000]
     assert data['basket_performance']['gain_buck'] == -20_000
     assert data['basket_performance']['return_pct'] == pytest.approx(-2)
+    assert data['basket_performance']['initial_usd'] == 1_000_000
+    assert data['basket_performance']['final_net_usd'] == pytest.approx(1_029_000)
+    assert data['basket_performance']['gain_usd'] == pytest.approx(29_000)
+    assert data['basket_performance']['return_usd_pct'] == pytest.approx(2.9)
+    assert panes['basket-return']['unit'] == 'Percent'
+    assert panes['basket-return']['lines'][0]['values'] == pytest.approx([1, -2])
+    assert panes['basket-return']['lines'][1]['values'] == pytest.approx([3.02, 2.9])
+    assert panes['basket-return']['lines'][2]['values'] == [0, 0]
 
 
 def test_cached_campaign_keeps_original_execution_time_and_rejects_partial_json(tmp_path):

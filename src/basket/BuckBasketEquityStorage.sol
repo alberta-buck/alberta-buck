@@ -131,6 +131,8 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ResponseParams public response;
     address public responseSignals;
     uint64 public lastResponseAt;
+    // Optional separate arb wheel: income crediting only, never upkeep or spending.
+    address public arbitrageCreditor;
 
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;

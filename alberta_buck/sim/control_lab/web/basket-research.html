@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BUCK · Basket returns and price estimators</title><link rel="stylesheet" href="style.css">
+<script src="manifest.js" defer></script><script src="app.js" defer></script></head><body>
+<header class="masthead"><a href="#top">BUCK <span>/ Basket research</span></a><a href="results.html">Read the results ↗</a></header>
+<main id="top"><section class="intro"><div class="eyebrow">Matched EVM experiments · Passive estimator comparison</div>
+<h1>Account for the income.<br>Compare the signals.</h1>
+<p class="lede">Separate the effects of rebalancing and owning the arbitrage receipts. Compare simple noise proxies and a small Kalman estimator on the same observed prices.</p>
+<p id="campaign-status" role="status">Loading saved runs…</p>
+<details class="method" open><summary>How to read these comparisons</summary><div><p id="method-details"></p>
+<p>Arb income in the owned arms reaches the basket's real BUCK account, repaying debt or funding later operations. It is already included in portfolio ROI. “Other portfolio return” includes inventory repricing, LP fees, relief and rebalancing. The final arm adds a matched comparison of the rebalancing effect, arb ownership effect and their interaction.</p>
+<p>Open “Inspect sensor quality…” for current motion estimates, second-difference roughness, disagreement between routes, and Kalman velocity bounds and innovations. The new estimators have no trading authority. Their noise estimates depend on modeling assumptions; the bounds are not calibrated confidence guarantees.</p>
+<p>The historical profile maps A/B/C to gold, food and energy. It uses stored historically anchored daily quotes with a log-price endpoint adjustment so each returns to its own starting value. This does not force its average to zero. Historical anchors exclude the future test window. The raw series and adjustment provenance remain in the JSON.</p>
+<p>Enable “Keep settings linked across tests” for matched selections. Allocation axes fit the visible data. Returns include the original prelude and exclude caller gas and liquidation costs.</p></div></details></section>
+<div class="workspace"><nav id="stage-nav" aria-label="Comparison arms"></nav><div id="stages"></div></div>
+<footer><a href="manifest.json">Manifest</a> · <a href="results.org">Org report</a> · <a href="../../interactive/index.html">Staged control lab</a></footer></main></body></html>

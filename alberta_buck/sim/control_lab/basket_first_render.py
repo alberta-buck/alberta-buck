@@ -73,11 +73,16 @@ def render(root):
     report=["#+title: Basket before monetary and persistent private actors","#+options: toc:2 num:nil",
         "#+html_head: <style>body{font-family:system-ui;line-height:1.5}#content{max-width:1150px;margin:auto;padding:1rem}img{max-width:100%;height:auto}</style>","",
         "[[file:index.html][Interactive plots]]", "", m["method"],"",
-        "| Profile | Policy | Pair transfers | Transfers per 30-day cycle | Wrong-side pair legs | Both sides of every TOKEN in each mature cycle | Allocation error, pp | Net value, BUCK | Return on initial BUCK, % | End lien, BUCK |",
-        "|---------+--------+----------------+----------------------------+----------------------+-----------------------------------------------+----------------------+-----------------+---------------------------+----------------|" ]
+        "| Profile | Policy | Pair transfers | Transfers per 30-day cycle | Wrong-side pair legs | Both sides of every TOKEN in each mature cycle | Allocation error, pp |",
+        "|---------+--------+----------------+----------------------------+----------------------+-----------------------------------------------+----------------------|" ]
     for s in sorted(rows,key=lambda s:(s["profile"],s["mode"])):
-        report.append(f"| {s['profile']} | {s['mode']} | {s['pair_transfers']} | {', '.join(str(p['pair_transfers']) for p in s['periods'])} | {s['wrong_side_pair_legs']} | {s['mature_both_sides_each_token_each_cycle']} | {s['mean_weight_error_pp']:.3f} | {s['final_net_buck']:,.2f} | {s['return_pct']:+.3f} | {s['lien_buck']:,.2f} |")
-    report += ["", f"Initial investment: {m['requested_config']['market']['basket_equity_usd']:,.0f} BUCK at bootstrap parity. The contract's equity mark already subtracts issued BUCK and includes accrued relief; the lien shown alongside it must not be deducted again. Return = (net BUCK value / initial investment − 1) × 100%, including the LP prelude and live experiment. No BUCK/USDC conversion enters this return."]
+        report.append(f"| {s['profile']} | {s['mode']} | {s['pair_transfers']} | {', '.join(str(p['pair_transfers']) for p in s['periods'])} | {s['wrong_side_pair_legs']} | {s['mature_both_sides_each_token_each_cycle']} | {s['mean_weight_error_pp']:.3f} |")
+    report += ["", "* Net basket value and return in both currencies", "",
+        "| Profile | Policy | Net value, BUCK | Return, BUCK % | Net value, USD | Return, USD % | End lien, BUCK |",
+        "|---------+--------+-----------------+----------------+----------------+---------------+----------------|"]
+    for s in sorted(rows,key=lambda s:(s["profile"],s["mode"])):
+        report.append(f"| {s['profile']} | {s['mode']} | {s['final_net_buck']:,.2f} | {s['return_pct']:+.3f} | {s['final_net_usd']:,.2f} | {s['return_usd_pct']:+.3f} | {s['lien_buck']:,.2f} |")
+    report += ["", f"Initial investment: {m['requested_config']['market']['basket_equity_usd']:,.0f} BUCK and the same number of USD at bootstrap parity. The contract's equity mark already subtracts issued BUCK and includes accrued relief; the lien shown alongside it must not be deducted again. Net USD value = net BUCK value × the sample's BUCK/USDC spot price, treating USDC as the dollar reference. Return = (net value / original investment − 1) × 100% in the same currency, including the LP prelude and live experiment. The initial investment stays fixed in each currency. An appreciating BUCK can produce a negative BUCK return alongside a positive USD return. Neither return isolates rebalancing profit."]
     report += ["", "Wrong-side counts apply to graded paired transfers: the sold TOKEN's pre-policy normalized BUCK-pool price must exceed its recipient's. Legacy risk/bootstrap work is separate. Marked equity includes inventory and leverage; it is not liquidation proceeds or realized net ROI. Pool fees affect outcomes; caller gas is not subtracted. Source fingerprints and all pre-response books remain in JSON.", ""]
     report += ["* Trade conditions and signal strength", "",
         "Every planned pair leg is checked against its exact pre-response book: both allocations improve, at least one exceeds its band, capacities are not exceeded, both quote routes are ready, intent is positive, and the intended swaps appear in receipts. The following counts distinguish conservative braking participation from an error envelope wholly on the closing side.", "",
@@ -104,7 +109,7 @@ def render(root):
     import matplotlib.pyplot as plt
     for profile in m["axes"][0]["values"]:
         selected=sorted([r for r in runs if r["profile"]["name"]==profile["id"]],key=lambda r:r["basket_mode"])
-        fig,axes=plt.subplots(6,2,figsize=(14,15),sharex=True,constrained_layout=True)
+        fig,axes=plt.subplots(7,2,figsize=(14,17),sharex=True,constrained_layout=True)
         for col,r in enumerate(selected):
             frames=r["frames"];days=[f["day"] for f in frames];marks=price_markers(r,native=True)
             for i in range(3):
@@ -119,10 +124,16 @@ def render(root):
             band=r["config"]["basket"].get("weight_band_bp",200)/100
             for y in (100/3-band,100/3,100/3+band):axes[3,col].axhline(y,color="#aaa",ls=":")
             axes[3,col].set_ylabel("Allocation, %");axes[3,col].legend(ncol=3,fontsize=7)
-            axes[4,col].plot(days,[f["basket"]["equity"]/1e6 for f in frames],color="#158067",label="Net basket value")
-            axes[4,col].axhline(basket_performance(r)["initial_buck"]/1e6,color="#87949c",ls="--",label="Initial investment")
-            axes[4,col].set_ylabel("Net value, M BUCK");axes[4,col].legend(fontsize=7)
-            axes[5,col].plot(days,[max(0,-f["basket"]["account"])/1e6 for f in frames],color="#b56c2f");axes[5,col].set_ylabel("Lien, M BUCK");axes[5,col].set_xlabel("Days")
+            performance=basket_performance(r)
+            for currency,color,style in (("buck","#158067","-"),("usd","#7653ab","--")):
+                values=[f["basket"]["equity"] * (f["buck_usdc"] if currency=="usd" else 1) for f in frames]
+                axes[4,col].plot(days,[v/1e6 for v in values],color=color,ls=style,label=f"Net value · {currency.upper()}")
+                axes[5,col].plot(days,[100*(v/performance[f"initial_{currency}"]-1) for v in values],color=color,ls=style,label=f"Return · {currency.upper()}")
+            axes[4,col].axhline(performance["initial_buck"]/1e6,color="#87949c",ls=":",label="Initial investment · BUCK / USD")
+            axes[4,col].set_ylabel("Net value, M BUCK / USD");axes[4,col].legend(fontsize=7)
+            axes[5,col].axhline(0,color="#87949c",ls=":",label="Break-even")
+            axes[5,col].set_ylabel("Return on investment, %");axes[5,col].legend(fontsize=7)
+            axes[6,col].plot(days,[max(0,-f["basket"]["account"])/1e6 for f in frames],color="#b56c2f");axes[6,col].set_ylabel("Lien, M BUCK");axes[6,col].set_xlabel("Days")
             for ax in axes[:,col]:ax.grid(alpha=.15)
         for row in axes:
             lo=min(ax.get_ylim()[0] for ax in row);hi=max(ax.get_ylim()[1] for ax in row)

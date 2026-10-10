@@ -24,7 +24,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
 
     constructor(address policy) { pairPolicy = PairRebalancePolicy(policy); }
 
-    function _allocation(Snap memory s) internal view returns (Allocation memory a) {
+    function _allocation(Snap memory s) internal view virtual returns (Allocation memory a) {
         uint256 n = s.m.length;
         require(n == pairPolicy.count() && address(this) == pairPolicy.basket(), "pair basket");
         require(response.tiltWad == 0, "pair targets are declared weights");

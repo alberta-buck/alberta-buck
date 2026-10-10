@@ -35,6 +35,11 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
         assert.equal(await page.$$eval(`#${stage} [data-pane=pair-intent] svg path`, n => n.length), 6);
         assert.equal(await page.$$eval(`#${stage} [data-pane=pair-impact] svg path`, n => n.length), 3);
       }
+      if (manifest.stages[stage].basket) {
+        assert.equal(await page.$$eval(`#${stage} [data-pane=basket-value] svg path`, n=>n.length), 3);
+        assert.equal(await page.$$eval(`#${stage} [data-pane=basket-return] svg path`, n=>n.length), 3);
+        assert.match(await page.$eval(`#${stage} .metrics`, e=>e.textContent), /Marked return on initial USD/);
+      }
       assert.match(await page.$eval(`#${stage} .data-link`, e => e.href), new RegExp(key.slice(0,16)));
       checked++;
     }
