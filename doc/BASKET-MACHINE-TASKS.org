@@ -19,99 +19,83 @@ when its step is merged, and delete this file when the list is empty.
   this list.
 - [X] The release sizing is a constructor argument of the policy; the lab uses 4 gaps a day on
   the rate's own scale. A commodity-like price profile and a reference valuation are in the lab.
+- [X] Urgency is built into the policy and replaces the allocation band in the lab: a quarter
+  point of slack and two point-days of patience. The band arms of the sizing campaign reproduce
+  their earlier runs exactly on the new contracts, and the patient arms match the trial that was
+  run from outside.
+- [X] The contracts carry their approved names, and each facet and service has its interface in
+  its own file. No behaviour changed: 1095 contract tests pass and six lab worlds reproduce
+  their results from before the renames.
 
-Nothing below has been started.
-
-* 0. Two rules proposed on 2026-10-10
-
-These came out of the results. Neither is agreed yet. If they are, they go in before the
-consolidation, because both change what the lab measures.
+* 0. Two rules agreed on 2026-10-10
 
 ** Pay the callers, and measure everything net of it
 
 Gas is modelled by paying for it. From the basket's side an operation is free so long as the
-slice it gives the wheel covers the callers and still leaves a gain.
+slice it gives the wheel covers the callers and still leaves a gain. Agreed: the wheel's reserve
+pays in BUCKs, a fixed share of what it holds to each turn that does work; the basket fixes
+what it spends, and the gas price sets how many turns that buys.
 
-- [ ] Record gas per wheel and per kind in each frame. =doc/review/wheel-gas.py= does it from
-  outside for now: upkeep is about 4.8 million gas a day at four turns a day, a turn that
-  trades nothing costs 900,000, and a transfer adds 900,000.
-- [ ] Switch the wheel's reserve on in the lab. Fund it with a slice of the basket's income, set
-  the share paid per working turn, and give the lab a keeper that calls only when the pay
+- [ ] Give the basket a way to fund the reserve. There is none on-chain today: =WorkWheel.fund=
+  takes BUCKs from whoever calls it, and only simulated agents do. The upkeep facet's Daily
+  step is the place: a share of the day's income (fees collected, relief, arbitrage credited),
+  up to the reserve's cap. Decide the share and what counts as income.
+- [ ] Switch the reserve on in the lab, and give the lab a keeper that calls only when the pay
   covers twice its gas at a stated gas price and ETH price. Report every result net of the
   funding.
-- [ ] Decide the slice. It should be a fixed share of income with a cap, as the wheel paper has
-  it, so the basket's cost is known and the reserve is a gas budget and not a second yield.
-- [ ] Do not pay "the last turn in the block". Pay each turn that does work, as the wheel does
-  now. Paying only the last one makes callers wait for each other. One call can already do all
-  the work that is due.
-- [ ] Make the idle turn cheap, and due only when there is work. On the commodity run 97% of
-  upkeep gas was the cost of looking, not of its 16 transfers. Most of an idle turn's 900,000
-  gas is re-reading pools and asking the policy about every ordered pair. Cache within the
-  response, and skip the policy when no share is urgent.
+- [ ] Record gas per wheel and per kind in each frame. =doc/review/wheel-gas.py= does it from
+  outside for now.
+- [ ] Make the idle turn cheap, and due only when there is work. Most of an idle turn's 900,000
+  gas is re-reading pools and asking the policy about every ordered pair, and nearly every turn
+  runs because the credit's mark is a grain stale. Cache within the response, skip the policy
+  when no share is urgent, and let a stale mark wait for work that needs it.
 - [ ] Tie the smallest transfer to what a turn is paid, in place of the fixed 100 ppm grain.
 
-** Replace the allocation band with urgency that builds
+** Urgency in place of the allocation band
 
-Today a constituent may be rebalanced only when its share is more than 2 points off target. On
-commodity-like prices that is 4% of the time. The replacement, per constituent:
+Built: see [[file:BASKET-MACHINE.org][the design]] for the rule and [[file:BASKET-MACHINE-RESULTS.org][the results]] for what it earns.
 
-#+begin_example
-urgency  <-  urgency + (|gap| - slack) x days elapsed      kept between zero and patience
-urgency  <-  zero       when the gap changes side, and for the donor and recipients of a transfer
-may be rebalanced while urgency = patience
-#+end_example
-
-=gap= is in points of the book. =patience= is in point-days and is the one knob: with a slack of
-a quarter point and a patience of two point-days, a gap of 2.25 points qualifies in a day, 1.25
-in two, 0.75 in four, and a quarter point never does. It decides only whether a gap may be
-worked. The pair policy still decides when, and the gap still sets how much.
-
-This is a CUSUM, the cumulative-sum test used to catch a small shift that persists. With the
-reset it is what electronics calls integrate-and-fire. In event-triggered control it is
-send-on-area, against the send-on-delta of a fixed band.
-
-- [X] Trial it from outside the contracts (=doc/review/urgency-trial.py=, table in the results).
-  With the reset, patience 2 earns 2.4 times the 2-point band on commodity-like prices with
-  twice its transfers, and as much as a half-point band with a fifth of its transfers. Without
-  the reset it is no better than a low band.
-- [ ] Build it. The policy already holds per-TOKEN state and is told of every execution, so the
-  counts live there and the shell's storage is untouched: the upkeep facet reports its gaps once
-  per response, and =recordExecution= names the donor and recipients. A view projects the counts
-  to the present so =wheelDue= and the response agree.
-- [ ] Rerun the trial's arms on the built rule, with more than one price path, and pick the
-  patience. Judge on gain per transfer net of what the callers are paid, not on gain alone.
+- [X] Trial it from outside the contracts (=doc/review/urgency-trial.py=).
+- [X] Build it: counts in the policy, gaps reported at each response, the donor and recipients
+  restarted by =recordExecution=, a view that carries the counts to the present.
+- [X] Patient arms in the sizing campaign, and an urgency pane on the lab page.
+- [ ] Pick the patience on more than one price path. Two point-days is a starting value from
+  one path each of three shapes. Judge on gain per transfer net of what the callers are paid.
 - [ ] Decide whether growth should follow the gap or its square. The harvest from closing a gap
-  goes as its square; the trial used the gap.
-- [ ] Offer patience as a selector in the interactive lab. This replaces the idea of a 1-point
-  against 2-point selector.
+  goes as its square; the built rule uses the gap.
+- [ ] The count advances only when the basket responds. In the lab that is nearly every turn.
+  Where responses are rare, an unobserved stretch earns at most a day, so the count lags.
+  Decide whether the Daily step should report gaps too.
+- [ ] Offer patience against the 2-point band as a selector in the interactive lab. It doubles
+  the runs of every stage with the basket active.
 
 * 1. Consolidate the contracts
 
-One change, because the pieces touch the same files and each one invalidates every saved run.
-Verify by reproducing a clean-cycle maintenance run and a rebalancing run frame for frame
-wherever behaviour is not meant to change.
+The names and interfaces are done. What is left changes behaviour, so each step is verified by
+reproducing a clean-cycle maintenance run and a rebalancing run frame for frame wherever
+behaviour is not meant to change. Each one invalidates every saved run.
 
+- [X] Rename, as tabled in [[file:BASKET-MACHINE.org::#names][the design]].
+- [X] Give each facet and service its interface in its own file, and make the contracts depend
+  on interfaces, not on each other's concrete types.
 - [ ] Retire the EMA ladders. Remove =excursion=, =votes=, =turned=, =running=, the ladders and
-  =initializeHistory= from =BasketSignals=, leaving the raw parity value, freshness and the day
-  count. Remove the 1280-day history import from the lab and the simulator
-  (=signal_history.py=, =history_rows=, =BasketSignalHistory.t.sol=) and the EMA panes from the
-  lab page.
+  =initializeHistory= from =BasketReference=, leaving the raw parity value, freshness and the
+  day count, and delete =IBasketSignals=. Remove the 1280-day history import from the lab and
+  the simulator (=signal_history.py=, =history_rows=, =BasketSignalHistory.t.sol=) and the EMA
+  panes from the lab page.
 - [ ] Reduce the fallback. With the ladders gone, the inherited plan in
   =BuckBasketEquityResponse= needs only its cash and credit work: sell to restore the liquidity
-  target, sell to get back under K, trim a constituent beyond its leash. Drop the trend gates,
-  the vote-scaled step and the target lean, and merge what remains into the one upkeep facet.
-  The lab's cyclic runs take the fallback in two to four of 481 responses, so expect a small
-  change in those frames and none elsewhere.
-- [ ] Rename, as tabled in [[file:BASKET-MACHINE.org::#names][the design]]. Confirm the names first; they become what the simulators
-  and the published package call these contracts.
-- [ ] Give each facet and service its interface in its own file, and make the contracts depend
-  on interfaces, not on each other's concrete types.
-- [ ] Fold what =EquityDesk= uses of =MonetaryDesk= into the desk, so the mixin can leave with
+  target, sell to get back under K, trim a constituent beyond its leash, place a first deposit.
+  Drop the trend gates, the vote-scaled step and the target lean, and merge what remains into
+  =BasketUpkeepFacet=. The lab's cyclic runs take the fallback in two to four of 481 responses,
+  so expect a small change in those frames and none elsewhere.
+- [ ] Fold what =BasketDesk= uses of =MonetaryDesk= into the desk, so the mixin can leave with
   =BuckBasketOps=. Keep =IStabilizer= only if something still reads it.
+- [ ] Declare =IBasketView= on the shell. It provides every function already.
 - [ ] Fix or bound the stalled-ratio branch of the policy. It grants a fixed fifth of the
   release rate whatever the rate's allowance; that is 0.8 of a gap a day at the lab's sizing.
-- [ ] Move the test-only facets (=PairBasketDecisionTrace=, =PairBasketMaintenanceControl=) to
-  the new names; delete =BasketGateComparison=, which adapts the retired turn gate.
+- [ ] Rename the test-only facets (=PairBasketDecisionTrace=, =PairBasketMaintenanceControl=)
+  for the facet they extend; delete =BasketGateComparison=, which adapts the retired turn gate.
 
 * 2. One way to deploy it
 

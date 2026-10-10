@@ -445,7 +445,7 @@ control-lab-basket-research-test:
 # maintenance control and several PairRebalancePolicy sizings per profile.
 CONTROL_LAB_BASKET_SIZING_OUT ?= doc/control-lab/basket-sizing/current
 CONTROL_LAB_BASKET_SIZING_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge,two-step,commodities
-CONTROL_LAB_BASKET_SIZING_SIZINGS ?= maintenance,first,rate-1,own-2,own-4,own-8,own-4-1pt,own-4-half
+CONTROL_LAB_BASKET_SIZING_SIZINGS ?= maintenance,first,rate-1,own-2,own-4,own-8,own-4-1pt,own-4-half,own-4-p1,own-4-p2,own-4-p4,own-4-p8
 CONTROL_LAB_BASKET_SIZING_STAGE ?= basket
 CONTROL_LAB_BASKET_SIZING_TICKS ?=
 .PHONY: control-lab-basket-sizing control-lab-basket-sizing-render control-lab-basket-sizing-test

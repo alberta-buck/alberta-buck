@@ -1,7 +1,11 @@
 """Would urgency that builds up beat the fixed allocation band?
 
-Today a constituent may be rebalanced only while its share is more than a fixed band
-(2 points) from target. This trial replaces that test, per constituent, with
+This is the trial that was run before the rule was built into PairRebalancePolicy, kept
+as its record and as an independent check on the built rule (the sizing campaign's
+patient arms). It runs a policy with no patience, so the basket's band decides.
+
+With a band, a constituent may be rebalanced only while its share is more than a fixed
+distance (2 points) from target. This trial replaces that test, per constituent, with
 
     urgency <- clamp(urgency + (|gap| - slack) x days, 0, patience)     reset when the gap changes side
     may be rebalanced while urgency = patience
@@ -23,7 +27,7 @@ same machinery and must reproduce that campaign's run.
 Run inside the Nix shell with the Python environment active. The baselines come from
     make control-lab-basket-sizing CONTROL_LAB_BASKET_SIZING_STAGE=all \
         CONTROL_LAB_BASKET_SIZING_OUT=doc/control-lab/basket-sizing/all-actors \
-        CONTROL_LAB_BASKET_SIZING_SIZINGS=maintenance,first,own-4,own-4-1pt,own-4-half
+        CONTROL_LAB_BASKET_SIZING_SIZINGS=maintenance,first,own-4,own-4-1pt,own-4-half,own-4-p1,own-4-p2,own-4-p4,own-4-p8
 and then
     python doc/review/urgency-trial.py /tmp/urgency [jobs]
 Each world runs in its own process: the script patches the lab's engine, and a reused
@@ -52,6 +56,7 @@ def run(profile_name, arm, out):
     spec = ARMS[arm]
     cfg = load_config("doc/control-lab.toml")
     cfg["basket"]["tilt"] = 0; cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
+    cfg["pair"].update(slack=0., patience=0.)      # a band policy: the script, not the contract, keeps the count
     profiles = {p["name"]: p for p in [*LAB, TWO_STEP, *(p for p in cfg["profiles"] if own_path(p))]}
     if profile_name in FLAT:
         cfg["feed"]["amplitude"] = 0
@@ -114,6 +119,7 @@ def report(out):
         print(f"  {'rule':14s} {'gain':>9s} {'transfers':>9s} {'per transfer':>12s} {'moved':>10s} {'open':>6s} {'leaks':>5s}")
         shown = [(f"band {name}", base[profile][key], None) for name, key in
                  (("2 points", "own-4"), ("1 point", "own-4-1pt"), ("half point", "own-4-half"))]
+        shown += [(f"built p{n}", base[profile][f"own-4-p{n}"], None) for n in (1, 2, 4, 8) if f"own-4-p{n}" in base[profile]]
         shown += [(arm, arms[arm], arms[arm]) for arm in ARMS if arm in arms]
         for name, s, mine in shown:
             gain = s["reference"] - still
