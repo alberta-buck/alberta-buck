@@ -22,10 +22,10 @@ when its step is merged, and delete this file when the list is empty.
 
 Nothing below has been started.
 
-* 0. Two rules settled on 2026-10-10
+* 0. Two rules proposed on 2026-10-10
 
-These came out of the results and go in before the consolidation, because both change what the
-lab measures.
+These came out of the results. Neither is agreed yet. If they are, they go in before the
+consolidation, because both change what the lab measures.
 
 ** Pay the callers, and measure everything net of it
 
@@ -44,9 +44,10 @@ slice it gives the wheel covers the callers and still leaves a gain.
 - [ ] Do not pay "the last turn in the block". Pay each turn that does work, as the wheel does
   now. Paying only the last one makes callers wait for each other. One call can already do all
   the work that is due.
-- [ ] Make the idle turn cheap. Most of its 900,000 gas is re-reading pools and asking the
-  policy about every ordered pair. Cache within the response, and skip the policy when no share
-  is urgent.
+- [ ] Make the idle turn cheap, and due only when there is work. On the commodity run 97% of
+  upkeep gas was the cost of looking, not of its 16 transfers. Most of an idle turn's 900,000
+  gas is re-reading pools and asking the policy about every ordered pair. Cache within the
+  response, and skip the policy when no share is urgent.
 - [ ] Tie the smallest transfer to what a turn is paid, in place of the fixed 100 ppm grain.
 
 ** Replace the allocation band with urgency that builds
@@ -55,22 +56,32 @@ Today a constituent may be rebalanced only when its share is more than 2 points 
 commodity-like prices that is 4% of the time. The replacement, per constituent:
 
 #+begin_example
-urgency  <-  max(0, urgency + (|gap| - slack) x days elapsed)      reset when the gap changes side
-may be rebalanced when urgency >= patience
+urgency  <-  urgency + (|gap| - slack) x days elapsed      kept between zero and patience
+urgency  <-  zero       when the gap changes side, and for the donor and recipients of a transfer
+may be rebalanced while urgency = patience
 #+end_example
 
 =gap= is in points of the book. =patience= is in point-days and is the one knob: with a slack of
 a quarter point and a patience of two point-days, a gap of 2.25 points qualifies in a day, 1.25
-in two, 0.75 in four, and a quarter point never does. This is a CUSUM, the cumulative-sum test
-used to catch a small shift that persists; the same thing is called integrate-and-fire in
-electronics and send-on-area in event-triggered control, against the send-on-delta of a fixed
-band. It decides only whether a gap may be worked. The pair policy still decides when, and the
-gap still sets how much.
+in two, 0.75 in four, and a quarter point never does. It decides only whether a gap may be
+worked. The pair policy still decides when, and the gap still sets how much.
 
-- [ ] Keep the accumulators in the policy, which already holds per-TOKEN state, so the shell's
-  storage is untouched. The upkeep facet reports its gaps once per response.
-- [ ] Trial it as arms of the sizing campaign at patience 1, 2 and 4 point-days against the 2-
-  and 1-point bands. Judge on gain per transfer, not gain alone.
+This is a CUSUM, the cumulative-sum test used to catch a small shift that persists. With the
+reset it is what electronics calls integrate-and-fire. In event-triggered control it is
+send-on-area, against the send-on-delta of a fixed band.
+
+- [X] Trial it from outside the contracts (=doc/review/urgency-trial.py=, table in the results).
+  With the reset, patience 2 earns 2.4 times the 2-point band on commodity-like prices with
+  twice its transfers, and as much as a half-point band with a fifth of its transfers. Without
+  the reset it is no better than a low band.
+- [ ] Build it. The policy already holds per-TOKEN state and is told of every execution, so the
+  counts live there and the shell's storage is untouched: the upkeep facet reports its gaps once
+  per response, and =recordExecution= names the donor and recipients. A view projects the counts
+  to the present so =wheelDue= and the response agree.
+- [ ] Rerun the trial's arms on the built rule, with more than one price path, and pick the
+  patience. Judge on gain per transfer net of what the callers are paid, not on gain alone.
+- [ ] Decide whether growth should follow the gap or its square. The harvest from closing a gap
+  goes as its square; the trial used the gap.
 - [ ] Offer patience as a selector in the interactive lab. This replaces the idea of a 1-point
   against 2-point selector.
 
@@ -136,10 +147,10 @@ the machine is clearly better in every regime.
 
 Each is argued in [[file:BASKET-MACHINE-RESULTS.org][the results]].
 
-- [ ] Wallet-sourced transfers leave half their value as BUCK inside the recipient's position.
-  At the lab's sizing the three wallets are empty in about 90 days and the basket is 13% net
-  BUCK. Where no one supplies that BUCK, K runs to its rail. Either accept a fully paired
-  book as the resting state, or make a wallet-sourced sale buy into the wallet.
+- [ ] Wallet-sourced transfers leave half their value as BUCKs inside the recipient's position.
+  At the lab's sizing the three wallets are empty in about 90 days and the basket holds 13% of
+  its value in BUCKs. Where no one supplies those BUCKs, K runs to its rail. Either accept a
+  fully paired book as the resting state, or make a wallet-sourced sale buy into the wallet.
 - [ ] Measure the gap on the TOKEN held, not on weights that liquidity mutes, so the urgency
   rule above does not depend on how much of the book is paired.
 - [ ] Whether to count owned arbitrage at all before per-block cadence and a competing
@@ -166,7 +177,6 @@ After step 2, so the surviving campaigns run on the final wiring.
 - [ ] Charge an unwinding cost in the reports.
 - [ ] Align assignments at column 32 in the Python added on this branch (=commodities.py= is in
   the lab's fingerprint, so do it with a change that already recomputes the runs).
-- [ ] Use "the BUCK" and "BUCKs" throughout the design document and this list.
 
 * 6. Release, then removal
 

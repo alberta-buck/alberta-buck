@@ -23,7 +23,7 @@ is a contract with its own state that the others call.
 | =PairBasketEquityResponse= | Facet | Nothing: the Daily, Sync and Respond steps | The wheel, through the shell |
 | =PairRebalancePolicy= | Service | Each pair's last rate and change, the basket's own recent price impact, the time of the last transfer | The upkeep facet |
 | =BlockPairSignals= | Service | One level-and-rate tracker per TOKEN per quote route, and their error statistics | Anyone (=observe=); read by the policy |
-| =BasketSignals= | Service | The last valid reference-basket value in BUCK, its freshness and day count | The wheel's Sample slot, the desk policy, K's reference |
+| =BasketSignals= | Service | The last valid reference-basket value in BUCKs, its freshness and day count | The wheel's Sample slot, the desk policy, K's reference |
 | =EquityDesk= | Service | The desk's own account, TOKEN, credit, turnover budget and capital floor | The wheel's Ops slot |
 | =OuterBandMonetaryDirector= | Service | Which side of parity the basket is on and for how many days | The desk and the wheel |
 | =BasketMachineWheel= | Wheel | The cursor, the reserve, the arbitrage triangles | Any keeper (=tick=) |
@@ -35,12 +35,12 @@ its risk fallback (see [[#fallback][below]]).
 * The books and the mark
 
 The basket is an ordinary BUCK credit holder. It holds one self-issued credit marked at its own
-equity, so Buck enforces its limit: it can owe at most K times that mark.
+equity, so Buck enforces its limit: it can draw at most K times that mark.
 
 - /Gross/ is every TOKEN/BUCK position at fair value (twice its BUCK side, full range) plus the
   wallet's TOKEN, at a chosen price mark.
 - /Equity/ is the gross plus the signed BUCK account plus the relief accrued on it. A negative
-  account is the lien. Equity already deducts it.
+  account is credit drawn, a claim on the basket's own assets: the lien. Equity already deducts it.
 - Marks are TWAP, HIGH (the higher of spot and TWAP, an entrant's price) and LOW (an exiter's).
   Every spend is preceded by a mark of the credit at equity(LOW).
 - A constituent's /allocation/ is its position (both sides) plus its wallet TOKEN, as a share of
@@ -74,7 +74,7 @@ It never trades and values no book.
 
 ** Parity: =BasketSignals=
 
-The reference basket's cost in BUCK from each pool's TWAP, refused when any pool has no
+The reference basket's cost in BUCKs from each pool's TWAP, refused when any pool has no
 liquidity or its spot is more than a tolerance (5%) from its TWAP. It publishes the last valid
 value, whether it is fresh, and how many consecutive days have had a valid sample. K reads the
 same quantity through the venue. No offset or filter is applied to either.
@@ -152,7 +152,7 @@ nothing and does not restart the transfer clock. Failing that it re-marks a stal
 :END:
 
 The facet hands the response to the inherited plan when the book is empty, when the lien exceeds
-K times equity(LOW), when spendable BUCK is below the liquidity target's band, or when any
+K times equity(LOW), when its spendable BUCKs are below the liquidity target's band, or when any
 constituent is beyond its leash (30% of its declared weight). That plan sells for cash first and
 is where the EMA ladders are still consulted. In the lab's cyclic runs it is taken in two to
 four of 481 responses.
@@ -166,7 +166,7 @@ spot within it, or the step reverts. A position is minted only when spot is with
 * The desk: =EquityDesk= and =OuterBandMonetaryDirector=
 
 The desk is its own credit holder beside the basket: its own account, its own marked credit, its
-own TOKEN. Nothing it holds or owes enters the basket's books. It mirrors the basket's
+own TOKEN. Nothing it holds or has drawn enters the basket's books. It mirrors the basket's
 constituents and trades the same pools through the same venue facet.
 
 The policy leaves the inner band to K.
@@ -177,12 +177,12 @@ The policy leaves the inner band to K.
   missed day, a reversal or a return clears the count.
 - /Effort./ A share (25%) of the error beyond the release band, capped (40 bp of the desk's
   size basis per operation), and only while TWAP and spot agree on the side.
-- /Authority./ The desk sells BUCK it holds, or buys BUCK with TOKEN, on any advice. It draws
+- /Authority./ The desk sells BUCKs it holds, or buys BUCKs with TOKEN, on any advice. It draws
   credit to issue only on advice that has persisted (30 days).
 - /Guard./ After the trade the terminal spot must still be outside the release band on the same
   side, or the operation reverts. The desk cannot spend through K's band.
 - /Limits./ A finite turnover budget that nothing replenishes, a capital floor on the desk's net
-  value, position and debt caps, and Buck's own limit on its lien.
+  value, caps on its position and on the credit it has drawn, and Buck's own limit on its lien.
 
 * The wheel: =BasketMachineWheel=
 

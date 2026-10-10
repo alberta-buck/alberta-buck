@@ -12,7 +12,8 @@ moved too little, too late. With one change to how much it moves, it earns about
 
 On realistic prices it earns much less, and the reason is a single threshold. The basket only
 rebalances a TOKEN once its share is 2 points off target. Realistic prices rarely push it that
-far. At 1 point it earns twice as much.
+far. At 1 point it earns twice as much. A rule that lets a small gap build up until it acts
+does better still, with a third of the trades.
 
 The BUCK itself held up well. When prices rose 42% in dollars, the BUCK rose with them.
 
@@ -32,6 +33,7 @@ supposed to be worth. We do this because in some runs nothing holds the BUCK's p
 then gains measured in BUCKs and in dollars can point in opposite directions.
 
 No gas is charged. Keep that in mind wherever a result depends on many small trades.
+The [[*Gas][gas section]] says what it would cost.
 
 * Rebalancing
 
@@ -75,9 +77,52 @@ Lowering it to 1 point doubles the gain on realistic prices. It also doubles the
 TOKEN never comes back, and makes five to seven times as many trades. With gas charged, some of
 those small trades would not pay. So this is a real choice, not a free improvement.
 
-A fixed line is the wrong shape for this. A share that is 1.9 points off for a month never
-acts, and one that touches 2.1 for an hour does. The plan is to replace the line with urgency
-that builds up: a big gap acts soon, a small one acts if it lasts. See [[file:BASKET-MACHINE-TASKS.org][the task list]].
+* Urgency in place of the threshold
+
+A fixed line is the wrong shape. A share that is 1.9 points off for a month never acts. One
+that touches 2.1 for an hour does.
+
+So we tried a rule that builds up. Each TOKEN keeps a count. Every day the count grows by how
+far its share is off target, less a quarter point. When the count reaches a set level, that
+TOKEN may be rebalanced. After a transfer its count starts again from zero. A big gap gets
+there soon. A small one gets there if it lasts.
+
+The set level is the one knob. Call it /patience/, in point-days. At a patience of 2, a share
+2 points off waits about a day, and a share 1 point off waits under three.
+
+| Prices | Rule | Gain | Transfers | Gain per transfer |
+|--------+------+------+-----------+-------------------|
+| Clean cycles | 2-point line | +36,808 | 71 | 518 |
+| | 1-point line | +42,836 | 469 | 91 |
+| | Patience 2 | +38,314 | 82 | 467 |
+| | Patience 4 | +36,378 | 45 | 808 |
+| | Patience 8 | +23,846 | 24 | 994 |
+| Commodity-like | 2-point line | +6,915 | 16 | 432 |
+| | 1-point line | +13,931 | 94 | 148 |
+| | Patience 2 | +16,340 | 34 | 481 |
+| | Patience 8 | +11,949 | 11 | 1,086 |
+| One TOKEN reprices for good | 2-point line | -2,074 | 4 | |
+| | 1-point line | -4,196 | 13 | |
+| | Patience 2 | -4,976 | 16 | |
+| | Patience 8 | -3,307 | 10 | |
+
+On commodity-like prices, a patience of 2 earns more than twice what the 2-point line does. It
+earns more than the 1-point line too, with a third of the transfers. On clean cycles it changes
+little. When a TOKEN never comes back it loses more: a little more than the 1-point line does.
+
+More patience means fewer and larger transfers and a smaller loss in the bad case. Too much
+gives up the harvest on fast cycles: at 8, a third of it.
+
+Gain per transfer is the number to watch once callers are paid. A transfer adds about 900,000
+gas to a turn. The 1-point line earns 90 to 150 BUCKs a transfer. Patience 2 earns about 470.
+
+Three cautions. We ran this by steering the existing threshold from outside, turn by turn, not
+by changing the contracts ([[file:review/urgency-trial.py][urgency-trial.py]]). It is one price path for each row, and neighbouring
+settings do not line up neatly, so read the table for its shape. And a version that did not
+start the count again after a transfer was no better than a low line: it made at least as many
+transfers as the lowest line, each earning about 90.
+
+The work to build it into the contracts is in [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
 * Realistic prices
 
@@ -145,21 +190,28 @@ more than rebalancing earns, and that size is much smaller on a rollup than on m
 this one-million basket the gain was 36,808 BUCKs on clean cycles and 6,915 on commodity-like
 prices. Price the gas for your chain and compare.
 
-Two things follow. A transfer adds about 900,000 gas to a turn, which sets the smallest trade
-worth making. And a turn that trades nothing still costs 900,000, which is too much: it
+Most of that gas is spent looking, not trading. On commodity-like prices the 16 transfers added
+16 million gas between them. The other 500 million was the cost of looking. And that run
+squeezes a decade into 120 days. At real speed, four turns a day would mean thirty times as
+much looking for the same 16 transfers.
+
+So two things follow. A transfer adds about 900,000 gas to a turn, which sets the smallest
+trade worth making. And a turn that trades nothing must cost far less than 900,000. Today it
 re-reads every pool and re-asks the policy about every pair.
 
 The wheel already knows how to pay its callers. It holds a reserve of BUCKs, fed by a slice of
 the basket's income, and pays each caller who does real work a fixed share of what is in it.
 If nobody calls, the reserve grows until someone does. If everybody calls, each gets less. The
-price finds itself, and the basket never needs to know the gas price or the price of ETH. The
-lab has this switched off. Switching it on, so that every result is net of what callers were
-paid, is the next thing to do.
+price finds itself, and the basket never needs to know the gas price or the price of ETH. What
+the basket spends is fixed by the slice. What that buys, in turns a day, is set by the gas
+price. The lab has this switched off. Switching it on, so that every result is net of what
+callers were paid, comes next.
 
 * What we do not know yet
 
 - How the old basket and desk compare on the same tests.
 - What the results look like net of paying the callers.
+- Whether the urgency rule does as well built into the contracts, and on other price paths.
 - Whether one seed and one bad case are representative.
 - How the machine behaves at real speed. The cycles are far faster than real commodities.
 
@@ -170,6 +222,8 @@ make control-lab-interactive        # 310 runs; open doc/control-lab/interactive
 make control-lab-verify             # check every saved run
 make control-lab-basket-sizing      # the rebalancing and threshold tables
 make control-lab-basket-research    # the arbitrage comparison
+python doc/review/wheel-gas.py /tmp/wheel-gas       # the gas table
+python doc/review/urgency-trial.py /tmp/urgency     # the urgency table
 python3 doc/review/rebalance-benchmark.py
 PYTHONPATH=. python3 doc/review/commodity-inflation.py
 #+end_src
