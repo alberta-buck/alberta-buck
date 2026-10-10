@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {WorkWheel} from "./WorkWheel.sol";
+import {IBasketUpkeep} from "../basket/IBasketUpkeep.sol";
+import {IBasketView} from "../basket/IBasketView.sol";
 
 /// @notice The permissionless upkeep the keepers do today, as wheel kinds
 ///         (alberta-buck-ethereum-wheel.org, "The work wheel").  Each claims one slot after its bases'
@@ -31,12 +33,6 @@ interface IWheelOps {
 
 interface IWheelEpoch {
     function epochNow() external view returns (uint32);
-}
-
-interface IWheelEquity {
-    function constituentsLength() external view returns (uint256);
-    function wheelDue(uint8 kind, uint256 i) external view returns (bool);
-    function wheelStep(uint8 kind, uint256 i) external returns (uint256);
 }
 
 /// @title ComputeKind -- the controller's PID cycle, when its interval is up.
@@ -182,7 +178,7 @@ abstract contract EquityKind is WorkWheel {
 
     function _equitySlots() internal view returns (uint256) {
         if (equityBasket == address(0)) return 0;
-        try IWheelEquity(equityBasket).constituentsLength() returns (uint256 n) {
+        try IBasketView(equityBasket).constituentsLength() returns (uint256 n) {
             return responseMode ? n + 2 : 2 * n + 3;
         } catch { return 0; }
     }
@@ -210,7 +206,7 @@ abstract contract EquityKind is WorkWheel {
         uint256 b = super._slotCount();
         if (s < b) return super._due(s);
         (uint8 kind, uint256 i) = _equityOf(s - b);
-        try IWheelEquity(equityBasket).wheelDue(kind, i) returns (bool d) { return d; }
+        try IBasketUpkeep(equityBasket).wheelDue(kind, i) returns (bool d) { return d; }
         catch { return false; }
     }
 
@@ -218,7 +214,7 @@ abstract contract EquityKind is WorkWheel {
         uint256 b = super._slotCount();
         if (s < b) return super._run(s);
         (uint8 kind, uint256 i) = _equityOf(s - b);
-        try IWheelEquity(equityBasket).wheelStep(kind, i) returns (uint256 w) { return w; }
+        try IBasketUpkeep(equityBasket).wheelStep(kind, i) returns (uint256 w) { return w; }
         catch { return 0; }
     }
 }

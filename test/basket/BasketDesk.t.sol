@@ -4,8 +4,8 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BuckBasketEquityTest} from "./BuckBasketEquity.t.sol";
 import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
-import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
-import {EquityDesk} from "../../src/basket/EquityDesk.sol";
+import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
+import {BasketDesk} from "../../src/basket/BasketDesk.sol";
 import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
 
@@ -18,22 +18,22 @@ contract EqMonDir {
     function epochNow() external view returns (uint32) { return epoch; }
 }
 
-/// @title The monetary desk as its own credit holder (EquityDesk) beside the
+/// @title The monetary desk as its own credit holder (BasketDesk) beside the
 ///        equity basket: every equity test again with a desk present, and the
 ///        two accounts kept apart -- the basket's mark, limit and books never
 ///        see the desk's capital or issuance (D2), the desk issues only on its
 ///        own credit (D1), and its relief is its own (D3).
-contract EquityDeskTest is BuckBasketEquityTest {
-    EquityDesk internal desk;
+contract BasketDeskTest is BuckBasketEquityTest {
+    BasketDesk internal desk;
     EqMonDir internal md;
 
     function setUp() public virtual override {
         super.setUp();
         md = new EqMonDir();
-        desk = new EquityDesk(address(buck), address(ctrl), address(b), GOV);
+        desk = new BasketDesk(address(buck), address(ctrl), address(b), GOV);
         _bind(address(desk), false);                      // its own account: non-Carrying
         vm.startPrank(GOV);
-        desk.setVenue(address(new ValidatedBasketVenue()));
+        desk.setVenue(address(new BasketVenueFacet()));
         desk.mirrorConstituents();
         desk.openCredit(address(credit), FACE);
         desk.setMonetaryDirector(address(md));

@@ -44,10 +44,10 @@ def activate(d) -> None:
     # User trading starts only after the full observation window exists.
     window = int(basket.functions.twapWindow().call())
     d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + window + 1)
-    venue = chain.deploy("ValidatedBasketVenue")
+    venue = chain.deploy("BasketVenueFacet")
     response = chain.deploy("BuckBasketEquityResponse")
     interval = int(os.environ.get("SIM_MACHINE_INTERVAL", "1800"))
-    signals = chain.deploy("BasketSignals", basket.address, interval,
+    signals = chain.deploy("BasketReference", basket.address, interval,
                            int(os.environ.get("SIM_MACHINE_MAX_AGE", "3600")), 500)
     # Historical observations must predate the experiment; never use the
     # simulated future CSV as a warm-up or invent an anchor from its day 0.
@@ -101,7 +101,7 @@ def activate(d) -> None:
             int(os.environ.get("SIM_OPS_TURNOVER_BUCK", str(initial_capital))) * 10**6,
             int(os.environ.get("SIM_OPS_CAPITAL_FLOOR_BUCK", str(initial_capital // 4))) * 10**6,
             500), sender=gov)
-        policy = chain.deploy("OuterBandMonetaryDirector", signals.address,
+        policy = chain.deploy("OuterBandDeskPolicy", signals.address,
             int(os.environ.get("SIM_OPS_ENTER_BP", "300")),
             int(os.environ.get("SIM_OPS_RELEASE_BP", "200")),
             int(os.environ.get("SIM_OPS_GAIN_BP", "2500")),

@@ -51,9 +51,9 @@ def fingerprint():
     for name in ("Buck", "BuckCredit", "BuckKControllerDirect", "IdentityRegistryHarness",
                  "SimLP", "MockERC20", "UniswapV3Factory", "UniswapV3Pool", "WETH9",
                  "BuckBasketEquity", "BuckBasketEquityWheel", "BuckBasketUniswapV3",
-                 "EquityDesk", "BasketRebalanceDirector", "BasketWheel", "BasketMachineWheel",
-                 "BuckBasketEquityResponse", "BasketSignals", "OuterBandMonetaryDirector",
-                 "ValidatedBasketVenue", "BlockPairSignals", "PairRebalancePolicy", "PairBasketEquityResponse"):
+                 "BasketDesk", "BasketRebalanceDirector", "BasketWheel", "BasketMachineWheel",
+                 "BuckBasketEquityResponse", "BasketReference", "OuterBandDeskPolicy",
+                 "BasketVenueFacet", "PairSignals", "PairRebalancePolicy", "BasketUpkeepFacet"):
         h.update(digest(load_artifact(name)).encode())
     versions = {n: version(n) for n in ("pyrevm", "web3")}
     h.update(digest(versions).encode())

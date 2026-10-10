@@ -2,7 +2,9 @@
 pragma solidity ^0.8.20;
 
 import {WorkWheel} from "./WorkWheel.sol";
-import {ComputeKind, OpsKind, IWheelEquity} from "./UpkeepKinds.sol";
+import {ComputeKind, OpsKind} from "./UpkeepKinds.sol";
+import {IBasketUpkeep} from "../basket/IBasketUpkeep.sol";
+import {IBasketView} from "../basket/IBasketView.sol";
 import {ArbKind} from "./ArbKind.sol";
 
 interface IWheelSample {
@@ -17,7 +19,7 @@ abstract contract ResponseKind is WorkWheel {
 
     function _equitySlots() private view returns (uint256) {
         if (equityBasket == address(0)) return 0;
-        try IWheelEquity(equityBasket).constituentsLength() returns (uint256 n) { return n + 2; }
+        try IBasketView(equityBasket).constituentsLength() returns (uint256 n) { return n + 2; }
         catch { return 0; }
     }
 
@@ -35,7 +37,7 @@ abstract contract ResponseKind is WorkWheel {
         uint256 base = super._slotCount();
         if (s < base) return super._due(s);
         (uint8 kind, uint256 i) = _component(s - base);
-        try IWheelEquity(equityBasket).wheelDue(kind, i) returns (bool due) { return due; }
+        try IBasketUpkeep(equityBasket).wheelDue(kind, i) returns (bool due) { return due; }
         catch { return false; }
     }
 
@@ -43,7 +45,7 @@ abstract contract ResponseKind is WorkWheel {
         uint256 base = super._slotCount();
         if (s < base) return super._run(s);
         (uint8 kind, uint256 i) = _component(s - base);
-        try IWheelEquity(equityBasket).wheelStep(kind, i) returns (uint256 work) { return work; }
+        try IBasketUpkeep(equityBasket).wheelStep(kind, i) returns (uint256 work) { return work; }
         catch { return 0; }
     }
 }

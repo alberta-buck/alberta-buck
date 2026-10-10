@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityTest, IEquityWheel, EqToken} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityTest, IBasketUpkeep, EqToken} from "./BuckBasketEquity.t.sol";
 import {BuckBasketEquityResponse} from "../../src/basket/BuckBasketEquityResponse.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
-import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
-import {BasketSignals} from "../../src/basket/BasketSignals.sol";
-import {OuterBandMonetaryDirector} from "../../src/basket/OuterBandMonetaryDirector.sol";
+import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
+import {BasketReference} from "../../src/basket/BasketReference.sol";
+import {OuterBandDeskPolicy} from "../../src/basket/OuterBandDeskPolicy.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
 
 contract BasketMachineTest is BuckBasketEquityTest {
-    BasketSignals internal signals;
+    BasketReference internal signals;
 
     function _assertReferenceNormalization() internal view {
         uint256 sum;
@@ -40,11 +40,11 @@ contract BasketMachineTest is BuckBasketEquityTest {
 
     function _replace(bool withSignal) internal {
         vm.startPrank(GOV);
-        b.setVenue(address(new ValidatedBasketVenue()));
+        b.setVenue(address(new BasketVenueFacet()));
         b.setEquityWheel(address(new BuckBasketEquityResponse()));
         vm.stopPrank();
         if (withSignal) {
-            signals = new BasketSignals(address(b), 1800, 3600, 500);
+            signals = new BasketReference(address(b), 1800, 3600, 500);
             signals.observe();
             vm.prank(GOV);
             b.setResponse(address(signals), BuckBasketEquityStorage.ResponseParams(3000, 1800, 1e18));
@@ -54,7 +54,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
     function _response() internal returns (uint256) {
         vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
         if (address(signals) != address(0)) signals.observe();
-        return IEquityWheel(address(b)).wheelStep(2, 0);
+        return IBasketUpkeep(address(b)).wheelStep(2, 0);
     }
 
     function _freshMark() internal view {
@@ -105,10 +105,10 @@ contract BasketMachineTest is BuckBasketEquityTest {
     function test_machine_responseIsPacedAndOldKindsAreRetired() public {
         _replace(false); _deposit(alice, address(tok[0]), 100_000e18);
         assertEq(_response(), 1);
-        assertEq(IEquityWheel(address(b)).wheelStep(2, 0), 0);
-        assertFalse(IEquityWheel(address(b)).wheelDue(2, 0));
-        assertEq(IEquityWheel(address(b)).wheelStep(3, 0), 0);
-        assertEq(IEquityWheel(address(b)).wheelStep(4, 0), 0);
+        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 0);
+        assertFalse(IBasketUpkeep(address(b)).wheelDue(2, 0));
+        assertEq(IBasketUpkeep(address(b)).wheelStep(3, 0), 0);
+        assertEq(IBasketUpkeep(address(b)).wheelStep(4, 0), 0);
     }
 
     function test_machine_configuredStaleSignalStopsTrades() public {
@@ -116,7 +116,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
         uint256 idle = b.idleToken(0);
         vm.warp(vm.getBlockTimestamp() + 3601); vm.roll(vm.getBlockNumber() + 1);
         vm.mockCall(address(signals), abi.encodeWithSelector(signals.observe.selector), bytes(""));
-        IEquityWheel(address(b)).wheelStep(2, 0);
+        IBasketUpkeep(address(b)).wheelStep(2, 0);
         assertEq(b.idleToken(0), idle);
         assertEq(b.liquidityOf(1), 0);
     }
@@ -172,7 +172,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
 
     function test_machine_policyWillNotExecuteOldDirectionAfterSpotReverts() public {
         _replace(true);
-        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        OuterBandDeskPolicy policy = new OuterBandDeskPolicy(address(signals), 300, 200, 2500, 40, 3);
         for (uint256 i; i < 3; ++i) _push(i, true, 25_000 * B);
         vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1); policy.observe();
         (int32 e,) = policy.monetaryEffort(); assertLt(e, 0);
@@ -186,7 +186,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
         // All prices about 1% higher: beyond parity, inside the desk's 3% entry.
         for (uint256 i; i < 3; ++i) _push(i, true, 5_000 * B);
         _age();
-        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        OuterBandDeskPolicy policy = new OuterBandDeskPolicy(address(signals), 300, 200, 2500, 40, 3);
         vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1); policy.observe();
         (int32 effort,) = policy.monetaryEffort();
         assertEq(effort, 0, "desk leaves the inner error visible");
@@ -200,7 +200,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
 
     function test_machine_policyReversalAndGapResetPersistence() public {
         _replace(true);
-        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        OuterBandDeskPolicy policy = new OuterBandDeskPolicy(address(signals), 300, 200, 2500, 40, 3);
         for (uint256 i; i < 3; ++i) _push(i, true, 25_000 * B);
         _age();
         for (uint256 day; day < 3; ++day) {
@@ -218,7 +218,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
 
     function test_machine_policyCannotReusePersistenceAfterIndependentSensorRecovery() public {
         _replace(true);
-        OuterBandMonetaryDirector policy = new OuterBandMonetaryDirector(address(signals), 300, 200, 2500, 40, 3);
+        OuterBandDeskPolicy policy = new OuterBandDeskPolicy(address(signals), 300, 200, 2500, 40, 3);
         for (uint256 i; i < 3; ++i) _push(i, true, 25_000 * B);
         for (uint256 day; day < 3; ++day) {
             vm.warp(vm.getBlockTimestamp() + 1 days); vm.roll(vm.getBlockNumber() + 1); policy.observe();

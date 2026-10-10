@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BlockPairSignalsTest} from "./BlockPairSignals.t.sol";
-import {BlockPairSignals} from "../../src/basket/BlockPairSignals.sol";
+import {PairSignalsTest} from "./PairSignals.t.sol";
+import {PairSignals} from "../../src/basket/PairSignals.sol";
 import {PairRebalancePolicy} from "../../src/basket/PairRebalancePolicy.sol";
 
 contract PairBookView {
-    BlockPairSignals immutable s;
-    constructor(BlockPairSignals s_) { s = s_; }
+    PairSignals immutable s;
+    constructor(PairSignals s_) { s = s_; }
     function constituentsLength() external view returns (uint256) { return s.tokenCount(); }
     function constituents(uint256 i) external view returns (address, uint8, uint256, uint256, uint24, address, int24, int24, bool, uint256, uint128) {
         (address pool, bool token0,) = s.routes(i);
@@ -15,7 +15,7 @@ contract PairBookView {
     }
 }
 
-contract PairRebalancePolicyTest is BlockPairSignalsTest {
+contract PairRebalancePolicyTest is PairSignalsTest {
     // The first experiment's sizing: 10%/day braking release, closure by speed alone.
     function _first() private pure returns (PairRebalancePolicy.Sizing memory) {
         return PairRebalancePolicy.Sizing(2e15, 1e17, 20, 0, 1e18, 1e18, 0, 0);

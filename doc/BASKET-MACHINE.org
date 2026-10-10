@@ -19,18 +19,19 @@ is a contract with its own state that the others call.
 | Contract | Kind | What it owns | Who calls it |
 |----------+------+--------------+--------------|
 | =BuckBasketEquity= | Shell | The books: receipts, shares, wallet TOKEN, liquidity counts, the credit | Depositors, governance, the wheel |
-| =ValidatedBasketVenue= | Facet | Nothing: Uniswap V3 reads, swaps and positions with strict price checks | The shell and the upkeep facet |
-| =PairBasketEquityResponse= | Facet | Nothing: the Daily, Sync and Respond steps | The wheel, through the shell |
-| =PairRebalancePolicy= | Service | Each pair's last rate and change, the basket's own recent price impact, the time of the last transfer | The upkeep facet |
-| =BlockPairSignals= | Service | One level-and-rate tracker per TOKEN per quote route, and their error statistics | Anyone (=observe=); read by the policy |
-| =BasketSignals= | Service | The last valid reference-basket value in BUCKs, its freshness and day count | The wheel's Sample slot, the desk policy, K's reference |
-| =EquityDesk= | Service | The desk's own account, TOKEN, credit, turnover budget and capital floor | The wheel's Ops slot |
-| =OuterBandMonetaryDirector= | Service | Which side of parity the basket is on and for how many days | The desk and the wheel |
+| =BasketVenueFacet= | Facet | Nothing: Uniswap V3 reads, swaps and positions with strict price checks | The shell and the upkeep facet |
+| =BasketUpkeepFacet= | Facet | Nothing: the Daily, Sync and Respond steps | The wheel, through the shell |
+| =PairRebalancePolicy= | Service | Each pair's last rate and change, each constituent's urgency, the basket's own recent price impact, the time of the last transfer | The upkeep facet |
+| =PairSignals= | Service | One level-and-rate tracker per TOKEN per quote route, and their error statistics | Anyone (=observe=); read by the policy |
+| =BasketReference= | Service | The last valid reference-basket value in BUCKs, its freshness and day count | The wheel's Sample slot, the desk policy, K's reference |
+| =BasketDesk= | Service | The desk's own account, TOKEN, credit, turnover budget and capital floor | The wheel's Ops slot |
+| =OuterBandDeskPolicy= | Service | Which side of parity the basket is on and for how many days | The desk and the wheel |
 | =BasketMachineWheel= | Wheel | The cursor, the reserve, the arbitrage triangles | Any keeper (=tick=) |
 
 =BuckBasketEquityResponse= is the base of the upkeep facet. It holds the three step entry points,
-the sell and buy primitives and an older allocation plan, which the pair facet now uses only as
-its risk fallback (see [[#fallback][below]]).
+the sell and buy primitives and an older allocation plan, which the upkeep facet now uses only as
+its risk fallback (see [[#fallback][below]]). Each service and facet has its interface in its own file
+(see [[#names][names]]); they depend on those, not on each other's contracts.
 
 * The books and the mark
 
@@ -44,7 +45,7 @@ equity, so Buck enforces its limit: it can draw at most K times that mark.
 - Marks are TWAP, HIGH (the higher of spot and TWAP, an entrant's price) and LOW (an exiter's).
   Every spend is preceded by a mark of the credit at equity(LOW).
 - A constituent's /allocation/ is its position (both sides) plus its wallet TOKEN, as a share of
-  the gross. Targets are the declared weights; the pair facet requires a zero target lean.
+  the gross. Targets are the declared weights; the upkeep facet requires a zero target lean.
 
 About 72% of the TOKEN sits inside liquidity in the lab's settled book. A position's value
 follows the square root of price, so the basket's allocations move about 60% as far as a wallet's
@@ -52,7 +53,7 @@ would for the same price change.
 
 * Signals
 
-** Relative price: =BlockPairSignals=
+** Relative price: =PairSignals=
 
 A price-only observer of every TOKEN on every registered quote route (BUCK and USDC in the lab).
 It never trades and values no book.
@@ -72,7 +73,7 @@ It never trades and values no book.
   routes, and the envelope (lowest low, highest high) of their rates. Routes are not treated as
   independent evidence.
 
-** Parity: =BasketSignals=
+** Parity: =BasketReference=
 
 The reference basket's cost in BUCKs from each pool's TWAP, refused when any pool has no
 liquidity or its spot is more than a tolerance (5%) from its TWAP. It publishes the last valid
@@ -85,8 +86,34 @@ They are read only by the inherited fallback plan, and are to be retired with it
 
 * The rebalance policy: =PairRebalancePolicy=
 
-The policy owns no assets and authorizes no spending. For an ordered pair (sell a, buy b) it
-returns a /desire/: the fraction of an eligible allocation gap to move per day.
+The policy owns no assets and authorizes no spending. It answers two questions. Which gaps may
+be worked at all is /urgency/. How much of an eligible gap to move, and when, is /desire/.
+
+** Urgency
+
+A fixed band is the wrong shape for eligibility: a share 1.9 points off for a month never
+qualifies, and one that touches 2.1 for an hour does. So each constituent keeps a count.
+
+#+begin_example
+urgency  <-  urgency + (|gap| - slack) x time elapsed      kept between zero and patience
+urgency  <-  zero       when the gap changes side, and for the donor and recipients of a transfer
+may be worked while urgency = patience
+#+end_example
+
+=gap= is the constituent's distance from target as a share of the book. The upkeep facet reports
+its gaps at every response; between reports the policy carries the count forward on the gap it is
+shown, for at most a day, so the wheel's view and the response agree. With a slack of a quarter
+point and a patience of two point-days, a gap of 2.25 points qualifies in a day, 1.25 in two,
+and a quarter point never does. A policy built with no patience keeps no count, and the basket's
+fixed allocation band decides as it did before.
+
+This is a CUSUM, the cumulative-sum test for a small shift that persists; with the restart it is
+integrate-and-fire. It decides only whether. Desire still decides when and how much.
+
+** Desire
+
+For an ordered pair (sell a, buy b) the policy returns the fraction of an eligible allocation
+gap to move per day.
 
 1. /Evidence must be current./ Every route ready, and the policy's motion sample taken from the
    observer's latest sample. Otherwise zero.
@@ -105,12 +132,12 @@ returns a /desire/: the fraction of an eligible allocation gap to move per day.
    closing speed against the allowance, at most 1).
 6. /Ceiling./ The sum is capped at =maxRate=.
 
-The =Sizing= (the five rates and scales above, and the share of own impact counted) is fixed at
-construction. =fraction(desire, elapsed)= converts a desire into the share of a gap to move now:
-=u / (1 + u)= with =u = desire × elapsed=, elapsed counted from the last executed transfer and
-capped at a day. Calling more often cannot spend more.
+The =Sizing= (the five rates and scales above, the share of own impact counted, the slack and
+the patience) is fixed at construction. =fraction(desire, elapsed)= converts a desire into the
+share of a gap to move now: =u / (1 + u)= with =u = desire × elapsed=, elapsed counted from the
+last executed transfer and capped at a day. Calling more often cannot spend more.
 
-* The upkeep facet: =PairBasketEquityResponse=
+* The upkeep facet: =BasketUpkeepFacet=
 
 The wheel turns three kinds of step on the basket.
 
@@ -122,8 +149,9 @@ The wheel turns three kinds of step on the basket.
 
 ** A paired transfer
 
-1. Value every constituent. A gap is /material/ when it exceeds the allocation band (2 points of
-   the gross in the lab).
+1. Value every constituent and report the gaps to the policy. A gap is /material/ when the
+   policy says it is urgent (or, for a policy with no patience, when it exceeds the allocation
+   band).
 2. For each overweight donor, the eligible recipients are the underweight constituents for
    which the policy's desire is positive, provided the donor or the recipient is material.
 3. The amount is the smaller of the donor's excess and the recipients' shortfalls, times
@@ -137,8 +165,8 @@ The wheel turns three kinds of step on the basket.
    No fresh credit is drawn: recipients spend the sale's proceeds.
 6. If any planned recipient is refused, or the mark would leave the basket over its limit, the
    whole response reverts, the sale included.
-7. The measured tick change of each pool is reported to the policy as own impact, and the
-   policy's transfer clock restarts.
+7. The measured tick change of each pool is reported to the policy as own impact. The policy's
+   transfer clock restarts, and so does the urgency of the donor and of each recipient.
 
 ** Otherwise
 
@@ -157,13 +185,13 @@ constituent is beyond its leash (30% of its declared weight). That plan sells fo
 is where the EMA ladders are still consulted. In the lab's cyclic runs it is taken in two to
 four of 481 responses.
 
-* The venue: =ValidatedBasketVenue=
+* The venue: =BasketVenueFacet=
 
 The Uniswap V3 venue with nothing optional. A missing TWAP is an unavailable price, including on
 K's reference path. A swap must execute within the price tolerance of the TWAP and leave the
 spot within it, or the step reverts. A position is minted only when spot is within tolerance.
 
-* The desk: =EquityDesk= and =OuterBandMonetaryDirector=
+* The desk: =BasketDesk= and =OuterBandDeskPolicy=
 
 The desk is its own credit holder beside the basket: its own account, its own marked credit, its
 own TOKEN. Nothing it holds or has drawn enters the basket's books. It mirrors the basket's
@@ -200,16 +228,17 @@ from one governance-appointed arbitrage creditor, which can deposit and nothing 
 | Group | Setting | Value |
 |-------+---------+-------|
 | Sizing (=[pair]=) | releaseRate, releaseSpeed, closureGain, closureRate, maxRate, impactShare | 4/day, own allowance, 0, 1/day, 4/day, 1 |
+| Urgency (=[pair]=) | slack, patience | A quarter point, two point-days |
 | Policy constants | Separation floor, impact memory | 100 ticks (1%), 2 days |
 | Pair observer | Response, error memory, largest gap, warm-up, rate floor | 12 h, 1 day, 1 day, 2 days, 2 bp/day |
-| Basket | Allocation band, leash, step, swap depth, grain | 2 points, 30% of weight, 5%, 1%, 100 ppm |
+| Basket | Allocation band (unused by a patient policy), leash, step, swap depth, grain | 2 points, 30% of weight, 5%, 1%, 100 ppm |
 | Parity reference | Sample interval, largest age, spot/TWAP tolerance | 30 min, 1 h, 5% |
 | Desk policy | Entry, release, gain, cap, persistence | 3%, 2%, 25%, 40 bp, 30 days |
 | Desk | Capital per TOKEN, turnover, floor | 400,000, 1,200,000, 300,000 |
 | K | Start, rails | 0.75, 0.20 to 0.95 |
 
-The first experiment's sizing (0.1/day, 20 bp/day, 20, 0, 1/day) remains the code default in the
-lab model, so earlier runs reproduce frame for frame.
+The first experiment's sizing (0.1/day, 20 bp/day, 20, 0, 1/day, no patience) remains the code
+default in the lab model, so earlier runs reproduce frame for frame.
 
 * How it is deployed today
 
@@ -230,34 +259,39 @@ desk, Sample at the desk policy, Equity at the basket.
 :CUSTOM_ID: names
 :END:
 
-The names record how the machine was arrived at, not what the parts are, and several interfaces
-live in files that happen to use them (=IEquityBasketView= in =EquityDesk.sol=, read by both
-signal contracts). Nothing has been renamed yet. The proposal, to be applied in one change
-together with retiring the EMA ladders:
+The contracts were renamed on 2026-10-10 for what they are. These are the names the simulators
+and the published package use.
 
-| Now | Proposed | Note |
-|-----+----------+------|
-| =PairBasketEquityResponse= on =BuckBasketEquityResponse= | =BasketUpkeepFacet= | One facet; the fallback reduced to cash and credit work |
+| Was | Now | Still to do |
+|-----+-----+-------------|
+| =PairBasketEquityResponse= | =BasketUpkeepFacet= | Still built on =BuckBasketEquityResponse=; the two become one facet when the fallback is reduced to cash and credit work |
 | =ValidatedBasketVenue= | =BasketVenueFacet= | Still built on =BuckBasketUniswapV3= while the older baskets ship |
 | =BlockPairSignals= | =PairSignals= | |
 | =PairRebalancePolicy= | unchanged | |
-| =BasketSignals= less its ladders | =BasketReference= | Raw parity value, freshness, day count |
+| =BasketSignals= | =BasketReference= | Still carries the EMA ladders until the fallback stops reading them |
 | =OuterBandMonetaryDirector= | =OuterBandDeskPolicy= | |
-| =EquityDesk= | =BasketDesk= | With what it uses of =MonetaryDesk= folded in |
+| =EquityDesk= | =BasketDesk= | Still built on the =MonetaryDesk= mixin it shares with =BuckBasketOps= |
 | =BasketMachineWheel= | unchanged | Becomes =BasketWheel= when the older wheel goes |
 | =BuckBasketEquity= and its storage | unchanged | The shell the simulators already deploy |
 
 One interface per facet or service, each in its own file, is what a diamond registers:
 
-| Interface | Replaces | Implemented by |
+| Interface | Replaced | Implemented by |
 |-----------+----------+----------------|
 | =IBasketView= | =IEquityBasketView=, =ISignalGovernance= | The shell |
 | =IBasketUpkeep= | =IEquityWheel=, =IWheelEquity= | The upkeep facet |
 | =IBuckBasketVenue= | kept | The venue facet |
 | =IPairSignals= | the concrete type | The pair observer |
 | =IRebalancePolicy= | the concrete type | The policy |
-| =IBasketReference= | =IBasketSignals= | The parity reference |
-| =IDeskPolicy= | =IMonetaryDirector=, =IMonetaryExecutionGuard= | The desk policy |
+| =IBasketReference= | most of =IBasketSignals= | The parity reference |
+| =IDeskPolicy= | =IMonetaryDirector= for this desk, =IMonetaryExecutionGuard= | The desk policy |
+
+=IBasketSignals= survives as the four EMA trend gates on top of =IBasketReference=, read only by
+the inherited fallback plan. =IMonetaryDirector= survives in =MonetaryDesk.sol= for the older ops
+basket. The shell provides everything in =IBasketView= but does not yet declare it.
+
+The papers (=alberta-buck-ethereum*.org=, =alberta-buck-deployment.org=) and the older working
+notes still say =EquityDesk=. They are rewritten with the papers, not here.
 
 The shell and the two facets share storage by inheriting one layout. A diamond wants each
 facet's state in a named storage slot instead. That is a later step and changes no behaviour.

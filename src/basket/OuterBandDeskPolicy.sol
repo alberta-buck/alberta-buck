@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BasketSignals} from "./BasketSignals.sol";
-import {IMonetaryDirector} from "./MonetaryDesk.sol";
+import {IBasketReference} from "./IBasketReference.sol";
+import {IDeskPolicy} from "./IDeskPolicy.sol";
 
 /// @notice An outer-band desk policy. The inner region is left to the direct
 ///         K controller. Defaults belong in deployment configuration, not in
 ///         a universal claim about stable gains or profitable interventions.
 ///         Sample this adapter in the wheel: it samples the price service and
 ///         advances hysteresis/persistence even when the desk does no work.
-contract OuterBandMonetaryDirector is IMonetaryDirector {
-    BasketSignals public immutable signals;
+contract OuterBandDeskPolicy is IDeskPolicy {
+    IBasketReference public immutable signals;
     uint16 public immutable enterBp;
     uint16 public immutable releaseBp;
     uint16 public immutable gainBp;
@@ -24,7 +24,7 @@ contract OuterBandMonetaryDirector is IMonetaryDirector {
     constructor(address signals_, uint16 enter_, uint16 release_, uint16 gain_, uint16 cap_, uint16 persist_) {
         require(signals_ != address(0) && release_ > 0 && enter_ > release_ && enter_ <= 5000
                 && gain_ <= 10000 && cap_ <= 500 && persist_ > 0, "desk policy");
-        signals = BasketSignals(signals_);
+        signals = IBasketReference(signals_);
         enterBp = enter_; releaseBp = release_; gainBp = gain_; capBp = cap_; persistDays = persist_;
     }
 

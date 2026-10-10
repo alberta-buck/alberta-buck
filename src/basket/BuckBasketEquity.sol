@@ -10,12 +10,8 @@ import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
 import {BuckBasketEquityStorage, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
 import {PortfolioMath} from "./PortfolioMath.sol";
+import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 
-/// @notice The components facet's entry points (BuckBasketEquityWheel).
-interface IEquityWheel {
-    function wheelDue(uint8 kind, uint256 i) external view returns (bool);
-    function wheelStep(uint8 kind, uint256 i) external returns (uint256 work);
-}
 
 /// @title BuckBasketEquity -- the BuckBasket as equity: shares, one pooled
 ///        lien, BUCK payouts, a wallet the work wheel places.
@@ -511,8 +507,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     // --- Dispatch: the components facet, else the venue ------------------------- //
 
     fallback() external {
-        address v = (msg.sig == IEquityWheel.wheelStep.selector
-                     || msg.sig == IEquityWheel.wheelDue.selector)
+        address v = (msg.sig == IBasketUpkeep.wheelStep.selector
+                     || msg.sig == IBasketUpkeep.wheelDue.selector)
             ? equityWheel : address(venue);
         if (v == address(0)) revert VenueUnset();
         assembly {

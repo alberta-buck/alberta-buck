@@ -105,7 +105,7 @@ class DirectorKeeperAgent(Agent):
 @_register
 class MonetaryKeeperAgent(Agent):
     """Drives monetaryOperation() -- the desk's only trigger: on the ops shell
-    (the pro-rata basket with the desk inside it), or on the EquityDesk beside
+    (the pro-rata basket with the desk inside it), or on the BasketDesk beside
     an equity basket ("equity-ops": the desk's own contract and account, and
     this agent its own invoker).
 
@@ -154,7 +154,7 @@ class MonetaryKeeperAgent(Agent):
 
     @staticmethod
     def _desk(d):
-        """The desk's contract: the EquityDesk when there is one, else the
+        """The desk's contract: the BasketDesk when there is one, else the
         ops shell."""
         return d.desk if getattr(d, "desk", None) is not None else d.basket
 

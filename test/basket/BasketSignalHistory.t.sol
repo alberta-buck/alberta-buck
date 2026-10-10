@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {BasketSignals} from "../../src/basket/BasketSignals.sol";
+import {BasketReference} from "../../src/basket/BasketReference.sol";
 
 contract SignalHistoryBasket {
     address public governance = address(0xA0);
@@ -13,12 +13,12 @@ contract SignalHistoryBasket {
 contract BasketSignalHistoryTest is Test {
     address constant GOV = address(0xA0);
     SignalHistoryBasket basket;
-    BasketSignals signals;
+    BasketReference signals;
 
     function setUp() public {
         vm.warp(100 days);
         basket = new SignalHistoryBasket();
-        signals = new BasketSignals(address(basket), 1800, 3600, 500);
+        signals = new BasketReference(address(basket), 1800, 3600, 500);
         _prices();
     }
 
@@ -58,24 +58,24 @@ contract BasketSignalHistoryTest is Test {
     function test_historyCannotBeOverwrittenOrInjectedAfterLivePublication() public {
         int256[7][] memory levels = new int256[7][](3);
         int256[7] memory common;
-        vm.expectRevert(BasketSignals.NotGovernance.selector);
+        vm.expectRevert(BasketReference.NotGovernance.selector);
         signals.initializeHistory(levels, common, 99, 1280, bytes32(uint256(1)));
         _seed();
-        vm.prank(GOV); vm.expectRevert(BasketSignals.InvalidHistory.selector);
+        vm.prank(GOV); vm.expectRevert(BasketReference.InvalidHistory.selector);
         signals.initializeHistory(levels, common, 99, 1280, bytes32(uint256(1)));
-        BasketSignals live = new BasketSignals(address(basket), 1800, 3600, 500);
+        BasketReference live = new BasketReference(address(basket), 1800, 3600, 500);
         vm.mockCall(address(live), abi.encodeWithSelector(live.readPrices.selector), abi.encode(int256(1e18), new int256[](3)));
         live.observe();
-        vm.prank(GOV); vm.expectRevert(BasketSignals.InvalidHistory.selector);
+        vm.prank(GOV); vm.expectRevert(BasketReference.InvalidHistory.selector);
         live.initializeHistory(levels, common, 99, 1280, bytes32(uint256(1)));
     }
 
     function test_futureAndIncompleteHistoryAreRejected() public {
         int256[7][] memory levels = new int256[7][](3);
         int256[7] memory common;
-        vm.prank(GOV); vm.expectRevert(BasketSignals.InvalidHistory.selector);
+        vm.prank(GOV); vm.expectRevert(BasketReference.InvalidHistory.selector);
         signals.initializeHistory(levels, common, 100, 1280, bytes32(uint256(1)));
-        vm.prank(GOV); vm.expectRevert(BasketSignals.InvalidHistory.selector);
+        vm.prank(GOV); vm.expectRevert(BasketReference.InvalidHistory.selector);
         signals.initializeHistory(new int256[7][](2), common, 99, 1280, bytes32(uint256(1)));
     }
 

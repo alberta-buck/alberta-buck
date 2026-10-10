@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {PairBasketEquityResponse} from "../../src/basket/PairBasketEquityResponse.sol";
-import {BlockPairSignals} from "../../src/basket/BlockPairSignals.sol";
-import {IBasketSignals} from "../../src/basket/BasketSignals.sol";
+import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
+import {IPairSignals} from "../../src/basket/IPairSignals.sol";
+import {IBasketSignals} from "../../src/basket/IBasketSignals.sol";
+import {PairRebalancePolicy} from "../../src/basket/PairRebalancePolicy.sol";
 
 /// @notice Lab only: emit the actual pre-response book, intent and allocation.
 /// The inherited response executes unchanged. Reverted responses also revert
 /// their trace; the replay audit checks coverage and economic equality.
-contract PairBasketDecisionTrace is PairBasketEquityResponse {
+contract PairBasketDecisionTrace is BasketUpkeepFacet {
     struct Decision {
         uint256 at;
         uint256 lastExecutionAt;
@@ -32,7 +33,7 @@ contract PairBasketDecisionTrace is PairBasketEquityResponse {
     }
     event PairDecision(Decision input, Allocation proposed);
 
-    constructor(address policy) PairBasketEquityResponse(policy) {}
+    constructor(address policy) BasketUpkeepFacet(policy) {}
 
     function _respond() internal override returns (uint256) {
         // These calls duplicate the parent's idempotent observation at the
@@ -51,7 +52,8 @@ contract PairBasketDecisionTrace is PairBasketEquityResponse {
         d.targets = new uint256[](n); d.swapCaps = new uint256[](n);
         d.desire = new uint256[](n*n); d.level = new int256[](n*n);
         d.rate = new int256[](n*n); d.change = new int256[](n*n); d.high = new int256[](n*n);
-        BlockPairSignals observer = pairPolicy.signals();
+        IPairSignals observer = pairPolicy.signals();
+        PairRebalancePolicy policy = PairRebalancePolicy(address(pairPolicy));
         d.readyMask = observer.readyMask();
         uint256 total = _grossS(s, MARK_TWAP);
         for (uint256 i; i < n; ++i) {
@@ -62,12 +64,12 @@ contract PairBasketDecisionTrace is PairBasketEquityResponse {
             for (uint256 j; j < n; ++j) {
                 if (i == j) continue;
                 uint256 k = i*n+j;
-                BlockPairSignals.Pair memory p = observer.pair(i, j);
+                IPairSignals.Pair memory p = observer.pair(i, j);
                 d.level[k] = p.level; d.rate[k] = p.rate;
                 d.desire[k] = pairPolicy.desire(i, j);
-                (, int128 change) = pairPolicy.motion(observer.pairIndex(i, j));
+                (, int128 change) = policy.motion(observer.pairIndex(i, j));
                 d.change[k] = i < j ? int256(change) : -int256(change);
-                d.high[k] = p.high + int256((pairPolicy.remainingImpact(i) + pairPolicy.remainingImpact(j)) / observer.responseTime());
+                d.high[k] = p.high + int256((policy.remainingImpact(i) + policy.remainingImpact(j)) / observer.responseTime());
             }
         }
         emit PairDecision(d, _allocation(s));

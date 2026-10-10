@@ -1,4 +1,4 @@
-"""Explicit, auditable historical initialization for BasketSignals.
+"""Explicit, auditable historical initialization for BasketReference.
 
 Daily prices are supplied in a common numeraire. Differential ticks cancel
 that numeraire; common-mode history additionally assumes one unit of it per

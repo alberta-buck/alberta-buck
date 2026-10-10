@@ -380,7 +380,7 @@ control-lab-block-pairs-render:
 	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_BLOCK_PAIRS_OUT)/results.org" --funcall org-html-export-to-html
 
 control-lab-block-pairs-test:
-	forge test $(FORGE_OPTS) --match-path test/basket/BlockPairSignals.t.sol
+	forge test $(FORGE_OPTS) --match-path test/basket/PairSignals.t.sol
 
 # Matched basket responses: keep the observer, arb, desk and private agents fixed.
 CONTROL_LAB_PAIR_BASKET_OUT ?= doc/control-lab/pair-basket
@@ -395,7 +395,7 @@ control-lab-pair-basket-render:
 	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit "$(CONTROL_LAB_PAIR_BASKET_OUT)/results.org" --funcall org-html-export-to-html
 
 control-lab-pair-basket-test:
-	forge test $(FORGE_OPTS) --match-contract 'PairBasketResponseTest|PairRebalancePolicyTest'
+	forge test $(FORGE_OPTS) --match-contract 'BasketUpkeepFacetTest|PairRebalancePolicyTest'
 
 # Explain saved basket outcomes with pre-response events from a lab-only facet.
 CONTROL_LAB_PAIR_OPPORTUNITIES_OUT ?= doc/control-lab/pair-opportunities
@@ -438,7 +438,7 @@ control-lab-basket-research-render:
 	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "$(abspath $(CONTROL_LAB_BASKET_RESEARCH_OUT))/results.org") (org-html-export-to-html))'
 
 control-lab-basket-research-test:
-	forge test $(FORGE_OPTS) --match-contract 'BasketArbIncomeTest|PairBasketResponseTest'
+	forge test $(FORGE_OPTS) --match-contract 'BasketArbIncomeTest|BasketUpkeepFacetTest'
 	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_research.py alberta_buck/test/test_control_lab_campaign.py -q
 
 # How much of an open gap the pair policy releases, and how soon: one
@@ -459,7 +459,7 @@ control-lab-basket-sizing-render:
 	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "$(abspath $(CONTROL_LAB_BASKET_SIZING_OUT))/results.org") (org-html-export-to-html))'
 
 control-lab-basket-sizing-test:
-	forge test $(FORGE_OPTS) --match-contract 'PairRebalancePolicyTest|PairBasketResponseTest'
+	forge test $(FORGE_OPTS) --match-contract 'PairRebalancePolicyTest|BasketUpkeepFacetTest'
 	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_sizing.py alberta_buck/test/test_control_lab_commodities.py -q
 
 

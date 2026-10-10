@@ -36,7 +36,7 @@ def main(argv=None):
     names=args.profiles.split(","); profiles=[p for p in PROFILES if p["name"] in names]
     if len(profiles)!=len(names): ap.error("unknown or duplicate profile")
     code={**fingerprint(),"basket_first":digest(dict(params=PARAMS,
-        artifacts=[load_artifact(n) for n in ("BlockPairSignals","PairRebalancePolicy","PairBasketDecisionTrace")],
+        artifacts=[load_artifact(n) for n in ("PairSignals","PairRebalancePolicy","PairBasketDecisionTrace")],
         sources=[Path(__file__).read_text(),Path(__file__).with_name("block_pairs.py").read_text()]))}
     modes={"legacy":"Legacy EMA basket","pair":"TOKEN-pair basket"}
     m=dict(schema=1,kind="basket-first",status="complete",requested_config=cfg,implementation=code,

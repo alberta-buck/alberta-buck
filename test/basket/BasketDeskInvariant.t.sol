@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
-import {EquityDeskTest} from "./EquityDesk.t.sol";
+import {BasketDeskTest} from "./BasketDesk.t.sol";
 
 /// @title Two credit holders, one set of pools: random sequences of deposits,
 ///        exits, desk grants and operations, wheel rounds, outside trades, K
@@ -15,7 +15,7 @@ import {EquityDeskTest} from "./EquityDesk.t.sol";
 ///         saw in ghost variables rather than asserting -- a failing assert
 ///         there would revert the call, which the fuzzer skips silently --
 ///         and the invariants read the ghosts.
-contract EquityDeskInvariantTest is EquityDeskTest {
+contract BasketDeskInvariantTest is BasketDeskTest {
     uint256[] internal ids;
     mapping(uint256 => address) internal ownerOfId;
 
@@ -25,7 +25,7 @@ contract EquityDeskInvariantTest is EquityDeskTest {
     uint256 public ghostDeskOverLimit;     // desk issuance past K x its own mark
     uint256 public ghostCalls;
 
-    /// @dev The world as EquityDeskTest builds it (an empty basket, so the
+    /// @dev The world as BasketDeskTest builds it (an empty basket, so the
     ///      inherited tests still hold); the handlers deposit.
     function setUp() public override {
         super.setUp();

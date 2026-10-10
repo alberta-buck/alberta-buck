@@ -8,7 +8,7 @@ class ExecutionRecorder:
         from alberta_buck.sim.chain import load_artifact
         self.world = world
         self.decoders = {}
-        for contract, event in [("UniswapV3Pool", "Swap"), ("EquityDesk", "MonetaryOperation"),
+        for contract, event in [("UniswapV3Pool", "Swap"), ("BasketDesk", "MonetaryOperation"),
                                 ("BuckBasketEquityResponse", "Responded"), ("BasketMachineWheel", "Cycled")]:
             abi, _ = load_artifact(contract)
             spec = next(a for a in abi if a.get("type") == "event" and a["name"] == event)

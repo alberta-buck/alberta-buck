@@ -33,7 +33,7 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
         def __init__(self, config, selected_stage):
             super().__init__(config, selected_stage)
             d = self.d
-            self.pair_observer = self.chain.deploy("BlockPairSignals",
+            self.pair_observer = self.chain.deploy("PairSignals",
                 [t.address for t in d.tokens], [d.buck.address, d.usdc.address],
                 [*d.pool_buck, *d.pool_usdc], *PARAMS.values())
             self.route_metadata = [dict(token0=bool(r[1]), decimal_offset_ticks=int(r[2])/1e18)
@@ -61,7 +61,7 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                     self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address,
                         d.basket.address, reference, pair_sizing(config["pair"]))
                     response_name = ("PairBasketMaintenanceControl" if maintenance_only else
-                                     "PairBasketDecisionTrace" if diagnostics else "PairBasketEquityResponse")
+                                     "PairBasketDecisionTrace" if diagnostics else "BasketUpkeepFacet")
                     facet = self.chain.deploy(response_name, self.pair_policy.address)
                     self.chain.send(d.basket.functions.setEquityWheel(facet.address), sender=d.gov)
                     abi, _ = load_artifact(response_name)
@@ -108,20 +108,20 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
             """
             from alberta_buck.sim.chain import load_artifact
             d = self.d; old_facet = d.basket.functions.equityWheel().call()
-            venue = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("ValidatedBasketVenue")[0])
+            venue = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("BasketVenueFacet")[0])
             references = [round(math.log(p)/LOG_TICK*1e18) for p in self.cfg["feed"]["base"]]
             # The artificial fixed-mean LP prelude is not live price history.
             # Keep its observer separate so the main estimator starts at the
             # selected opening phase, without a fictitious mean-to-spot jump.
-            prelude_observer = self.chain.deploy("BlockPairSignals",
+            prelude_observer = self.chain.deploy("PairSignals",
                 [t.address for t in d.tokens], [d.buck.address, d.usdc.address],
                 [*d.pool_buck, *d.pool_usdc], *PARAMS.values())
             # Prices rest at their means here, so no pair is separated and the
             # sizing is never consulted; every arm shares the default regardless.
             policy = self.chain.deploy("PairRebalancePolicy",prelude_observer.address,d.basket.address,references,
                 pair_sizing(DEFAULTS["pair"]))
-            facet = self.chain.deploy("PairBasketEquityResponse",policy.address)
-            response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("PairBasketEquityResponse")[0])
+            facet = self.chain.deploy("BasketUpkeepFacet",policy.address)
+            response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("BasketUpkeepFacet")[0])
             self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)
             self.chain.send(d.basket.functions.setResponse(engine.ZERO,
                 (self.cfg["basket"]["leash_bp"],self.cfg["monitor"]["interval"],0)),sender=d.gov)
@@ -266,7 +266,7 @@ def main(argv=None):
     cfg["feed"]["walk_amplification"] = 0
     validate(cfg)
     code = fingerprint()
-    code["observer"] = digest(dict(source=Path(__file__).read_text(), artifact=load_artifact("BlockPairSignals"), params=PARAMS))
+    code["observer"] = digest(dict(source=Path(__file__).read_text(), artifact=load_artifact("PairSignals"), params=PARAMS))
     stages = ("monitor", "linked", "basket")
     manifest = dict(schema=1, status="running", kind="block-pairs", requested_config=cfg,
         implementation=code, stages={s: STAGES[s] for s in stages}, entries={}, controls={},
@@ -275,7 +275,7 @@ def main(argv=None):
               *[dict(id=n, label=n.title(), requires=f, values=[dict(id="medium", label="Medium", value=5000)])
                 for n, f in (("buyer", "demand"), ("seller", "supply"))]],
         cases={s: {} for s in stages}, unique_runs=len(stages)*len(PROFILES), visible_cases=len(stages)*len(PROFILES),
-        method="Passive BlockPairSignals beside the legacy EMAs. Six-hour market updates for 120 days; the contract also has 12-second cadence tests. Noise is a per-observation perturbation of TOKEN prices, shared by both replay routes, not independent evidence. Grey reference rates use the synthetic smooth input only for scoring. No new signal has trading authority.")
+        method="Passive PairSignals beside the legacy EMAs. Six-hour market updates for 120 days; the contract also has 12-second cadence tests. Noise is a per-observation perturbation of TOKEN prices, shared by both replay routes, not independent evidence. Grey reference rates use the synthetic smooth input only for scoring. No new signal has trading authority.")
     tasks = []
     for profile in PROFILES:
         for stage in stages:

@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {UniswapV3Fixture} from "../fixtures/UniswapV3Fixture.sol";
-import {BlockPairSignals} from "../../src/basket/BlockPairSignals.sol";
+import {PairSignals} from "../../src/basket/PairSignals.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 
 // Deterministic accumulator fixture for rates, wraps, failures and cadence.
@@ -35,8 +35,8 @@ contract PairPool {
     }
 }
 
-contract BlockPairSignalsTest is Test {
-    BlockPairSignals s;
+contract PairSignalsTest is Test {
+    PairSignals s;
     PairPool[6] pools;
     address[] tokens;
     address[] quotes;
@@ -55,7 +55,7 @@ contract BlockPairSignalsTest is Test {
             pools[p] = new PairPool(forward ? tokens[i] : quotes[q], forward ? quotes[q] : tokens[i]);
             addresses[p] = address(pools[p]);
         }
-        s = new BlockPairSignals(tokens, quotes, addresses, 60, 120, 3600, 240, 1e12);
+        s = new PairSignals(tokens, quotes, addresses, 60, 120, 3600, 240, 1e12);
     }
     function setTicks(int24 a, int24 b, int24 c, int24 quoteShift) internal {
         int24[3] memory value = [a, b, c];
@@ -82,7 +82,7 @@ contract BlockPairSignalsTest is Test {
         setTicks(100, 300, -50, 0); warm();
         for (uint256 k = 1; k < 50; ++k) {
             setTicks(100, 300, -50, int24(int256(k * 70))); step(12);
-            BlockPairSignals.Pair memory ab = s.pair(0, 1);
+            PairSignals.Pair memory ab = s.pair(0, 1);
             assertEq(ab.rate, 0); assertEq(ab.priceError, 0); assertEq(ab.rateSpread, 0);
             assertEq(ab.levelSpread, 0);
             assertEq(ab.level + s.pair(1, 2).level, s.pair(0, 2).level);
@@ -99,7 +99,7 @@ contract BlockPairSignalsTest is Test {
         assertLt(slowing, outgoing); assertGt(slowing, 0, "cessation precedes sign reversal");
         for (uint256 k = 1; k <= 60; ++k) { setTicks(1200 - int24(int256(k * 12)), 0, 0, 0); step(12); }
         assertLt(s.pair(0, 1).high, 0, "closure clears empirical allowance");
-        BlockPairSignals.Pair memory reverse = s.pair(1, 0);
+        PairSignals.Pair memory reverse = s.pair(1, 0);
         assertEq(reverse.rate, -s.pair(0, 1).rate);
         assertEq(reverse.high, -s.pair(0, 1).low);
     }
@@ -170,7 +170,7 @@ contract BlockPairSignalsTest is Test {
             elapsed = nextAt; step(12);
         }
         int256 truth = int256(elapsed - 6) * 1e18 / 100;
-        BlockPairSignals.Pair memory p = s.pair(0, 1);
+        PairSignals.Pair memory p = s.pair(0, 1);
         (uint128 priceError, uint128 acceleration) = s.errors(0);
         int256 oldHigh = p.rate + int256(uint256(s.rateFloor()) + uint256(priceError) / 60 + uint256(acceleration) * 12);
         assertGt(truth, oldHigh, "one-sample rate allowance misses deterministic lag");
@@ -190,8 +190,8 @@ contract BlockPairSignalsTest is Test {
     }
 }
 
-contract BlockPairSignalsV3Test is UniswapV3Fixture {
-    BlockPairSignals s;
+contract PairSignalsV3Test is UniswapV3Fixture {
+    PairSignals s;
     MockERC20[3] token;
     MockERC20[2] quote;
     address[6] pools;
@@ -212,7 +212,7 @@ contract BlockPairSignalsV3Test is UniswapV3Fixture {
                 _mintFullRange(pool, 1e16); pools[q * 3 + i] = pool; ps[q * 3 + i] = pool;
             }
         }
-        s = new BlockPairSignals(ts, qs, ps, 60, 120, 3600, 240, 1e12);
+        s = new PairSignals(ts, qs, ps, 60, 120, 3600, 240, 1e12);
     }
     function next(uint256 dt) internal { time += dt; vm.warp(time); vm.roll(vm.getBlockNumber() + 1); }
     function test_realPoolsDecimalsSwapIsolationAndGas() public {
@@ -220,7 +220,7 @@ contract BlockPairSignalsV3Test is UniswapV3Fixture {
         for (uint256 k; k < 30; ++k) { next(12); s.observe(); }
         assertEq(s.readyMask(), 3);
         assertLt(uint256(s.pair(0, 1).level < 0 ? -s.pair(0, 1).level : s.pair(0, 1).level), 2e18, "decimal-normalized ratio within tick quantization");
-        BlockPairSignals.Pair memory before = s.pair(0, 1);
+        PairSignals.Pair memory before = s.pair(0, 1);
         _moveSpotToPrice(pools[0], address(token[0]), 1e18, address(quote[0]), 120e6);
         next(0); s.observe();
         assertEq(s.pair(0, 1).rate, before.rate, "own swap is not an elapsed observation");

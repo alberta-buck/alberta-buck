@@ -59,7 +59,7 @@ interface IMarkedCredit {
 ///         never its balances or its V3 position.  Its BUCK is one signed
 ///         account at Buck, the depositors' alone: equity's BUCK is that
 ///         balance plus the relief accrued on it.  Nothing else spends from
-///         it -- a monetary desk is its own credit holder (`EquityDesk`),
+///         it -- a monetary desk is its own credit holder (`BasketDesk`),
 ///         with its own account, mark and wheel -- so its limit is the
 ///         depositors' K x equity and no one else's collateral.
 ///

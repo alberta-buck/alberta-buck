@@ -2,18 +2,19 @@
 pragma solidity ^0.8.20;
 
 import {BuckBasketEquityResponse} from "./BuckBasketEquityResponse.sol";
-import {PairRebalancePolicy} from "./PairRebalancePolicy.sol";
-import {IBasketSignals} from "./BasketSignals.sol";
+import {IRebalancePolicy} from "./IRebalancePolicy.sol";
+import {IBasketSignals} from "./IBasketSignals.sol";
 import {PortfolioMath as PM} from "./PortfolioMath.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
-/// @notice Experimental response facet: one donor and proportional eligible
-/// recipients per response. Reuses the established LP, cash and credit books.
-/// Risk/initialization work retains the legacy response; discretionary work
-/// uses declared allocation gaps and graded pair intent, with no target lean.
-contract PairBasketEquityResponse is BuckBasketEquityResponse {
+/// @notice The basket's upkeep facet: Daily, Sync(i) and Respond. A response
+/// makes one paired transfer, from one donor to proportional eligible
+/// recipients, on declared allocation gaps and the policy's graded intent,
+/// with no target lean. Risk and initialization work is still handed to the
+/// inherited plan, which shares the LP, cash and credit books.
+contract BasketUpkeepFacet is BuckBasketEquityResponse {
     uint256 private constant NONE = type(uint256).max;
-    PairRebalancePolicy public immutable pairPolicy;
+    IRebalancePolicy public immutable pairPolicy;
     struct Allocation {
         uint256 donor;
         uint256 total;
@@ -23,7 +24,7 @@ contract PairBasketEquityResponse is BuckBasketEquityResponse {
     }
     event PairResponse(uint256 indexed donor, uint256 planned, uint256 proceeds, uint256 bought);
 
-    constructor(address policy) { pairPolicy = PairRebalancePolicy(policy); }
+    constructor(address policy) { pairPolicy = IRebalancePolicy(policy); }
 
     function _allocation(Snap memory s) internal view virtual returns (Allocation memory a) {
         uint256 n = s.m.length;

@@ -8,7 +8,7 @@ import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 /// @notice Venue for the replacement machine. Missing TWAP history is an
 ///         unavailable price, including on K's raw reference path. Pools
 ///         must be seeded and aged before the basket accepts valued entries.
-contract ValidatedBasketVenue is BuckBasketUniswapV3 {
+contract BasketVenueFacet is BuckBasketUniswapV3 {
     error UnavailablePrice();
 
     function basketValueInBuck() public view override returns (int256) {

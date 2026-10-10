@@ -3,14 +3,15 @@ pragma solidity ^0.8.20;
 
 import {BuckBasketEquityStorage} from "./BuckBasketEquityStorage.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
-import {IBasketSignals} from "./BasketSignals.sol";
+import {IBasketSignals} from "./IBasketSignals.sol";
+import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {PortfolioMath as PM} from "./PortfolioMath.sol";
 
 /// @notice Replacement components facet: Daily, Sync(i), Respond. One response
 ///         sells at most one leg and buys at most one, with a fresh credit mark
 ///         between the two. Idle TOKEN participates in the same allocation as
 ///         LP; waiting inventory never vetoes work in another leg.
-contract BuckBasketEquityResponse is BuckBasketEquityStorage {
+contract BuckBasketEquityResponse is BuckBasketEquityStorage, IBasketUpkeep {
     uint256 private constant NONE = type(uint256).max;
     int256 private constant TICK_LN_WAD = 99995000333297;
     struct Plan { uint256 sell; uint256 buy; uint256 sellCap; uint256 buyCap; bool pairOnly; }

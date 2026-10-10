@@ -31,8 +31,8 @@ def main(argv=None):
     cfg["basket"]["tilt"] = 0
     validate(cfg)
     code = fingerprint()
-    code["pair_basket"] = digest(dict(observer=load_artifact("BlockPairSignals"),
-        policy=load_artifact("PairRebalancePolicy"), response=load_artifact("PairBasketEquityResponse"),
+    code["pair_basket"] = digest(dict(observer=load_artifact("PairSignals"),
+        policy=load_artifact("PairRebalancePolicy"), response=load_artifact("BasketUpkeepFacet"),
         sources=[Path(__file__).read_text(), Path(__file__).with_name("block_pairs.py").read_text()], params=PARAMS))
     modes = {"legacy": "Legacy quorum · declared targets", "pair": "Graded TOKEN-pair response"}
     m = dict(schema=1, kind="pair-basket", status="running", requested_config=cfg,

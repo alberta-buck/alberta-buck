@@ -17,7 +17,7 @@ interface IMonetaryDirector {
 ///        on the COMMON mode.
 ///
 /// @notice Shared by BuckBasketOps (the pro-rata basket plus the desk, in one
-///         contract) and EquityDesk (the desk as its own credit holder beside
+///         contract) and BasketDesk (the desk as its own credit holder beside
 ///         the equity basket: its own contract, account, mark and wheel).  The
 ///         host supplies the three things the desk reads: a NAV to size its
 ///         bounds (`_deskNav`, and `_deskNavSafe` that never reverts) and each

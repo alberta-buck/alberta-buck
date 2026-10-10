@@ -11,7 +11,8 @@ import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
 import {bindCarryingPool}        from "../harness/CarryingPool.sol";
 import {Buck}                    from "../../src/Buck.sol";
 import {BuckCredit}              from "../../src/BuckCredit.sol";
-import {BuckBasketEquity, IEquityWheel} from "../../src/basket/BuckBasketEquity.sol";
+import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
+import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {BuckBasketUniswapV3}   from "../../src/basket/BuckBasketUniswapV3.sol";
@@ -194,7 +195,7 @@ contract BuckBasketEquityTest is Test {
 
     /// @dev Run the Daily component alone, as the wheel would.
     function _daily() internal virtual {
-        IEquityWheel(address(b)).wheelStep(0, 0);
+        IBasketUpkeep(address(b)).wheelStep(0, 0);
     }
 
     /// @dev The wheel: step every due component, the arbitrage re-pinning the
@@ -205,8 +206,8 @@ contract BuckBasketEquityTest is Test {
             for (uint8 kind = 0; kind < 5; kind++) {
                 uint256 slots = (kind == 1 || kind == 2) ? 3 : 1;
                 for (uint256 i = 0; i < slots; i++) {
-                    if (IEquityWheel(address(b)).wheelDue(kind, i)) {
-                        IEquityWheel(address(b)).wheelStep(kind, i);
+                    if (IBasketUpkeep(address(b)).wheelDue(kind, i)) {
+                        IBasketUpkeep(address(b)).wheelStep(kind, i);
                     }
                 }
             }

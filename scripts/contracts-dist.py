@@ -76,7 +76,7 @@ CONTRACTS = [
     "BuckBasketUniswapV3",     # its venue facet (V3 pools)
     "EquityTurnDirector",      # its turn director
     "BasketWheel",             # the work wheel a keeper turns
-    "EquityDesk",              # the monetary desk: its own credit holder
+    "BasketDesk",              # the monetary desk: its own credit holder
     "SimLP",                   # simulation liquidity helper
     "MockERC20",               # test/sim token
     # The Notes pool and the adapters that give it its verifiers.

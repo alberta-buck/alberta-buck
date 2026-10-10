@@ -6,24 +6,10 @@ import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IBuckMintBurn}      from "./BuckBasketStorage.sol";
 import {IBuckHolder, IMarkedCredit, IBuckKSource} from "./BuckBasketEquityStorage.sol";
 import {MonetaryDesk}       from "./MonetaryDesk.sol";
-import {IMonetaryDirector}  from "./MonetaryDesk.sol";
+import {IBasketView}        from "./IBasketView.sol";
+import {IDeskPolicy}        from "./IDeskPolicy.sol";
 
-/// @notice What the desk reads from the equity basket it runs beside.
-interface IEquityBasketView {
-    function equity() external view returns (uint256);
-    function twapWindow() external view returns (uint32);
-    function constituentsLength() external view returns (uint256);
-    function constituents(uint256 i) external view returns (
-        address token, uint8 decimals, uint256 basketAmount, uint256 initialPriceInBuck,
-        uint24 feeTier, address pool, int24 tickLower, int24 tickUpper, bool buckIsToken0,
-        uint256 targetWeightBp, uint128 treasuryLiquidity);
-}
-
-interface IMonetaryExecutionGuard {
-    function executionAllowed(int32 effort) external view returns (bool);
-}
-
-/// @title EquityDesk -- the monetary desk as its own BUCK credit holder,
+/// @title BasketDesk -- the monetary desk as its own BUCK credit holder,
 ///        beside the equity basket.
 ///
 /// @notice The desk reuses MonetaryDesk's configuration and stabilizer views,
@@ -57,9 +43,9 @@ interface IMonetaryExecutionGuard {
 ///               mark or limit: they are two accounts
 ///           D3  relief on the desk's lien is the desk's, and melts its
 ///               outstanding issuance
-contract EquityDesk is MonetaryDesk {
+contract BasketDesk is MonetaryDesk {
 
-    IEquityBasketView public basket;
+    IBasketView public basket;
     IMarkedCredit     public credit;
     uint256           public creditId;
     bool              public creditLive;
@@ -81,7 +67,7 @@ contract EquityDesk is MonetaryDesk {
     constructor(address _buck, address _controller, address _basket, address _governance) {
         buck       = IBuckMintBurn(_buck);
         controller = IBuckKController(_controller);
-        basket     = IEquityBasketView(_basket);
+        basket     = IBasketView(_basket);
         governance = _governance;
     }
 
@@ -221,9 +207,9 @@ contract EquityDesk is MonetaryDesk {
         if (!op.enabled || turnoverRemaining == 0) revert MonetaryIdle();
         address dir = _monDir();
         if (dir == address(0)) revert DirectorUnset();
-        uint32 epoch = IMonetaryDirector(dir).epochNow();
+        uint32 epoch = IDeskPolicy(dir).epochNow();
         if (lastMonetaryEpoch == epoch + 1) revert StepAlreadyDone();
-        (int32 effort, bool outright) = IMonetaryDirector(dir).monetaryEffort();
+        (int32 effort, bool outright) = IDeskPolicy(dir).monetaryEffort();
         if (effort == 0) revert NoAdvice();
         uint256 nav = _deskNav();
         uint256 size = nav * uint256(effort < 0 ? -int256(effort) : int256(effort)) / 10000;
@@ -258,7 +244,7 @@ contract EquityDesk is MonetaryDesk {
         uint256 cost = _trade(selling, size, op);
         if (cost == 0) revert MonetaryIdle();
         if (executionGuard != address(0)
-            && !IMonetaryExecutionGuard(executionGuard).executionAllowed(effort)) revert MonetaryBound();
+            && !IDeskPolicy(executionGuard).executionAllowed(effort)) revert MonetaryBound();
         turnoverRemaining -= cost;
         _syncAccount();
         _mark();

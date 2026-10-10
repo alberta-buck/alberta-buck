@@ -1,35 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {IEquityBasketView} from "./EquityDesk.sol";
+import {IBasketView} from "./IBasketView.sol";
+import {IBasketSignals} from "./IBasketSignals.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 
-interface IBasketSignals {
-    function observe() external;
-    function fresh() external view returns (bool);
-    function isDue() external view returns (bool);
-    function lastDay() external view returns (uint64);
-    function lastSampleAt() external view returns (uint64);
-    function rawValue() external view returns (int256);
-    function excursion(uint256 i) external view returns (int256);
-    function votes(uint256 i) external view returns (uint256);
-    function turned(uint256 i) external view returns (bool);
-    function running(uint256 i, int256 side) external view returns (bool);
-}
-
-interface ISignalGovernance {
-    function governance() external view returns (address);
-}
-
-/// @notice Price-only observation service: a fast validated raw reference and
-///         daily common/differential EMA ladders. No positions, targets or K.
-///         Each publication is one coherent all-pool observation. A missing
-///         pool invalidates the publication. Historical filter levels are
-///         supplied explicitly at bootstrap, never inferred from a first
-///         live price. Gaps preserve levels and discard velocity evidence.
-contract BasketSignals is IBasketSignals {
-    IEquityBasketView public immutable basket;
+/// @notice The parity reference: a fast validated raw value of the reference
+///         basket in BUCKs. No positions, targets or K. Each publication is
+///         one coherent all-pool observation; a missing pool invalidates it.
+///
+///         It still carries the daily common/differential EMA ladders, which
+///         only the inherited response plan reads and which retire with it.
+///         Their historical levels are supplied explicitly at bootstrap, never
+///         inferred from a first live price. Gaps preserve levels and discard
+///         velocity evidence.
+contract BasketReference is IBasketSignals {
+    IBasketView public immutable basket;
     uint32 public immutable sampleInterval;
     uint32 public immutable maxAge;
     uint16 public immutable maxDeviationBp;
@@ -61,7 +48,7 @@ contract BasketSignals is IBasketSignals {
         require(basket_ != address(0) && interval_ > 0 && interval_ <= 1 days
                 && maxAge_ >= interval_ && maxAge_ <= 1 days
                 && deviationBp_ > 0 && deviationBp_ <= 1000, "signal params");
-        basket = IEquityBasketView(basket_);
+        basket = IBasketView(basket_);
         sampleInterval = interval_;
         maxAge = maxAge_;
         maxDeviationBp = deviationBp_;
@@ -89,7 +76,7 @@ contract BasketSignals is IBasketSignals {
         uint32 samples,
         bytes32 digest
     ) external {
-        if (msg.sender != ISignalGovernance(address(basket)).governance()) revert NotGovernance();
+        if (msg.sender != basket.governance()) revert NotGovernance();
         uint256 n = basket.constituentsLength();
         if (historyInitialized || lastSampleAt != 0 || n == 0 || levels.length != n
             || samples == 0 || digest == bytes32(0) || throughDay >= block.timestamp / 1 days)

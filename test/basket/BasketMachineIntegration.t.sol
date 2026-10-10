@@ -1,29 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {EquityDeskTest} from "./EquityDesk.t.sol";
+import {BasketDeskTest} from "./BasketDesk.t.sol";
 import {BuckBasketEquityResponse} from "../../src/basket/BuckBasketEquityResponse.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
-import {ValidatedBasketVenue} from "../../src/basket/ValidatedBasketVenue.sol";
-import {BasketSignals} from "../../src/basket/BasketSignals.sol";
-import {OuterBandMonetaryDirector} from "../../src/basket/OuterBandMonetaryDirector.sol";
+import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
+import {BasketReference} from "../../src/basket/BasketReference.sol";
+import {OuterBandDeskPolicy} from "../../src/basket/OuterBandDeskPolicy.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 import {bindCarryingPool} from "../harness/CarryingPool.sol";
 import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
 
-contract BasketMachineIntegrationTest is EquityDeskTest {
-    BasketSignals internal service;
-    OuterBandMonetaryDirector internal policy;
+contract BasketMachineIntegrationTest is BasketDeskTest {
+    BasketReference internal service;
+    OuterBandDeskPolicy internal policy;
     BasketMachineWheel internal machine;
 
     function _machine() internal {
-        service = new BasketSignals(address(b), 1800, 3600, 500);
-        policy = new OuterBandMonetaryDirector(address(service), 300, 200, 2500, 40, 3);
+        service = new BasketReference(address(b), 1800, 3600, 500);
+        policy = new OuterBandDeskPolicy(address(service), 300, 200, 2500, 40, 3);
         machine = new BasketMachineWheel(address(buck), address(0xDEAD), GOV, 0, 0);
         bindCarryingPool(reg, address(machine));
         vm.startPrank(GOV);
-        b.setVenue(address(new ValidatedBasketVenue()));
+        b.setVenue(address(new BasketVenueFacet()));
         b.setEquityWheel(address(new BuckBasketEquityResponse()));
         b.setResponse(address(service), BuckBasketEquityStorage.ResponseParams(3000, 1800, 1e18));
         (bool ok,) = address(b).call(abi.encodeWithSignature("setWheel(address)", address(machine)));

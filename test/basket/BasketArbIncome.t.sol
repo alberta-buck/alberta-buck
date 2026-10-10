@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityTest, IEquityWheel} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityTest, IBasketUpkeep} from "./BuckBasketEquity.t.sol";
 
 contract BasketArbIncomeTest is BuckBasketEquityTest {
     function test_arbIncomeAuthorityCannotSpendOrPerformUpkeep() public {
@@ -17,7 +17,7 @@ contract BasketArbIncomeTest is BuckBasketEquityTest {
         buck.approve(address(b), 100 * B);
         b.creditTreasury(100 * B);
         vm.expectRevert();
-        IEquityWheel(address(b)).wheelStep(0, 0);
+        IBasketUpkeep(address(b)).wheelStep(0, 0);
         vm.stopPrank();
         assertApproxEqAbs(b.equity() - beforeEquity, 100 * B, 2);
         assertApproxEqAbs(beforeLien - b.lien(), 100 * B, 2);

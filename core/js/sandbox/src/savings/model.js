@@ -74,7 +74,7 @@ export function row(f) {
     hold: f.eq_hold ?? null,
     lean: f.eq_lean ?? null, w: f.eq_w ?? null, decl: f.eq_decl ?? null,
     eqSync: bk(f.wh_eq_sync), eqDeploy: bk(f.wh_eq_deploy), eqFund: bk(f.wh_eq_fund), eqTrim: bk(f.wh_eq_trim),
-    // The monetary desk (the EquityDesk): BUCK moved per quadrant, its book,
+    // The monetary desk (the BasketDesk): BUCK moved per quadrant, its book,
     // its net value against its founding grant held, and its signal --
     // BUCK's premium over its basket, % (the common mode, sign flipped).
     dkQ: [1, 2, 3, 4].map((q) => bk(f[`dk_q${q}`]) ?? 0),

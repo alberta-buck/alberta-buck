@@ -52,7 +52,7 @@ def _wp13_frame(d) -> dict:
          "pid_up": None, "pid_ui": None, "pid_ud": None,
          "pid_q": None, "pid_qi": None, "pid_qd": None}
     if getattr(d, "basket_impl", "") in ("ops", "equity-ops"):
-        # The desk: the ops shell, or the EquityDesk beside an equity basket.
+        # The desk: the ops shell, or the BasketDesk beside an equity basket.
         dk = d.desk if getattr(d, "desk", None) is not None else d.basket
         try:
             f["sh_held"] = int(dk.functions.monetaryBuckHeld().call())
@@ -118,7 +118,7 @@ def _eqsave_frame(d, ctr) -> dict:
       eq_hold   the basket's day-0 declared weights, held: an index from 1
       eq_decl   declared weights, bp        eq_w     actual weights, bp
       eq_lean   the director's leaned targets, bp (None without a director)
-      desk_nav  the EquityDesk's net value; desk_hold its founding grant,
+      desk_nav  the BasketDesk's net value; desk_hold its founding grant,
                 held (BUCK base units)
       ut_nw / ut_hold  the undertakings' book, marked, and their opening
                 TOKEN book held (BUCK base units; from UndertakingAgent)

@@ -187,7 +187,7 @@ class Deployment:
     director_impl: str = "pairs"  # "pairs" (default) | "vrate"
     controller_impl: str = "direct"   # "direct" (default) | "shadow"  (WP-3a)
     observer: Any = None          # ShadowObserver (shadow controller on ops only)
-    desk: Any = None              # EquityDesk ("equity-ops": the desk, its own credit holder)
+    desk: Any = None              # BasketDesk ("equity-ops": the desk, its own credit holder)
     equity_director: Any = None   # EquityTurnDirector (equity baskets)
     desk_grant: Any = None        # the desk's founding grant, TOKEN base units per constituent
     wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
@@ -330,7 +330,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # lien, BUCK payouts, a wallet its work wheel places.  Two facets:
         # the venue and the components; the shell emits the pro-rata
         # shells' Deposited / Redeemed, so the topics are theirs.
-        # "equity-ops" adds the monetary desk BESIDE the basket (EquityDesk,
+        # "equity-ops" adds the monetary desk BESIDE the basket (BasketDesk,
         # below): the basket itself is the same shell either way.
         name = "BuckBasketEquity"
         basket = chain.deploy(name, *ctor)
@@ -367,13 +367,13 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # venue facet.  Nothing it holds or owes enters the basket's mark.
         # Its constituents are mirrored, and its policy and founding grant
         # set, once the basket has its pools (the desk block below).
-        desk = chain.deploy("EquityDesk", buck.address, kctrl.address,
+        desk = chain.deploy("BasketDesk", buck.address, kctrl.address,
                             basket.address, gov)
         idmod.bind_as_operator(chain, reg, desk.address, True, False, sender=deployer)
         chain.send(desk.functions.setVenue(venue.address), sender=gov)
         chain.send(desk.functions.openCredit(credit.address, 10**23), sender=gov)
         desk_union, seen = [], set()
-        for art in ("EquityDesk", "BuckBasketUniswapV3"):
+        for art in ("BasketDesk", "BuckBasketUniswapV3"):
             abi, _ = load_artifact(art)
             for e in abi:
                 key = (e.get("type"), e.get("name"),
@@ -401,7 +401,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     if controller_impl == "shadow" and basket_impl in ("ops", "equity-ops"):
         shadow_lambda = int(float(os.environ.get("SIM_SHADOW_LAMBDA", "0")) * E18)
         shadow_gamma = int(float(os.environ.get("SIM_SHADOW_GAMMA", "0")) * E18)
-        # The desk is the stabilizer: the ops shell itself, or the EquityDesk
+        # The desk is the stabilizer: the ops shell itself, or the BasketDesk
         # beside an equity basket (its venue answers bvib from the same pools).
         stab = desk if desk is not None else basket
         observer = chain.deploy("ShadowObserver", stab.address, gov)
@@ -811,7 +811,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             leg_bp  = int(os.environ.get("SIM_OPS_LEG_BP", "40"))
             pos_bp  = int(os.environ.get("SIM_OPS_POSITION_BP", "1000"))
             out_bp  = int(os.environ.get("SIM_OPS_OUTRIGHT_BP", "1000"))
-            # The desk: the ops shell itself, or the EquityDesk beside an
+            # The desk: the ops shell itself, or the BasketDesk beside an
             # equity basket, which first mirrors the basket's pools.
             mon = desk if desk is not None else basket
             if desk is not None:

@@ -102,7 +102,7 @@ class World:
         self.drive(baseline_prices(cfg, 0), replay=True)
         self.warp(int(d.w3.eth.get_block("latest")["timestamp"]) + 601)
         self.reference_amounts = [int(d.basket.functions.constituents(i).call()[2]) for i in range(3)]
-        venue = self.chain.deploy("ValidatedBasketVenue")
+        venue = self.chain.deploy("BasketVenueFacet")
         self.chain.send(d.basket.functions.setVenue(venue.address), sender=d.gov)
         self.chain.send(d.desk.functions.setVenue(venue.address), sender=d.gov)
         for i, token in enumerate(d.tokens):
@@ -111,7 +111,7 @@ class World:
             self.execute(d.simlp, d.basket, "depositToken", [token.address, amount, 0])
         warm = bool(cfg["bootstrap"]["basket_warmup_days"])
         mon = cfg["monitor"] if self.flags.get("monitor") or warm else DEFAULTS["monitor"]
-        self.signals = self.chain.deploy("BasketSignals", d.basket.address,
+        self.signals = self.chain.deploy("BasketReference", d.basket.address,
                                         mon["interval"], mon["max_age"], mon["deviation_bp"])
         response = self.chain.deploy("BuckBasketEquityResponse")
         self.chain.send(d.basket.functions.setEquityWheel(response.address), sender=d.gov)
@@ -135,7 +135,7 @@ class World:
         # private inventory when a stage actually uses a different grant.
         if desk["capital_per_token"] != DEFAULTS["desk"]["capital_per_token"]:
             raise ValueError("capital_per_token is fixed at 400000 for matched initial books; vary budget/floor instead")
-        self.policy = self.chain.deploy("OuterBandMonetaryDirector", self.signals.address,
+        self.policy = self.chain.deploy("OuterBandDeskPolicy", self.signals.address,
             desk["enter_bp"], desk["release_bp"], desk["gain_bp"], desk["cap_bp"], desk["persist_days"])
         self.chain.send(d.desk.functions.setMonetaryDirector(self.policy.address), sender=d.gov)
         self.chain.send(d.desk.functions.setExecutionGuard(self.policy.address), sender=d.gov)

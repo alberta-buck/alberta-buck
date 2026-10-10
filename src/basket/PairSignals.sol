@@ -3,13 +3,14 @@ pragma solidity ^0.8.20;
 
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {IPairSignals} from "./IPairSignals.sol";
 
 /// @notice A price-only observer, callable directly or through SampleKind.
 /// One call observes all registered routes; it never trades or values a book.
 /// Levels are whole-token log prices in fractional ticks (1e18 per tick),
 /// rates are fractional ticks/second. Error allowances are empirical, not
 /// statistical confidence bounds. Configuration is immutable for continuity.
-contract BlockPairSignals {
+contract PairSignals is IPairSignals {
     int256 private constant WAD = 1e18;
     // ln(10) / ln(1.0001), rounded to 18 decimal places.
     int256 private constant TICKS_PER_DECIMAL = 23027002203299704104435;
@@ -49,16 +50,6 @@ contract BlockPairSignals {
         uint32 samples;
         bool readable;
         uint24 elapsed2; // Twice the last midpoint interval; entire Venue fits one slot.
-    }
-    struct Pair {
-        int256 level;
-        int256 rate;
-        int256 low;
-        int256 high;
-        uint256 priceError;
-        uint256 levelSpread;
-        uint256 rateSpread;
-        uint256 readyMask;
     }
 
     // Venue-major flat arrays: q * tokenCount + i, or q * pairs + pairIndex.
