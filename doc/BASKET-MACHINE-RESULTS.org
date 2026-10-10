@@ -75,6 +75,10 @@ Lowering it to 1 point doubles the gain on realistic prices. It also doubles the
 TOKEN never comes back, and makes five to seven times as many trades. With gas charged, some of
 those small trades would not pay. So this is a real choice, not a free improvement.
 
+A fixed line is the wrong shape for this. A share that is 1.9 points off for a month never
+acts, and one that touches 2.1 for an hour does. The plan is to replace the line with urgency
+that builds up: a big gap acts soon, a small one acts if it lasts. See [[file:BASKET-MACHINE-TASKS.org][the task list]].
+
 * Realistic prices
 
 The idea behind the BUCK is that basic commodities follow inflation over the long run, each
@@ -118,10 +122,44 @@ Those BUCKs have to come from somewhere. Clean cycles, 120 days:
 With someone issuing BUCKs, all is well. Without, the BUCK becomes 6% to 8% too expensive and K
 runs to its limit. We need to decide whether the basket should do this at all.
 
+* Gas
+
+Nothing above charges gas. Here is what the work costs, measured over a run with everything
+switched on ([[file:review/wheel-gas.py][wheel-gas.py]]). The lab turns the wheel four times a day.
+
+| Call | Gas each | Gas a day |
+|------+----------+-----------|
+| Wheel turn, nothing traded | 900,000 | 3.1 million |
+| Wheel turn with a transfer | 1,800,000 | 1.1 million |
+| Price observation | 160,000 | 0.6 million |
+| Arbitrage turn | 460,000 | 9.4 million |
+
+The basket's own upkeep is about 4.8 million gas a day. Arbitrage uses twice that, but it pays
+its own way out of what it captures.
+
+What this costs depends on the chain. At 1 gwei, 4.8 million gas is 0.0048 ETH a day, or 0.58 ETH
+over a run. At 10 gwei it is ten times that. On a rollup it is close to nothing.
+
+Gas does not grow with the basket. The gain does. So there is a size below which upkeep costs
+more than rebalancing earns, and that size is much smaller on a rollup than on mainnet. For
+this one-million basket the gain was 36,808 BUCKs on clean cycles and 6,915 on commodity-like
+prices. Price the gas for your chain and compare.
+
+Two things follow. A transfer adds about 900,000 gas to a turn, which sets the smallest trade
+worth making. And a turn that trades nothing still costs 900,000, which is too much: it
+re-reads every pool and re-asks the policy about every pair.
+
+The wheel already knows how to pay its callers. It holds a reserve of BUCKs, fed by a slice of
+the basket's income, and pays each caller who does real work a fixed share of what is in it.
+If nobody calls, the reserve grows until someone does. If everybody calls, each gets less. The
+price finds itself, and the basket never needs to know the gas price or the price of ETH. The
+lab has this switched off. Switching it on, so that every result is net of what callers were
+paid, is the next thing to do.
+
 * What we do not know yet
 
 - How the old basket and desk compare on the same tests.
-- What gas does to the results.
+- What the results look like net of paying the callers.
 - Whether one seed and one bad case are representative.
 - How the machine behaves at real speed. The cycles are far faster than real commodities.
 

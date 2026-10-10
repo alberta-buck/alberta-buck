@@ -22,6 +22,58 @@ when its step is merged, and delete this file when the list is empty.
 
 Nothing below has been started.
 
+* 0. Two rules settled on 2026-10-10
+
+These came out of the results and go in before the consolidation, because both change what the
+lab measures.
+
+** Pay the callers, and measure everything net of it
+
+Gas is modelled by paying for it. From the basket's side an operation is free so long as the
+slice it gives the wheel covers the callers and still leaves a gain.
+
+- [ ] Record gas per wheel and per kind in each frame. =doc/review/wheel-gas.py= does it from
+  outside for now: upkeep is about 4.8 million gas a day at four turns a day, a turn that
+  trades nothing costs 900,000, and a transfer adds 900,000.
+- [ ] Switch the wheel's reserve on in the lab. Fund it with a slice of the basket's income, set
+  the share paid per working turn, and give the lab a keeper that calls only when the pay
+  covers twice its gas at a stated gas price and ETH price. Report every result net of the
+  funding.
+- [ ] Decide the slice. It should be a fixed share of income with a cap, as the wheel paper has
+  it, so the basket's cost is known and the reserve is a gas budget and not a second yield.
+- [ ] Do not pay "the last turn in the block". Pay each turn that does work, as the wheel does
+  now. Paying only the last one makes callers wait for each other. One call can already do all
+  the work that is due.
+- [ ] Make the idle turn cheap. Most of its 900,000 gas is re-reading pools and asking the
+  policy about every ordered pair. Cache within the response, and skip the policy when no share
+  is urgent.
+- [ ] Tie the smallest transfer to what a turn is paid, in place of the fixed 100 ppm grain.
+
+** Replace the allocation band with urgency that builds
+
+Today a constituent may be rebalanced only when its share is more than 2 points off target. On
+commodity-like prices that is 4% of the time. The replacement, per constituent:
+
+#+begin_example
+urgency  <-  max(0, urgency + (|gap| - slack) x days elapsed)      reset when the gap changes side
+may be rebalanced when urgency >= patience
+#+end_example
+
+=gap= is in points of the book. =patience= is in point-days and is the one knob: with a slack of
+a quarter point and a patience of two point-days, a gap of 2.25 points qualifies in a day, 1.25
+in two, 0.75 in four, and a quarter point never does. This is a CUSUM, the cumulative-sum test
+used to catch a small shift that persists; the same thing is called integrate-and-fire in
+electronics and send-on-area in event-triggered control, against the send-on-delta of a fixed
+band. It decides only whether a gap may be worked. The pair policy still decides when, and the
+gap still sets how much.
+
+- [ ] Keep the accumulators in the policy, which already holds per-TOKEN state, so the shell's
+  storage is untouched. The upkeep facet reports its gaps once per response.
+- [ ] Trial it as arms of the sizing campaign at patience 1, 2 and 4 point-days against the 2-
+  and 1-point bands. Judge on gain per transfer, not gain alone.
+- [ ] Offer patience as a selector in the interactive lab. This replaces the idea of a 1-point
+  against 2-point selector.
+
 * 1. Consolidate the contracts
 
 One change, because the pieces touch the same files and each one invalidates every saved run.
@@ -88,10 +140,8 @@ Each is argued in [[file:BASKET-MACHINE-RESULTS.org][the results]].
   At the lab's sizing the three wallets are empty in about 90 days and the basket is 13% net
   BUCK. Where no one supplies that BUCK, K runs to its rail. Either accept a fully paired
   book as the resting state, or make a wallet-sourced sale buy into the wallet.
-- [ ] The allocation band, with caller gas charged. At 2 points it is open 4% of the time on
-  commodity-like prices; 1 point doubles that harvest and the cost of a repricing that never
-  returns. A band on the TOKEN held, not on weights that liquidity mutes, would not depend on
-  how much of the book is paired.
+- [ ] Measure the gap on the TOKEN held, not on weights that liquidity mutes, so the urgency
+  rule above does not depend on how much of the book is paired.
 - [ ] Whether to count owned arbitrage at all before per-block cadence and a competing
   arbitrageur are in the lab. Today it measures the feed's step.
 - [ ] Lead the tracker: the release starts about 1.7 days after a turn, the filter's own lag.
@@ -113,7 +163,10 @@ After step 2, so the surviving campaigns run on the final wiring.
   day the pools see a decade thirty times too fast and the buyer and seller are spent by day
   120.
 - [ ] More than one adverse shape and more than one seed.
-- [ ] Charge caller gas and an unwinding cost in the reports.
+- [ ] Charge an unwinding cost in the reports.
+- [ ] Align assignments at column 32 in the Python added on this branch (=commodities.py= is in
+  the lab's fingerprint, so do it with a change that already recomputes the runs).
+- [ ] Use "the BUCK" and "BUCKs" throughout the design document and this list.
 
 * 6. Release, then removal
 
