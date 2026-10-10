@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import shutil
 
+from .book import recorded, reference_value
 from .cli import atomic_json
 from .render import EXPLANATIONS
 from .event_view import MARKER_NOTE, execution_counts, execution_log, price_markers
@@ -21,6 +22,8 @@ def basket_performance(result):
     initial BUCK and USD value, before the LP prelude and live perturbations.
     Dollar marks convert net equity at the sample's BUCK/USDC spot price;
     USDC is the simulation's dollar reference. return_pct remains in BUCK.
+    Where the book itself was recorded, the reference mark values its TOKEN
+    at the external feed and its net BUCK at the reference basket's cost.
     """
     initial = result["config"]["market"]["basket_equity_usd"]
     end = result["frames"][-1]
@@ -28,13 +31,18 @@ def basket_performance(result):
     final_usd = final * end["buck_usdc"]
     income = end["basket"].get("arb_income", {})
     arb_buck, arb_usd = income.get("net_buck", 0.), income.get("net_usd", 0.)
-    return dict(initial_buck=initial, final_net_buck=final,
+    performance = dict(initial_buck=initial, final_net_buck=final,
                 gain_buck=final - initial, return_pct=100 * (final / initial - 1),
                 initial_usd=initial, final_net_usd=final_usd,
                 gain_usd=final_usd - initial, return_usd_pct=100 * (final_usd / initial - 1),
                 arb_beneficiary=income.get("beneficiary", "external"),
                 arb_income_buck=arb_buck, arb_income_usd=arb_usd,
                 other_gain_buck=final-initial-arb_buck, other_gain_usd=final_usd-initial-arb_usd)
+    if recorded(end):
+        at_reference = reference_value(end)
+        performance.update(final_net_reference=at_reference, gain_reference=at_reference - initial,
+                           return_reference_pct=100 * (at_reference / initial - 1))
+    return performance
 
 
 def plot_data(result):
@@ -62,8 +70,12 @@ def plot_data(result):
             line(f"{name} · feed", color, lambda f: f["target_usd"][i] / base[i], "7 4"),
             line(f"{name} · USDC pool", color, lambda f: f["token_usdc"][i] / base[i], "2 4"),
         ])
+    trend_note = ""
+    if "inflation_usd" in frames[0]:
+        lines.append(line("USD inflation trend", "#87949c", lambda f: f["inflation_usd"], "6 4"))
+        trend_note = " Grey: the USD price level every TOKEN follows, each through its own lag."
     pane("price", "Token prices in dollars", "USD / baseline mean", lines,
-         "Solid: TOKEN/BUCK × BUCK/USDC. Dashed: external feed. Dotted: TOKEN/USDC spot. Overlapping lines mean the markets agree.")
+         "Solid: TOKEN/BUCK × BUCK/USDC. Dashed: external feed. Dotted: TOKEN/USDC spot. Overlapping lines mean the markets agree." + trend_note)
     panes[-1]["markers"] = price_markers(result)
     if panes[-1]["markers"]:
         panes[-1]["note"] += " " + MARKER_NOTE
@@ -141,16 +153,20 @@ def plot_data(result):
             "Allocation follows the replacement basket’s bounded Daily / Sync / Respond work. The vertical axis fits the visible allocations.")
         performance = basket_performance(result)
         initial = performance["initial_buck"]
+        booked = recorded(frames[0])
+        reference_note = (" The reference mark revalues the recorded book itself: TOKEN at the external feed and net BUCK at the reference basket’s USD cost. It does not move when this stage’s own BUCK/USDC price drifts." if booked else "")
         pane("basket-value", "Basket net value in BUCK and USD", "BUCK / USD", [
             line("Net value · BUCK", "#158067", lambda f: f["basket"]["equity"]),
             line("Net value · USD", "#7653ab", lambda f: f["basket"]["equity"] * f["buck_usdc"], "7 4"),
             line("Initial investment · BUCK / USD", "#87949c", lambda f: initial, "6 4"),
-        ], f"Initial contribution: {initial:,.0f} BUCK = ${initial:,.0f} at bootstrap parity before the LP prelude. Net BUCK value = LP and idle TOKEN value + held BUCK − issued BUCK liability + accrued relief, using the contract’s TWAP equity mark. The liability is already deducted. USD value multiplies this net mark by each sample’s BUCK/USDC spot price, treating USDC as the dollar reference. The initial investment stays fixed in each currency.")
+            *([line("Net value · at reference", "#b86107", reference_value, "2 3")] if booked else []),
+        ], f"Initial contribution: {initial:,.0f} BUCK = ${initial:,.0f} at bootstrap parity before the LP prelude. Net BUCK value = LP and idle TOKEN value + held BUCK − issued BUCK liability + accrued relief, using the contract’s TWAP equity mark. The liability is already deducted. USD value multiplies this net mark by each sample’s BUCK/USDC spot price, treating USDC as the dollar reference. The initial investment stays fixed in each currency." + reference_note)
         pane("basket-return", "Basket return on initial investment", "Percent", [
             line("Return · BUCK", "#158067", lambda f: 100 * (f["basket"]["equity"] / initial - 1)),
             line("Return · USD", "#7653ab", lambda f: 100 * (f["basket"]["equity"] * f["buck_usdc"] / performance["initial_usd"] - 1), "7 4"),
             line("Break-even", "#87949c", lambda f: 0., "6 4"),
-        ], "Return = (net value / original investment − 1) × 100% in the same currency. An appreciating BUCK can produce a negative BUCK return alongside a positive USD return. Both include the LP prelude and live run, inventory repricing, fees and accrued relief; neither isolates rebalancing profit. These are marked returns, excluding caller gas and liquidation costs.")
+            *([line("Return · at reference", "#b86107", lambda f: 100 * (reference_value(f) / initial - 1), "2 3")] if booked else []),
+        ], "Return = (net value / original investment − 1) × 100% in the same currency. An appreciating BUCK can produce a negative BUCK return alongside a positive USD return. Both include the LP prelude and live run, inventory repricing, fees and accrued relief; neither isolates rebalancing profit. These are marked returns, excluding caller gas and liquidation costs." + reference_note)
         if owned_arb:
             for currency in ("buck", "usd"):
                 def total_return(f, c=currency):
@@ -166,7 +182,7 @@ def plot_data(result):
         comparison = result.get("research_comparison")
         if comparison:
             by_day = {f["day"]:f for f in comparison["frames"]}
-            for currency in ("buck", "usd"):
+            for currency in [c for c in ("buck", "usd", "reference") if c in comparison["frames"][0]]:
                 pane("basket-effects-"+currency, "Matched strategy effects · "+currency.upper(), "Percentage points of initial investment", [
                     line(label, color, lambda f,k=key,c=currency: 100*by_day[f["day"]][c][k]/comparison["initial"],dash)
                     for key,label,color,dash in (("baseline","Maintenance baseline", "#87949c","3 3"),
@@ -286,6 +302,8 @@ def render(root):
             prior = group_limits.get(pane["id"], (lo, hi))
             group_limits[pane["id"]] = [min(lo, prior[0]), max(hi, prior[1])]
     public = {k: manifest[k] for k in ("schema", "status", "axes", "stages", "cases", "unique_runs", "visible_cases", "implementation")}
+    if "kind" in manifest:
+        public["kind"] = manifest["kind"]   # which campaign a page shows; its browser check reads this
     public.update(entries=entries, limits=limits, explanations=manifest.get("explanations", EXPLANATIONS),
                   days=manifest["requested_config"]["days"],
                   seed=manifest["requested_config"]["seed"],

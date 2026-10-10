@@ -42,6 +42,11 @@ DEFAULTS = {
     "supply": {"credit_face_buck": 1_000_000, "max_per_day": 25_000,
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     "basket": {"leash_bp": 3000, "tilt": 1., "weight_band_bp": 200},
+    # PairRebalancePolicy.Sizing: speeds are log returns/day, rates gap fractions/day.
+    # These are the first experiment's values; closure_rate=0 leaves closure to speed alone,
+    # and release_speed=0 would scale the braking release by the rate's own allowance.
+    "pair": {"release_speed": .002, "release_rate": .1, "closure_gain": 20, "closure_rate": 0.,
+             "max_rate": 1., "impact_share": 1.},
     "profiles": [{"name": "three-phase", "perturbations": []}],
 }
 
@@ -95,6 +100,12 @@ def validate(cfg: dict) -> None:
     band = cfg["basket"]["weight_band_bp"]
     if not isinstance(band, int) or not 0 <= band <= 1000:
         raise ValueError("basket.weight_band_bp must be an integer in 0..1000")
+    pair = cfg["pair"]
+    if (not isinstance(pair["closure_gain"], int) or not 0 <= pair["closure_gain"] <= 10_000
+            or any(not math.isfinite(pair[k]) or not 0 <= pair[k] <= 18 for k in
+                   ("release_speed", "release_rate", "closure_rate", "max_rate", "impact_share"))
+            or pair["max_rate"] <= 0 or pair["impact_share"] > 1):
+        raise ValueError("invalid pair sizing")
     for name in ("demand", "supply"):
         a = cfg[name]
         if not 0 <= a["rate_at_par_per_day"] <= a["max_per_day"] or not a["backoff_bp"] > 0:
@@ -104,6 +115,12 @@ def validate(cfg: dict) -> None:
         raise ValueError("profile names must be nonempty and unique")
     if any(not n or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for c in n) for n in names):
         raise ValueError("profile names use lowercase letters, digits, hyphens and underscores")
+
+
+def pair_sizing(pair: dict) -> tuple:
+    """The PairRebalancePolicy.Sizing constructor argument."""
+    return (round(pair["release_speed"] * 1e18), round(pair["release_rate"] * 1e18), pair["closure_gain"],
+            round(pair["closure_rate"] * 1e18), round(pair["max_rate"] * 1e18), round(pair["impact_share"] * 1e18))
 
 
 def digest(value) -> str:
@@ -117,11 +134,19 @@ def baseline_prices(cfg: dict, day: float) -> list[float]:
         for i, base in enumerate(cfg["feed"]["base"])]
 
 
+def own_path(profile: dict | None) -> bool:
+    """A profile that supplies its whole price path takes no sine, walk or perturbation."""
+    return bool(profile) and ("history" in profile or "commodities" in profile)
+
+
 def history_rows(cfg: dict, profile: dict | None = None) -> list[dict]:
     """Strictly past history; synthetic disturbances and live endpoint pins stay out."""
     if profile and "history" in profile:
         from .historical import historical_inputs
         return historical_inputs(cfg, profile)["history"]
+    if profile and "commodities" in profile:
+        from .commodities import commodity_inputs
+        return commodity_inputs(cfg, profile)["history"]
     return [{"day": day, "prices": baseline_prices(cfg, day)}
             for day in range(-cfg["bootstrap"]["history_days"], 0)]
 
@@ -138,6 +163,11 @@ def feed_rows(cfg: dict, profile: dict) -> list[dict]:
         if profile.get("perturbations") or cfg["feed"]["walk_amplification"]:
             raise ValueError("pinned historical comparison currently requires no extra disturbances")
         return historical_inputs(cfg, profile)["rows"]
+    if "commodities" in profile:
+        from .commodities import commodity_inputs
+        if profile.get("perturbations") or cfg["feed"]["walk_amplification"]:
+            raise ValueError("the commodity profile is a complete path and takes no extra disturbances")
+        return commodity_inputs(cfg, profile)["rows"]
     # Independent Brownian log-price walks, with no drift in log space. The
     # seed excludes stage/profile/amplification, pairing all comparisons.
     # No day-zero shock; no walk enters the separate bootstrap history.
@@ -203,6 +233,8 @@ def dependencies(cfg: dict, profile: dict, stage: str) -> dict:
     for key in ("monitor", "desk", "demand", "supply", "basket"):
         if flags.get(key):
             resolved[key] = cfg[key]
+    if flags.get("basket"):
+        resolved["pair"] = cfg["pair"]
     if flags.get("monitor"):
         resolved["bootstrap"] = cfg["bootstrap"]
     if cfg["bootstrap"]["basket_warmup_days"]:

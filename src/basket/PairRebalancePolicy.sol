@@ -15,11 +15,25 @@ contract PairRebalancePolicy {
     uint256 public immutable count;
     int128[] public referenceLevels; // Accepted historical whole-TOKEN log-price means, fractional ticks.
     int256 public constant MIN_SEPARATION = 100e18; // ~1%: explicit first-experiment spread floor.
-    // Fixed first-experiment parameters, in log returns per day / fractions.
-    uint256 public constant RELEASE_SPEED = 2e15; // 20 log bp/day
-    uint256 public constant RELEASE_RATE = 1e17; // at most 10% of gap/day before closure
-    uint256 public constant CLOSURE_GAIN = 20;
     uint256 public constant IMPACT_MEMORY = 2 days;
+
+    /// @notice How much of an eligible allocation gap a separated pair releases.
+    /// Speeds are log returns per day and rates are gap fractions per day, both
+    /// 1e18. Fixed at deployment: a different sizing is a different policy.
+    struct Sizing {
+        uint64 releaseSpeed; // outward speed that halves the braking release; 0: the rate's own allowance
+        uint64 releaseRate;  // the most a braking ratio releases; a quiet, stalled one a fifth of it
+        uint64 closureGain;  // release per unit of closing speed beyond its allowance (a plain multiple)
+        uint64 closureRate;  // release at full closure confidence: closing at twice its allowance
+        uint64 maxRate;      // ceiling on the sum
+        uint64 impactShare;  // share of the basket's own measured impact kept as rate allowance
+    }
+    uint256 public immutable releaseSpeed;
+    uint256 public immutable releaseRate;
+    uint256 public immutable closureGain;
+    uint256 public immutable closureRate;
+    uint256 public immutable maxRate;
+    uint256 public immutable impactShare;
 
     struct Motion { int128 rate; int128 change; }
     struct Impact { uint128 magnitude; uint64 at; }
@@ -31,8 +45,12 @@ contract PairRebalancePolicy {
     uint64 public lastExecutionAt;
     event OwnImpact(uint256 indexed token, int256 tickChange);
 
-    constructor(address signals_, address basket_, int128[] memory reference_) {
+    constructor(address signals_, address basket_, int128[] memory reference_, Sizing memory sizing_) {
         signals = BlockPairSignals(signals_); basket = basket_;
+        require(sizing_.maxRate > 0 && sizing_.impactShare <= 1e18, "sizing");
+        releaseSpeed = sizing_.releaseSpeed; releaseRate = sizing_.releaseRate;
+        closureGain = sizing_.closureGain; closureRate = sizing_.closureRate;
+        maxRate = sizing_.maxRate; impactShare = sizing_.impactShare;
         lastExecutionAt = uint64(block.timestamp);
         uint256 n = signals.tokenCount(); count = n;
         require(reference_.length == n, "reference size");
@@ -129,19 +147,34 @@ contract PairRebalancePolicy {
         if (!separated(a, b)) return 0;
         Motion memory m = motion[signals.pairIndex(a, b)];
         int256 change = a < b ? int256(m.change) : -int256(m.change);
-        int256 own = int256((remainingImpact(a) + remainingImpact(b)) / signals.responseTime());
+        int256 own = int256((remainingImpact(a) + remainingImpact(b)) * impactShare / uint256(WAD) / signals.responseTime());
         int256 low = p.low - own; int256 high = p.high + own;
+        uint256 floor = signals.rateFloor();
         uint256 uncertainty = uint256(p.rate - low > high - p.rate ? p.rate - low : high - p.rate);
-        uint256 braking = change < 0 ? uint256(-change) * uint256(WAD) / (uncertainty + signals.rateFloor()) : 0;
+        uint256 braking = change < 0 ? uint256(-change) * uint256(WAD) / (uncertainty + floor) : 0;
         if (braking > uint256(WAD)) braking = uint256(WAD);
         uint256 outward = p.rate > 0 ? uint256(p.rate * LN_TICK / WAD) * 86400 : 0;
-        uint256 release = RELEASE_SPEED * uint256(WAD) / (RELEASE_SPEED + outward);
+        // A fixed speed scale suits one kind of market. With none given, the
+        // observer's own allowance is the scale: an outward speed it cannot
+        // tell from zero is half released, whatever the pair's usual pace.
+        uint256 scale = releaseSpeed != 0 ? releaseSpeed
+            : (uncertainty + floor) * uint256(LN_TICK) / uint256(WAD) * 86400;
+        uint256 release = scale + outward == 0 ? uint256(WAD) : scale * uint256(WAD) / (scale + outward);
         // A stationary, quiet ratio can release a small gap fraction too.
-        if (p.rate >= -int256(uint256(signals.rateFloor())) && p.rate <= int256(uint256(signals.rateFloor())))
-            braking = uint256(WAD) / 5;
-        rateWad = RELEASE_RATE * release / uint256(WAD) * braking / uint256(WAD);
-        if (high < 0) rateWad += uint256(-high * LN_TICK / WAD) * 86400 * CLOSURE_GAIN;
-        if (rateWad > uint256(WAD)) rateWad = uint256(WAD); // one gap/day maximum
+        if (p.rate >= -int256(floor) && p.rate <= int256(floor)) braking = uint256(WAD) / 5;
+        rateWad = releaseRate * release / uint256(WAD) * braking / uint256(WAD);
+        if (high < 0) {
+            // Two measures of the same evidence. The gain rewards closing
+            // speed itself, so a slow ratio never earns much however certain
+            // its turn. The confidence compares that speed with its own
+            // allowance, so a slow, clean reversal can earn the full rate.
+            uint256 closing = uint256(-high);
+            rateWad += closing * uint256(LN_TICK) / uint256(WAD) * 86400 * closureGain;
+            uint256 confidence = closing * uint256(WAD) / (uncertainty + floor);
+            if (confidence > uint256(WAD)) confidence = uint256(WAD);
+            rateWad += closureRate * confidence / uint256(WAD);
+        }
+        if (rateWad > maxRate) rateWad = maxRate;
     }
 
     function fraction(uint256 rateWad, uint256 elapsed) external pure returns (uint256) {

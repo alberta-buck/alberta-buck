@@ -37,8 +37,16 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
         assert.equal(await page.$$eval(`#${stage} [data-pane=basket-income-${currency}] svg path`,n=>n.length),owned?4:0);
         assert.equal(await page.$$eval(`#${stage} [data-pane=basket-effects-${currency}] svg path`,n=>n.length),stage==='rebalance-owned'?5:0);
       }
+      // The recorded book at reference prices: a third unit for the matched effects and the value panes.
+      assert.equal(await page.$$eval(`#${stage} [data-pane=basket-effects-reference] svg path`,n=>n.length),stage==='rebalance-owned'?5:0);
+      assert.equal(await page.$$eval(`#${stage} [data-pane=basket-value] svg path`,n=>n.length),4);
+      assert.match(await page.$eval(`#${stage} .metrics`,e=>e.textContent),/Marked return at reference/);
       if(owned)assert.match(await page.$eval(`#${stage} .metrics`,e=>e.textContent),/Arb income received · BUCK/);
       if(profile.id==='historical-bridge')assert.match(await page.$eval(`#${stage} .run-body`,e=>e.textContent),/A = Gold.*B = Food.*C = Energy/);
+      if(profile.id==='commodities'){
+        assert.match(await page.$eval(`#${stage} .run-body`,e=>e.textContent),/Synthetic commodity prices: A = Fast, gold-like; B = Mid, energy-like; C = Slow, labour-like/);
+        assert.equal(await page.$$eval(`#${stage} [data-pane=price] svg path`,n=>n.length),10);
+      }
       assert.ok(await page.$$eval(`#${stage} svg path`,ns=>ns.every(n=>!/(NaN|Infinity)/.test(n.getAttribute('d')))));
       checked++;
     }

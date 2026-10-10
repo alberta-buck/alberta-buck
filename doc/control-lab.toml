@@ -23,6 +23,19 @@ basket_warmup_days = 120
 [basket]
 tilt = 0.0
 
+# How much of an eligible allocation gap a separated pair releases (fractions
+# of the gap per day). release_speed = 0 and closure_gain = 0 judge both the
+# braking release and closure against the rate's own allowance, so no speed is
+# fitted to these synthetic cycles. Chosen from control-lab/basket-sizing: the
+# first experiment's values (0.002, 0.1, 20, 0, 1) remain the code defaults.
+[pair]
+release_speed = 0.0
+release_rate = 4.0
+closure_gain = 0
+closure_rate = 1.0
+max_rate = 4.0
+impact_share = 1.0
+
 # Private actors have an accumulation/divestment intent even at fair value.
 # A 1% adverse price multiplies the desired rate by exp(-1); favourable
 # prices increase it, bounded by max_per_day and available cash/credit.
@@ -83,3 +96,44 @@ tokens = [0]
 start = 45
 duration = 10
 amplitude = 0.30
+
+# Three uncorrelated commodity-like prices around a common USD inflation
+# trend (control_lab/commodities.py). One lab day is one month of market time,
+# so 120 days span a decade. Inflation is 3% a year with a two-year burst at
+# 9%; each TOKEN follows it through its own lag and adds a bounded oscillation
+# of its own. Spreads, crossing times and bounds are what a ten-year stretch of
+# each real series shows against US CPI (doc/review/commodity-inflation.py);
+# the lags are the M2 lags of doc/BASKET-REBALANCE.md, with gold's fast prior.
+# A complete path: it takes no three-phase sine, random walk or perturbation.
+[[profiles]]
+name = "commodities"
+
+[profiles.commodities]
+months_per_day = 1.0
+inflation = [[0, 3.0], [36, 9.0], [60, 3.0]]
+components = 10
+noise = 0.0015
+
+[[profiles.commodities.tokens]]
+label = "Fast, gold-like"
+lag_months = 3.0
+spread = 0.12
+crossing_months = 12.0
+floor = -0.24
+ceiling = 0.34
+
+[[profiles.commodities.tokens]]
+label = "Mid, energy-like"
+lag_months = 13.0
+spread = 0.07
+crossing_months = 11.0
+floor = -0.16
+ceiling = 0.22
+
+[[profiles.commodities.tokens]]
+label = "Slow, labour-like"
+lag_months = 16.0
+spread = 0.012
+crossing_months = 20.0
+floor = -0.023
+ceiling = 0.032

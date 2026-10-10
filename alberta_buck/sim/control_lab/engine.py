@@ -359,7 +359,11 @@ class World:
             supply_headroom=int(d.buck.functions.balanceOf(self.supplier.address).call()) / E6)
         frame["basket"] = dict(equity=int(d.basket.functions.equity().call()) / E6,
             weights=list(d.basket.functions.responseWeightsBp().call()),
-            account=int(d.buck.functions.signedBalanceOf(d.basket.address).call()) / E6)
+            account=int(d.buck.functions.signedBalanceOf(d.basket.address).call()) / E6,
+            # The book itself, so a reader can revalue it at prices of their choosing.
+            relief=int(d.buck.functions.reliefOf(d.basket.address).call()) / E6,
+            idle=[int(d.basket.functions.idleToken(i).call()) / E18 for i in range(3)],
+            liquidity=[str(d.basket.functions.liquidityOf(i).call()) for i in range(3)])
         frame["basket"]["arb_income"] = dict(beneficiary="basket" if self.basket_arb else "external", **self.arb_income)
         return frame
 
@@ -445,6 +449,9 @@ def simulate(cfg, profile, stage, world_factory=None):
             if "history" in profile:
                 from .historical import historical_inputs
                 result["feed_source"] = historical_inputs(cfg, profile)["provenance"]
+            if "commodities" in profile:
+                from .commodities import commodity_inputs
+                result["feed_source"] = commodity_inputs(cfg, profile)["provenance"]
             return result
         finally:
             world.close()

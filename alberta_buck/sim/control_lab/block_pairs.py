@@ -13,7 +13,7 @@ import multiprocessing
 from pathlib import Path
 
 from .cli import atomic_json, fingerprint
-from .model import STAGES, digest, load_config, validate
+from .model import DEFAULTS, STAGES, digest, load_config, pair_sizing, validate
 
 PAIRS = ((0, 1), (0, 2), (1, 2))
 LOG_TICK = math.log(1.0001)
@@ -58,7 +58,8 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                     # Accepted historical means, never the first live price or
                     # any selected perturbation. Observer levels normalize decimals.
                     reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
-                    self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address, d.basket.address, reference)
+                    self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address,
+                        d.basket.address, reference, pair_sizing(config["pair"]))
                     response_name = ("PairBasketMaintenanceControl" if maintenance_only else
                                      "PairBasketDecisionTrace" if diagnostics else "PairBasketEquityResponse")
                     facet = self.chain.deploy(response_name, self.pair_policy.address)
@@ -115,7 +116,10 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
             prelude_observer = self.chain.deploy("BlockPairSignals",
                 [t.address for t in d.tokens], [d.buck.address, d.usdc.address],
                 [*d.pool_buck, *d.pool_usdc], *PARAMS.values())
-            policy = self.chain.deploy("PairRebalancePolicy",prelude_observer.address,d.basket.address,references)
+            # Prices rest at their means here, so no pair is separated and the
+            # sizing is never consulted; every arm shares the default regardless.
+            policy = self.chain.deploy("PairRebalancePolicy",prelude_observer.address,d.basket.address,references,
+                pair_sizing(DEFAULTS["pair"]))
             facet = self.chain.deploy("PairBasketEquityResponse",policy.address)
             response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("PairBasketEquityResponse")[0])
             self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)

@@ -8,8 +8,9 @@ import multiprocessing
 from pathlib import Path
 
 from .block_pairs import PROFILES, simulate_observed
+from .book import recorded, reference_value
 from .cli import atomic_json, fingerprint
-from .model import STAGES, dependencies, digest, feed_rows, load_config
+from .model import STAGES, dependencies, digest, feed_rows, load_config, own_path
 
 ARMS = {
     "maintenance-external": (False, "external", "01 · Maintenance; external arb"),
@@ -44,14 +45,18 @@ def attribution(runs):
         assert cfg == reference_cfg and r["profile"] == base["profile"]
         assert [f["target_usd"] for f in r["frames"]] == [f["target_usd"] for f in base["frames"]]
     frames = []
+    # Runs that recorded the book itself are also compared with its TOKEN at the
+    # external feed and its net BUCK at the reference basket's cost.
+    currencies = ("buck","usd","reference") if all(recorded(r["frames"][0]) for r in runs.values()) else ("buck","usd")
     for index, f in enumerate(base["frames"]):
         row = dict(day=f["day"])
-        for currency in ("buck","usd"):
+        for currency in currencies:
             v = {}
             for arm,r in runs.items():
                 frame = r["frames"][index]
                 assert frame["day"] == f["day"]
-                v[arm] = frame["basket"]["equity"]*(frame["buck_usdc"] if currency=="usd" else 1)
+                v[arm] = (reference_value(frame) if currency=="reference" else
+                          frame["basket"]["equity"]*(frame["buck_usdc"] if currency=="usd" else 1))
             b = v["maintenance-external"]
             row[currency] = dict(baseline=b-initial,
                 rebalancing=v["rebalance-external"]-b,
@@ -102,13 +107,18 @@ def render(root):
         "| Profile | Currency | Maintenance baseline gain | Rebalancing effect | Arb ownership effect | Interaction | Combined gain |",
         "|---------+----------+---------------------------+--------------------+----------------------+-------------+---------------|"]
     for profile,c in comparisons.items():
-        for currency in ("buck","usd"):
+        for currency in ("buck","usd","reference"):
+            if currency not in c["frames"][-1]: continue
             f=c["frames"][-1][currency]
             report.append("| "+" | ".join([profile,currency.upper()]+[f"{f[k]:+,.2f}" for k in ("baseline","rebalancing","arb_ownership","interaction","total")])+" |")
+    report += ["", "REFERENCE revalues each arm's recorded book with TOKEN at the external feed and net BUCK at the reference basket's cost. In a stage with no K, desk or private flow the BUCK/USDC price drifts with the basket's own trades, and the BUCK and USD rows can disagree about a sign for that reason alone. The reference mark in turn favours an arm that ends with more net BUCK when BUCK trades below the reference basket's cost; read the three together."]
     report += ["", "* Estimator comparison", "",
         "Python diagnostics read the same aligned cumulative-tick intervals as the Solidity observer. No estimator has execution authority. Both routes must be available and warmed up. The simple second-difference proxy assumes locally linear motion and white measurement noise; the route-disagreement proxy misses noise shared by both venues. The small Kalman model retains two independent relative coordinates, their velocities and full within-route covariance. Its route envelope does not assume independent evidence from BUCK and USDC. Process variance is fixed; measurement covariance adapts from prior roughness, after the current sample's update. Innovations and uncertainty are displayed, not advertised as calibrated confidence.", "",
         "* Historical scenario", "",
         "TOKEN A/B/C use the committed gold/food/energy quote files. These contain historical anchors with generated daily texture between monthly observations. They are not three independent observed intraday feeds. The last 120-day window is normalized by strictly preceding historical means; a linear log-price endpoint correction makes each TOKEN end where it began. This is a constructed closed-path scenario, not an unmodified historical backtest or a zero-time-average guarantee. Its opening prices can differ from the historical means; the maintenance control captures that initial repricing. Raw unadjusted normalized prices, source hashes, window indices and the removed log changes are saved in JSON. The estimator receives none of the future endpoint information.", ""]
+    if "commodities" in comparisons:
+        report += ["* Commodity scenario", "",
+            "Three synthetic prices around a common USD inflation trend, each following it through its own lag and adding a bounded oscillation of its own; the three oscillations are uncorrelated over the run. One day stands for one month, so the run spans a decade and the reference basket's USD cost rises with the price level. Prices do not return to their opening values. Spreads, crossing times and bounds are calibrated to ten-year stretches of real series against US CPI (doc/review/commodity-inflation.py); this is not a replay of them. History before day zero is the same process in day-zero dollars.", ""]
     (root/"results.org").write_text("\n".join(report))
     print(f"Rendered {len(runs)} EVM runs with causal shadow diagnostics -> {root/'index.html'}")
 
@@ -117,7 +127,7 @@ def main(argv=None):
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config",default="doc/control-lab.toml")
     ap.add_argument("--out",default="doc/control-lab/basket-research/current")
-    ap.add_argument("--profiles",default="three-phase,noise20,noise80,flat-noise80,historical-bridge")
+    ap.add_argument("--profiles",default="three-phase,noise20,noise80,flat-noise80,historical-bridge,commodities")
     ap.add_argument("--stage",choices=("basket","k","all"),default="basket")
     ap.add_argument("--jobs",type=int,default=4)
     ap.add_argument("--days",type=int,default=120)
@@ -129,7 +139,7 @@ def main(argv=None):
     from alberta_buck.sim.chain import load_artifact
     cfg=load_config(args.config);cfg["days"]=args.days;cfg["basket"]["tilt"]=0;cfg["feed"]["walk_amplification"]=0
     cfg["bootstrap"]["basket_warmup_days"]=120
-    available={p["name"]:p for p in [*PROFILES,HISTORICAL]}
+    available={**{p["name"]:p for p in cfg["profiles"] if own_path(p)},**{p["name"]:p for p in [*PROFILES,HISTORICAL]}}
     names=args.profiles.split(",")
     if len(set(names))!=len(names) or any(n not in available for n in names):ap.error("unknown or duplicate profile")
     profiles=[available[n] for n in names]

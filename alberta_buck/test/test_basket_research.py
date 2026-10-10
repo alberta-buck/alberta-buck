@@ -136,3 +136,13 @@ def test_factorial_attribution_keeps_the_interaction_and_currency_effects():
     assert f["usd"]["total"]==pytest.approx(31_220)
     for currency in ("buck","usd"):
         assert sum(v for k,v in f[currency].items() if k!="total")==pytest.approx(f[currency]["total"])
+    assert "reference" not in f
+    # With each arm's book recorded, the same decomposition holds at reference
+    # prices, and is indifferent to each arm's own BUCK/USDC exchange rate.
+    for r,held in zip(runs.values(),(10_010,10_030,10_060,10_110)):
+        frame=r["frames"][0]
+        frame.update(token_buck=[100]*3,reference=dict(target_usd=1.))
+        frame["basket"].update(idle=[held,0,0],liquidity=["0"]*3,account=0.,relief=0.)
+    f=attribution(runs)["frames"][0]
+    assert f["reference"]==pytest.approx(dict(baseline=1000,rebalancing=2000,arb_ownership=5000,interaction=3000,total=11000))
+    assert f["usd"]["total"]==pytest.approx(31_220)

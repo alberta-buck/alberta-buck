@@ -426,7 +426,7 @@ control-lab-basket-first-render:
 
 # Four matched basket/arb arms, with render-only shadow noise estimators.
 CONTROL_LAB_BASKET_RESEARCH_OUT ?= doc/control-lab/basket-research/current
-CONTROL_LAB_BASKET_RESEARCH_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge
+CONTROL_LAB_BASKET_RESEARCH_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge,commodities
 CONTROL_LAB_BASKET_RESEARCH_STAGE ?= basket
 .PHONY: control-lab-basket-research control-lab-basket-research-render control-lab-basket-research-test
 control-lab-basket-research: stage-uniswap
@@ -441,6 +441,27 @@ control-lab-basket-research-render:
 control-lab-basket-research-test:
 	forge test $(FORGE_OPTS) --match-contract 'BasketArbIncomeTest|PairBasketResponseTest'
 	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_research.py alberta_buck/test/test_control_lab_campaign.py -q
+
+# How much of an open gap the pair policy releases, and how soon: one
+# maintenance control and several PairRebalancePolicy sizings per profile.
+CONTROL_LAB_BASKET_SIZING_OUT ?= doc/control-lab/basket-sizing/current
+CONTROL_LAB_BASKET_SIZING_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge,two-step,commodities
+CONTROL_LAB_BASKET_SIZING_SIZINGS ?= maintenance,first,rate-1,own-2,own-4,own-8,own-4-1pt,own-4-half
+CONTROL_LAB_BASKET_SIZING_STAGE ?= basket
+CONTROL_LAB_BASKET_SIZING_TICKS ?=
+.PHONY: control-lab-basket-sizing control-lab-basket-sizing-render control-lab-basket-sizing-test
+control-lab-basket-sizing: stage-uniswap
+	forge build $(FORGE_OPTS) -q
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_sizing --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BASKET_SIZING_OUT)" --profiles "$(CONTROL_LAB_BASKET_SIZING_PROFILES)" --sizings "$(CONTROL_LAB_BASKET_SIZING_SIZINGS)" --stage "$(CONTROL_LAB_BASKET_SIZING_STAGE)" $(if $(CONTROL_LAB_BASKET_SIZING_TICKS),--ticks-per-day $(CONTROL_LAB_BASKET_SIZING_TICKS)) --jobs $(CONTROL_LAB_JOBS)
+	$(MAKE) control-lab-basket-sizing-render
+
+control-lab-basket-sizing-render:
+	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_sizing --out "$(CONTROL_LAB_BASKET_SIZING_OUT)" --render-only
+	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "$(abspath $(CONTROL_LAB_BASKET_SIZING_OUT))/results.org") (org-html-export-to-html))'
+
+control-lab-basket-sizing-test:
+	forge test $(FORGE_OPTS) --match-contract 'PairRebalancePolicyTest|PairBasketResponseTest'
+	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_sizing.py alberta_buck/test/test_control_lab_commodities.py -q
 
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────

@@ -44,8 +44,9 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     assert.ok(smallScale[4]-smallScale[0]<.002, 'local scale hides the calibration drift');
     const firstKey = await choose('all', {profile:'three-phase',walk:'0',buyer:'medium',seller:'medium'});
     assert.equal(await page.$$eval('#all .chart', n=>n.length), 11);
-    assert.equal(await page.$$eval('#all [data-pane=basket-value] svg path', n=>n.length), 3);
-    assert.equal(await page.$$eval('#all [data-pane=basket-return] svg path', n=>n.length), 3);
+    // BUCK, USD, the fixed initial investment, and the recorded book at reference prices.
+    assert.equal(await page.$$eval('#all [data-pane=basket-value] svg path', n=>n.length), 4);
+    assert.equal(await page.$$eval('#all [data-pane=basket-return] svg path', n=>n.length), 4);
     assert.equal(await page.$eval('#all [aria-label="Toggle Initial investment · BUCK / USD"] .value',e=>e.textContent),'1,000,000');
     const returnMetrics = await page.$$eval('#all .metric', nodes=>Object.fromEntries(nodes.map(n=>[n.querySelector('span').textContent,n.querySelector('strong').textContent])));
     const rawURL = new URL(manifest.entries[firstKey].file, url);
@@ -55,6 +56,14 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
       const roi = 100 * (end.basket.equity * rate / initial - 1);
       assert.equal(returnMetrics[`Marked return on initial ${currency}`], `${roi >= 0 ? '+' : ''}${roi.toFixed(3)}%`);
     }
+    // At reference: wallet and position TOKEN at the external feed, net BUCK at the reference basket's cost.
+    let atReference = (end.basket.account + end.basket.relief) * end.reference.target_usd;
+    end.basket.idle.forEach((idle, i) => {
+      const root = Math.sqrt(end.token_buck[i]), liquidity = Number(end.basket.liquidity[i]);
+      atReference += (idle + liquidity / (root * 1e12)) * end.target_usd[i] + liquidity * root / 1e12 * end.reference.target_usd;
+    });
+    const referenceReturn = 100 * (atReference / initial - 1);
+    assert.equal(returnMetrics['Marked return at reference'], `${referenceReturn >= 0 ? '+' : ''}${referenceReturn.toFixed(3)}%`);
     const allocationScale = () => page.$$eval('#all [data-pane=allocation] svg text[x="85"]',ns=>ns.map(n=>Number(n.textContent.replaceAll(',',''))));
     const allocationBounds = await allocationScale();
     assert.ok(Math.min(...allocationBounds)>20 && Math.max(...allocationBounds)<45,
@@ -126,6 +135,22 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
           counts[counter]>0,`${profile}/${stage}/${kind}`);
       }
     }
+    // The commodity profile is a complete path: no random-walk variant exists,
+    // so choosing it moves the walk to 0 and disables the other choices.
+    await choose('all', {profile:'three-phase',walk:'1',buyer:'medium',seller:'medium'});
+    await page.select('#all select[name=profile]','commodities');
+    await page.waitForFunction(key=>document.querySelector('#all').dataset.loadedKey===key,{},manifest.cases.all['commodities:0:medium:medium']);
+    assert.equal(await page.$eval('#all select[name=walk]',e=>e.value),'0');
+    assert.deepEqual(await page.$$eval('#all select[name=walk] option',ns=>ns.map(n=>n.disabled)),[false,true,true]);
+    assert.equal(await page.$$eval('#all [data-pane=price] svg path', n=>n.length), 10); // nine price lines and the inflation trend
+    assert.match(await page.$eval('#all .run-body', e=>e.textContent), /Synthetic commodity prices: A = Fast, gold-like/);
+    assert.ok(Object.keys(manifest.cases.all).every(k=>!k.startsWith('commodities:') || k.split(':')[1]==='0'));
+    for (const stage of Object.keys(manifest.stages)) {
+      await choose(stage,{profile:'commodities',walk:'0',buyer:'high',seller:'low'});
+      assert.equal(await page.$eval(`#${stage} .run-body`,e=>e.hidden),false);
+    }
+    await page.select('#all select[name=profile]','three-phase');
+    assert.deepEqual(await page.$$eval('#all select[name=walk] option',ns=>ns.map(n=>n.disabled)),[false,false,false]);
     // Desk directions come from token swaps, and marker clicks select the
     // real receipt log, including the opposite leg of triangle arbitrage.
     // Enabling the pair basket changes which cases cross the desk's bands
@@ -172,6 +197,6 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     await page.select('#basket select[name=walk]','1');
     assert.equal(await page.$eval('#all select[name=walk]',e=>e.value),'1');
     assert.deepEqual(errors,[]);
-    console.log(`Browser checks passed: BUCK and USD basket value/return, allocation autorange, persistent linked settings, selectors, race handling, zoom, cursor, legends, sensor details, all stages (${process.env.TEST_PROFILES || 'three-phase,mixed,shock'}) and mobile layout.`);
+    console.log(`Browser checks passed: BUCK, USD and reference basket value/return, allocation autorange, persistent linked settings, selectors, the walk-free commodity profile, race handling, zoom, cursor, legends, sensor details, all stages (${process.env.TEST_PROFILES || 'three-phase,mixed,shock'}) and mobile layout.`);
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

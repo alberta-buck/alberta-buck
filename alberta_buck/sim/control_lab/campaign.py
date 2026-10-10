@@ -13,7 +13,7 @@ import time
 import tomllib
 
 from .cli import atomic_json, fingerprint, worker
-from .model import STAGES, dependencies, digest, feed_rows, load_config, validate
+from .model import STAGES, dependencies, digest, feed_rows, load_config, own_path, validate
 
 
 def load_grid(path):
@@ -49,6 +49,8 @@ def plan(cfg, grid, code, stages=None):
             for k, v in grid["flows"].items()]))
     runs, cases = {}, {}
     for p, walk in itertools.product(grid["profiles"], grid["walk"]):
+        if walk and own_path(profiles[p]):
+            continue  # a complete price path has no random-walk variant to select
         feed_cfg = copy.deepcopy(cfg)
         feed_cfg["feed"]["walk_amplification"] = walk
         feed_rows(feed_cfg, profiles[p])  # preflight all feeds before any EVM work

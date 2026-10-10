@@ -208,8 +208,12 @@
     state.data = data; state.body.hidden = false; state.body.replaceChildren(); state.charts = [];
     state.step = data.days.length > 1 ? data.days[1] - data.days[0] : .25;
     state.index = data.days.length - 1;
-    if (data.feed_source) state.body.append($("p", "explanation",
-      `Historical inputs: ${data.feed_source.labels.map((label,i)=>`${"ABC"[i]} = ${label}`).join("; ")}. Each ends at its opening price after a log-price endpoint adjustment. Historical means use preceding data only. Stored daily quotes include generated texture between monthly anchors.`));
+    if (data.feed_source) {
+      const named = data.feed_source.labels.map((label,i)=>`${"ABC"[i]} = ${label}`).join("; ");
+      state.body.append($("p", "explanation", data.feed_source.kind === "commodities"
+        ? `Synthetic commodity prices: ${named}. One day here is ${number(data.feed_source.months_per_day)} month of market time. Each TOKEN follows a common USD inflation trend (ending at ${data.feed_source.ending_inflation_usd.toFixed(3)} × its start) through its own lag, plus a bounded oscillation of its own; the three oscillations are uncorrelated over the run. Calibrated to real series against US CPI, not a replay of them.`
+        : `Historical inputs: ${named}. Each ends at its opening price after a log-price endpoint adjustment. Historical means use preceding data only. Stored daily quotes include generated texture between monthly anchors.`));
+    }
     const metrics = $("div", "metrics");
     const counts = data.execution_counts;
     const metricValues = [["Mean bvib", data.mean_bvib.toFixed(6)], ["Final K", data.summary.end_k.toFixed(6)],
@@ -225,6 +229,9 @@
         ["Final basket net value · USD", number(Math.round(p.final_net_usd * 100) / 100)],
         ["Net gain / loss · USD", number(Math.round(p.gain_usd * 100) / 100)],
         ["Marked return on initial USD", `${p.return_usd_pct >= 0 ? "+" : ""}${p.return_usd_pct.toFixed(3)}%`]);
+      if (p.final_net_reference !== undefined) metricValues.push(
+        ["Final basket net value · at reference", number(Math.round(p.final_net_reference * 100) / 100)],
+        ["Marked return at reference", `${p.return_reference_pct >= 0 ? "+" : ""}${p.return_reference_pct.toFixed(3)}%`]);
       if (p.arb_beneficiary === "basket") metricValues.push(
         ["Arb income received · BUCK", number(Math.round(p.arb_income_buck*100)/100)],
         ["Other basket gain · BUCK", number(Math.round(p.other_gain_buck*100)/100)],
@@ -298,9 +305,23 @@
     function redraw() { output.textContent = `${number(state.start)}–${number(state.end)} days`; state.charts.forEach(c => c.draw()); }
     state.redraw = redraw; redraw();
   }
+  // A profile that is a complete price path has no random-walk variant. Offer
+  // only choices that exist beside the selected profile, and move off one that does not.
+  function settle(state) {
+    for (const axis of M.axes.slice(1)) {
+      const select = state.controls[axis.id];
+      for (const option of select.options) option.disabled = !(M.axes.map(a =>
+        a.id === axis.id ? option.value : state.selected[a.id]).join(":") in M.cases[state.id]);
+      if (select.selectedOptions[0] && select.selectedOptions[0].disabled) {
+        const first = [...select.options].find(option => !option.disabled);
+        if (first) { select.value = first.value; state.selected[axis.id] = first.value; }
+      }
+    }
+  }
   async function update(state) {
     const version = ++state.version;
     delete state.section.dataset.loadedKey;
+    settle(state);
     const selection = M.axes.map(axis => state.selected[axis.id]).join(":");
     const key = M.cases[state.id][selection];
     state.body.hidden = true; state.status.classList.remove("error");

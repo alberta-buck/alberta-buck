@@ -34,10 +34,11 @@ def test_full_cartesian_grid_reuses_only_inactive_controls():
     cfg = load_config(ROOT / "doc/control-lab.toml")
     grid = load_grid(ROOT / "doc/control-lab-campaign.toml")
     manifest, runs = plan(cfg, grid, {"sha256": "test"})
-    assert manifest["visible_cases"] == 891
-    assert len(runs) == manifest["unique_runs"] == 279
+    # Three profiles take the full product; the complete commodity path has no walk variants.
+    assert manifest["visible_cases"] == 891 + 99
+    assert len(runs) == manifest["unique_runs"] == 279 + 31
     assert len(manifest["cases"]) == len(STAGES) == 11
-    assert all(len(cases) == 81 for cases in manifest["cases"].values())
+    assert all(len(cases) == 81 + 9 for cases in manifest["cases"].values())
     used = {k for cases in manifest["cases"].values() for k in cases.values()}
     assert used == runs.keys()
     for stage, cases in manifest["cases"].items():
@@ -119,6 +120,30 @@ def test_plot_payload_preserves_series_units_and_gaps():
     assert panes['basket-return']['lines'][0]['values'] == pytest.approx([1, -2])
     assert panes['basket-return']['lines'][1]['values'] == pytest.approx([3.02, 2.9])
     assert panes['basket-return']['lines'][2]['values'] == [0, 0]
+    # A saved run that never recorded the book keeps exactly those three lines.
+    assert len(panes['basket-value']['lines']) == len(panes['basket-return']['lines']) == 3
+    assert 'final_net_reference' not in data['basket_performance']
+    # With the book recorded, TOKEN is valued at the external feed and net BUCK
+    # at the reference basket's cost: the 1.05 BUCK/USDC spot does not enter.
+    for f, account in zip(result['frames'], (-600_000, -750_000)):
+        f['basket'].update(relief=1_000., idle=[5_000., 5_000., 6_000.], liquidity=['0', '0', '0'], account=account)
+        f['reference'] = dict(market_usd=1.01, target_usd=1.01)
+    data = plot_data(result)
+    panes = {p['id']: p for p in data['panes']}
+    held = 5_000 * 100 + 5_000 * 110 + 6_000 * 90
+    assert panes['basket-value']['lines'][3]['label'] == 'Net value · at reference'
+    assert panes['basket-value']['lines'][3]['values'] == pytest.approx([held - 599_000 * 1.01, held - 749_000 * 1.01])
+    assert panes['basket-return']['lines'][3]['values'] == pytest.approx(
+        [100 * ((held - 599_000 * 1.01) / 1e6 - 1), 100 * ((held - 749_000 * 1.01) / 1e6 - 1)])
+    assert data['basket_performance']['final_net_reference'] == pytest.approx(held - 749_000 * 1.01)
+    assert data['basket_performance']['return_reference_pct'] == pytest.approx(100 * ((held - 749_000 * 1.01) / 1e6 - 1))
+    # A feed that carries its own price level shows it beside the nine price lines.
+    assert len(panes['price']['lines']) == 9 and 'inflation' not in panes['price']['note']
+    for f, level in zip(result['frames'], (1., 1.25)):
+        f['inflation_usd'] = level
+    price = {p['id']: p for p in plot_data(result)['panes']}['price']
+    assert price['lines'][-1]['label'] == 'USD inflation trend' and price['lines'][-1]['values'] == [1., 1.25]
+    assert len(price['lines']) == 10 and 'own lag' in price['note']
 
 
 def test_cached_campaign_keeps_original_execution_time_and_rejects_partial_json(tmp_path):
