@@ -292,7 +292,7 @@ CONTROL_LAB_ARGS		= --config "$(CONTROL_LAB_CONFIG)" --jobs $(CONTROL_LAB_JOBS) 
 CONTROL_LAB_HTML_EVAL	= (progn (require (quote ox-html)) \
 			  (setq org-export-use-babel nil org-html-htmlize-output-type nil \
 			        org-html-link-org-files-as-html nil) \
-			  (find-file "doc/CONTROL-LAB.org") (org-html-export-to-html))
+			  (find-file "doc/BASKET-MACHINE-RESULTS.org") (org-html-export-to-html))
 
 .PHONY: control-lab control-lab-data control-lab-regenerate control-lab-render control-lab-html
 control-lab-data: stage-uniswap
@@ -360,7 +360,6 @@ pair-observer-data:
 
 pair-observer-render:
 	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.pair_observer_lab --out "$(PAIR_OBSERVER_OUT)" --render-only
-	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil))' --visit doc/PAIR-OBSERVER.org --funcall org-html-export-to-html
 
 pair-observer-lab: pair-observer-data
 	$(MAKE) pair-observer-render

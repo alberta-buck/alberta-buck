@@ -1,0 +1,325 @@
+#+TITLE: The basket machine: what the lab shows
+#+DATE: 2026-10-10
+#+OPTIONS: ^:nil toc:2 num:t
+
+Measurements of [[file:BASKET-MACHINE.org][the basket machine]] on the real contracts in pyrevm. Every number here is rebuilt
+by the commands in [[#regenerate][the last section]]; none of the output is committed. Open decisions and
+remaining work are in [[file:BASKET-MACHINE-TASKS.org][the task list]].
+
+* Summary
+
+- /Rebalancing, on prices built to revert./ With every actor active the pair policy adds 3.2% to
+  4.2% to the basket's value in 120 days, in BUCK, in USD and at reference alike. The first
+  sizing added 0.4%. A wallet of the same TOKENs under a simple turn rule would earn about 8%.
+- /Rebalancing, on commodity-like prices./ 0.5% to 0.7% over a run that stands for a decade. The
+  limit there is the 2-point allocation band, which is open 4% of the time; a 1-point band
+  doubles the result.
+- /It stays out of the way./ No transfer on flat noisy prices, under any setting. When a TOKEN
+  reprices and never returns it gives up 0.1% to 0.3%.
+- /The money./ On the commodity profile BUCK follows its reference basket through a 42% rise
+  in USD cost with a mean parity error of 0.37%, with no desk operation.
+- /Owned arbitrage is not a return yet./ It is the larger number in a six-hour-step lab and
+  falls 5.6 times at hourly steps. It measures the feed's discontinuity and an uncontested
+  arbitrageur.
+- /One side effect to rule on./ Each transfer turns some wallet TOKEN into BUCK inside
+  liquidity. Where no one supplies that BUCK, it becomes 6% to 8% dear and K runs to its rail.
+
+* The lab in brief
+
+One run is one isolated world: three TOKENs, TOKEN/USDC pools driven to an external feed, and
+TOKEN/BUCK and BUCK/USDC pools that float. It lasts 120 days at four market steps a day, after a
+120-day prelude that settles the basket's liquidity at mean prices. The basket starts with one
+million of equity; each pool has one million of outside liquidity.
+
+/Stages/ add actors one at a time: feeds, monitor, monitor with K, linked markets (arbitrage),
+basket, K, desk, buyer only, seller only, both, all. "Isolated basket" below is the basket stage:
+no K movement, no desk, no private flow. "All actors" is the last.
+
+/Profiles/ are the price paths:
+
+| Profile | Path |
+|---------+------|
+| three-phase | Each TOKEN a 12% sine, 30-day period, 120 degrees apart |
+| noise20, noise80 | The same with 20 or 80 bp of fresh noise per sample |
+| flat-noise80 | Flat prices with 80 bp of noise |
+| mixed, shock | Pulses, a ramp and noise; a ten-day 30% step in one TOKEN |
+| historical-bridge | Gold, food and energy over 120 real days, pinned to end where they began |
+| two-step | One TOKEN reprices by 15% twice and never returns |
+| commodities | Three uncorrelated prices around a USD inflation trend ([[#commodities][below]]) |
+
+/Units./ The contract's equity is in BUCK at its own marks. USD converts it at the BUCK/USDC
+spot. /At reference/ revalues the recorded book: TOKEN at the external feed, net BUCK at the
+reference basket's USD cost. Where nothing regulates BUCK its spot drifts with the basket's own
+trades, and BUCK and USD marks can disagree about a sign for that reason alone; the reference
+mark is the one to read there. With all actors the three agree. All are marks: no caller gas, no
+cost of unwinding.
+
+Effects are differences against a /maintenance/ control: the same basket with liquidity
+placement, daily bookkeeping and the risk fallback, and no paired transfer.
+
+* Rebalancing
+
+** How much there is to take
+
+A frictionless calculation ([[file:review/rebalance-benchmark.py][rebalance-benchmark.py]]) holds one million of TOKEN in a wallet,
+charges 0.3% per swap and applies simple rules to the clean cycle:
+
+| Rule | Return over 120 days |
+|------+----------------------|
+| Hold | 0.00% |
+| Rebalance to equal weights every 6 hours | -0.10% |
+| Rebalance when a weight is 2 points from target | +4.44% |
+| Rebalance when a weight is 3 points from target | +6.88% |
+| Rebalance after a pair retreats 1% from its extreme | +8.47% |
+| Rebalance every 10 days | +12.87% |
+
+Continuous rebalancing of a smooth closed cycle earns nothing. The harvest comes from leaving
+a gap open until near the turn. The basket cannot reach these figures as built: with most of
+its TOKEN in liquidity its allocation gaps are about 60% as wide as a wallet's.
+
+** Why the first sizing took a twentieth of it
+
+On the clean cycle the first sizing made 133 transfers moving 36,307 BUCK of TOKEN out of a
+1.72 million book: median 231 BUCK, largest 800. Every one sold the dearer TOKEN. Three causes:
+
+1. The braking release was 10% of the gap a day, times a braking factor that cannot exceed
+   =T / (2T + dt/2)= for a smooth turn: 0.44 at a 12-hour response and 6-hour steps.
+2. The release halved at a fixed 20 bp/day of outward speed. These pairs move at up to 435
+   bp/day and the estimate lags a turn by about 1.7 days, so around the true extreme the release
+   factor was 0.06 to 0.25.
+3. Closure was confirmed about four days after a pair's extreme, when one leg is already back
+   inside its allocation, and was paid by closing speed, which peaks as the spread vanishes.
+
+** The sizing campaign
+
+Seven profiles; a maintenance control, five sizings and two narrower bands each. Gain against
+maintenance over 120 days, book at reference. /Chosen/ is 4 gaps a day with the release and
+closure judged on the rate's own allowance.
+
+| Profile | First | 1/day | Chosen | 8/day | Chosen, all actors |
+|---------+-------+-------+--------+-------+--------------------|
+| three-phase | +4,059 | +17,063 | +35,300 | +37,912 | +36,808 |
+| noise20 | +4,162 | +18,060 | +36,947 | +37,526 | +38,002 |
+| noise80 | +3,807 | +20,004 | +34,495 | +36,588 | +39,878 |
+| flat-noise80 | 0 | 0 | 0 | 0 | 0 |
+| historical-bridge | +597 | +812 | +970 | +1,222 | +349 |
+| two-step | -232 | -738 | -1,265 | -1,597 | -2,074 |
+| commodities | +210 | +1,527 | +4,506 | +3,826 | +6,915 |
+
+With all actors the chosen sizing's gain on the cyclic profiles is 36,808 to 39,878 at
+reference, 38,915 to 41,710 in USD and 31,600 to 32,799 in BUCK. It makes fewer transfers than
+the first (71 against 122 on the clean cycle; median 4,600 BUCK). The gain recurs in each 30-day
+window: +9,628, +10,610, +9,118, +7,453.
+
+Doubling the rate again adds 2% to 7% on the cycles and a quarter to the two-step cost. On the
+historical path the effect is within 0.1% in every unit and its sign depends on the unit.
+
+Checked on every response of the clean and noisy runs: each planned leg improves both
+allocations, stays within its capacities, has both routes ready and appears in the receipts;
+no leg sells the cheaper TOKEN; every TOKEN is traded both ways in each mature cycle. All
+executed legs are braking releases. By the time closure is confirmed the gap has been moved.
+
+** The allocation band
+
+Chosen sizing, all actors, at reference:
+
+| Profile | 2 points | Transfers | 1 point | Transfers | Half a point | Transfers |
+|---------+----------+-----------+---------+-----------+--------------+-----------|
+| three-phase | +36,808 | 71 | +42,836 | 469 | +42,836 | 469 |
+| noise20 | +38,002 | 73 | +41,881 | 451 | +41,881 | 451 |
+| noise80 | +39,878 | 70 | +42,420 | 338 | +42,420 | 338 |
+| flat-noise80 | 0 | 0 | 0 | 0 | 0 | 0 |
+| historical-bridge | +349 | 1 | +451 | 2 | +1,104 | 3 |
+| two-step | -2,074 | 4 | -4,196 | 13 | -5,545 | 39 |
+| commodities | +6,915 | 16 | +13,931 | 94 | +16,638 | 183 |
+
+A 1-point band adds 6% to 16% on the cycles, doubles the commodity result, doubles the cost of
+the repricing that never returns, and makes five to seven times as many transfers. The lab
+charges no gas, which is the missing term. The band stays at 2 points.
+
+* Commodity-like prices
+:PROPERTIES:
+:CUSTOM_ID: commodities
+:END:
+
+** The hypothesis and the data
+
+A basic commodity's price is bounded below by what it costs to produce and above by what can
+replace it, so over years it follows the pricing currency's inflation, each with its own delay.
+[[file:review/commodity-inflation.py][commodity-inflation.py]] checks the vendored monthly series against US CPI, 1976 to 2026.
+/Departure/ is the log distance of the real price from its own trend line.
+
+| Series | Real drift, % a year | Spread | Lowest | Highest | Half-life | M2 lag, months |
+|--------+----------------------+--------+--------+---------+-----------+----------------|
+| Gold | +1.74 | 42.7% | -91% | +123% | 127 mo | none clear |
+| Energy, US retail | -0.19 | 13.8% | -30% | +41% | 53 mo | 13 |
+| Food, US retail | +0.23 | 6.4% | -12% | +15% | 17 mo | 23 |
+| Construction, US PPI | -0.02 | 10.2% | -18% | +30% | 106 mo | 10 |
+| Labour, US hourly | +0.29 | 5.3% | -9% | +13% | 299 mo | 16 |
+| Energy, BCPI | -0.19 | 39.1% | -138% | +103% | 32 mo | 10 |
+| Metals, BCPI | -0.01 | 26.3% | -59% | +70% | 82 mo | none clear |
+| Agriculture, BCPI | -1.62 | 21.4% | -50% | +51% | 63 mo | 10 |
+
+- Six of the eight drift within 0.3% a year of CPI over fifty years. Gold gains 1.7% a year
+  and the agriculture index loses 1.6%.
+- Departures are large and last years. Ceilings are further from trend than floors.
+- The delay is against money, not against CPI: year-over-year changes line up with CPI at
+  zero to five months and trail M2 by 10 to 23.
+- Over fifty years the departures move together (0.3 to 0.8). Inside a ten-year window, against
+  that window's own trend, gold, energy and food are close to uncorrelated (-0.05 to 0.14).
+
+Inside ten-year windows (medians), which is what a 120-day run stands for:
+
+| Series | Real drift in the window, % a year | Spread | Furthest | Months between crossings |
+|--------+------------------------------------+--------+----------+--------------------------|
+| Gold | 4.57 | 12.1% | 28.5% | 12.0 |
+| Energy, US retail | 2.46 | 7.1% | 18.5% | 10.9 |
+| Food, US retail | 0.80 | 3.0% | 9.3% | 6.7 |
+| Construction, US PPI | 1.04 | 3.6% | 8.4% | 13.3 |
+| Labour, US hourly | 0.66 | 1.2% | 2.7% | 20.0 |
+
+Within one decade a real price need not return: gold's typically drifts 4.6% a year one way
+or the other. The hypothesis is a statement about decades.
+
+** The profile
+
+=control_lab/commodities.py= builds each price in closed form:
+=base × exp(inflation + lag gap + departure)=.
+
+- /Inflation/ is 3% a year with a burst at 9% from day 36 to day 60; the level ends at 1.505.
+- /Lag gap./ Each TOKEN follows that level through a first-order lag. Through the burst a slow
+  TOKEN falls behind, then catches up.
+- /Departure/ is a bounded oscillation of the TOKEN's own: ten sinusoids with seeded phases,
+  the slower ones larger, squashed by a soft floor and a higher soft ceiling. The three are
+  made uncorrelated over the run.
+
+| TOKEN | Lag, months | Spread | Months between crossings | Floor | Ceiling |
+|-------+-------------+--------+--------------------------+-------+---------|
+| A: fast, gold-like | 3 | 12% | 12 | -24% | +34% |
+| B: mid, energy-like | 13 | 7% | 11 | -16% | +22% |
+| C: slow, labour-like | 16 | 1.2% | 20 | -2.3% | +3.2% |
+
+One lab day is one month, so the shapes are a decade's and the pools see them thirty times
+too fast. History before day zero is the same process in day-zero dollars. The profile takes no
+random walk; the food and construction rows above are ready to substitute in =control-lab.toml=.
+
+** What it shows
+
+With all actors:
+
+| Day | Reference basket, USD | BUCK/USDC | K |
+|-----+-----------------------+-----------+---|
+| 0 | 0.963 | 0.998 | 0.754 |
+| 30 | 1.080 | 1.079 | 0.753 |
+| 60 | 1.235 | 1.228 | 0.749 |
+| 90 | 1.374 | 1.379 | 0.744 |
+| 120 | 1.421 | 1.422 | 0.741 |
+
+Mean parity error is 0.37% and the desk does not operate. The buyer has used 866 thousand of
+its million USDC and the seller has 86 thousand BUCK of credit left: a longer run needs a
+funding rule for them.
+
+The wallet benchmark's rules earn 1.6% to 2.8% over holding on this path, against 4% to 13% on
+the clean cycle. The basket's allocation is more than 2 points from target in 4% of the samples
+and more than 1 point in 70%. Thirteen of its 16 transfers are at two extremes of TOKEN A: sold
+17% to 20% above trend, bought 17% to 18% below. The timing is right and the opportunity rare.
+
+A decade's harvest of 0.7% to 1.7% of the initial equity is small beside a 50% rise in the
+price level. On this evidence the basket's case rests on holding value through inflation, with
+rebalancing a modest addition, unless its constituents swing far more than these do.
+
+* Arbitrage
+
+With the chosen sizing, isolated basket, clean cycle, 120 days:
+
+| Unit | Maintenance | Rebalancing | Owning arbitrage | Interaction | Combined |
+|------+-------------+-------------+------------------+-------------+----------|
+| At reference | +8,529 | +35,300 | +18,739 | +947 | +63,516 |
+| USD | +9,728 | +45,956 | +19,021 | +434 | +75,138 |
+| BUCK | -2,142 | -24,217 | +18,128 | +5,539 | -2,692 |
+
+The arbitrage column is not a return:
+
+- 18,792 of the 18,843 BUCK of clean-cycle profit is taken in the pass right after a feed
+  step. The driver moves TOKEN/USDC by up to 0.63% per six-hour step and the BUCK pools are
+  stale until arbitrage links them.
+- With 24 steps a day the same cycle yields 3,394 BUCK on the same volume. With 80 bp of fresh
+  noise per step it is 25,845 against 28,230: that income is the noise each step is given.
+- The basket holds about a fifth of each TOKEN/BUCK pool. The owned arm takes the whole
+  receipt, most of it from the outside liquidity provider, and is never contested.
+
+Rebalancing does not share the dependence: at hourly steps the chosen sizing adds 39,506 at
+reference on the clean cycle against 35,300. The basket's own transfers create about 500 BUCK
+of arbitrage in 120 days, which it could close in the same transaction.
+
+* What a transfer does to the book
+
+A transfer sells the donor's wallet TOKEN before it touches a position, and places the
+recipient's share as liquidity: half buys TOKEN, half stays BUCK beside it. Each wallet-sourced
+transfer therefore moves half its value from TOKEN to net BUCK. The lien does not change.
+
+At the chosen sizing the three wallets, about 945 TOKEN each after the prelude, are empty by day
+90 to 100. TOKEN held falls from 10,019 to 9,120 and net BUCK rises from +2,441 to +135,193:
+roughly 87% TOKEN and 13% net BUCK by value. After that a sale burns liquidity and the
+composition is stable. The harvest continues: +7,225 at reference in the last 30 days isolated,
++7,453 with all actors.
+
+Where that BUCK must come from matters. Clean cycle, 120 days, chosen sizing:
+
+| Stage | Ending K | Mean parity error | BUCK/USDC at the end | Desk operations | Return at reference |
+|-------+----------+-------------------+----------------------+-----------------+---------------------|
+| Basket (isolated) | 0.750 | 4.66% | 1.084 | 0 | +4.38% |
+| K moves | 0.950 | 3.85% | 1.062 | 0 | +4.04% |
+| Desk | 0.950 | 2.98% | 1.031 | 21 | +4.11% |
+| Buyer only | 0.950 | 4.71% | 1.069 | 0 | +3.87% |
+| Seller only | 0.682 | 0.99% | 0.983 | 0 | +5.10% |
+| Buyer and seller | 0.762 | 0.19% | 1.008 | 0 | +4.53% |
+| All actors | 0.762 | 0.19% | 1.008 | 0 | +4.53% |
+
+Without a supplier of BUCK the basket's demand makes BUCK 6% to 8% dear and K runs to its upper
+rail. With one, K ends 0.009 above the maintenance run and parity holds. Returns are over the
+whole run including the prelude, and include the maintenance baseline of about +0.85%.
+
+The desk feels it too. Across the interactive campaign it operates 209 times, all of them in
+the desk stage, where it is the only supplier of BUCK: 69, 66 and 74 operations on the
+three-phase, mixed and shock profiles. At the first sizing the whole campaign had 14. With the
+private flows present it does not operate at all.
+
+This is not new behaviour, but it is now material. If a fully paired book is not the intended
+resting state, a wallet-sourced sale should buy the recipient's TOKEN into its wallet and leave
+pairing to the idle placement step, which acts only against credit headroom.
+
+* Limits of this evidence
+
+- One seed per profile, one adverse shape, 120 days.
+- The three-phase cycle is far faster and wider than commodity relatives; the commodity profile
+  is compressed thirtyfold.
+- No caller gas and no unwinding cost. Transfer counts are reported so gas can be applied.
+- One arbitrageur, which never competes and holds its profit.
+- The older machines have not been run against this one on the same inputs.
+
+* Regenerating
+:PROPERTIES:
+:CUSTOM_ID: regenerate
+:END:
+
+Inside the Nix shell with the repository's Python environment active:
+
+#+begin_src sh
+make control-lab-interactive        # 310 runs; the page doc/control-lab/interactive/index.html
+make control-lab-verify             # audit every saved run
+make control-lab-basket-sizing      # 56 runs; doc/control-lab/basket-sizing/current/results.org
+make control-lab-basket-sizing CONTROL_LAB_BASKET_SIZING_OUT=doc/control-lab/basket-sizing/all-actors \
+  CONTROL_LAB_BASKET_SIZING_STAGE=all CONTROL_LAB_BASKET_SIZING_SIZINGS=maintenance,first,own-4,own-4-1pt,own-4-half
+make control-lab-basket-sizing CONTROL_LAB_BASKET_SIZING_OUT=doc/control-lab/basket-sizing/hourly \
+  CONTROL_LAB_BASKET_SIZING_TICKS=24 CONTROL_LAB_BASKET_SIZING_PROFILES=three-phase,noise80 \
+  CONTROL_LAB_BASKET_SIZING_SIZINGS=maintenance,first,own-4
+make control-lab-basket-research    # 24 runs; four arms: rebalancing by arbitrage ownership
+make control-lab-basket-first CONTROL_LAB_BASKET_FIRST_PROFILES=three-phase,noise20,noise80,flat-noise80
+python3 doc/review/rebalance-benchmark.py
+PYTHONPATH=. python3 doc/review/commodity-inflation.py
+#+end_src
+
+A run takes about 70 seconds; the interactive campaign about 40 minutes on ten workers. Runs are
+cached by their inputs, the simulator's sources and the compiled contracts, so any change to a
+contract recomputes everything. =CONTROL_LAB_JOBS= sets the workers.

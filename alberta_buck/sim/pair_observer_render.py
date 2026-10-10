@@ -133,7 +133,7 @@ def render(out):
     (out / "summary.json").write_text(json.dumps(summaries, indent=2, allow_nan=False) + "\n")
     org = ["#+title: Pairwise price observer: generated sensor results", "#+options: toc:2", "",
         "This is a causal Python sensor comparison, not an EVM trading backtest.",
-        "No allocations are executed and no ROI is measured. See [[file:../../PAIR-OBSERVER.org][the design and limitations]].", "",
+        "No allocations are executed and no ROI is measured. This offline prototype was superseded by the on-chain pair observer.", "",
         f"{len(manifest['entries'])} runs, {manifest['days']} live days each. Parameters are fixed across cases, seeds and noise levels.",
         "Quote noise is log-price standard deviation per observation (0, 20 or 80 bp in the default grid).", "",
         "* Scoring", "",
