@@ -11,6 +11,14 @@
 # Dependency directories (installed via forge install)
 /lib/
 
+# Control-lab output: run JSON, plot data, rendered pages and reports. All of
+# it is rebuilt by the make control-lab-* targets from the sources and
+# doc/control-lab*.toml, and none of it is committed.
+/doc/control-lab/
+# Exports of the working documents in doc/
+/doc/*.html
+/doc/*.pdf
+
 # Nix
 /result
 
