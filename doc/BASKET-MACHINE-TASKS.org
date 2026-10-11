@@ -291,7 +291,7 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   - The most TOKEN the basket can hold stays (1 + K) x equity. Counting gross assets as
     collateral, the leverage loop of lending protocols, would allow 1/(1 - K) and is not taken.
   Built so far: the shell's =netMark= switch, off by default, and a trial fork of the upkeep
-  (=test/harness/BasketUpkeepNetTrial.sol=, 190 lines; =machine.upkeep=, =machine.net_mark=,
+  (=test/harness/BasketUpkeepNetTrial.sol=, 150 lines of code; =machine.upkeep=, =machine.net_mark=,
   =machine.parity_gain=). The fork pairs everything waiting, sizes the book at equity plus the
   parity lean, and works each constituent toward its share on its own, selling or buying
   against BUCKs when the pair policy sees it closing against the rest. It does not use the
@@ -320,7 +320,7 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
     of both.
   Next, if the rule is kept: simplify. Candidates, largest first:
   - The upkeep. The built facet's allocation, safeguard, placement and transfer are 265 lines;
-    the fork replaces them with about 110.
+    the whole fork is 150.
   - The shell's liquidity target and its flow average (=_targetS=, =dayFlow=, =flowMs= and five
     parameters), which exist to ration the room that pairing used to consume.
   - The older Deploy, Fund and Trim facet (316 lines), whose reason was the last (1 - K).
@@ -330,7 +330,11 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
     reading for each against the rest would replace n x (n - 1).
   - Pairing inside the deposit itself, so that nothing ever waits.
   Open: the gain of the parity lean (5 in the trial); whether a ceiling of half is right;
-  what the safeguard is when K is zero, where the mark cannot net; one seed and one year.
+  what the safeguard is when K is zero, where the mark cannot net; one seed and one year. The
+  five-year runs of old against new were made on the machine before these changes (savings
+  index +2.6% a year on the older upkeep and +2.7% on the machine on real prices, +3.5% and
+  +3.9% on reverting ones, the machine with a sixth of its book waiting): rerun them on
+  whatever is kept.
 
 - [X] What held deployment back before the net rule, measured the same day. TOKEN waiting, as
   a share of equity, real prices: built machine 45.8% at day 30 and 12.7% at day 364; with a
