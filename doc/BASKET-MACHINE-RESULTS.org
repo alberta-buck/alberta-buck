@@ -146,7 +146,9 @@ will not sell a TOKEN that is still rising.
 
 The book had almost nothing to sell. Three things turned a 30% jump into 1.6 points over weight.
 
-- The BUCK rose with its basket. Thirty percent in dollars was 15% in BUCKs.
+- Shares move less than prices. A TOKEN that is a third of the book and jumps 30% gains four
+  to six points of share, even held in a wallet. (The BUCK's own price rose 8% with its basket.
+  That changes nothing here: shares and signals compare one TOKEN with another.)
 - The pools sold on the way up. A liquidity position sells a TOKEN as its price rises. The
   basket's shed 172 of its 3,055 TOKEN, at an average of 105 BUCKs on the way to 112. In a
   wallet the same TOKEN would have stood 3.7 points over its weight. In the pools it stood 1.6.
@@ -162,7 +164,38 @@ Across the episode the basket came out 8,000 ahead of one that sat still. The ju
 
 To keep more it would have to sell below its declared weight while a TOKEN stands far above its
 usual price and is falling back. That is a bet that the price returns. It wins here. It loses
-when a TOKEN moves and stays, which is the case that already loses.
+when a TOKEN moves and stays, which is the case that already loses. The next section tries it.
+
+* Leaning against price
+
+We tried the bet with a lab-only version of the facet ([[file:review/lean-trial.py][lean-trial.py]]). Each TOKEN's target
+is its declared weight, lowered when its price stands above its accepted reference against the
+others and raised when it stands below. Nothing else changes. The policy still decides when to
+act, and still waits for a turn.
+
+The size of the lean is one number. At one half it asks for what someone holding the TOKEN in
+a wallet, and restoring the declared weights, would hold: it undoes the pools' damping. At one
+it is the lean the older design had. Gain over 120 days, basket alone:
+
+| Prices | No lean | Lean 1/4 | Lean 1/2 | Lean 1 |
+|--------+---------+----------+----------+--------|
+| Clean cycles | +36,254 | +49,521 | +59,915 | +79,149 |
+| Cycles with noise | +37,997 | +52,270 | +66,775 | +91,154 |
+| The sudden jump | +37,697 | +51,959 | +61,965 | +79,153 |
+| Commodity-like | +16,424 | +18,756 | +22,223 | +27,762 |
+| One TOKEN reprices for good | -4,446 | -6,981 | -9,995 | -16,288 |
+
+A lean of one half earns about 65% more on cycles and 35% more on commodity-like prices. It
+also more than doubles the loss when a TOKEN moves and stays. Every step up in the lean buys
+more of both. Transfers double on cycles, from 84 to 173, each earning about 350.
+
+In the sudden jump a lean of one half sold the TOKEN three times in the first two and a half
+days, 18,658 BUCKs in all, starting as soon as the policy asked. The basket came out 13,716
+ahead across the jump instead of 7,993.
+
+This is a trial, on one price path of each shape. The lean trusts the reference. When a TOKEN
+reprices for good the reference is wrong, and the basket stays short of that TOKEN until
+someone corrects it.
 
 * Realistic prices
 
@@ -194,6 +227,24 @@ continuously and has competing arbitrageurs.
 
 The rebalancing gain is not like that. With hourly jumps it is a little larger: +39,879 on
 clean cycles against +36,254.
+
+The lab also presses outside prices on the basket's pools too weakly
+([[file:review/price-forcing.py][price-forcing.py]]). Its outside market is one pool for each TOKEN, pinned to the feed every six
+hours, and one capped arbitrageur carries that price inward. The arbitrageur's own trades push
+the outside pool off the feed. So on cycles the basket's prices sit 1.3% from the feed,
+typically, and they took a day to follow the sudden jump.
+
+With an outside market too deep to move, they sit 0.66% away, which is the three pools' fees.
+The arbitrage profit on clean cycles falls from 20,731 to 6,604. The rebalancing gain rises:
+
+| Prices | Lab's outside market | Deep outside market |
+|--------+----------------------+---------------------|
+| Clean cycles | +36,254 | +39,048 |
+| Commodity-like | +16,424 | +16,807 |
+| The sudden jump | +37,697 | +39,175 |
+
+So the weak link costs rebalancing 2% to 8%. In the sudden jump it delayed the one sale by
+half a day and did not change its size.
 
 * A side effect
 
@@ -267,6 +318,7 @@ result is net of what callers were paid, comes next.
 - How it behaves with depositors arriving and leaving. The lab's book is deposited once.
 - What holds the BUCK's price inside 3% of its basket. Only K acts there, and K is slow.
 - How it does in a lasting trend on real prices. The one such test here is made up.
+- Whether to lean, and how far. The trial says the gain is large and so is the added loss.
 
 * Rebuilding the numbers
 
@@ -280,6 +332,8 @@ make control-lab-basket-research    # the arbitrage comparison
 python doc/review/wheel-gas.py /tmp/wheel-gas       # the gas table
 python doc/review/urgency-trial.py /tmp/urgency     # the trial from outside
 python doc/review/shock-response.py /tmp/shock      # the sudden jump, turn by turn
+python doc/review/price-forcing.py /tmp/forcing     # a deep outside market
+python doc/review/lean-trial.py /tmp/lean           # leaning against price (build the trial facet first)
 python3 doc/review/rebalance-benchmark.py
 PYTHONPATH=. python3 doc/review/commodity-inflation.py
 #+end_src
