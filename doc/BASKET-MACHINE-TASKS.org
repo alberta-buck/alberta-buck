@@ -7,6 +7,9 @@ ordered list of work that takes it from a lab subject to the replacement for the
 desk and signal contracts. Each numbered step is meant to be one reviewable change. Check a box
 when its step is merged, and delete this file when the list is empty.
 
+Some items were carried here from the older working documents when those were reviewed on
+2026-10-10. Each names its source, so the detail can be found while the source still exists.
+
 * Where things stand
 
 - [X] The unpushed commits were rebuilt without generated output: 14 commits, 3.4 MB in place of
@@ -20,12 +23,13 @@ when its step is merged, and delete this file when the list is empty.
 - [X] The release sizing is a constructor argument of the policy; the lab uses 4 gaps a day on
   the rate's own scale. A commodity-like price profile and a reference valuation are in the lab.
 - [X] Urgency is built into the policy and replaces the allocation band in the lab: a quarter
-  point of slack and two point-days of patience. The band arms of the sizing campaign reproduce
-  their earlier runs exactly on the new contracts, and the patient arms match the trial that was
-  run from outside.
+  point of slack and two point-days of patience.
 - [X] The contracts carry their approved names, and each facet and service has its interface in
-  its own file. No behaviour changed: 1095 contract tests pass and six lab worlds reproduce
-  their results from before the renames.
+  its own file.
+- [X] The EMA ladders are gone and the upkeep is one facet with a safeguard plan. Of 21 saved
+  lab worlds re-run on it, 13 reproduce frame for frame. The other 8 each contain a safeguard
+  sale, which now comes from the most overweight TOKEN, not the first listed.
+- [X] The wheel samples the parity reference first, before any kind that trades.
 
 * 0. Two rules agreed on 2026-10-10
 
@@ -37,12 +41,21 @@ pays in BUCKs, a fixed share of what it holds to each turn that does work; the b
 what it spends, and the gas price sets how many turns that buys.
 
 - [ ] Give the basket a way to fund the reserve. There is none on-chain today: =WorkWheel.fund=
-  takes BUCKs from whoever calls it, and only simulated agents do. The upkeep facet's Daily
-  step is the place: a share of the day's income (fees collected, relief, arbitrage credited),
-  up to the reserve's cap. Decide the share and what counts as income.
+  takes BUCKs from whoever calls it, and only simulated agents do. Agreed on 2026-10-10: the
+  upkeep facet's Daily step pays in 10% of the day's fees collected and arbitrage credited, up
+  to the reserve's cap. The 10% is a starting value, not a measurement. The basket's quarter of
+  a depositor's gain is not part of it: by ruling that leaves only when governance redeems the
+  treasury's shares (=BASKET-EQUITY.org= 13.5, item 9).
+- [ ] Say where the excess goes when the reserve is at its cap. The wheel's design returned it
+  to the depositors (=BASKET-WHEEL.org= 8.3); here that means it stays in the basket.
 - [ ] Switch the reserve on in the lab, and give the lab a keeper that calls only when the pay
-  covers twice its gas at a stated gas price and ETH price. Report every result net of the
-  funding.
+  covers twice its gas at a stated gas price and ETH price. A turn that does no work pays
+  nothing, so a real caller simulates first and sends only a working turn; the keeper should do
+  the same. Report every result net of the funding.
+- [ ] Let deposits and exits turn the wheel. Inside another transaction a turn whose work is
+  done costs a storage read; alone it costs the 21,000-gas base as well. The shell's deposit
+  and redeem should advance the wheel by one bounded turn (=BASKET-WHEEL.org= 5 and 8.2), which
+  needs the idle scan below to be cheap first.
 - [ ] Record gas per wheel and per kind in each frame. =doc/review/wheel-gas.py= does it from
   outside for now.
 - [ ] Make the idle turn cheap, and due only when there is work. Most of an idle turn's 900,000
@@ -63,45 +76,49 @@ Built: see [[file:BASKET-MACHINE.org][the design]] for the rule and [[file:BASKE
   one path each of three shapes. Judge on gain per transfer net of what the callers are paid.
 - [ ] Decide whether growth should follow the gap or its square. The harvest from closing a gap
   goes as its square; the built rule uses the gap.
-- [ ] The count advances only when the basket responds. In the lab that is nearly every turn.
-  Where responses are rare, an unobserved stretch earns at most a day, so the count lags.
-  Decide whether the Daily step should report gaps too.
+- [ ] The count advances only when the basket responds, and not on a turn the safeguard takes.
+  In the lab that is nearly every turn. Where responses are rare, an unobserved stretch earns
+  at most a day, so the count lags. Decide whether the Daily step should report gaps too.
 - [ ] Offer patience against the 2-point band as a selector in the interactive lab. It doubles
   the runs of every stage with the basket active.
 
 * 1. Consolidate the contracts
 
-The names and interfaces are done. What is left changes behaviour, so each step is verified by
-reproducing a clean-cycle maintenance run and a rebalancing run frame for frame wherever
-behaviour is not meant to change. Each one invalidates every saved run.
+The names, the interfaces and the single upkeep facet are done. What is left changes behaviour,
+so each step is verified by reproducing a clean-cycle maintenance run and a rebalancing run
+frame for frame wherever behaviour is not meant to change. Each one invalidates every saved run.
 
 - [X] Rename, as tabled in [[file:BASKET-MACHINE.org::#names][the design]].
 - [X] Give each facet and service its interface in its own file, and make the contracts depend
   on interfaces, not on each other's concrete types.
-- [ ] Retire the EMA ladders. Remove =excursion=, =votes=, =turned=, =running=, the ladders and
-  =initializeHistory= from =BasketReference=, leaving the raw parity value, freshness and the
-  day count, and delete =IBasketSignals=. Remove the 1280-day history import from the lab and
-  the simulator (=signal_history.py=, =history_rows=, =BasketSignalHistory.t.sol=) and the EMA
-  panes from the lab page.
-- [ ] Reduce the fallback. With the ladders gone, the inherited plan in
-  =BuckBasketEquityResponse= needs only its cash and credit work: sell to restore the liquidity
-  target, sell to get back under K, trim a constituent beyond its leash, place a first deposit.
-  Drop the trend gates, the vote-scaled step and the target lean, and merge what remains into
-  =BasketUpkeepFacet=. The lab's cyclic runs take the fallback in two to four of 481 responses,
-  so expect a small change in those frames and none elsewhere.
+- [X] Retire the EMA ladders. =BasketReference= keeps the raw parity value, its freshness and
+  the day count; =IBasketSignals=, the history import (=signal_history.py=, =history_rows=,
+  =BasketSignalHistory.t.sol=) and the EMA panes on the lab page are gone.
+- [X] Reduce the fallback and merge it into =BasketUpkeepFacet=. What remains is the safeguard
+  plan: cash for short liquidity or a lien above K, a constituent brought back inside its leash,
+  a first cash deposit placed. No trend gate, no vote-scaled step, no target lean. The shell's
+  =setResponse= takes the leash and the interval alone.
+- [X] Sample first. With the facet no longer sampling the parity reference, the wheel's Sample
+  slot is its only regular sampler. It was last, after Arb, where the turn's own trades could
+  get the reading refused; it now leads both wheels.
+- [ ] The safeguard reads one need for cash and sells one constituent a turn, capped by the
+  step. Check on a stressed run (a K cut, a run of exits) that this closes a large shortfall
+  fast enough, and whether a shortfall should be spread across constituents.
 - [ ] Fold what =BasketDesk= uses of =MonetaryDesk= into the desk, so the mixin can leave with
   =BuckBasketOps=. Keep =IStabilizer= only if something still reads it.
 - [ ] Declare =IBasketView= on the shell. It provides every function already.
 - [ ] Fix or bound the stalled-ratio branch of the policy. It grants a fixed fifth of the
   release rate whatever the rate's allowance; that is 0.8 of a gap a day at the lab's sizing.
-- [ ] Rename the test-only facets (=PairBasketDecisionTrace=, =PairBasketMaintenanceControl=)
-  for the facet they extend; delete =BasketGateComparison=, which adapts the retired turn gate.
+- [ ] Rename the test-only control facet (=PairBasketMaintenanceControl=) for the facet it
+  extends. =PairBasketDecisionTrace= and =BasketGateComparison= went with the campaigns that
+  used them.
 
 * 2. One way to deploy it
 
 - [ ] A single path in =alberta_buck/sim/deploy.py= that builds the whole machine: shell, venue
   facet, upkeep facet, pair observer, policy with reference means, parity reference, desk and
-  desk policy, wheel. No older facet as a stepping stone.
+  desk policy, wheel. No older facet as a stepping stone. =basket_machine.py= now builds every
+  part, but still on top of the older deployment and the older wheel.
 - [ ] Make the lab use it. =control_lab/engine.py= and =block_pairs.py= currently build the older
   equity machine and rewire it; move the shared wiring out of =block_pairs.py=, which is named
   for a retired campaign.
@@ -120,27 +137,114 @@ the machine is clearly better in every regime.
   shell lacks (=sweepTreasury=, =treasuryBuckPending=, the fence calls, the director hints) and
   decide for each: provide, replace or drop.
 - [ ] JS: =eqworld= deploys =BuckBasketProRata= with =BuckWithBasketHooks=; the sandbox's Savings
-  tab runs the equity basket on the older facet through the sim server. Port both.
-- [ ] Define the comparison before running it: the rebalancing regimes (reverting, trending,
-  the equilibrium casts, the commodity profile) and the disruption regimes (raids, excursions,
-  K cuts, exits under stress, a stable-coin failure), the measures (depositor value at
-  reference, parity error, drawdown, turnover, gas) and what "clearly better" means for each.
+  tab runs the equity basket on the older facet through the sim server. Port both. The third
+  sandbox planned in =DEMO-SANDBOX.org= is not started and should start on the machine.
+- [ ] Define the comparison before running it: the regimes, the measures and what "clearly
+  better" means for each. The earlier programs already name most of it.
+  - /Rebalancing regimes./ Reverting, trending, the equilibrium casts, the commodity profile.
+  - /Disruptions, from the catalogue/ (=CONVERGENCE.org= 3): a squeeze and a dump at one and
+    four times size, a slow grind each way, book-loading, a sensor fault, liquidity leaving.
+  - /Disruptions never yet run/ (=REBALANCING-EQ.org=, recommendations 3, 4 and 7): a commodity
+    spike in the middle of a run, a mass exit of depositors, a shift in the rate cycle, an
+    oversupply flood that drives K to its lower rail, a population that turns over.
+  - /Measures./ Depositor value at reference, parity error, drawdown, turnover, gas. For the
+    desk, its inventory beside its profit, never profit alone (=K-AND-OPS.org= F9).
+- [ ] Hold fixed what is not being compared. In the debtor matrix nothing about the controller
+  changed between every arm failing and every arm passing: what changed was how agents execute
+  (at once or paced), how deep the exit route is, and who the population is
+  (=REBALANCING-EQ.org=, finding 1). Old and new must share all three.
+- [ ] Vary one axis at a time from a baseline, not a full grid (the star method, =WAVE3.org=).
+  Run more than one seed before believing any arm: three of five seeds failed the equilibrium
+  campaign's plain baseline.
+- [ ] Keep cells repeatable. A new agent at count zero must leave every existing cell identical
+  byte for byte; the order of a cell's settings is part of its identity; no simulator code is
+  edited while a grid runs. These were the earlier program's rules and the comparison needs
+  them.
+- [ ] Judge the desk's numbers in a populated market. The earlier program's verdict
+  (=ORGANIC-SCALE.org=): a thin cast can settle whether a rule engages at all or whether an
+  attacker can move K, but not gains, capacities, carrying costs or an attacker's profit, which
+  depend on how deep and how populated the world is. Its gate was that no monetary operation
+  is judged in a world whose own population has not passed. It also found that holders with
+  standing BUCKs are what makes retirement possible: arms whose savers held none showed
+  issuance only (=REBALANCING-EQ.org=, finding 4). The lab's one buyer and one seller, both
+  spent by day 120, is thinner than the cast that verdict was about.
 - [ ] Run old against new on identical inputs and write the outcome into the results.
 
 * 4. Decisions the evidence is waiting on
 
-Each is argued in [[file:BASKET-MACHINE-RESULTS.org][the results]].
+The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. The rest come from the older working documents.
 
 - [ ] Wallet-sourced transfers leave half their value as BUCKs inside the recipient's position.
-  At the lab's sizing the three wallets are empty in about 90 days and the basket holds 13% of
-  its value in BUCKs. Where no one supplies those BUCKs, K runs to its rail. Either accept a
-  fully paired book as the resting state, or make a wallet-sourced sale buy into the wallet.
+  At the lab's sizing the three wallets are empty in about 90 days and the basket holds about
+  an eighth of its value in BUCKs. Where no one supplies those BUCKs, K runs to its rail. Either
+  accept a fully paired book as the resting state, or make a wallet-sourced sale buy into the
+  wallet.
 - [ ] Measure the gap on the TOKEN held, not on weights that liquidity mutes, so the urgency
-  rule above does not depend on how much of the book is paired.
+  rule does not depend on how much of the book is paired.
 - [ ] Whether to count owned arbitrage at all before per-block cadence and a competing
-  arbitrageur are in the lab. Today it measures the feed's step.
+  arbitrageur are in the lab. Today it measures the feed's step. The wheel's own analysis
+  (=BASKET-WHEEL.org= 4) bounds what is real: a gap between two and three pool fees is worth
+  taking only to the basket, whose fee on its own pool comes back to it. Above three fees a
+  searcher takes the whole gap and the basket keeps its fees. The earlier cast's arbitrageur
+  also wanted a 60 bp margin that real searchers compete away. Measure owned arbitrage inside
+  that band, against an arbitrageur at a competitive margin.
 - [ ] Lead the tracker: the release starts about 1.7 days after a turn, the filter's own lag.
 - [ ] A target lean past the declared weight, once timing is settled. It is zero today.
+- [ ] What holds the price inside the band. The earlier architecture had four layers
+  (=CONVERGENCE.org= 3): the wheel for agreement between venues; undertakings, a stress fee and
+  a facility that held the price inside the band from tick to tick; a persistence test that
+  turned a lasting position into a change of supply; and K for the stock of credit over
+  months. This machine has the wheel's arbitrage, a desk that acts only beyond 3%, and K. Inside
+  3% only K acts, and the results show K alone running to its rail. The undertakings, the
+  ladder, the facility and the seeder exist as simulator agents, not contracts. Decide whether
+  the machine needs an inner layer, and whether it is those agents made into contracts or a
+  second desk policy.
+- [ ] One refused sample clears the desk's persistence. The desk draws credit only after 30
+  consecutive valid days on one side, and =OuterBandDeskPolicy= clears its side and its count
+  whenever the reference is not fresh. Sampling is permissionless, and a reading is refused
+  when any pool's spot is 5% from its TWAP. So one push of one pool, once a month, at the
+  moment a sample is due, may be enough to stop the desk ever issuing. The earlier program met
+  the same guard, noted that it trips on exactly the days an attack is running, and ruled that
+  a value that cannot be read is held at its last good reading and flagged stale
+  (=K-AND-OPS.org= F8). Cost the attack, then decide between holding, a tolerance of missed
+  days, and a count that decays.
+- [ ] How long is persistent. Thirty days is assumed. The earlier program left the horizon open
+  and said the book's own dwell should set it (=K-AND-OPS.org=, decision 27). It also proposed
+  an estimator that would make the test continuous: a two-state filter that splits each day's
+  net flow into a lasting part, which is K's business, and a passing part, which is the desk's.
+- [ ] Deposits and exits. The lab has none: its book is deposited once. The older facet could
+  not rebalance while deposits kept arriving, because waiting TOKEN gated its trades
+  (=BASKET-EQUITY.org= 14). The machine counts waiting TOKEN in the same allocation, which was
+  meant to cure that and has not been tested with a depositor population. A second route to
+  the same fault is new: an exit that leaves liquidity short makes the next turn a safeguard
+  turn, and a safeguard turn makes no transfer. Measure both with depositors arriving and
+  leaving daily.
+- [ ] Place deposits toward the targets. A deposit lands as its own TOKEN in its own pool, so
+  the depositors' mix pushes the weights (=BASKET-EQUITY.org= 14.2, items 4 and 5). Two cures
+  were proposed and neither is built: place a deposit's value by the targets, selling nothing
+  already held; or price the mix into the entry charge, so a deposit that moves the weights
+  toward target pays less.
+- [ ] The desk's reserve as basket shares. An idea of 2026-09-30, not built; its note is
+  removed and this is its record. The desk would deposit its founding TOKEN in the basket, hold
+  the receipt, and count it in the net value its credit is marked at.
+  - /For./ The reserve earns instead of idling. A basket costs more BUCKs when the BUCK is
+    cheap, so the shares buy more exactly when the desk must buy. A large exit is paid in kind,
+    which is the TOKEN the desk sells. The mark is net of the lien, so pledging cannot spiral.
+  - /Against./ Depositing and exiting change supply and depth inside the pools, not the price,
+    so they are no substitute for the desk's swaps, and an exit thins the pools during an
+    attack. Every round trip pays the basket's quarter of the gain and both charges.
+  - /To decide it./ Three desks on the shock arms: the grant as plain TOKEN; the grant as
+    pledged shares; the same with part of the credit drawn at founding. Read the deviation of
+    the BUCK from its basket, days K spent at a rail, the desk's profit and inventory, the
+    depositors' return, and how often the desk had no lien to retire.
+  - /Open./ Is the desk's receipt exempt from the quarter? How much stays as plain TOKEN? Does
+    the desk's exit queue behind depositors' in the same stress? Is a standing draw sized in K
+    or in the basket's equity?
+- [ ] Rebalancing loses to holding in a lasting trend. On the 2020-25 history, in which bitcoin
+  rose ninefold, the older directors lost 1% to 4% a year against holding (=CONVERGENCE.org= 4).
+  The lab tests that only with the two-step profile. Its historical profile removes each TOKEN's
+  trend by construction, and its commodity profile gives all three the same one. Add a real
+  trending history before claiming the urgency rule is safe on real prices.
 
 * 5. Slim the lab
 
@@ -149,11 +253,15 @@ After step 2, so the surviving campaigns run on the final wiring.
 - [ ] Keep: the engine, model, campaign runner, audit, interactive renderer, events, the book
   valuation, the commodity and historical profiles, the sizing campaign and the four-arm
   campaign.
-- [ ] Remove with their tests, pages, scripts and make targets: the pair-basket,
-  pair-opportunities, gate-comparison and block-pairs campaigns, the static-figure workflow
-  (=render.py=, =control-lab=, =-data=, =-render=, =-html=, =-regenerate=), the basket-first
-  comparison against the EMA response once the EMA response is gone, and the Python Kalman
-  prototype (=pair_observer*.py=, =pair_spectrum.py=, =noise.py= if the shadow panes go).
+- [X] Removed with their pages and make targets, because each compared against the EMA
+  response or read its ladders: the pair-basket, pair-opportunities, gate-comparison,
+  block-pairs and basket-first campaigns and the static-figure workflow (=render.py=,
+  =control-lab=, =-data=, =-render=, =-regenerate=). Their old output is still on disk under
+  =doc/control-lab/= and can no longer be rebuilt; delete it when it is no longer wanted.
+- [ ] Remove the Python Kalman prototype (=pair_observer*.py=, =pair_spectrum.py=, and =noise.py=
+  if the shadow panes go). It keeps the retired ladder's windows as its comparison.
+- [ ] =bootstrap.history_days= now only sets how many earlier days give a historical profile its
+  reference means. Rename it, or fold it into that profile.
 - [ ] Give the commodity profile less compression and funded private actors: at one month a
   day the pools see a decade thirty times too fast and the buyer and seller are spent by day
   120.
@@ -173,13 +281,27 @@ After step 2, so the surviving campaigns run on the final wiring.
   =ShadowObserver=, =IShadowObserver=, =BuckKControllerShadow=, =BuckWithBasketHooks=, the older
   =BasketWheel= and its Director, Sweep and Equity kinds; about 150 tests in ten suites; the
   simulator modules that only drive them.
-- [ ] Retire the working documents that describe them: =BASKET-EQUITY=, =BASKET-WHEEL=,
-  =DESK-LP-RESERVE=, =K-AND-OPS=, =CONVERGENCE=, =CARRY-CONVEXITY=, =WAVE3=, =REBALANCING-EQ=,
-  =ORGANIC-SCALE=, =ONBOARDING-D7=, =BASKET-REBALANCE.md=, =BASKET-REDESIGN.md=. Keep from each only
-  what the papers below need.
+- [X] The working documents were reviewed on 2026-10-10. Two were removed, with what was worth
+  keeping carried into steps 3 and 4: =DESK-LP-RESERVE.org=, an idea that was never built, and
+  =ONBOARDING-D7.org=, the joining instructions for a program that has finished.
+- [ ] The rest are out of date in their status and cannot go yet, because contracts, tests and
+  simulator modules that still ship cite them section by section. [[file:BASKET-MACHINE.org::#record][The design]] lists what each
+  still records. What frees each:
+  - =BASKET-EQUITY.org=: the papers carrying the shell's rules, and the Deploy, Fund and Trim
+    facet removed. Cited by the Makefile, =deploy.py=, the equity tests and three prototypes.
+  - =BASKET-WHEEL.org=: the wheel paper carrying the incentive. Cited by =ArbKind.sol=, the
+    wheel's tests and four simulator modules.
+  - =K-AND-OPS.org=, =CARRY-CONVEXITY.org=, =WAVE3.org=, =ORGANIC-SCALE.org=, =CONVERGENCE.org=,
+    =REBALANCING-EQ.org= and =doc/reports/=: the simulator modules that cite them, about a
+    hundred files, ported or removed in step 3. They also cite each other and the two notes
+    removed above.
+  - =BASKET-REDESIGN.md=, =BASKET-REBALANCE.md=: the pro-rata basket and the directors removed.
+- [ ] =JUBILEE-ISSUANCE.org= says in its status that the basket's relief is not yet paid. The
+  equity shell settles relief in its Daily step. Say which baskets the status means.
 - [ ] Rewrite the papers: =alberta-buck-ethereum.org= (about fifty references to these
   contracts), =alberta-buck-ethereum-basket.org=, =alberta-buck-ethereum-wheel.org=; touch
-  =-deployment=, =-platform= and =-demo=.
+  =-deployment=, =-platform= and =-demo=. The wheel paper still names =EquityDesk=, the removed
+  =DESK-LP-RESERVE.org=, and the working documents as its design record.
 
 * 7. Toward a diamond
 

@@ -926,7 +926,7 @@ def _sub(smoke: bool = False, grind: bool = False) -> str:
 def launch_script(outdir: Path | None = None, smoke: bool = False,
                   venv: str | None = None, grind: bool = False) -> Path:
     """The detached runner: one nohup cell per line, a .log and a .done
-    marker each (ONBOARDING-D7.org's ssh habit)."""
+    marker each, so a cell outlives the ssh session that started it."""
     outdir = outdir or OUTDIR
     vec = outdir / _sub(smoke, grind)
     vec.mkdir(parents=True, exist_ok=True)

@@ -8,8 +8,12 @@ notes written while the machine was built. What the machine earns, and on what e
 [[file:BASKET-MACHINE-RESULTS.org][the results]]. What is left to do is in [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
 The older machines still ship beside this one: the pro-rata, fence and ops baskets, the Deploy /
-Fund / Trim facet, the rebalance directors, the turn director and the shadow observer. Nothing
-here imports them. They stay until the simulators show this machine is better in every regime.
+Fund / Trim facet, the rebalance directors, the turn director and the shadow observer. They stay
+until the simulators show this machine is better in every regime. Two parts of the machine still
+build on them (see [[#names][names]]): the venue facet on the older V3 venue, the desk on the ops mixin.
+
+This document covers the machine that turns the basket. What a depositor is promised (shares,
+the exit, the basket's quarter of a gain) is the shell's, and is unchanged: see [[#record][the older record]].
 
 * The parts
 
@@ -28,10 +32,9 @@ is a contract with its own state that the others call.
 | =OuterBandDeskPolicy= | Service | Which side of parity the basket is on and for how many days | The desk and the wheel |
 | =BasketMachineWheel= | Wheel | The cursor, the reserve, the arbitrage triangles | Any keeper (=tick=) |
 
-=BuckBasketEquityResponse= is the base of the upkeep facet. It holds the three step entry points,
-the sell and buy primitives and an older allocation plan, which the upkeep facet now uses only as
-its risk fallback (see [[#fallback][below]]). Each service and facet has its interface in its own file
-(see [[#names][names]]); they depend on those, not on each other's contracts.
+The upkeep facet is one contract: the three step entry points, the sell and buy primitives, the
+paired transfer and the [[#safeguard][safeguard plan]]. Each service and facet has its interface in its own
+file (see [[#names][names]]); they depend on those, not on each other's contracts.
 
 * The books and the mark
 
@@ -45,7 +48,7 @@ equity, so Buck enforces its limit: it can draw at most K times that mark.
 - Marks are TWAP, HIGH (the higher of spot and TWAP, an entrant's price) and LOW (an exiter's).
   Every spend is preceded by a mark of the credit at equity(LOW).
 - A constituent's /allocation/ is its position (both sides) plus its wallet TOKEN, as a share of
-  the gross. Targets are the declared weights; the upkeep facet requires a zero target lean.
+  the gross. Targets are the declared weights.
 
 About 72% of the TOKEN sits inside liquidity in the lab's settled book. A position's value
 follows the square root of price, so the basket's allocations move about 60% as far as a wallet's
@@ -80,9 +83,13 @@ liquidity or its spot is more than a tolerance (5%) from its TWAP. It publishes 
 value, whether it is fresh, and how many consecutive days have had a valid sample. K reads the
 same quantity through the venue. No offset or filter is applied to either.
 
-The contract also carries seven-window EMA ladders of each TOKEN's relative tick and of the
-common value, with an imported history. Nothing in the desk or in paired rebalancing reads them.
-They are read only by the inherited fallback plan, and are to be retired with it.
+It keeps nothing else. The seven-window EMA ladders it once carried, their imported history and
+the trend gates read from them were removed on 2026-10-10: nothing in the machine reads a trend
+from the parity reference.
+
+The sign is easy to get backwards. The value is BUCKs per reference basket. Above one, a basket
+costs more BUCKs: the BUCK is cheap, the desk's side is +1 and K falls. Below one the BUCK is
+dear, the side is -1 and K rises.
 
 * The rebalance policy: =PairRebalancePolicy=
 
@@ -145,9 +152,31 @@ The wheel turns three kinds of step on the basket.
   relief against the lien, re-mark the credit.
 - /Sync (1, pool i)./ Once a day per pool: collect the position's fees into the wallet and the
   account, re-mark.
-- /Respond (2)./ At most once per interval: observe, then one of the following.
+- /Respond (2)./ At most once per interval: observe, then the first of the following that
+  applies.
+
+** The safeguard
+:PROPERTIES:
+:CUSTOM_ID: safeguard
+:END:
+
+The book comes first. The facet runs its safeguard plan, and no paired transfer, when the book
+holds no TOKEN, when the lien exceeds K times equity(LOW), when its spendable BUCKs are below the
+liquidity target's band, or when any constituent is beyond its leash (30% of its declared
+weight). The plan has no view on prices and reads no signal:
+
+- /Cash./ Short liquidity or a lien above K is met by selling, from the constituent furthest
+  above its declared weight. While cash is needed nothing is bought.
+- /Leash./ A constituent beyond its leash is sold or bought back toward its declared weight.
+- /First deposit./ A book of BUCKs alone aims its usable cash at the declared weights.
+
+It makes at most one sale and one purchase, each capped by the step (5% of the constituent) and
+the pool's swap depth, with a fresh mark of the credit between the two. With nothing to sell or
+buy and no cash needed, it places wallet TOKEN as [[#otherwise][below]].
 
 ** A paired transfer
+
+When the book needs no safeguard:
 
 1. Value every constituent and report the gaps to the policy. A gap is /material/ when the
    policy says it is urgent (or, for a policy with no patience, when it exceeds the allocation
@@ -169,21 +198,13 @@ The wheel turns three kinds of step on the basket.
    transfer clock restarts, and so does the urgency of the donor and of each recipient.
 
 ** Otherwise
+:PROPERTIES:
+:CUSTOM_ID: otherwise
+:END:
 
 With no transfer to make, the facet places wallet TOKEN into liquidity where the funded
 allocation is shortest, if the account has spending room beyond its liquidity target. This swaps
 nothing and does not restart the transfer clock. Failing that it re-marks a stale credit.
-
-** The fallback
-:PROPERTIES:
-:CUSTOM_ID: fallback
-:END:
-
-The facet hands the response to the inherited plan when the book is empty, when the lien exceeds
-K times equity(LOW), when its spendable BUCKs are below the liquidity target's band, or when any
-constituent is beyond its leash (30% of its declared weight). That plan sells for cash first and
-is where the EMA ladders are still consulted. In the lab's cyclic runs it is taken in two to
-four of 481 responses.
 
 * The venue: =BasketVenueFacet=
 
@@ -214,11 +235,13 @@ The policy leaves the inner band to K.
 
 * The wheel: =BasketMachineWheel=
 
-One permissionless =tick= advances a cursor over slots, each due or not: Compute (K's cycle),
-Ops (the desk), the basket's Daily, Sync per pool and Respond, Arb (triangles between TOKEN/BUCK,
-TOKEN/USDC and BUCK/USDC, taken only at a realized profit) and Sample (the parity reference,
-through the desk policy when there is a desk). Ops publishes its observation dependency first. A
-failing target cannot trap the cursor.
+One permissionless =tick= advances a cursor over slots, each due or not: Sample (the parity
+reference, through the desk policy when there is a desk), Compute (K's cycle), Ops (the desk),
+the basket's Daily, Sync per pool and Respond, and Arb (triangles between TOKEN/BUCK, TOKEN/USDC
+and BUCK/USDC, taken only at a realized profit). Sample comes first so that every other kind
+acts on a market already read, and no trade of the same turn can spoil the reading. Ops
+publishes its observation dependency again before it acts. A failing target cannot trap the
+cursor.
 
 Arbitrage profit goes to a configured creditee. The basket accepts income from its wheel and
 from one governance-appointed arbitrage creditor, which can deposit and nothing else.
@@ -245,14 +268,48 @@ default in the lab model, so earlier runs reproduce frame for frame.
 There is no single recipe yet. The lab builds the older equity machine with the simulator's
 =deploy=, then swaps in the venue, the upkeep facet, the parity reference and the desk policy
 (=control_lab/engine.py=), and wires the pair observer and policy separately
-(=control_lab/block_pairs.py=). The general simulator reaches part of this with
-=SIM_EQUITY_MACHINE=1= and has no pair policy at all. The shell is not a proxy with upgradeable
-storage: a new facet needs a shell built from these sources.
+(=control_lab/block_pairs.py=). The general simulator builds the same parts with
+=SIM_EQUITY_MACHINE=1= (=basket_machine.py=), at the lab's sizing and with each constituent's
+declared price as the policy's reference. The shell is not a proxy with upgradeable storage: a
+new facet needs a shell built from these sources.
 
 The order that matters: seed and age every pool through a TWAP window; wire venue and upkeep
 facet; open and fund the desk's credit; deploy the observer, then the policy with the accepted
 reference means; set the desk's policy, guard, budget and floor; point the wheel's Ops at the
 desk, Sample at the desk policy, Equity at the basket.
+
+* What earlier measurement settled
+
+Three choices in this machine were not made here. The carry-convexity program measured them on a
+66-cell grid of shocks and attacks, and [[file:K-AND-OPS.org][K-AND-OPS.org]] ranks what it found.
+
+- /K reads the price alone./ Every design that fed a position into K pinned K at its ceiling
+  somewhere, and at the recommended gain an attacker who loaded the book came out ahead. So K
+  here is the direct controller on the basket's value in BUCKs, and nothing the desk holds or
+  has drawn reaches it.
+- /The seam between the desk and K is persistence, not size./ The desk trades on any advice
+  with what it holds. It draws credit, which changes supply, only on advice that has lasted.
+- /K is a slow, weak lever./ It moves the stock of credit over months. Holding the price inside
+  the band, now, was the job of faster facilities that this machine does not have: see the
+  first open decision in [[file:BASKET-MACHINE-TASKS.org][the task list]].
+
+* The older record
+:PROPERTIES:
+:CUSTOM_ID: record
+:END:
+
+These working documents predate the machine. Each is out of date in its status and still the
+only full record of something that ships, and the contracts and simulators cite them section by
+section. They go when what they describe goes.
+
+| Document | Still the record of |
+|----------+---------------------|
+| =BASKET-EQUITY.org= | The shell: its rulings, deposit and redemption, shares, the basket's quarter of a gain, credit and K. Its Deploy, Fund and Trim facet and its turn director are the older machine. |
+| =BASKET-WHEEL.org= | The wheel's chassis, the arbitrage kind, the caller's incentive and what they measured |
+| =K-AND-OPS.org=, =CARRY-CONVEXITY.org=, =WAVE3.org= | The equilibrium-defence program: K's designs, the undertakings, the stress fee, the facility, and every measured cell |
+| =ORGANIC-SCALE.org=, =CONVERGENCE.org= | The organic cast, the four-layer architecture and the experiments that joined equilibrium, harvest and the savings demonstration |
+| =REBALANCING-EQ.org= | The variant matrix and the excursion catalogue: the regimes the comparison will reuse |
+| =BASKET-REDESIGN.md=, =BASKET-REBALANCE.md= | The pro-rata basket and the rebalance directors, which are released |
 
 * Names and interfaces, toward facets
 :PROPERTIES:
@@ -264,11 +321,11 @@ and the published package use.
 
 | Was | Now | Still to do |
 |-----+-----+-------------|
-| =PairBasketEquityResponse= | =BasketUpkeepFacet= | Still built on =BuckBasketEquityResponse=; the two become one facet when the fallback is reduced to cash and credit work |
+| =PairBasketEquityResponse=, =BuckBasketEquityResponse= | =BasketUpkeepFacet= | |
 | =ValidatedBasketVenue= | =BasketVenueFacet= | Still built on =BuckBasketUniswapV3= while the older baskets ship |
 | =BlockPairSignals= | =PairSignals= | |
 | =PairRebalancePolicy= | unchanged | |
-| =BasketSignals= | =BasketReference= | Still carries the EMA ladders until the fallback stops reading them |
+| =BasketSignals= | =BasketReference= | |
 | =OuterBandMonetaryDirector= | =OuterBandDeskPolicy= | |
 | =EquityDesk= | =BasketDesk= | Still built on the =MonetaryDesk= mixin it shares with =BuckBasketOps= |
 | =BasketMachineWheel= | unchanged | Becomes =BasketWheel= when the older wheel goes |
@@ -283,12 +340,13 @@ One interface per facet or service, each in its own file, is what a diamond regi
 | =IBuckBasketVenue= | kept | The venue facet |
 | =IPairSignals= | the concrete type | The pair observer |
 | =IRebalancePolicy= | the concrete type | The policy |
-| =IBasketReference= | most of =IBasketSignals= | The parity reference |
+| =IBasketReference= | =IBasketSignals= | The parity reference |
 | =IDeskPolicy= | =IMonetaryDirector= for this desk, =IMonetaryExecutionGuard= | The desk policy |
 
-=IBasketSignals= survives as the four EMA trend gates on top of =IBasketReference=, read only by
-the inherited fallback plan. =IMonetaryDirector= survives in =MonetaryDesk.sol= for the older ops
-basket. The shell provides everything in =IBasketView= but does not yet declare it.
+=IMonetaryDirector= survives in =MonetaryDesk.sol= for the older ops basket. The shell provides
+everything in =IBasketView= but does not yet declare it. The shell's =setResponse= now takes the
+leash and the interval alone: the parity reference's address and the target lean went with the
+ladders.
 
 The papers (=alberta-buck-ethereum*.org=, =alberta-buck-deployment.org=) and the older working
 notes still say =EquityDesk=. They are rewritten with the papers, not here.
