@@ -7,77 +7,184 @@ do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. Every number can be r
 
 * The short version
 
-The basket makes money from prices that swing apart and come back. On a million, over 120 days
-of cycling prices, it ends about 70,000 ahead of a basket that sat still. On prices shaped like
-real commodities it ends 27,000 to 34,000 ahead.
+The basket makes money from prices that part and come back. It does so better than the older
+upkeep, on five years of five commodities with depositors coming and going.
 
-Three things changed since the last set of numbers, and all three are in these.
+| Five years, one seed | Older upkeep | The machine |
+|----------------------+--------------+-------------|
+| Share price at the end, real prices | 1.142 | 1.194 |
+| Share price at the end, reverting prices | 1.175 | 1.253 |
+| Equity it could spend on an exit, at the least | 0% | 65% |
 
-- Targets lean against price. A TOKEN above its reference price gets a smaller target, and one
-  below a larger one. This is the largest change. It adds 70% on cycles.
-- A gap is released at a steady rate: half of what remains each day, however often the wheel
-  turns. A gap that has become urgent stays open until it is closed.
-- The lab's outside market no longer moves when it is arbitraged, so the basket's pools follow
-  the feed as closely as their fees allow.
+The largest lesson came from that test, not from the lab. The machine as first built left half
+of every deposit waiting, for months. The cause was in how its credit was counted. A BUCK it
+drew and kept beside its own TOKEN counted as a BUCK spent, so it could pair only K of what it
+held. Now K bounds only the BUCKs it has let out. Then nothing is sold to place a deposit,
+nothing is sold to pay an exit, and most of the upkeep had no work left. We took it out.
 
-The BUCK itself held up well. When its basket of commodities rose 47% in dollars, the BUCK kept
-pace.
+What is still true from the lab: a target that leans against price earns most of the gain, a
+gap is best released at a steady rate, and when a TOKEN moves and never comes back the basket
+loses.
 
-Four things to be careful about. The basket now trades on nearly every turn, in small pieces,
-and each transfer earns a third of what it did. When a TOKEN moves and never comes back, the
-lean doubles the loss. Rebalancing still turns the basket's spare TOKEN into BUCKs, which pushes
-the BUCK's price up when nobody is issuing new ones. And owning the arbitrage is worth little
-once the outside market is deep.
+Four things to be careful about. Every result here is one seed. The machine uses a sixth more
+gas than the older upkeep and makes many small trades. The lab's tables below are from before
+the rebuild, and are being rerun. And a young basket's share price shows the relief on its lien
+before the demurrage on the BUCKs it holds.
 
 * How to read the numbers
 
-A run is 120 days with three TOKENs and a basket that starts with one million. The wheel turns
-four times a day.
+There are two tests.
 
-Every gain below is measured against the same basket doing no rebalancing. So +74,013 means the
-basket ended 74,013 richer than it would have by sitting still.
+/The lab/ is 120 days with three TOKENs and a basket that starts with one million. The wheel
+turns four times a day. Every gain is measured against the same basket doing no rebalancing,
+and valued "at reference": its TOKEN at outside prices, its BUCKs at what the BUCK is supposed
+to be worth.
 
-We value the basket "at reference": its TOKEN at outside prices, its BUCKs at what the BUCK is
-supposed to be worth. We do this because in some runs nothing holds the BUCK's price steady, and
-then gains measured in BUCKs and in dollars can point in opposite directions.
+/The savings world/ is five years with five commodities: labour, construction, food, energy and
+gold. It has depositors who come and go, retirees, a desk, K and arbitrageurs, and the wheel
+turns twice a day. It runs on real prices and on a reverting copy of them. What it reports is
+the share price: what one share of the basket is worth in BUCKs.
 
-Each shape of prices is one path from one seed. Read the tables for their shape.
+A share price moves about half a percent from one day to the next. So where two runs are
+compared, each is averaged over its last 90 days.
 
-No gas is charged. Keep that in mind wherever a result depends on many small trades.
-The [[*Gas][gas section]] says what it would cost.
+No gas is charged in either. The [[*Gas][gas section]] says what it would cost.
 
-* Rebalancing
+* Five years in the savings world
 
-The basket sells a TOKEN that has become expensive against another and buys the cheap one. It
-waits for evidence that the gap has stopped widening.
+The older upkeep is the director with its Deploy, Fund and Trim steps. The machine is the one
+described in the design, as rebuilt ([[file:review/savings-old-new.py][savings-old-new.py]]).
 
-The first version waited too long and then moved too little: 35,696 BUCKs in 120 days, about
-245 a trade. The rule as built moves sixteen times as much. Gain over 120 days:
+| | Older, real | Machine, real | Older, reverting | Machine, reverting |
+|--------+--------+--------+--------+--------|
+| Share price, last 90 days | 1.142 | 1.194 | 1.175 | 1.253 |
+| Growth a year, after the first month | +2.6% | +3.4% | +3.3% | +4.8% |
+| Net of the demurrage its held BUCKs carry | 1.110 | 1.154 | 1.143 | 1.219 |
+| Basket's cost in BUCK off 1, mean | 0.53% | 0.50% | 0.56% | 0.53% |
+| The same, at its worst | 5.1% | 3.3% | 3.3% | 2.7% |
+| Days with under 5% of equity to spend | 1,526 | 0 | 1,446 | 0 |
+| Pool fees, BUCKs | 108,636 | 122,604 | 117,860 | 144,284 |
+| Arbitrage credited to depositors, dollars | 347,951 | 373,808 | 275,965 | 315,613 |
+| Depositors' realized return a year, dollars | +3.7% | +4.4% | -0.8% | +0.6% |
+| Gas, billions | 10.2 | 12.0 | 10.8 | 12.8 |
 
-| Prices | First version | Declared weights | With the lean | With the lean, whole system running |
-|--------+---------------+------------------+---------------+-------------------------------------|
-| Clean cycles | +4,037 | +41,472 | +70,345 | +74,013 |
-| Cycles with noise | +1,555 | +40,193 | +71,381 | +74,876 |
-| Flat, noisy | 0 | 0 | 0 | 0 |
-| One TOKEN reprices for good | -75 | -5,174 | -11,004 | -11,175 |
-| Commodity-like | +246 | +19,782 | +27,204 | +34,351 |
+The machine ends 4.5% ahead on real prices and 6.6% ahead on reverting ones. It holds the
+BUCK's price as well or better. Its depositors do better.
 
-Three things to notice. On cycles the gain is about 7% in 120 days. On flat prices it does
-nothing, which is right. And when a TOKEN moves and never comes back, rebalancing loses,
-because it sold on the way.
+It also has room. The older upkeep had under 5% of its equity to spend on four days in five or
+more, because pairing used its whole limit. The machine never had less than 65%.
 
-For scale: someone holding the same TOKENs in a wallet, rebalancing by a simple rule, could
-have made about 8% on the clean cycles. Steering to its declared weights the basket gets half
-of that, because most of its TOKEN sits in liquidity pools, which damp how far its shares move.
-The lean makes up most of the difference.
+It trades more. On real prices it made 968 sales and 419 purchases, about two trades for every
+five turns of the wheel, and used 17% more gas.
 
-It costs trades. On clean cycles the basket made a transfer on 471 of its 480 turns, each
-between one and two thousand BUCKs. Before these changes it made 82. A transfer earned 466
-then and earns 157 now.
+On reverting prices K climbs to 0.93 or 0.95 in the last two years, under both. The BUCK was
+about half a percent dear by then. That is K's own behaviour, not the basket's.
 
-One more shape uses 120 days of real gold, food and energy prices, adjusted to end where they
-began. There the lean earned 5,675 with the basket alone and lost 1,262 with the whole system
-running. That is too little either way to read.
+The desk barely acts under the machine. It moved 36,000 BUCKs in five years and ended 1,751
+ahead of holding its grant. Under the older upkeep it moved 178,000 and ended 19,005 behind.
+
+* Why deposits waited
+
+The first five-year run of the machine was not like this. It placed none of its deposits for 70
+days, and after a year a sixth of its book was still TOKEN in a wallet. TOKEN waiting, as a
+share of equity, real prices:
+
+| Upkeep | Day 30 | Day 90 | Day 180 | Day 364 |
+|--------+--------+--------+---------+---------|
+| Older | 6.6% | 0.0% | 0.2% | 0.0% |
+| Machine as first built | 47.8% | 42.2% | 23.3% | 16.7% |
+| With placing no longer held back by a leash sale | 45.8% | 33.2% | 15.6% | 12.7% |
+| The same, and a reserve of one exit | 42.1% | 26.3% | 20.7% | 16.1% |
+| A trial that sold half of what waited | 10.8% | 5.0% | 0.0% | 0.0% |
+| A trial of the net mark | 0.1% | 0.0% | 0.0% | 0.0% |
+| The machine as rebuilt | 0.0% | 0.0% | 0.0% | 0.0% |
+
+We peeled it in layers.
+
+- /The turn./ Depositors bring an even mix, which put gold far above its weight. Every turn
+  was spent selling gold, and a turn that sold placed nothing. Fixing that helped a little.
+- /The reserve./ The basket kept a fifth of its assets unspent after a large deposit, for
+  three months. A smaller reserve helped a little more.
+- /The pace./ It placed one TOKEN a turn, under limits meant for swaps, though placing swaps
+  nothing.
+- /The credit./ Under all of these, the limit. Pairing a BUCK of TOKEN takes a BUCK. With K at
+  0.75 the basket could pair three quarters of its book and no more.
+
+The older upkeep gets round the limit by selling half of what credit does not cover. That
+works, and it costs. On reverting prices the share price after a year was 1.075 with a fifth of
+the book still waiting, and 1.049 when all of it was sold and placed at once.
+
+* The net mark
+
+A BUCK the basket owes and a BUCK it holds are the same thing. Holding both carries no risk.
+So the limit should count only what it has let out:
+
+#+begin_example
+BUCKs drawn - BUCKs still held beside its own TOKEN  <=  K x equity
+#+end_example
+
+| How the limit counts | Pairs | Left for exits | Most TOKEN it can hold |
+|----------------------+-------+----------------+------------------------|
+| Every BUCK drawn (as it was) | K of the book | what pairing leaves | 1.75 x equity |
+| Only BUCKs let out (now) | all of it | all of K x equity | 1.75 x equity |
+| Everything it owns as collateral | all of it | 3 x equity | 4 x equity |
+
+The last row is the loop that lending protocols offer. We did not take it. The middle row gives
+what we wanted and risks no more than before.
+
+With it:
+
+- A deposit is paired on the next turn, in full, by issuing. Nothing is sold.
+- An exit is paid in BUCKs. One exit of up to 43% of the book fits. What it leaves over is sold
+  down on later turns.
+- A cut in K forces no sale. It lowers a ceiling: in normal running the basket has let out at
+  most half of K times equity.
+- A sale and a purchase no longer have to meet. Each TOKEN is sold when it is high and bought
+  when it is low, and the credit carries the difference.
+- The size of the whole book leans against the BUCK's own price: it holds BUCKs when the BUCK
+  is cheap and issues them when it is dear.
+
+In five years the machine had let out between -5% and +14% of its equity, never near the
+ceiling of 37%.
+
+Three costs. After a large exit the depositors who stay hold the leavers' TOKEN until it is
+sold. A TOKEN that collapses takes a third more BUCKs with it, because all of its position is
+paired. And relief accrues on a lien twice the size: see below.
+
+** Relief and demurrage
+
+The basket's lien earns relief, 2% a year. The BUCKs it holds in its pools carry demurrage, 2%
+a year. Over time the two cancel, because BUCKs that leave a pool take their share of it with
+them.
+
+But the books count relief as it accrues, and the demurrage only when the BUCKs come back. So
+a share price runs ahead by what its held BUCKs carry. After five years that was 2.9% of equity
+for the older upkeep and 2.7% to 3.6% for the machine. The table above gives the share price
+net of it. The machine is still ahead by 3.9% and 6.7%.
+
+* The rebuilt machine in the lab
+
+The lab is being rerun on the rebuilt machine. Three shapes are done, with the whole system
+running:
+
+| Prices | Before the rebuild | Rebuilt | Rebuilt, declared weights |
+|--------+--------------------+---------+---------------------------|
+| Clean cycles | +74,013 | +96,623 | +55,646 |
+| Commodity-like | +34,351 | +33,263 | +17,796 |
+| One TOKEN reprices for good | -11,175 | -7,534 | -3,482 |
+
+It earns more on cycles, the same on commodity-like prices, and loses less when a TOKEN moves
+for good. The lean still does most of the work.
+
+It makes about a thousand sales and purchases in 120 days on clean cycles. Before, it made 471
+transfers, each a sale and one or two purchases. So the count of swaps is about the same.
+
+Turning off the lean against parity changes the gain little. It holds the BUCK's price a
+little worse: 0.25% from its basket on clean cycles in place of 0.20%.
+
+Everything below this line was measured before the rebuild, on the machine of commit =b756033=.
+The rules it measures are still in the machine. The numbers will be replaced when the rerun
+finishes.
 
 * Leaning against price
 
@@ -138,8 +245,8 @@ less a quarter point. When the count reaches a set level, that TOKEN may be reba
 gap gets there soon. A small one gets there if it lasts. The set level is the /patience/, in
 point-days. The lab runs at 2.
 
-A transfer used to start the count again from zero. It no longer does: an urgent gap stays open
-until the share is back within the quarter point.
+A trade does not start the count again: an urgent gap stays open until the share is back within
+the quarter point.
 
 With that change and the lean, patience has little left to decide. Whole system running:
 
@@ -167,14 +274,6 @@ earns, with under two fifths of the transfers. On the one-way move it loses thre
 much. Before the lean, urgency earned nearly twice what the line did. Most of that lead is gone.
 
 Which is better now depends on what a transfer costs. That waits for the callers to be paid.
-
-* Raising cash
-
-When the basket is short of BUCKs, or its credit is over its limit, it sells TOKEN before it
-does anything else. It sells the TOKEN furthest above its declared weight. It used to sell the
-first on its list.
-
-It matters most on commodity-like prices, which open with such a sale.
 
 * A sudden jump
 
@@ -258,24 +357,15 @@ Rebalancing gains a little from the deeper market:
 | Commodity-like | +24,993 | +27,204 |
 | The sudden jump | +71,754 | +74,769 |
 
-* A side effect
+* A side effect that is gone
 
-When the basket rebalances, half of what it buys goes in as BUCKs beside the TOKEN. Over about
-90 days this turns its spare TOKEN into BUCKs: it ends up holding 14% to 17% of its value in
-BUCKs.
+Before the net mark, rebalancing slowly turned the basket's spare TOKEN into BUCKs. It ended
+holding 14% to 17% of its value in BUCKs, and where nobody issued them the BUCK became 4% to 9%
+too dear.
 
-Those BUCKs have to come from somewhere. Clean cycles, 120 days:
-
-| Who else is in the market | K at the end | BUCK price at the end |
-|---------------------------+--------------+-----------------------|
-| Nobody | 0.750 | 1.087 |
-| K alone | 0.950 | 1.087 |
-| K and the desk | 0.950 | 1.040 |
-| A seller of BUCKs | 0.672 | 0.980 |
-| Buyers and sellers | 0.765 | 1.011 |
-
-With someone issuing BUCKs, all is well. Without, the BUCK becomes 4% to 9% too expensive and K
-runs to its limit. We need to decide whether the basket should do this at all.
+There is no spare TOKEN now. Every TOKEN is paired from the first turn with BUCKs the basket
+issues itself, and it ends the lab's run holding about 1% of its value in BUCKs or less. The
+table of who else is in the market will be redone with the rerun.
 
 * Gas
 
@@ -323,22 +413,22 @@ result is net of what callers were paid, comes next.
 
 * What we do not know yet
 
-- How the old basket and desk compare on the same tests.
-- What the results look like net of paying the callers, and what the smallest transfer should
-  be.
-- Whether urgency still earns its place over a plain line, now that the lean and the open gap
-  do most of the work.
-- Whether a tilt of one half is right. It was chosen on one price path of each shape.
-- Whether one seed and one bad case are representative.
-- How the machine behaves at real speed. The cycles are far faster than real commodities.
-- How it behaves with depositors arriving and leaving. The lab's book is deposited once.
-- What holds the BUCK's price inside 3% of its basket. Only K acts there, and K is slow.
-- How it does over years of real prices. The savings world's five commodities, run for five
-  years on the old machinery and the new, is the next test.
+- Whether one seed is representative. Nothing here has been run on a second.
+- What the lab's tables look like on the rebuilt machine. The rerun is under way.
+- What the results look like net of paying the callers, and what the smallest trade should be.
+- Whether the lean against parity is the right size, and whether half of K times equity is the
+  right ceiling. Both are first values.
+- Whether equity should deduct the demurrage on held BUCKs as it accrues.
+- Whether urgency still earns its place over a plain line.
+- How the machine behaves at real speed. The lab's cycles are far faster than real commodities.
+- What holds the BUCK's price inside 3% of its basket. The basket's lean helps, K is slow, and
+  the desk waits outside.
+- What a run of large exits does, and a cut in K to its floor.
 
 * Rebuilding the numbers
 
 #+begin_src sh
+python doc/review/savings-old-new.py /tmp/savings   # five years, both upkeeps, both price sets
 make control-lab-interactive        # 310 runs; open doc/control-lab/interactive/index.html
 make control-lab-verify             # check every saved run
 make control-lab-basket-sizing      # the rebalancing tables: the basket alone
@@ -357,6 +447,7 @@ python3 doc/review/rebalance-benchmark.py
 PYTHONPATH=. python3 doc/review/commodity-inflation.py
 #+end_src
 
-A run takes one to two and a half minutes and the full set about two hours. Each campaign
-writes a detailed report beside its data under =doc/control-lab/=. None of that output is
-committed. These numbers were measured on the contracts and lab of commit =b756033=.
+A five-year world takes about 50 minutes and a lab run about three. Each lab campaign writes a
+detailed report beside its data under =doc/control-lab/=. None of that output is committed. The
+five-year table is from commit =61fb598=; the earlier trials in "why deposits waited" are from
+the commits between =68ec15d= and =3472bb0=.

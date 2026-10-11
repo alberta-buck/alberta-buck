@@ -51,6 +51,10 @@ Some items were carried here from the older working documents when those were re
   quadrants, acting beyond the band that profit-seeking agents are expected to hold, on
   excursions that K will in time reverse. The basket's parity lean is a small tilt of its own
   book inside that band and replaces none of it.
+- [X] Five years on the savings world, older upkeep against the machine, real prices and
+  reverting ones, one seed. The machine ends 4.5% and 6.6% ahead in share price, holds the
+  BUCK's price as well or better, and never has less than 65% of its equity to spend. It uses
+  a sixth more gas. The table is in [[file:BASKET-MACHINE-RESULTS.org][the results]].
 
 * 0. Two rules agreed on 2026-10-10
 
@@ -136,18 +140,10 @@ frame for frame wherever behaviour is not meant to change. Each one invalidates 
   facet reads them now, so they go with it (step 6).
 - [ ] Decide whether equity should deduct the demurrage its pooled BUCKs carry. Relief on the
   lien is counted as it accrues; that demurrage only when the BUCKs come back. Over time the
-  two cancel. In a young basket the share price shows the relief first, and an exit is paid on
-  it. The simulator reports the amount (=eq_carried_fee=).
-- [ ] Fold what =BasketDesk= uses of =MonetaryDesk= into the desk, so the mixin can leave with
-  =BuckBasketOps=. Keep =IStabilizer= only if something still reads it.
-- [ ] Declare =IBasketView= on the shell. It provides every function already. Add the leaned
-  targets to it: the simulator works them out again from the shell's state (=basket_machine.py=,
-  =targets_bp=) because no view returns them.
-- [ ] One reference, not two. The shell holds each TOKEN's reference price for the lean, with a
-  setter. The policy holds its own copy for its direction guard, fixed at construction. They
-  agree only while nobody uses the setter. Make the policy read the shell's before anyone does.
-- [ ] Fix or bound the stalled-ratio branch of the policy. It grants a fixed fifth of the
-  release rate whatever the rate's allowance; that is 0.8 of a gap a day at the lab's sizing.
+  two cancel. Until then the share price runs ahead, and an exit is paid on it. After five
+  years on the savings world the amount was 2.9% of equity under the older upkeep and 2.7% to
+  3.6% under the machine (=eq_carried_fee= in the simulator's frames). The pools are Carrying
+  and the basket, holding a lien, is not.
 - [X] Rename the test-only control facet for the facet it extends:
   =BasketUpkeepMaintenanceControl=. It keeps the book and takes no view on prices.
 
@@ -178,15 +174,15 @@ the machine is clearly better in every regime.
 - [ ] JS: =eqworld= deploys =BuckBasketProRata= with =BuckWithBasketHooks=. Port it. The third
   sandbox planned in =DEMO-SANDBOX.org= is not started and should start on the machine.
 - [ ] The savings sandbox. Its page talks only to the shell, so saving and redeeming need
-  nothing. What is done: the server runs a world on the machine when its experiment asks; the
-  frames carry the leaned targets, each response by what it did, the credit and the desk
-  policy's side and days; the page draws them, knows the strict venue's refusal, and offers
-  the upkeep in its world settings; the world is on its five commodities. What is left:
-  - Five years each way, old machinery and new, on real prices and on their reverting twins
-    (=doc/review/savings-old-new.py=). Write the outcome into the results.
-  - Make the machine the hosted world's default once it holds up.
-  - The page's screenshot. Its browser test passes on both upkeeps
-    (=make nix-venv-sandbox-savings-test=, and with =SAVINGS_TEST_BASKET=equity-machine=).
+  nothing. Done: the server runs a world on the machine when its experiment asks; the frames
+  carry the leaned targets, each response by what it did, the credit and the desk policy's
+  side and days; the page draws them, knows the strict venue's refusal, and offers the upkeep
+  in its world settings; the world is on its five commodities; its browser test passes on
+  both upkeeps; and five years have been run each way (=doc/review/savings-old-new.py=).
+  What is left:
+  - Make the machine the hosted world's default. The five-year run supports it; a second seed
+    first would be prudent.
+  - The page's screenshot, and its captions once the default changes.
   - The published contracts list (=scripts/contracts-dist.py=) carries only =BasketDesk= of the
     machine's contracts, so a checkout without a Foundry build cannot serve it.
 - [ ] Define the comparison before running it: the regimes, the measures and what "clearly
@@ -218,7 +214,9 @@ the machine is clearly better in every regime.
   standing BUCKs are what makes retirement possible: arms whose savers held none showed
   issuance only (=REBALANCING-EQ.org=, finding 4). The lab's one buyer and one seller, both
   spent by day 120, is thinner than the cast that verdict was about.
-- [ ] Run old against new on identical inputs and write the outcome into the results.
+- [ ] Run old against new on identical inputs and write the outcome into the results. Done
+  for the savings world, one seed. Not yet for a second seed, the portcast world or the
+  catalogue's disruptions.
 
 * 4. Decisions the evidence is waiting on
 
@@ -268,8 +266,9 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   Inside 3% the expectation (2026-10-11) is that profit-seeking agents hold parity, trusting K
   to restore it. The basket now acts as one of them on its own book: its size leans against
   parity, five times the error as a share of equity. The undertakings, the ladder, the facility
-  and the seeder exist as simulator agents, not contracts. Measure what the lean and those
-  agents hold between them before adding an inner layer.
+  and the seeder exist as simulator agents, not contracts. Over five years on the savings
+  world the basket's cost stayed 0.50% from one BUCK on average with the machine and 0.53% with
+  the older upkeep, and the desk hardly acted. Vary the gain before adding an inner layer.
 - [ ] One refused sample clears the desk's persistence. The desk draws credit only after 30
   consecutive valid days on one side, and =OuterBandDeskPolicy= clears its side and its count
   whenever the reference is not fresh. Sampling is permissionless, and a reading is refused
@@ -309,12 +308,15 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   trial's lien is twice the size, so it accrues more relief than the demurrage it has yet
   borne (see step 1).
   Still to settle:
-  - The parity gain (5) and the ceiling (half). Both are first values.
+  - The parity gain (5) and the ceiling (half). Both are first values. In five years the
+    machine had let out between -5% and +14% of equity against a ceiling of 37%.
   - The policy's ordered pairs. A constituent is worked against BUCKs alone, so one reading
     for each against the rest would replace n x (n - 1) questions a turn.
   - Whether the rate should count only the others that agree. It is the average over all of
     them, so one closing pair among four moves a constituent at a quarter of the pace.
-  - One seed and one year. The five-year runs are the next evidence.
+  - The stale parity reference. It was stale on 18 of 1,827 days on real prices. On such a day
+    the book keeps its size, and the desk's count of days starts again.
+  - A second seed, and the lab's tables on the rebuilt facet.
 
 - [X] What held deployment back before the net rule, measured the same day. TOKEN waiting, as
   a share of equity, real prices: 45.8% at day 30 and 12.7% at day 364; with a reserve of 4% of
@@ -348,7 +350,10 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   Bitcoin was most of that, and it is out of the basket. The lab tests a lasting move only with
   the two-step profile. Its historical profile removes each TOKEN's trend by construction, and
   its commodity profile gives all three the same one. The five-year savings world on its five
-  commodities, old machinery against new, is the real test (step 3).
+  commodities is the real test, and the machine passed it: +3.4% a year in share price on real
+  prices against the older upkeep's +2.6%, with gold ending 1.39 times the basket. What it has
+  not shown is how the two compare with simply holding, on an equal footing: each run's
+  holding benchmark is its own.
 - [ ] Take bitcoin out of the record. The papers (=alberta-buck-ethereum.org=, =-basket=,
   =-wheel=) and the working documents (=REBALANCING-EQ.org=, =CONVERGENCE.org=,
   =CARRY-CONVEXITY.org=, =BASKET-EQUITY.org=) still describe a six-TOKEN basket with a bitcoin

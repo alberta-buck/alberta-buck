@@ -15,6 +15,14 @@ build on them (see [[#names][names]]): the venue facet on the older V3 venue, th
 This document covers the machine that turns the basket. What a depositor is promised (shares,
 the exit, the basket's quarter of a gain) is the shell's, and is unchanged: see [[#record][the older record]].
 
+In short. The basket is a credit holder whose limit counts only the BUCKs it has let out, so it
+pairs every TOKEN with BUCKs of its own issue the moment it arrives, and pays an exit in BUCKs
+before it sells anything. It earns by reversion: each constituent has a target that leans
+against its price, and is sold above it and bought below it, on its own, when its price has
+stopped parting from the others. The size of the whole book leans against the BUCK's own price.
+A desk beside it, with its own grant and credit, acts only on excursions of the BUCK beyond a
+band. K sets how much the basket may let out, and is the slow lever under both.
+
 * The parts
 
 A /facet/ is code the basket shell delegatecalls, so it runs on the shell's storage. A /service/
@@ -38,21 +46,20 @@ its own file (see [[#names][names]]); they depend on those, not on each other's 
 
 * The books and the mark
 
-The basket is an ordinary BUCK credit holder. It holds one self-issued credit marked at its own
-equity, so Buck enforces its limit: it can draw at most K times that mark.
+The basket is an ordinary BUCK credit holder. It holds one self-issued credit that it marks
+itself, so Buck enforces its limit: it can draw at most K times that mark.
 
 - /Gross/ is every TOKEN/BUCK position at fair value (twice its BUCK side, full range) plus the
   wallet's TOKEN, at a chosen price mark.
 - /Equity/ is the gross plus the signed BUCK account plus the relief accrued on it. A negative
   account is credit drawn, a claim on the basket's own assets: the lien. Equity already deducts it.
 - Marks are TWAP, HIGH (the higher of spot and TWAP, an entrant's price) and LOW (an exiter's).
-  Every spend is preceded by a mark of the credit at equity(LOW).
-- A constituent's /allocation/ is its position (both sides) plus its wallet TOKEN, as a share of
-  the gross. Its /target/ is its declared weight, leaned against price (see [[#targets][targets]]).
+  Every spend is preceded by a fresh mark of the credit, from equity(LOW).
+- A constituent's /holding/ is the TOKEN in its position and its wallet, in BUCK. Its /target/
+  is its leaned share of the book the equity asks for (see [[#targets][targets]]).
 
-About 72% of the TOKEN sits inside liquidity in the lab's settled book. A position's value
-follows the square root of price, so the basket's allocations move about 60% as far as a wallet's
-would for the same price change.
+Every TOKEN sits inside liquidity. A position's value follows the square root of price, so a
+holding moves about half as far as a wallet's would for the same price change.
 
 Marked at equity, the credit bounds every BUCK drawn: lien <= K x equity. A BUCK drawn and
 paired beside the basket's own TOKEN then uses the limit as if it had been spent, so credit can
@@ -310,7 +317,12 @@ The desk is its own credit holder beside the basket: its own account, its own ma
 own TOKEN. Nothing it holds or has drawn enters the basket's books. It mirrors the basket's
 constituents and trades the same pools through the same venue facet.
 
-The policy leaves the inner band to K.
+The desk and the basket are separate concerns. The basket earns on its constituents returning
+to one another. The desk deploys its own equity on excursions of the BUCK itself, which K will
+in time reverse, so it is paid when the BUCK returns to its basket. It is the backstop beyond
+the band that profit-seeking holders are expected to keep, and it offers depth there, at a
+premium or a discount, up to the limits of its reserves. Inside the band it does nothing: that
+is left to those holders, to the basket's own lean and to K.
 
 - /Side./ It enters a side when the raw parity error exceeds the entry band (3%) and leaves when
   it returns inside the release band (2%).
@@ -388,8 +400,9 @@ Three choices in this machine were not made here. The carry-convexity program me
 - /The seam between the desk and K is persistence, not size./ The desk trades on any advice
   with what it holds. It draws credit, which changes supply, only on advice that has lasted.
 - /K is a slow, weak lever./ It moves the stock of credit over months. Holding the price inside
-  the band, now, was the job of faster facilities that this machine does not have: see the
-  first open decision in [[file:BASKET-MACHINE-TASKS.org][the task list]].
+  the band, now, was the job of faster facilities. This machine has one of its own, the basket's
+  lean against parity, and otherwise expects profit-seeking holders to do it: see
+  [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
 * The older record
 :PROPERTIES:
@@ -442,9 +455,9 @@ One interface per facet or service, each in its own file, is what a diamond regi
 | =IDeskPolicy= | =IMonetaryDirector= for this desk, =IMonetaryExecutionGuard= | The desk policy |
 
 =IMonetaryDirector= survives in =MonetaryDesk.sol= for the older ops basket. The shell provides
-everything in =IBasketView= but does not yet declare it. The shell's =setResponse= now takes the
-leash and the interval alone: the parity reference's address and the target lean went with the
-ladders.
+everything in =IBasketView= but does not yet declare it. The shell's =setResponse= takes the
+leash, the interval, the tilt and the lean cap; =setReferencePrice= and =setNetMark= sit beside
+it. The upkeep facet takes its policy, the parity reference and the parity gain at construction.
 
 The papers (=alberta-buck-ethereum*.org=, =alberta-buck-deployment.org=) and the older working
 notes still say =EquityDesk=. They are rewritten with the papers, not here.

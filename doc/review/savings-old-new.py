@@ -52,7 +52,7 @@ def report(path):
     parity = [abs(int(f["basketVal"]) / 1e18 - 1) for f in frames[SETTLED:]]
     k = [int(f["buckK"]) / 1e18 for f in frames]
     work = {name: (last.get(f"wh_eq_{name}", 0) / 1e6, last.get(f"wh_eq_{name}_n", 0))
-            for name in ("deploy", "fund", "trim", "place", "transfer", "raise", "buy")}
+            for name in ("deploy", "fund", "trim", "place", "sell", "buy")}
     desk = (int(last["desk_nav"]) - int(last["desk_hold"])) / 1e6 if last.get("desk_nav") and last.get("desk_hold") else None
     # BUCKs let out, of equity: the lien net of the BUCKs still held in the positions. And the demurrage
     # those held BUCKs carry in their pools, which the share price does not deduct until they come back.
