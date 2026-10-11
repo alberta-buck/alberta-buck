@@ -27,8 +27,10 @@ def run(upkeep, prices, years, sets, out):
     exp = expmod.load(EXPERIMENT, sets=[f"scenario.basket={UPKEEPS[upkeep]}", f"scenario.prices={prices}",
                                         f"scenario.years={years}", *sets])
     started = time.time()
+    partial = out.with_suffix(".partial")           # the loop saves as it goes: only a finished world gets its name
     with PyrevmAnvil() as evm:
-        simulate(expmod.build(exp), evm, out_path=str(out), verbose=False, basket_impl=exp.scenario["basket"])
+        simulate(expmod.build(exp), evm, out_path=str(partial), verbose=False, basket_impl=exp.scenario["basket"])
+    partial.replace(out)
     return upkeep, prices, time.time() - started
 
 
