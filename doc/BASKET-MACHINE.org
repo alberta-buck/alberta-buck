@@ -322,10 +322,12 @@ pinned to the feed again after every arbitrage pass.
 There is no single recipe yet. The lab builds the older equity machine with the simulator's
 =deploy=, then swaps in the venue, the upkeep facet, the parity reference and the desk policy
 (=control_lab/engine.py=), and wires the pair observer and policy separately
-(=control_lab/block_pairs.py=). The general simulator builds the same parts with
-=SIM_EQUITY_MACHINE=1= (=basket_machine.py=), at the lab's sizing and with each constituent's
-declared price as the policy's reference. The shell is not a proxy with upgradeable storage: a
-new facet needs a shell built from these sources.
+(=control_lab/block_pairs.py=). The general simulator builds the same parts when an experiment
+names =basket = "equity-machine"= (=basket_machine.py=), sized by the experiment's =[machine]=
+table, which starts from the lab's values, and with each constituent's declared price as the
+policy's reference. =SIM_EQUITY_MACHINE=1= beside the older =equity-ops= does the same for a
+scenario that carries no experiment. The shell is not a proxy with upgradeable storage: a new
+facet needs a shell built from these sources.
 
 The order that matters: seed and age every pool through a TWAP window; wire venue and upkeep
 facet; open and fund the desk's credit; deploy the observer, then the policy with the accepted

@@ -1,5 +1,5 @@
 #+TITLE: The basket machine: what is left to do
-#+DATE: 2026-10-10
+#+DATE: 2026-10-11
 #+OPTIONS: ^:nil toc:2 num:t
 
 The machine is described in [[file:BASKET-MACHINE.org][the design as built]] and measured in [[file:BASKET-MACHINE-RESULTS.org][the results]]. This is the
@@ -30,6 +30,18 @@ Some items were carried here from the older working documents when those were re
   lab worlds re-run on it, 13 reproduce frame for frame. The other 8 each contain a safeguard
   sale, which now comes from the most overweight TOKEN, not the first listed.
 - [X] The wheel samples the parity reference first, before any kind that trades.
+- [X] Targets lean against price. The tilt and the lean's cap are on the shell, set by
+  governance, zero by default; the lab runs a tilt of one half and a cap of 15% of the declared
+  weight. The reference is each TOKEN's price when it joined, with a governance setter.
+- [X] A gap is released at a steady rate, exact in time and kept for each donor, so the pace
+  does not depend on how often the wheel turns. An urgent gap stays open until it is back
+  inside the slack. The lab releases half of what remains each day.
+- [X] The lab's outside market is deep: its pools are pinned to the feed again after every
+  arbitrage pass.
+- [X] Bitcoin is out of the basket (decided 2026-10-11). Constituents are TOKENs for real
+  commodities, bounded by what they cost to make and to replace. Its 6% is shared over the
+  other five in proportion. The simulator's builders keep their six, so the older five-year
+  record still reproduces, and a scenario can be narrowed to the five (=scenario.keep_tokens=).
 
 * 0. Two rules agreed on 2026-10-10
 
@@ -63,17 +75,24 @@ what it spends, and the gas price sets how many turns that buys.
   runs because the credit's mark is a grain stale. Cache within the response, skip the policy
   when no share is urgent, and let a stale mark wait for work that needs it.
 - [ ] Tie the smallest transfer to what a turn is paid, in place of the fixed 100 ppm grain.
+  This now matters most. With the steady release the basket trades on every turn a gap is
+  open: 471 transfers in 480 turns on clean cycles, each earning 157 BUCKs and adding 750,000
+  gas. At 24 turns a day it moves the same BUCKs for the same gain in 2,646 transfers. The
+  allowance already accumulates while a donor waits, so a floor on the piece costs no pace.
 
 ** Urgency in place of the allocation band
 
 Built: see [[file:BASKET-MACHINE.org][the design]] for the rule and [[file:BASKET-MACHINE-RESULTS.org][the results]] for what it earns.
 
-- [X] Trial it from outside the contracts (=doc/review/urgency-trial.py=).
-- [X] Build it: counts in the policy, gaps reported at each response, the donor and recipients
-  restarted by =recordExecution=, a view that carries the counts to the present.
+- [X] Trial it from outside the contracts. The trial script went when the rule was built.
+- [X] Build it: counts in the policy, gaps reported at each response, a view that carries the
+  counts to the present. A transfer no longer restarts a count.
 - [X] Patient arms in the sizing campaign, and an urgency pane on the lab page.
-- [ ] Pick the patience on more than one price path. Two point-days is a starting value from
-  one path each of three shapes. Judge on gain per transfer net of what the callers are paid.
+- [ ] Decide between urgency and a plain line again. With the lean and the open gap, a
+  patience of 1, 2 or 4 gives the same answer on cycles and nearly the same elsewhere. A
+  2-point line with the lean matches it on cycles, earns four fifths as much on commodity-like
+  prices with under two fifths of the transfers, and loses three fifths as much on the one-way
+  move. Judge on gain per transfer net of what the callers are paid, on more than one path.
 - [ ] Decide whether growth should follow the gap or its square. The harvest from closing a gap
   goes as its square; the built rule uses the gap.
 - [ ] The count advances only when the basket responds, and not on a turn the safeguard takes.
@@ -106,7 +125,12 @@ frame for frame wherever behaviour is not meant to change. Each one invalidates 
   fast enough, and whether a shortfall should be spread across constituents.
 - [ ] Fold what =BasketDesk= uses of =MonetaryDesk= into the desk, so the mixin can leave with
   =BuckBasketOps=. Keep =IStabilizer= only if something still reads it.
-- [ ] Declare =IBasketView= on the shell. It provides every function already.
+- [ ] Declare =IBasketView= on the shell. It provides every function already. Add the leaned
+  targets to it: the simulator works them out again from the shell's state (=basket_machine.py=,
+  =targets_bp=) because no view returns them.
+- [ ] One reference, not two. The shell holds each TOKEN's reference price for the lean, with a
+  setter. The policy holds its own copy for its direction guard, fixed at construction. They
+  agree only while nobody uses the setter. Make the policy read the shell's before anyone does.
 - [ ] Fix or bound the stalled-ratio branch of the policy. It grants a fixed fifth of the
   release rate whatever the rate's allowance; that is 0.8 of a gap a day at the lab's sizing.
 - [ ] Rename the test-only control facet (=PairBasketMaintenanceControl=) for the facet it
@@ -118,7 +142,8 @@ frame for frame wherever behaviour is not meant to change. Each one invalidates 
 - [ ] A single path in =alberta_buck/sim/deploy.py= that builds the whole machine: shell, venue
   facet, upkeep facet, pair observer, policy with reference means, parity reference, desk and
   desk policy, wheel. No older facet as a stepping stone. =basket_machine.py= now builds every
-  part, but still on top of the older deployment and the older wheel.
+  part, and an experiment selects it (=basket = "equity-machine"=) and sizes it (=[machine]=),
+  but still on top of the older deployment and the older wheel.
 - [ ] Make the lab use it. =control_lab/engine.py= and =block_pairs.py= currently build the older
   equity machine and rewire it; move the shared wiring out of =block_pairs.py=, which is named
   for a retired campaign.
@@ -136,9 +161,22 @@ the machine is clearly better in every regime.
   =deposits=, =depositToken=, =redeem=). List what the pro-rata, fence and ops paths use that the
   shell lacks (=sweepTreasury=, =treasuryBuckPending=, the fence calls, the director hints) and
   decide for each: provide, replace or drop.
-- [ ] JS: =eqworld= deploys =BuckBasketProRata= with =BuckWithBasketHooks=; the sandbox's Savings
-  tab runs the equity basket on the older facet through the sim server. Port both. The third
+- [ ] JS: =eqworld= deploys =BuckBasketProRata= with =BuckWithBasketHooks=. Port it. The third
   sandbox planned in =DEMO-SANDBOX.org= is not started and should start on the machine.
+- [ ] The savings sandbox. Its page talks only to the shell, so saving and redeeming need
+  nothing. What is done: the server runs a world on the machine when its experiment asks; the
+  frames carry the leaned targets, each response by what it did with the BUCKs it moved, and
+  the desk policy's side and days; the page draws them, knows the strict venue's refusal, and
+  offers the upkeep in its world settings; the world is on its five commodities. What is left,
+  in order:
+  - Five years each way, old machinery and new, on real prices and on their reverting twins
+    (=doc/review/savings-old-new.py=): the savings index, parity, gas, deposits placed. A world
+    takes 35 minutes on either. The first five weeks already show the machine placing no
+    deposits (step 4), so read the five years with that in mind and settle it first.
+  - Make the machine the hosted world's default once it holds up.
+  - The page's browser test on both upkeeps, and its screenshot.
+  - The published contracts list (=scripts/contracts-dist.py=) carries only =BasketDesk= of the
+    machine's contracts, so a checkout without a Foundry build cannot serve it.
 - [ ] Define the comparison before running it: the regimes, the measures and what "clearly
   better" means for each. The earlier programs already name most of it.
   - /Rebalancing regimes./ Reverting, trending, the equilibrium casts, the commodity profile.
@@ -172,21 +210,19 @@ the machine is clearly better in every regime.
 
 * 4. Decisions the evidence is waiting on
 
-The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. The rest come from the older working documents.
+The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. The rest come from the older working documents.
 
 - [ ] Wallet-sourced transfers leave half their value as BUCKs inside the recipient's position.
-  At the lab's sizing the three wallets are empty in about 90 days and the basket holds about
-  an eighth of its value in BUCKs. Where no one supplies those BUCKs, K runs to its rail. Either
-  accept a fully paired book as the resting state, or make a wallet-sourced sale buy into the
-  wallet.
+  At the lab's sizing the three wallets are empty in about 90 days and the basket holds a
+  seventh to a sixth of its value in BUCKs. Where no one supplies those BUCKs, K runs to its
+  rail. Either accept a fully paired book as the resting state, or make a wallet-sourced sale
+  buy into the wallet.
 - [ ] The pools rebalance first, and badly. A liquidity position sells a TOKEN as its price
   rises and buys as it falls, at every price on the way. In the shock run the basket's pools
-  shed 172 of 3,055 TOKEN on the way up, at a mean of 105 BUCKs against a peak of 112, before
-  the policy had sold anything. That is why a 30% jump showed as 1.6 points over weight where a
-  wallet would have shown 3.7. Decide how much of the book belongs in the pools. Owning the
-  arbitrage would recover some of what they give up. (This item used to say to measure the gap
-  on the TOKEN held. That was a mistake: the pools have really sold, so the TOKEN held shows
-  the same shares.)
+  shed 282 of 2,807 TOKEN on the way up, at a mean of 102 BUCKs against a peak of 110, before
+  the policy had sold anything, and twice what its transfers then sold. A 30% jump showed as
+  34.1% of the book where a wallet would have shown 36.6%. Decide how much of the book belongs
+  in the pools. Owning the arbitrage would recover some of what they give up.
 - [ ] Whether to count owned arbitrage at all before per-block cadence and a competing
   arbitrageur are in the lab. Today it measures the feed's step. The wheel's own analysis
   (=BASKET-WHEEL.org= 4) bounds what is real: a gap between two and three pool fees is worth
@@ -194,32 +230,25 @@ The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. T
   searcher takes the whole gap and the basket keeps its fees. The earlier cast's arbitrageur
   also wanted a 60 bp margin that real searchers compete away. Measure owned arbitrage inside
   that band, against an arbitrageur at a competitive margin.
-- [ ] Lead the tracker: the release starts about 1.7 days after a turn, the filter's own lag.
-  In the shock run the first sale came 1.75 days after the jump. With a deep outside market
-  it came half a day sooner. With a lean it also came half a day sooner, because the larger
-  gap is urgent at once; the two were not tried together. The day that is left either way is
-  the tracker's: it will not call a turn until it has seen the rate fall for one response time.
-- [ ] A target lean past the declared weight. It is zero today, so the basket only ever
-  restores its declared weights. The shock run shows what that costs
-  (=doc/review/shock-response.py=): the policy asked to sell the jumped TOKEN for eight days and
-  the basket sold it once, because within four days nothing was over its weight. Loosening
-  eligibility or doubling the rate sells no more. What binds is the size of the gap.
-  A trial facet (=test/harness/BasketUpkeepLeanTrial.sol=, =doc/review/lean-trial.py=) leans each
-  target by exp(-tilt x d), d being the TOKEN's log price above its reference against the
-  others. At a tilt of one half the gain on cycles rises from 36,254 to 59,915 and on
-  commodity-like prices from 16,424 to 22,223, and the loss on the one-way move grows from
-  4,446 to 9,995. The older design ran a tilt of one against a multi-year average
-  (=BASKET-EQUITY.org= 13.5, item 5), and that lean went when the facet took declared targets.
-  To decide and then build:
+- [ ] Lead the tracker. In the shock run the first sale now comes a day after the jump, where
+  it came 1.75 days after before the deep market and the lean. The day that is left is the
+  tracker's: it will not call a turn until it has seen the rate fall for one response time, and
+  until then the policy reads the TOKEN as still rising.
+- [ ] The lean is built; what is left is to judge it. At a tilt of one half the gain on cycles
+  rises from 41,472 to 70,345 and on commodity-like prices from 19,782 to 27,204, and the loss
+  on the one-way move grows from 5,174 to 11,004. The older design ran a tilt of one against a
+  multi-year average (=BASKET-EQUITY.org= 13.5, item 5).
   - The tilt. One half undoes the pools' damping and no more. Judge it on more than one path
-    and seed, and against a wallet holder who rebalances.
-  - Who keeps the reference true. The lean trusts it. The policy's reference is fixed at
-    construction; the older anchor moved slowly and governance could reset it. A TOKEN that
-    reprices for good must stop being leaned against.
-  - Where it lives. The policy should return each target, so the facet stays free of signals.
-    The trial instead rewrites the stored weights for the length of a response, so its leash
-    and safeguard lean too and its wheel view does not.
-  - A bound on the lean, in points of share, whatever the price does.
+    and seed, against a wallet holder who rebalances, and on five years of real prices.
+  - Who keeps the reference true. Decided 2026-10-11: fixed when the basket is made, changed
+    by governance if at all, and in time adjusted automatically over many years. A reference
+    that follows price slowly is not needed for bounded commodities: over the five years to
+    2025-09 the simulator's five stayed between 0.67 and 1.44 times their own basket, and a
+    tilt of one half reached the 15% cap only for gold, on 9% of days. Gold ends that window
+    at 1.39 and still rising, with the basket at the cap. That is a hard case to test against,
+    not a fault to tune away.
+  - Where it lives. The facet works the targets out from the shell's settings. The policy still
+    knows nothing of them, and its direction guard keeps its own reference (step 1).
 - [ ] What holds the price inside the band. The earlier architecture had four layers
   (=CONVERGENCE.org= 3): the wheel for agreement between venues; undertakings, a stress fee and
   a facility that held the price inside the band from tick to tick; a persistence test that
@@ -249,6 +278,19 @@ The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. T
   the same fault is new: an exit that leaves liquidity short makes the next turn a safeguard
   turn, and a safeguard turn makes no transfer. Measure both with depositors arriving and
   leaving daily.
+- [ ] A safeguard turn places nothing, and the savings world opens in one. Measured on its
+  first 40 days (2026-10-11): the machine placed none of the 6.1 million of waiting deposits,
+  where the older upkeep paired 1.35 million BUCKs with them and collected twice the pool fees.
+  Two conditions hold it there at once. The depositors bring an even mix, which puts gold at
+  14% of the book against a declared 8.5%, beyond its leash. And the opening deposits count as
+  a day's flow, which sets the liquidity target at 30% of equity, above the credit left once
+  prices settle. So each response is a sale of gold for cash, 2,500 BUCKs at a time because
+  that pool is the shallowest, against a shortfall of 370,000. Decide:
+  - whether a turn that sells for the leash may also place waiting TOKEN, which costs no view
+    on prices and deepens the pools the sale is capped by;
+  - whether a need for cash is raised from one constituent or spread over all of them;
+  - whether TOKEN still waiting counts against the leash, or only what the basket has placed;
+  - whether a first deposit should set the liquidity target as a day's flow does.
 - [ ] Place deposits toward the targets. A deposit lands as its own TOKEN in its own pool, so
   the depositors' mix pushes the weights (=BASKET-EQUITY.org= 14.2, items 4 and 5). Two cures
   were proposed and neither is built: place a deposit's value by the targets, selling nothing
@@ -272,9 +314,15 @@ The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. T
     or in the basket's equity?
 - [ ] Rebalancing loses to holding in a lasting trend. On the 2020-25 history, in which bitcoin
   rose ninefold, the older directors lost 1% to 4% a year against holding (=CONVERGENCE.org= 4).
-  The lab tests that only with the two-step profile. Its historical profile removes each TOKEN's
-  trend by construction, and its commodity profile gives all three the same one. Add a real
-  trending history before claiming the urgency rule is safe on real prices.
+  Bitcoin was most of that, and it is out of the basket. The lab tests a lasting move only with
+  the two-step profile. Its historical profile removes each TOKEN's trend by construction, and
+  its commodity profile gives all three the same one. The five-year savings world on its five
+  commodities, old machinery against new, is the real test (step 3).
+- [ ] Take bitcoin out of the record. The papers (=alberta-buck-ethereum.org=, =-basket=,
+  =-wheel=) and the working documents (=REBALANCING-EQ.org=, =CONVERGENCE.org=,
+  =CARRY-CONVEXITY.org=, =BASKET-EQUITY.org=) still describe a six-TOKEN basket with a bitcoin
+  satellite, and their five-year results were measured on it. Say in each what a constituent
+  must be, and rerun on five whatever is still claimed.
 
 * 5. Slim the lab
 
@@ -292,14 +340,13 @@ After step 2, so the surviving campaigns run on the final wiring.
   if the shadow panes go). It keeps the retired ladder's windows as its comparison.
 - [ ] =bootstrap.history_days= now only sets how many earlier days give a historical profile its
   reference means. Rename it, or fold it into that profile.
-- [ ] Give the lab an outside market that does not move. Today it is one pool for each TOKEN,
-  pinned to the feed every six hours, and the one arbitrageur pushes it off the feed as it
-  carries the price inward. The basket's prices sit 1.3% from the feed and took a day to
-  follow a 30% jump. Pinning the outside pools again after each arbitrage pass, until none
-  pays (=doc/review/price-forcing.py=), holds them at the fee band, raises the rebalancing gain
-  2% to 8% and cuts the recorded arbitrage profit by two thirds. It also makes a run nearly
-  twice as long. None of the general simulator's arbitrage agents run in the lab; decide whether
-  the lab should model them or keep one ideal arbitrageur.
+- [X] Give the lab an outside market that does not move. Its pools are pinned to the feed
+  again after each arbitrage pass, until none pays. The basket's prices sit at the fee band,
+  0.66% from the feed, where they sat 1.3% away.
+- [ ] None of the general simulator's arbitrage agents run in the lab. Decide whether the lab
+  should model them or keep one ideal arbitrageur. With the deep market that arbitrageur cycles
+  77 times a day, five times the gas of the basket's own upkeep, and a run takes up to twice
+  as long.
 - [ ] Give the commodity profile less compression and funded private actors: at one month a
   day the pools see a decade thirty times too fast and the buyer and seller are spent by day
   120.

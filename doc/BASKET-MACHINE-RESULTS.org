@@ -1,5 +1,5 @@
 #+TITLE: The basket machine: what the lab shows
-#+DATE: 2026-10-10
+#+DATE: 2026-10-11
 #+OPTIONS: ^:nil toc:2 num:t
 
 This is what we learned by running [[file:BASKET-MACHINE.org][the basket machine]] on the real contracts. The work still to
@@ -7,30 +7,41 @@ do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. Every number can be r
 
 * The short version
 
-The basket now makes money from prices that swing apart and come back. It did not before: it
-moved too little, too late. With one change to how much it moves, it earns about nine times more.
+The basket makes money from prices that swing apart and come back. On a million, over 120 days
+of cycling prices, it ends about 70,000 ahead of a basket that sat still. On prices shaped like
+real commodities it ends 27,000 to 34,000 ahead.
 
-What it may rebalance is now decided by urgency that builds up. A big gap acts soon. A small one
-acts if it lasts. On realistic prices this earns nearly twice what a fixed threshold did.
+Three things changed since the last set of numbers, and all three are in these.
 
-The BUCK itself held up well. When its basket of commodities rose 47% in dollars, the BUCK
-kept pace.
+- Targets lean against price. A TOKEN above its reference price gets a smaller target, and one
+  below a larger one. This is the largest change. It adds 70% on cycles.
+- A gap is released at a steady rate: half of what remains each day, however often the wheel
+  turns. A gap that has become urgent stays open until it is closed.
+- The lab's outside market no longer moves when it is arbitraged, so the basket's pools follow
+  the feed as closely as their fees allow.
 
-Three things to be careful about. The income from arbitrage is mostly an artifact of how the lab
-steps prices. Rebalancing slowly turns the basket's spare TOKEN into BUCKs, which pushes the
-BUCK's price up when nobody is issuing new ones. And when a TOKEN moves and never comes back,
-the new rule loses more than the old threshold did.
+The BUCK itself held up well. When its basket of commodities rose 47% in dollars, the BUCK kept
+pace.
+
+Four things to be careful about. The basket now trades on nearly every turn, in small pieces,
+and each transfer earns a third of what it did. When a TOKEN moves and never comes back, the
+lean doubles the loss. Rebalancing still turns the basket's spare TOKEN into BUCKs, which pushes
+the BUCK's price up when nobody is issuing new ones. And owning the arbitrage is worth little
+once the outside market is deep.
 
 * How to read the numbers
 
-A run is 120 days with three TOKENs and a basket that starts with one million.
+A run is 120 days with three TOKENs and a basket that starts with one million. The wheel turns
+four times a day.
 
-Every gain below is measured against the same basket doing no rebalancing. So +38,234 means the
-basket ended 38,234 richer than it would have by sitting still.
+Every gain below is measured against the same basket doing no rebalancing. So +74,013 means the
+basket ended 74,013 richer than it would have by sitting still.
 
 We value the basket "at reference": its TOKEN at outside prices, its BUCKs at what the BUCK is
 supposed to be worth. We do this because in some runs nothing holds the BUCK's price steady, and
 then gains measured in BUCKs and in dollars can point in opposite directions.
+
+Each shape of prices is one path from one seed. Read the tables for their shape.
 
 No gas is charged. Keep that in mind wherever a result depends on many small trades.
 The [[*Gas][gas section]] says what it would cost.
@@ -40,162 +51,161 @@ The [[*Gas][gas section]] says what it would cost.
 The basket sells a TOKEN that has become expensive against another and buys the cheap one. It
 waits for evidence that the gap has stopped widening.
 
-The first version waited too long and then moved too little. Over 120 days it moved 36,307
-BUCKs out of a book of 1.72 million. The typical trade was about 230 BUCKs.
+The first version waited too long and then moved too little: 35,696 BUCKs in 120 days, about
+245 a trade. The rule as built moves sixteen times as much. Gain over 120 days:
 
-We made the amount it moves a setting, and raised it. Then we replaced the fixed threshold that
-decided which TOKENs it may touch with urgency. Gain over 120 days:
-
-| Prices | First version | More moved | With urgency | With urgency, whole system running |
-|--------+---------------+------------+--------------+------------------------------------|
-| Clean cycles | +4,059 | +35,763 | +36,254 | +38,234 |
-| Cycles with noise | +3,807 | +36,752 | +37,997 | +38,180 |
+| Prices | First version | Declared weights | With the lean | With the lean, whole system running |
+|--------+---------------+------------------+---------------+-------------------------------------|
+| Clean cycles | +4,037 | +41,472 | +70,345 | +74,013 |
+| Cycles with noise | +1,555 | +40,193 | +71,381 | +74,876 |
 | Flat, noisy | 0 | 0 | 0 | 0 |
-| One TOKEN reprices for good | -232 | -1,265 | -4,446 | -4,953 |
-| Commodity-like | +262 | +6,487 | +16,424 | +17,938 |
+| One TOKEN reprices for good | -75 | -5,174 | -11,004 | -11,175 |
+| Commodity-like | +246 | +19,782 | +27,204 | +34,351 |
 
-Three things to notice. On cycles the gain is about 3.8% in 120 days. On flat prices it does
+Three things to notice. On cycles the gain is about 7% in 120 days. On flat prices it does
 nothing, which is right. And when a TOKEN moves and never comes back, rebalancing loses,
 because it sold on the way.
 
 For scale: someone holding the same TOKENs in a wallet, rebalancing by a simple rule, could
-have made about 8% on the clean cycles. The basket gets less because most of its TOKEN sits in
-liquidity pools, which damp how far its shares move.
+have made about 8% on the clean cycles. Steering to its declared weights the basket gets half
+of that, because most of its TOKEN sits in liquidity pools, which damp how far its shares move.
+The lean makes up most of the difference.
+
+It costs trades. On clean cycles the basket made a transfer on 471 of its 480 turns, each
+between one and two thousand BUCKs. Before these changes it made 82. A transfer earned 466
+then and earns 157 now.
+
+One more shape uses 120 days of real gold, food and energy prices, adjusted to end where they
+began. There the lean earned 5,675 with the basket alone and lost 1,262 with the whole system
+running. That is too little either way to read.
+
+* Leaning against price
+
+Each TOKEN's target is its declared weight, lowered when its price stands above its reference
+price and raised when it stands below. The reference is the price the TOKEN joined the basket
+at. Governance can change it. A target never leans by more than 15% of its declared weight.
+
+The size of the lean is one number, the tilt. At one half it asks for what someone holding the
+TOKEN in a wallet, and restoring the declared weights, would hold: it undoes the pools' damping.
+The lab runs at one half. Gain over 120 days, basket alone ([[file:review/lean-trial.py][lean-trial.py]]):
+
+| Prices | No lean | Tilt 1/4 | Tilt 1/2 | Tilt 1 |
+|--------+---------+----------+----------+--------|
+| Clean cycles | +41,472 | +56,244 | +70,345 | +97,877 |
+| Cycles with noise | +40,193 | +54,703 | +71,381 | +102,140 |
+| The sudden jump | +43,722 | +59,265 | +74,769 | +102,419 |
+| Commodity-like | +19,782 | +23,775 | +27,204 | +36,246 |
+| One TOKEN reprices for good | -5,174 | -8,223 | -11,004 | -15,984 |
+
+Every step up in the tilt buys more of both: more gain where prices return, more loss where one
+does not. At one half the loss on the one-way move is 1% of the basket.
+
+The lean trusts the reference. When a TOKEN reprices for good the reference is wrong, and the
+basket stays short of that TOKEN, by at most the 15%, until someone corrects it.
+
+* A steady release
+
+When the policy lets a gap go, the basket closes a share of it: half of what remains each day.
+The share is worked out from the time since that TOKEN last gave, so it does not depend on how
+often the wheel turns. Turning it 24 times a day in place of 4, basket alone:
+
+| Prices | Turns a day | Gain | BUCKs moved | Transfers |
+|--------+-------------+------+-------------+-----------|
+| Clean cycles | 4 | +70,345 | 585,081 | 471 |
+| | 24 | +68,757 | 590,078 | 2,646 |
+| Cycles with noise | 4 | +71,381 | 631,603 | 335 |
+| | 24 | +72,393 | 660,513 | 1,583 |
+
+The same BUCKs move, for the same gain, in five or six times as many pieces. The pace is
+independent of the turns. The number of transfers is not.
+
+How fast the pace is hardly matters, between half a day and two days. With the whole system
+running:
+
+| Half the gap in | Clean cycles | Cycles with noise | Commodity-like | One TOKEN reprices for good |
+|-----------------+--------------+-------------------+----------------+-----------------------------|
+| 12 hours | +74,164 | +74,993 | +34,516 | -11,148 |
+| A day | +74,013 | +74,876 | +34,351 | -11,175 |
+| Two days | +73,776 | +71,266 | +32,773 | -10,942 |
 
 * Urgency
 
-The basket used to act on a TOKEN only once its share was 2 points off target. That is the
-wrong shape. A share that is 1.9 points off for a month never acts. One that touches 2.1 for an
-hour does. On commodity-like prices a share is 2 points off 17% of the time, and 1 point off
-72% of the time.
+A fixed line is the wrong shape for deciding which TOKENs may be rebalanced. A share that is
+1.9 points off for a month never acts. One that touches 2.1 for an hour does.
 
-So each TOKEN now keeps a count. Every day the count grows by how far its share is off target,
-less a quarter point. When the count reaches a set level, that TOKEN may be rebalanced. After a
-transfer its count starts again from zero. A big gap gets there soon. A small one gets there if
-it lasts.
+So each TOKEN keeps a count. Every day the count grows by how far its share is from its target,
+less a quarter point. When the count reaches a set level, that TOKEN may be rebalanced. A big
+gap gets there soon. A small one gets there if it lasts. The set level is the /patience/, in
+point-days. The lab runs at 2.
 
-The set level is the one knob. We call it /patience/, in point-days. At a patience of 2, a share
-2 points off waits about a day, and a share 1 point off waits under three. The lab runs at 2.
+A transfer used to start the count again from zero. It no longer does: an urgent gap stays open
+until the share is back within the quarter point.
 
-With the whole system running:
+With that change and the lean, patience has little left to decide. Whole system running:
 
 | Prices | Rule | Gain | Transfers | Gain per transfer |
 |--------+------+------+-----------+-------------------|
-| Clean cycles | 2-point line | +36,808 | 71 | 518 |
-| | 1-point line | +42,836 | 469 | 91 |
-| | Patience 1 | +39,850 | 162 | 246 |
-| | Patience 2 | +38,234 | 82 | 466 |
-| | Patience 4 | +36,491 | 45 | 811 |
-| | Patience 8 | +23,998 | 24 | 1,000 |
-| Commodity-like | 2-point line | +9,668 | 21 | 460 |
-| | 1-point line | +15,266 | 87 | 175 |
-| | Patience 1 | +18,207 | 54 | 337 |
-| | Patience 2 | +17,938 | 33 | 544 |
-| | Patience 4 | +13,781 | 19 | 725 |
-| | Patience 8 | +12,889 | 12 | 1,074 |
-| One TOKEN reprices for good | 2-point line | -2,074 | 4 | |
-| | 1-point line | -4,196 | 13 | |
-| | Patience 2 | -4,953 | 15 | |
-| | Patience 8 | -3,374 | 10 | |
+| Clean cycles | Patience 1, 2 or 4 | +74,013 | 471 | 157 |
+| | 2-point line | +74,013 | 471 | 157 |
+| | 2-point line, no lean | +29,658 | 117 | 253 |
+| Commodity-like | Patience 1 | +34,081 | 258 | 132 |
+| | Patience 2 | +34,351 | 251 | 137 |
+| | Patience 4 | +34,723 | 228 | 152 |
+| | 2-point line | +27,139 | 95 | 286 |
+| | 2-point line, no lean | +8,121 | 19 | 427 |
+| One TOKEN reprices for good | Patience 1 | -11,248 | 134 | |
+| | Patience 2 | -11,175 | 134 | |
+| | Patience 4 | -10,921 | 125 | |
+| | 2-point line | -6,936 | 33 | |
+| | 2-point line, no lean | -1,586 | 12 | |
 
-On commodity-like prices, a patience of 2 earns nearly twice what the 2-point line did. It
-earns more than a 1-point line too, with 33 transfers against 87. On clean cycles it changes
-little. On noisy cycles it earns a little less than the 2-point line: 38,180 against 39,878.
+On cycles the leaned targets are always more than 2 points from the shares. Every rule lets
+every turn trade, and they all give the same answer.
 
-When a TOKEN never comes back it loses more: over twice what the 2-point line lost, and a
-little more than a 1-point line. That is the price of acting on small gaps.
+On commodity-like prices the old 2-point line, with the lean, earns four fifths of what urgency
+earns, with under two fifths of the transfers. On the one-way move it loses three fifths as
+much. Before the lean, urgency earned nearly twice what the line did. Most of that lead is gone.
 
-More patience means fewer and larger transfers and a smaller loss in the bad case. Too much
-gives up the harvest: at 8, a third of it on fast cycles.
-
-Gain per transfer is the number to watch once callers are paid. A transfer adds about 840,000
-gas to a turn. A 1-point line earns 90 to 175 BUCKs a transfer. Patience 2 earns about 500.
-
-Two cautions. This is one price path for each shape, and neighbouring settings do not line up
-neatly, so read the table for its shape and treat 2 as a starting value. And a version that did
-not start the count again after a transfer was no better than a low line: it made at least as
-many transfers as the lowest line, each earning about 90.
-
-Before building the rule we tried it from outside, by steering the old threshold turn by turn
-([[file:review/urgency-trial.py][urgency-trial.py]]). The built rule gives the same answers on cycles and on the one-way move.
-On commodity-like prices it earns about a tenth more than the trial, which could only
-approximate it there.
+Which is better now depends on what a transfer costs. That waits for the callers to be paid.
 
 * Raising cash
 
 When the basket is short of BUCKs, or its credit is over its limit, it sells TOKEN before it
-does anything else. It used to sell the first TOKEN on its list. It now sells the one furthest
-above its weight.
+does anything else. It sells the TOKEN furthest above its declared weight. It used to sell the
+first on its list.
 
-We repeated 21 saved runs on the new contracts. Thirteen came out identical, frame for frame.
-Each of the other eight contained such a sale, and first differs from its saved run there.
-
-It matters most on commodity-like prices, which open with one. There the gain rose from 16,307
-to 17,938 with urgency, and from 6,915 to 9,668 with the 2-point line.
+It matters most on commodity-like prices, which open with such a sale.
 
 * A sudden jump
 
-One test lifts one TOKEN's price by 30% for ten days and then drops it back. In those ten days
-the basket sold that TOKEN once, for 10,561 BUCKs, about 3% of what it held. That looks like
-too little, so we traced every turn ([[file:review/shock-response.py][shock-response.py]]).
+One test lifts one TOKEN's price by 30% for ten days and then drops it back
+([[file:review/shock-response.py][shock-response.py]]). Under the earlier rule the basket sold that TOKEN once in those ten days,
+for 10,561 BUCKs.
 
-The signals were not the problem. The policy wanted to sell from a day and a quarter after the
-jump, and went on wanting to for eight days, two of them at its full rate. The first day's wait
-was the lab's: its arbitrage takes a day to carry a jump into the basket's pools, and the policy
-will not sell a TOKEN that is still rising.
+It now sells seven times in two days, 14,870 BUCKs in all, and comes out 16,622 ahead of a
+basket that sat still. The jump was worth 97,600 while it lasted, so it keeps about a sixth.
+Before, it kept a twelfth.
 
-The book had almost nothing to sell. Three things turned a 30% jump into 1.6 points over weight.
+| Rule | Sales of the TOKEN | BUCKs | Gain across the jump |
+|------+--------------------+-------+----------------------|
+| As built | 7 | 14,870 | +16,622 |
+| No lean | 6 | 15,052 | +11,638 |
+| Tilt 1 | 8 | 21,264 | +21,961 |
+| 2-point line | 4 | 12,779 | +15,311 |
+| 2-point line, no lean | 2 | 8,548 | +5,079 |
 
-- Shares move less than prices. A TOKEN that is a third of the book and jumps 30% gains four
-  to six points of share, even held in a wallet. (The BUCK's own price rose 8% with its basket.
-  That changes nothing here: shares and signals compare one TOKEN with another.)
-- The pools sold on the way up. A liquidity position sells a TOKEN as its price rises. The
-  basket's shed 172 of its 3,055 TOKEN, at an average of 105 BUCKs on the way to 112. In a
-  wallet the same TOKEN would have stood 3.7 points over its weight. In the pools it stood 1.6.
-- The rule only restores the declared weight. One transfer moved 39% of those 1.6 points. The
-  rest closed by itself in under four days, as the other prices moved. After that nothing was
-  over its weight, whatever the policy asked.
+Three things still hold it back.
 
-Making it easier to act barely helps. With almost no threshold the basket sells 12,505 BUCKs of
-the TOKEN instead of 10,561. Doubling the rate sells no more.
+- It waits a day. The pools now show the new price at once, but the policy will not sell a
+  TOKEN it still reads as rising, and its filter takes a day to see that the rise has stopped.
+- The pools sold first. A liquidity position sells a TOKEN as its price rises. The basket's
+  shed 282 TOKEN on the way up, at an average of 102 BUCKs on the way to 110. That is twice
+  what its own transfers then sold. In a wallet the TOKEN would have stood at 36.6% of the
+  book. In the pools it stood at 34.1%.
+- It sells only to its target. By the fourth day the TOKEN was back at its leaned target, and
+  the basket sold no more of it while the price stayed high.
 
-Across the episode the basket came out 8,000 ahead of one that sat still. The jump was worth
-97,000 while it lasted, so it kept less than a tenth.
-
-To keep more it would have to sell below its declared weight while a TOKEN stands far above its
-usual price and is falling back. That is a bet that the price returns. It wins here. It loses
-when a TOKEN moves and stays, which is the case that already loses. The next section tries it.
-
-* Leaning against price
-
-We tried the bet with a lab-only version of the facet ([[file:review/lean-trial.py][lean-trial.py]]). Each TOKEN's target
-is its declared weight, lowered when its price stands above its accepted reference against the
-others and raised when it stands below. Nothing else changes. The policy still decides when to
-act, and still waits for a turn.
-
-The size of the lean is one number. At one half it asks for what someone holding the TOKEN in
-a wallet, and restoring the declared weights, would hold: it undoes the pools' damping. At one
-it is the lean the older design had. Gain over 120 days, basket alone:
-
-| Prices | No lean | Lean 1/4 | Lean 1/2 | Lean 1 |
-|--------+---------+----------+----------+--------|
-| Clean cycles | +36,254 | +49,521 | +59,915 | +79,149 |
-| Cycles with noise | +37,997 | +52,270 | +66,775 | +91,154 |
-| The sudden jump | +37,697 | +51,959 | +61,965 | +79,153 |
-| Commodity-like | +16,424 | +18,756 | +22,223 | +27,762 |
-| One TOKEN reprices for good | -4,446 | -6,981 | -9,995 | -16,288 |
-
-A lean of one half earns about 65% more on cycles and 35% more on commodity-like prices. It
-also more than doubles the loss when a TOKEN moves and stays. Every step up in the lean buys
-more of both. Transfers double on cycles, from 84 to 173, each earning about 350.
-
-In the sudden jump a lean of one half sold the TOKEN three times in the first two and a half
-days, 18,658 BUCKs in all, starting as soon as the policy asked. The basket came out 13,716
-ahead across the jump instead of 7,993.
-
-This is a trial, on one price path of each shape. The lean trusts the reference. When a TOKEN
-reprices for good the reference is wrong, and the basket stays short of that TOKEN until
-someone corrects it.
+When the price dropped back the basket bought the TOKEN again within a day and a half.
 
 * Realistic prices
 
@@ -210,91 +220,94 @@ around it independently. One day in the test stands for one month, so a run cove
 
 Over the run the basket of commodities came to cost 47% more dollars. The BUCK kept pace: it
 ended at 1.42 dollars, where its basket cost 1.42, and stayed within 0.4% of it on average. The
-desk never had to act. That is the main result. (The BUCK opened 3.7% too dear, because the pools
-start at long-run prices, and closed most of that gap in two or three days.)
+desk never had to act. That is the main result. (The BUCK opened 4% too dear, because the pools
+start at long-run prices, and was within 1% in two and a half days.)
 
-Rebalancing added 1.8% over the decade. With the fixed threshold it was 1.0%. Real prices do not
-swing far enough, often enough, for more. On this evidence the basket's job is to hold value
-through inflation. Rebalancing is a small bonus unless the things in the basket swing much more
-than these do.
+Rebalancing added 2.4% over the decade. Steering to declared weights it added 1.6%, and with
+the old 2-point line and no lean, 0.6%. Real prices do not swing far enough, often enough, for
+more. On this evidence the basket's job is to hold value through inflation. Rebalancing is a
+small bonus unless the things in the basket swing much more than these do.
 
 * Arbitrage
 
-Giving the basket the arbitrage profit looked like the biggest win: +18,739 on clean cycles.
-Do not count on it. Nearly all of that profit appears right after the lab moves prices, which it
-does in six-hour jumps. With hourly jumps the same profit falls to a fifth. A real market moves
-continuously and has competing arbitrageurs.
+The basket can own the arbitrage between its pools and the outside market. In the earlier lab
+that looked like the biggest win: +18,739 on clean cycles. Most of it was an artifact. The
+lab's outside market was one pool for each TOKEN, which the arbitrageur itself pushed off the
+feed, so the basket's prices sat 1.3% from the feed and a gap was always waiting.
 
-The rebalancing gain is not like that. With hourly jumps it is a little larger: +39,879 on
-clean cycles against +36,254.
+The outside market is now too deep to move ([[file:review/price-forcing.py][price-forcing.py]]). The basket's prices sit 0.66%
+from the feed, which is the three pools' fees. Owning the arbitrage is then worth:
 
-The lab also presses outside prices on the basket's pools too weakly
-([[file:review/price-forcing.py][price-forcing.py]]). Its outside market is one pool for each TOKEN, pinned to the feed every six
-hours, and one capped arbitrageur carries that price inward. The arbitrageur's own trades push
-the outside pool off the feed. So on cycles the basket's prices sit 1.3% from the feed,
-typically, and they took a day to follow the sudden jump.
+| Prices | Gain from owning the arbitrage |
+|--------+--------------------------------|
+| Clean cycles | +6,635 |
+| Cycles with noise | +18,002 |
+| Flat, noisy | +4,999 |
+| Commodity-like | +8,386 |
 
-With an outside market too deep to move, they sit 0.66% away, which is the three pools' fees.
-The arbitrage profit on clean cycles falls from 20,731 to 6,604. The rebalancing gain rises:
+It is real income, and noise makes more of it. But it still comes from the way the lab steps
+prices, with one arbitrageur and no competitor. With hourly steps in place of six-hour ones it
+falls to a fifth on clean cycles, 1,452, and doubles on noisy ones, 38,495, because the lab
+draws its noise at every step. Do not count on it.
 
-| Prices | Lab's outside market | Deep outside market |
-|--------+----------------------+---------------------|
-| Clean cycles | +36,254 | +39,048 |
-| Commodity-like | +16,424 | +16,807 |
-| The sudden jump | +37,697 | +39,175 |
+Rebalancing gains a little from the deeper market:
 
-So the weak link costs rebalancing 2% to 8%. In the sudden jump it delayed the one sale by
-half a day and did not change its size.
+| Prices | An outside pool that moves | A deep outside market |
+|--------+----------------------------+-----------------------|
+| Clean cycles | +68,552 | +70,345 |
+| Commodity-like | +24,993 | +27,204 |
+| The sudden jump | +71,754 | +74,769 |
 
 * A side effect
 
 When the basket rebalances, half of what it buys goes in as BUCKs beside the TOKEN. Over about
-90 days this turns its spare TOKEN into BUCKs: it ends up holding 13% of its value in BUCKs.
+90 days this turns its spare TOKEN into BUCKs: it ends up holding 14% to 17% of its value in
+BUCKs.
 
 Those BUCKs have to come from somewhere. Clean cycles, 120 days:
 
 | Who else is in the market | K at the end | BUCK price at the end |
 |---------------------------+--------------+-----------------------|
-| Nobody | 0.750 | 1.086 |
-| K alone | 0.950 | 1.064 |
-| K and the desk | 0.950 | 1.031 |
-| A seller of BUCKs | 0.682 | 0.983 |
-| Buyers and sellers | 0.762 | 1.008 |
+| Nobody | 0.750 | 1.087 |
+| K alone | 0.950 | 1.087 |
+| K and the desk | 0.950 | 1.040 |
+| A seller of BUCKs | 0.672 | 0.980 |
+| Buyers and sellers | 0.765 | 1.011 |
 
-With someone issuing BUCKs, all is well. Without, the BUCK becomes 6% to 9% too expensive and K
+With someone issuing BUCKs, all is well. Without, the BUCK becomes 4% to 9% too expensive and K
 runs to its limit. We need to decide whether the basket should do this at all.
 
 * Gas
 
-Nothing above charges gas. Here is what the work costs, measured over a run with everything
-switched on ([[file:review/wheel-gas.py][wheel-gas.py]]). The lab turns the wheel four times a day.
+Nothing above charges gas. Here is what the work costs, measured over a run on clean cycles
+with everything switched on ([[file:review/wheel-gas.py][wheel-gas.py]]). The lab turns the wheel four times a day.
 
 | Call | Gas each | Gas a day |
 |------+----------+-----------|
-| Wheel turn, nothing traded | 890,000 | 3.0 million |
-| Wheel turn with a transfer | 1,730,000 | 1.2 million |
+| Wheel turn with a transfer | 1,800,000 | 7.0 million |
+| Wheel turn, nothing traded | 1,000,000 | 0.1 million |
 | Price observation | 160,000 | 0.7 million |
-| Arbitrage turn | 460,000 | 9.5 million |
+| Arbitrage turn | 500,000 | 39 million |
 
-The basket's own upkeep is about 5 million gas a day. Arbitrage uses twice that, but it pays
-its own way out of what it captures.
+The basket's own upkeep is about 8 million gas a day, nearly all of it transfers. Arbitrage
+uses five times that, because the deep market lets the lab's arbitrageur turn 77 times a day.
+It pays its own way out of what it captures.
 
-What this costs depends on the chain. At 1 gwei, 5 million gas is 0.005 ETH a day, or 0.6 ETH
-over a run. At 10 gwei it is ten times that. On a rollup it is close to nothing.
+What this costs depends on the chain. At 1 gwei, 8 million gas is 0.008 ETH a day, or about
+1 ETH over a run. At 10 gwei it is ten times that. On a rollup it is close to nothing.
 
 Gas does not grow with the basket. The gain does. So there is a size below which upkeep costs
 more than rebalancing earns, and that size is much smaller on a rollup than on mainnet. For
-this one-million basket the gain was 38,234 BUCKs on clean cycles and 17,938 on commodity-like
+this one-million basket the gain was 74,013 BUCKs on clean cycles and 34,351 on commodity-like
 prices. Price the gas for your chain and compare.
 
-Most of that gas is spent looking, not trading. On commodity-like prices the 33 transfers added
-27 million gas between them. The other 500 million was the cost of looking. And that run
-squeezes a decade into 120 days. At real speed, four turns a day would mean thirty times as
-much looking for the same 33 transfers.
+A transfer adds about 750,000 gas to a turn and earns 140 to 160 BUCKs. That sets the smallest
+trade worth making, and today nothing enforces it: the basket trades whenever a gap is open,
+however small the piece. Turned every block, it would trade every block.
 
-So two things follow. A transfer adds about 840,000 gas to a turn, which sets the smallest
-trade worth making. And a turn that trades nothing must cost far less than 890,000. Today it
-re-reads every pool and re-asks the policy about every pair.
+On commodity-like prices half the turns trade nothing, and those still use 1.9 million gas a
+day beside the trading turns' 3.5 million. A turn that trades nothing re-reads every pool and
+re-asks the policy about every pair. It must cost far less.
 
 The wheel already knows how to pay its callers. It holds a reserve of BUCKs, fed by a slice of
 the basket's income, and pays each caller who does real work a fixed share of what is in it.
@@ -311,32 +324,39 @@ result is net of what callers were paid, comes next.
 * What we do not know yet
 
 - How the old basket and desk compare on the same tests.
-- What the results look like net of paying the callers.
-- Whether a patience of 2 is right. It was chosen on one price path of each shape.
+- What the results look like net of paying the callers, and what the smallest transfer should
+  be.
+- Whether urgency still earns its place over a plain line, now that the lean and the open gap
+  do most of the work.
+- Whether a tilt of one half is right. It was chosen on one price path of each shape.
 - Whether one seed and one bad case are representative.
 - How the machine behaves at real speed. The cycles are far faster than real commodities.
 - How it behaves with depositors arriving and leaving. The lab's book is deposited once.
 - What holds the BUCK's price inside 3% of its basket. Only K acts there, and K is slow.
-- How it does in a lasting trend on real prices. The one such test here is made up.
-- Whether to lean, and how far. The trial says the gain is large and so is the added loss.
+- How it does over years of real prices. The savings world's five commodities, run for five
+  years on the old machinery and the new, is the next test.
 
 * Rebuilding the numbers
 
 #+begin_src sh
 make control-lab-interactive        # 310 runs; open doc/control-lab/interactive/index.html
 make control-lab-verify             # check every saved run
-make control-lab-basket-sizing      # the rebalancing table: the basket alone
+make control-lab-basket-sizing      # the rebalancing tables: the basket alone
 make control-lab-basket-sizing CONTROL_LAB_BASKET_SIZING_STAGE=all \
     CONTROL_LAB_BASKET_SIZING_OUT=doc/control-lab/basket-sizing/all-actors   # the whole system
-make control-lab-basket-research    # the arbitrage comparison
+make control-lab-basket-sizing CONTROL_LAB_BASKET_SIZING_TICKS=24 \
+    CONTROL_LAB_BASKET_SIZING_PROFILES=three-phase,noise80 \
+    CONTROL_LAB_BASKET_SIZING_SIZINGS=maintenance,first,lab,tilt-0 \
+    CONTROL_LAB_BASKET_SIZING_OUT=doc/control-lab/basket-sizing/hourly       # 24 turns a day
+make control-lab-basket-research    # owning the arbitrage
 python doc/review/wheel-gas.py /tmp/wheel-gas       # the gas table
-python doc/review/urgency-trial.py /tmp/urgency     # the trial from outside
 python doc/review/shock-response.py /tmp/shock      # the sudden jump, turn by turn
-python doc/review/price-forcing.py /tmp/forcing     # a deep outside market
-python doc/review/lean-trial.py /tmp/lean           # leaning against price (build the trial facet first)
+python doc/review/price-forcing.py /tmp/forcing     # an outside pool that moves, and a deep market
+python doc/review/lean-trial.py /tmp/lean           # the tilt
 python3 doc/review/rebalance-benchmark.py
 PYTHONPATH=. python3 doc/review/commodity-inflation.py
 #+end_src
 
-A run takes about 70 seconds and the full set about 35 minutes. Each campaign writes a detailed
-report beside its data under =doc/control-lab/=. None of that output is committed.
+A run takes one to two and a half minutes and the full set about two hours. Each campaign
+writes a detailed report beside its data under =doc/control-lab/=. None of that output is
+committed. These numbers were measured on the contracts and lab of commit =b756033=.
