@@ -57,3 +57,18 @@ def test_the_scenario_refuses_an_unknown_price_mode():
                       sets=["scenario.prices=sideways"])
     with pytest.raises(ValueError, match="history.*revert"):
         expmod.build(exp)
+
+
+def test_the_savings_world_is_five_commodities_on_either_prices():
+    from alberta_buck.sim import experiment as expmod
+    path = "alberta_buck/sim/experiments/demo-savings.toml"
+    history = expmod.build(expmod.load(path))
+    assert [(t[0], t[3]) for t in history.tokens] == [("LABR", 2553), ("CNST", 2340), ("FOOD", 2128),
+                                                      ("NRGC", 2128), ("PAXG", 851)]
+    assert len(history.csv_files) == 5 and all(f.startswith("hist-") for f in history.csv_files)
+    assert history.agents["TokenAccumulatorAgent"] == 5
+    twin = expmod.build(expmod.load(path, sets=["scenario.prices=revert"]))
+    assert twin.csv_files == ["rev-" + f[len("hist-"):] for f in history.csv_files]
+    # The builder's own six, bitcoin among them, remain for the older record.
+    six = expmod.build(expmod.load(path, sets=["scenario.tokens=[]"]))
+    assert [t[0] for t in six.tokens][-1] == "cbBTC" and sum(t[3] for t in six.tokens) == 10000

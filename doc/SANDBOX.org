@@ -145,10 +145,11 @@ Mallory has no such list.
 The BuckBasket as a savings facility, in a whole economy too big for a browser tab -- a separate
 world from the other tools', which share one small world in your tab on the clock the world bar
 moves (the header's badge says which world you are looking at): five years of
-real commodity prices for its six constituents (or their reverting twins: the same commodities
-cycling about their first price, trend removed), the basket with its director and work wheel, the
-undertakings, =BUCK_K=, a market maker and arbitrageurs pinning every TOKEN to its commodity,
-depositors, retirees refinancing their mortgages.  It runs on a sim server
+real commodity prices for its five constituents (labour, construction, food, energy and gold; or
+their reverting twins: the same commodities cycling about their first price, trend removed), the
+basket with its upkeep and work wheel, the monetary desk, the undertakings, =BUCK_K=, a market maker
+and arbitrageurs pinning every TOKEN to its commodity, depositors, retirees refinancing their
+mortgages.  It runs on a sim server
 (=alberta_buck/sim/server.py=, pyrevm; one world per visitor), a simulated day every 10 to 60
 seconds, and this tab watches it frame by frame.
 
@@ -159,8 +160,9 @@ seconds, and this tab watches it frame by frame.
   mainnet's (/L1/: only wide ones pay).  /Shock/: someone buys BUCK with USDC (/BUCK demand/), or
   issues BUCK and sells it (/BUCK supply/), uncapped, over the days given -- the undertakings, the
   arbitrage, the wheel and =BUCK_K= restore the peg.  /World settings/: the server, and a /New world/
-  on history or reverting prices, with a seed; the link to this world, which anyone holding it can
-  watch and steer.
+  on history or reverting prices, with a seed and a choice of the basket's /Upkeep/ -- the older
+  director and its steps, or the basket machine ([[file:BASKET-MACHINE.org][BASKET-MACHINE.org]]); the link to this world, which
+  anyone holding it can watch and steer.
 - /Your savings/: a key of your own, made in this browser (it signs everything it does; the server
   runs nothing unsigned).  /Save/ dollars in a TOKEN -- or let the basket choose: the pool it most
   needs, among those the deposit guard admits.  Saving mints the TOKEN at its market price (the
@@ -175,7 +177,9 @@ seconds, and this tab watches it frame by frame.
   never interrupted mid-day.
 - /The charts/: BUCK against USD and the basket; the savings index -- what a share is worth, in
   BUCK value, per BUCK deposited; the wheel's harvest, what its callers earned and the gas they
-  spent; =BUCK_K=; the undertakings' open books;
+  spent; =BUCK_K=; the basket's credit and what its wheel did with it; each commodity's weight
+  against its leaned and its declared target; the desk's signal, its operations and its inventory,
+  and what the desks earned over holding; the undertakings' open books;
   and each commodity: its real price, its TOKEN/USDC pool, and its TOKEN/BUCK pool times
   BUCK/USDC -- the arbitrage pulls all three together.
 

@@ -1,11 +1,13 @@
 // The Savings tab's contract surface: only what a saver calls or reads, in
 // viem's human-readable form -- no artifact bundle, since the world's
 // contracts live on the server.  The basket is a pro-rata shell (ops) or an
-// equity shell (equity-ops, sim_info's basket_kind "equity"): both take
-// depositToken / redeem(id, bp) and emit Deposited / Redeemed; the venue
-// facet's views are reached through the shell's fallback at the same
-// address.  An equity basket also answers holdings / valueOf, and pays its
-// exits in BUCK (in kind, TOKEN, when its account cannot spend them).
+// equity shell (equity-ops or equity-machine, sim_info's basket_kind
+// "equity"): both take depositToken / redeem(id, bp) and emit Deposited /
+// Redeemed; the venue facet's views are reached through the shell's fallback
+// at the same address.  An equity basket also answers holdings / valueOf, and
+// pays its exits in BUCK (in kind, TOKEN, when its account cannot spend
+// them); on the basket machine (sim_info's machine) its venue is the strict
+// one, which refuses a pool it cannot price.
 // test/savings.model.test.js checks every signature here against the
 // compiled artifacts when out/ is built.
 
@@ -41,6 +43,7 @@ export const BASKET = parseAbi([
   "error TokenTooThin()",
   "error RedeemZero()",
   "error Bp10000()",
+  "error UnavailablePrice()",
 ]);
 
 export const POOL = parseAbi([
@@ -64,4 +67,5 @@ export const REASONS = {
   EmptyDeposit: "that receipt was already redeemed",
   NotInBasket: "that token is not in the basket",
   NoValue: "the basket holds no depositor liquidity yet",
+  UnavailablePrice: "that pool has no price the basket will use yet (it is empty, or too new to have a recent average); choose another, or wait a day",
 };

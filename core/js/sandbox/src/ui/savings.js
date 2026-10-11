@@ -90,6 +90,13 @@ export function mountSavings(ctx) {
     h("option", { value: "revert" }, "Reverting (cycles about a mean)"));
   const seedIn = h("input", { type: "text", "aria-label": "seed", placeholder: "default", size: 8,
                               dataset: { key: "savings:seed" } });
+  // An equity basket's upkeep: the older director and its Deploy / Fund / Trim
+  // steps, or the basket machine (the server's scenario.basket).
+  const upkeepOf = (machine) => (machine ? "equity-machine" : "equity-ops");
+  const upkeepSel = h("select", { "aria-label": "basket upkeep" },
+    h("option", { value: upkeepOf(false) }, "The director and its steps (older)"),
+    h("option", { value: upkeepOf(true) }, "The basket machine"));
+  const upkeepField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Upkeep"), upkeepSel);
   const worldLink = h("code", { class: "wrap" });
 
   const noServer = h("div", { class: "notice", hidden: true });
@@ -116,10 +123,11 @@ export function mountSavings(ctx) {
               "Connect"))),
         h("div", { class: "row" },
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Prices"), pricesSel),
+          upkeepField,
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn)),
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
-        h("p", { class: "hint" }, "A new world runs from its first day with these prices and seed; ",
+        h("p", { class: "hint" }, "A new world runs from its first day with these prices, upkeep and seed; ",
           "this one keeps running on the server until it is idle for ten minutes.  ",
           "The link to this world (anyone holding it can watch and steer it): "), worldLink)));
 
@@ -162,8 +170,8 @@ export function mountSavings(ctx) {
       { label: "paid per BUCK saved", color: S1 }, { label: `its commodities, held from day ${HOLD_FROM_DAY}`, color: S4, dash: true }],
       note: "What a saving is worth, in BUCK value, per BUCK deposited (the basket's share price), against "
         + "the basket's declared commodities bought on the day the pools have settled and simply held: the "
-        + "gap is what the basket's work has added -- the pools' fees, the wheel's captures, the director's "
-        + "timing -- or cost." }),
+        + "gap is what the basket's work has added -- the pools' fees, the wheel's captures, the timing "
+        + "of its rebalancing -- or cost." }),
     wheel: lineChart({ title: "The work wheel (cumulative)", fmt: dollars, series: [
       { label: "to depositors", color: S1 }, { label: "to callers", color: S2 }, { label: "gas", color: S4 }],
       note: "Consistency cycles through TOKEN/USDC, TOKEN/BUCK and BUCK/USDC: the harvest reaches the depositors." }),
@@ -185,6 +193,13 @@ export function mountSavings(ctx) {
       note: "Deploy pairs new deposits with BUCK in the pools; Fund buys the director's pick; Trim unwinds a "
         + "position (the most overweight, or the director's pick) to refill liquidity.  Fund and Trim wait "
         + "until no deposit is waiting to be placed." }),
+    machineSteps: lineChart({ title: "What the basket's wheel did (cumulative BUCK)", fmt: bucks, series: [
+      { label: "placed", color: S1 }, { label: "moved between commodities", color: S2 },
+      { label: "raised for cash", color: S3 }, { label: "bought back", color: S4 }],
+      note: "Each response does one thing.  Placing pairs waiting deposits with BUCK in the pools.  A move "
+        + "sells some of a commodity above its target and buys those below: held back while their prices "
+        + "are still parting, then released at a steady rate.  The safeguard raises cash when credit or "
+        + "liquidity is short, and buys back once it is not." }),
     deskOps: lineChart({ title: "The desk's operations (cumulative BUCK)", fmt: bucks, series: [
       { label: "absorbed (Q1)", color: S1 }, { label: "retired (Q2)", color: S2 },
       { label: "supplied (Q3)", color: S3 }, { label: "issued (Q4)", color: S4 }],
@@ -194,6 +209,11 @@ export function mountSavings(ctx) {
       { label: "premium (20-day)", color: S1 }],
       note: "Above zero BUCK is dear, and the desk supplies or issues; below, cheap, and it absorbs or "
         + "retires.  It acts only past a dead-band, and outright only after the push persists." }),
+    machineSignal: lineChart({ title: "The desk's signal: BUCK over its basket (%)", ref: 0, fmt: pct2, series: [
+      { label: "premium (as last sampled)", color: S1 }],
+      note: "Above zero BUCK is dear, and the desk supplies or issues; below, cheap, and it absorbs or "
+        + "retires.  It acts only beyond an outer band, and outright only once the reading has stayed "
+        + "beyond it for days on end (the Desk signal above counts them)." }),
     deskInv: lineChart({ title: "The desk's inventory (BUCK)", fmt: bucks, series: [
       { label: "BUCK it holds", color: S1 }, { label: "BUCK it has issued", color: S2 }],
       note: "What its operations have left it holding: read it beside what it earned -- a desk that "
@@ -201,6 +221,23 @@ export function mountSavings(ctx) {
   };
   const leanGrid = h("div", { class: "chart-grid small" });
   S.lean = [];
+  // The same picture under either upkeep: the older director's leaned targets,
+  // or the basket machine's (sim_info's machine).
+  const LEAN = {
+    director: "The director's lean: each commodity's weight, % (actual, leaned target, declared)",
+    machine: "The basket's lean against price: each commodity's weight, % (actual, leaned target, declared)",
+  };
+  const leanTitle = h("h3", { class: "grid-title" }, LEAN.director);
+  const shown = { steps: charts.steps, signal: charts.deskSignal };
+  function showUpkeep(machine) {
+    const want = { steps: machine ? charts.machineSteps : charts.steps,
+                   signal: machine ? charts.machineSignal : charts.deskSignal };
+    for (const k of Object.keys(want)) {
+      if (shown[k] !== want[k]) shown[k].el.replaceWith(want[k].el);
+      shown[k] = want[k];
+    }
+    leanTitle.textContent = machine ? LEAN.machine : LEAN.director;
+  }
   const commodityGrid = h("div", { class: "chart-grid small" });
   S.commodity = [];
 
@@ -222,8 +259,7 @@ export function mountSavings(ctx) {
         h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el),
         h("h3", { class: "grid-title" }, "The basket: its credit, and what its wheel did"),
         h("div", { class: "chart-grid" }, charts.credit.el, charts.steps.el),
-        h("h3", { class: "grid-title" }, "The director's lean: each commodity's weight, % (actual, leaned "
-          + "target, declared)"),
+        leanTitle,
         leanGrid,
         h("h3", { class: "grid-title" }, "The desks: what they did, and what it earned"),
         h("div", { class: "chart-grid" }, charts.deskSignal.el, charts.deskOps.el, charts.earned.el,
@@ -334,6 +370,9 @@ export function mountSavings(ctx) {
           const key = prefs.get("savings:key", "");
           S.saver = new Saver({ link: S.link, info, key });
           fill(howLine, HOW[info.basket_kind] ?? HOW.prorata);
+          showUpkeep(!!info.machine);
+          upkeepField.hidden = info.basket_kind !== "equity";
+          upkeepSel.value = upkeepOf(info.machine);
           prefs.set("savings:key", S.saver.key);
           buildCommodities();
           draw();
@@ -431,6 +470,7 @@ export function mountSavings(ctx) {
     const sets = {};
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
+    if (S.info?.basket_kind === "equity") sets["scenario.basket"] = upkeepSel.value;
     const chain = S.status?.chain;
     if (chain && chain !== "l2") sets["agents.BasketWheelAgent.chain"] = chain;
     prefs.set("savings:sets", JSON.stringify(sets));
@@ -480,6 +520,9 @@ export function mountSavings(ctx) {
       stat("Pool fees", last.eqSync === null ? "–" : bucks(last.eqSync), "BUCK the basket's pools have paid it in fees"),
       stat("Desk", last.deskNav === null || last.deskHold === null ? "–"
         : signed(last.deskNav - last.deskHold, bucks), "The monetary desk's book against its grant held, BUCK"),
+      last.deskSide === null ? null : stat("Desk signal",
+        last.deskSide === 0 ? "in band" : `${last.deskSide > 0 ? "cheap" : "dear"}, ${last.deskDays} d`,
+        "Whether BUCK has stayed cheap or dear beyond the desk's band, and for how many days"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
       stat("Pace", last.pace > 0 ? `${(1 / last.pace).toFixed(1)} s/day` : "–"),
       stat("Prices", !S.info ? "–" : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
@@ -493,7 +536,10 @@ export function mountSavings(ctx) {
     charts.index.update(xs, [rows.map((r) => r.D), heldLine(rows)]);
     charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
     charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim)]);
+    charts.machineSteps.update(xs, [rows.map((r) => r.eqPlace), rows.map((r) => r.eqTransfer),
+      rows.map((r) => r.eqRaise), rows.map((r) => r.eqBuy)]);
     charts.deskSignal.update(xs, [rows.map((r) => r.premium)]);
+    charts.machineSignal.update(xs, [rows.map((r) => r.premium)]);
     charts.deskOps.update(xs, [0, 1, 2, 3].map((q) => rows.map((r) => r.dkQ[q])));
     const gap = (a, b) => (a === null || b === null ? null : a - b);
     charts.earned.update(xs, [rows.map((r) => gap(r.deskNav, r.deskHold)), rows.map((r) => gap(r.utNw, r.utHold))]);

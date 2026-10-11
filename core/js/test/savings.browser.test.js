@@ -68,13 +68,22 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     await nextDay();
     assert.ok(await page.locator("#panel-savings .chart path.line").count() > 10, "the charts draw");
     const panelText = await page.textContent("#panel-savings");
-    for (const title of ["The basket's credit (BUCK)", "What the basket's wheel did", "The director's lean",
+    // The basket's upkeep is the older director and its steps, or the basket
+    // machine (the server's --basket, or the page's world settings): the same
+    // charts either way, captioned and fed for the one that is running.
+    const machine = await page.evaluate(() => !!globalThis.savings?.info?.machine);
+    for (const title of ["The basket's credit (BUCK)", "What the basket's wheel did",
+                         machine ? "The basket's lean against price" : "The director's lean",
                          "The desk's signal", "The desk's operations", "What the desks earned over holding",
                          "The desk's inventory"]) {
       assert.ok(panelText.includes(title), `the ${title} chart is on the page`);
     }
+    assert.ok(panelText.includes(machine ? "moved between commodities" : "bought for the director"),
+      "the wheel's work is charted by what this upkeep does");
+    assert.equal(await page.locator('#panel-savings select[aria-label="basket upkeep"]').inputValue(),
+      machine ? "equity-machine" : "equity-ops", "the world settings show the upkeep that is running");
     assert.equal(await page.locator("#panel-savings .chart-grid.small").count(), 2,
-      "the director's lean and the commodities, one small chart per commodity");
+      "the lean and the commodities, one small chart per commodity");
     // Hover: a guide at the nearest day, and the legend reads that day.
     const plot = page.locator("#panel-savings .chart .plot").first();
     const box = await plot.boundingBox();

@@ -47,6 +47,37 @@ class Scenario:
             self.days = self.prices.days
 
 
+def keep_tokens(sc: Scenario, symbols) -> Scenario:
+    """Narrow a scenario to the named TOKENs, in its own order.
+
+    The departed TOKENs' declared weight is shared over the rest in
+    proportion (largest remainders make up the whole), and a cast of one
+    agent per TOKEN shrinks with the set.  The builders keep their six, so
+    the five-year vectors measured on them still reproduce; an experiment
+    narrows its world with `[scenario] tokens = [...]`.
+    """
+    known = [t[0] for t in sc.tokens]
+    unknown = [x for x in symbols if x not in known]
+    if unknown or not symbols:
+        raise ValueError(f"scenario.tokens must name some of {known}, not {list(symbols)}")
+    keep = [i for i, x in enumerate(known) if x in symbols]
+    tokens = [sc.tokens[i] for i in keep]
+    if all(len(t) > 3 for t in tokens):
+        whole = sum(t[3] for t in sc.tokens)
+        exact = [t[3] * whole / sum(t[3] for t in tokens) for t in tokens]
+        weights = [int(x) for x in exact]
+        for i in sorted(range(len(exact)), key=lambda i: weights[i] - exact[i])[:whole - sum(weights)]:
+            weights[i] += 1
+        tokens = [(*t[:3], w) for t, w in zip(tokens, weights)]
+    if sc.agents.get("TokenAccumulatorAgent") == len(known):
+        sc.agents = {**sc.agents, "TokenAccumulatorAgent": len(tokens)}
+    sc.tokens = tokens
+    sc.csv_files = [sc.csv_files[i] for i in keep]
+    sc.prices = Prices(sc.csv_files)
+    sc.days = min(sc.days, sc.prices.days)
+    return sc
+
+
 ROUTING = Scenario(
     name="routing",
     tokens=[("PAXG", "PAX Gold", 18),

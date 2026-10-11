@@ -131,11 +131,12 @@ def test_public_rpc_refuses_unsigned_transactions():
 
 
 def test_public_session_overrides_are_the_pages_toggles_only():
-    from alberta_buck.sim.server import PUBLIC_SETS
+    from alberta_buck.sim.server import public_sets
     sets = ["scenario.prices=revert", "scenario.agents.DirectMintAgent=10000",
-            "agents.BasketWheelAgent.chain=l1"]
-    kept = [x for x in sets if x.startswith(PUBLIC_SETS)]
-    assert kept == ["scenario.prices=revert", "agents.BasketWheelAgent.chain=l1"]
+            "agents.BasketWheelAgent.chain=l1", "scenario.basket=equity-machine",
+            "scenario.basket=fence", "scenario.basket=equity-machine-and-more", "machine.tilt=1"]
+    assert public_sets(sets) == ["scenario.prices=revert", "agents.BasketWheelAgent.chain=l1",
+                                 "scenario.basket=equity-machine"]
 
 
 def test_a_batch_is_answered_under_one_hold_and_status_needs_no_chain():

@@ -117,7 +117,11 @@ def _eqsave_frame(d, ctr) -> dict:
 
       eq_hold   the basket's day-0 declared weights, held: an index from 1
       eq_decl   declared weights, bp        eq_w     actual weights, bp
-      eq_lean   the director's leaned targets, bp (None without a director)
+      eq_lean   the leaned targets, bp: the director's, or under the basket
+                machine the upkeep facet's (None without either)
+      desk_side / desk_over_days  under the basket machine, the desk
+                policy's side (+1 cheap BUCK, -1 dear, 0 neither) and the
+                days it has seen the parity error beyond its band
       desk_nav  the BasketDesk's net value; desk_hold its founding grant,
                 held (BUCK base units)
       ut_nw / ut_hold  the undertakings' book, marked, and their opening
@@ -149,6 +153,12 @@ def _eqsave_frame(d, ctr) -> dict:
             f["eq_lean"] = [int(x) for x in eqd.functions.targetsBp().call()]
         except Exception:
             pass
+    elif getattr(d, "equity_machine", False):
+        from alberta_buck.sim.basket_machine import targets_bp
+        try:
+            f["eq_lean"] = targets_bp(d)
+        except Exception:
+            pass
     if p_low and all(p_low) and f["eq_decl"]:
         st = d.__dict__.setdefault("_eqsave", {})
         if "p0" not in st:
@@ -160,6 +170,10 @@ def _eqsave_frame(d, ctr) -> dict:
         f["eq_signal_fresh"] = bool(d.signals.functions.fresh().call())
         f["eq_signal_at"] = int(d.signals.functions.lastSampleAt().call())
         f["eq_signal_raw"] = int(d.signals.functions.rawValue().call())
+        policy = getattr(d, "monetary_policy", None)
+        if policy is not None:
+            f["desk_side"] = int(policy.functions.side().call())
+            f["desk_over_days"] = int(policy.functions.overDays().call())
     if desk is not None:
         try:
             f["desk_nav"] = int(desk.functions.netValue().call())

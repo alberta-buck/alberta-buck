@@ -540,6 +540,7 @@ class Session:
                 "wheel": wheel.address if wheel is not None else None,
                 "director": getattr(getattr(d, "director", None), "address", None),
                 "basket_kind": "equity" if _is_equity(d) else "prorata",
+                "machine": bool(getattr(d, "equity_machine", False)),
                 "name": getattr(sc, "name", None),
                 "days": getattr(sc, "days", None),
                 "ticks_per_day": getattr(sc, "ticks_per_day", None),
@@ -624,6 +625,12 @@ PUBLIC_RPC = frozenset({
 # The session overrides a --public server accepts (?set=key=value): the
 # page's toggles, not the cast -- a visitor must not size the world.
 PUBLIC_SETS = ("scenario.seed=", "scenario.prices=", "agents.BasketWheelAgent.chain=")
+# ... and the page's choice of the equity basket's upkeep, as exactly these.
+PUBLIC_CHOICES = ("scenario.basket=equity-ops", "scenario.basket=equity-machine")
+
+
+def public_sets(sets) -> list:
+    return [x for x in sets if x.startswith(PUBLIC_SETS) or x in PUBLIC_CHOICES]
 
 
 class SessionRefused(Exception):
@@ -649,7 +656,7 @@ class SimServer:
             if s is None or s.done:
                 sets = urllib.parse.parse_qs(query).get("set", [])
                 if self.public:
-                    sets = [x for x in sets if x.startswith(PUBLIC_SETS)]
+                    sets = public_sets(sets)
                 live = sum(1 for x in self.sessions.values() if not x.done)
                 if self.max_sessions and live >= self.max_sessions:
                     raise SessionRefused(f"{live} sessions running (max {self.max_sessions})")

@@ -1828,10 +1828,13 @@ savings-sandbox-status:
 # minute and runs a simulated day in 10-60 s.
 #
 #   make nix-venv-sandbox-savings-test
+#   make nix-venv-sandbox-savings-test SAVINGS_TEST_BASKET=equity-machine   # on the basket machine
 SAVINGS_TEST_PORT ?= 8987
+SAVINGS_TEST_BASKET ?=
 .PHONY: sandbox-savings-test
 sandbox-savings-test:	sim-build sandbox-build
 	@python -m alberta_buck.sim.server --experiment alberta_buck/sim/experiments/demo-savings.toml \
+		$(if $(SAVINGS_TEST_BASKET),--basket $(SAVINGS_TEST_BASKET)) \
 		--port $(SAVINGS_TEST_PORT) --public --max-sessions 2 --static $(SANDBOX_DIST) & pid=$$!; \
 	trap "kill $$pid" EXIT; \
 	for i in $$(seq 120); do \

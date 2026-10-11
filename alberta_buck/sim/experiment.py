@@ -101,6 +101,10 @@ DEFAULTS: dict = {
         "day_step": 10,
         "seed": 0xA1BC,
         "basket": "prorata",
+        "tokens": [],              # [] => the builder's own constituents;
+                                   # else the symbols to keep of them, the
+                                   # rest's weight shared over these
+                                   # (scenario.keep_tokens)
         "agents": {},              # count overrides
     },
     "deploy": {
@@ -266,8 +270,11 @@ def build(exp: Experiment):
         years=s["years"] or None,
         ticks_per_day=int(s["ticks_per_day"]),
         seed=int(s["seed"]))
+    if s.get("tokens"):
+        from alberta_buck.sim.scenario import keep_tokens
+        keep_tokens(sc, list(s["tokens"]))
     # prices = "revert": the window's reverting twin (gen_prices.revert_like)
-    # -- the same six commodities cycling about their first price, trend
+    # -- the same commodities cycling about their first price, trend
     # removed; the savings demonstration's toggle.  Absent or "history": the
     # history itself.
     mode = str(s.get("prices", "history") or "history")

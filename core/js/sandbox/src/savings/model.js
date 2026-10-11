@@ -48,6 +48,15 @@ export function annualized(a, b, days) {
   return (b / a) ** (365 / days) - 1;
 }
 
+/** BUCK's premium over its basket, %: the older desk's signal (the common
+ *  mode on its 20-day rung, sign flipped), or the basket machine's (its parity
+ *  reference: the basket's cost in BUCK as last sampled, 1e18). */
+function premiumOf(f) {
+  if (f.mk_cm !== undefined && f.mk_cm !== null) return -Number(f.mk_cm) / 1e11;
+  const cost = Number(f.eq_signal_raw ?? 0);
+  return cost > 0 ? (1e18 / cost - 1) * 100 : null;
+}
+
 /** One frame, cut down to what the tab draws (a few dozen numbers). */
 export function row(f) {
   const sv = f.sv ?? {};
@@ -74,13 +83,19 @@ export function row(f) {
     hold: f.eq_hold ?? null,
     lean: f.eq_lean ?? null, w: f.eq_w ?? null, decl: f.eq_decl ?? null,
     eqSync: bk(f.wh_eq_sync), eqDeploy: bk(f.wh_eq_deploy), eqFund: bk(f.wh_eq_fund), eqTrim: bk(f.wh_eq_trim),
+    // The basket machine's responses instead (basket_machine.py book_receipt):
+    // BUCK placed with waiting deposits, moved from a commodity above its
+    // target to those below, raised for cash, and bought back.
+    eqPlace: bk(f.wh_eq_place), eqTransfer: bk(f.wh_eq_transfer), eqRaise: bk(f.wh_eq_raise), eqBuy: bk(f.wh_eq_buy),
     // The monetary desk (the BasketDesk): BUCK moved per quadrant, its book,
     // its net value against its founding grant held, and its signal --
-    // BUCK's premium over its basket, % (the common mode, sign flipped).
+    // BUCK's premium over its basket, % -- with, on the basket machine, the
+    // side its policy has taken (+1 cheap BUCK, -1 dear) and for how many days.
     dkQ: [1, 2, 3, 4].map((q) => bk(f[`dk_q${q}`]) ?? 0),
     deskNav: bk(f.desk_nav), deskHold: bk(f.desk_hold),
     deskHeld: bk(f.sh_held), deskOut: bk(f.sh_outstanding),
-    premium: f.mk_cm === undefined || f.mk_cm === null ? null : -Number(f.mk_cm) / 1e11,
+    premium: premiumOf(f),
+    deskSide: f.desk_side ?? null, deskDays: f.desk_over_days ?? null,
     // The undertakings' book, marked, against their opening book held.
     utNw: bk(f.ut_nw), utHold: bk(f.ut_hold),
     shockBought: f.shk_bought_usd ?? 0,
