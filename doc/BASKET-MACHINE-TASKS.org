@@ -174,7 +174,8 @@ the machine is clearly better in every regime.
     takes 35 minutes on either. The first five weeks already show the machine placing no
     deposits (step 4), so read the five years with that in mind and settle it first.
   - Make the machine the hosted world's default once it holds up.
-  - The page's browser test on both upkeeps, and its screenshot.
+  - The page's screenshot. Its browser test passes on both upkeeps
+    (=make nix-venv-sandbox-savings-test=, and with =SAVINGS_TEST_BASKET=equity-machine=).
   - The published contracts list (=scripts/contracts-dist.py=) carries only =BasketDesk= of the
     machine's contracts, so a checkout without a Foundry build cannot serve it.
 - [ ] Define the comparison before running it: the regimes, the measures and what "clearly
