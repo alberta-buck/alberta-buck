@@ -1,5 +1,5 @@
 #+TITLE: The basket machine, as built
-#+DATE: 2026-10-10
+#+DATE: 2026-10-11
 #+OPTIONS: ^:nil toc:2 num:t
 
 This describes the contracts that turn the equity basket: what each one is, what it reads, what
@@ -25,16 +25,16 @@ is a contract with its own state that the others call.
 | =BuckBasketEquity= | Shell | The books: receipts, shares, wallet TOKEN, liquidity counts, the credit | Depositors, governance, the wheel |
 | =BasketVenueFacet= | Facet | Nothing: Uniswap V3 reads, swaps and positions with strict price checks | The shell and the upkeep facet |
 | =BasketUpkeepFacet= | Facet | Nothing: the Daily, Sync and Respond steps | The wheel, through the shell |
-| =PairRebalancePolicy= | Service | Each pair's last rate and change, each constituent's urgency, the basket's own recent price impact, the time of the last transfer | The upkeep facet |
+| =PairRebalancePolicy= | Service | Each pair's last rate and change, each constituent's urgency and allowance, the basket's own recent price impact | The upkeep facet |
 | =PairSignals= | Service | One level-and-rate tracker per TOKEN per quote route, and their error statistics | Anyone (=observe=); read by the policy |
 | =BasketReference= | Service | The last valid reference-basket value in BUCKs, its freshness and day count | The wheel's Sample slot, the desk policy, K's reference |
 | =BasketDesk= | Service | The desk's own account, TOKEN, credit, turnover budget and capital floor | The wheel's Ops slot |
 | =OuterBandDeskPolicy= | Service | Which side of parity the basket is on and for how many days | The desk and the wheel |
 | =BasketMachineWheel= | Wheel | The cursor, the reserve, the arbitrage triangles | Any keeper (=tick=) |
 
-The upkeep facet is one contract: the three step entry points, the sell and buy primitives, the
-paired transfer and the [[#safeguard][safeguard plan]]. Each service and facet has its interface in its own
-file (see [[#names][names]]); they depend on those, not on each other's contracts.
+The upkeep facet is one contract: the three step entry points, the pairing of what waits, the
+book and its plan, and the sell and buy primitives. Each service and facet has its interface in
+its own file (see [[#names][names]]); they depend on those, not on each other's contracts.
 
 * The books and the mark
 
@@ -56,13 +56,29 @@ would for the same price change.
 
 Marked at equity, the credit bounds every BUCK drawn: lien <= K x equity. A BUCK drawn and
 paired beside the basket's own TOKEN then uses the limit as if it had been spent, so credit can
-pair only K of the book. The shell has a second way to mark, =netMark=, off as built and set by
-governance. On, the credit is marked at equity plus the BUCK side of the positions over K, which
-makes Buck's own limit read: lien - BUCKs held <= K x equity. K then bounds the BUCKs the basket
-has let out, not those it still holds, which carry no price risk against the lien they came
-from. Pairing uses none of the line, and an exit can be paid in BUCKs before anything is sold.
-The most TOKEN the basket can come to hold is unchanged, (1 + K) x equity. The built upkeep
-facet is not written for it; a trial is (see [[file:BASKET-MACHINE-TASKS.org][the task list]]).
+pair only K of the book, and the rest must be sold or left waiting. That is how the shell is
+made, and how the older upkeep runs it.
+
+The machine marks /net/ (=netMark=, set by governance). The credit is marked at equity plus the
+BUCK side of the positions over K, which makes Buck's own limit read:
+
+#+begin_example
+lien - BUCKs held in the positions  <=  K x equity
+#+end_example
+
+K then bounds the BUCKs the basket has let out, not those it still holds, which carry no price
+risk against the lien they came from. Three things follow.
+
+- Pairing uses none of the line. Every TOKEN is paired with issued BUCKs as it arrives.
+- An exit is paid in BUCKs from the line, before anything is sold. One exit of up to K/(1 + K)
+  of the book fits.
+- The most TOKEN the basket can come to hold is what it was, (1 + K) x equity. Counting gross
+  assets as collateral, the loop of lending protocols, would allow 1/(1 - K) and is not done.
+
+Buck never calls anything back. Beyond the limit the account simply cannot spend, and an exit is
+then paid in kind. Relief accrues on the whole lien and is counted in equity as it accrues. The
+demurrage on BUCKs held in a pool rides with them and is borne when they come back; equity does
+not deduct it until then, so a young basket's share price shows the relief first.
 
 * Signals
 
@@ -124,7 +140,7 @@ point and a patience of two point-days, a gap of 2.25 points qualifies in a day,
 and a quarter point never does. A policy built with no patience keeps no count, and the basket's
 fixed allocation band decides as it did before.
 
-A transfer does not restart the count. A gap that has become eligible stays so while it is
+A trade does not restart the count. A gap that has become eligible stays so while it is
 worked off, and closes the moment it is back inside the slack, because there the count drains.
 
 This is a CUSUM, the cumulative-sum test for a small shift that persists. It decides only
@@ -157,18 +173,18 @@ the patience) is fixed at construction.
 
 ** Release
 
-A rate becomes an amount through the donor's /allowance/: the rate it has been asked at, summed
-over time since it last transferred.
+A rate becomes an amount through a constituent's /allowance/: the rate it has been worked at,
+summed over time since it last traded.
 
 #+begin_example
 allowance  <-  allowance + rate x time elapsed       at every response; an unobserved stretch earns a day at most
-allowance  <-  zero                                  when the donor transfers, or is no longer asked
+allowance  <-  zero                                  when it trades, or is no longer worked
 share of the gap to move now  =  1 - exp(-allowance)
 #+end_example
 
 This composes exactly. A day at a rate of ln 2 moves half the gap whether the basket is turned
 once that day or in every block, and a turn too small to trade loses nothing: its allowance
-carries to the next. Each donor keeps its own.
+carries to the next. Each constituent keeps its own.
 
 * Targets
 :PROPERTIES:
@@ -203,74 +219,84 @@ With a tilt the basket sells a TOKEN that stands above its reference to below it
 weight, and buys it back as the price returns. That is a bet on the price returning. The
 reference price is the constituent's anchor, the price its reference quantity was struck at,
 unless governance sets another (=setReferencePrice=). The tilt and the cap are governance's too
-(=setResponse=); the cap must be inside the leash, so the safeguard never fights the lean. The
-leash and the safeguard keep the declared weights.
+(=setResponse=); the cap must be inside the leash, so the leash never fights the lean. The
+leash keeps the declared weights.
+
+The book those shares are of is not what the basket happens to hold. It is what its equity asks
+for, leaned against parity:
+
+#+begin_example
+book  =  equity + aim
+aim   =  - parity gain x (the basket's cost in BUCK - 1) x equity      held within the ceiling either way
+#+end_example
+
+Where the basket costs more than one BUCK the BUCK is cheap, the aim is below zero and the book
+is smaller than equity: TOKEN is sold and BUCKs held. Where it costs less the book is larger and
+BUCKs are issued. With no fresh reading of parity the book stays the size it is. A cut in K
+moves nothing by itself; it lowers the ceiling.
 
 * The upkeep facet: =BasketUpkeepFacet=
 
 The wheel turns three kinds of step on the basket.
 
-- /Daily (0)./ Once a day: update the flow statistic that sizes the liquidity target, settle
-  relief against the lien, re-mark the credit.
+- /Daily (0)./ Once a day: settle relief against the lien, re-mark the credit.
 - /Sync (1, pool i)./ Once a day per pool: collect the position's fees into the wallet and the
   account, re-mark.
-- /Respond (2)./ At most once per interval: observe, then the first of the following that
-  applies.
+- /Respond (2)./ At most once per interval: observe, then the three things below, in order.
 
-** The safeguard
+It runs only on a shell marked net. Nothing in it rations credit: there is no liquidity target,
+no cash need and no order of who may be placed first.
+
+** Pair what waits
 :PROPERTIES:
-:CUSTOM_ID: safeguard
+:CUSTOM_ID: pairing
 :END:
 
-The book comes first. The facet runs its safeguard plan, and no paired transfer, when the book
-holds no TOKEN, when the lien exceeds K times equity(LOW), when its spendable BUCKs are below the
-liquidity target's band, or when any constituent is beyond its leash (30% of its declared
-weight). The plan has no view on prices and reads no signal:
+Every constituent's wallet TOKEN is paired with issued BUCKs, at once and in full. This swaps
+nothing and spends no allowance. The BUCKs stay in the position, so each marking gives the room
+back, and a deposit larger than the room is paired in a few passes. Nothing waits past the
+next turn but the fees a position has just returned.
 
-- /Leash./ A constituent beyond its leash is sold or bought back toward its declared weight.
-- /Cash./ Short liquidity or a lien above K is met by selling. What the leash sales do not raise
-  is spread over every constituent, each giving in proportion to what it may give in one turn.
-  While cash is needed nothing is bought and nothing is placed.
-- /First deposit./ A book of BUCKs alone aims its usable cash at the declared weights.
-- /Placing./ When no cash is needed and the leash asks for no purchase, wallet TOKEN is placed
-  in the same turn, as [[#otherwise][below]], with the account's spare room and whatever the turn's
-  leash sale raised. Placing swaps nothing, so a leash sale does not hold it back.
+** Size the book and find each gap
 
-Each sale is capped by the step (5% of the constituent) and by twice its pool's swap depth. There
-is at most one purchase or placement a turn, with a fresh mark of the credit between the sales
-and it.
+The book is equity plus the aim (see [[#targets][targets]]). Each constituent's target is its leaned share
+of that book, and its gap is the TOKEN it holds, in its position and its wallet, less that
+target. The gaps are reported to the policy as shares of the book. A gap is /eligible/ when the
+policy says it is urgent or, for a policy with no patience, when it exceeds the allocation band.
 
-** A paired transfer
-
-When the book needs no safeguard:
-
-1. Value every constituent and report its gap from its target to the policy. A gap is
-   /material/ when the policy says it is urgent (or, for a policy with no patience, when it
-   exceeds the allocation band).
-2. For each overweight donor, the eligible recipients are the underweight constituents for
-   which the policy's desire is positive, provided the donor or the recipient is material.
-3. The amount is the smaller of the donor's excess and the recipients' shortfalls, times the
-   donor's =share= at its shortfall-weighted desire, then capped by the step (5% of the donor's
-   value) and the pool's depth (1% per swap). Recipients share it in proportion to their shortfalls and
-   are scaled down together to respect each one's step, depth and shortfall.
-4. Amounts at or below the minimum (the grain, widened for the venue's price tolerance) are not
-   requested. The donor with the largest executable total wins.
-5. Execution sells the donor's wallet TOKEN first and burns liquidity only for the remainder.
-   Each recipient's share buys TOKEN with half and places the other half beside it as liquidity.
-   No fresh credit is drawn: recipients spend the sale's proceeds.
-6. If any planned recipient is refused, or the mark would leave the basket over its limit, the
-   whole response reverts, the sale included.
-7. The measured tick change of each pool is reported to the policy as own impact, and the
-   donor's allowance is spent.
-
-** Otherwise
+** Work each constituent on its own
 :PROPERTIES:
-:CUSTOM_ID: otherwise
+:CUSTOM_ID: working
 :END:
 
-With no transfer to make, the facet places wallet TOKEN into liquidity where the funded
-allocation is shortest, if the account has spending room beyond its liquidity target. This swaps
-nothing and spends no allowance. Failing that it re-marks a stale credit.
+A constituent over its target is sold, and one under it is bought. Neither needs the other:
+the line carries the difference.
+
+1. /The rate./ For a sale, the policy's desire for this constituent against each of the
+   others, weighed by their declared weights. For a purchase, the same with the pair turned
+   round. A constituent that nothing is closing against is left.
+2. /The amount./ The gap times the constituent's =share= at that rate, then capped by the step
+   (5% of its holding, or of its target for a purchase) and its pool's depth (1% a swap).
+   Pieces under twice the grain are not asked for.
+3. /The line./ Purchases are scaled back together so that what is issued, after the turn's
+   sales, does not pass the ceiling.
+4. /Execution./ A sale takes wallet TOKEN first, then burns liquidity: a position gives up
+   TOKEN and BUCKs in equal value, so twice the remainder is burned and its TOKEN sold. A
+   purchase buys TOKEN with half its budget and pairs it with the other half. The credit is
+   marked after the sales and after each purchase.
+5. The measured tick change of each pool is reported to the policy as own impact, and each
+   constituent that traded has spent its allowance.
+
+Two things act with no view on prices and ask the policy nothing.
+
+- /The leash./ A constituent more than 30% of its declared weight from its declared share is
+  worked toward its target at once, in full, within the caps. A book of BUCKs alone holds
+  nothing of anything, so this is also how a cash deposit is bought into the book.
+- /The ceiling./ BUCKs issued beyond half of K x equity are sold down at once, every
+  constituent giving its share. The other half of the line is what exits are paid from. A
+  large exit is paid first and sold down over the following turns.
+
+Failing all of this the facet re-marks a stale credit.
 
 * The venue: =BasketVenueFacet=
 
@@ -322,6 +348,7 @@ from one governance-appointed arbitrage creditor, which can deposit and nothing 
 | Policy constants | Separation floor, impact memory | 100 ticks (1%), 2 days |
 | Pair observer | Response, error memory, largest gap, warm-up, rate floor | 12 h, 1 day, 1 day, 2 days, 2 bp/day |
 | Basket | Allocation band (unused by a patient policy), leash, step, swap depth, grain | 2 points, 30% of weight, 5%, 1%, 100 ppm |
+| Credit | Mark, ceiling on BUCKs issued, parity gain | Net, half of K x equity, 5 |
 | Parity reference | Sample interval, largest age, spot/TWAP tolerance | 30 min, 1 h, 5% |
 | Desk policy | Entry, release, gain, cap, persistence | 3%, 2%, 25%, 40 bp, 30 days |
 | Desk | Capital per TOKEN, turnover, floor | 400,000, 1,200,000, 300,000 |
@@ -336,7 +363,8 @@ pinned to the feed again after every arbitrage pass.
 There is no single recipe yet. The lab builds the older equity machine with the simulator's
 =deploy=, then swaps in the venue, the upkeep facet, the parity reference and the desk policy
 (=control_lab/engine.py=), and wires the pair observer and policy separately
-(=control_lab/block_pairs.py=). The general simulator builds the same parts when an experiment
+(=control_lab/block_pairs.py=). Both set the net mark, and the facet takes the parity reference
+and its gain at construction. The general simulator builds the same parts when an experiment
 names =basket = "equity-machine"= (=basket_machine.py=), sized by the experiment's =[machine]=
 table, which starts from the lab's values, and with each constituent's declared price as the
 policy's reference. =SIM_EQUITY_MACHINE=1= beside the older =equity-ops= does the same for a
