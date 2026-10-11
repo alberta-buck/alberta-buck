@@ -1,12 +1,13 @@
 """The sizing campaign's inputs, and the arithmetic that revalues the recorded book."""
 import copy
 import math
+from pathlib import Path
 
 import pytest
 
-from alberta_buck.sim.control_lab.basket_sizing import AVAILABLE, FLAT, SIZINGS, TWO_STEP, own_scale, patient, score
+from alberta_buck.sim.control_lab.basket_sizing import AVAILABLE, FLAT, LAB, SIZINGS, TWO_STEP, half_life, lean, patient, score
 from alberta_buck.sim.control_lab.book import holdings, recorded, reference_value
-from alberta_buck.sim.control_lab.model import DEFAULTS, dependencies, feed_rows, pair_sizing, validate
+from alberta_buck.sim.control_lab.model import DEFAULTS, dependencies, feed_rows, load_config, pair_sizing, response_params, validate
 
 
 def frame(day=0., idle=(10., 20., 30.), liquidity=(4e15, 0, 9e15), price=(100., 100., 100.),
@@ -54,7 +55,8 @@ def test_frames_saved_before_the_book_was_recorded_are_recognized():
 def test_sizings_resolve_to_valid_policy_arguments():
     assert "pair" not in SIZINGS["maintenance"] and SIZINGS["first"]["pair"] == {}
     assert pair_sizing(DEFAULTS["pair"]) == (2 * 10**15, 10**17, 20, 0, 10**18, 10**18, 0, 0)
-    assert SIZINGS["own-4-1pt"]["pair"] == SIZINGS["own-4"]["pair"] and SIZINGS["own-4-1pt"]["basket"] == dict(weight_band_bp=100)
+    assert SIZINGS["lab"] == dict(title=SIZINGS["lab"]["title"], pair=LAB, basket=lean(.5))
+    assert SIZINGS["tilt-0"]["pair"] == LAB and SIZINGS["tilt-0"]["basket"] == dict(tilt=0, lean_cap_bp=0)
     for name, arm in SIZINGS.items():
         if "pair" not in arm:
             continue
@@ -64,14 +66,18 @@ def test_sizings_resolve_to_valid_policy_arguments():
         validate(cfg)
         speed, rate, gain, closure, ceiling, impact, slack, patience = pair_sizing(cfg["pair"])
         assert all(isinstance(x, int) and 0 <= x < 2**64 for x in (speed, rate, gain, closure, ceiling, impact, slack, patience))
-        assert ceiling >= rate or name == "first" or ceiling == 10**18
-        assert (patience > 0) == name.startswith("own-4-p")
-        assert not (patience and "basket" in arm), "a patient arm has no band to override"
-    assert own_scale(4) == dict(release_speed=0., release_rate=4., closure_gain=0, closure_rate=1., max_rate=4.)
-    assert own_scale(.5)["max_rate"] == 1
+        assert closure <= ceiling
+        assert (patience > 0) == (not name.startswith("band-") and name != "first")
+        assert response_params(cfg["basket"], 1800)[2:] in ((0, 0), (2500, 1500), (5000, 1500), (10000, 1500))
+    # Half the remaining gap a day is a rate of ln 2, whatever the braking release may ask for.
+    assert half_life(1) == dict(release_speed=0., release_rate=4., closure_gain=0, closure_rate=.693147, max_rate=.693147)
+    assert half_life(.5)["max_rate"] == pytest.approx(2 * math.log(2), abs=1e-6)
     # A quarter point of slack and two point-days of patience, as shares of the book.
     assert pair_sizing({**DEFAULTS["pair"], **patient(2)})[6:] == (25 * 10**14, 2 * 10**16)
-    assert SIZINGS["own-4-p2"]["pair"] == {**own_scale(4), **patient(2)}
+    # The configuration's own rule is the campaign's `lab` arm.
+    cfg = load_config(Path(__file__).resolve().parents[2] / "doc/control-lab.toml")
+    assert {k: cfg["pair"][k] for k in LAB} == LAB
+    assert {k: cfg["basket"][k] for k in ("tilt", "lean_cap_bp")} == lean(.5)
 
 
 @pytest.mark.parametrize("change", [dict(max_rate=0.), dict(impact_share=1.5), dict(release_rate=-1.),
@@ -87,7 +93,7 @@ def test_invalid_sizings_are_rejected(change):
 def test_sizing_invalidates_only_stages_that_run_the_basket():
     cfg = copy.deepcopy(DEFAULTS)
     other = copy.deepcopy(cfg)
-    other["pair"].update(own_scale(4))
+    other["pair"].update(half_life(1))
     profile = AVAILABLE["three-phase"]
     for stage in ("feeds", "monitor", "monitor-k", "linked"):
         assert dependencies(cfg, profile, stage) == dependencies(other, profile, stage)

@@ -14,10 +14,11 @@ from alberta_buck.sim.chain import load_artifact
 
 LOG_TICK = math.log(1.0001)
 # The pair observer's timing (seconds) and rate floor, and the policy's sizing, as the control lab runs
-# them (doc/control-lab.toml): release and closure 4 and 1 gaps a day on the rate's own scale, a quarter
-# point of slack and two point-days of patience.
+# them (doc/control-lab.toml): a braking release of up to 4 a day on the rate's own scale, the whole
+# capped at ln 2 a day (half the remaining gap), a quarter point of slack and two point-days of patience.
 OBSERVER = (43200, 86400, 86400, 172800, round(.0002 / LOG_TICK / 86400 * 1e18))
-SIZING = (0, 4 * 10**18, 0, 10**18, 4 * 10**18, 10**18, 25 * 10**14, 2 * 10**16)
+HALF_A_DAY = round(math.log(2) * 10**18)
+SIZING = (0, 4 * 10**18, 0, HALF_A_DAY, HALF_A_DAY, 10**18, 25 * 10**14, 2 * 10**16)
 
 
 def book_receipt(d, receipt, ctr) -> None:
@@ -72,8 +73,9 @@ def activate(d) -> None:
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
-    chain.send(basket.functions.setResponse((int(os.environ.get("SIM_MACHINE_LEASH_BP", "3000")), interval)),
-               sender=gov)
+    chain.send(basket.functions.setResponse((int(os.environ.get("SIM_MACHINE_LEASH_BP", "3000")), interval,
+        round(float(os.environ.get("SIM_MACHINE_TILT", ".5")) * 10000),
+        int(os.environ.get("SIM_MACHINE_LEAN_CAP_BP", "1500")))), sender=gov)
     chain.send(wheel.functions.setResponseMode(True), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
     # These were comparison advisors; the replacement has one price service.

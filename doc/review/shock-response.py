@@ -1,13 +1,16 @@
-"""Why the basket sells so little of a TOKEN that jumps 30% for ten days.
+"""What the basket does with a TOKEN that jumps 30% for ten days.
 
 The lab's `shock` profile steps TOKEN A up by 30% of its base from day 45 to day 55, on top of
-the three-phase cycle. This runs it with the basket alone under several rules for which gaps may
-be worked, then prints:
+the three-phase cycle. This runs it with the basket alone under the lab's rule and with one
+thing changed at a time (the lean, the pace, urgency), then prints:
 
   1. for each rule, what it sold of TOKEN A while the shock lasted and what it earned across it;
   2. for the lab's own rule, every turn of the shock: the pair signals, the policy's desire, the
      TOKEN A the basket holds (in liquidity and in its wallet), and A's share of the book beside
      the share the same TOKEN would have had in a wallet.
+
+Before the lean and the steady release were built the basket sold the jumped TOKEN once, for
+about 10,500 BUCKs. "band, no lean" is the nearest arm to that rule that the contracts still have.
 
 Run inside the Nix shell with the Python environment active:
     python doc/review/shock-response.py /tmp/shock
@@ -17,33 +20,28 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 
-def own(rate):
-    return dict(release_speed=0., release_rate=float(rate), closure_gain=0, closure_rate=1., max_rate=float(max(rate, 1)))
-
-
-LAB = "patience 2"
-ARMS = {                                        # None: maintenance only
-    "maintenance":   None,
-    "2-point line":  dict(pair=own(4), band=200),
-    "half point":    dict(pair=own(4), band=50),
-    "tenth point":   dict(pair=own(4), band=10),
-    "tenth, rate 8": dict(pair=own(8), band=10),
-    LAB:             dict(pair={**own(4), "slack": .0025, "patience": .02}, band=200),
-    "patience 1":    dict(pair={**own(4), "slack": .0025, "patience": .01}, band=200),
-    "patience 1/4":  dict(pair={**own(4), "slack": .0025, "patience": .0025}, band=200),
+LAB = "lab"
+ARMS = {                                        # None: maintenance only; otherwise what to change in the lab's rule
+    "maintenance":      None,
+    LAB:                dict(),
+    "no lean":          dict(basket=dict(tilt=0., lean_cap_bp=0)),
+    "tilt 1":           dict(basket=dict(tilt=1.)),
+    "half in 12 hours": dict(pair=dict(closure_rate=1.386294, max_rate=1.386294)),
+    "2-point band":     dict(pair=dict(slack=0., patience=0.)),
+    "band, no lean":    dict(pair=dict(slack=0., patience=0.), basket=dict(tilt=0., lean_cap_bp=0)),
 }
 BEFORE, AFTER = 44.75, 55.                      # the last frame before the jump, the first after the drop
 
 
 def run(arm, out):
     from alberta_buck.sim.control_lab.block_pairs import simulate_observed
-    from alberta_buck.sim.control_lab.model import DEFAULTS, load_config, validate
+    from alberta_buck.sim.control_lab.model import load_config, validate
     cfg = load_config("doc/control-lab.toml")
     cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
     profile = next(p for p in cfg["profiles"] if p["name"] == "shock")
     spec = ARMS[arm]
-    if spec:
-        cfg["pair"] = {**DEFAULTS["pair"], **spec["pair"]}; cfg["basket"]["weight_band_bp"] = spec["band"]
+    for section, changes in (spec or {}).items():
+        cfg[section].update(changes)
     validate(cfg)
     result = simulate_observed(cfg, profile, "basket", maintenance_only=spec is None)
     Path(out, f"{arm.replace(' ', '-').replace('/', '-').replace(',', '')}.json").write_text(json.dumps(result["frames"]))
@@ -64,13 +62,13 @@ def report(out):
     runs = {a: frames(out, a) for a in ARMS}
     still = reference_value(at(runs["maintenance"], AFTER)) - reference_value(at(runs["maintenance"], BEFORE))
     print(f"TOKEN A sold by transfer from day 45 to day 55, and the gain across the shock (day {BEFORE} to {AFTER}) over maintenance")
-    print(f"  {'rule':14s} {'sales':>5s} {'BUCKs':>8s} {'TOKEN A':>8s} {'first':>6s} {'gain':>8s}   TOKEN A held before / at the end of the shock")
+    print(f"  {'rule':16s} {'sales':>5s} {'BUCKs':>8s} {'TOKEN A':>8s} {'first':>6s} {'last':>6s} {'gain':>8s}   TOKEN A held before / at the end of the shock")
     for arm, run_ in runs.items():
         sales = [(f["day"], t) for f in run_ if 45 <= f["day"] < 55 for e in f["events"]
                  if e["actor"] == "basket" and e.get("action") == "transfer" for t in e["trades"] if t["side"] == "sell" and t["token"] == 0]
         gain = reference_value(at(run_, AFTER)) - reference_value(at(run_, BEFORE)) - still
-        first = f"{sales[0][0]:6.2f}" if sales else f"{'':6s}"
-        print(f"  {arm:14s} {len(sales):5d} {sum(t['quote_amount'] for _, t in sales):8,.0f} {sum(t['token_amount'] for _, t in sales):8.1f} {first} {gain:+8,.0f}"
+        first = f"{sales[0][0]:6.2f} {sales[-1][0]:6.2f}" if sales else f"{'':13s}"
+        print(f"  {arm:16s} {len(sales):5d} {sum(t['quote_amount'] for _, t in sales):8,.0f} {sum(t['token_amount'] for _, t in sales):8.1f} {first} {gain:+8,.0f}"
               f"   {holdings(at(run_, BEFORE))[0][0]:7.1f} / {holdings(at(run_, 54.75))[0][0]:7.1f}")
     lab = runs[LAB]
     start = holdings(at(lab, BEFORE))[0]

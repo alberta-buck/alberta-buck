@@ -180,7 +180,9 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
                     own_impact_ticks=[int(self.pair_policy.functions.remainingImpact(i).call()) / 1e18 for i in range(3)],
                     # Each constituent's built-up urgency after this step, in point-days of gap beyond the slack.
                     urgency_point_days=[int(self.pair_policy.functions.urgency(i).call()[0]) / 1e18 / 86400 * 100
-                        for i in range(3)])
+                        for i in range(3)],
+                    # Each donor's allowance: the rate it has been asked at, summed over days since it last transferred.
+                    allowance=[int(self.pair_policy.functions.allowance(i).call()) / 1e18 for i in range(3)])
             return frame
 
     result = engine.simulate(cfg, profile, stage, world_factory=ObserverWorld)

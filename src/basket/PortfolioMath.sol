@@ -37,5 +37,20 @@ library PortfolioMath {
         return r;
     }
 
+    /// @dev ln(x), x in 1e18 and above zero: halve or double x into
+    /// [1/sqrt(2), sqrt(2)], then 2 atanh((x - 1) / (x + 1)) by its series.
+    function lnWad(uint256 x) internal pure returns (int256) {
+        require(x > 0, "ln of zero");
+        int256 halvings;
+        while (x >= 1414213562373095049) { x /= 2; ++halvings; }
+        while (x < 707106781186547524) { x *= 2; --halvings; }
+        int256 z = (int256(x) - 1e18) * 1e18 / (int256(x) + 1e18);
+        int256 square = z * z / 1e18;
+        int256 term = z;
+        int256 sum = z;
+        for (int256 n = 3; n <= 9; n += 2) { term = term * square / 1e18; sum += term / n; }
+        return 2 * sum + halvings * 693147180559945309;
+    }
+
     function min(uint256 a, uint256 b) internal pure returns (uint256) { return a < b ? a : b; }
 }

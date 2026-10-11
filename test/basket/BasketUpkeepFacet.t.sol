@@ -24,19 +24,23 @@ contract ControlledPairIntent {
     function desire(uint256, uint256 j) external view returns (uint256) {
         return onlyRecipient == type(uint256).max || onlyRecipient == j ? rate : 0;
     }
-    function fraction(uint256 r, uint256 elapsed) external pure returns (uint256) {
+    // The share of a gap to move: any rule will do for the facet's tests.
+    function share(uint256, uint256 r) external view returns (uint256) {
+        uint256 elapsed = block.timestamp - lastExecutionAt;
         if (elapsed > 1 days) elapsed = 1 days;
         uint256 u = r * elapsed / 1 days;
         return u * 1e18 / (1e18 + u);
     }
+    uint256[] public asked;
+    function recordRates(uint256[] calldata rates) external { require(msg.sender == basket); asked = rates; }
     function recordImpact(uint256, int24, int24) external { require(msg.sender == basket); ++impacts; }
-    function recordExecution(uint256 acted_) external {
-        require(msg.sender == basket); lastExecutionAt = uint64(block.timestamp); acted = acted_;
+    function recordExecution(uint256 donor) external {
+        require(msg.sender == basket); lastExecutionAt = uint64(block.timestamp); acted = donor;
     }
     // Urgency, as the facet sees it: a mask the test sets, and the gaps it was last told.
     uint256 public patience;
     uint256 public urgentMask;
-    uint256 public acted;
+    uint256 public acted = type(uint256).max; // the donor of the last transfer
     int256[] public reported;
     function setUrgent(uint256 patience_, uint256 mask) external { patience = patience_; urgentMask = mask; }
     function urgent(int256[] calldata) external view returns (uint256) { return urgentMask; }
@@ -58,7 +62,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
         b.setEquityWheel(address(new BasketUpkeepFacet(address(intent))));
-        b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800));
+        b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
         vm.stopPrank();
     }
 
@@ -202,7 +206,8 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         vm.warp(vm.getBlockTimestamp() + 1 hours);
         assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
         assertEq(intent.impacts(), 3);
-        assertEq(intent.acted(), 7, "the donor and both recipients start again");
+        assertEq(intent.acted(), 0, "the donor's allowance is spent");
+        assertGt(intent.asked(0), 0, "and the rate it was asked at was reported");
         _books();
     }
 
@@ -213,7 +218,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         IBasketUpkeep(address(b)).wheelStep(2, 0);
         assertLt(b.idleToken(0), idle, "+1.17 points is inside the 2-point band, and urgent");
         assertGt(intent.impacts(), 0);
-        assertEq(intent.acted() & 1, 1);
+        assertEq(intent.acted(), 0);
         _books();
     }
 

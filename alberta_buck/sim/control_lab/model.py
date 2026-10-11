@@ -44,8 +44,11 @@ DEFAULTS = {
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     "supply": {"credit_face_buck": 1_000_000, "max_per_day": 25_000,
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
-    "basket": {"leash_bp": 3000, "weight_band_bp": 200},
-    # PairRebalancePolicy.Sizing: speeds are log returns/day, rates gap fractions/day.
+    # tilt: how far a target leans against a TOKEN's price over its reference (0 none, 1/2 undoes the
+    # damping of liquidity, 1 the most); lean_cap_bp: the most it may lean, bp of the declared weight.
+    "basket": {"leash_bp": 3000, "weight_band_bp": 200, "tilt": 0., "lean_cap_bp": 0},
+    # PairRebalancePolicy.Sizing: speeds are log returns/day, rates are fractions of the remaining
+    # gap per day (ln 2 = 0.693 halves it each day).
     # These are the first experiment's values; closure_rate=0 leaves closure to speed alone,
     # and release_speed=0 would scale the braking release by the rate's own allowance.
     # slack is a share of the book and patience is share-days (0.02: two point-days);
@@ -107,6 +110,9 @@ def validate(cfg: dict) -> None:
     band = cfg["basket"]["weight_band_bp"]
     if not isinstance(band, int) or not 0 <= band <= 1000:
         raise ValueError("basket.weight_band_bp must be an integer in 0..1000")
+    cap = cfg["basket"]["lean_cap_bp"]
+    if not 0 <= cfg["basket"]["tilt"] <= 1 or not isinstance(cap, int) or not 0 <= cap < cfg["basket"]["leash_bp"]:
+        raise ValueError("basket.tilt must be in 0..1 and basket.lean_cap_bp an integer below the leash")
     pair = cfg["pair"]
     if (not isinstance(pair["closure_gain"], int) or not 0 <= pair["closure_gain"] <= 10_000
             or any(not math.isfinite(pair[k]) or not 0 <= pair[k] <= 18 for k in
@@ -122,6 +128,11 @@ def validate(cfg: dict) -> None:
         raise ValueError("profile names must be nonempty and unique")
     if any(not n or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for c in n) for n in names):
         raise ValueError("profile names use lowercase letters, digits, hyphens and underscores")
+
+
+def response_params(basket: dict, interval: int) -> tuple:
+    """The shell's ResponseParams."""
+    return (basket["leash_bp"], interval, round(basket["tilt"] * 10000), basket["lean_cap_bp"])
 
 
 def pair_sizing(pair: dict) -> tuple:

@@ -7,6 +7,7 @@ import argparse
 import copy
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
+import math
 import multiprocessing
 from pathlib import Path
 
@@ -25,9 +26,10 @@ AVAILABLE = {p["name"]: p for p in [*PROFILES, HISTORICAL, TWO_STEP]}
 FLAT = {"flat-noise80", "two-step"}             # no three-phase cycle beneath the perturbations
 
 
-def own_scale(rate):
-    """No speed constants: release and closure are both judged against the rate's own allowance."""
-    return dict(release_speed=0., release_rate=float(rate), closure_gain=0, closure_rate=1., max_rate=float(max(rate, 1)))
+def half_life(days):
+    """The remaining gap halves in so many days once a turn is clear; nothing is fitted to a speed."""
+    rate = round(math.log(2) / days, 6)
+    return dict(release_speed=0., release_rate=4., closure_gain=0, closure_rate=rate, max_rate=rate)
 
 
 def patient(point_days, slack_points=.25):
@@ -35,22 +37,29 @@ def patient(point_days, slack_points=.25):
     return dict(slack=slack_points / 100, patience=point_days / 100)
 
 
+def lean(tilt):
+    """How far a target leans against price, held to 15% of the declared weight."""
+    return dict(tilt=tilt, lean_cap_bp=1500 if tilt else 0)
+
+
 # An arm without `pair` is the maintenance control. `pair = {}` is the first experiment's sizing.
-# Which gaps may be worked at all is decided by the allocation band, which `basket` overrides,
-# or, in a patient arm, by urgency that builds with the gap and time.
+# Which gaps may be worked at all is decided by the allocation band or, in a patient arm, by urgency
+# that builds with the gap and time. `lab` is the configuration's own rule; each other arm changes
+# one thing about it.
+LAB = {**half_life(1), **patient(2)}
 SIZINGS = {
     "maintenance": dict(title="Maintenance only"),
-    "first": dict(title="First experiment: 10%/day, halved at 20 bp/day", pair={}),
-    "rate-1": dict(title="Release 1/day, halved at 20 bp/day", pair=dict(release_rate=1.)),
-    "own-2": dict(title="Release 2/day, own-allowance scale", pair=own_scale(2)),
-    "own-4": dict(title="Release 4/day, own-allowance scale", pair=own_scale(4)),
-    "own-8": dict(title="Release 8/day, own-allowance scale", pair=own_scale(8)),
-    "own-4-1pt": dict(title="Release 4/day, own scale, 1-point band", pair=own_scale(4), basket=dict(weight_band_bp=100)),
-    "own-4-half": dict(title="Release 4/day, own scale, half-point band", pair=own_scale(4), basket=dict(weight_band_bp=50)),
-    "own-4-p1": dict(title="Release 4/day, own scale, patience 1 point-day", pair={**own_scale(4), **patient(1)}),
-    "own-4-p2": dict(title="Release 4/day, own scale, patience 2 point-days", pair={**own_scale(4), **patient(2)}),
-    "own-4-p4": dict(title="Release 4/day, own scale, patience 4 point-days", pair={**own_scale(4), **patient(4)}),
-    "own-4-p8": dict(title="Release 4/day, own scale, patience 8 point-days", pair={**own_scale(4), **patient(8)}),
+    "first": dict(title="First experiment: 10%/day, halved at 20 bp/day, no lean", pair={}, basket=lean(0)),
+    "lab": dict(title="The lab: half the gap a day, patience 2, tilt 1/2", pair=LAB, basket=lean(.5)),
+    "tilt-0": dict(title="No lean", pair=LAB, basket=lean(0)),
+    "tilt-quarter": dict(title="Tilt 1/4", pair=LAB, basket=lean(.25)),
+    "tilt-1": dict(title="Tilt 1", pair=LAB, basket=lean(1)),
+    "half-12h": dict(title="Half the gap in 12 hours", pair={**half_life(.5), **patient(2)}, basket=lean(.5)),
+    "half-2d": dict(title="Half the gap in 2 days", pair={**half_life(2), **patient(2)}, basket=lean(.5)),
+    "patience-1": dict(title="Patience 1 point-day", pair={**half_life(1), **patient(1)}, basket=lean(.5)),
+    "patience-4": dict(title="Patience 4 point-days", pair={**half_life(1), **patient(4)}, basket=lean(.5)),
+    "band-2pt": dict(title="A 2-point band in place of urgency", pair=half_life(1), basket={**lean(.5), "weight_band_bp": 200}),
+    "band-2pt-tilt-0": dict(title="A 2-point band, no lean", pair=half_life(1), basket={**lean(0), "weight_band_bp": 200}),
 }
 
 
@@ -98,25 +107,27 @@ def render(root):
     cfg = m["requested_config"]
     report = ["#+title: Sizing the pair basket's release", "#+options: toc:2 num:nil", "", m["method"], "",
         "* The sizings", "",
-        "Rates are fractions of an eligible allocation gap per day; speeds are log returns per day. "
-        "The braking release is =release_rate × release × braking=, where =release= halves at =release_speed= of outward "
-        "motion and =braking= compares the rate's change with its allowance. With =release_speed = 0= the allowance "
-        "itself is the scale. Closure adds =closure_gain= per unit of confirmed closing speed, or =closure_rate= "
-        "times its confidence. Which gaps may be worked at all is decided by the allocation band or, in a patient "
-        "arm, by urgency: a constituent counts its distance from target beyond the slack over time, is eligible "
-        "once the count reaches the patience, and starts again when it is worked. Every other limit (step, pool "
-        "depth, minimum size, credit) is unchanged.", "",
-        "| Sizing | release_rate | release_speed | closure_gain | closure_rate | max_rate | Allocation band, bp | "
+        "Rates are fractions of the remaining eligible gap per day (0.693 halves it each day); speeds are log "
+        "returns per day. The braking release is =release_rate × release × braking=, where =release= halves at "
+        "=release_speed= of outward motion and =braking= compares the rate's change with its allowance. With "
+        "=release_speed = 0= the allowance itself is the scale. Closure adds =closure_gain= per unit of confirmed "
+        "closing speed, or =closure_rate= times its confidence, and =max_rate= caps the sum. A donor moves "
+        "1 - exp(-rate × time) of its gap, however often it is asked. Which gaps may be worked at all is decided "
+        "by the allocation band or, in a patient arm, by urgency: a constituent counts its distance from target "
+        "beyond the slack over time, is eligible once the count reaches the patience, and stays so until its gap "
+        "is back inside the slack. A target leans against price by the tilt, up to the cap. Every other limit "
+        "(step, pool depth, minimum size, credit) is unchanged.", "",
+        "| Sizing | release_rate | release_speed | closure_gain | closure_rate | max_rate | Tilt | Allocation band, bp | "
         "Slack, points | Patience, point-days |",
-        "|--------+--------------+---------------+--------------+--------------+----------+---------------------+"
+        "|--------+--------------+---------------+--------------+--------------+----------+------+---------------------+"
         "---------------+----------------------|"]
     for arm in arms:
         if "pair" in SIZINGS[arm]:
             p = {**DEFAULTS["pair"], **SIZINGS[arm]["pair"]}
-            band = SIZINGS[arm].get("basket", cfg["basket"])["weight_band_bp"]
-            gate = f"| | {100 * p['slack']:g} | {100 * p['patience']:g}" if p["patience"] else f"| {band} | |"
+            basket = {**cfg["basket"], **SIZINGS[arm].get("basket", {})}
+            gate = f"| | {100 * p['slack']:g} | {100 * p['patience']:g}" if p["patience"] else f"| {basket['weight_band_bp']} | |"
             report.append(f"| {arm} | {p['release_rate']:g} | {p['release_speed']:g} | {p['closure_gain']} | "
-                          f"{p['closure_rate']:g} | {p['max_rate']:g} {gate} |")
+                          f"{p['closure_rate']:g} | {p['max_rate']:g} | {basket['tilt']:g} {gate} |")
     report += ["", "The band arms are compared with the same maintenance control. Maintenance makes no paired "
         "transfer, so the band can reach it only through the risk fallback."]
     report += ["", "* Ending value against the maintenance control", "",

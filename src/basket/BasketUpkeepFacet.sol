@@ -13,9 +13,16 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 /// short liquidity or a lien above K, a constituent brought back inside its
 /// leash, a first cash deposit placed, all with no view on prices. Otherwise
 /// one paired transfer, from one donor to proportional eligible recipients,
-/// on declared allocation gaps and the policy's graded intent. Failing both,
-/// it pairs TOKEN the basket already holds. Idle TOKEN counts in the same
-/// allocation as LP; waiting inventory never vetoes work elsewhere.
+/// on the gaps from its targets and the policy's graded intent. Failing
+/// both, it pairs TOKEN the basket already holds. Idle TOKEN counts in the
+/// same allocation as LP; waiting inventory never vetoes work elsewhere.
+///
+/// A target is the declared weight, leaned against price when the shell's
+/// tilt is set: lowered for a constituent above its reference price against
+/// the others, raised for one below. A liquidity position sells as its price
+/// rises, so its share moves half as far as a wallet's; a tilt of one half
+/// asks for the other half. The leash and the safeguard keep the declared
+/// weights.
 contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     uint256 private constant NONE = type(uint256).max;
     IRebalancePolicy public immutable pairPolicy;
@@ -26,6 +33,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         uint256[] recipients;
         bool needsSafeguard;
         int256[] gaps; // each constituent over (+) or under (-) its target, as a share of the book, 1e18
+        uint256[] rates; // the rate each donor is asked at toward its eligible recipients, per day, 1e18
     }
     // action: 0 mark-only, 1 sell, 2 buy, 3 transfer, 4 pair existing inventory.
     event Responded(uint8 indexed action, uint256 sell, uint256 buy, uint256 proceeds, uint256 buySpent);
@@ -94,6 +102,34 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         return gap * 10000 > total * weight * response.leashBp / 10000;
     }
 
+    /// @dev Each constituent's target value. With no tilt, its declared
+    /// weight of the book. With one, that weight times (reference / price) to
+    /// the tilt, shared out over the book and held within the lean cap. Only
+    /// one price against another matters: a move in the BUCK itself cancels.
+    function _targets(Snap memory s, uint256 total) internal view returns (uint256[] memory target) {
+        uint256 n = s.m.length;
+        target = new uint256[](n);
+        uint256 tilt = response.tiltBp;
+        if (tilt == 0) {
+            for (uint256 i; i < n; ++i) target[i] = total * constituents[i].targetWeightBp / 10000;
+            return target;
+        }
+        uint256 sum;
+        for (uint256 i; i < n; ++i) {
+            uint256 price = s.m[i].pTwap;
+            uint256 anchor = referencePrice[i] == 0 ? constituents[i].initialPriceInBuck : referencePrice[i];
+            int256 above = price == 0 || anchor == 0 ? int256(0) : PM.lnWad(price * 1e18 / anchor);
+            target[i] = constituents[i].targetWeightBp * PM.expWad(-above * int256(tilt) / 10000);
+            sum += target[i];
+        }
+        for (uint256 i; i < n; ++i) {
+            uint256 declared = total * constituents[i].targetWeightBp / 10000;
+            uint256 most = declared * response.leanCapBp / 10000;
+            uint256 leaned = total * target[i] / sum;
+            target[i] = leaned > declared + most ? declared + most : leaned + most < declared ? declared - most : leaned;
+        }
+    }
+
     function _allocation(Snap memory s) internal view virtual returns (Allocation memory a) {
         uint256 n = s.m.length;
         require(n == pairPolicy.count() && address(this) == pairPolicy.basket(), "pair basket");
@@ -110,12 +146,16 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         }
         uint256[] memory excess = new uint256[](n);
         uint256[] memory deficit = new uint256[](n);
-        a.gaps = new int256[](n);
+        uint256[] memory targets = _targets(s, total);
+        a.gaps = new int256[](n); a.rates = new uint256[](n);
         for (uint256 i; i < n; ++i) {
             uint256 weight = constituents[i].targetWeightBp;
             uint256 target = total * weight / 10000;
             uint256 gap = value[i] > target ? value[i] - target : target - value[i];
+            // The leash is the mandate: it is kept on the declared weight.
             if (_beyondLeash(gap, total, weight)) { a.needsSafeguard = true; return a; }
+            target = targets[i];
+            gap = value[i] > target ? value[i] - target : target - value[i];
             a.gaps[i] = value[i] > target ? int256(gap * 1e18 / total) : -int256(gap * 1e18 / total);
             if (s.m[i].depth == 0) continue;
             if (value[i] > target) excess[i] = gap;
@@ -146,7 +186,6 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         uint256 tolerance = defaultMaxDeviationBp;
         if (tolerance >= 10000) return a;
         uint256 minimum = grain * (10000 + tolerance) / (10000 - tolerance) + 1;
-        uint256 elapsed = block.timestamp - pairPolicy.lastExecutionAt();
         for (uint256 i; i < n; ++i) {
             if (excess[i] == 0) continue;
             uint256 eligible;
@@ -158,7 +197,8 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
                 eligible += deficit[j]; weightedRate += deficit[j] * rate;
             }
             if (eligible == 0) continue;
-            uint256 amount = PM.min(excess[i], eligible) * pairPolicy.fraction(weightedRate / eligible, elapsed) / 1e18;
+            a.rates[i] = weightedRate / eligible;
+            uint256 amount = PM.min(excess[i], eligible) * pairPolicy.share(i, a.rates[i]) / 1e18;
             amount = PM.min(amount, PM.min(value[i] * eq.stepBp / 10000, _swapCap(s.m[i])));
             if (amount <= minimum || amount <= a.total) continue;
             uint256[] memory recipients = new uint256[](n);
@@ -173,8 +213,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
             uint256 scale = 1e18;
             for (uint256 j; j < n; ++j) {
                 if (recipients[j] == 0) continue;
-                uint256 target = total * constituents[j].targetWeightBp / 10000;
-                uint256 step = (value[j] > target ? value[j] : target) * eq.stepBp / 10000;
+                uint256 step = (value[j] > targets[j] ? value[j] : targets[j]) * eq.stepBp / 10000;
                 uint256 cap = PM.min(_swapCap(s.m[j]), PM.min(deficit[j], step));
                 if (cap < recipients[j]) scale = PM.min(scale, cap * 1e18 / recipients[j]);
             }
@@ -274,6 +313,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
             return work;
         }
         pairPolicy.recordGaps(a.gaps);
+        pairPolicy.recordRates(a.rates);
         bool stale = _staleMark(s); _markS(s);
         if (a.donor == NONE) {
             Plan memory p = _idlePlacement(s);
@@ -303,10 +343,8 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         uint256 budget = PM.min(a.total, PM.min(proceeds, s.spend));
         require(_headroomS(s) >= 0 && budget > _grainS(s), "pair cash unavailable");
         uint256 used;
-        uint256 acted = uint256(1) << a.donor;
         for (uint256 j; j < a.recipients.length; ++j) {
             if (a.recipients[j] == 0) continue;
-            acted |= uint256(1) << j;
             uint256 part = budget * a.recipients[j] / a.total;
             // Every leg rechecks current venue bounds; any refused planned
             // recipient rolls the entire response back, including the sale.
@@ -317,7 +355,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
             require(_headroomS(s) >= 0, "pair credit");
         }
         _record(beforeTicks);
-        pairPolicy.recordExecution(acted);
+        pairPolicy.recordExecution(a.donor);
         lastResponseAt = uint64(block.timestamp);
         emit Responded(3, a.donor, NONE, proceeds, used);
         emit PairResponse(a.donor, a.total, proceeds, used);

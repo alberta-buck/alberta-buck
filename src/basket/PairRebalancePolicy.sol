@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IPairSignals} from "./IPairSignals.sol";
 import {IBasketView} from "./IBasketView.sol";
 import {IRebalancePolicy} from "./IRebalancePolicy.sol";
+import {PortfolioMath as PM} from "./PortfolioMath.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
 /// @notice Graded pair intent. It owns no assets and authorizes no spending.
@@ -17,10 +18,12 @@ contract PairRebalancePolicy is IRebalancePolicy {
     int128[] public referenceLevels; // Accepted historical whole-TOKEN log-price means, fractional ticks.
     int256 public constant MIN_SEPARATION = 100e18; // ~1%: explicit first-experiment spread floor.
     uint256 public constant IMPACT_MEMORY = 2 days;
+    uint256 public constant MAX_ALLOWANCE = 4e18; // a share of 98%: more is no more
 
-    /// @notice How much of an eligible allocation gap a separated pair releases.
-    /// Speeds are log returns per day and rates are gap fractions per day, both
-    /// 1e18. Fixed at deployment: a different sizing is a different policy.
+    /// @notice How fast a separated pair closes an eligible allocation gap.
+    /// Speeds are log returns per day and rates are fractions of the remaining
+    /// gap per day, both 1e18: a rate of ln 2 halves the gap each day. Fixed
+    /// at deployment: a different sizing is a different policy.
     struct Sizing {
         uint64 releaseSpeed; // outward speed that halves the braking release; 0: the rate's own allowance
         uint64 releaseRate;  // the most a braking ratio releases; a quiet, stalled one a fifth of it
@@ -54,6 +57,10 @@ contract PairRebalancePolicy is IRebalancePolicy {
     struct Urgency { uint128 sum; int8 side; }
     mapping(uint256 => Urgency) public urgency;
     uint64 public gapsAt;
+    /// @notice A donor's allowance: the rate it has been asked at, summed
+    /// over time since it last transferred (1e18 for a rate of one held a day).
+    mapping(uint256 => uint256) public allowance;
+    uint64 public ratesAt;
     event OwnImpact(uint256 indexed token, int256 tickChange);
 
     constructor(address signals_, address basket_, int128[] memory reference_, Sizing memory sizing_) {
@@ -63,7 +70,7 @@ contract PairRebalancePolicy is IRebalancePolicy {
         closureGain = sizing_.closureGain; closureRate = sizing_.closureRate;
         maxRate = sizing_.maxRate; impactShare = sizing_.impactShare;
         slack = sizing_.slack; patience = sizing_.patience;
-        lastExecutionAt = uint64(block.timestamp); gapsAt = uint64(block.timestamp);
+        lastExecutionAt = uint64(block.timestamp); gapsAt = uint64(block.timestamp); ratesAt = uint64(block.timestamp);
         uint256 n = signals.tokenCount(); count = n;
         require(reference_.length == n, "reference size");
         for (uint256 i; i < n; ++i)
@@ -121,14 +128,38 @@ contract PairRebalancePolicy is IRebalancePolicy {
         return uint256(m.magnitude) * (IMPACT_MEMORY - age) / IMPACT_MEMORY;
     }
 
-    /// @notice Only an executed graded transfer consumes its elapsed budget.
-    /// Price observations, credit marks and LP placement do not reset it.
-    /// The donor and recipients it names (bit i for constituent i) have been
-    /// worked: their urgency starts again from zero.
-    function recordExecution(uint256 acted) external {
-        require(msg.sender == basket, "basket only");
+    /// @notice The share of a donor's gap to move now. Its allowance is the
+    /// rate it has been asked at, summed over time since it last transferred,
+    /// and carried to now at the rate given; an unobserved stretch earns at
+    /// most a day. 1 - exp(-allowance) composes exactly: a day asked once or
+    /// a thousand times releases the same share.
+    function share(uint256 donor, uint256 rateWad) public view returns (uint256) {
+        return uint256(WAD) - PM.expWad(-int256(_accrued(donor, rateWad)));
+    }
+
+    function _accrued(uint256 donor, uint256 rateWad) private view returns (uint256 sum) {
+        uint256 elapsed = block.timestamp - ratesAt;
+        if (elapsed > 1 days) elapsed = 1 days;
+        sum = allowance[donor] + rateWad * elapsed / 1 days;
+        if (sum > MAX_ALLOWANCE) sum = MAX_ALLOWANCE;
+    }
+
+    /// @notice The basket reports each constituent's asked rate at every
+    /// response. A donor no longer asked loses what it had accrued, so an
+    /// old allowance cannot be spent on a later, different turn.
+    function recordRates(uint256[] calldata rates) external {
+        require(msg.sender == basket && rates.length == count, "basket only");
+        for (uint256 i; i < count; ++i) allowance[i] = rates[i] == 0 ? 0 : _accrued(i, rates[i]);
+        ratesAt = uint64(block.timestamp);
+    }
+
+    /// @notice An executed transfer spends its donor's allowance. Urgency is
+    /// left alone: a gap that has become eligible stays so until it is back
+    /// inside the slack or on the other side of its target.
+    function recordExecution(uint256 donor) external {
+        require(msg.sender == basket && donor < count, "basket only");
         lastExecutionAt = uint64(block.timestamp);
-        for (uint256 i; i < count; ++i) if ((acted >> i) & 1 == 1) urgency[i].sum = 0;
+        allowance[donor] = 0;
     }
 
     /// @dev Urgency as it stands now for a constituent `gap` over its target
@@ -241,9 +272,4 @@ contract PairRebalancePolicy is IRebalancePolicy {
         if (rateWad > maxRate) rateWad = maxRate;
     }
 
-    function fraction(uint256 rateWad, uint256 elapsed) external pure returns (uint256) {
-        if (elapsed > 1 days) elapsed = 1 days; // bounded catch-up
-        uint256 u = rateWad * elapsed / 1 days;
-        return u * uint256(WAD) / (uint256(WAD) + u);
-    }
 }

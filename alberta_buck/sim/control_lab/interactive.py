@@ -147,9 +147,16 @@ def plot_data(result):
         pane("actors", "Buyer and seller flows", "Thousands of native units", lines,
              "The selected quantity is the desired daily rate at fair value. Adverse prices reduce it exponentially. Cash and credit are finite; the seller does not repay during this experiment.")
     if flags.get("basket"):
+        declared, tilt, cap = (3333, 3333, 3334), cfg["basket"].get("tilt", 0), cfg["basket"].get("lean_cap_bp", 0) / 10000
+        def targets(f):
+            """The facet's leaned targets, from the pools' prices against the feed's base prices, percent."""
+            raw = [w * (b / p) ** tilt for w, b, p in zip(declared, base, f["token_buck"])]
+            return [max(w * (1 - cap), min(w * (1 + cap), 10000 * r / sum(raw))) / 100 for w, r in zip(declared, raw)]
         pane("allocation", "Basket allocation", "Percent", [
-            line(f"TOKEN {'ABC'[i]}", color, lambda f: f["basket"]["weights"][i] / 100) for i, color in enumerate(COLORS)],
-            "Allocation follows the replacement basket’s bounded Daily / Sync / Respond work. The vertical axis fits the visible allocations.")
+            *[line(f"TOKEN {'ABC'[i]}", color, lambda f: f["basket"]["weights"][i] / 100) for i, color in enumerate(COLORS)],
+            *([line(f"{'ABC'[i]} target", color, lambda f, i=i: targets(f)[i], "2 4") for i, color in enumerate(COLORS)] if tilt else [])],
+            "Allocation follows the basket’s bounded Daily / Sync / Respond work. Dotted lines are the targets: each declared weight, "
+            "leaned against that TOKEN’s price over its reference. The vertical axis fits the visible allocations.")
         performance = basket_performance(result)
         initial = performance["initial_buck"]
         booked = recorded(frames[0])
@@ -253,9 +260,10 @@ def plot_data(result):
                   for i, color in enumerate(COLORS)],
                 line("Patience", "#87949c", lambda f: patience, "3 3")],
                 f"Each TOKEN counts how far its share of the book is from target, beyond a slack of {slack:g} points, over "
-                f"time. Once the count reaches the patience of {patience:g} point-days the TOKEN may be rebalanced, and a "
-                "transfer starts its count again. A large gap gets there soon; a small one gets there if it lasts. This "
-                "decides only whether a gap may be worked: pair participation still decides when and how much.")
+                f"time. Once the count reaches the patience of {patience:g} point-days the TOKEN may be rebalanced, and it "
+                "stays eligible until its gap is back inside the slack. A large gap gets there soon; a small one gets "
+                "there if it lasts. This decides only whether a gap may be worked: pair participation still decides when "
+                "and how fast.")
     if shadow_rows:
         def innovation(f, q):
             s=shadow_by_day.get(f["day"])

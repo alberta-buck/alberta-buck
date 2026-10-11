@@ -1,21 +1,18 @@
-"""Would a target that leans against price make the basket rebalance into a turn?
+"""How far should a target lean against price?
 
-The basket restores its declared weights and nothing more, and its liquidity positions have
-already done half of that by the time it looks: a position's share moves half as far as a
-wallet's. This trial runs the lab-only facet test/harness/BasketUpkeepLeanTrial.sol, which for
-the length of each response makes every TOKEN's target its declared weight times
-exp(-tilt x d), d being how far the TOKEN's log price stands above its accepted reference
-relative to the others. Nothing else changes: the policy still decides when (a turn, a closing
-ratio) and what share of the gap to move.
+The basket's liquidity positions sell a TOKEN as its price rises, so a position's share moves
+half as far as a wallet's. The shell's tilt leans each target the other way: a TOKEN's target
+is its declared weight times (reference price / price) to the power tilt, shared out over the
+book and held within the lean cap. The policy still decides when (a turn, a closing ratio) and
+how fast.
 
-    tilt 0     the shipped facet (must reproduce the lab's own run)
-    tilt 1/2   what a wallet holder restoring the declared weights would hold
+    tilt 0     restore the declared weights and no more
+    tilt 1/2   the lab's setting: ask for the half that liquidity damps
     tilt 1     the older design's lean
 
 Every arm runs the basket alone for 120 days beside a maintenance run of the same profile.
 
-Run inside the Nix shell with the Python environment active, after
-`forge build test/harness/BasketUpkeepLeanTrial.sol`:
+Run inside the Nix shell with the Python environment active:
     python doc/review/lean-trial.py /tmp/lean [jobs]
 """
 import json, multiprocessing, sys
@@ -27,7 +24,6 @@ TILTS = (0., .25, .5, 1.)
 
 
 def run(profile_name, tilt, out):
-    from alberta_buck.sim import chain as chain_mod
     from alberta_buck.sim.control_lab.basket_sizing import FLAT, TWO_STEP
     from alberta_buck.sim.control_lab.block_pairs import PROFILES as LAB, simulate_observed
     from alberta_buck.sim.control_lab.model import load_config, validate
@@ -36,22 +32,10 @@ def run(profile_name, tilt, out):
     if profile_name in FLAT:
         cfg["feed"]["amplitude"] = 0
     profile = next(p for p in [*LAB, TWO_STEP, *cfg["profiles"]] if p["name"] == profile_name)
-    validate(cfg)
-    deploy, facets = chain_mod.Chain.deploy, []
-
-    def leaning(self, name, *args, **kwargs):
-        if name == "BasketUpkeepFacet":
-            facets.append(name)
-            if len(facets) > 1:                 # the first is the mean-price prelude's: every arm shares that book
-                return deploy(self, "BasketUpkeepLeanTrial", *args, round(tilt * 1e18), **kwargs)
-        return deploy(self, name, *args, **kwargs)
-
     if tilt is not None:
-        chain_mod.Chain.deploy = leaning
-    try:
-        result = simulate_observed(cfg, profile, "basket", maintenance_only=tilt is None)
-    finally:
-        chain_mod.Chain.deploy = deploy
+        cfg["basket"].update(tilt=tilt, lean_cap_bp=1500 if tilt else 0)
+    validate(cfg)
+    result = simulate_observed(cfg, profile, "basket", maintenance_only=tilt is None)
     Path(out, name(profile_name, tilt)).write_text(json.dumps(result["frames"]))
     return profile_name, tilt, result["summary"]["seconds"]
 

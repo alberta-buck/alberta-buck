@@ -78,7 +78,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         eq = EquityParams({floorBp: 100, flowZx100: 200, bandBp: 5000, parkBp: 30000,
                            flowDays: 30, stepBp: 500, weightBandBp: 200, grainPpm: 100,
                            exitFeeBp: 0, swapCapBp: 100, ceilBp: 2000});
-        response = ResponseParams({leashBp: 3000, interval: 1800});
+        response = ResponseParams({leashBp: 3000, interval: 1800, tiltBp: 0, leanCapBp: 0});
         receipt = new BuckBasketReceipt(address(this));
     }
 
@@ -114,10 +114,25 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
 
     event ResponseConfigured(ResponseParams params);
 
+    /// @dev A target never leans as far as the leash, so the safeguard that
+    ///      keeps a constituent inside its leash cannot fight the lean.
     function setResponse(ResponseParams calldata p) external onlyGov {
-        require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0, "response params");
+        require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0
+                && p.tiltBp <= 10000 && p.leanCapBp < p.leashBp, "response params");
         response = p;
         emit ResponseConfigured(p);
+    }
+
+    event ReferencePriceSet(uint256 indexed i, uint256 priceInBuck);
+
+    /// @notice Set the price constituent i is taken to return to, in BUCK
+    ///         units per whole TOKEN as the venue quotes it; zero restores
+    ///         its anchor price. It moves rebalancing targets only: the
+    ///         reference basket K steers by keeps its quantities.
+    function setReferencePrice(uint256 i, uint256 priceInBuck) external onlyGov {
+        require(i < constituents.length, "constituent");
+        referencePrice[i] = priceInBuck;
+        emit ReferencePriceSet(i, priceInBuck);
     }
 
     function setEquityParams(EquityParams calldata p) external onlyGov {

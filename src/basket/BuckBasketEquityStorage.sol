@@ -126,8 +126,15 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     struct ResponseParams {
         uint16 leashBp;                  // relative to the leg's declared weight
         uint32 interval;                 // minimum seconds between responses
+        uint16 tiltBp;                   // how far a target leans against price: 0 not at all, 10000 the most
+        uint16 leanCapBp;                // the most a target may lean, relative to its declared weight
     }
     ResponseParams public response;
+    /// @notice The price a constituent is taken to return to, in BUCK units
+    ///         per whole TOKEN as the venue quotes it. Its target leans
+    ///         against its distance from this. Zero: its anchor price, the
+    ///         one its reference quantity was struck at.
+    mapping(uint256 => uint256) public referencePrice;
     uint64 public lastResponseAt;
     // Optional separate arb wheel: income crediting only, never upkeep or spending.
     address public arbitrageCreditor;

@@ -14,7 +14,7 @@ import os
 import time
 from types import SimpleNamespace
 
-from .model import DEFAULTS, STAGES, baseline_prices, feed_rows
+from .model import DEFAULTS, STAGES, baseline_prices, feed_rows, response_params
 
 E6, E18, Q96 = 10**6, 10**18, 1 << 96
 ZERO = "0x" + "0" * 40
@@ -124,7 +124,7 @@ class World:
         if equity_params[6] != rp["weight_band_bp"]:
             equity_params[6] = rp["weight_band_bp"]
             self.chain.send(d.basket.functions.setEquityParams(tuple(equity_params)), sender=d.gov)
-        self.chain.send(d.basket.functions.setResponse((rp["leash_bp"], mon["interval"])), sender=d.gov)
+        self.chain.send(d.basket.functions.setResponse(response_params(rp, mon["interval"])), sender=d.gov)
         self.chain.send(d.wheel.functions.setResponseMode(True), sender=d.gov)
         self.chain.send(d.wheel.functions.setEquity(d.basket.address if self.flags.get("basket") else ZERO), sender=d.gov)
         self.chain.send(d.wheel.functions.setDirector(ZERO), sender=d.gov)

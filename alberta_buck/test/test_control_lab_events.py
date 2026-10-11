@@ -47,7 +47,7 @@ def test_receipts_record_desk_basket_and_both_arb_legs():
     # real swaps on both basket legs and a monetary operation in three days.
     c["days"] = 3
     c["feed"]["period_days"] = 2
-    c["basket"]["leash_bp"] = 100
+    c["basket"].update(leash_bp=100, tilt=0., lean_cap_bp=0)       # a lean must stay inside the leash
     c["desk"].update(enter_bp=20, release_bp=10, persist_days=1)
     result = simulate(c, c["profiles"][0], "all")
     counts = execution_counts(result["frames"])

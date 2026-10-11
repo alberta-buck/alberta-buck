@@ -19,24 +19,36 @@ history_days = 1280
 # Both quote routes are then aligned to the selected opening TOKEN prices.
 basket_warmup_days = 120
 
-# How much of an eligible allocation gap a separated pair releases (fractions
-# of the gap per day). release_speed = 0 and closure_gain = 0 judge both the
-# braking release and closure against the rate's own allowance, so no speed is
-# fitted to these synthetic cycles. Chosen from control-lab/basket-sizing: the
-# first experiment's values (0.002, 0.1, 20, 0, 1) remain the code defaults.
+# A target leans against price. Each TOKEN's target is its declared weight
+# times (reference price / price) to the power `tilt`, shared out over the
+# book. A liquidity position's share moves half as far as a wallet's, so
+# tilt = 0.5 asks for the other half; 0 restores the declared weights and no
+# more. `lean_cap_bp` is the most a target may lean, as bp of its declared
+# weight; it must stay inside the leash.
+[basket]
+tilt = 0.5
+lean_cap_bp = 1500
+
+# How fast a separated pair closes an eligible gap: fractions of what remains
+# per day, so 0.693 (ln 2) halves it each day. The braking release may ask for
+# up to release_rate and a confident closure for closure_rate; max_rate caps
+# their sum at half the remaining gap a day. release_speed = 0 and
+# closure_gain = 0 judge both against the rate's own allowance, so no speed is
+# fitted to these synthetic cycles. The first experiment's values (0.002, 0.1,
+# 20, 0, 1) remain the code defaults.
 #
 # Which gaps may be worked at all is decided by urgency that builds: each
 # constituent counts its distance from target beyond `slack` (a share of the
-# book: 0.0025 is a quarter point) over time, may be rebalanced once the count
-# reaches `patience` (share-days: 0.02 is two point-days), and starts again
-# when it is worked. patience = 0, the code default, uses the basket's fixed
-# weight band instead.
+# book: 0.0025 is a quarter point) over time, and may be rebalanced once the
+# count reaches `patience` (share-days: 0.02 is two point-days). It then stays
+# eligible until its gap is back inside the slack. patience = 0, the code
+# default, uses the basket's fixed weight band instead.
 [pair]
 release_speed = 0.0
 release_rate = 4.0
 closure_gain = 0
-closure_rate = 1.0
-max_rate = 4.0
+closure_rate = 0.693147
+max_rate = 0.693147
 impact_share = 1.0
 slack = 0.0025
 patience = 0.02

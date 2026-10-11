@@ -65,26 +65,56 @@ contract PairRebalancePolicyTest is PairSignalsTest {
         assertEq(p.remainingImpact(0), 0);
     }
 
-    function test_policy_fractionIsTimeScaledAndCatchUpIsBounded() public {
-        PairRebalancePolicy p = _policy(address(new PairBookView(s)), 0);
-        assertEq(p.fraction(1e18, 0), 0);
-        assertLt(p.fraction(1e18, 12), p.fraction(1e18, 3600));
-        assertEq(p.fraction(1e18, 1 days), 0.5e18);
-        assertEq(p.fraction(1e18, 30 days), p.fraction(1e18, 1 days));
+    uint256 constant LN2 = 693147180559945309;
+
+    function _rates(uint256 a, uint256 b, uint256 c) internal pure returns (uint256[] memory r) {
+        r = new uint256[](3); r[0] = a; r[1] = b; r[2] = c;
     }
 
-    function test_policy_onlyExecutedTransfersResetElapsedBudget() public {
+    function test_policy_aRateOfLn2HalvesTheGapEachDay() public {
+        PairRebalancePolicy p = _policy(address(new PairBookView(s)), 0);
+        assertEq(p.share(0, LN2), 0, "no time, no share");
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        assertApproxEqAbs(p.share(0, LN2), 0.5e18, 1e12);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
+        assertApproxEqAbs(p.share(0, LN2), 0.5e18, 1e12, "an unobserved stretch earns a day and no more");
+    }
+
+    function test_policy_theSameTimeReleasesTheSameShareHoweverOftenItIsAsked() public {
+        address book = address(new PairBookView(s));
+        PairRebalancePolicy once = _policy(book, 0);
+        PairRebalancePolicy often = _policy(book, 0);
+        uint256[] memory rates = _rates(LN2, 0, 0);
+        // Twelve hours asked in 3,600 blocks of twelve seconds, or once.
+        for (uint256 k; k < 3600; ++k) {
+            vm.warp(vm.getBlockTimestamp() + 12);
+            vm.prank(book); often.recordRates(rates);
+        }
+        assertApproxEqAbs(often.share(0, LN2), once.share(0, LN2), 1e12);
+        assertApproxEqAbs(once.share(0, LN2), 1e18 - 707106781186547524, 1e12, "half a day: 1 - 1/sqrt(2)");
+        assertEq(often.share(1, 0), 0, "a constituent not asked accrues nothing");
+    }
+
+    function test_policy_allowanceIsSpentByItsDonorAndLostWhenTheAskIsWithdrawn() public {
         address book = address(new PairBookView(s));
         PairRebalancePolicy p = _policy(book, 0);
-        uint64 deployedAt = p.lastExecutionAt();
-        warm(); p.observe();
-        assertGt(block.timestamp, deployedAt);
-        assertEq(p.lastExecutionAt(), deployedAt, "sampling preserves unspent elapsed time");
-        vm.prank(book); p.recordImpact(0, 0, 40);
-        assertEq(p.lastExecutionAt(), deployedAt, "other basket operations preserve the pair clock");
+        vm.expectRevert(bytes("basket only")); p.recordRates(_rates(LN2, LN2, 0));
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.prank(book); p.recordRates(_rates(LN2, LN2, 0));
+        assertApproxEqAbs(p.share(0, 0), 0.5e18, 1e12); assertApproxEqAbs(p.share(1, 0), 0.5e18, 1e12);
         vm.expectRevert(bytes("basket only")); p.recordExecution(0);
         vm.prank(book); p.recordExecution(0);
         assertEq(p.lastExecutionAt(), block.timestamp);
+        assertEq(p.share(0, 0), 0, "the donor that transferred starts again");
+        assertApproxEqAbs(p.share(1, 0), 0.5e18, 1e12, "another donor keeps what it has accrued");
+        vm.warp(vm.getBlockTimestamp() + 6 hours);
+        vm.prank(book); p.recordRates(_rates(LN2, 0, 0));
+        assertEq(p.share(1, 0), 0, "an ask withdrawn forfeits its allowance");
+        assertGt(p.share(0, 0), 0);
+        vm.warp(vm.getBlockTimestamp() + 60 days);
+        for (uint256 k; k < 40; ++k) { vm.warp(vm.getBlockTimestamp() + 1 days); vm.prank(book); p.recordRates(_rates(4e18, 0, 0)); }
+        assertLt(p.share(0, 4e18), 1e18, "never the whole gap");
+        assertGt(p.share(0, 4e18), 0.98e18);
     }
 
     function test_policy_crossedReferenceAndLiveCrossingStopReversionSales() public {
@@ -218,7 +248,7 @@ contract PairRebalancePolicyTest is PairSignalsTest {
 
     /// A gap of 2.25 points qualifies in a day, 1.25 in two, and one inside
     /// the slack never does. Working a constituent starts its count again.
-    function test_policy_urgencyBuildsWithGapAndTimeAndRestartsWhenWorked() public {
+    function test_policy_urgencyBuildsWithGapAndTimeAndStaysOpenUntilWorkedOff() public {
         address book = address(new PairBookView(s));
         PairRebalancePolicy p = _patient(book);
         assertEq(p.slack(), 0.0025e18); assertEq(p.patience(), 0.02e18);
@@ -238,11 +268,11 @@ contract PairRebalancePolicyTest is PairSignalsTest {
         assertEq(p.urgent(gaps), 3, "1.25 points takes two days");
         assertEq(p.urgencyOf(0, gaps[0]), 0.02e18 * 1 days, "and the count stops at the full patience");
         assertEq(p.urgencyOf(2, gaps[2]), 0, "a gap inside the slack builds nothing");
-        vm.expectRevert(bytes("basket only")); p.recordExecution(1);
-        vm.prank(book); p.recordExecution(1);
-        assertEq(p.urgent(gaps), 2, "the constituent worked starts again; the other keeps its count");
-        vm.warp(vm.getBlockTimestamp() + 1 days);
-        assertEq(p.urgent(gaps), 3, "and a day later the large gap has built it again");
+        vm.prank(book); p.recordExecution(0);
+        assertEq(p.urgent(gaps), 3, "a transfer leaves both eligible: the gap stays open until it is worked off");
+        vm.warp(vm.getBlockTimestamp() + 6 hours);
+        vm.prank(book); p.recordGaps(_gaps(0.002e18, -0.0125e18, -0.002e18));
+        assertEq(p.urgent(_gaps(0.002e18, -0.0125e18, -0.002e18)), 2, "back inside the slack, it closes at once");
     }
 
     function test_policy_urgencyDrainsInsideTheSlackAndRestartsAcrossTarget() public {

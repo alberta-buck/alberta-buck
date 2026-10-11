@@ -48,7 +48,7 @@ equity, so Buck enforces its limit: it can draw at most K times that mark.
 - Marks are TWAP, HIGH (the higher of spot and TWAP, an entrant's price) and LOW (an exiter's).
   Every spend is preceded by a mark of the credit at equity(LOW).
 - A constituent's /allocation/ is its position (both sides) plus its wallet TOKEN, as a share of
-  the gross. Targets are the declared weights.
+  the gross. Its /target/ is its declared weight, leaned against price (see [[#targets][targets]]).
 
 About 72% of the TOKEN sits inside liquidity in the lab's settled book. A position's value
 follows the square root of price, so the basket's allocations move about 60% as far as a wallet's
@@ -103,7 +103,7 @@ qualifies, and one that touches 2.1 for an hour does. So each constituent keeps 
 
 #+begin_example
 urgency  <-  urgency + (|gap| - slack) x time elapsed      kept between zero and patience
-urgency  <-  zero       when the gap changes side, and for the donor and recipients of a transfer
+urgency  <-  zero       when the gap changes side
 may be worked while urgency = patience
 #+end_example
 
@@ -114,13 +114,16 @@ point and a patience of two point-days, a gap of 2.25 points qualifies in a day,
 and a quarter point never does. A policy built with no patience keeps no count, and the basket's
 fixed allocation band decides as it did before.
 
-This is a CUSUM, the cumulative-sum test for a small shift that persists; with the restart it is
-integrate-and-fire. It decides only whether. Desire still decides when and how much.
+A transfer does not restart the count. A gap that has become eligible stays so while it is
+worked off, and closes the moment it is back inside the slack, because there the count drains.
+
+This is a CUSUM, the cumulative-sum test for a small shift that persists. It decides only
+whether. Desire still decides when and how fast.
 
 ** Desire
 
-For an ordered pair (sell a, buy b) the policy returns the fraction of an eligible allocation
-gap to move per day.
+For an ordered pair (sell a, buy b) the policy returns a rate: the fraction of what remains of
+an eligible gap to close per day. A rate of ln 2, 0.693, halves the gap each day.
 
 1. /Evidence must be current./ Every route ready, and the policy's motion sample taken from the
    observer's latest sample. Otherwise zero.
@@ -140,9 +143,58 @@ gap to move per day.
 6. /Ceiling./ The sum is capped at =maxRate=.
 
 The =Sizing= (the five rates and scales above, the share of own impact counted, the slack and
-the patience) is fixed at construction. =fraction(desire, elapsed)= converts a desire into the
-share of a gap to move now: =u / (1 + u)= with =u = desire × elapsed=, elapsed counted from the
-last executed transfer and capped at a day. Calling more often cannot spend more.
+the patience) is fixed at construction.
+
+** Release
+
+A rate becomes an amount through the donor's /allowance/: the rate it has been asked at, summed
+over time since it last transferred.
+
+#+begin_example
+allowance  <-  allowance + rate x time elapsed       at every response; an unobserved stretch earns a day at most
+allowance  <-  zero                                  when the donor transfers, or is no longer asked
+share of the gap to move now  =  1 - exp(-allowance)
+#+end_example
+
+This composes exactly. A day at a rate of ln 2 moves half the gap whether the basket is turned
+once that day or in every block, and a turn too small to trade loses nothing: its allowance
+carries to the next. Each donor keeps its own.
+
+* Targets
+:PROPERTIES:
+:CUSTOM_ID: targets
+:END:
+
+A liquidity position sells a TOKEN as its price rises and buys as it falls. So a constituent's
+share of the book moves half as far as it would in a wallet, and a basket that only restored
+its declared weights would find little left to do after a large move. Its pools would already
+have sold, at every price on the way.
+
+So a target leans against price. The shell holds a /tilt/ and, for each constituent, a
+/reference price/: the price it is taken to return to.
+
+#+begin_example
+target  =  declared weight x (reference price / price) ^ tilt      shared out over the book
+           and held within the lean cap of the declared weight
+#+end_example
+
+Only one price against another matters. A move in the BUCK itself, or in every TOKEN together,
+leans nothing. As a share's response to its own price:
+
+| How the TOKEN is held | Share moves with price to the power |
+|-----------------------+-------------------------------------|
+| In a wallet, untouched | +1 |
+| In the pools, untouched | +1/2 |
+| Restored to its declared weight (tilt 0) | 0 |
+| Tilt 1/2 | -1/2 |
+| Tilt 1 | -1 |
+
+With a tilt the basket sells a TOKEN that stands above its reference to below its declared
+weight, and buys it back as the price returns. That is a bet on the price returning. The
+reference price is the constituent's anchor, the price its reference quantity was struck at,
+unless governance sets another (=setReferencePrice=). The tilt and the cap are governance's too
+(=setResponse=); the cap must be inside the leash, so the safeguard never fights the lean. The
+leash and the safeguard keep the declared weights.
 
 * The upkeep facet: =BasketUpkeepFacet=
 
@@ -178,14 +230,14 @@ buy and no cash needed, it places wallet TOKEN as [[#otherwise][below]].
 
 When the book needs no safeguard:
 
-1. Value every constituent and report the gaps to the policy. A gap is /material/ when the
-   policy says it is urgent (or, for a policy with no patience, when it exceeds the allocation
-   band).
+1. Value every constituent and report its gap from its target to the policy. A gap is
+   /material/ when the policy says it is urgent (or, for a policy with no patience, when it
+   exceeds the allocation band).
 2. For each overweight donor, the eligible recipients are the underweight constituents for
    which the policy's desire is positive, provided the donor or the recipient is material.
-3. The amount is the smaller of the donor's excess and the recipients' shortfalls, times
-   =fraction= of the shortfall-weighted desire, then capped by the step (5% of the donor's value)
-   and the pool's depth (1% per swap). Recipients share it in proportion to their shortfalls and
+3. The amount is the smaller of the donor's excess and the recipients' shortfalls, times the
+   donor's =share= at its shortfall-weighted desire, then capped by the step (5% of the donor's
+   value) and the pool's depth (1% per swap). Recipients share it in proportion to their shortfalls and
    are scaled down together to respect each one's step, depth and shortfall.
 4. Amounts at or below the minimum (the grain, widened for the venue's price tolerance) are not
    requested. The donor with the largest executable total wins.
@@ -194,8 +246,8 @@ When the book needs no safeguard:
    No fresh credit is drawn: recipients spend the sale's proceeds.
 6. If any planned recipient is refused, or the mark would leave the basket over its limit, the
    whole response reverts, the sale included.
-7. The measured tick change of each pool is reported to the policy as own impact. The policy's
-   transfer clock restarts, and so does the urgency of the donor and of each recipient.
+7. The measured tick change of each pool is reported to the policy as own impact, and the
+   donor's allowance is spent.
 
 ** Otherwise
 :PROPERTIES:
@@ -204,7 +256,7 @@ When the book needs no safeguard:
 
 With no transfer to make, the facet places wallet TOKEN into liquidity where the funded
 allocation is shortest, if the account has spending room beyond its liquidity target. This swaps
-nothing and does not restart the transfer clock. Failing that it re-marks a stale credit.
+nothing and spends no allowance. Failing that it re-marks a stale credit.
 
 * The venue: =BasketVenueFacet=
 
@@ -250,7 +302,8 @@ from one governance-appointed arbitrage creditor, which can deposit and nothing 
 
 | Group | Setting | Value |
 |-------+---------+-------|
-| Sizing (=[pair]=) | releaseRate, releaseSpeed, closureGain, closureRate, maxRate, impactShare | 4/day, own allowance, 0, 1/day, 4/day, 1 |
+| Sizing (=[pair]=) | releaseRate, releaseSpeed, closureGain, closureRate, maxRate, impactShare | 4/day, own allowance, 0, ln 2/day, ln 2/day, 1 |
+| Targets (=[basket]=) | tilt, lean cap, reference prices | 1/2, 15% of the declared weight, the anchors |
 | Urgency (=[pair]=) | slack, patience | A quarter point, two point-days |
 | Policy constants | Separation floor, impact memory | 100 ticks (1%), 2 days |
 | Pair observer | Response, error memory, largest gap, warm-up, rate floor | 12 h, 1 day, 1 day, 2 days, 2 bp/day |
@@ -260,8 +313,9 @@ from one governance-appointed arbitrage creditor, which can deposit and nothing 
 | Desk | Capital per TOKEN, turnover, floor | 400,000, 1,200,000, 300,000 |
 | K | Start, rails | 0.75, 0.20 to 0.95 |
 
-The first experiment's sizing (0.1/day, 20 bp/day, 20, 0, 1/day, no patience) remains the code
-default in the lab model, so earlier runs reproduce frame for frame.
+The first experiment's sizing (0.1/day, 20 bp/day, 20, 0, 1/day, no patience, no tilt) remains
+the code default in the lab model. The lab's outside market is deep: its TOKEN/USDC pools are
+pinned to the feed again after every arbitrage pass.
 
 * How it is deployed today
 
