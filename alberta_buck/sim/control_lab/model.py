@@ -28,6 +28,7 @@ DEFAULTS = {
     "days": 120, "ticks_per_day": 4, "seed": 41404,
     "feed": {"base": [100., 100., 100.], "amplitude": .12, "period_days": 30.,
              "walk_amplification": 0., "walk_daily_sigma": .01},
+    # history_days: the earlier prices whose mean a historical profile takes as its reference.
     "bootstrap": {"history_days": 1280, "basket_warmup_days": 0},
     "market": {"depth_usd": 1_000_000, "basket_equity_usd": 1_000_000,
                "arb_rounds": 2, "arb_cap_bp": 200, "arb_beneficiary": "external"},
@@ -41,7 +42,7 @@ DEFAULTS = {
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     "supply": {"credit_face_buck": 1_000_000, "max_per_day": 25_000,
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
-    "basket": {"leash_bp": 3000, "tilt": 1., "weight_band_bp": 200},
+    "basket": {"leash_bp": 3000, "weight_band_bp": 200},
     # PairRebalancePolicy.Sizing: speeds are log returns/day, rates gap fractions/day.
     # These are the first experiment's values; closure_rate=0 leaves closure to speed alone,
     # and release_speed=0 would scale the braking release by the rate's own allowance.
@@ -142,18 +143,6 @@ def own_path(profile: dict | None) -> bool:
     return bool(profile) and ("history" in profile or "commodities" in profile)
 
 
-def history_rows(cfg: dict, profile: dict | None = None) -> list[dict]:
-    """Strictly past history; synthetic disturbances and live endpoint pins stay out."""
-    if profile and "history" in profile:
-        from .historical import historical_inputs
-        return historical_inputs(cfg, profile)["history"]
-    if profile and "commodities" in profile:
-        from .commodities import commodity_inputs
-        return commodity_inputs(cfg, profile)["history"]
-    return [{"day": day, "prices": baseline_prices(cfg, day)}
-            for day in range(-cfg["bootstrap"]["history_days"], 0)]
-
-
 def feed_rows(cfg: dict, profile: dict) -> list[dict]:
     """Fractional perturbations add to a positive DC-biased three-phase sine.
 
@@ -173,7 +162,7 @@ def feed_rows(cfg: dict, profile: dict) -> list[dict]:
         return commodity_inputs(cfg, profile)["rows"]
     # Independent Brownian log-price walks, with no drift in log space. The
     # seed excludes stage/profile/amplification, pairing all comparisons.
-    # No day-zero shock; no walk enters the separate bootstrap history.
+    # No day-zero shock.
     walks = [0.] * 3
     streams = [random.Random(digest([cfg["seed"], "log-walk-v1", i])) for i in range(3)]
     sigma = cfg["feed"]["walk_daily_sigma"] / math.sqrt(cfg["ticks_per_day"])

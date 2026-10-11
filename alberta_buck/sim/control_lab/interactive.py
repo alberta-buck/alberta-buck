@@ -8,10 +8,23 @@ import shutil
 
 from .book import recorded, reference_value
 from .cli import atomic_json
-from .render import EXPLANATIONS
 from .event_view import MARKER_NOTE, execution_counts, execution_log, price_markers
 
 COLORS = ["#2463c4", "#b86107", "#158067"]
+
+EXPLANATIONS = {
+    "feeds": "Only the external market maker acts. Dashed lines are the selected feeds; dotted lines are TOKEN/USDC spot. The internal TOKEN/BUCK and BUCK/USDC pools are left alone. Their failure to follow is intentional: observing an external price does not transmit it into another pool.",
+    "monitor": "This is an instrument test, not a market model. The feed driver explicitly replays the same numeric trace into TOKEN/BUCK by real swaps, with no arbitrage, desk or private flow. The monitor reads those pools. The lower panes show the published reference, whether each sample was accepted, and the pair observer's relative-price estimates.",
+    "monitor-k": "Calibration: service the real K controller against the same replay, with no arbitrage or private/desk response. This isolates reference normalization and oracle precision from market flow. In the unperturbed three-phase case, the reference remains near one within integer-weight and V3-tick precision. K can integrate that small quantization error; its input and integral are not forcibly recentered. Compare this with linked/K before interpreting a larger drift as a filter defect.",
+    "linked": "Direct replay into TOKEN/BUCK is now removed. One bounded, profit-seeking consistency arbitrage actor links TOKEN/USDC, TOKEN/BUCK and BUCK/USDC. Only TOKEN/USDC is externally driven. Internal prices can lag the feed or remain separated by fees. K is held fixed and the basket's investment policy remains off.",
+    "k": "Service the real K controller after enabling the basket. Its input is the live basket TWAP. K changes basket credit headroom; the basket can respond through its own bounded actions. There is no desk or persistent buyer/seller yet. Compare this arm with basket at fixed K.",
+    "desk": "Add the separate equity desk to the K arm. Its outer entry/release bands are 3%/2% by default. Operations are financed by its own inventory or permitted credit, with a finite turnover programme and capital floor. The capital pane distinguishes remaining spending authority from the actual signed BUCK account. Before/after-policy pool prices are retained in JSON; K sees a completed operation through a later TWAP.",
+    "demand": "Branch from K without the desk. One buyer has a steady desire to accumulate BUCK, funded by a finite USDC budget. Its rate is positive at fair value and backs off exponentially at a premium; a discount increases the rate up to a daily cap. The reference is the basket's current external value. There is no private supplier, resale rule or replenishment. Buying outstanding BUCK is absorption into holdings, not a burn of total supply.",
+    "supply": "Branch from K without the desk or buyer. One issuer steadily sells BUCK for USDC using activated, fixed-face credit and current spendable balance. Its rate is positive at fair value and backs off exponentially at a discount; a premium increases the rate up to a daily cap. K changes available headroom. This simple flow agent never buys back to deleverage: a falling limit can leave an existing lien above the new limit. It is not a mortgage or liquidation model.",
+    "both": "Enable the buyer and issuer together, still without the desk. Each acts at most once per market step. Their call order alternates, both rate limits are per day, and neither receives new funding during the run. This distinguishes two-sided private response from the isolated demand and supply cases.",
+    "all": "Add the same desk to the two-sided private market. Compare both versus all for its incremental effect, and desk versus all for the private agents' effect. Every arm uses the same feed, initial pool liquidity and starting K; basket rebalancing remains enabled. The actors trade against current external basket value, not an assumed permanent USDC peg.",
+    "basket": "Enable BasketUpkeepFacet immediately after linking the pools. K remains fixed; the desk and persistent buyers/sellers are absent. Both quote routes inform the relative-price estimator. Separated pairs with slowing departure or credible closure can trigger bounded transfers from overweight to underweight TOKENs; historical references guard trade direction. All stages share a settled opening LP book. Inspect sensor quality for rates, errors, participation and own-impact allowances. Later stages retain this basket while adding other feedback loops.",
+}
 
 
 def basket_performance(result):
@@ -95,24 +108,10 @@ def plot_data(result):
             *[line(f"Desk entry {sign:+d}", "#cea1a5", lambda f, sign=sign: 1 + sign * cfg["desk"]["enter_bp"] / 10000, "5 5")
               for sign in (-1, 1) if flags.get("desk")],
         ], "bvib is the fixed reference basket’s cost in BUCK. The external basket’s USD cost is its fair-value comparison, not a permanent $1 target.")
-        scale = math.log(1.0001) * 100
-        pane("excursion", "Daily relative-price excursions", "Log percentage points", [
-            line(f"TOKEN {'ABC'[i]}", color, lambda f: f["signal"]["excursion"][i] * scale) for i, color in enumerate(COLORS)],
-            "Relative prices remove common basket motion. Excursion is a log-price displacement, not a realised trading return.")
-        pane("votes", "Sensor quality and turn votes", "Count / indicator", [
-            *[line(f"{'ABC'[i]} votes", color, lambda f: f["signal"]["votes"][i]) for i, color in enumerate(COLORS)],
-            line("Turn quorum", "#89969c", lambda f: 4, "3 4"),
+        pane("sensor", "Reference sample quality", "Indicator", [
             line("Rejected just after move", "#b63e45", lambda f: int(f["signal"]["invalid_after_move"])),
             line("Fresh at end of tick", "#172d39", lambda f: int(f["signal"]["fresh"]), "2 4"),
-        ], "Four of six votes form a turn quorum. Rejection is an observation-quality guard; it does not prohibit arbitrage. Freshness is measured after the 601-second observation window.", "monitor-detail")
-        means = result["history"]["mean_relative_ticks"]
-        for i in range(3):
-            ladder_colors = ["#153c72", "#2463c4", "#238cad", "#158067", "#ab8236", "#bd6332", "#9a456e"]
-            pane(f"ema-{i}", f"TOKEN {'ABC'[i]} · historical EMA ladder", "Log percentage points from known mean", [
-                line("Raw relative price", "#87949c", lambda f: (f["signal"]["relative"][i] - means[i]) * scale),
-                *[line(f"EMA {days}d", color, lambda f, j=j: (f["signal"]["ema"][i][j] - means[i]) * scale)
-                  for j, (days, color) in enumerate(zip([5, 10, 20, 40, 80, 160, 1280], ladder_colors))]],
-                "Every level starts from the unperturbed 1,280-day history. Noise, random walk, ramps and shocks begin only in the live experiment.", "monitor-detail")
+        ], "Rejection is an observation-quality guard; it does not prohibit arbitrage. Freshness is measured after the 601-second observation window.", "monitor-detail")
     if flags.get("k"):
         k0 = cfg["controller"]["k0"]
         pane("k", "K and its controller contributions", "Credit fraction", [
@@ -326,7 +325,7 @@ def render(root):
     web = Path(__file__).with_name("web")
     for name in ("index.html", "app.js", "style.css"):
         if name == "index.html":
-            template = manifest["kind"] + ".html" if manifest.get("kind") in ("block-pairs", "pair-basket", "basket-first", "basket-research") else name
+            template = "basket-research.html" if manifest.get("kind") == "basket-research" else name
             (root / name).write_text((web / template).read_text().replace("manifest.json", source.name))
         else:
             shutil.copyfile(web / name, root / name)

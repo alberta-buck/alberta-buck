@@ -50,7 +50,9 @@ abstract contract ResponseKind is WorkWheel {
     }
 }
 
-/// @notice Last in the wheel's slot order. No reward for a failed observation
+/// @notice First in the wheel's slot order, so every other kind acts on a
+///         market the sample has already read, and no trade of the same
+///         turn can spoil the reading. No reward for a failed observation
 ///         or for calling an already published sample again.
 abstract contract SampleKind is WorkWheel {
     address public sampleSource;
@@ -83,9 +85,9 @@ abstract contract SampleKind is WorkWheel {
     }
 }
 
-/// @notice Replacement wheel: Compute, Ops, N+2 basket components, Arb,
-///         Sample. BasketWheel retains its old slot ABI for comparison runs.
-contract BasketMachineWheel is WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind {
+/// @notice The machine's wheel: Sample, Compute, Ops, N+2 basket components,
+///         Arb. BasketWheel keeps the older kinds for comparison runs.
+contract BasketMachineWheel is WorkWheel, SampleKind, ComputeKind, OpsKind, ResponseKind, ArbKind {
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
 

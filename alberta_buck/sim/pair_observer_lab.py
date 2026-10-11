@@ -21,10 +21,10 @@ import numpy as np
 from .pair_observer import ObserverConfig, ResponseConfig, PairObserver, allocation_candidates
 from .pair_spectrum import historical_spectra
 from .rebalance_policy import _EmaLadder, synth_prices, SYNTH_BASE, SYMS
-from .signal_history import WINDOWS
 from .control_lab.model import baseline_prices
 
 ROOT = Path(__file__).resolve().parents[2]
+WINDOWS = (5, 10, 20, 40, 80, 160, 1280)    # the retired EMA ladder, kept here as the comparison
 OUT = ROOT / "doc/control-lab/pair-observer"
 CASES = ("three-phase", "changing-cycles", "numeraire-only", "own-impact",
          "impact-mismatch", "venue-dislocation", "persistent-trend",
@@ -259,7 +259,7 @@ def metrics(result):
 def fingerprint():
     paths = [Path(__file__), Path(__file__).with_name("pair_observer.py"),
              Path(__file__).with_name("pair_spectrum.py"),
-             Path(__file__).with_name("rebalance_policy.py"), Path(__file__).with_name("signal_history.py"),
+             Path(__file__).with_name("rebalance_policy.py"),
              Path(__file__).parent / "control_lab/model.py"]
     return hashlib.sha256(b"".join(p.read_bytes() for p in paths)).hexdigest()
 

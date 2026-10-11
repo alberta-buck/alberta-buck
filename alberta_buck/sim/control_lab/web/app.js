@@ -292,7 +292,7 @@
     const reset = $("button", "", "Full 120 days"); reset.textContent = `Full ${M.days} days`;
     reset.onclick = () => { state.start = 0; state.end = M.days; sliders[0].value = 0; sliders[1].value = M.days; redraw(); };
     zoom.append(output, reset); state.body.append(zoom);
-    const extra = $("details", "monitor-details"); extra.append($("summary", "", "Inspect sensor quality, TOKEN-pair signals and the seven EMA levels"));
+    const extra = $("details", "monitor-details"); extra.append($("summary", "", "Inspect sensor quality and TOKEN-pair signals"));
     let extraDrawn = false;
     function addChart(pane, parent) { state.charts.push(new Chart(pane, state, parent)); }
     for (const pane of data.panes.filter(p => !p.group)) addChart(pane, state.body);

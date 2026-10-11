@@ -25,7 +25,7 @@ HISTORICAL = dict(name="historical-bridge", history=dict(
 
 def worker(cfg, profile, stage, arm, key, code, path):
     active, owner, _ = ARMS[arm]
-    result = simulate_observed(cfg, profile, stage, basket_mode="pair", maintenance_only=not active)
+    result = simulate_observed(cfg, profile, stage, maintenance_only=not active)
     result.update(cache_key=key, implementation=code, experiment_arm=arm,
                   discretionary_rebalancing=active, arb_beneficiary=owner, sensor_details=True)
     atomic_json(path,result)
@@ -137,7 +137,7 @@ def main(argv=None):
     if args.jobs<1:ap.error("jobs must be positive")
     if args.days<1:ap.error("days must be positive")
     from alberta_buck.sim.chain import load_artifact
-    cfg=load_config(args.config);cfg["days"]=args.days;cfg["basket"]["tilt"]=0;cfg["feed"]["walk_amplification"]=0
+    cfg=load_config(args.config);cfg["days"]=args.days;cfg["feed"]["walk_amplification"]=0
     cfg["bootstrap"]["basket_warmup_days"]=120
     available={**{p["name"]:p for p in cfg["profiles"] if own_path(p)},**{p["name"]:p for p in [*PROFILES,HISTORICAL]}}
     names=args.profiles.split(",")

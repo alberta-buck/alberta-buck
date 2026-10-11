@@ -43,7 +43,7 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     assert.equal(smallScale.length,5);
     assert.ok(smallScale[4]-smallScale[0]<.002, 'local scale hides the calibration drift');
     const firstKey = await choose('all', {profile:'three-phase',walk:'0',buyer:'medium',seller:'medium'});
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 11);
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 10);
     // BUCK, USD, the fixed initial investment, and the recorded book at reference prices.
     assert.equal(await page.$$eval('#all [data-pane=basket-value] svg path', n=>n.length), 4);
     assert.equal(await page.$$eval('#all [data-pane=basket-return] svg path', n=>n.length), 4);
@@ -86,8 +86,8 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     const key=manifest.cases.all['three-phase:1:high:low'];
     await page.waitForFunction(key=>document.querySelector('#all').dataset.loadedKey===key, {}, key);
     await page.click('#all .monitor-details>summary');
-    await page.waitForSelector('#all [data-pane="ema-2"]');
-    assert.equal(await page.$$eval('#all .chart', n=>n.length), 28);   // one more than before: the urgency pane
+    await page.waitForSelector('#all .monitor-details [data-pane="sensor"]');
+    assert.equal(await page.$$eval('#all .chart', n=>n.length), 24);
     await page.waitForSelector('#all .monitor-details [data-pane="pair-rate-2"]');
     await page.waitForSelector('#all .monitor-details [data-pane="pair-impact"]');
     await page.waitForSelector('#all .monitor-details [data-pane="pair-urgency"]');

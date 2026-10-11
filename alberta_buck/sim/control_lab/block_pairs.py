@@ -1,19 +1,12 @@
-"""Shared real-EVM pair observer and optional basket response.
+"""Shared real-EVM wiring of the pair observer, the pair policy and the upkeep facet.
 
-This campaign deliberately has its own cache. Its six-hour market driver is
-not a claim to simulate every L1 block. Solidity tests cover 12-second and
-irregular service; these long runs assess signal lag and error allowances.
+Every campaign runs its worlds through simulate_observed. The six-hour market
+driver is not a claim to simulate every L1 block: Solidity tests cover
+12-second and irregular service, and these long runs assess lag and sizing.
 """
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import argparse
-import copy
-import json
 import math
-import multiprocessing
-from pathlib import Path
 
-from .cli import atomic_json, fingerprint
-from .model import DEFAULTS, STAGES, digest, load_config, pair_sizing, validate
+from .model import DEFAULTS, STAGES, pair_sizing
 
 PAIRS = ((0, 1), (0, 2), (1, 2))
 LOG_TICK = math.log(1.0001)
@@ -25,9 +18,13 @@ PROFILES = [dict(name="three-phase", perturbations=[])] + [
     for name, sigma in (("noise20", .002), ("noise80", .008), ("flat-noise80", .008))]
 
 
-def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagnostics=False, maintenance_only=False):
-    """Shared observer/response wiring for the walkthrough and comparisons."""
+def simulate_observed(cfg, profile, stage, maintenance_only=False):
+    """One world with the pair observer and, where the stage has the basket, its policy and upkeep facet.
+
+    maintenance_only installs the control facet: the same upkeep with no paired transfers.
+    """
     from . import engine
+    with_basket = bool(STAGES[stage].get("basket"))
 
     class ObserverWorld(engine.World):
         def __init__(self, config, selected_stage):
@@ -43,68 +40,36 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
             self.observation_gas = []
             self.pair_policy = None
             self.pair_plans = []
-            self.pair_decisions = []
-            self.pair_response_check = None
             warm_days = config["bootstrap"].get("basket_warmup_days",0)
             if warm_days:
                 self.warm_basket(warm_days)
-            if basket_mode:
-                self.chain.send(d.basket.functions.setResponse(self.signals.address,
-                    (config["basket"]["leash_bp"], config["monitor"]["interval"], 0)), sender=d.gov)
-                if basket_mode == "pair":
-                    from alberta_buck.sim.chain import load_artifact
-                    from web3.logs import DISCARD
-                    from eth_utils import keccak
-                    # Accepted historical means, never the first live price or
-                    # any selected perturbation. Observer levels normalize decimals.
-                    reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
-                    self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address,
-                        d.basket.address, reference, pair_sizing(config["pair"]))
-                    response_name = ("PairBasketMaintenanceControl" if maintenance_only else
-                                     "PairBasketDecisionTrace" if diagnostics else "BasketUpkeepFacet")
-                    facet = self.chain.deploy(response_name, self.pair_policy.address)
-                    self.chain.send(d.basket.functions.setEquityWheel(facet.address), sender=d.gov)
-                    abi, _ = load_artifact(response_name)
-                    events = d.w3.eth.contract(address=d.basket.address, abi=abi).events
-                    original = self.chain.send
-                    def send(fn, **kwargs):
-                        rc = original(fn, **kwargs)
-                        if fn.address == d.wheel.address and fn.fn_name == "tick":
-                            self.pair_plans.extend(dict(e["args"]) for e in events.PairResponse().process_receipt(rc, errors=DISCARD))
-                            if diagnostics:
-                                def plain(x):
-                                    if isinstance(x, bool): return x
-                                    if isinstance(x, int): return str(x)
-                                    if isinstance(x, (list, tuple)): return [plain(v) for v in x]
-                                    return {k: plain(v) for k,v in x.items()}
-                                self.pair_decisions.extend(plain(e["args"]) for e in events.PairDecision().process_receipt(rc, errors=DISCARD))
-                                if not self.pair_decisions:
-                                    # pyrevm rejects contract-code callers. In a
-                                    # discarded snapshot only, authorize the EOA
-                                    # governor as wheel and replay that component.
-                                    # No simulated receipt, gas or book survives.
-                                    probe = d.w3.eth.contract(address=d.basket.address, abi=abi)
-                                    checkpoint = self.evm.evm.snapshot()
-                                    try:
-                                        setter = keccak(text="setWheel(address)")[:4] + d.w3.codec.encode(["address"], [d.gov])
-                                        self.evm.evm.message_call(d.gov, d.basket.address, calldata=setter)
-                                        output = self.evm.evm.message_call(d.gov, d.basket.address,
-                                            calldata=bytes.fromhex(probe.functions.wheelStep(2, 0)._encode_transaction_data()[2:]))
-                                        self.pair_response_check = dict(work=int.from_bytes(output,"big"), error=None)
-                                    except RuntimeError as exc:
-                                        self.pair_response_check = dict(work=None, error=str(exc))
-                                    finally:
-                                        self.evm.evm.revert(checkpoint)
-                                    self.pair_response_check["method"] = "discarded EOA-wheel replay"
-                        return rc
-                    self.chain.send = send
+            if with_basket:
+                from alberta_buck.sim.chain import load_artifact
+                from web3.logs import DISCARD
+                # Accepted historical means, never the first live price or
+                # any selected perturbation. Observer levels normalize decimals.
+                reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
+                self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address,
+                    d.basket.address, reference, pair_sizing(config["pair"]))
+                response_name = "PairBasketMaintenanceControl" if maintenance_only else "BasketUpkeepFacet"
+                self.upkeep = self.chain.deploy(response_name, self.pair_policy.address)
+                self.chain.send(d.basket.functions.setEquityWheel(self.upkeep.address), sender=d.gov)
+                abi, _ = load_artifact(response_name)
+                events = d.w3.eth.contract(address=d.basket.address, abi=abi).events
+                original = self.chain.send
+                def send(fn, **kwargs):
+                    rc = original(fn, **kwargs)
+                    if fn.address == d.wheel.address and fn.fn_name == "tick":
+                        self.pair_plans.extend(dict(e["args"]) for e in events.PairResponse().process_receipt(rc, errors=DISCARD))
+                    return rc
+                self.chain.send = send
 
         def warm_basket(self, days):
             """Identical funded starting book, with no knowledge of live prices.
 
-            Use the corrected response's actual LP placement at accepted mean
-            prices, before either experimental response is installed. Daily
-            deposit-flow accounting settles too; K and private actors are idle.
+            Use the upkeep facet's own LP placement at accepted mean prices,
+            before the run's policy is installed. Daily deposit-flow
+            accounting settles too; K and private actors are idle.
             """
             from alberta_buck.sim.chain import load_artifact
             d = self.d; old_facet = d.basket.functions.equityWheel().call()
@@ -123,8 +88,6 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
             facet = self.chain.deploy("BasketUpkeepFacet",policy.address)
             response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("BasketUpkeepFacet")[0])
             self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)
-            self.chain.send(d.basket.functions.setResponse(engine.ZERO,
-                (self.cfg["basket"]["leash_bp"],self.cfg["monitor"]["interval"],0)),sender=d.gov)
             self.chain.send(venue.functions.setWheel(d.gov),sender=d.gov)
             self.drive(self.cfg["feed"]["base"],replay=True)
             start = int(d.w3.eth.get_block("latest")["timestamp"]) + 601
@@ -135,9 +98,6 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                 self.chain.send(response.functions.wheelStep(2,0),sender=d.gov)
             self.chain.send(venue.functions.setWheel(d.wheel.address),sender=d.gov)
             self.chain.send(d.basket.functions.setEquityWheel(old_facet),sender=d.gov)
-            self.chain.send(d.basket.functions.setResponse(self.signals.address,
-                (self.cfg["basket"]["leash_bp"],self.cfg["monitor"]["interval"],
-                 round(self.cfg["basket"]["tilt"]*1e18))),sender=d.gov)
             self.start = (int(d.w3.eth.get_block("latest")["timestamp"])//86400+1)*86400
             self.initial_market_book = self.market_book()
             self.bootstrap.update(prices=self.prices(),market=self.initial_market_book,
@@ -153,21 +113,19 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
             self.observation_gas.append(int(rc["gasUsed"]))
 
         def before_policy(self):
-            if basket_mode and enabled:
+            if with_basket:
                 self.pair_plans = []
-                self.pair_decisions = []
-                self.pair_response_check = None
                 self.observe_pairs()
 
         def arbitrage(self, phase):
             super().arbitrage(phase)
-            if enabled and phase == "after-policy" and not basket_mode and self.flags.get("monitor"):
-                # A separate wheel keeps the legacy slot order unchanged.
+            if phase == "after-policy" and not with_basket and self.flags.get("monitor"):
+                # With no basket to feed, observe after the policy turn.
                 self.observe_pairs()
 
         def snapshot(self, row, before, invalid_after_move):
             frame = super().snapshot(row, before, invalid_after_move)
-            if not enabled or not self.flags.get("monitor"):
+            if not self.flags.get("monitor"):
                 return frame
             s = self.pair_observer
             routes = []
@@ -223,93 +181,14 @@ def simulate_observed(cfg, profile, stage, enabled=True, basket_mode=None, diagn
                     # Each constituent's built-up urgency after this step, in point-days of gap beyond the slack.
                     urgency_point_days=[int(self.pair_policy.functions.urgency(i).call()[0]) / 1e18 / 86400 * 100
                         for i in range(3)])
-                if diagnostics:
-                    frame["pair_decisions"] = self.pair_decisions
-                    frame["pair_response_check"] = self.pair_response_check
             return frame
 
-    # Disabled-observer controls still receive the identical funded LP prelude.
     result = engine.simulate(cfg, profile, stage, world_factory=ObserverWorld)
-    result.update(observer_params=PARAMS, observer_enabled=enabled)
+    result.update(observer_params=PARAMS)
     if "pair_signal" in result["frames"][0]:
         result["observer_routes"] = result["frames"][0]["pair_signal"].pop("route_metadata")
-    if basket_mode:
-        result.update(basket_mode=basket_mode)
-        if basket_mode == "pair":
-            result["pair_reference"] = dict(source="configured historical baseline means, excluding live perturbations",
-                prices=cfg["feed"]["base"], fractional_ticks=[str(round(math.log(p)/LOG_TICK*1e18)) for p in cfg["feed"]["base"]])
+    if with_basket:
+        result.update(basket_mode="pair")
+        result["pair_reference"] = dict(source="configured historical baseline means, excluding live perturbations",
+            prices=cfg["feed"]["base"], fractional_ticks=[str(round(math.log(p)/LOG_TICK*1e18)) for p in cfg["feed"]["base"]])
     return result
-
-
-def run_case(cfg, profile, stage, key, code, path, enabled=True, basket_mode=None, diagnostics=False):
-    result = simulate_observed(cfg, profile, stage, enabled, basket_mode, diagnostics)
-    result.update(cache_key=key, implementation=code)
-    atomic_json(path, result)
-    return dict(profile=profile["name"], stage=stage, cache_key=key, file=Path(path).name, summary=result["summary"])
-
-
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", default="doc/control-lab.toml")
-    ap.add_argument("--out", default="doc/control-lab/block-pairs")
-    ap.add_argument("--days", type=int)
-    ap.add_argument("--jobs", type=int, default=4)
-    ap.add_argument("--render-only", action="store_true")
-    args = ap.parse_args(argv)
-    if args.jobs < 1:
-        ap.error("--jobs must be positive")
-    out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
-    if args.render_only:
-        from .block_pairs_render import render
-        return render(out)
-    from alberta_buck.sim.chain import load_artifact
-    cfg = load_config(args.config)
-    if args.days is not None:
-        cfg["days"] = args.days
-    cfg["feed"]["walk_amplification"] = 0
-    validate(cfg)
-    code = fingerprint()
-    code["observer"] = digest(dict(source=Path(__file__).read_text(), artifact=load_artifact("PairSignals"), params=PARAMS))
-    stages = ("monitor", "linked", "basket")
-    manifest = dict(schema=1, status="running", kind="block-pairs", requested_config=cfg,
-        implementation=code, stages={s: STAGES[s] for s in stages}, entries={}, controls={},
-        axes=[dict(id="profile", label="Price signal", values=[dict(id=p["name"], label=p["name"]) for p in PROFILES]),
-              dict(id="walk", label="Random walk", values=[dict(id="0", label="0×", value=0)]),
-              *[dict(id=n, label=n.title(), requires=f, values=[dict(id="medium", label="Medium", value=5000)])
-                for n, f in (("buyer", "demand"), ("seller", "supply"))]],
-        cases={s: {} for s in stages}, unique_runs=len(stages)*len(PROFILES), visible_cases=len(stages)*len(PROFILES),
-        method="Passive PairSignals beside the legacy EMAs. Six-hour market updates for 120 days; the contract also has 12-second cadence tests. Noise is a per-observation perturbation of TOKEN prices, shared by both replay routes, not independent evidence. Grey reference rates use the synthetic smooth input only for scoring. No new signal has trading authority.")
-    tasks = []
-    for profile in PROFILES:
-        for stage in stages:
-            selected = copy.deepcopy(cfg)
-            if profile["name"] == "flat-noise80":
-                selected["feed"]["amplitude"] = 0
-            for enabled in ([True, False] if profile["name"] == "three-phase" else [True]):
-                key = digest(dict(config=selected, profile=profile, stage=stage, observer=enabled, implementation=code))
-                path = out / f"{profile['name']}-{stage}-{'on' if enabled else 'off'}-{key[:16]}.json"
-                if enabled:
-                    manifest["cases"][stage][f"{profile['name']}:0:medium:medium"] = key
-                tasks.append((selected, profile, stage, key, code, str(path), enabled))
-    with ProcessPoolExecutor(max_workers=args.jobs, mp_context=multiprocessing.get_context("spawn")) as pool:
-        futures = {}
-        for task in tasks:
-            if Path(task[5]).exists():
-                r = json.loads(Path(task[5]).read_text())
-                entry = dict(profile=task[1]["name"], stage=task[2], cache_key=task[3], file=Path(task[5]).name, summary=r["summary"])
-                manifest["entries" if task[6] else "controls"][task[3]] = entry
-            else:
-                futures[pool.submit(run_case, *task)] = task[6]
-        for future in as_completed(futures):
-            entry = future.result()
-            manifest["entries" if futures[future] else "controls"][entry["cache_key"]] = entry
-            atomic_json(out / "progress.json", manifest)
-            print(f"{entry['profile']}/{entry['stage']} observer={futures[future]}: {entry['summary']['seconds']:.1f}s", flush=True)
-    manifest["status"] = "complete"
-    atomic_json(out / "manifest.json", manifest)
-    from .block_pairs_render import render
-    render(out)
-
-
-if __name__ == "__main__":
-    main()

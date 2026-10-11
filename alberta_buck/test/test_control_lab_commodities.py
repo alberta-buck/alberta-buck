@@ -8,7 +8,7 @@ import pytest
 from alberta_buck.sim.control_lab import commodities
 from alberta_buck.sim.control_lab.campaign import load_grid, plan
 from alberta_buck.sim.control_lab.commodities import commodity_inputs
-from alberta_buck.sim.control_lab.model import DEFAULTS, STAGES, dependencies, feed_rows, history_rows, load_config, own_path
+from alberta_buck.sim.control_lab.model import DEFAULTS, STAGES, dependencies, feed_rows, load_config, own_path
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = next(p for p in load_config(ROOT / "doc/control-lab.toml")["profiles"] if p["name"] == "commodities")
@@ -32,7 +32,7 @@ def test_usd_price_is_the_real_price_times_the_inflation_level():
     data = commodity_inputs(cfg, PROFILE)
     rows = data["rows"]
     assert len(rows) == 481 and rows[0]["inflation_usd"] == 1
-    assert feed_rows(cfg, PROFILE) == rows and history_rows(cfg, PROFILE) == data["history"]
+    assert feed_rows(cfg, PROFILE) == rows
     for r in rows[::37]:
         assert r["target_usd"] == pytest.approx([p * r["inflation_usd"] for p in r["real_usd"]], abs=2e-6)
     # Eight years at 3% and two at 9%: the level every TOKEN ends near.
@@ -43,22 +43,13 @@ def test_usd_price_is_the_real_price_times_the_inflation_level():
         assert token["floor"] - .08 < ending < token["ceiling"] + .08
 
 
-def test_history_is_deflated_strictly_past_and_continuous_with_the_opening():
+def test_more_future_does_not_move_the_opening_price_level():
     cfg = copy.deepcopy(DEFAULTS)
-    data = commodity_inputs(cfg, quiet())
-    history = data["history"]
-    assert [r["day"] for r in history] == list(range(-1280, 0))
-    for i, token in enumerate(PROFILE["commodities"]["tokens"]):
-        logs = [math.log(r["prices"][i] / 100) for r in history]
-        assert abs(sum(logs) / len(logs)) < .02                       # no price level in it
-        assert math.sqrt(sum(x * x for x in logs) / len(logs)) == pytest.approx(token["spread"], rel=.25)
-        assert token["floor"] < min(logs) and max(logs) < token["ceiling"]
-        # The process does not jump at day zero.
-        assert math.log(data["rows"][0]["real_usd"][i] / history[-1]["prices"][i]) == pytest.approx(0, abs=.06)
     longer = copy.deepcopy(cfg)
     longer["days"] = 240
     # More future does not rewrite the trend or the lags; only the decorrelation
     # constants, taken over the live window, may move the oscillations slightly.
+    assert commodity_inputs(cfg, quiet())["rows"][0]["inflation_usd"] == 1
     assert commodity_inputs(longer, quiet())["rows"][0]["inflation_usd"] == 1
 
 

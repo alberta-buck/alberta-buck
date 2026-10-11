@@ -11,7 +11,7 @@ import os
 import time
 from types import SimpleNamespace
 
-from .model import DEFAULTS, STAGES, baseline_prices, feed_rows, history_rows
+from .model import DEFAULTS, STAGES, baseline_prices, feed_rows
 
 E6, E18, Q96 = 10**6, 10**18, 1 << 96
 ZERO = "0x" + "0" * 40
@@ -113,15 +113,15 @@ class World:
         mon = cfg["monitor"] if self.flags.get("monitor") or warm else DEFAULTS["monitor"]
         self.signals = self.chain.deploy("BasketReference", d.basket.address,
                                         mon["interval"], mon["max_age"], mon["deviation_bp"])
-        response = self.chain.deploy("BuckBasketEquityResponse")
-        self.chain.send(d.basket.functions.setEquityWheel(response.address), sender=d.gov)
+        # The upkeep facet needs its pair policy, so whoever wires the pair
+        # observer installs it (block_pairs.simulate_observed); run() checks.
+        self.upkeep = None
         rp = cfg["basket"] if self.flags.get("basket") or warm else DEFAULTS["basket"]
         equity_params = list(d.basket.functions.eq().call())
         if equity_params[6] != rp["weight_band_bp"]:
             equity_params[6] = rp["weight_band_bp"]
             self.chain.send(d.basket.functions.setEquityParams(tuple(equity_params)), sender=d.gov)
-        self.chain.send(d.basket.functions.setResponse(self.signals.address,
-            (rp["leash_bp"], mon["interval"], round(rp["tilt"] * E18))), sender=d.gov)
+        self.chain.send(d.basket.functions.setResponse((rp["leash_bp"], mon["interval"])), sender=d.gov)
         self.chain.send(d.wheel.functions.setResponseMode(True), sender=d.gov)
         self.chain.send(d.wheel.functions.setEquity(d.basket.address if self.flags.get("basket") else ZERO), sender=d.gov)
         self.chain.send(d.wheel.functions.setDirector(ZERO), sender=d.gov)
@@ -337,18 +337,10 @@ class World:
         frame["controller_raw"] = {key: str(getattr(d.kctrl.functions, key)().call()) for key in ("P", "I", "D", "buckK")}
         if self.flags.get("monitor"):
             fresh = bool(sig.functions.fresh().call())
-            ladders = [sig.functions.ladder(i).call() for i in range(3)]
             frame["signal"] = dict(fresh=fresh, invalid_after_move=invalid_after_move,
-                history_ready=bool(sig.functions.historyReady().call()),
                 sampled_at=int(sig.functions.lastSampleAt().call()),
                 raw=int(sig.functions.rawValue().call()) / E18 if fresh else None,
-                consecutive_days=int(sig.functions.consecutiveDays().call()),
-                relative=[int(sig.functions.deviation(i).call()) / E18 for i in range(3)],
-                ema=[[int(x) / E18 for x in l[0]] for l in ladders],
-                velocity=[[int(x) / E18 for x in l[1]] for l in ladders],
-                excursion=[int(sig.functions.excursion(i).call()) / E18 for i in range(3)],
-                votes=[int(sig.functions.votes(i).call()) for i in range(3)],
-                common=[int(sig.functions.common(i).call()) / E18 for i in range(7)])
+                consecutive_days=int(sig.functions.consecutiveDays().call()))
         frame["desk"] = dict(account=int(d.buck.functions.signedBalanceOf(d.desk.address).call()) / E6,
             capital=int(d.desk.functions.netValue().call()) / E6,
             budget=int(d.desk.functions.turnoverRemaining().call()) / E6,
@@ -373,12 +365,11 @@ class World:
     def run(self, rows):
         from web3.logs import DISCARD
         from web3.exceptions import ContractLogicError, Web3RPCError
-        from alberta_buck.sim.signal_history import initialize_history
-        self.history = None
+        if self.flags.get("basket") and self.upkeep is None:
+            raise ValueError("a stage with the basket needs the upkeep facet: run it through block_pairs.simulate_observed")
         # LP bootstrapping can leave pools at the historical means. Set both
         # quote routes to the actual opening feed, then mature their TWAPs
-        # before any live arbitrage, observation or monetary action. Historical
-        # EMA anchors still exclude all selected live perturbations.
+        # before any live arbitrage, observation or monetary action.
         self.drive(rows[0]["target_usd"], replay=True)
         settled = int(self.d.w3.eth.get_block("latest")["timestamp"]) + 601
         self.start = (settled // 86400 + 1) * 86400
@@ -387,10 +378,6 @@ class World:
         self.bootstrap.update(prices=self.prices(), market=self.initial_market_book,
                               opening_target_usd=rows[0]["target_usd"], opening_twap_settled=True,
                               reference_at_start=self.reference_cost(rows[0]["target_usd"]))
-        if self.flags.get("monitor"):
-            self.history = initialize_history(self.chain, self.signals, self.d.basket,
-                self.d.gov, history_rows(self.cfg, getattr(self, "profile", None)), self.cfg["feed"]["base"])
-            self.history["perturbations_included"] = False
         self.bootstrap_gas = self.gas
         self.bootstrap_transactions = self.transactions
         frames = []
@@ -409,7 +396,7 @@ class World:
                 # on a failed probe; the scheduled observation follows after
                 # one full TWAP window, whether the probe succeeded or not.
                 try:
-                    self.signals.functions.readPrices().call()
+                    self.signals.functions.basketValueInBuck().call()
                 except (ContractLogicError, Web3RPCError):
                     invalid_after_move = True
                     self.chain.send(self.signals.functions.observe())
@@ -437,7 +424,7 @@ def simulate(cfg, profile, stage, world_factory=None):
             runtime = time.perf_counter() - started
             errors = [abs(f["bvib"] - 1) for f in frames]
             result = {"schema": 1, "backend": "pyrevm", "stage": stage, "flags": STAGES[stage],
-                    "profile": profile, "config": cfg, "history": world.history,
+                    "profile": profile, "config": cfg,
                     "bootstrap": world.bootstrap, "frames": frames,
                     "summary": {"seconds": round(runtime, 3), "samples": len(frames),
                         "mean_abs_parity_error": sum(errors) / len(errors),

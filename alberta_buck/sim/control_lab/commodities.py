@@ -18,9 +18,7 @@ the currency's inflation, each with its own delay. A price here is
   three are made uncorrelated over the live window.
 
 Every term is a closed form in time, so the path does not depend on the
-sampling rate, and history before day zero is the same process continued
-backwards. History is deflated: it is each TOKEN's price in day-zero dollars,
-which is what a BUCK that kept its value would have paid.
+sampling rate.
 
 Time is compressed: `months_per_day` months of market time pass in one lab
 day. The shapes and their relative timing are meant to look like a decade of
@@ -102,8 +100,7 @@ def _unmix(shapes):
 
     Independent draws this slow still correlate by chance over ten or so
     swings. Each oscillation gives up its projection on the ones before it,
-    so the test does not depend on a lucky seed. The same constants apply to
-    history, which is therefore only nearly uncorrelated.
+    so the test does not depend on a lucky seed.
     """
     kept, means, coefficients = [], [], []
     for u in shapes:
@@ -158,8 +155,6 @@ def commodity_inputs(cfg, profile):
         return [b * math.exp(_lag_gap(segments, t["lag_months"], month) + x)
                 for b, t, x in zip(base, tokens, _departures(tokens, waves, mix, month))]
 
-    history = [dict(day=d, prices=[round(p, 6) for p in real(d)])
-               for d in range(-cfg["bootstrap"]["history_days"], 0)]
     rows = []
     for step in range(cfg["days"] * cfg["ticks_per_day"] + 1):
         day = step / cfg["ticks_per_day"]
@@ -170,11 +165,10 @@ def commodity_inputs(cfg, profile):
                       for i, p in enumerate(prices)]
         rows.append(dict(day=day, target_usd=[round(p * level, 6) for p in prices],
                          inflation_usd=round(level, 9), real_usd=[round(p, 6) for p in prices]))
-    return dict(rows=rows, history=history, provenance=dict(kind="commodities", version=VERSION,
+    return dict(rows=rows, provenance=dict(kind="commodities", version=VERSION,
         labels=[t.get("label", f"TOKEN {'ABC'[i]}") for i, t in enumerate(tokens)],
         months_per_day=scale, inflation_percent_per_year=[[d, r] for d, r in spec["inflation"]],
         tokens=tokens, waves=[[list(w) for w in ws] for ws in waves], unmixing=mix[0], noise=noise,
         ending_inflation_usd=rows[-1]["inflation_usd"],
         method="base * exp(inflation + first-order lag gap + bounded seeded oscillation), closed form in time. "
-               "History is the same process before day 0, in day-zero dollars. Synthetic: calibrated to the "
-               "departures of real prices from US CPI, not a replay of them."))
+               "Synthetic: calibrated to the departures of real prices from US CPI, not a replay of them."))

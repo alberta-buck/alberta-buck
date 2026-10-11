@@ -18,7 +18,7 @@ def run(profile_name, stage):
     from alberta_buck.sim.control_lab.block_pairs import PROFILES, simulate_observed
     from alberta_buck.sim.control_lab.model import load_config
     cfg = load_config("doc/control-lab.toml")
-    cfg["basket"]["tilt"] = 0; cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
+    cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
     profiles = {p["name"]: p for p in [*PROFILES, *cfg["profiles"]]}
     calls = []                                   # (address, fn name, args, gas, topics)
     live = dict(on=False, roles={})
@@ -40,7 +40,7 @@ def run(profile_name, stage):
         return original_run(self, rows)
     engine.World.run = world_run
     try:
-        r = simulate_observed(cfg, profiles[profile_name], stage, basket_mode="pair")
+        r = simulate_observed(cfg, profiles[profile_name], stage)
     finally:
         chain_mod.Chain.send, engine.World.run = original_send, original_run
     transfer = keccak(text="PairResponse(uint256,uint256,uint256,uint256)").hex()

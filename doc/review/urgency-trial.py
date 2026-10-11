@@ -55,7 +55,7 @@ def run(profile_name, arm, out):
     from alberta_buck.sim.control_lab.model import load_config, own_path, validate
     spec = ARMS[arm]
     cfg = load_config("doc/control-lab.toml")
-    cfg["basket"]["tilt"] = 0; cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
+    cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
     cfg["pair"].update(slack=0., patience=0.)      # a band policy: the script, not the contract, keeps the count
     profiles = {p["name"]: p for p in [*LAB, TWO_STEP, *(p for p in cfg["profiles"] if own_path(p))]}
     if profile_name in FLAT:
@@ -95,7 +95,7 @@ def run(profile_name, arm, out):
 
     engine.World.run = world_run
     try:
-        result = simulate_observed(cfg, profiles[profile_name], "all", basket_mode="pair")
+        result = simulate_observed(cfg, profiles[profile_name], "all")
     finally:
         engine.World.run = original_run            # a reused worker must not stack one arm's rule on the next
     turns = len(trace)

@@ -6,21 +6,20 @@ from pathlib import Path
 import pytest
 
 from alberta_buck.sim.control_lab.campaign import load_grid, plan
-from alberta_buck.sim.control_lab.model import DEFAULTS, STAGES, feed_rows, history_rows, load_config
+from alberta_buck.sim.control_lab.model import DEFAULTS, STAGES, feed_rows, load_config
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_walk_starts_at_zero_and_scales_the_same_path_without_seeding_history():
+def test_walk_starts_at_zero_and_scales_the_same_path():
     cfg = copy.deepcopy(DEFAULTS)
     profile = cfg["profiles"][0]
-    baseline, history = feed_rows(cfg, profile), history_rows(cfg)
+    baseline = feed_rows(cfg, profile)
     cfg["feed"]["walk_amplification"] = .5
     half = feed_rows(cfg, profile)
     cfg["feed"]["walk_amplification"] = 1
     full = feed_rows(cfg, profile)
     assert baseline[0] == half[0] == full[0]
-    assert history_rows(cfg) == history
     assert full == feed_rows(cfg, profile)
     for b, h, f in zip(baseline, half, full):
         for bv, hv, fv in zip(b["target_usd"], h["target_usd"], f["target_usd"]):
@@ -78,8 +77,7 @@ def test_plot_payload_preserves_series_units_and_gaps():
     from alberta_buck.sim.control_lab.interactive import plot_data
     frame = dict(day=0, target_usd=[100, 110, 90], token_usdc=[101, 111, 91],
         token_buck=[98, 108, 88], buck_usdc=1.02, bvib=.99,
-        signal=dict(raw=.99, fresh=True, excursion=[1, 2, 3], votes=[2, 4, 6],
-                    invalid_after_move=False, relative=[10, 20, 30], ema=[[0] * 7] * 3),
+        signal=dict(raw=.99, fresh=True, invalid_after_move=False),
         reference=dict(market_usd=1.01), k=.76, p_contribution=.001, i_contribution=.009,
         market=dict(arb_held_buck=10, pool_minus_virtual_buck=20, active_buck=1000),
         desk=dict(capital=1_200_000, budget=1_000_000, account=-500),
@@ -87,7 +85,7 @@ def test_plot_payload_preserves_series_units_and_gaps():
         agents=dict(demand_cash=997500, supply_headroom=740000),
         basket=dict(weights=[3333,3333,3334], equity=1_010_000, account=-600_000))
     result = dict(frames=[frame, copy.deepcopy(frame)], flags=STAGES['all'], config=DEFAULTS,
-        history=dict(mean_relative_ticks=[0, 0, 0]), bootstrap=dict(market=frame['market']),
+        bootstrap=dict(market=frame['market']),
         summary={}, stage='all', profile=dict(name='three-phase'), cache_key='test')
     result['frames'][1]['day'] = .25
     result['frames'][1]['signal']['fresh'] = False
@@ -101,8 +99,7 @@ def test_plot_payload_preserves_series_units_and_gaps():
         result['frames'][0]['token_buck'][0] * result['frames'][0]['buck_usdc'] / result['config']['feed']['base'][0])
     assert panes['reference']['lines'][1]['values'][1] is None
     assert panes['actors']['lines'][0]['values'][1] == pytest.approx(result['frames'][1]['cumulative']['demand_usdc'] / 1000)
-    assert {'ema-0','ema-1','ema-2','votes','k','desk','custody'} <= panes.keys()
-    assert len(panes['ema-0']['lines']) == 8
+    assert {'sensor','k','desk','custody'} <= panes.keys()
     # Net equity already deducts the lien. Keep the original investment
     # fixed, and convert each net mark at its own exchange rate. A native
     # loss can coexist with a dollar gain as BUCK appreciates.

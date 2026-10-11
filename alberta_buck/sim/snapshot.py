@@ -158,7 +158,6 @@ def _eqsave_frame(d, ctr) -> dict:
     desk = getattr(d, "desk", None)
     if getattr(d, "signals", None) is not None:
         f["eq_signal_fresh"] = bool(d.signals.functions.fresh().call())
-        f["eq_signal_history_ready"] = bool(d.signals.functions.historyReady().call())
         f["eq_signal_at"] = int(d.signals.functions.lastSampleAt().call())
         f["eq_signal_raw"] = int(d.signals.functions.rawValue().call())
     if desk is not None:

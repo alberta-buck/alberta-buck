@@ -23,7 +23,7 @@ def opening_runs(tmp_path_factory):
         path = root / f"{stage}.json"
         worker(cfg, cfg["profiles"][0], stage, stage, {}, path)
         results[stage] = json.loads(path.read_text())
-    # A day-zero disturbance is an opening price, not historical EMA data.
+    # A day-zero disturbance is an opening price.
     profile = dict(name="opening-shock", perturbations=[
         dict(kind="step", tokens=[0], start=0, duration=2, amplitude=.12)])
     path = root / "shock.json"
@@ -46,7 +46,6 @@ def test_funded_bootstrap_restores_both_routes_before_arbitrage(opening_runs):
             assert first["cumulative"]["arb_cycles"] == 0
             assert first["token_buck"] == pytest.approx(first["target_usd"], rel=1e-9)
         assert boot["reference_at_means"] == pytest.approx(1.)
-    assert opening_runs["shock"]["history"] == opening_runs["basket"]["history"]
     assert opening_runs["shock"]["bootstrap"]["opening_target_usd"][0] == 112
 
 

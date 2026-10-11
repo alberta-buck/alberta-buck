@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {BuckBasketEquityTest, IBasketUpkeep, EqToken} from "./BuckBasketEquity.t.sol";
-import {BuckBasketEquityResponse} from "../../src/basket/BuckBasketEquityResponse.sol";
-import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
+import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
+import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {BasketReference} from "../../src/basket/BasketReference.sol";
 import {OuterBandDeskPolicy} from "../../src/basket/OuterBandDeskPolicy.sol";
@@ -38,16 +38,18 @@ contract BasketMachineTest is BuckBasketEquityTest {
         _assertReferenceNormalization();
     }
 
+    // The upkeep facet under a policy that wants no transfer: what is left
+    // is the safeguard plan and the placement of TOKEN already held.
     function _replace(bool withSignal) internal {
+        ControlledPairIntent intent = new ControlledPairIntent(address(b));
+        intent.setRate(0);
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BuckBasketEquityResponse()));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent))));
         vm.stopPrank();
         if (withSignal) {
             signals = new BasketReference(address(b), 1800, 3600, 500);
             signals.observe();
-            vm.prank(GOV);
-            b.setResponse(address(signals), BuckBasketEquityStorage.ResponseParams(3000, 1800, 1e18));
         }
     }
 
@@ -111,14 +113,18 @@ contract BasketMachineTest is BuckBasketEquityTest {
         assertEq(IBasketUpkeep(address(b)).wheelStep(4, 0), 0);
     }
 
-    function test_machine_configuredStaleSignalStopsTrades() public {
-        _replace(true); _deposit(alice, address(tok[0]), 100_000e18);
-        uint256 idle = b.idleToken(0);
-        vm.warp(vm.getBlockTimestamp() + 3601); vm.roll(vm.getBlockNumber() + 1);
-        vm.mockCall(address(signals), abi.encodeWithSelector(signals.observe.selector), bytes(""));
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(b.idleToken(0), idle);
-        assertEq(b.liquidityOf(1), 0);
+    function test_machine_cashNeedSellsTheMostOverweightConstituent() public {
+        _replace(false);
+        _deposit(alice, address(tok[0]), 30_000e18);
+        _deposit(alice, address(tok[1]), 18_000e18);
+        _deposit(alice, address(tok[2]), 10_000e18);
+        ctrl.setK(0);
+        uint256 first = b.idleToken(0); uint256 heavy = b.idleToken(1); uint256 last = b.idleToken(2);
+        assertEq(_response(), 1);
+        assertLt(b.idleToken(1), heavy, "the constituent furthest above its weight supplies the cash");
+        assertEq(b.idleToken(0), first); assertEq(b.idleToken(2), last);
+        assertEq(b.liquidityOf(0) + b.liquidityOf(1) + b.liquidityOf(2), 0, "nothing is bought while cash is needed");
+        _freshMark();
     }
 
     function test_machine_signalDoesNotInventSamplesAcrossGap() public {
@@ -127,9 +133,13 @@ contract BasketMachineTest is BuckBasketEquityTest {
         assertApproxEqAbs(signals.rawValue(), 1e18, 0.001e18);
         vm.warp(vm.getBlockTimestamp() + 8 days); vm.roll(vm.getBlockNumber() + 1);
         signals.observe();
-        assertEq(signals.consecutiveDays(), 1);
-        (int256[7] memory ema, int256[7] memory velocity) = signals.ladder(0);
-        for (uint256 i; i < 7; ++i) { assertEq(velocity[i], 0); assertEq(ema[i], ema[0]); }
+        assertEq(signals.consecutiveDays(), 1, "a missed week starts the day count again");
+        vm.warp(vm.getBlockTimestamp() + 1 days); vm.roll(vm.getBlockNumber() + 1);
+        signals.observe();
+        assertEq(signals.consecutiveDays(), 2);
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
+        signals.observe();
+        assertEq(signals.consecutiveDays(), 2, "a second sample in a day does not count twice");
     }
 
     function test_machine_signalInvalidatesOnManipulatedSpot() public {
@@ -153,21 +163,6 @@ contract BasketMachineTest is BuckBasketEquityTest {
         assertEq(signals.rawValue(), oldRaw, "no partly refreshed publication");
         assertEq(signals.lastSampleAt(), sampled, "failed read does not freshen the old price");
         vm.expectRevert(); IBuckBasketVenue(address(b)).basketValueInBuck();
-    }
-
-    function test_machine_runningDownLegWaitsButLeashCanOverride() public {
-        _replace(true);
-        for (uint256 i; i < 3; ++i) _deposit(alice, address(tok[i]), 30_000e18 / (i + 1));
-        vm.mockCall(address(signals), abi.encodeWithSelector(signals.excursion.selector, uint256(2)), abi.encode(int256(-2000e18)));
-        vm.mockCall(address(signals), abi.encodeWithSelector(signals.running.selector, uint256(2), int256(-1)), abi.encode(true));
-        uint256 idle = b.idleToken(2);
-        _response();
-        assertEq(b.liquidityOf(2), 0, "do not buy a running-down leg inside its leash");
-        assertEq(b.idleToken(2), idle);
-        _deposit(alice, address(tok[0]), 80_000e18); // Leg 2 becomes leashed underweight.
-        _response();
-        assertGt(b.liquidityOf(2), 0, "mandate leash can override the trend gate");
-        _freshMark();
     }
 
     function test_machine_policyWillNotExecuteOldDirectionAfterSpotReverts() public {

@@ -9,7 +9,7 @@ class ExecutionRecorder:
         self.world = world
         self.decoders = {}
         for contract, event in [("UniswapV3Pool", "Swap"), ("BasketDesk", "MonetaryOperation"),
-                                ("BuckBasketEquityResponse", "Responded"), ("BasketMachineWheel", "Cycled")]:
+                                ("BasketUpkeepFacet", "Responded"), ("BasketMachineWheel", "Cycled")]:
             abi, _ = load_artifact(contract)
             spec = next(a for a in abi if a.get("type") == "event" and a["name"] == event)
             self.decoders[bytes(event_abi_to_log_topic(spec))] = spec

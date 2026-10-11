@@ -55,7 +55,7 @@ SIZINGS = {
 
 
 def worker(cfg, profile, stage, arm, key, code, path):
-    result = simulate_observed(cfg, profile, stage, basket_mode="pair", maintenance_only="pair" not in SIZINGS[arm])
+    result = simulate_observed(cfg, profile, stage, maintenance_only="pair" not in SIZINGS[arm])
     result.update(cache_key=key, implementation=code, sizing=arm)
     atomic_json(path, result)
     return dict(profile=profile["name"], sizing=arm, cache_key=key, file=Path(path).name, summary=result["summary"])
@@ -203,7 +203,6 @@ def main(argv=None):
     if len(set(names)) != len(names) or any(n not in available for n in names):
         ap.error("unknown or duplicate profile")
     cfg["days"] = args.days
-    cfg["basket"]["tilt"] = 0
     cfg["feed"]["walk_amplification"] = 0
     cfg["bootstrap"]["basket_warmup_days"] = 120
     if args.ticks_per_day:

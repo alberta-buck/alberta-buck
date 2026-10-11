@@ -1,16 +1,23 @@
 """Opt-in replacement after the comparison's common pool/bootstrap phase.
 
-SIM_EQUITY_MACHINE=1 selects the new response, strict venue, shared signals
-and outer-band policy. The old director/facet remain available with =0.
+SIM_EQUITY_MACHINE=1 selects the basket machine: the upkeep facet with its
+pair observer and policy, the strict venue, the parity reference and the
+outer-band desk policy. The old director/facet remain available with =0.
 No deployed chain is migrated by this simulation helper.
 """
 from __future__ import annotations
 
+import math
 import os
-import json
-from pathlib import Path
 
 from alberta_buck.sim.chain import load_artifact
+
+LOG_TICK = math.log(1.0001)
+# The pair observer's timing (seconds) and rate floor, and the policy's sizing, as the control lab runs
+# them (doc/control-lab.toml): release and closure 4 and 1 gaps a day on the rate's own scale, a quarter
+# point of slack and two point-days of patience.
+OBSERVER = (43200, 86400, 86400, 172800, round(.0002 / LOG_TICK / 86400 * 1e18))
+SIZING = (0, 4 * 10**18, 0, 10**18, 4 * 10**18, 10**18, 25 * 10**14, 2 * 10**16)
 
 
 def book_receipt(d, receipt, ctr) -> None:
@@ -45,17 +52,17 @@ def activate(d) -> None:
     window = int(basket.functions.twapWindow().call())
     d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + window + 1)
     venue = chain.deploy("BasketVenueFacet")
-    response = chain.deploy("BuckBasketEquityResponse")
     interval = int(os.environ.get("SIM_MACHINE_INTERVAL", "1800"))
     signals = chain.deploy("BasketReference", basket.address, interval,
                            int(os.environ.get("SIM_MACHINE_MAX_AGE", "3600")), 500)
-    # Historical observations must predate the experiment; never use the
-    # simulated future CSV as a warm-up or invent an anchor from its day 0.
-    history_path = os.environ.get("SIM_MACHINE_HISTORY")
-    if history_path:
-        from alberta_buck.sim.signal_history import initialize_history
-        history = json.loads(Path(history_path).read_text())
-        initialize_history(chain, signals, basket, gov, history["rows"], history["mean_prices"])
+    # Both quote routes inform the pair observer. The policy's reference is each
+    # constituent's declared price, never a live one.
+    observer = chain.deploy("PairSignals", [t.address for t in d.tokens], [d.buck.address, d.usdc.address],
+                            [*d.pool_buck, *d.pool_usdc], *OBSERVER)
+    reference = [round(math.log(int(basket.functions.constituents(i).call()[3]) / 10**6) / LOG_TICK * 10**18)
+                 for i in range(len(d.tokens))]
+    policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, SIZING)
+    response = chain.deploy("BasketUpkeepFacet", policy.address)
     # Preserve an explicitly configured integration horizon. The otherwise
     # unlimited default must not integrate a recovered observation over an
     # arbitrarily long outage.
@@ -65,16 +72,15 @@ def activate(d) -> None:
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
-    chain.send(basket.functions.setResponse(signals.address, (
-        int(os.environ.get("SIM_MACHINE_LEASH_BP", "3000")), interval,
-        int(float(os.environ.get("SIM_MACHINE_TILT", "1")) * 10**18))), sender=gov)
+    chain.send(basket.functions.setResponse((int(os.environ.get("SIM_MACHINE_LEASH_BP", "3000")), interval)),
+               sender=gov)
     chain.send(wheel.functions.setResponseMode(True), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
     # These were comparison advisors; the replacement has one price service.
     zero = "0x" + "0" * 40
     chain.send(wheel.functions.setDirector(zero), sender=gov)
     d.equity_director = None
-    d.venue, d.signals = venue, signals
+    d.venue, d.signals, d.pair_signals, d.pair_policy = venue, signals, observer, policy
     source = signals
     if d.desk is not None:
         # Configuration of the replacement is independent of which legacy
@@ -101,23 +107,23 @@ def activate(d) -> None:
             int(os.environ.get("SIM_OPS_TURNOVER_BUCK", str(initial_capital))) * 10**6,
             int(os.environ.get("SIM_OPS_CAPITAL_FLOOR_BUCK", str(initial_capital // 4))) * 10**6,
             500), sender=gov)
-        policy = chain.deploy("OuterBandDeskPolicy", signals.address,
+        desk_policy = chain.deploy("OuterBandDeskPolicy", signals.address,
             int(os.environ.get("SIM_OPS_ENTER_BP", "300")),
             int(os.environ.get("SIM_OPS_RELEASE_BP", "200")),
             int(os.environ.get("SIM_OPS_GAIN_BP", "2500")),
             int(os.environ.get("SIM_OPS_CAP_BP", "40")),
             int(os.environ.get("SIM_OPS_PERSIST", "30")))
         chain.send(d.desk.functions.setVenue(venue.address), sender=gov)
-        chain.send(d.desk.functions.setMonetaryDirector(policy.address), sender=gov)
-        chain.send(d.desk.functions.setExecutionGuard(policy.address), sender=gov)
-        chain.send(wheel.functions.setOps(d.desk.address, policy.address), sender=gov)
-        d.monetary_policy = source = policy
+        chain.send(d.desk.functions.setMonetaryDirector(desk_policy.address), sender=gov)
+        chain.send(d.desk.functions.setExecutionGuard(desk_policy.address), sender=gov)
+        chain.send(wheel.functions.setOps(d.desk.address, desk_policy.address), sender=gov)
+        d.monetary_policy = source = desk_policy
     chain.send(wheel.functions.setSample(source.address), sender=gov)
     chain.send(source.functions.observe())
     if not signals.functions.fresh().call():
         raise ValueError("basket machine could not publish a valid initial observation")
     # Include the new event ABI; the shell still wins duplicate selectors.
-    abi, _ = load_artifact("BuckBasketEquityResponse")
+    abi, _ = load_artifact("BasketUpkeepFacet")
     union = list(basket.abi)
     keys = {(e.get("type"), e.get("name"), tuple(i.get("type") for i in e.get("inputs", []))) for e in union}
     for entry in abi:

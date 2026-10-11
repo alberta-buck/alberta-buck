@@ -9,18 +9,18 @@ import {SampleKind, IWheelSample} from "./BasketMachineWheel.sol";
 /// @title BasketWheel -- a BuckBasket's work wheel, deployed beside its shell.
 ///
 /// @notice (alberta-buck-ethereum-wheel.org, "The work wheel".)  The chassis plus every kind the basket
-///         has today; the order of the bases IS the slot layout (the
-///         controller's compute, the director's poke, the treasury sweep, the
-///         desk's quadrant operation, the equity basket's components, then one
-///         slot per arbitrage triangle).
+///         has today; the order of the bases IS the slot layout (the price
+///         sample, the controller's compute, the director's poke, the
+///         treasury sweep, the desk's quadrant operation, the equity basket's
+///         components, then one slot per arbitrage triangle).
 ///         A kind whose target is unset has no slots, so one contract serves
 ///         a savings basket (compute + director + sweep + arb) and a monetary
 ///         one (plus ops) by configuration.  The shell grants it one thing:
 ///         =setWheel=, which lets its arbitrage credit the depositors (TOKEN)
 ///         and the treasury (BUCK).  Every other entry point it calls is
 ///         permissionless already.
-contract BasketWheel is WorkWheel, ComputeKind, DirectorKind, SweepKind, OpsKind, EquityKind,
-                        ArbKind, SampleKind {
+contract BasketWheel is WorkWheel, SampleKind, ComputeKind, DirectorKind, SweepKind, OpsKind, EquityKind,
+                        ArbKind {
     constructor(address buck_, address usdc_, address governance_,
                 uint16 kappaBp_, uint256 reserveCap_)
         WorkWheel(buck_, governance_, kappaBp_, reserveCap_)

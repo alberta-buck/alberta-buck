@@ -41,7 +41,7 @@ def test_arb_marker_uses_internal_leg_but_log_retains_both_venues():
 
 def test_receipts_record_desk_basket_and_both_arb_legs():
     pytest.importorskip("pyrevm")
-    from alberta_buck.sim.control_lab.engine import simulate
+    from alberta_buck.sim.control_lab.block_pairs import simulate_observed as simulate
     c = load_config(Path(__file__).resolve().parents[2] / "doc/control-lab.toml")
     # Compress the oscillation and tighten these test-only bands to exercise
     # real swaps on both basket legs and a monetary operation in three days.

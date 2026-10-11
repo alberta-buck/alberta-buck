@@ -2,7 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {BasketDeskTest} from "./BasketDesk.t.sol";
-import {BuckBasketEquityResponse} from "../../src/basket/BuckBasketEquityResponse.sol";
+import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
+import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {BasketReference} from "../../src/basket/BasketReference.sol";
@@ -24,8 +25,8 @@ contract BasketMachineIntegrationTest is BasketDeskTest {
         bindCarryingPool(reg, address(machine));
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BuckBasketEquityResponse()));
-        b.setResponse(address(service), BuckBasketEquityStorage.ResponseParams(3000, 1800, 1e18));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))))));
+        b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800));
         (bool ok,) = address(b).call(abi.encodeWithSignature("setWheel(address)", address(machine)));
         require(ok);
         desk.setMonetaryDirector(address(policy));

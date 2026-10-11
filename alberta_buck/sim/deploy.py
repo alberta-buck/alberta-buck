@@ -193,6 +193,8 @@ class Deployment:
     wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
     equity_machine: bool = False  # replacement, activated after identical bootstrap
     signals: Any = None
+    pair_signals: Any = None
+    pair_policy: Any = None
     monetary_policy: Any = None
     deposited_topic: bytes = DEPOSITED_TOPIC
     redeemed_topic: bytes = REDEEMED_TOPIC

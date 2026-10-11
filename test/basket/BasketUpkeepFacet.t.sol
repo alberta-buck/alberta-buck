@@ -58,7 +58,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
         b.setEquityWheel(address(new BasketUpkeepFacet(address(intent))));
-        b.setResponse(address(0), BuckBasketEquityStorage.ResponseParams(3000, 1800, 0));
+        b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800));
         vm.stopPrank();
     }
 
@@ -247,17 +247,6 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         }
         assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
         _books();
-    }
-
-    function test_pair_priceTurnVetoCannotBlockPlacementOfOwnedInventory() public {
-        _installValues(33_333e18, 36_700e18, 29_967e18); intent.setRate(0);
-        vm.prank(GOV);
-        b.setResponse(address(intent), BuckBasketEquityStorage.ResponseParams(3000, 1800, 0));
-        vm.mockCall(address(intent), abi.encodeWithSignature("fresh()"), abi.encode(true));
-        vm.mockCall(address(intent), abi.encodeWithSignature("running(uint256,int256)", uint256(2), int256(-1)), abi.encode(true));
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertGt(b.liquidityOf(2), 0);
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
     }
 
     function test_pair_minimumBudgetMustSurviveSaleFees() public {

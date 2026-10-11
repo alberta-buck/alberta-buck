@@ -10,7 +10,7 @@ from alberta_buck.sim.control_lab import historical
 from alberta_buck.sim.control_lab.basket_research import ARMS, HISTORICAL, attribution
 from alberta_buck.sim.control_lab.historical import historical_inputs
 from alberta_buck.sim.control_lab.interactive import basket_performance
-from alberta_buck.sim.control_lab.model import DEFAULTS, feed_rows, history_rows, dependencies
+from alberta_buck.sim.control_lab.model import DEFAULTS, feed_rows, dependencies
 from alberta_buck.sim.control_lab.noise import LOG_TICK, NoiseComparison, RouteFilter, shadow_frames
 
 
@@ -26,7 +26,6 @@ def test_historical_bridge_keeps_endpoints_and_past_only_reference():
     assert means==pytest.approx([100,100,100],abs=1e-6)
     assert rows[-1]["historical_unadjusted_usd"]!=rows[0]["historical_unadjusted_usd"]
     assert feed_rows(cfg,HISTORICAL)==rows
-    assert history_rows(cfg,HISTORICAL)==data["history"]
     assert dependencies(cfg,HISTORICAL,"basket")["historical_source"]==data["provenance"]
     for i,change in enumerate(data["provenance"]["removed_log_change"]):
         f=rows[200]

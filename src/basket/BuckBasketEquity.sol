@@ -78,7 +78,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         eq = EquityParams({floorBp: 100, flowZx100: 200, bandBp: 5000, parkBp: 30000,
                            flowDays: 30, stepBp: 500, weightBandBp: 200, grainPpm: 100,
                            exitFeeBp: 0, swapCapBp: 100, ceilBp: 2000});
-        response = ResponseParams({leashBp: 3000, interval: 1800, tiltWad: 1e18});
+        response = ResponseParams({leashBp: 3000, interval: 1800});
         receipt = new BuckBasketReceipt(address(this));
     }
 
@@ -112,14 +112,12 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         emit DirectorSet(d);
     }
 
-    event ResponseConfigured(address indexed signals, ResponseParams params);
+    event ResponseConfigured(ResponseParams params);
 
-    function setResponse(address signals, ResponseParams calldata p) external onlyGov {
-        require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0
-                && p.tiltWad >= 0 && p.tiltWad <= 4e18, "response params");
-        responseSignals = signals;
+    function setResponse(ResponseParams calldata p) external onlyGov {
+        require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0, "response params");
         response = p;
-        emit ResponseConfigured(signals, p);
+        emit ResponseConfigured(p);
     }
 
     function setEquityParams(EquityParams calldata p) external onlyGov {
