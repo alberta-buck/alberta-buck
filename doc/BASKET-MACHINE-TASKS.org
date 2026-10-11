@@ -279,49 +279,66 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   the same fault is new: an exit that leaves liquidity short makes the next turn a safeguard
   turn, and a safeguard turn makes no transfer. Measure both with depositors arriving and
   leaving daily.
-- [ ] Deploy equity as it arrives. The direction, set on 2026-10-11:
-  - A deposit is paired with issued BUCKs almost at once, up to K times equity.
-  - The rest stays as TOKEN and is consumed by rebalancing: sold when its TOKEN is overweight,
-    to fund what is underweight. Nothing is sold just to place it.
-  - A rebalance is funded by issuing while credit allows, then from undeployed TOKEN, and from
-    positions only when no undeployed TOKEN is left.
-  - The reserve is what one withdrawal needs. A shortfall enlarges the next rebalancing sale;
-    it is not a turn of its own.
-  - Income is reversion, not pool fees, so what matters is positions placed early.
-  So about a quarter of the book is meant to wait at K 0.75, and the yardstick is how soon the
-  waiting share falls to that. TOKEN waiting, as a share of equity, on the savings world's
-  first year of real prices:
-  | Upkeep | Day 30 | Day 90 | Day 180 | Day 364 | Pool fees, year 1 |
-  |--------+--------+--------+---------+---------+-------------------|
-  | Older | 6.6% | 0.0% | 0.2% | 0.0% | 28,080 |
-  | Machine, before 5079d37 | 47.8% | 42.2% | 23.3% | 16.7% | 22,298 |
-  | Machine, as built now | 45.8% | 33.2% | 15.6% | 12.7% | 22,482 |
-  | The same, reserve 4% of gross and no flow term | 42.1% | 26.3% | 20.7% | 16.1% | 22,808 |
-  | Placing trial (sells half of what waits) | 10.8% | 5.0% | 0.0% | 0.0% | 26,139 |
-  The machine takes three to five months over what should take a day. What holds it, largest
-  first:
-  - /Pace./ Placing does one constituent a turn, only where the book is short of it, capped at
-    5% of the constituent and 1% of its pool's depth, though pairing swaps nothing. A smaller
-    reserve alone moves day 30 from 46% to 42%.
-  - /The reserve./ A deposit counts as a day's flow, which holds the liquidity target at its
-    ceiling, a fifth of the gross, for about three months. Placing may use only what is beyond
-    it. On day 11 the basket had drawn 2.74 million of a limit of 4.05 million and the target
-    was 1.63 million, more than the 1.29 million of room left. Falling under half the target
-    makes a safeguard turn. =machine.reserve_floor_bp= and =machine.reserve_flow_z= set it in
-    the simulator.
-  - /Order./ A transfer never draws; credit is used only by placing, on a turn with no
-    transfer. A recipient's waiting TOKEN is not paired before more is bought.
-  The older upkeep and the trial clear the wallets by selling half of what credit does not
-  cover, on arrival. That is not the direction, and it costs: on reverting prices the share
-  price after a year is 1.0745 with a fifth of the book waiting, 1.0494 with the trial and
-  1.0484 on the older upkeep. Remove the trial (=test/harness/BasketUpkeepPlacingTrial.sol=)
-  once the steps below are built. Part of the machine's lead over the older upkeep in the
-  five-year runs may be its undeployed TOKEN, not its rebalancing.
-  Steps: placing as its own step, every turn, every constituent, to K of its value and
-  uncapped; then inside the deposit. The reserve rule. The funding order of a transfer. Open:
-  whether deployment stops short of the limit by the reserve; how one withdrawal is sized;
-  whether a deposit's share goes to its own pool; whether undeployed TOKEN is judged for each
-  constituent or across the book.
+- [ ] The net rule: K bounds what the basket has let out, not what it holds. Decided on
+  2026-10-11, after the measurements below it. A BUCK drawn and paired beside the basket's own
+  TOKEN is not exposure, so it should not use the limit: lien - BUCKs held <= K x equity. Then
+  nothing is sold to place a deposit or to pay an exit.
+  - Every deposit is paired at once by issuing. An exit is paid in BUCKs from the line and
+    unwound on later turns.
+  - In normal running the basket has issued at most half of K x equity; the rest is for exits.
+  - A cut in K forces no sale. The size of the book leans against parity instead: BUCKs are
+    held when the BUCK is cheap and issued when it is dear.
+  - The most TOKEN the basket can hold stays (1 + K) x equity. Counting gross assets as
+    collateral, the leverage loop of lending protocols, would allow 1/(1 - K) and is not taken.
+  Built so far: the shell's =netMark= switch, off by default, and a trial fork of the upkeep
+  (=test/harness/BasketUpkeepNetTrial.sol=, 190 lines; =machine.upkeep=, =machine.net_mark=,
+  =machine.parity_gain=). The fork pairs everything waiting, sizes the book at equity plus the
+  parity lean, and works each constituent toward its share on its own, selling or buying
+  against BUCKs when the pair policy sees it closing against the rest. It does not use the
+  built facet's safeguard, liquidity target, placement rule or paired transfer.
+  The savings world's first year, one seed:
+  | | Older | Machine as built | Net trial |
+  |--------+--------+--------+--------|
+  | TOKEN waiting, day 30 / 90 / 364, real prices | 6.6% / 0 / 0 | 45.8% / 33.2% / 12.7% | 0.1% / 0 / 0 |
+  | Share price at day 364, real prices | 1.0389 | 1.0362 | 1.0523 |
+  | Share price at day 364, reverting prices | 1.0484 | 1.0745 | 1.0691 |
+  | Pool fees, real prices | 28,080 | 22,482 | 35,720 |
+  | Basket's cost in BUCK off 1, mean, real / reverting | 0.65% / 0.60% | 0.62% / 0.59% | 0.61% / 0.53% |
+  | Gas, billions, real prices | 2.27 | 2.49 | 2.77 |
+  The net trial had issued between -3.5% and +16.4% of equity, never near its ceiling of 37%,
+  and could spend at least 57% of equity at every day's end. All 13 exits were paid.
+  Read the share prices with care:
+  - On real prices the lead over the older upkeep is made in the first month, when the older
+    upkeep sells half of what waits while the pools settle. From day 30 the two grow alike,
+    x1.0396 and x1.0392.
+  - The net trial's lien is about twice as large, so it accrues more relief: 2.4% of equity a
+    year against at most 1.5% for a lien bounded by K. Buck charges the demurrage on the BUCKs
+    in a pool to whoever takes them out, not to the basket's books as it accrues. So part of
+    this is income only if the takers bear it. Settle where that demurrage lands before
+    counting it.
+  - On reverting prices the built machine, with a fifth of its book still in wallets, is ahead
+    of both.
+  Next, if the rule is kept: simplify. Candidates, largest first:
+  - The upkeep. The built facet's allocation, safeguard, placement and transfer are 265 lines;
+    the fork replaces them with about 110.
+  - The shell's liquidity target and its flow average (=_targetS=, =dayFlow=, =flowMs= and five
+    parameters), which exist to ration the room that pairing used to consume.
+  - The older Deploy, Fund and Trim facet (316 lines), whose reason was the last (1 - K).
+  - The desk and its outer-band policy (430 lines), if the basket's own parity lean does that
+    work on the basket's own line.
+  - The policy's ordered pairs. A constituent is now worked against BUCKs alone, so one
+    reading for each against the rest would replace n x (n - 1).
+  - Pairing inside the deposit itself, so that nothing ever waits.
+  Open: the gain of the parity lean (5 in the trial); whether a ceiling of half is right;
+  what the safeguard is when K is zero, where the mark cannot net; one seed and one year.
+
+- [X] What held deployment back before the net rule, measured the same day. TOKEN waiting, as
+  a share of equity, real prices: built machine 45.8% at day 30 and 12.7% at day 364; with a
+  reserve of 4% of the gross and no flow term, 42.1% and 16.1%; with a trial that sold half of
+  what waited (=test/harness/BasketUpkeepPlacingTrial.sol=), 10.8% and none. Placing was one
+  constituent a turn under swap caps, and the liquidity target held a fifth of the gross for
+  three months after a deposit. Selling to place cost 2.4% of share price in a year on
+  reverting prices. Both trials are superseded by the net rule; remove the placing trial.
 - [ ] Place deposits toward the targets. A deposit lands as its own TOKEN in its own pool, so
   the depositors' mix pushes the weights (=BASKET-EQUITY.org= 14.2, items 4 and 5). Two cures
   were proposed and neither is built: place a deposit's value by the targets, selling nothing

@@ -123,6 +123,16 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         emit ResponseConfigured(p);
     }
 
+    event NetMarkSet(bool on);
+
+    /// @notice Mark the credit so that K bounds the lien net of the BUCKs the
+    ///         basket still holds in its positions (on), or the whole lien
+    ///         (off, as it was made). The next verb or wheel step re-marks.
+    function setNetMark(bool on) external onlyGov {
+        netMark = on;
+        emit NetMarkSet(on);
+    }
+
     event ReferencePriceSet(uint256 indexed i, uint256 priceInBuck);
 
     /// @notice Set the price constituent i is taken to return to, in BUCK
@@ -348,7 +358,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         pay = value * (1e18 - _chargeBuck(sn.k)) / 1e18;
 
         // Mark the equity that stays, then pay from what Buck lets it spend.
-        _markAt(eLow - pay);
+        _markAt(_creditValueS(sn, eLow - pay));
         if (pay <= _bk().balanceOf(address(this))) {
             totalShares = S - out;
             IERC20(address(buck)).transfer(to, pay);

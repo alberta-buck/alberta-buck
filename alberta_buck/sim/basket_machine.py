@@ -29,6 +29,8 @@ DEFAULTS = {
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
+    "net_mark": False,              # mark the credit so that K bounds the lien net of the BUCKs still held
+    "parity_gain": 5.,              # a net-mark trial: BUCKs held or issued per unit of parity error, of equity
     # The shell's liquidity target, the room it keeps unspent for exits. None: as deployed (1% of the
     # gross at least, two standard deviations of the daily flow, a fifth of the gross at most).
     "reserve_floor_bp": None,       # at least this of the gross
@@ -152,7 +154,10 @@ def activate(d, given=None, turn_seconds=0) -> None:
     reference = [round(math.log(int(basket.functions.constituents(i).call()[3]) / 10**6) / LOG_TICK * 10**18)
                  for i in range(len(d.tokens))]
     policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, sizing(s))
-    response = chain.deploy(s["upkeep"], policy.address)
+    # A facet's constructor names what it needs; a trial may need more than the policy.
+    wanted = next((e["inputs"] for e in load_artifact(s["upkeep"])[0] if e.get("type") == "constructor"), [])
+    given_to = {"policy": policy.address, "parity_": signals.address, "parityGain_": round(s["parity_gain"] * 10**18)}
+    response = chain.deploy(s["upkeep"], *(given_to[i["name"]] for i in wanted))
     # Preserve an explicitly configured integration horizon. The otherwise
     # unlimited default must not integrate a recovered observation over an
     # arbitrarily long outage; but it must cover the time between two turns,
@@ -164,6 +169,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
+    if s["net_mark"] in (True, 1, "true", "True"):
+        chain.send(basket.functions.setNetMark(True), sender=gov)
     chain.send(basket.functions.setResponse((int(s["leash_bp"]), interval, round(s["tilt"] * 10000),
                                              int(s["lean_cap_bp"]))), sender=gov)
     if s["reserve_floor_bp"] is not None or s["reserve_flow_z"] is not None:

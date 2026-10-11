@@ -174,6 +174,15 @@ def _eqsave_frame(d, ctr) -> dict:
         if policy is not None:
             f["desk_side"] = int(policy.functions.side().call())
             f["desk_over_days"] = int(policy.functions.overDays().call())
+        # The credit: the lien, what the account can still spend, and the BUCK
+        # side of the positions (BUCKs drawn and still held), base units.
+        try:
+            f["eq_lien"] = int(b.functions.lien().call())
+            f["eq_liquidity"] = int(b.functions.liquidity().call())
+            f["eq_held_buck"] = sum(int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[1]) // 2
+                                    for i in range(n))
+        except Exception:
+            pass
     if desk is not None:
         try:
             f["desk_nav"] = int(desk.functions.netValue().call())

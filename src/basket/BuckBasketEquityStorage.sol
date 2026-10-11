@@ -138,6 +138,11 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     uint64 public lastResponseAt;
     // Optional separate arb wheel: income crediting only, never upkeep or spending.
     address public arbitrageCreditor;
+    /// @notice How the credit is marked. Off: at the basket's equity, so K
+    ///         bounds every BUCK drawn. On: so that K bounds the BUCKs drawn
+    ///         net of those still held beside the TOKEN in its own positions,
+    ///         which carry no price risk against the lien they came from.
+    bool public netMark;
 
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
@@ -270,8 +275,22 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///         then re-read what the account can spend.  Every verb and wheel
     ///         step marks before it spends (E2).
     function _markS(Snap memory s) internal {
-        _markAt(_equityS(s, MARK_LOW));
+        _markAt(_creditValueS(s, _equityS(s, MARK_LOW)));
         s.spend = _bk().balanceOf(address(this));
+    }
+
+    /// @notice The BUCK side of every position, at the LOW marks: BUCKs the
+    ///         basket drew and still holds.
+    function _heldBuckS(Snap memory s) internal pure returns (uint256 held) {
+        for (uint256 i = 0; i < s.m.length; i++) held += s.m[i].posLow / 2;
+    }
+
+    /// @notice What the credit is marked at for `equity`. Buck allows a lien
+    ///         of K x the mark, so adding the held BUCKs over K makes that
+    ///         K x equity + held: the lien net of them is what K x equity bounds.
+    function _creditValueS(Snap memory s, uint256 equity) internal view returns (uint256) {
+        if (!netMark || s.k == 0) return equity;
+        return equity + _heldBuckS(s) * 1e18 / s.k;
     }
 
     /// @dev Mark the credit at `value` (activating it the first time it is

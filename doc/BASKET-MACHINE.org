@@ -54,6 +54,16 @@ About 72% of the TOKEN sits inside liquidity in the lab's settled book. A positi
 follows the square root of price, so the basket's allocations move about 60% as far as a wallet's
 would for the same price change.
 
+Marked at equity, the credit bounds every BUCK drawn: lien <= K x equity. A BUCK drawn and
+paired beside the basket's own TOKEN then uses the limit as if it had been spent, so credit can
+pair only K of the book. The shell has a second way to mark, =netMark=, off as built and set by
+governance. On, the credit is marked at equity plus the BUCK side of the positions over K, which
+makes Buck's own limit read: lien - BUCKs held <= K x equity. K then bounds the BUCKs the basket
+has let out, not those it still holds, which carry no price risk against the lien they came
+from. Pairing uses none of the line, and an exit can be paid in BUCKs before anything is sold.
+The most TOKEN the basket can come to hold is unchanged, (1 + K) x equity. The built upkeep
+facet is not written for it; a trial is (see [[file:BASKET-MACHINE-TASKS.org][the task list]]).
+
 * Signals
 
 ** Relative price: =PairSignals=

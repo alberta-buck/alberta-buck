@@ -94,7 +94,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
 
     function _staleMark(Snap memory s) internal view returns (bool) {
         if (address(credit) == address(0)) return false;
-        uint256 value = _equityS(s, MARK_LOW);
+        uint256 value = _creditValueS(s, _equityS(s, MARK_LOW));
         uint256 mark = credit.markOf(creditId);
         return (value > mark ? value - mark : mark - value) > _grainS(s);
     }
