@@ -179,8 +179,14 @@ The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. T
   an eighth of its value in BUCKs. Where no one supplies those BUCKs, K runs to its rail. Either
   accept a fully paired book as the resting state, or make a wallet-sourced sale buy into the
   wallet.
-- [ ] Measure the gap on the TOKEN held, not on weights that liquidity mutes, so the urgency
-  rule does not depend on how much of the book is paired.
+- [ ] The pools rebalance first, and badly. A liquidity position sells a TOKEN as its price
+  rises and buys as it falls, at every price on the way. In the shock run the basket's pools
+  shed 172 of 3,055 TOKEN on the way up, at a mean of 105 BUCKs against a peak of 112, before
+  the policy had sold anything. That is why a 30% jump showed as 1.6 points over weight where a
+  wallet would have shown 3.7. Decide how much of the book belongs in the pools. Owning the
+  arbitrage would recover some of what they give up. (This item used to say to measure the gap
+  on the TOKEN held. That was a mistake: the pools have really sold, so the TOKEN held shows
+  the same shares.)
 - [ ] Whether to count owned arbitrage at all before per-block cadence and a competing
   arbitrageur are in the lab. Today it measures the feed's step. The wheel's own analysis
   (=BASKET-WHEEL.org= 4) bounds what is real: a gap between two and three pool fees is worth
@@ -189,7 +195,19 @@ The first five are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. T
   also wanted a 60 bp margin that real searchers compete away. Measure owned arbitrage inside
   that band, against an arbitrageur at a competitive margin.
 - [ ] Lead the tracker: the release starts about 1.7 days after a turn, the filter's own lag.
-- [ ] A target lean past the declared weight, once timing is settled. It is zero today.
+  In the shock run the first sale came 1.75 days after the jump. A day of that was the lab's
+  arbitrage carrying the jump into the pools, during which the policy rightly would not sell a
+  TOKEN still rising. Half a day was patience.
+- [ ] A target lean past the declared weight. It is zero today, so the basket only ever
+  restores its declared weights, and the shock run shows what that costs
+  (=doc/review/shock-response.py=). One TOKEN rose 30% for ten days. The policy asked to sell it
+  for eight of them, at its full rate for two, and the basket sold 10,561 BUCKs once, because
+  within four days of that sale nothing was over its weight. With almost no threshold it sold 12,505, and
+  doubling the rate sold no more: what binds is the size of the gap, not the rule for working
+  it. A lean would let the target fall below the declared weight while a TOKEN stands far above
+  its reference and is closing, which the policy already measures. It is a bet on the price
+  coming back. Try it from the policy's own closure measure, bounded to a point or two, and
+  judge it on the shock, on the one-way move that already loses, and on commodity-like prices.
 - [ ] What holds the price inside the band. The earlier architecture had four layers
   (=CONVERGENCE.org= 3): the wheel for agreement between venues; undertakings, a stress fee and
   a facility that held the price inside the band from tick to tick; a persistence test that

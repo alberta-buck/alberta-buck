@@ -133,6 +133,37 @@ Each of the other eight contained such a sale, and first differs from its saved 
 It matters most on commodity-like prices, which open with one. There the gain rose from 16,307
 to 17,938 with urgency, and from 6,915 to 9,668 with the 2-point line.
 
+* A sudden jump
+
+One test lifts one TOKEN's price by 30% for ten days and then drops it back. In those ten days
+the basket sold that TOKEN once, for 10,561 BUCKs, about 3% of what it held. That looks like
+too little, so we traced every turn ([[file:review/shock-response.py][shock-response.py]]).
+
+The signals were not the problem. The policy wanted to sell from a day and a quarter after the
+jump, and went on wanting to for eight days, two of them at its full rate. The first day's wait
+was the lab's: its arbitrage takes a day to carry a jump into the basket's pools, and the policy
+will not sell a TOKEN that is still rising.
+
+The book had almost nothing to sell. Three things turned a 30% jump into 1.6 points over weight.
+
+- The BUCK rose with its basket. Thirty percent in dollars was 15% in BUCKs.
+- The pools sold on the way up. A liquidity position sells a TOKEN as its price rises. The
+  basket's shed 172 of its 3,055 TOKEN, at an average of 105 BUCKs on the way to 112. In a
+  wallet the same TOKEN would have stood 3.7 points over its weight. In the pools it stood 1.6.
+- The rule only restores the declared weight. One transfer moved 39% of those 1.6 points. The
+  rest closed by itself in under four days, as the other prices moved. After that nothing was
+  over its weight, whatever the policy asked.
+
+Making it easier to act barely helps. With almost no threshold the basket sells 12,505 BUCKs of
+the TOKEN instead of 10,561. Doubling the rate sells no more.
+
+Across the episode the basket came out 8,000 ahead of one that sat still. The jump was worth
+97,000 while it lasted, so it kept less than a tenth.
+
+To keep more it would have to sell below its declared weight while a TOKEN stands far above its
+usual price and is falling back. That is a bet that the price returns. It wins here. It loses
+when a TOKEN moves and stays, which is the case that already loses.
+
 * Realistic prices
 
 The idea behind the BUCK is that basic commodities follow inflation over the long run, each
@@ -248,6 +279,7 @@ make control-lab-basket-sizing CONTROL_LAB_BASKET_SIZING_STAGE=all \
 make control-lab-basket-research    # the arbitrage comparison
 python doc/review/wheel-gas.py /tmp/wheel-gas       # the gas table
 python doc/review/urgency-trial.py /tmp/urgency     # the trial from outside
+python doc/review/shock-response.py /tmp/shock      # the sudden jump, turn by turn
 python3 doc/review/rebalance-benchmark.py
 PYTHONPATH=. python3 doc/review/commodity-inflation.py
 #+end_src
