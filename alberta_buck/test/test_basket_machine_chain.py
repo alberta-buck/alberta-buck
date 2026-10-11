@@ -35,7 +35,7 @@ def test_replacement_publishes_and_runs_through_the_simulator(monkeypatch, tmp_p
         assert d.wheel.functions.opsBasket().call() == d.desk.address
         assert d.wheel.functions.sampleSource().call() == d.monetary_policy.address
         assert d.desk.functions.executionGuard().call() == d.monetary_policy.address
-        assert d.kctrl.functions.dTMax().call() == 3600
+        assert d.kctrl.functions.dTMax().call() == 21600           # the world's step: four ticks a day
         assert len(frames) == 2
         assert all(frame["eq_signal_fresh"] for frame in frames)
         assert all(sum(frame["eq_w"]) == 10000 for frame in frames)
@@ -48,7 +48,7 @@ def test_an_experiment_selects_and_sizes_the_machine(tmp_path):
         assert d.equity_machine and d.basket_impl == "equity-ops"
         assert d.wheel.functions.responseMode().call()
         assert tuple(d.basket.functions.response().call()) == (3000, 900, 2500, 1000)
-        assert d.kctrl.functions.dTMax().call() == 1800
+        assert d.kctrl.functions.dTMax().call() == 21600
         last = frames[-1]
         assert last["eq_signal_fresh"] and last["desk_side"] in (-1, 0, 1) and last["desk_over_days"] >= 0
         # The targets the frame reports are the facet's: they share the book, within the lean cap.
@@ -58,9 +58,9 @@ def test_an_experiment_selects_and_sizes_the_machine(tmp_path):
         assert last["eq_lean"] == basket_machine.targets_bp(d)
         # Each response is booked by what it did, with the BUCKs it moved.
         booked = {k: v for k, v in last.items() if k.startswith("wh_eq_") and "response" not in k}
-        assert sum(last.get(f"wh_eq_{name}_n", 0) for name, _ in basket_machine.ACTIONS.values()) > 0, booked
-        assert all(last.get(f"wh_eq_{name}", 0) > 0 for name, _ in basket_machine.ACTIONS.values()
-                   if last.get(f"wh_eq_{name}_n", 0))
+        names = {name for parts in basket_machine.ACTIONS.values() for name, _ in parts}
+        assert sum(last.get(f"wh_eq_{name}_n", 0) for name in names) > 0, booked
+        assert all(last.get(f"wh_eq_{name}", 0) > 0 for name in names if last.get(f"wh_eq_{name}_n", 0))
 
 
 def test_machine_settings_are_the_experiments_then_the_environments_then_the_labs(monkeypatch):

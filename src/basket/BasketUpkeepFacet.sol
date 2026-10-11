@@ -26,7 +26,8 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     uint256 private constant NONE = type(uint256).max;
     IRebalancePolicy public immutable pairPolicy;
-    struct Plan { uint256 sell; uint256 buy; uint256 sellCap; uint256 buyCap; bool pairOnly; }
+    // sells: the value each constituent is to sell; sell: the one selling most, NONE when none does.
+    struct Plan { uint256 sell; uint256 buy; uint256[] sells; uint256 buyCap; bool pairOnly; }
     struct Allocation {
         uint256 donor;
         uint256 total;
@@ -51,7 +52,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         Snap memory s = _snap();
         if (_staleMark(s)) return true;
         Allocation memory a = _allocation(s);
-        if (!a.needsSafeguard) return a.donor != NONE || _idlePlacement(s).buy != NONE;
+        if (!a.needsSafeguard) return a.donor != NONE || _idlePlacement(s, 0).buy != NONE;
         Plan memory p = _safeguard(s);
         return p.sell != NONE || (p.buy != NONE && _usableS(s) > _grainS(s));
     }
@@ -228,13 +229,17 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         }
     }
 
-    /// @dev What the book needs before any view on prices. Cash comes from
-    /// the constituent furthest above its weight, and while cash is needed
-    /// nothing is bought. A constituent beyond its leash is sold or bought
-    /// back toward its declared weight. At most one sale and one purchase.
+    /// @dev What the book needs before any view on prices. A constituent
+    /// beyond its leash is sold or bought back toward its declared weight. A
+    /// need for cash beyond that is spread over every constituent, each
+    /// giving in proportion to what it may give in one turn, and while cash
+    /// is needed nothing is bought. When none is, TOKEN already held may be
+    /// placed in the same turn: that swaps nothing, so a leash sale need not
+    /// hold it back.
     function _safeguard(Snap memory s) internal view returns (Plan memory p) {
         p.sell = NONE; p.buy = NONE;
         uint256 n = s.m.length;
+        p.sells = new uint256[](n);
         uint256[] memory value = new uint256[](n);
         uint256 total;
         for (uint256 i; i < n; ++i) { value[i] = s.m[i].posTwap + _tokenValue(s, i); total += value[i]; }
@@ -246,7 +251,9 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         uint256 liquidity = _targetS(s);
         uint256 need = s.spend + grain < liquidity * (10000 - eq.bandBp) / 10000 ? liquidity - s.spend : 0;
         if (s.lien > limit) need += s.lien - limit;
-        int256 mostOver = type(int256).min;
+        uint256[] memory room = new uint256[](n);
+        uint256 rooms;
+        uint256 raised;
         uint256 mostUnder;
         for (uint256 i; i < n; ++i) {
             if (s.m[i].depth == 0) continue;
@@ -255,26 +262,43 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
             bool over = value[i] > target;
             uint256 gap = over ? value[i] - target : target - value[i];
             bool leashed = _beyondLeash(gap, total, weight);
-            uint256 sellAim = over && leashed ? gap : 0;
-            if (need > sellAim) sellAim = need;
-            uint256 sellCap = PM.min(sellAim, PM.min(value[i] * eq.stepBp / 10000, 2 * _swapCap(s.m[i])));
-            int256 excess = over ? int256(gap) : -int256(gap);
-            if (sellCap > grain && excess > mostOver) { p.sell = i; p.sellCap = sellCap; mostOver = excess; }
+            room[i] = PM.min(value[i] * eq.stepBp / 10000, 2 * _swapCap(s.m[i]));
+            if (over && leashed) { p.sells[i] = PM.min(gap, room[i]); raised += p.sells[i]; }
+            rooms += room[i] - p.sells[i];
             if (need > 0 || over || !leashed) continue;
             // A zero holding must be able to receive its first allocation.
             uint256 buyCap = PM.min(gap, PM.min(target * eq.stepBp / 10000, _swapCap(s.m[i])));
             if (buyCap > grain && gap > mostUnder) { p.buy = i; p.buyCap = buyCap; mostUnder = gap; }
         }
-        if (p.sell == NONE && p.buy == NONE && need == 0) return _idlePlacement(s);
+        if (need > raised && rooms > 0) {
+            uint256 more = need - raised;
+            for (uint256 i; i < n; ++i) {
+                uint256 rest = room[i] - p.sells[i];
+                p.sells[i] += more >= rooms ? rest : more * rest / rooms;
+            }
+        }
+        uint256 most;
+        raised = 0;
+        for (uint256 i; i < n; ++i) {
+            if (p.sells[i] <= grain) { p.sells[i] = 0; continue; }
+            raised += p.sells[i];
+            if (p.sells[i] > most) { most = p.sells[i]; p.sell = i; }
+        }
+        if (need == 0 && p.buy == NONE) {
+            // What a leash sale raises can pair waiting TOKEN in the same turn.
+            Plan memory idle = _idlePlacement(s, raised);
+            p.buy = idle.buy; p.buyCap = idle.buyCap; p.pairOnly = true;
+        }
     }
 
-    /// @dev Pair inventory already owned by the basket. Adding BUCK expands
+    /// @dev Pair inventory already owned by the basket, with the cash it can
+    /// spare and any more this turn is about to raise. Adding BUCK expands
     /// the book, so rank shortages in the funded allocation, not capped step
     /// sizes (which repeatedly favour the largest leg). No TOKEN is swapped,
     /// so no policy is asked.
-    function _idlePlacement(Snap memory s) internal view returns (Plan memory p) {
+    function _idlePlacement(Snap memory s, uint256 raised) internal view returns (Plan memory p) {
         p.sell = NONE; p.buy = NONE; p.pairOnly = true;
-        uint256 usable = _usableS(s);
+        uint256 usable = _usableS(s) + raised;
         uint256 grain = _grainS(s);
         if (usable <= grain) return p;
         uint256 expanded = _grossS(s, MARK_TWAP) + usable;
@@ -316,7 +340,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         pairPolicy.recordRates(a.rates);
         bool stale = _staleMark(s); _markS(s);
         if (a.donor == NONE) {
-            Plan memory p = _idlePlacement(s);
+            Plan memory p = _idlePlacement(s, 0);
             if (p.buy != NONE && _headroomS(s) >= 0) {
                 uint256 placed = _buy(p.buy, PM.min(p.buyCap, s.spend), true);
                 if (placed > 0) {
@@ -375,7 +399,9 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         bool sold;
         if (p.sell != NONE) {
             uint256 beforeSpend = s.spend;
-            sold = _sell(s, p.sell, p.sellCap);
+            // Each sale is in its own pool, so the opening snapshot prices them all.
+            for (uint256 i; i < p.sells.length; ++i)
+                if (p.sells[i] > 0 && _sell(s, i, p.sells[i])) sold = true;
             uint256 afterSpend = _bk().balanceOf(address(this));
             proceeds = afterSpend > beforeSpend ? afterSpend - beforeSpend : 0;
             // Never re-mark the opening snapshot after changing the book.
@@ -392,7 +418,8 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         }
         if (!sold && buySpent == 0 && !stale) return 0;
         lastResponseAt = uint64(block.timestamp);
-        uint8 action = sold ? (buySpent > 0 ? 3 : 1) : (buySpent > 0 ? (p.pairOnly ? 4 : 2) : 0);
+        // 0 a mark alone, 1 sold, 2 bought, 3 sold and bought, 4 placed, 5 sold and placed.
+        uint8 action = sold ? (buySpent > 0 ? (p.pairOnly ? 5 : 3) : 1) : (buySpent > 0 ? (p.pairOnly ? 4 : 2) : 0);
         emit Responded(action, p.sell, p.buy, proceeds, buySpent);
         emit WheelWork(2, 0, buySpent + proceeds);
         return 1;

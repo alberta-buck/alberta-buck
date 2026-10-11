@@ -113,17 +113,37 @@ contract BasketMachineTest is BuckBasketEquityTest {
         assertEq(IBasketUpkeep(address(b)).wheelStep(4, 0), 0);
     }
 
-    function test_machine_cashNeedSellsTheMostOverweightConstituent() public {
+    function test_machine_cashNeedIsSpreadOverEveryConstituent() public {
         _replace(false);
         _deposit(alice, address(tok[0]), 30_000e18);
         _deposit(alice, address(tok[1]), 18_000e18);
         _deposit(alice, address(tok[2]), 10_000e18);
         ctrl.setK(0);
-        uint256 first = b.idleToken(0); uint256 heavy = b.idleToken(1); uint256 last = b.idleToken(2);
+        uint256[3] memory idle = [b.idleToken(0), b.idleToken(1), b.idleToken(2)];
+        vm.expectEmit(true, false, false, false, address(b));
+        emit BasketUpkeepFacet.Responded(1, 0, 0, 0, 0);
         assertEq(_response(), 1);
-        assertLt(b.idleToken(1), heavy, "the constituent furthest above its weight supplies the cash");
-        assertEq(b.idleToken(0), first); assertEq(b.idleToken(2), last);
+        for (uint256 i; i < 3; ++i) assertLt(b.idleToken(i), idle[i], "every constituent gives toward the cash");
         assertEq(b.liquidityOf(0) + b.liquidityOf(1) + b.liquidityOf(2), 0, "nothing is bought while cash is needed");
+        _freshMark();
+    }
+
+    function test_machine_aLeashSaleDoesNotHoldBackPlacingWaitingToken() public {
+        _replace(false);
+        // Half the book in the first TOKEN, beyond its leash; the others short of their weight but inside theirs.
+        _deposit(alice, address(tok[0]), 50_000e18);
+        _deposit(alice, address(tok[1]), 13_000e18);
+        _deposit(alice, address(tok[2]), 8_000e18);
+        uint256[] memory share = b.responseWeightsBp();
+        assertGt(share[0], 4334); assertGt(share[1], 2334); assertGt(share[2], 2334);
+        uint256[3] memory idle = [b.idleToken(0), b.idleToken(1), b.idleToken(2)];
+        vm.expectEmit(true, false, false, false, address(b));
+        emit BasketUpkeepFacet.Responded(5, 0, 0, 0, 0);
+        assertEq(_response(), 1);
+        assertLt(b.idleToken(0), idle[0], "the TOKEN beyond its leash is sold");
+        assertEq(b.liquidityOf(0), 0);
+        assertGt(b.liquidityOf(1) + b.liquidityOf(2), 0, "and waiting TOKEN is placed in the same turn");
+        assertLt(b.idleToken(1) + b.idleToken(2), idle[1] + idle[2], "from the wallet: placing swaps nothing");
         _freshMark();
     }
 

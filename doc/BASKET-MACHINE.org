@@ -217,14 +217,18 @@ holds no TOKEN, when the lien exceeds K times equity(LOW), when its spendable BU
 liquidity target's band, or when any constituent is beyond its leash (30% of its declared
 weight). The plan has no view on prices and reads no signal:
 
-- /Cash./ Short liquidity or a lien above K is met by selling, from the constituent furthest
-  above its declared weight. While cash is needed nothing is bought.
 - /Leash./ A constituent beyond its leash is sold or bought back toward its declared weight.
+- /Cash./ Short liquidity or a lien above K is met by selling. What the leash sales do not raise
+  is spread over every constituent, each giving in proportion to what it may give in one turn.
+  While cash is needed nothing is bought and nothing is placed.
 - /First deposit./ A book of BUCKs alone aims its usable cash at the declared weights.
+- /Placing./ When no cash is needed and the leash asks for no purchase, wallet TOKEN is placed
+  in the same turn, as [[#otherwise][below]], with the account's spare room and whatever the turn's
+  leash sale raised. Placing swaps nothing, so a leash sale does not hold it back.
 
-It makes at most one sale and one purchase, each capped by the step (5% of the constituent) and
-the pool's swap depth, with a fresh mark of the credit between the two. With nothing to sell or
-buy and no cash needed, it places wallet TOKEN as [[#otherwise][below]].
+Each sale is capped by the step (5% of the constituent) and by twice its pool's swap depth. There
+is at most one purchase or placement a turn, with a fresh mark of the credit between the sales
+and it.
 
 ** A paired transfer
 

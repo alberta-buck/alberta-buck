@@ -59,7 +59,7 @@ class ExecutionRecorder:
                 operation.update(action={1: "absorb", 2: "retire", 3: "supply", 4: "issue"}[quadrant],
                                  buck_moved=int(args["buckMoved"]) / 1e6)
             else:
-                operation.update(action={0: "mark", 1: "sell", 2: "buy", 3: "transfer", 4: "pair"}[int(args["action"])],
+                operation.update(action={0: "mark", 1: "sell", 2: "buy", 3: "transfer", 4: "pair", 5: "sell-pair"}[int(args["action"])],
                     sell_token=int(args["sell"]) if int(args["sell"]) < 3 else None,
                     buy_token=int(args["buy"]) if int(args["buy"]) < 3 else None,
                     proceeds_buck=int(args["proceeds"]) / 1e6, spent_buck=int(args["buySpent"]) / 1e6)
@@ -74,7 +74,7 @@ def execution_counts(frames):
               "arb_cycles": sum(e["actor"] == "arb" for e in events),
               "desk_ops": sum(e["actor"] == "desk" for e in events),
               "basket_responses": sum(e["actor"] == "basket" for e in events),
-              "basket_pairs": sum(e["actor"] == "basket" and e["action"] == "pair" for e in events)}
+              "basket_pairs": sum(e["actor"] == "basket" and e["action"] in ("pair", "sell-pair") for e in events)}
     for actor in ("desk", "basket", "arb"):
         for side in ("buy", "sell"):
             counts[f"{actor}_{side}s"] = sum(t["side"] == side for e in events if e["actor"] == actor for t in e["trades"])

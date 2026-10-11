@@ -137,7 +137,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
         placed = turn_wheel(d, rounds=2)
         from alberta_buck.sim.basket_machine import activate
         chosen = getattr(scenario, "experiment", None)
-        activate(d, chosen.cfg.get("machine") if chosen is not None else None)
+        activate(d, chosen.cfg.get("machine") if chosen is not None else None,
+                 turn_seconds=86_400 * max(1, getattr(scenario, "day_step", 1)) // scenario.ticks_per_day)
         equity_arb_on(d)
         if verbose:
             print(f"[sim] equity basket: the wheel made the pools' first "

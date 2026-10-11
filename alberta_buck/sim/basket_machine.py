@@ -20,7 +20,7 @@ OBSERVER = (43200, 86400, 86400, 172800, round(.0002 / LOG_TICK / 86400 * 1e18))
 DEFAULTS = {
     "interval": 1800,               # seconds between responses, and between reference samples
     "max_age": 3600,                # seconds a reference sample stays fresh
-    "dt_max": None,                 # the K controller's integration horizon, seconds; None: twice the interval
+    "dt_max": None,                 # K's integration horizon, seconds; None: the world's step, or twice the interval
     "leash_bp": 3000,               # a constituent this far from its declared weight is safeguarded
     "tilt": .5,                     # how far a target leans against price: 0 not at all, 1 the most
     "lean_cap_bp": 1500,            # the most a target may lean, relative to its declared weight
@@ -28,6 +28,7 @@ DEFAULTS = {
     "release_rate": 4.,             # a braking release, a day, on the rate's own scale
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
+    "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
     # The desk beside the basket and its outer-band policy.
     "desk_capital_usd": 400000,     # its founding grant, for each constituent
     "desk_leg_bp": 40,              # one operation's leg, of the pool
@@ -48,8 +49,10 @@ ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_A
                "desk_turnover_buck": "SIM_OPS_TURNOVER_BUCK", "desk_floor_buck": "SIM_OPS_CAPITAL_FLOOR_BUCK",
                "desk_enter_bp": "SIM_OPS_ENTER_BP", "desk_release_bp": "SIM_OPS_RELEASE_BP",
                "desk_gain_bp": "SIM_OPS_GAIN_BP", "desk_cap_bp": "SIM_OPS_CAP_BP", "desk_persist_days": "SIM_OPS_PERSIST"}
-# Responded's action: what a response did, and which of its two amounts measures it.
-ACTIONS = {1: ("raise", "proceeds"), 2: ("buy", "buySpent"), 3: ("transfer", "proceeds"), 4: ("place", "buySpent")}
+# Responded's action: what a response did, and which of its two amounts measures each part of it.
+ACTIONS = {1: (("raise", "proceeds"),), 2: (("buy", "buySpent"),), 3: (("transfer", "proceeds"),),
+           4: (("place", "buySpent"),), 5: (("raise", "proceeds"), ("place", "buySpent")),
+           6: (("place", "buySpent"),)}        # a trial's: placed by selling half of what waited
 
 
 def settings(given=None) -> dict:
@@ -114,13 +117,14 @@ def book_receipt(d, receipt, ctr) -> None:
         action = int(event["args"]["action"])
         key = f"wh_eq_response_{action}_n"
         ctr[key] = ctr.get(key, 0) + 1
-        if action in ACTIONS:
-            name, amount = ACTIONS[action]
+        for name, amount in ACTIONS.get(action, ()):
             ctr[f"wh_eq_{name}"] = ctr.get(f"wh_eq_{name}", 0) + int(event["args"][amount])
             ctr[f"wh_eq_{name}_n"] = ctr.get(f"wh_eq_{name}_n", 0) + 1
 
 
-def activate(d, given=None) -> None:
+def activate(d, given=None, turn_seconds=0) -> None:
+    """Put the machine in place. `turn_seconds` is the world's own step: the time between two
+    turns of its wheel, which K must be able to integrate over."""
     if not d.equity_machine:
         return
     s = settings(given)
@@ -144,13 +148,15 @@ def activate(d, given=None) -> None:
     reference = [round(math.log(int(basket.functions.constituents(i).call()[3]) / 10**6) / LOG_TICK * 10**18)
                  for i in range(len(d.tokens))]
     policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, sizing(s))
-    response = chain.deploy("BasketUpkeepFacet", policy.address)
+    response = chain.deploy(s["upkeep"], policy.address)
     # Preserve an explicitly configured integration horizon. The otherwise
     # unlimited default must not integrate a recovered observation over an
-    # arbitrarily long outage.
+    # arbitrarily long outage; but it must cover the time between two turns,
+    # or K integrates only a part of every step.
     dt_max = s["dt_max"]
     if dt_max is not None or int(d.kctrl.functions.dTMax().call()) == 2**256 - 1:
-        horizon = int(dt_max) if dt_max is not None else max(2 * interval, int(d.kctrl.functions.dT().call()))
+        horizon = (int(dt_max) if dt_max is not None
+                   else max(2 * interval, int(d.kctrl.functions.dT().call()), int(turn_seconds)))
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
