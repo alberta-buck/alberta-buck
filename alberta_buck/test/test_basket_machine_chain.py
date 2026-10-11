@@ -58,9 +58,13 @@ def test_an_experiment_selects_and_sizes_the_machine(tmp_path):
         assert last["eq_lean"] == basket_machine.targets_bp(d)
         # Each response is booked by what it did, with the BUCKs it moved.
         booked = {k: v for k, v in last.items() if k.startswith("wh_eq_") and "response" not in k}
-        names = {name for parts in basket_machine.ACTIONS.values() for name, _ in parts}
-        assert sum(last.get(f"wh_eq_{name}_n", 0) for name in names) > 0, booked
+        names = {name for name, _ in basket_machine.ACTIONS.values()}
+        assert last.get("wh_eq_place_n", 0) > 0, booked
         assert all(last.get(f"wh_eq_{name}", 0) > 0 for name in names if last.get(f"wh_eq_{name}_n", 0))
+        # The credit is marked net: every TOKEN is paired, and the line is still there.
+        assert d.basket.functions.netMark().call()
+        assert last["eq_lien"] > 0 and last["eq_held_buck"] > 0 and last["eq_liquidity"] > 0
+        assert abs(last["eq_lien"] - last["eq_held_buck"]) < last["eq_equity"] // 2
 
 
 def test_machine_settings_are_the_experiments_then_the_environments_then_the_labs(monkeypatch):

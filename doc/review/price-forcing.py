@@ -54,13 +54,13 @@ def report(out):
     sys.path.insert(0, ".")
     from alberta_buck.sim.control_lab.book import holdings, reference_value
     load = lambda p, deep, m: json.loads(Path(out, name(p, deep, m)).read_text())
-    print(f"{'prices':12s} {'market':6s} | inside against the feed: TOKEN median, 90%; pair median, 90% | {'gain':>8s} {'transfers':>9s} {'arb cycles':>10s} {'arb profit':>10s}")
+    print(f"{'prices':12s} {'market':6s} | inside against the feed: TOKEN median, 90%; pair median, 90% | {'gain':>8s} {'trades':>9s} {'arb cycles':>10s} {'arb profit':>10s}")
     for p in PROFILES:
         for deep in (False, True):
             policy, still = load(p, deep, False), load(p, deep, True)
             e = errors(policy["frames"])
             gain = reference_value(policy["frames"][-1]) - reference_value(still["frames"][-1])
-            transfers = sum(e_["actor"] == "basket" and e_.get("action") == "transfer" for f in policy["frames"] for e_ in f["events"])
+            transfers = sum(e_["actor"] == "basket" and e_.get("action") in ("sell", "buy") for f in policy["frames"] for e_ in f["events"])
             print(f"{p:12s} {'deep' if deep else 'pool':6s} | {e[0]:23.2f}% {e[1]:5.2f}% {e[2]:11.2f}% {e[3]:5.2f}% | {gain:+8,.0f} {transfers:9d}"
                   f" {policy['summary']['arb_cycles']:10d} {policy['summary']['arb_profit_buck']:10,.0f}")
     at = lambda frames, day: next(f for f in frames if f["day"] == day)
@@ -72,11 +72,11 @@ def report(out):
             continue
         cell = lambda x: (f"{x['token_buck'][0] * x['buck_usdc']:11.1f} {x['basket']['weights'][0] / 100:10.2f} {x['pair_policy']['desire'][0][1]:11.2f}  "
                           + "; ".join(",".join(f"{t['side']} {'ABC'[t['token']]} {t['quote_amount']:,.0f}" for t in e["trades"])
-                                      for e in x["events"] if e["actor"] == "basket" and e.get("action") == "transfer").ljust(19))
+                                      for e in x["events"] if e["actor"] == "basket" and e.get("action") in ("sell", "buy")).ljust(19))
         print(f"  {f['day']:5.2f} {f['target_usd'][0]:6.1f} | {cell(f)}| {cell(g)}")
     for label, frames in (("pool", lab), ("deep", deep)):
         still = load("shock", label == "deep", True)["frames"]
-        sales = [(f["day"], t) for f in frames if 45 <= f["day"] < 55 for e in f["events"] if e["actor"] == "basket" and e.get("action") == "transfer"
+        sales = [(f["day"], t) for f in frames if 45 <= f["day"] < 55 for e in f["events"] if e["actor"] == "basket" and e.get("action") in ("sell", "buy")
                  for t in e["trades"] if t["side"] == "sell" and t["token"] == 0]
         across = lambda fr: reference_value(at(fr, 55.)) - reference_value(at(fr, 44.75))
         liquid = lambda f: holdings(f)[0][0] - f["basket"]["idle"][0]

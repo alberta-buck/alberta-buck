@@ -27,7 +27,7 @@ def price_markers(result, native=False):
             for trade in operation["trades"]:
                 if trade["quote"] == "BUCK":
                     buckets[operation["actor"] + "-" + trade["side"], trade["token"]].append(trade)
-            if operation["actor"] == "basket" and operation["action"] in ("pair", "sell-pair"):
+            if operation["actor"] == "basket" and operation["action"] == "pair":
                 token = operation["buy_token"]
                 buckets["basket-pair", token].append(dict(token_amount=0, quote_amount=operation["spent_buck"]))
         for (kind, token), trades in buckets.items():

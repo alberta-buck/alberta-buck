@@ -84,9 +84,9 @@ export function row(f) {
     lean: f.eq_lean ?? null, w: f.eq_w ?? null, decl: f.eq_decl ?? null,
     eqSync: bk(f.wh_eq_sync), eqDeploy: bk(f.wh_eq_deploy), eqFund: bk(f.wh_eq_fund), eqTrim: bk(f.wh_eq_trim),
     // The basket machine's responses instead (basket_machine.py book_receipt):
-    // BUCK placed with waiting deposits, moved from a commodity above its
-    // target to those below, raised for cash, and bought back.
-    eqPlace: bk(f.wh_eq_place), eqTransfer: bk(f.wh_eq_transfer), eqRaise: bk(f.wh_eq_raise), eqBuy: bk(f.wh_eq_buy),
+    // BUCKs issued beside deposited TOKEN, and the commodities it has sold
+    // and bought toward their targets, in BUCK.
+    eqPlace: bk(f.wh_eq_place), eqSell: bk(f.wh_eq_sell), eqBuy: bk(f.wh_eq_buy),
     // The monetary desk (the BasketDesk): BUCK moved per quadrant, its book,
     // its net value against its founding grant held, and its signal --
     // BUCK's premium over its basket, % -- with, on the basket machine, the

@@ -78,7 +78,7 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
                          "The desk's inventory"]) {
       assert.ok(panelText.includes(title), `the ${title} chart is on the page`);
     }
-    assert.ok(panelText.includes(machine ? "moved between commodities" : "bought for the director"),
+    assert.ok(panelText.includes(machine ? "paired" : "bought for the director"),
       "the wheel's work is charted by what this upkeep does");
     assert.equal(await page.locator('#panel-savings select[aria-label="basket upkeep"]').inputValue(),
       machine ? "equity-machine" : "equity-ops", "the world settings show the upkeep that is running");

@@ -112,9 +112,9 @@ def test_two_step_reprices_one_token_and_never_returns():
     assert all(abs(r["target_usd"][i] - 100) < 1.5 for r in rows for i in (1, 2))
 
 
-def test_score_counts_transfers_and_differences_cycles():
+def test_score_counts_trades_and_differences_cycles():
     def transfer(sold, bought):
-        return dict(actor="basket", action="transfer", trades=[
+        return dict(actor="basket", action="sell", trades=[
             dict(side="sell", quote_amount=sold), dict(side="buy", quote_amount=bought)])
     cfg = copy.deepcopy(DEFAULTS)
     cfg["feed"]["period_days"] = 1.
@@ -122,7 +122,7 @@ def test_score_counts_transfers_and_differences_cycles():
                     events=[transfer(40., 20.)] if k in (2, 5) else [dict(actor="arb", action="cycle", trades=[])])
               for k in range(9)]
     s = score(dict(frames=frames, config=cfg, summary=dict(mean_abs_parity_error=.001, end_k=.75)))
-    assert (s["transfers"], s["sold"], s["bought"]) == (2, 80., 40.)
+    assert (s["trades"], s["sold"], s["bought"]) == (2, 80., 40.)
     assert s["usd"] == pytest.approx(1008 * 1.1) and s["buck"] == 1008
     assert len(s["cycles"]) == 3                                         # day 0, 1 and 2 at four steps a day
     assert s["cycles"][1] - s["cycles"][0] == pytest.approx(40) and s["reference"] - s["opened"] == pytest.approx(80)

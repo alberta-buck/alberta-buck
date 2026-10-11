@@ -4,45 +4,72 @@ pragma solidity ^0.8.20;
 import {BuckBasketEquityStorage} from "./BuckBasketEquityStorage.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
+import {IBasketReference} from "./IBasketReference.sol";
 import {IRebalancePolicy} from "./IRebalancePolicy.sol";
 import {PortfolioMath as PM} from "./PortfolioMath.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
-/// @notice The basket's upkeep facet: Daily, Sync(i) and Respond. A response
-/// does one of three things. Where the book needs it, a safeguard: cash for
-/// short liquidity or a lien above K, a constituent brought back inside its
-/// leash, a first cash deposit placed, all with no view on prices. Otherwise
-/// one paired transfer, from one donor to proportional eligible recipients,
-/// on the gaps from its targets and the policy's graded intent. Failing
-/// both, it pairs TOKEN the basket already holds. Idle TOKEN counts in the
-/// same allocation as LP; waiting inventory never vetoes work elsewhere.
+/// @notice The basket's upkeep facet: Daily, Sync(i) and Respond, for a shell
+/// whose credit is marked net (netMark): K bounds the BUCKs the basket has
+/// let out, not those it still holds beside its TOKEN. Nothing is sold to
+/// place a deposit or to pay an exit, so a response is three things.
+///
+/// 1. Pair every waiting TOKEN with issued BUCKs, at once. The BUCKs stay in
+///    the position, so this uses none of the line.
+/// 2. Size the book. The TOKEN it should hold is its equity plus the BUCKs it
+///    aims to have issued. That aim leans against parity: where the basket
+///    costs more than one BUCK the BUCK is cheap and the aim is below zero
+///    (hold BUCKs); where it costs less, above (issue them).
+/// 3. Work each constituent toward its target share of that book on its own:
+///    sell one that is over, buy one that is under, each when the policy
+///    sees it closing against the rest and at the policy's release. The two
+///    legs need not meet in one turn: the line carries the difference.
+///
+/// Two things act with no view on prices. A constituent beyond its leash is
+/// brought back at once. BUCKs issued beyond the ceiling, half of K x equity,
+/// are sold down at once, every constituent giving its share; the other half
+/// of the line is what exits are paid from.
 ///
 /// A target is the declared weight, leaned against price when the shell's
 /// tilt is set: lowered for a constituent above its reference price against
 /// the others, raised for one below. A liquidity position sells as its price
 /// rises, so its share moves half as far as a wallet's; a tilt of one half
-/// asks for the other half. The leash and the safeguard keep the declared
-/// weights.
+/// asks for the other half. The leash keeps the declared weights.
 contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     uint256 private constant NONE = type(uint256).max;
+    /// @notice The most BUCKs to have issued in normal running, of K x equity.
+    uint256 public constant CEILING_BP = 5000;
     IRebalancePolicy public immutable pairPolicy;
-    // sells: the value each constituent is to sell; sell: the one selling most, NONE when none does.
-    struct Plan { uint256 sell; uint256 buy; uint256[] sells; uint256 buyCap; bool pairOnly; }
-    struct Allocation {
-        uint256 donor;
-        uint256 total;
-        uint256[] recipients;
-        bool needsSafeguard;
-        int256[] gaps; // each constituent over (+) or under (-) its target, as a share of the book, 1e18
-        uint256[] rates; // the rate each donor is asked at toward its eligible recipients, per day, 1e18
-    }
-    // action: 0 mark-only, 1 sell, 2 buy, 3 transfer, 4 pair existing inventory.
-    event Responded(uint8 indexed action, uint256 sell, uint256 buy, uint256 proceeds, uint256 buySpent);
-    event PairResponse(uint256 indexed donor, uint256 planned, uint256 proceeds, uint256 bought);
+    /// @notice The parity reference: the basket's cost in BUCK, as last sampled.
+    IBasketReference public immutable parity;
+    /// @notice BUCKs to hold or issue per unit of parity error, as a share of equity, 1e18.
+    uint256 public immutable parityGain;
 
-    constructor(address policy) { pairPolicy = IRebalancePolicy(policy); }
+    struct Book {
+        uint256[] token;   // each constituent's TOKEN, in its position and the wallet, in BUCK at the TWAP
+        uint256[] target;  // what the book asks of it
+        uint256 total;     // the TOKEN the book should hold
+        int256 issued;     // BUCKs let out: the lien net of relief and of the BUCKs held in the positions
+        uint256 ceiling;   // the most to have issued in normal running
+        uint256 grain;
+    }
+    struct Plan {
+        int256[] gaps;     // each constituent over (+) or under (-) its target, as a share of the book, 1e18
+        uint256[] rates;   // the rate each is worked at, per day, 1e18
+        uint256[] sells;   // TOKEN to sell, in BUCK
+        uint256[] buys;    // TOKEN to buy, in BUCK
+    }
+    // action: 0 a mark alone, 1 sold, 2 bought, 4 placed. proceeds: the TOKEN sold; buySpent: BUCKs paired or TOKEN bought.
+    event Responded(uint8 indexed action, uint256 sell, uint256 buy, uint256 proceeds, uint256 buySpent);
+
+    constructor(address policy, address parity_, uint256 parityGain_) {
+        pairPolicy = IRebalancePolicy(policy);
+        parity = IBasketReference(parity_);
+        parityGain = parityGain_;
+    }
 
     function _v() private view returns (IBuckBasketVenue) { return IBuckBasketVenue(address(this)); }
+    function _spendable() private view returns (uint256) { return _bk().balanceOf(address(this)); }
 
     function wheelDue(uint8 kind, uint256 i) public view returns (bool) {
         if (kind == 0) return block.timestamp / 1 days > lastDay;
@@ -51,10 +78,11 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         if (pairPolicy.signals().isDue()) return true;
         Snap memory s = _snap();
         if (_staleMark(s)) return true;
-        Allocation memory a = _allocation(s);
-        if (!a.needsSafeguard) return a.donor != NONE || _idlePlacement(s, 0).buy != NONE;
-        Plan memory p = _safeguard(s);
-        return p.sell != NONE || (p.buy != NONE && _usableS(s) > _grainS(s));
+        uint256 grain = _grainS(s);
+        for (uint256 j; j < s.m.length; ++j) if (s.m[j].depth != 0 && _tokenValue(s, j) > grain) return true;
+        Plan memory p = _plan(s, _book(s));
+        for (uint256 j; j < s.m.length; ++j) if (p.sells[j] > 0 || p.buys[j] > 0) return true;
+        return false;
     }
 
     function wheelStep(uint8 kind, uint256 i) external returns (uint256) {
@@ -73,13 +101,12 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         return _respond();
     }
 
+    /// @dev Settle the relief on the lien and mark. The day's flow is reported
+    /// and cleared; nothing here rations room by it.
     function _daily() private returns (uint256) {
         uint64 day = uint64(block.timestamp / 1 days);
         if (day <= lastDay) return 0;
         uint256 flow = uint256(dayFlow < 0 ? -dayFlow : dayFlow);
-        uint256 square = flow * flow / 1e18;
-        uint256 span = uint256(eq.flowDays) + 1;
-        flowMs = square >= flowMs ? flowMs + (square - flowMs) * 2 / span : flowMs - (flowMs - square) * 2 / span;
         dayFlow = 0;
         lastDay = day;
         if (_bk().signedBalanceOf(address(this)) < 0 && _bk().reliefOf(address(this)) > 0) _bk().settleRelief();
@@ -131,187 +158,151 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         }
     }
 
-    function _allocation(Snap memory s) internal view virtual returns (Allocation memory a) {
+    /// @dev Pair every waiting TOKEN with issued BUCKs. The BUCKs are still
+    /// held afterwards, so each marking gives the room back: a deposit larger
+    /// than the room is paired in a few passes.
+    function _placeAll(Snap memory s) private returns (uint256 moved) {
+        uint256 grain = _grainS(s);
+        for (uint256 i; i < s.m.length; ++i) {
+            if (s.m[i].depth == 0) continue;
+            for (uint256 pass; pass < 4; ++pass) {
+                uint256 budget = PM.min(_tokenValue(s, i), _spendable());
+                if (budget <= grain) break;
+                uint256 placed = _buy(i, budget, true);
+                if (placed == 0) break;
+                _markS(_snap());
+                emit Responded(4, NONE, i, 0, placed);
+                moved += placed;
+            }
+        }
+    }
+
+    /// @dev The book the equity asks for, and where each constituent stands in it.
+    function _book(Snap memory s) internal view returns (Book memory b) {
+        uint256 n = s.m.length;
+        b.token = new uint256[](n);
+        uint256 held;
+        uint256 token;
+        for (uint256 i; i < n; ++i) {
+            held += s.m[i].posTwap / 2;
+            b.token[i] = s.m[i].posTwap / 2 + _tokenValue(s, i);
+            token += b.token[i];
+        }
+        b.issued = -s.buckEq - int256(held);
+        int256 equity = int256(token) - b.issued;
+        if (equity < 0) equity = 0;
+        b.ceiling = s.k * uint256(equity) / 1e18 * CEILING_BP / 10000;
+        // With no fresh reading the book stays the size it is.
+        int256 aim = b.issued;
+        if (parityGain == 0) aim = 0;
+        else if (parity.fresh()) {
+            // Above zero the basket costs more than a BUCK: the BUCK is cheap.
+            aim = -(parity.rawValue() - 1e18) * int256(parityGain) / 1e18 * equity / 1e18;
+        }
+        if (aim > int256(b.ceiling)) aim = int256(b.ceiling);
+        if (aim < -int256(b.ceiling)) aim = -int256(b.ceiling);
+        b.total = equity + aim > 0 ? uint256(equity + aim) : 0;
+        b.target = _targets(s, b.total);
+        b.grain = _grainS(s);
+    }
+
+    /// @dev How fast constituent i may be worked: the policy's rate for it
+    /// against each of the others, weighed by their declared weights. Sold,
+    /// it is the pair's seller; bought, its buyer.
+    function _rate(uint256 i, bool sold, uint256 n) internal view virtual returns (uint256) {
+        uint256 sum;
+        uint256 weights;
+        for (uint256 j; j < n; ++j) {
+            if (j == i) continue;
+            uint256 weight = constituents[j].targetWeightBp;
+            sum += weight * (sold ? pairPolicy.desire(i, j) : pairPolicy.desire(j, i));
+            weights += weight;
+        }
+        return weights == 0 ? 0 : sum / weights;
+    }
+
+    /// @dev Which gaps may be worked at all: with a patient policy, those
+    /// that have built their full urgency; with none, those beyond the fixed
+    /// band.
+    function _eligible(Book memory b, int256[] memory gaps) private view returns (uint256 mask) {
+        if (pairPolicy.patience() != 0) return pairPolicy.urgent(gaps);
+        uint256 band = b.total * eq.weightBandBp / 10000;
+        for (uint256 i; i < gaps.length; ++i) {
+            uint256 gap = b.token[i] > b.target[i] ? b.token[i] - b.target[i] : b.target[i] - b.token[i];
+            if (gap > band) mask |= uint256(1) << i;
+        }
+    }
+
+    function _plan(Snap memory s, Book memory b) internal view returns (Plan memory p) {
         uint256 n = s.m.length;
         require(n == pairPolicy.count() && address(this) == pairPolicy.basket(), "pair basket");
-        a.donor = NONE; a.recipients = new uint256[](n);
-        uint256[] memory value = new uint256[](n);
-        uint256 total;
-        for (uint256 i; i < n; ++i) { value[i] = s.m[i].posTwap + _tokenValue(s, i); total += value[i]; }
-        uint256 grain = _grainS(s);
-        // The book comes first: a cash-only start, a lien above K, short
-        // liquidity or a constituent beyond its leash is safeguard work.
-        if (total == 0 || s.lien > s.k * _equityS(s, MARK_LOW) / 1e18
-            || s.spend + grain < _targetS(s) * (10000 - eq.bandBp) / 10000) {
-            a.needsSafeguard = true; return a;
-        }
-        uint256[] memory excess = new uint256[](n);
-        uint256[] memory deficit = new uint256[](n);
-        uint256[] memory targets = _targets(s, total);
-        a.gaps = new int256[](n); a.rates = new uint256[](n);
+        p.gaps = new int256[](n); p.rates = new uint256[](n);
+        p.sells = new uint256[](n); p.buys = new uint256[](n);
+        uint256 tokens;
         for (uint256 i; i < n; ++i) {
-            uint256 weight = constituents[i].targetWeightBp;
-            uint256 target = total * weight / 10000;
-            uint256 gap = value[i] > target ? value[i] - target : target - value[i];
-            // The leash is the mandate: it is kept on the declared weight.
-            if (_beyondLeash(gap, total, weight)) { a.needsSafeguard = true; return a; }
-            target = targets[i];
-            gap = value[i] > target ? value[i] - target : target - value[i];
-            a.gaps[i] = value[i] > target ? int256(gap * 1e18 / total) : -int256(gap * 1e18 / total);
-            if (s.m[i].depth == 0) continue;
-            if (value[i] > target) excess[i] = gap;
-            else deficit[i] = gap;
+            tokens += b.token[i];
+            if (b.total > 0) p.gaps[i] = (int256(b.token[i]) - int256(b.target[i])) * 1e18 / int256(b.total);
         }
-        // Which gaps may be worked at all. With a patient policy, those that
-        // have built their full urgency; with none, those beyond the fixed
-        // band. Either triggers consideration only; capacity is the safe
-        // distance to target. Requiring both legs to qualify starves useful
-        // counter-legs, and subtracting both bands starves size.
-        bool[] memory material = new bool[](n);
-        {
-            bool patient = pairPolicy.patience() != 0;
-            uint256 mask = patient ? pairPolicy.urgent(a.gaps) : 0;
-            uint256 band = total * eq.weightBandBp / 10000;
-            bool outside;
-            for (uint256 i; i < n; ++i) {
-                if (s.m[i].depth == 0) continue;
-                material[i] = patient ? (mask >> i) & 1 == 1 : excess[i] + deficit[i] > band;
-                if (material[i]) outside = true;
-            }
-            if (!outside) return a;
-        }
-        // A nominal request barely above grain can fall below it after the
-        // sale, reverting a predictable dust transfer. Reserve room for the
-        // venue's allowed price band on input and output; execution still
-        // rechecks actual proceeds, credit and each recipient's grain.
-        uint256 tolerance = defaultMaxDeviationBp;
-        if (tolerance >= 10000) return a;
-        uint256 minimum = grain * (10000 + tolerance) / (10000 - tolerance) + 1;
+        // Beyond the ceiling every constituent gives its share, whatever the policy sees.
+        if (b.issued > int256(b.ceiling) && tokens > 0)
+            for (uint256 i; i < n; ++i) p.sells[i] = uint256(b.issued - int256(b.ceiling)) * b.token[i] / tokens;
+        uint256 mask = _eligible(b, p.gaps);
         for (uint256 i; i < n; ++i) {
-            if (excess[i] == 0) continue;
-            uint256 eligible;
-            uint256 weightedRate;
-            for (uint256 j; j < n; ++j) {
-                if (deficit[j] == 0 || (!material[i] && !material[j])) continue;
-                uint256 rate = pairPolicy.desire(i, j);
-                if (rate == 0) continue;
-                eligible += deficit[j]; weightedRate += deficit[j] * rate;
+            if (s.m[i].depth == 0 || b.token[i] == b.target[i]) continue;
+            bool over = b.token[i] > b.target[i];
+            uint256 gap = over ? b.token[i] - b.target[i] : b.target[i] - b.token[i];
+            uint256 amount;
+            uint256 declared = b.total * constituents[i].targetWeightBp / 10000;
+            if (_beyondLeash(b.token[i] > declared ? b.token[i] - declared : declared - b.token[i], b.total,
+                             constituents[i].targetWeightBp)) {
+                // The leash is the mandate: it is kept on the declared weight, and at once.
+                amount = gap;
+            } else if ((mask >> i) & 1 == 1) {
+                p.rates[i] = _rate(i, over, n);
+                amount = gap * pairPolicy.share(i, p.rates[i]) / 1e18;
             }
-            if (eligible == 0) continue;
-            a.rates[i] = weightedRate / eligible;
-            uint256 amount = PM.min(excess[i], eligible) * pairPolicy.share(i, a.rates[i]) / 1e18;
-            amount = PM.min(amount, PM.min(value[i] * eq.stepBp / 10000, _swapCap(s.m[i])));
-            if (amount <= minimum || amount <= a.total) continue;
-            uint256[] memory recipients = new uint256[](n);
-            uint256 executable;
-            for (uint256 j; j < n; ++j) {
-                if (deficit[j] == 0 || (!material[i] && !material[j]) || pairPolicy.desire(i, j) == 0) continue;
-                uint256 part = amount * deficit[j] / eligible;
-                // One common scale is used below for depth/step constraints;
-                // do not separately overfill a small recipient.
-                recipients[j] = part; executable += part;
-            }
-            uint256 scale = 1e18;
-            for (uint256 j; j < n; ++j) {
-                if (recipients[j] == 0) continue;
-                uint256 step = (value[j] > targets[j] ? value[j] : targets[j]) * eq.stepBp / 10000;
-                uint256 cap = PM.min(_swapCap(s.m[j]), PM.min(deficit[j], step));
-                if (cap < recipients[j]) scale = PM.min(scale, cap * 1e18 / recipients[j]);
-            }
-            executable = 0;
-            for (uint256 j; j < n; ++j) {
-                recipients[j] = recipients[j] * scale / 1e18;
-                // Leave uneconomic dust unrequested rather than forcing a leg.
-                if (recipients[j] <= minimum) recipients[j] = 0;
-                executable += recipients[j];
-            }
-            if (executable > a.total) { a.donor = i; a.total = executable; a.recipients = recipients; }
+            if (over) p.sells[i] += amount; else p.buys[i] = amount;
         }
+        uint256 selling;
+        uint256 buying;
+        for (uint256 i; i < n; ++i) {
+            uint256 cap = _swapCap(s.m[i]);
+            p.sells[i] = PM.min(p.sells[i], PM.min(b.token[i] * eq.stepBp / 10000, cap));
+            p.buys[i] = PM.min(p.buys[i], PM.min(b.target[i] * eq.stepBp / 10000, cap));
+            // Leave uneconomic dust unrequested rather than forcing a leg.
+            if (p.sells[i] <= 2 * b.grain) p.sells[i] = 0;
+            if (p.buys[i] <= 2 * b.grain) p.buys[i] = 0;
+            selling += p.sells[i]; buying += p.buys[i];
+        }
+        // Purchases may not take the issue past the ceiling.
+        int256 line = int256(b.ceiling) - b.issued + int256(selling);
+        if (line <= 0) { for (uint256 i; i < n; ++i) p.buys[i] = 0; }
+        else if (buying > uint256(line)) { for (uint256 i; i < n; ++i) p.buys[i] = p.buys[i] * uint256(line) / buying; }
     }
 
-    /// @dev What the book needs before any view on prices. A constituent
-    /// beyond its leash is sold or bought back toward its declared weight. A
-    /// need for cash beyond that is spread over every constituent, each
-    /// giving in proportion to what it may give in one turn, and while cash
-    /// is needed nothing is bought. When none is, TOKEN already held may be
-    /// placed in the same turn: that swaps nothing, so a leash sale need not
-    /// hold it back.
-    function _safeguard(Snap memory s) internal view returns (Plan memory p) {
-        p.sell = NONE; p.buy = NONE;
-        uint256 n = s.m.length;
-        p.sells = new uint256[](n);
-        uint256[] memory value = new uint256[](n);
-        uint256 total;
-        for (uint256 i; i < n; ++i) { value[i] = s.m[i].posTwap + _tokenValue(s, i); total += value[i]; }
-        // A cash-only book has no weights yet: aim its usable cash at the declared ones.
-        if (total == 0) total = _usableS(s);
-        if (total == 0) return p;
-        uint256 grain = _grainS(s);
-        uint256 limit = s.k * _equityS(s, MARK_LOW) / 1e18;
-        uint256 liquidity = _targetS(s);
-        uint256 need = s.spend + grain < liquidity * (10000 - eq.bandBp) / 10000 ? liquidity - s.spend : 0;
-        if (s.lien > limit) need += s.lien - limit;
-        uint256[] memory room = new uint256[](n);
-        uint256 rooms;
-        uint256 raised;
-        uint256 mostUnder;
-        for (uint256 i; i < n; ++i) {
-            if (s.m[i].depth == 0) continue;
-            uint256 weight = constituents[i].targetWeightBp;
-            uint256 target = total * weight / 10000;
-            bool over = value[i] > target;
-            uint256 gap = over ? value[i] - target : target - value[i];
-            bool leashed = _beyondLeash(gap, total, weight);
-            room[i] = PM.min(value[i] * eq.stepBp / 10000, 2 * _swapCap(s.m[i]));
-            if (over && leashed) { p.sells[i] = PM.min(gap, room[i]); raised += p.sells[i]; }
-            rooms += room[i] - p.sells[i];
-            if (need > 0 || over || !leashed) continue;
-            // A zero holding must be able to receive its first allocation.
-            uint256 buyCap = PM.min(gap, PM.min(target * eq.stepBp / 10000, _swapCap(s.m[i])));
-            if (buyCap > grain && gap > mostUnder) { p.buy = i; p.buyCap = buyCap; mostUnder = gap; }
+    function _execute(Snap memory s, Plan memory p, uint256 grain) private returns (uint256 moved) {
+        // Each sale is in its own pool, so the opening snapshot prices them all. Wallet TOKEN goes
+        // first; a position gives up TOKEN and BUCKs in equal value, so twice the rest is burned.
+        bool sold;
+        for (uint256 i; i < p.sells.length; ++i) {
+            if (p.sells[i] == 0) continue;
+            uint256 waiting = _tokenValue(s, i);
+            if (!_sell(s, i, waiting >= p.sells[i] ? p.sells[i] : waiting + 2 * (p.sells[i] - waiting))) continue;
+            pairPolicy.recordExecution(i);
+            emit Responded(1, i, NONE, p.sells[i], 0);
+            moved += p.sells[i]; sold = true;
         }
-        if (need > raised && rooms > 0) {
-            uint256 more = need - raised;
-            for (uint256 i; i < n; ++i) {
-                uint256 rest = room[i] - p.sells[i];
-                p.sells[i] += more >= rooms ? rest : more * rest / rooms;
-            }
-        }
-        uint256 most;
-        raised = 0;
-        for (uint256 i; i < n; ++i) {
-            if (p.sells[i] <= grain) { p.sells[i] = 0; continue; }
-            raised += p.sells[i];
-            if (p.sells[i] > most) { most = p.sells[i]; p.sell = i; }
-        }
-        if (need == 0 && p.buy == NONE) {
-            // What a leash sale raises can pair waiting TOKEN in the same turn.
-            Plan memory idle = _idlePlacement(s, raised);
-            p.buy = idle.buy; p.buyCap = idle.buyCap; p.pairOnly = true;
-        }
-    }
-
-    /// @dev Pair inventory already owned by the basket, with the cash it can
-    /// spare and any more this turn is about to raise. Adding BUCK expands
-    /// the book, so rank shortages in the funded allocation, not capped step
-    /// sizes (which repeatedly favour the largest leg). No TOKEN is swapped,
-    /// so no policy is asked.
-    function _idlePlacement(Snap memory s, uint256 raised) internal view returns (Plan memory p) {
-        p.sell = NONE; p.buy = NONE; p.pairOnly = true;
-        uint256 usable = _usableS(s) + raised;
-        uint256 grain = _grainS(s);
-        if (usable <= grain) return p;
-        uint256 expanded = _grossS(s, MARK_TWAP) + usable;
-        uint256 best;
-        for (uint256 i; i < s.m.length; ++i) {
-            uint256 idle = _tokenValue(s, i);
-            uint256 value = s.m[i].posTwap + idle;
-            uint256 target = expanded * constituents[i].targetWeightBp / 10000;
-            if (target <= value) continue;
-            uint256 gap = target - value;
-            uint256 cap = PM.min(idle, PM.min(gap, usable));
-            cap = PM.min(cap, PM.min(value * eq.stepBp / 10000, _swapCap(s.m[i])));
-            if (gap > best && cap > grain) { best = gap; p.buy = i; p.buyCap = cap; }
+        if (sold) _markS(_snap());
+        for (uint256 j; j < p.buys.length; ++j) {
+            // Half buys the TOKEN, half is paired with it.
+            uint256 budget = PM.min(2 * p.buys[j], _spendable());
+            if (budget <= 2 * grain) continue;
+            uint256 used = _buy(j, budget, false);
+            if (used == 0) continue;
+            _markS(_snap());
+            pairPolicy.recordExecution(j);
+            emit Responded(2, NONE, j, 0, used / 2);
+            moved += used / 2;
         }
     }
 
@@ -327,101 +318,26 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     }
 
     function _respond() internal virtual returns (uint256) {
+        require(netMark, "net mark");
         pairPolicy.observe();
         Snap memory s = _snap();
-        Allocation memory a = _allocation(s);
-        int24[] memory beforeTicks = _spotTicks();
-        if (a.needsSafeguard) {
-            uint256 work = _protect(s);
-            _record(beforeTicks);
-            return work;
-        }
-        pairPolicy.recordGaps(a.gaps);
-        pairPolicy.recordRates(a.rates);
-        bool stale = _staleMark(s); _markS(s);
-        if (a.donor == NONE) {
-            Plan memory p = _idlePlacement(s, 0);
-            if (p.buy != NONE && _headroomS(s) >= 0) {
-                uint256 placed = _buy(p.buy, PM.min(p.buyCap, s.spend), true);
-                if (placed > 0) {
-                    _markS(_snap());
-                    lastResponseAt = uint64(block.timestamp);
-                    emit Responded(4, NONE, p.buy, 0, placed);
-                    emit WheelWork(2, 0, placed);
-                    return 1;
-                }
-            }
-            if (!stale) return 0;
-            lastResponseAt = uint64(block.timestamp);
-            emit Responded(0, NONE, NONE, 0, 0);
-            emit WheelWork(2, 0, 0);
-            return 1;
-        }
-        uint256 spendBefore = s.spend;
-        require(_sell(s, a.donor, a.total), "pair sell refused");
-        uint256 spendAfter = _bk().balanceOf(address(this));
-        uint256 proceeds = spendAfter > spendBefore ? spendAfter - spendBefore : 0;
-        s = _snap(); _markS(s);
-        // This operation transfers donor value; it does not add a fresh draw
-        // merely because the credit account has unused headroom.
-        uint256 budget = PM.min(a.total, PM.min(proceeds, s.spend));
-        require(_headroomS(s) >= 0 && budget > _grainS(s), "pair cash unavailable");
-        uint256 used;
-        for (uint256 j; j < a.recipients.length; ++j) {
-            if (a.recipients[j] == 0) continue;
-            uint256 part = budget * a.recipients[j] / a.total;
-            // Every leg rechecks current venue bounds; any refused planned
-            // recipient rolls the entire response back, including the sale.
-            require(part > _grainS(s) && part <= _bk().balanceOf(address(this)), "pair recipient budget");
-            uint256 filled = _buy(j, part, false);
-            require(filled > 0, "pair buy refused");
-            used += filled; s = _snap(); _markS(s);
-            require(_headroomS(s) >= 0, "pair credit");
-        }
-        _record(beforeTicks);
-        pairPolicy.recordExecution(a.donor);
-        lastResponseAt = uint64(block.timestamp);
-        emit Responded(3, a.donor, NONE, proceeds, used);
-        emit PairResponse(a.donor, a.total, proceeds, used);
-        emit WheelWork(2, 0, proceeds + used);
-        return 1;
-    }
-
-    /// @dev Carry out the safeguard plan, with a fresh credit mark between
-    /// its sale and its purchase.
-    function _protect(Snap memory s) private returns (uint256) {
         bool stale = _staleMark(s);
         _markS(s);
-        Plan memory p = _safeguard(s);
-        int256 headroom0 = _headroomS(s);
-        uint256 usable0 = _usableS(s);
-        uint256 proceeds;
-        bool sold;
-        if (p.sell != NONE) {
-            uint256 beforeSpend = s.spend;
-            // Each sale is in its own pool, so the opening snapshot prices them all.
-            for (uint256 i; i < p.sells.length; ++i)
-                if (p.sells[i] > 0 && _sell(s, i, p.sells[i])) sold = true;
-            uint256 afterSpend = _bk().balanceOf(address(this));
-            proceeds = afterSpend > beforeSpend ? afterSpend - beforeSpend : 0;
-            // Never re-mark the opening snapshot after changing the book.
-            s = _snap();
-            _markS(s);
+        int24[] memory beforeTicks = _spotTicks();
+        uint256 moved = _placeAll(s);
+        if (moved > 0) { s = _snap(); _markS(s); }
+        Book memory b = _book(s);
+        Plan memory p = _plan(s, b);
+        pairPolicy.recordGaps(p.gaps);
+        pairPolicy.recordRates(p.rates);
+        uint256 traded = _execute(s, p, b.grain);
+        if (traded > 0) _record(beforeTicks);
+        if (moved + traded == 0) {
+            if (!stale) return 0;
+            emit Responded(0, NONE, NONE, 0, 0);
         }
-        uint256 buySpent;
-        if (p.buy != NONE && headroom0 >= 0) {
-            uint256 budget = PM.min(proceeds, p.buyCap);
-            if (_headroomS(s) >= 0) budget += PM.min(usable0, p.buyCap - budget);
-            budget = PM.min(budget, s.spend);
-            if (budget > _grainS(s)) buySpent = _buy(p.buy, budget, p.pairOnly);
-            if (buySpent > 0) _markS(_snap());
-        }
-        if (!sold && buySpent == 0 && !stale) return 0;
         lastResponseAt = uint64(block.timestamp);
-        // 0 a mark alone, 1 sold, 2 bought, 3 sold and bought, 4 placed, 5 sold and placed.
-        uint8 action = sold ? (buySpent > 0 ? (p.pairOnly ? 5 : 3) : 1) : (buySpent > 0 ? (p.pairOnly ? 4 : 2) : 0);
-        emit Responded(action, p.sell, p.buy, proceeds, buySpent);
-        emit WheelWork(2, 0, buySpent + proceeds);
+        emit WheelWork(2, 0, moved + traded);
         return 1;
     }
 

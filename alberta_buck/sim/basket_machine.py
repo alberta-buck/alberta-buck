@@ -29,12 +29,7 @@ DEFAULTS = {
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
-    "net_mark": False,              # mark the credit so that K bounds the lien net of the BUCKs still held
-    "parity_gain": 5.,              # a net-mark trial: BUCKs held or issued per unit of parity error, of equity
-    # The shell's liquidity target, the room it keeps unspent for exits. None: as deployed (1% of the
-    # gross at least, two standard deviations of the daily flow, a fifth of the gross at most).
-    "reserve_floor_bp": None,       # at least this of the gross
-    "reserve_flow_z": None,         # standard deviations of the daily flow; 0: the floor alone
+    "parity_gain": 5.,              # BUCKs the book aims to hold or to have issued per unit of parity error, of equity
     # The desk beside the basket and its outer-band policy.
     "desk_capital_usd": 400000,     # its founding grant, for each constituent
     "desk_leg_bp": 40,              # one operation's leg, of the pool
@@ -55,10 +50,9 @@ ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_A
                "desk_turnover_buck": "SIM_OPS_TURNOVER_BUCK", "desk_floor_buck": "SIM_OPS_CAPITAL_FLOOR_BUCK",
                "desk_enter_bp": "SIM_OPS_ENTER_BP", "desk_release_bp": "SIM_OPS_RELEASE_BP",
                "desk_gain_bp": "SIM_OPS_GAIN_BP", "desk_cap_bp": "SIM_OPS_CAP_BP", "desk_persist_days": "SIM_OPS_PERSIST"}
-# Responded's action: what a response did, and which of its two amounts measures each part of it.
-ACTIONS = {1: (("raise", "proceeds"),), 2: (("buy", "buySpent"),), 3: (("transfer", "proceeds"),),
-           4: (("place", "buySpent"),), 5: (("raise", "proceeds"), ("place", "buySpent")),
-           6: (("place", "buySpent"),)}        # a trial's: placed by selling half of what waited
+# Responded's action: what a response did, and which of its two amounts measures it. A sale's is the
+# TOKEN sold and a purchase's the TOKEN bought, in BUCK; a placement's is the BUCKs paired.
+ACTIONS = {1: ("sell", "proceeds"), 2: ("buy", "buySpent"), 4: ("place", "buySpent")}
 
 
 def settings(given=None) -> dict:
@@ -123,7 +117,8 @@ def book_receipt(d, receipt, ctr) -> None:
         action = int(event["args"]["action"])
         key = f"wh_eq_response_{action}_n"
         ctr[key] = ctr.get(key, 0) + 1
-        for name, amount in ACTIONS.get(action, ()):
+        if action in ACTIONS:
+            name, amount = ACTIONS[action]
             ctr[f"wh_eq_{name}"] = ctr.get(f"wh_eq_{name}", 0) + int(event["args"][amount])
             ctr[f"wh_eq_{name}_n"] = ctr.get(f"wh_eq_{name}_n", 0) + 1
 
@@ -169,17 +164,10 @@ def activate(d, given=None, turn_seconds=0) -> None:
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
-    if s["net_mark"] in (True, 1, "true", "True"):
-        chain.send(basket.functions.setNetMark(True), sender=gov)
+    # The upkeep facet is written for a credit marked net: K bounds the BUCKs let out, not those held.
+    chain.send(basket.functions.setNetMark(True), sender=gov)
     chain.send(basket.functions.setResponse((int(s["leash_bp"]), interval, round(s["tilt"] * 10000),
                                              int(s["lean_cap_bp"]))), sender=gov)
-    if s["reserve_floor_bp"] is not None or s["reserve_flow_z"] is not None:
-        params = list(basket.functions.eq().call())        # floorBp first, flowZx100 second
-        if s["reserve_floor_bp"] is not None:
-            params[0] = int(s["reserve_floor_bp"])
-        if s["reserve_flow_z"] is not None:
-            params[1] = round(s["reserve_flow_z"] * 100)
-        chain.send(basket.functions.setEquityParams(tuple(params)), sender=gov)
     chain.send(wheel.functions.setResponseMode(True), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
     # These were comparison advisors; the replacement has one price service.

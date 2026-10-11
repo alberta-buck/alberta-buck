@@ -12,6 +12,7 @@ import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 import {bindCarryingPool} from "../harness/CarryingPool.sol";
 import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
+import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 
 contract BasketMachineIntegrationTest is BasketDeskTest {
     BasketReference internal service;
@@ -25,8 +26,9 @@ contract BasketMachineIntegrationTest is BasketDeskTest {
         bindCarryingPool(reg, address(machine));
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))))));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))), address(service), 0)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
+        b.setNetMark(true);
         (bool ok,) = address(b).call(abi.encodeWithSignature("setWheel(address)", address(machine)));
         require(ok);
         desk.setMonetaryDirector(address(policy));
@@ -35,6 +37,11 @@ contract BasketMachineIntegrationTest is BasketDeskTest {
         machine.setOps(address(desk), address(policy));
         machine.setSample(address(policy));
         vm.stopPrank();
+    }
+
+    function _issued() internal view returns (int256 issued) {
+        issued = -buck.signedBalanceOf(address(b));
+        for (uint256 i; i < 3; ++i) issued -= int256(IBuckBasketVenue(address(b)).marks(i, b.liquidityOf(i)).posLow / 2);
     }
 
     function test_integration_sparseWheelCallsSampleBeforeTrading() public {
@@ -83,11 +90,13 @@ contract BasketMachineIntegrationTest is BasketDeskTest {
             _push(i, seed % 2 == 0, seed % 2 == 0 ? (100 + uint256(seed) % 3000) * B : (100 + uint256(seed) % 1000) * 1e18);
             ctrl.setK((20 + seed % 65) * 1e16);
             vm.warp(vm.getBlockTimestamp() + 6 hours); vm.roll(vm.getBlockNumber() + 1);
-            int256 account = buck.signedBalanceOf(address(b));
-            int256 low = int256(b.grossAt(2)) + account + int256(buck.reliefOf(address(b)));
-            bool underwater = account < 0 && uint256(-account) > ctrl.k() * uint256(low > 0 ? low : int256(0)) / 1e18;
+            // Under the net mark the basket is under water when what it has
+            // issued, net of the BUCKs in its positions, is beyond K x equity.
+            int256 issued = _issued();
+            int256 low = int256(b.grossAt(2)) + buck.signedBalanceOf(address(b)) + int256(buck.reliefOf(address(b)));
+            bool underwater = issued > 0 && uint256(issued) > ctrl.k() * uint256(low > 0 ? low : int256(0)) / 1e18;
             machine.rearm(); machine.tick(12, 0);
-            if (underwater) assertGe(buck.signedBalanceOf(address(b)), account, "no draw while underwater");
+            if (underwater) assertLe(_issued(), issued + int256(b.grossAt(2) / 200), "nothing more issued while underwater");
             for (uint256 leg; leg < 3; ++leg) {
                 assertGe(tok[leg].balanceOf(address(b)), b.idleToken(leg));
                 assertGe(tok[leg].balanceOf(address(desk)), desk.monetaryTokenHeld(leg));

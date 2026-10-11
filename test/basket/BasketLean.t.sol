@@ -14,8 +14,8 @@ import {PortfolioMath as PM} from "../../src/basket/PortfolioMath.sol";
 contract BasketLeanTest is BuckBasketEquityTest {
     ControlledPairIntent intent;
 
-    // A book at its declared weights, and a policy that asks for everything.
-    function _balanced(uint16 tiltBp, uint16 capBp) private {
+    // A paired book at its declared weights, and a policy that asks for everything.
+    function _balanced(uint16 tiltBp, uint16 capBp) private returns (uint128[3] memory placed) {
         _deposit(alice, address(tok[0]), 33_333e18);
         _deposit(alice, address(tok[1]), uint256(33_333e18) / 2);
         _deposit(alice, address(tok[2]), uint256(33_334e18) / 3);
@@ -23,9 +23,18 @@ contract BasketLeanTest is BuckBasketEquityTest {
         intent.setUrgent(0.02e18, 7);
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent))));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, tiltBp, capBp));
+        b.setNetMark(true);
         vm.stopPrank();
+        assertEq(_response(), 1);
+        assertEq(intent.impacts(), 0, "pairing a balanced book trades nothing");
+        placed = [b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2)];
+    }
+
+    function _response() private returns (uint256) {
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
+        return IBasketUpkeep(address(b)).wheelStep(2, 0);
     }
 
     function test_lean_tiltAndCapAreBoundedAndTheReferenceIsGovernances() public {
@@ -45,16 +54,16 @@ contract BasketLeanTest is BuckBasketEquityTest {
     function test_lean_withNoTiltABalancedBookIsLeftAlone() public {
         _balanced(0, 1500);
         vm.prank(GOV); b.setReferencePrice(0, price[0] / 2);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
+        _response();
         assertEq(intent.impacts(), 0, "declared weights, and nothing over them");
     }
 
     function test_lean_aTokenAboveItsReferenceIsSoldBelowItsDeclaredWeight() public {
-        _balanced(5000, 1500);
+        uint128[3] memory placed = _balanced(5000, 1500);
         vm.prank(GOV); b.setReferencePrice(0, price[0] / 2); // TOKEN 0 stands at twice its reference
-        uint256 idle = b.idleToken(0);
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
-        assertLt(b.idleToken(0), idle, "a balanced book sells the TOKEN that stands above its reference");
+        assertEq(_response(), 1);
+        assertLt(b.liquidityOf(0), placed[0], "a balanced book sells the TOKEN that stands above its reference");
+        assertGt(b.liquidityOf(1), placed[1], "and buys the others");
         // A tilt of one half would take 1/sqrt(2) of its weight; the cap holds it to 15% of 33.33 points.
         assertApproxEqAbs(intent.reported(0), 0.05e18, 0.001e18, "its gap is measured from the leaned target");
         assertLt(intent.reported(1), 0); assertLt(intent.reported(2), 0);
@@ -64,7 +73,7 @@ contract BasketLeanTest is BuckBasketEquityTest {
     function test_lean_theCapIsWhatBindsOnlyBeyondIt() public {
         _balanced(5000, 2900);
         vm.prank(GOV); b.setReferencePrice(0, price[0] / 2);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
+        _response();
         // 3333 x 0.7071 against 3333 and 3334: 26.1% of the book, 7.2 points under its declared weight.
         assertApproxEqAbs(intent.reported(0), 0.0721e18, 0.001e18);
     }
@@ -74,7 +83,7 @@ contract BasketLeanTest is BuckBasketEquityTest {
         vm.startPrank(GOV);
         for (uint256 i; i < 3; ++i) b.setReferencePrice(i, price[i] / 2);
         vm.stopPrank();
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
+        _response();
         assertEq(intent.impacts(), 0, "only one price against another leans a target");
     }
 }

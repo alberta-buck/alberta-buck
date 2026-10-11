@@ -10,7 +10,7 @@ Run inside the Nix shell with the Python environment active. A world takes about
 one that is already saved is read, not run again:
     python doc/review/savings-old-new.py /tmp/savings [years] [set ...]
 """
-import json, multiprocessing, sys, time
+import json, multiprocessing, os, sys, time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -26,6 +26,7 @@ def run(upkeep, prices, years, sets, out):
     from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
     exp = expmod.load(EXPERIMENT, sets=[f"scenario.basket={UPKEEPS[upkeep]}", f"scenario.prices={prices}",
                                         f"scenario.years={years}", *sets])
+    os.environ["SIM_CREDIT_FRAMES"] = "1"           # the lien, the BUCKs held and the demurrage they carry, either upkeep
     started = time.time()
     partial = out.with_suffix(".partial")           # the loop saves as it goes: only a finished world gets its name
     with PyrevmAnvil() as evm:
@@ -53,6 +54,12 @@ def report(path):
     work = {name: (last.get(f"wh_eq_{name}", 0) / 1e6, last.get(f"wh_eq_{name}_n", 0))
             for name in ("deploy", "fund", "trim", "place", "transfer", "raise", "buy")}
     desk = (int(last["desk_nav"]) - int(last["desk_hold"])) / 1e6 if last.get("desk_nav") and last.get("desk_hold") else None
+    # BUCKs let out, of equity: the lien net of the BUCKs still held in the positions. And the demurrage
+    # those held BUCKs carry in their pools, which the share price does not deduct until they come back.
+    credit = [f for f in frames[SETTLED:] if "eq_lien" in f]
+    issued = [(f["eq_lien"] - f["eq_held_buck"]) / int(f["eq_equity"]) for f in credit]
+    spendable = [f["eq_liquidity"] / int(f["eq_equity"]) for f in credit]
+    carried = last.get("eq_carried_fee", 0) / int(last["eq_equity"])
     return dict(
         days=len(frames), index=index, yearly=index ** (365 / days) - 1 if days else 0., over_holding=index / held - 1,
         equity=int(last["eq_equity"]) / 1e6, parity=sum(parity) / len(parity), worst_parity=max(parity),
@@ -61,7 +68,10 @@ def report(path):
         fees=last.get("wh_eq_sync", 0) / 1e6, harvest=last.get("wh_sol_credited_usd", 0.), gas=last.get("wh_sol_gas", 0),
         ticks=last.get("wh_sol_ticks", 0), work={n: w for n, w in work.items() if w[1]}, desk=desk,
         desk_moved=sum(last.get(f"dk_q{q}", 0) for q in (1, 2, 3, 4)) / 1e6, entries=last.get("dmEntries", 0),
-        exits=last.get("dmExits", 0), stale=sum(1 for f in frames if f.get("eq_signal_fresh") is False))
+        exits=last.get("dmExits", 0), stale=sum(1 for f in frames if f.get("eq_signal_fresh") is False),
+        price=price(last), carried=carried, lien=last.get("eq_lien", 0) / int(last["eq_equity"]),
+        issued=(min(issued), sum(issued) / len(issued), max(issued)) if issued else None,
+        spendable=min(spendable) if spendable else None)
 
 
 if __name__ == "__main__":
@@ -87,6 +97,11 @@ if __name__ == "__main__":
             print("           wheel: " + ", ".join(f"{n} {v:,.0f} in {c}" for n, (v, c) in r["work"].items())
                   + f"; pool fees {r['fees']:,.0f}; harvest ${r['harvest']:,.0f}; "
                   + f"{r['gas'] / 1e9:.2f} billion gas in {r['ticks']} turns")
+            if r["issued"]:
+                print(f"           share price {r['price']:.4f}, {r['price'] * (1 - r['carried']):.4f} net of the demurrage "
+                      f"its held BUCKs carry ({100 * r['carried']:.2f}% of equity); lien {100 * r['lien']:.0f}% of equity; "
+                      f"issued {100 * r['issued'][0]:+.1f}% to {100 * r['issued'][2]:+.1f}%, "
+                      f"mean {100 * r['issued'][1]:+.1f}%; spendable at least {100 * r['spendable']:.0f}%")
             print(f"           desk {'-' if r['desk'] is None else format(r['desk'], '+,.0f')} over holding, "
                   f"{r['desk_moved']:,.0f} moved; depositors {r['entries']} in, {r['exits']} out; "
                   f"days with a stale parity reference {r['stale']}")

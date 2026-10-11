@@ -8,6 +8,8 @@ renders this unchanged:
 
 from __future__ import annotations
 
+import os
+
 import json
 from pathlib import Path
 
@@ -166,6 +168,24 @@ def _eqsave_frame(d, ctr) -> dict:
         tot = sum(st["w0"]) or 1
         f["eq_hold"] = sum(w * p / p0 for w, p, p0 in zip(st["w0"], p_low, st["p0"])) / tot
     desk = getattr(d, "desk", None)
+    if getattr(d, "equity_machine", False) or os.environ.get("SIM_CREDIT_FRAMES"):
+        # The credit (always under the basket machine; SIM_CREDIT_FRAMES=1 adds it to any equity
+        # basket's frames): the lien, what the account can still spend, the BUCK side of the
+        # positions (BUCKs drawn and still held), and the demurrage those BUCKs carry in their
+        # pools, which the basket bears when they come back.  BUCK base units.
+        try:
+            f["eq_lien"] = int(b.functions.lien().call())
+            f["eq_liquidity"] = int(b.functions.liquidity().call())
+            held = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[1]) // 2 for i in range(n)]
+            f["eq_held_buck"] = sum(held)
+            carried = 0
+            for i in range(n):
+                raw = int(d.buck.functions.rawBalanceOf(d.pool_buck[i]).call())
+                if raw:
+                    carried += int(d.buck.functions.feeOwing(d.pool_buck[i]).call()) * min(held[i], raw) // raw
+            f["eq_carried_fee"] = carried
+        except Exception:
+            pass
     if getattr(d, "signals", None) is not None:
         f["eq_signal_fresh"] = bool(d.signals.functions.fresh().call())
         f["eq_signal_at"] = int(d.signals.functions.lastSampleAt().call())
@@ -174,15 +194,6 @@ def _eqsave_frame(d, ctr) -> dict:
         if policy is not None:
             f["desk_side"] = int(policy.functions.side().call())
             f["desk_over_days"] = int(policy.functions.overDays().call())
-        # The credit: the lien, what the account can still spend, and the BUCK
-        # side of the positions (BUCKs drawn and still held), base units.
-        try:
-            f["eq_lien"] = int(b.functions.lien().call())
-            f["eq_liquidity"] = int(b.functions.liquidity().call())
-            f["eq_held_buck"] = sum(int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[1]) // 2
-                                    for i in range(n))
-        except Exception:
-            pass
     if desk is not None:
         try:
             f["desk_nav"] = int(desk.functions.netValue().call())

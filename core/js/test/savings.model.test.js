@@ -71,9 +71,9 @@ test("a frame's basket and desks: decisions in BUCK, books against holding, the 
 
 test("a frame from the basket machine: its responses by what they did, its parity reference as the signal", () => {
   const r = row({ day: 40, eq_lean: [3500, 3200, 3300], eq_w: [3600, 3100, 3300], eq_decl: [3333, 3333, 3334],
-                  wh_eq_sync: 12_000_000, wh_eq_place: "2500000000", wh_eq_transfer: 750_000_000, wh_eq_raise: 5_000_000,
+                  wh_eq_sync: 12_000_000, wh_eq_place: "2500000000", wh_eq_sell: 750_000_000,
                   eq_signal_raw: "980392156862745098", desk_side: -1, desk_over_days: 12 });
-  assert.deepEqual([r.eqPlace, r.eqTransfer, r.eqRaise, r.eqBuy, r.eqSync], [2500, 750, 5, null, 12]);
+  assert.deepEqual([r.eqPlace, r.eqSell, r.eqBuy, r.eqSync], [2500, 750, null, 12]);
   assert.deepEqual([r.eqDeploy, r.eqFund, r.eqTrim], [null, null, null], "the older steps have no source");
   assert.ok(Math.abs(r.premium - 2) < 1e-9, "a basket costing 0.98 BUCK: BUCK 2% dear");
   assert.deepEqual([r.deskSide, r.deskDays], [-1, 12]);

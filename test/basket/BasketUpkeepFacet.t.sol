@@ -6,7 +6,7 @@ import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
-import {PairBasketMaintenanceControl} from "../harness/PairBasketMaintenanceControl.sol";
+import {BasketUpkeepMaintenanceControl} from "../harness/BasketUpkeepMaintenanceControl.sol";
 
 contract ControlledPairIntent {
     address public basket;
@@ -47,230 +47,231 @@ contract ControlledPairIntent {
     function recordGaps(int256[] calldata gaps) external { require(msg.sender == basket); reported = gaps; }
 }
 
+/// A parity reference the test sets: the basket's cost in BUCK, and whether it is fresh.
+contract ParityStub {
+    int256 public rawValue = 1e18;
+    bool public fresh = true;
+    function set(int256 value, bool fresh_) external { rawValue = value; fresh = fresh_; }
+}
+
 contract BasketUpkeepFacetTest is BuckBasketEquityTest {
     ControlledPairIntent intent;
-    function _install() private {
-        // One overweight donor and two equally underweight recipients.
-        _installValues(40_000e18, 30_000e18, 30_000e18);
-    }
+    ParityStub parity;
+    uint256[3] ids;
 
-    function _installValues(uint256 a, uint256 c1, uint256 c2) private {
-        _deposit(alice, address(tok[0]), a);
-        _deposit(alice, address(tok[1]), c1 / 2);
-        _deposit(alice, address(tok[2]), c2 / 3);
+    // One constituent 6.7 points over its third and two 3.3 points under, all inside their leashes.
+    function _install() private { _installValues(40_000e18, 30_000e18, 30_000e18, 0); }
+
+    function _installValues(uint256 a, uint256 c1, uint256 c2, uint256 parityGain) private {
+        ids[0] = _deposit(alice, address(tok[0]), a);
+        ids[1] = _deposit(alice, address(tok[1]), c1 / 2);
+        ids[2] = _deposit(alice, address(tok[2]), c2 / 3);
         intent = new ControlledPairIntent(address(b));
+        parity = new ParityStub();
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent))));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(parity), parityGain)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
+        b.setNetMark(true);
         vm.stopPrank();
     }
 
-    function test_pair_oneDonorFundsBothRecipientsAndRecordsOwnImpact() public {
+    function _response() private returns (uint256) {
+        vm.warp(vm.getBlockTimestamp() + 1800); vm.roll(vm.getBlockNumber() + 1);
+        return IBasketUpkeep(address(b)).wheelStep(2, 0);
+    }
+
+    // The first response of a policy that asks for nothing: every deposit paired, nothing traded.
+    function _placed3() private returns (uint128[3] memory liquidity) {
+        intent.setRate(0);
+        assertEq(_response(), 1);
+        intent.setRate(1e18);
+        liquidity = [b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2)];
+    }
+
+    function _spots() private view returns (uint160[3] memory spot) {
+        for (uint256 i; i < 3; ++i) (spot[i],,,,,,) = IPool(pools[i]).slot0();
+    }
+
+    function test_upkeep_needsTheNetMark() public {
         _install();
-        uint256 idle = b.idleToken(0);
-        int256 account = buck.signedBalanceOf(address(b));
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
-        assertLt(b.idleToken(0), idle);
-        assertGt(b.liquidityOf(1), 0); assertGt(b.liquidityOf(2), 0);
-        IBuckBasketVenue.Marks memory m1 = IBuckBasketVenue(address(b)).marks(1, b.liquidityOf(1));
-        IBuckBasketVenue.Marks memory m2 = IBuckBasketVenue(address(b)).marks(2, b.liquidityOf(2));
-        assertApproxEqRel(m1.posTwap, m2.posTwap, 0.005e18, "equal deficits receive equal value");
-        assertGe(buck.signedBalanceOf(address(b)), account, "transfer did not add a fresh debt draw");
-        assertEq(intent.impacts(), 3);
-        uint256 remaining = b.idleToken(0);
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 0, "same interval cannot repeat allowance");
-        assertEq(b.idleToken(0), remaining);
-        _books();
-    }
-
-    function test_pair_failedRecipientRollsBackDonorAndOtherRecipient() public {
-        _install();
-        uint256 idle = b.idleToken(0);
-        int256 account = buck.signedBalanceOf(address(b));
-        (uint160 spot,,,,,,) = IPool(pools[0]).slot0();
-        vm.mockCallRevert(address(b), abi.encodeWithSelector(IBuckBasketVenue.monetaryLeg.selector, uint256(2), true), bytes("recipient refusal"));
-        vm.expectRevert(bytes("recipient refusal"));
+        vm.prank(GOV); b.setNetMark(false);
+        vm.expectRevert(bytes("net mark"));
         IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(b.idleToken(0), idle); assertEq(b.liquidityOf(1), 0); assertEq(b.liquidityOf(2), 0);
-        assertEq(buck.signedBalanceOf(address(b)), account);
-        (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0(); assertEq(afterSpot, spot);
-        assertEq(intent.impacts(), 0);
     }
 
-    function test_pair_quenchedIntentLeavesDiscretionaryInventoryAlone() public {
-        _install(); intent.setRate(0);
-        (uint160 spot,,,,,,) = IPool(pools[0]).slot0();
-        IBasketUpkeep(address(b)).wheelStep(2, 0); // May refresh a credit mark.
-        (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0();
-        assertEq(afterSpot, spot, "LP pairing can move inventory but does not trade TOKEN");
-        assertEq(intent.impacts(), 0);
-        assertEq(intent.lastExecutionAt(), 0, "bookkeeping/LP work does not consume pair budget");
+    function test_upkeep_onlyGovernanceSetsTheMark() public {
+        vm.expectRevert();
+        b.setNetMark(true);
+        assertFalse(b.netMark());
     }
 
-    function test_maintenanceControlSuppressesTradesButRetainsLPPlacement() public {
-        _install(); // Positive intent would normally exchange the overweight TOKEN.
-        vm.startPrank(GOV);
-        b.setEquityWheel(address(new PairBasketMaintenanceControl(address(intent))));
-        vm.stopPrank();
-        (uint160 spot,,,,,,) = IPool(pools[0]).slot0();
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0();
-        assertEq(afterSpot, spot);
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
-        assertGt(b.liquidityOf(1) + b.liquidityOf(2), 0);
-        _books();
-    }
-
-    function test_maintenanceControlRetainsLiquidityOverride() public {
-        _install();
-        vm.startPrank(GOV);
-        b.setEquityWheel(address(new PairBasketMaintenanceControl(address(intent))));
-        vm.stopPrank();
-        ctrl.setK(0);
-        int256 account = buck.signedBalanceOf(address(b));
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
-        assertGe(buck.signedBalanceOf(address(b)), account);
-        assertEq(b.liquidityOf(1) + b.liquidityOf(2), 0);
-        _books();
-    }
-
-    function test_pair_liquidityOverrideDoesNotRequireAClosureSignal() public {
-        _install(); intent.setRate(0); ctrl.setK(0);
-        int256 account = buck.signedBalanceOf(address(b));
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
-        assertGe(buck.signedBalanceOf(address(b)), account);
-        assertEq(b.liquidityOf(1) + b.liquidityOf(2), 0, "no simultaneous fresh draw");
-        _books();
-    }
-
-    function test_pair_markOnlyDoesNotStarveALaterExecutableTransfer() public {
-        _install(); intent.setRate(0.01e18);
-        vm.prank(address(b)); intent.recordExecution(0);
-        uint256 start = vm.getBlockTimestamp();
-        uint256 idle = b.idleToken(0);
-        // The six-hour request is below the minimum leg size. Bookkeeping
-        // must leave that unused time available to the next response.
-        vm.warp(start + 6 hours);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(b.idleToken(0), idle);
-        assertEq(intent.lastExecutionAt(), start);
-        vm.warp(start + 1 days);
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
-        assertLt(b.idleToken(0), idle, "one day's released gap now clears the minimum size");
-        assertEq(intent.lastExecutionAt(), vm.getBlockTimestamp());
-        _books();
-    }
-
-    function test_pair_oneMaterialRecipientCanUseADonorInsideItsBand() public {
-        _installValues(35_000e18, 31_000e18, 34_000e18);
-        uint256 idle = b.idleToken(0);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertLt(b.idleToken(0), idle, "+1.67pp donor can fund -2.33pp recipient");
-        assertGt(b.liquidityOf(1), 0); assertEq(b.liquidityOf(2), 0);
-        uint256[] memory weights = b.responseWeightsBp();
-        assertGe(weights[0], 3333); assertLe(weights[1], 3333);
-        _books();
-    }
-
-    function test_pair_oneMaterialDonorCanFundRecipientsInsideTheirBands() public {
-        _installValues(36_000e18, 32_000e18, 32_000e18);
-        uint256 idle = b.idleToken(0);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertLt(b.idleToken(0), idle);
-        assertGt(b.liquidityOf(1), 0); assertGt(b.liquidityOf(2), 0);
-        uint256[] memory weights = b.responseWeightsBp();
-        assertGe(weights[0], 3333); assertLe(weights[1], 3333); assertLe(weights[2], 3334);
-        _books();
-    }
-
-    function test_pair_noMaterialGapCannotAuthorizeATokenSwap() public {
-        _installValues(34_500e18, 32_500e18, 33_000e18);
-        (uint160 beforeSpot,,,,,,) = IPool(pools[0]).slot0();
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        (uint160 afterSpot,,,,,,) = IPool(pools[0]).slot0();
-        assertEq(afterSpot, beforeSpot);
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
-    }
-
-    /// A patient policy replaces the band: a large gap waits for its urgency,
-    /// and the policy is told the gaps and which constituents were worked.
-    function test_pair_patientPolicyDecidesWhichGapsMayBeWorked() public {
-        _install(); intent.setUrgent(0.02e18, 0);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(intent.impacts(), 0, "6.7 points over target, and not yet urgent");
-        // Gaps are reported as signed shares of the book.
-        assertApproxEqAbs(intent.reported(0), 0.0667e18, 0.0005e18);
-        assertApproxEqAbs(intent.reported(1), -0.0333e18, 0.0005e18);
-        intent.setUrgent(0.02e18, 1);
-        vm.warp(vm.getBlockTimestamp() + 1 hours);
-        assertEq(IBasketUpkeep(address(b)).wheelStep(2, 0), 1);
-        assertEq(intent.impacts(), 3);
-        assertEq(intent.acted(), 0, "the donor's allowance is spent");
-        assertGt(intent.asked(0), 0, "and the rate it was asked at was reported");
-        _books();
-    }
-
-    function test_pair_urgentGapInsideTheBandCanBeWorked() public {
-        _installValues(34_500e18, 32_500e18, 33_000e18);
-        intent.setUrgent(0.02e18, 1);
-        uint256 idle = b.idleToken(0);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertLt(b.idleToken(0), idle, "+1.17 points is inside the 2-point band, and urgent");
-        assertGt(intent.impacts(), 0);
-        assertEq(intent.acted(), 0);
-        _books();
-    }
-
-    function test_pair_intentCannotBuyAnAlreadyOverweightRecipient() public {
-        _installValues(40_000e18, 36_000e18, 24_000e18);
-        intent.setRecipient(1);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
-        assertEq(b.liquidityOf(1), 0, "at least one error does not justify worsening the other leg");
-    }
-
-    function test_pair_idlePlacementChoosesLargestShortageNotLargestCappedLeg() public {
-        _installValues(33_333e18, 36_700e18, 29_967e18); intent.setRate(0);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(b.liquidityOf(0), 0); assertEq(b.liquidityOf(1), 0);
-        assertGt(b.liquidityOf(2), 0, "fund the smallest allocation first");
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
-        _books();
-    }
-
-    function test_pair_balancedBootstrapDoesNotConcentrateTheNewBook() public {
-        _installValues(33_333e18, 33_333e18, 33_334e18); intent.setRate(0);
-        for (uint256 k; k < 40; ++k) {
-            IBasketUpkeep(address(b)).wheelStep(2, 0);
-            uint256[] memory weights = b.responseWeightsBp();
-            for (uint256 i; i < 3; ++i) {
-                if (k >= 2) assertGt(b.liquidityOf(i), 0);
-                assertApproxEqAbs(weights[i], i == 2 ? 3334 : 3333, 120);
-            }
-            vm.warp(vm.getBlockTimestamp() + 6 hours);
+    function test_upkeep_everyDepositIsPairedAtOnceAndTheLineIsWhole() public {
+        _installValues(30_000e18, 30_000e18, 30_000e18, 0);
+        uint160[3] memory spot = _spots();
+        _placed3();
+        for (uint256 i; i < 3; ++i) {
+            assertGt(b.liquidityOf(i), 0, "placed");
+            assertLt(b.idleToken(i) * price[i] / 1e18, b.equity() / 1000, "nothing left waiting");
         }
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        uint160[3] memory afterSpot = _spots();
+        for (uint256 i; i < 3; ++i) assertEq(afterSpot[i], spot[i], "pairing swaps nothing");
+        // A BUCK was drawn for every BUCK of TOKEN, far beyond K x equity ...
+        assertGt(_lien(), b.equity() * 9 / 10, "the whole book is paired");
+        // ... and all of K x equity is still there to spend.
+        assertApproxEqRel(b.liquidity(), ctrl.k() * b.equity() / 1e18, 0.03e18, "the line is whole");
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0, "placing spends no allowance");
+        assertEq(_response(), 0, "a paired book at its targets has nothing to do");
         _books();
     }
 
-    function test_pair_minimumBudgetMustSurviveSaleFees() public {
-        _install(); intent.setRecipient(1);
-        uint256 gross = b.equity();
-        uint256 grain = gross / 10000;
-        IBuckBasketVenue.Marks memory m = IBuckBasketVenue(address(b)).marks(1, 0);
-        uint256 gap = gross * 3333 / 10000 - b.idleToken(1) * m.pTwap / 1e18;
-        uint256 requested = grain * 1001 / 1000; // 0.1% margin, smaller than the 0.3% fee.
-        intent.setRate(requested * 1e18 / (gap - requested) + 1);
-        // Nominal request is just over the 10 BUCK minimum. Its sale fees
-        // leave a smaller recipient budget: wait without attempting the swap.
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
-        vm.warp(vm.getBlockTimestamp() + 1 days);
-        intent.setRate(0.1e18);
-        IBasketUpkeep(address(b)).wheelStep(2, 0);
-        assertGt(intent.impacts(), 0, "larger allowance survives execution costs");
+    function test_upkeep_eachConstituentIsWorkedOnItsOwn() public {
+        _install();
+        uint128[3] memory placed = _placed3();
+        uint256 lien = _lien();
+        assertEq(_response(), 1);
+        assertLt(b.liquidityOf(0), placed[0], "the one over its target is sold");
+        assertGt(b.liquidityOf(1), placed[1], "those under are bought");
+        assertGt(b.liquidityOf(2), placed[2]);
+        assertEq(intent.impacts(), 3, "each pool's own impact is recorded");
+        assertGt(intent.asked(0), 0, "and the rate each was worked at");
         assertEq(intent.lastExecutionAt(), vm.getBlockTimestamp());
+        // Gaps are reported as signed shares of the book.
+        assertApproxEqAbs(intent.reported(0), 0.0667e18, 0.001e18);
+        assertApproxEqAbs(intent.reported(1), -0.0333e18, 0.001e18);
+        assertTrue(_lien() != lien, "the two legs need not match: the line carries the difference");
+        _books();
+    }
+
+    function test_upkeep_aConstituentWithNoEvidenceIsLeft() public {
+        _install();
+        uint128[3] memory placed = _placed3();
+        // The policy sees every pair closing toward TOKEN 1 only.
+        intent.setRecipient(1);
+        uint160[3] memory spot = _spots();
+        assertEq(_response(), 1);
+        assertLt(b.liquidityOf(0), placed[0], "sold: closing against a part of the rest");
+        assertGt(b.liquidityOf(1), placed[1], "bought: the rest is closing toward it");
+        assertEq(b.liquidityOf(2), placed[2], "under its target, and left: nothing closes toward it");
+        (uint160 third,,,,,,) = IPool(pools[2]).slot0();
+        assertEq(third, spot[2]);
+        _books();
+    }
+
+    function test_upkeep_aPolicyThatAsksNothingTradesNothing() public {
+        _install();
+        _placed3();
+        intent.setRate(0);
+        uint160[3] memory spot = _spots();
+        _response();
+        uint160[3] memory afterSpot = _spots();
+        for (uint256 i; i < 3; ++i) assertEq(afterSpot[i], spot[i]);
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+    }
+
+    function test_upkeep_bandThenUrgencyDecideWhichGapsMayBeWorked() public {
+        // 1.2 points over and 0.8 and 0.3 under: all inside the 2-point band.
+        _installValues(34_500e18, 32_500e18, 33_000e18, 0);
+        uint128[3] memory placed = _placed3();
+        _response();
+        assertEq(intent.impacts(), 0, "inside the band nothing is worked");
+        // A patient policy replaces the band: only what it calls urgent is worked.
+        intent.setUrgent(0.02e18, 1);
+        assertEq(_response(), 1);
+        assertLt(b.liquidityOf(0), placed[0], "urgent, and inside the band");
+        assertEq(b.liquidityOf(1), placed[1]); assertEq(b.liquidityOf(2), placed[2]);
+        assertApproxEqAbs(intent.reported(0), 0.0117e18, 0.001e18);
+        assertEq(intent.acted(), 0, "its allowance is spent");
+        _books();
+    }
+
+    function test_upkeep_aPieceBelowTheGrainIsLeft() public {
+        _install();
+        _placed3();
+        // Half a percent of a 6,667 gap is 33 BUCKs, under twice the grain.
+        intent.setRate(0.005e18);
+        _response();
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        intent.setRate(0.1e18);
+        assertEq(_response(), 1);
+        assertGt(intent.impacts(), 0, "a larger release clears it");
+        _books();
+    }
+
+    function test_upkeep_aConstituentBeyondItsLeashIsBroughtBackWithNoSignal() public {
+        // Half the book in the first TOKEN, beyond its leash; the others short of their weight but inside theirs.
+        _installValues(50_000e18, 26_000e18, 24_000e18, 0);
+        intent.setRate(0);
+        uint160[3] memory spot = _spots();
+        vm.expectEmit(true, false, false, false, address(b));
+        emit BasketUpkeepFacet.Responded(4, 0, 0, 0, 0);
+        vm.expectEmit(true, false, false, false, address(b));
+        emit BasketUpkeepFacet.Responded(1, 0, 0, 0, 0);
+        assertEq(_response(), 1);
+        uint160[3] memory afterSpot = _spots();
+        assertTrue(afterSpot[0] != spot[0], "sold toward its weight, policy or not");
+        assertEq(afterSpot[1], spot[1], "inside their leashes, and nothing asked");
+        assertEq(afterSpot[2], spot[2]);
+        _books();
+    }
+
+    function test_upkeep_aLargeExitIsPaidInBucksAndSoldDownToTheCeiling() public {
+        _installValues(30_000e18, 30_000e18, 30_000e18, 0);
+        uint128[3] memory placed = _placed3();
+        intent.setRate(0);
+        uint256 lien = _lien();
+        uint256 held = buck.balanceOf(alice);
+        // A third of the book leaves in one go.
+        vm.prank(alice);
+        uint256 paid = b.redeem(ids[0], 10000);
+        assertEq(buck.balanceOf(alice) - held, paid, "paid in BUCK");
+        for (uint256 i; i < 3; ++i) assertEq(b.liquidityOf(i), placed[i], "no position was sold to pay it");
+        assertEq(_lien(), lien + paid, "it was issued");
+        // That is more than half of K x what stays: every constituent gives its share, and no policy is asked.
+        assertEq(_response(), 1);
+        for (uint256 i; i < 3; ++i) assertLt(b.liquidityOf(i), placed[i], "each gives its share");
+        assertLt(_lien(), lien + paid);
+        _books();
+    }
+
+    function test_upkeep_maintenanceControlKeepsTheBookAndTakesNoView() public {
+        _installValues(40_000e18, 30_000e18, 30_000e18, 0);
+        address control = address(new BasketUpkeepMaintenanceControl(address(intent), address(parity), 0));
+        vm.prank(GOV);
+        b.setEquityWheel(control);
+        uint160[3] memory spot = _spots();
+        assertEq(_response(), 1); // The policy asks for everything, and is not heard.
+        uint160[3] memory afterSpot = _spots();
+        for (uint256 i; i < 3; ++i) { assertEq(afterSpot[i], spot[i]); assertGt(b.liquidityOf(i), 0, "placed all the same"); }
+        assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+        // The ceiling is kept: a large exit is still sold down.
+        uint128[3] memory placed = [b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2)];
+        vm.prank(alice); b.redeem(ids[0], 10000);
+        assertEq(_response(), 1);
+        for (uint256 i; i < 3; ++i) assertLt(b.liquidityOf(i), placed[i]);
+        _books();
+    }
+
+    function test_upkeep_theBookLeansAgainstParity() public {
+        _installValues(30_000e18, 30_000e18, 30_000e18, 5e18);
+        uint128[3] memory placed = _placed3();
+        // The basket costs 1.02 BUCKs: the BUCK is cheap, so hold some. TOKEN is sold for it.
+        parity.set(1.02e18, true);
+        assertEq(_response(), 1);
+        for (uint256 i; i < 3; ++i) assertLt(b.liquidityOf(i), placed[i], "TOKEN sold for BUCKs");
+        // It costs 0.98: the BUCK is dear, so issue some. TOKEN is bought with it.
+        parity.set(0.98e18, true);
+        for (uint256 i; i < 3; ++i) _repin(i);
+        placed = [b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2)];
+        assertEq(_response(), 1);
+        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), placed[i], "TOKEN bought with issued BUCKs");
+        // A reference that is not fresh leans nothing: the book stays the size it is.
+        parity.set(0.5e18, false);
+        for (uint256 i; i < 3; ++i) _repin(i);
+        uint160[3] memory spot = _spots();
+        _response();
+        uint160[3] memory afterSpot = _spots();
+        for (uint256 i; i < 3; ++i) assertEq(afterSpot[i], spot[i]);
         _books();
     }
 }

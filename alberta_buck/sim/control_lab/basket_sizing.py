@@ -1,7 +1,7 @@
 """Matched sizings of the pair policy's release: how much of an open gap to move, and how soon.
 
 Every arm of a profile shares its feed, opening book and market rules. Only the
-PairRebalancePolicy.Sizing differs; the maintenance arm makes no paired transfer.
+PairRebalancePolicy.Sizing differs; the maintenance arm takes no view on prices.
 """
 import argparse
 import copy
@@ -58,6 +58,7 @@ SIZINGS = {
     "half-2d": dict(title="Half the gap in 2 days", pair={**half_life(2), **patient(2)}, basket=lean(.5)),
     "patience-1": dict(title="Patience 1 point-day", pair={**half_life(1), **patient(1)}, basket=lean(.5)),
     "patience-4": dict(title="Patience 4 point-days", pair={**half_life(1), **patient(4)}, basket=lean(.5)),
+    "parity-0": dict(title="No lean against parity", pair=LAB, basket={**lean(.5), "parity_gain": 0.}),
     "band-2pt": dict(title="A 2-point band in place of urgency", pair=half_life(1), basket={**lean(.5), "weight_band_bp": 200}),
     "band-2pt-tilt-0": dict(title="A 2-point band, no lean", pair=half_life(1), basket={**lean(0), "weight_band_bp": 200}),
 }
@@ -71,14 +72,14 @@ def worker(cfg, profile, stage, arm, key, code, path):
 
 
 def score(result):
-    """One run's ending values, its paired transfers, and its value at each cycle boundary."""
+    """One run's ending values, its sales and purchases, and its value at each cycle boundary."""
     frames = result["frames"]
     first, last = frames[0], frames[-1]
-    transfers = sold = bought = 0
+    trades = sold = bought = 0
     for f in frames:
         for e in f["events"]:
-            if e["actor"] == "basket" and e.get("action") == "transfer":
-                transfers += 1
+            if e["actor"] == "basket" and e.get("action") in ("sell", "buy"):
+                trades += 1
                 sold += sum(t["quote_amount"] for t in e["trades"] if t["side"] == "sell")
                 bought += sum(t["quote_amount"] for t in e["trades"] if t["side"] == "buy")
     targets = [3333, 3333, 3334]
@@ -89,7 +90,7 @@ def score(result):
                 untouched=reference_value(last, holdings(first)),
                 usd=last["basket"]["equity"] * last["buck_usdc"], buck=last["basket"]["equity"],
                 buck_usdc=last["buck_usdc"], reference_usd=last["reference"]["target_usd"],
-                transfers=transfers, sold=sold, bought=bought, error_pp=error / 100,
+                trades=trades, sold=sold, bought=bought, error_pp=error / 100,
                 tokens=sum(tokens), net_buck=buck, arb=last["cumulative"]["arb_profit_buck"],
                 mean_abs_parity=result["summary"]["mean_abs_parity_error"], end_k=result["summary"]["end_k"],
                 cycles=[reference_value(f) for f in frames[::cycle]])
@@ -128,8 +129,8 @@ def render(root):
             gate = f"| | {100 * p['slack']:g} | {100 * p['patience']:g}" if p["patience"] else f"| {basket['weight_band_bp']} | |"
             report.append(f"| {arm} | {p['release_rate']:g} | {p['release_speed']:g} | {p['closure_gain']} | "
                           f"{p['closure_rate']:g} | {p['max_rate']:g} | {basket['tilt']:g} {gate} |")
-    report += ["", "The band arms are compared with the same maintenance control. Maintenance makes no paired "
-        "transfer, so the band can reach it only through the risk fallback."]
+    report += ["", "The band arms are compared with the same maintenance control. Maintenance pairs what waits "
+        "and keeps the leash and the ceiling, and works no gap on the policy's word."]
     report += ["", "* Ending value against the maintenance control", "",
         "/At reference/ values TOKEN at the external feed and net BUCK at the reference basket's cost, so the "
         "stage's own BUCK/USDC drift does not enter. USD converts the contract's BUCK equity at the ending "
@@ -137,17 +138,17 @@ def render(root):
         "Differences are against the maintenance arm of the same profile. Where BUCK trades far from the "
         "reference basket's cost, the reference mark favours whichever arm ends with more net BUCK when BUCK is "
         "cheap and penalizes it when BUCK is dear; read the three units together.", "",
-        "| Profile | Sizing | Transfers | TOKEN sold, BUCK | At reference | vs maintenance | Per transfer | "
+        "| Profile | Sizing | Trades | TOKEN sold, BUCK | At reference | vs maintenance | Per trade | "
         "USD vs maintenance | BUCK vs maintenance | BUCK/USDC | Allocation error, pp |",
-        "|---------+--------+-----------+------------------+--------------+----------------+--------------+"
+        "|---------+--------+--------+------------------+--------------+----------------+-----------+"
         "--------------------+---------------------+-----------+----------------------|"]
     for profile, group in scores.items():
         base = group["maintenance"]
         for arm in arms:
             s = group[arm]
             gain = s["reference"] - base["reference"]
-            each = f"{gain / s['transfers']:+,.0f}" if s["transfers"] else ""
-            report.append(f"| {profile} | {arm} | {s['transfers']} | {s['sold']:,.0f} | {s['reference']:,.0f} | "
+            each = f"{gain / s['trades']:+,.0f}" if s["trades"] else ""
+            report.append(f"| {profile} | {arm} | {s['trades']} | {s['sold']:,.0f} | {s['reference']:,.0f} | "
                           f"{gain:+,.0f} | {each} | {s['usd'] - base['usd']:+,.0f} | "
                           f"{s['buck'] - base['buck']:+,.0f} | {s['buck_usdc']:.4f} | {s['error_pp']:.3f} |")
     report += ["", "* What holding still would have done", "",
@@ -173,8 +174,8 @@ def render(root):
             report.append(f"| {profile} | {arm} | " + " | ".join(
                 f"{(c[i + 1] - c[i]) - (base[i + 1] - base[i]):+,.0f}" for i in range(len(c) - 1)) + " |")
     report += ["", "* The book each arm ends with", "",
-        "A paired transfer sells the donor's wallet TOKEN first and places the recipient's half as liquidity, so it "
-        "also converts unpaired TOKEN into net BUCK until the wallets are empty. Larger releases reach that sooner.", "",
+        "Every TOKEN is paired with issued BUCKs from the first turn. Net BUCK is what the book has let out (below "
+        "zero) or holds beyond its lien (above): sales raise it and purchases lower it.", "",
         "| Profile | Sizing | TOKEN held | Net BUCK | Mean abs parity error, % | Ending K | Arb profit, BUCK |",
         "|---------+--------+------------+----------+--------------------------+----------+------------------|"]
     for profile, group in scores.items():
@@ -219,7 +220,7 @@ def main(argv=None):
     if args.ticks_per_day:
         cfg["ticks_per_day"] = args.ticks_per_day
     code = {**fingerprint(), "basket_sizing": digest(dict(source=Path(__file__).read_text(),
-        book=Path(__file__).with_name("book.py").read_text(), control=load_artifact("PairBasketMaintenanceControl")))}
+        book=Path(__file__).with_name("book.py").read_text(), control=load_artifact("BasketUpkeepMaintenanceControl")))}
     m = dict(schema=1, kind="basket-sizing", status="running", requested_config=cfg, implementation=code,
         market_stage=args.stage, flags=STAGES[args.stage], profiles=names, sizings={a: SIZINGS[a]["title"] for a in arms},
         entries={},

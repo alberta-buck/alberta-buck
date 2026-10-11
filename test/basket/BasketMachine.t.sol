@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityTest, IBasketUpkeep, EqToken} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityTest, IBasketUpkeep, EqToken, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
@@ -38,19 +38,22 @@ contract BasketMachineTest is BuckBasketEquityTest {
         _assertReferenceNormalization();
     }
 
-    // The upkeep facet under a policy that wants no transfer: what is left
-    // is the safeguard plan and the placement of TOKEN already held.
+    // The upkeep facet under a policy that asks for nothing: what is left is
+    // pairing what waits, the leash and the ceiling.
     function _replace(bool withSignal) internal {
         ControlledPairIntent intent = new ControlledPairIntent(address(b));
         intent.setRate(0);
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent))));
         vm.stopPrank();
         if (withSignal) {
             signals = new BasketReference(address(b), 1800, 3600, 500);
             signals.observe();
         }
+        vm.startPrank(GOV);
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(signals), 0)));
+        b.setNetMark(true);
+        vm.stopPrank();
     }
 
     function _response() internal returns (uint256) {
@@ -59,9 +62,13 @@ contract BasketMachineTest is BuckBasketEquityTest {
         return IBasketUpkeep(address(b)).wheelStep(2, 0);
     }
 
+    // The credit is marked net: at the equity, plus the positions' BUCK side over K.
     function _freshMark() internal view {
         int256 net = int256(b.grossAt(2)) + buck.signedBalanceOf(address(b)) + int256(buck.reliefOf(address(b)));
-        assertEq(b.markNow(), net > 0 ? uint256(net) : 0, "post-trade mark matches the new book");
+        uint256 held;
+        for (uint256 i; i < 3; ++i) held += IBuckBasketVenue(address(b)).marks(i, b.liquidityOf(i)).posLow / 2;
+        uint256 mark = (net > 0 ? uint256(net) : 0) + (ctrl.k() == 0 ? 0 : held * 1e18 / ctrl.k());
+        assertEq(b.markNow(), mark, "post-trade mark matches the new book");
         for (uint256 i; i < 3; ++i) assertGe(tok[i].balanceOf(address(b)), b.idleToken(i), "wallet accounted");
     }
 
@@ -69,38 +76,42 @@ contract BasketMachineTest is BuckBasketEquityTest {
         _replace(false);
         _deposit(alice, address(buck), 300_000 * B);
         for (uint256 j; j < 20; ++j) { _response(); for (uint256 i; i < 3; ++i) _repin(i); }
-        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), 0, "an empty leg is reachable");
+        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), 0, "a holding of nothing is far beyond its leash, and is bought");
         _response(); _freshMark();
     }
 
-    function test_machine_waitingDepositDoesNotBlockOtherLegs() public {
+    function test_machine_aLoneDepositIsPairedAndTheBookBroughtTowardItsWeights() public {
         _replace(false);
         _deposit(alice, address(tok[0]), 100_000e18);
-        uint256 idle = b.idleToken(0);
         assertEq(_response(), 1);
-        assertLt(b.idleToken(0), idle, "sell idle first");
-        assertGt(b.liquidityOf(1) + b.liquidityOf(2), 0, "proceeds buy an empty underweight leg");
-        assertEq(b.liquidityOf(0), 0, "arrival pool is not privileged");
+        assertGt(b.liquidityOf(0), 0, "what arrived is paired where it arrived");
+        assertLt(b.idleToken(0), 100e18, "and none of it waits");
+        assertGt(b.liquidityOf(1), 0, "the empty legs, beyond their leashes, are bought on the line");
+        assertGt(b.liquidityOf(2), 0);
         _freshMark();
     }
 
-    function test_machine_balancedIdleCanBecomeLpWithoutASecondSwap() public {
+    function test_machine_balancedDepositsArePairedWithNoSwap() public {
         _replace(false);
         for (uint256 i; i < 3; ++i) _deposit(alice, address(tok[i]), 30_000e18 / (i + 1));
         uint256[] memory weights = b.responseWeightsBp();
         assertEq(weights[0] + weights[1] + weights[2], 10000);
         assertEq(_response(), 1);
-        assertGt(b.liquidityOf(0) + b.liquidityOf(1) + b.liquidityOf(2), 0);
+        for (uint256 i; i < 3; ++i) {
+            assertGt(b.liquidityOf(i), 0);
+            (uint160 spot,,,,,,) = IPool(pools[i]).slot0();
+            assertEq(spot, ref[i], "no price moved");
+        }
         _freshMark();
     }
 
     function test_machine_underwaterResponseNeverDrawsNewDebt() public {
         _placed(); _replace(false);
         ctrl.setK(0);
-        int256 account = buck.signedBalanceOf(address(b));
-        assertLt(account, 0);
-        assertEq(_response(), 1);
-        assertGt(buck.signedBalanceOf(address(b)), account, "cash need reduces balanced book's debt");
+        uint256 lien = _lien();
+        assertGt(lien, 0);
+        _response();
+        assertLe(_lien(), lien, "with no K nothing more is issued");
         _freshMark();
     }
 
@@ -111,40 +122,6 @@ contract BasketMachineTest is BuckBasketEquityTest {
         assertFalse(IBasketUpkeep(address(b)).wheelDue(2, 0));
         assertEq(IBasketUpkeep(address(b)).wheelStep(3, 0), 0);
         assertEq(IBasketUpkeep(address(b)).wheelStep(4, 0), 0);
-    }
-
-    function test_machine_cashNeedIsSpreadOverEveryConstituent() public {
-        _replace(false);
-        _deposit(alice, address(tok[0]), 30_000e18);
-        _deposit(alice, address(tok[1]), 18_000e18);
-        _deposit(alice, address(tok[2]), 10_000e18);
-        ctrl.setK(0);
-        uint256[3] memory idle = [b.idleToken(0), b.idleToken(1), b.idleToken(2)];
-        vm.expectEmit(true, false, false, false, address(b));
-        emit BasketUpkeepFacet.Responded(1, 0, 0, 0, 0);
-        assertEq(_response(), 1);
-        for (uint256 i; i < 3; ++i) assertLt(b.idleToken(i), idle[i], "every constituent gives toward the cash");
-        assertEq(b.liquidityOf(0) + b.liquidityOf(1) + b.liquidityOf(2), 0, "nothing is bought while cash is needed");
-        _freshMark();
-    }
-
-    function test_machine_aLeashSaleDoesNotHoldBackPlacingWaitingToken() public {
-        _replace(false);
-        // Half the book in the first TOKEN, beyond its leash; the others short of their weight but inside theirs.
-        _deposit(alice, address(tok[0]), 50_000e18);
-        _deposit(alice, address(tok[1]), 13_000e18);
-        _deposit(alice, address(tok[2]), 8_000e18);
-        uint256[] memory share = b.responseWeightsBp();
-        assertGt(share[0], 4334); assertGt(share[1], 2334); assertGt(share[2], 2334);
-        uint256[3] memory idle = [b.idleToken(0), b.idleToken(1), b.idleToken(2)];
-        vm.expectEmit(true, false, false, false, address(b));
-        emit BasketUpkeepFacet.Responded(5, 0, 0, 0, 0);
-        assertEq(_response(), 1);
-        assertLt(b.idleToken(0), idle[0], "the TOKEN beyond its leash is sold");
-        assertEq(b.liquidityOf(0), 0);
-        assertGt(b.liquidityOf(1) + b.liquidityOf(2), 0, "and waiting TOKEN is placed in the same turn");
-        assertLt(b.idleToken(1) + b.idleToken(2), idle[1] + idle[2], "from the wallet: placing swaps nothing");
-        _freshMark();
     }
 
     function test_machine_signalDoesNotInventSamplesAcrossGap() public {

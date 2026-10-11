@@ -194,12 +194,11 @@ export function mountSavings(ctx) {
         + "position (the most overweight, or the director's pick) to refill liquidity.  Fund and Trim wait "
         + "until no deposit is waiting to be placed." }),
     machineSteps: lineChart({ title: "What the basket's wheel did (cumulative BUCK)", fmt: bucks, series: [
-      { label: "placed", color: S1 }, { label: "moved between commodities", color: S2 },
-      { label: "raised for cash", color: S3 }, { label: "bought back", color: S4 }],
-      note: "Each response does one thing.  Placing pairs waiting deposits with BUCK in the pools.  A move "
-        + "sells some of a commodity above its target and buys those below: held back while their prices "
-        + "are still parting, then released at a steady rate.  The safeguard raises cash when credit or "
-        + "liquidity is short, and buys back once it is not." }),
+      { label: "paired", color: S1 }, { label: "sold", color: S2 }, { label: "bought", color: S3 }],
+      note: "A deposit is paired at once with BUCKs the basket issues beside it: nothing is sold to place "
+        + "it.  After that each commodity is worked on its own toward its target: one above it is sold "
+        + "and one below it bought, held back while its price is still parting from the others and then "
+        + "released at a steady rate.  The basket's credit carries the difference between the two." }),
     deskOps: lineChart({ title: "The desk's operations (cumulative BUCK)", fmt: bucks, series: [
       { label: "absorbed (Q1)", color: S1 }, { label: "retired (Q2)", color: S2 },
       { label: "supplied (Q3)", color: S3 }, { label: "issued (Q4)", color: S4 }],
@@ -536,8 +535,7 @@ export function mountSavings(ctx) {
     charts.index.update(xs, [rows.map((r) => r.D), heldLine(rows)]);
     charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
     charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim)]);
-    charts.machineSteps.update(xs, [rows.map((r) => r.eqPlace), rows.map((r) => r.eqTransfer),
-      rows.map((r) => r.eqRaise), rows.map((r) => r.eqBuy)]);
+    charts.machineSteps.update(xs, [rows.map((r) => r.eqPlace), rows.map((r) => r.eqSell), rows.map((r) => r.eqBuy)]);
     charts.deskSignal.update(xs, [rows.map((r) => r.premium)]);
     charts.machineSignal.update(xs, [rows.map((r) => r.premium)]);
     charts.deskOps.update(xs, [0, 1, 2, 3].map((q) => rows.map((r) => r.dkQ[q])));

@@ -6,7 +6,7 @@ driver is not a claim to simulate every L1 block: Solidity tests cover
 """
 import math
 
-from .model import DEFAULTS, STAGES, pair_sizing
+from .model import DEFAULTS, STAGES, pair_sizing, parity_gain
 
 PAIRS = ((0, 1), (0, 2), (1, 2))
 LOG_TICK = math.log(1.0001)
@@ -21,7 +21,7 @@ PROFILES = [dict(name="three-phase", perturbations=[])] + [
 def simulate_observed(cfg, profile, stage, maintenance_only=False):
     """One world with the pair observer and, where the stage has the basket, its policy and upkeep facet.
 
-    maintenance_only installs the control facet: the same upkeep with no paired transfers.
+    maintenance_only installs the control facet: the same upkeep with no view on prices.
     """
     from . import engine
     with_basket = bool(STAGES[stage].get("basket"))
@@ -39,30 +39,19 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
             self.chain.send(self.pair_wheel.functions.setSample(self.pair_observer.address), sender=d.gov)
             self.observation_gas = []
             self.pair_policy = None
-            self.pair_plans = []
             warm_days = config["bootstrap"].get("basket_warmup_days",0)
             if warm_days:
                 self.warm_basket(warm_days)
             if with_basket:
-                from alberta_buck.sim.chain import load_artifact
-                from web3.logs import DISCARD
                 # Accepted historical means, never the first live price or
                 # any selected perturbation. Observer levels normalize decimals.
                 reference = [round(math.log(p) / LOG_TICK * 1e18) for p in config["feed"]["base"]]
                 self.pair_policy = self.chain.deploy("PairRebalancePolicy", self.pair_observer.address,
                     d.basket.address, reference, pair_sizing(config["pair"]))
-                response_name = "PairBasketMaintenanceControl" if maintenance_only else "BasketUpkeepFacet"
-                self.upkeep = self.chain.deploy(response_name, self.pair_policy.address)
+                response_name = "BasketUpkeepMaintenanceControl" if maintenance_only else "BasketUpkeepFacet"
+                self.upkeep = self.chain.deploy(response_name, self.pair_policy.address, self.signals.address,
+                                                parity_gain(config["basket"]))
                 self.chain.send(d.basket.functions.setEquityWheel(self.upkeep.address), sender=d.gov)
-                abi, _ = load_artifact(response_name)
-                events = d.w3.eth.contract(address=d.basket.address, abi=abi).events
-                original = self.chain.send
-                def send(fn, **kwargs):
-                    rc = original(fn, **kwargs)
-                    if fn.address == d.wheel.address and fn.fn_name == "tick":
-                        self.pair_plans.extend(dict(e["args"]) for e in events.PairResponse().process_receipt(rc, errors=DISCARD))
-                    return rc
-                self.chain.send = send
 
         def warm_basket(self, days):
             """Identical funded starting book, with no knowledge of live prices.
@@ -85,7 +74,8 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
             # sizing is never consulted; every arm shares the default regardless.
             policy = self.chain.deploy("PairRebalancePolicy",prelude_observer.address,d.basket.address,references,
                 pair_sizing(DEFAULTS["pair"]))
-            facet = self.chain.deploy("BasketUpkeepFacet",policy.address)
+            # The prelude takes no view on parity: at mean prices there is none to take.
+            facet = self.chain.deploy("BasketUpkeepFacet",policy.address,self.signals.address,0)
             response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("BasketUpkeepFacet")[0])
             self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)
             self.chain.send(venue.functions.setWheel(d.gov),sender=d.gov)
@@ -114,7 +104,6 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
 
         def before_policy(self):
             if with_basket:
-                self.pair_plans = []
                 self.observe_pairs()
 
         def arbitrage(self, phase):
@@ -174,14 +163,14 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
             if self.step == 0:
                 frame["pair_signal"]["route_metadata"] = self.route_metadata
             if self.pair_policy is not None:
-                frame["pair_policy"] = dict(plans=self.pair_plans,
+                frame["pair_policy"] = dict(
                     desire=[[0 if i == j else int(self.pair_policy.functions.desire(i, j).call()) / 1e18
                         for j in range(3)] for i in range(3)],
                     own_impact_ticks=[int(self.pair_policy.functions.remainingImpact(i).call()) / 1e18 for i in range(3)],
                     # Each constituent's built-up urgency after this step, in point-days of gap beyond the slack.
                     urgency_point_days=[int(self.pair_policy.functions.urgency(i).call()[0]) / 1e18 / 86400 * 100
                         for i in range(3)],
-                    # Each donor's allowance: the rate it has been asked at, summed over days since it last transferred.
+                    # Each constituent's allowance: the rate it has been worked at, summed over days since it last traded.
                     allowance=[int(self.pair_policy.functions.allowance(i).call()) / 1e18 for i in range(3)])
             return frame
 

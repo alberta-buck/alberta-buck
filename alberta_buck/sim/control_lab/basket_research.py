@@ -144,7 +144,7 @@ def main(argv=None):
     if len(set(names))!=len(names) or any(n not in available for n in names):ap.error("unknown or duplicate profile")
     profiles=[available[n] for n in names]
     code={**fingerprint(),"basket_research":digest(dict(source=Path(__file__).read_text(),
-        control=load_artifact("PairBasketMaintenanceControl")))}
+        control=load_artifact("BasketUpkeepMaintenanceControl")))}
     m=dict(schema=1,kind="basket-research",status="running",requested_config=cfg,implementation=code,
         market_stage=args.stage,entries={},cases={arm:{} for arm in ARMS},
         stages={arm:{**STAGES[args.stage],"title":values[2]} for arm,values in ARMS.items()},

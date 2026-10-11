@@ -57,8 +57,8 @@ contract PairRebalancePolicy is IRebalancePolicy {
     struct Urgency { uint128 sum; int8 side; }
     mapping(uint256 => Urgency) public urgency;
     uint64 public gapsAt;
-    /// @notice A donor's allowance: the rate it has been asked at, summed
-    /// over time since it last transferred (1e18 for a rate of one held a day).
+    /// @notice A constituent's allowance: the rate it has been worked at, summed
+    /// over time since it last traded (1e18 for a rate of one held a day).
     mapping(uint256 => uint256) public allowance;
     uint64 public ratesAt;
     event OwnImpact(uint256 indexed token, int256 tickChange);
@@ -128,24 +128,24 @@ contract PairRebalancePolicy is IRebalancePolicy {
         return uint256(m.magnitude) * (IMPACT_MEMORY - age) / IMPACT_MEMORY;
     }
 
-    /// @notice The share of a donor's gap to move now. Its allowance is the
-    /// rate it has been asked at, summed over time since it last transferred,
+    /// @notice The share of constituent i's gap to move now. Its allowance is
+    /// the rate it has been worked at, summed over time since it last traded,
     /// and carried to now at the rate given; an unobserved stretch earns at
     /// most a day. 1 - exp(-allowance) composes exactly: a day asked once or
     /// a thousand times releases the same share.
-    function share(uint256 donor, uint256 rateWad) public view returns (uint256) {
-        return uint256(WAD) - PM.expWad(-int256(_accrued(donor, rateWad)));
+    function share(uint256 i, uint256 rateWad) public view returns (uint256) {
+        return uint256(WAD) - PM.expWad(-int256(_accrued(i, rateWad)));
     }
 
-    function _accrued(uint256 donor, uint256 rateWad) private view returns (uint256 sum) {
+    function _accrued(uint256 i, uint256 rateWad) private view returns (uint256 sum) {
         uint256 elapsed = block.timestamp - ratesAt;
         if (elapsed > 1 days) elapsed = 1 days;
-        sum = allowance[donor] + rateWad * elapsed / 1 days;
+        sum = allowance[i] + rateWad * elapsed / 1 days;
         if (sum > MAX_ALLOWANCE) sum = MAX_ALLOWANCE;
     }
 
-    /// @notice The basket reports each constituent's asked rate at every
-    /// response. A donor no longer asked loses what it had accrued, so an
+    /// @notice The basket reports the rate each constituent is worked at, at
+    /// every response. One no longer worked loses what it had accrued, so an
     /// old allowance cannot be spent on a later, different turn.
     function recordRates(uint256[] calldata rates) external {
         require(msg.sender == basket && rates.length == count, "basket only");
@@ -153,13 +153,13 @@ contract PairRebalancePolicy is IRebalancePolicy {
         ratesAt = uint64(block.timestamp);
     }
 
-    /// @notice An executed transfer spends its donor's allowance. Urgency is
-    /// left alone: a gap that has become eligible stays so until it is back
-    /// inside the slack or on the other side of its target.
-    function recordExecution(uint256 donor) external {
-        require(msg.sender == basket && donor < count, "basket only");
+    /// @notice A sale or a purchase spends its constituent's allowance.
+    /// Urgency is left alone: a gap that has become eligible stays so until it
+    /// is back inside the slack or on the other side of its target.
+    function recordExecution(uint256 i) external {
+        require(msg.sender == basket && i < count, "basket only");
         lastExecutionAt = uint64(block.timestamp);
-        allowance[donor] = 0;
+        allowance[i] = 0;
     }
 
     /// @dev Urgency as it stands now for a constituent `gap` over its target

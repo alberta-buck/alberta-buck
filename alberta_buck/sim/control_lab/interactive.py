@@ -23,7 +23,7 @@ EXPLANATIONS = {
     "supply": "Branch from K without the desk or buyer. One issuer steadily sells BUCK for USDC using activated, fixed-face credit and current spendable balance. Its rate is positive at fair value and backs off exponentially at a discount; a premium increases the rate up to a daily cap. K changes available headroom. This simple flow agent never buys back to deleverage: a falling limit can leave an existing lien above the new limit. It is not a mortgage or liquidation model.",
     "both": "Enable the buyer and issuer together, still without the desk. Each acts at most once per market step. Their call order alternates, both rate limits are per day, and neither receives new funding during the run. This distinguishes two-sided private response from the isolated demand and supply cases.",
     "all": "Add the same desk to the two-sided private market. Compare both versus all for its incremental effect, and desk versus all for the private agents' effect. Every arm uses the same feed, initial pool liquidity and starting K; basket rebalancing remains enabled. The actors trade against current external basket value, not an assumed permanent USDC peg.",
-    "basket": "Enable BasketUpkeepFacet immediately after linking the pools. K remains fixed; the desk and persistent buyers/sellers are absent. Both quote routes inform the relative-price estimator. Separated pairs with slowing departure or credible closure can trigger bounded transfers from overweight to underweight TOKENs; historical references guard trade direction. All stages share a settled opening LP book. Inspect sensor quality for rates, errors, participation and own-impact allowances. Later stages retain this basket while adding other feedback loops.",
+    "basket": "Enable BasketUpkeepFacet immediately after linking the pools. K remains fixed; the desk and persistent buyers/sellers are absent. The credit is marked net, so every TOKEN is paired with issued BUCKs and none waits. Both quote routes inform the relative-price estimator. Each TOKEN is then worked toward its target on its own: one over it is sold and one under it bought when it is separating no further from the rest or credibly closing; historical references guard trade direction, and the credit carries the difference between the two legs. All stages share a settled opening LP book. Inspect sensor quality for rates, errors, participation and own-impact allowances. Later stages retain this basket while adding other feedback loops.",
 }
 
 
@@ -157,6 +157,20 @@ def plot_data(result):
             *([line(f"{'ABC'[i]} target", color, lambda f, i=i: targets(f)[i], "2 4") for i, color in enumerate(COLORS)] if tilt else [])],
             "Allocation follows the basket’s bounded Daily / Sync / Respond work. Dotted lines are the targets: each declared weight, "
             "leaned against that TOKEN’s price over its reference. The vertical axis fits the visible allocations.")
+        if "held" in frames[0]["basket"]:
+            def issued(f):
+                """BUCKs let out, percent of equity: the lien net of relief and of the BUCKs held in the positions."""
+                b = f["basket"]
+                return 100 * (-b["account"] - b["relief"] - b["held"]) / b["equity"] if b["equity"] else None
+            pane("credit", "The basket’s credit", "Percent of equity", [
+                line("BUCKs issued, net of those it holds", "#b63e45", issued),
+                line("Ceiling · half of K", "#87949c", lambda f: 50 * f["k"], "3 3"),
+                line("Still spendable", "#158067",
+                     lambda f: 100 * f["basket"]["spendable"] / f["basket"]["equity"] if f["basket"]["equity"] else None, "7 4")],
+                "Every TOKEN is paired with BUCKs the basket issues beside it, and those BUCKs do not count against K: "
+                "K bounds what it has let out. Below zero it holds more BUCKs than it owes. Sales lower the line and "
+                "purchases and exits raise it; the book aims where parity leans it, and anything beyond the ceiling is "
+                "sold down at once. What is still spendable is what an exit can be paid from before anything is sold.")
         performance = basket_performance(result)
         initial = performance["initial_buck"]
         booked = recorded(frames[0])

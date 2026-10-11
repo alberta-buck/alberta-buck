@@ -20,14 +20,15 @@ def run(profile_name, stage):
     cfg = load_config("doc/control-lab.toml")
     cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
     profiles = {p["name"]: p for p in [*PROFILES, *cfg["profiles"]]}
-    calls = []                                   # (address, fn name, args, gas, topics)
+    calls = []                                   # (address, fn name, args, gas, each log's first two topics)
     live = dict(on=False, roles={})
     original_send = chain_mod.Chain.send
     def send(self, fn, **kw):
         rc = original_send(self, fn, **kw)
         if live["on"]:
             calls.append((fn.address, fn.fn_name, tuple(a for a in fn.args if isinstance(a, int)), int(rc["gasUsed"]),
-                          {bytes(l["topics"][0]).hex() for l in rc["logs"] if l["topics"]}))
+                          {(bytes(l["topics"][0]).hex(), bytes(l["topics"][1]).hex() if len(l["topics"]) > 1 else "")
+                           for l in rc["logs"] if l["topics"]}))
         return rc
     chain_mod.Chain.send = send
     original_run = engine.World.run
@@ -43,14 +44,16 @@ def run(profile_name, stage):
         r = simulate_observed(cfg, profiles[profile_name], stage)
     finally:
         chain_mod.Chain.send, engine.World.run = original_send, original_run
-    transfer = keccak(text="PairResponse(uint256,uint256,uint256,uint256)").hex()
+    # Responded(action, ...): action 1 is a sale and 2 a purchase; pairing what waits and a mark alone trade nothing.
+    responded = keccak(text="Responded(uint8,uint256,uint256,uint256,uint256)").hex()
+    traded = {(responded, (1).to_bytes(32, "big").hex()), (responded, (2).to_bytes(32, "big").hex())}
     desk_op = None
     buckets = collections.defaultdict(list)
     for address, name, args, gas, topics in calls:
         role = live["roles"].get(address, "other")
         key = f"{role}.{name}"
         if role == "policy wheel" and name == "tick":
-            key += " (with a paired transfer)" if transfer in topics else " (no transfer)"
+            key += " (with a trade)" if traded & topics else " (no trade)"
         buckets[key].append(gas)
     days = cfg["days"]
     out = {k: dict(calls=len(v), total=sum(v), mean=round(statistics.mean(v)), median=round(statistics.median(v)), max=max(v),

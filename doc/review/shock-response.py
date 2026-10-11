@@ -61,11 +61,11 @@ def report(out):
     from alberta_buck.sim.control_lab.book import holdings, reference_value
     runs = {a: frames(out, a) for a in ARMS}
     still = reference_value(at(runs["maintenance"], AFTER)) - reference_value(at(runs["maintenance"], BEFORE))
-    print(f"TOKEN A sold by transfer from day 45 to day 55, and the gain across the shock (day {BEFORE} to {AFTER}) over maintenance")
+    print(f"TOKEN A sold from day 45 to day 55, and the gain across the shock (day {BEFORE} to {AFTER}) over maintenance")
     print(f"  {'rule':16s} {'sales':>5s} {'BUCKs':>8s} {'TOKEN A':>8s} {'first':>6s} {'last':>6s} {'gain':>8s}   TOKEN A held before / at the end of the shock")
     for arm, run_ in runs.items():
         sales = [(f["day"], t) for f in run_ if 45 <= f["day"] < 55 for e in f["events"]
-                 if e["actor"] == "basket" and e.get("action") == "transfer" for t in e["trades"] if t["side"] == "sell" and t["token"] == 0]
+                 if e["actor"] == "basket" and e.get("action") in ("sell", "buy") for t in e["trades"] if t["side"] == "sell" and t["token"] == 0]
         gain = reference_value(at(run_, AFTER)) - reference_value(at(run_, BEFORE)) - still
         first = f"{sales[0][0]:6.2f} {sales[-1][0]:6.2f}" if sales else f"{'':13s}"
         print(f"  {arm:16s} {len(sales):5d} {sum(t['quote_amount'] for _, t in sales):8,.0f} {sum(t['token_amount'] for _, t in sales):8.1f} {first} {gain:+8,.0f}"
