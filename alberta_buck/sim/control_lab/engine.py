@@ -1,7 +1,10 @@
 """One isolated world per stage. All prices and controller states are EVM reads.
 
 Only the external feed driver swaps to a requested price. In replay mode it
-also drives TOKEN/BUCK explicitly; in market mode those pools float freely.
+also drives TOKEN/BUCK explicitly; in market mode those pools float freely,
+and one arbitrageur carries the outside price to them. The outside market
+is deep: its pools are pinned to the feed again after every arbitrage pass,
+so the arbitrageur cannot move the price it is carrying.
 """
 from __future__ import annotations
 
@@ -241,6 +244,7 @@ class World:
     def drive(self, target, *, replay=None):
         from alberta_buck.sim.router import sqrt_price_x96
         d = self.d
+        self.feed_now = target
         groups = [(d.pool_usdc, d.usdc)]
         if replay is None:
             replay = self.flags.get("replay", False)
@@ -284,6 +288,9 @@ class World:
             self.events.extend(self.recorder.capture(rc, phase))
             if not events:
                 break
+            if self.cfg["market"]["outside"] == "deep":
+                # A real outside market does not stay moved by one arbitrageur.
+                self.drive(self.feed_now)
 
     def agents(self):
         from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO

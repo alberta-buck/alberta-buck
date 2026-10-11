@@ -30,8 +30,10 @@ DEFAULTS = {
              "walk_amplification": 0., "walk_daily_sigma": .01},
     # history_days: the earlier prices whose mean a historical profile takes as its reference.
     "bootstrap": {"history_days": 1280, "basket_warmup_days": 0},
-    "market": {"depth_usd": 1_000_000, "basket_equity_usd": 1_000_000,
-               "arb_rounds": 2, "arb_cap_bp": 200, "arb_beneficiary": "external"},
+    # outside: "deep" pins the TOKEN/USDC pools to the feed again after every arbitrage pass, up to
+    # arb_rounds passes in a phase; "pool" pins them once a step and lets the arbitrageur move them.
+    "market": {"depth_usd": 1_000_000, "basket_equity_usd": 1_000_000, "outside": "deep",
+               "arb_rounds": 24, "arb_cap_bp": 200, "arb_beneficiary": "external"},
     "monitor": {"interval": 1800, "max_age": 3600, "deviation_bp": 500},
     "controller": {"k0": .75, "kmin": .20, "kmax": .95,
                    "tau_i_days": 90., "kp_frac": .02},
@@ -96,8 +98,10 @@ def validate(cfg: dict) -> None:
         raise ValueError("invalid monitor pacing or tolerance")
     if cfg["market"]["depth_usd"] <= 0 or cfg["market"]["basket_equity_usd"] <= 0:
         raise ValueError("pool depth and basket capital must be positive")
-    if not 1 <= cfg["market"]["arb_rounds"] <= 20 or not 0 < cfg["market"]["arb_cap_bp"] <= 1000:
+    if not 1 <= cfg["market"]["arb_rounds"] <= 100 or not 0 < cfg["market"]["arb_cap_bp"] <= 1000:
         raise ValueError("invalid arbitrage work bound")
+    if cfg["market"]["outside"] not in ("deep", "pool"):
+        raise ValueError("market.outside must be deep or pool")
     if cfg["market"].get("arb_beneficiary", "external") not in ("external", "basket"):
         raise ValueError("arb_beneficiary must be external or basket")
     band = cfg["basket"]["weight_band_bp"]

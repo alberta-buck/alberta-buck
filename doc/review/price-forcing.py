@@ -1,13 +1,14 @@
-"""Does the lab press outside prices onto the basket's pools hard enough?
+"""How hard must outside prices be pressed onto the basket's pools?
 
-In the lab the outside price of a TOKEN is its TOKEN/USDC pool, which the feed driver pins to
-the feed once a step. One arbitrageur, a triangle cycle per TOKEN (TOKEN/BUCK, TOKEN/USDC,
-BUCK/USDC), carries that price to the basket's pools. It is capped per cycle and per step, it
-stops inside the three pools' fees, and its own trades push the TOKEN/USDC pool off the feed.
+In the lab the outside price of a TOKEN is its TOKEN/USDC pool. One arbitrageur, a triangle
+cycle per TOKEN (TOKEN/BUCK, TOKEN/USDC, BUCK/USDC), carries that price to the basket's pools.
+It is capped per cycle, and it stops inside the three pools' fees.
 
-`deep` models an outside market too deep to move: after every pass of the arbitrageur the
-TOKEN/USDC pools are pinned to the feed again, until a pass finds no cycle. Each profile runs
-with the lab's rule and with maintenance only, as the lab has it and deep.
+`pool` is how the lab first ran: the feed driver pins the TOKEN/USDC pools once a step, two
+arbitrage passes follow, and the arbitrageur's own trades push those pools off the feed.
+`deep` is how it runs now (market.outside in the configuration): an outside market too deep to
+move, pinned to the feed again after every pass until a pass finds no cycle. Each profile runs
+both ways, with the lab's rule and with maintenance only.
 
 Run inside the Nix shell with the Python environment active:
     python doc/review/price-forcing.py /tmp/forcing [jobs]
@@ -17,43 +18,24 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 PROFILES = ("shock", "three-phase", "commodities")
-PASSES = 24                                     # most a deep market is given in one phase
 
 
 def run(profile_name, deep, maintenance, out):
-    from alberta_buck.sim.control_lab import engine
     from alberta_buck.sim.control_lab.block_pairs import PROFILES as LAB, simulate_observed
     from alberta_buck.sim.control_lab.model import load_config, validate
     cfg = load_config("doc/control-lab.toml")
     cfg["feed"]["walk_amplification"] = 0; cfg["bootstrap"]["basket_warmup_days"] = 120
     profile = next(p for p in [*LAB, *cfg["profiles"]] if p["name"] == profile_name)
+    if not deep:
+        cfg["market"].update(outside="pool", arb_rounds=2)
     validate(cfg)
-    drive, arbitrage = engine.World.drive, engine.World.arbitrage
-
-    def remembering_drive(self, target, *, replay=None):
-        self.feed_now = target
-        return drive(self, target, replay=replay)
-
-    def deep_arbitrage(self, phase="arbitrage"):
-        for _ in range(PASSES):
-            before = self.counters["arb_cycles"]
-            arbitrage(self, phase)
-            if self.counters["arb_cycles"] == before:
-                break
-            drive(self, self.feed_now)          # the outside market does not stay moved
-
-    if deep:
-        engine.World.drive, engine.World.arbitrage = remembering_drive, deep_arbitrage
-    try:
-        result = simulate_observed(cfg, profile, "basket", maintenance_only=maintenance)
-    finally:
-        engine.World.drive, engine.World.arbitrage = drive, arbitrage
+    result = simulate_observed(cfg, profile, "basket", maintenance_only=maintenance)
     Path(out, name(profile_name, deep, maintenance)).write_text(json.dumps(dict(frames=result["frames"], summary=result["summary"])))
     return profile_name, deep, maintenance, result["summary"]["seconds"]
 
 
 def name(profile, deep, maintenance):
-    return f"{profile}-{'deep' if deep else 'lab'}-{'maintenance' if maintenance else 'policy'}.json"
+    return f"{profile}-{'deep' if deep else 'pool'}-{'maintenance' if maintenance else 'policy'}.json"
 
 
 def errors(frames):
@@ -79,11 +61,11 @@ def report(out):
             e = errors(policy["frames"])
             gain = reference_value(policy["frames"][-1]) - reference_value(still["frames"][-1])
             transfers = sum(e_["actor"] == "basket" and e_.get("action") == "transfer" for f in policy["frames"] for e_ in f["events"])
-            print(f"{p:12s} {'deep' if deep else 'lab':6s} | {e[0]:23.2f}% {e[1]:5.2f}% {e[2]:11.2f}% {e[3]:5.2f}% | {gain:+8,.0f} {transfers:9d}"
+            print(f"{p:12s} {'deep' if deep else 'pool':6s} | {e[0]:23.2f}% {e[1]:5.2f}% {e[2]:11.2f}% {e[3]:5.2f}% | {gain:+8,.0f} {transfers:9d}"
                   f" {policy['summary']['arb_cycles']:10d} {policy['summary']['arb_profit_buck']:10,.0f}")
     at = lambda frames, day: next(f for f in frames if f["day"] == day)
-    print("\nshock: TOKEN A through the jump at day 45, as the lab has it and with a deep outside market")
-    print(f"  {'day':>5s} {'feed':>6s} | lab: inside  A's share  desire A>B  basket             | deep: inside  A's share  desire A>B  basket")
+    print("\nshock: TOKEN A through the jump at day 45, with the outside market a pool and deep")
+    print(f"  {'day':>5s} {'feed':>6s} | pool: inside A's share  desire A>B  basket             | deep: inside  A's share  desire A>B  basket")
     lab, deep = load("shock", False, False)["frames"], load("shock", True, False)["frames"]
     for f, g in zip(lab, deep):
         if not 44.75 <= f["day"] <= 48:
@@ -92,7 +74,7 @@ def report(out):
                           + "; ".join(",".join(f"{t['side']} {'ABC'[t['token']]} {t['quote_amount']:,.0f}" for t in e["trades"])
                                       for e in x["events"] if e["actor"] == "basket" and e.get("action") == "transfer").ljust(19))
         print(f"  {f['day']:5.2f} {f['target_usd'][0]:6.1f} | {cell(f)}| {cell(g)}")
-    for label, frames in (("lab", lab), ("deep", deep)):
+    for label, frames in (("pool", lab), ("deep", deep)):
         still = load("shock", label == "deep", True)["frames"]
         sales = [(f["day"], t) for f in frames if 45 <= f["day"] < 55 for e in f["events"] if e["actor"] == "basket" and e.get("action") == "transfer"
                  for t in e["trades"] if t["side"] == "sell" and t["token"] == 0]
