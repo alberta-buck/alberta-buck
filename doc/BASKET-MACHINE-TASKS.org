@@ -279,35 +279,49 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   the same fault is new: an exit that leaves liquidity short makes the next turn a safeguard
   turn, and a safeguard turn makes no transfer. Measure both with depositors arriving and
   leaving daily.
-- [ ] Deposits wait where the basket has no BUCKs to pair them with. On the savings world the
-  machine first placed nothing for 70 days, because every response was a safeguard turn (gold
-  beyond its leash from the depositors' even mix) and a safeguard turn placed nothing. That is
-  fixed: a leash sale no longer holds placing back, and a need for cash is spread over every
-  constituent. It was not the whole cause. TOKEN waiting, as a share of equity, real prices:
+- [ ] Deploy equity as it arrives. The direction, set on 2026-10-11:
+  - A deposit is paired with issued BUCKs almost at once, up to K times equity.
+  - The rest stays as TOKEN and is consumed by rebalancing: sold when its TOKEN is overweight,
+    to fund what is underweight. Nothing is sold just to place it.
+  - A rebalance is funded by issuing while credit allows, then from undeployed TOKEN, and from
+    positions only when no undeployed TOKEN is left.
+  - The reserve is what one withdrawal needs. A shortfall enlarges the next rebalancing sale;
+    it is not a turn of its own.
+  - Income is reversion, not pool fees, so what matters is positions placed early.
+  So about a quarter of the book is meant to wait at K 0.75, and the yardstick is how soon the
+  waiting share falls to that. TOKEN waiting, as a share of equity, on the savings world's
+  first year of real prices:
   | Upkeep | Day 30 | Day 90 | Day 180 | Day 364 | Pool fees, year 1 |
   |--------+--------+--------+---------+---------+-------------------|
   | Older | 6.6% | 0.0% | 0.2% | 0.0% | 28,080 |
-  | Machine, before | 47.8% | 42.2% | 23.3% | 16.7% | 22,298 |
+  | Machine, before 5079d37 | 47.8% | 42.2% | 23.3% | 16.7% | 22,298 |
   | Machine, as built now | 45.8% | 33.2% | 15.6% | 12.7% | 22,482 |
-  | Placing trial | 10.8% | 5.0% | 0.0% | 0.0% | 26,139 |
-  What is left is credit. The machine pairs waiting TOKEN only with what the account can spare
-  beyond its liquidity target. Two things bound that:
-  - /The reserve./ The opening deposits count as a day's flow, which holds the liquidity target
-    at its ceiling, a fifth of gross assets, for about three months. On day 11 the basket had
-    drawn 2.74 million of a limit of 4.05 million (K times equity) and the target was 1.63
-    million, more than the 1.29 million of room left. Decide whether placing may use room the
-    reserve holds, and whether a deposit should raise the reserve as an exit's flow does.
-  - /K./ Pairing a BUCK of TOKEN takes a BUCK. With no reserve at all, credit pairs TOKEN up to
-    a lien of K times equity, three quarters of the book. The last quarter waits or is sold.
-  The older upkeep's Deploy step gave each waiting constituent its share of the spare credit
-  and sold half of what that did not cover, capped by the pool. The machine kept the first half
-  of that rule only. The trial (=test/harness/BasketUpkeepPlacingTrial.sol=, selected with
-  =machine.upkeep=) adds the second: after the built response it sells half of what still waits
-  into its own pool and pairs the rest. It clears the wallets in under six months.
-  Placing is not free. On reverting prices the share price after a year is 1.0745 with a fifth
-  of the book still waiting, 1.0494 with the trial and 1.0484 on the older upkeep. So part of
-  the machine's lead over the older upkeep in the five-year runs may be its unplaced TOKEN,
-  not its rebalancing. On real prices the three are within 0.3%.
+  | The same, reserve 4% of gross and no flow term | 42.1% | 26.3% | 20.7% | 16.1% | 22,808 |
+  | Placing trial (sells half of what waits) | 10.8% | 5.0% | 0.0% | 0.0% | 26,139 |
+  The machine takes three to five months over what should take a day. What holds it, largest
+  first:
+  - /Pace./ Placing does one constituent a turn, only where the book is short of it, capped at
+    5% of the constituent and 1% of its pool's depth, though pairing swaps nothing. A smaller
+    reserve alone moves day 30 from 46% to 42%.
+  - /The reserve./ A deposit counts as a day's flow, which holds the liquidity target at its
+    ceiling, a fifth of the gross, for about three months. Placing may use only what is beyond
+    it. On day 11 the basket had drawn 2.74 million of a limit of 4.05 million and the target
+    was 1.63 million, more than the 1.29 million of room left. Falling under half the target
+    makes a safeguard turn. =machine.reserve_floor_bp= and =machine.reserve_flow_z= set it in
+    the simulator.
+  - /Order./ A transfer never draws; credit is used only by placing, on a turn with no
+    transfer. A recipient's waiting TOKEN is not paired before more is bought.
+  The older upkeep and the trial clear the wallets by selling half of what credit does not
+  cover, on arrival. That is not the direction, and it costs: on reverting prices the share
+  price after a year is 1.0745 with a fifth of the book waiting, 1.0494 with the trial and
+  1.0484 on the older upkeep. Remove the trial (=test/harness/BasketUpkeepPlacingTrial.sol=)
+  once the steps below are built. Part of the machine's lead over the older upkeep in the
+  five-year runs may be its undeployed TOKEN, not its rebalancing.
+  Steps: placing as its own step, every turn, every constituent, to K of its value and
+  uncapped; then inside the deposit. The reserve rule. The funding order of a transfer. Open:
+  whether deployment stops short of the limit by the reserve; how one withdrawal is sized;
+  whether a deposit's share goes to its own pool; whether undeployed TOKEN is judged for each
+  constituent or across the book.
 - [ ] Place deposits toward the targets. A deposit lands as its own TOKEN in its own pool, so
   the depositors' mix pushes the weights (=BASKET-EQUITY.org= 14.2, items 4 and 5). Two cures
   were proposed and neither is built: place a deposit's value by the targets, selling nothing

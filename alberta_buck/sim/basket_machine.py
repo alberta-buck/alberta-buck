@@ -29,6 +29,10 @@ DEFAULTS = {
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
+    # The shell's liquidity target, the room it keeps unspent for exits. None: as deployed (1% of the
+    # gross at least, two standard deviations of the daily flow, a fifth of the gross at most).
+    "reserve_floor_bp": None,       # at least this of the gross
+    "reserve_flow_z": None,         # standard deviations of the daily flow; 0: the floor alone
     # The desk beside the basket and its outer-band policy.
     "desk_capital_usd": 400000,     # its founding grant, for each constituent
     "desk_leg_bp": 40,              # one operation's leg, of the pool
@@ -162,6 +166,13 @@ def activate(d, given=None, turn_seconds=0) -> None:
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
     chain.send(basket.functions.setResponse((int(s["leash_bp"]), interval, round(s["tilt"] * 10000),
                                              int(s["lean_cap_bp"]))), sender=gov)
+    if s["reserve_floor_bp"] is not None or s["reserve_flow_z"] is not None:
+        params = list(basket.functions.eq().call())        # floorBp first, flowZx100 second
+        if s["reserve_floor_bp"] is not None:
+            params[0] = int(s["reserve_floor_bp"])
+        if s["reserve_flow_z"] is not None:
+            params[1] = round(s["reserve_flow_z"] * 100)
+        chain.send(basket.functions.setEquityParams(tuple(params)), sender=gov)
     chain.send(wheel.functions.setResponseMode(True), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
     # These were comparison advisors; the replacement has one price service.
