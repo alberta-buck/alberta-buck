@@ -45,7 +45,7 @@ the feature tree, each checked against the golden vectors.
 
 ## Status
 
-0.3.0, prototype.  Unaudited software carrying the identity accumulator of a
+0.4.0, prototype.  Unaudited software carrying the identity accumulator of a
 monetary system.
 
 ## Licence
