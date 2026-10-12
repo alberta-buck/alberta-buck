@@ -336,7 +336,9 @@ net of it. The machine is still ahead by 3.9% and 6.7%.
 Every lab campaign was rerun on the rebuilt machine, at commit =61fb598=. The sections below
 carry its numbers. After the older baskets were removed the interactive runs, the sizing
 campaigns, the research campaign and gas were regenerated once more and came out the same. The
-jump, the tilt and the price forcing runs were not repeated. Against the machine before the rebuild, with the whole system running:
+jump, the tilt and the price forcing runs were not repeated.
+
+Against the machine before the rebuild, with the whole system running:
 
 | Prices | Before the rebuild | Rebuilt | Rebuilt, declared weights |
 |--------+--------------------+---------+---------------------------|
