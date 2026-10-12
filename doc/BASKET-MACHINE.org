@@ -117,11 +117,23 @@ pro-rata basket the same seven worlds stayed at parity.
 
 /Why it should not happen./ A dear BUCK is an offer. Anyone with assets can pledge them, issue
 BUCKs that are worth more than their basket, and buy other assets cheaply with them. That
-selling is what brings the BUCK back. In these worlds the offer went unanswered. The portcast
-world has 30 debtors and three credit arbitrageurs who can issue, each with a fixed credit, and
-the debtors' mints were refused 64 times for want of mint funding. A real economy has more
-people with assets than that. So one reading is that these worlds simply run out of issuers,
-which is a fault of the worlds and not of any basket. That has not been looked into.
+selling is what brings the BUCK back. In these worlds the offer went unanswered, and the
+portcast world shows why ([[file:BASKET-MACHINE-RESULTS.org::*Who could issue][the results]] have the count). It holds about 18 million of issuing
+capacity against 75 million BUCKs in circulation, and most of it was shut out or used up before
+the rise began:
+
+- The 30 mortgage debtors could not pass the funding gate. To mint against an insured credit
+  the minter must already hold BUCKs worth the insurance deposit times a factor, and the factor
+  is near one at parity and falls to zero only when the BUCK is 9% dear. These debtors have no
+  spare cash to buy that reserve. They were refused 59 times in 63 attempts while the BUCK sat
+  up to 4% dear and K climbed to its limit.
+- The three credit arbitrageurs, the only people in the world who issue because the BUCK is
+  dear, had 11 million of pledgeable wealth among them and had used it all by day 600.
+- The desk is small, and under the older upkeep nobody in this world turns it.
+
+So these worlds run out of issuers, and one rule of Buck's, the gate, keeps willing ones out in
+exactly the band where they are wanted. Neither is the basket's doing. Whether the BUCK holds
+once there are issuers enough is being run.
 
 /What the basket did meanwhile./ This is the part that belongs to the basket. While the BUCK
 rose, the basket bought BUCKs, all the way up. Three of its rules made it.

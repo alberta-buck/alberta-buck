@@ -206,6 +206,55 @@ One caution about the worlds themselves. They were built for the pro-rata basket
 BUCK for every BUCK's worth deposited. On the equity basket the same people have fewer sources
 of BUCKs, so some of this may be the worlds' doing. The loop is the basket's all the same.
 
+** Who could issue
+
+A dear BUCK should bring out issuers: anyone with assets can pledge them and sell BUCKs that
+are worth more than their basket. In the portcast world we counted who could, on the older
+upkeep's run. The machine's and the pro-rata basket's runs have the same people and the same
+story until day 600.
+
+| Who | How many | What they could issue | What happened |
+|-----+----------+-----------------------+---------------|
+| Mortgage debtors | 30, arriving over three years | 7.2 million in all | Refused by the funding gate until the BUCK was 9% dear |
+| Credit arbitrageurs | 3 | 10.4 million | Issued it all between day 260 and day 600 |
+| Dollar arbitrageurs | 5, with 22 million dollars | Nothing: they can only buy cheap BUCKs | Idle for five years |
+| The desk | 1 | 0.4 million | Older upkeep: never turned. Machine: issued 27 times and lost its capital |
+
+That is about 18 million of issuing capacity in a world with 75 million BUCKs in circulation.
+
+/The funding gate./ To mint against a credit that carries an insurance premium, the minter must
+already hold BUCKs worth the insurance deposit for that mint times a factor. The deposit is ten
+years' premium: here 5% to 15% of what is minted, so 40,000 to 120,000 BUCKs for an 800,000
+refinance. The factor is one at parity, more when the BUCK is cheap, 0.7 when it is 3% dear,
+and reaches zero only when it is 9% dear.
+
+These debtors cannot meet it. Their income goes to their mortgage. Of the twelve who had arrived
+by day 600, four had got a mint through. Of the other eight, five held no dollars at all and
+three about the 20,000 they keep in hand. The debtor saves toward the gate only out of cash
+above that, and in five years not one of them ever bought a BUCK for it, on any of the three
+baskets.
+
+| Up to day 600 | Older upkeep | Machine | Pro-rata basket |
+|---------------+--------------+---------+-----------------|
+| Debtors' mints refused | 59 | 53 | 42 |
+| Debtors' mints that went through | 4 | 4 | 3 |
+| BUCK's distance from its basket, at most | 4% dear | 3% dear | 1% |
+| K | 0.76 to 0.95 | 0.75 to 0.95 | 0.75 |
+
+From day 240 to day 600 the BUCK sat up to 4% dear and K climbed to its limit. That is the
+stretch in which new issuers were wanted, and the gate turned them away. When the BUCK passed 9%
+dear, around day 650, the factor fell to zero and every debtor who had arrived issued within
+weeks. By then the credit arbitrageurs were spent and 7 million was not enough.
+
+On the pro-rata basket the debtors are refused just the same, 156 times in the five years, and
+it does not matter: the BUCK never leaves parity and the credit arbitrageurs never issue a
+BUCK. That basket supplies the BUCKs itself, one for every BUCK's worth deposited.
+
+So this world is short of issuers, and one rule of Buck's keeps the willing ones out in the band
+where they are wanted. Three runs are under way to see whether the BUCK holds when that is
+changed: the credit arbitrageurs' wealth ten times larger, on each upkeep, and the debtors'
+credits free of the gate.
+
 ** The same worlds without the lean against parity
 
 Three of the worlds were run again on the machine with its lean against parity switched off:

@@ -192,9 +192,29 @@ machine's design is expected to become the accepted one.
   - K's upper limit of 0.95 and what it means for the controller to sit on it. Under the older
     upkeep K is at 0.92 to 0.94 after five years even in worlds that hold, and at 0.93 to 0.95
     in the savings world on reverting prices.
-  - The worlds. They were tuned on the pro-rata basket, which issues a BUCK for every BUCK's
-    worth deposited. On the equity basket the same cast has fewer sources of BUCKs. Find which
-    worlds are short of issuers by construction.
+  - [X] Who could issue in a failing world (2026-10-12, the portcast world; the count is in
+    [[file:BASKET-MACHINE-RESULTS.org::*Who could issue][the results]]). About 18 million of capacity against 75 million BUCKs: 30 mortgage debtors
+    (7.2 million), three credit arbitrageurs (10.4 million, spent by day 600), a desk of 0.4
+    million. The debtors were refused by Buck's funding gate 59 times in 63 while the BUCK was
+    up to 4% dear and K climbed to its limit: they have no cash for the reserve it asks, and
+    its factor reaches zero only at 9% dear. On the pro-rata basket they are refused as often
+    and it does not matter, because that basket supplies the BUCKs.
+  - [ ] Does the BUCK hold with issuers enough? Three runs of the portcast world
+    (=build/sim/issuers/=): the credit arbitrageurs' wealth ten times larger, on each upkeep,
+    and the debtors' credits free of the gate.
+  - [ ] The funding gate keeps willing issuers out in the band where they are wanted. It asks a
+    minter to hold BUCKs worth the insurance deposit times a factor that is one at parity and
+    still 0.7 at 3% dear. So to issue BUCKs when they are scarce a debtor must first buy some.
+    Candidates, none decided: let the factor reach zero at parity, so the gate asks for a
+    reserve only while the BUCK is cheap; or let the deposit be met out of the mint itself
+    while the BUCK is dear. And the debtor agent never saves for the gate in five years,
+    which is the agent's fault whatever the gate does.
+  - [ ] Issuers in the cast. Only credit arbitrageurs issue because the BUCK is dear, and a world
+    has three. The five dollar arbitrageurs hold 22 million and can only buy cheap BUCKs. Give
+    the casts pledgeable wealth in proportion to the BUCKs in circulation.
+  - [ ] The desk is 0.4 million in a world of 75 million, and under the older upkeep the matrix
+    worlds have nobody to turn it. Under the machine it issued 27 times into the rise and lost
+    its capital. Size it and bound its loss when it is evaluated.
   - Whether the machine should be the default, and the published basket, before this is settled.
   - One world stops on the machine on its first day (=debtors-mature-basketeers=): K falls to
     0.02 and a depositor's refused mint ends the run. The agent should survive a refusal.
