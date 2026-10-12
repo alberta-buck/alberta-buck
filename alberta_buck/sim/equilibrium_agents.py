@@ -2374,6 +2374,14 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))
         self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
         self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
+        # A household that can refinance a mortgage has savings.  It arrives
+        # with so many months of its income in dollars (a setting, no draw:
+        # the draw order is pinned).  Arriving with nothing, as it used to,
+        # left it unable to hold the BUCKs the funding gate asks of a minter,
+        # and shut out of issuing when it had every reason to
+        # (doc/BASKET-MACHINE-RESULTS.org, "Who could issue").
+        self.savings = int(self.income_annual
+                           * float(_spec(scenario, cls, "savings_months", 6.0)) / 12)
         self.overdraw_effort = _draw(scenario, cls, "overdraw_effort", r, 0.0)
         # How hard this debtor is willing to push the BUCK/USDC route to get
         # its refinancing done.  This is the throttle that matters: a debtor
@@ -2673,6 +2681,12 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             self._started = True
             self._last_day = day
             self._last_month_day = day - self.MONTH
+            # Its savings, in both ledgers: the counterfactual household has
+            # them too.
+            if self.savings > 0:
+                d.chain.send(d.usdc.functions.mint(self.proxy.address,
+                                                   self.savings))
+                self.hypo_cash += self.savings
         days = max(0, day - self._last_day)
         self._last_day = day
         if days > 0:

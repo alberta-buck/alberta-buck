@@ -228,11 +228,17 @@ years' premium: here 5% to 15% of what is minted, so 40,000 to 120,000 BUCKs for
 refinance. The factor is one at parity, more when the BUCK is cheap, 0.7 when it is 3% dear,
 and reaches zero only when it is 9% dear.
 
-These debtors cannot meet it. Their income goes to their mortgage. Of the twelve who had arrived
-by day 600, four had got a mint through. Of the other eight, five held no dollars at all and
-three about the 20,000 they keep in hand. The debtor saves toward the gate only out of cash
-above that, and in five years not one of them ever bought a BUCK for it, on any of the three
-baskets.
+These debtors cannot meet it, because the model gives them no savings. A debtor arrives with
+nothing but the income that follows. One paid at harvest holds no dollars at all until its
+first harvest, and its mortgage grows meanwhile. One on a salary builds up a few thousand a
+month and keeps the first 20,000 back. Of the twelve who had arrived by day 600, four had got a
+mint through. Of the other eight, five held no dollars and three about 20,000. They did buy
+BUCKs toward the gate, 17 times by then, but the reserve was beyond what most of them had.
+
+That is a fault of the model. A household that can refinance a mortgage has savings, and the
+want of some would not keep it from retiring a debt that bears interest with BUCKs that bear
+none. The debtors now arrive with six months of their income (2026-10-12). The runs in this
+section were made before that.
 
 | Up to day 600 | Older upkeep | Machine | Pro-rata basket |
 |---------------+--------------+---------+-----------------|
