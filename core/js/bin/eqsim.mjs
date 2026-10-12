@@ -18,7 +18,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { anvilSession, tevmSession } from "../src/backends.js";
 import { loadArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
-import { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome }
+import { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome, WheelKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
 import { ParityArb } from "../src/agents/arb.js";
@@ -71,13 +71,15 @@ const debtor = new MortgageRetiree({
   aggrBp: BigInt(a.aggr),
   payment: PAYMENT, account: debtorAcct });
 
+const arb = new ParityArb();
 const agents = [
   new DayClock(),
   ...world.tokens.map((t, i) => new PinWhale({
     simlp: world.simlp, pool: t.poolUsdc, token: t.erc20.address,
     tokenDec: t.dec, quote: world.usdc.address,
     refPrice: (d) => world.feeds[i][d % world.feeds[i].length] })),
-  new ParityArb(),
+  arb,
+  new WheelKeeper({ arb }),        // turns the basket machine's wheel; the arb follows it
   new PidKeeper(),
   saver,
   new MonthlyIncome({ account: debtorAcct, amount: PAYMENT }),

@@ -111,9 +111,14 @@ async function renderController() {
 
 async function renderBasket() {
   const bs = await app.basketSnapshot();
+  const what = bs.kind === "prorata"
+    ? `<b>BuckBasketProRata</b> (deposits mint BUCK and LP the pair; the ` +
+      `depositor holds the receipt NFT)`
+    : `<b>BuckBasketEquity</b> on the basket machine (the wheel pairs each ` +
+      `deposit with BUCKs the basket issues itself; the depositor holds ` +
+      `shares, by a receipt NFT, and is paid out in BUCK)`;
   $("basketcard").innerHTML =
-    `<div class="card"><b>BuckBasketProRata</b> (deposits mint BUCK and LP ` +
-    `the pair; the depositor holds the receipt NFT)<br>` +
+    `<div class="card">${what}<br>` +
     `basketValueInBuck <b>${bs.bvib.toFixed(6)}</b> · receipts issued ${bs.receipts}<br>` +
     bs.constituents.map((c) =>
       `<span class="addr">backing in ${c.sym}/BUCK: ${USD(c.tok)} ${c.sym} + ` +

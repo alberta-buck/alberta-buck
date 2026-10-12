@@ -1,8 +1,8 @@
 // Stage 6/7 gate: the minimal two-agent equilibrium LOOP runs on Tevm.
 //
 // DayClock + PinWhale (TOKEN/USDC pinned to the seeded walk) + ParityArb
-// (triangle consistency) + PidKeeper + BasketSaver + MonthlyIncome +
-// MortgageRetiree (the prototype, live) for 35 simulated days:
+// (triangle consistency) + WheelKeeper + PidKeeper + BasketSaver +
+// MonthlyIncome + MortgageRetiree (the prototype, live):
 //
 //   * every op matches its declared expectation,
 //   * the arb holds TOKEN/BUCK to the implied triangle price,
@@ -11,7 +11,12 @@
 //   * the saver completes a full deposit -> term -> redeem cycle,
 //   * the debtor books monthly ledger rows (both chart columns).
 //
-// ~35 sim-days of real txs on tevm: the suite's heaviest gate (~2 min).
+// Twice.  On the equity basket with the basket machine, the world's
+// default, for 14 days: the wheel pairs the saver's deposit and the exit is
+// paid in BUCK.  A wheel turn is over a million gas, about four seconds on
+// tevm, so a day there costs some twenty seconds and the run is kept short.
+// And on the pro-rata basket for 35 days, as before (~2 min), which also
+// takes the debtor through its first month.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,10 +45,8 @@ const skip = !id ? "identity kernel not built (make nix-core-build-wasm)"
   : !(urPath && existsSync(urPath)) ? "vendored UR artifact missing"
   : false;
 
-const DAYS = 35;
-
-test("eqsim: the two-agent equilibrium loop runs on tevm", { skip }, async () => {
-  const { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome } =
+async function loop({ basket, days, holdDays }) {
+  const { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome, WheelKeeper } =
     await import("../src/scenarios/eqworld.js");
   const { PinWhale } = await import("../src/agents/whale.js");
   const { ParityArb } = await import("../src/agents/arb.js");
@@ -53,7 +56,7 @@ test("eqsim: the two-agent equilibrium loop runs on tevm", { skip }, async () =>
 
   const session = await tevmSession();
   const world = await buildEquilibriumWorld(session, loadArtifact, {
-    identity: id.default,
+    identity: id.default, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
     feedSeed: 0xF005, stepBp: 120 });
 
@@ -61,7 +64,7 @@ test("eqsim: the two-agent equilibrium loop runs on tevm", { skip }, async () =>
   const PAYMENT = 3_000n * 10n ** 6n;
   const debtorAcct = privateKeyToAccount(generatePrivateKey());
   const saver = new BasketSaver({
-    account: privateKeyToAccount(generatePrivateKey()), holdDays: 20 });
+    account: privateKeyToAccount(generatePrivateKey()), holdDays });
   const debtor = new MortgageRetiree({
     house: HOUSE, mortgageBp: 550n, premiumBp: 50n, payment: PAYMENT,
     account: debtorAcct });
@@ -73,15 +76,15 @@ test("eqsim: the two-agent equilibrium loop runs on tevm", { skip }, async () =>
       simlp: world.simlp, pool: t.poolUsdc, token: t.erc20.address,
       tokenDec: t.dec, quote: world.usdc.address,
       refPrice: (d) => world.feeds[i][d % world.feeds[i].length] })),
-    arb, new PidKeeper(), saver,
+    arb, new WheelKeeper({ arb }), new PidKeeper(), saver,
     new MonthlyIncome({ account: debtorAcct, amount: PAYMENT }),
     debtor,
-  ], { days: DAYS, onDay: (d) => world.record(d) });
+  ], { days, onDay: (d) => world.record(d) });
 
   // Every op matched its declared expectation.
   assert.equal(session.mismatches.length, 0,
     `mismatches: ${JSON.stringify(session.mismatches[0] ?? null)}`);
-  assert.equal(world.series.length, DAYS);
+  assert.equal(world.series.length, days);
 
   // The arb holds the triangle together at the end of the run.
   const [pTU, pUB, pTB] = await Promise.all(
@@ -105,13 +108,39 @@ test("eqsim: the two-agent equilibrium loop runs on tevm", { skip }, async () =>
   assert.deepEqual(events.slice(0, 2), ["deposit", "redeem"],
     `saver cycle (got ${events})`);
   assert.ok(saver.dollarDays > 0n, "dollar-days accounting ran");
-  assert.equal(debtor.ledger.length, 2, "debtor booked d0 and d30");
   assert.ok(debtor.ledger.every((r) => r.hypoOwing <= HOUSE),
     "counterfactual amortizes");
 
-  console.log(`eqsim: K=${K.toFixed(4)} bvib=${bvib.toFixed(4)} ` +
+  console.log(`eqsim (${world.basketKind}, ${days}d): K=${K.toFixed(4)} bvib=${bvib.toFixed(4)} ` +
     `div=${divBp}bp triangles=${arb.triangles} ` +
     `saver=${JSON.stringify(events)} ` +
-    `debtor drawn=${debtor.ledger[1].drawn} ` +
+    `debtor drawn=${debtor.ledger.at(-1).drawn} ` +
     `mortgage=${debtor.mortgageOwing}`);
+  return { world, session, saver, debtor };
+}
+
+test("eqsim: the two-agent equilibrium loop runs on tevm, on the basket machine", { skip }, async () => {
+  const { world, session, saver, debtor } = await loop({ basket: "machine", days: 14, holdDays: 8 });
+  assert.equal(world.basketKind, "machine", "the machine is the world's default basket");
+  // The wheel paired what was deposited: only dust waits in the wallet
+  // (fees a position collected since the last turn), far under a
+  // thousandth of the book.
+  for (let i = 0; i < world.tokens.length; i++) {
+    const t = world.tokens[i];
+    const idle = await session.call(world.basket, "idleToken", [BigInt(i)]);
+    assert.ok(idle * 1000n < t.seedTok,
+      `${t.sym}: nothing but dust waits to be paired (${idle} of ${t.seedTok})`);
+  }
+  // The exit was paid in BUCK, and the saver holds it.
+  const got = saver.ledger.find((r) => r.event === "redeem").usd;
+  assert.ok(got > 0n, "the saver was paid");
+  assert.ok(await session.call(world.buck, "balanceOf", [saver.account.address]) > 0n,
+    "in BUCK");
+  assert.equal(debtor.ledger.length, 1, "debtor booked d0");
+});
+
+test("eqsim: the same loop on the pro-rata basket, through the debtor's first month", { skip }, async () => {
+  const { world, debtor } = await loop({ basket: "prorata", days: 35, holdDays: 20 });
+  assert.equal(world.wheel, null, "the pro-rata basket has no wheel");
+  assert.equal(debtor.ledger.length, 2, "debtor booked d0 and d30");
 });

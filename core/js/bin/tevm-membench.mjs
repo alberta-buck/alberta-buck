@@ -319,6 +319,9 @@ const nTok = Math.max(1, Math.min(6, Number(a.tokens)));
 const tBuild = performance.now();
 const world = await buildEquilibriumWorld(session, loadArtifact, {
   identity: id, urArtifact, tokens: COMMODITIES.slice(0, nTok),
+  // The recorded memory curves are the pro-rata basket's, from one
+  // constituent up; the machine needs two and a wheel keeper.
+  basket: "prorata",
   feedSeed: 61445, stepBp: 80 });
 
 const key = (label) => keccak256(toBytes(`tevm-membench:${label}`));

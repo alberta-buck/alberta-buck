@@ -23,7 +23,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { anvilSession, tevmSession } from "../src/backends.js";
 import { loadArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
-import { buildEquilibriumWorld, DayClock, PidKeeper }
+import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
 import { ParityArb } from "../src/agents/arb.js";
@@ -82,8 +82,11 @@ if (cast.has("whales")) {
     tokenDec: t.dec, quote: world.usdc.address,
     refPrice: (d) => world.feeds[i][d % world.feeds[i].length] })));
 }
-if (cast.has("arb")) agents.push(new ParityArb({
-  maxIters: Number(a.arbIters) }));
+const arb = cast.has("arb") ? new ParityArb({ maxIters: Number(a.arbIters) }) : null;
+if (arb) agents.push(arb);
+// The basket machine does nothing unless its wheel is turned: with any cast.
+// The arbitrageur, if cast, follows the wheel's own trades.
+if (world.wheel) agents.push(new WheelKeeper({ arb }));
 if (cast.has("pid")) agents.push(new PidKeeper());
 if (cast.has("saver")) agents.push(new BasketSaver({
   account: privateKeyToAccount(generatePrivateKey()),

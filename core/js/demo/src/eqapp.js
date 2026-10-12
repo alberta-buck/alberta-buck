@@ -10,7 +10,7 @@
 // drives the SAME class with node-loaded ones.
 
 import { advanceTime, DAY, DEPLOY_DEFAULTS } from "../../src/buckworld.js";
-import { buildEquilibriumWorld, MonthlyIncome, PidKeeper }
+import { buildEquilibriumWorld, MonthlyIncome, PidKeeper, WheelKeeper }
   from "../../src/scenarios/eqworld.js";
 import { PinWhale } from "../../src/agents/whale.js";
 import { ParityArb } from "../../src/agents/arb.js";
@@ -45,12 +45,14 @@ export class EqWorldApp {
     this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng });
     const w = this.world;
+    const arb = new ParityArb();
     this.core = [
       ...w.tokens.map((t, i) => new PinWhale({
         simlp: w.simlp, pool: t.poolUsdc, token: t.erc20.address,
         tokenDec: t.dec, quote: w.usdc.address,
         refPrice: (d) => w.feeds[i][d % w.feeds[i].length] })),
-      new ParityArb(),
+      arb,
+      new WheelKeeper({ arb }),    // turns the basket machine's wheel; the arb follows it
       new PidKeeper(),
     ];
     for (const a of this.core) {
@@ -276,7 +278,7 @@ export class EqWorldApp {
         buck: f6(await s.call(w.buck, "balanceOf", [t.poolBuck.address])),
       });
     }
-    return { bvib, receipts: w.receipts, constituents };
+    return { bvib, receipts: w.receipts, constituents, kind: w.basketKind };
   }
 
   basketChart({ width = 840, height = 220 } = {}) {

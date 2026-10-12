@@ -286,7 +286,16 @@ export async function registerWallet(world, account, credential, opts = {}) {
   ], { tag: `onboard:${fields.given_name ?? account.address}`, gas: 3_000_000n,
        account });
 
-  return { account, fields, canonical, m, M, kp: { sk, pk }, E, issuer };
+  const handle = { account, fields, canonical, m, M, kp: { sk, pk }, E, issuer };
+  // The world remembers who registered through it, so an op helper can run
+  // a holder's identity handshake for it (identityOf).
+  (world.identities ??= new Map()).set(account.address.toLowerCase(), handle);
+  return handle;
+}
+
+/** The identity handle of an account registered through this world, or null. */
+export function identityOf(world, address) {
+  return world.identities?.get(String(address).toLowerCase()) ?? null;
 }
 
 /**

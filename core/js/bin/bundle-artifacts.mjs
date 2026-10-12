@@ -33,10 +33,19 @@ export const NEEDED = [
   "BuckCreditHarness",         // eq world: credits to proxies that never opt in
   "BuckKControllerDirect",
   "Buck",
-  "BuckWithBasketHooks",       // eq world: the pro-rata basket's mint/burn hooks
   "WETH9",
+  // eq world: the equity basket on the basket machine (the default)
+  "BuckBasketEquity",
+  "BuckBasketUniswapV3",       // the venue the shell registers its pools on
+  "BasketVenueFacet",          // the machine's venue, once they are seeded
+  "BasketUpkeepFacet",
+  "PairSignals",
+  "PairRebalancePolicy",
+  "BasketReference",
+  "BasketMachineWheel",
+  // eq world, opts.basket = "prorata": the pro-rata basket and its hooks
   "BuckBasketProRata",
-  "BuckBasketUniswapV3",
+  "BuckWithBasketHooks",
 ];
 
 // The sandbox: production contracts only (no test harnesses), so a fresh
