@@ -71,13 +71,16 @@ machine's design is expected to become the accepted one.
 - [X] The merges are clean. This branch is strictly ahead of =origin/feature/carry-convexity=
   and of master, and neither has moved. The local =feature/carry-convexity= is behind its
   origin. Nothing here has been pushed since 2026-10-01.
-- [ ] Say which earlier basket is the best. Proposed: the equity basket with its older upkeep
-  and the desk (=--basket equity-ops=). The equity design replaced the pro-rata accounting by
+- [X] The best earlier basket is the equity basket with its older upkeep and the desk
+  (=--basket equity-ops=; agreed 2026-10-11). The equity design replaced the pro-rata accounting by
   ruling (=BASKET-EQUITY.org=, section 2). It is the baseline of the five-year savings
   comparison. And it shares the shell, the venue, the desk and the wheel with the machine: only
   one facet (=BuckBasketEquityWheel=, 316 lines) and one director (=EquityTurnDirector=, 230)
   are its own. The matrix below runs on the pro-rata basket as well, so the numbers can say.
-- [ ] Remove what neither equity basket reaches. By imports, that is exactly these:
+- [ ] Remove the older baskets, and keep the pro-rata one (agreed 2026-10-11): the original
+  basket, the Fence, the =vrate= director and the rebalancer go now, with their tests and
+  simulator modes. The pro-rata basket, its Buck and the Ops shell stay. What neither equity
+  basket reaches, by imports, is exactly these:
 
   | Contract | Lines | What still uses it |
   |----------+-------+--------------------|
@@ -93,6 +96,8 @@ machine's design is expected to become the accepted one.
   =BuckKControllerShadow=, =ShadowObserver= and =IShadowObserver= (818 lines) are also
   unreached, but they are a K controller, not a basket, and =--controller shadow= still runs
   on the equity basket with the desk. They wait for their own decision.
+- [ ] Move the JS world and the simulators' defaults to the equity basket on the machine
+  (agreed 2026-10-11). The pro-rata basket stays selectable.
 - [ ] The pro-rata basket's ties are inside the repository. The published bundle has carried
   the equity basket, not the pro-rata one, since 0.3.0 (the list is =CONTRACTS= in
   =scripts/contracts-dist.py=; the =contracts.json= beside the package is its output and is
@@ -107,9 +112,10 @@ machine's design is expected to become the accepted one.
   =js-contracts-v*= and =py-contracts-v*=) need a new number.
   - [X] The machine is in the published list: 43 contracts, and the bundle check passes. The
     earlier upkeep ships beside it and the READMEs say it will be removed.
-  - [ ] Choose the number and set it in =core/contracts/package.json= and
-    =core/contracts/python/pyproject.toml=. Proposed 0.3.1. The bundle renames =EquityDesk= to
-    =BasketDesk=, which breaks a consumer that names it; that is the case for 0.4.0.
+  - [ ] The number is 0.4.0: "a major pre-release update" (2026-10-11). Each package pins the
+    one below it under 0.4, so every package rolls, as for 0.3.0 (commit =c80778f= is the
+    pattern: 24 files). Make it the last commit before the merge, so no half-rolled tree is
+    ever built. The pin of the contracts in =core/js= follows once they are on npm (=6e88d0e=).
   - [ ] The release's gates, on the commit to be tagged: =make test=, =make contracts-dist= and
     its check, and the third-party notices check.
   - [ ] After the contracts are on npm: pin them in =core/js= and relock, then the JS and
