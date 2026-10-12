@@ -209,6 +209,24 @@ machine's design is expected to become the accepted one.
     reserve only while the BUCK is cheap; or let the deposit be met out of the mint itself
     while the BUCK is dear. And the debtor agent never saves for the gate in five years,
     which is the agent's fault whatever the gate does.
+  - [ ] A new curve for the funding factor, proposed 2026-10-12 and not built: nothing at 1%
+    dear, a quarter at parity, one at 1% cheap, and from there the factor is the discount in
+    percent (2 at 2%, 10 at 10%), so insured issuance into a cheap BUCK is priced out. With u
+    the BUCK's distance under its basket:
+
+    #+begin_example
+    factor  =  0                      u <= -1%
+            =  ((u + 1%) / 2%)^2      -1% <= u <= +1%
+            =  u / 1%                 u >= +1%
+    #+end_example
+
+    The pieces meet with the same slope at +1%. Today it is 1 + 10 u, floored at zero: 0.9 at
+    1% dear, 1 at parity, 2 at 10% cheap. Replayed on the portcast world, 52 of the debtors' 70
+    refusals under the older upkeep came with the BUCK 1% dear or more and would have gone
+    through, and 26 of 64 under the machine. A debtor with no cash is still refused at parity,
+    where a quarter of the deposit is asked. What it touches: =BuckKControllerBase=, its copy
+    in the Rust kernel and so the JS and Python kernels, the golden vectors, about ten test
+    assertions, and every world with insured debtors, which must be run again.
   - [ ] Issuers in the cast. Only credit arbitrageurs issue because the BUCK is dear, and a world
     has three. The five dollar arbitrageurs hold 22 million and can only buy cheap BUCKs. Give
     the casts pledgeable wealth in proportion to the BUCKs in circulation.
