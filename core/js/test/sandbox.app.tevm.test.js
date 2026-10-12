@@ -137,9 +137,11 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     home = await app.insure(W1, { assetClass: "home", face: 400_000n * BUCK });
     const q = await app.quote(W1, 50_000n * BUCK);
     // 0.35 %/yr deposits e = 3.5 % of the cover; 50,000 to spend at K 0.75
-    // takes 50,000 / (0.75 - 0.035) of cover: ~4.9 % of the draw up front.
+    // takes 50,000 / (0.75 - 0.035) of cover: a deposit of ~4.9 % of the draw,
+    // and at parity the gate asks her to hold half of it up front.
     assert.ok(q.principal > 2_440n * BUCK && q.principal < 2_455n * BUCK, `${q.principal}`);
-    assert.equal(q.shortfall, q.principal, "she holds no BUCK yet");
+    assert.equal(q.required, q.principal / 2n);
+    assert.equal(q.shortfall, q.required, "she holds no BUCK yet");
     await assert.rejects(app.activate(W1, 50_000n * BUCK),
       (e) => e instanceof S.SandboxError && /insufficient mint funding/.test(e.reason));
 

@@ -7,7 +7,7 @@
 //   * a registered wallet cannot trade before its identity handshake with
 //     the pool, then buys (exact in and exact out) and SELLS through Permit2,
 //   * real premiums: an insured credit's activation is refused by the
-//     funding gate until the holder holds the premium's principal, which it
+//     funding gate until the holder holds its share of the premium's principal, which it
 //     buys in the pool; the principal lands in the insurance pool.
 //
 // Skips cleanly when the kernels, the Foundry build or the vendored
@@ -127,16 +127,16 @@ describe("the BUCK/USDC market through an unbound router", { skip }, () => {
     const want = 100_000n * E6;
     const q = await bw.quoteActivation(world, uma, want);
     assert.deepEqual(q.tokenIds, [home]);
-    assert.equal(q.factor, 10n ** 18n, "no basket: the funding factor is 1.0");
+    assert.equal(q.factor, 5n * 10n ** 17n, "no basket: the funding factor is its parity value, a half");
     // principal = net * e / (K - e), e = 10r: 0.35 %/yr at the 10 % pool ROI.
     const k = await session.call(world.kctrl, "currentBuckK");
     const e = 350n * 10n ** 14n;
     const expect = (want * e) / (k - e);
     assert.ok(q.principal + 2n >= expect && q.principal <= expect + 2n, `${q.principal} vs ${expect}`);
-    assert.equal(q.required, q.principal);
+    assert.equal(q.required, q.principal / 2n);
     assert.ok(q.shortfall > 0n && q.shortfall === q.required - q.balance);
 
-    // Uma holds ~1,200 BUCK; 100,000 needs ~4,895 up front at K 0.75.
+    // Uma holds ~1,200 BUCK; 100,000 needs half of ~4,895 up front at K 0.75.
     await assert.rejects(bw.activateCredit(world, uma, want), /insufficient mint funding/);
     session.mismatches.length = 0;
 

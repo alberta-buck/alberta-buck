@@ -138,26 +138,48 @@ contract BuckKControllerBaseTest is Test {
 
     // ---- fundingFactor ------------------------------------------------- //
 
-    function test_funding_factor_at_parity_is_unit() public {
+    function test_funding_factor_at_parity_is_a_half() public {
         ctrl.setReferences(1.0e18, 1.0e18);
         vm.warp(block.timestamp + 3601);
         ctrl.compute();
-        assertApproxEqRel(ctrl.fundingFactor(), 1e18, 0.0001e18);
+        assertApproxEqRel(ctrl.fundingFactor(), 0.5e18, 0.0001e18);
     }
 
     function test_funding_factor_rises_on_inflation() public {
         ctrl.setReferences(0.95e18, 1.0e18);   // BUCK 5% under basket
         vm.warp(block.timestamp + 3601);
         ctrl.compute();
-        // factor = 1 + 10 * (basket - buck) / basket = 1 + 10 * 0.05 = 1.5
-        assertApproxEqRel(ctrl.fundingFactor(), 1.5e18, 0.001e18);
+        // factor = 0.5 + 25 * (basket - buck) / basket = 0.5 + 25 * 0.05 = 1.75
+        assertApproxEqRel(ctrl.fundingFactor(), 1.75e18, 0.001e18);
+    }
+
+    function test_funding_factor_is_one_at_two_percent_cheap() public {
+        ctrl.setReferences(0.98e18, 1.0e18);   // BUCK 2% under basket
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        assertApproxEqRel(ctrl.fundingFactor(), 1e18, 0.0001e18);
+    }
+
+    function test_funding_factor_is_nothing_from_two_percent_dear() public {
+        ctrl.setReferences(1.02e18, 1.0e18);   // BUCK 2% over basket
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        // factor = 0.5 + 25 * (1 - 1.02) / 1 = 0
+        assertEq(ctrl.fundingFactor(), 0);
+    }
+
+    function test_funding_factor_is_a_quarter_at_one_percent_dear() public {
+        ctrl.setReferences(1.01e18, 1.0e18);   // BUCK 1% over basket
+        vm.warp(block.timestamp + 3601);
+        ctrl.compute();
+        assertApproxEqRel(ctrl.fundingFactor(), 0.25e18, 0.0001e18);
     }
 
     function test_funding_factor_saturates_at_zero_on_deflation() public {
         ctrl.setReferences(1.20e18, 1.0e18);   // BUCK 20% over basket
         vm.warp(block.timestamp + 3601);
         ctrl.compute();
-        // factor = 1 + 10 * (1 - 1.2) / 1 = -1, clamped to 0
+        // factor = 0.5 + 25 * (1 - 1.2) / 1 = -4.5, clamped to 0
         assertEq(ctrl.fundingFactor(), 0);
     }
 

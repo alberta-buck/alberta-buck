@@ -230,8 +230,11 @@ contract MathVectorsTest is Test {
     function _fundingFactorRows() internal {
         PidHarness h = new PidHarness(0, 1, 0, 600, 0, 1e18, 5e17);
         // 1e18-scale pairs (legacy embodiment) and ppm pairs (direct).
-        int256[2][10] memory pairs = [
+        int256[2][13] memory pairs = [
             [int256(1e18), 1e18],
+            [int256(102e16), 1e18],
+            [int256(98e16), 1e18],
+            [int256(97e16), 1e18],
             [int256(105e16), 1e18],
             [int256(95e16), 1e18],
             [int256(11e17), 1e18],

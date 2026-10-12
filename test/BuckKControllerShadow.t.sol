@@ -264,7 +264,7 @@ contract BuckKControllerShadowTest is Test {
         // Decision 10: the price loop and fundingFactor() read the RAW
         // basket; only the composite twin's mint gate moves with the book.
         assertEq(kS0.lastBasketCost(), 1_000_000, "raw process at parity");
-        assertEq(kS0.fundingFactor(), 1e18, "funding factor sees the raw bvib");
+        assertEq(kS0.fundingFactor(), 0.5e18, "funding factor sees the raw bvib: a half at parity");
     }
 
     function test_s0_reproducesD4_interior_exact() public {
@@ -290,8 +290,8 @@ contract BuckKControllerShadowTest is Test {
         _advance(3601);
         kD4.compute(); kS0.compute();
         assertEq(kS0.buckK(), kD4.buckK(), "K agrees (S0)");
-        assertGt(kD4.fundingFactor(), 1e18, "composite twin: gate moved");
-        assertEq(kS0.fundingFactor(), 1e18, "two-loop: gate on the raw bvib");
+        assertGt(kD4.fundingFactor(), 0.5e18, "composite twin: gate moved");
+        assertEq(kS0.fundingFactor(), 0.5e18, "two-loop: gate on the raw bvib, a half at parity");
     }
 
     // ---- sign canaries (CARRY-CONVEXITY.org 7.3, D7) ------------------------ //

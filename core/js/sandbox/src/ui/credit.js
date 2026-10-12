@@ -2,7 +2,8 @@
 // a BuckCredit NFT held by its owner; the owner activates credit against it,
 // depositing ten years' premium with the insurance pool, which invests it to
 // earn the premiums and returns it when the insurance is dropped -- a deposit
-// the funding gate lets through only once the owner already holds as much.
+// the funding gate lets through only once the owner already holds a share of
+// it: half at parity, none once the BUCK is 2% dear, all of it at 2% cheap.
 // The credits' depreciated values move as the clock does.
 
 import { ASSET_CLASSES, walletTitle } from "../app.js";
@@ -112,7 +113,8 @@ export function mountCredit(ctx) {
         h("dt", { title: "Ten years of premium, deposited with the insurance pool; returned when the " +
                                "insurance is dropped" }, "Premium deposit"),
         h("dd", {}, money(q.principal, "BUCK")),
-        h("dt", { title: "The deposit times the funding factor" }, "Must already hold"),
+        h("dt", { title: "The deposit times the funding factor: half at parity, nothing once the BUCK is " +
+                               "2% dear, the whole deposit at 2% cheap" }, "Must already hold"),
         h("dd", {}, money(q.required, "BUCK")),
         h("dt", { title: "Held BUCKs plus unused credit" }, "Holds"), h("dd", {}, money(q.balance, "BUCK")),
         h("dt", {}, "Shortfall"), h("dd", { class: q.shortfall ? "bad" : "good" }, money(q.shortfall, "BUCK"))),
@@ -139,7 +141,7 @@ export function mountCredit(ctx) {
     h("p", { class: "hint" }, "The owner draws on their insured value: each unit of it activated ",
       "adds BUCK_K of credit, less its premium deposit, and the amount is the credit they gain to ",
       "spend.  The deposit goes to the insurance pool now, and the funding gate lets that through ",
-      "only once the owner already holds as much."),
+      "only once the owner already holds a share of it: half while the BUCK is at parity."),
     h("div", { class: "row" }, field("Wallet", who), field("Amount (BUCKs)", amt)),
     quote,
     h("p", { class: "discloses" }, h("b", {}, "Discloses: "), "the amount, the coverage and the ",

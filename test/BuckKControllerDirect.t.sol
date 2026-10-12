@@ -107,20 +107,20 @@ contract BuckKControllerDirectTest is Test {
     // ---- fundingFactor ------------------------------------------------- //
 
     function test_funding_factor_direct_inflation() public {
-        // basket at 1.05 BUCK -> factor = 1 + 10 * (1.05 - 1) / 1.05 ~ 1.476
+        // basket at 1.05 BUCK -> factor = 0.5 + 25 * (1.05 - 1) / 1.05 ~ 1.690
         basket.setBasketValue(int256(1.05e18));
         vm.warp(block.timestamp + 3601);
         ctrl.compute();
         uint256 f = ctrl.fundingFactor();
-        assertGt(f, 1.4e18);
-        assertLt(f, 1.5e18);
+        assertGt(f, 1.68e18);
+        assertLt(f, 1.70e18);
     }
 
     function test_funding_factor_direct_deflation_saturates() public {
         basket.setBasketValue(int256(0.85e18));
         vm.warp(block.timestamp + 3601);
         ctrl.compute();
-        // factor = 1 + 10 * (0.85 - 1)/0.85 ~ -0.76 -> clamped 0
+        // factor = 0.5 + 25 * (0.85 - 1)/0.85 ~ -3.9 -> clamped 0
         assertEq(ctrl.fundingFactor(), 0);
     }
 

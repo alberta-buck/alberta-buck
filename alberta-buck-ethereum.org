@@ -925,16 +925,26 @@ Step 5 above asks a minter to already hold ~poolPrincipal * fundingFactor~ befor
 succeeds, where the controller's factor is counter-cyclical in BUCK's deviation from the basket:
 
 #+BEGIN_SRC text
-factor = max(0, 1 + 10 * (basket - BUCK) / basket)
+factor = max(0, 1/2 + 25 * (basket - BUCK) / basket)
 #+END_SRC
+
+One straight line: nothing once the BUCK is 2 % dear, a half at parity, the whole principal at 2 %
+cheap, and on up at the same slope.
 
 | BUCK price (basket = 1.00) | Factor | Reserve, as a share of the principal this mint pays |
 |----------------------------+--------+------------------------------------------------------|
-| 1.10                       | 0.0    | none -- BUCK is scarce, issuance is welcome          |
-| 1.05                       | 0.5    | half                                                 |
-| 1.00                       | 1.0    | the whole principal                                  |
-| 0.95                       | 1.5    | one and a half times                                 |
-| 0.90                       | 2.0    | twice                                                |
+| 1.02 or more               | 0.0    | none -- BUCK is scarce, issuance is welcome          |
+| 1.01                       | 0.25   | a quarter                                            |
+| 1.00                       | 0.5    | half                                                 |
+| 0.99                       | 0.75   | three quarters                                       |
+| 0.98                       | 1.0    | the whole principal                                  |
+| 0.95                       | 1.75   | one and three quarters                               |
+| 0.90                       | 3.0    | three times                                          |
+
+Near parity, where the system is meant to run, the reserve is small: half of a principal that is
+itself 5 to 15 % of the mint.  Past a few percent cheap it is more than an insured issuer will
+sensibly find, which is the point: issuing BUCKs into a market that already has too many is left
+to credit that pays no premium, and there is very little of that.
 
 The reserve is a check, not a deposit.  It is measured on the pre-activation =balanceOf= -- held
 BUCK plus unused credit from earlier activations -- and nothing locks it afterwards.  A first-time

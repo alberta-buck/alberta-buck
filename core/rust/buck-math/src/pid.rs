@@ -117,10 +117,11 @@ impl DirectPid {
     pub fn funding_factor(&self) -> u128 {
         let b = self.last_basket_cost;
         if b <= 0 {
-            return UNIT as u128;
+            return (UNIT / 2) as u128;
         }
         let p = self.last_buck_price;
-        let raw = UNIT + 10 * (b - p) * UNIT / b;
+        // One straight line: 0 at 2% dear, a half at parity, 1 at 2% cheap.
+        let raw = UNIT / 2 + 25 * (b - p) * UNIT / b;
         if raw <= 0 {
             0
         } else {

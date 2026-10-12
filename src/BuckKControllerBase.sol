@@ -204,16 +204,20 @@ abstract contract BuckKControllerBase {
 
     /// @notice Counter-cyclical insurance funding factor (18-dec; 1e18 = 1.0).
     ///
-    /// @dev   factor = max(0, 1e18 + 10 * (basketValue - buckValue) * 1e18 / basketValue)
+    /// @dev   factor = max(0, 0.5e18 + 25 * (basketValue - buckValue) * 1e18 / basketValue)
     ///
-    ///        Saturates at 0 once basketValue <= 0.9 * buckValue (BUCK
-    ///        sufficiently overvalued); reaches 2x at basketValue = 1.1 *
-    ///        buckValue (BUCK 10% undervalued).
+    ///        One straight line in how far the BUCK stands under its basket:
+    ///        nothing once the BUCK is 2% dear or more, a half at parity, one
+    ///        at 2% cheap, and on up at the same slope (3 at 10% cheap).  A
+    ///        minter of insured credit holds its insurance deposit times this
+    ///        (Buck.mint).  So issuing into a dear BUCK asks no reserve, a
+    ///        system near parity asks half the deposit, and issuing into a
+    ///        cheap BUCK is priced out.
     function fundingFactor() external view returns (uint256) {
         int256 b = lastBasketCost;
-        if (b <= 0) return uint256(UNIT);
+        if (b <= 0) return uint256(UNIT) / 2;
         int256 p = lastBuckPrice;
-        int256 raw = UNIT + int256(10) * (b - p) * UNIT / b;
+        int256 raw = UNIT / 2 + int256(25) * (b - p) * UNIT / b;
         if (raw <= 0) return 0;
         return uint256(raw);
     }

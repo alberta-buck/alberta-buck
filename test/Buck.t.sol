@@ -699,7 +699,7 @@ contract BuckTest is Test {
     }
 
     /// @dev With the PID-direct controller signalling BUCK undervaluation
-    ///      (basket > 1.0 BUCK), fundingFactor() rises above 1.0 and the
+    ///      (basket well over 1.0 BUCK), fundingFactor() rises above 1.0 and the
     ///      reserve gate bites: minting `amount` requires balanceOf >=
     ///      amount * factor / 1e18.  Alice has only her unused credit (no
     ///      held BUCK) and asks for an amount the factor pushes past her
@@ -708,9 +708,9 @@ contract BuckTest is Test {
         (Buck b, BuckKControllerDirect kc, BuckCreditHarness c)
             = _freshStackWithDirectController();
 
-        // Basket > 1.0 BUCK -> BUCK undervalued -> factor pushes above 1.0.
-        // factor = max(0, 1e18 + 10 * (basket - 1.0) * 1e18 / basket)
-        // basket = 1.05e18 -> factor ~= 1 + 10 * 0.05 / 1.05 ~= 1.476e18.
+        // Basket > 1.02 BUCK -> BUCK undervalued -> factor pushes above 1.0.
+        // factor = max(0, 0.5e18 + 25 * (basket - 1.0) * 1e18 / basket)
+        // basket = 1.05e18 -> factor ~= 0.5 + 25 * 0.05 / 1.05 ~= 1.690e18.
         MockBasket basket = new MockBasket();
         basket.setBasketValue(int256(1.05e18));
         vm.prank(GOV);
@@ -744,7 +744,7 @@ contract BuckTest is Test {
             = _freshStackWithDirectController();
 
         MockBasket basket = new MockBasket();
-        basket.setBasketValue(int256(0.95e18));      // BUCK overvalued
+        basket.setBasketValue(int256(0.99e18));      // BUCK 1% overvalued: a quarter
         vm.prank(GOV);
         kc.setBasket(address(basket));
         vm.warp(block.timestamp + 61);
