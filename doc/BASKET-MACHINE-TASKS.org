@@ -196,8 +196,8 @@ machine's design is expected to become the accepted one.
     [[file:BASKET-MACHINE-RESULTS.org::*Who could issue][the results]]). About 18 million of capacity against 75 million BUCKs: 30 mortgage debtors
     (7.2 million), three credit arbitrageurs (10.4 million, spent by day 600), a desk of 0.4
     million. The debtors were refused by Buck's funding gate 59 times in 63 while the BUCK was
-    up to 4% dear and K climbed to its limit: they have no cash for the reserve it asks, and
-    its factor reaches zero only at 9% dear. On the pro-rata basket they are refused as often
+    up to 4% dear and K climbed to its limit: the model gave them no savings for the reserve it
+    asks, and its factor reaches zero only at 9% dear. On the pro-rata basket they are refused as often
     and it does not matter, because that basket supplies the BUCKs.
   - [ ] Does the BUCK hold with issuers enough? Three runs of the portcast world
     (=build/sim/issuers/=): the credit arbitrageurs' wealth ten times larger, on each upkeep,
@@ -207,8 +207,13 @@ machine's design is expected to become the accepted one.
     still 0.7 at 3% dear. So to issue BUCKs when they are scarce a debtor must first buy some.
     Candidates, none decided: let the factor reach zero at parity, so the gate asks for a
     reserve only while the BUCK is cheap; or let the deposit be met out of the mint itself
-    while the BUCK is dear. And the debtor agent never saves for the gate in five years,
-    which is the agent's fault whatever the gate does.
+    while the BUCK is dear.
+  - [X] The debtors have savings (decided and built 2026-10-12). The model gave a mortgage
+    debtor nothing but its income from the day it arrived, so one paid at harvest held no
+    dollars for months and could not buy the reserve the gate asks. It now arrives with six
+    months of its income (=savings_months=), in both of its ledgers. (I first wrote that the
+    debtors never bought a BUCK for the gate. That was wrong: they did, 17 times by day 600.
+    I had read a count as an amount.)
   - [ ] A new curve for the funding factor, proposed 2026-10-12 and not built: nothing at 1%
     dear, a quarter at parity, one at 1% cheap, and from there the factor is the discount in
     percent (2 at 2%, 10 at 10%), so insured issuance into a cheap BUCK is priced out. With u

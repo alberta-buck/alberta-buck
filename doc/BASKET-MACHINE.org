@@ -124,9 +124,10 @@ the rise began:
 
 - The 30 mortgage debtors could not pass the funding gate. To mint against an insured credit
   the minter must already hold BUCKs worth the insurance deposit times a factor, and the factor
-  is near one at parity and falls to zero only when the BUCK is 9% dear. These debtors have no
-  spare cash to buy that reserve. They were refused 59 times in 63 attempts while the BUCK sat
-  up to 4% dear and K climbed to its limit.
+  is near one at parity and falls to zero only when the BUCK is 9% dear. The model gave these
+  debtors no savings to buy that reserve with, which is a fault of the model, since mended. They
+  were refused 59 times in 63 attempts while the BUCK sat up to 4% dear and K climbed to its
+  limit.
 - The three credit arbitrageurs, the only people in the world who issue because the BUCK is
   dear, had 11 million of pledgeable wealth among them and had used it all by day 600.
 - The desk is small, and under the older upkeep nobody in this world turns it.
