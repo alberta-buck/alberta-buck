@@ -72,11 +72,22 @@ CONTRACTS = [
     "BuckKControllerDirect",   # the on-chain PID controller
     "IdentityRegistry",        # identity accumulator + verifier wiring
     "BuckBasketEquity",        # the equity basket: a credit holder
-    "BuckBasketEquityWheel",   # its components facet
     "BuckBasketUniswapV3",     # its venue facet (V3 pools)
-    "EquityTurnDirector",      # its turn director
-    "BasketWheel",             # the work wheel a keeper turns
     "BasketDesk",              # the monetary desk: its own credit holder
+    # The basket machine (doc/BASKET-MACHINE.org): one upkeep facet on a credit
+    # marked net, a policy it asks, and the wheel that turns them.
+    "BasketUpkeepFacet",       # the upkeep facet
+    "BasketVenueFacet",        # the venue facet with the marks the upkeep reads
+    "PairSignals",             # the pair observer
+    "PairRebalancePolicy",     # the policy: which constituent to work, and how fast
+    "BasketReference",         # the parity reference: the basket's cost in BUCK
+    "OuterBandDeskPolicy",     # the desk's policy, beyond the band
+    "BasketMachineWheel",      # the work wheel a keeper turns
+    # The earlier upkeep of the same basket, kept beside the machine so the two
+    # can be compared: Deploy, Fund and Trim components, a turn director, its wheel.
+    "BuckBasketEquityWheel",   # the components facet
+    "EquityTurnDirector",      # the turn director
+    "BasketWheel",             # its work wheel
     "SimLP",                   # simulation liquidity helper
     "MockERC20",               # test/sim token
     # The Notes pool and the adapters that give it its verifiers.

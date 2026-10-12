@@ -82,7 +82,7 @@ machine's design is expected to become the accepted one.
   | Contract | Lines | What still uses it |
   |----------+-------+--------------------|
   | =BuckBasket= | 1,404 | =--basket legacy=; 18 tests |
-  | =BuckBasketProRata= | 709 | the published 0.2 bundle; the JS world (=eqworld.js=) and demo; the default basket of every simulator family; 47 tests in 4 suites |
+  | =BuckBasketProRata= | 709 | the JS world (=eqworld.js=), its demo and tests; the default basket of every simulator family; 47 tests in 4 suites |
   | =BuckBasketFence= | 725 | =--basket fence=; 17 tests |
   | =BuckBasketOps= | 47 | =--basket ops=; 37 tests, which also carry the shadow observer's and the desk base's |
   | =BasketRebalanceDirector= | 182 | =--director vrate=; 10 tests |
@@ -93,11 +93,27 @@ machine's design is expected to become the accepted one.
   =BuckKControllerShadow=, =ShadowObserver= and =IShadowObserver= (818 lines) are also
   unreached, but they are a K controller, not a basket, and =--controller shadow= still runs
   on the equity basket with the desk. They wait for their own decision.
-- [ ] The pro-rata basket cannot leave master yet. It is the basket in the published contracts
-  list (=core/contracts/contracts.json=) and the one the JS world deploys. Either it stays,
-  with its Buck, until the JS world is ported to the equity basket (step 2), or that port is
-  part of this cleanup. The original basket, the Fence and the Ops shell, the other director
-  and the rebalancer have no such tie and can go first.
+- [ ] The pro-rata basket's ties are inside the repository. The published bundle has carried
+  the equity basket, not the pro-rata one, since 0.3.0 (the list is =CONTRACTS= in
+  =scripts/contracts-dist.py=; the =contracts.json= beside the package is its output and is
+  not tracked). What still deploys the pro-rata basket: the JS world (=eqworld.js=, its demo
+  and its tests), from the repository's own artifacts, and every simulator family by default.
+  Either it stays, with its Buck, until those are moved to the equity basket (steps 2 and 3),
+  or moving them is part of this cleanup. The original basket, the Fence and the Ops shell, the
+  other director and the rebalancer have no such tie and can go first.
+- [ ] The next release of the contracts, for the merge into master. 0.3.0 is out: its tags
+  stand on two commits of =feature/carry-convexity= from 2026-09-30, which master does not have
+  yet. So the packages that carry contracts (=alberta-buck-contracts= on npm and on PyPI, tags
+  =js-contracts-v*= and =py-contracts-v*=) need a new number.
+  - [X] The machine is in the published list: 43 contracts, and the bundle check passes. The
+    earlier upkeep ships beside it and the READMEs say it will be removed.
+  - [ ] Choose the number and set it in =core/contracts/package.json= and
+    =core/contracts/python/pyproject.toml=. Proposed 0.3.1. The bundle renames =EquityDesk= to
+    =BasketDesk=, which breaks a consumer that names it; that is the case for 0.4.0.
+  - [ ] The release's gates, on the commit to be tagged: =make test=, =make contracts-dist= and
+    its check, and the third-party notices check.
+  - [ ] After the contracts are on npm: pin them in =core/js= and relock, then the JS and
+    simulator packages, in the order the deployment paper gives.
 - [ ] The five-year matrix on the equity baskets. Its 14 arms were tuned on the pro-rata
   basket. A 20-day probe of each on both upkeeps, on five TOKENs (2026-10-11):
   - 27 of the 28 run.
