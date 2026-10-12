@@ -158,8 +158,18 @@ machine's design is expected to become the accepted one.
     arms the savings world's start, before reading that arm.
 - [ ] Run it: 14 arms on the machine, the older upkeep and the pro-rata basket, five TOKENs,
   five years. Started 2026-10-11 19:12 from a frozen copy of commit =11a1103= under
-  =build/sim/matrix5/= (=run.sh=, =run.log=; a finished world is =<arm>-<basket>.json=), so the
-  contracts can be edited meanwhile.
+  =build/sim/matrix5/= (=run.sh=, =run.log=; a finished world is =<arm>-<basket>.json=;
+  =table.py= reads them), so the contracts can be edited meanwhile. The first five arms, share
+  price over the last 90 days, machine against older upkeep: capacity +2.4%, endow-deep +2.4%,
+  endow +1.8%, deep -0.7%, base -1.8%. So not ahead everywhere. In the two arms where it is
+  behind, K ends at 0.92 and 0.94 under the older upkeep and at 0.79 and 0.76 under the
+  machine: the machine's lean supplies the BUCKs that K otherwise climbs to allow. Whether
+  that climb is what pays the older upkeep there is not yet looked at. The older upkeep has
+  under 5% of its equity to spend on 340 to 1,010 days of the 1,826; the machine on none.
+  Write up all 14 when they finish.
+- [ ] Regenerate the lab after the cut (queued behind the matrix: =build/lab/after-matrix.sh=).
+  Every saved run is stale by its fingerprint since the Fence left the venue facet. Results
+  should not move; gas will, a little.
 - [X] A second seed of the five-year savings comparison (=build/sim/savings/seed2/=). It
   agrees with the first.
 
