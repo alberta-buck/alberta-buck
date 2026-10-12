@@ -19,6 +19,7 @@ day_step = 1
 seed = 0xA1BC
 days = 365
 basket = "ops"
+tokens = []               # the builder's own six, as the record ran
 
 [deploy]
 target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route

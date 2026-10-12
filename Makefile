@@ -660,7 +660,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
-SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | ops | equity | equity-ops | equity-machine
+SIM_BASKET	?= equity-machine  # equity-machine (default) | equity-ops | equity | prorata | ops
 #
 # Every Anvil-style sim below composes from a common matrix:
 #
@@ -668,10 +668,12 @@ SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | ops | equit
 #                | pyrevm (in-process revm: identical outputs, ~6.5x wall
 #                  on short runs, far more on long ones -- see
 #                  alberta_buck/sim/pyrevm_backend.py)
-#   SIM_BASKET   = prorata (BuckBasketProRata + UniswapV3 venue facet)
+#   SIM_BASKET   = equity-machine (the equity basket on the basket machine,
+#                  with the desk beside it; default)
+#                | equity-ops, equity (the same basket on its earlier upkeep,
+#                  with the desk and without)
+#                | prorata (BuckBasketProRata + UniswapV3 venue facet)
 #                | ops (the pro-rata basket with the desk inside it)
-#                | equity, equity-ops (the equity basket, and with the desk
-#                  beside it), equity-machine (on the basket machine)
 #   SIM_DIRECTOR = pairs (PairsRebalanceDirector: differential-mode
 #                  tick-EMA ladders, quorum turn votes; the one left)
 #   Env knobs (deploy-time director params, for short smoke runs):
@@ -754,11 +756,10 @@ sim:		sim-run sim-plot
 # a tick, [d] step a day, [r] run/pause, [w]rite a snapshot vector, [q]uit.
 sim-tui:	sim-build
 	@echo "sim-tui: scenario: $(SIM_SCENARIO)"
-	@echo "sim-tui: basket:   $(SIM_BASKET)"
-	python -m $(SIM_PKG).tui --scenario $(SIM_SCENARIO) --basket $(SIM_BASKET) \
+	@echo "sim-tui: basket:   prorata (the inspector reads the pro-rata basket's books)"
+	python -m $(SIM_PKG).tui --scenario $(SIM_SCENARIO) --basket prorata \
 		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
 
-sim-tui-prorata: SIM_BASKET=prorata
 sim-tui-prorata: sim-tui
 
 
@@ -887,13 +888,13 @@ OPS_SEED	= $(if $(SIM_SEED),--seed $(SIM_SEED),)
 sim-run-ops-off:	sim-build
 	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
 		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
+		--basket prorata --backend $(SIM_BACKEND) \
 		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_OFF)
 
 sim-run-ops-on:	sim-build
 	SIM_MONETARY_OPS=1 python -m $(SIM_PKG) --scenario rebalancing-revert \
 		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) \
+		--basket prorata --backend $(SIM_BACKEND) \
 		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_ON)
 
 sim-compare-ops:

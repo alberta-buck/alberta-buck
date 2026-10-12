@@ -54,7 +54,7 @@ def turn_wheel(d, rounds: int = 1, max_work: int = 12, ctr=None) -> int:
     return work
 
 
-def run(scenario, anvil, out_path=None, verbose=True, basket_impl="prorata",
+def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",
         director_impl="pairs", on_day_start=None, on_frame=None,
         controller_impl="direct") -> dict:
     """on_day_start(day, d, agents, ctr): a mutation window before the

@@ -797,7 +797,8 @@ def step_toml(cell: str, depth_m: float, step: float | None, days: int = 365,
         f'notes = "WP-16 step test: none arm + undertakings, gains off day {hold_day}, '
         f'K held {k_hold:g}, K0 step {"none" if step is None else f"{step:+.2f}"} day {step_day}"',
         1)
-    rest = rest.replace("seed = 0xA1BC\n", f"seed = 0xA1BC\ndays = {days}\nbasket = \"ops\"\n", 1)
+    rest = rest.replace("seed = 0xA1BC\n", f"seed = 0xA1BC\ndays = {days}\nbasket = \"ops\"\n"
+                        "tokens = []               # the builder's own six, as the record ran\n", 1)
     rest = rest.replace("target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route\n",
                         "target_buck_lp_m = 50.0     # deep national-scale BUCK/USDC exit route\n"
                         f"target_buck_m = {depth_m:g}       # WP-16: the depth axis (10 | 40)\n", 1)
@@ -944,7 +945,7 @@ def launch_script(outdir: Path | None = None, smoke: bool = False,
         done = vec / f"{name}.done"
         cmd = (f"source {venv}/bin/activate && SIM_CONTROLLER=shadow SIM_SHADOW_LAMBDA=1 "
                f"python -m alberta_buck.sim --experiment {t} --backend pyrevm "
-               f"--set scenario.basket=ops --out {out}; echo exit $? > {done}")
+               f"--set scenario.basket=ops --set scenario.tokens=[] --out {out}; echo exit $? > {done}")
         lines.append(f"rm -f {done}; nohup nix develop --command bash -c '{cmd}' "
                      f"> {log} 2>&1 < /dev/null & disown")
     sh = vec / "run.sh"

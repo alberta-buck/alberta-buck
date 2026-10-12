@@ -34,12 +34,13 @@ def main(argv=None) -> int:
                          "sets the default so catalogue/star cells can select it")
     ap.add_argument("--basket", default=None,
                     choices=["prorata", "ops", "equity", "equity-ops", "equity-machine"],
-                    help="basket implementation: BuckBasketProRata (prorata, "
-                         "default), BuckBasketOps (ops -- prorata plus the "
-                         "monetary-operations desk on the director's common "
-                         "mode), the equity basket (equity), with the desk "
-                         "beside it (equity-ops), or on the basket machine "
-                         "(equity-machine)")
+                    help="basket implementation: the equity basket on the "
+                         "basket machine (equity-machine, default), the "
+                         "equity basket with its earlier upkeep (equity), "
+                         "and the desk beside it (equity-ops), "
+                         "BuckBasketProRata (prorata), or BuckBasketOps "
+                         "(ops -- prorata plus the monetary-operations desk "
+                         "on the director's common mode)")
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)
@@ -83,7 +84,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     os.environ["SIM_SHADOW_MODE"] = a.shadow_mode       # WP-13: deploy.py reads it
 
-    basket_impl = a.basket or "prorata"
+    basket_impl = a.basket or "equity-machine"
     seed0 = a.seed if a.seed is not None else 0xA1BC
     if a.experiment or a.sets:
         from alberta_buck.sim import experiment as expmod
@@ -105,7 +106,7 @@ def main(argv=None) -> int:
         if a.days is not None:
             s["days"] = a.days
         if a.basket is None:                        # no CLI flag: exp wins
-            basket_impl = s.get("basket", "prorata")
+            basket_impl = s.get("basket", "equity-machine")
         sc = expmod.build(exp)
         if a.out is None:
             a.out = f"test/vectors/eq-{exp.name}.json"

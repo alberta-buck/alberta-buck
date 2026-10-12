@@ -100,11 +100,17 @@ DEFAULTS: dict = {
         "ticks_per_day": 1,
         "day_step": 10,
         "seed": 0xA1BC,
-        "basket": "prorata",
-        "tokens": [],              # [] => the builder's own constituents;
-                                   # else the symbols to keep of them, the
-                                   # rest's weight shared over these
-                                   # (scenario.keep_tokens)
+        "basket": "equity-machine",    # the equity basket on the basket machine
+                                   # (doc/BASKET-MACHINE.org); "equity-ops" is
+                                   # its earlier upkeep, "prorata" the
+                                   # pro-rata basket the older record ran on
+        "tokens": ["LABR", "CNST", "FOOD", "NRGC", "PAXG"],
+                                   # the symbols to keep of the builder's
+                                   # constituents, the rest's weight shared
+                                   # over these (scenario.keep_tokens): the
+                                   # five commodities, without bitcoin.
+                                   # [] => the builder's own six, as the
+                                   # older record ran
         "agents": {},              # count overrides
     },
     "deploy": {

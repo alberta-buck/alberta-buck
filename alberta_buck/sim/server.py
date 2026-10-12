@@ -202,7 +202,7 @@ class Session:
         self.scenario = None
         exp = expmod.load(exp_path, sets=sets)
         self.scenario_factory = lambda: expmod.build(exp)
-        self.basket_impl = basket_impl or exp.scenario.get("basket", "prorata")
+        self.basket_impl = basket_impl or exp.scenario.get("basket", "equity-machine")
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        name=f"sim-{sid}")
         self.thread.start()

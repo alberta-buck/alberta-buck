@@ -9,14 +9,15 @@
 # debtors.  Kept: the desk and the engaged undertakings, the director, the
 # Solidity work wheel (TOKEN start: its harvest reaches the depositors), the
 # market (the whale pinning TOKEN/USDC to the references, the arbs), the
-# savers.  The basket is the equity basket with the desk (equity-ops): a
-# credit holder whose wheel components place deposits and keep its BUCK
-# liquidity, paying exits in BUCK (alberta-buck-ethereum.org, "BuckBasketEquity").
-# basket = "equity-machine" runs the same basket and desk on the basket machine
-# (doc/BASKET-MACHINE.org), sized by a [machine] table
-# (alberta_buck/sim/basket_machine.py DEFAULTS); the page's world settings offer
-# both.  Served by alberta_buck.sim.server; a session may override anything
-# here with ?set=.
+# savers.  The basket is the equity basket with the desk, on the basket machine
+# (equity-machine; doc/BASKET-MACHINE.org): a credit holder that pairs every
+# deposit with BUCKs it issues itself and pays exits in BUCK, sized by a
+# [machine] table (alberta_buck/sim/basket_machine.py DEFAULTS).
+# basket = "equity-ops" runs the same basket and desk on the earlier upkeep
+# (wheel components that place deposits and keep a BUCK liquidity target;
+# alberta-buck-ethereum.org, "BuckBasketEquity"); the page's world settings
+# offer both.  Served by alberta_buck.sim.server; a session may override
+# anything here with ?set=.
 name = "demo-savings"
 notes = "the savings demonstration's world: full stack, lean cast, two ticks a day"
 
@@ -27,7 +28,7 @@ years = 5.0
 ticks_per_day = 2
 day_step = 1
 seed = 0xA1BC
-basket = "equity-ops"
+basket = "equity-machine"
 tokens = ["LABR", "CNST", "FOOD", "NRGC", "PAXG"]
 
 [deploy]
