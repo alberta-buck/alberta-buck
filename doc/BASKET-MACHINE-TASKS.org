@@ -52,9 +52,9 @@ Some items were carried here from the older working documents when those were re
   excursions that K will in time reverse. The basket's parity lean is a small tilt of its own
   book inside that band and replaces none of it.
 - [X] Five years on the savings world, older upkeep against the machine, real prices and
-  reverting ones, one seed. The machine ends 4.5% and 6.6% ahead in share price, holds the
-  BUCK's price as well or better, and never has less than 65% of its equity to spend. It uses
-  a sixth more gas. The table is in [[file:BASKET-MACHINE-RESULTS.org][the results]].
+  reverting ones. The machine ends 4.5% and 6.6% ahead in share price, holds the BUCK's price
+  as well or better, and never has less than 65% of its equity to spend. It uses a sixth more
+  gas. A second seed agrees: 3.7% and 7.8% ahead. The tables are in [[file:BASKET-MACHINE-RESULTS.org][the results]].
 - [X] Every lab campaign was rerun on the rebuilt machine (2026-10-11) and verified, and both
   lab pages were checked in a browser. The results' lab tables carry its numbers. What changed:
   urgency now earns half again what a fixed 2-point line does, where the two had been close; the
@@ -96,16 +96,37 @@ machine's design is expected to become the accepted one.
   the older upkeep uses them. =BuckKControllerShadow=, =ShadowObserver= and =IShadowObserver=
   (818 lines) are a K controller, not a basket, and =--controller shadow= still runs on the
   equity basket with the desk. They wait for their own decision.
-- [ ] Move the JS world and the simulators' defaults to the equity basket on the machine
-  (agreed 2026-10-11). The pro-rata basket stays selectable.
-- [ ] The pro-rata basket's ties are inside the repository. The published bundle has carried
-  the equity basket, not the pro-rata one, since 0.3.0 (the list is =CONTRACTS= in
+- [X] The simulators' default is the equity basket on the machine, on five TOKENs (agreed and
+  done 2026-10-11): an experiment that names no basket and no TOKENs, =--basket= left off,
+  =loop.run=, the server, =SIM_BASKET= in the Makefile, and the savings demonstration, whose
+  page still offers the earlier upkeep. All 47 experiments and both named scenarios ran on it
+  for a few days first. What keeps its older setting: the Ops shell's step experiments (six
+  TOKENs, pinned), the terminal inspector and the Ops A/B (pro-rata). To reproduce a record made
+  on the pro-rata basket: =--basket prorata --set scenario.tokens=[]=.
+- [X] The JS world's default is the equity basket on the machine (=eqworld.js=;
+  =opts.basket = "prorata"= builds the other). What the port needed, each a fact about the
+  machine and not about JS:
+  - Two constituents or more. The policy compares them in pairs.
+  - Seeded, aged pools before the machine's venue is installed. That venue refuses a price from
+    an empty pool or one with no history, and adding a constituent re-primes K, which reads
+    every pool. So the shell registers its constituents on the plain venue, an independent LP
+    seeds each pool, the TWAP window passes, and only then does the machine's venue go in. The
+    machine cannot make the first pairing into an empty pool. Step 2's single path must say
+    who seeds.
+  - A keeper to turn the wheel (=WheelKeeper=), or nothing is ever paired.
+  - The holder's identity-bound approval of the basket before its first deposit, since an exit
+    is paid in BUCK.
+  - An arbitrageur sized to the gap, with a second pass after the wheel. The basket trades its
+    own pools every turn, and a fixed small triangle cannot keep up.
+  A wheel turn is 1.2 million gas, about four seconds in the JS EVM, so a simulated day takes
+  three times as long as on the pro-rata basket. The loop test runs 14 days on the machine and
+  35 on the pro-rata basket.
+- [ ] The pro-rata basket's remaining ties. =--basket prorata= and =--basket ops= in the
+  simulator, the Ops shell that inherits it, the JS world's =opts.basket = "prorata"=, the
+  memory benchmark, and their tests. Nothing runs on it by default any more. The published
+  bundle has carried the equity basket since 0.3.0 (the list is =CONTRACTS= in
   =scripts/contracts-dist.py=; the =contracts.json= beside the package is its output and is
-  not tracked). What still deploys the pro-rata basket: the JS world (=eqworld.js=, its demo
-  and its tests), from the repository's own artifacts, and every simulator family by default.
-  Either it stays, with its Buck, until those are moved to the equity basket (steps 2 and 3),
-  or moving them is part of this cleanup. The original basket, the Fence and the Ops shell, the
-  other director and the rebalancer have no such tie and can go first.
+  not tracked).
 - [ ] The next release of the contracts, for the merge into master. 0.3.0 is out: its tags
   stand on two commits of =feature/carry-convexity= from 2026-09-30, which master does not have
   yet. So the packages that carry contracts (=alberta-buck-contracts= on npm and on PyPI, tags
@@ -139,7 +160,8 @@ machine's design is expected to become the accepted one.
   five years. Started 2026-10-11 19:12 from a frozen copy of commit =11a1103= under
   =build/sim/matrix5/= (=run.sh=, =run.log=; a finished world is =<arm>-<basket>.json=), so the
   contracts can be edited meanwhile.
-- [ ] A second seed of the five-year savings comparison (=build/sim/savings/seed2/=).
+- [X] A second seed of the five-year savings comparison (=build/sim/savings/seed2/=). It
+  agrees with the first.
 
 * 0. Two rules agreed on 2026-10-10
 
@@ -242,8 +264,9 @@ frame for frame wherever behaviour is not meant to change. Each one invalidates 
 - [ ] Make the lab use it. =control_lab/engine.py= and =block_pairs.py= currently build the older
   equity machine and rewire it; move the shared wiring out of =block_pairs.py=, which is named
   for a retired campaign.
-- [ ] The same recipe for the JS platform (=core/js=), and the new contracts in the artifact
-  bundle and in =core/contracts/contracts.json=.
+- [X] The JS platform builds the machine by one path of its own (=core/js=, =eqworld.js=),
+  with no older facet on the way: see [[*Toward the merge][Toward the merge]] for what it had to do first. The
+  machine's contracts are in the demo's artifact bundle and in the published list.
 
 * 3. Move the simulators onto it
 
@@ -300,8 +323,13 @@ the machine is clearly better in every regime.
   issuance only (=REBALANCING-EQ.org=, finding 4). The lab's one buyer and one seller, both
   spent by day 120, is thinner than the cast that verdict was about.
 - [ ] Run old against new on identical inputs and write the outcome into the results. Done
-  for the savings world, one seed. Not yet for a second seed, the portcast world or the
-  catalogue's disruptions.
+  for the savings world on two seeds. The five-year matrix, which has the portcast world, is
+  running on both ([[*Toward the merge][Toward the merge]]). Not yet for the catalogue's disruptions.
+- [ ] A new seed cannot start side by side. Every process rewrites the identity cache
+  (=test/vectors/identity-cache.json=) whole, so worlds starting together on a seed it does not
+  hold read each other's keys, and an identity proof fails days or years into the run. It cost
+  the second seed's first attempt. =savings-old-new.py= now runs a few days of each upkeep
+  alone first. The cache itself should be safe: one file a seed, or a lock.
 
 * 4. Decisions the evidence is waiting on
 

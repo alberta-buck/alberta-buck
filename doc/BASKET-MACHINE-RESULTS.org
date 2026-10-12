@@ -10,7 +10,7 @@ do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. Every number can be r
 The basket makes money from prices that part and come back. It does so better than the older
 upkeep, on five years of five commodities with depositors coming and going.
 
-| Five years, one seed | Older upkeep | The machine |
+| Five years, the first of two seeds | Older upkeep | The machine |
 |----------------------+--------------+-------------|
 | Share price at the end, real prices | 1.142 | 1.194 |
 | Share price at the end, reverting prices | 1.175 | 1.253 |
@@ -27,8 +27,8 @@ leans against price earns most of the gain, a gap is best released at a steady r
 TOKEN moves and never comes back the basket loses. One thing changed. Counting how long a gap
 has lasted now earns half again what a fixed line does. Before the rebuild the two were close.
 
-Four things to be careful about. Every result here is one seed. The machine uses a sixth more
-gas than the older upkeep and makes many small trades. The desk made no trade in the lab and
+Four things to be careful about. The five-year result is two seeds, which agree, and the lab
+is one. The machine uses a sixth more gas than the older upkeep and makes many small trades. The desk made no trade in the lab and
 few in the savings world, so nothing here tests it. And a young basket's share price shows the
 relief on its lien before the demurrage on the BUCKs it holds.
 
@@ -83,6 +83,29 @@ about half a percent dear by then. That is K's own behaviour, not the basket's.
 
 The desk barely acts under the machine. It moved 36,000 BUCKs in five years and ended 1,751
 ahead of holding its grant. Under the older upkeep it moved 178,000 and ended 19,005 behind.
+
+** A second seed
+
+The same four worlds, from a second seed:
+
+| | Older, real | Machine, real | Older, reverting | Machine, reverting |
+|--------+--------+--------+--------+--------|
+| Share price, last 90 days | 1.249 | 1.295 | 1.270 | 1.369 |
+| Net of the demurrage its held BUCKs carry | 1.228 | 1.266 | 1.247 | 1.341 |
+| Basket's cost in BUCK off 1, mean | 0.87% | 0.76% | 0.83% | 0.80% |
+| The same, at its worst | 6.8% | 5.1% | 6.3% | 4.6% |
+| Days with under 5% of equity to spend | 1,634 | 0 | 1,486 | 0 |
+| Gas, billions | 11.3 | 12.5 | 11.6 | 13.2 |
+
+The machine ends 3.7% ahead on real prices and 7.8% ahead on reverting ones. The first seed
+gave 4.5% and 6.6%. It holds the BUCK's price better in all four measures, never has less than
+66% of its equity to spend, and uses 10% to 14% more gas.
+
+This world is rougher than the first. The BUCK strays further from its basket under both
+upkeeps, and the desk does more. Under the machine it moved about 500,000 BUCKs on each price
+set, and ended 4,797 ahead on one and 3,640 behind on the other. Under the older upkeep it
+moved 163,000 and 246,000, and ended 17,168 and 9,738 behind. The machine's parity reference
+was stale on 37 and 22 days of the five years.
 
 * Why deposits waited
 
@@ -445,7 +468,7 @@ result is net of what callers were paid, comes next.
 
 * What we do not know yet
 
-- Whether one seed is representative. Nothing here has been run on a second.
+- Whether two seeds are enough. They agree on the five-year result. The lab has one.
 - What the desk does. It hardly acted in the savings world and not at all in the lab, where the
   BUCK never stays outside its band. It needs runs built to take the BUCK there and hold it.
 - What the results look like net of paying the callers, and what the smallest trade should be.
@@ -462,6 +485,7 @@ result is net of what callers were paid, comes next.
 
 #+begin_src sh
 python doc/review/savings-old-new.py /tmp/savings   # five years, both upkeeps, both price sets
+python doc/review/savings-old-new.py /tmp/seed2 5 scenario.seed=45517   # the second seed
 make control-lab-interactive        # 310 runs; open doc/control-lab/interactive/index.html
 make control-lab-verify             # check every saved run
 make control-lab-basket-sizing      # the rebalancing tables: the basket alone

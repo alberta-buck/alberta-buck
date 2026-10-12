@@ -28,10 +28,11 @@ def run(upkeep, prices, years, sets, out):
                                         f"scenario.years={years}", *sets])
     os.environ["SIM_CREDIT_FRAMES"] = "1"           # the lien, the BUCKs held and the demurrage they carry, either upkeep
     started = time.time()
-    partial = out.with_suffix(".partial")           # the loop saves as it goes: only a finished world gets its name
+    partial = out and out.with_suffix(".partial")   # the loop saves as it goes: only a finished world gets its name
     with PyrevmAnvil() as evm:
-        simulate(expmod.build(exp), evm, out_path=str(partial), verbose=False, basket_impl=exp.scenario["basket"])
-    partial.replace(out)
+        simulate(expmod.build(exp), evm, out_path=partial and str(partial), verbose=False, basket_impl=exp.scenario["basket"])
+    if out:
+        partial.replace(out)
     return upkeep, prices, time.time() - started
 
 
@@ -81,6 +82,11 @@ if __name__ == "__main__":
     name = lambda upkeep, prices: out / f"savings-{upkeep}-{prices}-{years:g}y.json"
     jobs = [(u, p) for p in PRICES for u in UPKEEPS if not name(u, p).exists()]
     with ProcessPoolExecutor(max_workers=4, max_tasks_per_child=1, mp_context=multiprocessing.get_context("spawn")) as pool:
+        # Every process rewrites the identity cache whole. Worlds that start together on a seed it
+        # does not hold yet read each other's keys, and an identity proof fails days or years in.
+        # So a few days of each upkeep run alone first, and the worlds that follow only read.
+        for upkeep in UPKEEPS if jobs else ():
+            pool.submit(run, upkeep, PRICES[0], .01, sets, None).result()
         for done in as_completed([pool.submit(run, u, p, years, sets, name(u, p)) for u, p in jobs]):
             print("ran %s on %s in %.0f s" % done.result(), flush=True)
     for prices in PRICES:
