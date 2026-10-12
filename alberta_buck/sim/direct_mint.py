@@ -37,6 +37,7 @@ from alberta_buck.sim import identity as idmod
 from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.chain import load_artifact
+from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import MIN_SQRT_RATIO, MAX_SQRT_RATIO
 
 # WP-5: the stress fee on duress exits.  BuckBasketProRata emits
@@ -74,6 +75,10 @@ class _DMBase(Agent):
     # (identity-bound) before it can be paid, so it keeps its identity key.
     KEEP_IDENTITY_SECRET = True
 
+    # ... and it sells the BUCKs it is paid for dollars, moving the
+    # BUCK/dollar pool's price by at most this much a tick (the rest waits).
+    SELL_IMPACT_BP = 50
+
     def __init__(self, idx: int):
         super().__init__(idx)
         self._receipt_id: int | None = None
@@ -82,6 +87,7 @@ class _DMBase(Agent):
         self._deposit_token_idx: int | None = None
         self._entered: bool = False
         self._exited: bool = False
+        self._proceeds: bool = False            # BUCKs from an exit, unsold
         # Realized-return accounting: USD committed at deposit, and the day.
         self._deposit_value_usd: int = 0
         self._deposit_day: int = 0
@@ -115,6 +121,54 @@ class _DMBase(Agent):
                                d.basket.address,
                                idmod.seeded_rng(0xA99 * 1_000_003 + self.idx))
         self._basket_approved = True
+
+    def _sell_proceeds(self, d, ctr) -> None:
+        """On an equity basket an exit pays BUCKs.  Sell them for dollars
+        through the BUCK/dollar pool: this depositor came in with dollars and
+        leaves with them.
+
+        It used to keep them.  Every entry brought fresh dollars and every
+        exit left its BUCKs in a wallet for good, so a world's depositors
+        took BUCKs out of circulation without end -- 9 million in the
+        portcast world's first 300 days -- and that demand, which nothing
+        could ever satisfy, is what carried K to its limit there
+        (doc/BASKET-MACHINE-RESULTS.org, "Who held the BUCKs").  The pro-rata
+        basket returns TOKEN, so nothing is sold on it."""
+        if not self._proceeds or not self._equity(d) or not getattr(d, "pool_ub", ""):
+            return
+        held = d.buck.functions.balanceOf(self.address).call()
+        if held < 10 ** 6:
+            self._proceeds = False
+            return
+        try:
+            r_buck, _r_usd = active_reserves(d.chain, d.pool_ub, d.buck, d.usdc)
+            cap = int(r_buck * ((1.0 - self.SELL_IMPACT_BP / 10_000) ** -0.5 - 1.0))
+            amount = min(held, max(10 ** 6, cap))
+            if not getattr(self, "_simlp_approved", False):
+                # The identity-bound approve of the swap helper, once, as of
+                # the basket: a private account may pay only whom it approved.
+                idmod.identity_approve(d.chain, d.reg, d.buck, self.account,
+                                       self.register_args, self.identity_sk,
+                                       d.simlp.address,
+                                       idmod.seeded_rng(0xA9A * 1_000_003 + self.idx))
+                self._simlp_approved = True
+            pool_abi, _ = load_artifact("UniswapV3Pool")
+            pool = d.w3.eth.contract(address=d.pool_ub, abi=pool_abi)
+            t0 = pool.functions.token0().call()
+            t1 = pool.functions.token1().call()
+            zero_for_one = d.buck.address.lower() == t0.lower()
+            sqrt_limit = MIN_SQRT_RATIO + 1 if zero_for_one else MAX_SQRT_RATIO - 1
+            d.chain.send(d.buck.functions.transfer(d.simlp.address, amount),
+                         sender=self.account)
+            # The helper pays the pool from its own balance, which carries a
+            # lien of its own: swap no more than it can spend.
+            amount = min(amount, d.buck.functions.balanceOf(d.simlp.address).call())
+            d.chain.send(d.simlp.functions.swap(
+                d.pool_ub, self.address, zero_for_one, int(amount),
+                sqrt_limit, t0, t1), sender=self.account)
+            ctr["dmBuckSold"] = ctr.get("dmBuckSold", 0) + amount
+        except Exception as e:
+            ctr["dm_sell_err"] = repr(e)[:200]
 
     def _record_roundtrip(self, d, ctr, holder, before_usd) -> None:
         """Book a completed deposit->redeem: realized USD profit and the
@@ -246,6 +300,7 @@ class _DMBase(Agent):
             ctr["treasuryBuck"] = ctr.get("treasuryBuck", 0) + treasury_buck
             _book_stress_fee(rcpt, ctr)   # WP-5
             self._record_roundtrip(d, ctr, self.address, before_usd)
+            self._proceeds = True         # an equity basket paid BUCKs: sell them
             # Reset state so the agent can re-enter on a later tick
             # (stochastic DMs).  Bootstrap DMs override _exit to a no-op
             # so this path is never hit.
@@ -329,6 +384,7 @@ class DirectMintAgent(_DMBase):
     def act(self, d, scenario, day, tick, ctr) -> None:
         if self._rng is None:
             return
+        self._sell_proceeds(d, ctr)
         if not self._entered:
             if self._rng.random() < self.ENTER_PROB_PER_TICK:
                 tok_idx = self._rng.randrange(len(d.tokens))

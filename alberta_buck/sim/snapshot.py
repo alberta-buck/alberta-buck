@@ -851,6 +851,9 @@ class Snapshotter:
             "dmEntries": ctr.get("dmEntries", 0),
             "dmExits": ctr.get("dmExits", 0),
             "dmExitFails": ctr.get("dmExitFails", 0),
+            # BUCKs depositors were paid by an equity basket and sold for dollars.
+            "dmBuckSold": ctr.get("dmBuckSold", 0),
+            "dm_sell_err": ctr.get("dm_sell_err", ""),
             "dmTotalInvested": ctr.get("dmTotalInvested", 0),
             # Realized round-trip accounting: profit booked only when a
             # deposit is actually redeemed, against the capital-days it was
