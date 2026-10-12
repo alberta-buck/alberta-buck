@@ -52,17 +52,9 @@ TARGET_BUCK_LP = TARGET_BUCK
 
 # --- Event topics, per basket implementation ------------------------------- #
 #
-# Both baskets index (who, receiptId) so `topics[2]` is the receiptId on either,
-# but the signatures (hence topic[0]) differ -- legacy BuckBasket carries an
-# extra `address` in Deposited and a 5-arg Redeemed + per-pool RedeemedFromPool;
-# BuckBasketProRata pays out via ERC20 transfers and emits a 6-arg Redeemed.
-LEGACY_DEPOSITED_TOPIC = Web3.keccak(
-    text="Deposited(address,uint256,address,uint256,uint256,address,uint128)")
-LEGACY_REDEEMED_TOPIC = Web3.keccak(
-    text="Redeemed(address,uint256,uint256,uint256,uint256)")
-REDEEMED_FROM_POOL_TOPIC = Web3.keccak(
-    text="RedeemedFromPool(uint256,address,address,uint256,uint256,uint128)")
-
+# Every basket indexes (who, receiptId), so `topics[2]` is the receiptId.
+# BuckBasketProRata pays out via ERC20 transfers and emits a 6-arg Redeemed;
+# the equity shell emits the same two events.
 PRORATA_DEPOSITED_TOPIC = Web3.keccak(
     text="Deposited(address,uint256,address,uint256,uint256,uint128)")
 PRORATA_REDEEMED_TOPIC = Web3.keccak(
@@ -70,9 +62,9 @@ PRORATA_REDEEMED_TOPIC = Web3.keccak(
 
 ERC20_TRANSFER_TOPIC = Web3.keccak(text="Transfer(address,address,uint256)")
 
-# Back-compat aliases (legacy is the default; older imports keep working).
-DEPOSITED_TOPIC = LEGACY_DEPOSITED_TOPIC
-REDEEMED_TOPIC = LEGACY_REDEEMED_TOPIC
+# The names older imports use.
+DEPOSITED_TOPIC = PRORATA_DEPOSITED_TOPIC
+REDEEMED_TOPIC = PRORATA_REDEEMED_TOPIC
 
 
 def wheel_arb_enabled() -> bool:
@@ -98,10 +90,9 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
 
     The equity baskets pay BUCK: token_to_user is then the BUCK paid.
 
-    Legacy BuckBasket emits one RedeemedFromPool per pool (sum `tokToUser`) and
-    Redeemed(..., retainedBuck, ...).  BuckBasketProRata has no per-pool event:
-    it pays the holder via ERC20 transfers, so sum the basket-TOKEN transfers
-    basket->holder, and read `treasuryBuck` from its 6-arg Redeemed.
+    BuckBasketProRata pays the holder via ERC20 transfers, so sum the
+    basket-TOKEN transfers basket->holder, and read `treasuryBuck` from its
+    6-arg Redeemed.
     """
     from eth_abi import decode
     holder = Web3.to_checksum_address(holder)
@@ -109,46 +100,28 @@ def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
     token_to_user = 0
     treasury_buck = 0
 
-    # Anything that is NOT the legacy shell pays via ERC20 transfers and
-    # emits the 6-arg Redeemed.  Enumerating implementations here instead
-    # silently mis-parsed the "ops" shell as legacy: it emits no
-    # RedeemedFromPool, so every redemption booked 0 treasury BUCK and 0
-    # TOKEN returned, and an A/B read as the desk having consumed the entire
-    # treasury when nothing of the sort had happened.
-    if d.basket_impl != "legacy":
-        basket_tokens = {c.address.lower() for c in d.tokens}
-        # The equity baskets pay BUCK; a pro-rata exit's TOKEN (paid in kind)
-        # is in the holder's portfolio, which the round trip values -- the
-        # counter stays in BUCK.
-        equity = str(d.basket_impl).startswith("equity")
-        for log in rcpt["logs"]:
-            t0 = log["topics"][0]
-            if (not equity and t0 == ERC20_TRANSFER_TOPIC
-                    and log["address"].lower() in basket_tokens
-                    and len(log["topics"]) >= 3
-                    and bytes(log["topics"][2])[-20:] == holder_bytes):
-                token_to_user += decode(["uint256"], bytes(log["data"]))[0]
-            elif t0 == d.redeemed_topic:
-                # (burned, depositorBuck, treasuryBuck, remainingBp)
-                _, db, tb, _ = decode(
-                    ["uint256", "uint256", "uint256", "uint256"],
-                    bytes(log["data"]))
-                treasury_buck += tb
-                if equity:
-                    # The equity basket pays BUCK (depositorBuck); its
-                    # treasuryBuck is the value of the cut, taken in shares.
-                    token_to_user += db
-    else:
-        for log in rcpt["logs"]:
-            t0 = log["topics"][0]
-            if t0 == REDEEMED_FROM_POOL_TOPIC:
-                tok_to_user, _, _ = decode(
-                    ["uint256", "uint256", "uint128"], bytes(log["data"]))
-                token_to_user += tok_to_user
-            elif t0 == d.redeemed_topic:
-                _, retained, _ = decode(
-                    ["uint256", "uint256", "uint256"], bytes(log["data"]))
-                treasury_buck += retained
+    basket_tokens = {c.address.lower() for c in d.tokens}
+    # The equity baskets pay BUCK; a pro-rata exit's TOKEN (paid in kind)
+    # is in the holder's portfolio, which the round trip values -- the
+    # counter stays in BUCK.
+    equity = str(d.basket_impl).startswith("equity")
+    for log in rcpt["logs"]:
+        t0 = log["topics"][0]
+        if (not equity and t0 == ERC20_TRANSFER_TOPIC
+                and log["address"].lower() in basket_tokens
+                and len(log["topics"]) >= 3
+                and bytes(log["topics"][2])[-20:] == holder_bytes):
+            token_to_user += decode(["uint256"], bytes(log["data"]))[0]
+        elif t0 == d.redeemed_topic:
+            # (burned, depositorBuck, treasuryBuck, remainingBp)
+            _, db, tb, _ = decode(
+                ["uint256", "uint256", "uint256", "uint256"],
+                bytes(log["data"]))
+            treasury_buck += tb
+            if equity:
+                # The equity basket pays BUCK (depositorBuck); its
+                # treasuryBuck is the value of the cut, taken in shares.
+                token_to_user += db
     return token_to_user, treasury_buck
 
 
@@ -175,16 +148,14 @@ class Deployment:
     pool_usdc: list = field(default_factory=list)   # TOKEN/USDC addrs
     pool_buck: list = field(default_factory=list)   # TOKEN/BUCK addrs
     pool_ub: str = ""                               # floating BUCK/USDC pool
-    pool_fence: list = field(default_factory=list)  # BuckBasketFence bands
     pool_meta: list = field(default_factory=list)   # (pool,owner,lo,hi,group)
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "fence" | "equity"
-                                  # | "equity-ops" | "legacy"
+    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "equity" | "equity-ops"
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
-    director_impl: str = "pairs"  # "pairs" (default) | "vrate"
+    director_impl: str = "pairs"  # "pairs": the one signal engine left
     controller_impl: str = "direct"   # "direct" (default) | "shadow"  (WP-3a)
     observer: Any = None          # ShadowObserver (shadow controller on ops only)
     desk: Any = None              # BasketDesk ("equity-ops": the desk, its own credit holder)
@@ -287,42 +258,27 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
-    # Constructor is identical for both implementations (drop-in).  The
-    # spot/TWAP guard tolerance is 5% (500 bp): legacy uses it only for BUCK
-    # deposits, ProRata also for the redeem value read; 5% keeps ordinary
-    # inter-tick commodity moves (6h ticks vs 600s TWAP) from tripping it.
+    # Constructor is identical for every shell (drop-in).  The spot/TWAP
+    # guard tolerance is 5% (500 bp), for BUCK deposits and the redeem value
+    # read; 5% keeps ordinary inter-tick commodity moves (6h ticks vs 600s
+    # TWAP) from tripping it.
     ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
     venue = None
-    if basket_impl in ("prorata", "ops", "fence"):
+    if basket_impl in ("prorata", "ops"):
         # "ops" is BuckBasketProRata plus the monetary-operations desk on the
         # director's COMMON mode.  Identical constructor, identical venue,
         # and inert until setOpsParams enables it -- so an ops basket with no
         # policy installed is the baseline, byte for byte in behaviour.
-        if basket_impl == "fence":
-            # The fence tier defaults to the DEPOSITOR tier, which makes
-            # _findOrCreatePool hand back the constituent's own pool.  The
-            # separate tier was proposed to keep the fence out of
-            # poolBuckValues, but BuckBasketFence overrides _redeem and
-            # prices claims from exact V3 math on its own band, so nothing
-            # reads poolBuckValues on this path.  A separate tier would
-            # instead make the experiment inert: basketValueInBuck -- what K
-            # reads -- comes from the constituent's pool, so a fence
-            # elsewhere could not move K's signal without an arbitrageur
-            # linking the two.  SIM_FENCE_TIER=500 restores the split.
-            fence_tier = int(os.environ.get("SIM_FENCE_TIER", str(FEE_BUCK)))
-            basket = chain.deploy("BuckBasketFence", *ctor, fence_tier)
-        else:
-            basket = chain.deploy(
-                "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata",
-                *ctor)
+        basket = chain.deploy(
+            "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata",
+            *ctor)
         # Install the Uniswap V3 venue facet (the shell delegatecalls it) and
         # re-wrap the basket handle with the union ABI so Python can call facet
         # views (basketValueInBuck) that the shell serves via its fallback.
         venue = chain.deploy("BuckBasketUniswapV3")
         chain.send(basket.functions.setVenue(venue.address), sender=gov)
         shell_abi, _ = load_artifact(
-            {"ops": "BuckBasketOps", "fence": "BuckBasketFence"}
-            .get(basket_impl, "BuckBasketProRata"))
+            "BuckBasketOps" if basket_impl == "ops" else "BuckBasketProRata")
         facet_abi, _ = load_artifact("BuckBasketUniswapV3")
         union = shell_abi + [e for e in facet_abi if e not in shell_abi]
         basket = w3.eth.contract(address=basket.address, abi=union)
@@ -352,8 +308,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         basket = w3.eth.contract(address=basket.address, abi=union)
         deposited_topic, redeemed_topic = PRORATA_DEPOSITED_TOPIC, PRORATA_REDEEMED_TOPIC
     else:
-        basket = chain.deploy("BuckBasket", *ctor)
-        deposited_topic, redeemed_topic = LEGACY_DEPOSITED_TOPIC, LEGACY_REDEEMED_TOPIC
+        raise ValueError(f"unknown basket: {basket_impl!r} (prorata, ops, equity, equity-ops)")
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
     if credit_holder:
         # A credit holder: bound public and NON-Carrying (it holds a lien), and
@@ -484,8 +439,6 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                   f"w desk={w_desk / E18:g} offset={w_off / E18:g}  "
                   f"offset cap=${cap_off / 10 ** 6:,.0f}")
 
-    fence_factors: list = []
-
     # --- tokens ------------------------------------------------------ #
     usdc = chain.deploy("MockERC20", "USD Coin", "USDC", 6)
     tok, dec, wbp = [], [], []
@@ -607,33 +560,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         pb = v3f.functions.getPool(c.address, buck.address, FEE_BUCK).call()
         idmod.bind_as_operator(chain, reg, pb, True, True, sender=deployer)
         d.pool_buck.append(pb)
-        if basket_impl == "fence":
-            # Strike the first band.  Must follow addBasketToken: the fence
-            # is priced and centred off the constituent record.
-            chain.send(basket.functions.openFence(i), sender=gov)
-            d.pool_fence.append(
-                basket.functions.fenceOf(i).call()[0])
-            fence_factors.append(i)
-
         if verbose:
             print(f"[deploy] TOKEN/BUCK {sym}/BUCK pool {pb[:10]}...  "
                   f"fee={FEE_BUCK} ({TICK_SPACING[FEE_BUCK]}-tick)  "
                   f"targetBp={wbp[i]} (passed {pass_wbp[i]})")
             print(f"         empty pool — bootstrap DM agents will seed")
-
-    # Read back the basket's realized target weights (legacy exposes the
-    # `constituents` array getter; targetWeightBp is the last struct field).
-    # addBasketToken renormalizes existing constituents on each add, so the
-    # stored weights are the SEQUENTIAL result of the passed bp, summing to
-    # 10000 -- this confirms the per-token weightBp actually took effect.
-    if verbose and basket_impl == "legacy":
-        n = basket.functions.constituentsLength().call()
-        parts, wsum = [], 0
-        for i in range(n):
-            w = basket.functions.constituents(i).call()[-1]  # targetWeightBp
-            wsum += w
-            parts.append(f"{scenario.tokens[i][0]}={w}")
-        print(f"[deploy] basket target weightBp (sum={wsum}): " + "  ".join(parts))
 
     # --- floating BUCK/USDC pool (gauge-breaking, not a peg) ---------- #
     #
@@ -730,68 +661,34 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
 
     # --- Rebalance director (standalone advisor; prorata only) ------------ #
     # Amortized rebalance-signal state machine: agents poke() it with a small
-    # work budget; hints direct deposit routing and redemption draws.  Two
-    # signal engines share the chassis (IRebalanceDirector-compatible):
-    #   vrate -- per-constituent share-deviation regime + rate-matched sizing
-    #            (window 15d, rho 3);
-    #   pairs -- differential-mode: per-leg tick-EMA ladders (5..320d), pair
-    #            quorum votes on the confirmed turn, matched pair trades.
-    # DIRECTOR_WINDOW / DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides
-    # let short smoke sims exercise the trade path (pairs quorum 4 needs the
-    # 40-epoch window warm -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
-    if basket_impl in ("prorata", "ops", "fence", "equity-ops"):
+    # work budget; hints direct deposit routing and redemption draws.  Its
+    # signal engine is differential-mode: per-leg tick-EMA ladders (5..320d),
+    # pair quorum votes on the confirmed turn, matched pair trades.
+    # DIRECTOR_DEADBAND_BP / DIRECTOR_QUORUM env overrides let short smoke
+    # sims exercise the trade path (quorum 4 needs the 40-epoch window warm
+    # -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
+    if director_impl != "pairs":
+        raise ValueError(f"unknown director: {director_impl!r} (pairs)")
+    if basket_impl in ("prorata", "ops", "equity-ops"):
         # (on "equity-ops" the pairs director only feeds the desk its
         # common-mode signal; the basket rebalances itself -- see below)
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
-        if director_impl == "pairs":
-            dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
-            # boundaryBp: the no-trade-region form of effort sizing.  0 is
-            # not a placeholder -- it is the measured right answer for a 30bp
-            # venue (the refinement costs 5bp/yr there and only pays above
-            # ~50bp/leg).  Raise it if the pools ever trade expensively.
-            dir_boundary = int(os.environ.get("DIRECTOR_BOUNDARY_BP", "0"))
-            director = chain.deploy(
-                "PairsRebalanceDirector", basket.address, gov,
-                (86400, dir_quorum, 500_000_000, dir_deadband * 100_000,
-                 300_000_000, 250_000_000, 50, dir_boundary))
-            desc = (f"quorum={dir_quorum}/7 kappa=0.5"
-                    + (f" boundary={dir_boundary}bp" if dir_boundary else ""))
-        else:
-            dir_window = int(os.environ.get("DIRECTOR_WINDOW", "15"))
-            director = chain.deploy(
-                "BasketRebalanceDirector", basket.address, gov,
-                (86400, dir_window, 3_000_000_000, dir_deadband * 100_000,
-                 250_000_000, 300_000_000, 250_000_000, 50))
-            desc = f"window={dir_window}d rho=3"
+        dir_quorum = int(os.environ.get("DIRECTOR_QUORUM", "4"))
+        # boundaryBp: the no-trade-region form of effort sizing.  0 is not a
+        # placeholder -- it is the measured right answer for a 30bp venue (the
+        # refinement costs 5bp/yr there and only pays above ~50bp/leg).  Raise
+        # it if the pools ever trade expensively.
+        dir_boundary = int(os.environ.get("DIRECTOR_BOUNDARY_BP", "0"))
+        director = chain.deploy(
+            "PairsRebalanceDirector", basket.address, gov,
+            (86400, dir_quorum, 500_000_000, dir_deadband * 100_000,
+             300_000_000, 250_000_000, 50, dir_boundary))
+        desc = (f"quorum={dir_quorum}/7 kappa=0.5"
+                + (f" boundary={dir_boundary}bp" if dir_boundary else ""))
         chain.send(director.functions.syncConstituents())
         d.director = director
         d.director_impl = director_impl
-        if basket_impl == "fence" and fence_factors:
-            # The factors READ the director, so the fence needs it wired.
-            # Safe here where it was not for the ops basket: this shell
-            # overrides depositToken and _redeem outright, so none of the
-            # inherited advisory-routing paths that `director` also gates are
-            # reachable.
-            chain.send(basket.functions.setDirector(director.address),
-                       sender=gov)
-            if int(os.environ.get("SIM_FENCE_FACTORS", "0") or 0):
-                # A: differential -- lean against the constituent that has
-                #    diverged most from its target weight.
-                # B: common -- lean the way K is about to push BUCK.
-                # Off by default so the symmetric band stays the baseline
-                # every comparison is measured against.
-                chain.send(basket.functions.setFactorParams((
-                    int(os.environ.get("SIM_FACTOR_A", "100")),
-                    int(os.environ.get("SIM_FACTOR_B", "100")),
-                    int(os.environ.get("SIM_FACTOR_MAXSKEW", "5000")),
-                    int(os.environ.get("SIM_FACTOR_MEAS", "2")),
-                    True)), sender=gov)
-                if verbose:
-                    print("[deploy] fence FACTORS on  "
-                          f"A={os.environ.get('SIM_FACTOR_A','100')}% "
-                          f"B={os.environ.get('SIM_FACTOR_B','100')}% "
-                          f"maxSkew={os.environ.get('SIM_FACTOR_MAXSKEW','5000')}bp")
-        if basket_impl in ("ops", "equity-ops") and director_impl == "pairs":
+        if basket_impl in ("ops", "equity-ops"):
             # Thresholds are in tick*1e9 and a tick is ~1bp, so 100e9 reads as
             # 100bp.  measIdx 2 is the 20-epoch rung: the article's sweep puts
             # the knee there, and past the 80-epoch rung the lagged reading

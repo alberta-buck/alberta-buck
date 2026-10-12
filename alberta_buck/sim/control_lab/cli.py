@@ -48,7 +48,7 @@ def fingerprint():
     for name in ("Buck", "BuckCredit", "BuckKControllerDirect", "IdentityRegistryHarness",
                  "SimLP", "MockERC20", "UniswapV3Factory", "UniswapV3Pool", "WETH9",
                  "BuckBasketEquity", "BuckBasketEquityWheel", "BuckBasketUniswapV3",
-                 "BasketDesk", "BasketRebalanceDirector", "BasketWheel", "BasketMachineWheel",
+                 "BasketDesk", "BasketWheel", "BasketMachineWheel",
                  "BasketReference", "OuterBandDeskPolicy",
                  "BasketVenueFacet", "PairSignals", "PairRebalancePolicy", "BasketUpkeepFacet"):
         h.update(digest(load_artifact(name)).encode())

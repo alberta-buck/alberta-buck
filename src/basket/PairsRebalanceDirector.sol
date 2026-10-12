@@ -43,8 +43,8 @@ interface IBasketValue {
 ///
 ///         Pair efforts are cached and folded into per-leg NET efforts at
 ///         poke time, so the chassis's `depositHint`/`redeemHint`/`effortOf`
-///         surface stays O(N) cached reads -- fully API-compatible with the
-///         vrate director; `bestPair()` additionally names the top matched
+///         surface stays O(N) cached reads; `bestPair()` additionally names
+///         the top matched
 ///         trade (sell leg, buy leg) for keepers.
 contract PairsRebalanceDirector is RebalanceDirectorBase {
 

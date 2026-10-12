@@ -36,7 +36,7 @@ contract MockStabilizer is IStabilizer {
 
 /// @dev Stands in for PairsRebalanceDirector's monetary surface so the
 ///      basket's quadrant logic can be driven directly.  The director's own
-///      common-mode arithmetic is tested in BasketRebalanceDirector.t.sol.
+///      common-mode arithmetic is tested in PairsRebalanceDirector.t.sol.
 ///      The shell wraps every director call in try/catch, so implementing
 ///      only these two is safe.
 contract MockMonetaryDirector {

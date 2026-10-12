@@ -262,7 +262,7 @@ def _basket_node() -> Node:
         c = drv.ctr
         weights = _pool_value_weights(drv)
         out = [
-            f"{'BuckBasketProRata' if d.basket_impl == 'prorata' else 'BuckBasket'}"
+            f"{'BuckBasketProRata' if d.basket_impl == 'prorata' else d.basket_impl}"
             f"  {_short(d.basket.address)}",
             f"impl           {d.basket_impl}"
             + (f"   venue {_short(d.venue.address)}" if d.venue else ""),

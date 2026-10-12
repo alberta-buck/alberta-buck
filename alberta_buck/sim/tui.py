@@ -309,7 +309,7 @@ def main(argv=None) -> int:
     ap.add_argument("--scenario", default="rebalancing",
                     choices=sorted(SCENARIOS))
     ap.add_argument("--basket", default="prorata",
-                    choices=["legacy", "prorata"])
+                    choices=["prorata"])
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)

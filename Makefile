@@ -62,7 +62,7 @@ VENV_OPTS		=
 .PHONY: golden-receipts
 .PHONY: snark snark-setup snark-fixtures snark-ptau snark-clean snark-a2 snark-a2-setup snark-a2-fixtures
 .PHONY: sim sim-build sim-run sim-test sim-plot sim-tui
-.PHONY: test-director test-director-regimes sim-run-director sim-director
+.PHONY: test-director sim-run-director sim-director
 .PHONY: sim-run-policy sim-run-policy-sweep sim-plot-policy sim-policy sim-policy-sweep
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
 .PHONY: sim-run-flow sim-plot-flow sim-flow
@@ -113,39 +113,13 @@ test-fork-mainnet:
 snapshot:
 	forge snapshot $(FORGE_OPTS)
 
-# ── BasketRebalanceDirector tests ────────────────────────────────────
+# ── Rebalance director tests ─────────────────────────────────────────
 #
-# The director's Forge suite reads DIR_WINDOW / DIR_RHO1E9 from the
-# environment, so the same assertions can be exercised across a window x
-# rho parameter matrix.  The regimes target runs the whole matrix in
-# parallel (one forge process per regime; `build` first so they share a
-# warm compile cache).
-#
-#   make nix-test-director           # unit + fuzz suite, default regime
-#   make nix-test-director-regimes   # parallel window x rho matrix
+#   make nix-test-director           # unit + fuzz suite
 #   make nix-sim-director            # 30-day Anvil smoke sim (keeper agent)
-
-DIRECTOR_WINDOWS	?= 6 8 16
-DIRECTOR_RHOS		?= 1500000000 3000000000 6000000000
 
 test-director:	build
 	forge test $(FORGE_OPTS) --match-contract 'RebalanceDirector' -vv
-
-test-director-regimes:	build
-	@rc=0; pids=""; \
-	for w in $(DIRECTOR_WINDOWS); do \
-	  for r in $(DIRECTOR_RHOS); do \
-	    log="out/director-w$$w-r$$r.log"; \
-	    ( DIR_WINDOW=$$w DIR_RHO1E9=$$r forge test $(FORGE_OPTS) \
-	        --match-contract BasketRebalanceDirector > "$$log" 2>&1 ) & \
-	    pids="$$pids $$!=w$$w-r$$r"; \
-	  done; \
-	done; \
-	for pr in $$pids; do \
-	  p=$${pr%%=*}; tag=$${pr##*=}; \
-	  if wait "$$p"; then echo "director regime $$tag  PASS"; \
-	  else echo "director regime $$tag  FAIL  (see out/director-$$tag.log)"; rc=1; fi; \
-	done; exit $$rc
 
 # Formatting and linting
 fmt:
@@ -686,7 +660,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
-SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (BuckBasket)
+SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | ops | equity | equity-ops | equity-machine
 #
 # Every Anvil-style sim below composes from a common matrix:
 #
@@ -695,17 +669,18 @@ SIM_BASKET	?= prorata       # prorata (BuckBasketProRata, default) | legacy (Buc
 #                  on short runs, far more on long ones -- see
 #                  alberta_buck/sim/pyrevm_backend.py)
 #   SIM_BASKET   = prorata (BuckBasketProRata + UniswapV3 venue facet)
-#                | legacy (fused BuckBasket)
+#                | ops (the pro-rata basket with the desk inside it)
+#                | equity, equity-ops (the equity basket, and with the desk
+#                  beside it), equity-machine (on the basket machine)
 #   SIM_DIRECTOR = pairs (PairsRebalanceDirector: differential-mode
-#                  tick-EMA ladders, quorum turn votes; default)
-#                | vrate (BasketRebalanceDirector: share-deviation regime)
+#                  tick-EMA ladders, quorum turn votes; the one left)
 #   Env knobs (deploy-time director params, for short smoke runs):
-#     DIRECTOR_DEADBAND_BP=10  DIRECTOR_QUORUM=2|3 (pairs)  DIRECTOR_WINDOW=3 (vrate)
+#     DIRECTOR_DEADBAND_BP=10  DIRECTOR_QUORUM=2|3
 #
-#   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm SIM_DIRECTOR=vrate
+#   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm
 #         SIM_BACKEND=pyrevm make nix-sim-historical SIM_YEARS=5
 SIM_BACKEND	?= pyrevm        # pyrevm (default: in-process, fast) | anvil
-SIM_DIRECTOR	?= pairs         # pairs (default) | vrate
+SIM_DIRECTOR	?= pairs         # pairs: the one signal engine left
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
@@ -773,7 +748,7 @@ sim:		sim-run sim-plot
 # the display-only first layer; parameter adjustment comes later.
 #
 #   make nix-sim-tui                                       # rebalancing/prorata
-#   make nix-sim-tui SIM_SCENARIO=routing SIM_BASKET=legacy   # lighter, fast deploy
+#   make nix-sim-tui SIM_SCENARIO=routing                     # lighter, fast deploy
 #
 # In the UI:  arrows/PgUp/PgDn move; Right/Left expand/collapse; [space] step
 # a tick, [d] step a day, [r] run/pause, [w]rite a snapshot vector, [q]uit.
@@ -813,25 +788,19 @@ sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
 
 
-# ── Rebalancing A/B: BuckBasketProRata vs the traditional BuckBasket ────
+# ── Rebalancing on the pro-rata basket ──────────────────────────────────
 #
-# Two independent targets, each writing its own vector + image so the runs
-# can be compared side by side.  The hypothesis: BUCK direct-mint agents +
-# the rebalancing effect of BuckBasketProRata redemptions yield a smoother
-# holder ROI than the traditional basket.
+# BUCK direct-mint agents and the rebalancing effect of BuckBasketProRata
+# redemptions.  (The run against the original basket went with that basket.)
 #
 #   make nix-sim-rebalancing-prorata        # build -> run (prorata) -> plot
-#   make nix-sim-rebalancing-traditional    # build -> run (legacy)  -> plot
 #   make nix-sim-run-rebalancing-prorata    # just the run
 #
 # Horizon override applies as usual:  ... SIM_DAYS=365 SIM_TICKS=4
 
 REBALANCING_VECTOR_PRORATA      = test/vectors/rebalancing-sim-prorata.json
-REBALANCING_VECTOR_TRADITIONAL  = test/vectors/rebalancing-sim-traditional.json
 
-.PHONY: sim-run-rebalancing-prorata sim-run-rebalancing-traditional
-.PHONY: sim-plot-rebalancing-prorata sim-plot-rebalancing-traditional
-.PHONY: sim-rebalancing-prorata sim-rebalancing-traditional
+.PHONY: sim-run-rebalancing-prorata sim-plot-rebalancing-prorata sim-rebalancing-prorata
 
 sim-run-rebalancing-prorata:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
@@ -839,24 +808,12 @@ sim-run-rebalancing-prorata:	sim-build
 		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
 		--out $(REBALANCING_VECTOR_PRORATA)
 
-sim-run-rebalancing-traditional:	sim-build
-	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
-		--ticks-per-day $(SIM_TICKS) --basket legacy \
-		--backend $(SIM_BACKEND) \
-		--out $(REBALANCING_VECTOR_TRADITIONAL)
-
 sim-plot-rebalancing-prorata:	$(REBALANCING_VECTOR_PRORATA)
 	REB_VECTOR=$(REBALANCING_VECTOR_PRORATA) \
 		REB_OUT=images/rebalancing-sim-prorata.png \
 		python -m pytest $(SIM_REB_PLOT) -v -s
 
-sim-plot-rebalancing-traditional:	$(REBALANCING_VECTOR_TRADITIONAL)
-	REB_VECTOR=$(REBALANCING_VECTOR_TRADITIONAL) \
-		REB_OUT=images/rebalancing-sim-traditional.png \
-		python -m pytest $(SIM_REB_PLOT) -v -s
-
 sim-rebalancing-prorata:	sim-run-rebalancing-prorata sim-plot-rebalancing-prorata
-sim-rebalancing-traditional:	sim-run-rebalancing-traditional sim-plot-rebalancing-traditional
 
 
 # -- The reverting regime: oscillation without drift -------------------
@@ -1044,7 +1001,7 @@ sim-policy-sweep:	sim-run-policy-sweep
 sim-plot-article:	$(POLICY_VECTOR)
 	python -m alberta_buck.sim.plot_rebalance_article
 
-# 30-day Anvil smoke sim exercising the BasketRebalanceDirector end to end:
+# 30-day Anvil smoke sim exercising the rebalance director end to end:
 # the rebalancing scenario's DirectorKeeperAgent pokes the director's work
 # wheel each tick and executes its advisory efforts through the router.
 sim-run-director:

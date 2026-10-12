@@ -15,8 +15,7 @@ import {IRebalanceDirector, IBasketMeta} from "./IRebalanceDirector.sol";
 ///         per-pool observations with running sums (a poke reads only its
 ///         own pool), the O(log n) fixed-point power for closed-form EMA
 ///         catch-up, and the advisory-read surface built over the derived
-///         policy's `effortOf`.  A signal engine (the vrate
-///         `BasketRebalanceDirector`, the differential-mode
+///         policy's `effortOf`.  A signal engine (the differential-mode
 ///         `PairsRebalanceDirector`) supplies only `_isStale` / `_pokeOne` /
 ///         `effortOf` -- the seam sits exactly at the tested boundary.
 abstract contract RebalanceDirectorBase is IRebalanceDirector {

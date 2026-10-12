@@ -164,7 +164,7 @@ REBALANCING = Scenario(
             # one year of payments per tranche is ~$21M/yr); the COLLATERAL
             # is, and 4 agents carried under $4M of it.
             "BuckCreditDebtorAgent": 24,
-            # Advances the BasketRebalanceDirector's amortized MA signals a
+            # Advances the rebalance director's amortized signals a
             # bounded slice per tick and executes its advisory efforts
             # (sell-side hint -> BUCK -> buy-side hint) through the router.
             "DirectorKeeperAgent": 1,
@@ -172,8 +172,8 @@ REBALANCING = Scenario(
             # unless --basket ops deployed the two-mode shell, so it costs one
             # skipped call a day on every other run and needs no roster switch.
             "MonetaryKeeperAgent": 1,
-            # Re-strikes BuckBasketFence's bands, one constituent a day.
-            # Inert unless --basket fence deployed that shell.
+            # A retired slot (the Fence basket's keeper), kept so the agents
+            # after it keep their numbers: see FenceKeeperAgent.
             "FenceKeeperAgent": 1,
             # The COMMON mode.  Everything above trades the differences
             # between commodities; this reads their mean -- which is
@@ -319,7 +319,7 @@ def build_rebalancing_eq(start=None, end=None, years=None, ticks_per_day=1,
     weighted basket on the same real historical window, the same
     FatCreditBorrower/Saver monetary loop and PID cadence -- plus the one
     agent that makes it a *rebalancing* run: a DirectorKeeperAgent
-    advancing the BasketRebalanceDirector's amortized signals and
+    advancing the rebalance director's amortized signals and
     executing its advisory efforts.  The director itself deploys in every
     prorata run; in the equilibrium scenario nothing pokes it, so its
     contribution to the closed loop is exactly the delta this scenario

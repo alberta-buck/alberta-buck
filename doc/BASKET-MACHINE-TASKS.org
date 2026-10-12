@@ -77,25 +77,25 @@ machine's design is expected to become the accepted one.
   comparison. And it shares the shell, the venue, the desk and the wheel with the machine: only
   one facet (=BuckBasketEquityWheel=, 316 lines) and one director (=EquityTurnDirector=, 230)
   are its own. The matrix below runs on the pro-rata basket as well, so the numbers can say.
-- [ ] Remove the older baskets, and keep the pro-rata one (agreed 2026-10-11): the original
-  basket, the Fence, the =vrate= director and the rebalancer go now, with their tests and
-  simulator modes. The pro-rata basket, its Buck and the Ops shell stay. What neither equity
-  basket reaches, by imports, is exactly these:
+- [X] The older baskets are removed and the pro-rata one kept (agreed and done 2026-10-11): the
+  original =BuckBasket=, =BuckBasketFence= with its 163 lines in the venue facet,
+  =BasketRebalanceDirector= (=--director vrate=) and =BasketRebalancer=, with their four
+  suites (51 tests) and their simulator modes. 3,300 lines of Solidity. The Fence's keeper
+  agent stays in the cast as a slot that does nothing, so every agent after it keeps its
+  number and saved worlds reproduce. The Python policy models (=rebalance_policy.py= and its
+  plots) need no contract and stay.
+- [ ] Still unreached by either equity basket, and kept for now:
 
   | Contract | Lines | What still uses it |
   |----------+-------+--------------------|
-  | =BuckBasket= | 1,404 | =--basket legacy=; 18 tests |
-  | =BuckBasketProRata= | 709 | the JS world (=eqworld.js=), its demo and tests; the default basket of every simulator family; 47 tests in 4 suites |
-  | =BuckBasketFence= | 725 | =--basket fence=; 17 tests |
+  | =BuckBasketProRata= | 709 | the JS world (=eqworld.js=), its demo and tests; =--basket prorata=; 47 tests in 4 suites |
   | =BuckBasketOps= | 47 | =--basket ops=; 37 tests, which also carry the shadow observer's and the desk base's |
-  | =BasketRebalanceDirector= | 182 | =--director vrate=; 10 tests |
-  | =BasketRebalancer=, =IBasketRebalancer= | 92 | 6 tests |
   | =legacy/BuckWithBasketHooks= | 120 | the Buck every pro-rata basket needs; =Buck.t.sol=, =JubileeBasis.t.sol= |
 
-  That is 3,279 lines. =PairsRebalanceDirector= and its base stay: the older upkeep uses them.
-  =BuckKControllerShadow=, =ShadowObserver= and =IShadowObserver= (818 lines) are also
-  unreached, but they are a K controller, not a basket, and =--controller shadow= still runs
-  on the equity basket with the desk. They wait for their own decision.
+  The Ops shell waits for the desk's evaluation. =PairsRebalanceDirector= and its base stay:
+  the older upkeep uses them. =BuckKControllerShadow=, =ShadowObserver= and =IShadowObserver=
+  (818 lines) are a K controller, not a basket, and =--controller shadow= still runs on the
+  equity basket with the desk. They wait for their own decision.
 - [ ] Move the JS world and the simulators' defaults to the equity basket on the machine
   (agreed 2026-10-11). The pro-rata basket stays selectable.
 - [ ] The pro-rata basket's ties are inside the repository. The published bundle has carried

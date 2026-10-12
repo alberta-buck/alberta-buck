@@ -91,7 +91,6 @@ def _vectors():
     return [pytest.param(VECTORS / n, id=n[:-5]) for n in (
         "rebalancing-sim.json",
         "rebalancing-sim-prorata.json",
-        "rebalancing-sim-traditional.json",
         "rebalancing-sim-revert.json")]
 
 

@@ -21,8 +21,8 @@ def main(argv=None) -> int:
                     help="EVM backend: in-process pyrevm (default; ~1000x "
                          "faster, see pyrevm_backend) or the anvil subprocess "
                          "(RPC-faithful; needs anvil on PATH -- fork tests)")
-    ap.add_argument("--director", default="pairs", choices=["vrate", "pairs"],
-                    help="rebalance-director signal engine (prorata only)")
+    ap.add_argument("--director", default="pairs", choices=["pairs"],
+                    help="rebalance-director signal engine: the pairs director is the one left")
     ap.add_argument("--controller", default=os.environ.get("SIM_CONTROLLER", "direct"),
                     choices=["direct", "shadow"],
                     help="BUCK_K controller: BuckKControllerDirect (direct, "
@@ -33,11 +33,13 @@ def main(argv=None) -> int:
                          "default 0, make it Direct's twin).  Env SIM_CONTROLLER "
                          "sets the default so catalogue/star cells can select it")
     ap.add_argument("--basket", default=None,
-                    choices=["legacy", "prorata", "ops", "fence", "equity", "equity-ops", "equity-machine"],
+                    choices=["prorata", "ops", "equity", "equity-ops", "equity-machine"],
                     help="basket implementation: BuckBasketProRata (prorata, "
                          "default), BuckBasketOps (ops -- prorata plus the "
                          "monetary-operations desk on the director's common "
-                         "mode), BuckBasketFence (fence -- K-scaled issuance deployed as a concentrated band), or BuckBasket (legacy)")
+                         "mode), the equity basket (equity), with the desk "
+                         "beside it (equity-ops), or on the basket machine "
+                         "(equity-machine)")
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)

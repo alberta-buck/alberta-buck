@@ -39,7 +39,7 @@ abstract contract BuckBasketStorage {
 
     // --- Constituents ----------------------------------------------------- //
 
-    // Field order matches the legacy BuckBasket.Constituent so the public
+    // Field order matches the original basket's Constituent so the public
     // `constituents(i)` getter is positionally compatible (the sim reads
     // `c[2] == basketAmount`); `treasuryLiquidity` is appended.
     struct Constituent {
@@ -147,8 +147,8 @@ abstract contract BuckBasketStorage {
     // --- Stress fee on duress exits --------------------------------------- //
     //
     // APPENDED at the end of the shared layout: every slot above keeps its
-    // position for the venue facet and for the ops / fence shells that add
-    // state of their own after this base.
+    // position for the venue facet and for the ops shell that adds
+    // state of its own after this base.
     //
     // A redemption that lands in the DEFLATION branch (Bw < R: BUCK dear,
     // basketValueInBuck < 1) while the TWAP deviation exceeds the deadband

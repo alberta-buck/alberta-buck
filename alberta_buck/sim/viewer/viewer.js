@@ -27,7 +27,7 @@ const CLASS_PREFIX = {
   ExcursionBuckArbAgent: ["exc_"], WhaleRaidAgent: ["raid_"],
   CommodityRebalArbAgent: ["crb_"], UndertakingAgent: ["ut_"],
   FacilityAgent: ["fac_"], SeederAgent: ["sd_"], MonetaryOpsAgent: ["mo_"],
-  MonetaryKeeperAgent: ["mk_"], FenceKeeperAgent: ["fk_"],
+  MonetaryKeeperAgent: ["mk_"],
   PidKeeperAgent: ["pid_"], DirectorKeeperAgent: ["director"],
   BuckBasketRebalancerAgent: ["rebalance"], AnonymousArbAgent: ["cycle", "ub"],
   TokenAccumulatorAgent: ["invested", "iv_"], MarketMakerWhale: ["poolBal"],

@@ -13,8 +13,8 @@ import {toBuckQtySigned, toBuckSeconds} from "../BuckTypes.sol";
 ///         ordinary credit holder -- a self-issued MARKED BuckCredit, its
 ///         debt a lien, relief like anyone's (alberta-buck-ethereum.org,
 ///         "Two Kinds of BUCK").
-///         The pro-rata baskets that came before it (BuckBasketProRata,
-///         BuckBasketOps, BuckBasketFence and the legacy BuckBasket) mint
+///         The pro-rata baskets that came before it (BuckBasketProRata and
+///         BuckBasketOps) mint
 ///         and burn through these hooks instead, so the sims deploy this
 ///         subclass to keep their baselines and judged results reproducible.
 ///
