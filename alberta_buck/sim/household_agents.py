@@ -228,14 +228,16 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
             amount = min(max(0, buck - spendable) * 1_002 // 1_000, cap)
         # The funding gate: hold poolPrincipal x fundingFactor BEFORE the
         # mint.  Short, the household SAVES (buys BUCK) and waits a month.
+        if amount >= M6:
+            ff = self._gate_factor(d, ff)
         if amount >= M6 and ff:
             try:
                 _, principal = d.buck.functions.quoteMint(
                     mint_amount(amount, cap), self._token_ids).call()
             except Exception:
                 principal = 0
-            # +0.5%: the gate is strict (balance >= required) and Buck.mint
-            # runs compute() before it reads the factor, which can move it.
+            # +0.5%: the gate is strict (balance >= required), and K can step
+            # between the quote and the mint.
             required = principal * ff // 10 ** 18 * 1_005 // 1_000
             bal = d.buck.functions.balanceOf(self.proxy.address).call()
             short = required - bal

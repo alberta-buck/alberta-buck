@@ -2520,6 +2520,23 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.hypo_cash += self.savings
         ctr["bcdCashFound"] = ctr.get("bcdCashFound", 0) + self.savings
 
+    def _gate_factor(self, d, ff: int) -> int:
+        """The funding factor a mint sent now would face.  Buck.mint runs the
+        controller's cycle before it reads the factor, so a factor read from
+        the last cycle is as old as the last poke -- hours, in a world of a few
+        ticks a day -- and at the factor's slope a half-percent move in the BUCK
+        is an eighth of a deposit: a household that bought the reserve it read
+        was refused for the one the mint then asked.  Anyone may run the cycle;
+        this household does, then reads.  Returns `ff` unchanged for credit that
+        pays no premium (no gate, no poke) or when the poke fails."""
+        if self.premium_rate <= 0:
+            return ff
+        try:
+            d.chain.send(d.kctrl.functions.compute())
+            return int(d.kctrl.functions.fundingFactor().call())
+        except Exception:
+            return ff
+
     def _buy_for_gate(self, d, short: int, spare: int) -> int:
         """Buy BUCKs toward a funding-gate shortfall of `short`.  The household
         lets go of its saving rate's share of `spare` cash, or of what is left
@@ -2849,14 +2866,16 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                     mint_amount(mint_amt, cap), self._token_ids).call()
             except Exception:
                 principal = 0
-            required = principal * ff // 10 ** 18 if ff else 0
+            # +0.5%, and 1% and a dollar over on the purchase: the gate is
+            # strict (balance >= required) and a purchase lands near its aim.
+            ff = self._gate_factor(d, ff)
+            required = principal * ff // 10 ** 18 * 1_005 // 1_000 if ff else 0
             bal = d.buck.functions.balanceOf(self.proxy.address).call()
             short = required - bal
-            if short > 10 ** 6 and gate_disc <= max(self.theta * self.apr,
-                                                    0.01):
+            if short > 0 and gate_disc <= max(self.theta * self.apr, 0.01):
                 cash = d.chain.balance_of(d.usdc, self.proxy.address)
                 try:
-                    if self._buy_for_gate(d, short, cash - self.cash_buffer):
+                    if self._buy_for_gate(d, short * 101 // 100 + 10 ** 6, cash - self.cash_buffer):
                         ctr["bcdSaved"] = ctr.get("bcdSaved", 0) + 1
                 except Exception as e:
                     ctr["bcd_save_err"] = repr(e)[:200]
