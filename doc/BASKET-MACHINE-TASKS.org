@@ -61,6 +61,60 @@ Some items were carried here from the older working documents when those were re
   BUCK no longer drifts dear when nobody else is in the market; and the desk makes no trade in
   any run.
 
+* Toward the merge
+
+The direction of 2026-10-11: get this branch ready to merge into =feature/carry-convexity= and
+then into master. Keep two baskets for now, the best of the earlier ones and the machine, so
+the five-year matrix can compare them, and remove the rest. The desk is evaluated next. The
+machine's design is expected to become the accepted one.
+
+- [X] The merges are clean. This branch is strictly ahead of =origin/feature/carry-convexity=
+  and of master, and neither has moved. The local =feature/carry-convexity= is behind its
+  origin. Nothing here has been pushed since 2026-10-01.
+- [ ] Say which earlier basket is the best. Proposed: the equity basket with its older upkeep
+  and the desk (=--basket equity-ops=). The equity design replaced the pro-rata accounting by
+  ruling (=BASKET-EQUITY.org=, section 2). It is the baseline of the five-year savings
+  comparison. And it shares the shell, the venue, the desk and the wheel with the machine: only
+  one facet (=BuckBasketEquityWheel=, 316 lines) and one director (=EquityTurnDirector=, 230)
+  are its own. The matrix below runs on the pro-rata basket as well, so the numbers can say.
+- [ ] Remove what neither equity basket reaches. By imports, that is exactly these:
+
+  | Contract | Lines | What still uses it |
+  |----------+-------+--------------------|
+  | =BuckBasket= | 1,404 | =--basket legacy=; 18 tests |
+  | =BuckBasketProRata= | 709 | the published 0.2 bundle; the JS world (=eqworld.js=) and demo; the default basket of every simulator family; 47 tests in 4 suites |
+  | =BuckBasketFence= | 725 | =--basket fence=; 17 tests |
+  | =BuckBasketOps= | 47 | =--basket ops=; 37 tests, which also carry the shadow observer's and the desk base's |
+  | =BasketRebalanceDirector= | 182 | =--director vrate=; 10 tests |
+  | =BasketRebalancer=, =IBasketRebalancer= | 92 | 6 tests |
+  | =legacy/BuckWithBasketHooks= | 120 | the Buck every pro-rata basket needs; =Buck.t.sol=, =JubileeBasis.t.sol= |
+
+  That is 3,279 lines. =PairsRebalanceDirector= and its base stay: the older upkeep uses them.
+  =BuckKControllerShadow=, =ShadowObserver= and =IShadowObserver= (818 lines) are also
+  unreached, but they are a K controller, not a basket, and =--controller shadow= still runs
+  on the equity basket with the desk. They wait for their own decision.
+- [ ] The pro-rata basket cannot leave master yet. It is the basket in the published contracts
+  list (=core/contracts/contracts.json=) and the one the JS world deploys. Either it stays,
+  with its Buck, until the JS world is ported to the equity basket (step 2), or that port is
+  part of this cleanup. The original basket, the Fence and the Ops shell, the other director
+  and the rebalancer have no such tie and can go first.
+- [ ] The five-year matrix on the equity baskets. Its 14 arms were tuned on the pro-rata
+  basket. A 20-day probe of each on both upkeeps, on five TOKENs (2026-10-11):
+  - 27 of the 28 run.
+  - Every arm opens far from parity, on the pro-rata basket too: the basket costs 1.07 to 3.4
+    BUCKs at the first frame. That is the arms' own start, and K takes the fall, to 0.4 or 0.5
+    in the roughest arms. The portcast arm is mildest, and the savings world, which was cut
+    from it, opens at 1.2 and is within 1% in a week.
+  - One arm stops on the machine. In =debtors-mature-basketeers= K reaches zero within 18
+    hours, a depositor's mint is refused, and the agent does not handle the refusal. On the
+    older upkeep K falls to 0.36 in the same hours and the run goes on. Find why the machine's
+    K falls further before reading that arm.
+- [ ] Run it: 14 arms on the machine, the older upkeep and the pro-rata basket, five TOKENs,
+  five years. Started 2026-10-11 19:12 from a frozen copy of commit =11a1103= under
+  =build/sim/matrix5/= (=run.sh=, =run.log=; a finished world is =<arm>-<basket>.json=), so the
+  contracts can be edited meanwhile.
+- [ ] A second seed of the five-year savings comparison (=build/sim/savings/seed2/=).
+
 * 0. Two rules agreed on 2026-10-10
 
 ** Pay the callers, and measure everything net of it
@@ -409,7 +463,8 @@ After step 2, so the surviving campaigns run on the final wiring.
 
 - [ ] Next release: both sets of contracts. Add the machine to =contracts.json= and the bundles;
   note in the release that the older basket and desk are deprecated.
-- [ ] When step 3 has its verdict, remove the older contracts and what exists only for them:
+- [ ] Remove the older contracts and what exists only for them. The first cut, and what ties
+  the pro-rata basket to master, are under [[*Toward the merge][Toward the merge]]. The whole list:
   =BuckBasket=, =BuckBasketProRata=, =BuckBasketFence=, =BuckBasketOps=, =BuckBasketEquityWheel=
   and with it the shell's liquidity target and plain mark,
   =EquityTurnDirector=, =BasketRebalanceDirector=, =PairsRebalanceDirector=,
