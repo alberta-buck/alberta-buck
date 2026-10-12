@@ -269,6 +269,15 @@ The first few are argued in [[file:BASKET-MACHINE-RESULTS.org][the results]]. Th
   and the seeder exist as simulator agents, not contracts. Over five years on the savings
   world the basket's cost stayed 0.50% from one BUCK on average with the machine and 0.53% with
   the older upkeep, and the desk hardly acted. Vary the gain before adding an inner layer.
+- [ ] The lab no longer exercises the desk. In the 310 interactive runs regenerated on the
+  rebuilt upkeep (2026-10-11) the desk made no trade. The BUCK was never 3% cheap. It was more
+  than 3% dear in 20 of the 100 runs that have the desk, for at most 17 turns (about four
+  days), and a desk holding no BUCKs draws credit only after 30 days: its policy advised a sale
+  and the desk declined it. Before the rebuild some runs had desk trades, and the page's
+  browser check demanded one; it now accepts none. Decide whether the lab should carry a shape
+  that holds the BUCK outside the band for a month or more, so the page's desk stage shows the
+  desk acting, or leave the desk to the savings world, where it moved 36,000 BUCKs in five
+  years.
 - [ ] One refused sample clears the desk's persistence. The desk draws credit only after 30
   consecutive valid days on one side, and =OuterBandDeskPolicy= clears its side and its count
   whenever the reference is not fresh. Sampling is permissionless, and a reading is refused

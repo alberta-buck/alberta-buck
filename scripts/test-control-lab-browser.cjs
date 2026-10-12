@@ -172,18 +172,35 @@ const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core');
     }
     await deskFill('sell');
     const deskStage = await deskFill('buy');
-    assert.ok(deskStage, 'Need at least one recorded desk TOKEN buy to test its execution log');
-    const deskPoint = `#${deskStage} [data-pane=price] polygon[data-kind="desk-buy"]`;
-    await page.$eval(deskPoint,e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
-    await page.waitForFunction(stage=>document.querySelector(`#${stage} .execution-details`).open && document.querySelector(`#${stage} .execution-body table`),{},deskStage);
-    assert.match(await page.$eval(`#${deskStage} .execution-body`,e=>e.textContent), /desk · (supply|issue)/);
-    assert.match(await page.$eval(`#${deskStage} .execution-body`,e=>e.textContent), /BUY/);
-    await page.click(`#${deskStage} [data-pane=price] [aria-label="Toggle Arb TOKEN buys"]`);
-    assert.equal(await page.$$eval(`#${deskStage} [data-pane=price] polygon[data-kind="arb-buy"]`,n=>n.length),0);
+    if (deskStage) {
+      const deskPoint = `#${deskStage} [data-pane=price] polygon[data-kind="desk-buy"]`;
+      await page.$eval(deskPoint,e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+      await page.waitForFunction(stage=>document.querySelector(`#${stage} .execution-details`).open && document.querySelector(`#${stage} .execution-body table`),{},deskStage);
+      assert.match(await page.$eval(`#${deskStage} .execution-body`,e=>e.textContent), /desk · (supply|issue)/);
+      assert.match(await page.$eval(`#${deskStage} .execution-body`,e=>e.textContent), /BUY/);
+    } else {
+      // The desk waits outside its band and draws credit only on advice that
+      // persists, so a campaign in which the BUCK never stays out has no desk
+      // fill at all. Then no saved run may claim one, and the execution log
+      // is opened from an arbitrage marker instead.
+      assert.ok(Object.values(manifest.entries).every(e=>!e.execution_counts.desk_buys && !e.execution_counts.desk_sells));
+      await choose('all', {profile:'three-phase',walk:'1',buyer:'medium',seller:'medium'});
+      await page.$eval('#all [data-pane=price] polygon[data-kind="arb-buy"]',e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+      await page.waitForFunction(()=>document.querySelector('#all .execution-details').open && document.querySelector('#all .execution-body table'));
+      assert.match(await page.$eval('#all .execution-body',e=>e.textContent), /BUY/);
+    }
+    const arbStage = deskStage || 'all';
+    await page.click(`#${arbStage} [data-pane=price] [aria-label="Toggle Arb TOKEN buys"]`);
+    assert.equal(await page.$$eval(`#${arbStage} [data-pane=price] polygon[data-kind="arb-buy"]`,n=>n.length),0);
     await choose('basket', {profile:'mixed',walk:'0',buyer:'medium',seller:'medium'});
-    for (const kind of ['basket-buy','basket-sell','basket-pair']) {
+    for (const kind of ['basket-buy','basket-sell']) {
       assert.ok(await page.$$eval(`#basket [data-pane=price] polygon[data-kind="${kind}"]`, n=>n.length)>0);
     }
+    // The basket pairs TOKEN only when some is waiting, which is rare once the
+    // opening deposits are placed: take a saved run that recorded a pairing.
+    const paired = Object.entries(manifest.cases.basket).find(([,key])=>manifest.entries[key].execution_counts.basket_pairs>0);
+    assert.ok(paired, 'Need at least one recorded basket pairing to test its execution log');
+    await choose('basket', Object.fromEntries(paired[0].split(':').map((v,i)=>[manifest.axes[i].id,v])));
     await page.$eval('#basket [data-pane=price] polygon[data-kind="basket-pair"]',e=>e.dispatchEvent(new MouseEvent('click',{bubbles:true})));
     await page.waitForFunction(()=>document.querySelector('#basket .execution-body').textContent.includes('no token swap'));
     await page.setViewport({width:390,height:844});
