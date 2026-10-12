@@ -206,6 +206,43 @@ One caution about the worlds themselves. They were built for the pro-rata basket
 BUCK for every BUCK's worth deposited. On the equity basket the same people have fewer sources
 of BUCKs, so some of this may be the worlds' doing. The loop is the basket's all the same.
 
+** The same worlds without the lean against parity
+
+Three of the worlds were run again on the machine with its lean against parity switched off:
+the book then aims to have let out nothing, whatever the BUCK's price.
+
+| World | | K at its limit from day | BUCK at the end, dollars | A share in baskets | BUCKs let out, of equity |
+|-------+---+-------------------------+--------------------------+--------------------+--------------------------|
+| base (holds) | Older | never (ends 0.924) | 1.40 | 1.249 | -16% to -4% |
+| | Machine | never (ends 0.790) | 1.38 | 1.227 | -13% to +1% |
+| | Machine, no lean | never (ends 0.745) | 1.39 | 1.246 | -6% to +1% |
+| portcast | Older | 415 | 7.17 | 1.00 | -18% to -1% |
+| | Machine | 524 | 12.17 | 0.21 | +6% to +61% |
+| | Machine, no lean | 464 | 11.50 | 0.51 | +2% to +30% |
+| basketeers, endog, excursion | Older | 305 | 5.73 | 1.70 | -15% to -2% |
+| | Machine | 501 | 10.71 | 0.73 | +5% to +54% |
+| | Machine, no lean | 346 | 8.18 | 2.06 | +3% to +19% |
+
+- The lean does not cause the rise, and taking it away does not prevent it. The BUCK still goes
+  to 8 and 11 dollars.
+- The lean does postpone it: K reaches its limit two to five months later with the lean than
+  without.
+- The lean is most of what the machine's depositors lose. Without it a share ends worth half a
+  basket in the portcast world in place of a fifth, and two baskets in the other in place of
+  three quarters.
+- Even without the lean the machine has BUCKs out while the BUCK rises, up to 30% of its equity
+  in the portcast world. It aims at none. But its positions give up BUCKs as the TOKEN
+  cheapens, faster than it buys them back. That is why a share still ends at half a basket
+  there, where the older upkeep's, which holds more BUCKs than it has let out, ends at one.
+- In the world that holds, the lean costs. Without it the machine's share ends level with the
+  older upkeep's, 1.246 against 1.249, where with it the machine was 1.8% behind. And K ends
+  lowest of all, 0.745.
+
+So on this evidence the lean against parity pays for nothing it was meant to. It costs a little
+where the BUCK holds and a great deal where it does not, and what it buys is a delay. K stays
+away from its limit under the machine because the machine does not hoard BUCKs as the older
+upkeep does, not because it leans.
+
 * Why deposits waited
 
 The first five-year run of the machine was not like this. It placed none of its deposits for 70
@@ -569,7 +606,8 @@ result is net of what callers were paid, comes next.
 
 - Whether two seeds are enough. They agree on the five-year result. The lab has one.
 - What stops the BUCK rising once K is at its limit, and whether the basket's repayments are
-  the cause. This comes first.
+  the cause. This comes first. The lean against parity is not the cause and not the cure.
+- Whether the lean against parity should stay at all. Three worlds say it costs.
 - What the desk does. It hardly acted in the savings world and not at all in the lab, where the
   BUCK never stays outside its band. It needs runs built to take the BUCK there and hold it.
 - What the results look like net of paying the callers, and what the smallest trade should be.

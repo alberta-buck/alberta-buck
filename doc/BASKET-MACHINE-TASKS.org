@@ -173,9 +173,17 @@ machine's design is expected to become the accepted one.
   - If it is the cause: count the limit in baskets and not in BUCKs, so a dearer BUCK does not
     shrink it. The basket would then go on issuing at the basket's cost while the BUCK is dear,
     which is what the pro-rata basket in effect does.
-  - The lean when parity does not return. The book leans five times the parity error, up to
-    half of K times equity. Decide what it does when K is at its limit, when the error has
-    lasted, or when it has grown: stop adding, shrink, or never exceed a smaller ceiling.
+  - The lean against parity. Measured on three worlds with it switched off (2026-10-12,
+    =build/sim/matrix5/lean0/=): it is not the cause of the rise and removing it does not
+    prevent it; it postpones K's limit by two to five months; it is most of what the machine's
+    depositors lose (a share ends worth 0.51 of a basket without it and 0.21 with it in the
+    portcast world, 2.06 and 0.73 in another); and in a world that holds it costs 1.5% of the
+    share price in five years. Proposed: switch it off by default (=parity_gain = 0= in the
+    simulator, the lab and the JS world) and keep the setting. Not done: it is a design choice
+    of 2026-10-11, and the lab is regenerating on the present value.
+  - Even with no lean the machine has BUCKs out while the BUCK rises (up to 30% of equity), since
+    its positions give them up as the TOKEN cheapens. Say whether the book should aim to hold
+    BUCKs, as the older upkeep in effect does, when K nears its limit.
   - K's upper limit of 0.95 and what it means for the controller to sit on it. Under the older
     upkeep K is at 0.92 to 0.94 after five years even in worlds that hold, and at 0.93 to 0.95
     in the savings world on reverting prices.
