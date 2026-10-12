@@ -55,6 +55,11 @@ Some items were carried here from the older working documents when those were re
   reverting ones, one seed. The machine ends 4.5% and 6.6% ahead in share price, holds the
   BUCK's price as well or better, and never has less than 65% of its equity to spend. It uses
   a sixth more gas. The table is in [[file:BASKET-MACHINE-RESULTS.org][the results]].
+- [X] Every lab campaign was rerun on the rebuilt machine (2026-10-11) and verified, and both
+  lab pages were checked in a browser. The results' lab tables carry its numbers. What changed:
+  urgency now earns half again what a fixed 2-point line does, where the two had been close; the
+  BUCK no longer drifts dear when nobody else is in the market; and the desk makes no trade in
+  any run.
 
 * 0. Two rules agreed on 2026-10-10
 
