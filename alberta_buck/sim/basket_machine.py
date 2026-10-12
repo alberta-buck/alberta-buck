@@ -29,7 +29,8 @@ DEFAULTS = {
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
-    "parity_gain": 5.,              # BUCKs the book aims to hold or to have issued per unit of parity error, of equity
+    "parity_gain": 5.,              # BUCKs the book aims to hold while the BUCK is cheap, per unit of parity error, of equity
+    "parity_gain_dear": 0.,         # BUCKs it aims to have let out while the BUCK is dear: none
     # The desk beside the basket and its outer-band policy.
     "desk_capital_usd": 400000,     # its founding grant, for each constituent
     "desk_leg_bp": 40,              # one operation's leg, of the pool
@@ -151,7 +152,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
     policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, sizing(s))
     # A facet's constructor names what it needs; a trial may need more than the policy.
     wanted = next((e["inputs"] for e in load_artifact(s["upkeep"])[0] if e.get("type") == "constructor"), [])
-    given_to = {"policy": policy.address, "parity_": signals.address, "parityGain_": round(s["parity_gain"] * 10**18)}
+    given_to = {"policy": policy.address, "parity_": signals.address, "parityGain_": round(s["parity_gain"] * 10**18),
+                "parityGainDear_": round(s["parity_gain_dear"] * 10**18)}
     response = chain.deploy(s["upkeep"], *(given_to[i["name"]] for i in wanted))
     # Preserve an explicitly configured integration horizon. The otherwise
     # unlimited default must not integrate a recovered observation over an

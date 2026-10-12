@@ -88,7 +88,8 @@ export const MACHINE = {
             closureRate: RATE, maxRate: RATE, impactShare: E18,
             slack: 25n * 10n ** 14n, patience: 2n * 10n ** 16n },
   response: { leashBp: 3000, interval: 1800, tiltBp: 5000, leanCapBp: 1500 },
-  parityGain: 5n * E18,        // the book leans five times the parity error, of equity
+  parityGain: 5n * E18,        // while the BUCK is cheap the book holds five times the parity error, of equity
+  parityGainDear: 0n,          // while it is dear the book lets none out for that
   creditFace: 10n ** 23n,      // the basket's own credit: no practical cap
   settle: 601,                 // seconds for the pools' averages to take in a trade
 };
@@ -328,7 +329,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
       { name: "BasketReference", gas });
     const upkeep = await session.deploy(artifacts("BasketUpkeepFacet"),
-      [policy.address, parity.address, MACHINE.parityGain],
+      [policy.address, parity.address, MACHINE.parityGain, MACHINE.parityGainDear],
       { name: "BasketUpkeepFacet", gas });
     const wheel = await session.deploy(artifacts("BasketMachineWheel"),
       [buck.address, usdc.address, me, 0, 0n], { name: "BasketMachineWheel", gas });

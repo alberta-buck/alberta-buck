@@ -7,9 +7,10 @@ it decides and what bounds it. It replaces the proposal that carried this name a
 notes written while the machine was built. What the machine earns, and on what evidence, is in
 [[file:BASKET-MACHINE-RESULTS.org][the results]]. What is left to do is in [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
-The older machines still ship beside this one: the pro-rata, fence and ops baskets, the Deploy /
-Fund / Trim facet, the rebalance directors, the turn director and the shadow observer. They stay
-until the simulators show this machine is better in every regime. Two parts of the machine still
+Two older machines still ship beside this one: the equity basket's earlier upkeep (the Deploy /
+Fund / Trim facet and its turn director), kept so the two can be compared, and the pro-rata
+basket with its ops shell, its director and the shadow observer. The original basket, the Fence
+and the other director are gone (2026-10-11). Two parts of the machine still
 build on them (see [[#names][names]]): the venue facet on the older V3 venue, the desk on the ops mixin.
 
 This document covers the machine that turns the basket. What a depositor is promised (shares,
@@ -19,7 +20,8 @@ In short. The basket is a credit holder whose limit counts only the BUCKs it has
 pairs every TOKEN with BUCKs of its own issue the moment it arrives, and pays an exit in BUCKs
 before it sells anything. It earns by reversion: each constituent has a target that leans
 against its price, and is sold above it and bought below it, on its own, when its price has
-stopped parting from the others. The size of the whole book leans against the BUCK's own price.
+stopped parting from the others. While the BUCK is cheap the book holds some. While it is dear
+the book lets none out for that.
 A desk beside it, with its own grant and credit, acts only on excursions of the BUCK beyond a
 band. K sets how much the basket may let out, and is the slow lever under both.
 
@@ -95,6 +97,89 @@ as the TOKEN cheapens, so what it has let out rises with no decision of its own:
 holds are not a fixed sum. The upkeep then sells TOKEN for BUCKs to come back under its ceiling,
 which bids for BUCKs when they are scarcest. Nothing in the machine prevents this yet. It is the
 first open item in [[file:BASKET-MACHINE-TASKS.org::*Toward the merge][the task list]].
+
+* The question at K's limit
+:PROPERTIES:
+:CUSTOM_ID: k-limit
+:END:
+
+This section states an open question. Nothing in it is decided. The measurements are in
+[[file:BASKET-MACHINE-RESULTS.org::*The five-year matrix][the results]].
+
+/What K is for./ K is how the system makes more BUCKs when they are scarce. Everyone who holds
+credit may owe K times its worth. When the BUCK is dear the controller raises K, people can
+issue more, and the new BUCKs bring the price down. K stops at 0.95. Past that the controller
+has nothing left to do.
+
+/What happened./ In seven of the fourteen five-year worlds K reached 0.95 with the BUCK still a
+little dear. From there the BUCK rose for years, to between 4 and 12 times its basket. On the
+pro-rata basket the same seven worlds stayed at parity.
+
+/Why it should not happen./ A dear BUCK is an offer. Anyone with assets can pledge them, issue
+BUCKs that are worth more than their basket, and buy other assets cheaply with them. That
+selling is what brings the BUCK back. In these worlds the offer went unanswered. The portcast
+world has 30 debtors and three credit arbitrageurs who can issue, each with a fixed credit, and
+the debtors' mints were refused 64 times for want of mint funding. A real economy has more
+people with assets than that. So one reading is that these worlds simply run out of issuers,
+which is a fault of the worlds and not of any basket. That has not been looked into.
+
+/What the basket did meanwhile./ This is the part that belongs to the basket. While the BUCK
+rose, the basket bought BUCKs, all the way up. Three of its rules made it.
+
+1. What it may have let out is K times its equity, and equity is counted in BUCKs at the pools'
+   prices. A dearer BUCK makes the same TOKEN worth fewer BUCKs, so the limit falls under it.
+2. Its positions give up BUCKs for TOKEN as the TOKEN cheapens. So what it has let out rises
+   with no decision of its own, and the upkeep buys BUCKs to come back to what it aims at.
+3. The older upkeep also keeps a stock of BUCKs, sized as a share of its book.
+
+In the portcast world the older upkeep's lien fell from 9.5 million BUCKs to 2.0 million over
+the rise, and the machine's from 18.2 million to 1.3 million. Every BUCK of that was bought.
+
+/The question./ Was the basket's buying a cause of the rise, or only a consequence of it?
+
+If a cause, the basket turns a shortage it could have waited out into a spiral. Each purchase
+lifts the BUCK. That lowers its limit. That forces the next purchase. It is a margin call, and
+the design set out to have none. If only a consequence, the worlds are short of issuers and the
+basket is one more of the people caught.
+
+The pro-rata basket is the evidence that it may be a cause. It owes nothing that can be called
+back, it never buys BUCKs, and the same worlds hold with it. But it also issues a BUCK for every
+BUCK's worth deposited, so it is the largest issuer in those worlds as well. The runs so far
+cannot tell the two apart.
+
+/An example of rule 1./ A basket has taken in TOKEN worth 100 baskets and let out 30 BUCKs,
+which it spent on 30 baskets' worth more. It holds TOKEN worth 130 baskets and owes 30 BUCKs. K
+is 0.95.
+
+| | The BUCK at parity | The BUCK doubled | Doubled, limit counted in baskets |
+|---+--------------------+------------------+-----------------------------------|
+| Its TOKEN, in BUCKs | 130 | 65 | 65 |
+| It owes, BUCKs | 30 | 30 | 30 |
+| Equity, BUCKs | 100 | 35 | 35 |
+| Equity, baskets | 100 | 70 | 70 |
+| Equity the limit is worked from | 100 | 35 | 100 |
+| It may have let out, K times that | 95 | 33 | 95 |
+| The machine's ceiling, half of it | 47.5 | 16.6 | 47.5 |
+| It must buy back, BUCKs | 0 | 13.4 | 0 |
+
+When the BUCK doubles the depositors have lost 30 baskets in a hundred, whichever way the limit
+is counted: the 30 BUCKs owed now cost 60 baskets. The difference is the last row. Counted in
+BUCKs, the machine must sell 27 baskets' worth of TOKEN to buy 13.4 BUCKs, in a market that is
+already short of them. If that lifts the BUCK again, the sum is done again from a worse start.
+
+/The candidate./ Count the limit in baskets. Value the basket's TOKEN at what the basket is
+declared to cost, one BUCK, and not at what the pools say. A rise in the BUCK's price then
+lowers no limit, and rule 1 buys nothing.
+
+It does not make the basket safe. It still owes BUCKs that cost more than they did, and if the
+BUCK went on to 4.3 times its basket this one would owe more than it holds. It gives up a forced
+purchase now and accepts a larger loss later, should the BUCK never come back. A basket that
+lets out few BUCKs has less at stake either way, which is what the lean on the cheap side only
+now does. Rule 2 remains.
+
+/How to tell./ Run a failing world with the limit counted in baskets. If the BUCK stops rising,
+or rises far less, the buying was a cause. Separately, count who could still issue in that world
+when K reached its limit, and why they did not.
 
 * Signals
 
@@ -239,17 +324,25 @@ unless governance sets another (=setReferencePrice=). The tilt and the cap are g
 leash keeps the declared weights.
 
 The book those shares are of is not what the basket happens to hold. It is what its equity asks
-for, leaned against parity:
+for, leaned against parity on one side:
 
 #+begin_example
 book  =  equity + aim
-aim   =  - parity gain x (the basket's cost in BUCK - 1) x equity      held within the ceiling either way
+aim   =  - parity gain x (the basket's cost in BUCK - 1) x equity      where the BUCK is cheap
+aim   =  0                                                           where it is dear
 #+end_example
 
 Where the basket costs more than one BUCK the BUCK is cheap, the aim is below zero and the book
-is smaller than equity: TOKEN is sold and BUCKs held. Where it costs less the book is larger and
-BUCKs are issued. With no fresh reading of parity the book stays the size it is. A cut in K
-moves nothing by itself; it lowers the ceiling.
+is smaller than equity: TOKEN is sold and BUCKs held, down to the ceiling. The basket has then
+taken its BUCKs while they were cheap, before the fall in K that a cheap BUCK brings. Where the
+basket costs less than one BUCK the BUCK is dear, and the book is the size of its equity: it
+lets no BUCKs out because of that. With no fresh reading of parity the book stays the size it
+is. A cut in K moves nothing by itself; it lowers the ceiling.
+
+The two sides are not treated alike because they are not alike (decided 2026-10-12). A basket
+holding cheap BUCKs can lose what it paid for them. A basket that has let out dear BUCKs loses
+without bound while they go on rising, and in the five-year matrix that was most of what its
+depositors lost. A second gain, zero as deployed, restores the dear side for a measurement.
 
 * The upkeep facet: =BasketUpkeepFacet=
 
@@ -369,7 +462,7 @@ from one governance-appointed arbitrage creditor, which can deposit and nothing 
 | Policy constants | Separation floor, impact memory | 100 ticks (1%), 2 days |
 | Pair observer | Response, error memory, largest gap, warm-up, rate floor | 12 h, 1 day, 1 day, 2 days, 2 bp/day |
 | Basket | Allocation band (unused by a patient policy), leash, step, swap depth, grain | 2 points, 30% of weight, 5%, 1%, 100 ppm |
-| Credit | Mark, ceiling on BUCKs issued, parity gain | Net, half of K x equity, 5 |
+| Credit | Mark, ceiling on BUCKs issued, parity gain cheap and dear | Net, half of K x equity, 5 and 0 |
 | Parity reference | Sample interval, largest age, spot/TWAP tolerance | 30 min, 1 h, 5% |
 | Desk policy | Entry, release, gain, cap, persistence | 3%, 2%, 25%, 40 bp, 30 days |
 | Desk | Capital per TOKEN, turnover, floor | 400,000, 1,200,000, 300,000 |
@@ -409,9 +502,9 @@ Three choices in this machine were not made here. The carry-convexity program me
 - /The seam between the desk and K is persistence, not size./ The desk trades on any advice
   with what it holds. It draws credit, which changes supply, only on advice that has lasted.
 - /K is a slow, weak lever./ It moves the stock of credit over months. Holding the price inside
-  the band, now, was the job of faster facilities. This machine has one of its own, the basket's
-  lean against parity, and otherwise expects profit-seeking holders to do it: see
-  [[file:BASKET-MACHINE-TASKS.org][the task list]].
+  the band, now, was the job of faster facilities. This machine has one of its own, on one side:
+  the basket holds BUCKs while they are cheap. Otherwise it expects profit-seeking holders to do
+  it: see [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
 * The older record
 :PROPERTIES:
@@ -466,7 +559,8 @@ One interface per facet or service, each in its own file, is what a diamond regi
 =IMonetaryDirector= survives in =MonetaryDesk.sol= for the older ops basket. The shell provides
 everything in =IBasketView= but does not yet declare it. The shell's =setResponse= takes the
 leash, the interval, the tilt and the lean cap; =setReferencePrice= and =setNetMark= sit beside
-it. The upkeep facet takes its policy, the parity reference and the parity gain at construction.
+it. The upkeep facet takes its policy, the parity reference and the two parity gains at
+construction.
 
 The papers (=alberta-buck-ethereum*.org=, =alberta-buck-deployment.org=) and the older working
 notes still say =EquityDesk=. They are rewritten with the papers, not here.

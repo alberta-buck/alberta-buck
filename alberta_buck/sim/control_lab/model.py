@@ -46,9 +46,11 @@ DEFAULTS = {
                "rate_at_par_per_day": 5_000, "backoff_bp": 100},
     # tilt: how far a target leans against a TOKEN's price over its reference (0 none, 1/2 undoes the
     # damping of liquidity, 1 the most); lean_cap_bp: the most it may lean, bp of the declared weight.
-    # parity_gain: BUCKs the book aims to hold (BUCK cheap) or to have issued (dear) per unit of parity
-    # error, as a share of equity; 0 sizes the book at its equity alone.
-    "basket": {"leash_bp": 3000, "weight_band_bp": 200, "tilt": 0., "lean_cap_bp": 0, "parity_gain": 0.},
+    # parity_gain: BUCKs the book aims to hold while the BUCK is cheap, per unit of parity error, as a
+    # share of equity; parity_gain_dear: BUCKs it aims to have let out while the BUCK is dear, none
+    # by default. Both 0 sizes the book at its equity alone.
+    "basket": {"leash_bp": 3000, "weight_band_bp": 200, "tilt": 0., "lean_cap_bp": 0, "parity_gain": 0.,
+               "parity_gain_dear": 0.},
     # PairRebalancePolicy.Sizing: speeds are log returns/day, rates are fractions of the remaining
     # gap per day (ln 2 = 0.693 halves it each day).
     # These are the first experiment's values; closure_rate=0 leaves closure to speed alone,
@@ -115,8 +117,8 @@ def validate(cfg: dict) -> None:
     cap = cfg["basket"]["lean_cap_bp"]
     if not 0 <= cfg["basket"]["tilt"] <= 1 or not isinstance(cap, int) or not 0 <= cap < cfg["basket"]["leash_bp"]:
         raise ValueError("basket.tilt must be in 0..1 and basket.lean_cap_bp an integer below the leash")
-    if not 0 <= cfg["basket"]["parity_gain"] <= 100:
-        raise ValueError("basket.parity_gain must be in 0..100")
+    if not 0 <= cfg["basket"]["parity_gain"] <= 100 or not 0 <= cfg["basket"]["parity_gain_dear"] <= 100:
+        raise ValueError("basket.parity_gain and basket.parity_gain_dear must be in 0..100")
     pair = cfg["pair"]
     if (not isinstance(pair["closure_gain"], int) or not 0 <= pair["closure_gain"] <= 10_000
             or any(not math.isfinite(pair[k]) or not 0 <= pair[k] <= 18 for k in
@@ -139,9 +141,9 @@ def response_params(basket: dict, interval: int) -> tuple:
     return (basket["leash_bp"], interval, round(basket["tilt"] * 10000), basket["lean_cap_bp"])
 
 
-def parity_gain(basket: dict) -> int:
-    """The upkeep facet's parityGain constructor argument."""
-    return round(basket["parity_gain"] * 1e18)
+def parity_gain(basket: dict) -> tuple:
+    """The upkeep facet's parityGain and parityGainDear constructor arguments."""
+    return round(basket["parity_gain"] * 1e18), round(basket["parity_gain_dear"] * 1e18)
 
 
 def pair_sizing(pair: dict) -> tuple:

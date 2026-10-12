@@ -26,7 +26,7 @@ contract BasketMachineIntegrationTest is BasketDeskTest {
         bindCarryingPool(reg, address(machine));
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))), address(service), 0)));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))), address(service), 0, 0)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
         b.setNetMark(true);
         (bool ok,) = address(b).call(abi.encodeWithSignature("setWheel(address)", address(machine)));

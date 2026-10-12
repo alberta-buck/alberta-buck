@@ -252,6 +252,10 @@ the cheap side only is the obvious thing to try.
 K stays away from its limit under the machine because the machine does not hoard BUCKs as the
 older upkeep does, not because it leans.
 
+On this the lean was made one-sided (2026-10-12): the book holds BUCKs while they are cheap and
+lets none out because they are dear. Every table in this document was measured before that,
+with the lean on both sides. They are being measured again.
+
 * Why deposits waited
 
 The first five-year run of the machine was not like this. It placed none of its deposits for 70

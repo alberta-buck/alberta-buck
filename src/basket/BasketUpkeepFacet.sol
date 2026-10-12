@@ -42,8 +42,12 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     IRebalancePolicy public immutable pairPolicy;
     /// @notice The parity reference: the basket's cost in BUCK, as last sampled.
     IBasketReference public immutable parity;
-    /// @notice BUCKs to hold or issue per unit of parity error, as a share of equity, 1e18.
+    /// @notice BUCKs to hold per unit of parity error while the BUCK is cheap, as a share of equity, 1e18.
     uint256 public immutable parityGain;
+    /// @notice BUCKs to have let out per unit of parity error while the BUCK is dear. Zero unless a
+    /// deployment asks: the basket chooses to hold BUCKs at a discount, never to be short of them at a
+    /// premium, where its loss would have no bound.
+    uint256 public immutable parityGainDear;
 
     struct Book {
         uint256[] token;   // each constituent's TOKEN, in its position and the wallet, in BUCK at the TWAP
@@ -62,10 +66,11 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     // action: 0 a mark alone, 1 sold, 2 bought, 4 placed. proceeds: the TOKEN sold; buySpent: BUCKs paired or TOKEN bought.
     event Responded(uint8 indexed action, uint256 sell, uint256 buy, uint256 proceeds, uint256 buySpent);
 
-    constructor(address policy, address parity_, uint256 parityGain_) {
+    constructor(address policy, address parity_, uint256 parityGain_, uint256 parityGainDear_) {
         pairPolicy = IRebalancePolicy(policy);
         parity = IBasketReference(parity_);
         parityGain = parityGain_;
+        parityGainDear = parityGainDear_;
     }
 
     function _v() private view returns (IBuckBasketVenue) { return IBuckBasketVenue(address(this)); }
@@ -194,10 +199,13 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         b.ceiling = s.k * uint256(equity) / 1e18 * CEILING_BP / 10000;
         // With no fresh reading the book stays the size it is.
         int256 aim = b.issued;
-        if (parityGain == 0) aim = 0;
+        if (parityGain == 0 && parityGainDear == 0) aim = 0;
         else if (parity.fresh()) {
-            // Above zero the basket costs more than a BUCK: the BUCK is cheap.
-            aim = -(parity.rawValue() - 1e18) * int256(parityGain) / 1e18 * equity / 1e18;
+            // Above zero the basket costs more than a BUCK: the BUCK is cheap, and the book holds
+            // some. Below, it is dear, and the book lets out only what the dear gain asks: by
+            // default nothing.
+            int256 error = parity.rawValue() - 1e18;
+            aim = -error * int256(error > 0 ? parityGain : parityGainDear) / 1e18 * equity / 1e18;
         }
         if (aim > int256(b.ceiling)) aim = int256(b.ceiling);
         if (aim < -int256(b.ceiling)) aim = -int256(b.ceiling);

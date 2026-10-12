@@ -51,7 +51,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
             signals.observe();
         }
         vm.startPrank(GOV);
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(signals), 0)));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(signals), 0, 0)));
         b.setNetMark(true);
         vm.stopPrank();
     }

@@ -28,9 +28,11 @@ basket_warmup_days = 120
 [basket]
 tilt = 0.5
 lean_cap_bp = 1500
-# The book leans against parity: it aims to hold (BUCK cheap) or to have issued
-# (dear) this many times the parity error, as a share of its equity.
+# The book leans against parity on the cheap side: while the BUCK is cheap it
+# aims to hold this many times the parity error, as a share of its equity.
+# While the BUCK is dear it lets none out for that (parity_gain_dear = 0).
 parity_gain = 5.0
+parity_gain_dear = 0.0
 
 # How fast a separated pair closes an eligible gap: fractions of what remains
 # per day, so 0.693 (ln 2) halves it each day. The braking release may ask for

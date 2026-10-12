@@ -63,6 +63,10 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
     function _install() private { _installValues(40_000e18, 30_000e18, 30_000e18, 0); }
 
     function _installValues(uint256 a, uint256 c1, uint256 c2, uint256 parityGain) private {
+        _installGains(a, c1, c2, parityGain, 0);
+    }
+
+    function _installGains(uint256 a, uint256 c1, uint256 c2, uint256 parityGain, uint256 parityGainDear) private {
         ids[0] = _deposit(alice, address(tok[0]), a);
         ids[1] = _deposit(alice, address(tok[1]), c1 / 2);
         ids[2] = _deposit(alice, address(tok[2]), c2 / 3);
@@ -70,7 +74,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         parity = new ParityStub();
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(parity), parityGain)));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(parity), parityGain, parityGainDear)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
         b.setNetMark(true);
         vm.stopPrank();
@@ -236,7 +240,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
 
     function test_upkeep_maintenanceControlKeepsTheBookAndTakesNoView() public {
         _installValues(40_000e18, 30_000e18, 30_000e18, 0);
-        address control = address(new BasketUpkeepMaintenanceControl(address(intent), address(parity), 0));
+        address control = address(new BasketUpkeepMaintenanceControl(address(intent), address(parity), 0, 0));
         vm.prank(GOV);
         b.setEquityWheel(control);
         uint160[3] memory spot = _spots();
@@ -252,8 +256,24 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         _books();
     }
 
-    function test_upkeep_theBookLeansAgainstParity() public {
-        _installValues(30_000e18, 30_000e18, 30_000e18, 5e18);
+    function test_upkeep_theBookHoldsBucksWhenCheapAndLetsNoneOutWhenDear() public {
+        _installValues(30_000e18, 30_000e18, 30_000e18, 5e18);      // as deployed: no gain on the dear side
+        uint128[3] memory placed = _placed3();
+        // The basket costs 0.98 BUCKs: the BUCK is dear. The book lets none out for that.
+        parity.set(0.98e18, true);
+        _response();
+        for (uint256 i; i < 3; ++i) assertLe(b.liquidityOf(i), placed[i], "no TOKEN bought with issued BUCKs");
+        // The basket costs 1.02 BUCKs: the BUCK is cheap, so hold some. TOKEN is sold for it.
+        for (uint256 i; i < 3; ++i) _repin(i);
+        placed = [b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2)];
+        parity.set(1.02e18, true);
+        assertEq(_response(), 1);
+        for (uint256 i; i < 3; ++i) assertLt(b.liquidityOf(i), placed[i], "TOKEN sold for BUCKs");
+        _books();
+    }
+
+    function test_upkeep_aDearGainLeansBothWays() public {
+        _installGains(30_000e18, 30_000e18, 30_000e18, 5e18, 5e18);
         uint128[3] memory placed = _placed3();
         // The basket costs 1.02 BUCKs: the BUCK is cheap, so hold some. TOKEN is sold for it.
         parity.set(1.02e18, true);

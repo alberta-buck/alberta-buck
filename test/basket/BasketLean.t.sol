@@ -23,7 +23,7 @@ contract BasketLeanTest is BuckBasketEquityTest {
         intent.setUrgent(0.02e18, 7);
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0)));
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0, 0)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, tiltBp, capBp));
         b.setNetMark(true);
         vm.stopPrank();

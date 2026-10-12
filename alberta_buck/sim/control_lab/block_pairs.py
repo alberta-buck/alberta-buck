@@ -50,7 +50,7 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
                     d.basket.address, reference, pair_sizing(config["pair"]))
                 response_name = "BasketUpkeepMaintenanceControl" if maintenance_only else "BasketUpkeepFacet"
                 self.upkeep = self.chain.deploy(response_name, self.pair_policy.address, self.signals.address,
-                                                parity_gain(config["basket"]))
+                                                *parity_gain(config["basket"]))
                 self.chain.send(d.basket.functions.setEquityWheel(self.upkeep.address), sender=d.gov)
 
         def warm_basket(self, days):
@@ -75,7 +75,7 @@ def simulate_observed(cfg, profile, stage, maintenance_only=False):
             policy = self.chain.deploy("PairRebalancePolicy",prelude_observer.address,d.basket.address,references,
                 pair_sizing(DEFAULTS["pair"]))
             # The prelude takes no view on parity: at mean prices there is none to take.
-            facet = self.chain.deploy("BasketUpkeepFacet",policy.address,self.signals.address,0)
+            facet = self.chain.deploy("BasketUpkeepFacet",policy.address,self.signals.address,0,0)
             response = d.w3.eth.contract(address=d.basket.address,abi=load_artifact("BasketUpkeepFacet")[0])
             self.chain.send(d.basket.functions.setEquityWheel(facet.address),sender=d.gov)
             self.chain.send(venue.functions.setWheel(d.gov),sender=d.gov)

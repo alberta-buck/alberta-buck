@@ -7,7 +7,8 @@ import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 /// pairs what waits, keeps every constituent inside its leash and the issue
 /// under its ceiling, and never works a gap on the policy's word.
 contract BasketUpkeepMaintenanceControl is BasketUpkeepFacet {
-    constructor(address policy, address parity_, uint256 parityGain_) BasketUpkeepFacet(policy, parity_, parityGain_) {}
+    constructor(address policy, address parity_, uint256 parityGain_, uint256 parityGainDear_)
+        BasketUpkeepFacet(policy, parity_, parityGain_, parityGainDear_) {}
 
     function _rate(uint256, bool, uint256) internal pure override returns (uint256) { return 0; }
 }
