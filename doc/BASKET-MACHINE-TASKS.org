@@ -183,9 +183,12 @@ machine's design is expected to become the accepted one.
     less (a share worth 0.51 of a basket against 0.21 in the portcast world); in a world that
     holds the two-sided lean cost 1.5% of the share price in five years; and in the lab's
     history shape, where the BUCK is cheap, the lean turned a loss of 37,689 into 1,860.
-  - [ ] Measure the one-sided lean: the same three matrix worlds, the savings world on both
-    seeds, and the lab. The savings and lab tables in the results are from the two-sided lean
-    until then.
+  - [X] The one-sided lean is measured (2026-10-12, =build/sim/onesided/=; the table is in
+    [[file:BASKET-MACHINE-RESULTS.org::*The same worlds without the lean against parity][the results]]). It did less than hoped: a share ends at 0.29 of a basket in the portcast
+    world against 0.21 with the lean on both sides and 0.51 with none, and where the BUCK
+    holds it costs 1% of the share price in five years, because the book holds more BUCKs and
+    they carry demurrage. All of it was measured with depositors who kept their BUCKs, so it
+    is to be judged again on the runs below. The lab is not yet run on it.
   - Even with no lean the machine has BUCKs out while the BUCK rises (up to 30% of equity), since
     its positions give them up as the TOKEN cheapens. Say whether the book should aim to hold
     BUCKs, as the older upkeep in effect does, when K nears its limit.
@@ -199,39 +202,62 @@ machine's design is expected to become the accepted one.
     up to 4% dear and K climbed to its limit: the model gave them no savings for the reserve it
     asks, and its factor reaches zero only at 9% dear. On the pro-rata basket they are refused as often
     and it does not matter, because that basket supplies the BUCKs.
-  - [ ] Does the BUCK hold with issuers enough? Three runs of the portcast world
-    (=build/sim/issuers/=): the credit arbitrageurs' wealth ten times larger, on each upkeep,
-    and the debtors' credits free of the gate.
-  - [ ] The funding gate keeps willing issuers out in the band where they are wanted. It asks a
-    minter to hold BUCKs worth the insurance deposit times a factor that is one at parity and
-    still 0.7 at 3% dear. So to issue BUCKs when they are scarce a debtor must first buy some.
-    Candidates, none decided: let the factor reach zero at parity, so the gate asks for a
-    reserve only while the BUCK is cheap; or let the deposit be met out of the mint itself
-    while the BUCK is dear.
-  - [X] The debtors have savings (decided and built 2026-10-12). The model gave a mortgage
-    debtor nothing but its income from the day it arrived, so one paid at harvest held no
-    dollars for months and could not buy the reserve the gate asks. It now arrives with six
-    months of its income (=savings_months=), in both of its ledgers. (I first wrote that the
-    debtors never bought a BUCK for the gate. That was wrong: they did, 17 times by day 600.
-    I had read a count as an amount.)
-  - [ ] A new curve for the funding factor, proposed 2026-10-12 and not built: nothing at 1%
-    dear, a quarter at parity, one at 1% cheap, and from there the factor is the discount in
-    percent (2 at 2%, 10 at 10%), so insured issuance into a cheap BUCK is priced out. With u
-    the BUCK's distance under its basket:
+  - [X] Does the BUCK hold with issuers enough? (2026-10-12, =build/sim/issuers/=.) Only while
+    they last. With the credit arbitrageurs ten times richer the BUCK held for five years on
+    the older upkeep and until day 1,750 on the machine, when their 103.5 million was all
+    issued. K sat at its limit throughout, and the world took 25 million new BUCKs a year.
+    With the debtors free of the gate it ran from day 660 as before. So the world was not
+    short of issuers. It had a sink.
+  - [X] *The sink: depositors kept the BUCKs an exit paid them* (found and mended 2026-10-12,
+    commit =a488af7=). The equity basket pays an exit in BUCKs and the pro-rata basket returns
+    TOKEN. The model's depositors were written for the pro-rata basket and did nothing with
+    what they were paid, so each came in with fresh dollars and left holding BUCKs for good:
+    9 million after 300 days of the portcast world, where on the pro-rata basket they held
+    none. That is the demand that carried K to its limit in the seven failing worlds, and
+    most likely what moved K up in the ones that held and in the savings world. They now sell
+    what an exit pays them for dollars. =doc/review/who-holds.py= reads every account's
+    balance on chosen days, which is how it was found.
+  - [X] The funding factor is one straight line (decided and built 2026-10-12, commit
+    =302cf2d=). The gate asked a minter to hold BUCKs worth the insurance deposit times a
+    factor that was one at parity and still 0.7 at 3% dear, so to issue BUCKs when they were
+    scarce a debtor had first to buy some. With u the BUCK's distance under its basket:
 
     #+begin_example
-    factor  =  0                      u <= -1%
-            =  ((u + 1%) / 2%)^2      -1% <= u <= +1%
-            =  u / 1%                 u >= +1%
+    factor  =  max(0, 1/2 + 25 u)        nothing at 2% dear, a half at parity, one at 2% cheap
     #+end_example
 
-    The pieces meet with the same slope at +1%. Today it is 1 + 10 u, floored at zero: 0.9 at
-    1% dear, 1 at parity, 2 at 10% cheap. Replayed on the portcast world, 52 of the debtors' 70
-    refusals under the older upkeep came with the BUCK 1% dear or more and would have gone
-    through, and 26 of 64 under the machine. A debtor with no cash is still refused at parity,
-    where a quarter of the deposit is asked. What it touches: =BuckKControllerBase=, its copy
-    in the Rust kernel and so the JS and Python kernels, the golden vectors, about ten test
-    assertions, and every world with insured debtors, which must be run again.
+    and on up at the same slope: 1.75 at 5% cheap, 3 at 10%. It was 1 + 10 u. The change is in
+    =BuckKControllerBase=, its copy in the Rust kernel and so the JS and Python kernels, the
+    golden vectors and the tests. With no basket the factor is its parity value, a half. (A
+    curve with a toe and a steeper line was proposed first and put aside as harder to explain
+    than it was worth.)
+  - [X] The debtors find the cash for their insurance deposit (decided and built 2026-10-12,
+    commit =7251666=). The model gave a mortgage debtor nothing but its income from the day it
+    arrived, so one paid at harvest held no dollars for months and could not buy the reserve
+    the gate asks. A household about to retire a debt that bears interest does the arithmetic
+    and finds the deposit, from savings or a relative. It now arrives with dollars worth the
+    deposit its refinance asks (=savings_cover=, once by default), in both of its ledgers, and
+    puts them to the gate whole. With the new factor that carries it through the gate until
+    the BUCK is 2% cheap. Credit that pays no premium finds nothing, so worlds without
+    insurance are unchanged. This replaces six months of income, built the same day, which
+    had nothing to do with what the gate asks. (I first wrote that the debtors never bought a
+    BUCK for the gate. That was wrong: they did, 17 times by day 600. I had read a count as an
+    amount.)
+  - [X] A debtor reads the factor a mint would face (2026-10-12, commit =ca98139=). The mint
+    runs the controller's cycle before it reads the factor. The debtor read the factor of the
+    last cycle, hours old, bought exactly that reserve, and was refused for the one the mint
+    then asked. At the new slope half a percent in the BUCK is an eighth of a deposit, so this
+    refused most first attempts. It now runs the cycle, reads, and buys half a percent over.
+    Half a year of the portcast world: 18 refinances and no refusal. The other 12 households
+    wait because their mortgage is more than their credit at today's K, which is the design.
+  - [ ] *Measure everything again on the settled model* (=build/sim/sellers/=, from a frozen
+    copy of =a488af7=): the 14 matrix worlds on both upkeeps, the nine whose debtors pay a
+    premium on the pro-rata basket too, and the savings world on both seeds. Every table in
+    the results is from before the three changes above. Then judge again: the two upkeeps
+    against each other, the lean, K's upper limit, and whether anything is left of the
+    question at K's limit.
+  - [ ] The JS saver keeps what it redeems (=core/js/src/agents/saver.js=, one cycle). It is
+    one exit and not a recurring one, but it is the same habit; have it sell.
   - [ ] Issuers in the cast. Only credit arbitrageurs issue because the BUCK is dear, and a world
     has three. The five dollar arbitrageurs hold 22 million and can only buy cheap BUCKs. Give
     the casts pledgeable wealth in proportion to the BUCKs in circulation.

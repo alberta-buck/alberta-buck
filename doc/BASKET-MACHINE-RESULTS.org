@@ -225,8 +225,8 @@ That is about 18 million of issuing capacity in a world with 75 million BUCKs in
 /The funding gate./ To mint against a credit that carries an insurance premium, the minter must
 already hold BUCKs worth the insurance deposit for that mint times a factor. The deposit is ten
 years' premium: here 5% to 15% of what is minted, so 40,000 to 120,000 BUCKs for an 800,000
-refinance. The factor is one at parity, more when the BUCK is cheap, 0.7 when it is 3% dear,
-and reaches zero only when it is 9% dear.
+refinance. The factor was then one at parity, more when the BUCK was cheap, 0.7 when it was 3%
+dear, and reached zero only when it was 9% dear.
 
 These debtors cannot meet it, because the model gives them no savings. A debtor arrives with
 nothing but the income that follows. One paid at harvest holds no dollars at all until its
@@ -237,8 +237,20 @@ BUCKs toward the gate, 17 times by then, but the reserve was beyond what most of
 
 That is a fault of the model. A household that can refinance a mortgage has savings, and the
 want of some would not keep it from retiring a debt that bears interest with BUCKs that bear
-none. The debtors now arrive with six months of their income (2026-10-12). The runs in this
-section were made before that.
+none. Three things were changed on this (2026-10-12), and the runs in this section were made
+before any of them:
+
+- The factor is one straight line: nothing once the BUCK is 2% dear, a half at parity, one at 2%
+  cheap, and on up at the same slope. Near parity the gate now asks half a deposit, and none
+  when BUCKs are scarce.
+- A debtor arrives with dollars worth the insurance deposit its refinance asks. A household
+  about to retire a mortgage does the arithmetic and finds that much, from savings or a
+  relative.
+- A debtor reads the factor a mint would face. The mint runs the controller's cycle before it
+  reads the factor. The debtor read the factor of the last cycle, hours old, bought exactly
+  that reserve, and was then refused for the one the mint asked. So some of the refusals
+  counted below were of debtors who had bought what they were told to. With all three, half a
+  year of this world has 18 refinances and no refusal.
 
 | Up to day 600 | Older upkeep | Machine | Pro-rata basket |
 |---------------+--------------+---------+-----------------|
@@ -256,10 +268,69 @@ On the pro-rata basket the debtors are refused just the same, 156 times in the f
 it does not matter: the BUCK never leaves parity and the credit arbitrageurs never issue a
 BUCK. That basket supplies the BUCKs itself, one for every BUCK's worth deposited.
 
-So this world is short of issuers, and one rule of Buck's keeps the willing ones out in the band
-where they are wanted. Three runs are under way to see whether the BUCK holds when that is
-changed: the credit arbitrageurs' wealth ten times larger, on each upkeep, and the debtors'
-credits free of the gate.
+So this world is short of issuers, and one rule of Buck's kept the willing ones out in the band
+where they are wanted.
+
+** Issuers enough
+
+Three more runs of the portcast world put that to the test, on the factor as it then was
+(=build/sim/issuers/=). In one the debtors' credits pay no premium, so the gate does not apply
+to them. In two the three credit arbitrageurs have ten times the wealth to pledge, 109 million
+in place of 11.
+
+| Portcast world | K at its limit from day | BUCK from its basket, worst | BUCK at the end, dollars | BUCKs at the end, millions | A share in baskets |
+|----------------+-------------------------+-----------------------------+--------------------------+----------------------------+--------------------|
+| As it is, older upkeep | 415 | 81% | 7.17 | 74 | 1.00 |
+| As it is, machine | 571 | 89% | 11.81 | 74 | 0.29 |
+| Debtors free of the gate, machine | 656 | 89% | 11.84 | 73 | 0.30 |
+| Richer arbitrageurs, older upkeep | 415 | 7% | 1.41 | 165 | 1.02 |
+| Richer arbitrageurs, machine | 550 | 44% | 2.39 | 180 | 0.72 |
+
+- Freeing the debtors is not enough. They refinance as they arrive and are never refused, and
+  the BUCK runs from day 660 all the same. They have 7 million to issue.
+- With issuers enough the BUCK holds, while they last. On the older upkeep it stays within 7% of
+  its basket for the five years. The arbitrageurs issue 87 million BUCKs to keep it there.
+- On the machine it holds until day 1,750. By then the arbitrageurs have issued 103.5 million,
+  which is all they can, and the BUCK runs.
+- K is at its limit from day 415 or 550 to the end in both. Parity is held by the issuers alone,
+  and the world takes 25 million new BUCKs a year from them.
+
+So more issuers do not cure this world. They feed it. Something in it takes BUCKs in without
+end.
+
+** Who held the BUCKs
+
+Every BUCK is in some account, so we read them all ([[file:review/who-holds.py][who-holds.py]]). The portcast world on day 300,
+millions of BUCKs:
+
+| Held by | Older upkeep | Pro-rata basket |
+|---------+--------------+-----------------|
+| Depositors who had left the basket | 9.1 | 0 |
+| Savers | 0 | 8.2 |
+| The BUCK/dollar pool | 46.7 | 47.5 |
+| The basket's pools | 7.8 | 8.9 |
+| All BUCKs | 63.9 | 65.1 |
+| K | 0.819 | 0.750 |
+| The basket's cost in BUCK | 0.973 | 1.000 |
+
+The depositors are the difference. The equity basket pays an exit in BUCKs. The pro-rata basket
+returns TOKEN. The model's depositors were written for the pro-rata basket, and they did nothing
+with what an exit paid them. So on the equity basket each one came in with fresh dollars, left
+with BUCKs, and kept the BUCKs for good. After 124 exits they held 9 million. In five years
+there are over a thousand exits.
+
+That is a demand for BUCKs that nothing can satisfy. The basket must find BUCKs for every exit,
+and they never come back to the market. The BUCK turns dear, the savers sell what they have,
+K climbs to make room for issuers, the issuers are used up, and then nothing is left. It is the
+whole course of the seven failing worlds, and of K's slow climb in the ones that held.
+
+It is a fault of the model and not of either basket. A depositor paid in BUCKs spends them or
+sells them. The model's depositors now sell what an exit pays them for dollars, through the
+BUCK/dollar pool, a little each tick. In the first 120 days of the same world they sold 2.4
+million, held almost none, and K stayed at 0.747.
+
+Every number above this section, and every table in this document, was measured with depositors
+who kept their BUCKs. The matrix and the savings world are being run again.
 
 ** The same worlds without the lean against parity
 
@@ -308,8 +379,37 @@ K stays away from its limit under the machine because the machine does not hoard
 older upkeep does, not because it leans.
 
 On this the lean was made one-sided (2026-10-12): the book holds BUCKs while they are cheap and
-lets none out because they are dear. Every table in this document was measured before that,
-with the lean on both sides. They are being measured again.
+lets none out because they are dear. The same three worlds, and the savings world, on that
+lean (=build/sim/onesided/=):
+
+| World | Lean | K at its limit from day | BUCK at the end, dollars | A share in baskets | BUCKs let out, of equity |
+|-------+------+-------------------------+--------------------------+--------------------+--------------------------|
+| base (holds) | Both sides | never (ends 0.790) | 1.38 | 1.227 | -13% to +1% |
+| | Cheap side only | never (ends 0.824) | 1.38 | 1.215 | -22% to 0% |
+| | None | never (ends 0.745) | 1.39 | 1.246 | -6% to +1% |
+| portcast | Both sides | 524 | 12.17 | 0.21 | +6% to +61% |
+| | Cheap side only | 571 | 11.81 | 0.29 | +5% to +57% |
+| | None | 464 | 11.50 | 0.51 | +2% to +30% |
+| basketeers, endog, excursion | Both sides | 501 | 10.71 | 0.73 | +5% to +54% |
+| | Cheap side only | 496 | 10.23 | 0.82 | 0% to +53% |
+| | None | 346 | 8.18 | 2.06 | +3% to +19% |
+
+| Savings world, the machine's share price | Both sides | Cheap side only |
+|------------------------------------------+------------+-----------------|
+| First seed, real prices | 1.194 | 1.188 |
+| First seed, reverting prices | 1.253 | 1.245 |
+| Second seed, real prices | 1.295 | 1.291 |
+| Second seed, reverting prices | 1.369 | 1.361 |
+
+The one-sided lean did less than hoped. Where the BUCK ran away a share ends a little better
+than with the lean on both sides, and well short of no lean at all. Where the BUCK holds it
+costs: the book holds more BUCKs, up to a fifth of its equity, and they carry demurrage. That is
+1% of the share price in five years in the base world and about half a percent in the savings
+world. The book still has BUCKs out while the BUCK is dear, because every deposit is paired by
+issuing and the leash works that down slowly.
+
+These were all measured with depositors who kept their BUCKs ([[*Who held the BUCKs][Who held the BUCKs]]), which is
+what made the BUCK dear in them. The lean is to be judged again on the runs that follow.
 
 * Why deposits waited
 
