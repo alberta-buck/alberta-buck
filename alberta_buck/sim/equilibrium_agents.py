@@ -441,10 +441,11 @@ class _ProxyAgent(Agent):
 # `poolPrincipal` capitalizes the insurance pool as a perpetuity at an assumed
 # 10% ROI -- POOL_ROI_INV = 10 in Buck.sol -- so it is the ANNUAL premium
 # TIMES TEN, not the annual premium.  A 50bp policy on a $100,000 draw is
-# $500/yr, hence $5,000 of principal; and fundingFactor is 1 + 10(b - p)/b,
-# so at basketValueInBuck 1.10 the factor is 1.91 and the minter must be
-# HOLDING $9,550 of BUCK -- about 9.5% of the draw -- before the mint is
-# allowed.  That is a serious accumulation requirement.
+# $500/yr, hence $5,000 of principal; and fundingFactor is 1/2 + 25(b - p)/b
+# -- nothing once the BUCK is 2% dear, a half at parity, one at 2% cheap --
+# so at parity the minter must be HOLDING $2,500 of BUCK, 2.5% of the draw,
+# before the mint is allowed, and at basketValueInBuck 1.10 the factor is
+# 2.77 and it is $13,900.  Dear, the gate is open; cheap, it shuts fast.
 #
 # It does two jobs, both of which vanish here:
 #
@@ -1955,8 +1956,9 @@ class FatCreditBorrowerAgent(_ProxyAgent):
                 return
 
             # (B) Funding factor for THIS tranche: counter-cyclical in BOTH
-            # directions (mirroring the on-chain fundingFactor(), which
-            # SATURATES AT ZERO in deflation: base = max(0, 1 + cyc*(bv-1)/bv))
+            # directions (after the on-chain fundingFactor(), which SATURATES
+            # AT ZERO in deflation; this is the agent's own model of it, with
+            # its own slope: base = max(0, 1 + cyc*(bv-1)/bv))
             # x super-linear in the system issuance rate.  Above parity a hot
             # uptake demands a heavy pre-buy toll; BELOW parity (BUCK rich,
             # the system starving for supply) the toll melts away, so
@@ -2304,6 +2306,10 @@ class BuckCreditDebtorAgent(_ProxyAgent):
       * it SAVES for that gate: monthly, it accumulates a BUCK buffer by
         buying on the open market (the real pre-issuance demand the gate is
         designed to compel) -- preferring to buy when BUCK is at/below value;
+      * it ARRIVES WITH THE CASH for the insurance deposit of its refinance
+        (`savings_cover` times it, default once), and puts that cash to the
+        gate whole: a household about to retire interest-bearing debt finds
+        the deposit, so the gate stops it only past a factor of one;
       * it issues in TRANCHES: mint (activate) just before selling, so each
         tranche re-faces the live gate at the live fundingFactor;
       * Jubilee is NOT simulated: the fund accrues on-chain; this agent's
@@ -2374,14 +2380,18 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.save_rate = _draw(scenario, cls, "save_rate", r, (0.25, 0.75))
         self.retire_disc = _draw(scenario, cls, "retire_disc", r, 0.02)
         self.cash_buffer = int(_draw(scenario, cls, "buffer_k", r, 20) * m6)
-        # A household that can refinance a mortgage has savings.  It arrives
-        # with so many months of its income in dollars (a setting, no draw:
-        # the draw order is pinned).  Arriving with nothing, as it used to,
-        # left it unable to hold the BUCKs the funding gate asks of a minter,
-        # and shut out of issuing when it had every reason to
+        # A household that can retire an interest-bearing mortgage does the
+        # arithmetic and finds the cash for the insurance deposit: savings, or
+        # a relative.  It arrives with `savings_cover` times the deposit its
+        # refinance asks, in dollars (a setting, no draw: the draw order is
+        # pinned), sized on arrival by _find_cash.  Arriving with nothing, as
+        # it used to, left it unable to hold the BUCKs the funding gate asks
+        # of a minter, and shut out of issuing when it had every reason to
         # (doc/BASKET-MACHINE-RESULTS.org, "Who could issue").
-        self.savings = int(self.income_annual
-                           * float(_spec(scenario, cls, "savings_months", 6.0)) / 12)
+        self.savings_cover = float(_spec(scenario, cls, "savings_cover", 1.0))
+        self.savings = 0                # dollars found, set on arrival
+        self.gate_cash = 0              # of them, not yet put to the gate
+        self._cash_found = False
         self.overdraw_effort = _draw(scenario, cls, "overdraw_effort", r, 0.0)
         # How hard this debtor is willing to push the BUCK/USDC route to get
         # its refinancing done.  This is the throttle that matters: a debtor
@@ -2478,6 +2488,53 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             for i in range(self.N_CREDITS)]
 
     # -- instrumented market legs ------------------------------------------- #
+
+    def _find_cash(self, d, ctr) -> None:
+        """Once, on arrival: the dollars this household has found for the
+        insurance deposit of its refinance, in both ledgers (the counterfactual
+        household has them too).  The deposit is ten years' premium on the
+        coverage the mortgage needs at today's K, and no more than the whole
+        asset's; nothing for credit that pays no premium."""
+        if self._cash_found:
+            return
+        self._cash_found = True
+        e = self.premium_rate * POOL_ROI_INV            # bp of coverage
+        if e <= 0 or self.savings_cover <= 0:
+            return
+        cover = self._face0
+        price = 1.0                                     # dollars a BUCK
+        try:
+            per = int(d.kctrl.functions.buckK().call()) - e * 10 ** 14
+            if per > 0:
+                cover = min(cover, self.mortgage * 10 ** 18 // per)
+            if d.pool_ub:
+                r_in, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+                price = r_in / r_out if r_out else 1.0
+        except Exception:
+            pass
+        self.savings = int(cover * e // 10_000 * price * self.savings_cover)
+        if self.savings <= 0:
+            return
+        self.gate_cash = self.savings
+        d.chain.send(d.usdc.functions.mint(self.proxy.address, self.savings))
+        self.hypo_cash += self.savings
+        ctr["bcdCashFound"] = ctr.get("bcdCashFound", 0) + self.savings
+
+    def _buy_for_gate(self, d, short: int, spare: int) -> int:
+        """Buy BUCKs toward a funding-gate shortfall of `short`.  The household
+        lets go of its saving rate's share of `spare` cash, or of what is left
+        of the cash it found for the deposit, whichever is more.  Returns the
+        BUCKs bought (0 when it has nothing to spend)."""
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        budget = max(int(max(0, spare) * self.save_rate), min(cash, self.gate_cash))
+        if budget <= 10 ** 6 or not d.pool_ub:
+            return 0
+        r_in, r_out = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+        price = r_in / r_out if r_in and r_out else 1.0  # dollars a BUCK
+        got = self._buy_track(d, min(short, int(budget / price)))
+        spent = cash - d.chain.balance_of(d.usdc, self.proxy.address)
+        self.gate_cash = max(0, self.gate_cash - spent)
+        return got
 
     def _buy_track(self, d, want_buck: int) -> int:
         """_buy_buck through the BUCK/USDC pool, accumulating the par-value
@@ -2681,12 +2738,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             self._started = True
             self._last_day = day
             self._last_month_day = day - self.MONTH
-            # Its savings, in both ledgers: the counterfactual household has
-            # them too.
-            if self.savings > 0:
-                d.chain.send(d.usdc.functions.mint(self.proxy.address,
-                                                   self.savings))
-                self.hypo_cash += self.savings
+            self._find_cash(d, ctr)
         days = max(0, day - self._last_day)
         self._last_day = day
         if days > 0:
@@ -2803,14 +2855,11 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             if short > 10 ** 6 and gate_disc <= max(self.theta * self.apr,
                                                     0.01):
                 cash = d.chain.balance_of(d.usdc, self.proxy.address)
-                budget = int(max(0, cash - self.cash_buffer)
-                             * self.save_rate)
-                if budget > 10 ** 6 and d.pool_ub:
-                    try:
-                        self._buy_track(d, min(short, budget))
+                try:
+                    if self._buy_for_gate(d, short, cash - self.cash_buffer):
                         ctr["bcdSaved"] = ctr.get("bcdSaved", 0) + 1
-                    except Exception as e:
-                        ctr["bcd_save_err"] = repr(e)[:200]
+                except Exception as e:
+                    ctr["bcd_save_err"] = repr(e)[:200]
 
         # 3. THE CONTROL: activate a tranche through the REAL gate, then
         #    deploy it against the mortgage.  Atomic mode fires only when
@@ -3853,8 +3902,8 @@ class BuckIssuerArbAgent(_ProxyAgent):
             ctr["biaThrottled"] = ctr.get("biaThrottled", 0) + 1
             # Record the reason.  Swallowing it produced a confident wrong
             # story: the funding gate was blamed for these refusals, but
-            # fundingFactor is 1 + 10(b-p)/b and returns ZERO once BUCK is
-            # ~9% over-valued -- the gate is OFF exactly when this agent
+            # fundingFactor is 1/2 + 25(b-p)/b and returns ZERO once BUCK is
+            # 2% over-valued -- the gate is OFF exactly when this agent
             # wants to issue.  Whatever stops it is something else.
             why = repr(e)[:120]
             ctr.setdefault("biaWhy", {})
@@ -4113,7 +4162,7 @@ class MonetaryOpsAgent(_ProxyAgent):
       * Q4 mints against its OWN BuckCredit, so it is bounded by
         creditLimit = totalCurrentValue x buckK.  The real basket's
         mintFromBasket bypasses K entirely.  (It is NOT bounded by the funding
-        factor: that is 1 + 10(b-p)/b, which returns 0 once BUCK is ~9%
+        factor: that is 1/2 + 25(b-p)/b, which returns 0 once BUCK is 2%
         over-valued -- the gate is off exactly when Q4 wants to fire.)
 
       * Q2 can only retire supply THIS AGENT issued.  `Buck.burn` does not

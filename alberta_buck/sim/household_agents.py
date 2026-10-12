@@ -130,6 +130,7 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
             return
         if not _growth_active(self, day, ctr):
             return
+        self._find_cash(d, ctr)
         days = max(0, day - self._last_day)
         self._last_day = day
         if days > 0:
@@ -239,14 +240,12 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
             bal = d.buck.functions.balanceOf(self.proxy.address).call()
             short = required - bal
             if short > 0:
-                budget = int(max(0, cash - fixed - penalty - self.cash_buffer)
-                             * self.save_rate)
-                if budget > M6:
-                    try:
-                        self._buy_track(d, min(short * 101 // 100 + M6, budget))
+                try:
+                    if self._buy_for_gate(d, short * 101 // 100 + M6,
+                                          cash - fixed - penalty - self.cash_buffer):
                         ctr["rtrSaved"] = ctr.get("rtrSaved", 0) + 1
-                    except Exception as e:
-                        ctr["rtr_save_err"] = repr(e)[:200]
+                except Exception as e:
+                    ctr["rtr_save_err"] = repr(e)[:200]
                 bal = d.buck.functions.balanceOf(self.proxy.address).call()
                 if bal < required:
                     ctr["rtrGateWait"] = ctr.get("rtrGateWait", 0) + 1
