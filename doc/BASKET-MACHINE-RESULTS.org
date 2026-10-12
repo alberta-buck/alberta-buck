@@ -238,10 +238,19 @@ the book then aims to have let out nothing, whatever the BUCK's price.
   older upkeep's, 1.246 against 1.249, where with it the machine was 1.8% behind. And K ends
   lowest of all, 0.745.
 
-So on this evidence the lean against parity pays for nothing it was meant to. It costs a little
-where the BUCK holds and a great deal where it does not, and what it buys is a delay. K stays
-away from its limit under the machine because the machine does not hoard BUCKs as the older
-upkeep does, not because it leans.
+The lab shows the other side of the lean. In its history shape the BUCK is cheap for most of the
+120 days, and the lean has the basket hold BUCKs. With the whole system running the basket ends
+1,860 behind doing nothing. With the lean off it ends 37,689 behind, the BUCK sits 2.4% from its
+basket in place of 1.4%, and K falls to 0.59 in place of 0.66.
+
+So the lean helps when the BUCK is cheap and harms when it is dear, and the two are not alike. A
+basket that holds cheap BUCKs can lose only what it paid. A basket that has let out dear BUCKs
+loses without bound while they keep rising. In these runs the dear side costs a little where
+the BUCK holds and most of a share where it does not, and what it buys is a delay. A lean on
+the cheap side only is the obvious thing to try.
+
+K stays away from its limit under the machine because the machine does not hoard BUCKs as the
+older upkeep does, not because it leans.
 
 * Why deposits waited
 
@@ -325,7 +334,9 @@ net of it. The machine is still ahead by 3.9% and 6.7%.
 * The rebuilt machine in the lab
 
 Every lab campaign was rerun on the rebuilt machine, at commit =61fb598=. The sections below
-carry its numbers. Against the machine before the rebuild, with the whole system running:
+carry its numbers. After the older baskets were removed the interactive runs, the sizing
+campaigns, the research campaign and gas were regenerated once more and came out the same. The
+jump, the tilt and the price forcing runs were not repeated. Against the machine before the rebuild, with the whole system running:
 
 | Prices | Before the rebuild | Rebuilt | Rebuilt, declared weights |
 |--------+--------------------+---------+---------------------------|
@@ -607,7 +618,8 @@ result is net of what callers were paid, comes next.
 - Whether two seeds are enough. They agree on the five-year result. The lab has one.
 - What stops the BUCK rising once K is at its limit, and whether the basket's repayments are
   the cause. This comes first. The lean against parity is not the cause and not the cure.
-- Whether the lean against parity should stay at all. Three worlds say it costs.
+- Whether the lean against parity should work on the dear side at all. Three five-year worlds
+  say that side costs; the lab's history shape says the cheap side helps.
 - What the desk does. It hardly acted in the savings world and not at all in the lab, where the
   BUCK never stays outside its band. It needs runs built to take the BUCK there and hold it.
 - What the results look like net of paying the callers, and what the smallest trade should be.

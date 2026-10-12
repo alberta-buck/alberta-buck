@@ -178,9 +178,12 @@ machine's design is expected to become the accepted one.
     prevent it; it postpones K's limit by two to five months; it is most of what the machine's
     depositors lose (a share ends worth 0.51 of a basket without it and 0.21 with it in the
     portcast world, 2.06 and 0.73 in another); and in a world that holds it costs 1.5% of the
-    share price in five years. Proposed: switch it off by default (=parity_gain = 0= in the
-    simulator, the lab and the JS world) and keep the setting. Not done: it is a design choice
-    of 2026-10-11, and the lab is regenerating on the present value.
+    share price in five years. But in the lab's history shape, where the BUCK is cheap, it
+    turns a loss of 37,689 into 1,860 and holds the BUCK's price better. So the cheap side
+    helps and the dear side harms, without bound. Proposed: lean on the cheap side only (hold
+    BUCKs when the BUCK is cheap, let out none because it is dear), as a setting, and measure
+    it on the same three worlds and the history shape. Not done: it is a design choice of
+    2026-10-11 and a contract change.
   - Even with no lean the machine has BUCKs out while the BUCK rises (up to 30% of equity), since
     its positions give them up as the TOKEN cheapens. Say whether the book should aim to hold
     BUCKs, as the older upkeep in effect does, when K nears its limit.
@@ -193,9 +196,10 @@ machine's design is expected to become the accepted one.
   - Whether the machine should be the default, and the published basket, before this is settled.
   - One world stops on the machine on its first day (=debtors-mature-basketeers=): K falls to
     0.02 and a depositor's refused mint ends the run. The agent should survive a refusal.
-- [ ] Regenerate the lab after the cut (queued behind the matrix: =build/lab/after-matrix.sh=).
-  Every saved run is stale by its fingerprint since the Fence left the venue facet. Results
-  should not move; gas will, a little.
+- [X] The lab is regenerated after the cut (2026-10-12): 310 interactive runs verified, both
+  pages checked in a browser, every number the same and gas a tenth of a percent lower. The
+  jump, the tilt and the price forcing review runs were read from their saved worlds and not
+  repeated.
 - [X] A second seed of the five-year savings comparison (=build/sim/savings/seed2/=). It
   agrees with the first.
 
