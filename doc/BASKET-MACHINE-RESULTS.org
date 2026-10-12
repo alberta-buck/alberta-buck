@@ -7,8 +7,8 @@ do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. Every number can be r
 
 * The short version
 
-The basket makes money from prices that part and come back. It does so better than the older
-upkeep, on five years of five commodities with depositors coming and going.
+The basket makes money from prices that part and come back. In the savings world, five years of
+five commodities with depositors coming and going, it does so better than the older upkeep.
 
 | Five years, the first of two seeds | Older upkeep | The machine |
 |----------------------+--------------+-------------|
@@ -16,21 +16,31 @@ upkeep, on five years of five commodities with depositors coming and going.
 | Share price at the end, reverting prices | 1.175 | 1.253 |
 | Equity it could spend on an exit, at the least | 0% | 65% |
 
-The largest lesson came from that test, not from the lab. The machine as first built left half
-of every deposit waiting, for months. The cause was in how its credit was counted. A BUCK it
-drew and kept beside its own TOKEN counted as a BUCK spent, so it could pair only K of what it
-held. Now K bounds only the BUCKs it has let out. Then nothing is sold to place a deposit,
-nothing is sold to pay an exit, and most of the upkeep had no work left. We took it out.
+That is half of what the five-year runs show. In seven worlds of the earlier program's matrix
+both upkeeps of this basket fail. K reaches its upper limit, the BUCK then rises against its
+basket without stopping, and the basket, repaying what it owes, buys BUCKs all the way up. The
+same worlds hold on the pro-rata basket. The machine reaches the limit later than the older
+upkeep, but its depositors lose more when it comes: it leans against the BUCK's price, and that
+is a leveraged bet that parity returns. [[*The five-year matrix][The five-year matrix]] has the numbers. Nothing below
+should be read past it.
+
+The largest lesson of the savings test came from the test itself, not from the lab. The machine
+as first built left half of every deposit waiting, for months. The cause was in how its credit
+was counted. A BUCK it drew and kept beside its own TOKEN counted as a BUCK spent, so it could
+pair only K of what it held. Now K bounds only the BUCKs it has let out. Then nothing is sold to
+place a deposit, nothing is sold to pay an exit, and most of the upkeep had no work left. We
+took it out.
 
 The lab was rerun on the rebuilt machine, and what it showed before still holds: a target that
 leans against price earns most of the gain, a gap is best released at a steady rate, and when a
 TOKEN moves and never comes back the basket loses. One thing changed. Counting how long a gap
 has lasted now earns half again what a fixed line does. Before the rebuild the two were close.
 
-Four things to be careful about. The five-year result is two seeds, which agree, and the lab
-is one. The machine uses a sixth more gas than the older upkeep and makes many small trades. The desk made no trade in the lab and
-few in the savings world, so nothing here tests it. And a young basket's share price shows the
-relief on its lien before the demurrage on the BUCKs it holds.
+Four more things to be careful about. The savings result is two seeds, which agree, and the
+lab is one. The machine uses a sixth more gas than the older upkeep and makes many small trades.
+The desk made no trade in the lab and few in the savings world, so nothing here tests it. And a
+young basket's share price shows the relief on its lien before the demurrage on the BUCKs it
+holds.
 
 * How to read the numbers
 
@@ -106,6 +116,95 @@ upkeeps, and the desk does more. Under the machine it moved about 500,000 BUCKs 
 set, and ended 4,797 ahead on one and 3,640 behind on the other. Under the older upkeep it
 moved 163,000 and 246,000, and ended 17,168 and 9,738 behind. The machine's parity reference
 was stale on 37 and 22 days of the five years.
+
+* The five-year matrix
+
+The matrix is the earlier program's 14 five-year worlds: different mixes of depositors, debtors
+and disturbances, at four turns of the wheel a day. They were built on the pro-rata basket. Each
+was run here on three baskets, with the five TOKENs: the pro-rata basket, the equity basket on
+its older upkeep, and the equity basket on the machine ([[file:review/matrix-baskets.py][matrix-baskets.py]]).
+
+Half of them hold and half fail. The failure is the most important thing in this document.
+
+** Seven worlds hold
+
+In these the BUCK stays within 0.2% to 0.4% of its basket on all three baskets.
+
+| World | K at the end, pro-rata | Older | Machine | Share price, older | Machine | Machine ahead by |
+|-------+------------------------+-------+---------+--------------------+---------+------------------|
+| base | 0.780 | 0.924 | 0.790 | 1.249 | 1.227 | -1.8% |
+| deep | 0.781 | 0.943 | 0.758 | 1.224 | 1.215 | -0.7% |
+| endow | 0.730 | 0.730 | 0.725 | 1.189 | 1.211 | +1.8% |
+| endow-deep | 0.738 | 0.737 | 0.728 | 1.185 | 1.213 | +2.4% |
+| capacity | 0.722 | 0.835 | 0.691 | 1.361 | 1.394 | +2.4% |
+| debtors | 0.769 | 0.915 | 0.772 | 1.227 | 1.205 | -1.8% |
+| debtors-mature | 0.944 | 0.949 | 0.913 | 1.802 | 3.072 | |
+
+Between the two upkeeps there is little in it. The machine ends about 2% ahead in three worlds
+and 1% or 2% behind in three. The seventh is decided by its first weeks, when the basket costs 3
+BUCKs, and says nothing about either upkeep. The machine never runs short of room. The older
+upkeep has under 5% of its equity to spend on 134 to 1,010 of the 1,826 days.
+
+The larger difference is K. Under the older upkeep K ends at 0.92 to 0.94 in three of these
+worlds and at 0.84 in a fourth, on its way to its upper limit of 0.95. Under the machine it ends
+where it ends on the pro-rata basket, between 0.69 and 0.79. The likely reason is that the
+machine lets BUCKs out when the BUCK is dear, which is what K would otherwise climb to allow.
+
+** Seven worlds fail, on both upkeeps
+
+These are the portcast world and the six with mature debtors and basketeers. K reaches its upper
+limit, 0.95. Then the BUCK begins to rise against its basket and does not stop.
+
+| World | K at its limit from day, older | Machine | Basket's cost at the end in BUCKs, older | Machine | A share in baskets, older | Machine |
+|-------+--------------------------------+---------+------------------------------------------+---------+---------------------------+---------|
+| portcast | 415 | 524 | 0.20 | 0.12 | 1.00 | 0.21 |
+| basketeers | 24 | stopped | 0.26 | | 1.67 | |
+| basketeers, originate | 25 | 57 | 0.12 | 0.08 | 1.97 | 0.53 |
+| basketeers, endog | 26 | 57 | 0.28 | 0.18 | 1.83 | 0.88 |
+| basketeers, endog, excursion | 305 | 501 | 0.25 | 0.13 | 1.70 | 0.73 |
+| basketeers, endog, raid | 26 | 74 | 0.23 | 0.16 | 1.89 | 0.96 |
+| basketeers, endog, excursion, raid | 300 | 350 | 0.21 | 0.12 | 1.70 | 0.72 |
+
+On the pro-rata basket all seven hold: the BUCK stays within 0.3% to 5% of its basket for the
+five years. In four of them K is at its limit there too, and nothing follows from it.
+
+In the portcast world K reaches 0.95 on day 415 under the older upkeep and on day 524 under the
+machine. On both the BUCK is 10% dear by day 650. From there its price in dollars goes from 1.2
+to 7.2 under the older upkeep and to 12.2 under the machine, while its basket comes to cost 1.40
+dollars. The supply of BUCKs hardly changes: it stays between 70 and 85 million.
+
+The basket is in the loop. It owes BUCKs, and what it may owe is K times its equity, counted in
+BUCKs. When the BUCK rises, the same TOKEN is worth fewer BUCKs, the limit falls, and the basket
+sells TOKEN for BUCKs to repay. That is a bid for BUCKs when they are already scarce, and with K
+at its limit nobody can issue the BUCKs it is buying. In the portcast world the older upkeep's
+lien falls from 9.5 million to 2.0 million. The machine's falls from 18.2 million to 1.3 million,
+and it sells over 50 million BUCKs' worth of TOKEN on the way down.
+
+That is what the runs show the basket doing. That it is the cause, and not only carried along,
+is not yet tested. The pro-rata basket owes nothing: its BUCKs are issued against deposits and
+never called back. That is the visible difference between the basket that holds and the two
+that fail.
+
+Who loses depends on the upkeep. Counted in BUCKs every share falls, because its TOKEN is worth
+fewer BUCKs. Counted in baskets, which is what a share buys, the older upkeep's share holds or
+gains: it holds more BUCKs than it has let out. The machine's share loses, by 4% to 79%. The
+machine leans against the BUCK's price, so when the BUCK is dear it has let out all its ceiling
+allows, 47% of its equity, and it stays there while the BUCK rises many times over. Its lean is
+a bet that parity returns. With K at its limit parity does not return, and the bet is leveraged.
+
+Four things follow.
+
+- The equity basket, on either upkeep, can feed a rise in the BUCK that K cannot stop. The
+  machine did not create this and does not cure it.
+- The machine postpones it. It reaches K's limit later in every world it finished, and in the
+  worlds that hold it keeps K away from the limit where the older upkeep does not.
+- The machine's depositors bear more of it when it comes.
+- The savings world is not clear of it. It holds for five years on two seeds, but on reverting
+  prices K was at 0.93 to 0.95 in its last two years under both upkeeps.
+
+One caution about the worlds themselves. They were built for the pro-rata basket, which issues a
+BUCK for every BUCK's worth deposited. On the equity basket the same people have fewer sources
+of BUCKs, so some of this may be the worlds' doing. The loop is the basket's all the same.
 
 * Why deposits waited
 
@@ -469,6 +568,8 @@ result is net of what callers were paid, comes next.
 * What we do not know yet
 
 - Whether two seeds are enough. They agree on the five-year result. The lab has one.
+- What stops the BUCK rising once K is at its limit, and whether the basket's repayments are
+  the cause. This comes first.
 - What the desk does. It hardly acted in the savings world and not at all in the lab, where the
   BUCK never stays outside its band. It needs runs built to take the BUCK there and hold it.
 - What the results look like net of paying the callers, and what the smallest trade should be.
@@ -486,6 +587,7 @@ result is net of what callers were paid, comes next.
 #+begin_src sh
 python doc/review/savings-old-new.py /tmp/savings   # five years, both upkeeps, both price sets
 python doc/review/savings-old-new.py /tmp/seed2 5 scenario.seed=45517   # the second seed
+python doc/review/matrix-baskets.py build/sim/matrix5   # the matrix on three baskets; see its header
 make control-lab-interactive        # 310 runs; open doc/control-lab/interactive/index.html
 make control-lab-verify             # check every saved run
 make control-lab-basket-sizing      # the rebalancing tables: the basket alone

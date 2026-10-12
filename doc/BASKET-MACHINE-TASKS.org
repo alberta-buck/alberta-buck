@@ -156,17 +156,35 @@ machine's design is expected to become the accepted one.
     BUCKs at that moment; on the machine it cost 7.4, and that alone took 0.64 off K. Find
     what in that arm's first day sells so many BUCKs into the machine's pools, or give the
     arms the savings world's start, before reading that arm.
-- [ ] Run it: 14 arms on the machine, the older upkeep and the pro-rata basket, five TOKENs,
-  five years. Started 2026-10-11 19:12 from a frozen copy of commit =11a1103= under
-  =build/sim/matrix5/= (=run.sh=, =run.log=; a finished world is =<arm>-<basket>.json=;
-  =table.py= reads them), so the contracts can be edited meanwhile. The first five arms, share
-  price over the last 90 days, machine against older upkeep: capacity +2.4%, endow-deep +2.4%,
-  endow +1.8%, deep -0.7%, base -1.8%. So not ahead everywhere. In the two arms where it is
-  behind, K ends at 0.92 and 0.94 under the older upkeep and at 0.79 and 0.76 under the
-  machine: the machine's lean supplies the BUCKs that K otherwise climbs to allow. Whether
-  that climb is what pays the older upkeep there is not yet looked at. The older upkeep has
-  under 5% of its equity to spend on 340 to 1,010 days of the 1,826; the machine on none.
-  Write up all 14 when they finish.
+- [X] The matrix ran: 14 worlds on the machine, the older upkeep and the pro-rata basket, five
+  TOKENs, five years (=build/sim/matrix5/=, from a frozen copy of commit =11a1103=;
+  =doc/review/matrix-baskets.py= reads it). Seven worlds hold on all three baskets and the two
+  upkeeps are within 2% of each other in them. Seven fail on both equity upkeeps and hold on the
+  pro-rata basket. [[file:BASKET-MACHINE-RESULTS.org::*The five-year matrix][The results]] have the tables.
+- [ ] *Before the merge is released: the BUCK's rise once K is at its limit.* In the seven
+  failing worlds K reaches 0.95, the BUCK then rises against its basket for years (to 4 to 12
+  baskets), and the equity basket sells TOKEN for BUCKs all the way, because what it may owe
+  is K times an equity counted in BUCKs. The machine's depositors lose 4% to 79% of a share's
+  worth in baskets, since it has let out its whole ceiling against a BUCK that keeps rising.
+  The older upkeep's do not lose in baskets. In order:
+  - Test the cause. Run one failing world with the basket's limit held where it stood when K
+    reached 0.95 (no repayment forced by the BUCK's own rise). If the rise stops, the loop is
+    the cause. If not, look to who else is buying BUCKs and who could issue them.
+  - If it is the cause: count the limit in baskets and not in BUCKs, so a dearer BUCK does not
+    shrink it. The basket would then go on issuing at the basket's cost while the BUCK is dear,
+    which is what the pro-rata basket in effect does.
+  - The lean when parity does not return. The book leans five times the parity error, up to
+    half of K times equity. Decide what it does when K is at its limit, when the error has
+    lasted, or when it has grown: stop adding, shrink, or never exceed a smaller ceiling.
+  - K's upper limit of 0.95 and what it means for the controller to sit on it. Under the older
+    upkeep K is at 0.92 to 0.94 after five years even in worlds that hold, and at 0.93 to 0.95
+    in the savings world on reverting prices.
+  - The worlds. They were tuned on the pro-rata basket, which issues a BUCK for every BUCK's
+    worth deposited. On the equity basket the same cast has fewer sources of BUCKs. Find which
+    worlds are short of issuers by construction.
+  - Whether the machine should be the default, and the published basket, before this is settled.
+  - One world stops on the machine on its first day (=debtors-mature-basketeers=): K falls to
+    0.02 and a depositor's refused mint ends the run. The agent should survive a refusal.
 - [ ] Regenerate the lab after the cut (queued behind the matrix: =build/lab/after-matrix.sh=).
   Every saved run is stale by its fingerprint since the Fence left the venue facet. Results
   should not move; gas will, a little.

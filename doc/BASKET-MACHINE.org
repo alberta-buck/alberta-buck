@@ -87,6 +87,15 @@ then paid in kind. Relief accrues on the whole lien and is counted in equity as 
 demurrage on BUCKs held in a pool rides with them and is borne when they come back; equity does
 not deduct it until then, so a young basket's share price shows the relief first.
 
+All of this holds while the BUCK stays near its basket. It fails when the BUCK rises against its
+basket and keeps rising, as it does in half of the five-year matrix once K is at its upper limit
+([[file:BASKET-MACHINE-RESULTS.org::*The five-year matrix][the results]]). Two things then work against the basket at once. Equity is counted in BUCKs, so
+a dearer BUCK lowers what the basket may have let out. And a position gives up BUCKs for TOKEN
+as the TOKEN cheapens, so what it has let out rises with no decision of its own: the BUCKs it
+holds are not a fixed sum. The upkeep then sells TOKEN for BUCKs to come back under its ceiling,
+which bids for BUCKs when they are scarcest. Nothing in the machine prevents this yet. It is the
+first open item in [[file:BASKET-MACHINE-TASKS.org::*Toward the merge][the task list]].
+
 * Signals
 
 ** Relative price: =PairSignals=
