@@ -121,10 +121,14 @@ machine's design is expected to become the accepted one.
     BUCKs at the first frame. That is the arms' own start, and K takes the fall, to 0.4 or 0.5
     in the roughest arms. The portcast arm is mildest, and the savings world, which was cut
     from it, opens at 1.2 and is within 1% in a week.
-  - One arm stops on the machine. In =debtors-mature-basketeers= K reaches zero within 18
+  - One arm stops on the machine. In =debtors-mature-basketeers= K reaches 0.02 within 18
     hours, a depositor's mint is refused, and the agent does not handle the refusal. On the
-    older upkeep K falls to 0.36 in the same hours and the run goes on. Find why the machine's
-    K falls further before reading that arm.
+    older upkeep K falls to 0.36 in the same hours and the run goes on. K is not faster on the
+    machine: the reading is worse. The controller has no derivative term here and its
+    proportional term takes a tenth of the error off K. On the older upkeep the basket cost 3.1
+    BUCKs at that moment; on the machine it cost 7.4, and that alone took 0.64 off K. Find
+    what in that arm's first day sells so many BUCKs into the machine's pools, or give the
+    arms the savings world's start, before reading that arm.
 - [ ] Run it: 14 arms on the machine, the older upkeep and the pro-rata basket, five TOKENs,
   five years. Started 2026-10-11 19:12 from a frozen copy of commit =11a1103= under
   =build/sim/matrix5/= (=run.sh=, =run.log=; a finished world is =<arm>-<basket>.json=), so the
