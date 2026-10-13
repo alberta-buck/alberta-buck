@@ -286,6 +286,27 @@ machine's design is expected to become the accepted one.
     benefit: in the lab a lone buyer of BUCKs moves the price 2.4% with it and 4% without, and
     in the base world the lean on both sides costs less than the lean on one. So putting the
     dear side back, with or without a dead band, is one of the things to measure.
+  - [X] *The lean against parity is on both sides again* (decided 2026-10-13). =parityGainDear=
+    is 5 in the simulator, the lab's configuration and the JS world; the lab's alternative arm
+    is now =parity-cheap=. The contract is unchanged but for its notes. Still to do: the lab
+    and the machine's worlds again on it (the base, deep, endow and capacity worlds of the
+    first matrix were run on it and stand, having no depositor who leaves).
+  - [X] *Why the mature worlds cannot issue enough* (2026-10-13; the day-by-day table is in
+    [[file:BASKET-MACHINE-RESULTS.org::*Why the mature worlds cannot issue enough][the results]]). Four things in the model, none a basket: everyone issues on day 0 into
+    pools of 2.3 million; the big borrowers escrow a BUCK for every BUCK they draw, for as
+    long as it is drawn (8 million withheld); savers buy 15 million into the crash; and the
+    shared swap helper keeps 6.3 million BUCKs it could not swap. The dollar pool ends short
+    of 6.5 million BUCKs, which prices the BUCK a third above its basket, and nobody in these
+    casts issues because the BUCK is dear.
+  - [ ] Mend the mature worlds' model. Perry to say which:
+    - The big borrowers' reserve at the gate's own scale: a share of the insurance deposit by
+      the linear factor, checked at the draw and not held afterwards.
+    - An opening that is not a shock: mature borrowers and debtors start with their credit
+      already drawn and placed, or draw it over weeks.
+    - The swap helper returns what it could not swap.
+    - Borrowers who use their unused limit when the BUCK is dear.
+    Each of the first three changes every world that has big borrowers, which is all but the
+    portcast and savings worlds, on all three baskets.
   - [ ] K rests at its limit in five worlds that hold, on all three baskets (the worlds with
     mature debtors, whose opening has the basket costing 3.5 BUCKs). K is thrown to 0.42,
     climbs to 0.95 within months, and at parity nothing brings it back. Mend the opening of those worlds, and say whether a

@@ -398,6 +398,59 @@ depositor's refused mint ends the run.
 The sections above this one, and the lean's tables below, were measured with depositors who
 kept their BUCKs.
 
+** Why the mature worlds cannot issue enough
+
+In the five worlds with mature debtors K is at its limit within weeks, and under the pro-rata
+basket and the older upkeep the BUCK then stays 8% to 33% dear for a year. We read every account
+through the first 60 days of one of them (=debtors-mature-basketeers-originate=, older upkeep;
+[[file:review/who-holds.py][who-holds.py]]). Millions of BUCKs, at the start of each day:
+
+| | Day 0 | Day 1 | Day 5 | Day 10 | Day 30 | Day 60 |
+|---+-------+-------+-------+--------+--------+--------|
+| The basket's cost in BUCK | 0.98 | 3.18 | 0.67 | 0.51 | 0.74 | 0.75 |
+| K | 0.750 | 0.379 | 0.551 | 0.673 | 0.950 | 0.950 |
+| BUCKs in the BUCK/dollar pool | 50.0 | 26.8 | 24.1 | 32.2 | 42.8 | 43.5 |
+| BUCKs in the basket's pools | 2.3 | 4.2 | 2.5 | 2.7 | 6.2 | 7.2 |
+| Held by savers | 0 | 12.0 | 15.5 | 9.0 | 0 | 0 |
+| Held in the big borrowers' escrow | 0 | 10.8 | 8.7 | 8.1 | 8.0 | 8.0 |
+| Drawn by the big borrowers | 0 | 1.9 | 5.2 | 6.3 | 8.9 | 8.9 |
+| Drawn by the pool-seeding helper | 50.0 | 49.6 | 43.3 | 43.3 | 43.3 | 43.3 |
+
+Four things in the model make it, and none is a basket.
+
+1. /Everyone issues on the first day./ These worlds set the big borrowers' adoption as already
+   complete. So on day 0 they draw their whole target at once and sell it, partly into the
+   basket's own pools, which hold 2.3 million BUCKs. The BUCK falls to a third of its basket
+   there, and K is thrown from 0.75 to 0.38.
+2. /The big borrowers set aside a BUCK for every BUCK they draw./ The agent has its own model of
+   the funding gate, older than the gate's correction: a reserve the size of the whole draw,
+   held in escrow for as long as the credit is out. The gate asks a share of the insurance
+   deposit, 2.5% to 7.5% of a draw at parity, and holds nothing afterwards. On day 0 the escrow
+   buys 10.8 million BUCKs out of the BUCK/dollar pool, and 8 million never come back. After
+   their own escrow the big borrowers have supplied the world 0.9 million BUCKs.
+3. /Savers buy the crash./ They read the basket's discount, buy 12 to 15 million BUCKs out of
+   the same dollar pool in the first days, and sell them all by day 30.
+4. /The swap helper keeps what it could not swap./ Between day 1 and day 5, with prices three
+   times out of line, 6.3 million BUCKs sent to the shared swap helper stay with it and repay
+   its own lien. They are gone from circulation for the rest of the run. Nothing of the kind
+   happens in a world that opens quietly.
+
+What is left after the first month is a dollar pool short of 6.5 million BUCKs. In a pool of
+50 million that alone prices the BUCK a third above its basket: 43.5 million BUCKs against 57
+million dollars. K has climbed to 0.95 by day 30. The big borrowers reach their target share
+of their limit and stop, with 5 million of their limit unused. They follow an adoption curve,
+and a BUCK 33% dear means nothing to them. The debtors arrive over five years. These casts have
+no one who issues because the BUCK is dear, and the two that do, the excursion worlds with three
+credit arbitrageurs, hold parity from day 30 with K at 0.75.
+
+So the BUCK stays dear until enough debtors and depositors have arrived, about a year. On the
+machine it is back in 90 days, because the basket lets BUCKs out. K stays at its limit
+afterwards on every basket, because at parity nothing moves it.
+
+The same escrow is in the quiet worlds, where it grows slowly with the borrowers' adoption:
+in the base world they have drawn 11.0 million BUCKs after five years and hold 10.7 million of
+them in escrow.
+
 /Where K rests in a quiet world./ The base world has no depositor who leaves, so nothing in it
 changed with the depositors, and it shows what the basket itself does to K. A basket that holds
 BUCKs is a buyer of BUCKs, and K rises to meet a buyer.
