@@ -213,9 +213,10 @@ machine's design is expected to become the accepted one.
     TOKEN. The model's depositors were written for the pro-rata basket and did nothing with
     what they were paid, so each came in with fresh dollars and left holding BUCKs for good:
     9 million after 300 days of the portcast world, where on the pro-rata basket they held
-    none. That is the demand that carried K to its limit in the seven failing worlds, and
-    most likely what moved K up in the ones that held and in the savings world. They now sell
-    what an exit pays them for dollars. =doc/review/who-holds.py= reads every account's
+    none. That is the demand that carried K to its limit in the seven failing worlds, and in
+    the savings world on reverting prices. It is not why K climbs in the base world, which has
+    no depositor who leaves (see the lean, below). They now sell what an exit pays them for
+    dollars. =doc/review/who-holds.py= reads every account's
     balance on chosen days, which is how it was found.
   - [X] The funding factor is one straight line (decided and built 2026-10-12, commit
     =302cf2d=). The gate asked a minter to hold BUCKs worth the insurance deposit times a
@@ -264,6 +265,14 @@ machine's design is expected to become the accepted one.
     - [ ] The lab, on the one-sided lean and the linear factor. Its saved runs are stale since
       =ff4f5d5= (=build/lab/regen.sh=, then the verify and the two page checks).
     - [ ] The lean's tables, on the settled model: with, without and one-sided.
+  - [ ] *The lean against parity costs in a quiet world* (found 2026-10-12 in the base world,
+    which the depositors' fix does not touch). With no lean the machine ends five years with K
+    at 0.745 and a share at 1.246. With the lean on both sides, 0.790 and 1.227. With the lean
+    on the cheap side only, as built, 0.824 and 1.215, holding BUCKs worth 22% of its equity.
+    It buys BUCKs whenever the BUCK is a little cheap and has no rule that lets them go when it
+    is a little dear, and a basket that holds BUCKs is a buyer K rises to meet. Decide: a
+    smaller gain, a dead band before it acts, a rule that releases what it holds, or no lean.
+    Measure each on the base world and on one where the BUCK is cheap for long.
   - [ ] K rests at its limit in three worlds that hold (the basketeers worlds whose opening has
     the basket costing 3.5 BUCKs). K is thrown to 0.42, climbs to 0.95 within a month, and at
     parity nothing brings it back. Mend the opening of those worlds, and say whether a
