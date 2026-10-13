@@ -59,6 +59,16 @@ def _book_stress_fee(rcpt, ctr) -> None:   # WP-5
             ctr["stressFeeExits"] = ctr.get("stressFeeExits", 0) + 1
 
 
+def _transit(d):
+    """A SimLP with no credit: an EOA's swap input is forwarded or returned."""
+    t                           = getattr(d, "_transit", None)
+    if t is None:
+        t                       = d.chain.deploy("SimLP", sol_file="SimLP")
+        idmod.bind_as_operator(d.chain, d.reg, t.address, True, False)
+        d._transit              = t
+    return t
+
+
 class _DMBase(Agent):
     """Shared deposit/redeem state + helpers for DM-family agents.
 
@@ -144,12 +154,13 @@ class _DMBase(Agent):
             r_buck, _r_usd = active_reserves(d.chain, d.pool_ub, d.buck, d.usdc)
             cap = int(r_buck * ((1.0 - self.SELL_IMPACT_BP / 10_000) ** -0.5 - 1.0))
             amount = min(held, max(10 ** 6, cap))
+            transit             = _transit(d)
             if not getattr(self, "_simlp_approved", False):
                 # The identity-bound approve of the swap helper, once, as of
                 # the basket: a private account may pay only whom it approved.
                 idmod.identity_approve(d.chain, d.reg, d.buck, self.account,
                                        self.register_args, self.identity_sk,
-                                       d.simlp.address,
+                                       transit.address,
                                        idmod.seeded_rng(0xA9A * 1_000_003 + self.idx))
                 self._simlp_approved = True
             pool_abi, _ = load_artifact("UniswapV3Pool")
@@ -158,15 +169,20 @@ class _DMBase(Agent):
             t1 = pool.functions.token1().call()
             zero_for_one = d.buck.address.lower() == t0.lower()
             sqrt_limit = MIN_SQRT_RATIO + 1 if zero_for_one else MAX_SQRT_RATIO - 1
-            d.chain.send(d.buck.functions.transfer(d.simlp.address, amount),
+            d.chain.send(d.buck.functions.transfer(transit.address, amount),
                          sender=self.account)
-            # The helper pays the pool from its own balance, which carries a
-            # lien of its own: swap no more than it can spend.
-            amount = min(amount, d.buck.functions.balanceOf(d.simlp.address).call())
-            d.chain.send(d.simlp.functions.swap(
-                d.pool_ub, self.address, zero_for_one, int(amount),
-                sqrt_limit, t0, t1), sender=self.account)
-            ctr["dmBuckSold"] = ctr.get("dmBuckSold", 0) + amount
+            try:
+                d.chain.send(transit.functions.swap(
+                    d.pool_ub, self.address, zero_for_one, int(amount),
+                    sqrt_limit, t0, t1), sender=self.account)
+            finally:
+                # A refused or partially filled swap must not strand the input.
+                remaining       = d.buck.functions.balanceOf(transit.address).call()
+                if remaining:
+                    d.chain.send(transit.functions.exec(
+                        d.buck.address, d.buck.encode_abi("transfer(address,uint256)",
+                                                         args=[self.address, remaining])))
+            ctr["dmBuckSold"]    = ctr.get("dmBuckSold", 0) + amount - remaining
         except Exception as e:
             ctr["dm_sell_err"] = repr(e)[:200]
 

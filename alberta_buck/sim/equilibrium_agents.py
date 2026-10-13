@@ -246,8 +246,8 @@ def mint_amount(want: int, capacity: int) -> int:
 
 class _ProxyAgent(Agent):
     """Base for the two proxy (SimLP-backed, identity-bound) agents.  Holds
-    the deploy+bind boilerplate and the transfer-to-simlp + simlp.swap
-    primitive that both selling and buying BUCK share."""
+    the deploy+bind boilerplate and the proxy's own swap callback shared
+    by selling and buying the BUCK."""
 
     is_eoa = False
 
@@ -330,42 +330,22 @@ class _ProxyAgent(Agent):
     def _swap_via_simlp(self, d, pool_addr: str, input_c, amount: int,
                         recipient: str, from_proxy=None) -> None:
         """Swap exactly `amount` of `input_c` into `pool_addr`, output to
-        `recipient`.  The paying proxy (default self.proxy) first transfers
-        the input to SimLP (whose swap callback pays the pool from its own
-        balance)."""
+        `recipient`.  The paying proxy (default self.proxy) pays the pool
+        directly in its own swap callback."""
         if amount <= 0:
             return
         t0, t1 = _pool_tokens(d, pool_addr)
-        # BUCK is a lien-bearing balance: `balanceOf` is raw MINUS accrued
-        # demurrage, and both the paying proxy and SimLP are Non-Carrying, so
-        # each can hold `raw` while being able to spend strictly less.  Size
-        # against the proxy's spendable BEFORE the transfer, or the transfer
-        # reverts with "amount exceeds spendable".
+        payer                   = from_proxy or self.proxy
+        # Cap to this proxy's spendable BUCKs, including its unused credit.
+        # The pool-seeding helper's lien must never absorb an agent's payment.
         if input_c.address.lower() == d.buck.address.lower():
-            payer = (from_proxy or self.proxy).address
             amount = min(int(amount),
-                         max(0, d.buck.functions.balanceOf(payer).call()))
+                         max(0, d.buck.functions.balanceOf(payer.address).call()))
             if amount <= 0:
                 return
         zero_for_one = input_c.address.lower() == t0.lower()
         sqrt_limit = MIN_SQRT_RATIO + 1 if zero_for_one else MAX_SQRT_RATIO - 1
-        self._proxy_exec(
-            d, input_c.address,
-            input_c.encode_abi("transfer(address,uint256)",
-                               args=[d.simlp.address, int(amount)]),
-            proxy=from_proxy)
-        # ... and again on SimLP's side: it pays the pool from its OWN
-        # balance in the swap callback, and it carries a lien of its own from
-        # whatever BUCK has passed through it.  Swapping more than it can
-        # spend reverts inside the callback, which is what the traceback
-        # points at rather than the transfer above.
-        if input_c.address.lower() == d.buck.address.lower():
-            amount = min(int(amount),
-                         max(0, d.buck.functions.balanceOf(
-                             d.simlp.address).call()))
-            if amount <= 0:
-                return
-        d.chain.send(d.simlp.functions.swap(
+        d.chain.send(payer.functions.swap(
             pool_addr, recipient, zero_for_one, int(amount),
             sqrt_limit, t0, t1))
 
@@ -2015,9 +1995,7 @@ class FatCreditBorrowerAgent(_ProxyAgent):
             try:
                 # Each leg is capped to the borrowing proxy's live spendable
                 # (== unused credit; it holds no reserve BUCK any more) read
-                # immediately before its transfer.  (A rare "exceeds
-                # spendable" can still surface from the shared SimLP swap leg
-                # under heavy flow; it is caught below, benign.)
+                # immediately before its own swap callback pays the pool.
                 sold = self._sell_capped(d, d.pool_buck[i], internal)
                 if d.pool_ub:
                     sold += self._sell_capped(d, d.pool_ub, external)

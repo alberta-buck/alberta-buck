@@ -694,6 +694,7 @@ class Snapshotter:
             "spotBuck": sb,
             "basketVal": bv,
             "buckK": bk,
+            "simlp_drawn": max(0, -d.buck.functions.signedBalanceOf(d.simlp.address).call()),
             "pid_p": pid_p,
             "pid_i": pid_i,
             "pid_d": pid_d,

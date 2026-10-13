@@ -34,6 +34,9 @@ def accounts(d, agents):
     for name, c in (("pool-seeding helper", d.simlp), ("desk", d.desk), ("wheel", d.wheel), ("router", d.router)):
         if c is not None:
             yield name, c.address
+    transit                     = getattr(d, "_transit", None)
+    if transit is not None:
+        yield "depositor transit", transit.address
     for name, a in (("insurance pool", d.pool_acct), ("governor", d.gov), ("issuer", d.issuer_addr)):
         if a:
             yield name, a

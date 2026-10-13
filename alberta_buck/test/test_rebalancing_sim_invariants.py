@@ -111,6 +111,15 @@ def _series(frames, key):
 
 
 @pytest.mark.parametrize("path", _vectors())
+def test_pool_seeding_helper_keeps_no_swap_input(path):
+    frames                      = [f for f in _load(path)["frames"] if f["day"] > 0]
+    if not frames or "simlp_drawn" not in frames[0]:
+        pytest.skip("vector predates simlp_drawn or has no frame after day 0")
+    opening                     = frames[0]["simlp_drawn"]
+    assert all(f["simlp_drawn"] == opening for f in frames), "the helper absorbed or issued BUCKs after opening"
+
+
+@pytest.mark.parametrize("path", _vectors())
 def test_frames_are_well_formed(path):
     fr = _load(path)["frames"]
     days = [f["day"] for f in fr]
