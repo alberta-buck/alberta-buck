@@ -764,12 +764,12 @@ The net mark is most of it.  The same shell marked plainly, with the upkeep that
 ended 4 to 7% behind in all four runs, and on three days in four had under 5% of its equity to
 spend on an exit, because pairing used its whole limit.
 
-*Harder casts.*  The same contracts ran five years in other worlds built to strain them: waves of
-households arriving to refinance, debtors saving their surplus into the basket, forced excursions
-of the BUCK, an arbitrage raid.  In the five that have finished, the BUCK stayed within half a
-percent of its basket on average.  In three of them =K= ended near its upper limit of 0.95.  A
-start far from parity carried it there in the first month, and with the BUCK back at parity
-nothing pulled it down again.
+*Harder casts.*  The same contracts ran five years in thirteen other worlds built to strain them:
+waves of households arriving to refinance, debtors saving their surplus into the basket, forced
+excursions of the BUCK, an arbitrage raid.  In every one the BUCK stayed within half a percent of
+its basket on average, the raid included.  In five of them =K= ended at its upper limit of 0.95.
+Those worlds open far from parity, which carries =K= there within months, and with the BUCK back
+at parity nothing pulls it down again.
 
 ** The desk
 :PROPERTIES:
