@@ -260,8 +260,11 @@ machine's design is expected to become the accepted one.
       was the depositors' hoard. The results carry the tables.
     - [X] The portcast world and four of the basketeers worlds (2026-10-12). None runs away.
       Portcast ends at parity with K at 0.73 to 0.74 on all three baskets.
-    - [ ] The other nine worlds, still running when this was written. Then fill the settled
-      table in the results and retire the first matrix's tables.
+    - [X] The whole matrix (2026-10-12, 36 runs; the settled table is in the results). No world
+      runs away on any basket. The machine holds the BUCK within 0.24% to 0.42% of its basket
+      everywhere, and within 0.4% in the three worlds where the other two baskets let it stray
+      1% to 5%. In the seven worlds where share prices can be compared it ends between 2.7%
+      behind the older upkeep and 2.1% ahead.
     - [ ] The lab, on the one-sided lean and the linear factor. Its saved runs are stale since
       =ff4f5d5= (=build/lab/regen.sh=, then the verify and the two page checks).
     - [ ] The lean's tables, on the settled model: with, without and one-sided.
@@ -273,9 +276,9 @@ machine's design is expected to become the accepted one.
     is a little dear, and a basket that holds BUCKs is a buyer K rises to meet. Decide: a
     smaller gain, a dead band before it acts, a rule that releases what it holds, or no lean.
     Measure each on the base world and on one where the BUCK is cheap for long.
-  - [ ] K rests at its limit in three worlds that hold (the basketeers worlds whose opening has
-    the basket costing 3.5 BUCKs). K is thrown to 0.42, climbs to 0.95 within a month, and at
-    parity nothing brings it back. Mend the opening of those worlds, and say whether a
+  - [ ] K rests at its limit in five worlds that hold, on all three baskets (the worlds with
+    mature debtors, whose opening has the basket costing 3.5 BUCKs). K is thrown to 0.42,
+    climbs to 0.95 within months, and at parity nothing brings it back. Mend the opening of those worlds, and say whether a
     controller at rest on its limit should bleed back toward its neutral value.
   - [ ] The demonstration paper's 240-day figure and its numbers
     (=alberta-buck-demo.org=, =images/alberta-buck-demo-farm.svg=) are from the pro-rata

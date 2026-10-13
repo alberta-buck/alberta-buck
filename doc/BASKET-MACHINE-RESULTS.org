@@ -353,41 +353,50 @@ million, held almost none, and K stayed at 0.747.
 
 The matrix again, with depositors who sell what an exit pays them, debtors who find the cash for
 their insurance deposit, and the funding factor a straight line (=build/sim/sellers/=, commit
-=a488af7=). The worlds finished so far:
+=a488af7=). Five years, all fourteen worlds, three baskets.
 
-| World | Basket | BUCK from its basket, mean | K at the end | K at its limit | A share, in baskets |
-|-------+--------+----------------------------+--------------+----------------+---------------------|
-| portcast | Pro-rata | 0.34% | 0.743 | never | |
-| | Older | 0.35% | 0.742 | never | 1.12 |
-| | Machine | 0.42% | 0.732 | never | 1.14 |
-| basketeers, endog, excursion | Older | 0.31% | 0.751 | never | 1.91 |
-| | Machine | 0.33% | 0.772 | never | 3.08 |
-| basketeers, originate | Older | 2.22% | 0.940 | from day 26 | 2.00 |
-| | Machine | 0.40% | 0.947 | from day 33 | 2.92 |
-| basketeers, endog | Older | 1.73% | 0.949 | from day 26 | 1.96 |
-| | Machine | 0.37% | 0.946 | from day 33 | 2.90 |
-| basketeers, endog, raid | Machine | 0.38% | 0.945 | from day 33 | 2.97 |
-| base | Pro-rata | 0.32% | 0.780 | never | |
-| | Older | 0.27% | 0.924 | never | 1.249 |
-| | Machine | 0.25% | 0.824 | never | 1.215 |
-| debtors | Older | 0.25% | 0.876 | never | 1.209 |
-| | Machine | 0.24% | 0.767 | never | 1.216 |
-| debtors-mature | Older | 0.48% | 0.949 | from day 26 | 1.77 |
-| | Machine | 0.28% | 0.950 | from day 46 | 2.94 |
+| World | BUCK from its basket, mean: pro-rata | Older | Machine | K at the end: pro-rata | Older | Machine | Share price: older | Machine | Machine ahead by |
+|-------+--------------------------------------+-------+---------+------------------------+-------+---------+--------------------+---------+------------------|
+| base | 0.32% | 0.27% | 0.25% | 0.780 | 0.924 | 0.824 | 1.249 | 1.215 | -2.7% |
+| deep | 0.31% | 0.26% | 0.25% | 0.781 | 0.943 | 0.777 | 1.224 | 1.205 | -1.6% |
+| endow | 0.31% | 0.23% | 0.24% | 0.730 | 0.730 | 0.730 | 1.189 | 1.207 | +1.5% |
+| endow-deep | 0.30% | 0.25% | 0.24% | 0.738 | 0.737 | 0.733 | 1.185 | 1.210 | +2.1% |
+| capacity | 0.38% | 0.33% | 0.28% | 0.722 | 0.835 | 0.717 | 1.361 | 1.385 | +1.8% |
+| debtors | 0.34% | 0.25% | 0.24% | 0.755 | 0.876 | 0.767 | 1.209 | 1.216 | +0.5% |
+| portcast | 0.34% | 0.35% | 0.42% | 0.743 | 0.742 | 0.732 | 1.125 | 1.139 | +1.3% |
+| basketeers, endog, excursion | 0.31% | 0.31% | 0.33% | 0.666 | 0.751 | 0.772 | 1.91 | 3.08 | |
+| basketeers, endog, excursion, raid | 0.39% | 0.33% | 0.36% | 0.782 | 0.786 | 0.752 | 1.91 | 3.08 | |
+| debtors-mature | 0.29% | 0.48% | 0.28% | 0.934 | 0.949 | 0.950 | 1.77 | 2.94 | |
+| basketeers | 0.40% | 0.26% | stops | 0.949 | 0.949 | | 1.68 | | |
+| basketeers, originate | 1.54% | 2.22% | 0.40% | 0.949 | 0.940 | 0.947 | 2.00 | 2.92 | |
+| basketeers, endog | 1.22% | 1.73% | 0.37% | 0.949 | 0.949 | 0.946 | 1.96 | 2.90 | |
+| basketeers, endog, raid | 4.65% | 4.87% | 0.38% | 0.950 | 0.950 | 0.945 | 1.89 | 2.97 | |
 
-No world runs away. In the portcast world, where the BUCK went to 7 and 12 dollars, it now ends
-at parity on all three baskets with K at 0.73 to 0.74, and the machine's share is 1.3% ahead of
-the older upkeep's.
+No world runs away, on any basket. In the portcast world, where the BUCK went to 7 and 12
+dollars, it ends at parity with K at 0.73 to 0.74.
 
-In four worlds K ends at 0.94 to 0.95 with the BUCK at parity. These worlds open with the
-basket costing 3.5 BUCKs. K is thrown down to 0.42 on the first day, climbs to its limit within
-the month, and nothing afterwards pulls it down, because the BUCK is then at parity. That is a
-question about these worlds' opening and about a controller that rests wherever its error
-leaves it, not about the basket. It does leave K with nothing in reserve. The share prices in
-these worlds, 2 to 3, are decided by the same first weeks and do not compare the upkeeps.
+/The machine holds the BUCK's price as well as either, and better where it is hard./ It is
+within 0.24% to 0.42% of its basket in every world. In the three worlds where the other two
+baskets let it stray 1% to 5%, the raid among them, the machine holds it within 0.4%.
 
-One world still stops on its first day under the machine (=debtors-mature-basketeers=): K falls
-to 0.02 and a depositor's refused mint ends the run.
+/Between the two upkeeps the share price is close./ In the seven worlds where it can be compared
+the machine ends between 2.7% behind and 2.1% ahead: ahead in five, behind in the two (base and
+deep) where it ends holding the most BUCKs. In the last seven worlds the share price is 2 to 3
+and is decided by the first weeks, when the basket costs 3.5 BUCKs. It does not compare the
+upkeeps.
+
+/K rests at its limit in five worlds, on all three baskets./ These are the worlds with mature
+debtors. They open with the basket costing 3.5 BUCKs. K is thrown down to 0.42 on the first
+day, climbs to 0.95 within one to three months, and nothing afterwards pulls it down, because
+the BUCK is then at parity. The pro-rata basket rests there too, so this is not the equity
+basket's doing. It is these worlds' opening, and a controller that stays wherever its error
+last left it. It does leave K with nothing in reserve.
+
+One world still stops on its first day under the machine (=basketeers=): K falls to 0.02 and a
+depositor's refused mint ends the run.
+
+The sections above this one, and the lean's tables below, were measured with depositors who
+kept their BUCKs.
 
 /Where K rests in a quiet world./ The base world has no depositor who leaves, so nothing in it
 changed with the depositors, and it shows what the basket itself does to K. A basket that holds
@@ -858,8 +867,9 @@ result is net of what callers were paid, comes next.
 * What we do not know yet
 
 - Whether two seeds are enough. They agree on the five-year result. The lab has one.
-- Why K rests at its limit in three worlds that hold. Their opening throws the BUCK far from
-  parity, K is carried to 0.95 in a month, and at parity nothing brings it back.
+- Why K rests at its limit in five worlds that hold, on all three baskets. Their opening
+  throws the BUCK far from parity, K is carried to 0.95 within months, and at parity nothing
+  brings it back.
 - What the lean against parity is worth on the settled model. Its tables were measured in
   worlds where the BUCK was made dear by the depositors' hoard.
 - What the basket does if the BUCK does rise without stopping. Its limit is K times an equity
