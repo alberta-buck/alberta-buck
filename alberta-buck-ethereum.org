@@ -1386,7 +1386,7 @@ account can spend, the rest stays in the receipt as shares.
 - *Sync(i)*: collect pool i's fees (TOKEN to the wallet, BUCKs into the account); mark.
 - *Respond*, at most once an interval: sample the signals, then
   1. /pair what waits/ -- every constituent's wallet TOKEN with issued BUCKs, in full, no swap;
-  2. /size the book/ -- equity, less a holding of BUCKs while the BUCK is cheap -- and find each
+  2. /size the book/ -- equity, leaned against the BUCK's own price -- and find each
      constituent's gap from its leaned target;
   3. /work each constituent on its own/ -- sell one that is over, buy one that is under, by the
      amount =PairRebalancePolicy= releases, at most 5% of the holding a turn and 1% of a pool's

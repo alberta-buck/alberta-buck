@@ -30,7 +30,7 @@ DEFAULTS = {
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
     "parity_gain": 5.,              # BUCKs the book aims to hold while the BUCK is cheap, per unit of parity error, of equity
-    "parity_gain_dear": 0.,         # BUCKs it aims to have let out while the BUCK is dear: none
+    "parity_gain_dear": 5.,         # BUCKs it aims to have let out while the BUCK is dear, likewise
     # The desk beside the basket and its outer-band policy.
     "desk_capital_usd": 400000,     # its founding grant, for each constituent
     "desk_leg_bp": 40,              # one operation's leg, of the pool

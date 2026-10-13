@@ -20,8 +20,8 @@ In short. The basket is a credit holder whose limit counts only the BUCKs it has
 pairs every TOKEN with BUCKs of its own issue the moment it arrives, and pays an exit in BUCKs
 before it sells anything. It earns by reversion: each constituent has a target that leans
 against its price, and is sold above it and bought below it, on its own, when its price has
-stopped parting from the others. While the BUCK is cheap the book holds some. While it is dear
-the book lets none out for that.
+stopped parting from the others. While the BUCK is cheap the book holds some, and while it is
+dear the book lets some out.
 A desk beside it, with its own grant and credit, acts only on excursions of the BUCK beyond a
 band. K sets how much the basket may let out, and is the slow lever under both.
 
@@ -184,8 +184,8 @@ lowers no limit, and rule 1 buys nothing.
 It does not make the basket safe. It still owes BUCKs that cost more than they did, and if the
 BUCK went on to 4.3 times its basket this one would owe more than it holds. It gives up a forced
 purchase now and accepts a larger loss later, should the BUCK never come back. A basket that
-lets out few BUCKs has less at stake either way, which is what the lean on the cheap side only
-now does. Rule 2 remains.
+lets out few BUCKs has less at stake either way, and the ceiling, half of K times equity, bounds
+what the lean may let out. Rule 2 remains.
 
 /Where that leaves it./ Counting the limit in baskets is not built, and nothing now measured
 asks for it. It stays on the list as the remedy to reach for if a world with a sound cast ever
@@ -334,25 +334,27 @@ unless governance sets another (=setReferencePrice=). The tilt and the cap are g
 leash keeps the declared weights.
 
 The book those shares are of is not what the basket happens to hold. It is what its equity asks
-for, leaned against parity on one side:
+for, leaned against parity:
 
 #+begin_example
 book  =  equity + aim
-aim   =  - parity gain x (the basket's cost in BUCK - 1) x equity      where the BUCK is cheap
-aim   =  0                                                           where it is dear
+aim   =  - parity gain x (the basket's cost in BUCK - 1) x equity      held within the ceiling
 #+end_example
 
 Where the basket costs more than one BUCK the BUCK is cheap, the aim is below zero and the book
 is smaller than equity: TOKEN is sold and BUCKs held, down to the ceiling. The basket has then
 taken its BUCKs while they were cheap, before the fall in K that a cheap BUCK brings. Where the
-basket costs less than one BUCK the BUCK is dear, and the book is the size of its equity: it
-lets no BUCKs out because of that. With no fresh reading of parity the book stays the size it
-is. A cut in K moves nothing by itself; it lowers the ceiling.
+basket costs less than one BUCK the BUCK is dear, the aim is above zero and the book is larger
+than equity: BUCKs are let out for TOKEN, up to the ceiling. With no fresh reading of parity the
+book stays the size it is. A cut in K moves nothing by itself; it lowers the ceiling.
 
-The two sides are not treated alike because they are not alike (decided 2026-10-12). A basket
-holding cheap BUCKs can lose what it paid for them. A basket that has let out dear BUCKs loses
-without bound while they go on rising, and in the first five-year matrix, where a fault of
-the model made the BUCK run, that was most of what its depositors lost. A second gain, zero as deployed, restores the dear side for a measurement.
+Each side has its own gain, and both are 5 as deployed (decided 2026-10-13). For a day the dear
+side was switched off, on the evidence of worlds in which the BUCK ran away and a basket that
+had let BUCKs out lost most of a share. Those worlds ran away because of a fault in the model
+([[#k-limit][above]]). With that mended the dear side shows only a benefit: where a lone buyer
+wants BUCKs and nobody else can issue, the basket supplies them, and in a quiet world the lean
+on both sides costs less than the lean on one. The dear side's risk is real all the same, and
+the ceiling is what bounds it.
 
 * The upkeep facet: =BasketUpkeepFacet=
 
@@ -472,7 +474,7 @@ from one governance-appointed arbitrage creditor, which can deposit and nothing 
 | Policy constants | Separation floor, impact memory | 100 ticks (1%), 2 days |
 | Pair observer | Response, error memory, largest gap, warm-up, rate floor | 12 h, 1 day, 1 day, 2 days, 2 bp/day |
 | Basket | Allocation band (unused by a patient policy), leash, step, swap depth, grain | 2 points, 30% of weight, 5%, 1%, 100 ppm |
-| Credit | Mark, ceiling on BUCKs issued, parity gain cheap and dear | Net, half of K x equity, 5 and 0 |
+| Credit | Mark, ceiling on BUCKs issued, parity gain cheap and dear | Net, half of K x equity, 5 and 5 |
 | Parity reference | Sample interval, largest age, spot/TWAP tolerance | 30 min, 1 h, 5% |
 | Desk policy | Entry, release, gain, cap, persistence | 3%, 2%, 25%, 40 bp, 30 days |
 | Desk | Capital per TOKEN, turnover, floor | 400,000, 1,200,000, 300,000 |
@@ -512,9 +514,9 @@ Three choices in this machine were not made here. The carry-convexity program me
 - /The seam between the desk and K is persistence, not size./ The desk trades on any advice
   with what it holds. It draws credit, which changes supply, only on advice that has lasted.
 - /K is a slow, weak lever./ It moves the stock of credit over months. Holding the price inside
-  the band, now, was the job of faster facilities. This machine has one of its own, on one side:
-  the basket holds BUCKs while they are cheap. Otherwise it expects profit-seeking holders to do
-  it: see [[file:BASKET-MACHINE-TASKS.org][the task list]].
+  the band, now, was the job of faster facilities. This machine has one of its own: the basket
+  holds BUCKs while they are cheap and lets some out while they are dear. Otherwise it expects
+  profit-seeking holders to do it: see [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
 * The older record
 :PROPERTIES:

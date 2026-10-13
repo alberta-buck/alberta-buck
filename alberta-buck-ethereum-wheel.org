@@ -371,19 +371,19 @@ governance sets another.  The tilt is 1/2 in the lab, and no target leans by mor
 declared weight.
 
 *The book.*  Those shares are shares of a /book/, and the book leans too, against the BUCK's own
-price and on one side only:
+price:
 
 #+BEGIN_EXAMPLE
     book  =  equity + aim
-    aim   =  - gain x (the basket's cost in BUCKs - 1) x equity     while the BUCK is cheap
-    aim   =  0                                                      while it is dear
+    aim   =  - gain x (the basket's cost in BUCKs - 1) x equity     held within the ceiling
 #+END_EXAMPLE
 
 While the BUCK is cheap the book is smaller than equity: TOKEN is sold and BUCKs held.  The basket
 has then taken its BUCKs while they were cheap, before the fall in =K= that a cheap BUCK brings.
-While the BUCK is dear the book is the size of its equity: the basket lets no BUCKs out because of
-that.  The two sides are not alike.  A basket holding cheap BUCKs can lose what it paid.  A basket
-short of a dear BUCK loses without bound while the BUCK goes on rising.
+While the BUCK is dear the book is larger than equity: BUCKs are let out for TOKEN, which is supply
+when supply is wanted.  The two sides are not alike in risk.  A basket holding cheap BUCKs can lose
+what it paid.  A basket that has let out dear BUCKs loses for as long as the BUCK goes on rising,
+so what it may let out is bounded: half of =K x equity=, the ceiling below.
 
 * When to trade
 :PROPERTIES:
@@ -718,9 +718,9 @@ does not.  At one half the loss on the one-way move is 0.7% of the basket.
 the same BUCKs for the same gain, in two or three times as many pieces.  Between half a day and
 two days, how fast a gap is released hardly matters.
 
-*A count beats a band.*  The urgency count earns a third to a half again what a fixed two-point
-band does, and makes more trades to do it.  Per trade the band earns more, so which is better depends
-on what a trade costs, and that waits for the callers to be paid.
+*A count beats a band.*  The urgency count earns a third to a half again what a fixed two-point band
+does, and makes more trades to do it.  Per trade the band earns more, so which is better depends on
+what a trade costs, and that waits for the callers to be paid.
 
 *On realistic prices rebalancing is a small bonus.*  Fifty years of data say basic commodities
 follow inflation, each with its own delay: six of eight series stayed within 0.3% a year of it.
@@ -804,7 +804,7 @@ this one.
 
 1. *The desk.*  It needs worlds built to take the BUCK outside its band and hold it there: an
    attack, a squeeze, a genuine revaluation it should lose to.
-2. *What holds the BUCK inside the band.*  The basket's lean helps on one side, =K= is slow, and the
+2. *What holds the BUCK inside the band.*  The basket's lean helps, =K= is slow, and the
    desk waits outside.  The rest is left to holders who profit by closing a gap.  How wide a gap
    they leave is not measured.
 3. *Paying the callers.*  What the results are net of the reserve, and what the smallest trade
@@ -814,9 +814,11 @@ this one.
    dearer BUCK lowers it, and the basket then buys BUCKs when they are scarcest.  Counting the limit
    in baskets instead would stop that, at the price of a larger loss should the BUCK never come
    back.  No world with a sound cast has needed it.
-5. *First values.*  The tilt of one half, the lean against a cheap BUCK, and the ceiling at half
-   of =K x equity= were each chosen once.  Holding cheap BUCKs carries demurrage; whether it pays
-   for that is not settled.
+5. *First values.*  The tilt of one half, the lean against parity, and the ceiling at half of
+   =K x equity= were each chosen once.  In a quiet world the lean costs a percent or two of share
+   price in five years, mostly in demurrage on BUCKs it holds; where the BUCK is pushed one way
+   for long it earns that back many times.  Its size, and whether it should wait for a wider gap,
+   are not settled.
 6. *Demurrage in equity.*  Whether equity should deduct the demurrage on BUCKs held in the pools
    as it accrues, and not when the BUCKs come back.
 7. *Real speed.*  The lab's cycles are far faster than real commodities.

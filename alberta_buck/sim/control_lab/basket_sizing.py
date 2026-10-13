@@ -58,9 +58,10 @@ SIZINGS = {
     "half-2d": dict(title="Half the gap in 2 days", pair={**half_life(2), **patient(2)}, basket=lean(.5)),
     "patience-1": dict(title="Patience 1 point-day", pair={**half_life(1), **patient(1)}, basket=lean(.5)),
     "patience-4": dict(title="Patience 4 point-days", pair={**half_life(1), **patient(4)}, basket=lean(.5)),
-    "parity-0": dict(title="No lean against parity", pair=LAB, basket={**lean(.5), "parity_gain": 0.}),
-    "parity-both": dict(title="Lean against parity on the dear side too", pair=LAB,
-                        basket={**lean(.5), "parity_gain_dear": 5.}),
+    "parity-0": dict(title="No lean against parity", pair=LAB,
+                     basket={**lean(.5), "parity_gain": 0., "parity_gain_dear": 0.}),
+    "parity-cheap": dict(title="Lean against parity on the cheap side only", pair=LAB,
+                         basket={**lean(.5), "parity_gain_dear": 0.}),
     "band-2pt": dict(title="A 2-point band in place of urgency", pair=half_life(1), basket={**lean(.5), "weight_band_bp": 200}),
     "band-2pt-tilt-0": dict(title="A 2-point band, no lean", pair=half_life(1), basket={**lean(0), "weight_band_bp": 200}),
 }

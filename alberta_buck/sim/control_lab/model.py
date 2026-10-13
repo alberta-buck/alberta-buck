@@ -47,8 +47,8 @@ DEFAULTS = {
     # tilt: how far a target leans against a TOKEN's price over its reference (0 none, 1/2 undoes the
     # damping of liquidity, 1 the most); lean_cap_bp: the most it may lean, bp of the declared weight.
     # parity_gain: BUCKs the book aims to hold while the BUCK is cheap, per unit of parity error, as a
-    # share of equity; parity_gain_dear: BUCKs it aims to have let out while the BUCK is dear, none
-    # by default. Both 0 sizes the book at its equity alone.
+    # share of equity; parity_gain_dear: BUCKs it aims to have let out while the BUCK is dear,
+    # likewise. Both 0 sizes the book at its equity alone.
     "basket": {"leash_bp": 3000, "weight_band_bp": 200, "tilt": 0., "lean_cap_bp": 0, "parity_gain": 0.,
                "parity_gain_dear": 0.},
     # PairRebalancePolicy.Sizing: speeds are log returns/day, rates are fractions of the remaining

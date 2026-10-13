@@ -89,7 +89,7 @@ export const MACHINE = {
             slack: 25n * 10n ** 14n, patience: 2n * 10n ** 16n },
   response: { leashBp: 3000, interval: 1800, tiltBp: 5000, leanCapBp: 1500 },
   parityGain: 5n * E18,        // while the BUCK is cheap the book holds five times the parity error, of equity
-  parityGainDear: 0n,          // while it is dear the book lets none out for that
+  parityGainDear: 5n * E18,    // and while it is dear it lets as many out
   creditFace: 10n ** 23n,      // the basket's own credit: no practical cap
   settle: 601,                 // seconds for the pools' averages to take in a trade
 };

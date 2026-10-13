@@ -213,9 +213,9 @@ When =K= falls, the limit shrinks; nothing already issued is called back.  There
 calls, in the basket or anywhere else in the system.
 
 The basket also keeps one eye on the BUCK itself.  When the BUCK is cheap against the basket, it
-buys some and holds them.  That steadies the price, and the basket will be glad of them later.  It
-does not do the opposite.  It never sells BUCKs it does not have because the BUCK looks dear: a
-cheap BUCK can only fall so far, and a dear one can go on rising.
+buys some and holds them.  When the BUCK is dear, it lets a few more out.  Both steady the price.
+The second is the riskier, since a dear BUCK can go on rising, so the basket never lets out more
+than half of what =K= allows.
 
 The upkeep -- pairing new deposits, collecting tolls, selling what is over its target and buying
 what is under -- happens on a /work wheel/: a small machine that anyone may turn with a
@@ -234,11 +234,11 @@ the BUCK off course in days.
 
 So beside the basket there is a /monetary desk/: a tugboat.  Most days it does nothing at all.
 Small wanderings of the BUCK are left to people who profit by closing them, to the basket's own
-habit of buying cheap BUCKs, and to =K=.  The desk wakes only when the BUCK is more than three
-percent from its basket.  Then it buys BUCKs that are cheap, or sells BUCKs that are dear, a little
-at a time, with what it already holds.  It issues new BUCKs only when the BUCK has stayed dear for
-thirty days running.  That is how a central bank splits the work between its policy rate and its
-open-market desk.
+habit of leaning against the price, and to =K=.  The desk wakes only when the BUCK is more than
+three percent from its basket.  Then it buys BUCKs that are cheap, or sells BUCKs that are dear, a
+little at a time, with what it already holds.  It issues new BUCKs only when the BUCK has stayed
+dear for thirty days running.  That is how a central bank splits the work between its policy rate
+and its open-market desk.
 
 The desk has hard limits, and each one is there because an earlier desk needed it.  It may trade
 only so much in its whole life, and nothing refills that budget.  It stops when its own capital

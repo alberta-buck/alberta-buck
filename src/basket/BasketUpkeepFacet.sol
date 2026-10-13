@@ -44,9 +44,9 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     IBasketReference public immutable parity;
     /// @notice BUCKs to hold per unit of parity error while the BUCK is cheap, as a share of equity, 1e18.
     uint256 public immutable parityGain;
-    /// @notice BUCKs to have let out per unit of parity error while the BUCK is dear. Zero unless a
-    /// deployment asks: the basket chooses to hold BUCKs at a discount, never to be short of them at a
-    /// premium, where its loss would have no bound.
+    /// @notice BUCKs to have let out per unit of parity error while the BUCK is dear, likewise. Deployed
+    /// equal to parityGain, so the book leans against parity on both sides; a deployment may set either
+    /// to zero. What is let out is bounded by the ceiling whatever the gain.
     uint256 public immutable parityGainDear;
 
     struct Book {
@@ -202,8 +202,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         if (parityGain == 0 && parityGainDear == 0) aim = 0;
         else if (parity.fresh()) {
             // Above zero the basket costs more than a BUCK: the BUCK is cheap, and the book holds
-            // some. Below, it is dear, and the book lets out only what the dear gain asks: by
-            // default nothing.
+            // some. Below, it is dear, and the book lets some out. Each side has its own gain.
             int256 error = parity.rawValue() - 1e18;
             aim = -error * int256(error > 0 ? parityGain : parityGainDear) / 1e18 * equity / 1e18;
         }
