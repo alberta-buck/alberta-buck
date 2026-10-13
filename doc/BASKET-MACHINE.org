@@ -89,55 +89,59 @@ then paid in kind. Relief accrues on the whole lien and is counted in equity as 
 demurrage on BUCKs held in a pool rides with them and is borne when they come back; equity does
 not deduct it until then, so a young basket's share price shows the relief first.
 
-All of this holds while the BUCK stays near its basket. It fails when the BUCK rises against its
-basket and keeps rising, as it does in half of the five-year matrix once K is at its upper limit
-([[file:BASKET-MACHINE-RESULTS.org::*The five-year matrix][the results]]). Two things then work against the basket at once. Equity is counted in BUCKs, so
-a dearer BUCK lowers what the basket may have let out. And a position gives up BUCKs for TOKEN
-as the TOKEN cheapens, so what it has let out rises with no decision of its own: the BUCKs it
-holds are not a fixed sum. The upkeep then sells TOKEN for BUCKs to come back under its ceiling,
-which bids for BUCKs when they are scarcest. Nothing in the machine prevents this yet. It is the
-first open item in [[file:BASKET-MACHINE-TASKS.org::*Toward the merge][the task list]].
+All of this holds while the BUCK stays near its basket. Were the BUCK to rise against its basket
+and keep rising, two things would work against the basket at once. Equity is counted in BUCKs,
+so a dearer BUCK lowers what the basket may have let out. And a position gives up BUCKs for
+TOKEN as the TOKEN cheapens, so what it has let out rises with no decision of its own: the BUCKs
+it holds are not a fixed sum. The upkeep then sells TOKEN for BUCKs to come back under its
+ceiling, which bids for BUCKs when they are scarcest. Nothing in the machine prevents this. The
+next section says when it was seen, and why it is not now.
 
-* The question at K's limit
+* What happened at K's limit
 :PROPERTIES:
 :CUSTOM_ID: k-limit
 :END:
 
-This section states an open question. Nothing in it is decided. The measurements are in
-[[file:BASKET-MACHINE-RESULTS.org::*The five-year matrix][the results]].
+This section stated an open question. It has an answer, and the answer was in the model, not in
+the basket. The measurements are in [[file:BASKET-MACHINE-RESULTS.org::*The five-year matrix][the results]].
 
 /What K is for./ K is how the system makes more BUCKs when they are scarce. Everyone who holds
 credit may owe K times its worth. When the BUCK is dear the controller raises K, people can
 issue more, and the new BUCKs bring the price down. K stops at 0.95. Past that the controller
 has nothing left to do.
 
-/What happened./ In seven of the fourteen five-year worlds K reached 0.95 with the BUCK still a
-little dear. From there the BUCK rose for years, to between 4 and 12 times its basket. On the
-pro-rata basket the same seven worlds stayed at parity.
+/What was seen./ In seven of the fourteen five-year worlds, as first run, K reached 0.95 with
+the BUCK still a little dear. From there the BUCK rose for years, to between 4 and 12 times its
+basket. On the pro-rata basket the same seven worlds stayed at parity.
 
-/Why it should not happen./ A dear BUCK is an offer. Anyone with assets can pledge them, issue
-BUCKs that are worth more than their basket, and buy other assets cheaply with them. That
-selling is what brings the BUCK back. In these worlds the offer went unanswered, and the
-portcast world shows why ([[file:BASKET-MACHINE-RESULTS.org::*Who could issue][the results]] have the count). It holds about 18 million of issuing
-capacity against 75 million BUCKs in circulation, and most of it was shut out or used up before
-the rise began:
+/Why./ The equity basket pays an exit in BUCKs. The pro-rata basket returns TOKEN. The model's
+depositors were written for the pro-rata basket, and did nothing with what an exit paid them.
+So on the equity basket each came in with fresh dollars, left with BUCKs, and kept them for
+good: 9 million after 300 days of one world, and over a thousand exits in five years. That is
+a demand for BUCKs that nothing can meet. It made the BUCK dear, carried K to its limit, and
+used up every issuer in the world. With depositors who sell what they are paid, the same world
+ends five years at parity with K at 0.73, on both upkeeps
+([[file:BASKET-MACHINE-RESULTS.org::*The settled model][the settled model]]).
 
-- The 30 mortgage debtors could not pass the funding gate. To mint against an insured credit
-  the minter must already hold BUCKs worth the insurance deposit times a factor, and the factor
-  is near one at parity and falls to zero only when the BUCK is 9% dear. The model gave these
-  debtors no savings to buy that reserve with, which is a fault of the model, since mended. They
-  were refused 59 times in 63 attempts while the BUCK sat up to 4% dear and K climbed to its
-  limit.
-- The three credit arbitrageurs, the only people in the world who issue because the BUCK is
-  dear, had 11 million of pledgeable wealth among them and had used it all by day 600.
-- The desk is small, and under the older upkeep nobody in this world turns it.
+/What the search turned up on the way./ Two things that were real, and are mended.
 
-So these worlds run out of issuers, and one rule of Buck's, the gate, keeps willing ones out in
-exactly the band where they are wanted. Neither is the basket's doing. Whether the BUCK holds
-once there are issuers enough is being run.
+- The funding gate kept willing issuers out. To mint against an insured credit the minter must
+  already hold BUCKs worth the insurance deposit times a factor, and the factor was one at
+  parity and fell to zero only when the BUCK was 9% dear. It is now one straight line: nothing
+  once the BUCK is 2% dear, a half at parity, one at 2% cheap.
+- The model's debtors arrived with no savings, and read a factor hours old. They now find the
+  cash for their deposit, and read the factor a mint would face.
 
-/What the basket did meanwhile./ This is the part that belongs to the basket. While the BUCK
-rose, the basket bought BUCKs, all the way up. Three of its rules made it.
+And one thing that was tried and did not matter much: with issuers ten times richer the BUCK
+held only while they lasted. More issuers do not cure a sink. They feed it.
+
+/The lesson./ When a world shows a pressure that never lets up, read every account's balance
+before theorising about the protocol (=doc/review/who-holds.py=). An agent written for one
+basket may not close its loop on another.
+
+/What the basket did meanwhile./ This part does belong to the basket, and it stands whatever
+made the BUCK rise. While the BUCK rose, the basket bought BUCKs, all the way up. Three of its
+rules made it.
 
 1. What it may have let out is K times its equity, and equity is counted in BUCKs at the pools'
    prices. A dearer BUCK makes the same TOKEN worth fewer BUCKs, so the limit falls under it.
@@ -148,17 +152,10 @@ rose, the basket bought BUCKs, all the way up. Three of its rules made it.
 In the portcast world the older upkeep's lien fell from 9.5 million BUCKs to 2.0 million over
 the rise, and the machine's from 18.2 million to 1.3 million. Every BUCK of that was bought.
 
-/The question./ Was the basket's buying a cause of the rise, or only a consequence of it?
-
-If a cause, the basket turns a shortage it could have waited out into a spiral. Each purchase
-lifts the BUCK. That lowers its limit. That forces the next purchase. It is a margin call, and
-the design set out to have none. If only a consequence, the worlds are short of issuers and the
-basket is one more of the people caught.
-
-The pro-rata basket is the evidence that it may be a cause. It owes nothing that can be called
-back, it never buys BUCKs, and the same worlds hold with it. But it also issues a BUCK for every
-BUCK's worth deposited, so it is the largest issuer in those worlds as well. The runs so far
-cannot tell the two apart.
+So the basket's buying was a consequence of the rise and not its cause. But it is not
+harmless. Were the BUCK ever to run for a real reason, each purchase would lift it, lower the
+basket's limit and force the next. That is a margin call in all but name, and the design set
+out to have none.
 
 /An example of rule 1./ A basket has taken in TOKEN worth 100 baskets and let out 30 BUCKs,
 which it spent on 30 baskets' worth more. It holds TOKEN worth 130 baskets and owes 30 BUCKs. K
@@ -190,9 +187,9 @@ purchase now and accepts a larger loss later, should the BUCK never come back. A
 lets out few BUCKs has less at stake either way, which is what the lean on the cheap side only
 now does. Rule 2 remains.
 
-/How to tell./ Run a failing world with the limit counted in baskets. If the BUCK stops rising,
-or rises far less, the buying was a cause. Separately, count who could still issue in that world
-when K reached its limit, and why they did not.
+/Where that leaves it./ Counting the limit in baskets is not built, and nothing now measured
+asks for it. It stays on the list as the remedy to reach for if a world with a sound cast ever
+shows the BUCK running.
 
 * Signals
 
@@ -354,8 +351,8 @@ is. A cut in K moves nothing by itself; it lowers the ceiling.
 
 The two sides are not treated alike because they are not alike (decided 2026-10-12). A basket
 holding cheap BUCKs can lose what it paid for them. A basket that has let out dear BUCKs loses
-without bound while they go on rising, and in the five-year matrix that was most of what its
-depositors lost. A second gain, zero as deployed, restores the dear side for a measurement.
+without bound while they go on rising, and in the first five-year matrix, where a fault of
+the model made the BUCK run, that was most of what its depositors lost. A second gain, zero as deployed, restores the dear side for a measurement.
 
 * The upkeep facet: =BasketUpkeepFacet=
 

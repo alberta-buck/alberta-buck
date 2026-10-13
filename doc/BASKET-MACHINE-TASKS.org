@@ -252,10 +252,26 @@ machine's design is expected to become the accepted one.
     wait because their mortgage is more than their credit at today's K, which is the design.
   - [ ] *Measure everything again on the settled model* (=build/sim/sellers/=, from a frozen
     copy of =a488af7=): the 14 matrix worlds on both upkeeps, the nine whose debtors pay a
-    premium on the pro-rata basket too, and the savings world on both seeds. Every table in
-    the results is from before the three changes above. Then judge again: the two upkeeps
-    against each other, the lean, K's upper limit, and whether anything is left of the
-    question at K's limit.
+    premium on the pro-rata basket too, and the savings world on both seeds.
+    - [X] The savings world, both seeds (2026-10-12). The machine ends 3.6% to 7.3% ahead of
+      the older upkeep, the BUCK within 0.5% to 0.8% of its basket, and K ends at 0.74 to 0.77
+      (0.75 to 0.81 under the older upkeep). K's climb to 0.93 and 0.95 on reverting prices
+      was the depositors' hoard. The results carry the tables.
+    - [X] The portcast world and four of the basketeers worlds (2026-10-12). None runs away.
+      Portcast ends at parity with K at 0.73 to 0.74 on all three baskets.
+    - [ ] The other nine worlds, still running when this was written. Then fill the settled
+      table in the results and retire the first matrix's tables.
+    - [ ] The lab, on the one-sided lean and the linear factor. Its saved runs are stale since
+      =ff4f5d5= (=build/lab/regen.sh=, then the verify and the two page checks).
+    - [ ] The lean's tables, on the settled model: with, without and one-sided.
+  - [ ] K rests at its limit in three worlds that hold (the basketeers worlds whose opening has
+    the basket costing 3.5 BUCKs). K is thrown to 0.42, climbs to 0.95 within a month, and at
+    parity nothing brings it back. Mend the opening of those worlds, and say whether a
+    controller at rest on its limit should bleed back toward its neutral value.
+  - [ ] The demonstration paper's 240-day figure and its numbers
+    (=alberta-buck-demo.org=, =images/alberta-buck-demo-farm.svg=) are from the pro-rata
+    world. Run =node bin/eqsim.mjs= as that paper gives it, on the basket as it is, and put in
+    the new figure and numbers.
   - [ ] The JS saver keeps what it redeems (=core/js/src/agents/saver.js=, one cycle). It is
     one exit and not a recurring one, but it is the same habit; have it sell.
   - [ ] Issuers in the cast. Only credit arbitrageurs issue because the BUCK is dear, and a world
