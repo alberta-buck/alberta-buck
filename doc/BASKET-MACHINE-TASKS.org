@@ -265,8 +265,12 @@ machine's design is expected to become the accepted one.
       everywhere, and within 0.4% in the three worlds where the other two baskets let it stray
       1% to 5%. In the seven worlds where share prices can be compared it ends between 2.7%
       behind the older upkeep and 2.1% ahead.
-    - [ ] The lab, on the one-sided lean and the linear factor. Its saved runs are stale since
-      =ff4f5d5= (=build/lab/regen.sh=, then the verify and the two page checks).
+    - [X] The lab, on the one-sided lean and the linear factor (2026-10-13: 310 interactive
+      runs verified, the sizing and research campaigns, gas, and the jump, tilt and price
+      forcing runs made fresh). Most rows moved under 2%. One did not: with a lone buyer of
+      BUCKs and nobody else to issue, K now climbs to 0.94 and the BUCK is 4% dear, where the
+      lean on both sides held it to 0.86 and 2.4%. The two page checks in a browser are not
+      yet run on it.
     - [ ] The lean's tables, on the settled model: with, without and one-sided.
   - [ ] *The lean against parity costs in a quiet world* (found 2026-10-12 in the base world,
     which the depositors' fix does not touch). With no lean the machine ends five years with K
@@ -276,6 +280,13 @@ machine's design is expected to become the accepted one.
     is a little dear, and a basket that holds BUCKs is a buyer K rises to meet. Decide: a
     smaller gain, a dead band before it acts, a rule that releases what it holds, or no lean.
     Measure each on the base world and on one where the BUCK is cheap for long.
+
+    The case for the cheap side only has also lost its evidence. It was made one-sided because
+    the dear side lost most of a share in the worlds where the BUCK ran away, and those worlds
+    ran away because of the depositors' hoard. Since then the dear side has shown only a
+    benefit: in the lab a lone buyer of BUCKs moves the price 2.4% with it and 4% without, and
+    in the base world the lean on both sides costs less than the lean on one. So putting the
+    dear side back, with or without a dead band, is one of the things to measure.
   - [ ] K rests at its limit in five worlds that hold, on all three baskets (the worlds with
     mature debtors, whose opening has the basket costing 3.5 BUCKs). K is thrown to 0.42,
     climbs to 0.95 within months, and at parity nothing brings it back. Mend the opening of those worlds, and say whether a
