@@ -484,10 +484,13 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    spots, and references for the new panels; both demo gates drive
    the tab bar itself.
 6. *The equilibrium world in JS*: =buildEquilibriumWorld= ports
-   deploy.py's basket world -- BuckBasketProRata + TOKEN/BUCK pools +
-   the floating BUCK/USDC pool, CSV reference feeds bundled for the
-   browser, whales pinning TOKEN/USDC to the feeds, a PidKeeper
-   driving the controller -- on the REAL routing periphery (see the
+   deploy.py's basket world -- the BuckBasket (the equity shell, its
+   venue and upkeep facets, the pair observer and policy, the parity
+   reference and the work wheel) + TOKEN/BUCK pools + the floating
+   BUCK/USDC pool, CSV reference feeds bundled for the browser, whales
+   pinning TOKEN/USDC to the feeds, a PidKeeper driving the controller
+   and a WheelKeeper turning the wheel -- on the REAL routing periphery
+   (see the
    SimLP risk note: =router.tevm.test.js= already proves the router
    on Tevm).  Gate: a mini-equilibrium scenario's py/js journals
    agree (the Stage-4 transcription pattern).  Deploy-weight risk
@@ -497,12 +500,15 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    as the public BUCK-backed LP, per deploy.py), bound Universal
    Router -- deploys and RUNS on Tevm: 38 ops, ~49M total gas,
    ~4.2 s wall; largest single deploy 5.37M (the V3 factory;
-   basket shell 4.32M, venue 3.16M, UR 5.35M).  The bootstrap
-   =depositToken= (mints BUCK into the basket pool, LPs the pair)
-   and the PidKeeper's permissionless =compute()= both execute
-   in-process.  Scope decision: stage 6 builds this MINIMAL world
-   (1-2 tokens); the full multi-token research world stays in
-   Python (decision of record).  Landed 2026-07-04
+   basket shell 4.32M, venue 3.16M, UR 5.35M; measured on the
+   first, one-token world -- the basket as it is now adds its
+   facets, observers and wheel, and needs two tokens, since its
+   policy compares them in pairs).  The bootstrap deposit (which
+   the wheel pairs with BUCK the basket issues itself) and the
+   PidKeeper's permissionless =compute()= both execute in-process.
+   Scope decision: stage 6 builds this MINIMAL world (two tokens);
+   the full multi-token research world stays in Python (decision of
+   record).  Landed 2026-07-04
    (=scenarios/eqworld.js=): =buildEquilibriumWorld= with the
    doctrine's op-helper surface (=pledge= / =route= / =buyBuck= /
    =sellBuck= / =buyTokenBest= / =basketDeposit= / =basketRedeem= /
@@ -599,8 +605,9 @@ caps file length) and substantively by review.
 *Prototypes* (=core/js/prototypes/=, banked ahead of the world that
 runs them; Stage 7 wires them live):
 - =basket-investor.js= -- deposits a constituent TOKEN into BuckBasket
-  (the basket mints BUCK against it and LPs the pair; the depositor
-  holds the receipt NFT -- the claim), marks the receipt to market
+  (the basket pairs it with BUCK it issues itself; the depositor
+  holds shares, by a receipt NFT, and is paid out in BUCK), marks the
+  receipt to market
   daily, redeems at a horizon; books USD cost/mark/redeem rows for
   the ROI chart (dollar-days accounting mirroring the Python DM
   agents).

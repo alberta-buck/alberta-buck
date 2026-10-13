@@ -5,15 +5,15 @@
 # documents".  "Alberta Buck" is a mark: see TRADEMARKS.md.
 # SPDX-License-Identifier: LicenseRef-AllRightsReserved
 #+title: The Alberta Buck -- The BasketWheel (prototype)
-#+SUBTITLE: How the BuckBasket Earns and Defends: Its Credit, Its Own Arbitrage, Its Timing, Its Desk, and the Wheel That Turns Them
+#+SUBTITLE: How the BuckBasket Earns and Defends: Its Credit, Its Own Arbitrage, Its Lean, Its Desk, and the Wheel That Turns Them
 #+author: Perry Kundert
-#+date: 2026-09-30
+#+date: 2026-10-12
 #+category: Alberta Buck
 #+series_order: 26
 #+weight: 27
 #+draft: false
 #+bucky: true
-#+description: The machinery behind the BuckBasket.  A basket of pools is a rebalancer that trades at stale prices, and whoever re-pins it keeps the rebalancing premium.  The equity basket takes that premium back with capital-free consistency cycles, times the slow swings a pool cannot harvest with a director that waits for each excursion to turn, runs a monetary desk that trades BUCK against the basket from an account of its own, and turns all of it on a work wheel that anyone can advance and that pays for its own turning.  The theory, the mechanism, what the simulations say, and what is still open.
+#+description: The machinery behind the BuckBasket.  The basket is a credit holder whose limit counts only the BUCKs it has let out, so it pairs every deposit at once and pays every exit before it sells.  It takes back the rebalancing premium its pools give away with capital-free consistency cycles, leans each commodity's target against its price and works toward it only when the price has stopped running, keeps a bounded desk for excursions of the BUCK itself, and turns all of it on one work wheel that anyone can advance.  The theory, the mechanism, what the simulations say, and what is still open.
 
 #+EXPORT_FILE_NAME: ./images/alberta-buck-ethereum-wheel
 #+STARTUP: org-startup-with-inline-images inlineimages
@@ -24,19 +24,21 @@
 
 #+begin_abstract
 [[file:alberta-buck-ethereum-basket.org][The BuckBasket]] says the basket earns from tolls, from
-correcting its own prices and from timing slow swings, and that a desk beside it steadies BUCK.
-This paper is the machinery and the arithmetic behind those claims.
+correcting its own prices and from leaning against slow swings, and that a desk beside it steadies
+the BUCK.  This paper is the machinery and the arithmetic behind those claims.
 
-A pool of liquidity is a rebalancer that trades at stale prices.  In a market that reverts, the
-arbitrageur who re-pins it keeps nearly all of the rebalancing premium, and the pool keeps only its
-fees.  The equity basket takes that premium back with /consistency cycles/: three swaps round a
-commodity's three prices, needing no capital and unable to lose.  One filter bank over the pools
-then serves two mandates.  Its /differential/ mode -- which commodity is rich against which --
-drives a /director/ that leans against each excursion once it has turned.  Its /common/ mode --
-BUCK against the whole basket -- drives a /monetary desk/ that absorbs and supplies BUCK in days,
-where the K controller needs months; the desk trades from an account of its own, never the
-depositors'.  All of it runs on /work wheels/: bounded state machines that anyone may advance and
-that pay their callers from what they capture.
+The basket is an ordinary BUCK credit holder with one unusual rule: its limit counts only the BUCKs
+it has /let out/.  BUCKs it issues and holds beside its own commodity in a pool are not at risk
+against the lien they came from, so they use none of the limit.  Every deposit is therefore paired
+the moment it arrives, and every exit is paid in BUCKs before anything is sold.
+
+That leaves the upkeep free to earn.  A pool of liquidity is a rebalancer that trades at stale
+prices, and whoever re-pins it keeps the rebalancing premium.  The basket takes that back with
+/consistency cycles/: three swaps round a commodity's three prices, needing no capital and unable to
+lose.  Each commodity's share has a /target that leans against its price/, and a small policy
+decides when a gap may be worked: only one that has lasted, and only once the price has stopped
+running.  A /desk/ with books of its own acts on excursions of the BUCK beyond a band.  One /work
+wheel/, which anyone may advance, turns all of it.
 
 *This is a prototype.*  The contracts exist and run in a simulated economy and in a public sandbox.
 None of it is deployed or audited, and the numbers below are a simulation's or a model's.
@@ -50,30 +52,32 @@ None of it is deployed or audited, and the numbers below are a simulation's or a
 :CUSTOM_ID: status
 :END:
 
-| Piece                                | State (2026-09-30)                           |
-|--------------------------------------+----------------------------------------------|
-| The equity basket (=src/basket/=)    | built and Foundry-tested                     |
-| The monetary desk (=EquityDesk=)     | built beside it; its separation fuzz-tested  |
-| The work wheel (=src/wheel/=)        | built; one instance per machine              |
-| The consistency cycles (=ArbKind=)   | built; 16 tests on real Uniswap V3 pools     |
-| The simulated economy                | running, and live in the savings sandbox     |
-| The two-year experiments             | rerunning on this basket                     |
-| Deployment, audit                    | none                                         |
+| Piece                                                | State (2026-10-12)                      |
+|------------------------------------------------------+-----------------------------------------|
+| The basket shell (=BuckBasketEquity=)                | built and Foundry-tested                |
+| Its upkeep and venue facets                          | built and Foundry-tested                |
+| The signals and the policy                           | built and Foundry-tested                |
+| The desk (=BasketDesk=, =OuterBandDeskPolicy=)       | built; separation fuzzed; barely tried  |
+| The work wheel (=BasketMachineWheel=)                | built; one wheel turns the whole machine |
+| The consistency cycles (=ArbKind=)                   | built; tested on real Uniswap V3 pools  |
+| Paying the wheel's callers                           | the reserve is built; nothing funds it  |
+| The simulated economy                                | running, and live in the savings sandbox |
+| Deployment, audit                                    | none                                    |
 
 Read every figure below as "in a simulated economy", not as a forecast.  The contract surface is in
 [[file:alberta-buck-ethereum.org::#buck-basket-equity][the Ethereum implementation]]; the design
-record, with every ruling and measurement, is in =doc/= (=BASKET-EQUITY.org=, =BASKET-WHEEL.org=,
-=BASKET-REBALANCE.md=).
+record, with every measurement, is in =doc/= (=BASKET-MACHINE.org= and
+=BASKET-MACHINE-RESULTS.org=).
 
 * The machine
 :PROPERTIES:
 :CUSTOM_ID: machine
 :END:
 
-The basket is shares of equity, one lien, and a wallet.
+The basket is shares of equity, one lien, and a set of pools.
 
 #+BEGIN_EXAMPLE
-    gross(mark)   =  sum over pools ( 2 L_i sqrt(P_i)  +  idle TOKEN_i x P_i )
+    gross(mark)   =  sum over pools ( 2 L_i sqrt(P_i)  +  wallet TOKEN_i x P_i )
     equity(mark)  =  gross(mark)  +  signedBalance(basket)  +  reliefAccrued(basket)
     share price   =  equity / shares
 #+END_EXAMPLE
@@ -81,33 +85,59 @@ The basket is shares of equity, one lien, and a wallet.
 =2 L sqrt(P)= is a full-range position's fair value at a price.  It is computed from the pool's
 liquidity and a price, never from token balances, so tokens sent to a pool cannot inflate it.
 There are three marks: the TWAP, HIGH (each pool at the higher of spot and TWAP) and LOW (the
-lower).  A deposit is valued at LOW against a basket at HIGH; an exit at LOW.  Each side pays a
-charge the size of the swap the wheel will make for it: =(1 - K)/2= of the pool fee for TOKEN in,
-=(1 + K)/2= of the dearest pool's fee for BUCK in or out.  Nobody can enter or leave at a price
-that moves value between the holders.
+lower).  A deposit is valued at LOW against a basket at HIGH; an exit at LOW.  Each side also pays
+a charge of about half a pool fee, which stays with the holders: =(1 - K)/2= of the pool fee for
+TOKEN in, =(1 + K)/2= of the dearest pool's fee for BUCKs in or out.  Nobody can enter or leave at
+a price that moves value between the holders.
 
-*The credit.*  The basket is an ordinary BUCK account holding one self-issued /marked/ credit, marked
-before anything that spends at =equity(LOW)= -- the depositors' equity, and nothing else.  Buck
-therefore enforces
+** The credit, and what counts against it
+:PROPERTIES:
+:CUSTOM_ID: net-mark
+:END:
+
+The basket is an ordinary BUCK account holding one self-issued /marked/ credit.  It marks the
+credit itself, before anything that spends, and Buck enforces the limit: the basket can have drawn
+at most =K= times the mark.  It never mints or burns.  It spends past its held BUCKs, which draws on
+the credit, and BUCKs it receives repay the lien.
+
+The plain choice is to mark the credit at the depositors' equity.  Then every BUCK drawn counts,
+including one that was drawn and set down in a pool beside the basket's own TOKEN.  Credit can
+then pair only =K= of the book.  The rest of every deposit must be sold to make its own BUCK side,
+or left waiting.
+
+But a BUCK the basket issued and still holds carries no price risk against the lien it came from.
+If the BUCK doubles in price, the lien is twice as dear and so are the BUCKs held.  So the basket
+marks /net/: at its equity plus the BUCK side of its positions over =K=, which makes Buck's own
+limit read
 
 #+BEGIN_EXAMPLE
-    lien(basket)  <=  K x equity(LOW)
+    lien  -  BUCKs held in the positions  <=   K x equity
 #+END_EXAMPLE
 
-on every draw.  The basket never mints or burns: it spends past its held BUCK, which draws on the
-credit, and BUCK it receives repays the lien.  The lien earns Jubilee relief like any other.  A cut
-in =K= changes no lien; an under-water account simply cannot draw.  There are no margin calls:
-the excess is repaid only by the wheel's paced Trim.
+=K= bounds the BUCKs the basket has let out, not what it still holds.  Three things follow.
+
+- *Pairing uses none of the line.*  Every TOKEN is paired with issued BUCKs as it arrives.  Nothing
+  is swapped to place a deposit.
+- *An exit is paid before anything is sold.*  It is paid in BUCKs from the line; one exit of up to
+  =K / (1 + K)= of the book fits.  The basket sells down afterwards, over the following turns.
+- *There is no loop.*  The most TOKEN the basket can come to hold is =(1 + K) x equity=, as under
+  the plain mark.  Counting gross assets as collateral, as lending protocols that loop do, would
+  allow =1 / (1 - K)= and is not done.
+
+In normal running the upkeep uses at most half of =K x equity=.  The other half is what exits
+are paid from.
+
+*No margin calls.*  A cut in =K= changes no lien; beyond its limit the account simply cannot spend.
+Buck never calls anything back.
 
 *Exits.*  The treasury takes 25% of a receipt's gain over its cost basis, as shares, and nothing of
-a loss.  The rest is paid in BUCK when Buck lets the basket spend it.  Otherwise it is paid in
-kind: the exit's fraction =f= of every position and of the idle TOKEN, by transfer, its share of
-the lien repaid from the BUCK its positions return.  No swap is forced on anyone.
+a loss.  The rest is paid in BUCKs when Buck lets the basket spend it.  Otherwise it is paid in
+kind: the exit's fraction =f= of every position and of the wallet's TOKEN, by transfer, its share
+of the lien repaid from the BUCKs its positions return.  No swap is forced on anyone.
 
-The wallet absorbs the flows.  Its target liquidity is the larger of 1% of the gross and a
-flow-sized amount -- enough that half of it covers two standard deviations of the daily net flow
-times =1 + K= -- capped at 20% of the gross.  Deposits and exits net against each other inside it,
-and an ordinary exit touches no pool.
+*Relief and demurrage.*  The lien earns Jubilee relief like any other, counted in equity as it
+accrues.  The demurrage on BUCKs held in a pool rides with them and is borne when they come back, so
+a young basket's share price shows the relief first.
 
 * Where a pool's harvest goes
 :PROPERTIES:
@@ -122,7 +152,7 @@ theory calls the difference the /excess growth rate/ (Fernholz, 2002),
 #+END_EXAMPLE
 
 -- half the gap between the parts' average variance and the portfolio's own.  It is the rebalancing
-premium, and for a pool half TOKEN and half BUCK it is =sigma^2 / 8= of the position per unit time.
+premium, and for a pool half TOKEN and half BUCKs it is =sigma^2 / 8= of the position per unit time.
 
 *A full-range position is a constant-mix rebalancer that trades at stale prices.*  It sells TOKEN
 as the price rises and buys as it falls, but at its own price, which trails the market.  Whoever
@@ -149,17 +179,17 @@ only the basket's own arbitrage can.
 
 *A pool cannot harvest slow swings at all.*  A constant-mix rebalancer earns the variance of
 short-horizon moves -- the quadratic variation.  A smooth cycle has almost none, however large its
-amplitude.  A swing is harvested only by trades timed across pools: selling one leg near its top,
-buying another near its bottom.
+amplitude.  A swing is harvested only by trades timed across pools: selling one constituent
+near its top, buying another near its bottom.
 
 So a basket's excess return over holding its commodities has three sources, each with its own
 harvester:
 
-| mispricing                  | harvester             | its risk             |
-|-----------------------------+-----------------------+----------------------|
-| a stale TOKEN/BUCK pool     | the consistency cycle | none, per cycle      |
-| a leg rich against its past | the director's lean   | whipsaw in a trend   |
-| BUCK off its basket         | the monetary desk     | persistent inventory |
+| mispricing                           | harvester             | its risk                     |
+|--------------------------------------+-----------------------+------------------------------|
+| a stale TOKEN/BUCK pool              | the consistency cycle | none, per cycle              |
+| a commodity dear against the others  | the lean              | a price that never returns   |
+| the BUCK off its basket              | the desk              | persistent inventory         |
 
 Beneath all three are the tolls: the fees on the basket's own pools, which the Sync step collects.
 
@@ -221,17 +251,17 @@ is this section in Solidity.
   first leg pays out; the other two run inside its callback; what they return pays the first.  No
   inventory, no flash loan, no flash mint.  USDC exists only between two swaps inside one
   transaction.
-- *No change in supply.*  No BUCK is issued or destroyed; value moves from the venues to the
-  basket.  A cycle never trades BUCK against the basket's value -- that is the desk's business.
+- *No change in supply.*  No BUCKs are issued or destroyed; value moves from the venues to the
+  basket.  A cycle never trades BUCKs against the basket's value -- that is the desk's business.
 - *It cannot lose.*  The cycle checks its realized output against its input and reverts below a
   minimum edge.  Someone who pushes a pool first only pays the basket to push it back.
-- *It keeps the gauge true.*  The controller steers on the basket's value in BUCK, read from these
+- *It keeps the gauge true.*  The controller steers on the basket's value in BUCKs, read from these
   pools.  Closing their gaps makes that reading follow the commodities instead of lagging them by
   an arbitrageur's threshold.
 
 The same three swaps, in the same rotation, earn the same whichever token the cycle starts from;
 the start decides only what the profit is made of.  Started from the TOKEN, the profit lands in the
-basket's wallet, and every share is worth more.  Started from BUCK, it funds the wheel's callers'
+basket's wallet, and every share is worth more.  Started from BUCKs, it funds the wheel's callers'
 reserve (below) up to a cap, and the rest goes to the basket's account.
 
 ** Who can take which gap
@@ -253,99 +283,220 @@ Winning that race by construction needs control of the order of swaps: a Uniswap
 the cycle before the first swap of each block, or an auction for the right to go first (the
 auction-managed AMM of Adams, Moallemi, Reynolds and Robinson, 2024).  That is the upgrade path.
 
-* One filter bank, two modes
+* What the basket watches
 :PROPERTIES:
-:CUSTOM_ID: modes
+:CUSTOM_ID: signals
 :END:
 
 A Uniswap tick is a log price, so the basket's pools hand it log prices for free.  Write =c_i= for
-constituent /i/'s log price in BUCK, and split the vector the way a three-phase machine splits its
+constituent /i/'s log price in BUCKs, and split the vector the way a three-phase machine splits its
 line voltages -- into a common mode, which carries no torque, and differential modes, which carry
 all of it:
 
 #+BEGIN_EXAMPLE
-    differential:  c_i - mean(c)        which commodity is rich against which
-    common:        log(basket in BUCK)  what the whole basket costs, against par
+    differential:  c_i - mean(c)        which commodity is dear against which
+    common:        log(basket in BUCKs) what the whole basket costs, against par
 #+END_EXAMPLE
 
-The differential mode is numeraire-free: anything common to every leg, including BUCK's own
-wobble against the dollar, cancels exactly.  It is the director's signal.  The common mode is the
-K controller's process variable, and it is the desk's signal.  Both are kept as ladders of
-exponential moving averages over geometrically spaced windows; the difference of two adjacent EMAs
-is a band-pass filter, so a ladder is an octave filter bank, each rung seeing swings of its own
-size.
+The differential mode is numeraire-free: anything common to every constituent, including the BUCK's
+own wobble, cancels exactly.  It is the rebalancing signal.  The common mode is the K controller's
+process variable, and the desk's signal.  Each has its own observer, and neither trades.
 
-* The director: timing the tides
+*Relative price* (=PairSignals=).  For every TOKEN on every quote route (its BUCK pool and its
+USDC pool) the observer reads the pool's cumulative tick.  The difference from the last reading,
+over the time between, is the interval's mean log price; within a route the mean across TOKENs is
+removed.  An alpha-beta filter then keeps a /level/ and a /rate/ for each, its gains set by one
+response time (12 hours in the lab) and the time actually elapsed.  Beside them it keeps a running
+measure of its own error, from which it reports an /allowance/ on the rate: how far the rate could
+be from what it says.  For a pair of TOKENs it reports the level and rate of one against the
+other.  A route is ready after three samples and two days, and falls out when a pool cannot be
+read.
+
+*Parity* (=BasketReference=).  The reference basket's cost in BUCKs from each pool's TWAP, refused
+when a pool has no liquidity or its spot is more than 5% from its TWAP.  It publishes the last valid
+value, whether it is fresh, and how many days running it has had a valid sample.  Above one, a
+basket costs more BUCKs: the BUCK is cheap.  Below one, the BUCK is dear.  It is read raw.  No
+average is taken of it, for a reason the desk taught us ([[#lag][below]]).
+
+* The lean: targets that move against price
 :PROPERTIES:
 :CUSTOM_ID: director
 :END:
 
 *Why there are tides.*  New money does not reach all prices at once (Cantillon, 1755).  Correlating
-each constituent's year-over-year growth with the M2 money supply, lags swept from 0 to 36 months:
+each series' year-over-year growth with the M2 money supply, lags swept from 0 to 36 months:
 
-| constituent       | peak lag (months) | peak correlation |
+| series            | peak lag (months) | peak correlation |
 |-------------------+-------------------+------------------|
-| bitcoin (cbBTC)   | 0                 | 0.08             |
-| gold (PAXG)       | censored at 36    | 0.10             |
+| bitcoin           | 0                 | 0.08             |
+| gold              | censored at 36    | 0.10             |
 | construction      | 9-10              | 0.48-0.52        |
 | energy            | 13                | 0.33-0.39        |
 | labour            | 15-16             | 0.32-0.38        |
 | food              | 23                | 0.21-0.26        |
 
-Monetary assets move first, energy and construction next, labour and food last.  When M2 surges
-the fast legs overshoot their share and stay overweight until the slow ones catch up -- roughly a
-year.  Those excursions are the director's harvest.
+Construction and energy move within a year, labour and food a year after.  (Bitcoin is shown for
+comparison; it is not admitted to the basket.)  When M2 surges the fast constituents overshoot
+their share and stay overweight until the slow ones catch up -- roughly a year.  Those excursions
+are the harvest a pool cannot reach.
 
-*Wait for the turn.*  A rebalancer that reacts to the instantaneous deviation sells a riser all the
-way up, paying fees and bleeding against the trend.  One that waits until the excursion levels off
-makes fewer, larger trades at the greatest mispricing.  Measured on a portfolio of held tokens over
-twenty synthetic years (30 bp a leg), gated policies collected 75-90% of continuous rebalancing's
-premium on 30-55% of its turnover, trading at twice the mispricing depth; through the 2020-25
-history, where bitcoin ran nine-fold and never reverted, they bled 90-130 bp a year less than
-continuous rebalancing.  Across a filter bank, with each rung voting, a gated policy beat continuous
-rebalancing's gross premium outright (+496 against +430 bp a year): multiple scales recover the
-mid-size swings a single window concedes.
+*A pool already does half the job.*  A liquidity position sells a TOKEN as its price rises and buys
+as it falls.  So a constituent's share of the book moves half as far as it would in a wallet, and
+a basket that only restored its declared weights would find little left to do after a large move.
+Its pools would already have sold, at every price on the way.
 
-#+CAPTION: The gate on bitcoin's share of a basket, 2020-25.  While an excursion builds (the raw deviation pulling away from its moving average) nothing trades; sells (red) cluster where overweight excursions level off and turn, buys (green) where underweight ones do.  Shaded bands mark the gate open.
-#+ATTR_LATEX: :width \textwidth
-#+ATTR_HTML: :width 100%
-[[./images/rebalance-mechanism.png]]
+*So the target leans.*  The shell holds a /tilt/ and, for each constituent, a /reference price/:
+the price it is taken to return to.
 
-*The equity director.*  =EquityTurnDirector= (optional) samples each pool's TWAP tick once a day,
-takes it against the basket's mean, and keeps for each leg a ladder of EMAs of that deviation:
+#+BEGIN_EXAMPLE
+    target_i  =  declared weight_i  x  (reference price_i / price_i) ^ tilt
+                 shared out over the book, and held within the lean cap of the declared weight
+#+END_EXAMPLE
 
-- *The lean.*  Each declared weight is scaled by =exp(-tilt x excursion)= and the weights
-  renormalized, the excursion being the leg's deviation against a long /anchor/ EMA (1280 days).  A
-  leg rich against its own past is leaned down.  =tilt= defaults to 1.
-- *The turn.*  Six shorter EMAs, 5 to 160 days, each vote when moving back toward the anchor.  A
-  quorum (default 4 of 6) is a turn.  No rung can fire alone, which is what makes the fast ones
-  safe to include.  A leg not turned is still running, and a run is let run: the director never
-  trims a leg still rising or buys one still falling.
-- *The leash.*  A leg more than 30% off its /declared/ weight trades regardless of the turn.  The
-  lean times the mandate; the leash enforces it.  (Today a deposit waiting to be placed still
-  defers it: see the open questions.)
+Only one price against another matters.  A move in the BUCK itself, or in every TOKEN together,
+leans nothing.  As a share's response to its own price:
 
-The Fund step buys the director's pick and the Trim step sells it.  Proceeds wait in the wallet
-between a sale and the buy that is due, so the director never has to catch a falling knife to stay
-invested.  Its outputs are hints, not authority: it holds no funds, and every step it steers marks
-the credit first and trades at most 1% of a pool's depth.  A stale or adversarial director can
-mis-time trades within those bounds; it cannot move value out of the basket.
+| How the TOKEN is held                     | Share moves with price to the power |
+|-------------------------------------------+-------------------------------------|
+| In a wallet, untouched                    | +1                                  |
+| In the pools, untouched                   | +1/2                                |
+| Restored to its declared weight (tilt 0)  | 0                                   |
+| Tilt 1/2                                  | -1/2                                |
+| Tilt 1                                    | -1                                  |
 
-*On pools, the value is in the lean.*  The gated-portfolio numbers above are for held tokens.  In
-the basket the pools already do the continuous part, so on synthetic worlds (below) the gate alone
-adds little -- a pool's weight moves only half its price move, and the pool already sells into every
-run.  The lean adds the most, and the gate becomes the regime knob:
+With a tilt the basket sells a TOKEN that stands above its reference to below its declared weight,
+and buys it back as the price returns.  That is a bet on the price returning, and it is the bet
+the basket exists to make.  The reference price is the price the constituent joined at unless
+governance sets another.  The tilt is 1/2 in the lab, and no target leans by more than 15% of its
+declared weight.
 
-| over the arbitrage alone, a year (tilt 1 / 2) | slow cycles | fast reversion | random walk |
-|-----------------------------------------------+-------------+----------------+-------------|
-| ungated                                       | -0.1 / +0.3 | +2.7 / +4.5    | 0.0 / -0.3  |
-| quorum 4 of 6                                 | +1.9 / +3.7 | +0.2 / +0.5    | -0.1 / -0.4 |
+*The book.*  Those shares are shares of a /book/, and the book leans too, against the BUCK's own
+price and on one side only:
 
-In momentum cycles the gate is what makes the lean pay; in memoryless reversion it costs, by
-trading late; in a walk every setting is noise.  The longer the anchor, the better the lean (320
-days: +1.1%; 1280 days: +1.6%; all but fixed: +1.9%, at tilt 1 in the cycle world).  An anchor's
-risk is a permanent repricing, which the leash bounds.  Timing beats volume: every setting that
-bought more gross harvest with more turnover lost it again in a trend.
+#+BEGIN_EXAMPLE
+    book  =  equity + aim
+    aim   =  - gain x (the basket's cost in BUCKs - 1) x equity     while the BUCK is cheap
+    aim   =  0                                                      while it is dear
+#+END_EXAMPLE
+
+While the BUCK is cheap the book is smaller than equity: TOKEN is sold and BUCKs held.  The basket
+has then taken its BUCKs while they were cheap, before the fall in =K= that a cheap BUCK brings.
+While the BUCK is dear the book is the size of its equity: the basket lets no BUCKs out because of
+that.  The two sides are not alike.  A basket holding cheap BUCKs can lose what it paid.  A basket
+short of a dear BUCK loses without bound while the BUCK goes on rising.
+
+* When to trade
+:PROPERTIES:
+:CUSTOM_ID: policy
+:END:
+
+A target says where a constituent should stand.  It does not say when to go there.  A rebalancer
+that follows its target at once sells a riser all the way up, paying fees and bleeding against
+the trend.  Measured on a portfolio of held tokens over twenty synthetic years, policies that
+waited for an excursion to level off collected 75-90% of continuous rebalancing's premium on
+30-55% of its turnover.  So a small policy (=PairRebalancePolicy=) stands between the targets and
+the trades.  It owns no assets and authorizes no spending.  It answers two questions.
+
+** Which gaps may be worked: urgency
+:PROPERTIES:
+:CUSTOM_ID: urgency
+:END:
+
+A fixed band is the wrong shape.  A share 1.9 points off for a month never qualifies, and one
+that touches 2.1 for an hour does.  So each constituent keeps a count:
+
+#+BEGIN_EXAMPLE
+    urgency  <-  urgency + (|gap| - slack) x time elapsed      kept between zero and patience
+    urgency  <-  zero       when the gap changes side
+    the gap may be worked while urgency = patience
+#+END_EXAMPLE
+
+=gap= is the constituent's distance from its target, as a share of the book.  With a slack of a
+quarter point and a patience of two point-days, a gap of 2.25 points qualifies in a day, 1.25 in
+two, and a quarter point never does.  A trade does not restart the count: a gap that has
+qualified stays open while it is worked off, and closes once it is back inside the slack.
+
+This is a CUSUM, the cumulative-sum test for a small shift that persists.  It decides only
+/whether/.
+
+** How fast: desire
+:PROPERTIES:
+:CUSTOM_ID: desire
+:END:
+
+For an ordered pair (sell /a/, buy /b/) the policy returns a /rate/: the fraction of what remains
+of the gap to close per day.  A rate of ln 2 halves the gap each day.
+
+1. /The evidence must be current./  Every route ready and freshly sampled.  Otherwise zero.
+2. /The pair must have parted./  The log price of /a/ against /b/ must stand more than 1% above
+   its accepted reference, on the filtered level and on every live pool.
+3. /Let a run run./  While /a/ is still gaining on /b/ the rate is held back.  It is released as
+   the pair's rate /falls/: the fall over one response time, measured against the filter's
+   allowance, is the brake coming off.
+4. /A pair that is closing is worked./  When even the upper allowance on the rate is below zero the
+   pair is coming back, and the rate rises with the policy's confidence in that.
+5. /A ceiling./  The sum is capped: ln 2 a day in the lab.
+
+The basket's own recent trades move the pools it reads.  It reports the tick change it caused, and
+the policy widens its allowance by that much, fading over two days, so the basket does not
+mistake its own footprint for the market turning.
+
+** How much now: release
+:PROPERTIES:
+:CUSTOM_ID: release
+:END:
+
+A rate becomes an amount through an /allowance/: the rate a constituent has been worked at, summed
+over the time since it last traded.
+
+#+BEGIN_EXAMPLE
+    allowance  <-  allowance + rate x time elapsed       an unobserved stretch earns a day at most
+    allowance  <-  zero                                  when it trades, or is no longer worked
+    share of the gap to move now  =  1 - exp(-allowance)
+#+END_EXAMPLE
+
+This composes exactly.  A day at a rate of ln 2 moves half the gap whether the wheel turns once
+that day or in every block, and a turn too small to trade loses nothing: its allowance carries to
+the next.  The pace does not depend on who calls, or how often.
+
+* The upkeep
+:PROPERTIES:
+:CUSTOM_ID: upkeep
+:END:
+
+The wheel turns three kinds of step on the basket (=BasketUpkeepFacet=).
+
+- *Daily.*  Once a day: settle the relief against the lien and mark the credit.
+- *Sync(i).*  Once a day for each pool: collect the position's fees and mark.
+- *Respond.*  At most once an interval (30 minutes in the lab): observe, then the three things
+  below, in order.
+
+*Pair what waits.*  Every constituent's wallet TOKEN is paired with issued BUCKs, at once and in
+full.  This swaps nothing.  The BUCKs stay in the position, so each marking gives the room back.
+
+*Size the book and find each gap.*  The book is equity plus the aim.  Each constituent's target is
+its leaned share of that book, and its gap is the TOKEN it holds less that target.  The gaps are
+reported to the policy.
+
+*Work each constituent on its own.*  One over its target is sold, and one under it is bought.
+Neither needs the other: the credit line carries the difference.  The rate is the policy's
+desire for this constituent against each of the others, weighed by their declared weights.  The
+amount is the gap times its release, capped at 5% of the holding a turn and 1% of the pool's depth
+a swap.  A sale takes wallet TOKEN first, then burns liquidity: a position gives up TOKEN and BUCKs
+in equal value, so twice the remainder is burned and its TOKEN sold.  A purchase buys TOKEN with
+half its budget and pairs it with the other half.  The credit is marked after the sales and after
+each purchase.
+
+Two rules act with no view on prices and ask the policy nothing.
+
+- *The leash.*  A constituent more than 30% of its declared weight from its declared share is
+  worked toward its target at once.  The lean times the mandate; the leash enforces it.
+- *The ceiling.*  BUCKs let out beyond half of =K x equity= are bought back at once, every
+  constituent giving its share.  A large exit is paid first and sold down over the next turns.
+
+The venue (=BasketVenueFacet=) is Uniswap V3 with nothing optional.  A missing TWAP is an
+unavailable price.  A swap must execute within a tolerance of the TWAP and leave the spot within
+it, or the step reverts.
 
 * The desk: monetary operations
 :PROPERTIES:
@@ -353,56 +504,57 @@ bought more gross harvest with more turnover lost it again in a trend.
 :END:
 
 =BUCK_K= is sound and slow.  It reaches the economy only through credit limits, and a credit book
-turns over in months; an attacker with real money can push BUCK off parity in days.  The desk is
-the fast actuator: =K= sets the standing policy, the desk runs the operations -- the division a
-central bank makes between its policy rate and its open-market desk.
+turns over in months; someone with real money can push the BUCK off parity in days.  The division of
+work is the one a central bank makes between its policy rate and its open-market desk.
 
-** The four quadrants
+The basket and the desk are separate concerns.  The basket earns on its constituents returning to
+one another.  The desk puts its own capital to work on excursions of the BUCK itself, which =K= will
+in time reverse, so it is paid when the BUCK returns to its basket.
+
+** What it does
 :PROPERTIES:
 :CUSTOM_ID: quadrants
 :END:
 
-Two questions decide an operation: is BUCK cheap or dear, and has the excursion turned or is it
-persisting?
+Two questions decide an operation: is the BUCK cheap or dear, and has the excursion lasted?
 
 #+BEGIN_EXAMPLE
                    BUCK CHEAP                    BUCK DEAR
-                   (basket costs more BUCK)      (basket costs less BUCK)
+                   (basket costs more BUCKs)     (basket costs less BUCKs)
 
-  REVERTING     Q1 ABSORB: buy BUCK, hold     Q3 SUPPLY: sell held BUCK
+  ON ANY ADVICE    buy BUCKs with TOKEN, hold    sell BUCKs it holds
                    supply unchanged              supply unchanged
 
-  PERSISTENT    Q2 RETIRE: buy BUCK back      Q4 ISSUE: draw BUCK and
-  (past the        against its own issue         sell it for TOKEN
-  leash N days)    supply falls                  supply rises
+  AFTER 30 DAYS    buy back what it issued       draw BUCKs on its credit
+  ON ONE SIDE      supply falls                  and sell them; supply rises
 #+END_EXAMPLE
 
-Q1 and Q3 are repo: what Q1 absorbs, Q3 releases when the deviation turns.  Q2 and Q4 are outright
-and change the size of the balance sheet; they are reached only when the deviation has stayed past
-the leash for =N= consecutive days.  Persistence is a duration, not a velocity -- a short-window
-velocity changes sign on noise, and an early model built on it never once reported "persisting",
-leaving the outright quadrants inert while everything looked healthy.
+- *A band.*  The desk takes a side when the BUCK is more than 3% from its basket, and leaves it when
+  the BUCK is back within 2%.  Inside the band it does nothing.  That ground is left to holders who
+  profit by closing it, to the basket's own lean, and to =K=.
+- *Persistence.*  It counts the days running that the BUCK has been outside the band on one side.  A
+  missed day, a reversal or a return clears the count.  With what it holds the desk trades on any
+  advice.  It draws credit, which changes supply, only after thirty days.
+- *Effort.*  A quarter of the error beyond the release band, capped at 40 basis points of its size
+  an operation, and only while TWAP and spot agree on the side.
+- *A guard.*  After the trade the spot must still be outside the release band on the same side, or
+  the operation reverts.  The desk cannot spend through to parity; that is =K='s to do.
+- *Limits.*  A lifetime turnover budget that nothing refills, a floor on its net value, caps on
+  its position and on the credit it has drawn, and Buck's own limit on its lien.
 
-The signal is the common mode: a ladder of EMAs of the basket's value in BUCK against par, with a
-deadband, a leash and the persistence counter, from which a director publishes a signed effort.
-(It was first the legs' mean tick, which drifts from the basket as the commodities diverge; a desk
-on that signal sat one-sided at its cap for two years.)
-
-*Issue and retire on its own credit.*  The desk issues by spending its own credit, so Buck caps its
-lien at =K= times its own value.  It retires by buying: circulating supply is the sum of positive
-balances, so BUCK bought while the desk's balance is drawn repays its lien and leaves circulation,
-and BUCK bought beyond the draw is merely held.  The desk can retire only as much as it has issued.
-
-** Measure fast enough, or become the destabilizer
+** Why it is built this way
 :PROPERTIES:
 :CUSTOM_ID: lag
 :END:
 
-The desk trades on a value read from the pools it trades in, so the obvious guard is a slow signal
-that one bounded operation cannot move.  It is exactly wrong.  In the model (below), measuring on a
-160-day EMA attenuated a 1645 bp excursion to 712 bp; that attenuation is phase lag.  Operations
-arrived after the spot had turned, landed pro-cyclically, and grew the peak to 2116 bp -- while
-making money.
+Each rule above is a lesson from an earlier, freer desk (=alberta_buck/sim/monetary_ops.py= is
+its model).
+
+*Measure fast enough, or become the destabilizer.*  The desk trades on a value read from the pools
+it trades in, so the obvious guard is a slow average that one operation cannot move.  It is
+exactly wrong.  Measuring on a 160-day average attenuated a 1645 bp excursion to 712 bp; that
+attenuation is phase lag.  Operations arrived after the spot had turned, landed pro-cyclically,
+and grew the peak to 2116 bp -- while making money.
 
 #+BEGIN_QUOTE
 Profitability and stabilization are not the same objective.  "The corrective trade is the
@@ -410,73 +562,32 @@ profitable trade" holds only when the signal is timely; with lag they come apart
 operator is a profitable destabilizer.
 #+END_QUOTE
 
-Measured across the ladder on an inflation attack, the peak grows with the measuring window (10
-days: 1004 bp; 20: 1074; 40: 1185; 80: 1344), and past about 80 days the outright operations
-/invert/: the lagged reading still says "dear" after the market has gone cheap, and answers an
-inflation attack by issuing.  That is a correctness bound, not a preference.  The desk measures on
-the 20-day rung, and its per-operation bound keeps it too small to dominate a 20-day average.
+So this desk reads parity raw, and its guard is on the spot after the trade.
 
-** Three bounds, three runaways
-:PROPERTIES:
-:CUSTOM_ID: runaways
-:END:
+*An operator can silence its own alarm.*  Tested against a /genuine/ revaluation -- commodities
+really are worth 8% more BUCKs, and stay there -- the earlier desk bought until it held half the
+pool it traded in, showing a profit the whole way on a position it could not have unwound.
+Bounding its inventory moved the runaway: it then burned most of the supply chasing a gap 8% would
+have closed.  A bounded operator needs separate bounds on the /flow/, on the /position/ and on
+its /cumulative/ work.  This desk has all three, and a persistence count taken from the market's
+price, not from its own book.
 
-The test that matters is a /genuine/ revaluation -- commodities really are worth 8% more BUCK, and
-stay there -- because a desk that profits in every scenario is not being tested.  It exposed three
-unbounded behaviours, each invisible until the one before it was fixed:
+*A desk defends only with reserves it already holds* -- the lesson of the 1992 ERM crisis.  So it
+is founded with a grant of TOKEN, its own collateral.
 
-1. *The operator suppresses its own alarm.*  Absorbing holds the measured deviation down -- that is
-   what absorbing /is/ -- so a persistence test on that deviation is silenced by the act it
-   polices.  The desk bought until it held half the pool, never escalated, and showed a profit the
-   whole way on a mark of a position it could not have unwound.  The fix: bound the /inventory/,
-   the one signal the operator's action cannot suppress, because it is the operator's action.  At
-   its ceiling the desk stops absorbing, the real move shows through to the persistence test, and
-   the escalation retires the inventory first.
-2. *The fix relocated the runaway.*  With the inventory bounded the position held, and the desk burned
-   93% of all supply chasing a gap 8% would have closed.  The fix: a cumulative bound on outright
-   operations.  A central bank announces a programme's size; it does not run the desk until the
-   number comes right.
-3. *Only then did the failure test pass honestly*: the revaluation lost money in 7 seeds of 9, and
-   moved supply by the right amount in the right direction.
+*K reads the price alone.*  Every design that fed a desk's position into =K= pinned =K= at its
+ceiling somewhere.  Nothing the desk holds or has drawn reaches the controller.
 
-A bounded operator needs bounds on the /flow/ (=maxLegBp=, each operation a fraction of the pool's
-BUCK depth, so the desk cannot drag a pool's spot far from the TWAP the basket marks against), on
-the /position/ (=maxPositionBp=, inventory against the basket's equity), and on the /cumulative
-balance sheet/ (=maxOutrightBp=).  They are three
-different constraints, not three settings of one.  They are also where the desk's mandate meets
-=K='s: bounds that stop the desk substituting a fast fix for the slow withdrawal of credit that
-=K= performs.
-
-*Extracting and stabilizing are the same budget spent twice.*  Q1 and Q3 extract: buy the dump,
-sell the recovery, keep the spread.  Q2 forgoes that recovery to buy a permanent supply reduction,
-whose gain accrues to every holder rather than the desk.  In the chain simulation a desk that
-escalated to Q2 lost 0.5-2.0M on its own book and retired slightly /more/ float than it spent (1.03
-and 1.22 BUCK per BUCK), buying at a discount and destroying it.  A desk tuned to extract holds and
-sells; one tuned to stabilize burns; the persistence test lets it do the first by default and the
-second only when the move proves real.
-
-*The desk's position is a bet that K forces the issue.*  It buys what the market dumps and holds
-while =K= tightens credit behind it, so interim mark-to-market is the wrong scorecard.  What would
-break the bet is the desk damping the excursion so well that =K='s error vanishes and the forcing
-never arrives -- the first runaway again, one loop further out.  The desk publishes what its
-inventory has taken out of the deviation =K= sees (=monetaryDeviationOffset=), for the controller
-to act on once it is measured.
-
-*A desk defends only with reserves it already holds* -- the lesson of the 1992 ERM crisis.  Q1 is a
-TOKEN-funded bid, and in a reverting world BUCK is rarely dear, so a desk never accumulates by
-itself; uncapitalized, it wanted to act on 57 days of 90 and had nothing to act with.  So it is
-founded with a grant of TOKEN, its own collateral.
-
-** A separate machine
+** A separate account
 :PROPERTIES:
 :CUSTOM_ID: separate
 :END:
 
-Beside the equity basket the desk is =EquityDesk=: a separate contract with its own account at Buck,
-its own marked credit (marked at its own net value: its TOKEN at the low marks, plus its account
-and the relief accrued on it), its own founding grant, and its own work wheel.  From the basket it
-reads two things: its equity, which sizes the desk's bounds, and its constituents, so the desk
-trades in the same pools through the same venue facet.
+The desk is =BasketDesk=: a separate contract with its own account at Buck, its own marked credit
+(marked at its own net value: its TOKEN at the low marks, plus its account and the relief accrued
+on it), and its own founding grant.  From the basket it reads two things: its equity, which sizes
+the desk's bounds, and its constituents, so the desk trades in the same pools through the same
+venue.
 
 - D1: the desk spends only after a mark at its own net value, so Buck holds its lien within =K x=
   that value.
@@ -484,11 +595,9 @@ trades in the same pools through the same venue facet.
 - D3: the relief on the desk's lien is the desk's, and melts its outstanding issuance.
 
 The rule behind it: Buck keys everything by address -- one balance, one lien, one limit per account
--- so bookkeeping sub-accounts inside one contract are invisible to it.  The desk was first built as
-one, and in the savings sandbox its founding grant quietly raised the depositors' limit: a lien of
-6.3M on 5.8M of equity at =K = 0.75=.  Two machines now means two contracts, two accounts, two
-credits and two wheels.  A fuzzing suite (=test/basket/EquityDeskInvariant.t.sol=) checks the wall
-after every call; inflating the basket's mark by 2% makes it fail.
+-- so bookkeeping sub-accounts inside one contract are invisible to it.  The desk was first built
+as one, and its founding grant quietly raised the depositors' limit.  A fuzzing suite
+(=test/basket/BasketDeskInvariant.t.sol=) now checks the wall after every call.
 
 * The work wheel
 :PROPERTIES:
@@ -496,19 +605,26 @@ after every call; inflating the basket's mark by 2% makes it fail.
 :END:
 
 Someone has to notice the work and send the transaction.  The basket does not wait for a keeper
-paid by the hour: its work runs on a /work wheel/, a bounded state machine any caller advances with
-=tick(maxWork, maxScan)=, which does each block's work once however many callers there are.
+paid by the hour: its work runs on a /work wheel/ (=BasketMachineWheel=), a bounded state machine
+any caller advances with =tick(maxWork, maxScan)=, which does each block's work once however many
+callers there are.
 
-- *Slots over task kinds.*  Each kind of work owns a range of slots, and a cursor walks them round
-  robin.  The equity basket's components are 2N + 3 slots: Daily (the flow estimate, the relief,
-  the director's sample), Sync and Deploy for each of N pools, Fund and Trim.  The consistency
-  cycles are one slot per triangle.  The controller's =compute=, the director's refresh and the
-  desk's operation are kinds too.  Kinds are Solidity mixins over a common chassis, so a wheel is
-  assembled from the kinds it wants, and a kind with no target has no slots.  One engine,
-  =BasketWheel=, is instantiated per machine: the basket's wheel carries the basket's kinds, the
-  desk's carries only the desk's.
-- *Each step is small.*  Every component step marks the credit first, and trades at most 1% of a
-  pool's depth, so the outside arbitrage re-pins between steps and no step moves a price far.
+- *Slots.*  A cursor walks the slots round robin, and each is due or not:
+
+  | Slot            | What it does                                               |
+  |-----------------+------------------------------------------------------------|
+  | Sample          | reads parity                                               |
+  | Compute         | runs the K controller's cycle                              |
+  | Ops             | one operation of the desk                                  |
+  | Daily           | the basket's relief and mark                               |
+  | Sync, per pool  | collects that pool's fees                                  |
+  | Respond         | pairs what waits and works the gaps                        |
+  | Arb, per TOKEN  | a consistency cycle, taken only at a realized profit       |
+
+  Sample comes first, so every other slot acts on a market already read, and no trade of the same
+  turn can spoil the reading.  A target that fails cannot trap the cursor.
+- *Each step is small.*  Every step marks the credit first and trades at most 1% of a pool's depth,
+  so the outside arbitrage re-pins between steps and no step moves a price far.
 - *Amortizing the scan.*  Deciding whether an arbitrage slot is due costs three cold pool reads,
   about 14,000 gas.  A call examines at most =maxScan= slots, the cursor moves past every slot
   examined, and the block is marked idle only once consecutive calls have found every slot not due.
@@ -517,22 +633,11 @@ paid by the hour: its work runs on a /work wheel/, a bounded state machine any c
 - *A clock per chain.*  The wheel keys its work to the chain's own block number; where that is not
   the chain's own (Arbitrum reports the L1's), a small adapter supplies the right one.
 
-Folded into a transaction a caller sends anyway, a tick whose block is done costs a few thousand
-gas.  A working tick costs what its work costs: about 365,000 gas for a cycle.
-
-*Time without a scheduler.*  Moving averages advance with time, and the EVM has no clock that runs
-unasked.  The answer is the pattern behind Compound's =accrueInterest= and Maker's =drip=: advance
-state on first touch, as a closed function of elapsed time.  Under sample-and-hold, /n/ missed
-epochs of an EMA with decay /q/ collapse exactly,
-
-#+BEGIN_EXAMPLE
-    m'  =  x + (m - x) q^n
-#+END_EXAMPLE
-
-in O(log n) by binary exponentiation (with a matching closed form for its velocity), so a poke after
-a quiet month costs the same as one after a busy hour and lands where /n/ diligent pokes would have.
-Work is conserved: triggering more often trades per-call gas against staleness, never total cost.
-Both directors do this.
+*Time without a scheduler.*  The EVM has no clock that runs unasked, and the wheel may be turned
+every block or once a day.  Nothing in the machine counts turns.  The filter's gains, the urgency
+count and the release allowance are all closed functions of the time elapsed since they were last
+touched, so the basket lands in the same place however often it is called.  An unobserved stretch
+is credited one day at most: silence earns no authority to trade.
 
 ** Paying the caller
 :PROPERTIES:
@@ -544,153 +649,209 @@ the price of ETH.
 
 - *No cure, no pay.*  A tick pays only for work done.  Callers simulate first and send only when
   there is work; an idle call is the caller's loss, never the basket's.
-- *A share of the value.*  A kind that captures value pays its caller a share /s/ of it.  A caller
+- *A share of the value.*  A slot that captures value pays its caller a share /s/ of it.  A caller
   calls when /s/ x value exceeds its gas, so the action margin sets itself per chain: on an L1 the
   wheel acts on large gaps, on a rollup on small ones.
 - *A reserve for the work that captures nothing.*  Upkeep earns nothing by itself.  A slice of the
-  yield flows into a reserve, and each working tick pays its caller /kappa/ of the reserve's
-  balance.  The reserve builds when the wheel is under-called and pays less when it is over-called;
-  at equilibrium a working tick pays the funding rate over the calling rate, and callers call until
-  that equals their gas.  The calling rate sets itself, with no oracle.  A cap sends the excess to
-  the basket: the reserve is a gas budget, not a second yield.
+  basket's income flows into a reserve, and each working tick pays its caller /kappa/ of the
+  reserve's balance.  The reserve builds when the wheel is under-called and pays less when it is
+  over-called; at equilibrium a working tick pays the funding rate over the calling rate, and
+  callers call until that equals their gas.  The calling rate sets itself, with no oracle.  A cap
+  sends the excess to the basket: the reserve is a gas budget, not a second yield.
 - *Competition is harmless.*  Callers racing for a tick bid their priority fees up to the pay less
   their gas; that transfer is the block builder's, out of the pay.  The basket's cost is fixed at
   /s/ and /kappa/.
+
+The reserve and its pay are built.  The slice is agreed -- a tenth of the fees and the arbitrage
+credited to the basket -- and not yet wired, so no result below is net of it.
 
 * What the simulations say
 :PROPERTIES:
 :CUSTOM_ID: evidence
 :END:
 
-*Synthetic worlds* (=alberta_buck/sim/basket_harvest.py=): independent TOKENs at about 1.5% a day in
+There are three kinds of evidence here, and they are not equally strong.
+
+** A model of the pools
+:PROPERTIES:
+:CUSTOM_ID: evidence-model
+:END:
+
+Synthetic worlds (=alberta_buck/sim/basket_harvest.py=): independent TOKENs at about 1.5% a day in
 three regimes -- fast reversion (a 10-day half-life), slow damped cycles with momentum, and a
 random walk as the control -- with an outside arbitrageur re-pinning every pool each step.  Eight
-seeds over four years; a year's return over simply holding the starting commodities ("pools
-alone" is the basket with no arbitrage of its own):
+seeds over four years; a year's return over simply holding the starting commodities:
 
-| regime         | pools alone | + the basket's arbitrage | + the lean, turn-gated |
-|----------------+-------------+--------------------------+------------------------|
-| fast reversion | +0.66%      | +1.63%                   | +1.88%                 |
-| slow cycles    | +1.09%      | +1.52%                   | +3.24%                 |
-| random walk    | -1.19%      | +0.55%                   | +0.35%                 |
+| regime         | pools alone | with the basket's own arbitrage |
+|----------------+-------------+---------------------------------|
+| fast reversion | +0.66%      | +1.63%                          |
+| slow cycles    | +1.09%      | +1.52%                          |
+| random walk    | -1.19%      | +0.55%                          |
 
 The basket's arbitrage recaptures what the outsiders took, to the basis point.  Costless, perfect
 rebalancing at the market price would have earned 2.6% in the fast world: pools alone keep about a
-quarter of it, and the arbitrage lifts that to about two thirds.  With realistic flows -- two
-arrivals a day, sixty-day holds -- a long-term holder earned about 3% a year, because deposits and
-exits net inside the wallet and an exit touches no pool.
+quarter of it, and the arbitrage lifts that to about two thirds.
 
-*The desk, modelled* (=alberta_buck/sim/monetary_ops.py=): the pools abstracted to one price with
-constant-product impact, reverting on a 120-day timescale; an attacker sells 6M BUCK over 20 days,
-holds 60, then buys back to retire the credit that funded it; 30 bp a leg; nine seeds.
+** The lab
+:PROPERTIES:
+:CUSTOM_ID: evidence-lab
+:END:
 
-| scenario                   | peak deviation off -> on | desk P&L  | desk profitable |
-|----------------------------+--------------------------+-----------+-----------------|
-| inflation attack           | 1538 -> 1099 bp          | +603,772  | 9 of 9          |
-| squeeze                    | 1366 -> 1274 bp          | +491,509  | 9 of 9          |
-| genuine 8% revaluation     | 1141 -> 870 bp           | -96,234   | 2 of 9          |
-| quiet                      | 760 -> 509 bp            | +147,392  | 9 of 9          |
+The lab (=alberta_buck/sim/control_lab/=) runs the real contracts for 120 days on three TOKENs
+with a basket that starts at one million BUCKs.  The wheel turns four times a day.  Every gain is
+measured against the same basket doing no rebalancing, valued at outside prices.  Its price
+shapes are made up, and its cycles are far faster than real commodities, so read it for which
+rule matters, not for what a basket earns.
 
-#+CAPTION: The desk model, operations off and on.  Left: the deviation the market experiences.  Middle: who pays -- the attacker's mark against the desk's.  Right: BUCK supply, which only the outright quadrants move.  Rows: inflation attack, squeeze, genuine revaluation ("drift", which the desk loses), quiet.
-#+ATTR_LATEX: :width \textwidth
-#+ATTR_HTML: :width 100%
-[[./images/basket-operations.png]]
+*The lean does most of the work.*  Gain over 120 days, in BUCKs, on the one-million basket:
 
-The excursion is damped every time; the desk is paid for absorbing it where the move is not real,
-and loses where it is.  Each attacker was worse off in nine seeds of nine.  That the same machinery
-/loses/ to a real move is the property that makes the rest trustworthy.
+| Prices                      | No lean | Tilt 1/4 | Tilt 1/2 | Tilt 1   |
+|-----------------------------+---------+----------+----------+----------|
+| Clean cycles                | +54,908 | +76,611  | +96,241  | +131,337 |
+| Commodity-like              | +20,764 | +26,888  | +34,633  | +47,822  |
+| One TOKEN reprices for good | -3,940  | -5,803   | -7,787   | -11,410  |
 
-*A simulated economy* (=alberta_buck/sim/=): the real contracts on an in-process EVM, six commodity
-TOKENs on their 2020-2025 price histories, the controller, depositors, savers, debtors and a cast of
-arbitrageurs.  These runs predate the equity basket: the cycles and the desk ran on the pro-rata
-basket it replaced.
+Every step up in the tilt buys more of both: more gain where prices return, more loss where one
+does not.  At one half the loss on the one-way move is 0.7% of the basket.
 
-- The cycles captured 2-3% of the basket's value a year in the first calm months, and about 1.3% a
-  year over two years; their calls paid for themselves even at 5-gwei L1 gas.  About half came
-  from gaps the outside arbitrageurs would have closed.
-- The gauge became truer: the basket's value in BUCK, against its value at the commodities'
-  reference prices, erred a third less at the median and 43% less at the 90th percentile.
-- Through two years of shocks -- demand and supply at one and four times a whale's budget, slow
-  grinds, cohorts of debtors, a book-loading attack, a liquidity exit -- nothing broke, the gauge was
-  truer on every run, and the wheel transmitted shocks without amplifying them: BUCK's dollar price
-  swung less, while the basket's pools, which now followed the market, took part of each
-  dislocation and were paid for it.
-- The contract desk cut the peak deviation in both seeds tried (1143 -> 768 bp, 1083 -> 914 bp) and
-  the mean in both.  An earlier desk run from outside the basket, as an ordinary agent, had cut the
-  peak by a third on one seed -- and made it worse on the next two.  What replicated was narrower:
-  the mean deviation fell every time.  A peak-damping figure from one seed is noise.
+*The pace does not depend on the calling.*  Turned 24 times a day in place of 4, the basket moves
+the same BUCKs for the same gain, in two or three times as many pieces.  Between half a day and
+two days, how fast a gap is released hardly matters.
 
-Two cautions.  The simulated arbitrageurs demand a 60-basis-point edge over the fees, so they leave
-wider gaps than competitive searchers would; against a real market the wheel's take will be
-smaller.  And the two-year experiments are being rerun on the equity basket and the corrected
-Jubilee accounting now.
+*A count beats a band.*  The urgency count earns about half again what a fixed two-point band
+does, and makes more trades to do it.  Per trade the band earns more, so which is better depends
+on what a trade costs, and that waits for the callers to be paid.
+
+*On realistic prices rebalancing is a small bonus.*  Fifty years of data say basic commodities
+follow inflation, each with its own delay: six of eight series stayed within 0.3% a year of it.
+A lab run built that way, a decade long, had the basket's cost rise 47% in dollars.  The BUCK kept
+pace, within 0.3% of its basket on average, and rebalancing added 2.3% over the decade.  On this
+evidence the basket's first job is to hold value through inflation.
+
+*The arbitrage is real, and small.*  Against a deep outside market, owning the cycles was worth
+7,000 to 19,000 BUCKs on the one-million basket in 120 days, more where prices are noisy.  It comes
+from one simulated arbitrageur with no competitor.  Do not count on it.
+
+*What it costs.*  The upkeep is about 8 million gas a day at four turns a day, nearly all of it
+trading.  Gas does not grow with the basket and the gain does, so there is a size below which
+upkeep costs more than it earns, much smaller on a rollup than on an L1.
+
+** A simulated economy
+:PROPERTIES:
+:CUSTOM_ID: evidence-economy
+:END:
+
+The strongest test runs the real contracts for five years on an in-process EVM
+(=alberta_buck/sim/=): five commodity TOKENs -- labour, construction, food, energy and gold -- on
+their real price histories, and on a copy made to revert; depositors who come and go; households
+refinancing mortgages into BUCKs; savers; arbitrageurs; the K controller; the desk; and the wheel,
+turned twice a day.
+
+| Five years                                      | Real prices  | Reverting prices |
+|                                                 | (two seeds)  | (two seeds)      |
+|-------------------------------------------------+--------------+------------------|
+| A share, from 1.00                              | 1.19, 1.29   | 1.28, 1.40       |
+| Ahead of holding the same commodities           | +17%, +29%   | +26%, +41%       |
+| The BUCK from its basket, on average            | 0.5%, 0.8%   | 0.5%, 0.8%       |
+| The same, at its worst                          | 3.1%, 5.0%   | 4.0%, 4.4%       |
+| =K=, from 0.72, at the end                      | 0.74, 0.76   | 0.77, 0.77       |
+| Equity it could spend on an exit, at the least  | 62%, 69%     | 66%, 67%         |
+
+That is 3 to 5% a year over holding on real prices, and 5 to 7% where prices revert.  =K= stays
+in the middle of its range, and the BUCK within a percent of its basket on average.
+
+The net mark is most of it.  The same shell marked plainly, with the upkeep that mark needs,
+ended 4 to 7% behind in all four runs, and on three days in four had under 5% of its equity to
+spend on an exit, because pairing used its whole limit.
+
+*Harder casts.*  The same contracts ran five years in other worlds built to strain them: waves of
+households arriving to refinance, debtors saving their surplus into the basket, forced excursions
+of the BUCK, an arbitrage raid.  In the five that have finished, the BUCK stayed within half a
+percent of its basket on average.  In three of them =K= ended near its upper limit of 0.95.  A
+start far from parity carried it there in the first month, and with the BUCK back at parity
+nothing pulled it down again.
+
+** The desk
+:PROPERTIES:
+:CUSTOM_ID: evidence-desk
+:END:
+
+The desk made no trade in any of the lab's 310 runs, and few in the simulated economy.  The BUCK
+seldom left its band, and never for the thirty days the desk waits before it issues.  That is
+what a desk beyond a band should do when the band holds.  It also means nothing here tests the
+desk.  Its rules are lessons from an earlier desk's model ([[#lag][above]]), not measurements of
+this one.
+
+** Cautions
+:PROPERTIES:
+:CUSTOM_ID: cautions
+:END:
+
+- The simulated arbitrageurs demand a 60-basis-point edge over the fees, so they leave wider gaps
+  than competitive searchers would.  Against a real market the wheel's take will be smaller.
+- Nothing above is net of gas, or of what the wheel's callers would be paid.
+- A simulated economy is only as good as its cast.  An earlier cast, written for a different
+  basket, kept every BUCK an exit paid it and spent none.  That manufactured a shortage of BUCKs
+  which drove =K= to its limit, and for a while it looked like a flaw in the basket.  Reading
+  every account's balance found it.  When a world shows a pressure that never lets up, look for
+  an agent that never closes its loop.
+- Two seeds of the economy, and one of the lab.
 
 * Open questions
 :PROPERTIES:
 :CUSTOM_ID: open
 :END:
 
-1. *A competitive market.*  How much remains when real searchers compete the large gaps down to
-   gas, whether thinning their participation widens the gaps beyond the wheel's reach, and which of
-   a v4 hook or an auction for the right to go first should take the gaps v3 must race for.
-2. *Leverage through a K cut.*  Drawing the full =K= on each deposit keeps the basket more levered
-   through a cut (a lien of 0.92 of equity at the stress peak, against 0.80), with returns within
-   noise.  The paced Trim is the only repayment, by design; whether its pace is right is open.
-3. *Depositors as shock absorbers.*  Pools that follow the market carry BUCK's moves into the
-   depositors' positions.  They were paid for transient shocks; under a persistent increase in
-   supply their realized profit on the calm runs fell to nothing.  Whether the wheel or the cast
-   did that is not yet separated.
-4. *A residual oscillation.*  With the agents' decisions randomized, BUCK's dollar price is white
-   noise day to day, but the basket's value and =K= still reverse direction more often than noise
-   would (about 75% of days against 67%).  Some loop still overshoots; it predates the equity
-   basket.
-5. *The desk and K.*  Whether a successful desk starves =K= of the error it needs, and whether the
-   controller should then read the undamped error or feed the desk's achieved action back to its
-   integrator as anti-windup.  The bounds and the founding grant are not converged; they are the
-   sweep that answers it.  A patient attacker, bleeding in over months, is untested; so is the
-   desk and the director competing for the same pool depth.
-6. *The desk's reach.*  It retires only what it has issued.  Opening with a standing book -- part of
-   its line drawn and sold, which funds Q1 and gives Q2 something to retire -- is the remedy an
-   earlier desk used.  =doc/DESK-LP-RESERVE.org= sketches a reserve held as basket shares, pledged.
-7. *Rebalancing under continuous deposits.*  The wheel's Fund and Trim wait for a settled wallet
-   -- no deposit waiting to be placed -- which a growing basket seldom has; in the savings world
-   they never ran in 45 days while legs drifted to twice their declared weight.  Gating by what
-   actually conflicts, letting the leash through, and placing deposits toward the targets are the
-   candidates (=doc/BASKET-EQUITY.org=, section 14).
-8. *The director's bands.*  The 30% leash is hand-set.  Two refinements with firm theory: under
-   proportional costs the optimal policy is a no-trade region, trading only to its /boundary/
-   (Davis and Norman, 1990); and for a reverting spread the optimal thresholds are known in closed
-   form from its reversion rate and volatility (Bertram, 2010).
-9. *The wheel's parameters*: the share /s/, /kappa/, where the callers' reserve is funded from, and
-   capping every leg of a cycle (v1 caps only the first).
-10. *Depth.*  A thin BUCK/USDC pool caps every cycle.  The basket owns no BUCK/USDC position, and
-   should not; who provides that depth is a question for any deployment.
+1. *The desk.*  It needs worlds built to take the BUCK outside its band and hold it there: an
+   attack, a squeeze, a genuine revaluation it should lose to.
+2. *What holds the BUCK inside the band.*  The basket's lean helps on one side, =K= is slow, and the
+   desk waits outside.  The rest is left to holders who profit by closing a gap.  How wide a gap
+   they leave is not measured.
+3. *Paying the callers.*  What the results are net of the reserve, and what the smallest trade
+   worth making is.  Today the basket trades whenever a gap is open, however small the piece, and
+   a turn that trades nothing still re-reads every pool.
+4. *A BUCK that keeps rising.*  The basket's limit is =K= times an equity counted in BUCKs, so a
+   dearer BUCK lowers it, and the basket then buys BUCKs when they are scarcest.  Counting the limit
+   in baskets instead would stop that, at the price of a larger loss should the BUCK never come
+   back.  No world with a sound cast has needed it.
+5. *First values.*  The tilt of one half, the lean against a cheap BUCK, and the ceiling at half
+   of =K x equity= were each chosen once.  Holding cheap BUCKs carries demurrage; whether it pays
+   for that is not settled.
+6. *Demurrage in equity.*  Whether equity should deduct the demurrage on BUCKs held in the pools
+   as it accrues, and not when the BUCKs come back.
+7. *Real speed.*  The lab's cycles are far faster than real commodities.
+8. *Stress.*  A run of large exits, and a cut in =K= to its floor.
+9. *A competitive market.*  How much of the cycles remains when real searchers compete the large
+   gaps down to gas, and which of a v4 hook or an auction for the right to go first should take
+   the gaps v3 must race for.
+10. *Depth.*  A thin BUCK/USDC pool caps every cycle and every exit that is sold for dollars.  The
+    basket owns no BUCK/USDC position, and should not; who provides that depth is a question for
+    any deployment.
 
 * Risks
 :PROPERTIES:
 :CUSTOM_ID: risks
 :END:
 
+- *A price that never returns.*  The lean trusts each constituent's reference price.  When a TOKEN
+  reprices for good the reference is wrong, and the basket stays short of that TOKEN, by at most the
+  cap, until governance corrects it.  The admission rule is the real defence
+  ([[file:alberta-buck-ethereum-basket.org::#the-asset-that-never-reverts][the asset that never comes back]]).
 - *The callbacks and the credits.*  The swap callback must accept only the pool it expects, only
-  inside its own cycle; the cycle entry only from the wheel itself; the basket's credit entry
-  points only from its wheel.  The contracts do all three and test them, unaudited.
+  inside its own cycle; the cycle entry only from the wheel itself; the basket's upkeep only from
+  its wheel.  The contracts do all three and test them, unaudited.
+- *A policy that is wrong.*  The signals and the policy hold no funds.  A stale or adversarial
+  policy can mis-time trades within the caps -- 5% of a holding a turn, 1% of a pool a swap -- and
+  cannot move value out of the basket.
 - *A farmable reserve.*  The share /s/ cannot be farmed: pushing a pool costs more than closing the
   gap returns.  /kappa/ per working tick is not tied to the work's size, so a large reserve might
-  reward many small, cheaply opened gaps.  The minimum edge, the reserve's cap and a pay bounded by
-  the work's value are the defences to test.
-- *Displacing the arbitrageurs.*  If external arbitrageurs thin out, the gaps beyond the wheel's
-  reach may close more slowly.
+  reward many small, cheaply opened gaps.
 - *Gas on an L1.*  A working tick is expensive; on an L1 only large gaps pay, and those are the ones
   searchers race for.  The case is strongest on rollups.
 - *Liveness.*  No calls, no harvest, and new deposits wait in the wallet.  Nothing already placed is
-  at risk, and exits are paid from the wallet or in kind.
-- *A desk that looks healthy.*  Every runaway above showed a profit while it ran.  Watch the desk's
-  inventory beside its P&L, always: a desk that damps a deviation by holding a position it could
-  never unwind has moved the loss, not removed it.
-- *A trending market.*  None of this changes the basket's exposure.  In a secular trend a
-  constant-mix basket still trails a buy-and-hold of the runaway; the director's leash and the
-  admission rule are the only defences
-  ([[file:alberta-buck-ethereum-basket.org::#the-asset-that-never-reverts][the asset that never comes back]]).
+  at risk, and exits are paid from the line or in kind.
+- *A desk that looks healthy.*  Every runaway of the earlier desk showed a profit while it ran.
+  Watch the desk's inventory beside its P&L, always.
 
 * Conclusion
 :PROPERTIES:
@@ -699,12 +860,16 @@ Jubilee accounting now.
 
 The first BuckBasket assumed that the world's arbitrageurs keep it honest and pay it to be kept.
 The first half is true.  The second is only partly true, because the price of keeping a pool honest
-is paid by the pool.  The equity basket brings that work home: it closes its own gaps with cycles
-that need no capital and cannot lose, waits for the tides its pools cannot feel to turn, and lets a
-desk with its own books steady BUCK in days while =K= does the slow work of months.  Anyone who finds
-it worth their gas turns the wheels.  If the early readings survive a competitive market and an
-audit, the savings basket earns a little more -- and its valuation tells the controller the truth a
-little sooner.
+is paid by the pool.
+
+This basket brings the work home.  It counts against its limit only the BUCKs it has let out, so a
+deposit is at work at once and an exit is paid before anything is sold.  It closes its own gaps
+with cycles that need no capital and cannot lose.  It leans each commodity against its price, and
+waits for a run to stop before it trades against it.  A desk with its own books stands outside
+the band, and one wheel that anyone may turn does all of it.
+
+Most of the gain comes from the simplest idea in it: sell what is dear and buy what is cheap,
+among things that come back.  The machinery is there to do that patiently, with nobody in charge.
 
 * References
 :PROPERTIES:
@@ -716,12 +881,10 @@ little sooner.
 - A. Adams, C. C. Moallemi, S. Reynolds, D. Robinson, /am-AMM: An Auction-Managed Automated Market
   Maker/, 2024.
 - E. R. Fernholz, /Stochastic Portfolio Theory/, Springer, 2002.
-- M. H. A. Davis, A. R. Norman, /Portfolio Selection with Transaction Costs/, Mathematics of
-  Operations Research, 1990.
-- W. K. Bertram, /Analytic Solutions for Optimal Statistical Arbitrage Trading/, Physica A, 2010.
+- E. S. Page, /Continuous Inspection Schemes/, Biometrika, 1954 (the cumulative-sum test).
 - R. Cantillon, /Essai sur la Nature du Commerce en General/, 1755.
 - Uniswap Labs, /Uniswap v3 Core/ (2021): the pay-first swap callback; and Uniswap v4's hooks.
-- The design record: =doc/BASKET-EQUITY.org= (the equity basket's rulings and the harvest study),
-  =doc/BASKET-WHEEL.org= (the wheel and its measurements), =doc/BASKET-REBALANCE.md= (the gated
-  policies and the M2 lags), =doc/CONVERGENCE.org= (the experiments), =src/basket/=, =src/wheel/=
-  and =alberta_buck/sim/= (including =monetary_ops.py=, the desk's model).
+- The design record: =doc/BASKET-MACHINE.org= (the machine as built),
+  =doc/BASKET-MACHINE-RESULTS.org= (every measurement here), =doc/BASKET-WHEEL.org= (the wheel's
+  chassis and the cycles), =doc/BASKET-REBALANCE.md= (the M2 lags and the study of waiting),
+  =doc/K-AND-OPS.org= (the desk's lessons), =src/basket/=, =src/wheel/= and =alberta_buck/sim/=.

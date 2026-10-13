@@ -143,6 +143,17 @@ was published; the tag was re-pushed at the same commit and passed.  Before
 tagging a package whose job installs from PyPI, wait until =pip download
 --no-deps= fetches its dependency.
 
+*0.4.0, the basket machine* (prepared 2026-10-12, not yet tagged).  The BuckBasket's upkeep is
+rebuilt, and the bundle carries it: =BasketUpkeepFacet= and =BasketVenueFacet= on the
+=BuckBasketEquity= shell, the observers and the policy they ask (=PairSignals=,
+=PairRebalancePolicy=, =BasketReference=), the desk (=BasketDesk= with =OuterBandDeskPolicy=)
+and the one wheel that turns them (=BasketMachineWheel=).  These are the basket.  The upkeep
+they replace (=BuckBasketEquityWheel=, =EquityTurnDirector=, =BasketWheel=) rides along for this
+one release, so the two can be run side by side, and then goes.  =Buck='s funding factor
+becomes one straight line -- nothing once BUCK is 2% dear, a half at parity, one at 2% cheap --
+and =buck-math= mirrors it exactly, so this too is a minor bump everywhere, lockstep, every
+package moving.  Order as for 0.3.0.
+
 From 0.3.0 every package carries its LICENSE, and the kernels and the contracts bundle their
 generated THIRD-PARTY-NOTICES.txt (doc/KNOWN-ISSUES.org, KI-5).  Before tagging, run
 =make nix-third-party-notices-check=: a dependency bump since the last regeneration fails it, and

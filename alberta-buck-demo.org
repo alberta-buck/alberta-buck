@@ -46,11 +46,12 @@ virtual machine that lives and dies inside your browser tab: the
 =IdentityRegistry=, =BuckCredit= (the insured-asset NFT), the =Buck=
 token with its demurrage and credit-limit machinery, the
 =BuckKControllerDirect= PID that steers the system's loan-to-value lever
-K, the =BuckBasketProRata= commodity basket, three Uniswap V3 pools
-(TOKEN/USDC, TOKEN/BUCK, and the floating BUCK/USDC pool), and the
+K, the =BuckBasket= commodity basket and the work wheel that turns it,
+the Uniswap V3 pools (a TOKEN/USDC and a TOKEN/BUCK pool for each of the
+basket's two commodities, and the floating BUCK/USDC pool), and the
 Universal Router that every trade routes through.
 
-Three background actors keep the market honest while you interact:
+Four background actors keep the market honest while you interact:
 
 - a *whale* pins the TOKEN/USDC pool to a reference commodity price walk
   (in the full research simulations these are real historical feeds --
@@ -58,7 +59,10 @@ Three background actors keep the market honest while you interact:
 - a *parity arbitrageur* ties the TOKEN/BUCK basket pool to the price
   implied by the other two pools, the way real arbitrage capital would;
 - a *keeper* advances the PID controller each day -- =compute()= is
-  permissionless, so in production anyone can do this.
+  permissionless, so in production anyone can do this;
+- a second *keeper* turns the basket's work wheel, which pairs new
+  deposits, collects the pools' fees and rebalances -- also
+  permissionless, and in production paid for out of what it captures.
 
 The page is tabbed like an instrument panel: *Overview*, *Pools*,
 *BUCK K & PID*, *Basket*, *Savers*, *Debtors*, *Journal*.  The Journal
@@ -154,15 +158,16 @@ flow now.  The BUCK system gives it two productive homes:
 
 - *Hold BUCK* -- knowing that idle balances pay demurrage: the system
   is built for money that moves.
-- *Invest in the basket.*  =BuckBasketProRata= accepts the commodity
+- *Invest in the basket.*  The =BuckBasket= accepts the commodity
   TOKENs themselves -- and these are not abstractions: construction
-  materials, labour, energy are precisely the farm's own input bill.
-  A deposit mints BUCK against the tokens and places both into the
-  basket's pool; the depositor holds a *receipt NFT* -- a pro-rata
-  claim on the basket, redeemable any time.  In effect, Dale pre-buys
+  materials, labour, energy, food are precisely the farm's own input
+  bill.  A deposit buys a share of the whole basket.  The basket pairs
+  the tokens with BUCK it issues on its own credit and sets both to
+  work in its pool; the depositor holds a *receipt NFT* for the shares,
+  redeemable any time and paid out in BUCK.  In effect, Dale pre-buys
   his input basket with this year's grain cheque, holds a claim that
-  tracks those real prices, and collects the pool's trading fees
-  while he waits.
+  tracks those real prices, and collects his share of the pools'
+  trading fees and the basket's rebalancing while he waits.
 
 In the demo the saver does this automatically: give it a budget and a
 term on the Savers tab, and it acquires the TOKEN via whichever route
@@ -236,8 +241,8 @@ Router), every balance and every refusal.
 /Simulated/: the commodity price walk (the research harness uses real
 historical feeds); the fiat rail (dollar income arrives as a mint on a
 mock USDC); the insurance office (premiums are booked to the ledger
-rather than invoiced); and the demo world carries one basket
-constituent where the research basket carries the full recomposed set.
+rather than invoiced); and the demo world carries two basket
+constituents where the research basket carries five.
 The population is deliberately tiny -- one whale, one arb, and whoever
 you add -- where the research simulations run heterogeneous crowds.
 

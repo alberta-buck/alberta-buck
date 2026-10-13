@@ -41,11 +41,10 @@ contracts:
    headroom by transferring out, driving the signed raw negative.  =balanceOf= reports
    ~held + unused credit~ on non-Carrying accounts, so the ERC-20 view answers /"what can I spend
    right now"/.
-4. *BuckBasket* -- USD-free basket registry and direct-mint orchestrator.  Custodies a single
-   full-range Uniswap-V3 LP position per TOKEN/BUCK pool, mints BUCK against deposited basket
-   tokens at the current pool spot price, and on redemption withdraws proportionally from
-   overweight pools, hands the depositor the TOKEN side(s) and recycles the BUCK side "sell high /
-   buy low" into the most underweight pool as treasury LP.  Publishes
+4. *BuckBasket* -- the USD-free value anchor, and an ordinary credit holder.  Keeps one
+   full-range Uniswap-V3 position per TOKEN/BUCK pool, takes deposits as shares of its equity,
+   pairs every TOKEN with BUCKs it issues on its own credit, and pays exits in BUCKs before it
+   sells anything.  A permissionless work wheel turns its upkeep.  Publishes
    ~basketValueInBuck() = sum( basketAmount_i * pool_price_in_BUCK_i )~ as the direct-embodiment
    process variable for =BUCK_K=.
 5. *BUCK_K* -- the value-stabilization factor for credit-limit computation.  Three implementations
@@ -96,8 +95,8 @@ counterparty on both sides.
     +-----------+      +-----------+        +-----------+    +-----------+
     |   Notes   |      |           |        |           |    | Identity  |
     | (privacy) +<---->+   Buck    +<------>+BuckBasket |    | Registry  |
-    |           | xfer | (ERC 20)  | mintFB |direct mint|    |  (BN254)  |
-    +-----------+      |           | burnFB | + V3 LPs  |    |           |
+    |           | xfer | (ERC 20)  | credit |  shares   |    |  (BN254)  |
+    +-----------+      |           |  xfer  | + V3 LPs  |    |           |
                        +-+--+---+--+        +-----+-----+    +-----+-----+
                          |  |   ^                 |                ^
                          |  |   |                 | reprime        |
@@ -168,18 +167,15 @@ The flow is:
    =Notes.spendCoupledA1= / =A2= / =B1= with a fresh nullifier, a SNARK proving inclusion under a
    recent root, and a deposit gate proving the depositor is the identity the note names, against a
    posted identity root.
-7. =BuckBasket= is the *direct-mint orchestrator* and the value anchor.  Anyone holding a basket
-   constituent (PAXG, cbBTC, XAUT, WBTC, etc., as wired by governance via =addBasketToken=) can
-   call =BuckBasket.depositToken= to LP it into the corresponding TOKEN/BUCK Uniswap-V3 pool; the
-   basket mints exactly =tokenAmount * spotPrice= worth of fresh BUCK against the deposit (via the
-   privileged =Buck.mintFromBasket= hook), pairs the two sides as full-range V3 liquidity, and
-   hands the depositor an ERC-721 receipt (=BuckBasketReceipt=).  Depositing already-minted BUCK is
-   symmetric: the basket swaps it into the most underweight constituent's TOKEN and LPs there.
-   On =BuckBasket.redeem=, the value claim is allocated across overweight pools proportional to
-   each pool's positive value-weight error; the basket withdraws L from each, transfers the entire
-   TOKEN side to the depositor, burns the principal BUCK from the BUCK side, and routes the
-   remaining "profit" BUCK into the most underweight pool's TOKEN as treasury LP -- the "sell high
-   on the way out, recycle to buy low" leg fires in the same transaction.
+7. =BuckBasket= is the *value anchor*, and a credit holder like any other.  Anyone holding a
+   basket constituent (as wired by governance via =addBasketToken=), or BUCKs, can call =deposit=
+   and receive shares of the basket's equity on an ERC-721 receipt (=BuckBasketReceipt=).  The
+   basket pairs the TOKEN with BUCKs it issues on its own [[#marked-credits][marked credit]], as
+   full-range V3 liquidity; nothing is sold to place a deposit.  On =redeem= the treasury takes a
+   quarter of the receipt's gain, and the rest is paid in BUCKs from the credit line before
+   anything is sold.  A permissionless work wheel turns the upkeep: pairing, collecting fees, and
+   working each constituent toward a target that leans against its price.  See
+   [[#buck-basket-equity][BuckBasket]].
 8. =BUCK_K= ships in three forms today.  The governance-set static variant is the simpler choice
    for early deployments where no on-chain price reference exists.  =BuckKControllerDirect= is the
    *USD-free* embodiment: process variable = =BuckBasket.basketValueInBuck()=, setpoint = 1.0 BUCK
@@ -726,7 +722,7 @@ it activates is the dependent quantity, larger when K is lower.  A mint for more
 credits can give reverts ("insufficient credit allocation"), with one exception:
 =mint(type(uint256).max)= delivers everything they can give, activating their whole faces.  That
 is how a holder opens all of a credit at once -- a SimLP seeding a pool, or a
-[[#buck-basket-equity][BuckBasketEquity]] opening its marked credit -- without computing
+[[#buck-basket-equity][BuckBasket]] opening its marked credit -- without computing
 ~K x face~ first and racing K to the block.
 
 =burn(uint256 amount)= mirrors the overload pair: it lowers the caller's spendable by =amount= at
@@ -862,8 +858,8 @@ The shipped =mint= sequence:
    credit limit would.  A *zero-premium* credit yields =poolPrincipal == 0= ("zero-cost
    insurance"), so the requirement is zero and the mint is exempt (the basket / LP bootstrap
    mints freely).  On a non-Carrying account ~balanceOf = held + unusedCredit~; =fundingFactor=
-   is 0 under the static controller (gate disabled), ~1.0 at parity, and rises above 1.0 when
-   BUCK is undervalued, so it bites hardest on bootstrapping *insured* credit from a thin
+   is 0 under the static controller (gate disabled), a half at parity, and passes one once BUCK
+   is 2% undervalued, so it bites hardest on bootstrapping *insured* credit from a thin
    reserve while the market already signals too much BUCK.  Its schedule and its precedents are in
    [[#funding-factor][The Funding-Factor Reserve]].
 6. =_accrueJubilee()=, crystallise =insurancePool= and =msg.sender=, debit =poolPrincipal= from
@@ -1084,8 +1080,7 @@ it reads is always settled through the current block.
     :END:
 
 Every state-mutating entry point -- =transfer=, =transferFrom=, the identity-bound =approve=,
-both =mint= and =burn= overloads, =mintFromBasket=, =burnFromBasket=, and the delegated-demurrage
-calls -- is wrapped in a transient-storage mutex (EIP-1153; the build targets cancun).
+both =mint= and =burn= overloads, =settleRelief=, and the delegated-demurrage calls -- is wrapped in a transient-storage mutex (EIP-1153; the build targets cancun).
 =TSTORE= / =TLOAD= are 100 gas flat with no cold tier, so the guard costs ~600 gas per guarded
 call against ~5,150 for the classic storage-slot guard, and it occupies *no storage slot* -- the
 layout is undisturbed.  Transient state cannot survive the transaction, so a path that sets the
@@ -1133,8 +1128,6 @@ otherwise shed it:
   absorbs it, so the lien is exactly the credit drawn.
 - *Aged BUCK arriving at an account below zero.*  They repay the lien net of the fee they carry.
   A receipt that repays the whole lien also pays out the relief the lien earned.
-- *A basket burn.*  The burned BUCK take their share of the basket's age with them, and retire
-  that much less of the basket's issuance.
 
 Relief pays out of the fund when the lien is repaid, when the holder burns coverage, or when the
 holder calls =settleRelief()= (only the holder: relief accrues linearly on the lien, so paying it
@@ -1166,13 +1159,13 @@ and on every transfer that draws or repays credit, =_accrueJubilee= writes
 
 #+BEGIN_SRC text
 _state[address(this)].balance += totalIssued * BASE_RATE_PER_SEC * elapsed / SCALE
-totalIssued = totalSupply - reliefRealized + feesRealized     (+ |basketIssued| if negative)
+totalIssued = totalSupply - reliefRealized + feesRealized
 #+END_SRC
 
-=totalIssued= is the BUCK issued -- the liens plus the basket's net issuance -- which the relief
-accrues on, so the fund always holds the relief it owes.  It follows from the only three things
-that move the sum of the non-Jubilee signed balances: the basket's hooks, relief paid out, and
-fees realized.
+=totalIssued= is the BUCK issued -- the sum of the liens -- which the relief accrues on, so the
+fund always holds the relief it owes.  It follows from the only two things that move the sum of
+the non-Jubilee signed balances: relief paid out, and fees realized.  (The basket's issuance is a
+lien like any other.)
 
 directly into Jubilee's slot via a raw slot write -- bypassing =_setBalanceSigned= -- so
 =totalSupply= is *not* mutated.  Demurrage is internal redistribution from positive-balance
@@ -1276,237 +1269,82 @@ and issuing fresh BUCK to the recipient.  A pre-flight ~require(balanceOf(x) >= 
 contract is therefore redundant, and against a stale read it is wrong in both directions.  Let
 the transfer revert instead.
 
-* BuckBasket: Direct-Mint Orchestrator + USD-Free Value Anchor
-  :PROPERTIES:
-  :CUSTOM_ID: buck-basket
-  :END:
-
-/This section describes the pro-rata basket (=BuckBasketProRata= and its heirs =BuckBasketOps=,
-=BuckBasketFence=, and the legacy =BuckBasket=).  It mints and burns BUCK through basket hooks that
-production =Buck= does not have; it runs in the simulations, on =BuckWithBasketHooks=, as the
-baseline the production basket is measured against.  The production basket is
-[[#buck-basket-equity][BuckBasketEquity]], an ordinary credit holder./
-
-=BuckBasket= is the contract that closes the loop between BUCK and the real-world commodity tokens
-it tracks.  It registers a set of TOKEN/BUCK Uniswap-V3 pools (one per basket constituent),
-custodies a single full-range Buck-owned LP position in each, lets anyone direct-mint BUCK by
-depositing a constituent (or recycle already-minted BUCK into the most underweight constituent),
-and on redemption pulls BUCK out of overweight pools while routing the surplus into the most
-underweight pool as treasury LP.  It is also the publisher of the USD-free process variable read
-by =BuckKControllerDirect=.
-
-** Two Kinds of BUCK
-
-In production every BUCK is issued against a lien: drawn on a =BuckCredit= through the standard
-=Buck.mint= path ([[#buck-erc20][BUCK]]), gated by =BUCK_K=.  The equity basket is no exception --
-its credit is a [[#marked-credits][marked credit]] on its own equity.
-
-The pro-rata basket is the exception, and only in the simulations:
-
-1. *Hook-minted BUCK* -- minted by the basket via =mintFromBasket(to, amount)= when a depositor
-   pledges a TOKEN, tracked in =totalOutstandingBuck=, burned on redemption.  The gate is not a
-   credit limit but the depositor's willingness to put TOKEN (or BUCK) in at the pool valuation.
-   =BuckWithBasketHooks= records the hooks' net issuance (=basketIssued=) and the relief it has
-   earned (=basketRelief=, recorded, not paid); a burn's BUCK carry their share of the basket's
-   age out and retire =amount - fee= of that issuance.  The fund accrues on it like any lien.
-2. *Credit-drawn BUCK* -- as in production; these reach the TOKEN/BUCK pools through arbitrage and
-   are the lever the PID pulls on.
-
-The two supply paths converge in the basket's BUCK-side balance.  Price-up TOKEN moves leave
-extra BUCK in the pool (TOKEN bought with BUCK by external traders); price-down moves draw BUCK
-out.  Combined with reinvested treasury BUCK from prior redemptions, the basket's NAV typically
-exceeds =totalOutstandingBuck= -- the spread is what compounds for depositors and underwrites the
-"profit" side of the redemption split.
-
-** Constituents and Weights
-
-Governance registers each basket constituent via =addBasketToken(token, decimals,
-initialPriceInBuck, weightBp, feeTier)=.  =weightBp= is the declared target weight in basis
-points; passing 0 defaults to an equal share (=10000 / N=).  The call:
-
-1. Renormalizes every existing constituent's =targetWeightBp= so the total across the N+1
-   constituents sums to 10000 bp, preserving each existing constituent's *relative* weight ratio.
-2. Re-prices every existing constituent's =basketAmount= at the *current* pool spot price so its
-   contribution to =basketValueInBuck= equals its declared weight share of 1.0 BUCK.
-3. Finds or creates the BUCK/TOKEN V3 pool at the requested fee tier, initializes it at
-   =initialPriceInBuck= (silently no-ops if already initialized), and bumps the observation
-   cardinality so TWAP reads are available immediately after the first swap.
-4. Computes the full-range tick bounds for the pool's fee-tier spacing and stores the
-   constituent's =buckIsToken0= ordering.
-5. Calls =controller.reprime()= so the controller absorbs the dilution-discontinuity in
-   =basketValueInBuck= without firing a one-cycle P/I spike.
-
-A future =rebalanceWeights(tokens[], weightBps[])= will let governance re-weight (or, with
-~weightBp = 0~, remove) one or more constituents in a single call -- recomputing all
-=basketAmount= values from the current spot prices so each constituent's contribution again
-matches its declared share of 1.0 BUCK.
-
-** Process Variable: =basketValueInBuck()=
-
-#+BEGIN_SRC text
-basketValueInBuck = sum_i ( basketAmount_i * pool_price_in_BUCK_i / 1e18 )
-#+END_SRC
-
-This is the direct-embodiment "process variable" -- the value of one basket bundle measured in
-BUCK -- and is what =BuckKControllerDirect= reads.  TWAP-windowed reads (=twapWindow= seconds)
-fall back to spot if the pool is too cold to satisfy the request, so the PID degrades gracefully
-on a freshly-added constituent rather than freezing.
-
-** Direct-Mint: =depositToken=
-
-=depositToken(token, tokenAmount, maxDeviationBp)= has two paths chosen on =token=:
-
-- *Basket TOKEN deposit*: the depositor pledges a registered constituent.  =BuckBasket= reads the
-  pool's spot price, mints =tokenAmount * spotPrice= worth of BUCK to itself via
-  =Buck.mintFromBasket=, and LPs the (TOKEN, BUCK) pair as full-range liquidity in that
-  constituent's pool.  An ERC-721 receipt (=BuckBasketReceipt=) records the (BUCK principal, TOKEN
-  principal, original token, deposit time).
-- *Already-minted BUCK deposit* (=token == address(buck)=): the depositor's BUCK is pulled in,
-  swapped on the *most underweight* pool for that pool's TOKEN, partner BUCK is freshly minted
-  against the received TOKEN, and the full (TOKEN, BUCK) pair is LP'd into the underweight pool.
-  This is the cross-pool rebalance arrow on the deposit side.
-
-=maxDeviationBp= optionally guards against TWAP/spot divergence (set to 0 during bootstrap or
-cold-pool deposits; non-zero rejects the deposit if =|spot - TWAP| > maxDeviationBp / 10000=).
-
-** Redemption: "Sell High, Recycle to Buy Low"
-
-=redeem(receiptId, redeemBp, maxDeviationBp)= settles a value claim
-~valueClaim = redeemBuck * NAV / totalOutstandingBuck~ where =NAV= is the basket's total LP value
-across all pools.  The claim is split across constituents by =_allocateRedemption=, then settled in
-seven phases:
-
-1. *Validate + size* the receipt; compute =redeemBuck= as either the full =buckPrincipal= or a
-   basis-point fraction.
-2. *Slippage guard* on the depositor's original pool (the known gap: this guard should also fire
-   on every pool actually withdrawn from -- tracked as =BUG #5=).
-3. *Allocate* =redeemValue= across pools.  Each pool's "ideal" allocation is
-   ~alloc_i = v_i - t_i * (NAV - redeemValue)~ where =t_i= is the pool's natural value share at
-   target.  Heavily overweight pools contribute /more/ than their proportional share; heavily
-   underweight pools clamp to zero.  Two passes handle the equilibrium case (proportional) and
-   the rare "must dip into underweight" case.  A small-redemption fast path takes the entire
-   claim from the most overweight pool when =redeemValue= is below =SMALL_REDEEM_BP= (1 %) of
-   that pool's value, saving the multi-pool gas in the dominant case.
-4. *Burn LP* from each allocated pool.  TOKEN and BUCK are held inside =BuckBasket=; no transfers
-   yet, so any aggregate BUCK shortfall (e.g. from a single pool dominating the allocation but
-   carrying mostly TOKEN) can still reach back into the basket's TOKEN holdings.
-5. *Cover shortfall* by greedy TOKEN→BUCK swaps on the pools with the most TOKEN balance left,
-   using exact-input swaps padded by =SHORTFALL_BUFFER_BP= (2 %).  Any residual gap below
-   =MAX_ORPHAN_DUST_WEI= (1 µBUCK) is tolerated; larger gaps revert with
-   ="pool depth too thin"=.
-6. *Pay depositor* the surviving TOKEN side per pool, emit one =RedeemedFromPool= event per
-   touched pool (TOKEN-to-user, TOKEN-swapped, L burned).
-7. *Reinvest profit* above the =MIN_REINVEST_BUCK= floor (0.001 BUCK): the BUCK side minus the
-   principal burn is routed through =_buckToLp= into the most underweight pool's TOKEN and LP'd
-   as a treasury position.  Sub-floor profit stays in the basket's BUCK balance and is swept by
-   the next redemption (still treasury-owned, just not yet LP'd).  Then =Buck.burnFromBasket=
-   burns the principal, =totalOutstandingBuck= decrements, and the deposit is finalized
-   (cleared on full redemption; both BUCK and TOKEN principals scale down proportionally on
-   partial).
-
-The depositor/treasury split is *approximately* 50/50: full-range V3 LP is roughly 50/50 by value
-at any price, so the TOKEN side (depositor) and BUCK side (treasury) are roughly equal.  The
-principal burn comes out of the BUCK side, slightly favouring the depositor.
-
-** Invariant
-
-After all deposits exit, ~totalOutstandingBuck = 0~ and remaining LP value is entirely
-treasury-owned -- compounded TOKEN appreciation, accumulated AMM fees, and external-arb BUCK that
-didn't get claimed.  Modulo bounded =MAX_ORPHAN_DUST_WEI= per-redemption dust, this is the
-liveness backstop the audit trail rests on.
-
-** Known Gaps
-
-The contract carries =BUG #N:= tags for the redesign work still in flight:
-
-- *#5* -- Slippage guard runs on the depositor's original pool, not on the pools actually
-  withdrawn from.
-- *#6* -- =_buckToLp= / =_swapTokenForBuckExactIn= swaps use the permissive
-  =MIN/MAX_SQRT_RATIO ± 1= price limit; should be TWAP-bounded to resist sandwich.
-- *#7* -- =_mostUnderweightPool= / =_mostOverweightPool= read spot prices; should use TWAP.
-- *#8* -- =_reinvestBuck= LPs into a single most-underweight pool; should mirror the redemption's
-  proportional allocation.
-- *#9* -- TOKEN deposits LP into the deposited token's own pool with no underweight-routing --
-  asymmetric with the BUCK-deposit path.
-- *#10* -- =Buck.mintFromBasket= bypasses =BuckK='s =fundingFactor= gate; document or fold
-  basket-minted BUCK into the PID's accounting (see [[#dynamic-issuance][Dynamic Issuance]] below).
-- *#11* -- =_reinvestBuck= emits no event; downstream observers can't distinguish treasury
-  reinvestment from external arb trades.
-- *#13* -- Late-basket-life redemptions can revert =pool depth too thin= when the basket NAV is
-  too low to cover the remaining outstanding (genuine liquidity exhaustion, not dust); a
-  graceful tail-redemption mode is future work.
-
-** Dynamic Issuance: Why BuckBasket Needs BUCK_K
-   :PROPERTIES:
-   :CUSTOM_ID: dynamic-issuance
-   :END:
-
-=BuckBasket= mints BUCK at *exactly* the current pool spot price.  That is value-neutral at the
-moment of deposit, but it is also the cause of a structural deflationary pressure on BUCK:
-
-- Direct-mint adds new BUCK only when a depositor *wants* to LP a constituent.  External BUCK
-  demand (somebody wants to buy a TOKEN and the cheapest path is BUCK -> TOKEN swap on the
-  BuckBasket pool) does *not* mint new BUCK -- it just rearranges existing BUCK between the pool
-  and the swap-caller.
-- The only path that produces "free" BUCK against assets *outside* the basket is
-  =Buck.mint(amount, tokenIds)= via =BuckCredit= NFTs, gated by ~maxLimit = totalCreditValue *
-  currentBuckK / 1e18~.  When external arbitrageurs buy TOKEN with BUCK from the basket pools,
-  BUCK gets scarce (price up vs. TOKEN ⇒ each TOKEN/BUCK pool quotes a higher TOKEN price in
-  BUCK terms ⇒ =basketValueInBuck= rises above 1.0).
-
-Sign convention (inherited from [[#buck-k-pid][BUCK_K]]):
-
-- ~basketValue > 1.0~ (BUCK undervalued / inflation: TOKEN expensive in BUCK):
-  ~error < 0~ ⇒ =buckK= /decreases/ ⇒ =BuckCredit= backed mints shrink ⇒ BUCK supply contracts ⇒
-  basket value falls back toward 1.0.
-- ~basketValue < 1.0~ (BUCK overvalued / deflation: TOKEN cheap in BUCK):
-  ~error > 0~ ⇒ =buckK= /increases/ ⇒ =BuckCredit= backed mints expand ⇒ BUCK supply grows ⇒
-  basket value rises back toward 1.0.
-
-So the closed-loop equilibrium picture is: =BuckBasket= establishes the TOKEN-side anchor and
-publishes the deviation signal; =BuckKControllerDirect= integrates that deviation into a
-credit-limit multiplier; =Buck= meters new supply against the multiplier; external arb agents
-close the loop by moving BUCK between the basket pools and the wider market.  Direct-mint
-deposits are the *value injector* (asset coming in); =BuckCredit= backed mints under PID control
-are the *supply regulator* (BUCK going out).
-
-#+LATEX: \clearpage
-* BuckBasketEquity: the Basket as a Credit Holder
+* BuckBasket: the Basket as a Credit Holder
   :PROPERTIES:
   :CUSTOM_ID: buck-basket-equity
   :END:
 
-The production basket holds shares of equity, one pooled lien, and a wallet its work wheel
-places.  Three contracts share one storage layout: the shell =BuckBasketEquity= (deposit, redeem,
-the treasury, views), the components facet =BuckBasketEquityWheel= (the wheel's steps), and the
-venue facet =BuckBasketUniswapV3= (the pools).  The shell delegatecalls the facets: =wheelDue= /
-=wheelStep= to the components, every other unknown selector to the venue.  A monetary desk, when
-there is one, is a separate contract beside it ([[#equity-desk][The Desk: Its Own Credit
-Holder]]).
+=BuckBasket= closes the loop between the BUCK and the commodity tokens it tracks.  It keeps one
+full-range Uniswap-V3 position in each TOKEN/BUCK pool, takes deposits as shares of its equity,
+and publishes the USD-free process variable that =BuckKControllerDirect= reads.  It has no mint
+authority and no hook into =Buck=.  It is an ordinary account holding one
+[[#marked-credits][marked credit]] on its own equity, and every BUCK it issues is drawn on that
+credit like anyone else's.
 
-The rule the layout follows: *independent machines get independent accounts and independent
-wheels*.  Buck keys everything by address -- one signed balance, one lien, one limit, one relief
-quote per address -- so bookkeeping "sub-accounts" inside one contract are invisible to it, and
-it cannot hold one party within its own collateral.  The basket's depositors and the desk are two
-parties with two books of collateral, so they are two contracts, two BUCK accounts, two marked
-credits, and two work wheels (one engine, =BasketWheel=, instantiated per machine with only that
-machine's kinds, and its own reserve and callers).  A caller who wants both turned in one
-transaction batches the calls; nothing is shared to do it.
+Why it earns, and the arithmetic behind each rule, is in
+[[file:alberta-buck-ethereum-wheel.org][The BasketWheel]].  This section is the contract surface.
+
+| Contract               | Kind    | What it owns                                              |
+|------------------------+---------+-----------------------------------------------------------|
+| =BuckBasketEquity=     | shell   | the books: receipts, shares, wallet TOKEN, the credit     |
+| =BasketVenueFacet=     | facet   | nothing: Uniswap V3 reads, swaps and positions            |
+| =BasketUpkeepFacet=    | facet   | nothing: the Daily, Sync and Respond steps                |
+| =PairSignals=          | service | a level-and-rate tracker per TOKEN per quote route        |
+| =PairRebalancePolicy=  | service | each constituent's urgency and release allowance          |
+| =BasketReference=      | service | the last valid cost of the reference basket in BUCKs      |
+| =BasketDesk=           | service | the desk's own account, TOKEN and credit                  |
+| =OuterBandDeskPolicy=  | service | which side of parity the BUCK is on, and for how long     |
+| =BasketMachineWheel=   | wheel   | the cursor, the callers' reserve, the arbitrage triangles |
+
+A /facet/ is code the shell delegatecalls, so it runs on the shell's storage: =wheelDue= and
+=wheelStep= go to the upkeep facet, every other unknown selector to the venue.  A /service/ is a
+contract with its own state.  Each depends on the others' interfaces, not their contracts.
+
+** Constituents and Weights
+
+Governance registers each constituent via =addBasketToken(token, decimals, initialPriceInBuck,
+weightBp, feeTier)=.  =weightBp= is the declared weight in basis points; 0 means an equal share.
+The call:
+
+1. Rescales every existing constituent's weight so the total is 10000 bp, keeping their ratios.
+2. Sets each constituent's reference quantity so that, at the price it joined at, it is worth its
+   declared share of one BUCK.  The joining price is kept: it is the constituent's /anchor/, and
+   the reference its target leans against.
+3. Finds or creates the TOKEN/BUCK pool at the fee tier, initializes it, and widens its
+   observation history so a TWAP can be read.
+4. Calls =controller.reprime()=, so the controller does not read the one-block jump as an error.
+
+** Process Variable: =basketValueInBuck()=
+
+#+BEGIN_SRC text
+basketValueInBuck = sum_i ( basketAmount_i * TWAP price of TOKEN_i in BUCKs )
+#+END_SRC
+
+What one reference basket costs in BUCKs.  Above one, a basket costs more: the BUCK is cheap.
+Below one, the BUCK is dear.  The venue reads each pool's TWAP and nothing else: a pool with no TWAP
+is an unavailable price, not a spot price.  =BasketReference= publishes the same quantity for the
+upkeep and the desk, refused when any pool's spot is more than a tolerance from its TWAP.
 
 ** The Account and the Credit
 
-The basket is an ordinary BUCK account -- bound public and non-Carrying -- and an ordinary credit
-holder.  =openCredit= (governance, once) has it issue itself one [[#marked-credits][marked
-credit]]: the basket is its insurer, the premium is zero, and the face caps all it may ever draw
-at =K x face=.  Before anything that spends -- a deposit, an exit, every wheel step -- the basket
-marks the credit at its equity at the exit marks, and nothing else, so Buck enforces
-=creditLimit(basket) = K x equity= -- the depositors' equity.  The credit is activated, with one =Buck.mint=,
-at the first mark above zero.
+The basket is bound public and non-Carrying.  =openCredit= (governance, once) has it issue itself
+one marked credit: the basket is its own insurer, the premium is zero, and the face caps all it
+may ever draw at =K x face=.  It never mints or burns after the first activation.  Spending past
+its held BUCKs draws on the credit; BUCKs it receives repay the lien.  The lien earns Jubilee
+relief like any other.
 
-It never mints or burns.  Spending past its held BUCK (placing a position, buying TOKEN, paying
-an exit) draws on the credit; BUCK it receives (a position's BUCK side, a sale's proceeds, a
-deposit, fees) repay the lien.  Its debt is its lien, which earns Jubilee relief like any other;
-the Daily step collects it.
+Before anything that spends -- a deposit, an exit, every upkeep step -- the basket marks the
+credit.  With =netMark= set, which is how it runs, the mark is its equity at the exit marks plus
+the BUCK side of its positions over =K=, so Buck's limit reads
+
+#+BEGIN_SRC text
+lien - BUCKs held in the positions  <=  K x equity(LOW)
+#+END_SRC
+
+=K= bounds the BUCKs the basket has let out.  BUCKs it issued and still holds beside its own TOKEN
+carry no price risk against the lien they came from, and use none of the limit.  So every TOKEN
+is paired as it arrives, an exit is paid from the line before anything is sold, and the most
+TOKEN the basket can come to hold is =(1 + K) x equity=.
 
 ** Valuation
 
@@ -1515,104 +1353,120 @@ TWAP (the price), HIGH (each pool at the higher of spot and TWAP -- the incumben
 entry) and LOW (the lower -- their side of an exit).
 
 #+BEGIN_SRC text
-gross(mark)  = sum over pools (position value at mark + idle TOKEN at mark)
+gross(mark)  = sum over pools (position value at mark + wallet TOKEN at mark)
 equity(mark) = gross(mark) + signedBalance(basket) + reliefAccrued(basket)
 #+END_SRC
 
-where =signedBalance= is negative by the lien (or positive by BUCK held, net of its fee).
-=liquidity= is what Buck lets the account spend -- held BUCK plus headroom under the limit.  Its
-target is the larger of 1% of the gross and enough that half the target covers two sigma of the
-daily net flow times =1 + K=, capped at 20% of the gross.
+where =signedBalance= is negative by the lien (or positive by BUCKs held, net of their fee).
 
 ** Deposit
 
-A deposit of TOKEN or BUCK is equity: valued at its pool's LOW mark (BUCK at par), against the
-basket at its HIGH marks, less a charge -- the pool fee on the swap the wheel will make to place
-it: =(1 - K)/2= of the pool fee for TOKEN, =(1 + K)/2= of the dearest for BUCK.  It buys shares,
-lands in the wallet (BUCK straight into the account), and raises the mark: =K x value= of new
-credit.  Into an under-water basket (lien above its limit) the new credit first restores the
-limit -- an under-water account stops issuing.
+=deposit(asset, amount, minShares)= takes a constituent TOKEN or BUCKs.  It is valued at its
+pool's LOW mark (BUCKs at par), against the basket at its HIGH marks, less a charge: =(1 - K)/2= of
+the pool fee for TOKEN, =(1 + K)/2= of the dearest pool's fee for BUCKs.  It buys shares, recorded
+on an ERC-721 receipt (=BuckBasketReceipt=), and lands in the wallet.  The next Respond step pairs
+it.  Into an under-water basket (lien above its limit) the new equity first restores the limit.
 
 ** Redemption
 
-The treasury takes 25% of the receipt's gain over its cost basis, as shares.  The rest leaves
-at the exit marks, less the same charge as a BUCK deposit.  The shell first marks the credit at
-the equity that stays (=equity(LOW) - pay=), then pays in BUCK if Buck lets the account spend
-it.  Otherwise the exit is paid *in kind*: its fraction =f= of every position and of the
-wallet's TOKEN, by transfer, with no swap.  The BUCK its positions return repay its share of the
-lien; what they returned beyond that share is paid in BUCK.  Two corners: short of its lien share
-(leverage above one) it leaves TOKEN behind worth the shortfall at the LOW marks; owed more BUCK
-than an under-water account can spend, the rest stays in the receipt as shares at the
-post-exit price.  No charge in kind.
+=redeem(id, bp, minBuck)=.  The treasury takes 25% of the receipt's gain over its cost basis, as
+shares.  The rest leaves at the exit marks, less the same charge as a BUCK deposit.  The shell
+first marks the credit at the equity that stays, then pays in BUCKs if Buck lets the account spend
+it.  Otherwise the exit is paid /in kind/: its fraction =f= of every position and of the wallet's
+TOKEN, by transfer, with no swap.  The BUCKs its positions return repay its share of the lien;
+what they returned beyond that share is paid in BUCKs.  Two corners: short of its lien share, it
+leaves TOKEN behind worth the shortfall at the LOW marks; owed more BUCKs than an under-water
+account can spend, the rest stays in the receipt as shares.
 
-** The Wheel's Components
+** The Upkeep
 
-Each step is bounded, marks the credit first, and trades at most 1% of a pool's depth
-(=swapCapBp=), the arbitrage re-pinning between steps:
+=BasketUpkeepFacet= is three kinds of step, each bounded, each marking the credit first:
 
-- *Daily*: fold the day's net flow into the flow EMA; collect the relief on the lien; the
-  director's sample.
-- *Sync(i)*: collect pool i's fees (TOKEN to the wallet, BUCK into the account).
-- *Deploy(i)*: pair pool i's waiting TOKEN with its share of the credit beyond the target --
-  pro rata to the TOKEN waiting in every pool -- selling part of the TOKEN if the pair is short.
-- *Fund*: buy the director's pick (or, past the parking room, the largest gap) with half of what
-  it places; Deploy pairs it.
-- *Trim*: when liquidity is below its floor, unwind a slice of a position (the director's pick,
-  else the most overweight) and sell its TOKEN until liquidity is back at its target -- including,
-  after a K cut, the amount the basket is over its new limit; or trim what the director names.
+- *Daily*: settle the relief against the lien; mark.
+- *Sync(i)*: collect pool i's fees (TOKEN to the wallet, BUCKs into the account); mark.
+- *Respond*, at most once an interval: sample the signals, then
+  1. /pair what waits/ -- every constituent's wallet TOKEN with issued BUCKs, in full, no swap;
+  2. /size the book/ -- equity, less a holding of BUCKs while the BUCK is cheap -- and find each
+     constituent's gap from its leaned target;
+  3. /work each constituent on its own/ -- sell one that is over, buy one that is under, by the
+     amount =PairRebalancePolicy= releases, at most 5% of the holding a turn and 1% of a pool's
+     depth a swap.
 
-** The Director
+Two rules ask the policy nothing.  The /leash/ works a constituent more than 30% of its declared
+weight from its declared share at once.  The /ceiling/ buys back BUCKs let out beyond half of
+=K x equity=; the other half is what exits are paid from.
 
-=EquityTurnDirector= (optional) supplies leaning targets and two gates, per leg, from a ladder of
-EMAs of each pool's TWAP tick against the basket's mean ([[file:alberta-buck-ethereum-wheel.org::#director][The
-BasketWheel]], "The director"):
+** Targets and the Policy
 
-- *The lean*: the declared weights scaled by =exp(-tilt x excursion)= and renormalized, the
-  excursion being the leg's deviation from the basket's mean against its anchor EMA (1280 days)
-  -- a leg rich against its anchor is leaned down.  =tilt= defaults to 1.
-- *The turn*: six shorter EMAs (5 to 160 days) each vote when moving back toward the anchor;
-  =quorum= votes (default 4) is a turn.  A leg not turned is running.
-- *mayTrim(i)*: true unless the leg is still running up -- a run is let run -- and true
-  regardless once its weight is over its declared target by the leash (=leashBp=, 30% of the
-  target).  *mayFund(i)*: the mirror, for a leg running down.  The leash is measured against the
-  declared targets, not the leaned ones.
-
-With no director, the basket keeps its declared targets and trims or funds only beyond a plain
-weight band.
+A constituent's target is its declared weight leaned against its price:
+=weight x (reference price / price) ^ tilt=, shared over the book and held within a cap of the
+declared weight (=setResponse=, =setReferencePrice=).  =PairSignals= tracks each TOKEN's relative
+price and its rate of change; =PairRebalancePolicy= lets a gap be worked only when it has lasted
+(a cumulative count, not a band) and only as the pair's rate stops running against the trade.  It
+owns no assets and authorizes no spending: a stale or adversarial policy can mis-time trades
+within the caps above, and cannot move value out of the basket.
 
 ** The Desk: Its Own Credit Holder
    :PROPERTIES:
    :CUSTOM_ID: equity-desk
    :END:
 
-The monetary desk (=MonetaryDesk=: the four quadrants, the bounds, the stabilizer seam;
-[[file:alberta-buck-ethereum-wheel.org::#desk][The BasketWheel]], "The desk") beside
-an equity basket is =EquityDesk=: its own contract, so its own account at Buck -- bound public and
-non-Carrying -- and its own self-issued marked credit, marked before every operation at its own
-net value: its TOKEN at the pools' low marks, plus its account and the relief accrued on it.  Its
-founding grant (=capitalizeMonetary=) is its own TOKEN, in its own contract, collateral for it
-alone.  It issues by spending its own credit, so Buck holds its lien within =K x= its own value;
-BUCK it buys repay that lien (their fee on arrival is its own); the relief on its lien is its own,
-collected before each operation, and melts its outstanding issuance.
+=BasketDesk= is its own contract, so its own account at Buck -- bound public and non-Carrying --
+and its own self-issued marked credit, marked before every operation at its own net value: its
+TOKEN at the pools' low marks, plus its account and the relief accrued on it.  Its founding grant
+(=capitalizeMonetary=) is its own TOKEN, collateral for it alone.  It issues by spending its own
+credit, so Buck holds its lien within =K x= its own value; BUCKs it buys repay that lien.
 
-From the basket it reads two things: its equity, which sizes the desk's bounds (as the ops shell's
-NAV sized them), and its constituents, mirrored so the desk trades in the same pools through the
-same venue facet (the desk's fallback delegatecalls to it).  Nothing the desk holds or owes enters
-the basket's books, mark, or limit.  Its invoker is its own: =monetaryOperation= once per director
-epoch, from a =BasketWheel= carrying only the ops kind (pointed at the desk) or a keeper.
+From the basket it reads two things: its equity, which sizes the desk's bounds, and its
+constituents, mirrored so the desk trades in the same pools through the same venue facet.
+=OuterBandDeskPolicy= tells it which side to take: none while the BUCK is within 3% of its basket,
+and credit drawn only after thirty days running on one side.  After each operation the spot must
+still be outside the release band, or the operation reverts.  A lifetime turnover budget and a
+floor on its net value (=setRiskBudget=) bound the rest.
 
-(It was first built as a sub-account of the basket's one account, marked at the basket's equity
-/plus/ the desk's book.  The desk's founding grant then raised the depositors' limit, and the
-savings world levered its depositors to a lien of 6.3M on 5.8M of equity at =K = 0.75=.  The
-separation above is structural for that reason: two accounts, so Buck enforces each limit.)
+The rule the layout follows: /independent parties get independent accounts/.  Buck keys
+everything by address -- one signed balance, one lien, one limit per address -- so bookkeeping
+sub-accounts inside one contract are invisible to it, and it cannot hold one party within its own
+collateral.  The basket's depositors and the desk are two parties with two books of collateral,
+so they are two contracts, two accounts and two marked credits.
+
+** The Wheel
+
+=BasketMachineWheel.tick(maxWork, maxScan)= is permissionless.  A cursor walks its slots, each due
+or not: Sample (the parity reference), Compute (K's cycle), Ops (the desk), the basket's Daily,
+Sync per pool and Respond, and Arb (a consistency cycle round TOKEN/BUCK, TOKEN/USDC and
+BUCK/USDC, taken only at a realized profit).  Sample comes first, so no trade of the same turn can
+spoil the reading.  A target that fails cannot trap the cursor.  The basket accepts income from
+its wheel and from one governance-appointed arbitrage creditor, which can deposit and nothing else.
+
+** Why the Basket Needs BUCK_K
+   :PROPERTIES:
+   :CUSTOM_ID: dynamic-issuance
+   :END:
+
+The basket can let out at most =K x equity=, and in normal running half of that.  It cannot make
+BUCKs plentiful by itself.  What supplies the economy is everyone else's credit, drawn through
+=Buck.mint= against =BuckCredit= NFTs and bounded by the same =K=.
+
+Sign convention (inherited from [[#buck-k-pid][BUCK_K]]):
+
+- ~basketValue > 1.0~ (the BUCK cheap: a basket costs more BUCKs): ~error < 0~, =buckK= /falls/,
+  credit contracts, supply shrinks, and the basket's cost falls back toward 1.0.
+- ~basketValue < 1.0~ (the BUCK dear): ~error > 0~, =buckK= /rises/, credit expands, supply grows,
+  and the basket's cost rises back toward 1.0.
+
+So the closed loop is: the basket's pools price the commodities in BUCKs and publish the deviation;
+=BuckKControllerDirect= integrates it into the credit-limit multiplier; =Buck= meters everyone's
+issuance, the basket's included, against the multiplier; arbitrage carries BUCKs between the
+basket's pools and the wider market.
 
 ** Invariants
 
 - E1: =equity = gross + signedBalance + reliefAccrued= (clamped at zero), at any mark.
-- E2: every issuance is within =K x equity(LOW)= of the depositors alone: the credit is marked at
-  that equity, and nothing else, before any spend, and Buck enforces the limit.
-- E3: no margin calls: a K cut changes no lien; only the wheel's paced Trim repays.
-- E4: an exit takes no more than its fraction: in BUCK, at most its value at the LOW marks less
+- E2: what the basket has let out is within =K x equity(LOW)= of the depositors alone: the credit
+  is marked before any spend, and Buck enforces the limit.
+- E3: no margin calls: a K cut changes no lien, and nothing is called back.
+- E4: an exit takes no more than its fraction: in BUCKs, at most its value at the LOW marks less
   the charge; in kind, exactly =f= of the positions and TOKEN with its lien share repaid; the
   remaining holders' share price is whole, to rounding.
 - E5: the wallet's TOKEN is backed: =token.balanceOf(basket) >= idleToken=.
@@ -1687,19 +1541,19 @@ two references.
 | Controller              | BUCK side                     | Basket side                                      | Role                              |
 |-------------------------+-------------------------------+--------------------------------------------------+-----------------------------------|
 | =BuckKControllerStatic= | --                            | --                                               | a governance-set constant         |
-| =BuckKControllerDirect= | 1 BUCK, by definition         | =BuckBasket.basketValueInBuck()= over TOKEN/BUCK | the USD-free controller           |
+| =BuckKControllerDirect= | 1 BUCK, by definition         | the basket's =basketValueInBuck()= over TOKEN/BUCK | the USD-free controller         |
 | =BuckKController=       | BUCK/USDx Uniswap V3 TWAP     | Chainlink feeds and V3 commodity-pool TWAPs      | the USD-intermediated controller  |
 
 - *Static.*  Holds one value that governance sets, and reports a funding factor of zero (the
   reserve gate disabled).  It lets the identity, demurrage and Notes layers run where no price
   reference exists yet.
-- *Direct.*  Pairs with =BuckBasket=: the setpoint is one BUCK, and the process is what the
-  basket's constituents are worth in BUCK in their own TOKEN/BUCK pools, with no stablecoin in
-  between.  The loop runs in parts per million with gains scaled so the output lands directly in
+- *Direct.*  Pairs with the [[#buck-basket-equity][BuckBasket]]: the setpoint is one BUCK, and the
+  process is what the basket's constituents are worth in BUCK in their own TOKEN/BUCK pools, with
+  no stablecoin in between.  The loop runs in parts per million with gains scaled so the output lands directly in
   =BUCK_K= units, around a governance-set neutral =buckK0= (itself adjustable bumplessly with
   =setBuckK0=).  Because the setpoint never moves, the derivative acts on the error itself.  The
-  basket is wired once (=setBasket=), and =BuckBasket= calls =reprime()= after adding a
-  constituent, so the one-block jump that dilution causes is not read as an error.
+  basket is wired once (=setBasket=), and it calls =reprime()= after adding a constituent, so the
+  one-block jump that dilution causes is not read as an error.
 - *External-Basket.*  The original controller: BUCK's price and the basket's cost, both in USD,
   from separate pools and feeds (the target basket is XAUT/USDT, PAXG/USDC, cbBTC/USDC and
   WBTC/USDT, a quarter each -- two golds and two bitcoins against two stablecoins, so no single
@@ -2241,8 +2095,7 @@ flags for later study:
   on stock Groth16 verifiers.  Calldata-IC delivery (hash-pinned) buys headroom to N=128 or 256;
   Nova / Halo2 / Plonky3 recursion is the natural fix above N=512.
 - *Buck as a Diamond (EIP-2535)*.  =Buck= today is a single monolith covering identity,
-  demurrage, NFT-credit accounting, ERC-20 wire-protocol, BuckBasket direct-mint hooks, and
-  Jubilee bookkeeping.  Splitting these into facets (identity facet, demurrage facet, mint-burn
+  demurrage, NFT-credit accounting, ERC-20 wire-protocol, and Jubilee bookkeeping.  Splitting these into facets (identity facet, demurrage facet, mint-burn
   facet, ERC-20 facet) is the natural modularization path: facets share =Buck='s storage layout
   (=AccountState=, =_totalSupply=, =mintsBacked=), function selectors don't
   collide within a single ERC standard, and per-facet upgradability lets bug fixes ship without
@@ -2256,9 +2109,9 @@ flags for later study:
 
 * Status
 
-Current Foundry suite: 55 test files cover all six contracts in tree (=BuckCredit=,
-=IdentityRegistry=, =Buck=, =BuckBasket=, =BuckKControllerStatic= + =BuckKControllerDirect= +
-=BuckKController=, =Notes=) plus dedicated suites for the NFT-credit machinery
+Current Foundry suite: 72 test files cover all six contracts in tree (=BuckCredit=,
+=IdentityRegistry=, =Buck=, the =BuckBasket= and its wheel, =BuckKControllerStatic= +
+=BuckKControllerDirect= + =BuckKController=, =Notes=) plus dedicated suites for the NFT-credit machinery
 (=BuckCreditLimit.t.sol=, =BuckCreditBacking.t.sol=, =BuckCreditReappraisal.t.sol=,
 =BuckSignedBalance.t.sol=), the reentrancy guard and delegated demurrage
 (=BuckReentrancy.t.sol=, =BuckDelegatedDemurrage.t.sol=, =GuardBench.t.sol=), the identity
@@ -2287,30 +2140,27 @@ The BUCK_K and BuckBasket test suites cover:
   warmup loop that walks forward writing observations on each pool.  Verifies the TWAP path
   smooths a flash-shape spike (spot $0.50, TWAP $1.000002) and tracks sustained drift over the
   600-s window (TWAP converges from $1.00 → $0.97 → $0.95 over a full window at $0.95 spot).
-- =BuckBasketTest= -- direct-mint deposit/redeem flows, =addBasketToken= renormalization,
-  proportional-allocation correctness across overweight/underweight pools, "sell high / buy low"
-  redemption invariants, shortfall-cover greedy swap, and the =reprime= callback into
-  =BuckKControllerDirect=.
+- =test/basket/= -- the shell (=BuckBasketEquity.t.sol=: deposit and exit at the marks, the
+  treasury's quarter, exits in kind, invariants E1-E6), the upkeep (=BasketUpkeepFacet.t.sol=,
+  =BasketLean.t.sol=: pairing, the net mark, the leaned targets, the leash and the ceiling), the
+  signals and the policy (=PairSignals.t.sol=, =PairRebalancePolicy.t.sol=), the desk
+  (=BasketDesk.t.sol=, =BasketDeskAccounting.t.sol=, and =BasketDeskInvariant.t.sol=, which
+  fuzzes the wall between the desk's books and the basket's), and the whole machine together
+  (=BasketMachine.t.sol=, =BasketMachineIntegration.t.sol=).
+- =test/wheel/= -- the wheel's chassis, its slot order and the consistency cycles on real Uniswap
+  V3 pools.
 
-The Python simulation harness in =alberta_buck/sim/= externally drives an anvil instance with
-the deployed contracts (see =make sim*= targets and the project memo on the externally-driven
-sim) to replay multi-agent scenarios -- =direct_mint.py= and =scenario.py= for the basket-side
-flows, =agents.py= for arb / depositor / redeemer agents, =rebalancer.py= for the cross-pool
-recycling sanity check, =plot_basket_model.py= / =plot_rebalancing.py= / =plot_routing.py= for
-visualization.
+The Python simulation harness in =alberta_buck/sim/= runs the same contracts on an in-process EVM,
+or an anvil instance, with a cast of agents -- depositors, savers, households refinancing
+mortgages into BUCK, arbitrageurs, the wheel's callers -- on historical commodity prices (see the
+=make sim*= targets).  =alberta_buck/sim/control_lab/= is the laboratory the basket's rules were
+measured in.  What they show is in [[file:alberta-buck-ethereum-wheel.org::#evidence][The BasketWheel]].
 
 Outstanding work tracked in companion memos:
 
-- *Equilibrium-seeking dynamic-issuance test* -- closed-loop integration of =BuckBasket=,
-  =BuckKControllerDirect=, =BuckCredit=, and =Buck= against an external market driver and an arb
-  agent that responds to =buckK= changes by minting/burning =BuckCredit= backed BUCK.  Should
-  emit a snapshot tape suitable for the existing =plot_*= visualizers and double as the
-  regression for [[#dynamic-issuance][Dynamic Issuance: Why BuckBasket Needs BUCK_K]].  Highest-priority
-  validation for the closed-loop control claim.
-- *Resolve =BUG #5..#11/#13= in =BuckBasket=* -- per-withdrawal slippage guards, TWAP-bounded
-  swap limits, TWAP-driven overweight/underweight reads, proportional reinvestment, symmetric
-  TOKEN-deposit routing, basket-mint accounting in =fundingFactor=, treasury-reinvest event,
-  graceful tail-redemption.
+- *The basket's open items* -- paying the wheel's callers out of the basket's income, exercising
+  the desk outside its band, and the rest of
+  [[file:alberta-buck-ethereum-wheel.org::#open][The BasketWheel, "Open questions"]].
 - *Mainnet-fork BUCK_K test* -- exercise =BuckKController= against the four real on-chain pools
   at a pinned recent block, verifying basket cost reads sensibly against live data.  Cheap
   validation step before mainnet.
