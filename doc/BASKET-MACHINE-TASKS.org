@@ -269,8 +269,7 @@ machine's design is expected to become the accepted one.
       runs verified, the sizing and research campaigns, gas, and the jump, tilt and price
       forcing runs made fresh). Most rows moved under 2%. One did not: with a lone buyer of
       BUCKs and nobody else to issue, K now climbs to 0.94 and the BUCK is 4% dear, where the
-      lean on both sides held it to 0.86 and 2.4%. The two page checks in a browser are not
-      yet run on it.
+      lean on both sides held it to 0.86 and 2.4%. Both pages pass their checks in a browser.
     - [ ] The lean's tables, on the settled model: with, without and one-sided.
   - [ ] *The lean against parity costs in a quiet world* (found 2026-10-12 in the base world,
     which the depositors' fix does not touch). With no lean the machine ends five years with K
