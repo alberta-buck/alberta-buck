@@ -280,10 +280,25 @@ machine's design is expected to become the accepted one.
     mature debtors, whose opening has the basket costing 3.5 BUCKs). K is thrown to 0.42,
     climbs to 0.95 within months, and at parity nothing brings it back. Mend the opening of those worlds, and say whether a
     controller at rest on its limit should bleed back toward its neutral value.
-  - [ ] The demonstration paper's 240-day figure and its numbers
-    (=alberta-buck-demo.org=, =images/alberta-buck-demo-farm.svg=) are from the pro-rata
-    world. Run =node bin/eqsim.mjs= as that paper gives it, on the basket as it is, and put in
-    the new figure and numbers.
+  - [X] The demonstration paper's figure and numbers are from the demo as it runs now
+    (2026-10-13). Getting there found three more brakes on the JS debtor, which Perry named:
+    "Debtors are smart: if they can obtain equity from the same collateral without interest or
+    risk of forfeiture, I think most would choose that." It had no cash for the gate's reserve,
+    drew a year of payments a month, and drew only when the BUCK stood at or above its basket.
+    It now finds its deposit, and takes all its credit allows a day's bite at a time (half a
+    percent of price). One farm was 5% of the demo's market and its own issuance took K from
+    0.75 to 0.69, so the demo's pools are 100 million. In 240 days it moves 500,961 of a
+    650,000 loan and K ends at 0.78.
+  - [ ] The Python households refinance all of a mortgage or none (=refi_mode = "atomic"=). One
+    whose mortgage is more than its credit at today's K waits, and pays interest on all of it,
+    where a smart one would move the part that fits. In the portcast world that was 12 of 30
+    households holding 7.0 of the 7.2 million. Changing it means running the debtor worlds a
+    third time. Perry to say.
+  - [ ] The JS =Farmer= prototype (=farmsim.mjs=) still draws at most two years of payments a
+    month. Give it the debtor's rule.
+  - [ ] A debtor over its limit still buys BUCKs for a gate that counts only unused credit. They
+    repay its lien, so it loses nothing, but it cannot pass that way. Seen in the 10 million
+    demo world, not in the 100 million one.
   - [ ] The JS saver keeps what it redeems (=core/js/src/agents/saver.js=, one cycle). It is
     one exit and not a recurring one, but it is the same habit; have it sell.
   - [ ] Issuers in the cast. Only credit arbitrageurs issue because the BUCK is dear, and a world
