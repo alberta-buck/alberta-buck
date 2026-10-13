@@ -37,7 +37,8 @@ const { values: a } = parseArgs({ options: {
   hold:    { type: "string", default: "60" },     // saver term, days
   house:   { type: "string", default: "400000" }, // debtor face, $
   rate:    { type: "string", default: "550" },    // mortgage bp/yr
-  aggr:    { type: "string", default: "0" },      // deploy-tolerance bp (theta*apr)
+  aggr:    { type: "string", default: "" },       // tolerated discount, bp (default: a year's interest)
+  target:  { type: "string", default: "100000000" },  // pool depth, $ a pool: one debtor is small in it
   payment: { type: "string", default: "3000" },   // $/month
   budget:  { type: "string", default: "25000" },  // saver stake, $
   plot:    { type: "string", default: "" },
@@ -57,6 +58,7 @@ const urArtifact = JSON.parse(readFileSync(
   "utf8"));
 const world = await buildEquilibriumWorld(session, loadArtifact, {
   identity: id, urArtifact,
+  targetBuck: BigInt(a.target) * 10n ** 6n,
   feedSeed: Number(a.seed), stepBp: Number(a.step) });
 
 const HOUSE = BigInt(a.house) * 10n ** 6n;
@@ -68,7 +70,7 @@ const saver = new BasketSaver({
   holdDays: Number(a.hold) });
 const debtor = new MortgageRetiree({
   house: HOUSE, mortgageBp: BigInt(a.rate), premiumBp: 50n,
-  aggrBp: BigInt(a.aggr),
+  aggrBp: a.aggr === "" ? undefined : BigInt(a.aggr),
   payment: PAYMENT, account: debtorAcct });
 
 const arb = new ParityArb();

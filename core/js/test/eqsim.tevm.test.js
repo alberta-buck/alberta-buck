@@ -86,13 +86,16 @@ async function loop({ basket, days, holdDays }) {
     `mismatches: ${JSON.stringify(session.mismatches[0] ?? null)}`);
   assert.equal(world.series.length, days);
 
-  // The arb holds the triangle together at the end of the run.
+  // The arb holds the triangle together at the end of the run: within
+  // its own 150bp, and the 50bp the debtor may have moved the BUCK/dollar
+  // pool since (it acts after the arb, and in this $10M market it is still
+  // moving its loan onto its credit, a day's bite at a time).
   const [pTU, pUB, pTB] = await Promise.all(
     [world.spotUsd(0), world.spotUB(), world.spotBuck(0)]);
   const implied = (pTU * 1_000_000n) / pUB;
   const divBp = ((pTB - implied) * 10_000n) / implied;
-  assert.ok(divBp > -150n && divBp < 150n,
-    `TOKEN/BUCK within 150bp of the implied price (got ${divBp}bp, ` +
+  assert.ok(divBp > -200n && divBp < 200n,
+    `TOKEN/BUCK within 200bp of the implied price (got ${divBp}bp, ` +
     `${arb.triangles} triangles)`);
 
   // The controller stays interior and the peg observable stays sane.

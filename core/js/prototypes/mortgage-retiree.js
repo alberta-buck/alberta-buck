@@ -1,20 +1,19 @@
-// The two-sided mortgage debtor, AUDITED: the JS port of the Python
-// BuckCreditDebtorAgent, proven by the isolation-world ledger audit to
-// exactness:  adv = interest_saved + jubilee - premium - trade_loss.
+// The two-sided mortgage debtor: the JS port of the Python
+// BuckCreditDebtorAgent, whose ledger the isolation-world audit proved
+// exact:  adv = interest_saved + jubilee - premium - trade_loss.
 //
-// What the audit taught, now doctrine here:
-//   * credits carry a REAL premium, so Buck.mint's funding gate bites;
-//     the debtor finds the cash for its insurance deposit once, and the
-//     SAVE leg buys the BUCK buffer the gate asks ahead of each tranche;
+//   * a debtor does not pay interest it need not: each day it moves as
+//     much of the loan onto its own credit as the market takes without
+//     the price moving, until its credit is used or the loan is gone;
+//   * credits carry a REAL premium, so Buck.mint's funding gate bites:
+//     it finds the cash for its insurance deposit once, and buys the
+//     BUCKs the gate asks ahead of each draw;
 //   * the liability is the chain's own melting quote: drawn net of
 //     Buck.reliefOf (~2%/yr of the lien; never force-closed);
-//   * the unwind buys ONLY below USD par (the basket signal says nothing
-//     about USD price) and never lifts the pool past par -- profitable.
+//   * the unwind buys ONLY below USD par, and never lifts the pool past it.
 //
-// Plumbing lives in the world (pledgeInsured / creditState / buyBuck /
-// buyForGate / mintTranche / sellBuckCapped / unwindBite); the agent
-// is its own accountant: ledger rows carry both trajectories plus the
-// cost telemetry, so nw chart and conservation identity both fall out.
+// Plumbing lives in the world; the agent is its own accountant: ledger
+// rows carry both trajectories and the cost telemetry.
 
 const BP = 10_000n;
 const MONTH = 30;
@@ -29,19 +28,22 @@ export class MortgageRetiree {
    * @param opts.premiumBp  REAL annual insurance premium (funding gate!)
    * @param opts.payment    fixed monthly payment / income, USDC base units
    * @param opts.account    funded account with a registered identity
-   * @param opts.aggrBp     tolerated basket discount, bp (theta * apr):
-   *                        deploy while bvib <= 1 + aggrBp
+   * @param opts.aggrBp     basket discount it still sells into, bp
+   *                        (default: a year of the loan's interest)
+   * @param opts.impactBp   most a day's sale may move the BUCK's price
    * @param opts.saveRate   pct of spare cash routed to the gate buffer
    * @param opts.retireDiscBp unwind when the pool spot is this far below par
    * @param opts.cashBuffer floor the unwind never spends into
    */
   constructor({ house, mortgageBp, premiumBp, payment, account,
-                aggrBp = 0n, saveRate = 50n, retireDiscBp = 200n,
-                cashBuffer = 20_000n * E6 }) {
+                aggrBp = mortgageBp, impactBp = 50n, saveRate = 50n,
+                retireDiscBp = 200n, cashBuffer = 20_000n * E6 }) {
     Object.assign(this, { house, mortgageBp, premiumBp, payment, account,
-                          aggrBp, saveRate, retireDiscBp, cashBuffer });
+                          aggrBp, impactBp, saveRate, retireDiscBp, cashBuffer });
     this.mortgageOwing = house;
     this.hypoOwing = house;   // the counterfactual: the mortgage untouched
+    this.days = 0n;           // each loan's daily balances summed since its
+    this.hypoDays = 0n;       // last payment: interest is charged on these
     this.usdc = 0n;           // banked income awaiting the legs
     this.hypoBanked = 0n;
     this.premiumPaid = 0n;    // insurance principal drawn at each mint
@@ -59,15 +61,15 @@ export class MortgageRetiree {
   }
 
   async act(world, day, tick) {
-    if (tick !== 0 || day % MONTH !== 0) return;
-    let budget = this.payment;
-    if (this.mortgageOwing > 0n) {
-      const interest = this.mortgageOwing * this.mortgageBp / BP / 12n;
-      const pay = min(budget, this.mortgageOwing + interest);
-      this.mortgageOwing += interest - pay;
-      budget -= pay;
+    if (tick !== 0) return;
+    const month = day % MONTH === 0;
+    this.days += this.mortgageOwing; this.hypoDays += this.hypoOwing;
+    if (month) {   // the payment falls due, on both loans alike
+      const [owing, left] = this.#pay(this.mortgageOwing, this.days);
+      const [hypo, hypoLeft] = this.#pay(this.hypoOwing, this.hypoDays);
+      [this.mortgageOwing, this.hypoOwing, this.days, this.hypoDays] = [owing, hypo, 0n, 0n];
+      this.usdc += left; this.hypoBanked += hypoLeft;
     }
-    this.usdc += budget;
     if (this.gateCash === undefined) {   // once, in both ledgers
       this.gateCash = await world.findDepositCash(this.account, this.mortgageOwing);
       this.usdc += this.gateCash; this.hypoBanked += this.gateCash;
@@ -76,31 +78,32 @@ export class MortgageRetiree {
     const cs = await world.creditState(this.account);
     const bvib = await world.session.call(world.basket, "basketValueInBuck");
     this.jub = min(cs.jub, cs.drawn);
-    const spare = this.usdc > this.cashBuffer
-      ? this.usdc - this.cashBuffer : 0n;
-    const tranche = min(min(this.payment * 12n, cs.headroom),
-                        this.mortgageOwing);
-    const deployOk = bvib <= (E18 * (BP + this.aggrBp)) / BP;
+    const spare = this.usdc > this.cashBuffer ? this.usdc - this.cashBuffer : 0n;
+    // Interest runs on what is left with the bank, so it takes all its
+    // credit allows, a day's bite at a time, unless the BUCK is too cheap.
+    const tranche = min(min(cs.headroom, this.mortgageOwing),
+                        await world.sellBite(this.impactBp));
 
-    if (tranche >= E6 && this.mortgageOwing > E6 && deployOk) {
+    if (tranche >= E6 && this.mortgageOwing > E6
+        && bvib <= (E18 * (BP + this.aggrBp)) / BP) {
       // SAVE for the gate: its saving rate of spare cash, or the found cash.
       const save = (spare * this.saveRate) / 100n;
-      const { spend, got } = await world.buyForGate(this.account, tranche,
+      const { tranche: bite, spend, got } = await world.buyForGate(this.account, tranche,
         save > this.gateCash ? save : this.gateCash, { tag: `debtor:save:d${day}` });
       this.usdc -= spend; this.tradeLoss += spend - got; this.gateCash -= min(spend, this.gateCash);
-      // DEPLOY: activate a tranche through the gate, sell, retire.
-      const m = await world.mintTranche(this.account, tranche,
+      // DEPLOY: activate what its cash got through the gate, sell, retire.
+      const m = bite < E6 ? { wait: true } : await world.mintTranche(this.account, bite,
         { tag: `debtor:mint:d${day}` });
       if (!m.ok) {
-        this.throttled += 1;
+        if (!m.wait) this.throttled += 1;
       } else {
         this.premiumPaid += m.premium;
-        const { sold, got } = await world.sellBuckCapped(tranche,
+        const { sold, got } = await world.sellBuckCapped(bite,
           this.account, { tag: `debtor:draw:d${day}` });
         this.tradeLoss += sold - got;
         this.mortgageOwing -= min(got, this.mortgageOwing);
       }
-    } else if (this.mortgageOwing <= E6 && cs.drawn > 0n && spare >= E6) {
+    } else if (month && this.mortgageOwing <= E6 && cs.drawn > 0n && spare >= E6) {
       // UNWIND, spot-gated + impact-capped: only below USD par, only
       // what cannot lift the pool past par.  Never urgent, never forced.
       const { spot, capBuck } = await world.unwindBite();
@@ -115,25 +118,19 @@ export class MortgageRetiree {
       }
     }
 
+    if (!month) return;
     const post = await world.creditState(this.account);
     this.ledger.push({ day, drawn: post.drawn, jub: this.jub,
                        premiumPaid: this.premiumPaid, tradeLoss: this.tradeLoss,
-                       mortgageOwing: this.mortgageOwing,
-                       banked: this.usdc, hypoOwing: this.#hypoMonth(),
-                       hypoBanked: this.hypoBanked });
+                       mortgageOwing: this.mortgageOwing, banked: this.usdc,
+                       hypoOwing: this.hypoOwing, hypoBanked: this.hypoBanked });
   }
 
-  #hypoMonth() {
-    // The counterfactual: the same payment against the untouched loan;
-    // after payoff the payment banks, keeping net worths comparable.
-    if (this.hypoOwing > 0n) {
-      const interest = this.hypoOwing * this.mortgageBp / BP / 12n;
-      const pay = min(this.payment, this.hypoOwing + interest);
-      this.hypoOwing += interest - pay;
-      this.hypoBanked += this.payment - pay;
-    } else {
-      this.hypoBanked += this.payment;
-    }
-    return this.hypoOwing;
+  /** One payment on a loan: interest on its daily balances since the last
+   *  (30/360), then principal.  Returns [still owing, payment left over]. */
+  #pay(owing, days) {
+    const interest = days * this.mortgageBp / BP / 360n;
+    const pay = min(this.payment, owing + interest);
+    return [owing + interest - pay, this.payment - pay];
   }
 }

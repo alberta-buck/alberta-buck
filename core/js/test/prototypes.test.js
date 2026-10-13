@@ -66,26 +66,29 @@ test("prototypes: the debtor's mortgage arithmetic amortizes", async () => {
                   holderAddress: (a) => a.address,
                   creditState: async () => zeroCredit,
                   gateShortfall: async () => ({ required: 0n, shortfall: 0n }),
-                  buyForGate: async () => ({ spend: 0n, got: 0n }),
+                  buyForGate: async () => ({ tranche: 0n, spend: 0n, got: 0n }),
                   findDepositCash: async () => 0n,
+                  sellBite: async () => 0n,
                   mintTranche: async () => ({ ok: false, premium: 0n }),
                   sellBuckCapped: async () => ({ sold: 0n, got: 0n }),
                   unwindBite: async () => ({ spot: 10n ** 6n, capBuck: 0n }),
                   buyBuck: async () => 0n };
 
-  for (let m = 0; m < 12; m++) {
-    const owing = r.mortgageOwing;
-    await r.act(world, m * 30, 0);
-    assert.ok(r.mortgageOwing < owing, "principal must fall every month");
-  }
+  // The debtor acts every day (its refinancing is paced by the market, not
+  // the calendar); the payment and the ledger row fall monthly.
+  for (let d = 0; d < 360; d++) await r.act(world, d, 0);
   const rows = r.ledger;
+  assert.equal(rows.length, 12, "one ledger row a month");
+  assert.ok(rows.every((row, i) => i === 0 || row.mortgageOwing < rows[i - 1].mortgageOwing),
+    "principal must fall every month");
   assert.ok(rows.every((row) => row.mortgageOwing === row.hypoOwing),
     "with no BUCK legs, actual == counterfactual trajectory");
-  // $400k at 5.5%/12 accrues ~$1,833 the first month; the $3k payment
-  // retires ~$1,167 of principal.
-  const firstDrop = 400_000n * 10n ** 6n - rows[0].mortgageOwing;
-  assert.ok(firstDrop > 1_150n * 10n ** 6n && firstDrop < 1_200n * 10n ** 6n,
-    `first month retires ~$1,167 of principal (got ${firstDrop})`);
+  // Interest is charged on the days just past: ~$397k at 5.5% accrues
+  // ~$1,820 over the 30 days to the second payment, so the $3k payment
+  // retires ~$1,180 of principal.
+  const drop = rows[0].mortgageOwing - rows[1].mortgageOwing;
+  assert.ok(drop > 1_150n * 10n ** 6n && drop < 1_200n * 10n ** 6n,
+    `a month's payment retires ~$1,180 of principal (got ${drop})`);
   assert.ok(rows.every((row) => row.premiumPaid === 0n
                              && row.tradeLoss === 0n && row.jub === 0n),
     "zero cost telemetry when no legs fire");

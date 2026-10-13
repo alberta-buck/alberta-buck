@@ -42,8 +42,11 @@ export class EqWorldApp {
   }
 
   async boot() {
+    // Pools of $100M: a market in which one farm or one household is small,
+    // so a debtor moving a whole loan onto its own credit does not move it.
     this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
-      identity: this.identity, urArtifact: this.urArtifact, rng: this.rng });
+      identity: this.identity, urArtifact: this.urArtifact, rng: this.rng,
+      targetBuck: 10n ** 14n });
     const w = this.world;
     const arb = new ParityArb();
     this.core = [

@@ -533,16 +533,27 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     return { required, shortfall: required > bal ? required - bal : 0n };
   };
 
-  /** Buy BUCKs toward the gate's shortfall for `tranche`, spending at
+  /** Buy the BUCKs the gate asks before `tranche` can be minted, with at
    *  most `budget` dollars: the shortfall at the pool's price, a percent
-   *  and a dollar over.  Returns {spend, got}. */
+   *  and a dollar over.  When the budget does not reach, the tranche is
+   *  cut to the share it does fund -- so a dearer gate (a cheaper BUCK)
+   *  slows a debtor in proportion, and one with nothing to spend waits
+   *  and buys nothing.  Returns {tranche, spend, got}: the tranche to
+   *  mint (0n: wait). */
   world.buyForGate = async (account, tranche, budget, opts2 = {}) => {
-    const { shortfall } = await world.gateShortfall(account, tranche);
-    if (shortfall === 0n) return { spend: 0n, got: 0n };
-    const want = shortfall * (await world.spotUB()) / 10n ** 6n * 101n / 100n + 10n ** 6n;
-    const spend = want < budget ? want : budget;
-    if (spend < 10n ** 6n) return { spend: 0n, got: 0n };
-    return { spend, got: await world.buyBuck(spend, account, opts2) };
+    const E6 = 10n ** 6n;
+    const price = await world.spotUB();
+    const cost = (s) => s * price / E6 * 101n / 100n + E6;
+    let { shortfall } = await world.gateShortfall(account, tranche);
+    if (shortfall > 0n && cost(shortfall) > budget) {
+      tranche = tranche * budget / cost(shortfall) * 98n / 100n;
+      if (tranche < E6) return { tranche: 0n, spend: 0n, got: 0n };
+      ({ shortfall } = await world.gateShortfall(account, tranche));
+      if (shortfall > 0n && cost(shortfall) > budget) return { tranche: 0n, spend: 0n, got: 0n };
+    }
+    if (shortfall === 0n) return { tranche, spend: 0n, got: 0n };
+    const spend = cost(shortfall);
+    return { tranche, spend, got: await world.buyBuck(spend, account, opts2) };
   };
 
   /** The dollars a household finds for the insurance deposit of
@@ -579,6 +590,13 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const after = await session.call(buck, "signedBalanceOf", [p.address]);
     return { ok: true, premium: before > after ? before - after : 0n };
   };
+
+  /** The most BUCKs a sale can put into the BUCK/dollar pool while moving
+   *  its price by at most `bp`: adding dx to a reserve x moves the price
+   *  by about 2 dx / x.  A debtor retiring a loan that bears interest is
+   *  paced by this, the market's depth, and not by the calendar. */
+  world.sellBite = async (bp) =>
+    (await session.call(buck, "balanceOf", [poolUB.address])) * bp / 20_000n;
 
   /** Sell capped by the live spendable balance (held + unused credit). */
   world.sellBuckCapped = async (buckIn, account, opts2 = {}) => {
