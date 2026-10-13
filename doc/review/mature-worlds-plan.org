@@ -31,9 +31,9 @@ These are standing instructions for this repository. They are not optional.
 - Commit messages are ASCII, short, say what changed and why, and carry no co-author or AI line.
   Stage explicit paths only.
 - Perry has uncommitted work of his own that must stay untouched and unstaged:
-  =alberta-buck-ethereum-basket.org= (one link line in the abstract), =images/alberta-buck-ethereum-basket.pdf=
-  and =.txt=, =images/equilibrium-isolation.png=, =lib/circom-lib=, and untracked files under
-  =test/vectors/=, =images/= and =doc/review/=.
+  =alberta-buck-ethereum-basket.org= (one link line in the abstract), the =.pdf= and =.txt= of
+  that paper under =images/=, =images/equilibrium-isolation.png=, =lib/circom-lib=, and untracked
+  files under =test/vectors/=, =images/= and =doc/review/=.
 - Commands start instantly through =build/cleanup/nx.sh= (a captured =nix develop= environment).
   Python needs the venv as well:
   #+begin_src sh
