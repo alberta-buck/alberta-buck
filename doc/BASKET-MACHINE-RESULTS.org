@@ -398,7 +398,7 @@ BUCKs is a buyer of BUCKs, and K rises to meet a buyer.
 | Pro-rata basket | 0.780 | | |
 | Older upkeep | 0.924 | 1.249 | 8% |
 | Machine, no lean against parity | 0.745 | 1.246 | 1% |
-| Machine, lean on both sides | 0.790 | 1.227 | 12% |
+| Machine, lean on both sides | 0.790 | 1.227 | 13% |
 | Machine, lean on the cheap side only (as built) | 0.824 | 1.215 | 22% |
 
 K takes its level in the first 300 days and keeps it. The stock of BUCKs builds late, from day
