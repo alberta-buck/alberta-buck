@@ -127,29 +127,47 @@ the Journal, and the new position appears with its credit limit.
 
 Here is the heart of the demonstration.  Dale's simulated twin holds
 the $650,000 loan at 6.2% and keeps making the $4,300 payments.  Dale
-himself now runs a simple, patient policy each month:
+himself does what anyone would who is offered the same money, on the
+same land, at no interest and with no lender who can foreclose: he
+moves the loan onto his own credit as fast as he can.  He draws against
+his headroom, sells the BUCKs for dollars, and retires loan PRINCIPAL --
+swapping interest-bearing bank debt for an interest-free claim on his
+own land.
 
-- *When BUCK trades above the basket* (deflation side -- the market
-  values BUCK richly), he draws against his headroom and sells BUCK
-  high for dollars, retiring loan PRINCIPAL early -- swapping
-  interest-bearing bank debt for his interest-free claim on his own
-  land.  The draws are tranche-capped (a year of payments at a time),
-  so one farmer never moves the market.
-- As the loan shrinks, the payments it no longer consumes *bank up*.
-- *When BUCK trades below the basket* (inflation side -- BUCK is
-  cheap), he spends the banked dollars buying discounted BUCK,
-  retiring the drawn claim toward zero.
+Three things pace him, and none of them is a rule of his own.
 
-Sell high, buy low -- not as speculation, but as the natural rhythm of
-someone retiring one kind of obligation with another.  And note what
-this behaviour does systemically: it is *counter-cyclical demand* that
-pulls BUCK back toward the basket from both sides.  The farmer's
-self-interest and the currency's stability are the same motion.  (The
-controller helps from the other side: sustained deviation moves K
-slowly, tightening or relaxing every credit limit in the system.  The
-demo keeps this honest -- if K tightens past Dale's draw, he is FORCED
-to buy BUCK at whatever the market asks, and the cost is booked to his
-ledger like everything else.)
+- *The market.*  Each day he sells only as many BUCKs as the market
+  takes without the price moving half a percent.  In a market where one
+  farm is small, that is a matter of days.
+- *His limit.*  His credit is the insured value of the land times K.
+  The demo pledges land worth exactly the loan, so at K = 0.75 his
+  credit reaches about $455,000 of the $650,000.  The rest stays with
+  the bank until K rises or the payments wear it down.  A farm that
+  owes a fraction of what it is worth would clear the whole loan.
+- *The deposit.*  Insured credit carries a deposit with the insurance
+  pool -- ten years' premium, returned when the coverage is dropped --
+  and it is drawn on the credit itself.  Before each draw the system
+  checks that Dale already holds a share of that deposit in BUCKs: half
+  of it while the BUCK is at parity, none when BUCKs are scarce, all of
+  it and more when there are already too many about.  So Dale sets
+  aside about $32,000, once, and buys those BUCKs as he needs them.  It
+  is the system's brake on issuing into a glut, and near parity it
+  hardly slows him.
+
+As the loan shrinks, the payments it no longer consumes *bank up*.
+Later, with the loan gone, he spends those dollars buying BUCKs back
+when they are cheap, wearing the claim down toward zero.  There is no
+hurry: the claim bears no interest and nobody can call it.
+
+Note what this does systemically.  A dear BUCK is an offer to everyone
+with something to pledge, and people like Dale take it, which is what
+brings the BUCK back.  A cheap BUCK shuts the door on them, through the
+deposit rule above.  The farmer's self-interest and the currency's
+stability are the same motion.  (The controller helps from the other
+side: a deviation that lasts moves K slowly, tightening or relaxing
+every credit limit in the system.  If K tightens past what Dale has
+drawn, nothing is called back.  He simply cannot draw more until he is
+under his limit again.)
 
 * Step 4: investing the savings
 
@@ -162,9 +180,9 @@ flow now.  The BUCK system gives it two productive homes:
   TOKENs themselves -- and these are not abstractions: construction
   materials, labour, energy, food are precisely the farm's own input
   bill.  A deposit buys a share of the whole basket.  The basket pairs
-  the tokens with BUCK it issues on its own credit and sets both to
+  the tokens with BUCKs it issues on its own credit and sets both to
   work in its pool; the depositor holds a *receipt NFT* for the shares,
-  redeemable any time and paid out in BUCK.  In effect, Dale pre-buys
+  redeemable any time and paid out in BUCKs.  In effect, Dale pre-buys
   his input basket with this year's grain cheque, holds a claim that
   tracks those real prices, and collects his share of the pools'
   trading fees and the basket's rebalancing while he waits.
@@ -185,10 +203,11 @@ numbers above):
 #+CAPTION: 240 simulated days: BUCK K, basket value in BUCK, the floating BUCK price, and the farm's net worth vs the loan-servicing counterfactual.
 [[./images/alberta-buck-demo-farm.svg]]
 
-- *BUCK K* moves deliberately (0.75 -> 0.86 over this run): the
-  controller answers persistent deflation with more credit capacity.
-  It is a structural lever, not a market-maker; the fast
-  stabilization is the savers' and debtors' own buying and selling.
+- *BUCK K* moves deliberately (0.75 -> 0.78 over this run): the
+  controller answers a BUCK that stays a little dear with a little
+  more credit capacity.  It is a structural lever, not a market-maker;
+  the fast stabilization is the savers' and debtors' own buying and
+  selling.
 - *basketValueInBuck* rides near 1.0 -- one basket costs about one
   BUCK: the peg, defended by everyone's self-interest.
 - *The floating BUCK price* is never pinned; it wanders with supply
@@ -199,11 +218,12 @@ numbers above):
   by construction -- and then separates, because the carrying costs
   differ by an order of magnitude: the untouched loan bleeds $3,358 a
   month in interest on day one, while the claim costs $271 a month in
-  insurance premium.  In this 240-day run Dale has already moved
-  $201,672 of principal out of the bank's column ($440,657 owing vs
-  the twin's $642,329); the avoided interest on that retired
-  principal is what compounds the gap from here.  The improvement is
-  not magic; it is the removal of a standing outflow.
+  insurance premium.  In this 240-day run Dale has moved $500,961 of
+  principal out of the bank's column ($138,002 owing vs the twin's
+  $638,963), nearly all of it in the first ten days; the avoided
+  interest on that retired principal is what compounds the gap from
+  here.  The improvement is not magic; it is the removal of a standing
+  outflow.
 
 * Drive it yourself
 
