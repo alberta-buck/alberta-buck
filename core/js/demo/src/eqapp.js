@@ -144,7 +144,7 @@ export class EqWorldApp {
         drawn: last ? f6(last.drawn) : 0, banked: f6(a.usdc),
         net: last ? f6(house + last.banked - last.mortgageOwing - last.drawn)
                   : f6(house - a.mortgageOwing),
-        hypoNet: f6(house - a.hypoOwing),
+        hypoNet: f6(house + a.hypoBanked - a.hypoOwing),
       });
     }
     return rows;
@@ -318,7 +318,7 @@ export class EqWorldApp {
           { label: "BuckCredit route", points: L.map((r) =>
               [r.day, f6(house + r.banked - r.mortgageOwing - r.drawn)]) },
           { label: "hypo (mortgage kept)", points: L.map((r) =>
-              [r.day, f6(house - r.hypoOwing)]) },
+              [r.day, f6(house + r.hypoBanked - r.hypoOwing)]) },
         ] }),
       position: lineChart({
         title: `${d.name}: mortgage / credit drawn / banked ($)`,

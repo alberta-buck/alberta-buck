@@ -4,15 +4,15 @@
 //
 // What the audit taught, now doctrine here:
 //   * credits carry a REAL premium, so Buck.mint's funding gate bites;
-//     the SAVE leg buys the required BUCK buffer ahead of each tranche
-//     (a revert is the gate saying "save more" -- counted, retried);
+//     the debtor finds the cash for its insurance deposit once, and the
+//     SAVE leg buys the BUCK buffer the gate asks ahead of each tranche;
 //   * the liability is the chain's own melting quote: drawn net of
 //     Buck.reliefOf (~2%/yr of the lien; never force-closed);
 //   * the unwind buys ONLY below USD par (the basket signal says nothing
 //     about USD price) and never lifts the pool past par -- profitable.
 //
 // Plumbing lives in the world (pledgeInsured / creditState / buyBuck /
-// gateShortfall / mintTranche / sellBuckCapped / unwindBite); the agent
+// buyForGate / mintTranche / sellBuckCapped / unwindBite); the agent
 // is its own accountant: ledger rows carry both trajectories plus the
 // cost telemetry, so nw chart and conservation identity both fall out.
 
@@ -68,6 +68,10 @@ export class MortgageRetiree {
       budget -= pay;
     }
     this.usdc += budget;
+    if (this.gateCash === undefined) {   // once, in both ledgers
+      this.gateCash = await world.findDepositCash(this.account, this.mortgageOwing);
+      this.usdc += this.gateCash; this.hypoBanked += this.gateCash;
+    }
 
     const cs = await world.creditState(this.account);
     const bvib = await world.session.call(world.basket, "basketValueInBuck");
@@ -79,15 +83,11 @@ export class MortgageRetiree {
     const deployOk = bvib <= (E18 * (BP + this.aggrBp)) / BP;
 
     if (tranche >= E6 && this.mortgageOwing > E6 && deployOk) {
-      // SAVE for the real gate, preferring cheap BUCK (deployOk window).
-      const { shortfall } = await world.gateShortfall(this.account, tranche);
-      const spend = min(shortfall, (spare * this.saveRate) / 100n);
-      if (spend >= E6) {
-        const got = await world.buyBuck(spend, this.account,
-                                        { tag: `debtor:save:d${day}` });
-        this.usdc -= spend;
-        this.tradeLoss += spend - got;
-      }
+      // SAVE for the gate: its saving rate of spare cash, or the found cash.
+      const save = (spare * this.saveRate) / 100n;
+      const { spend, got } = await world.buyForGate(this.account, tranche,
+        save > this.gateCash ? save : this.gateCash, { tag: `debtor:save:d${day}` });
+      this.usdc -= spend; this.tradeLoss += spend - got; this.gateCash -= min(spend, this.gateCash);
       // DEPLOY: activate a tranche through the gate, sell, retire.
       const m = await world.mintTranche(this.account, tranche,
         { tag: `debtor:mint:d${day}` });
@@ -117,10 +117,10 @@ export class MortgageRetiree {
 
     const post = await world.creditState(this.account);
     this.ledger.push({ day, drawn: post.drawn, jub: this.jub,
-                       premiumPaid: this.premiumPaid,
-                       tradeLoss: this.tradeLoss,
+                       premiumPaid: this.premiumPaid, tradeLoss: this.tradeLoss,
                        mortgageOwing: this.mortgageOwing,
-                       banked: this.usdc, hypoOwing: this.#hypoMonth() });
+                       banked: this.usdc, hypoOwing: this.#hypoMonth(),
+                       hypoBanked: this.hypoBanked });
   }
 
   #hypoMonth() {

@@ -513,18 +513,53 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   };
 
   /** What the funding gate demands before the mint that makes `tranche`
-   *  spendable: quoteMint's insurance principal scaled by the live
-   *  fundingFactor, less what the holder's balanceOf already covers. */
+   *  spendable: quoteMint's insurance principal scaled by the
+   *  fundingFactor a mint sent now would face, less what the holder's
+   *  balanceOf already covers.  Buck.mint runs the controller's cycle
+   *  before it reads the factor, so this runs it first (anyone may): a
+   *  factor from the last cycle is up to a day old, and at its slope half
+   *  a percent in the BUCK is an eighth of a deposit.  Half a percent
+   *  over, since the gate is strict. */
   world.gateShortfall = async (account, tranche) => {
     const me = world.holderAddress(account);
     const ids = world._credits.get(account.address) ?? [];
     const arg = await world.mintArg(account, tranche);
     if (arg === 0n) return { required: 0n, shortfall: 0n };
+    await session.send(kctrl, "compute", [], { tag: "gate:compute", expect: "either" });
     const quote = await session.call(buck, "quoteMint", [arg, ids]);
     const ff = await session.call(kctrl, "fundingFactor");
-    const required = (quote[1] * ff) / E18;
+    const required = (quote[1] * ff) / E18 * 1005n / 1000n;
     const bal = await session.call(buck, "balanceOf", [me]);
     return { required, shortfall: required > bal ? required - bal : 0n };
+  };
+
+  /** Buy BUCKs toward the gate's shortfall for `tranche`, spending at
+   *  most `budget` dollars: the shortfall at the pool's price, a percent
+   *  and a dollar over.  Returns {spend, got}. */
+  world.buyForGate = async (account, tranche, budget, opts2 = {}) => {
+    const { shortfall } = await world.gateShortfall(account, tranche);
+    if (shortfall === 0n) return { spend: 0n, got: 0n };
+    const want = shortfall * (await world.spotUB()) / 10n ** 6n * 101n / 100n + 10n ** 6n;
+    const spend = want < budget ? want : budget;
+    if (spend < 10n ** 6n) return { spend: 0n, got: 0n };
+    return { spend, got: await world.buyBuck(spend, account, opts2) };
+  };
+
+  /** The dollars a household finds for the insurance deposit of
+   *  refinancing `amount`, from savings or a relative: the deposit that
+   *  mint would pay, at the pool's price.  Arrives on the fiat rail.  A
+   *  household about to retire a debt that bears interest does the
+   *  arithmetic and finds it; with none it cannot hold the BUCKs the
+   *  funding gate asks, and is shut out while the BUCK is near parity. */
+  world.findDepositCash = async (account, amount) => {
+    const ids = world._credits.get(account.address) ?? [];
+    const cs = await world.creditState(account);
+    if (cs.capacity === 0n || amount === 0n) return 0n;
+    const arg = amount * 100n >= cs.capacity * 99n ? MINT_MAX : amount;
+    const quote = await session.call(buck, "quoteMint", [arg, ids]);
+    const cash = quote[1] * (await world.spotUB()) / 10n ** 6n;
+    if (cash > 0n) await world.fiatIn(account, cash, { tag: "debtor:found-cash" });
+    return cash;
   };
 
   /** Activate what makes `tranche` spendable, through the REAL gate

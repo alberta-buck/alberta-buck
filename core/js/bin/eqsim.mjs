@@ -128,7 +128,7 @@ if (a.plot) {
         { label: "BuckCredit route", points: debtor.ledger.map((r) =>
             [r.day, f6(HOUSE + r.banked - r.mortgageOwing - r.drawn + r.jub)]) },
         { label: "counterfactual", points: debtor.ledger.map((r) =>
-            [r.day, f6(HOUSE - r.hypoOwing)]) },
+            [r.day, f6(HOUSE + r.hypoBanked - r.hypoOwing)]) },
       ] }),
   ];
   writeFileSync(a.plot, svgDoc(charts));
