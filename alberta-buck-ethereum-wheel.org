@@ -707,8 +707,8 @@ rule matters, not for what a basket earns.
 
 | Prices                      | No lean | Tilt 1/4 | Tilt 1/2 | Tilt 1   |
 |-----------------------------+---------+----------+----------+----------|
-| Clean cycles                | +54,908 | +76,611  | +96,241  | +131,337 |
-| Commodity-like              | +20,764 | +26,888  | +34,633  | +47,822  |
+| Clean cycles                | +55,399 | +77,744  | +97,974  | +133,872 |
+| Commodity-like              | +18,130 | +24,652  | +31,591  | +45,253  |
 | One TOKEN reprices for good | -3,940  | -5,803   | -7,787   | -11,410  |
 
 Every step up in the tilt buys more of both: more gain where prices return, more loss where one
@@ -718,14 +718,14 @@ does not.  At one half the loss on the one-way move is 0.7% of the basket.
 the same BUCKs for the same gain, in two or three times as many pieces.  Between half a day and
 two days, how fast a gap is released hardly matters.
 
-*A count beats a band.*  The urgency count earns about half again what a fixed two-point band
-does, and makes more trades to do it.  Per trade the band earns more, so which is better depends
+*A count beats a band.*  The urgency count earns a third to a half again what a fixed two-point
+band does, and makes more trades to do it.  Per trade the band earns more, so which is better depends
 on what a trade costs, and that waits for the callers to be paid.
 
 *On realistic prices rebalancing is a small bonus.*  Fifty years of data say basic commodities
 follow inflation, each with its own delay: six of eight series stayed within 0.3% a year of it.
 A lab run built that way, a decade long, had the basket's cost rise 47% in dollars.  The BUCK kept
-pace, within 0.3% of its basket on average, and rebalancing added 2.3% over the decade.  On this
+pace, within 0.4% of its basket on average, and rebalancing added 2.3% over the decade.  On this
 evidence the basket's first job is to hold value through inflation.
 
 *The arbitrage is real, and small.*  Against a deep outside market, owning the cycles was worth
