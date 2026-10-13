@@ -1,0 +1,491 @@
+#+TITLE: Mending the mature worlds: a plan
+#+DATE: 2026-10-13
+#+OPTIONS: ^:nil toc:2 num:t
+
+This is a plan for four fixes to the simulator's cast, written so that someone who was not there
+can carry them out. Perry agreed to all four on 2026-10-13. None of them touches a contract. Line
+numbers are as of commit =87d5a6f= on =doc/basket-machine=; find things by name if they have moved.
+
+* Why
+
+In the five matrix worlds with mature debtors K is at its limit within weeks, and on the pro-rata
+basket and the older upkeep the BUCK then stays 8% to 33% dear for a year. We read every account
+through the first 60 days of one of them. The table and the account are in
+[[file:../BASKET-MACHINE-RESULTS.org::*Why the mature worlds cannot issue enough][the results]]. Four things in the model make it:
+
+1. The big borrowers set aside a BUCK for every BUCK they draw, and hold it while the credit is
+   out. The protocol's gate asks a few percent, for the moment of the draw.
+2. Everyone issues on day 0, into basket pools of 2.3 million BUCKs.
+3. The shared swap helper keeps BUCKs it cannot forward. It lost 6.3 million in four days.
+4. No borrower uses its unused limit because the BUCK is dear.
+
+Savers also buy 15 million BUCKs into the day-0 crash. That is not a fault: it is what a saver
+does, and with no crash it does not happen. Leave the savers alone.
+
+* Ground rules
+
+These are standing instructions for this repository. They are not optional.
+
+- Work on =doc/basket-machine=. Push nothing, tag nothing. After each commit bring the local
+  =feature/carry-convexity= level with it: =git fetch . doc/basket-machine:feature/carry-convexity=.
+- Commit messages are ASCII, short, say what changed and why, and carry no co-author or AI line.
+  Stage explicit paths only.
+- Perry has uncommitted work of his own that must stay untouched and unstaged:
+  =alberta-buck-ethereum-basket.org= (one link line in the abstract), =images/alberta-buck-ethereum-basket.pdf=
+  and =.txt=, =images/equilibrium-isolation.png=, =lib/circom-lib=, and untracked files under
+  =test/vectors/=, =images/= and =doc/review/=.
+- Commands start instantly through =build/cleanup/nx.sh= (a captured =nix develop= environment).
+  Python needs the venv as well:
+  #+begin_src sh
+  build/cleanup/nx.sh bash -c 'source ../alberta-buck.venv-0.2.0-nix-darwin-cpython-313/bin/activate; python -m pytest alberta_buck -q -p no:cacheprovider'
+  build/cleanup/nx.sh make test                       # Foundry, about 6 minutes
+  build/cleanup/nx.sh bash -c 'cd core/js && node --test'
+  #+end_src
+- New Python is written with === aligned at column 32 and wraps at 128. Documents wrap at 100.
+- Prose says "the BUCK" for the currency and "BUCKs" for amounts, and never "debt" for a negative
+  balance.
+- *The random draws are pinned.* Each agent draws its settings in a fixed order from its own
+  stream (=_draw(scenario, cls, name, r, range)=). Adding, removing or reordering a =_draw= changes
+  every later setting of that agent, and so the whole world. Take every new setting with
+  =_spec(scenario, cls, name, default)=, which draws nothing. Leave every existing =_draw= where it
+  is, even when its value is no longer used.
+- *The lab's fingerprint* covers =src/**/*.sol= and these files under =alberta_buck/sim/=:
+  =deploy.py=, =chain.py=, =identity.py=, =experiment.py=, =router.py=, =gauge.py=,
+  =pyrevm_backend.py= and =control_lab/*=. Touch any of them and the lab's saved runs are stale,
+  which costs a two-hour regeneration (=build/lab/regen2.sh=). Nothing below needs to touch them.
+  =equilibrium_agents.py=, =direct_mint.py=, =loop.py= and =snapshot.py= are outside it.
+- Long runs go from a frozen copy, never from the working tree, so edits cannot disturb them. See
+  [[*Measuring][Measuring]].
+- Never start, stop or probe anything on ports 8797, 8798 or 8000.
+
+* Where the branch stands
+
+- The four model faults found earlier are mended and committed: the linear funding factor
+  (=302cf2d=), debtors who find their deposit and read a fresh factor (=7251666=, =ca98139=),
+  depositors who sell what an exit pays them (=a488af7=).
+- The lean against parity is on both sides again (=29df13f=).
+- Runs on that lean were in flight when this was written, and none of them has big borrowers:
+  =build/sim/lean2/= (the savings world on both seeds and the portcast world, on the machine) and
+  the lab (=build/lab/regen-both.log=, review runs in =build/lab/review3/=). When they finish,
+  their numbers belong in the results in place of the one-sided ones. The machine's other worlds
+  were *not* run again on the two-sided lean. They wait for the fixes below, so the matrix is run
+  once.
+- The settled matrix that these fixes will replace is in =build/sim/sellers/runs/= (36 runs), read
+  by =doc/review/matrix-baskets.py=.
+
+* Fix 3: the swap helper keeps nothing
+
+Do this one first. It is plumbing, and the other fixes are measured through it.
+
+** What is wrong
+
+=d.simlp= does two jobs. It is the account that seeded the BUCK/dollar pool, so it carries a lien
+of about 50 million BUCKs against a credit whose limit moves with K (=deploy.py=, lines 588 to
+640). It is also the transit account for every agent's swap: =_ProxyAgent._swap_via_simlp=
+(=equilibrium_agents.py=, line 330) has the paying proxy transfer its tokens to =d.simlp= and then
+calls =d.simlp.swap=, which pays the pool from =d.simlp='s own balance.
+
+When K falls far enough that the helper's limit is under its lien, the helper has nothing to
+spend. BUCKs that arrive repay its lien and cannot go on. The code then caps the swap to what the
+helper can spend, which is nothing, and returns. The agent has lost its BUCKs and nobody has
+recorded it. On day 0 of the mature worlds K falls to 0.38, the limit to 38 million, and in four
+days 6.3 million BUCKs vanish this way.
+
+** What to do
+
+1. /Proxies swap for themselves./ Every proxy is a =SimLP= (=_new_proxy=, line 321), so it has
+   =swap= and the callbacks. In =_swap_via_simlp= drop the transfer to =d.simlp= and call =swap= on
+   the paying proxy:
+   #+begin_src python
+   payer                           = from_proxy or self.proxy
+   # (keep the cap to the payer's own spendable BUCK, as now)
+   d.chain.send(payer.functions.swap(pool_addr, recipient, zero_for_one, int(amount), sqrt_limit, t0, t1))
+   #+end_src
+   The pool then takes the tokens from the proxy in the callback. Delete the second cap, the one
+   against =balanceOf(d.simlp)=. Keep the method's name: many callers use it.
+2. /Depositors get a transit account with no credit./ =_DMBase._sell_proceeds= (=direct_mint.py=,
+   line 125) is an EOA and cannot take a callback, so it needs a helper. Give it one that holds no
+   credit and no lien, made on first use and kept on the deployment:
+   #+begin_src python
+   def _transit(d):
+       """A SimLP with no credit of its own, for an EOA's swaps: what it is sent it forwards or returns."""
+       t                           = getattr(d, "_transit", None)
+       if t is None:
+           t                       = d.chain.deploy("SimLP", sol_file="SimLP")
+           idmod.bind_as_operator(d.chain, d.reg, t.address, True, False)
+           d._transit              = t
+       return t
+   #+end_src
+   The depositor's identity approval (the =_simlp_approved= block) must name the transit's address,
+   not =d.simlp='s. After the swap, send anything still in the transit back to the depositor with
+   the transit's =exec=. Do not add a field to =Deployment= for it: =deploy.py= is in the lab's
+   fingerprint.
+3. /Leave the other uses of =d.simlp= alone./ The whale's snaps (=agents.py=, line 291) and
+   =_buy_token_from_usdc= (=direct_mint.py=, line 201) move TOKEN and dollars, of which the helper
+   holds an endless stock and no lien. =_simlp_endow_buck= (line 588) and the pusher agents use
+   =exec= to issue from the helper on purpose.
+4. /Make it visible./ Add the helper's lien to each frame in =snapshot.py= as =simlp_drawn=
+   (=-signedBalanceOf(d.simlp)=, or 0 when positive). It should be flat through any run.
+
+** How to know it worked
+
+- New test in =alberta_buck/test/test_rebalancing_sim_invariants.py= (it already takes a finished
+  run's frames): =simlp_drawn= is the same in the last frame as in the first frame after day 0.
+- =who-holds.py= on the world below: the row "pool-seeding helper" no longer falls from 49.6 to
+  43.3 between day 1 and day 5.
+
+* Fix 1: the big borrowers' reserve at the gate's own scale
+
+** What is wrong
+
+=FatCreditBorrowerAgent= (=equilibrium_agents.py=, line 1627) uses credit that pays no premium, so
+the real gate never applies to it, and it models the gate itself. Its model is older than the
+gate's correction. In =act= (the lever-up branch, lines 1950 to 2034) a draw of =delta= needs
+=delta x ff= BUCKs in a separate escrow proxy, with =ff= about one at parity. The requirement
+rolls: =reserve_req= (line 1817) is the sum over open tranches of =outstanding x ff=, so the
+escrow holds about one BUCK for every BUCK still drawn. In the base world after five years the
+big borrowers have drawn 11.0 million and hold 10.7 million in escrow.
+
+The protocol asks something else (=Buck.mint=, and "The Funding-Factor Reserve" in
+=alberta-buck-ethereum.org=). The minter must hold, at the moment of the mint, BUCKs worth the
+insurance deposit that mint pays, times =fundingFactor=. The deposit is ten years' premium, 5% to
+15% of the coverage. The factor is a half at parity. Nothing is locked afterwards.
+
+** What to do
+
+Add two settings in =setup=, after the existing draws and with =_spec=:
+
+#+begin_src python
+# How the simulated funding reserve is kept (settings; no draw):
+#   "gate"     what Buck.mint's gate asks of an insured draw: fundingFactor x the deposit, for the draw only
+#   "rolling"  the earlier model: ff x the whole draw, held while the credit is out
+#   "none"     no reserve at all
+self.reserve_mode               = str(_spec(scenario, cls, "reserve_mode", "gate"))
+self.gate_deposit               = float(_spec(scenario, cls, "gate_deposit", 0.10))     # the deposit, of coverage: ten years at 100 bp
+#+end_src
+
+In the lever-up branch, when =reserve_mode == "gate"=:
+
+#+begin_src python
+k                               = d.kctrl.functions.buckK().call() / 1e18
+factor                          = d.kctrl.functions.fundingFactor().call() / 1e18       # the contract's own, linear
+e                               = self.gate_deposit
+deposit                         = delta * e / (k - e) if k > e else 0                   # on the coverage that delivers delta
+need_add                        = int(deposit * factor)
+req                             = 0                                                     # nothing is owed for earlier draws
+ff                              = need_add / delta if delta else 0.                     # what the throttle below divides by
+#+end_src
+
+The rest of the branch then works as written: buy the shortfall into the escrow, throttle the
+draw to what the escrow funds, sell. Two more changes in that mode:
+
+- Do not append to =self._tranches=. With no tranches =reserve_req= is zero and =_pop_tranches=
+  releases nothing, which is right.
+- After the sale, free the whole escrow: =self.pending_release = self._reserve_balance(d)=.
+  =_release_pending= (line 1844) already sells pending reserve back, a share a day, and only while
+  the BUCK is not cheap. That last condition is worth keeping: it holds BUCKs off a market that
+  already has too many.
+
+"rolling" keeps today's code path exactly, so an old run can be reproduced. "none" skips the
+purchase and the throttle. The draws of =ff_cyc=, =ff_amp= and =ff_pow= stay in =setup= though
+"gate" does not use them.
+
+Update the class docstring's section (B), the note at line 431 of the same file, and
+=alberta_buck/sim/EQUILIBRIUM.md= (its "Rolling reserve + two-sided toll" section records why
+the rolling form was chosen over a cumulative one; add what replaced it and why).
+
+** What to watch
+
+The escrow was a large part of what held these worlds' books level: a borrower that buys back
+most of what it sells adds little supply. With "gate" the big borrowers become real issuers of
+about 10 million BUCKs a world. Expect K to rest lower than it did. If the BUCK turns cheap and K
+runs to its floor of 0.20 in the base world, the borrowers' =util_target= is too high for a
+world whose demand was tuned around the escrow. Say so and stop; do not tune it away quietly.
+
+* Fix 2: an opening that is not a shock
+
+** What is wrong
+
+The mature worlds set =mid_frac = -0.5= for the big borrowers, so their adoption curve
+(=_cap_frac=, line 1801) is complete on day 0 and their target is their whole share of their
+limit. On the first tick they sell it: about 10 million BUCKs, part of it into basket pools that
+hold 2.3 million. The debtors in those worlds arrive on day 0 as well (=arrive_frac = 0.0=) and
+sixteen of them sell a whole mortgage's worth each. "Mature" was meant to say that this credit
+is already out when the window opens. The model has it all issued in the window's first minute.
+
+Even the quiet worlds open badly for the same reason, at a smaller size: in the base world the
+basket costs 1.45 BUCKs on day 0.
+
+** What to do
+
+Give both agents a =bootstrap=, which =loop.run= already calls for every agent before the first
+tick (=loop.py=, line 117). In it, credit that is to be out on day 0 is drawn and handed to the
+pool-seeding helper at the pool's price. The helper's lien is the 50 million BUCKs that seeded
+the BUCK/dollar pool. BUCKs handed to it repay that much of its lien. So the float is the same
+size, no pool moves, and that much of the float is now the borrower's issue and not the
+helper's. That is what "already out" means.
+
+Two small methods on =_ProxyAgent=, used only in the opening:
+
+#+begin_src python
+def _otc_sell(self, d, buck_amt: int) -> int:
+    """Hand `buck_amt` to the pool-seeding helper at the BUCK/dollar pool's price, for dollars from its stock.
+    The helper's lien falls by as much: the float and every pool are untouched.  Returns dollars received."""
+
+def _otc_buy(self, d, buck_amt: int) -> int:
+    """The reverse: dollars to the helper for BUCKs it issues.  Returns dollars paid."""
+#+end_src
+
+=_otc_sell= is a BUCK transfer from the proxy to =d.simlp= (through =_proxy_exec=) and a dollar
+transfer back (=d.simlp.functions.exec= of =usdc.transfer=). Price both ways with =buck_usd6= from
+=gauge.py=. Cap a sale at the helper's lien.
+
+*** The big borrowers
+
+#+begin_src python
+def bootstrap(self, d, scenario, ctr) -> None:
+    """Open with the credit this borrower already has out: its day-0 target, placed with the helper at par."""
+    if self.proxy is None or self.open_mode != "placed":
+        return
+    limit                       = d.buck.functions.creditLimit(self.proxy.address).call()
+    target                      = int(self.util_target * limit * self._cap_frac(0, getattr(scenario, "days", 1)))
+    got                         = self._otc_sell(d, min(target, limit))
+    ctr["fatPlaced"]            = ctr.get("fatPlaced", 0) + ...
+#+end_src
+
+with =self.open_mode = str(_spec(scenario, cls, "open", "placed"))= in =setup=. ="market"= keeps
+today's opening. On the first tick =drawn= is then at =target= and the lever-up branch has
+nothing to do. No reserve is bought for a placed opening: it is the state the world starts in.
+
+*** The debtors
+
+A debtor whose =arrive_day= is 0 and which is not on the endogenous clock does its first month's
+work in =bootstrap=, settled with the helper and not through the pools. The smallest change that
+does this:
+
+- Add =self._otc = False= and an =open= setting like the borrowers'.
+- In =bootstrap=, for those debtors, set =self._otc = True=, call =self.act(d, scenario, 0, 0, ctr)=
+  and set it back. The day-0 call from the loop then returns early, because =_last_month_day= is
+  already 0.
+- Where =act= sells the draw (=_sell_capped=, both the atomic and the paced branch) and where
+  =_buy_for_gate= buys BUCKs (through =_buy_track=), go by =_otc_sell= and =_otc_buy= while
+  =self._otc= is set.
+- In =_atomic_plan= (line 2674), while =self._otc= is set there is no slippage and no depth to
+  check: =need_b= is the mortgage at the pool's price and =d_eff= is zero. Keep the capacity check.
+
+The debtor still mints through the real gate, still pays its deposit, and still keeps both of its
+ledgers. Only the two market legs change.
+
+*** A guard for later
+
+The big borrowers can still sell several times a pool's depth in one step, at a shock
+(=shock_mag=) or after a jump in K. Cap each leg of a sale by price impact, as the debtors do:
+
+#+begin_src python
+self.max_impact_bp              = int(_spec(scenario, cls, "max_impact_bp", 100))       # 0: no cap
+#+end_src
+
+and in the lever-up branch cap =internal= by =_impact_cap(BUCK reserve of pool_buck[i], bp)= and
+=external= by the same for the BUCK/dollar pool (=_impact_cap=, line 477; reserves from
+=active_reserves=). What is not sold this step is sold on the next: the target has not moved.
+This changes how the scripted uptake shocks play out, which is the point, but check the shock
+catalogue's worlds before taking its old numbers as still true.
+
+** How to know it worked
+
+On the world below, the day-1 column of =who-holds.py= shows the basket's cost in BUCK within 2%
+of one, K within 0.02 of 0.75, the BUCK/dollar pool still holding about 50 million BUCKs, and the
+helper's lien down by exactly what was placed. Add to =test_debtor_ledger.py= a case for a debtor
+that opens placed: after =bootstrap= its mortgage is down, its books balance, and the BUCK/dollar
+pool's =slot0= is what it was.
+
+* Fix 4: borrowers who answer a dear BUCK
+
+** What is wrong
+
+A big borrower's target is =util_target x limit x cap_frac= (line 1946). The BUCK's price is not
+in it. In the mature worlds the big borrowers sat with 5 million of unused limit for a year while
+the BUCK was 8% to 33% dear. A dear BUCK is an offer to anyone with something to pledge, and a
+borrower with room takes it. Perry's rule for debtors applies: they are smart.
+
+The borrower already answers the other side. When the BUCK is cheap it retires faster
+(=disc_gain=, line 2050).
+
+** What to do
+
+#+begin_src python
+self.dear_full                  = float(_spec(scenario, cls, "dear_full", 0.05))        # uses its whole limit when the BUCK is this dear; 0: never
+#+end_src
+
+and where the target is set:
+
+#+begin_src python
+use                             = self.util_target * cap
+if self.dear_full > 0 and use < 1:
+    use                        += (1 - use) * min(1., max(0., 1 - bvib) / self.dear_full)
+target                          = int(use * limit)
+#+end_src
+
+So at parity nothing changes, at 2.5% dear it uses half of what it had spare, and at 5% dear all
+of it. When the BUCK comes back the target falls, the borrower is over it, and the existing
+retire branch buys the BUCKs back. That is an arbitrage with its own credit, and it is what the
+three credit arbitrageurs do in the two worlds that held. The impact cap from fix 2 paces it.
+
+** How to know it worked
+
+Run the world below with =agents.FatCreditBorrowerAgent.open=market= so the old shock still
+happens. The BUCK should be back within 5% of its basket in weeks, not a year, and
+=fat_drawn / fat_limit= should rise toward one while it is dear and fall again after.
+
+* Order, and one commit each
+
+1. Fix 3. Run the Python suite and the check world. Commit.
+2. Fix 1. The same. Commit.
+3. Fix 2, borrowers first, then debtors, then the impact cap. The same. Commit.
+4. Fix 4. The same. Commit.
+5. Measure everything once ([[*Measuring][below]]). Write it up. Commit.
+
+After each fix:
+
+#+begin_src sh
+build/cleanup/nx.sh bash -c 'source ../alberta-buck.venv-0.2.0-nix-darwin-cpython-313/bin/activate; python -m pytest alberta_buck -q -p no:cacheprovider'   # 987 passed when this was written
+#+end_src
+
+Foundry and the JS suite are not affected by any of this and need not be rerun, unless a contract
+or a JS file is touched.
+
+* Measuring
+
+** The check world, six minutes
+
+#+begin_src sh
+build/cleanup/nx.sh bash -c 'source ../alberta-buck.venv-0.2.0-nix-darwin-cpython-313/bin/activate; SIM_CREDIT_FRAMES=1 \
+  python doc/review/who-holds.py alberta_buck/sim/experiments/rebalancing-eq-5yr-debtors-mature-basketeers-originate.toml \
+  equity-ops 0,1,5,10,30,60 2>&1 | grep -v "redeemed\|^\["'
+#+end_src
+
+It prints who holds and who has drawn BUCKs at the start of each day named, with the basket's
+cost in BUCK and K beneath. The table before any fix is in the results. What each fix should
+change in it is said under that fix. This runs from the working tree, so run nothing else that
+writes =test/vectors/identity-cache.json= beside it.
+
+** The whole matrix, about five hours
+
+Every world with big borrowers changes on all three baskets, and fix 3 changes the order of
+transactions everywhere. So run all of it: 14 worlds on three baskets, and the savings world on
+both seeds and both upkeeps.
+
+Freeze the commit first, then run from the copy:
+
+#+begin_src sh
+N=build/sim/mended
+mkdir -p $N/snapshot $N/runs $N/savings-s1 $N/savings-s2
+git archive HEAD | tar -x -C $N/snapshot && git rev-parse --short HEAD > $N/COMMIT
+cp -R out $N/snapshot/out
+cp test/vectors/identity-cache.json $N/snapshot/test/vectors/
+cp alberta_buck/sim/prices/*.csv $N/snapshot/alberta_buck/sim/prices/
+#+end_src
+
+Then the two scripts below (=build/= is not in git, so they are given whole). Start each with
+=nohup bash ... > .../run.log 2>&1 &=. They run ten worlds at a time and write =ok= or =FAIL=
+lines, ending with a line that starts ======. Wait for that line with a background loop, not by
+polling.
+
+#+begin_src sh
+#!/usr/bin/env bash
+# build/sim/mended/run.sh: the five-year matrix, every world on three baskets, from the frozen copy.
+R=/Users/perry/src/alberta-buck
+S=$R/build/sim/mended/snapshot
+export O=$R/build/sim/mended/runs
+source $R/../alberta-buck.venv-0.2.0-nix-darwin-cpython-313/bin/activate
+cd $S; export PYTHONPATH=$S ALBERTA_BUCK_REPO=$S
+ARMS="portcast debtors-mature-basketeers-endog-excursion debtors-mature-basketeers-endog debtors-mature-basketeers-originate
+      debtors-mature-basketeers-endog-raid debtors-mature-basketeers-endog-excursion-raid debtors-mature-basketeers debtors
+      debtors-mature base deep endow endow-deep capacity"
+{ for arm in $ARMS; do echo "$arm equity-machine"; echo "$arm equity-ops"; done
+  for arm in $ARMS; do echo "$arm prorata"; done; } | xargs -P ${JOBS:-10} -L 1 bash -c '
+  arm=$0; basket=$1
+  [ -f $O/$arm-$basket.json ] && { echo "have $arm $basket"; exit 0; }
+  [ "$basket" = prorata ] || export SIM_CREDIT_FRAMES=1
+  toml=alberta_buck/sim/experiments/rebalancing-eq-5yr$([ "$arm" = base ] || echo "-$arm").toml
+  start=$(date +%s)
+  if python -m alberta_buck.sim --experiment $toml --backend pyrevm --basket $basket \
+       --director pairs --set scenario.basket=$basket --out $O/$arm-$basket.partial > $O/$arm-$basket.log 2>&1
+  then mv $O/$arm-$basket.partial $O/$arm-$basket.json; echo "ok   $arm $basket $(( ($(date +%s) - start) / 60 )) min $(date +%H:%M)"
+  else echo "FAIL $arm $basket $(( ($(date +%s) - start) / 60 )) min $(date +%H:%M)"; fi'
+echo "=== matrix done $(date +%H:%M)"
+#+end_src
+
+#+begin_src sh
+#!/usr/bin/env bash
+# build/sim/mended/savings.sh: the savings world, five years, both upkeeps, real and reverting prices, two seeds.
+R=/Users/perry/src/alberta-buck
+S=$R/build/sim/mended/snapshot
+O=$R/build/sim/mended
+source $R/../alberta-buck.venv-0.2.0-nix-darwin-cpython-313/bin/activate
+cd $S; export PYTHONPATH=$S ALBERTA_BUCK_REPO=$S SIM_CREDIT_FRAMES=1
+python doc/review/savings-old-new.py $O/savings-s1 5 > $O/savings-s1/run.log 2>&1; echo "=== s1 done $? $(date +%H:%M)"
+python doc/review/savings-old-new.py $O/savings-s2 5 scenario.seed=45517 > $O/savings-s2/run.log 2>&1; echo "=== s2 done $? $(date +%H:%M)"
+#+end_src
+
+Killing a run script does not kill what =xargs= has started, and =xargs= will start the next
+world as each one dies. Kill =xargs= first, then the worlds.
+
+Read the results with:
+
+#+begin_src sh
+python3 doc/review/matrix-baskets.py build/sim/mended/runs
+grep -A13 "^history: 5 years\|^revert: 5 years" build/sim/mended/savings-s1/run.log
+#+end_src
+
+A run's =.partial= file is a complete checkpoint and can be read while the run goes on.
+
+Two things to know about these runs. Worlds that start together on a seed the identity cache
+does not hold read each other's keys, and an identity proof fails days later: these seeds are
+all in the cache, so it will not happen unless a cast is enlarged. And one world,
+=debtors-mature-basketeers=, stops on its first day under the machine because K falls to 0.02
+and a depositor's refused mint ends the run. A quiet opening may cure that. If it does not, it
+is a separate fault: the agent should survive a refusal.
+
+** What good looks like
+
+- No world opens with the basket's cost in BUCK more than 5% from one on day 1.
+- In the mature worlds the BUCK is within 2% of its basket from day 30 on every basket, and K
+  ends well inside its rails. If K still rests at 0.95, report it: the last suspect is the
+  controller, which stays wherever its error last left it.
+- =simlp_drawn= is flat in every run.
+- The big borrowers' escrow is small beside what they have drawn.
+- The worlds that held before still hold.
+
+* Writing it up
+
+- =doc/BASKET-MACHINE-RESULTS.org=: the settled matrix table and the savings tables from the new
+  runs; under "Why the mature worlds cannot issue enough", the same day-by-day table after the
+  fixes, beside the one there now; the lean's tables on the settled model (base, portcast and one
+  mature world, with the lean on both sides, on one, and off: =machine.parity_gain= and
+  =machine.parity_gain_dear= are the settings).
+- =doc/BASKET-MACHINE-TASKS.org=: tick "Mend the mature worlds' model" and say what each fix did.
+- =doc/BASKET-MACHINE.org=: nothing, unless K's rest at its limit turns out to be the
+  controller's.
+- =alberta-buck-ethereum-wheel.org=, "A simulated economy": the table and the paragraph on harder
+  casts. =alberta-buck-ethereum-basket.org=, "Yield against demurrage": the two ranges, if the
+  savings world's numbers moved. Stage the basket paper without Perry's own link line: build the
+  blob with that one line put back as it is in =HEAD= and use =git update-index --cacheinfo=.
+- =alberta-buck-ethereum.org=, "The Funding-Factor Reserve": the sentence about borrowers in the
+  equilibrium simulations that never released their reserve. Say what the simulations do now.
+
+* Not part of this
+
+These came up beside the four and are not agreed. Do not do them without Perry's word.
+
+- /Debtors that refinance all or nothing./ =refi_mode = "atomic"= has a household whose mortgage
+  is more than its credit wait, and pay interest on all of it. In the portcast world that was 12
+  of 30 households holding 7.0 of the 7.2 million. Letting them move the part that fits has been
+  put to Perry and not answered.
+- /The lean against parity./ It is on both sides at a gain of 5. Whether it should be smaller, or
+  wait for a wider gap, is open: in the base world it costs 1.5% of the share price in five
+  years, and with a lone buyer of BUCKs it holds the price at 2.4% where no lean lets it go to 4%.
+- /The JS =Farmer= prototype/ (=core/js/prototypes/farmer.js=) still draws at most two years of
+  payments a month. The JS debtor (=mortgage-retiree.js=) has the rule to copy.
+- /A debtor over its limit/ still buys BUCKs for a gate that counts only unused credit. It loses
+  nothing by it and cannot pass that way.

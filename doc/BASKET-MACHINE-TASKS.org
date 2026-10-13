@@ -298,15 +298,17 @@ machine's design is expected to become the accepted one.
     shared swap helper keeps 6.3 million BUCKs it could not swap. The dollar pool ends short
     of 6.5 million BUCKs, which prices the BUCK a third above its basket, and nobody in these
     casts issues because the BUCK is dear.
-  - [ ] Mend the mature worlds' model. Perry to say which:
+  - [ ] Mend the mature worlds' model. Perry agreed to all four on 2026-10-13, and the plan,
+    written so another session can do it, is [[file:review/mature-worlds-plan.org][doc/review/mature-worlds-plan.org]]:
+    - The swap helper keeps nothing: proxies swap for themselves, depositors through a transit
+      account with no credit.
     - The big borrowers' reserve at the gate's own scale: a share of the insurance deposit by
-      the linear factor, checked at the draw and not held afterwards.
-    - An opening that is not a shock: mature borrowers and debtors start with their credit
-      already drawn and placed, or draw it over weeks.
-    - The swap helper returns what it could not swap.
+      the linear factor, for the draw only.
+    - An opening that is not a shock: credit that is out on day 0 is placed with the
+      pool-seeding helper at par before the first tick, and a sale is capped by its price
+      impact.
     - Borrowers who use their unused limit when the BUCK is dear.
-    Each of the first three changes every world that has big borrowers, which is all but the
-    portcast and savings worlds, on all three baskets.
+    Then the whole matrix and the savings world once more, about five hours.
   - [ ] K rests at its limit in five worlds that hold, on all three baskets (the worlds with
     mature debtors, whose opening has the basket costing 3.5 BUCKs). K is thrown to 0.42,
     climbs to 0.95 within months, and at parity nothing brings it back. Mend the opening of those worlds, and say whether a
