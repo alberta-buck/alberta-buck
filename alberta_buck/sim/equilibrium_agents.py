@@ -408,9 +408,9 @@ class _ProxyAgent(Agent):
 
 
 
-# -- insurance is switched OFF in this simulation -----------------------
+# -- the big borrowers simulate the gate; the debtors use it ------------
 #
-# Both issuing agents create their BuckCredit with premiumRate 0, which makes
+# FatCreditBorrowerAgent creates its BuckCredit with premiumRate 0, which makes
 # `poolPrincipal` zero, which makes `Buck.mint` EXEMPT from the funding gate:
 #
 #     if (factor > 0 && poolPrincipal > 0) { require(preFundingBalance >= ...) }
@@ -427,7 +427,7 @@ class _ProxyAgent(Agent):
 # before the mint is allowed, and at basketValueInBuck 1.10 the factor is
 # 2.77 and it is $13,900.  Dear, the gate is open; cheap, it shuts fast.
 #
-# It does two jobs, both of which vanish here:
+# It does two jobs, modelled by the big borrower's default "gate" reserve:
 #
 #   * it discourages issuance INTO inflation.  The factor rises exactly when
 #     BUCK is undervalued, so the moment issuing more BUCK would hurt most is
@@ -436,22 +436,13 @@ class _ProxyAgent(Agent):
 #     because the reserve must be bought on the market first, so issuance
 #     drags a bid along behind it.
 #
-# Turning it off makes issuance cheaper and less counter-cyclical than the
-# real design, and removes a source of standing demand.  Read any result
-# about issuance volume or parity with that in mind.
-#
-# TO RESTORE FIDELITY LATER, in rough order of effort:
-#   1. a helper quoting the BUCK accumulation a draw requires -- quoteMint
-#      gives poolPrincipal and fundingFactor is a live read, so
-#      `required = poolPrincipal * factor / 1e18` is a two-call view;
-#   2. a saving loop that actually funds it.  BuckCreditDebtorAgent has one
-#      in outline (step 2 of its act) and it could not keep up: with a real
-#      premium it managed 3 deploys against 77 gate refusals over 120 days,
-#      because `balanceOf` counts unused credit headroom, headroom needs
-#      activated coverage, and a NEW borrower holds nothing the gate accepts.
-#      That bootstrap deadlock is the thing to model, not to route around;
-#   3. the premium as a real cost in the ROI ledger, on BOTH the BUCK path
-#      and the mortgage counterfactual.
+# The default reserve now uses the contract's linear fundingFactor and the
+# deposit on the coverage delivering this draw: delta * e / (K - e). It is
+# released after the draw, paced so it does not sell into a cheap market.
+# The earlier "rolling" mode instead held ff times every outstanding draw;
+# "none" omits the reserve. Neither simulated mode pays an actual premium.
+# BuckCreditDebtorAgent does: it finds cash for the deposit, mints through
+# the real gate, and keeps the deposit and premiums in both of its ledgers.
 
 
 def _impact_cap(reserve_in: int, max_impact_bp: int) -> int:
@@ -1618,35 +1609,20 @@ class FatCreditBorrowerAgent(_ProxyAgent):
           effective target draw is `util_target * creditLimit * cap_frac(day)`,
           so issuance ramps IN instead of flooding, and a shock injects a wave.
 
-      (B) ROLLING PRE-ISSUANCE FUNDING RESERVE (simulated).  Before issuing
-          `delta` net BUCK the agent must HOLD a funding reserve in a separate
-          ESCROW proxy, topping it up by BUYING BUCK (the pre-issuance demand
-          the real funding gate would compel).  The per-issuance requirement
-          scales with a funding factor
-              ff = max(0, 1 + FF_CYC*(basketValueInBuck-1)/basketValueInBuck)
-                   * (1 + FF_AMP*(issue_rate**FF_POW))
-          counter-cyclical in BOTH directions -- the same shape as the
-          on-chain fundingFactor(), which SATURATES AT ZERO in deflation --
-          and super-linear in the SYSTEM-WIDE issuance rate (totalSupply
-          delta since last step).  Above parity a hot uptake makes ff blow
-          up, demanding heavy pre-BUCK demand (the throttle bites when the
-          agent cannot fund it); below parity the toll melts away, so
-          issuance is cheap exactly when new supply pushes TOWARD parity.
+      (B) FUNDING RESERVE (simulated). In the default "gate" mode a draw of
+          `delta` needs the live on-chain fundingFactor times its insurance
+          deposit, delta * gate_deposit / (K - gate_deposit). The escrow buys
+          that reserve before the draw, which is throttled to what it funds.
+          Nothing is locked afterwards: the whole escrow is pending release,
+          sold a share a day only while the BUCK is not cheap, with TOKEN
+          proceeds recycled to dollars. No earlier draw needs a reserve.
 
-          The requirement is ROLLING, tied to OUTSTANDING drawn credit: each
-          issuance pushes a (outstanding, ff) tranche; retiring credit pops
-          tranches FIFO and moves their ff-scaled reserve to a PENDING-RELEASE
-          buffer.  Pending reserve is sold back into the TOKEN/BUCK pools
-          (the controlled observable) counter-cyclically -- only while
-          basketValueInBuck <= ~parity, i.e. exactly when unwinding pushes
-          TOWARD parity -- and the TOKEN proceeds are recycled to USDC via
-          the deep truth pools, replenishing the funding budget.  This kills
-          the two failure modes of the first (reverted) attempt AND of the
-          cumulative design it replaces: the reserve no longer ratchets to a
-          permanent net demand (which froze issuance for whole runs once
-          budgets exhausted, leaving the PID open-loop), and the accounting
-          is untangled -- drawn credit is read from the borrowing proxy's own
-          signed balance (the escrow's holdings never contaminate it).
+          "rolling" preserves the earlier model: ff times the whole draw,
+          held in FIFO tranches while the credit is out, with ff counter-cyclical
+          in parity and super-linear in issuance. "none" skips the reserve.
+          The old ff knob draws stay pinned even when the mode ignores them.
+          In every mode the separate escrow leaves drawn credit readable from
+          the borrowing proxy's own signed balance.
 
       (C) DISCOUNT-DRIVEN REDEMPTION ("money at a discount").  The retire/
           buy-back leg accelerates with the discount:
@@ -1655,10 +1631,9 @@ class FatCreditBorrowerAgent(_ProxyAgent):
           counter-cyclical demand -- on top of the forced deleverage when K
           tightens and the K-scaled creditLimit shrinks below the current draw.
 
-    Net dynamic: strong issuance -> large ff -> pre-buy dominates the issuance
-    sell -> net BUCK demand -> BUCK bid up -> the wave self-limits, and the
-    ramp keeps the day-0 draw small, so basketValueInBuck no longer spikes at
-    t=0.  See module docstring for the surrounding loop."""
+    The reserve creates a temporary bid before issuance, at the gate's scale.
+    It no longer offsets almost the whole supply for the life of a draw.
+    See the module docstring for the surrounding loop."""
 
     N_CREDITS = 8                 # pool of "property" NFTs
     # aggregate face sized ~$2-5M (6-dec BUCK wei), chosen per-agent in setup.
@@ -1764,6 +1739,17 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         except Exception as e:
             print(f"[fatborrower-{self.idx}] fund mint failed: {e!r}",
                   flush=True)
+
+        # Settings draw nothing: all the older draws above keep their order.
+        # "gate": fundingFactor times the deposit, needed only for this draw.
+        # "rolling": the earlier reserve on every outstanding tranche.
+        # "none": no simulated funding reserve.
+        self.reserve_mode       = str(_spec(scenario, cls, "reserve_mode", "gate"))
+        self.gate_deposit       = float(_spec(scenario, cls, "gate_deposit", 0.10))
+        if self.reserve_mode not in ("gate", "rolling", "none"):
+            raise ValueError(f"unknown borrower reserve_mode: {self.reserve_mode}")
+        if not 0 <= self.gate_deposit < 1:
+            raise ValueError("gate_deposit must be a share of coverage in [0, 1)")
 
     # -- regime change ----------------------------------------------------- #
 
@@ -1935,22 +1921,27 @@ class FatCreditBorrowerAgent(_ProxyAgent):
             if delta < 10 ** 6:            # sub-$1 moves: skip
                 return
 
-            # (B) Funding factor for THIS tranche: counter-cyclical in BOTH
-            # directions (after the on-chain fundingFactor(), which SATURATES
-            # AT ZERO in deflation; this is the agent's own model of it, with
-            # its own slope: base = max(0, 1 + cyc*(bv-1)/bv))
-            # x super-linear in the system issuance rate.  Above parity a hot
-            # uptake demands a heavy pre-buy toll; BELOW parity (BUCK rich,
-            # the system starving for supply) the toll melts away, so
-            # issuance is cheap exactly when it pushes TOWARD parity.  An
-            # always->=1 floor here was the deflation trap: budgets drained
-            # buying reserve BUCK at a premium, the issuance plant saturated
-            # below the setpoint, and K pinned at its ceiling.
-            base = max(0.0, 1.0 + self.ff_cyc * (bvib - 1.0) / max(bvib, 1e-9))
-            ff = base * (1.0 + self.ff_amp * (issue_rate ** self.ff_pow))
-            req = self.reserve_req
+            # (B) The gate asks for fundingFactor times the insurance deposit
+            # on the coverage delivering this draw, not the whole draw held
+            # for its lifetime. Keep the earlier rolling arithmetic selectable.
+            if self.reserve_mode == "gate":
+                k               = d.kctrl.functions.buckK().call() / 1e18
+                factor          = d.kctrl.functions.fundingFactor().call() / 1e18
+                e               = self.gate_deposit
+                if k <= e:
+                    return      # this coverage cannot deliver a net draw
+                deposit         = delta * e / (k - e)
+                need_add        = int(deposit * factor)
+                req             = 0
+                ff              = need_add / delta
+            elif self.reserve_mode == "rolling":
+                base            = max(0.0, 1.0 + self.ff_cyc * (bvib - 1.0) / max(bvib, 1e-9))
+                ff              = base * (1.0 + self.ff_amp * (issue_rate ** self.ff_pow))
+                req             = self.reserve_req
+                need_add        = int(delta * ff)
+            else:
+                ff, req, need_add = 0., 0, 0
             bal = self._reserve_balance(d)
-            need_add = int(delta * ff)
             # Top the escrow up toward (rolling requirement + this tranche)
             # by BUYING BUCK straight into the escrow -- the pre-issuance
             # demand.  Pending-release stock already in the escrow counts
@@ -2002,14 +1993,16 @@ class FatCreditBorrowerAgent(_ProxyAgent):
                 if sold > 0:
                     ctr["fatEntries"] = ctr.get("fatEntries", 0) + 1
                     ctr["fatIssued"] = ctr.get("fatIssued", 0) + sold
-                    # Commit a tranche for what actually sold; whatever part
-                    # of the escrow now backs it is no longer pending.
-                    self._tranches.append([sold, ff])
-                    self.pending_release = min(
-                        self.pending_release,
-                        max(0, bal - self.reserve_req))
+                    if self.reserve_mode == "rolling":
+                        # Only the earlier mode holds a reserve while drawn.
+                        self._tranches.append([sold, ff])
+                        self.pending_release = min(
+                            self.pending_release,
+                            max(0, bal - self.reserve_req))
             except Exception as e:
                 ctr["fat_sell_err"] = repr(e)[:200]
+            if self.reserve_mode == "gate":
+                self.pending_release = self._reserve_balance(d)
 
         elif drawn > target + dead:
             # (C) Deleverage / redemption.  K tightened (limit shrank) or the

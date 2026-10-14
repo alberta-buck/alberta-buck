@@ -56,21 +56,18 @@ for the passive rebalancing harvest from their independent dynamics).
   - *Adoption ramp*: target draw = `util_target * creditLimit * cap_frac(day)`,
     a logistic S-curve (+ optional one-off uptake shock), so issuance grows in
     rather than flooding at t=0.
-  - *ROLLING pre-issuance funding reserve* (simulated -- zero-premium credit
+  - *Gate-sized funding reserve* (simulated -- zero-premium credit
     bypasses the on-chain gate): the reserve lives in a separate **escrow
     proxy** (drawn credit is chain-truth `-signed(proxy)`; the escrow's
-    holdings never contaminate it).  Each issuance pushes an
-    `(outstanding, ff)` tranche; the requirement is `sum(outstanding*ff)`
-    -- it FALLS as credit retires.  Retirement pops tranches FIFO into a
-    pending-release buffer that is **sold back into the TOKEN/BUCK pools**
-    (the controlled observable) counter-cyclically -- only while
-    `basketValueInBuck <= ~1`, i.e. exactly when the push is toward parity --
-    with TOKEN proceeds recycled to USDC through the deep truth pools.
-  - *Two-sided funding factor* (mirrors the on-chain `fundingFactor()`):
-    `ff = max(0, 1 + FF_CYC*(bvib-1)/bvib) * (1 + FF_AMP*issue_rate^FF_POW)`.
-    Above parity a hot uptake demands a heavy pre-buy toll (the throttle bites
-    when it can't be funded); below parity the toll **saturates toward zero**,
-    so issuance is cheap exactly when new supply pushes toward parity.
+    holdings never contaminate it). With `reserve_mode = "gate"` (default),
+    it buys the live contract's `fundingFactor` times the insurance deposit
+    on the coverage delivering this draw: `delta * e / (K - e)`, where
+    `gate_deposit = e = 0.10` by default. Nothing is locked after the draw.
+    The whole reserve is then released a share a day while the BUCK is not
+    cheap, through TOKEN/BUCK pools, recycling the TOKEN to dollars.
+    `"rolling"` preserves the earlier outstanding-tranche reserve and its
+    old factor; `"none"` skips buying and throttling. The old random draws
+    stay in their original order in every mode.
   - *Discount-driven redemption*: retire harder when BUCK is cheap vs the
     basket ("money at a discount").
 - **`SaverAgent`**: counter-cyclical, **basket-anchored** -- buys when
@@ -137,6 +134,13 @@ fix and 3x volatility tightening from that milestone were real and are
 retained.
 
 ### Rolling reserve + two-sided toll (this iteration), 1-year check
+This is the earlier model's record. On 2026-10-13 the default became the gate-sized reserve
+described above. The rolling model improved on the cumulative ratchet, but held about one BUCK
+for every BUCK drawn for the life of the credit. In the base world it withheld 10.7 million of
+11.0 million BUCKs drawn. The real gate asks a share of the insurance deposit at the moment of
+the draw and locks nothing afterwards. `reserve_mode = "rolling"` keeps the old arithmetic for
+reproduction; these measurements have not been relabelled as results of the new mode.
+
 Same window/seed, three designs:
 
 | design                     | bv tail (sd)      | K tail        | channel (iss/ret) |
