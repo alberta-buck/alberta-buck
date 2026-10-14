@@ -1637,7 +1637,7 @@ class PidKeeperAgent(Agent):
 @_register
 class FatCreditBorrowerAgent(_ProxyAgent):
     """A realistic BUCK issuer/redeemer lifecycle against a pool of BuckCredit
-    "properties".  Three mechanisms shape the standing draw, since the on-chain
+    "properties". Four mechanisms shape the standing draw, since the on-chain
     funding-factor gate is bypassed for zero-premium credit (poolPrincipal == 0)
     and would otherwise let issuance flood at t=0:
 
@@ -1673,6 +1673,12 @@ class FatCreditBorrowerAgent(_ProxyAgent):
           so when BUCK is cheap vs the basket, redeemers buy BUCK hard --
           counter-cyclical demand -- on top of the forced deleverage when K
           tightens and the K-scaled creditLimit shrinks below the current draw.
+
+      (D) A DEAR BUCK BRINGS OUT UNUSED CREDIT. Above the adoption target,
+          use spare room in proportion to 1 - basketValueInBuck, reaching the
+          whole limit at `dear_full` (5% by default; 0 disables this response).
+          When parity returns the target falls and the existing retire leg
+          buys the BUCKs back. The same impact cap paces these new sales.
 
     The reserve creates a temporary bid before issuance, at the gate's scale.
     It no longer offsets almost the whole supply for the life of a draw.
@@ -1791,6 +1797,7 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         self.gate_deposit       = float(_spec(scenario, cls, "gate_deposit", 0.10))
         self.open_mode          = str(_spec(scenario, cls, "open", "placed"))
         self.max_impact_bp      = int(_spec(scenario, cls, "max_impact_bp", 100))
+        self.dear_full          = float(_spec(scenario, cls, "dear_full", 0.05))
         if self.reserve_mode not in ("gate", "rolling", "none"):
             raise ValueError(f"unknown borrower reserve_mode: {self.reserve_mode}")
         if not 0 <= self.gate_deposit < 1:
@@ -1965,7 +1972,10 @@ class FatCreditBorrowerAgent(_ProxyAgent):
 
         # (A) Adoption ramp (+ optional shock) scales the effective target.
         cap = self._cap_frac(day, getattr(scenario, "days", 1))
-        target = int(self.util_target * limit * cap)
+        use                     = self.util_target * cap
+        if self.dear_full > 0 and use < 1:
+            use                += (1 - use) * min(1., max(0., 1 - bvib) / self.dear_full)
+        target                  = int(use * limit)
         dead = int(self.band * max(1, limit))
         n = len(d.tokens)
 

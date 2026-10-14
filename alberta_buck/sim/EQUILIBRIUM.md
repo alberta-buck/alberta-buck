@@ -75,6 +75,11 @@ for the passive rebalancing harvest from their independent dynamics).
     stay in their original order in every mode.
   - *Discount-driven redemption*: retire harder when BUCK is cheap vs the
     basket ("money at a discount").
+  - *Dear-price issuance*: use spare credit as the BUCK becomes dear. At
+    `dear_full = 0.05` (default) the whole limit is used; halfway there, half
+    the spare room is used. At parity the adoption target applies again,
+    and the existing retire leg buys back the excess. `dear_full = 0`
+    disables this response. Sales keep the per-pool impact cap.
 - **`SaverAgent`**: counter-cyclical, **basket-anchored** -- buys when
   `basketValueInBuck > 1` (BUCK cheap vs basket), sells when `< 1`, keeping a
   reserve.  Scaled so private demand is comparable to BUCK supply.  (A

@@ -138,7 +138,9 @@ def test_reserve_settings_preserve_the_borrowers_random_stream(world):
     assert states[0] == states[1] == states[2]
 
 
-def test_placed_borrower_moves_the_lien_without_moving_the_pool(world):
+def test_placed_borrower_moves_the_lien_without_moving_the_pool(world, monkeypatch):
+    from types import SimpleNamespace
+
     d, scenario, _              = world
     agent                       = borrower(world)
     agent.open_mode             = "placed"
@@ -156,6 +158,8 @@ def test_placed_borrower_moves_the_lien_without_moving_the_pool(world):
     assert d.buck.functions.totalSupply().call() == supply
     assert pool.functions.slot0().call() == slot
     assert agent._reserve_balance(d) == agent.pending_release == agent.reserve_req == 0
+    monkeypatch.setattr(d, "basket", SimpleNamespace(functions=SimpleNamespace(
+        basketValueInBuck=lambda: SimpleNamespace(call=lambda: 10 ** 18))))
     agent.act(d, scenario, 0, 0, ctr)
     assert ctr.get("fatIssued", 0) == 0
 
@@ -193,3 +197,40 @@ def test_borrower_sales_stay_inside_the_impact_cap_and_resume_next_tick(world):
         after                   = pool.functions.slot0().call()[0]
         assert ctr["fatIssued"] > issued
         assert abs((after / before) ** 2 - 1) < 0.0102
+
+
+@pytest.mark.parametrize("bvib,use", [(1., .7), (.975, .85), (.95, 1.)])
+def test_dear_buck_brings_out_unused_credit(world, monkeypatch, bvib, use):
+    from types import SimpleNamespace
+
+    d, scenario, _              = world
+    agent                       = borrower(world, "none")
+    monkeypatch.setattr(agent, "_cap_frac", lambda *_: 1.)
+    monkeypatch.setattr(d, "basket", SimpleNamespace(functions=SimpleNamespace(
+        basketValueInBuck=lambda: SimpleNamespace(call=lambda: round(bvib * 10 ** 18)))))
+    limit                       = d.buck.functions.creditLimit(agent.address).call()
+    ctr                         = {}
+    agent.act(d, scenario, 0, 0, ctr)
+    drawn                       = -d.buck.functions.signedBalanceOf(agent.address).call()
+    assert drawn == pytest.approx(use * limit, abs=2)
+    if bvib < 1:
+        # Returning to parity lowers the target and uses the existing retire leg.
+        monkeypatch.setattr(d, "basket", SimpleNamespace(functions=SimpleNamespace(
+            basketValueInBuck=lambda: SimpleNamespace(call=lambda: 10 ** 18))))
+        agent.act(d, scenario, 0, 1, ctr)
+        assert -d.buck.functions.signedBalanceOf(agent.address).call() < drawn
+        assert ctr["fatRetired"] > 0
+
+
+def test_dear_response_can_be_disabled(world, monkeypatch):
+    from types import SimpleNamespace
+
+    d, scenario, _              = world
+    agent                       = borrower(world, "none")
+    agent.dear_full              = 0
+    monkeypatch.setattr(agent, "_cap_frac", lambda *_: 1.)
+    monkeypatch.setattr(d, "basket", SimpleNamespace(functions=SimpleNamespace(
+        basketValueInBuck=lambda: SimpleNamespace(call=lambda: 9 * 10 ** 17))))
+    limit                       = d.buck.functions.creditLimit(agent.address).call()
+    agent.act(d, scenario, 0, 0, {})
+    assert -d.buck.functions.signedBalanceOf(agent.address).call() == int(.7 * limit)
