@@ -351,6 +351,46 @@ class _ProxyAgent(Agent):
 
     # -- market primitives ------------------------------------------------- #
 
+    def _otc_sell(self, d, buck_amt: int) -> int:
+        """Place opening BUCKs with the pool seeder at the dollar pool's price.
+
+        Its lien falls, the float and pools stay unchanged. Return dollars received.
+        This is only for credit already out when the world's window opens.
+        """
+        price                   = buck_usd6(d.chain, d.pool_ub, d.buck)
+        lien                    = max(0, -d.buck.functions.signedBalanceOf(d.simlp.address).call())
+        spendable               = d.buck.functions.balanceOf(self.proxy.address).call()
+        dollars                 = d.chain.balance_of(d.usdc, d.simlp.address)
+        if price <= 0:
+            return 0
+        amount                  = min(max(0, int(buck_amt)), lien, spendable, dollars * PARITY // price)
+        paid                    = amount * price // PARITY
+        if paid <= 0:
+            return 0
+        self._proxy_exec(d, d.buck.address, d.buck.encode_abi("transfer", args=[d.simlp.address, amount]))
+        d.chain.send(d.simlp.functions.exec(
+            d.usdc.address, d.usdc.encode_abi("transfer", args=[self.proxy.address, paid])))
+        return paid
+
+    def _otc_buy(self, d, buck_amt: int) -> int:
+        """Buy opening BUCKs from the pool seeder at the dollar pool's price.
+
+        The helper issues against its own credit; no pool moves. Return dollars paid.
+        """
+        price                   = buck_usd6(d.chain, d.pool_ub, d.buck)
+        dollars                 = d.chain.balance_of(d.usdc, self.proxy.address)
+        spendable               = d.buck.functions.balanceOf(d.simlp.address).call()
+        if price <= 0:
+            return 0
+        amount                  = min(max(0, int(buck_amt)), spendable, dollars * PARITY // price)
+        paid                    = (amount * price + PARITY - 1) // PARITY
+        if amount <= 0:
+            return 0
+        self._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("transfer", args=[d.simlp.address, paid]))
+        d.chain.send(d.simlp.functions.exec(
+            d.buck.address, d.buck.encode_abi("transfer", args=[self.proxy.address, amount])))
+        return paid
+
     def _amount_in_for_out(self, r_in: int, r_out: int, want_out: int,
                            fee: int) -> int:
         """Constant-product input needed to receive ~`want_out` of the output
@@ -1607,7 +1647,10 @@ class FatCreditBorrowerAgent(_ProxyAgent):
           gradually.  A minority of agents also get a one-off STEP shock at a
           seeded mid-run day (`+shock_mag`), a sudden society-wide uptake.  The
           effective target draw is `util_target * creditLimit * cap_frac(day)`,
-          so issuance ramps IN instead of flooding, and a shock injects a wave.
+          Day-0 credit is placed with the pool-seeding helper before trading:
+          it replaces the helper's issue without changing the float or a pool.
+          `open = "market"` keeps the earlier opening. Later sales are paced
+          by `max_impact_bp` per leg (100 by default; 0 disables the cap).
 
       (B) FUNDING RESERVE (simulated). In the default "gate" mode a draw of
           `delta` needs the live on-chain fundingFactor times its insurance
@@ -1746,10 +1789,23 @@ class FatCreditBorrowerAgent(_ProxyAgent):
         # "none": no simulated funding reserve.
         self.reserve_mode       = str(_spec(scenario, cls, "reserve_mode", "gate"))
         self.gate_deposit       = float(_spec(scenario, cls, "gate_deposit", 0.10))
+        self.open_mode          = str(_spec(scenario, cls, "open", "placed"))
+        self.max_impact_bp      = int(_spec(scenario, cls, "max_impact_bp", 100))
         if self.reserve_mode not in ("gate", "rolling", "none"):
             raise ValueError(f"unknown borrower reserve_mode: {self.reserve_mode}")
         if not 0 <= self.gate_deposit < 1:
             raise ValueError("gate_deposit must be a share of coverage in [0, 1)")
+
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """Place the day-0 target with the seeder: this credit is already out."""
+        if self.proxy is None or self.open_mode != "placed":
+            return
+        limit                   = d.buck.functions.creditLimit(self.proxy.address).call()
+        target                  = int(self.util_target * limit * self._cap_frac(0, getattr(scenario, "days", 1)))
+        before                  = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        self._otc_sell(d, max(0, min(target, limit) - max(0, -before)))
+        after                   = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        ctr["fatPlaced"]        = ctr.get("fatPlaced", 0) + before - after
 
     # -- regime change ----------------------------------------------------- #
 
@@ -1984,6 +2040,12 @@ class FatCreditBorrowerAgent(_ProxyAgent):
             external = delta - internal
             i = self._rng.randrange(n)     # which TOKEN/BUCK pool to push
             try:
+                if self.max_impact_bp > 0:
+                    rb, _       = active_reserves(d.chain, d.pool_buck[i], d.buck, d.tokens[i])
+                    internal    = min(internal, _impact_cap(rb, self.max_impact_bp))
+                    if d.pool_ub:
+                        rb, _   = active_reserves(d.chain, d.pool_ub, d.buck, d.usdc)
+                        external = min(external, _impact_cap(rb, self.max_impact_bp))
                 # Each leg is capped to the borrowing proxy's live spendable
                 # (== unused credit; it holds no reserve BUCK any more) read
                 # immediately before its own swap callback pays the pool.
@@ -2458,6 +2520,26 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 self.proxy.address, i).call()
             for i in range(self.N_CREDITS)]
 
+        self.open_mode          = str(_spec(scenario, cls, "open", "placed"))
+        self._otc               = False
+
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """Do a day-0 debtor's first month at the opening price, without swaps."""
+        if self.open_mode != "placed" or self._endog or self.arrive_day != 0:
+            return
+        self._otc               = True
+        try:
+            self.act(d, scenario, 0, 0, ctr)
+        finally:
+            self._otc           = False
+
+    def _sell_capped(self, d, pool_addr: str, buck_amt: int) -> int:
+        if not self._otc:
+            return super()._sell_capped(d, pool_addr, buck_amt)
+        before                  = d.buck.functions.signedBalanceOf(self.proxy.address).call()
+        self._otc_sell(d, buck_amt)
+        return before - d.buck.functions.signedBalanceOf(self.proxy.address).call()
+
     # -- instrumented market legs ------------------------------------------- #
 
     def _find_cash(self, d, ctr) -> None:
@@ -2529,7 +2611,12 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         cost (USDC spent minus BUCK received; negative = bought below par)
         into trade_loss.  Returns BUCK bought."""
         before = d.chain.balance_of(d.usdc, self.proxy.address)
-        got = self._buy_buck(d, d.pool_ub, d.usdc, want_buck, d.fee_ub)
+        if self._otc:
+            balance             = d.buck.functions.balanceOf(self.proxy.address).call()
+            self._otc_buy(d, want_buck)
+            got                 = d.buck.functions.balanceOf(self.proxy.address).call() - balance
+        else:
+            got                 = self._buy_buck(d, d.pool_ub, d.usdc, want_buck, d.fee_ub)
         spent = before - d.chain.balance_of(d.usdc, self.proxy.address)
         self.trade_loss += spent - got
         return got
@@ -2661,7 +2748,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         if M <= 10 ** 6 or not d.pool_ub:
             return 0, 0.0
         ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
-        if ru <= 0 or rb <= 0 or M * 5 >= ru * 4:
+        if not self._otc and (ru <= 0 or rb <= 0 or M * 5 >= ru * 4):
             # Needing >80% of the pool's USDC side is not a quote, it is a
             # liquidity hole; wait for depth.
             ctr["bcdAtomicDeclined"] = ctr.get("bcdAtomicDeclined", 0) + 1
@@ -2669,10 +2756,15 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             ctr["bcdAtomicWhy"]["depth"] = (
                 ctr["bcdAtomicWhy"].get("depth", 0) + 1)
             return 0, float("inf")
-        fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
-        bprime = M * rb // max(1, ru - M)
-        need_b = int(bprime / max(1e-9, 1.0 - fee) * 1.005) + 10 ** 6
-        d_eff = max(0.0, 1.0 - M / need_b)
+        if self._otc:
+            price               = buck_usd6(d.chain, d.pool_ub, d.buck)
+            need_b              = (M * PARITY + price - 1) // price
+            d_eff               = 0.
+        else:
+            fee                 = (getattr(d, "fee_ub", 0) or 0) / 1e6
+            bprime              = M * rb // max(1, ru - M)
+            need_b              = int(bprime / max(1e-9, 1.0 - fee) * 1.005) + 10 ** 6
+            d_eff               = max(0.0, 1.0 - M / need_b)
         capacity = spendable + cap * 95 // 100
         if need_b > capacity:
             ctr["bcdAtomicDeclined"] = ctr.get("bcdAtomicDeclined", 0) + 1
@@ -2883,7 +2975,10 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             if minted and d.pool_ub:
                 before = d.chain.balance_of(d.usdc, self.proxy.address)
                 try:
-                    if self._refi_atomic:
+                    if self._otc:
+                        sold    = self._sell_capped(d, d.pool_ub,
+                                                   self._atomic_B if self._refi_atomic else want_tranche)
+                    elif self._refi_atomic:
                         # The whole quoted sale in one act -- the slippage
                         # was computed and accepted before anything was
                         # committed, so no impact cap applies.

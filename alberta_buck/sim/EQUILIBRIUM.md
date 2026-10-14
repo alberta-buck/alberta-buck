@@ -54,8 +54,13 @@ for the passive rebalancing harvest from their independent dynamics).
 ## The agents (`equilibrium_agents.py`)
 - **`FatCreditBorrowerAgent`** (lifecycle): a pool of BuckCredit "properties".
   - *Adoption ramp*: target draw = `util_target * creditLimit * cap_frac(day)`,
-    a logistic S-curve (+ optional one-off uptake shock), so issuance grows in
-    rather than flooding at t=0.
+    a logistic S-curve (+ optional one-off uptake shock). With `open = "placed"`
+    (default), the day-0 target is already out: it is handed to the pool-seeding
+    helper at the dollar pool's price before trading, replacing that part of
+    the helper's lien without changing the float or the pools. No reserve is
+    bought for this opening state. `"market"` keeps the earlier day-0 sale.
+    Later sales move each pool at most `max_impact_bp` (100 by default; 0 for
+    no cap), leaving the rest of the target to later ticks.
   - *Gate-sized funding reserve* (simulated -- zero-premium credit
     bypasses the on-chain gate): the reserve lives in a separate **escrow
     proxy** (drawn credit is chain-truth `-signed(proxy)`; the escrow's
@@ -78,6 +83,11 @@ for the passive rebalancing harvest from their independent dynamics).
 - **Support**: MarketMakerWhale (pegs TOKEN/USDC to the CSV feeds),
   AnonymousArb + TokenAccumulator (propagate into TOKEN/BUCK + BUCK/USDC),
   BootstrapDM (seed pools).
+- **Day-0 mortgage debtors** likewise open placed, unless `open = "market"`
+  or their arrival clock is endogenous. They do their first month's work in
+  bootstrap, settling the market legs with the helper while still minting
+  through the real gate and keeping both ledgers. The day-0 tick does not
+  repeat that month. The retiree cast still decides on the live market.
 - **Regime shocks**: a few agents each redraw one knob every 182 days, staggered
   so ~10 isolated perturbations land over a 5-year run and the loop re-settles.
 

@@ -97,6 +97,10 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
 
     # -- observability ------------------------------------------------------- #
 
+    def bootstrap(self, d, scenario, ctr) -> None:
+        """Retirees decide on the live market; none of their credit is already out."""
+        pass
+
     def telemetry_static(self) -> dict:
         out = super().telemetry_static()
         out.update(term_months=self.term_months, renew_in=self.renew_in,

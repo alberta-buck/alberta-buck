@@ -69,6 +69,68 @@ def _payment(mortgage: int, apr: float) -> int:
     return int(mortgage * mrate / (1.0 - (1.0 + mrate) ** -300))
 
 
+@pytest.mark.parametrize("mode", ["atomic", "paced"])
+def test_placed_debtor_opens_with_balanced_books_and_an_untouched_pool(mode):
+    pytest.importorskip("pyrevm")
+    from dataclasses import replace
+    from alberta_buck.sim import experiment as expmod, identity as idmod
+    from alberta_buck.sim.chain import Chain, load_artifact
+    from alberta_buck.sim.deploy import deploy
+    from alberta_buck.sim.equilibrium_agents import BuckCreditDebtorAgent
+    from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
+    from alberta_buck.sim.scenario import ROUTING
+
+    scenario                    = replace(ROUTING, days=60, agents={"BuckCreditDebtorAgent": 1})
+    scenario.experiment         = expmod.load(None, sets=[
+        f"agents.BuckCreditDebtorAgent.{key}={value}" for key, value in dict(
+            arrive_frac=0., refi_mode=mode, open="placed", face_k=2000, mortgage_k=800,
+            premium_bp=100, pattern="salary", income_k=260, buffer_k=100, theta=3).items()])
+    rng                         = idmod.seeded_rng(scenario.seed)
+    with PyrevmAnvil(port=0) as evm:
+        chain                   = Chain(evm.w3, evm.w3.eth.accounts[0])
+        d                       = deploy(chain, evm, scenario, rng, verbose=False, basket_impl="equity-ops")
+        agent                   = BuckCreditDebtorAgent(0)
+        agent.setup(d, scenario, rng)
+        pool                    = d.w3.eth.contract(address=d.pool_ub, abi=load_artifact("UniswapV3Pool")[0])
+        slot                    = pool.functions.slot0().call()
+        ctr                     = {}
+        agent.bootstrap(d, scenario, ctr)
+        state                   = agent.octl_state(d)
+        assert agent.mortgage <= M6 and agent.deploys == 1
+        assert agent.premium_paid > 0 and state["deposit"] > 0
+        assert state["nw"] - state["hypo"] == pytest.approx(
+            state["jub"] - state["trade_loss"] + state["hypo_premium"]
+            - (state["premium_paid"] - state["deposit"]), abs=10)
+        assert pool.functions.slot0().call() == slot
+        assert not agent._otc
+        agent.act(d, scenario, 0, 0, ctr)
+        assert agent.octl_state(d) == state  # no second first month on tick 0
+
+
+def test_endogenous_debtor_does_not_place_before_its_arrival():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from alberta_buck.sim.equilibrium_agents import BuckCreditDebtorAgent
+
+    agent                       = BuckCreditDebtorAgent(0)
+    agent.open_mode              = "placed"
+    agent._endog                = True
+    agent.arrive_day             = None
+    agent.act                   = Mock()
+    agent.bootstrap(None, SimpleNamespace(), {})
+    agent.act.assert_not_called()
+
+
+def test_retiree_keeps_its_live_market_decision():
+    from unittest.mock import Mock
+    from alberta_buck.sim.household_agents import ExternalDebtRetireeAgent
+
+    agent                       = ExternalDebtRetireeAgent(0)
+    agent.act                   = Mock()
+    agent.bootstrap(None, None, {})
+    agent.act.assert_not_called()
+
+
 def _frames():
     data = json.loads(DATA.read_text())
     frames = [f for f in data["frames"] if f.get("octl")]

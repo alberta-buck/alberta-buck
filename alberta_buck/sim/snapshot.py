@@ -712,6 +712,7 @@ class Snapshotter:
             "fat_reserve_req": fat["reserve_req"],
             "fat_pending": fat["pending"],
             "fat_issued": ctr.get("fatIssued", 0),         # cum BUCK sold
+            "fat_placed": ctr.get("fatPlaced", 0),         # opening issue replacing the seeder's lien
             "fat_retired": ctr.get("fatRetired", 0),       # cum BUCK bought back
             "fat_burned": ctr.get("fatBurned", 0),         # cum BUCK burned
             "fat_prefund": ctr.get("fatPreFundBought", 0), # cum reserve buys
