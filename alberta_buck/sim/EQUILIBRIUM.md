@@ -134,6 +134,16 @@ caches CSVs behind a window manifest so parallel sweep children don't race.
 
 ## Results
 
+### Four mature-world fixes, five-year check (1a5afec)
+The 2026-10-14 campaign completed all 42 matrix worlds, six additional lean comparisons and
+eight savings runs. The helper's lien stays flat and the gate reserve releases, but the mature
+worlds still reach K's upper rail. A remaining lifecycle fault is now visible: setup activates
+the whole credit once, retirement deactivates coverage with `burn`, and later issuance never
+reactivates it. In mature originate on the older upkeep, the limit falls from 13.4 million to
+18,011 BUCKs. The dear-price response uses the remaining room but cannot restore it. This path
+is unchanged by the four fixes; the [results](../../doc/BASKET-MACHINE-RESULTS.org) record the
+unmet parity and opening targets. No controller or saver was tuned to conceal them.
+
 ### History: the banked lifecycle milestone (eee765b) -- corrected
 The milestone banked as "basketValue settles ~0.92 with K riding ~0.93"
 actually describes the mid-run plateau (~days 700-1250).  The banked vector's

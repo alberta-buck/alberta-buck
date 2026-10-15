@@ -251,7 +251,7 @@ machine's design is expected to become the accepted one.
     refused most first attempts. It now runs the cycle, reads, and buys half a percent over.
     Half a year of the portcast world: 18 refinances and no refusal. The other 12 households
     wait because their mortgage is more than their credit at today's K, which is the design.
-  - [ ] *Measure everything again on the settled model* (=build/sim/sellers/=, from a frozen
+  - [X] *Measure everything again on the settled model* (=build/sim/sellers/=, from a frozen
     copy of =a488af7=): the 14 matrix worlds on both upkeeps, the nine whose debtors pay a
     premium on the pro-rata basket too, and the savings world on both seeds.
     - [X] The savings world, both seeds (2026-10-12). The machine ends 3.6% to 7.3% ahead of
@@ -270,27 +270,21 @@ machine's design is expected to become the accepted one.
       forcing runs made fresh). Most rows moved under 2%. One did not: with a lone buyer of
       BUCKs and nobody else to issue, K now climbs to 0.94 and the BUCK is 4% dear, where the
       lean on both sides held it to 0.86 and 2.4%. Both pages pass their checks in a browser.
-    - [ ] The lean's tables, on the settled model: with, without and one-sided.
-  - [ ] *The lean against parity costs in a quiet world* (found 2026-10-12 in the base world,
-    which the depositors' fix does not touch). With no lean the machine ends five years with K
-    at 0.745 and a share at 1.246. With the lean on both sides, 0.790 and 1.227. With the lean
-    on the cheap side only, as built, 0.824 and 1.215, holding BUCKs worth 22% of its equity.
-    It buys BUCKs whenever the BUCK is a little cheap and has no rule that lets them go when it
-    is a little dear, and a basket that holds BUCKs is a buyer K rises to meet. Decide: a
-    smaller gain, a dead band before it acts, a rule that releases what it holds, or no lean.
-    Measure each on the base world and on one where the BUCK is cheap for long.
-
-    The case for the cheap side only has also lost its evidence. It was made one-sided because
-    the dear side lost most of a share in the worlds where the BUCK ran away, and those worlds
-    ran away because of the depositors' hoard. Since then the dear side has shown only a
-    benefit: in the lab a lone buyer of BUCKs moves the price 2.4% with it and 4% without, and
-    in the base world the lean on both sides costs less than the lean on one. So putting the
-    dear side back, with or without a dead band, is one of the things to measure.
+    - [X] The lean's tables on the mended cast (2026-10-14, =build/sim/mended/=): base,
+      portcast and mature originate, with both sides, cheap only and off. The two-sided lean
+      costs 2.2% of the share price in base and 0.8% in portcast against no lean, and earns
+      3.6% more in mature originate. The remaining activation fault below qualifies that test.
+  - [ ] *The lean against parity costs in a quiet world* (remeasured 2026-10-14). In base,
+    the two-sided lean ends with a share at 1.135, cheap-only at 1.153, and no lean at 1.161.
+    K ends at 0.843, 0.884 and 0.878 respectively. In mature originate the two-sided lean
+    improves both parity and share price. The lab's lone buyer moves the BUCK 2.4% with the
+    dear side and 4.4% without it. A gain, a dead band and a release rule remain decisions
+    to make after the remaining borrower fault is resolved; the campaign changes none of them.
   - [X] *The lean against parity is on both sides again* (decided 2026-10-13). =parityGainDear=
     is 5 in the simulator, the lab's configuration and the JS world; the lab's alternative arm
-    is now =parity-cheap=. The contract is unchanged but for its notes. Still to do: the lab
-    and the machine's worlds again on it (the base, deep, endow and capacity worlds of the
-    first matrix were run on it and stand, having no depositor who leaves).
+    is now =parity-cheap=. The contract is unchanged but for its notes. The lab's regeneration
+    finished on 2026-10-13 (=build/lab/regen-both.log=); its numbers are now in the results.
+    All machine worlds were measured again with the four cast fixes on 2026-10-14.
   - [X] *Why the mature worlds cannot issue enough* (2026-10-13; the day-by-day table is in
     [[file:BASKET-MACHINE-RESULTS.org::*Why the mature worlds cannot issue enough][the results]]). Four things in the model, none a basket: everyone issues on day 0 into
     pools of 2.3 million; the big borrowers escrow a BUCK for every BUCK they draw, for as
@@ -298,21 +292,37 @@ machine's design is expected to become the accepted one.
     shared swap helper keeps 6.3 million BUCKs it could not swap. The dollar pool ends short
     of 6.5 million BUCKs, which prices the BUCK a third above its basket, and nobody in these
     casts issues because the BUCK is dear.
-  - [ ] Mend the mature worlds' model. Perry agreed to all four on 2026-10-13, and the plan,
-    written so another session can do it, is [[file:review/mature-worlds-plan.org][doc/review/mature-worlds-plan.org]]:
-    - The swap helper keeps nothing: proxies swap for themselves, depositors through a transit
-      account with no credit.
-    - The big borrowers' reserve at the gate's own scale: a share of the insurance deposit by
-      the linear factor, for the draw only.
-    - An opening that is not a shock: credit that is out on day 0 is placed with the
-      pool-seeding helper at par before the first tick, and a sale is capped by its price
-      impact.
-    - Borrowers who use their unused limit when the BUCK is dear.
-    Then the whole matrix and the savings world once more, about five hours.
-  - [ ] K rests at its limit in five worlds that hold, on all three baskets (the worlds with
-    mature debtors, whose opening has the basket costing 3.5 BUCKs). K is thrown to 0.42,
-    climbs to 0.95 within months, and at parity nothing brings it back. Mend the opening of those worlds, and say whether a
-    controller at rest on its limit should bleed back toward its neutral value.
+  - [X] Mend the mature worlds' model (2026-10-14). All four agreed fixes in
+    [[file:review/mature-worlds-plan.org][doc/review/mature-worlds-plan.org]] are implemented, separately committed and measured:
+    - =9bf0eae=: proxies swap for themselves; depositors use a creditless transit account that
+      forwards or returns the input. Frames record the pool seeder's lien.
+    - =b4e0c70=: the big borrowers buy the funding factor times the insurance deposit for a
+      draw, then release the reserve gradually while the BUCK is not cheap. The earlier
+      rolling mode and a no-reserve mode remain selectable.
+    - =e6432db=: existing day-0 credit is placed with the helper without moving a pool.
+      Day-0 debtors still use the real insured mint and keep their ledgers. Later borrower
+      sales have a 1% impact cap per leg; the market opening remains selectable.
+    - =1a5afec=: a dear BUCK brings out spare borrower credit, half at 2.5% dear and all at
+      5%; returning to parity lowers the target and invokes the existing retirement path.
+    The full Python suite passes (1,006 passed, 5 skipped), with the 76 original =_draw= calls
+    unchanged. Frozen =1a5afec= completed 42 matrix runs, six extra lean comparisons and eight
+    savings runs. The helper's lien is flat in all 56. The formerly stopped basketeers world
+    finishes. No base world approaches the 0.20 stop condition. The results and papers carry
+    the new tables, including the unmet economic criteria below.
+  - [ ] Borrowers retire activated credit and never activate it again (found in those runs).
+    =FatCreditBorrowerAgent.setup= mints once; its retire branch burns coverage, but later
+    issuance reads only the remaining limit. In mature originate on the older upkeep the
+    limit falls from 13.4 million to 18,011 BUCKs; in base on the machine, to 306 BUCKs.
+    Decide how the borrower reactivates that collateral, then measure the affected worlds
+    again. The four-fix campaign leaves this existing path unchanged.
+  - [ ] The opening still misses the 5% band in 25 of 42 worlds, although placed credit itself
+    moves no pool. A trace isolates an excursion in the older upkeep's first turn. Keep
+    investigating the opening separately from the placement invariant.
+  - [ ] K still reaches its upper rail in every mature cast on all three baskets, and none
+    stays within 2% from day 30 throughout. The endog raid without excursion issuers ends
+    with the BUCK about 19% dear on pro-rata and 20% on the older upkeep. Resolve the
+    activation ratchet before deciding whether K at rest should return toward neutral;
+    these runs do not isolate the controller. Savers, atomic refinancing and gains are unchanged.
   - [X] The demonstration paper's figure and numbers are from the demo as it runs now
     (2026-10-13). Getting there found three more brakes on the JS debtor, which Perry named:
     "Debtors are smart: if they can obtain equity from the same collateral without interest or

@@ -1,5 +1,5 @@
 #+TITLE: The basket machine: what the lab shows
-#+DATE: 2026-10-11
+#+DATE: 2026-10-14
 #+OPTIONS: ^:nil toc:2 num:t
 
 This is what we learned by running [[file:BASKET-MACHINE.org][the basket machine]] on the real contracts. The work still to
@@ -13,14 +13,17 @@ the BUCK holds.
 
 | Five years, two seeds | Older upkeep | The machine |
 |----------------------+--------------+-------------|
-| Share price at the end, real prices | 1.146, 1.237 | 1.187, 1.294 |
-| Share price at the end, reverting prices | 1.194, 1.302 | 1.276, 1.398 |
-| Equity it could spend on an exit, at the least | 0% | 62% to 69% |
-| K at the end, from 0.72 | 0.75 to 0.81 | 0.74 to 0.77 |
+| Share price, last 90 days, real prices | 1.143, 1.238 | 1.194, 1.296 |
+| Share price, last 90 days, reverting prices | 1.184, 1.291 | 1.263, 1.394 |
+| Equity it could spend on an exit, at the least | 0% | 62% to 68% |
+| K at the end, from 0.72 | 0.75 to 0.81 | 0.73 to 0.78 |
 
-Those numbers are from the model as it stands on 2026-10-12. Every table below that is not
-marked as settled was measured before three faults in the model were mended, and one of them
-changes the reading of all of it.
+These are the frozen model's numbers at =1a5afec=, measured on 2026-10-14. All 42 matrix worlds
+and eight savings runs finish. The helper no longer absorbs swap inputs, the big borrowers'
+escrow is small, and opening credit is placed without moving a pool. The mature worlds still
+miss the intended parity band and leave K at its upper rail. Their borrowers retire activated
+credit and never activate it again; the remaining issuance limit dwindles even while K rises.
+The four agreed fixes are complete, but these casts are not yet a settled test of the controller.
 
 The first five-year matrix seemed to show both upkeeps failing in seven worlds: K reached its
 upper limit and the BUCK then rose against its basket without stopping. It was not the basket.
@@ -41,7 +44,7 @@ TOKEN moves and never comes back the basket loses. One thing changed. Counting h
 has lasted now earns half again what a fixed line does. Before the rebuild the two were close.
 
 Four more things to be careful about. The savings result is two seeds, which agree, and the
-lab is one. The machine uses a sixth more gas than the older upkeep and makes many small trades.
+lab is one. The machine uses 11% to 17% more gas than the older upkeep and makes many small trades.
 The desk made no trade in the lab and few in the first seed of the savings world, so little
 here tests it. And a young basket's share price shows the relief on its lien before the
 demurrage on the BUCKs it holds.
@@ -68,39 +71,43 @@ No gas is charged in either. The [[*Gas][gas section]] says what it would cost.
 * Five years in the savings world
 
 The older upkeep is the director with its Deploy, Fund and Trim steps. The machine is the one
-described in the design ([[file:review/savings-old-new.py][savings-old-new.py]]). These are the settled model's numbers
-(=build/sim/sellers/=, commit =a488af7=): the funding factor a straight line, debtors who find
-the cash for their insurance deposit, and depositors who sell the BUCKs an exit pays them.
+described in the design ([[file:review/savings-old-new.py][savings-old-new.py]]), with the lean against parity on both sides.
+These are the frozen =1a5afec= runs in =build/sim/mended/savings-s1/= and =savings-s2/=.
+
+Share prices, including the deduction for carried demurrage, average the last 90 days. Growth
+and the gain over holding compare day 7 with the final day; parity and liquidity omit the first
+week. The earlier savings tables labelled final-day share prices as 90-day means. These tables
+correct that label's underlying calculation as well as replacing the runs.
 
 | First seed | Older, real | Machine, real | Older, reverting | Machine, reverting |
 |--------+--------+--------+--------+--------|
-| Share price, last 90 days | 1.146 | 1.187 | 1.194 | 1.276 |
-| Growth a year, after the first week | +3.0% | +3.2% | +3.1% | +5.0% |
-| Ahead of holding the same commodities | +12% | +17% | +17% | +26% |
-| Net of the demurrage its held BUCKs carry | 1.112 | 1.147 | 1.164 | 1.248 |
-| Basket's cost in BUCK off 1, mean | 0.53% | 0.49% | 0.53% | 0.51% |
-| The same, at its worst | 7.0% | 3.1% | 3.3% | 4.0% |
-| K at the end, from 0.72 | 0.746 | 0.736 | 0.813 | 0.768 |
+| Share price, last 90 days | 1.143 | 1.194 | 1.184 | 1.263 |
+| Growth a year, after the first week | +3.0% | +3.5% | +3.1% | +5.0% |
+| Ahead of holding the same commodities | +12% | +18% | +17% | +26% |
+| Net of the demurrage its held BUCKs carry | 1.111 | 1.154 | 1.157 | 1.234 |
+| Basket's cost in BUCK off 1, mean | 0.53% | 0.49% | 0.53% | 0.48% |
+| The same, at its worst | 7.0% | 3.4% | 3.3% | 3.5% |
+| K at the end | 0.746 | 0.735 | 0.813 | 0.763 |
 | Days with under 5% of equity to spend | 1,404 | 0 | 1,422 | 0 |
-| Pool fees, BUCKs | 110,694 | 123,076 | 128,627 | 159,858 |
-| Arbitrage credited to depositors, dollars | 348,887 | 365,054 | 302,751 | 360,058 |
-| Gas, billions | 10.2 | 12.2 | 10.9 | 13.1 |
+| Pool fees, BUCKs | 110,694 | 123,903 | 128,627 | 155,993 |
+| Arbitrage credited to depositors, dollars | 348,887 | 383,495 | 302,751 | 352,404 |
+| Gas, billions | 10.2 | 12.0 | 10.9 | 12.8 |
 
-The machine ends 3.6% ahead on real prices and 6.9% ahead on reverting ones. It holds the
-BUCK's price as well or better.
+The machine ends 4.5% ahead on real prices and 6.6% ahead on reverting ones. It holds the
+BUCK's price a little closer on average, though its worst reverting-price excursion is larger.
 
 It also has room. The older upkeep had under 5% of its equity to spend on three days in four,
 because pairing used its whole limit. The machine never had less than 62%.
 
-It trades more. On real prices it made 1,063 sales and 456 purchases, about two trades for
-every five turns of the wheel, and used a fifth more gas.
+It trades more. On real prices it made 983 sales and 392 purchases, about two trades for every
+five turns of the wheel, and used 17% more gas.
 
 K stays in the middle of its range under both. Before the depositors were mended it climbed to
 0.93 and 0.95 on reverting prices, and we wrote that this was K's own behaviour. It was not. It
 was the depositors' hoard.
 
-The desk barely acts under the machine. It moved 42,000 BUCKs in five years on real prices and
-ended 1,702 ahead of holding its grant. Under the older upkeep it moved 176,000 and ended 19,338
+The desk acts little under the machine. It moved 104,000 BUCKs in five years on real prices and
+ended 2,635 behind holding its grant. Under the older upkeep it moved 176,000 and ended 19,338
 behind.
 
 ** A second seed
@@ -109,25 +116,25 @@ The same four worlds, from a second seed:
 
 | Second seed | Older, real | Machine, real | Older, reverting | Machine, reverting |
 |--------+--------+--------+--------+--------|
-| Share price, last 90 days | 1.237 | 1.294 | 1.302 | 1.398 |
-| Growth a year, after the first week | +3.9% | +5.5% | +4.6% | +6.7% |
-| Ahead of holding the same commodities | +20% | +29% | +24% | +41% |
-| Net of the demurrage its held BUCKs carry | 1.215 | 1.268 | 1.284 | 1.378 |
+| Share price, last 90 days | 1.238 | 1.296 | 1.291 | 1.394 |
+| Growth a year, after the first week | +3.9% | +5.6% | +4.6% | +6.8% |
+| Ahead of holding the same commodities | +20% | +28% | +24% | +41% |
+| Net of the demurrage its held BUCKs carry | 1.217 | 1.269 | 1.274 | 1.373 |
 | Basket's cost in BUCK off 1, mean | 0.83% | 0.76% | 0.86% | 0.80% |
-| The same, at its worst | 7.3% | 5.0% | 4.4% | 4.4% |
-| K at the end, from 0.73 | 0.763 | 0.755 | 0.771 | 0.767 |
+| The same, at its worst | 7.3% | 7.8% | 4.4% | 4.0% |
+| K at the end | 0.763 | 0.751 | 0.771 | 0.778 |
 | Days with under 5% of equity to spend | 1,634 | 0 | 1,566 | 0 |
-| Gas, billions | 11.2 | 12.7 | 11.9 | 13.6 |
+| Gas, billions | 11.2 | 12.5 | 11.9 | 13.2 |
 
-The machine ends 4.6% ahead on real prices and 7.3% ahead on reverting ones. The first seed
-gave 3.6% and 6.9%. It holds the BUCK's price a little better, never has less than 67% of its
-equity to spend, and uses 13% to 15% more gas.
+The machine ends 4.7% ahead on real prices and 7.9% ahead on reverting ones. The first seed
+gave 4.5% and 6.6%. It holds the BUCK's price a little closer on average, never has less than
+67% of its equity to spend, and uses 11% more gas. Its worst real-price excursion is 7.8%,
+against 7.3% under the older upkeep; the average improvement does not remove that tail.
 
-This world is rougher than the first. The BUCK strays further from its basket under both
-upkeeps, and the desk does more. Under the machine it moved 450,000 and 648,000 BUCKs, and ended
-13,935 behind on real prices and 4,690 ahead on reverting ones. Under the older upkeep it moved
-about 160,000 and ended 17,000 behind on both. The machine's parity reference was stale on 32
-and 30 days of the five years.
+This world is rougher than the first, and the desk does more. Under the machine it moved
+635,000 and 446,000 BUCKs, and ended 15,012 behind on real prices and 6,512 ahead on reverting
+ones. Under the older upkeep it moved about 160,000 and ended 17,000 behind on both. The
+machine's parity reference was stale on 24 and 25 days of the five years.
 
 * The five-year matrix
 
@@ -351,58 +358,90 @@ million, held almost none, and K stayed at 0.747.
 
 ** The settled model
 
-The matrix again, with depositors who sell what an exit pays them, debtors who find the cash for
-their insurance deposit, and the funding factor a straight line (=build/sim/sellers/=, commit
-=a488af7=). Five years, all fourteen worlds, three baskets.
+The matrix after all four cast fixes, with the lean on both sides (=build/sim/mended/runs/=,
+commit =1a5afec=). Five years, all fourteen worlds, three baskets; every run finishes. Parity
+error is the mean absolute distance of the basket's cost in BUCK from one after day 90. Share
+prices average the last 90 days. The name of this section is retained for earlier links; the
+remaining failure to reactivate credit means the mature casts are not yet settled.
 
 | World | BUCK from its basket, mean: pro-rata | Older | Machine | K at the end: pro-rata | Older | Machine | Share price: older | Machine | Machine ahead by |
 |-------+--------------------------------------+-------+---------+------------------------+-------+---------+--------------------+---------+------------------|
-| base | 0.32% | 0.27% | 0.25% | 0.780 | 0.924 | 0.824 | 1.249 | 1.215 | -2.7% |
-| deep | 0.31% | 0.26% | 0.25% | 0.781 | 0.943 | 0.777 | 1.224 | 1.205 | -1.6% |
-| endow | 0.31% | 0.23% | 0.24% | 0.730 | 0.730 | 0.730 | 1.189 | 1.207 | +1.5% |
-| endow-deep | 0.30% | 0.25% | 0.24% | 0.738 | 0.737 | 0.733 | 1.185 | 1.210 | +2.1% |
-| capacity | 0.38% | 0.33% | 0.28% | 0.722 | 0.835 | 0.717 | 1.361 | 1.385 | +1.8% |
-| debtors | 0.34% | 0.25% | 0.24% | 0.755 | 0.876 | 0.767 | 1.209 | 1.216 | +0.5% |
-| portcast | 0.34% | 0.35% | 0.42% | 0.743 | 0.742 | 0.732 | 1.125 | 1.139 | +1.3% |
-| basketeers, endog, excursion | 0.31% | 0.31% | 0.33% | 0.666 | 0.751 | 0.772 | 1.91 | 3.08 | |
-| basketeers, endog, excursion, raid | 0.39% | 0.33% | 0.36% | 0.782 | 0.786 | 0.752 | 1.91 | 3.08 | |
-| debtors-mature | 0.29% | 0.48% | 0.28% | 0.934 | 0.949 | 0.950 | 1.77 | 2.94 | |
-| basketeers | 0.40% | 0.26% | stops | 0.949 | 0.949 | | 1.68 | | |
-| basketeers, originate | 1.54% | 2.22% | 0.40% | 0.949 | 0.940 | 0.947 | 2.00 | 2.92 | |
-| basketeers, endog | 1.22% | 1.73% | 0.37% | 0.949 | 0.949 | 0.946 | 1.96 | 2.90 | |
-| basketeers, endog, raid | 4.65% | 4.87% | 0.38% | 0.950 | 0.950 | 0.945 | 1.89 | 2.97 | |
+| base | 0.27% | 0.39% | 0.26% | 0.823 | 0.948 | 0.843 | 1.145 | 1.135 | -0.9% |
+| deep | 0.26% | 0.42% | 0.39% | 0.799 | 0.948 | 0.949 | 1.137 | 1.113 | -2.1% |
+| endow | 0.25% | 0.23% | 0.22% | 0.754 | 0.744 | 0.745 | 1.118 | 1.160 | +3.8% |
+| endow-deep | 0.25% | 0.23% | 0.23% | 0.746 | 0.750 | 0.754 | 1.110 | 1.147 | +3.3% |
+| capacity | 0.26% | 0.55% | 0.43% | 0.844 | 0.950 | 0.950 | 1.166 | 1.122 | -3.8% |
+| debtors | 0.28% | 0.24% | 0.22% | 0.760 | 0.861 | 0.792 | 1.129 | 1.147 | +1.5% |
+| portcast | 0.34% | 0.35% | 0.41% | 0.743 | 0.742 | 0.738 | 1.125 | 1.128 | +0.3% |
+| debtors-mature | 2.58% | 2.97% | 3.51% | 0.950 | 0.950 | 0.950 | 1.119 | 1.093 | -2.3% |
+| basketeers | 2.53% | 4.93% | 1.02% | 0.950 | 0.950 | 0.949 | 0.911 | 1.064 | +16.7% |
+| basketeers, originate | 0.49% | 1.49% | 0.96% | 0.949 | 0.948 | 0.948 | 1.115 | 1.183 | +6.1% |
+| basketeers, endog | 1.38% | 1.92% | 0.94% | 0.949 | 0.949 | 0.946 | 1.063 | 1.128 | +6.1% |
+| basketeers, endog, excursion | 0.74% | 0.38% | 0.46% | 0.949 | 0.946 | 0.947 | 1.147 | 1.180 | +2.9% |
+| basketeers, endog, raid | 11.61% | 12.59% | 1.92% | 0.950 | 0.950 | 0.949 | 0.837 | 1.105 | +31.9% |
+| basketeers, endog, excursion, raid | 0.50% | 0.48% | 0.58% | 0.949 | 0.945 | 0.947 | 1.151 | 1.180 | +2.5% |
 
-No world runs away, on any basket. In the portcast world, where the BUCK went to 7 and 12
-dollars, it ends at parity with K at 0.73 to 0.74.
+/The previously quiet worlds still hold parity./ Base, deep, endow, endow-deep, capacity,
+debtors and portcast average 0.22% to 0.55% from parity across the three baskets. The base
+world never approaches the plan's 0.20 stop threshold: its lowest K is 0.729 on the machine,
+0.733 on the older upkeep and 0.746 on the pro-rata basket.
 
-/The machine holds the BUCK's price as well as either, and better where it is hard./ It is
-within 0.24% to 0.42% of its basket in every world. In the three worlds where the other two
-baskets let it stray 1% to 5%, the raid among them, the machine holds it within 0.4%.
+/The mature worlds miss the target./ Every mature cast still reaches the upper rail on every
+basket. The endog raid without excursion issuers is the clearest failure: its final 90-day
+basket cost is 0.843 on pro-rata and 0.831 on the older upkeep. The BUCK is therefore about
+19% and 20% dear. The machine returns that world to parity at the end, but its five-year mean
+error is 1.92%; the simpler mature-debtors world averages 3.51% on the machine. These are worse
+than their earlier runs. None of the mature worlds stays within 2% from day 30 throughout.
 
-/Between the two upkeeps the share price is close./ In the seven worlds where it can be compared
-the machine ends between 2.7% behind and 2.1% ahead: ahead in five, behind in the two (base and
-deep) where it ends holding the most BUCKs. In the last seven worlds the share price is 2 to 3
-and is decided by the first weeks, when the basket costs 3.5 BUCKs. It does not compare the
-upkeeps.
+/The opening is smaller, but still fails the requested band./ At the start of day 1, 25 of the
+42 worlds are more than 5% from parity. The worst basket cost is 1.179, in portcast on the
+older upkeep. These readings are the vectors' frame 0, after its four ticks, matching the
+start-of-day account table below. Reading frame 1 instead would silently give the opening
+another day to settle. The basketeers world that previously stopped under the machine now
+finishes all five years.
 
-/K rests at its limit in five worlds, on all three baskets./ These are the worlds with mature
-debtors. They open with the basket costing 3.5 BUCKs. K is thrown down to 0.42 on the first
-day, climbs to 0.95 within one to three months, and nothing afterwards pulls it down, because
-the BUCK is then at parity. The pro-rata basket rests there too, so this is not the equity
-basket's doing. It is these worlds' opening, and a controller that stays wherever its error
-last left it. It does leave K with nothing in reserve.
+/The swap and reserve faults are gone./ The helper's lien is constant after opening in all
+48 matrix and lean runs and all eight savings runs. The reserve no longer withholds almost
+the whole draw. The check world's day-5 escrow holds 0.08 million against 9.96 million drawn,
+and by day 60 it is below the table's rounding threshold. The largest escrow in a mature run
+is 0.27 million against 11.63 million drawn. Outside the mature casts, capacity on the older
+upkeep briefly holds 1.58 million against 5.06 million drawn on day 1, so the reserve is not
+negligible at every opening. The share-price comparison no longer starts from the earlier
+threefold crash, but it still includes the remaining opening and credit activation effects.
 
-One world still stops on its first day under the machine (=basketeers=): K falls to 0.02 and a
-depositor's refused mint ends the run.
+*** The remaining issuance ratchet
 
-The sections above this one, and the lean's tables below, were measured with depositors who
-kept their BUCKs.
+The borrowers answer a dear BUCK, but their available credit is not a renewable pool in this
+model. =setup= activates the whole face once. Each retirement buys BUCKs back and calls
+=burn=, which deactivates coverage. Later draws read the smaller =creditLimit= and never call
+=mint= to reactivate it. This path predates the four fixes. With a temporary reserve and a
+target that answers both sides of parity, repeated cycles of drawing and retiring expose it.
+
+In the originate world on the older upkeep, millions of BUCKs, at the end of each named day:
+
+| Day | Activated limit | Drawn | Used | K |
+|-----+-----------------+-------+------+---|
+| 0 | 13.413 | 9.925 | 74.0% | 0.733 |
+| 30 | 10.858 | 10.060 | 92.6% | 0.798 |
+| 60 | 9.987 | 9.620 | 96.3% | 0.872 |
+| 90 | 9.313 | 8.990 | 96.5% | 0.942 |
+| 365 | 3.773 | 3.645 | 96.6% | 0.950 |
+| 1000 | 0.018 | 0.015 | 82.4% | 0.950 |
+| 1826 | 0.018 | 0.015 | 83.0% | 0.948 |
+
+The borrower uses about 96% of its limit while the BUCK is dear, as intended, but the limit
+falls from 13.4 million to 18,011 BUCKs. In the base world on the machine it falls from
+13.3 million to 306 BUCKs. K cannot replace collateral the agent has deactivated. This is
+another cast fault to resolve before attributing the persistent shortage to the controller.
+K also has no term returning it toward neutral at parity, but these runs do not isolate that.
+No activation rule, controller setting, saver or refinancing policy was changed to conceal it.
 
 ** Why the mature worlds cannot issue enough
 
-In the five worlds with mature debtors K is at its limit within weeks, and under the pro-rata
-basket and the older upkeep the BUCK then stays 8% to 33% dear for a year. We read every account
-through the first 60 days of one of them (=debtors-mature-basketeers-originate=, older upkeep;
+Before the cast fixes, in five worlds with mature debtors K reached its limit within weeks, and
+under the pro-rata basket and the older upkeep the BUCK then stayed 8% to 33% dear for a year.
+We read every account through the first 60 days of one of them
+(=debtors-mature-basketeers-originate=, older upkeep;
 [[file:review/who-holds.py][who-holds.py]]). Millions of BUCKs, at the start of each day:
 
 | | Day 0 | Day 1 | Day 5 | Day 10 | Day 30 | Day 60 |
@@ -416,7 +455,36 @@ through the first 60 days of one of them (=debtors-mature-basketeers-originate=,
 | Drawn by the big borrowers | 0 | 1.9 | 5.2 | 6.3 | 8.9 | 8.9 |
 | Drawn by the pool-seeding helper | 50.0 | 49.6 | 43.3 | 43.3 | 43.3 | 43.3 |
 
-Four things in the model make it, and none is a basket.
+After the four fixes, the same world and the same account readings
+(=build/sim/mature-fix4/check.log=):
+
+| | Day 0 | Day 1 | Day 5 | Day 10 | Day 30 | Day 60 |
+|---+-------+-------+-------+--------+--------+--------|
+| The basket's cost in BUCK | 0.980 | 1.118 | 0.981 | 0.961 | 0.966 | 0.951 |
+| K | 0.750 | 0.733 | 0.749 | 0.758 | 0.795 | 0.869 |
+| BUCKs in the BUCK/dollar pool | 50.00 | 48.25 | 49.85 | 49.91 | 49.07 | 49.07 |
+| BUCKs in the basket's pools | 2.33 | 2.72 | 3.08 | 3.64 | 4.64 | 5.24 |
+| Held by savers | 0 | 2.02 | 0.01 | 0 | 0 | 0 |
+| Held in the big borrowers' escrow | 0 | 0 | 0.08 | 0.01 | 0 | 0 |
+| Drawn by the big borrowers | 9.50 | 9.92 | 9.96 | 10.39 | 10.06 | 9.62 |
+| Drawn by the pool-seeding helper | 40.50 | 40.50 | 40.50 | 40.50 | 40.50 | 40.50 |
+
+The opening places 9.50 million BUCKs of existing credit without changing the float or a pool's
+price. Proxies now swap for themselves; depositors use a transit account with no credit, which
+forwards or returns every BUCK. The helper's lien stays flat. The borrowers' reserve is a
+temporary share of the insurance deposit, and their later sales are capped at 1% price impact
+per pool. They use spare credit when the BUCK is dear and retire the excess when parity returns.
+
+The check does not meet every target in the plan. Day 1 is still 11.8% from parity, and days 30
+and 60 are 3.4% and 4.9% away. A trace after the opening fix isolated a day-0 price excursion in
+the older upkeep: its first turn raised the instantaneous basket price from 1.061 to 1.178.
+The spot was back at 1.004 at the start of day 1, while the TWAP still read 1.087. That trace
+preceded the dear-price response; neither fix changes the controller or the upkeep. Restoring
+the borrowers' market opening with all four fixes gives basket prices of 1.140, 1.049, 1.012,
+0.996 and 0.978 on days 1, 5, 10, 30 and 60, with K ending at 0.755. The old shock recovers in
+weeks, but a quiet opening alone does not establish the promised 2% band.
+
+Four things in the earlier model made the shortage, and none was a basket.
 
 1. /Everyone issues on the first day./ These worlds set the big borrowers' adoption as already
    complete. So on day 0 they draw their whole target at once and sell it, partly into the
@@ -451,34 +519,38 @@ The same escrow is in the quiet worlds, where it grows slowly with the borrowers
 in the base world they have drawn 11.0 million BUCKs after five years and hold 10.7 million of
 them in escrow.
 
-/Where K rests in a quiet world./ The base world has no depositor who leaves, so nothing in it
-changed with the depositors, and it shows what the basket itself does to K. A basket that holds
-BUCKs is a buyer of BUCKs, and K rises to meet a buyer.
+** The lean on the mended cast
 
-| Base world, five years | K at the end | Share price | BUCKs held beyond its lien, of equity, at the end |
-|------------------------+--------------+-------------+----------------------------------------------------|
-| Pro-rata basket | 0.780 | | |
-| Older upkeep | 0.924 | 1.249 | 8% |
-| Machine, no lean against parity | 0.745 | 1.246 | 1% |
-| Machine, lean on both sides | 0.790 | 1.227 | 13% |
-| Machine, lean on the cheap side only (as built) | 0.824 | 1.215 | 22% |
+The base, portcast and mature-originate worlds each ran on the machine with the lean on both
+sides, on the cheap side only, and off. The defaults are gains of 5 on both sides; cheap-only
+sets =machine.parity_gain_dear=0=, and off also sets =machine.parity_gain=0=. All nine runs use
+the frozen =1a5afec= cast. Parity error is after day 90; share prices average the last 90 days.
 
-K takes its level in the first 300 days and keeps it. The stock of BUCKs builds late, from day
-1,200. Each form of the lean costs: the one-sided lean, which is what ships, leaves K 0.08
-higher than no lean and the share 2.5% lower, and the basket ends holding BUCKs worth a fifth of
-its equity. It buys BUCKs whenever the BUCK is a little cheap, which here is half the time, and
-has no rule that lets them go again when the BUCK is a little dear. This world says the lean
-against parity, at a gain of 5, is too strong or should not be there. The worlds where the BUCK
-is cheap for long are where it was meant to help, and the lab's history shape is the only one
-measured.
+| World | Lean | Parity error, mean | K at the end | Share price | A share in baskets | Issued net, of equity, at the end |
+|-------+------+--------------------+--------------+-------------+--------------------+-----------------------------------|
+| base | both | 0.26% | 0.843 | 1.135 | 1.136 | -21% |
+| base | cheap only | 0.29% | 0.884 | 1.153 | 1.153 | -7% |
+| base | off | 0.28% | 0.878 | 1.161 | 1.161 | -1% |
+| portcast | both | 0.41% | 0.738 | 1.128 | 1.129 | +21% |
+| portcast | cheap only | 0.42% | 0.732 | 1.139 | 1.139 | +35% |
+| portcast | off | 0.39% | 0.736 | 1.138 | 1.137 | +15% |
+| mature, originate | both | 0.96% | 0.948 | 1.183 | 1.184 | +24% |
+| mature, originate | cheap only | 1.34% | 0.945 | 1.137 | 1.137 | +47% |
+| mature, originate | off | 1.23% | 0.948 | 1.142 | 1.142 | +16% |
 
-The rest of the matrix is running. The sections above this one, and the lean's tables below,
-were measured with depositors who kept their BUCKs.
+A negative issued figure means the basket holds more BUCKs than its lien. In base, the lean
+on both sides costs 2.2% of the share price against no lean, while ending with K lower. In
+portcast it costs 0.8%, with little change in parity. In the mature originate world it earns
+3.6% more and reduces mean parity error from 1.23% to 0.96%. All three forms reach K's rail
+there. The depleted borrower limits remain a confounder; these results do not justify tuning
+the lean to repair the cast. The gain, band and release rule remain open decisions.
 
 ** The same worlds without the lean against parity
 
-Three of the worlds were run again on the machine with its lean against parity switched off:
-the book then aims to have let out nothing, whatever the BUCK's price.
+These are historical tests before depositors sold their exit proceeds and before the four
+mature cast fixes. The current comparison is [[*The lean on the mended cast][above]]. Three worlds were run on the machine
+with its lean against parity switched off: the book then aims to have let out nothing, whatever
+the BUCK's price.
 
 | World | | K at its limit from day | BUCK at the end, dollars | A share in baskets | BUCKs let out, of equity |
 |-------+---+-------------------------+--------------------------+--------------------+--------------------------|
@@ -552,7 +624,8 @@ world. The book still has BUCKs out while the BUCK is dear, because every deposi
 issuing and the leash works that down slowly.
 
 These were all measured with depositors who kept their BUCKs ([[*Who held the BUCKs][Who held the BUCKs]]), which is
-what made the BUCK dear in them. The lean is to be judged again on the runs that follow.
+what made the BUCK dear in them. The new comparison above measures it again, with the remaining
+failure to reactivate credit made explicit.
 
 * Why deposits waited
 
@@ -635,17 +708,17 @@ net of it. The machine is still ahead by 3.9% and 6.7%.
 
 * The rebuilt machine in the lab
 
-Every lab campaign was rerun on the machine as it stands (2026-10-13, commit =78a195b=): the
-lean against parity on the cheap side only, and the funding factor a straight line. The
-sections below carry its numbers. They moved little from the run before, at =61fb598=, with the
-lean on both sides: under 2% on most rows.
+Every lab campaign was rerun after the lean against parity returned on both sides
+(2026-10-13, commit =29df13f=; =build/lab/regen-both.log= and =build/lab/review3/=). The sections
+below carry those numbers. The four later cast fixes touch none of the lab's fingerprinted
+files, so these runs still describe the machine as built.
 
 Against the machine before the rebuild, with the whole system running:
 
 | Prices | Before the rebuild | Rebuilt | Rebuilt, declared weights |
 |--------+--------------------+---------+---------------------------|
-| Clean cycles | +74,013 | +96,388 | +54,089 |
-| Commodity-like | +34,351 | +32,591 | +17,766 |
+| Clean cycles | +74,013 | +96,623 | +55,646 |
+| Commodity-like | +34,351 | +33,263 | +17,796 |
 | One TOKEN reprices for good | -11,175 | -7,534 | -3,482 |
 
 It earns more on cycles, the same on commodity-like prices, and loses less when a TOKEN moves
@@ -655,7 +728,7 @@ It makes about a thousand sales and purchases in 120 days on clean cycles. Befor
 transfers, each a sale and one or two purchases. So the count of swaps is about the same.
 
 Turning off the lean against parity changes the gain little (+98,133 on clean cycles). It holds
-the BUCK's price a little worse: 0.25% from its basket in place of 0.23%.
+the BUCK's price a little worse: 0.25% from its basket in place of 0.20%.
 
 The desk made no trade in any of the lab's 310 runs (counted again on this run). Holding no
 BUCKs, it draws credit only after 30 days on one side, and the BUCK is never outside its band
@@ -673,10 +746,10 @@ The lab runs at one half. Gain over 120 days, basket alone ([[file:review/lean-t
 
 | Prices | No lean | Tilt 1/4 | Tilt 1/2 | Tilt 1 |
 |--------+---------+----------+----------+--------|
-| Clean cycles | +55,399 | +77,744 | +97,974 | +133,872 |
-| Cycles with noise | +52,993 | +77,285 | +100,067 | +143,600 |
-| The sudden jump | +53,917 | +75,575 | +96,939 | +132,898 |
-| Commodity-like | +18,130 | +24,652 | +31,591 | +45,253 |
+| Clean cycles | +54,908 | +76,611 | +96,241 | +131,337 |
+| Cycles with noise | +53,011 | +76,517 | +99,564 | +143,573 |
+| The sudden jump | +54,271 | +76,131 | +97,051 | +133,508 |
+| Commodity-like | +20,764 | +26,888 | +34,633 | +47,822 |
 | One TOKEN reprices for good | -3,940 | -5,803 | -7,787 | -11,410 |
 
 Every step up in the tilt buys more of both: more gain where prices return, more loss where one
@@ -696,10 +769,10 @@ often the wheel turns. Turning it 24 times a day in place of 4, basket alone:
 
 | Prices | Turns a day | Gain | TOKEN sold, BUCKs | Trades |
 |--------+-------------+------+-------------------+--------|
-| Clean cycles | 4 | +97,974 | 547,639 | 1,014 |
-| | 24 | +99,189 | 558,908 | 2,180 |
-| Cycles with noise | 4 | +100,067 | 607,137 | 672 |
-| | 24 | +101,857 | 606,573 | 1,931 |
+| Clean cycles | 4 | +96,241 | 535,706 | 1,029 |
+| | 24 | +98,588 | 555,989 | 2,193 |
+| Cycles with noise | 4 | +99,564 | 595,759 | 682 |
+| | 24 | +102,880 | 589,506 | 1,930 |
 
 The same BUCKs move, for the same gain, in two or three times as many pieces. The pace is
 independent of the turns. The number of trades is not.
@@ -709,9 +782,9 @@ running:
 
 | Half the gap in | Clean cycles | Cycles with noise | Commodity-like | One TOKEN reprices for good |
 |-----------------+--------------+-------------------+----------------+-----------------------------|
-| 12 hours | +96,749 | +102,800 | +32,861 | -7,528 |
-| A day | +96,388 | +99,896 | +32,591 | -7,534 |
-| Two days | +95,935 | +88,513 | +29,449 | -7,236 |
+| 12 hours | +97,057 | +103,273 | +33,676 | -7,528 |
+| A day | +96,623 | +100,584 | +33,263 | -7,534 |
+| Two days | +96,132 | +88,872 | +29,960 | -7,236 |
 
 Two days is a little slow where prices are noisy: it gives up a tenth there.
 
@@ -733,16 +806,16 @@ matters a good deal. Whole system running:
 
 | Prices | Rule | Gain | Trades | Gain per trade |
 |--------+------+------+--------+----------------|
-| Clean cycles | Patience 1 | +96,056 | 1,017 | 94 |
-| | Patience 2 | +96,388 | 1,014 | 95 |
-| | Patience 4 | +97,684 | 992 | 98 |
-| | 2-point line | +71,572 | 688 | 104 |
-| | 2-point line, no lean | +2,203 | 8 | 275 |
-| Commodity-like | Patience 1 | +33,328 | 451 | 74 |
-| | Patience 2 | +32,591 | 416 | 78 |
-| | Patience 4 | +31,684 | 353 | 90 |
-| | 2-point line | +21,249 | 125 | 170 |
-| | 2-point line, no lean | +3,494 | 16 | 218 |
+| Clean cycles | Patience 1 | +96,091 | 1,070 | 90 |
+| | Patience 2 | +96,623 | 1,055 | 92 |
+| | Patience 4 | +98,108 | 1,028 | 95 |
+| | 2-point line | +65,856 | 680 | 97 |
+| | 2-point line, no lean | +1,751 | 6 | 292 |
+| Commodity-like | Patience 1 | +33,781 | 457 | 74 |
+| | Patience 2 | +33,263 | 428 | 78 |
+| | Patience 4 | +32,415 | 372 | 87 |
+| | 2-point line | +20,995 | 127 | 165 |
+| | 2-point line, no lean | +3,705 | 19 | 195 |
 | One TOKEN reprices for good | Patience 1 | -7,614 | 182 | |
 | | Patience 2 | -7,534 | 183 | |
 | | Patience 4 | -7,417 | 179 | |
@@ -752,12 +825,11 @@ matters a good deal. Whole system running:
 A trade here is one sale or one purchase. Before the rebuild the table counted transfers, each
 a sale and one or two purchases.
 
-The old 2-point line earns three quarters of what urgency earns on cycles and two thirds on
-commodity-like prices, with two thirds of the trades on cycles and under a third of them on
-commodity-like prices. On the
-one-way move it loses half as much. Before the rebuild the two tied on cycles. They no longer
-do, and without the lean the line hardly trades at all. The likely reason, not yet checked: with
-every TOKEN paired in a pool, shares move less with price than they did when a third of the
+The old 2-point line earns about two thirds of what urgency earns on cycles and commodity-like
+prices, with two thirds of the trades on cycles and under a third of them on commodity-like
+prices. On the one-way move it loses half as much. Before the rebuild the two tied on cycles.
+They no longer do, and without the lean the line hardly trades at all. The likely reason, not yet
+checked: with every TOKEN paired in a pool, shares move less with price than when a third of the
 book sat in wallets, so a line 2 points away is crossed less often.
 
 So urgency earns its place in gain. Per trade the line still earns more, twice as much on
@@ -770,16 +842,16 @@ One test lifts one TOKEN's price by 30% for ten days and then drops it back
 ([[file:review/shock-response.py][shock-response.py]]). Under the earlier rule the basket sold that TOKEN once in those ten days,
 for 10,561 BUCKs.
 
-It now sells eight times in two days, 23,970 BUCKs in all, and comes out 15,384 ahead of a
+It now sells eight times in two days, 24,897 BUCKs in all, and comes out 15,430 ahead of a
 basket that sat still. The jump was worth 96,800 while it lasted, so it keeps about a sixth.
 Under the earlier rule it kept a twelfth.
 
 | Rule | Sales of the TOKEN | BUCKs | Gain across the jump |
 |------+--------------------+-------+----------------------|
-| As built | 8 | 23,970 | +15,384 |
-| No lean | 6 | 15,075 | +7,453 |
-| Tilt 1 | 9 | 31,524 | +21,499 |
-| 2-point line | 4 | 20,793 | +12,917 |
+| As built | 8 | 24,897 | +15,430 |
+| No lean | 6 | 15,339 | +7,325 |
+| Tilt 1 | 9 | 32,832 | +21,478 |
+| 2-point line | 5 | 24,960 | +13,425 |
 | 2-point line, no lean | 5 | 18,770 | +4,220 |
 
 Before the rebuild it sold 14,870 BUCKs' worth and came out 16,622 ahead. It now sells two
@@ -790,7 +862,7 @@ Three things still hold it back.
 - It waits a day. The pools show the new price at once, but the policy will not sell a TOKEN
   it still reads as rising, and its filter takes a day to see that the rise has stopped.
 - The pools sold first. A liquidity position sells a TOKEN as its price rises. The basket's
-  shed 350 TOKEN on the way up, at an average of 108 BUCKs on the way to 116. That is two
+  shed 355 TOKEN on the way up, at an average of 108.5 BUCKs on the way to 116. That is two
   thirds more than its own sales then sold. In a wallet the TOKEN would have stood at 36.3% of
   the book. In the pools it stood at 33.7%.
 - It sells only to its target. By the third day the TOKEN was back at its leaned target, and
@@ -845,9 +917,9 @@ Rebalancing gains a little from the deeper market:
 
 | Prices | An outside pool that moves | A deep outside market |
 |--------+----------------------------+-----------------------|
-| Clean cycles | +92,721 | +97,974 |
-| Commodity-like | +28,933 | +31,591 |
-| The sudden jump | +90,215 | +96,939 |
+| Clean cycles | +91,737 | +96,241 |
+| Commodity-like | +31,578 | +34,633 |
+| The sudden jump | +90,341 | +97,051 |
 
 * A side effect that is gone
 
@@ -861,19 +933,19 @@ cycles, 120 days, before the rebuild and now:
 
 | Who else is in the market | K at the end | BUCK price at the end | Before: K | Before: BUCK price |
 |---------------------------+--------------+-----------------------+-----------+--------------------|
-| Nobody | 0.750 | 1.009 | 0.750 | 1.087 |
-| K alone | 0.768 | 1.009 | 0.950 | 1.087 |
-| K and the desk | 0.768 | 1.009 | 0.950 | 1.040 |
-| A buyer of BUCKs | 0.939 | 1.044 | | |
-| A seller of BUCKs | 0.653 | 0.982 | 0.672 | 0.980 |
-| Buyers and sellers | 0.753 | 1.003 | 0.765 | 1.011 |
+| Nobody | 0.750 | 1.003 | 0.750 | 1.087 |
+| K alone | 0.755 | 1.003 | 0.950 | 1.087 |
+| K and the desk | 0.755 | 1.003 | 0.950 | 1.040 |
+| A buyer of BUCKs | 0.856 | 1.024 | | |
+| A seller of BUCKs | 0.653 | 0.981 | 0.672 | 0.980 |
+| Buyers and sellers | 0.753 | 1.001 | 0.765 | 1.011 |
 
 With nobody else in the market the BUCK ends within 1% of its basket and K stays where it
 started. A lone seller moves the price by about 2%, and K moves to meet it.
 
-A lone buyer now moves it 4%, and K climbs to 0.94. That is the lean on the cheap side only.
-With the lean on both sides the same buyer moved the price 2.4% and K to 0.86, because the
-basket let BUCKs out to it. The lab has nobody else who can issue, so here the basket's dear
+A lone buyer moves it 2.4%, and K climbs to 0.86. With the lean on the cheap side only, the
+same buyer moved the price 4.4% and K to 0.94. The restored dear side lets the basket supply
+BUCKs to the buyer. The lab has nobody else who can issue, so here the basket's dear
 side was the only supply there was.
 
 * Gas
@@ -883,7 +955,7 @@ with everything switched on ([[file:review/wheel-gas.py][wheel-gas.py]]). The la
 
 | Call | Gas each | Gas a day |
 |------+----------+-----------|
-| Wheel turn with a trade | 1,800,000 | 7.3 million |
+| Wheel turn with a trade | 1,900,000 | 7.4 million |
 | Wheel turn, nothing traded | 1,000,000 | 0.1 million |
 | Price observation | 160,000 | 0.7 million |
 | Arbitrage turn | 500,000 | 40 million |
@@ -897,7 +969,7 @@ What this costs depends on the chain. At 1 gwei, 8 million gas is 0.008 ETH a da
 
 Gas does not grow with the basket. The gain does. So there is a size below which upkeep costs
 more than rebalancing earns, and that size is much smaller on a rollup than on mainnet. For
-this one-million basket the gain was 96,388 BUCKs on clean cycles and 32,591 on commodity-like
+this one-million basket the gain was 96,623 BUCKs on clean cycles and 33,263 on commodity-like
 prices. Price the gas for your chain and compare.
 
 A turn that trades uses about 900,000 more gas than one that does not. It makes two trades on
@@ -924,11 +996,13 @@ result is net of what callers were paid, comes next.
 * What we do not know yet
 
 - Whether two seeds are enough. They agree on the five-year result. The lab has one.
-- Why K rests at its limit in five worlds that hold, on all three baskets. Their opening
-  throws the BUCK far from parity, K is carried to 0.95 within months, and at parity nothing
-  brings it back.
-- What the lean against parity is worth on the settled model. Its tables were measured in
-  worlds where the BUCK was made dear by the depositors' hoard.
+- What the mature worlds do when retired credit can be activated again. The current borrowers
+  burn activated coverage and never replace it. K still reaches its rail in every mature cast;
+  this is not yet a clean test of whether K should return toward neutral at parity.
+- How to remove the remaining first-day excursions. Placing existing credit leaves every pool
+  unchanged, but 25 of the 42 worlds still miss the requested 5% opening band.
+- What the lean against parity is worth after that activation fault is removed. On this cast
+  it costs in base and portcast and helps in the mature originate world.
 - What the basket does if the BUCK does rise without stopping. Its limit is K times an equity
   counted in BUCKs, so it would buy BUCKs all the way up. No world with a sound cast now does
   this, so it is no longer first.
@@ -951,7 +1025,7 @@ result is net of what callers were paid, comes next.
 #+begin_src sh
 python doc/review/savings-old-new.py /tmp/savings   # five years, both upkeeps, both price sets
 python doc/review/savings-old-new.py /tmp/seed2 5 scenario.seed=45517   # the second seed
-python doc/review/matrix-baskets.py build/sim/sellers/runs   # the matrix on three baskets; see its header
+python doc/review/matrix-baskets.py build/sim/mended/runs   # the matrix on three baskets; see its header
 python doc/review/who-holds.py alberta_buck/sim/experiments/rebalancing-eq-5yr-portcast.toml equity-ops 300   # every account's BUCKs
 make control-lab-interactive        # 310 runs; open doc/control-lab/interactive/index.html
 make control-lab-verify             # check every saved run
@@ -971,7 +1045,10 @@ python3 doc/review/rebalance-benchmark.py
 PYTHONPATH=. python3 doc/review/commodity-inflation.py
 #+end_src
 
-A five-year world takes about 50 minutes and a lab run about three. Each lab campaign writes a
-detailed report beside its data under =doc/control-lab/=. None of that output is committed. The
-five-year table is from commit =61fb598=; the earlier trials in "why deposits waited" are from
-the commits between =68ec15d= and =3472bb0=.
+A five-year world took 33 to 180 minutes in this concurrent campaign. Each lab campaign writes
+a detailed report beside its data under =doc/control-lab/=. None of that output is committed.
+The current matrix, lean and savings tables use frozen =1a5afec=; =build/sim/mended/COMMIT=,
+the run logs and =summary.json= record their provenance. The four fixes passed the Python suite
+(1,006 passed, 5 skipped); all 76 existing =_draw= calls remain unchanged. The lab's fingerprint
+is unchanged by those fixes. The earlier trials in "why deposits waited" are from the commits
+between =68ec15d= and =3472bb0=.

@@ -707,8 +707,8 @@ rule matters, not for what a basket earns.
 
 | Prices                      | No lean | Tilt 1/4 | Tilt 1/2 | Tilt 1   |
 |-----------------------------+---------+----------+----------+----------|
-| Clean cycles                | +55,399 | +77,744  | +97,974  | +133,872 |
-| Commodity-like              | +18,130 | +24,652  | +31,591  | +45,253  |
+| Clean cycles                | +54,908 | +76,611  | +96,241  | +131,337 |
+| Commodity-like              | +20,764 | +26,888  | +34,633  | +47,822  |
 | One TOKEN reprices for good | -3,940  | -5,803   | -7,787   | -11,410  |
 
 Every step up in the tilt buys more of both: more gain where prices return, more loss where one
@@ -718,7 +718,7 @@ does not.  At one half the loss on the one-way move is 0.7% of the basket.
 the same BUCKs for the same gain, in two or three times as many pieces.  Between half a day and
 two days, how fast a gap is released hardly matters.
 
-*A count beats a band.*  The urgency count earns a third to a half again what a fixed two-point band
+*A count beats a band.*  The urgency count earns about half again what a fixed two-point band
 does, and makes more trades to do it.  Per trade the band earns more, so which is better depends on
 what a trade costs, and that waits for the callers to be paid.
 
@@ -745,31 +745,37 @@ The strongest test runs the real contracts for five years on an in-process EVM
 (=alberta_buck/sim/=): five commodity TOKENs -- labour, construction, food, energy and gold -- on
 their real price histories, and on a copy made to revert; depositors who come and go; households
 refinancing mortgages into BUCKs; savers; arbitrageurs; the K controller; the desk; and the wheel,
-turned twice a day.
+turned twice a day.  These runs use the frozen model at =1a5afec=, with the lean against parity
+on both sides.  Share prices average the last 90 days; the gain over holding compares the end
+with day 7, and parity and liquidity omit the first week.
 
 | Five years                                      | Real prices  | Reverting prices |
 |                                                 | (two seeds)  | (two seeds)      |
 |-------------------------------------------------+--------------+------------------|
-| A share, from 1.00                              | 1.19, 1.29   | 1.28, 1.40       |
-| Ahead of holding the same commodities           | +17%, +29%   | +26%, +41%       |
+| A share, from 1.00                              | 1.19, 1.30   | 1.26, 1.39       |
+| Ahead of holding the same commodities           | +18%, +28%   | +26%, +41%       |
 | The BUCK from its basket, on average            | 0.5%, 0.8%   | 0.5%, 0.8%       |
-| The same, at its worst                          | 3.1%, 5.0%   | 4.0%, 4.4%       |
-| =K=, from 0.72, at the end                      | 0.74, 0.76   | 0.77, 0.77       |
-| Equity it could spend on an exit, at the least  | 62%, 69%     | 66%, 67%         |
+| The same, at its worst                          | 3.4%, 7.8%   | 3.5%, 4.0%       |
+| =K=, from about 0.72, at the end                | 0.73, 0.75   | 0.76, 0.78       |
+| Equity it could spend on an exit, at the least  | 66%, 67%     | 62%, 68%         |
 
 That is 3 to 5% a year over holding on real prices, and 5 to 7% where prices revert.  =K= stays
 in the middle of its range, and the BUCK within a percent of its basket on average.
 
-The net mark is most of it.  The same shell marked plainly, with the upkeep that mark needs,
-ended 4 to 7% behind in all four runs, and on three days in four had under 5% of its equity to
-spend on an exit, because pairing used its whole limit.
+The net mark is most of it.  The machine ends 4.5% to 7.9% ahead of the same shell marked
+plainly, with the upkeep that mark needs.  On three days in four that older upkeep had under
+5% of its equity to spend on an exit, because pairing used its whole limit.
 
-*Harder casts.*  The same contracts ran five years in thirteen other worlds built to strain them:
-waves of households arriving to refinance, debtors saving their surplus into the basket, forced
-excursions of the BUCK, an arbitrage raid.  In every one the BUCK stayed within half a percent of
-its basket on average, the raid included.  In five of them =K= ended at its upper limit of 0.95.
-Those worlds open far from parity, which carries =K= there within months, and with the BUCK back
-at parity nothing pulls it down again.
+*Harder casts.*  Fourteen worlds ran five years on each of three baskets: waves of households
+arriving to refinance, debtors saving into the basket, forced excursions and an arbitrage raid.
+All 42 runs finish, including one that previously stopped on its first day.  On the machine,
+the seven quieter casts average 0.22% to 0.43% from parity; the seven mature casts average
+0.46% to 3.51%.  Every mature cast still reaches =K='s upper rail on every basket, and the raid
+without additional issuers ends with the BUCK about 19% dear on pro-rata and 20% on the older
+upkeep.  These are not clean evidence against the controller: the big borrowers activate
+credit once, deactivate it as they retire, and never reactivate it.  Their available limit
+shrinks almost to nothing.  That remaining cast fault must be resolved before the mature
+worlds can judge where =K= should rest.
 
 ** The desk
 :PROPERTIES:

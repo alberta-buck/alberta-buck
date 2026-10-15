@@ -268,7 +268,7 @@ hold its ground.
 
 The BuckBasket is the saver's answer.  Savings parked in it earn the tolls and the harvest instead
 of paying demurrage, and remain available on demand.  In a simulated economy that ran for five
-years on the real price histories of five commodities, a share of the basket ended 17% to 29%
+years on the real price histories of five commodities, a share of the basket ended 18% to 28%
 ahead of simply holding the same commodities: three to five percent a year.  Where prices came
 home more faithfully it was five to seven.  Where a price wanders off and does not come back, the
 basket loses a little instead.  Treat those as a simulation's numbers, not a promise.

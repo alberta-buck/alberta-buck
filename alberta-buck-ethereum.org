@@ -947,10 +947,11 @@ BUCK plus unused credit from earlier activations -- and nothing locks it afterwa
 minter has no unused credit, so it must acquire BUCK first, and that purchase is demand for BUCK
 sized to the insurance it is about to buy, largest when the market already says there is too
 much BUCK.  A zero-premium credit pays no principal and so needs no reserve, which is how the
-supply is seeded.  Treating the reserve as permanently set aside is a strategy, not a rule, and a
-poor one: in the equilibrium simulations, borrowers that never released it starved their own
-later issuance until supply froze, and borrowers that let it go as their positions retired kept
-the loop closed (=alberta_buck/sim/EQUILIBRIUM.md=).
+supply is seeded.  The equilibrium simulations now model this temporary check: big borrowers
+acquire the funding factor times the insurance deposit for a draw, then release that reserve
+gradually while the BUCK is not cheap.  Their earlier reserve, nearly a BUCK for each BUCK drawn
+and held until retirement, withheld most of their issuance from circulation
+(=alberta_buck/sim/EQUILIBRIUM.md=).
 
 The mechanism is old; only its trigger is new.
 
