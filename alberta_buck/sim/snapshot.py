@@ -26,6 +26,27 @@ Q128 = 1 << 128
 MASK256 = (1 << 256) - 1
 
 
+def household_summary(states):
+    """Compact household books retained by the savings server's lite frames; money is in base units.
+
+    Only arrived members contribute financial amounts. Basket shares are marked before exit costs;
+    a pro-rata receipt uses its principal as an explicit fallback, not an asserted redemption quote.
+    """
+    members                     = [a for a in states if "member" in a]
+    active                      = [a for a in members if a.get("active")]
+    fields                      = ("nw", "hypo", "mortgage", "hypo_mortgage", "cash", "hypo_cash", "drawn",
+                                   "basket", "invested_usd", "issued_invest", "pending_usd", "unwound",
+                                   "external_interest", "hypo_interest", "external_paid", "hypo_paid",
+                                   "arrears", "hypo_arrears", "basket_receipts")
+    out                         = {k: sum(a.get(k, 0) for a in active) for k in fields}
+    out.update(active=len(active), scheduled=len(members), savers=sum(a["role"] == "saver" for a in active),
+               errors=sum(bool(a.get("error")) for a in active),
+               basket_mark=sum(a["basket_mark"] if a.get("basket_mark") is not None else a["basket"] for a in active),
+               mark_basis="shares" if all(a.get("basket_mark") is not None or not a["basket"] for a in active)
+               else "principal fallback")
+    return out
+
+
 def _bal(c, who):
     return c.functions.balanceOf(who).call()
 
@@ -719,6 +740,7 @@ class Snapshotter:
             "fat_throttled": ctr.get("fatThrottled", 0),   # cum throttle hits
             "fat_released": ctr.get("fatReleased", 0),     # cum reserve released
             "octl": octl,                                  # per-debtor states
+            **({"households": household_summary(octl)} if any("member" in a for a in octl) else {}),
             "arb2": arbs2,                                 # discount-arb states
             "dba_bought": ctr.get("dbaBought", 0),
             "dba_sold": ctr.get("dbaSold", 0),

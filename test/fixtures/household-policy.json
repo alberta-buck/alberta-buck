@@ -1,0 +1,27 @@
+{
+  "seed": 41404,
+  "settings": {"home_k": 1000, "ltv": 0.4, "apr": 0.055, "premium_bp": 50,
+               "theta": 3, "switch_k": 0, "risk": 0, "max_impact_bp": 100},
+  "state": {"mortgage": 400000, "face": 1000000, "joined": false, "k": 0.75,
+            "drawn": 0, "spendable": 0, "unactivated": 1000000, "ru": 10000000,
+            "rb": 10000000, "fee": 0.0005, "basket_usd": 1, "at_renewal": true},
+  "issuance": [
+    {"name": "refinance", "state": {}, "settings": {}, "kind": "refinance", "go": true},
+    {"name": "interest justifies poor execution", "state": {"ru": 9500000}, "settings": {}, "kind": "refinance", "go": true},
+    {"name": "K cannot cover insurance", "state": {"k": 0.02}, "settings": {}, "kind": "refinance", "go": false},
+    {"name": "premium investment", "state": {"mortgage": 0, "ru": 11000000}, "settings": {}, "kind": "invest", "go": true},
+    {"name": "no investment at par", "state": {"mortgage": 0}, "settings": {}, "kind": "invest", "go": false},
+    {"name": "retirement policy does not borrow to invest", "state": {"mortgage": 0, "ru": 11000000}, "settings": {"surplus_policy": "retire"}, "kind": "hold", "go": false},
+    {"name": "repaid activated line can issue again", "state": {"mortgage": 0, "ru": 11000000, "joined": true, "spendable": 100000, "unactivated": 0}, "settings": {}, "kind": "invest", "go": true}
+  ],
+  "surplus": [
+    ["adaptive", 1.1, 1.2, 0.003, 0.02, 0.02, "retire"],
+    ["adaptive", 1.1, 1.0, 0.003, 0.02, 0.02, "invest"],
+    ["adaptive", 1.0, 1.0, 0.003, 0.02, 0.02, "hold"],
+    ["adaptive", 0.99, 0.95, 0.003, 0.02, 0.02, "invest"],
+    ["adaptive", 0.98, 1.0, 0.003, 0.02, 0.02, "hold"],
+    ["basket", 0.8, 1.0, 0.003, 0.02, 0.02, "invest"],
+    ["retire", 1.2, 1.0, 0.003, 0.02, 0.02, "retire"],
+    ["discount", 1.2, 1.0, 0.003, 0.02, 0.02, "hold"]
+  ]
+}

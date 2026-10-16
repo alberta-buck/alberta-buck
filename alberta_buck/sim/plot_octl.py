@@ -49,7 +49,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
                 "theta": o["theta"], "pattern": o["pattern"],
                 "adv": [], "mort": [], "drawn": [], "deploys": []})
             a["adv"].append((o["nw"] - o["hypo"]) / 1e6)
-            a["mort"].append(o["mortgage"] / 1e6)
+            a["mort"].append(o["mortgage"] / 1e6 if "member" not in o or o.get("active") else float("nan"))
             a["drawn"].append(o["drawn"] / 1e6)
             a["deploys"].append(o["deploys"])
     bvib = [f["basketVal"] / 1e18 for f in frames]

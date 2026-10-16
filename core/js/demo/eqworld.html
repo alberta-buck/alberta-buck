@@ -111,8 +111,16 @@
   <div id="view-debtors" style="display:none">
     <div class="tabctl">
       <button id="adddebtor">Add debtor</button>
-      mortgage $<input id="dhouse" value="400000" size="8">
-      payment $<input id="dpay" value="3000" size="6">/mo
+      insured asset $<input id="dhouse" value="400000" size="8">
+      net income $<input id="dpay" value="3000" size="6">/mo
+      <select id="drole" aria-label="Household role">
+        <option value="debtor">Mortgage holder (100% LTV)</option><option value="saver">Insured saver</option>
+      </select>
+      <select id="dpolicy" aria-label="Household surplus policy">
+        <option value="adaptive">Invest at premium / retire at discount</option>
+        <option value="basket">Always invest</option><option value="retire">Always retire liability</option>
+        <option value="discount">Retire only at discount</option>
+      </select>
       <span class="addr">(BuckCredit against insured assets; sells high, buys low)</span>
       &nbsp;&nbsp;detail: <select id="debtorsel"></select>
     </div>

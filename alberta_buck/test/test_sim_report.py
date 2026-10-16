@@ -48,6 +48,13 @@ def test_checkpoint_is_not_a_completed_report(snapshot, tmp_path):
     assert not report.pdf_path(path).exists()
 
 
+def test_adaptive_households_get_the_policy_page(snapshot, tmp_path):
+    for frame in snapshot.frames:
+        frame["octl"][0]["surplus_policy"] = "adaptive"
+    _, pdf                      = report.finish(snapshot, tmp_path / "households.json")
+    assert len(re.findall(rb"/Type /Page\b", pdf.read_bytes())) == 5
+
+
 def test_old_savings_vector_needs_its_full_configured_horizon(snapshot, tmp_path):
     snapshot.meta               = {"experiment": {"scenario": {"years": 5., "day_step": 1}}}
     snapshot.frames[-1]["day"]   = 1825

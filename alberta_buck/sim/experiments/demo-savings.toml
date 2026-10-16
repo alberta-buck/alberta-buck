@@ -4,9 +4,9 @@
 # holds TOKENs for real commodities, bounded by what they cost to make and to
 # replace, and its 6% is shared over the five.
 # The catalogue's physics (keyed rng, the portcast settings, a deep BUCK/USDC
-# exit route) with the heavy parts cut: 24 depositors instead of 120, no
-# arrival hazards, 10 external-debt retirees (T15) in place of 30 endog
-# debtors.  Kept: the desk and the engaged undertakings, the director, the
+# exit route) with 24 opening depositors and a continuing household population:
+# mortgage refinancers and insured credit savers, with staggered decisions.
+# Kept: the desk and the engaged undertakings, the director, the
 # Solidity work wheel (TOKEN start: its harvest reaches the depositors), the
 # market (the whale pinning TOKEN/USDC to the references, the arbs), the
 # savers.  The basket is the equity basket with the desk, on the basket machine
@@ -44,13 +44,21 @@ ExcursionArbAgent = 3
 ExcursionCreditArbAgent = 1
 UndertakingAgent = 1
 MonetaryKeeperAgent = 1     # turns the BasketDesk beside the basket (its own account and credit)
-ExternalDebtRetireeAgent = 10
+ExternalDebtRetireeAgent = 0
+HouseholdPopulationAgent = 1
 BasketWheelAgent = 1
 ShockAgent = 1             # the page's demand / supply shock buttons arm it
 
 [agents.SaverAgent]
 arrive_mode = "endow"
 endow_m = [1, 3]
+
+[agents.HouseholdPopulationAgent]
+initial = 10
+arrival_rate = 6.0          # new households/year, throughout the horizon
+max_members = 256
+saver_share = 0.5          # insured savers; the rest carry external mortgages
+surplus_policy = "adaptive"
 
 [agents.UndertakingAgent]
 eps = 0.005

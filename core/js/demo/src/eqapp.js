@@ -10,12 +10,12 @@
 // drives the SAME class with node-loaded ones.
 
 import { advanceTime, DAY, DEPLOY_DEFAULTS } from "../../src/buckworld.js";
-import { buildEquilibriumWorld, MonthlyIncome, PidKeeper, WheelKeeper }
+import { buildEquilibriumWorld, PidKeeper, WheelKeeper }
   from "../../src/scenarios/eqworld.js";
 import { PinWhale } from "../../src/agents/whale.js";
 import { ParityArb } from "../../src/agents/arb.js";
 import { BasketSaver } from "../../src/agents/saver.js";
-import { MortgageRetiree } from "../../prototypes/mortgage-retiree.js";
+import { CreditHouseholdAgent, CreditSaverAgent } from "../../src/agents/credit-household.js";
 import { lineChart } from "../../src/chart.js";
 
 export const SAVER_NAMES = ["Sana", "Liam", "Aiko", "Ravi", "Zoë"];
@@ -38,7 +38,7 @@ export class EqWorldApp {
     this.day = 0;
     this.core = [];      // whale(s) + arb + pid, fixed at boot
     this.savers = [];    // {name, agent}
-    this.debtors = [];   // {name, agent, income, house}
+    this.debtors = [];   // {name, agent, house}
   }
 
   async boot() {
@@ -82,22 +82,24 @@ export class EqWorldApp {
     return entry.name;
   }
 
-  /** Pledge a new debtor (insured assets -> BuckCredit headroom) with a
-   *  monthly income feed; it starts acting on the next month boundary. */
+  /** Pledge an insured household; its own ledger schedules income and decisions. */
   async addDebtor({ house = 400_000n * 10n ** 6n, mortgageBp = 550n,
-                    premiumBp = 50n, payment = 3_000n * 10n ** 6n } = {}) {
+                    premiumBp = 50n, payment = 3_000n * 10n ** 6n,
+                    surplus_policy = "adaptive", role = "debtor" } = {}) {
     const n = this.debtors.length + 1;
     const account = this.makeAccount();
-    const agent = new MortgageRetiree(
-      { house, mortgageBp, premiumBp, payment, account });
-    const income = new MonthlyIncome({ account, amount: payment });
+    const Agent = role === "saver" ? CreditSaverAgent : CreditHouseholdAgent;
+    const agent = new Agent({ account, member: String(n), arrive_day: this.day, settings: {
+      home_k: Number(house) / 1e9, ltv: 1, apr: Number(mortgageBp) / 10000,
+      premium_bp: Number(premiumBp), income_frac: Number(payment) * 12 / Number(house),
+      living_frac: 0, surplus_policy } });
     await agent.setup(this.world);      // pledges via the world's proxy
-    const entry = { name: `Debtor-${n}`, agent, income, house };
+    const entry = { name: `Debtor-${n}`, agent, house };
     this.debtors.push(entry);
     return entry.name;
   }
 
-  /** One simulated day: clock, core agents, savers, incomes + debtors,
+  /** One simulated day: clock, core agents, savers and households,
    *  then the series sample the charts read. */
   async tick() {
     const w = this.world, d = this.day;
@@ -105,7 +107,6 @@ export class EqWorldApp {
     for (const a of this.core) await a.act(w, d, 0);
     for (const s of this.savers) await s.agent.act(w, d, 0);
     for (const dd of this.debtors) {
-      await dd.income.act(w, d, 0);
       await dd.agent.act(w, d, 0);
     }
     await w.record(d);
@@ -145,9 +146,9 @@ export class EqWorldApp {
         kind: "debtor", name,
         mortgage: f6(a.mortgageOwing), hypo: f6(a.hypoOwing),
         drawn: last ? f6(last.drawn) : 0, banked: f6(a.usdc),
-        net: last ? f6(house + last.banked - last.mortgageOwing - last.drawn)
+        net: last ? f6(house + last.nw)
                   : f6(house - a.mortgageOwing),
-        hypoNet: f6(house + a.hypoBanked - a.hypoOwing),
+        hypoNet: f6(house + (last?.hypo ?? a.hypoBanked - a.hypoOwing)),
       });
     }
     return rows;
@@ -319,9 +320,9 @@ export class EqWorldApp {
         width, height,
         series: [
           { label: "BuckCredit route", points: L.map((r) =>
-              [r.day, f6(house + r.banked - r.mortgageOwing - r.drawn)]) },
+              [r.day, f6(house + r.nw)]) },
           { label: "hypo (mortgage kept)", points: L.map((r) =>
-              [r.day, f6(house + r.hypoBanked - r.hypoOwing)]) },
+              [r.day, f6(house + r.hypo)]) },
         ] }),
       position: lineChart({
         title: `${d.name}: mortgage / credit drawn / banked ($)`,

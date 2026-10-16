@@ -29,6 +29,7 @@ from alberta_buck.sim import shadow_book  # WP-13: the stand-ins' book -> observ
 import alberta_buck.sim.pusher_agent  # noqa: F401  WP-15  @_register PusherAgent, LpExitAgent
 import alberta_buck.sim.bookloader  # noqa: F401  WP-15  @_register BookLoaderAgent
 import alberta_buck.sim.household_agents as households  # T15  @_register ExternalDebtRetireeAgent
+import alberta_buck.sim.credit_households  # noqa: F401  portable household and arrival population
 import alberta_buck.sim.basket_wheel_agent  # noqa: F401  BASKET-WHEEL  @_register BasketWheelAgent
 import alberta_buck.sim.shock_agent  # noqa: F401  CONVERGENCE 7a  @_register ShockAgent
 
@@ -103,7 +104,12 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]
-        for _ in range(n):
+        for ordinal in range(n):
+            if hasattr(cls, "expand"):
+                members         = cls.expand(scenario, ordinal, idx)
+                agents.extend(members)
+                idx            += len(members)
+                continue
             a = cls(idx); idx += 1
             agents.append(a)
     for a in agents:

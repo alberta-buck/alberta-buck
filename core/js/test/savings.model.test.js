@@ -14,6 +14,19 @@ import { annualized, channels, chooseIndex, dateOf, deviationBp, equityWorth, hi
 
 const loc = (href) => new URL(href);
 
+test("household lite frames preserve counts and convert only currency units", () => {
+  const r = row({ households: { active: 24, scheduled: 80, savers: 12, errors: 0, basket_receipts: 50,
+    nw: "-2500000000000", hypo: -2600000000000, mortgage: 1_000_000, hypo_mortgage: 2_000_000,
+    basket_mark: 5000000, mark_basis: "shares" } });
+  assert.equal(r.households.active, 24);
+  assert.equal(r.households.basket_receipts, 50);
+  assert.equal(r.households.nw, -2500000);
+  assert.equal(r.households.hypo, -2600000);
+  assert.equal(r.households.basket_mark, 5);
+  assert.equal(r.households.mark_basis, "shares");
+  assert.equal(row({}).households, null);
+});
+
 test("the world's address: ?sim=, then this browser's choice, then the page's configuration", () => {
   assert.equal(serverBase({ param: "wss://sim.example/", saved: "ws://x:1", location: loc("https://a.example/") }),
     "wss://sim.example");

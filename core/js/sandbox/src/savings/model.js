@@ -60,6 +60,7 @@ function premiumOf(f) {
 /** One frame, cut down to what the tab draws (a few dozen numbers). */
 export function row(f) {
   const sv = f.sv ?? {};
+  const hh = f.households;
   return {
     day: f.day,
     ref: f.refUsd ?? [], su: f.spotUsdc ?? [], sb: f.spotBuck ?? [],
@@ -103,6 +104,10 @@ export function row(f) {
     shockActive: f.shk_active ?? 0,
     pace: f.pace ?? 0,
     paused: !!f.paused,
+    households: hh ? { ...hh, ...Object.fromEntries([
+      "nw", "hypo", "mortgage", "hypo_mortgage", "cash", "hypo_cash", "drawn", "basket", "basket_mark",
+      "invested_usd", "issued_invest", "pending_usd", "unwound", "external_interest", "hypo_interest",
+      "external_paid", "hypo_paid", "arrears", "hypo_arrears"].map((key) => [key, bk(hh[key])])) } : null,
   };
 }
 

@@ -11,3 +11,4 @@ export { runDays } from "./world.js";
 export { PinWhale } from "./agents/whale.js";
 export { RoundTripTrader } from "./agents/trader.js";
 export { buildOnePool } from "./scenarios/onepool.js";
+export { CreditHouseholdAgent, CreditSaverAgent, HouseholdPopulationAgent } from "./agents/credit-household.js";

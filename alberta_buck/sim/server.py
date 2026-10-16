@@ -546,6 +546,9 @@ class Session:
                 "ticks_per_day": getattr(sc, "ticks_per_day", None),
                 "prices": files,
                 "start_date": start,
+                "households": {key: expmod.spec(sc, "HouseholdPopulationAgent", key, default)
+                               for key, default in (("initial", 10), ("arrival_rate", 6.),
+                                                    ("saver_share", .5), ("surplus_policy", "adaptive"))},
                 "tokens": toks}
         return self._info or {}
 
@@ -623,10 +626,15 @@ PUBLIC_RPC = frozenset({
 
 
 # The session overrides a --public server accepts (?set=key=value): the
-# page's toggles, not the cast -- a visitor must not size the world.
+# page's toggles and bounded household settings; arbitrary cast sizing is refused.
 PUBLIC_SETS = ("scenario.seed=", "scenario.prices=", "agents.BasketWheelAgent.chain=")
 # ... and the page's choice of the equity basket's upkeep, as exactly these.
 PUBLIC_CHOICES = ("scenario.basket=equity-ops", "scenario.basket=equity-machine")
+PUBLIC_CHOICES += tuple(f"agents.HouseholdPopulationAgent.{key}={value}"
+                       for key, values in (("initial", (10, 24, 40)), ("arrival_rate", (0, 3, 6, 12)),
+                                           ("saver_share", ("0", "0.5", "1")),
+                                           ("surplus_policy", ("adaptive", "basket", "retire", "discount")))
+                       for value in values)
 
 
 def public_sets(sets) -> list:

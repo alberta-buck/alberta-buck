@@ -1,0 +1,54 @@
+# Canonical household population. Old mature-world presets retain their old cast
+# for reproducibility. Run with make nix-sim-run-rebalancing-eq-households.
+name = "rebalancing-eq-5yr-households"
+notes = "continuing arrivals of insured households: cost-based refinancing, premium issuance, adaptive surplus"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 5.0
+ticks_per_day = 2
+day_step = 1
+seed = 0xA1BC
+basket = "equity-machine"
+tokens = ["LABR", "CNST", "FOOD", "NRGC", "PAXG"]
+
+[deploy]
+target_buck_lp_m = 50.0
+
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+BuckCreditDebtorAgent = 0
+ExternalDebtRetireeAgent = 0
+HouseholdPopulationAgent = 1
+DirectMintAgent = 24
+DirectMintBuckAgent = 6
+ArrivingDMAgent = 0
+ExcursionArbAgent = 3
+ExcursionCreditArbAgent = 1
+UndertakingAgent = 1
+MonetaryKeeperAgent = 1
+BasketWheelAgent = 1
+
+[agents.HouseholdPopulationAgent]
+initial = 24
+arrival_rate = 12.0
+max_members = 256
+saver_share = 0.5
+surplus_policy = "adaptive" # basket / retire / discount are explicit comparison arms
+
+[agents.SaverAgent]
+arrive_mode = "endow"
+endow_m = [1, 3]
+
+[agents.UndertakingAgent]
+eps = 0.005
+p = 1.0
+
+[agents.BasketWheelAgent]
+impl = "solidity"
+start = "token"
+cap_bp = 200
+max_work = 12
+chain = "l2"
+call = "profitable"

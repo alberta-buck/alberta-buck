@@ -58,6 +58,8 @@ test("shipped eq bundle: boots live, adds agents, steps a day", { skip }, async 
   byId("shold").value = "60";
   byId("dhouse").value = "400000";
   byId("dpay").value = "3000";
+  byId("drole").value = "debtor";
+  byId("dpolicy").value = "adaptive";
   byId("speed").value = "1500";
 
   await import(bundle);

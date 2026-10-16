@@ -139,6 +139,16 @@ def test_public_session_overrides_are_the_pages_toggles_only():
                                  "scenario.basket=equity-machine"]
 
 
+def test_public_household_choices_are_bounded():
+    from alberta_buck.sim.server import public_sets
+    prefix                      = "agents.HouseholdPopulationAgent."
+    allowed                     = [prefix + x for x in ("surplus_policy=adaptive", "surplus_policy=retire",
+                                                        "initial=24", "arrival_rate=12", "saver_share=0.5")]
+    refused                     = [prefix + x for x in ("initial=10000", "arrival_rate=10000", "max_members=10000",
+                                                        "cash_k=10000", "surplus_policy=arbitrary")]
+    assert public_sets(allowed + refused) == allowed
+
+
 def test_a_batch_is_answered_under_one_hold_and_status_needs_no_chain():
     """A page's approve + deposit + their receipts land together: one hold of
     the chain lock for the whole batch.  sim_status touches no chain, so it

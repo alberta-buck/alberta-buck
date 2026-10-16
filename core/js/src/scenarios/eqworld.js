@@ -33,6 +33,7 @@
 // enter as MockERC20 mints via fiatIn -- the sim's fiat bridge.
 
 import { encodeFunctionData, keccak256, toBytes } from "viem";
+import { installHouseholdOps } from "../agents/household-ops.js";
 
 import { advanceTime, buildBuckWorld, DAY, identityApprove, identityOf, onboard }
   from "../buckworld.js";
@@ -496,7 +497,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       capacity += per > 0n ? (room * per) / E18 : 0n;
     }
     const drawn = signed < 0n ? -signed : 0n;
-    const spendable = limit > drawn ? limit - drawn : 0n;
+    const spendable = await session.call(buck, "balanceOf", [me]);
     return { drawn, limit, held: signed > 0n ? signed : 0n, unactivated, jub,
              spendable, capacity, headroom: spendable + capacity };
   };
@@ -771,7 +772,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     world.series.push({ day, K, bvib, spotUB, ff, spots, spotsBuck, refs });
   };
 
-  return world;
+  return installHouseholdOps(world);
 }
 
 /** The clock: FIRST in the agent order, it advances simulated time one

@@ -97,6 +97,18 @@ export function mountSavings(ctx) {
     h("option", { value: upkeepOf(false) }, "The director and its steps (older)"),
     h("option", { value: upkeepOf(true) }, "The basket machine"));
   const upkeepField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Upkeep"), upkeepSel);
+  const householdChoices = {
+    surplus_policy: ["Surplus cash", [["adaptive", "Invest at premium / retire at discount"],
+      ["basket", "Always invest"], ["retire", "Always retire liability"], ["discount", "Retire only at discount"]]],
+    initial: ["Opening households", [[10, "10"], [24, "24"], [40, "40"]]],
+    arrival_rate: ["New households / year", [[0, "0"], [3, "3"], [6, "6"], [12, "12"]]],
+    saver_share: ["Insured savers", [[0, "All mortgage holders"], [.5, "Half the population"], [1, "All savers"]]],
+  };
+  const householdDefaults = { surplus_policy: "adaptive", initial: 10, arrival_rate: 6, saver_share: .5 };
+  const householdSelects = Object.fromEntries(Object.entries(householdChoices).map(([key, [label, choices]]) =>
+    [key, h("select", { "aria-label": label }, ...choices.map(([value, text]) => h("option", { value: String(value) }, text)))]));
+  const householdFields = Object.entries(householdChoices).map(([key, [label]]) =>
+    h("label", { class: "field" }, h("span", { class: "field-label" }, label), householdSelects[key]));
   const worldLink = h("code", { class: "wrap" });
 
   const noServer = h("div", { class: "notice", hidden: true });
@@ -125,9 +137,10 @@ export function mountSavings(ctx) {
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Prices"), pricesSel),
           upkeepField,
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn)),
+        h("div", { class: "row" }, ...householdFields),
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
-        h("p", { class: "hint" }, "A new world runs from its first day with these prices, upkeep and seed; ",
+        h("p", { class: "hint" }, "A new world runs from its first day with these prices, upkeep, seed and household settings; ",
           "this one keeps running on the server until it is idle for ten minutes.  ",
           "The link to this world (anyone holding it can watch and steer it): "), worldLink)));
 
@@ -162,6 +175,17 @@ export function mountSavings(ctx) {
 
   // ---- the charts --------------------------------------------------------
   const charts = {
+    householdNet: lineChart({ title: "Households: financial net worth (USD)", fmt: dollars, series: [
+      { label: "BUCK route", color: S1 }, { label: "untouched mortgage", color: S2 }],
+      note: "Arrived households only, with the same starting cash and income. Includes basket assets, insurance "
+        + "principal and unpaid expenses; excludes the insured property common to both paths. Basket shares "
+        + "are marked before exit costs; pro-rata receipts use principal. New arrivals change the totals." }),
+    householdMortgage: lineChart({ title: "External mortgages remaining (USD)", fmt: dollars, series: [
+      { label: "BUCK route", color: S1 }, { label: "untouched mortgage", color: S2 }] }),
+    householdFlows: lineChart({ title: "Households: cumulative allocation", fmt: bucks, series: [
+      { label: "basket purchases (USD)", color: S1 }, { label: "liabilities retired (BUCK)", color: S2 }],
+      note: "Purchases include TOKEN awaiting an accepted deposit. The lines use different currencies, "
+        + "so their levels are not a return comparison." }),
     buck: lineChart({ title: "BUCK", ref: 1, fmt: f3, series: [
       { label: "USD per BUCK (pool)", color: S1 }, { label: "the basket, in BUCK", color: S2 }],
       note: "K steers the basket's BUCK price to 1; the BUCK/USDC pool says what a BUCK fetches." }),
@@ -256,6 +280,8 @@ export function mountSavings(ctx) {
       h("div", { class: "stack" }, worldCard, walletCard),
       h("div", { class: "stack" },
         h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el),
+        h("h3", { class: "grid-title" }, "Households: refinancing and investing"),
+        h("div", { class: "chart-grid" }, charts.householdNet.el, charts.householdMortgage.el, charts.householdFlows.el),
         h("h3", { class: "grid-title" }, "The basket: its credit, and what its wheel did"),
         h("div", { class: "chart-grid" }, charts.credit.el, charts.steps.el),
         leanTitle,
@@ -323,6 +349,9 @@ export function mountSavings(ctx) {
     S.sid = q.get("world") || prefs.get("savings:sid", "") || newSid();
     prefs.set("savings:sid", S.sid);
     S.sets = jsonPref("savings:sets", {});
+    for (const [key, select] of Object.entries(householdSelects)) {
+      select.value = String(S.sets[`agents.HouseholdPopulationAgent.${key}`] ?? householdDefaults[key]);
+    }
     pricesSel.value = S.sets["scenario.prices"] || "history";
     seedIn.value = S.sets["scenario.seed"] ?? "";
     const u = new URL(location.href);
@@ -372,6 +401,9 @@ export function mountSavings(ctx) {
           showUpkeep(!!info.machine);
           upkeepField.hidden = info.basket_kind !== "equity";
           upkeepSel.value = upkeepOf(info.machine);
+          for (const [key, select] of Object.entries(householdSelects)) {
+            select.value = String(info.households?.[key] ?? householdDefaults[key]);
+          }
           prefs.set("savings:key", S.saver.key);
           buildCommodities();
           draw();
@@ -467,6 +499,7 @@ export function mountSavings(ctx) {
   function newWorld() {
     if (!confirm("Start a new world?  This one keeps running until it is idle, but this tab leaves it.")) return;
     const sets = {};
+    for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
     if (S.info?.basket_kind === "equity") sets["scenario.basket"] = upkeepSel.value;
@@ -511,6 +544,10 @@ export function mountSavings(ctx) {
       stat("BUCK", `$${last.bu.toFixed(4)}`, "USD per BUCK in the BUCK/USDC pool"),
       stat("Basket", `${last.bv.toFixed(4)} BUCK`, "What the basket costs in BUCK (K steers it to 1)"),
       stat("K", last.k.toFixed(4)),
+      last.households ? stat("Households", `${last.households.active} / ${last.households.scheduled}`,
+        `${last.households.savers} arrived insured savers; the rest hold mortgages. Total includes future arrivals.`) : null,
+      last.households ? stat("Household decisions", last.households.errors ? `${last.households.errors} waiting after errors` : "ready",
+        "Members with an execution error at their latest decision; pending assets remain in their accounts.") : null,
       stat("Savings index", last.D === null ? "–" : last.D.toFixed(4), "Paid per BUCK saved, in BUCK value"),
       stat("A year", signed(yearly(rows), (v) => `${(v * 100).toFixed(2)}%`),
         "The savings index's growth, compounded to a year"),
@@ -532,6 +569,9 @@ export function mountSavings(ctx) {
     const xs = rows.map((r) => r.day);
     charts.buck.update(xs, [rows.map((r) => r.bu || null), rows.map((r) => r.bv || null)]);
     charts.k.update(xs, [rows.map((r) => r.k || null)]);
+    charts.householdNet.update(xs, ["nw", "hypo"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
+    charts.householdMortgage.update(xs, ["mortgage", "hypo_mortgage"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
+    charts.householdFlows.update(xs, ["invested_usd", "unwound"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
     charts.index.update(xs, [rows.map((r) => r.D), heldLine(rows)]);
     charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
     charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim)]);

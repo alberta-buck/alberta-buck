@@ -1,0 +1,155 @@
+#+TITLE: One household model in Python and JavaScript
+#+DATE: 2026-10-16
+#+OPTIONS: ^:nil toc:2
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+
+* Audit and choice
+
+| Existing agent | What it models | What is missing |
+|----------------+----------------+-----------------|
+| Python =ExternalDebtRetireeAgent= | Partial refinancing, carrying-cost comparison, real funding gate, renewal penalties, external premiums, two cash-flow ledgers | Continuing arrivals, adaptive surplus allocation, investment from reusable credit |
+| Python =BuckCreditDebtorAgent= | Same refinance kernel in carry mode; older paced/atomic modes; staggered arrivals; discounted retirement or recurring investment | Several historical policies in one class; finite cohort; no premium-driven investment |
+| Python =FatCreditBorrowerAgent= | Aggregate credit use, adoption and regime schedules | No mortgage counterfactual; simulated insurance gate; burns capacity after buyback and never reactivates |
+| Python =SaverAgent= | Cash-backed purchases below basket value and sales above it; randomized action probability | No insured asset, credit issuance or basket-investment ledger |
+| JS =MortgageRetiree= prototype | Real insured credit, funding gate, income and mortgage ledgers | Older issuance rule; dollar-par buybacks; no recurring basket deposits or carrying-cost kernel |
+| JS =BasketSaver= | Cash-backed constituent purchase, deposit, mark and timed exit | No credit or mortgage; one saving cycle |
+| JS =Farmer= prototype | Mortgage and operating line, seasonal business cash flow, basket assets | Specialized business model, not a common household implementation |
+
+The Python carrying-cost kernel is the decision baseline. The new household model keeps real
+contract enforcement and separate accounts for borrowing and savings. It has the same pure
+decisions, seeded parameter sampling, arrival schedule and cash-flow convention in both
+languages. Common vectors test those rules; each implementation also executes against contracts.
+
+The existing agents remain available for reproducing old experiments. New economy presets use
+the household population instead of synthetic large borrowers. This avoids interpreting a
+changed population, balance sheet and decision rule as a controlled change to an old result.
+The older savings and trading agents still serve actors without credit; capital alone does not
+grant a BuckCredit line. The new credit saver explicitly brings an insured asset.
+
+* Decisions and accounting
+
+The external mortgage and its untouched counterfactual receive the same starting cash, income,
+living expenses and mortgage terms. Interest accrues daily; income, expenses, insurance and
+scheduled payments settle every thirty days from arrival. Funds paid to the external lender
+leave the agent's real USDC account. Refinancing uses actual proceeds, not a notional quote.
+Insurance principal remains an asset; cash premiums, execution, switching and penalty costs
+are recorded separately. Basket principal, market value and pending tokens are distinguished.
+The insurance asset's mark subtracts its share of the insurance pool's accrued demurrage,
+which a refund would carry back. The liability's accrued Jubilee relief is counted separately.
+Unpaid living expenses and insurance remain payable in both books; a cash shortage cannot
+improve net worth by silently dropping an expense. Unpaid mortgage payments remain in the
+outstanding balance. No extra income is invented for the savings from refinancing: the same
+income simply has less external debt service to pay.
+
+Four surplus policies are explicit:
+
+- =adaptive=: retire liabilities at a basket-relative discount after costs; invest at a premium;
+  hold cash within the household's individual neutral band.
+- =basket=: invest available surplus regardless of parity.
+- =retire=: spend available surplus retiring the existing BUCK liability regardless of parity.
+- =discount=: retire only at a discount and otherwise keep cash, for the previous comparison.
+
+Refinancing may accept an execution discount when interest savings justify it. Investment
+issuance additionally requires a premium after fees and impact, available insured credit, the
+funding reserve, and a favorable cost comparison. It is disabled for retirement-only policies.
+Buying BUCKs repays a liability by receipt; it does not burn reusable coverage. Falling K limits
+new spending and never triggers a forced liquidation by this agent.
+
+Cash invested at a premium buys a basket constituent through TOKEN/USDC and deposits it. It
+does not immediately buy back the expensive BUCKs just issued. Borrowing and saving have
+separate accounts so deposits cannot accidentally extinguish a liability or depend on redraw.
+
+* Population and integration
+
+A population is a collection of separate household books and credit accounts, with an initial
+population and Poisson arrivals measured in households per year. Each has independently keyed
+thresholds, patience and decision timing. The arrival stream continues through the configured
+horizon, bounded by an explicit population limit. It is not a single unlimited credit account
+whose balance is multiplied by a nominal population count.
+
+The savings sandbox's background economy runs in Python. Its JavaScript controls select the
+same policy and population settings used by the five-year presets. The JavaScript library also
+provides the household and population agents for the in-browser EVM; both use the same policy
+contract and conformance vectors. Existing attacks and shocks remain separate agents.
+
+* Migration cost
+
+The decision kernel and settings are straightforward to port. Most of the work is execution
+and accounting: fresh funding-gate reads, separate savings custody, real lender payments,
+retrying rejected deposits without losing assets, and keeping both ledgers synchronized.
+Replacing the synthetic borrower is a population migration, not a one-line correction to its
+burn call. Old results remain tied to their old cast. New five-year worlds need new measurements
+before making equilibrium claims; unit agreement between languages is not such evidence.
+
+* Available implementations
+
+- Python: =alberta_buck/sim/credit_households.py= exports =CreditHouseholdAgent=,
+  =CreditSaverAgent= and =HouseholdPopulationAgent=. The ordinary simulator expands a population
+  into individual accounts; the resulting members appear in =octl= and per-agent telemetry.
+- JavaScript: =core/js/src/agents/credit-household.js= exports the same three classes from the
+  package's main entry point. =buildEquilibriumWorld= installs their contract operations.
+  =EqWorldApp= now uses these households and offers role and surplus-policy controls.
+- The new five-year preset is =rebalancing-eq-5yr-households.toml=: 24 initial households,
+  12 arrivals/year and a 50% probability of being an insured saver. Roles are independently
+  sampled, so a particular finite population need not be exactly half savers.
+- =demo-savings.toml= uses 10 initial households and 6 arrivals/year. Its JavaScript savings
+  sandbox selects all four policies, arrival rates, initial population and saver share when
+  creating a world. Existing sessions retain the parameters with which they were created.
+
+The population's =agents.HouseholdPopulationAgent= table accepts the single-household settings,
+plus =initial=, =arrival_rate=, =max_members= and =saver_share=. Monetary parameters ending in
+=_k= are thousands of USD; thresholds and APRs are fractions, not percentages. The defaults
+and validation live in =household_policy.py= and its JavaScript counterpart. Adding a setting
+does not move another setting's random draw. Reaching =max_members= fails explicitly rather
+than silently stopping an arrival stream.
+
+For a JavaScript population, provide a distinct account for each member:
+
+#+begin_src js
+const households = new HouseholdPopulationAgent({
+  makeAccount: () => privateKeyToAccount(generatePrivateKey()),
+  seed: 0xA1BC, days: 1827, initial: 24, arrival_rate: 12, saver_share: 0.5,
+  settings: { surplus_policy: "adaptive" },
+});
+// Add households to the world's normal agent loop after its clock and market agents.
+// Its setup and act methods manage every member. Do not add a second income agent.
+#+end_src
+
+Run the new Python preset from a frozen checkout using the ordinary simulator command:
+
+#+begin_src sh
+python -m alberta_buck.sim \
+  --experiment alberta_buck/sim/experiments/rebalancing-eq-5yr-households.toml \
+  --out /absolute/path/households.json
+#+end_src
+
+Overrides such as =--set agents.HouseholdPopulationAgent.surplus_policy=basket= select comparison
+arms. A completed five-year run automatically writes the adjacent PDF; its household pages
+include credit availability, issuance, buybacks, mortgage balances and policy allocations.
+The savings page retains a compact household summary in its lite frames, including actual and
+counterfactual financial net worth. Pro-rata receipt values use principal as an approximation;
+equity shares use the basket's share price before exit costs. Neither is a guaranteed exit quote.
+
+* Validation and limits
+
+Shared vectors compare policy verdicts, all cost components, sampled settings and arrival
+dates across Python and JavaScript. Contract tests exercise both basket implementations,
+partial refinancing with actual USDC lender payments, premium issuance by savers, discounted
+repayment and reuse of the resulting headroom without burning coverage, separate savings
+custody, and retrying rejected deposits without spending twice. The cash-flow books are also
+compared between languages to one micro-dollar rounding tolerance.
+
+A 60-day run of the new preset completed with 27 arrived households: about $2.49 million paid
+to external lenders, $385,238 spent on basket investments and 109,820 BUCKs bought back toward
+liabilities. Twenty deposits succeeded. Some deposits temporarily hit the basket's slippage
+guard; their TOKENs remained in custody and none was still waiting at day 59. The run's PDF
+is =build/cleanup/households-60d.pdf=. These are integration observations, not a five-year
+equilibrium finding.
+
+Issuance currently uses the deep direct BUCK/USDC route. Savings acquire TOKENs through their
+TOKEN/USDC route. The existing arbitrageurs connect the markets; the household does not yet
+optimize a split across direct and multihop routes. Credit investment is capped by utilization
+and a premium after execution costs; it does not assume a guaranteed future basket return.
+Defaults describe a population of insured asset holders, not the entire economy. Existing
+cash-only savers, market makers, attacks and shocks remain independent of this population.

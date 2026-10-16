@@ -67,6 +67,7 @@ def _credit_page(data, name, digest, pdf) -> None:
     frames                      = data["frames"]
     days                        = [f["day"] for f in frames]
     last                        = frames[-1]
+    household                   = "households" in last
     counts                      = Counter(a["cls"] for a in data.get("meta", {}).get("telemetry", {}).get("agents", []))
     fig, axes                   = plt.subplots(3, 2, figsize=(11.7, 8.3), sharex=True)
     fig.suptitle(name, fontsize=11)
@@ -80,28 +81,41 @@ def _credit_page(data, name, digest, pdf) -> None:
     ax.axhline(1, color="black", linewidth=.7, linestyle="--")
     ax.set_title("Above 1: the BUCK is cheap; below 1: dear")
     ax                          = axes[0, 1]
-    series(ax, "fat_limit", "activated limit")
-    series(ax, "fat_drawn", "drawn")
-    ax.set_title("Large synthetic borrowers (million BUCKs)")
+    if household:
+        for key, label in (("limit", "activated limit"), ("drawn", "drawn")):
+            ax.plot(days, [sum(a[key] for a in f.get("octl", []) if a.get("active")) / 1e12
+                           for f in frames], label=label)
+        ax.set_title("Household credit (million BUCKs)")
+    else:
+        series(ax, "fat_limit", "activated limit")
+        series(ax, "fat_drawn", "drawn")
+        ax.set_title("Large synthetic borrowers (million BUCKs)")
     ax                          = axes[1, 0]
-    series(ax, "fat_issued", "market issuance")
-    series(ax, "fat_placed", "opening placement")
-    series(ax, "fat_retired", "buybacks")
-    series(ax, "fat_burned", "burn requests")
-    ax.set_title("Large borrowers: cumulative flows (million BUCKs)")
+    if household:
+        series(ax, "rtr_buck_sold", "BUCK sold", 1e6)  # this legacy counter uses whole BUCKs
+        series(ax, "bcd_retired", "BUCK bought back")
+        ax.set_title("Household cumulative flows (million BUCKs)")
+    else:
+        series(ax, "fat_issued", "market issuance")
+        series(ax, "fat_placed", "opening placement")
+        series(ax, "fat_retired", "buybacks")
+        series(ax, "fat_burned", "burn requests")
+        ax.set_title("Large borrowers: cumulative flows (million BUCKs)")
     ax                          = axes[1, 1]
     for key, label in (("mortgage", "external mortgage ($M)"), ("drawn", "BUCK drawn (M)"),
                        ("limit", "activated limit (M BUCKs)")):
         if last.get("octl"):
-            ax.plot(days, [sum(a[key] for a in f.get("octl", [])) / 1e12 for f in frames], label=label)
+            ax.plot(days, [sum(a[key] for a in f.get("octl", []) if not household or a.get("active")) / 1e12
+                           for f in frames], label=label)
     ax.set_title("Mortgage cohort: amounts (separate currencies)")
     ax                          = axes[2, 0]
     for label, predicate in (("arrived", lambda a: a.get("active", False)),
                               ("ever deployed", lambda a: a["deploys"] > 0),
-                              ("still has mortgage", lambda a: a["mortgage"] > 1e6)):
+                              ("still has mortgage", lambda a: a["mortgage"] > 1e6
+                               and (not household or a.get("active", False)))):
         if last.get("octl"):
             ax.plot(days, [sum(predicate(a) for a in f.get("octl", [])) for f in frames], label=label)
-    ax.set_title("Finite mortgage cohort: people")
+    ax.set_title("Household population: people" if household else "Finite mortgage cohort: people")
     ax                          = axes[2, 1]
     series(ax, "bcd_atomic_refis", "completed refinances", 1)
     series(ax, "bcd_atomic_declined", "declined quotes (repeat attempts)", 1)
@@ -130,13 +144,15 @@ def _policy_page(data, pdf) -> None:
     frames                      = data["frames"]
     days                        = [f["day"] for f in frames]
     fig, axes                   = plt.subplots(2, 2, figsize=(11.7, 8.3), sharex=True)
-    fig.suptitle("After refinancing: discounted retirement or carry and invest")
-    for key, label in (("bcd_retired", "discounted buybacks"), ("bcd_invested", "basket deposits")):
+    fig.suptitle("Household surplus policies: retirement and investment")
+    for key, label in (("bcd_retired", "liability buybacks"), ("bcd_invested", "basket deposits")):
         axes[0, 0].plot(days, [f.get(key, 0) / 1e12 for f in frames], label=label)
     axes[0, 0].set_title("Cumulative household flows (million BUCKs)")
     axes[0, 1].plot(days, [f.get("bcd_investments", 0) for f in frames], label="successful deposits")
     axes[0, 1].set_title("Recurring investment, not one opening deposit")
-    for policy in ("discount", "basket"):
+    for policy in ("adaptive", "basket", "retire", "discount"):
+        if not any(a.get("surplus_policy") == policy for f in frames for a in f.get("octl", [])):
+            continue
         axes[1, 0].plot(days, [sum(a["drawn"] for a in f.get("octl", [])
                                   if a.get("surplus_policy") == policy) / 1e12 for f in frames], label=policy)
     axes[1, 0].set_title("Liabilities carried by policy (million BUCKs)")
@@ -188,7 +204,8 @@ def render(vector: Path) -> dict:
                 plot_rebalancing.render(vector, target, pdf=pdf)
                 if any(f.get("octl") for f in frames):
                     plot_octl.render(vector, target, pdf=pdf)
-            if any(a.get("surplus_policy") in ("discount", "basket") for f in frames for a in f.get("octl", [])):
+            if any(a.get("surplus_policy") in ("adaptive", "basket", "retire", "discount")
+                   for f in frames for a in f.get("octl", [])):
                 _policy_page(data, pdf)
             pages               = pdf.get_pagecount()
         Path(temporary).replace(target)

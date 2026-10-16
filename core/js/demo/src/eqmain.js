@@ -266,7 +266,8 @@ async function main() {
   });
   $("adddebtor").onclick = () => act("add debtor", async () => {
     await app.addDebtor({ house: num("dhouse", 400_000),
-                          payment: num("dpay", 3_000) });
+                          payment: num("dpay", 3_000),
+                          role: $("drole").value, surplus_policy: $("dpolicy").value });
   });
 
   let timer = null;
