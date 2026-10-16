@@ -1,10 +1,10 @@
 #+TITLE: Who issues in the five-year mature worlds
-#+DATE: 2026-10-15
+#+DATE: 2026-10-16
 #+OPTIONS: ^:nil toc:2
 
-This reads the completed =1a5afec= campaign in =build/sim/mended/=, before the next debtor-policy
-changes. All 56 runs completed. Their PDFs and a linked index have been generated from the saved
-vectors: [[file:../../build/sim/mended/index.html][open the campaign]]. No simulation was repeated to make these reports.
+The first sections read the completed =1a5afec= campaign in =build/sim/mended/=, before the
+debtor-policy changes measured below. All 56 runs completed. Their PDFs and a linked index use
+the saved vectors: [[file:../../build/sim/mended/index.html][open the campaign]]. No simulation was repeated to make these reports.
 
 * What the casts contain
 
@@ -119,9 +119,114 @@ number of borrowers who have arrived or refinanced. The source JSON hash is reco
 The original interactive viewer is also available via =make nix-venv-viewer VIEWER_PORT=8787=;
 it is separate from report generation. No viewer server was started for this audit.
 
-* Next debtor policy
+* The corrected debtor policy
 
 Perry requested a carrying-cost decision that accepts unfavorable execution when interest
 savings justify it. He selected an even split after refinancing: half retire their BUCK
 liabilities only at a basket-relative discount after costs; half carry them and invest recurring
-surplus in the basket. This is the next change; the 56 reports above preserve the earlier policy.
+surplus in the basket. This is now implemented. The 56 reports above preserve the earlier policy.
+
+All nine matrix casts with mortgage borrowers now select =refi_mode = "carry"=. The existing
+=BuckCreditDebtorAgent= keeps its arrival clock and random draws, but calls the same refinance
+decision and execution method as =ExternalDebtRetireeAgent=. It can refinance part of a mortgage
+and return for more when credit permits. The decision compares interest and premium savings
+and Jubilee relief with execution costs, the deposit's opportunity and carried age, and any
+configured switching cost, penalty and risk charge. =theta= is the time allowed for savings to
+repay those costs. The basic matrix household has no switching, penalty or risk charge; the organic
+retiree retains its existing renewal, penalty and risk settings.
+
+BUCK-denominated costs are valued at the basket's current dollar reference, calculated from
+=basketValueInBuck x USDC-per-BUCK=. They are no longer implicitly valued at a fixed dollar.
+The actual BUCK/USDC sale quote still includes its fee and price impact. The funding gate and
+the credit-capacity bound remain the contracts' own checks.
+
+=surplus_policy = "mixed"= assigns alternating members of each cohort to the two policies,
+without a new random draw. A 24-member cohort has 12 of each; a 30-member cohort has 15.
+
+- =discount=: after the external mortgage is retired, buy back only when the execution still
+  offers the configured basket-relative discount, 2% by default. The size leaves even the last
+  BUCK bought below that threshold after the fee and price impact, respects cash and the
+  agent's impact budget, and never exceeds its current liability. Receipt of the BUCKs repays
+  the lien; no coverage is burned. There is no scheduled amortization.
+- =basket=: carry the BUCK liability and invest cash above the household's cash buffer every
+  month. A separate creditless savings account receives the purchased BUCKs and holds the
+  basket receipts. The investment therefore neither repays the household's lien nor depends
+  on being allowed to redraw it. Deposits repeat; unspent or temporarily rejected deposits
+  remain in that account and are counted in the household's books.
+
+The policies are shared by both debtor classes. Explicit =surplus_policy = "legacy"= retains
+the old amortization, single deposit and dollar-discount routine for comparison. The original
+=atomic= and =paced= refinancing modes also remain selectable.
+
+Telemetry now records the policy, recurring deposit count and principal, pending savings BUCKs,
+discounted retirements, and the equity basket shares' current marked value. The household
+comparison's original ledger still carries basket principal at par; the new PDF policy page
+shows marked share value separately, before exit costs. Pro-rata receipts retain their
+principal measure; they do not claim an equity-share mark.
+
+* Perry's rerun on the machine
+
+Perry reran all fourteen matrix worlds on the basket machine overnight on October 15--16.
+All reached day 1826 with =completed = true=, and all fourteen PDFs match the SHA256 of their
+source JSON. The nine borrower worlds have five pages, including the new policy page; the
+other five have three. [[file:../../build/sim/debtor-policy/user-reruns.html][Open these fourteen reports]]. Their price paths match the earlier campaign.
+
+Mean parity error is measured after day 90. Buybacks and deposits are millions of BUCKs over
+the whole run. The final basket cost averages the last 90 days.
+
+| World | Earlier mean error | New mean error | Final basket cost | Final K | Buybacks | Basket deposits | Deposit count |
+|-------+--------------------+----------------+-------------------+---------+----------+-----------------+---------------|
+| debtors | 0.22% | 0.22% | 0.9998 | 0.772 | 0.000 | 7.174 | 380 |
+| portcast | 0.41% | 0.41% | 1.0003 | 0.733 | 0.074 | 3.871 | 205 |
+| debtors-mature | 3.51% | 12.02% | 0.8414 | 0.950 | 0.000 | 6.756 | 419 |
+| basketeers | 1.02% | 1.83% | 1.0001 | 0.948 | 0.000 | 7.649 | 419 |
+| originate | 0.96% | 0.85% | 1.0002 | 0.945 | 0.000 | 7.865 | 451 |
+| endog | 0.94% | 1.08% | 0.9991 | 0.947 | 0.072 | 7.158 | 417 |
+| endog-excursion | 0.46% | 0.47% | 0.9994 | 0.947 | 0.072 | 7.138 | 408 |
+| endog-raid | 1.92% | 1.58% | 1.0001 | 0.950 | 0.001 | 7.073 | 416 |
+| endog-excursion-raid | 0.58% | 0.48% | 0.9993 | 0.947 | 0.089 | 7.065 | 409 |
+
+The investing cohorts' =unwound= counters are zero. In =originate=, their 7.865 million of
+principal is marked at 8.297 million BUCKs at the end; their household cash is at the $300,000
+combined buffer. Another 8,136 BUCKs remain in the savings accounts waiting to deposit. Three
+worlds record a last =Slippage()= on an attempted investment. These are the basket's price
+guards, not missing funds; pending BUCKs remain visible and later months retry.
+
+The retirement cohorts mostly keep cash, because the BUCK is mostly at parity or dear, not at
+their required discount. In =originate= they end with $9.147 million cash and 4.047 million
+BUCKs drawn. They no longer buy BUCKs merely to match the hypothetical mortgage's amortization.
+Every mature household has retired its external mortgage by the end; portcast has one mortgage
+still partly external, which the partial-refinance policy permits.
+
+This correction does not settle the mature worlds. The simplest mature cast is materially
+worse: its final basket cost of 0.8414 means the BUCK is about 18.9% dear. Its synthetic borrowers'
+activated limit is 2.547 million BUCKs, with 2.458 million drawn, and K is at 0.95. The finite
+cohort and those borrowers' failure to reactivate credit remain. Recurring investment also
+creates continuing demand that these casts must supply. The near-parity final values in the
+other mature worlds do not excuse their earlier deviations or their high K.
+
+* Validation and remaining comparisons
+
+The full Python suite passed: 1025 tests, five skipped. The final focused run passed 43 tests,
+including two added checks that savings retirees retain range-valued cost settings.
+Real-contract tests on both the pro-rata
+and equity baskets cover partial refinancing, the even split, no retirement without a discount,
+retirement without deactivating coverage, and repeated investments that preserve the liability.
+Kernel tests include an unfavorable refinance whose interest savings justify it and a
+basket-discount purchase above $1. All 76 existing agent draws and all five organic-retiree
+draws retain their expressions and order. No contract or lab-fingerprint file changed.
+
+The frozen follow-up campaign is =build/sim/debtor-policy/=. Its =source-manifest.json= records
+the exact matrix source hashes and =source.patch= the changes over =efdb0c2=. It reuses Perry's nine
+affected machine runs and runs the remaining eighteen older/pro-rata cells, four lean
+comparisons and eight savings cells. Thirty new runs, eight at a time, with logs and PDFs
+beside their vectors under =runs/=. =run.log= and =status.json= record progress. These comparisons
+were still running when this account was written; no result from them is asserted above.
+
+Review before the savings cells started found that the shared setup tried to parse their
+range-valued switching and risk settings as scalars. The basic household now initializes those
+costs to zero and leaves the organic retiree's existing draws to set its own. Matrix settings
+and behavior are unchanged. The savings cells use a separate =savings-snapshot/= with that fix;
+=savings-source-manifest.json= and =savings-source.patch= record it. No running snapshot was
+edited. Both savings seeds and both upkeeps receive a short sequential preflight before the
+long savings runs, warming their identity cache.

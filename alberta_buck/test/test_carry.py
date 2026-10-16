@@ -37,6 +37,32 @@ def test_pool_quote_inverts():
     assert math.isinf(carry.buck_in(ru, ru, rb, fee))
 
 
+def test_refinance_accepts_bad_execution_when_carry_pays_for_it():
+    t                           = terms(payback_y=2., buck_value=1.2)
+    # Retiring $400k by issuing BUCKs worth $420k is worthwhile against 5.5% external interest.
+    v                           = carry.refinance(t, 400_000, 350_000)
+    assert v.parts["execution"] == pytest.approx(-20_000)
+    assert v.go and v.carry * t.payback_y > v.one_time
+    assert not carry.refinance(terms(payback_y=.01, buck_value=1.2), 400_000, 350_000).go
+
+
+def test_buyback_uses_basket_discount_even_above_a_dollar():
+    ru, rb, fee                  = 1_100_000., 1_000_000., .003
+    bought                      = carry.discounted_buyback(500_000, 400_000, ru, rb, fee, 1.2, .02)
+    assert bought > 0  # USD execution starts at $1.10; basket parity is $1.20.
+    cost                        = bought * ru / ((rb - bought) * (1 - fee))
+    marginal                    = (ru / rb) * (rb / (rb - bought)) ** 2 / (1 - fee)
+    assert cost / bought < marginal <= 1.2 * .98
+    assert cost < 500_000 and bought <= 400_000
+
+
+@pytest.mark.parametrize("ru, rb, value, fee", [(990_000, 1_000_000, .95, .003),
+                                               (980_000, 1_000_000, 1., .003),
+                                               (1_000_000, 1_000_000, 1., .003)])
+def test_buyback_refuses_no_discount_or_discount_consumed_by_fees(ru, rb, value, fee):
+    assert carry.discounted_buyback(100_000, 400_000, ru, rb, fee, value, .02) == 0
+
+
 def test_insurance_is_an_outlay_not_a_cost():
     """master fe3083f: the BUCK path's deposit is returned when the insurance
     is dropped, so it is charged its opportunity and carried age, never its

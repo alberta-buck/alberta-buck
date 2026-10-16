@@ -358,6 +358,11 @@ million, held almost none, and K stayed at 0.747.
 
 ** The settled model
 
+The later [[file:review/mature-worlds-agents.org::*Perry's rerun on the machine][carrying-cost and surplus-policy rerun]] covers all fourteen machine worlds. The investing
+half now makes recurring deposits and the retiring half waits for a basket-relative discount.
+The simple mature world worsens to 12.02% mean error; its BUCK is about 18.9% dear at the end.
+The table below remains the earlier three-basket campaign, before that debtor-policy change.
+
 The matrix after all four cast fixes, with the lean on both sides (=build/sim/mended/runs/=,
 commit =1a5afec=). Five years, all fourteen worlds, three baskets; every run finishes. Parity
 error is the mean absolute distance of the basket's cost in BUCK from one after day 90. Share

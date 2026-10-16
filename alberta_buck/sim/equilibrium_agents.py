@@ -52,6 +52,7 @@ import hashlib
 import math
 import random
 
+from alberta_buck.sim import carry
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim import rng as _rng_mod
 from alberta_buck.sim.agents import Agent, _register
@@ -2532,6 +2533,26 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
         self.open_mode          = str(_spec(scenario, cls, "open", "placed"))
         self._otc               = False
+        self._refi_carry         = _spec(scenario, cls, "refi_mode", "paced") == "carry"
+        # The mature cohort keeps its arrival draws, but can use the organic retiree's cost comparison.
+        # The basic cohort has no switching, renewal or risk charge. The subclass sets these
+        # with its existing draws, whose specs may be ranges and must not be parsed here.
+        self.joined             = False
+        self.refis              = 0
+        self.switch_cost        = 0
+        self.penalty_months     = 0.
+        self.risk               = 0.
+        self.ext_premium        = 0
+        self.switch_paid        = 0
+        self.penalty_paid       = 0
+        self._last_verdict      = None
+        policy                  = str(_spec(scenario, cls, "surplus_policy", "mixed"))
+        self.surplus_policy     = ("discount" if self._class_seq % 2 == 0 else "basket") if policy == "mixed" else policy
+        if self.surplus_policy not in ("discount", "basket", "legacy"):
+            raise ValueError(f"unknown debtor surplus_policy: {policy}")
+        self._basket_receipts    = []
+        self._basket_shares      = 0
+        self._savings_proxy      = None
 
     def bootstrap(self, d, scenario, ctr) -> None:
         """Do a day-0 debtor's first month at the opening price, without swaps."""
@@ -2664,7 +2685,8 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 "mortgage0": self._mortgage0,
                 "income": self.income_annual, "payment": self.payment,
                 "premium_bp": self.premium_rate,
-                "refi_mode": "atomic" if self._refi_atomic else "paced",
+                "refi_mode": "carry" if self._refi_carry else "atomic" if self._refi_atomic else "paced",
+                "surplus_policy": self.surplus_policy,
                 "arrive_day": self.arrive_day}
 
     def telemetry(self, d) -> dict | None:
@@ -2690,6 +2712,9 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             return None
         drawn = max(0, -signed)
         held = max(0, signed)
+        savings_held            = (max(0, d.buck.functions.signedBalanceOf(self._savings_proxy.address).call())
+                                   if self._savings_proxy is not None else 0)
+        held                   += savings_held
         # Pure chain truth at par; the liability side is the chain's OWN
         # close-cost quote: drawn net of the Jubilee relief accrued on the
         # lien (Buck.reliefOf -- the redemption discount that melts ~2%/yr
@@ -2705,12 +2730,20 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         # loss.  Valued at the principal deposited, which is the same
         # convention Snapshot._agent_value uses for a BUCK-side deposit.
         basket = 0
-        if self._basket_receipt is not None:
+        if self._basket_receipts:
+            basket              = self._basket_in
+        elif self._basket_receipt is not None:
             try:
                 dep = d.basket.functions.deposits(self._basket_receipt).call()
                 basket = dep[0]
             except Exception:
                 basket = self._basket_in
+        basket_mark             = None
+        if self._basket_shares:
+            try:
+                basket_mark     = self._basket_shares * d.basket.functions.sharePrice().call() // 10 ** 18
+            except Exception:
+                pass  # an unavailable basket mark is not zero value and must not stop the simulation
         # The insurance deposits are this debtor's capital, held by the pool
         # and returned when the insurance is dropped: an asset at par.
         deposit = 0
@@ -2724,6 +2757,10 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 "pattern": self.pattern, "nw": nw,
                 "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
                 "basket": basket, "basket_in": self._basket_in,
+                "basket_mark": basket_mark, "basket_receipts": len(self._basket_receipts),
+                "savings_held": savings_held, "surplus_policy": self.surplus_policy,
+                "joined": self.joined, "refis": self.refis, "ext_premium": self.ext_premium,
+                "switch_paid": self.switch_paid, "penalty_paid": self.penalty_paid,
                 "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
                 "jub": jub, "deploys": self.deploys,
                 "throttled": self.throttled,
@@ -2859,6 +2896,9 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                     self.hypo_cash)
         self.hypo_cash -= hprem
         self.hypo_premium += hprem
+        if self._refi_carry and not self.joined and hprem > 0:
+            premium             = self._face0 * self.premium_rate // 10_000 * months // 12
+            self.ext_premium   += self._pay_bank(d, premium)
         due = min(self.payment * months, self.mortgage)
         self.mortgage -= self._pay_bank(d, due)
         hdue = min(self.payment * months, self.hypo_mortgage)
@@ -2910,6 +2950,12 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         spend_now = max(0, limit - drawn)
         cap = mint_capacity(unactivated, k, self.premium_rate)
         headroom = spend_now + cap
+
+        if self._refi_carry:
+            if self.mortgage > PARITY and d.pool_ub:
+                self._decide(d, ff, k, limit, drawn, unactivated, ctr)
+            self._carry_tail(d, drawn, limit, jub, ctr)
+            return
 
         # 2. SAVE for the real funding gate: estimate the next tranche's
         #    insurance principal via quoteMint and top the BUCK buffer up to
@@ -3024,7 +3070,203 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                             ctr.get("bcdAtomicRefis", 0) + 1)
         self._carry_tail(d, drawn, limit, jub, ctr)
 
+    def _at_renewal(self) -> bool:
+        return True  # the basic household has no separate renewal penalty
+
+    def _decide(self, d, ff, k, limit, drawn, unactivated, ctr) -> None:
+        spendable               = max(0, d.buck.functions.balanceOf(self.proxy.address).call())
+        ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+        fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
+        at_renewal = self._at_renewal()
+        terms = carry.RefiTerms(
+            debt=self.mortgage / PARITY, rate=self.apr, face=self._face0 / PARITY,
+            premium_bp=self.premium_rate, joined=self.joined,
+            payback_y=self.theta, k=k / 1e18, headroom=spendable / PARITY,
+            unactivated=unactivated / PARITY,
+            fixed_cost=0.0 if self.joined else self.switch_cost / PARITY,
+            penalty_months=0.0 if at_renewal else self.penalty_months,
+            risk=self.risk, buck_value=self._basket_usd(d))
+        if self._otc:
+            # Opening placement has no market impact; the available credit still binds.
+            price               = buck_usd6(d.chain, d.pool_ub, d.buck) / PARITY
+            buck                = min(terms.capacity, terms.debt / price)
+            v                   = carry.refinance(terms, buck * price, buck)
+        else:
+            v                   = carry.best_refinance(terms, ru / PARITY, rb / PARITY, fee)
+        self._last_verdict      = v.why()
+        if not v.go:
+            ctr["rtrWaits"] = ctr.get("rtrWaits", 0) + 1
+            return
+        buck = int(v.buck * PARITY) + PARITY
+        fixed = 0 if self.joined else self.switch_cost
+        penalty = int(v.parts["penalty"] * -PARITY)
+        cash = d.chain.balance_of(d.usdc, self.proxy.address)
+        if cash < fixed + penalty:
+            # The one-time costs are paid in cash, up front.
+            ctr["rtrCashWait"] = ctr.get("rtrCashWait", 0) + 1
+            return
+
+        # Buck.mint(amount) raises spendable by `amount`: mint what the draw
+        # needs beyond the headroom on hand (+0.2%), at most what the
+        # unactivated face can deliver at K - e (mint_amount asks for all of
+        # it once the need is within 1%).
+        cap = mint_capacity(unactivated, k, self.premium_rate)
+        amount = 0
+        if v.coverage > 0:
+            amount = min(max(0, buck - spendable) * 1_002 // 1_000, cap)
+        # The funding gate: hold poolPrincipal x fundingFactor BEFORE the
+        # mint.  Short, the household SAVES (buys BUCK) and waits a month.
+        if amount >= PARITY:
+            ff = self._gate_factor(d, ff)
+        if amount >= PARITY and ff:
+            try:
+                _, principal = d.buck.functions.quoteMint(
+                    mint_amount(amount, cap), self._token_ids).call()
+            except Exception:
+                principal = 0
+            # +0.5%: the gate is strict (balance >= required), and K can step
+            # between the quote and the mint.
+            required = principal * ff // 10 ** 18 * 1_005 // 1_000
+            bal = d.buck.functions.balanceOf(self.proxy.address).call()
+            short = required - bal
+            if short > 0:
+                try:
+                    if self._buy_for_gate(d, short * 101 // 100 + PARITY,
+                                          cash - fixed - penalty - self.cash_buffer):
+                        ctr["rtrSaved"] = ctr.get("rtrSaved", 0) + 1
+                except Exception as e:
+                    ctr["rtr_save_err"] = repr(e)[:200]
+                bal = d.buck.functions.balanceOf(self.proxy.address).call()
+                if bal < required:
+                    ctr["rtrGateWait"] = ctr.get("rtrGateWait", 0) + 1
+                    return
+
+        if amount >= PARITY:
+            try:
+                pre = d.buck.functions.signedBalanceOf(
+                    self.proxy.address).call()
+                self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                    "mint(uint256)", args=[mint_amount(amount, cap)]))
+                post = d.buck.functions.signedBalanceOf(
+                    self.proxy.address).call()
+                self.premium_paid += max(0, pre - post)
+            except Exception as e:
+                self.throttled += 1
+                ctr["rtrThrottled"] = ctr.get("rtrThrottled", 0) + 1
+                why = repr(e)[:120]
+                ctr.setdefault("rtrWhy", {})
+                ctr["rtrWhy"][why] = ctr["rtrWhy"].get(why, 0) + 1
+                return
+
+        before = d.chain.balance_of(d.usdc, self.proxy.address)
+        try:
+            sold = self._sell_capped(d, d.pool_ub, buck)
+        except Exception as e:
+            ctr["rtr_sell_err"] = repr(e)[:200]
+            return
+        if sold <= 0:
+            return
+        got = d.chain.balance_of(d.usdc, self.proxy.address) - before
+        self.trade_loss += sold - got
+        paid = self._pay_bank(d, min(got, self.mortgage))
+        self.mortgage -= paid
+        if fixed:
+            self.switch_paid += self._pay_bank(d, fixed)
+        if penalty > 0:
+            self.penalty_paid += self._pay_bank(d, penalty)
+        first = not self.joined
+        self.joined = True
+        self.refis += 1
+        self.deploys += 1
+        ctr["rtrRefis" if first else "rtrTopUps"] = (
+            ctr.get("rtrRefis" if first else "rtrTopUps", 0) + 1)
+        ctr["rtrBuckSold"] = ctr.get("rtrBuckSold", 0) + sold // PARITY
+        ctr["rtrUsdRetired"] = ctr.get("rtrUsdRetired", 0) + paid // PARITY
+        self.note(d, "refinance" if first else "top-up",
+                  renewal=self._at_renewal(), k=round(k / 1e18, 4),
+                  sold=sold // PARITY, retired=paid // PARITY, **v.why())
+
+
+    def _basket_usd(self, d) -> float:
+        """The live basket-parity dollar reference, distinct from the BUCK's execution price."""
+        return (d.basket.functions.basketValueInBuck().call() / 1e18
+                * buck_usd6(d.chain, d.pool_ub, d.buck) / PARITY)
+
     def _carry_tail(self, d, drawn, limit, jub, ctr) -> None:
+        """After refinancing: buy a discounted liability, or carry it and invest recurring surplus."""
+        if self.surplus_policy == "legacy":
+            return self._legacy_carry_tail(d, drawn, limit, jub, ctr)
+        if self.mortgage > PARITY:
+            return
+        if not self._retired_flagged:
+            self._retired_flagged = True
+            ctr["neighborsRetired"] = ctr.get("neighborsRetired", 0) + 1
+        if self._otc or not d.pool_ub:
+            return  # opening placement is a balance-sheet initialization; later surplus uses the market
+        cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
+        spare                   = max(0, cash - self.cash_buffer)
+        if self.surplus_policy == "basket":
+            self._invest_surplus(d, spare, ctr)
+            return
+        # Read again: this month's refinance may have changed the lien after act()'s opening reads.
+        drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        if spare <= PARITY or drawn <= PARITY:
+            return
+        ru, rb                  = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+        budget                  = min(spare, _impact_cap(ru, self.max_impact_bp))
+        want                    = int(PARITY * carry.discounted_buyback(
+            budget / PARITY, drawn / PARITY, ru / PARITY, rb / PARITY,
+            d.fee_ub / 1e6, self._basket_usd(d), self.retire_disc))
+        if want <= PARITY:
+            return
+        try:
+            loss_before         = self.trade_loss
+            got                 = self._buy_track(d, want)
+            self.unwound        += got
+            self.unwind_loss    += self.trade_loss - loss_before
+            ctr["bcdRetired"]    = ctr.get("bcdRetired", 0) + got
+            # Receiving BUCKs already repays the lien. Do not deactivate the reusable credit.
+        except Exception as exc:
+            ctr["bcd_buy_err"]   = repr(exc)[:200]
+
+    def _invest_surplus(self, d, spare, ctr) -> None:
+        """Buy and deposit from cash, keeping the borrower's lien separate from its savings."""
+        if spare <= PARITY and self._savings_proxy is None:
+            return
+        if self._savings_proxy is None:
+            self._savings_proxy  = self._new_proxy(d)
+        saver                   = self._savings_proxy
+        try:
+            if spare > PARITY:
+                ru, rb          = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+                budget          = min(spare, _impact_cap(ru, self.max_impact_bp))
+                net             = budget * (1 - d.fee_ub / 1e6)
+                want            = int(rb * net / (ru + net)) if ru + net else 0
+                before          = d.chain.balance_of(d.usdc, self.proxy.address)
+                got             = self._buy_buck(d, d.pool_ub, d.usdc, want, d.fee_ub, recipient=saver.address)
+                spent           = before - d.chain.balance_of(d.usdc, self.proxy.address)
+                self.trade_loss += spent - got
+            held                = d.buck.functions.balanceOf(saver.address).call()
+            if held <= PARITY:
+                return
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                "approve(address,uint256)", args=[d.basket.address, held]), proxy=saver)
+            rcpt                = self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                "depositToken(address,uint256,uint256)", args=[d.buck.address, held, 0]), proxy=saver)
+            for log in rcpt["logs"]:
+                if log["topics"][0] == d.deposited_topic:
+                    rid         = int.from_bytes(log["topics"][2], "big")
+                    principal   = d.basket.functions.deposits(rid).call()[0]
+                    self._basket_receipts.append(rid)
+                    self._basket_in += principal
+                    if str(getattr(d, "basket_impl", "")).startswith("equity"):
+                        self._basket_shares += d.basket.functions.holdings(rid).call()[0]
+                    ctr["bcdInvested"] = ctr.get("bcdInvested", 0) + principal
+                    ctr["bcdInvestments"] = ctr.get("bcdInvestments", 0) + 1
+        except Exception as exc:
+            ctr["bcd_invest_err"] = repr(exc)[:200]
+
+    def _legacy_carry_tail(self, d, drawn, limit, jub, ctr) -> None:
         """Steps 4-5 and the voluntary unwind: what the debtor does with
         its claim and its surplus once the tranche step has run.  `drawn`,
         `limit` and `jub` are the month's opening reads.  Shared with the

@@ -86,7 +86,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     ax.plot(days, bvib, color=INK2, linewidth=1.6)
     ax.axhline(1.0, color=INK, linewidth=0.8, alpha=0.4)
     ax.set_title("basketValueInBuck (basket-relative value)\n"
-                 "(the mortgage agents quote execution against USD par)")
+                 "(financing decisions also depend on execution and carrying costs)")
     ax.set_ylabel("bvib")
     ax.grid(True, alpha=0.25)
 

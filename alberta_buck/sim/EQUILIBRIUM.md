@@ -71,6 +71,21 @@ from M2 year-over-year growth (poor monetary anchors, kept as a small satellite
 for the passive rebalancing harvest from their independent dynamics).
 
 ## The agents (`equilibrium_agents.py`)
+
+The matrix's mortgage cohorts now select `refi_mode = "carry"`: the same cost
+comparison and partial-refinance execution used by `ExternalDebtRetireeAgent`,
+with their original arrival schedules. `theta` is the payback time for the
+one-time costs. BUCK obligations are valued against the basket's dollar
+reference, while execution uses the actual pool quote.
+
+Both household classes default to `surplus_policy = "mixed"`, an even split
+after external refinancing: `discount` buys back only at a basket-relative
+discount after fees and impact; `basket` carries the liability and invests
+recurring surplus through a separate savings account. Neither policy forces
+mortgage-style amortization. `legacy` retains the old tail for comparison.
+The original `atomic` and `paced` refinance modes are still available.
+The cast audit and measured rerun are in `doc/review/mature-worlds-agents.org`.
+
 - **`FatCreditBorrowerAgent`** (lifecycle): a pool of BuckCredit "properties".
   - *Adoption ramp*: target draw = `util_target * creditLimit * cap_frac(day)`,
     a logistic S-curve (+ optional one-off uptake shock). With `open = "placed"`

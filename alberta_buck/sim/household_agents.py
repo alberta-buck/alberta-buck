@@ -41,13 +41,11 @@ pays in cash:
 """
 from __future__ import annotations
 
-from alberta_buck.sim import carry
 from alberta_buck.sim.agents import _register
 from alberta_buck.sim.equilibrium_agents import (
-    BuckCreditDebtorAgent, _growth_active, mint_amount, mint_capacity,
+    BuckCreditDebtorAgent, _growth_active,
 )
 from alberta_buck.sim.experiment import draw as _draw
-from alberta_buck.sim.gauge import active_reserves
 
 M6 = 10 ** 6
 
@@ -75,6 +73,7 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
         cls = type(self).__name__
         # A household from day 0: no arrival clock, no stagger.
         self._endog = False
+        self._refi_carry         = True
         self.arrive_day = 0
         self._last_day = 0
         self._last_month_day = -self.MONTH
@@ -192,115 +191,9 @@ class ExternalDebtRetireeAgent(BuckCreditDebtorAgent):
         if self.mortgage > M6 and d.pool_ub:
             self._decide(d, ff, k, limit, drawn, unactivated, ctr)
 
-        # 3. Once the external debt is gone: the debtor's amortization of the
-        #    claim, its investment of the surplus, and the voluntary unwind.
+        # 3. Once the external debt is gone: discounted retirement or recurring basket investment.
         self._carry_tail(d, drawn, limit, jub, ctr)
 
-    def _decide(self, d, ff, k, limit, drawn, unactivated, ctr) -> None:
-        spendable = max(0, limit - drawn)
-        ru, rb = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
-        fee = (getattr(d, "fee_ub", 0) or 0) / 1e6
-        at_renewal = self._at_renewal()
-        terms = carry.RefiTerms(
-            debt=self.mortgage / M6, rate=self.apr, face=self._face0 / M6,
-            premium_bp=self.premium_rate, joined=self.joined,
-            payback_y=self.theta, k=k / 1e18, headroom=spendable / M6,
-            unactivated=unactivated / M6,
-            fixed_cost=0.0 if self.joined else self.switch_cost / M6,
-            penalty_months=0.0 if at_renewal else self.penalty_months,
-            risk=self.risk)
-        v = carry.best_refinance(terms, ru / M6, rb / M6, fee)
-        if not v.go:
-            ctr["rtrWaits"] = ctr.get("rtrWaits", 0) + 1
-            return
-        buck = int(v.buck * M6) + M6
-        fixed = 0 if self.joined else self.switch_cost
-        penalty = int(v.parts["penalty"] * -M6)
-        cash = d.chain.balance_of(d.usdc, self.proxy.address)
-        if cash < fixed + penalty:
-            # The one-time costs are paid in cash, up front.
-            ctr["rtrCashWait"] = ctr.get("rtrCashWait", 0) + 1
-            return
-
-        # Buck.mint(amount) raises spendable by `amount`: mint what the draw
-        # needs beyond the headroom on hand (+0.2%), at most what the
-        # unactivated face can deliver at K - e (mint_amount asks for all of
-        # it once the need is within 1%).
-        cap = mint_capacity(unactivated, k, self.premium_rate)
-        amount = 0
-        if v.coverage > 0:
-            amount = min(max(0, buck - spendable) * 1_002 // 1_000, cap)
-        # The funding gate: hold poolPrincipal x fundingFactor BEFORE the
-        # mint.  Short, the household SAVES (buys BUCK) and waits a month.
-        if amount >= M6:
-            ff = self._gate_factor(d, ff)
-        if amount >= M6 and ff:
-            try:
-                _, principal = d.buck.functions.quoteMint(
-                    mint_amount(amount, cap), self._token_ids).call()
-            except Exception:
-                principal = 0
-            # +0.5%: the gate is strict (balance >= required), and K can step
-            # between the quote and the mint.
-            required = principal * ff // 10 ** 18 * 1_005 // 1_000
-            bal = d.buck.functions.balanceOf(self.proxy.address).call()
-            short = required - bal
-            if short > 0:
-                try:
-                    if self._buy_for_gate(d, short * 101 // 100 + M6,
-                                          cash - fixed - penalty - self.cash_buffer):
-                        ctr["rtrSaved"] = ctr.get("rtrSaved", 0) + 1
-                except Exception as e:
-                    ctr["rtr_save_err"] = repr(e)[:200]
-                bal = d.buck.functions.balanceOf(self.proxy.address).call()
-                if bal < required:
-                    ctr["rtrGateWait"] = ctr.get("rtrGateWait", 0) + 1
-                    return
-
-        if amount >= M6:
-            try:
-                pre = d.buck.functions.signedBalanceOf(
-                    self.proxy.address).call()
-                self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
-                    "mint(uint256)", args=[mint_amount(amount, cap)]))
-                post = d.buck.functions.signedBalanceOf(
-                    self.proxy.address).call()
-                self.premium_paid += max(0, pre - post)
-            except Exception as e:
-                self.throttled += 1
-                ctr["rtrThrottled"] = ctr.get("rtrThrottled", 0) + 1
-                why = repr(e)[:120]
-                ctr.setdefault("rtrWhy", {})
-                ctr["rtrWhy"][why] = ctr["rtrWhy"].get(why, 0) + 1
-                return
-
-        before = d.chain.balance_of(d.usdc, self.proxy.address)
-        try:
-            sold = self._sell_capped(d, d.pool_ub, buck)
-        except Exception as e:
-            ctr["rtr_sell_err"] = repr(e)[:200]
-            return
-        if sold <= 0:
-            return
-        got = d.chain.balance_of(d.usdc, self.proxy.address) - before
-        self.trade_loss += sold - got
-        paid = self._pay_bank(d, min(got, self.mortgage))
-        self.mortgage -= paid
-        if fixed:
-            self.switch_paid += self._pay_bank(d, fixed)
-        if penalty > 0:
-            self.penalty_paid += self._pay_bank(d, penalty)
-        first = not self.joined
-        self.joined = True
-        self.refis += 1
-        self.deploys += 1
-        ctr["rtrRefis" if first else "rtrTopUps"] = (
-            ctr.get("rtrRefis" if first else "rtrTopUps", 0) + 1)
-        ctr["rtrBuckSold"] = ctr.get("rtrBuckSold", 0) + sold // M6
-        ctr["rtrUsdRetired"] = ctr.get("rtrUsdRetired", 0) + paid // M6
-        self.note(d, "refinance" if first else "top-up",
-                  renewal=self._at_renewal(), k=round(k / 1e18, 4),
-                  sold=sold // M6, retired=paid // M6, **v.why())
 
 
 # -- reading a vector ---------------------------------------------------------- #

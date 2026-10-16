@@ -813,6 +813,12 @@ class Snapshotter:
             "bcd_deploys": ctr.get("bcdDeploys", 0),
             "bcd_atomic_refis": ctr.get("bcdAtomicRefis", 0),
             "bcd_atomic_declined": ctr.get("bcdAtomicDeclined", 0),
+            "bcd_atomic_why": dict(ctr.get("bcdAtomicWhy", {})),
+            "bcd_retired": ctr.get("bcdRetired", 0),
+            "bcd_invested": ctr.get("bcdInvested", 0),
+            "bcd_investments": ctr.get("bcdInvestments", 0),
+            "bcd_invest_err": ctr.get("bcd_invest_err", ""),
+            "bcd_buy_err": ctr.get("bcd_buy_err", ""),
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
             # Endogenous-origination arrivals (arrive_mode "endog"): how many

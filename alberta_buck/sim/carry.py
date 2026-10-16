@@ -81,6 +81,25 @@ def buck_in(usdc: float, r_usdc: float, r_buck: float, fee: float) -> float:
     return usdc * r_buck / ((r_usdc - usdc) * (1.0 - fee))
 
 
+def discounted_buyback(cash: float, drawn: float, r_usdc: float, r_buck: float,
+                       fee: float, basket_usd: float, discount: float) -> float:
+    """BUCKs to buy while even the last unit, including fee and impact, retains the requested discount.
+
+    Inputs and output use whole currency units. The caller may further cap cash by its impact budget.
+    Basket parity can be above or below $1; the obligation is denominated in BUCK, not dollars.
+    """
+    if min(cash, drawn, r_usdc, r_buck, basket_usd) <= 0 or not 0 <= fee < 1:
+        return 0.
+    net                         = 1 - fee
+    ceiling                     = basket_usd * (1 - discount)
+    spot                        = r_usdc / r_buck
+    if ceiling * net <= spot:
+        return 0.
+    budget                      = r_usdc * (math.sqrt(ceiling * net / spot) - 1) / net
+    spend                       = min(cash, budget) * .999  # leave rounding room at the marginal-price bound
+    return min(drawn, r_buck * (spend * net) / (r_usdc + spend * net))
+
+
 @dataclass(frozen=True)
 class RefiTerms:
     """One household's refinance question, in USD.
@@ -103,6 +122,7 @@ class RefiTerms:
     risk: float = 0.0           # /yr the household charges for owing basket-indexed BUCK
     opp_rate: float | None = None  # the deposit's opportunity; None = `rate`
     k_margin: float = 0.99      # K may move at the mint (Buck.mint runs compute())
+    buck_value: float = 1.0     # basket-parity USD value of one BUCK, not a fixed dollar peg
 
     @property
     def spend_per_cover(self) -> float:
@@ -156,23 +176,25 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
     if not math.isfinite(cov):
         return NO
     dep = cov * deposit_rate(t.premium_bp)
+    value_buck                  = buck * t.buck_value
+    value_dep                   = dep * t.buck_value
     opp = t.rate if t.opp_rate is None else t.opp_rate
     parts = {
         # external interest no longer paid
         "interest": usd * t.rate,
         # the Jubilee relief the new lien earns: the BUCK drawn and the
         # deposit drawn with it
-        "relief": (buck + dep) * RELIEF,
+        "relief": (value_buck + value_dep) * RELIEF,
         # the external premium stops once the asset is insured through BUCK
         "premium": 0.0 if t.joined else t.face * t.premium_bp / 10_000.0,
         # the deposit: an outlay, whose cost is the opportunity it forgoes...
-        "deposit_opp": -dep * opp,
+        "deposit_opp": -value_dep * opp,
         # ...and the pool's accrued age its refund carries back
-        "deposit_age": -dep * DEMURRAGE,
+        "deposit_age": -value_dep * DEMURRAGE,
         # owing a basket-indexed unit against USD income
-        "risk": -buck * t.risk,
+        "risk": -value_buck * t.risk,
         # execution: the liability, at par, beyond the USD it retired
-        "execution": -(buck - usd),
+        "execution": -(value_buck - usd),
         "fixed": -t.fixed_cost,
         "penalty": -usd * t.rate * t.penalty_months / 12.0,
     }
