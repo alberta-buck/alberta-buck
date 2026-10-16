@@ -411,6 +411,10 @@ threefold crash, but it still includes the remaining opening and credit activati
 
 *** The remaining issuance ratchet
 
+The [[file:review/mature-worlds-agents.org][cast and issuance audit]] follows the mortgage cohorts as well as the large borrowers, and
+links all 56 completed runs' PDFs. Every mature mortgage cohort eventually refinances; no new
+cohort replaces it. The large borrowers have the separate activation fault below.
+
 The borrowers answer a dear BUCK, but their available credit is not a renewable pool in this
 model. =setup= activates the whole face once. Each retirement buys BUCKs back and calls
 =burn=, which deactivates coverage. Later draws read the smaller =creditLimit= and never call

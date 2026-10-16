@@ -10,8 +10,8 @@ that is repeatedly perturbed by periodic regime changes and re-settles:
   1. basketValueInBuck vs the 1.0 parity setpoint, with buckK (the K-scaled
      LTV cap the controller moves) on a twin axis -- the headline.  Applied
      experiment interventions are marked as labelled vertical lines.
-  2. buck_usd: the floating BUCK/USDC spot vs 1.0 parity -- the
-     discount/premium the counter-cyclical savers trade against.
+  2. buck_usd: the floating BUCK/USDC spot vs a $1 reference. Basket
+     parity is separate: the counter-cyclical savers trade pane 1's signal.
   3. PID internals P (ppm error), D (ppm dError) left + I (ppm*s) twin.
   4. Monetary aggregates: BUCK supply / DM outstanding / saver-held BUCK.
   5. Borrower issuance channel: drawn vs K-scaled limit, the rolling reserve
@@ -30,8 +30,6 @@ independently.
 import json
 import os
 from pathlib import Path
-
-import pytest
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -71,12 +69,7 @@ def _cols(frames):
     return n, col
 
 
-@pytest.mark.skipif(
-    not DATA.exists(),
-    reason="equilibrium-sim.json not generated yet; run: "
-           "python -m alberta_buck.sim --scenario equilibrium",
-)
-def test_equilibrium_sim_plot():
+def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     cache_dir = Path(os.environ.get("TMPDIR", "/tmp")) / "alberta-buck-mpl"
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache_dir))
@@ -86,7 +79,7 @@ def test_equilibrium_sim_plot():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    d = json.loads(DATA.read_text())
+    d = json.loads(data_path.read_text())
     tokens = d.get("tokens", [])
     meta = d.get("meta", {})
     ivs = [iv for iv in meta.get("interventions_applied", [])]
@@ -127,18 +120,17 @@ def test_equilibrium_sim_plot():
                  "by buckK"
                  + (f"  [{len(ivs)} interventions]" if ivs else ""))
 
-    # ---- Pane 2: BUCK/USDC spot vs parity ---------------------------- #
+    # ---- Pane 2: BUCK/USDC spot vs the dollar reference -------------- #
     ax = axes[1]
     bu = [v / E6 for v in col("buck_usd")]     # USDC per BUCK
     ax.axhline(1.0, color="black", linestyle="--", linewidth=1.2,
-               label="parity (1.0)")
+               label="$1 reference (not basket parity)")
     ax.plot(days, bu, color="tab:cyan", linewidth=1.4,
             label="BUCK/USDC spot")
     ax.set_ylabel("USDC per BUCK")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="upper left", fontsize=8)
-    ax.set_title("(2) BUCK/USDC spot: the discount (buy) / premium (sell) "
-                 "the savers trade")
+    ax.set_title("(2) BUCK/USDC exchange rate; basket parity is measured in pane 1")
 
     # ---- Pane 3: PID internals --------------------------------------- #
     ax = axes[2]
@@ -260,15 +252,18 @@ def test_equilibrium_sim_plot():
     ax.set_title("(7) TOKEN/USDC tracking error (spot vs CSV reference)")
 
     fig.tight_layout()
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT, dpi=120)
+    if pdf is None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=120)
+    else:
+        pdf.savefig(fig)
     plt.close(fig)
 
     # ---- Convergence summary ----------------------------------------- #
     try:
-        shown = OUT.relative_to(REPO)
+        shown = out_path.relative_to(REPO)
     except ValueError:
-        shown = OUT
+        shown = out_path
     print(f"\nWrote {shown}  ({len(days)} days, 7 panes)")
 
     bval_c = [v / E18 for v in col("basketVal")]
@@ -292,7 +287,7 @@ def test_equilibrium_sim_plot():
 
     # ---- Acceptance verdict (parity-with-interior-K gate) ------------ #
     from alberta_buck.sim import eqmetrics
-    st = eqmetrics.summarize(DATA)
+    st = eqmetrics.summarize(data_path)
     ok, reasons = eqmetrics.accept(st)
     print(f"  tail: basketVal {st['bv_tail_mean']:.4f} +/- "
           f"{st['bv_tail_std']:.4f}  K {st['k_tail_mean']:.3f} "
@@ -301,6 +296,13 @@ def test_equilibrium_sim_plot():
           f"${st['retired_tail_m']:.2f}M throttled "
           f"{100 * st['throttle_tail_frac']:.0f}%")
     print("  ACCEPTANCE: " + ("PASS" if ok else "FAIL -- " + "; ".join(reasons)))
+
+
+def test_equilibrium_sim_plot():
+    import pytest
+    if not DATA.exists():
+        pytest.skip("vector not generated yet; run the equilibrium simulation")
+    render()
 
 
 if __name__ == "__main__":

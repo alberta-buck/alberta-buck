@@ -1,0 +1,127 @@
+#+TITLE: Who issues in the five-year mature worlds
+#+DATE: 2026-10-15
+#+OPTIONS: ^:nil toc:2
+
+This reads the completed =1a5afec= campaign in =build/sim/mended/=, before the next debtor-policy
+changes. All 56 runs completed. Their PDFs and a linked index have been generated from the saved
+vectors: [[file:../../build/sim/mended/index.html][open the campaign]]. No simulation was repeated to make these reports.
+
+* What the casts contain
+
+The common cast has one =MarketMakerWhale= to keep TOKEN/USDC markets on the historical feeds,
+three =AnonymousArbAgent= and five =TokenAccumulatorAgent= to trade profitable cycles, 24
+=BootstrapDMAgent= to seed the basket pools, five =FatCreditBorrowerAgent=, four =SaverAgent=,
+one =PidKeeperAgent= and one =DirectorKeeperAgent=. The arbitrageurs connect prices; they do not
+create a continuing flow of household credit. The basket implementations supply their own
+upkeep machinery.
+
+| Mature variant | Mortgage borrowers | Other additions to the common cast |
+|----------------+--------------------+------------------------------------|
+| debtors-mature | 24, day-0 arrivals | none |
+| basketeers | 24, day-0 arrivals | 120 TOKEN depositors, 30 BUCK depositors |
+| originate | 30, staggered arrivals | above, plus 60 arriving depositors |
+| endog | 30, price-responsive arrival clock | same depositor counts |
+| endog-excursion | same 30 | above, plus 5 cash arbs and 3 credit arbs |
+| endog-raid | same 30 | above, plus one whale raid |
+| endog-excursion-raid | same 30 | both excursion arbs and raid |
+
+The mortgage class in these saved runs is =BuckCreditDebtorAgent=, with =refi_mode = "atomic"=.
+It is not the newer =ExternalDebtRetireeAgent=, which compares carrying costs and permits partial
+refinancing. The latter appears in the savings worlds. The older class asks monthly whether it
+can convert its whole remaining mortgage, after fees and slippage, within its credit capacity
+and its =theta x apr= tolerance. Otherwise it waits. A high LTV can therefore postpone the whole
+refinance even when a partial one would pay. It buys the real funding reserve, activates insured
+credit, sells BUCKs through BUCK/USDC and pays the external lender. It does not search the
+BUCK/TOKEN/USDC alternatives itself.
+
+The five large borrowers are aggregate stand-ins, each with eight zero-premium credit NFTs and
+two to five million of face. They have no external mortgage ledger. Their target is a utilization
+fraction of activated credit, with adoption, regime changes and a response to a dear BUCK.
+They sell 30--60% of a draw into BUCK/TOKEN and keep the TOKEN; the rest goes into BUCK/USDC.
+They do not finish that first leg with a TOKEN/USDC sale to a bank. Their reserve models the
+insured gate's scale, since their own zero-premium credits bypass it.
+
+The four savers buy a basket-relative discount and sell a premium from finite inventories.
+The excursion credit arbs activate unused face when the BUCK is dear and buy back when cheap;
+unlike the large borrowers, they can reactivate credit. There are only three, only in the
+excursion variants. Their execution hurdle also refers to dollar par. The raid buys before
+mid-run, dumps, then buys back; it can leave a lasting shortage when the other issuers cannot
+replace the BUCKs it takes out.
+
+* What actually happens
+
+Selling newly issued BUCKs for USDC has the direction Perry describes: BUCK reserve rises,
+USDC reserve falls, USDC per BUCK falls, and arbitrage transmits the discount into a basket
+cost above one BUCK. The runs do have this flow. Three other model choices obscure or exhaust it.
+
+First, the opening placement is deliberately outside the market. The mature large borrowers
+and eligible day-0 mortgage borrowers exchange with the pool-seeding helper at the opening
+price. Their new liens replace part of its lien, leaving the float and pool price unchanged.
+That implements the earlier request to begin with a mature balance sheet rather than dump it
+all in the first tick. Later refinancing uses the market.
+
+Second, these are finite cohorts, not continuing origination. Every mortgage borrower in every
+mature run eventually refinances. On the older upkeep:
+
+| Variant | Borrowers | Day the last borrower has refinanced |
+|---------+-----------+-------------------------------------|
+| debtors-mature | 24 | 240 |
+| basketeers | 24 | 240 |
+| originate | 30 | 745 |
+| endog | 30 | 1216 |
+| endog-excursion | 30 | 1346 |
+| endog-raid | 30 | 1045 |
+| endog-excursion-raid | 30 | 1342 |
+
+The opening =debtors-mature= placement refinances 17 of 24. Others follow as capacity permits.
+In =originate= all 30 have arrived by day 715: the neighbor-attraction clock accelerates the
+nominal five-year stagger. Across all baskets, every mature cohort finishes by day 1422 at the
+latest. There is no next cohort. The whole-mortgage rule delays issuance; it is not a permanent
+failure to issue in these completed runs.
+
+Third, the large borrowers buy back BUCKs and then =burn= coverage, but never activate it again.
+Buying back already reduces their signed liability; the burn additionally removes credit
+capacity. In =originate= on the older upkeep, their combined limit falls from 13.413 million
+BUCKs on day 0 to 3.773 million on day 365 and 18,011 BUCKs at the end. They placed 9.503 million,
+sold another 7.317 million through the market, and bought back 16.649 million. K at its ceiling
+cannot restore coverage the agents have deactivated. The underlying property face has not gone.
+
+After refinancing, the saved mortgage policy also buys BUCKs to match a hypothetical mortgage's
+amortization, regardless of discount. It deposits surplus only once, then accumulates cash.
+Its separate optional buyback rule requires a USDC price below $0.98, rather than a discount
+against the basket. In =originate= on the older upkeep, year-five household cash is $18.294
+million, while recorded basket principal is only 1.168 million BUCKs. That policy does not
+represent recurring investment of freed cash flow or a basket-relative bargain hunter.
+
+These runs therefore do not test a continuing supply of cost-sensitive external refinancing
+against discount-driven retirement. They do not establish that such refinancing would fail to
+create inflationary pressure. The persistent shortage is entangled with the finite cohort and
+the synthetic borrowers' activation ratchet.
+
+* Rendering and viewing
+
+The old matrix and frozen campaign scripts wrote JSON and metrics only. The optional Makefile
+plot targets produced PNGs separately. The shared loop now renders a PDF after every completed,
+saved run of at least 1825 days, including programmatic savings runs. It checks the plotting
+dependency before starting. A PDF failure fails the command but preserves the completed JSON.
+
+#+begin_src sh
+python -m alberta_buck.sim.report path/to/run.json
+python -m alberta_buck.sim.report build/sim/mended/runs/*.json \
+    build/sim/mended/savings-s1/*.json build/sim/mended/savings-s2/*.json \
+    --jobs 4 --index build/sim/mended/index.html
+#+end_src
+
+The index opens as a local file, without a server. Each PDF has an issuance overview, the
+equilibrium plots, the market/basket plots, and a household page when relevant. The overview
+shows activated limits, actual drawings, issuance and buybacks, remaining mortgages and the
+number of borrowers who have arrived or refinanced. The source JSON hash is recorded in the PDF.
+The original interactive viewer is also available via =make nix-venv-viewer VIEWER_PORT=8787=;
+it is separate from report generation. No viewer server was started for this audit.
+
+* Next debtor policy
+
+Perry requested a carrying-cost decision that accepts unfavorable execution when interest
+savings justify it. He selected an even split after refinancing: half retire their BUCK
+liabilities only at a basket-relative discount after costs; half carry them and invest recurring
+surplus in the basket. This is the next change; the 56 reports above preserve the earlier policy.

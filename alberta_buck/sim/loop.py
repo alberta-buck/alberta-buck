@@ -61,6 +61,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     day's ticks (the sim server applies population/knob controls here).
     on_frame(frame): called with each just-captured snapshot frame (the
     sim server streams these to its clients)."""
+    from alberta_buck.sim import report
+    if out_path and scenario.days >= report.FIVE_YEARS:
+        report.preflight()
     w3 = anvil.w3
     chain = Chain(w3, w3.eth.accounts[0])
     rng = idmod.seeded_rng(scenario.seed)
@@ -161,6 +164,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         iv = Interventions(exp, d, scenario, agents, arbs, ctr, rng)
 
     snap = Snapshotter(d, scenario)
+    snap.meta["run"]             = {"completed": False, "days": scenario.days,
+                                   "day_step": max(1, getattr(scenario, "day_step", 1)),
+                                   "basket": basket_impl, "agents": dict(scenario.agents)}
     if exp is not None:
         # Live references: iv.applied keeps growing; every checkpoint write
         # (and the final one) embeds the up-to-date log + resolved config.
@@ -415,7 +421,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
                   f"fees ${fee/E6:,.0f}  ROI {roi:+.3f}%")
 
     # Final write, with the teardown recorded: the run's books are closed.
-    path = snap.write(out_path) if out_path else None
+    path, pdf                   = report.finish(snap, out_path)
 
     # --- summary ----------------------------------------------------- #
     tail = snap.frames[-30:] if len(snap.frames) >= 30 else snap.frames
@@ -441,6 +447,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     realized_apr = (365.0 * profit_usd / dollar_days) if dollar_days else 0.0
     summary = {
         "json": str(path),
+        "pdf": str(pdf) if pdf else None,
         "days": len(snap.frames),
         "tokens": [t[0] for t in scenario.tokens],
         "track_err": track,
@@ -458,6 +465,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     }
     if verbose:
         print(f"\n[sim] wrote {path}")
+        if pdf:
+            print(f"[sim] wrote {pdf}")
         for i, t in enumerate(summary["tokens"]):
             print(f"[sim]   {t:5s} TOKEN/USDC tail tracking err {100*track[i]:.2f}%")
         print(f"[sim] BUCK-routed trades: {ctr['cycleTrades']}  "

@@ -18,8 +18,6 @@ import json
 import os
 from pathlib import Path
 
-import pytest
-
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 
@@ -61,12 +59,7 @@ def _i(v):
     return int(v)
 
 
-@pytest.mark.skipif(
-    not DATA.exists(),
-    reason="rebalancing-sim.json not generated yet; run: "
-           "python -m alberta_buck.sim --scenario rebalancing",
-)
-def test_rebalancing_sim_plot():
+def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     cache_dir = Path(os.environ.get("TMPDIR", "/tmp")) / "alberta-buck-mpl"
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache_dir))
@@ -77,7 +70,7 @@ def test_rebalancing_sim_plot():
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
-    d = json.loads(DATA.read_text())
+    d = json.loads(data_path.read_text())
     names = d["tokens"]
     dec = d.get("decimals", [18, 8, 18])
     fr = d["frames"]
@@ -484,12 +477,15 @@ def test_rebalancing_sim_plot():
                  f"{pct(basketeer[-1])} basketeer / {pct(holder[-1])} holder")
 
     fig.tight_layout()
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT, dpi=120)
+    if pdf is None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=120)
+    else:
+        pdf.savefig(fig)
     plt.close(fig)
 
     # Convergence summary.
-    print(f"\nWrote {_rel(OUT)}  "
+    print(f"\nWrote {_rel(out_path)}  "
           f"({len(days)} frames, day {days[0]}..{days[-1]})")
     for t in range(nt):
         ref = col("refUsd", t)[-1] / E6
@@ -549,6 +545,13 @@ def test_rebalancing_sim_plot():
         dev = (aw - tw) * 100
         print(f"  {names[t]:5s}  weight actual={aw:.4f} target={tw:.4f}  "
               f"deviation {dev:+.2f}%")
+
+
+def test_rebalancing_sim_plot():
+    import pytest
+    if not DATA.exists():
+        pytest.skip("vector not generated yet; run the rebalancing simulation")
+    render()
 
 
 if __name__ == "__main__":

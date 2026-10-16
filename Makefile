@@ -1221,6 +1221,9 @@ sim-compare-rebalancing-eq:
 # BuckBasket, Buck, the controller -- propagate to every arm), then print
 # the eqmetrics table.  Each arm is hours at full cadence; MATRIX_JOBS
 # arms run concurrently (pyrevm is in-process, one core each).
+# The shared simulation loop now writes a PDF beside each completed five-year
+# vector, including programmatic runs. Re-render saved data without an EVM:
+#   python -m alberta_buck.sim.report test/vectors/rebalancing-sim-eq*.json --jobs 4 --index build/sim/index.html
 #
 #   make nix-venv-sim-rebalancing-eq-matrix
 #   make nix-venv-sim-rebalancing-eq-matrix MATRIX_JOBS=8

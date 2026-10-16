@@ -20,6 +20,25 @@ Run the standard baseline:
 or ad hoc: `python -m alberta_buck.sim --scenario equilibrium --years N
 --ticks-per-day 1 --day-step 10`.
 
+Every saved run of at least 1,825 days now writes a PDF beside its JSON after
+teardown. This applies to the CLI, the matrix and programmatic savings runs.
+The plotting extra is checked before the simulation starts. If rendering fails,
+the completed JSON is kept and the run reports the failure; retry rendering alone:
+
+    python -m alberta_buck.sim.report path/to/run.json
+
+To render a campaign and create an index that opens directly in a browser:
+
+    python -m alberta_buck.sim.report build/sim/mended/runs/*.json \
+        build/sim/mended/savings-s1/*.json build/sim/mended/savings-s2/*.json \
+        --jobs 4 --index build/sim/mended/index.html
+
+The PDF contains an issuance overview, the equilibrium and market plots, and a
+household comparison when present. Checkpoints are marked incomplete and refused.
+Older vectors use their teardown or complete configured horizon as evidence of
+completion. `name.partial` and `name.json` both produce `name.pdf`, so promoting a
+finished vector does not lose its report. PDF metadata records the JSON's SHA256.
+
 ## The control loop
 - **`BuckKControllerDirect`** (`src/`): rescaled ppm PID (process/error in 1e6,
   dt in seconds), integral-dominant, deliberately **slow** (integral time ~90d,

@@ -26,7 +26,7 @@ THETA_MAX = 3.0
 INK, INK2 = "#0b0b0b", "#52514e"
 
 
-def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
+def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     cache_dir = Path(os.environ.get("TMPDIR", "/tmp")) / "alberta-buck-mpl"
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache_dir))
@@ -85,12 +85,8 @@ def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
     ax = axes[0][1]
     ax.plot(days, bvib, color=INK2, linewidth=1.6)
     ax.axhline(1.0, color=INK, linewidth=0.8, alpha=0.4)
-    for th, c in THETA_COLOR.items():
-        if th > 0:
-            ax.axhline(1.0 + th * 0.055, color=c, linewidth=0.9,
-                       linestyle=":", alpha=0.8)
-    ax.set_title("basketValueInBuck (the discount signal)\n"
-                 "(dotted lines: each theta's deploy tolerance)")
+    ax.set_title("basketValueInBuck (basket-relative value)\n"
+                 "(the mortgage agents quote execution against USD par)")
     ax.set_ylabel("bvib")
     ax.grid(True, alpha=0.25)
 
@@ -104,7 +100,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
 
     ax = axes[1][1]
     order = sorted(agents.values(), key=lambda a: (a["theta"], a["pattern"]))
-    labels = [f"{a['theta']}\n{a['pattern'][:3]}" for a in order]
+    labels = [f"{a['theta']:.2g}\n{a['pattern'][:3]}" for a in order]
     vals = [a["adv"][-1] for a in order]
     bars = ax.bar(range(len(order)), vals,
                   color=[_color(a["theta"]) for a in order])
@@ -117,8 +113,11 @@ def render(data_path: Path = DATA, out_path: Path = OUT) -> None:
     ax.grid(True, alpha=0.25, axis="y")
 
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=140)
+    if pdf is None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=140)
+    else:
+        pdf.savefig(fig)
     plt.close(fig)
     print(f"Wrote {out_path.relative_to(REPO) if out_path.is_relative_to(REPO) else out_path}")
     for a in order:
