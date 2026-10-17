@@ -27,6 +27,47 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
     const a = new Class({ account: privateKeyToAccount(generatePrivateKey()), member, settings: { ...settings, ...overrides } });
     await a.setup(w); return a;
   };
+  const funded = await make(CreditHouseholdAgent, "funding", {
+    cash_k: 10, switch_k: 5, surplus_policy: "basket", max_impact_bp: 400,
+  });
+  const waits = new Set(), held = [];
+  for (let day = 0; day <= 360; day += 30) {
+    await funded.act(w, day, 0);
+    assert.equal(funded.lastError, "");
+    if (funded.joined) break;
+    waits.add(funded.lastIssue);
+    assert.ok(funded.fundingPending);
+    assert.equal(funded.lastSurplus, "fund-issue");
+    assert.equal(funded.investedUsd, 0n);
+    assert.equal(funded.mortgage, funded.hypoMortgage);
+    for (const tid of w._credits.get(funded.account.address)) {
+      assert.equal((await session.call(w.credit, "creditInfo", [tid]))[1], 0n);
+    }
+    const st = await w.households.read(funded.account);
+    assert.ok(st.cash >= funded.buffer);
+    if (funded.lastIssue === "gate-wait") {
+      held.push(st.signed);
+      assert.ok(st.cash >= funded.buffer + 5000n * E6);
+    }
+  }
+  assert.deepEqual(waits, new Set(["cash-wait", "gate-wait"]));
+  assert.ok(held.length >= 2 && held[0] > 0n && held.at(-1) > held[0], "real gate BUCKs accumulate across paydays");
+  assert.ok(funded.joined && funded.mortgage < funded.hypoMortgage);
+  assert.equal(funded.fundingPending, false);
+  assert.equal(funded.lastSurplus, "invest");
+  assert.ok(funded.investedUsd > 0n);
+  assert.equal(funded.switchPaid, 5000n * E6);
+  assert.ok((await w.households.read(funded.account)).signed < 0n);
+
+  const changed = await make(CreditHouseholdAgent, "changed", { cash_k: 12, switch_k: 5, surplus_policy: "basket" });
+  await changed.act(w, 0, 0);
+  assert.ok(changed.fundingPending && changed.investedUsd === 0n);
+  changed.p.theta = 0;
+  await changed.act(w, 1, 0);
+  assert.equal(changed.lastIssue, "declined");
+  assert.equal(changed.fundingPending, false);
+  assert.ok(changed.investedUsd > 0n && !changed.joined);
+
   const a = await make(CreditHouseholdAgent, "test");
   await a.act(w, 0, 0);
   assert.equal(a.lastError, "");

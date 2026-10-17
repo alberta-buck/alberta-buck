@@ -1,5 +1,5 @@
 #+TITLE: One household model in Python and JavaScript
-#+DATE: 2026-10-16
+#+DATE: 2026-10-17
 #+OPTIONS: ^:nil toc:2
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
@@ -46,7 +46,7 @@ Four surplus policies are explicit:
 
 - =adaptive=: retire liabilities at a basket-relative discount after costs; invest at a premium;
   hold cash within the household's individual neutral band.
-- =basket=: invest available surplus regardless of parity.
+- =basket=: invest available surplus regardless of parity, after funding worthwhile issuance.
 - =retire=: spend available surplus retiring the existing BUCK liability regardless of parity.
 - =discount=: retire only at a discount and otherwise keep cash, for the previous comparison.
 
@@ -55,6 +55,21 @@ issuance additionally requires a premium after fees and impact, available insure
 funding reserve, and a favorable cost comparison. It is disabled for retirement-only policies.
 Buying BUCKs repays a liability by receipt; it does not burn reusable coverage. Falling K limits
 new spending and never triggers a forced liquidation by this agent.
+
+Issuance funding has priority over all four discretionary surplus policies. A household first
+retains USDC for its cash buffer, switching charge and quoted prepayment penalty. It then buys
+the BUCKs needed by the live funding gate, keeping partial purchases across decisions and
+paydays. While a worthwhile issuance remains unfunded, =surplus_action= is =fund-issue= and
+cash is not invested or spent on discretionary buybacks. The gate BUCKs stay in the borrower's
+real account; they are not a synthetic escrow or a permanently locked reserve. Issuance still
+requires the contract's current funding factor and credit availability.
+
+Every decision recomputes the cost comparison; activation reads the live funding quote.
+Successful issuance releases the remaining cash to the selected surplus policy. A newly
+unfavorable verdict also releases cash; it does not force a sale of BUCKs already acquired.
+Pending savings TOKENs can still be deposited without spending new cash. Telemetry records
+=funding_pending= (JavaScript: =fundingPending=), alongside the existing =cash-wait= and
+=gate-wait= reasons.
 
 Cash invested at a premium buys a basket constituent through TOKEN/USDC and deposits it. It
 does not immediately buy back the expensive BUCKs just issued. Borrowing and saving have
@@ -81,6 +96,93 @@ retrying rejected deposits without losing assets, and keeping both ledgers synch
 Replacing the synthetic borrower is a population migration, not a one-line correction to its
 burn call. Old results remain tied to their old cast. New five-year worlds need new measurements
 before making equilibrium claims; unit agreement between languages is not such evidence.
+
+** Converting the mature matrix
+
+There are seven mature variants: =debtors-mature=, =basketeers=, =originate=, =endog=,
+=endog-excursion=, =endog-raid= and =endog-excursion-raid=. Their current mortgage settings
+already select the carrying-cost kernel and a mixed surplus policy, but their casts still use
+=BuckCreditDebtorAgent= and five =FatCreditBorrowerAgent= instances. The canonical household
+preset is a new economy with different counts and two ticks/day; the mature presets use four.
+Its results cannot stand in for rerunning those seven worlds.
+
+| Area | Already available | Work needed for a faithful migration |
+|------+-------------------+--------------------------------------|
+| Mortgage decisions | Cost-based partial refinancing, real lender payments, both cash-flow books | Carry over the mature APR, face, LTV and premium ranges explicitly; reconcile cash and expenses |
+| Credit savers | Premium issuance and reusable coverage, separate basket custody | Replace synthetic face and cash with an explicit insured-saver cohort |
+| Surplus mix | Four individual policies in both languages | Add population policy sampling for the previous 50:50 =discount= / =basket= comparison |
+| Continuing arrivals | Independent Poisson stream in both languages | Set rates by incoming mortgage principal and insured face, not household count alone |
+| Mature opening | Legacy Python has OTC placement | Add audited household placement and equivalent JS operations, or label a warm-up experiment separately |
+| Endogenous arrivals | Legacy debtors have a market-responsive clock | Port a continuing hazard clock to both household populations, including shared vectors |
+| Shocks and traders | Existing separate actors remain usable | Preserve excursion and raid controls; replace synthetic adoption/utilization shocks with explicit household shocks |
+| Reporting | Household books, five-year PDF generation and linked campaign index | Add the new matrix names and replace synthetic-credit summary columns |
+
+The most consequential choices are these:
+
+1. Preserve the meaning of /mature/. The new household's =bootstrap= is empty: even its initial
+   population refinances through the market after day 0. Simply swapping classes reintroduces
+   an opening issuance event. For a matched mature arm, implement an opening placement with
+   real insured activation, real funding and lender transfers, consistent actual/counterfactual
+   books, and an exactly offsetting reduction in the seeder's liability. Assert that pool
+   reserves and prices do not move. Put the equivalent operations in the JavaScript adapter.
+   A market warm-up is another useful experiment, but must specify the measurement window and
+   the counterfactual's history rather than silently calling new arrivals mature.
+2. Replace the large borrowers' economic size explicitly. Their face is $2--5 million each and
+   funding cash $3--6 million each; the canonical households are much smaller insured accounts.
+   The canonical 24 initial members include savers, whereas the mature world has 24 mortgage
+   borrowers /plus/ the five large borrowers. Match opening insured face, mortgage principal,
+   cash and outstanding BUCK liabilities as separate quantities. Do not grant fictional
+   mortgages to savers or multiply one account's books to mimic many households. Separate
+   initial =CreditHouseholdAgent= and =CreditSaverAgent= cohorts can use their existing class
+   settings; population-specific profiles would make more complex cohorts easier to configure.
+3. Keep policy mix distinct from role mix. =saver_share= chooses whether a member has a mortgage;
+   it does not implement the requested even split between discounted retirement and investment.
+   The household population currently accepts one surplus policy for everyone. Add a stable
+   keyed policy assignment shared by Python and JavaScript before claiming to reproduce the
+   old mixed-policy arm. Keep all-adaptive and the four uniform-policy arms as comparisons.
+4. Preserve the arrival experiment. Thirty finite mortgage borrowers over five years suggest
+   roughly six new borrowers/year as a starting count comparison; the principal and capacity
+   flows must still be measured. The new constant-rate Poisson stream does not reproduce
+   =endog=: that arm responds to K and the BUCK's basket price. Use shared exponential arrival
+   thresholds with cumulative market-dependent intensity so the constant and responsive arms
+   share their underlying draws. Keep the arriving depositors' separate peg-stability response.
+   Provision the population bound for the maximum hazard; never silently exhaust the stream.
+   Python currently expands the population into members before the run and discards the
+   wrapper. A live shared arrival clock therefore needs a retained coordinator or equivalent
+   once-per-day state. JavaScript retains its wrapper. In both, income and mortgage accounting
+   must start on the actual arrival day, not the provisional neutral-rate date.
+5. Keep the rest of the economy comparable. Retain the 120 TOKEN depositors, 30 BUCK depositors,
+   and, where present, 60 arriving depositors in the first migration comparison. Household
+   investments are an additional measured flow. Keep the $50 million BUCK/USDC depth, four
+   ticks/day, price path, upkeep and raid parameters. Avoid treating =save_rate= as the new
+   =living_frac=: the former allocates old-model surplus, the latter pays real living expenses.
+   Adding expanded populations changes later agents' numerical indices, so audit their sampled
+   settings as well; a shared seed alone does not guarantee the same non-household cast.
+6. Keep shocks meaningful. Legacy =uptake_shock= changes =extra_cap=, which the household policy
+   does not read. Synthetic borrowers also have utilization regimes and scheduled adoption
+   jumps. Define household equivalents in arrivals, income, credit eligibility or costs and
+   test them; attaching the old fields would silently do nothing. The separate whale raid
+   can remain the same market actor.
+
+Recommended sequence: finish the household funding comparison, implement and test placed
+openings and policy mixtures in both languages, then add separately named mature-household
+and mature-household-basketeer presets. Measure those on =prorata=, =equity-ops= and
+=equity-machine= before adding continuing/endogenous arrivals and the excursion/raid variants.
+This is modest configuration work once the missing opening and population semantics are built;
+those shared behaviors and their accounting tests are the substantive implementation work.
+Keep legacy classes and TOMLs for reproduction until their consumers have migrated.
+The Python household still inherits contract helpers and telemetry from =BuckCreditDebtorAgent=;
+extract those helpers before deleting that class. Setting its population to zero needs no such
+refactor and is enough to remove its old decisions from a migrated world.
+
+The complete replacement matrix is seven worlds by three baskets (21 five-year runs per
+seed and policy configuration). At minimum compare multiple seeds, inspect year-five issuance,
+discounted buybacks, retained coverage, funding waits, mortgage costs, K and BVIB, and reconcile
+every active household's real/counterfactual books. Separate opening placement from market
+issuance. Run from frozen sources and require a completed vector plus its matching PDF before
+marking a run successful. The household PDF already works; =matrix-baskets.py= has a fixed list
+of the older world names, and the HTML index still reports the synthetic borrowers' limit.
+Neither is a reason to change a contract or the lab's fingerprinted modules.
 
 * Available implementations
 
@@ -139,6 +241,24 @@ partial refinancing with actual USDC lender payments, premium issuance by savers
 repayment and reuse of the resulting headroom without burning coverage, separate savings
 custody, and retrying rejected deposits without spending twice. The cash-flow books are also
 compared between languages to one micro-dollar rounding tolerance.
+
+The four policy runs at =00dfb2f= completed all 1827 daily frames on the basket machine, seed
+41404, with 90 arrived households (48 mortgage borrowers and 42 credit savers). All four PDFs
+were generated and matched to their vectors. Their index is
+[[file:../../build/sim/households/index.html][the original household campaign]]. Adaptive and discount-only borrowers retired all external
+mortgages. Always-invest left $3.351 million outstanding: thirteen borrowers never refinanced
+because investment repeatedly consumed the cash needed for issuance fees. That is the funding
+priority defect corrected on 2026-10-17; these saved results remain the /before/ comparison.
+They are one path on one basket, not validation of the older mature matrix.
+
+The corrected four-policy comparison uses a separate frozen campaign under
+=build/sim/households-funding/=. Its [[file:../../build/sim/households-funding/index.html][report index]] lists completed results only, each with
+an adjacent PDF and source vector. Do not substitute an in-progress run for a completed result.
+
+Regression tests in both languages exercise an initially cash-constrained always-invest
+household through several paydays: it saves fees, buys and retains gate BUCKs without activating
+unfunded credit, refinances, then resumes basket investment. Another case withdraws the economic
+justification for refinancing and checks that the cash becomes available to invest again.
 
 A 60-day run of the new preset completed with 27 arrived households: about $2.49 million paid
 to external lenders, $385,238 spent on basket investments and 109,820 BUCKs bought back toward

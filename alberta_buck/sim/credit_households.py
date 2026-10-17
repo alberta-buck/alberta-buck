@@ -72,6 +72,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self._savings_proxy     = None
         self.invested_usd       = 0
         self.issued_invest      = 0
+        self.funding_pending    = False
         self._last_verdict      = None
         self.last_action        = "waiting"
         self.last_issue         = "waiting"
@@ -160,6 +161,9 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         return got
 
     def _issue(self, d, state, kind, v, ctr):
+        # Reassess every decision: only a currently worthwhile issuance takes priority
+        # over discretionary saving. Cash fees stay in USDC; gate purchases stay in BUCKs.
+        self.funding_pending    = v.go and v.buck >= 1
         if not v.go or v.buck < 1:
             return
         fixed                   = int((-v.parts["fixed"]) * PARITY)
@@ -198,6 +202,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         got                     = d.chain.balance_of(d.usdc, self.proxy.address) - before
         if sold <= 0:
             return
+        self.funding_pending    = False
         self.trade_loss         += sold - got
         self.switch_paid        += self._pay_bank(d, fixed)
         first                   = not self.joined
@@ -262,6 +267,9 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
                 ctr["bcdInvestments"] = ctr.get("bcdInvestments", 0) + 1
 
     def _surplus(self, d, state, ctr):
+        if self.funding_pending:
+            self.last_action    = "fund-issue"
+            return
         p                       = self.p
         cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
         spare                   = max(0, cash - self.cash_buffer)
@@ -345,6 +353,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
                   insurance_age=insurance_age,
                   active=self._started, role=self.p["role"], member=self.member, action=self.last_action,
                   issue_action=self.last_issue, surplus_action=self.last_surplus,
+                  funding_pending=self.funding_pending,
                   pending_usd=pending, invested_usd=self.invested_usd, issued_invest=self.issued_invest,
                   external_interest=self.external_interest, hypo_interest=self.hypo_interest,
                   income_total=self.income_total, living_paid=self.living_paid, hypo_living=self.hypo_living,

@@ -126,6 +126,45 @@ def test_credit_saver_issues_at_premium_and_invests_proceeds(household_world, mo
     assert a.invested_usd > 0
 
 
+def test_always_invest_accumulates_fees_and_real_gate_bucks_before_saving(household_world):
+    d, scenario, make           = household_world
+    a                           = make(cash_k=10, switch_k=5, surplus_policy="basket", max_impact_bp=400)
+    waits                       = set()
+    held                        = []
+    for day in range(0, 361, 30):
+        a.act(d, scenario, day, 0, {})
+        assert not a.last_error
+        if a.joined:
+            break
+        waits.add(a.last_issue)
+        assert a.funding_pending and a.last_surplus == "fund-issue"
+        assert a.invested_usd == 0 and not a._basket_receipts
+        assert a.mortgage == a.hypo_mortgage
+        assert all(d.credit.functions.creditInfo(t).call()[1] == 0 for t in a._token_ids)
+        cash                    = d.chain.balance_of(d.usdc, a.proxy.address)
+        assert cash >= a.cash_buffer
+        if a.last_issue == "gate-wait":
+            held.append(d.buck.functions.signedBalanceOf(a.proxy.address).call())
+            assert cash >= a.cash_buffer + 5000 * M6
+    assert waits == {"cash-wait", "gate-wait"}
+    assert len(held) >= 2 and 0 < held[0] < held[-1], "gate BUCKs accumulate across paydays"
+    assert a.joined and a.mortgage < a.hypo_mortgage
+    assert not a.funding_pending and a.last_surplus == "invest"
+    assert a.invested_usd > 0 and a.switch_paid == 5000 * M6
+    assert d.buck.functions.signedBalanceOf(a.proxy.address).call() < 0
+
+
+def test_funding_priority_releases_cash_when_issuance_is_no_longer_worthwhile(household_world):
+    d, scenario, make           = household_world
+    a                           = make(cash_k=12, switch_k=5, surplus_policy="basket")
+    a.act(d, scenario, 0, 0, {})
+    assert a.funding_pending and a.invested_usd == 0
+    a.p["theta"]                = 0
+    a.act(d, scenario, 1, 0, {})
+    assert a.last_issue == "declined" and not a.funding_pending
+    assert a.invested_usd > 0 and not a.joined
+
+
 def test_arrival_has_no_earlier_income_or_market_activity(household_world):
     d, scenario, make           = household_world
     a                           = make()

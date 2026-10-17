@@ -38,6 +38,7 @@ export class CreditHouseholdAgent {
     this.lastSurplus = "waiting";
     this.lastError = "";
     this.lastVerdict = null;
+    this.fundingPending = false;
   }
 
   get mortgageOwing() { return this.mortgage; }
@@ -108,6 +109,8 @@ export class CreditHouseholdAgent {
   }
 
   async issue(world, state, kind, v) {
+    // Reassess each decision. Preserve USDC fees and accumulated gate BUCKs before saving.
+    this.fundingPending = v.go && v.buck >= 1;
     if (!v.go || v.buck < 1) return;
     const r = await world.households.issue(this.account, state, v, this.buffer, this.p.premium_bp);
     this.tradeLoss += r.gateSpent - r.gateGot + r.sold - r.got;
@@ -116,6 +119,7 @@ export class CreditHouseholdAgent {
     if (r.error) this.lastError = r.error;
     if (r.reason === "gate-wait" || r.reason === "mint-wait") this.throttled += 1;
     if (!r.sold) return;
+    this.fundingPending = false;
     this.switchPaid += await world.households.pay(this.account, units(-v.parts.fixed), "household:switch");
     this.joined = true; this.deploys += 1;
     if (kind === "refinance") {
@@ -133,6 +137,7 @@ export class CreditHouseholdAgent {
   }
 
   async surplus(world, state) {
+    if (this.fundingPending) { this.lastAction = "fund-issue"; return; }
     const p = this.p, { ru, rb, fee } = state;
     const spare = max(0n, await world.households.cash(this.account) - this.buffer);
     const action = surplusAction(p.surplus_policy, ru / rb, state.basket_usd, fee, p.retire_disc, p.issue_premium);
@@ -166,6 +171,7 @@ export class CreditHouseholdAgent {
       incomeTotal: this.incomeTotal, livingPaid: this.livingPaid, hypoLiving: this.hypoLiving,
       receipts: this.receipts.length, policy: this.p.surplus_policy, role: this.p.role,
       action: this.lastAction, issueAction: this.lastIssue, surplusAction: this.lastSurplus,
+      fundingPending: this.fundingPending,
       error: this.lastError, decision: this.lastVerdict });
   }
 
