@@ -325,6 +325,16 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-18: seed 45517's 18 grid cells: 15 pass, the same pattern. Across both seeds *36 of 42
+  pass*, and all six failures are demand-heavy cells with K on its 0.95 ceiling: low supply with
+  high demand on both paths and seeds (71--219 days at the rail, mean error 1.2--1.4%), and mid
+  supply with high demand on one path per seed (seed 41404 revert: 92% of days interior, no rail
+  day; seed 45517 history: 50 days at the rail). Every other cell holds parity within 1% on
+  average and K inside its band, from 0.17 (high supply, low demand) to about 0.88 (high demand).
+  Open question for the next step: whether the demand-heavy ceiling is a finding about the design
+  (the supply side has nothing left to give when K is at 0.95) or about this population (its
+  savers issue only at a premium and carry 30% of their limit; debtors refinance on cost, not on
+  the BUCK's price).
 - 2026-10-18: seed 41404's grid at =a3dd65d= (=build/sim/economy/balanced/index.html=, 24 five-year
   runs of 45--100 minutes each): *21 pass*. Parity holds in every cell (mean |bvib - 1| 0.46--1.23%,
   99th percentile below 2.8%). K settles where the imbalance puts it: high supply with low demand
