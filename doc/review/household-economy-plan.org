@@ -51,6 +51,15 @@ recommendations.
    rather than $50M; and credit savers keep 30% of their K-scaled limit drawn and invested
    (=carry_utilization= 0.3), which is the flow K moves: a higher K, more carried supply; a lower
    K, repayment from the basket.
+8. *Issuers come faster as K rises; households repay only by selling.* (Perry, 2026-10-18.) A K near
+   1 means unlimited BUCKs from any insurable asset, so no rational actor stays away: debtors and
+   savers arrive (1 - 0.75) / (1 - K) times as fast as at K 0.75 (5x at 0.95), on top of the
+   dear-side gap term; this stands in for recursive collateral. Escaping interest-bearing USD
+   mortgages is so desirable that the BUCK system, not the households, must rate-limit it. A debtor
+   or saver sells its insured asset at 10% a year: the sale pays any mortgage, its basket shares and
+   then dollars buy back the whole lien, its coverage is released and it leaves. It repays BUCKs at no
+   other time; spare income goes into the basket (the =basket= surplus policy). The savers' 30%
+   carrying share stays; its repayment when K falls is removed.
 
 * What exists today
 

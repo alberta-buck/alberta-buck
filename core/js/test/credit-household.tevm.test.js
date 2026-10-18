@@ -18,7 +18,7 @@ const urPath = join(repoRoot(), "alberta_buck/sim/artifacts/UniversalRouter.json
 const skip = !identity || !artifactsAvailable() || !existsSync(urPath) ? "build kernels and contract artifacts first" : false;
 const E6 = 1_000_000n;
 const settings = { home_k: 1000, ltv: .2, apr: .055, premium_bp: 50, theta: 3, cash_k: 100,
-  buffer_k: 10, switch_k: 0, risk: 0, decision_days: 1, income_frac: .1, living_frac: .5 };
+  buffer_k: 10, switch_k: 0, risk: 0, decision_days: 1, income_frac: .1, living_frac: .5, divest_rate: 0 };
 
 for (const basket of ["prorata", "machine"]) test(`households: live ${basket} accounting and reusable credit`, { skip }, async () => {
   const session = await tevmSession();
@@ -193,6 +193,21 @@ for (const basket of ["prorata", "machine"]) test(`households: ${basket} investo
   const cash = await w.households.cash(inv.account);
   await inv.act(w, 90, 0);
   assert.equal(await w.households.cash(inv.account), cash);
+
+  // A debtor sells its home: the sale pays the mortgage, the lien is bought back, coverage released.
+  const seller = new CreditHouseholdAgent({ account: privateKeyToAccount(generatePrivateKey()), member: "seller",
+    settings: { ...settings, max_impact_bp: 2000, surplus_policy: "basket" } });
+  await seller.setup(w);
+  await seller.act(w, 0, 0);
+  assert.ok((await w.households.read(seller.account)).drawn > E6, "it has a lien to clear");
+  seller.divestDay = 1;
+  for (let day = 1; day < 60 && !seller.exited; day++) {
+    await seller.act(w, day, 0);
+    assert.equal(seller.lastError, "", `day ${day}`);
+  }
+  const sold = await w.households.read(seller.account);
+  assert.ok(seller.exited && seller.mortgage === 0n && seller.hypoMortgage === 0n);
+  assert.ok(sold.signed >= 0n && sold.limit <= E6, "lien cleared and coverage released");
 
   // A population adds its opening members and its arrivals while the world runs.
   const pop = new HouseholdPopulationAgent({ makeAccount: () => privateKeyToAccount(generatePrivateKey()),

@@ -872,6 +872,12 @@ class Snapshotter:
             "inv_redeemed": ctr.get("invRedeemed", 0),
             "inv_exits": ctr.get("invExits", 0),
             "household_refused": ctr.get("household_refused", 0),
+            # Households selling their insured assets: started, finished, BUCKs of lien bought back,
+            # and those that ran out of dollars before clearing it.
+            "hh_divestments": ctr.get("hhDivestments", 0),
+            "hh_divested": ctr.get("hhDivested", 0),
+            "hh_divest_bought": ctr.get("hhDivestBought", 0),
+            "hh_divest_short": ctr.get("hhDivestShort", 0),
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
             # Endogenous-origination arrivals (arrive_mode "endog"): how many

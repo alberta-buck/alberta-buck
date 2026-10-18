@@ -1,6 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, overdrawn, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, divestDay, ROLES } from "./household-policy.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -24,6 +24,9 @@ export class CreditHouseholdAgent {
     this.payment = rate ? BigInt(Math.trunc(Number(this.mortgage) * rate / (1 - (1 + rate) ** -300))) : this.mortgage / 300n;
     this.buffer = this.investor ? 0n : units(p.buffer_k * 1000);
     this.exitDay = this.investor ? arrive_day + Math.trunc(365 * p.hold_years) : null;
+    this.divestDay = this.investor ? null : divestDay(seed, member, arrive_day, p.divest_rate);
+    this.sold = false;          // the insured asset has been sold
+    this.released = false;     // its coverage has been released
     this.exited = false;
     this.withdrawnUsd = 0n;
     this.refusals = 0;
@@ -74,7 +77,7 @@ export class CreditHouseholdAgent {
     paid = min(this.hypoLivingArrears, this.hypoCash);
     this.hypoLivingArrears -= paid;
     this.hypoCash -= paid; this.hypoLiving += paid;
-    const premium = this.face * BigInt(this.p.premium_bp) / 10000n / 12n;
+    const premium = this.sold ? 0n : this.face * BigInt(this.p.premium_bp) / 10000n / 12n;
     if (!this.joined) this.premiumArrears += premium;
     paid = await ops.pay(this.account, this.premiumArrears, "household:insurance");
     this.premiumArrears -= paid; this.extPremium += paid;
@@ -150,8 +153,6 @@ export class CreditHouseholdAgent {
   async surplus(world, state) {
     if (this.fundingPending) { this.lastAction = "fund-issue"; return; }
     const p = this.p, { ru, rb, fee } = state;
-    // K has fallen below what this household keeps drawn: repay from the basket, whatever the price.
-    if (p.carry_utilization > 0 && this.mortgage <= E6 && overdrawn(state, p) > 1) await this.redeemToRetire(world);
     const spare = max(0n, await world.households.cash(this.account) - this.buffer);
     const action = surplusAction(p.surplus_policy, ru / rb, state.basket_usd, fee, p.retire_disc, p.issue_premium);
     if (action === "invest") await this.invest(world, spare);
@@ -220,6 +221,33 @@ export class CreditHouseholdAgent {
     if (!r.left && !this.receipts.length) this.exited = true;
   }
 
+  // Sell the insured asset (household_policy and credit_households._divest): its price pays any mortgage
+  // left; the basket shares are redeemed toward the lien; the rest is bought back a capped bite a day;
+  // the coverage is released and the BUCKs left are sold; then the household leaves. The counterfactual
+  // sells the same asset on the same day.
+  async divest(world) {
+    const ops = world.households;
+    if (!this.sold) {
+      this.sold = true;
+      await world.fiatIn(this.account, this.face, { tag: "household:sale" });
+      this.hypoCash += this.face;
+      let paid = await ops.pay(this.account, this.mortgage, "household:retire-external");
+      this.mortgage -= paid; this.externalPaid += paid;
+      paid = min(this.hypoMortgage, this.hypoCash);
+      this.hypoCash -= paid; this.hypoMortgage -= paid; this.hypoPaid += paid;
+    }
+    const r = await ops.divest(this);
+    for (const rid of r.redeemed ?? []) {
+      const b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
+      this.book.delete(rid);
+      this.receipts = this.receipts.filter((x) => x !== rid);
+      this.basketPrincipal -= b.principal; this.shares -= b.shares;
+    }
+    this.unwound += r.bought ?? 0n;
+    if (r.refused) this.refusals += 1;
+    if (r.done) this.exited = true;
+  }
+
   async record(world, day) {
     const s = await world.households.mark(this);
     this.usdc = s.cash;
@@ -249,7 +277,11 @@ export class CreditHouseholdAgent {
       this.hypoCash = cash; this.started = true;
     }
     await this.advance(world, day);
-    if (day >= this.nextDecision) {
+    if (this.divestDay !== null && day >= this.divestDay) {
+      // Selling the asset is worked every day until the lien is cleared and the household leaves.
+      this.lastError = ""; this.lastAction = "divest";
+      try { await this.divest(world); } catch (e) { this.lastError = String(e).slice(0, 200); }
+    } else if (day >= this.nextDecision) {
       this.nextDecision += (Math.floor((day - this.nextDecision) / this.p.decision_days) + 1) * this.p.decision_days;
       this.lastError = "";
       if (this.investor) {
@@ -306,7 +338,8 @@ export class HouseholdPopulationAgent {
       for (const role of ROLES) for (let k = 0; k < this.pop[`initial_${role}s`]; k++) await this.arrive(world, role, k, day);
     }
     const bvib = day >= this.pop.settle_days ? Number(await world.bvib()) / 1e18 : null;
-    for (const [role, k] of arrivalsStep(this.state, this.seed, this.name, day, this.days, bvib, this.pop)) {
+    const kNow = Number(await world.K()) / 1e18;
+    for (const [role, k] of arrivalsStep(this.state, this.seed, this.name, day, this.days, bvib, kNow, this.pop)) {
       await this.arrive(world, role, this.pop[`initial_${role}s`] + k, day);
     }
   }

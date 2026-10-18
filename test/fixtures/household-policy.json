@@ -37,6 +37,7 @@
     "name": "0", "days": 730,
     "settings": {"initial_debtors": 2, "initial_savers": 1, "initial_investors": 3,
                  "debtor_rate": 6, "saver_rate": 6, "investor_rate": 12},
-    "bvib": [[0, 1.0], [100, 0.96], [300, 1.04], [500, 1.0]]
+    "bvib": [[0, 1.0], [100, 0.96], [300, 1.04], [500, 1.0]],
+    "k": [[0, 0.75], [600, 0.9]]
   }
 }

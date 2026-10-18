@@ -26,9 +26,9 @@ def test_surplus_cases(case):
     assert hp.surplus_action(*case[:-1]) == case[-1]
 
 
-def bvib_on(day):
-    """The fixture's scripted basket price in BUCKs: each entry holds from its day on."""
-    return [v for start, v in FIXTURE["population"]["bvib"] if start <= day][-1]
+def bvib_on(day, series="bvib"):
+    """The fixture's scripted basket price in BUCKs (or K): each entry holds from its day on."""
+    return [v for start, v in FIXTURE["population"][series] if start <= day][-1]
 
 
 def arrivals(gain, settings=None, seed=None):
@@ -39,7 +39,7 @@ def arrivals(gain, settings=None, seed=None):
     state                       = hp.arrival_state(seed, f["name"])
     days                        = {r: [] for r in hp.ROLES}
     for day in range(f["days"]):
-        for role, k in hp.arrivals_step(state, seed, f["name"], day, f["days"], bvib_on(day), p):
+        for role, k in hp.arrivals_step(state, seed, f["name"], day, f["days"], bvib_on(day), bvib_on(day, "k"), p):
             assert k == len(days[role])
             days[role].append(day)
     return days
@@ -60,6 +60,11 @@ def test_arrivals_are_reproducible_keyed_and_drawn_by_the_price_gap():
     # The same people arrive, only sooner: the k-th arrival is never later with the response.
     for role in hp.ROLES:
         assert all(a <= b for a, b in zip(drawn[role], base[role]))
+    # K at 0.9 from day 600: debtors and savers come (1 - 0.75) / (1 - 0.9) = 2.5 times as fast.
+    for role in ("debtor", "saver"):
+        assert within(base[role], 600, 730) > 1.5 * 6 * 130 / 365.25
+    assert hp.k_factor(.75, hp.population({})) == 1 and hp.k_factor(.9, hp.population({})) == pytest.approx(2.5)
+    assert hp.k_factor(None, hp.population({})) == 1
 
 
 def test_population_settings_read_the_older_keys_and_validate():
@@ -95,6 +100,13 @@ def test_profiles_are_keyed_and_settings_separate():
         hp.profile(41404, "0/investor/0", {"role": "investor", "hold_years": 0})
 
 
+def test_divestment_waits_average_ten_years_at_a_tenth_a_year():
+    days                        = [hp.divest_day(41404, f"0/debtor/{i}", 100, .1) - 100 for i in range(2000)]
+    assert 9 * 365 < sum(days) / len(days) < 11 * 365
+    assert hp.divest_day(41404, "0/debtor/0", 100, .1) == hp.divest_day(41404, "0/debtor/0", 100, .1)
+    assert hp.divest_day(41404, "0/debtor/0", 100, 0) is None
+
+
 def test_premium_sale_keeps_even_last_unit_above_the_premium():
     ru, rb, fee                 = 12e6, 10e6, .003
     b                           = hp.premium_sale(1e6, ru, rb, fee, 1., .02, 5000)
@@ -107,12 +119,13 @@ def test_javascript_and_python_make_the_same_decisions_and_populations():
 import fs from 'node:fs';
 import * as hp from './core/js/src/agents/household-policy.js';
 const f = JSON.parse(fs.readFileSync('test/fixtures/household-policy.json'));
-const bvib = (day) => f.population.bvib.filter(([start]) => start <= day).at(-1)[1];
+const at = (series, day) => f.population[series].filter(([start]) => start <= day).at(-1)[1];
 const arrivals = (gain) => {
  const p = hp.population({...f.population.settings, gain});
  const state = hp.arrivalState(f.seed, f.population.name), days = {debtor: [], saver: [], investor: []};
  for (let day = 0; day < f.population.days; day++)
-  for (const [role] of hp.arrivalsStep(state, f.seed, f.population.name, day, f.population.days, bvib(day), p))
+  for (const [role] of hp.arrivalsStep(state, f.seed, f.population.name, day, f.population.days,
+                                       at("bvib", day), at("k", day), p))
    days[role].push(day);
  return days;
 };
@@ -121,6 +134,7 @@ console.log(JSON.stringify({
  investors: Array.from({length: 4}, (_, i) => hp.profile(f.seed, `0/investor/${i}`, {role: 'investor'})),
  arrivals: [arrivals(0), arrivals(50)],
  population: hp.population({initial: 24, arrival_rate: 12, saver_share: .25}),
+ divest: Array.from({length: 8}, (_, i) => hp.divestDay(f.seed, `0/debtor/${i}`, 30, .1)),
  decisions: f.issuance.map(c => hp.issuance({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings})))
 }));
 """
@@ -128,6 +142,7 @@ console.log(JSON.stringify({
                                                            check=True, text=True, capture_output=True).stdout)
     assert js["arrivals"] == [arrivals(0.), arrivals(50.)]
     assert js["population"] == hp.population({"initial": 24, "arrival_rate": 12, "saver_share": .25})
+    assert js["divest"] == [hp.divest_day(FIXTURE["seed"], f"0/debtor/{i}", 30, .1) for i in range(8)]
     for i, p in enumerate(js["profiles"]):
         assert p == pytest.approx(hp.profile(FIXTURE["seed"], f"0/debtor/{i}"))
     for i, p in enumerate(js["investors"]):

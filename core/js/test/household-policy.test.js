@@ -16,12 +16,13 @@ test("household surplus policies use basket parity after trading costs", () => {
 test("investors buy BUCKs unless they are dear", () => {
   for (const c of f.investor) assert.equal(investorAction(...c.slice(0, -1)), c.at(-1));
 });
-const bvib = (day) => f.population.bvib.filter(([start]) => start <= day).at(-1)[1];
+const at = (series, day) => f.population[series].filter(([start]) => start <= day).at(-1)[1];
 const arrivals = (gain, seed = f.seed) => {
   const p = population({ ...f.population.settings, gain }), state = arrivalState(seed, f.population.name);
   const days = Object.fromEntries(ROLES.map((r) => [r, []]));
   for (let day = 0; day < f.population.days; day++) {
-    for (const [role] of arrivalsStep(state, seed, f.population.name, day, f.population.days, bvib(day), p)) days[role].push(day);
+    for (const [role] of arrivalsStep(state, seed, f.population.name, day, f.population.days,
+                                      at("bvib", day), at("k", day), p)) days[role].push(day);
   }
   return days;
 };

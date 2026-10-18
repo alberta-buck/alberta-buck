@@ -37,7 +37,7 @@ def household_world(request):
             agent               = cls(77)
             agent.settings      = dict(home_k=1000, ltv=.2, apr=.055, premium_bp=50, theta=3.,
                                        cash_k=100, buffer_k=10, switch_k=0, risk=0, decision_days=1,
-                                       income_frac=.1, living_frac=.5) | settings
+                                       income_frac=.1, living_frac=.5, divest_rate=0) | settings
             agent.setup(d, scenario, rng)
             return agent
         yield d, scenario, make
@@ -145,20 +145,41 @@ def test_credit_saver_redeems_its_basket_to_repay_while_the_buck_is_cheap(househ
         assert after == drawn, "a pro-rata basket pays TOKENs; the saver keeps its receipts"
 
 
-def test_carrying_saver_borrows_at_parity_and_repays_when_k_falls(household_world):
+def test_carrying_saver_borrows_at_parity_and_repays_only_by_divesting(household_world):
     d, scenario, make           = household_world
-    a                           = make(CreditSaverAgent, cash_k=30, carry_utilization=.3, max_impact_bp=400)
+    a                           = make(CreditSaverAgent, cash_k=30, carry_utilization=.3, max_impact_bp=400,
+                                       surplus_policy="basket")
     a.act(d, scenario, 0, 0, {})
     assert not a.last_error and a.issued_invest > 0 and a._basket_receipts, "it borrows to invest at parity"
     drawn                       = -d.buck.functions.signedBalanceOf(a.proxy.address).call()
-    receipts, ctr               = len(a._basket_receipts), {}
-    state                       = a._state(d, 1) | {"k": .05}                # K has fallen far
-    a._surplus(d, state, ctr)
-    after                       = -d.buck.functions.signedBalanceOf(a.proxy.address).call()
-    if str(d.basket_impl).startswith("equity"):
-        assert len(a._basket_receipts) == receipts - 1 and after < drawn
-    else:
-        assert after == drawn, "a pro-rata basket pays TOKENs; nothing to repay with"
+    a._surplus(d, a._state(d, 1) | {"k": .05}, {})          # K has fallen far: it does not repay
+    assert -d.buck.functions.signedBalanceOf(a.proxy.address).call() == drawn
+
+
+@pytest.mark.parametrize("role", [CreditHouseholdAgent, CreditSaverAgent])
+def test_divesting_household_sells_clears_its_lien_releases_coverage_and_leaves(household_world, role):
+    d, scenario, make           = household_world
+    a                           = make(role, cash_k=30, carry_utilization=.3, max_impact_bp=2000,
+                                       surplus_policy="basket")
+    a.act(d, scenario, 0, 0, {})
+    assert -d.buck.functions.signedBalanceOf(a.proxy.address).call() > M6, "it has a lien to clear"
+    a._divest_day, ctr          = 1, {}
+    for day in range(1, 60):
+        a.act(d, scenario, day, 0, ctr)
+        assert not a.last_error
+        if a.exited:
+            break
+    assert a.exited and ctr["hhDivestments"] == 1 and ctr["hhDivested"] == 1 and "hhDivestShort" not in ctr
+    assert d.buck.functions.signedBalanceOf(a.proxy.address).call() >= 0, "the lien is cleared"
+    assert d.buck.functions.balanceOf(a.proxy.address).call() <= M6
+    assert d.buck.functions.creditLimit(a.proxy.address).call() <= M6, "its coverage is released"
+    assert a.mortgage == a.hypo_mortgage == 0 and not a._basket_receipts
+    cash                        = d.chain.balance_of(d.usdc, a.proxy.address)
+    a.act(d, scenario, 90, 0, {})
+    assert d.chain.balance_of(d.usdc, a.proxy.address) == cash, "a household that has left does nothing"
+    st                          = a.octl_state(d)
+    # Both books sold the same asset; the BUCK path's books keep what it gained and lost on the way.
+    assert abs(st["nw"] - st["hypo"]) < .1 * a._face0
 
 
 def test_always_invest_accumulates_fees_and_real_gate_bucks_before_saving(household_world):

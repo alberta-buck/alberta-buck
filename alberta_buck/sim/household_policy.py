@@ -13,17 +13,23 @@ DEFAULTS                        = dict(
     buffer_k=10., max_impact_bp=[25., 100.], decision_days=[5., 20.], surplus_policy="adaptive",
     role="debtor", credit_invest=True,
     # Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
-    # is not cheap (0: it borrows only at a premium). Above `utilization` of that limit it repays.
+    # is not cheap (0: it borrows only at a premium).
     carry_utilization=0.,
     # The investor: opening savings and yearly saving ($k), and the years before it withdraws.
-    invest_cash_k=[10., 100.], invest_income_k=[2., 20.], hold_years=[3., 15.])
+    invest_cash_k=[10., 100.], invest_income_k=[2., 20.], hold_years=[3., 15.],
+    # A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien
+    # first; it repays BUCKs at no other time (0: never).
+    divest_rate=.1)
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
 ROLES                           = ("debtor", "saver", "investor")
 SUPPLY                          = ("debtor", "saver")   # drawn while the BUCK is dear; investors while it is cheap
 GROWTH                          = ("steady", "rising", "falling")
 POPULATION                      = dict(
     initial_debtors=5, initial_savers=5, initial_investors=0, debtor_rate=3., saver_rate=3., investor_rate=0.,
-    growth="steady", gain=50., gain_cap=4., signal_halflife_days=30., settle_days=7, max_members=2000)
+    growth="steady", gain=50., gain_cap=4., signal_halflife_days=30., settle_days=7, max_members=2000,
+    # Issuers arrive faster as K rises, by (1 - k_ref) / (1 - K): the BUCKs an insured dollar yields
+    # grow without bound as K nears 1, so no rational household stays away.
+    k_ref=.75)
 # Older settings, still accepted when no role is named: a total split between savers and debtors.
 LEGACY_POPULATION               = dict(initial=10, arrival_rate=6., saver_share=.5)
 
@@ -56,7 +62,7 @@ def profile(seed, member, overrides=None):
         result[key]             = value
     for key in ("home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
                 "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
-                "invest_cash_k", "invest_income_k", "hold_years"):
+                "invest_cash_k", "invest_income_k", "hold_years", "divest_rate"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
@@ -108,8 +114,10 @@ def population(given):
     for role in ROLES:
         result[f"initial_{role}s"] = _count(float(result[f"initial_{role}s"]), f"initial_{role}s")
         result[f"{role}_rate"]  = float(result[f"{role}_rate"])
-    for key in ("gain", "gain_cap", "signal_halflife_days"):
+    for key in ("gain", "gain_cap", "signal_halflife_days", "k_ref"):
         result[key]             = float(result[key])
+    if not 0 <= result["k_ref"] < 1:
+        raise ValueError("k_ref must be in [0, 1)")
     result["settle_days"]       = _count(float(result["settle_days"]), "settle_days")
     result["max_members"]       = _count(float(result["max_members"]), "max_members")
     if result["growth"] not in GROWTH:
@@ -136,28 +144,39 @@ def _exponential(seed, population, role, k):
 
 def arrival_state(seed, population):
     """Before day 0: the averaged basket price at parity, and each role's first arrival threshold."""
-    return dict(average=1., gap=0., intensity={r: 0. for r in ROLES}, arrived={r: 0 for r in ROLES},
+    return dict(average=1., gap=0., k_factor=1., intensity={r: 0. for r in ROLES}, arrived={r: 0 for r in ROLES},
                 multiplier={r: 1. for r in ROLES}, due={r: _exponential(seed, population, r, 0) for r in ROLES})
 
 
-def arrivals_step(state, seed, population, day, days, bvib, p):
+def k_factor(k, p):
+    """How much faster issuers arrive at this K than at k_ref: (1 - k_ref) / (1 - K)."""
+    if k is None or not math.isfinite(k):
+        return 1.
+    return (1 - p["k_ref"]) / max(1e-6, 1 - k)
+
+
+def arrivals_step(state, seed, population, day, days, bvib, k, p):
     """One day of arrivals, updating `state` in place; returns [(role, k), ...] for today's arrivals.
 
     The gap is 1 - (the averaged basket price in BUCKs): positive while the BUCK is dear. Debtors and
-    savers arrive faster while it is dear, investors while it is cheap, by 1 + gain x gap, at most
-    gain_cap. A role's k-th arrival (from 0) comes when its cumulative intensity reaches the sum of
-    k + 1 unit exponentials, so a world with gain 0 has the same arrivals at the base pace.
+    savers arrive faster while it is dear, by 1 + gain x gap (at most gain_cap), and faster as K
+    rises, by (1 - k_ref) / (1 - K); investors arrive faster while it is cheap, by 1 + gain x -gap.
+    A role's k-th arrival (from 0) comes when its cumulative intensity reaches the sum of k + 1 unit
+    exponentials, so a world with gain 0 at K = k_ref has the same arrivals at the base pace.
     """
     settled                     = day >= p["settle_days"]
     if settled and bvib is not None and math.isfinite(bvib):
         state["average"]       += (1 - .5 ** (1 / p["signal_halflife_days"])) * (bvib - state["average"])
     gap                         = 1 - state["average"] if settled else 0.
     state["gap"]                = gap
+    state["k_factor"]           = k_factor(k, p)
     pace                        = growth_factor(p["growth"], day, days)
     arrived                     = []
     for role in ROLES:
         side                    = gap if role in SUPPLY else -gap
         m                       = min(p["gain_cap"], 1 + p["gain"] * max(0., side))
+        if role in SUPPLY:
+            m                  *= state["k_factor"]
         state["multiplier"][role] = m
         state["intensity"][role] += p[f"{role}_rate"] * pace * m / 365.25
         while state["intensity"][role] >= state["due"][role]:
@@ -165,6 +184,14 @@ def arrivals_step(state, seed, population, day, days, bvib, p):
             state["arrived"][role] += 1
             state["due"][role] += _exponential(seed, population, role, state["arrived"][role])
     return arrived
+
+
+def divest_day(seed, member, arrive_day, rate):
+    """The day a debtor or saver sells its insured asset: an exponential wait at `rate` a year, keyed
+    by the member alone. None when it never does."""
+    if rate <= 0:
+        return None
+    return arrive_day + int(-math.log(1 - uniform(seed, member, "divest")) * 365.25 / rate)
 
 
 def investor_action(spot, basket_usd, fee, premium):
@@ -229,8 +256,3 @@ def issuance(state, p):
         buck                    = max(0., min(t.capacity, keep, rb * p["max_impact_bp"] / 20_000) * .999)
     v                           = carry.refinance(t, carry.usdc_out(buck, ru, rb, fee), buck)
     return "invest", v
-
-
-def overdrawn(state, p):
-    """BUCKs drawn beyond the household's share of its K-scaled limit; a falling K asks for them back."""
-    return max(0., state["drawn"] - state["face"] * state["k"] * p["utilization"])

@@ -46,6 +46,10 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self.premium_rate       = p["premium_bp"]
         self.cash_buffer        = 0 if self.investor else int(p["buffer_k"] * 1000 * PARITY)
         self._exit_day          = self.arrive_day + int(365 * p["hold_years"]) if self.investor else None
+        self._divest_day        = (None if self.investor
+                                   else policy.divest_day(scenario.seed, self.member, self.arrive_day, p["divest_rate"]))
+        self._sold              = False                 # the insured asset has been sold
+        self._released          = False                 # its coverage has been released
         self.exited             = False
         self.withdrawn_usd      = 0
         self.refusals           = 0
@@ -121,7 +125,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self.hypo_living_arrears -= paid
         self.hypo_cash         -= paid
         self.hypo_living       += paid
-        premium                 = self._face0 * self.premium_rate // 10_000 // 12
+        premium                 = 0 if self._sold else self._face0 * self.premium_rate // 10_000 // 12
         if not self.joined:
             self.premium_arrears += premium
         paid                    = self._pay_bank(d, self.premium_arrears)
@@ -378,9 +382,6 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             self.last_action    = "fund-issue"
             return
         p                       = self.p
-        if p["carry_utilization"] > 0 and self.mortgage <= PARITY and policy.overdrawn(state, p) > 1:
-            # K has fallen below what this household keeps drawn: repay from the basket, whatever the price.
-            self._redeem_to_retire(d, ctr)
         cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
         spare                   = max(0, cash - self.cash_buffer)
         action                  = policy.surplus_action(p["surplus_policy"], state["ru"] / state["rb"],
@@ -401,6 +402,91 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
                 ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
             self._redeem_to_retire(d, ctr)
         self.last_action        = action
+
+    def _divest(self, d, ctr):
+        """Sell the insured asset. Its price pays any mortgage left; the basket shares are redeemed and
+        their BUCKs repay the lien; the rest of the lien is bought back, a capped bite a day; then the
+        coverage is released (its deposit refunded), the BUCKs left are sold, and the household leaves.
+        The counterfactual sells the same asset on the same day and pays its mortgage."""
+        if not self._sold:
+            self._sold          = True
+            d.chain.send(d.usdc.functions.mint(self.proxy.address, self._face0))
+            self.hypo_cash     += self._face0
+            paid                = self._pay_bank(d, self.mortgage)
+            self.mortgage      -= paid
+            self.external_paid += paid
+            paid                = min(self.hypo_mortgage, self.hypo_cash)
+            self.hypo_cash     -= paid
+            self.hypo_mortgage -= paid
+            self.hypo_paid     += paid
+            ctr["hhDivestments"] = ctr.get("hhDivestments", 0) + 1
+        if not self._redeem_all(d, ctr):
+            return                                      # the guard refused a redemption: tomorrow
+        drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
+        if drawn > PARITY:
+            if cash <= PARITY:
+                ctr["hhDivestShort"] = ctr.get("hhDivestShort", 0) + 1
+                self.exited     = True                  # nothing left to buy the lien back with
+                return
+            ru, rb              = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+            want                = min(drawn * 101 // 100, rb // 2)
+            cost                = int(want * ru / ((rb - want) * (1 - d.fee_ub / 1e6))) + 1
+            got                 = self._buy_cash(d, min(cost, _impact_cap(ru, self.max_impact_bp)))
+            self.unwound       += got
+            ctr["hhDivestBought"] = ctr.get("hhDivestBought", 0) + got
+            return
+        if not self._released:
+            self._released      = True
+            # Releasing coverage lowers the spendable by its limit less the deposit it refunds; a
+            # whisker less each pass, so rounding never asks for more than the coverage can give.
+            for _ in range(3):
+                limit           = d.buck.functions.creditLimit(self.proxy.address).call()
+                deposit         = sum(d.buck.functions.mintsPrincipal(t).call() for t in self._token_ids)
+                amount          = max(0, limit - deposit) * 999 // 1000
+                if amount <= PARITY:
+                    break
+                try:
+                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi("burn(uint256)", args=[amount]))
+                except Exception as exc:
+                    self._refused(exc, ctr)
+                    break
+        held                    = d.buck.functions.balanceOf(self.proxy.address).call()
+        if held > PARITY:
+            _, rb               = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+            bite                = min(held - PARITY // 2, max(PARITY, _impact_cap(rb, self.max_impact_bp)))
+            self._swap_via_simlp(d, d.pool_ub, d.buck, bite, self.proxy.address)
+            if held - bite > PARITY:
+                return
+        self.exited             = True
+        ctr["hhDivested"]       = ctr.get("hhDivested", 0) + 1
+
+    def _redeem_all(self, d, ctr) -> bool:
+        """Redeem every savings receipt and move what it pays (and any TOKEN waiting) to the borrower's
+        account. False while the basket's guard refuses one."""
+        saver                   = self._savings_proxy
+        if saver is None:
+            return True
+        for rid in list(self._basket_receipts):
+            try:
+                self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                    "redeem(uint256,uint256,uint256)", args=[rid, 0, 0]), proxy=saver)
+            except Exception as exc:
+                self._refused(exc, ctr)
+                return False
+            principal, shares   = self._receipt_book.pop(rid, (0, 0))
+            self._basket_receipts.remove(rid)
+            self._basket_in    -= principal
+            self._basket_shares -= shares
+        held                    = d.buck.functions.balanceOf(saver.address).call()
+        if held > 0:
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi("transfer", args=[self.proxy.address, held]),
+                             proxy=saver)
+        for i, token in enumerate(d.tokens):
+            amount              = d.chain.balance_of(token, saver.address)
+            if amount:
+                self._swap_via_simlp(d, d.pool_usdc[i], token, amount, self.proxy.address, from_proxy=saver)
+        return True
 
     def _redeem_to_retire(self, d, ctr):
         """The other half of borrowing to invest: while the BUCK is cheap, redeem a basket receipt (an
@@ -443,6 +529,16 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             self.hypo_cash      = cash
             self._started      = self._growth_arrived = True
         self._advance(d, day)
+        if self._divest_day is not None and day >= self._divest_day:
+            # Selling the asset is worked every day until the lien is cleared and the household leaves.
+            self.last_error     = ""
+            self.last_action    = "divest"
+            try:
+                self._divest(d, ctr)
+            except Exception as exc:
+                self.last_error = repr(exc)[:200]
+                ctr["household_err"] = self.last_error
+            return
         if day < self._next_decision:
             return
         period                  = self.p["decision_days"]
@@ -605,8 +701,12 @@ class HouseholdPopulationAgent(Agent):
                 bvib            = d.basket.functions.basketValueInBuck().call() / 1e18
             except Exception:
                 bvib            = None  # an unreadable price leaves the average where it was
+        try:
+            k_now               = d.kctrl.functions.buckK().call() / 1e18
+        except Exception:
+            k_now               = None  # an unreadable K leaves the issuers' pace at its reference
         for role, k in policy.arrivals_step(self.state, scenario.seed, self.population, day, scenario.days,
-                                            bvib, self.pop):
+                                            bvib, k_now, self.pop):
             self._arrive(d, scenario, rng, agents, arbs, role, self.pop[f"initial_{role}s"] + k, day)
         ctr["pop"]              = self.summary()
 
@@ -624,7 +724,8 @@ class HouseholdPopulationAgent(Agent):
 
     def summary(self):
         s                       = self.state
-        out                     = dict(average=s["average"], gap=s["gap"], multiplier=dict(s["multiplier"]))
+        out                     = dict(average=s["average"], gap=s["gap"], k_factor=s["k_factor"],
+                                       multiplier=dict(s["multiplier"]))
         for role in policy.ROLES:
             mine                = [a for a in self.members if a.p["role"] == role]
             out[role]           = dict(arrived=len(mine), active=sum(a._started and not a.exited for a in mine),

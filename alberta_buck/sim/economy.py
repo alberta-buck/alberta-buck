@@ -237,7 +237,10 @@ def judge(vector: Path) -> dict:
         arrived={r: pop.get(r, {}).get("arrived", 0) for r in ("debtor", "saver", "investor")},
         supply_multiplier=sum(m["debtor"] for m in multipliers) / len(multipliers) if multipliers else None,
         demand_multiplier=sum(m["investor"] for m in multipliers) / len(multipliers) if multipliers else None,
-        errors=errors, refused=last.get("household_refused", 0))
+        errors=errors, refused=last.get("household_refused", 0),
+        divested=last.get("hh_divested", 0), divest_bought=last.get("hh_divest_bought", 0) / 1e12,
+        divest_short=last.get("hh_divest_short", 0),
+        k_factor=sum(f["pop"].get("k_factor", 1) for f in window if f.get("pop")) / max(1, len(multipliers)))
     result["passed"]            = (result["mean_err"] < .01 and result["p99_err"] < .05 and interior >= .95
                                    and longest <= 30 and errors == 0)
     return result

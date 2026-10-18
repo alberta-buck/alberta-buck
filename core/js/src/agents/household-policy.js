@@ -7,10 +7,13 @@ export const DEFAULTS = {
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
   role: "debtor", credit_invest: true,
   // Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
-  // is not cheap (0: it borrows only at a premium). Above `utilization` of that limit it repays.
+  // is not cheap (0: it borrows only at a premium).
   carry_utilization: 0,
   // The investor: opening savings and yearly saving ($k), and the years before it withdraws.
   invest_cash_k: [10, 100], invest_income_k: [2, 20], hold_years: [3, 15],
+  // A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien first;
+  // it repays BUCKs at no other time (0: never).
+  divest_rate: .1,
 };
 export const POLICIES = ["adaptive", "basket", "retire", "discount"];
 export const ROLES = ["debtor", "saver", "investor"];
@@ -19,6 +22,8 @@ export const GROWTH = ["steady", "rising", "falling"];
 export const POPULATION = {
   initial_debtors: 5, initial_savers: 5, initial_investors: 0, debtor_rate: 3, saver_rate: 3, investor_rate: 0,
   growth: "steady", gain: 50, gain_cap: 4, signal_halflife_days: 30, settle_days: 7, max_members: 2000,
+  // Issuers arrive faster as K rises, by (1 - k_ref) / (1 - K).
+  k_ref: .75,
 };
 // Older settings, still accepted when no role is named: a total split between savers and debtors.
 export const LEGACY_POPULATION = { initial: 10, arrival_rate: 6, saver_share: .5 };
@@ -46,7 +51,7 @@ export function profile(seed, member, overrides = {}) {
   }
   for (const key of ["home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
-    "invest_cash_k", "invest_income_k", "hold_years"]) {
+    "invest_cash_k", "invest_income_k", "hold_years", "divest_rate"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
@@ -91,7 +96,8 @@ export function population(given = {}) {
     p[`initial_${role}s`] = count(Number(p[`initial_${role}s`]), `initial_${role}s`);
     p[`${role}_rate`] = Number(p[`${role}_rate`]);
   }
-  for (const k of ["gain", "gain_cap", "signal_halflife_days"]) p[k] = Number(p[k]);
+  for (const k of ["gain", "gain_cap", "signal_halflife_days", "k_ref"]) p[k] = Number(p[k]);
+  if (!(p.k_ref >= 0 && p.k_ref < 1)) throw new Error("k_ref must be in [0, 1)");
   p.settle_days = count(Number(p.settle_days), "settle_days");
   p.max_members = count(Number(p.max_members), "max_members");
   if (!GROWTH.includes(p.growth)) throw new Error(`growth must be one of ${GROWTH}`);
@@ -115,24 +121,31 @@ const exponential = (seed, pop, role, k) => -Math.log(1 - uniform(seed, pop, `${
 // Before day 0: the averaged basket price at parity, and each role's first arrival threshold.
 export function arrivalState(seed, pop) {
   const each = (f) => Object.fromEntries(ROLES.map((r) => [r, f(r)]));
-  return { average: 1, gap: 0, intensity: each(() => 0), arrived: each(() => 0), multiplier: each(() => 1),
-           due: each((r) => exponential(seed, pop, r, 0)) };
+  return { average: 1, gap: 0, k_factor: 1, intensity: each(() => 0), arrived: each(() => 0),
+           multiplier: each(() => 1), due: each((r) => exponential(seed, pop, r, 0)) };
 }
+
+// How much faster issuers arrive at this K than at k_ref: (1 - k_ref) / (1 - K).
+export const kFactor = (k, p) => k === null || k === undefined || !Number.isFinite(k) ? 1
+  : (1 - p.k_ref) / Math.max(1e-6, 1 - k);
 
 // One day of arrivals, updating `state` in place; returns [[role, k], ...]. Mirrors
 // household_policy.arrivals_step: the gap is 1 - the averaged basket price in BUCKs (positive while the
-// BUCK is dear); debtors and savers arrive faster while it is dear, investors while it is cheap.
-export function arrivalsStep(state, seed, pop, day, days, bvib, p) {
+// BUCK is dear); debtors and savers arrive faster while it is dear and as K rises, investors while it
+// is cheap.
+export function arrivalsStep(state, seed, pop, day, days, bvib, k, p) {
   const settled = day >= p.settle_days;
   if (settled && bvib !== null && bvib !== undefined && Number.isFinite(bvib)) {
     state.average += (1 - .5 ** (1 / p.signal_halflife_days)) * (bvib - state.average);
   }
   const gap = settled ? 1 - state.average : 0;
   state.gap = gap;
+  state.k_factor = kFactor(k, p);
   const pace = growthFactor(p.growth, day, days), arrived = [];
   for (const role of ROLES) {
     const side = SUPPLY.includes(role) ? gap : -gap;
-    const m = Math.min(p.gain_cap, 1 + p.gain * Math.max(0, side));
+    let m = Math.min(p.gain_cap, 1 + p.gain * Math.max(0, side));
+    if (SUPPLY.includes(role)) m *= state.k_factor;
     state.multiplier[role] = m;
     state.intensity[role] += p[`${role}_rate`] * pace * m / 365.25;
     while (state.intensity[role] >= state.due[role]) {
@@ -143,6 +156,11 @@ export function arrivalsStep(state, seed, pop, day, days, bvib, p) {
   }
   return arrived;
 }
+
+// The day a debtor or saver sells its insured asset: an exponential wait at `rate` a year, keyed by the
+// member alone; null when it never does (household_policy.divest_day).
+export const divestDay = (seed, member, arriveDay, rate) => rate <= 0 ? null
+  : arriveDay + Math.trunc(-Math.log(1 - uniform(seed, member, "divest")) * 365.25 / rate);
 
 // An investor holds BUCKs as its money: it buys them, unless they are dear by more than its premium
 // after the fee; then it converts what it holds into basket shares (household_policy.investor_action).
@@ -239,6 +257,3 @@ export function issuance(s, p) {
   if (buck <= 0 && keep > 0 && !cheap) buck = Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999);
   return ["invest", refinance(t, usdcOut(buck, ru, rb, fee), buck)];
 }
-
-// BUCKs drawn beyond the household's share of its K-scaled limit; a falling K asks for them back.
-export const overdrawn = (s, p) => Math.max(0, s.drawn - s.face * s.k * p.utilization);

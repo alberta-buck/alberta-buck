@@ -53,9 +53,12 @@ investor_rate = 30.0
 growth = "steady"
 gain = 200.0                # pace x (1 + 200 x gap): twice as fast at a 0.5% gap
 gain_cap = 8.0
+k_ref = 0.75                # issuers also arrive (1 - 0.75) / (1 - K) times as fast: 5x at K 0.95
 signal_halflife_days = 30.0
-surplus_policy = "adaptive"
-carry_utilization = 0.3     # savers keep 30% of their K-scaled limit drawn: the flow K moves
+# Households repay BUCKs only when they sell the asset (10% a year); spare income goes into the basket.
+surplus_policy = "basket"
+divest_rate = 0.1
+carry_utilization = 0.3     # savers keep 30% of their K-scaled limit drawn
 
 [agents.BasketWheelAgent]
 impl = "solidity"
