@@ -79,6 +79,9 @@ def cells(which: str) -> list[Cell]:
         return grid
     every                       = grid + [Cell("mid", "mid", p, SEEDS[0], v) for v in ("open", "rising", "falling")
                                           for p in PRICES]
+    if which == "probe":        # the centre on both seeds and paths, and the two corners that failed before
+        return ([Cell("mid", "mid", p, s) for s in SEEDS for p in PRICES]
+                + [Cell("hi", "mid", "history", SEEDS[0]), Cell("lo", "hi", "history", SEEDS[0])])
     if which == "paydown":      # the discounted paydown on and off, on the centre and two corners
         probe                   = ([Cell("mid", "mid", p, SEEDS[0]) for p in PRICES]
                                    + [Cell("hi", "mid", "history", SEEDS[0]), Cell("lo", "hi", "history", SEEDS[0])])
