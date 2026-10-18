@@ -334,6 +334,28 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-18: the ablation (=build/sim/economy/ablation/=, seed 41404, five years) puts the
+  regression on one change. Each change alone, mean error / 99th pct / K at the end:
+
+  | Cell | K pace only | divestment only | =basket= policy only |
+  |------+-------------+-----------------+----------------------|
+  | centre, history | 0.53% / 2.0% / 0.58 | 0.64% / 2.3% / 0.51 | 0.89% / 4.0% / 0.55 |
+  | centre, revert | 0.71% / 1.9% / 0.55 | 0.65% / 1.7% / 0.56 | 0.95% / 2.8% / 0.50 |
+  | high supply, history | 0.63% / 1.9% / 0.37 | 0.58% / 2.0% / 0.30 | 2.11% / 18.9% / 0 (86 days) |
+
+  The K pace and divestment each hold parity as well as before (the pace also slows issuers when
+  K is low: 0.5--0.7x at K 0.4--0.6). Investing every household's spare income in the basket is
+  what breaks it: TOKEN deposits grow the basket's equity, the machine lets out BUCKs against it
+  whatever the BUCK's price, and on the high-supply side that cheapens the BUCK until K reaches 0.
+- 2026-10-18: decision 8 at =3027dad= (=build/sim/economy/paced/index.html=): *7 of 42 pass*, against
+  36 for =balanced=. Most cells now fail on parity, mean error 1.0--3.1% against 0.5--0.9%. Two
+  high-supply history cells take K to its floor of 0 (the BUCK 2.4% cheap), and the demand-heavy
+  corner still reaches 0.95 although issuers arrive 2.2--3.2 times as fast there. At the centre the
+  bias barely moved (mean bvib 1.0035 against 1.0020); the error doubled through volatility, while
+  the households' basket holdings doubled (7.7M to 16.5M) because the =basket= policy invests all
+  spare income. In the demand-heavy corner the machine holds 14M more BUCKs than its lien. The three
+  changes went in together; =d3b33d2= adds a switch for the K pace and ablation cells running each
+  change alone (=build/sim/economy/ablation/=).
 - 2026-10-18: seed 45517's 18 grid cells: 15 pass, the same pattern. Across both seeds *36 of 42
   pass*, and all six failures are demand-heavy cells with K on its 0.95 ceiling: low supply with
   high demand on both paths and seeds (71--219 days at the rail, mean error 1.2--1.4%), and mid
