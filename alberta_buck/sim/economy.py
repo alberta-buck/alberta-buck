@@ -69,9 +69,12 @@ def cells(which: str) -> list[Cell]:
     grid                        = [Cell(s, dm, p, seed) for seed in SEEDS for p in PRICES for s in FACTORS for dm in FACTORS]
     if which == "grid":
         return grid
+    every                       = grid + [Cell("mid", "mid", p, SEEDS[0], v) for v in VARIANTS for p in PRICES]
     if which == "all":
-        return grid + [Cell("mid", "mid", p, SEEDS[0], v) for v in VARIANTS for p in PRICES]
-    raise ValueError(f"unknown cells {which!r}: centre, grid or all")
+        return every
+    if which == "rest":         # everything but the centre, when the centre runs as its own campaign
+        return [c for c in every if c not in centre]
+    raise ValueError(f"unknown cells {which!r}: centre, grid, rest or all")
 
 
 def centre_rates(root: Path) -> dict:
