@@ -6,6 +6,9 @@ export const DEFAULTS = {
   retire_disc: [.005, .03], issue_premium: [.005, .025], utilization: [.65, .85],
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
   role: "debtor", credit_invest: true,
+  // Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
+  // is not cheap (0: it borrows only at a premium). Above `utilization` of that limit it repays.
+  carry_utilization: 0,
   // The investor: opening savings and yearly saving ($k), and the years before it withdraws.
   invest_cash_k: [10, 100], invest_income_k: [2, 20], hold_years: [3, 15],
 };
@@ -51,7 +54,8 @@ export function profile(seed, member, overrides = {}) {
   if (!POLICIES.includes(p.surplus_policy)) throw new Error("unknown household surplus_policy");
   if (!ROLES.includes(p.role)) throw new Error("unknown household role");
   if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0)) throw new Error("invalid household price thresholds");
-  if (!(p.utilization > 0 && p.utilization <= 1 && p.living_frac >= 0 && p.living_frac <= 1)) {
+  if (!(p.utilization > 0 && p.utilization <= 1 && p.living_frac >= 0 && p.living_frac <= 1
+    && p.carry_utilization >= 0 && p.carry_utilization <= 1)) {
     throw new Error("invalid household budget fractions");
   }
   p.decision_days = Math.max(1, Math.trunc(p.decision_days));
@@ -227,7 +231,14 @@ export function issuance(s, p) {
   if (!p.credit_invest || ["retire", "discount"].includes(p.surplus_policy)) return ["hold", NO];
   t = terms(s, p, true);
   const limit = s.face * s.k * p.utilization - s.drawn;
-  const buck = premiumSale(Math.min(capacity(t), Math.max(0, limit)), ru, rb, fee,
-                           s.basket_usd, p.issue_premium, p.max_impact_bp);
+  let buck = premiumSale(Math.min(capacity(t), Math.max(0, limit)), ru, rb, fee,
+                         s.basket_usd, p.issue_premium, p.max_impact_bp);
+  const keep = s.face * s.k * p.carry_utilization - s.drawn;
+  const cheap = ru / rb / (1 - fee) < s.basket_usd * (1 - p.retire_disc);
+  // Carry: keep this share of the K-scaled limit drawn and invested while the BUCK is not cheap.
+  if (buck <= 0 && keep > 0 && !cheap) buck = Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999);
   return ["invest", refinance(t, usdcOut(buck, ru, rb, fee), buck)];
 }
+
+// BUCKs drawn beyond the household's share of its K-scaled limit; a falling K asks for them back.
+export const overdrawn = (s, p) => Math.max(0, s.drawn - s.face * s.k * p.utilization);

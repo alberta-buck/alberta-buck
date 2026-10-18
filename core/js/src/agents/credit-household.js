@@ -1,6 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, overdrawn, ROLES } from "./household-policy.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -150,6 +150,8 @@ export class CreditHouseholdAgent {
   async surplus(world, state) {
     if (this.fundingPending) { this.lastAction = "fund-issue"; return; }
     const p = this.p, { ru, rb, fee } = state;
+    // K has fallen below what this household keeps drawn: repay from the basket, whatever the price.
+    if (p.carry_utilization > 0 && this.mortgage <= E6 && overdrawn(state, p) > 1) await this.redeemToRetire(world);
     const spare = max(0n, await world.households.cash(this.account) - this.buffer);
     const action = surplusAction(p.surplus_policy, ru / rb, state.basket_usd, fee, p.retire_disc, p.issue_premium);
     if (action === "invest") await this.invest(world, spare);

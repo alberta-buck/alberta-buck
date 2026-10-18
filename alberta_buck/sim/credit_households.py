@@ -377,6 +377,9 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             self.last_action    = "fund-issue"
             return
         p                       = self.p
+        if p["carry_utilization"] > 0 and self.mortgage <= PARITY and policy.overdrawn(state, p) > 1:
+            # K has fallen below what this household keeps drawn: repay from the basket, whatever the price.
+            self._redeem_to_retire(d, ctr)
         cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
         spare                   = max(0, cash - self.cash_buffer)
         action                  = policy.surplus_action(p["surplus_policy"], state["ru"] / state["rb"],

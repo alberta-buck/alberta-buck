@@ -12,6 +12,9 @@ DEFAULTS                        = dict(
     retire_disc=[.005, .03], issue_premium=[.005, .025], utilization=[.65, .85],
     buffer_k=10., max_impact_bp=[25., 100.], decision_days=[5., 20.], surplus_policy="adaptive",
     role="debtor", credit_invest=True,
+    # Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
+    # is not cheap (0: it borrows only at a premium). Above `utilization` of that limit it repays.
+    carry_utilization=0.,
     # The investor: opening savings and yearly saving ($k), and the years before it withdraws.
     invest_cash_k=[10., 100.], invest_income_k=[2., 20.], hold_years=[3., 15.])
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
@@ -66,7 +69,8 @@ def profile(seed, member, overrides=None):
         raise ValueError("unknown household role")
     if not 0 <= result["retire_disc"] < 1 or result["issue_premium"] < 0:
         raise ValueError("invalid household price thresholds")
-    if not 0 < result["utilization"] <= 1 or not 0 <= result["living_frac"] <= 1:
+    if (not 0 < result["utilization"] <= 1 or not 0 <= result["living_frac"] <= 1
+            or not 0 <= result["carry_utilization"] <= 1):
         raise ValueError("invalid household budget fractions")
     result["decision_days"]      = max(1, int(result["decision_days"]))
     result["phase"]              = int(uniform(seed, member, "phase") * result["decision_days"])
@@ -218,5 +222,15 @@ def issuance(state, p):
     limit                       = state["face"] * state["k"] * p["utilization"] - state["drawn"]
     buck                        = premium_sale(min(t.capacity, max(0., limit)), ru, rb, fee,
                                                state["basket_usd"], p["issue_premium"], p["max_impact_bp"])
+    keep                        = state["face"] * state["k"] * p["carry_utilization"] - state["drawn"]
+    cheap                       = ru / rb / (1 - fee) < state["basket_usd"] * (1 - p["retire_disc"])
+    if buck <= 0 and keep > 0 and not cheap:
+        # Carry: keep this share of the K-scaled limit drawn and invested while the BUCK is not cheap.
+        buck                    = max(0., min(t.capacity, keep, rb * p["max_impact_bp"] / 20_000) * .999)
     v                           = carry.refinance(t, carry.usdc_out(buck, ru, rb, fee), buck)
     return "invest", v
+
+
+def overdrawn(state, p):
+    """BUCKs drawn beyond the household's share of its K-scaled limit; a falling K asks for them back."""
+    return max(0., state["drawn"] - state["face"] * state["k"] * p["utilization"])

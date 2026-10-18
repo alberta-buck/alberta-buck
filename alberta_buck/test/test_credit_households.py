@@ -145,6 +145,22 @@ def test_credit_saver_redeems_its_basket_to_repay_while_the_buck_is_cheap(househ
         assert after == drawn, "a pro-rata basket pays TOKENs; the saver keeps its receipts"
 
 
+def test_carrying_saver_borrows_at_parity_and_repays_when_k_falls(household_world):
+    d, scenario, make           = household_world
+    a                           = make(CreditSaverAgent, cash_k=30, carry_utilization=.3, max_impact_bp=400)
+    a.act(d, scenario, 0, 0, {})
+    assert not a.last_error and a.issued_invest > 0 and a._basket_receipts, "it borrows to invest at parity"
+    drawn                       = -d.buck.functions.signedBalanceOf(a.proxy.address).call()
+    receipts, ctr               = len(a._basket_receipts), {}
+    state                       = a._state(d, 1) | {"k": .05}                # K has fallen far
+    a._surplus(d, state, ctr)
+    after                       = -d.buck.functions.signedBalanceOf(a.proxy.address).call()
+    if str(d.basket_impl).startswith("equity"):
+        assert len(a._basket_receipts) == receipts - 1 and after < drawn
+    else:
+        assert after == drawn, "a pro-rata basket pays TOKENs; nothing to repay with"
+
+
 def test_always_invest_accumulates_fees_and_real_gate_bucks_before_saving(household_world):
     d, scenario, make           = household_world
     a                           = make(cash_k=10, switch_k=5, surplus_policy="basket", max_impact_bp=400)

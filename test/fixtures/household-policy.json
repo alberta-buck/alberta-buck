@@ -12,7 +12,10 @@
     {"name": "premium investment", "state": {"mortgage": 0, "ru": 11000000}, "settings": {}, "kind": "invest", "go": true},
     {"name": "no investment at par", "state": {"mortgage": 0}, "settings": {}, "kind": "invest", "go": false},
     {"name": "retirement policy does not borrow to invest", "state": {"mortgage": 0, "ru": 11000000}, "settings": {"surplus_policy": "retire"}, "kind": "hold", "go": false},
-    {"name": "repaid activated line can issue again", "state": {"mortgage": 0, "ru": 11000000, "joined": true, "spendable": 100000, "unactivated": 0}, "settings": {}, "kind": "invest", "go": true}
+    {"name": "repaid activated line can issue again", "state": {"mortgage": 0, "ru": 11000000, "joined": true, "spendable": 100000, "unactivated": 0}, "settings": {}, "kind": "invest", "go": true},
+    {"name": "carry keeps a share of the limit drawn at parity", "state": {"mortgage": 0}, "settings": {"carry_utilization": 0.5}, "kind": "invest", "go": true},
+    {"name": "no carry while the BUCK is cheap", "state": {"mortgage": 0, "ru": 9000000}, "settings": {"carry_utilization": 0.5}, "kind": "invest", "go": false},
+    {"name": "no carry beyond the share already drawn", "state": {"mortgage": 0, "drawn": 400000}, "settings": {"carry_utilization": 0.5}, "kind": "invest", "go": false}
   ],
   "surplus": [
     ["adaptive", 1.1, 1.2, 0.003, 0.02, 0.02, "retire"],
