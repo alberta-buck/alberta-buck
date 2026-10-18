@@ -60,6 +60,14 @@ Intervention actions (the four surfaces):
     remove_agents {cls, idx, mode="wind_down"|"hard"}
                   wind_down: util_target -> 0 (retires via the normal loop)
                   hard: stops acting (positions freeze where they stand)
+
+  the household economy (doc/review/household-economy-plan.org):
+    arm_shock      {side="buy"|"sell", usd, days}   a ShockAgent's one-leg pressure
+    set_population {debtor_rate|saver_rate|investor_rate|rate_scale, gain,
+                    apr_shift, income_scale[, days], exit_now}
+                   rates from today; external mortgage rates move for arrivals and
+                   present debtors; incomes scale (for `days`, else for good); a
+                   fraction of present investors withdraw now
 """
 
 from __future__ import annotations
@@ -531,6 +539,19 @@ class Interventions:
                 self.arbs.append(a)
                 added.append(a.idx)
             return f"added {n} {iv['cls']} (idx {added})"
+        # ---- the household economy's disturbances --------------------- #
+        if act == "arm_shock":
+            shock = self._of_class("ShockAgent")
+            if not shock:
+                raise ValueError("arm_shock needs a ShockAgent in the cast")
+            days = int(iv.get("days", 1))
+            shock[0].arm(iv["side"], float(iv["usd"]), days)
+            return f"{iv['side']} shock of ${float(iv['usd']):,.0f} over {days} days"
+        if act == "set_population":
+            pops = self._of_class("HouseholdPopulationAgent")
+            if not pops:
+                raise ValueError("set_population needs a HouseholdPopulationAgent in the cast")
+            return "; ".join(p.disturb(iv, day) for p in pops)
         if act == "remove_agents":
             sel = self._select(iv)
             mode = iv.get("mode", "wind_down")

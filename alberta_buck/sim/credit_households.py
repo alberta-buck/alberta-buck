@@ -511,11 +511,50 @@ class HouseholdPopulationAgent(Agent):
         self.state              = policy.arrival_state(scenario.seed, self.population)
         self.members            = []
         self._opened            = False
+        self._restore           = []                    # (day, member, income) a temporary income shock ends
+
+    def disturb(self, iv, day):
+        """The set_population intervention: rates, gain, external rates, incomes and investors' exits."""
+        notes                   = []
+        scale                   = float(iv.get("rate_scale", 1.))
+        for role in policy.ROLES:
+            key                 = f"{role}_rate"
+            if key in iv or scale != 1.:
+                self.pop[key]   = float(iv.get(key, self.pop[key])) * scale
+                notes.append(f"{key} {self.pop[key]:g}")
+        if "gain" in iv:
+            self.pop["gain"]    = float(iv["gain"])
+            notes.append(f"gain {self.pop['gain']:g}")
+        if "apr_shift" in iv:
+            shift               = float(iv["apr_shift"])
+            apr                 = self.settings["apr"]
+            self.settings["apr"] = [a + shift for a in apr] if isinstance(apr, (list, tuple)) else apr + shift
+            for a in self.members:
+                if not a.investor:
+                    a.apr       = a.p["apr"] = max(0., a.apr + shift)
+            notes.append(f"external rates {shift:+.2%}")
+        if "income_scale" in iv:
+            factor, days        = float(iv["income_scale"]), iv.get("days")
+            for a in self.members:
+                if days is not None:
+                    self._restore.append((day + int(days), a, a.income_annual))
+                a.income_annual = int(a.income_annual * factor)
+            notes.append(f"incomes x{factor:g}" + (f" for {int(days)} days" if days is not None else ""))
+        if "exit_now" in iv:
+            present             = [a for a in self.members if a.investor and a._started and not a.exited]
+            leaving             = present[:round(float(iv["exit_now"]) * len(present))]
+            for a in leaving:
+                a._exit_day     = day
+            notes.append(f"{len(leaving)} of {len(present)} investors withdraw")
+        return ", ".join(notes) or "no change"
 
     def act(self, d, scenario, day, tick, ctr):
         pass                    # members act for themselves; arrivals are decided in day_start
 
     def day_start(self, d, scenario, day, ctr, agents, arbs, rng):
+        for end, member, income in [r for r in self._restore if r[0] <= day]:
+            member.income_annual = income
+        self._restore           = [r for r in self._restore if r[0] > day]
         if not self._opened:
             self._opened        = True
             for role in policy.ROLES:

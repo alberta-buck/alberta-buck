@@ -324,6 +324,32 @@ def test_population_adds_arrivals_to_the_live_lists(household_world):
         assert not a.last_error
 
 
+def test_population_disturbances_move_rates_incomes_and_exits(household_world):
+    from alberta_buck.sim import household_policy as policy
+    d, scenario, make           = household_world
+    pop                         = HouseholdPopulationAgent(50)
+    pop.setup(d, scenario, None)
+    pop.pop                     = policy.population(dict(initial_debtors=1, initial_savers=0, initial_investors=4,
+                                                         debtor_rate=0, saver_rate=0, investor_rate=0))
+    agents, arbs, ctr           = [pop], [pop], {}
+    pop.day_start(d, scenario, 0, ctr, agents, arbs, None)
+    for a in agents[1:]:
+        a.act(d, scenario, 0, 0, ctr)
+    debtor, investors           = agents[1], agents[2:]
+    apr, income                 = debtor.apr, investors[0].income_annual
+    note                        = pop.disturb(dict(investor_rate=24, apr_shift=.02, income_scale=.5, days=30,
+                                                   exit_now=.5), 5)
+    assert "investor_rate 24" in note and "2 of 4 investors" in note
+    assert pop.pop["investor_rate"] == 24 and debtor.apr == debtor.p["apr"] == pytest.approx(apr + .02)
+    assert pop.settings["apr"][0] == pytest.approx(policy.DEFAULTS["apr"][0] + .02), "arrivals face it too"
+    assert investors[0].income_annual == income // 2
+    assert [a._exit_day for a in investors[:2]] == [5, 5] and investors[2]._exit_day > 5
+    pop.day_start(d, scenario, 35, ctr, agents, arbs, None)
+    assert investors[0].income_annual == income, "a temporary income shock ends"
+    pop.disturb(dict(rate_scale=.5), 40)
+    assert pop.pop["investor_rate"] == 12 and pop.pop["debtor_rate"] == 0
+
+
 def test_cash_flow_ledger_matches_javascript(household_world):
     import json
     from pathlib import Path
