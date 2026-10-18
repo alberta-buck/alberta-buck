@@ -325,6 +325,17 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-18: seed 41404's grid at =a3dd65d= (=build/sim/economy/balanced/index.html=, 24 five-year
+  runs of 45--100 minutes each): *21 pass*. Parity holds in every cell (mean |bvib - 1| 0.46--1.23%,
+  99th percentile below 2.8%). K settles where the imbalance puts it: high supply with low demand
+  ends at 0.14--0.18, the centre at 0.47--0.54, high demand at 0.87--0.89; with gain 0 (=open=) the
+  centre still passes but K ends at 0.31--0.33 against 0.47--0.54 with the price response. The three
+  failures are demand-heavy: low supply with high demand puts K on its 0.95 ceiling (219 days on
+  history, 71 on revert; mean error 1.2%, the BUCK dear), and mid supply with high demand on revert
+  keeps K inside the band on 92% of days (95% required), touching 0.92 without a rail day. The
+  ceiling is where the supply side has nothing left to give: more debtors and savers would have to
+  arrive faster while the BUCK is dear. Also fixed: =test_economy='s short run left keyed draws
+  selected for the rest of the test session, which broke a mature-world stream test.
 - 2026-10-17: the balanced centre holds for 400 days (=build/diag/balanced*=, from day 60):
 
   | Run | Mean bvib | Mean error | 99th pct | K at day 400 |

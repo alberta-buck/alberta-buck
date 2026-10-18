@@ -29,13 +29,17 @@ def test_adopt_names_only_completed_checkpoints(tmp_path):
 
 
 def test_a_short_economy_runs_to_its_closing_summary():
-    from alberta_buck.sim import experiment as expmod
+    from alberta_buck.sim import experiment as expmod, rng
     from alberta_buck.sim.loop import run
     from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
-    scenario                    = expmod.build(expmod.load(economy.repo_root() / economy.EXPERIMENT))
-    scenario.days               = 3
-    with PyrevmAnvil(port=0) as evm:
-        summary                 = run(scenario, evm, out_path=None, verbose=False, basket_impl="equity-machine")
+    mode                        = rng.mode()            # the economy selects keyed draws process-wide
+    try:
+        scenario                = expmod.build(expmod.load(economy.repo_root() / economy.EXPERIMENT))
+        scenario.days           = 3
+        with PyrevmAnvil(port=0) as evm:
+            summary             = run(scenario, evm, out_path=None, verbose=False, basket_impl="equity-machine")
+    finally:
+        rng.set_mode(mode)
     assert summary is not None
 
 
