@@ -436,7 +436,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         e = sum(abs(fr["spotUsdc"][i] - fr["refUsd"][i]) / max(1, fr["refUsd"][i])
                 for fr in tail) / len(tail)
         track.append(e)
-    verified = all(d.reg.functions.isVerified(a.address).call() for a in agents)
+    # Agents with neither an account nor a proxy (a household population's coordinator) hold no identity.
+    verified = all(d.reg.functions.isVerified(a.address).call() for a in agents
+                   if getattr(a, "account", None) is not None or getattr(a, "proxy", None) is not None)
     # Arb throughput vs basket fee income: validate that the DM return scale
     # is consistent with actual BUCK volume crossing the pools, not a trade
     # count.  Each routed cycle crosses ~2 TOKEN/BUCK pool hops at fee_buck,

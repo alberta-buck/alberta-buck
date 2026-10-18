@@ -120,6 +120,20 @@ def freeze(root: Path, base: Path) -> Path:
     return snapshot
 
 
+def adopt(runs: Path) -> list[str]:
+    """Name every checkpoint whose world completed (an older runner judged by the exit status)."""
+    named                       = []
+    for partial in runs.glob("*.partial"):
+        try:
+            completed           = json.loads(partial.read_bytes())["meta"]["run"]["completed"]
+        except (ValueError, KeyError):
+            continue            # still being written, or not a vector
+        if completed:
+            partial.replace(partial.with_suffix(".json"))
+            named.append(partial.stem)
+    return named
+
+
 def environment(snapshot: Path) -> dict:
     kernel                      = Path(importlib.util.find_spec("buck_kernel").origin).parents[1]
     path                        = [snapshot, snapshot / "core/python", snapshot / "core/contracts/python", kernel]
@@ -135,6 +149,7 @@ def run(args) -> int:
     snapshot                    = freeze(root, base)
     env                         = environment(snapshot)
     centre                      = centre_rates(snapshot)
+    adopt(runs)
     todo                        = [c for c in cells(args.cells) if not (runs / f"{c.name}.json").exists()]
     status_path                 = base / "status.json"
     status                      = json.loads(status_path.read_text()) if status_path.exists() else {}
@@ -170,9 +185,8 @@ def run(args) -> int:
         with out.with_suffix(".log").open("w") as log:
             done                = subprocess.run(command(cell, partial, args.days), cwd=snapshot, env=env,
                                                  stdout=log, stderr=subprocess.STDOUT)
-        ok                      = done.returncode == 0 and partial.exists()
-        if ok:
-            ok                  = json.loads(partial.read_bytes())["meta"]["run"]["completed"]
+        # The vector says whether the world completed; the process may still fail in its closing summary.
+        ok                      = partial.exists() and json.loads(partial.read_bytes())["meta"]["run"]["completed"]
         if ok:
             partial.replace(out)
         record(cell.name, status="complete" if ok else "failed", returncode=done.returncode,
@@ -230,6 +244,7 @@ def judge(vector: Path) -> dict:
 
 def report(args) -> int:
     base                        = repo_root() / "build/sim/economy" / args.campaign
+    adopt(base / "runs")
     vectors                     = sorted((base / "runs").glob("*.json"))
     results                     = [judge(v) for v in vectors]
     (base / "summary.json").write_text(json.dumps(results, indent=1))

@@ -20,6 +20,25 @@ def test_cells_cover_the_grid_and_its_variants_once():
     assert f"{economy.POP}.gain=0" in economy.Cell("mid", "mid", "history", 41404, "open").sets(CENTRE)
 
 
+def test_adopt_names_only_completed_checkpoints(tmp_path):
+    for name, completed in (("done", True), ("running", False)):
+        (tmp_path / f"{name}.partial").write_text(json.dumps({"meta": {"run": {"completed": completed}}}))
+    (tmp_path / "torn.partial").write_text('{"meta": ')
+    assert economy.adopt(tmp_path) == ["done"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["done.json", "running.partial", "torn.partial"]
+
+
+def test_a_short_economy_runs_to_its_closing_summary():
+    from alberta_buck.sim import experiment as expmod
+    from alberta_buck.sim.loop import run
+    from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
+    scenario                    = expmod.build(expmod.load(economy.repo_root() / economy.EXPERIMENT))
+    scenario.days               = 3
+    with PyrevmAnvil(port=0) as evm:
+        summary                 = run(scenario, evm, out_path=None, verbose=False, basket_impl="equity-machine")
+    assert summary is not None
+
+
 def frame(day, bvib, k, **extra):
     return dict(day=day, basketVal=int(bvib * 1e18), buckK=int(k * 1e18), supply=int(60e12), **extra)
 
