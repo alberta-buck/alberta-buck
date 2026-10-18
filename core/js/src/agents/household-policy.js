@@ -23,7 +23,7 @@ export const POPULATION = {
   initial_debtors: 5, initial_savers: 5, initial_investors: 0, debtor_rate: 3, saver_rate: 3, investor_rate: 0,
   growth: "steady", gain: 50, gain_cap: 4, signal_halflife_days: 30, settle_days: 7, max_members: 2000,
   // Issuers arrive faster as K rises, by (1 - k_ref) / (1 - K).
-  k_ref: .75,
+  k_ref: .75, k_pace: true,
 };
 // Older settings, still accepted when no role is named: a total split between savers and debtors.
 export const LEGACY_POPULATION = { initial: 10, arrival_rate: 6, saver_share: .5 };
@@ -98,6 +98,7 @@ export function population(given = {}) {
   }
   for (const k of ["gain", "gain_cap", "signal_halflife_days", "k_ref"]) p[k] = Number(p[k]);
   if (!(p.k_ref >= 0 && p.k_ref < 1)) throw new Error("k_ref must be in [0, 1)");
+  p.k_pace = [true, 1, "true", "True"].includes(p.k_pace);
   p.settle_days = count(Number(p.settle_days), "settle_days");
   p.max_members = count(Number(p.max_members), "max_members");
   if (!GROWTH.includes(p.growth)) throw new Error(`growth must be one of ${GROWTH}`);
@@ -126,7 +127,7 @@ export function arrivalState(seed, pop) {
 }
 
 // How much faster issuers arrive at this K than at k_ref: (1 - k_ref) / (1 - K).
-export const kFactor = (k, p) => k === null || k === undefined || !Number.isFinite(k) ? 1
+export const kFactor = (k, p) => !p.k_pace || k === null || k === undefined || !Number.isFinite(k) ? 1
   : (1 - p.k_ref) / Math.max(1e-6, 1 - k);
 
 // One day of arrivals, updating `state` in place; returns [[role, k], ...]. Mirrors

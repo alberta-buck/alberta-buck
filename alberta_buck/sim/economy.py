@@ -36,7 +36,12 @@ EXPERIMENT                      = "alberta_buck/sim/experiments/economy.toml"
 FACTORS                         = {"lo": 1 / 3, "mid": 1., "hi": 3.}
 PRICES                          = ("history", "revert")
 SEEDS                           = (41404, 45517)
-VARIANTS                        = {"open": {"gain": 0}, "rising": {"growth": "rising"}, "falling": {"growth": "falling"}}
+VARIANTS                        = {"open": {"gain": 0}, "rising": {"growth": "rising"}, "falling": {"growth": "falling"},
+                                   # One of the three 2026-10-18 changes at a time, the others as before.
+                                   "pace-only": {"surplus_policy": "adaptive", "divest_rate": 0},
+                                   "divest-only": {"surplus_policy": "adaptive", "k_pace": "false"},
+                                   "basket-only": {"divest_rate": 0, "k_pace": "false"}}
+ABLATIONS                       = ("pace-only", "divest-only", "basket-only")
 POP                             = "agents.HouseholdPopulationAgent"
 MEASURED_FROM                   = 365       # acceptance reads the economy after its first year
 
@@ -69,7 +74,11 @@ def cells(which: str) -> list[Cell]:
     grid                        = [Cell(s, dm, p, seed) for seed in SEEDS for p in PRICES for s in FACTORS for dm in FACTORS]
     if which == "grid":
         return grid
-    every                       = grid + [Cell("mid", "mid", p, SEEDS[0], v) for v in VARIANTS for p in PRICES]
+    every                       = grid + [Cell("mid", "mid", p, SEEDS[0], v) for v in ("open", "rising", "falling")
+                                          for p in PRICES]
+    if which == "ablation":     # each change alone, on the centre and on a high-supply cell
+        return ([Cell("mid", "mid", p, SEEDS[0], v) for v in ABLATIONS for p in PRICES]
+                + [Cell("hi", "mid", "history", SEEDS[0], v) for v in ABLATIONS])
     if which == "all":
         return every
     if which == "rest":         # everything but the centre, when the centre runs as its own campaign

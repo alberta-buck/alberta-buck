@@ -29,7 +29,7 @@ POPULATION                      = dict(
     growth="steady", gain=50., gain_cap=4., signal_halflife_days=30., settle_days=7, max_members=2000,
     # Issuers arrive faster as K rises, by (1 - k_ref) / (1 - K): the BUCKs an insured dollar yields
     # grow without bound as K nears 1, so no rational household stays away.
-    k_ref=.75)
+    k_ref=.75, k_pace=True)
 # Older settings, still accepted when no role is named: a total split between savers and debtors.
 LEGACY_POPULATION               = dict(initial=10, arrival_rate=6., saver_share=.5)
 
@@ -118,6 +118,7 @@ def population(given):
         result[key]             = float(result[key])
     if not 0 <= result["k_ref"] < 1:
         raise ValueError("k_ref must be in [0, 1)")
+    result["k_pace"]            = result["k_pace"] in (True, 1, "true", "True")
     result["settle_days"]       = _count(float(result["settle_days"]), "settle_days")
     result["max_members"]       = _count(float(result["max_members"]), "max_members")
     if result["growth"] not in GROWTH:
@@ -149,8 +150,8 @@ def arrival_state(seed, population):
 
 
 def k_factor(k, p):
-    """How much faster issuers arrive at this K than at k_ref: (1 - k_ref) / (1 - K)."""
-    if k is None or not math.isfinite(k):
+    """How much faster issuers arrive at this K than at k_ref: (1 - k_ref) / (1 - K); 1 with k_pace off."""
+    if not p["k_pace"] or k is None or not math.isfinite(k):
         return 1.
     return (1 - p["k_ref"]) / max(1e-6, 1 - k)
 
