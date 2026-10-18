@@ -344,6 +344,15 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-18: BUCK-deposit saving with the paydown on and off (=91f26a9=, before working balances;
+  =build/sim/economy/paydown/=, seed 41404): 0 of 8 pass. Without the paydown K falls to 0 in all
+  four cells (119--217 days at the floor; mean error 3.0--3.8%, 99th percentile 28--41%). With it,
+  K stays in its band on the centre's history path (0.52--0.85) and the high-supply cell (0.40--0.74)
+  but overshoots to 0.95 on the centre's revert path (36 days) and the demand-heavy corner (144 days);
+  mean error 1.7--2.8%, 99th percentile 7--15%. Why saving in the basket cheapens the BUCK: with the net
+  mark the machine holds TOKENs worth (1 + K) x its equity, so a deposit of D BUCKs makes it buy
+  (1 + K) D of TOKENs, D from the deposit and K D it issues. Each BUCK saved in the basket nets about K
+  BUCKs of new supply: the basket lends its deposits at a multiple of K.
 - 2026-10-18: the ablation (=build/sim/economy/ablation/=, seed 41404, five years) puts the
   regression on one change. Each change alone, mean error / 99th pct / K at the end:
 
