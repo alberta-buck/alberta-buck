@@ -100,6 +100,15 @@ def test_profiles_are_keyed_and_settings_separate():
         hp.profile(41404, "0/investor/0", {"role": "investor", "hold_years": 0})
 
 
+def test_paydown_urgency_compounds_with_the_discount():
+    p                           = hp.profile(41404, "0/debtor/0")
+    assert hp.paydown(0, p) == 0 and hp.paydown(-.01, p) == 0
+    assert hp.paydown(.005, p) == pytest.approx(.01) and hp.paydown(.01, p) == pytest.approx(.03)
+    assert hp.paydown(.02, p) == pytest.approx(.15) and hp.paydown(.04, p) == 1
+    assert hp.discount(1., 1., 0) == 0 and hp.discount(.97, 1., 0) == pytest.approx(.03)
+    assert hp.discount(1.02, 1., 0) == 0
+
+
 def test_divestment_waits_average_ten_years_at_a_tenth_a_year():
     days                        = [hp.divest_day(41404, f"0/debtor/{i}", 100, .1) - 100 for i in range(2000)]
     assert 9 * 365 < sum(days) / len(days) < 11 * 365

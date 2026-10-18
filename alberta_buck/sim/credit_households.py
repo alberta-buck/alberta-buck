@@ -214,6 +214,24 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             before              = d.buck.functions.signedBalanceOf(self.proxy.address).call()
             self._proxy_exec(d, d.buck.address, d.buck.encode_abi("mint(uint256)", args=[arg]))
             self.premium_paid  += max(0, before - d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        if kind == "invest" and self.p["surplus_policy"] == "basket":
+            # Borrowed to save: the BUCKs go straight into the basket, never through dollars.
+            if self._savings_proxy is None:
+                self._savings_proxy = self._new_proxy(d)
+            moved               = min(want, d.buck.functions.balanceOf(self.proxy.address).call())
+            if moved < PARITY:
+                return
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                "transfer", args=[self._savings_proxy.address, moved]))
+            self._deposit_bucks(d, ctr, proxy=self._savings_proxy, prefix="bcd")
+            self.funding_pending = False
+            self.switch_paid   += self._pay_bank(d, fixed)
+            self.joined         = True
+            self.deploys       += 1
+            self.issued_invest += moved
+            self.last_action    = kind
+            self.note(d, kind, moved=moved, **v.why())
+            return
         before                  = d.chain.balance_of(d.usdc, self.proxy.address)
         signed                  = d.buck.functions.signedBalanceOf(self.proxy.address).call()
         self._sell_capped(d, d.pool_ub, want)
@@ -323,23 +341,25 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             self._deposit_bucks(d, ctr)
         self.last_action        = action
 
-    def _deposit_bucks(self, d, ctr):
-        """Deposit the BUCKs held. When the basket's price guard refuses, offer half, up to four times;
-        whatever is still refused stays here for the next decision."""
-        amount                  = d.buck.functions.balanceOf(self.proxy.address).call()
+    def _deposit_bucks(self, d, ctr, proxy=None, prefix="inv"):
+        """Deposit the BUCKs held (by the household's own account, or its savings account). When the
+        basket's price guard refuses, offer half, up to four times; what is still refused stays."""
+        proxy                   = proxy or self.proxy
+        amount                  = d.buck.functions.balanceOf(proxy.address).call()
         for _ in range(4):
             if amount <= PARITY:
                 return
             try:
-                self._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.basket.address, amount]))
+                self._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.basket.address, amount]),
+                                 proxy=proxy)
                 receipt         = self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
-                    "depositToken", args=[d.buck.address, amount, 0]))
+                    "depositToken", args=[d.buck.address, amount, 0]), proxy=proxy)
             except Exception as exc:
                 if not self._refused(exc, ctr):
                     return
                 amount         //= 2
                 continue
-            self._book_receipts(d, receipt, ctr, "inv")
+            self._book_receipts(d, receipt, ctr, prefix)
             return
 
     def _withdraw(self, d, ctr):
@@ -384,6 +404,9 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         p                       = self.p
         cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
         spare                   = max(0, cash - self.cash_buffer)
+        if p["surplus_policy"] == "basket":
+            self._save_or_pay_down(d, state, spare, ctr)
+            return
         action                  = policy.surplus_action(p["surplus_policy"], state["ru"] / state["rb"],
                                                        state["basket_usd"], state["fee"], p["retire_disc"],
                                                        p["issue_premium"])
@@ -491,13 +514,14 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
     def _redeem_to_retire(self, d, ctr):
         """The other half of borrowing to invest: while the BUCK is cheap, redeem a basket receipt (an
         equity basket pays its exits in BUCKs) and repay the lien with what comes back. One receipt a
-        decision, oldest first; what exceeds the lien stays in savings."""
+        decision, oldest first; what exceeds the lien stays in savings. Returns the BUCKs repaid, or
+        None when there was nothing to redeem or the basket's guard refused."""
         if (not self._basket_receipts or self._savings_proxy is None
                 or not str(d.basket_impl).startswith("equity")):
-            return
+            return None
         drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
         if drawn <= PARITY:
-            return
+            return None
         saver                   = self._savings_proxy
         rid                     = self._basket_receipts[0]
         before                  = d.buck.functions.balanceOf(saver.address).call()
@@ -506,7 +530,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
                 "redeem(uint256,uint256,uint256)", args=[rid, 0, 0]), proxy=saver)
         except Exception as exc:
             self._refused(exc, ctr)
-            return
+            return None
         principal, shares       = self._receipt_book.pop(rid, (0, 0))
         self._basket_receipts.remove(rid)
         self._basket_in        -= principal
@@ -519,6 +543,50 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self.unwound           += repay
         ctr["bcdRetired"]       = ctr.get("bcdRetired", 0) + repay
         ctr["bcdRedeemedToRetire"] = ctr.get("bcdRedeemedToRetire", 0) + 1
+        return repay
+
+    # -- saving in BUCK deposits, and paying down at a discount ----------------------------------------- #
+
+    def _save_or_pay_down(self, d, state, spare, ctr):
+        """The =basket= policy. While the BUCK trades at a discount, pay down the lien with an urgency
+        that compounds with the discount (household_policy.paydown): basket shares first, then spare
+        dollars. Otherwise save: buy BUCKs with the spare dollars and deposit them in the basket."""
+        share                   = policy.paydown(policy.discount(state["ru"] / state["rb"], state["basket_usd"],
+                                                                 state["fee"]), self.p)
+        drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        if share > 0 and drawn > PARITY:
+            target              = int(drawn * share)
+            repaid              = 0
+            while repaid < target:
+                got             = self._redeem_to_retire(d, ctr)
+                if got is None:
+                    break
+                repaid         += got
+            if repaid < target and spare > PARITY:
+                ru, rb          = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+                want            = min(target - repaid, rb // 2)
+                cost            = int(want * ru / ((rb - want) * (1 - d.fee_ub / 1e6))) + 1
+                got             = self._buy_cash(d, min(spare, cost, _impact_cap(ru, self.max_impact_bp)))
+                self.unwound   += got
+                repaid         += got
+                ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
+            ctr["hhPaidDown"]   = ctr.get("hhPaidDown", 0) + repaid
+            self.last_action    = "pay-down"
+            return
+        if spare > PARITY:
+            if self._savings_proxy is None:
+                self._savings_proxy = self._new_proxy(d)
+            ru, rb              = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+            net                 = min(spare, _impact_cap(ru, self.max_impact_bp)) * (1 - d.fee_ub / 1e6)
+            before              = d.chain.balance_of(d.usdc, self.proxy.address)
+            got                 = self._buy_buck(d, d.pool_ub, d.usdc, int(rb * net / (ru + net)), d.fee_ub,
+                                                 recipient=self._savings_proxy.address)
+            spent               = before - d.chain.balance_of(d.usdc, self.proxy.address)
+            self.invested_usd  += spent
+            self.trade_loss    += spent - got
+        if self._savings_proxy is not None:
+            self._deposit_bucks(d, ctr, proxy=self._savings_proxy, prefix="bcd")
+        self.last_action        = "save"
 
     def act(self, d, scenario, day, tick, ctr):
         if tick or day < self.arrive_day or self.exited:

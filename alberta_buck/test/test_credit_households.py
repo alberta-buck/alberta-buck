@@ -179,7 +179,42 @@ def test_divesting_household_sells_clears_its_lien_releases_coverage_and_leaves(
     assert d.chain.balance_of(d.usdc, a.proxy.address) == cash, "a household that has left does nothing"
     st                          = a.octl_state(d)
     # Both books sold the same asset; the BUCK path's books keep what it gained and lost on the way.
-    assert abs(st["nw"] - st["hypo"]) < .1 * a._face0
+    # (On the pro-rata basket a saver's BUCK deposits come back as TOKENs sold in thin pools.)
+    assert abs(st["nw"] - st["hypo"]) < .15 * a._face0
+
+
+def test_basket_policy_saves_in_buck_deposits_and_pays_down_at_a_discount(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    a                           = make(cash_k=60, surplus_policy="basket", max_impact_bp=400)
+    a.act(d, scenario, 0, 0, {})                            # refinance part of the mortgage
+    drawn                       = -d.buck.functions.signedBalanceOf(a.proxy.address).call()
+    assert drawn > M6
+    ctr                         = {}
+    monkeypatch.setattr(a, "_basket_usd", lambda d: .5)     # no discount: save, in BUCK deposits
+    a._surplus(d, a._state(d, 1), ctr)
+    assert a.last_action == "save" and a._basket_receipts
+    assert -d.buck.functions.signedBalanceOf(a.proxy.address).call() == drawn, "saving does not repay"
+    assert d.buck.functions.balanceOf(a._savings_proxy.address).call() <= M6, "the BUCKs bought were deposited"
+    receipts                    = len(a._basket_receipts)
+    d.chain.send(d.usdc.functions.mint(a.proxy.address, 50_000 * M6))   # a payday's spare dollars
+    monkeypatch.setattr(a, "_basket_usd", lambda d: 1.05)   # 5% cheap: the whole lien, as far as it can
+    a._surplus(d, a._state(d, 2), ctr)
+    after                       = -d.buck.functions.signedBalanceOf(a.proxy.address).call()
+    assert a.last_action == "pay-down" and after < drawn and ctr["hhPaidDown"] > 0
+    if str(d.basket_impl).startswith("equity"):
+        assert len(a._basket_receipts) < receipts, "its basket shares went first"
+
+
+def test_saver_deposits_bucks_issued_at_a_premium_without_selling_them(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    a                           = make(CreditSaverAgent, cash_k=30, surplus_policy="basket")
+    monkeypatch.setattr(a, "_basket_usd", lambda d: .90)
+    cash                        = d.chain.balance_of(d.usdc, a.proxy.address)
+    a.act(d, scenario, 0, 0, {})
+    assert not a.last_error and a.issued_invest > 0 and a._basket_receipts
+    assert d.buck.functions.signedBalanceOf(a.proxy.address).call() < 0
+    # Its dollars went to the funding gate and the cash buffer only: none came from selling BUCKs.
+    assert d.chain.balance_of(d.usdc, a.proxy.address) <= cash + 30_000 * M6
 
 
 def test_always_invest_accumulates_fees_and_real_gate_bucks_before_saving(household_world):
@@ -205,7 +240,7 @@ def test_always_invest_accumulates_fees_and_real_gate_bucks_before_saving(househ
     assert waits == {"cash-wait", "gate-wait"}
     assert len(held) >= 2 and 0 < held[0] < held[-1], "gate BUCKs accumulate across paydays"
     assert a.joined and a.mortgage < a.hypo_mortgage
-    assert not a.funding_pending and a.last_surplus == "invest"
+    assert not a.funding_pending and a.last_surplus == "save"
     assert a.invested_usd > 0 and a.switch_paid == 5000 * M6
     assert d.buck.functions.signedBalanceOf(a.proxy.address).call() < 0
 

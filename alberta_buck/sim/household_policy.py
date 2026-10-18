@@ -18,8 +18,12 @@ DEFAULTS                        = dict(
     # The investor: opening savings and yearly saving ($k), and the years before it withdraws.
     invest_cash_k=[10., 100.], invest_income_k=[2., 20.], hold_years=[3., 15.],
     # A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien
-    # first; it repays BUCKs at no other time (0: never).
-    divest_rate=.1)
+    # first (0: never).
+    divest_rate=.1,
+    # While the BUCK trades at a discount d to the basket, a household with a lien pays down
+    # paydown_share x (2^(d / paydown_double) - 1) of it each decision: an urgency that compounds with
+    # the discount (0: no paydown). Its basket shares go first, then its spare dollars.
+    paydown_share=.01, paydown_double=.005)
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
 ROLES                           = ("debtor", "saver", "investor")
 SUPPLY                          = ("debtor", "saver")   # drawn while the BUCK is dear; investors while it is cheap
@@ -62,13 +66,15 @@ def profile(seed, member, overrides=None):
         result[key]             = value
     for key in ("home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
                 "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
-                "invest_cash_k", "invest_income_k", "hold_years", "divest_rate"):
+                "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
         raise ValueError("invalid household size, impact or renewal fraction")
     if result["hold_years"] <= 0:
         raise ValueError("an investor's hold_years must be positive")
+    if result["paydown_double"] <= 0:
+        raise ValueError("paydown_double must be positive")
     if result["surplus_policy"] not in POLICIES:
         raise ValueError("unknown household surplus_policy")
     if result["role"] not in ROLES:
@@ -185,6 +191,20 @@ def arrivals_step(state, seed, population, day, days, bvib, k, p):
             state["arrived"][role] += 1
             state["due"][role] += _exponential(seed, population, role, state["arrived"][role])
     return arrived
+
+
+def discount(spot, basket_usd, fee):
+    """How far below the basket's value a BUCK can be bought, after the fee (0 when it cannot)."""
+    if spot <= 0 or basket_usd <= 0:
+        return 0.
+    return max(0., 1 - spot / ((1 - fee) * basket_usd))
+
+
+def paydown(d, p):
+    """The share of its lien a household pays down this decision at discount d: compounding urgency."""
+    if d <= 0 or p["paydown_share"] <= 0:
+        return 0.
+    return min(1., p["paydown_share"] * (2 ** (d / p["paydown_double"]) - 1))
 
 
 def divest_day(seed, member, arrive_day, rate):

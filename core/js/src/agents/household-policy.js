@@ -11,9 +11,11 @@ export const DEFAULTS = {
   carry_utilization: 0,
   // The investor: opening savings and yearly saving ($k), and the years before it withdraws.
   invest_cash_k: [10, 100], invest_income_k: [2, 20], hold_years: [3, 15],
-  // A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien first;
-  // it repays BUCKs at no other time (0: never).
+  // A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien first.
   divest_rate: .1,
+  // While the BUCK trades at a discount d, a household with a lien pays down
+  // paydown_share x (2^(d / paydown_double) - 1) of it each decision (0: no paydown).
+  paydown_share: .01, paydown_double: .005,
 };
 export const POLICIES = ["adaptive", "basket", "retire", "discount"];
 export const ROLES = ["debtor", "saver", "investor"];
@@ -51,11 +53,12 @@ export function profile(seed, member, overrides = {}) {
   }
   for (const key of ["home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
-    "invest_cash_k", "invest_income_k", "hold_years", "divest_rate"]) {
+    "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
   if (p.hold_years <= 0) throw new Error("an investor's hold_years must be positive");
+  if (p.paydown_double <= 0) throw new Error("paydown_double must be positive");
   if (!POLICIES.includes(p.surplus_policy)) throw new Error("unknown household surplus_policy");
   if (!ROLES.includes(p.role)) throw new Error("unknown household role");
   if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0)) throw new Error("invalid household price thresholds");
@@ -157,6 +160,14 @@ export function arrivalsStep(state, seed, pop, day, days, bvib, k, p) {
   }
   return arrived;
 }
+
+// How far below the basket's value a BUCK can be bought, after the fee (household_policy.discount).
+export const discount = (spot, basket, fee) => spot <= 0 || basket <= 0 ? 0
+  : Math.max(0, 1 - spot / ((1 - fee) * basket));
+
+// The share of its lien a household pays down this decision at discount d: compounding urgency.
+export const paydown = (d, p) => d <= 0 || p.paydown_share <= 0 ? 0
+  : Math.min(1, p.paydown_share * (2 ** (d / p.paydown_double) - 1));
 
 // The day a debtor or saver sells its insured asset: an exponential wait at `rate` a year, keyed by the
 // member alone; null when it never does (household_policy.divest_day).

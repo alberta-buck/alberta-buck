@@ -878,6 +878,7 @@ class Snapshotter:
             "hh_divested": ctr.get("hhDivested", 0),
             "hh_divest_bought": ctr.get("hhDivestBought", 0),
             "hh_divest_short": ctr.get("hhDivestShort", 0),
+            "hh_paid_down": ctr.get("hhPaidDown", 0),        # BUCKs of lien paid down at a discount
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
             # Endogenous-origination arrivals (arrive_mode "endog"): how many

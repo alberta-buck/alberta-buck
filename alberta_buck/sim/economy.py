@@ -40,7 +40,8 @@ VARIANTS                        = {"open": {"gain": 0}, "rising": {"growth": "ri
                                    # One of the three 2026-10-18 changes at a time, the others as before.
                                    "pace-only": {"surplus_policy": "adaptive", "divest_rate": 0},
                                    "divest-only": {"surplus_policy": "adaptive", "k_pace": "false"},
-                                   "basket-only": {"divest_rate": 0, "k_pace": "false"}}
+                                   "basket-only": {"divest_rate": 0, "k_pace": "false"},
+                                   "no-paydown": {"paydown_share": 0}}
 ABLATIONS                       = ("pace-only", "divest-only", "basket-only")
 POP                             = "agents.HouseholdPopulationAgent"
 MEASURED_FROM                   = 365       # acceptance reads the economy after its first year
@@ -76,6 +77,10 @@ def cells(which: str) -> list[Cell]:
         return grid
     every                       = grid + [Cell("mid", "mid", p, SEEDS[0], v) for v in ("open", "rising", "falling")
                                           for p in PRICES]
+    if which == "paydown":      # the discounted paydown on and off, on the centre and two corners
+        probe                   = ([Cell("mid", "mid", p, SEEDS[0]) for p in PRICES]
+                                   + [Cell("hi", "mid", "history", SEEDS[0]), Cell("lo", "hi", "history", SEEDS[0])])
+        return probe + [Cell(c.supply, c.demand, c.prices, c.seed, "no-paydown") for c in probe]
     if which == "ablation":     # each change alone, on the centre and on a high-supply cell
         return ([Cell("mid", "mid", p, SEEDS[0], v) for v in ABLATIONS for p in PRICES]
                 + [Cell("hi", "mid", "history", SEEDS[0], v) for v in ABLATIONS])
@@ -248,6 +253,7 @@ def judge(vector: Path) -> dict:
         demand_multiplier=sum(m["investor"] for m in multipliers) / len(multipliers) if multipliers else None,
         errors=errors, refused=last.get("household_refused", 0),
         divested=last.get("hh_divested", 0), divest_bought=last.get("hh_divest_bought", 0) / 1e12,
+        paid_down=last.get("hh_paid_down", 0) / 1e12,
         divest_short=last.get("hh_divest_short", 0),
         k_factor=sum(f["pop"].get("k_factor", 1) for f in window if f.get("pop")) / max(1, len(multipliers)))
     result["passed"]            = (result["mean_err"] < .01 and result["p99_err"] < .05 and interior >= .95
