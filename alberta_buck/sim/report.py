@@ -200,7 +200,10 @@ def _population_page(data, pdf) -> None:
     held                        = [sum((a.get("basket_mark") if a.get("basket_mark") is not None else a.get("basket", 0))
                                        for a in f.get("octl", []) if a.get("role") == "investor" and a.get("active"))
                                    / 1e12 for f in frames]
+    money                       = [sum(a.get("held_buck", 0) for a in f.get("octl", [])
+                                       if a.get("role") == "investor" and a.get("active")) / 1e12 for f in frames]
     ax.plot(days, drawn, label="BUCKs drawn by debtors and savers")
+    ax.plot(days, money, label="BUCKs investors hold")
     ax.plot(days, held, label="investors' basket holdings (BUCKs)")
     ax.plot(days, [f.get("supply", 0) / 1e12 / 10 for f in frames], linestyle="--", label="BUCK supply / 10")
     ax.set_title("Supply and demand (million BUCKs)")

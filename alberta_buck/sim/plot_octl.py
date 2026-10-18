@@ -45,9 +45,11 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     agents: dict[int, dict] = {}
     for f in frames:
         for o in f["octl"]:
+            # A population's members arrive during the run: each keeps its own days.
             a = agents.setdefault(o["idx"], {
                 "theta": o["theta"], "pattern": o["pattern"],
-                "adv": [], "mort": [], "drawn": [], "deploys": []})
+                "days": [], "adv": [], "mort": [], "drawn": [], "deploys": []})
+            a["days"].append(f["day"])
             a["adv"].append((o["nw"] - o["hypo"]) / 1e6)
             a["mort"].append(o["mortgage"] / 1e6 if "member" not in o or o.get("active") else float("nan"))
             a["drawn"].append(o["drawn"] / 1e6)
@@ -72,7 +74,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
 
     ax = axes[0][0]
     for a in agents.values():
-        ax.plot(days, a["adv"], **_style(a))
+        ax.plot(a["days"], a["adv"], **_style(a))
     ax.axhline(0, color=INK, linewidth=0.8, alpha=0.3)
     ax.set_title("net-worth advantage vs own no-BUCK counterfactual\n"
                  "(color = theta tolerance; solid = salary, dashed = lumpy)")
@@ -92,7 +94,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
 
     ax = axes[1][0]
     for a in agents.values():
-        ax.plot(days, a["mort"], **_style(a))
+        ax.plot(a["days"], a["mort"], **_style(a))
     ax.set_title("mortgage principal outstanding")
     ax.set_ylabel("$")
     ax.set_xlabel("day")

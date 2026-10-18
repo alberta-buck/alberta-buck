@@ -318,6 +318,27 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-17: 400-day diagnostics of the centre (=build/diag/=, measured from day 60). Holding
+  investors and the savers' round trip (=e53397e=) narrow the gap; none holds K:
+
+  | Run | Mean bvib | Mean error | K at day 400 |
+  |-----+-----------+------------+--------------|
+  | first investor (deposits), history | 1.066 | 6.6% | 0 (by day 350) |
+  | holding investors, history | 1.031 | 3.1% | 0.11 |
+  | holding + saver round trip, history | 1.027 | 2.7% | 0.20 |
+  | holding + round trip + $10M BUCK/USDC pool, history | 1.010 | 1.06% | 0.54 |
+  | holding (with or without round trip), revert | 1.008 | 1.05% | 0.51 |
+  | first investor + three cash arbitrageurs, history | 1.052 | 5.2% | 0 |
+
+  Every run sits about 1% cheap on average. The population's price response is proportional, so
+  it needs a standing gap to draw the extra investors; K's integral sees the gap and keeps winding
+  down, and K has little grip on supply until it is low: a debtor draws at most K - e of its home,
+  and with LTVs spread over [0.05, 0.85] the refinanceable share falls only 6% at K 0.7, 23% at
+  0.5 and about half at 0.3. The desk did buy on the cheap side (1.08M over 600 days) but holds
+  about $2M; the machine's lean scales with its equity of about $6M, against a $50M pool. On the
+  history path the basket's dollar price rises about 14% a year in 2021--22 and nothing but net
+  buying lifts the deep BUCK/USDC pool after it: the equity basket pays exits in BUCKs, so there
+  is no route converting cheap BUCKs into commodities at the basket's value.
 - 2026-10-17: the first centre failed, and why. Both centre cells (=build/sim/economy/centre=,
   stopped at day 600; checkpoints kept as =build/diag/centre-{history,revert}-day600.json=) held
   the BUCK 1--3% cheap from day 20, and K fell steadily to its floor of 0 near day 350 (history)

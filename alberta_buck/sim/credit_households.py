@@ -496,7 +496,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         st.update(nw=financial - arrears, hypo=self.hypo_cash - self.hypo_mortgage - hypo_arrears,
                   hypo_cash=self.hypo_cash, hypo_mortgage=self.hypo_mortgage, arrears=arrears,
                   hypo_arrears=hypo_arrears, external_paid=self.external_paid, hypo_paid=self.hypo_paid,
-                  insurance_age=insurance_age, exited=self.exited, withdrawn_usd=self.withdrawn_usd,
+                  insurance_age=insurance_age, exited=self.exited, withdrawn_usd=self.withdrawn_usd, held_buck=held,
                   refusals=self.refusals,
                   active=self._started, role=self.p["role"], member=self.member, action=self.last_action,
                   issue_action=self.last_issue, surplus_action=self.last_surplus,
