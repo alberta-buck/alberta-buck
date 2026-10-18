@@ -23,5 +23,17 @@
     ["basket", 0.8, 1.0, 0.003, 0.02, 0.02, "invest"],
     ["retire", 1.2, 1.0, 0.003, 0.02, 0.02, "retire"],
     ["discount", 1.2, 1.0, 0.003, 0.02, 0.02, "hold"]
-  ]
+  ],
+  "investor": [
+    [1.0, 1.0, 0.003, 0.02, "invest"],
+    [1.03, 1.0, 0.003, 0.02, "hold"],
+    [1.02, 1.0, 0.003, 0.02, "invest"],
+    [0.95, 1.0, 0.003, 0.02, "invest"]
+  ],
+  "population": {
+    "name": "0", "days": 730,
+    "settings": {"initial_debtors": 2, "initial_savers": 1, "initial_investors": 3,
+                 "debtor_rate": 6, "saver_rate": 6, "investor_rate": 12},
+    "bvib": [[0, 1.0], [100, 0.96], [300, 1.04], [500, 1.0]]
+  }
 }

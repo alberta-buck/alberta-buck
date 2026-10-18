@@ -26,20 +26,73 @@ def test_surplus_cases(case):
     assert hp.surplus_action(*case[:-1]) == case[-1]
 
 
-def test_population_arrivals_and_knobs_are_reproducible_and_separate():
-    days                        = hp.arrivals(41404, 0, 1827)
-    assert days[:10] == [0] * 10
-    assert days == sorted(days) and max(days) > 1500
-    assert days == hp.arrivals(41404, 0, 1827)
-    assert days != hp.arrivals(41405, 0, 1827)
-    profiles                    = [hp.profile(41404, f"0/{i}") for i in range(40)]
+def bvib_on(day):
+    """The fixture's scripted basket price in BUCKs: each entry holds from its day on."""
+    return [v for start, v in FIXTURE["population"]["bvib"] if start <= day][-1]
+
+
+def arrivals(gain, settings=None, seed=None):
+    """Every arrival day by role over the fixture's horizon, for one gain."""
+    f                           = FIXTURE["population"]
+    p                           = hp.population(f["settings"] | {"gain": gain} | (settings or {}))
+    seed                        = FIXTURE["seed"] if seed is None else seed
+    state                       = hp.arrival_state(seed, f["name"])
+    days                        = {r: [] for r in hp.ROLES}
+    for day in range(f["days"]):
+        for role, k in hp.arrivals_step(state, seed, f["name"], day, f["days"], bvib_on(day), p):
+            assert k == len(days[role])
+            days[role].append(day)
+    return days
+
+
+def test_arrivals_are_reproducible_keyed_and_drawn_by_the_price_gap():
+    base, drawn                 = arrivals(0.), arrivals(50.)
+    assert base == arrivals(0.) and base != arrivals(0., seed=FIXTURE["seed"] + 1)
+    for role, rate in (("debtor", 6), ("saver", 6), ("investor", 12)):
+        assert .5 * rate * 2 < len(base[role]) < 1.5 * rate * 2, "about the base pace over two years"
+    within                      = lambda days, lo, hi: sum(lo <= d < hi for d in days)
+    # Dear from day 100 (the 30-day average lags): debtors and savers come faster, investors do not.
+    for role in ("debtor", "saver"):
+        assert within(drawn[role], 130, 300) > within(base[role], 130, 300)
+    assert within(drawn["investor"], 130, 300) == within(base["investor"], 130, 300)
+    # Cheap from day 300: investors come faster.
+    assert within(drawn["investor"], 330, 500) > within(base["investor"], 330, 500)
+    # The same people arrive, only sooner: the k-th arrival is never later with the response.
+    for role in hp.ROLES:
+        assert all(a <= b for a, b in zip(drawn[role], base[role]))
+
+
+def test_population_settings_read_the_older_keys_and_validate():
+    p                           = hp.population({})
+    assert (p["initial_debtors"], p["initial_savers"], p["debtor_rate"], p["saver_rate"]) == (5, 5, 3., 3.)
+    p                           = hp.population({"initial": 24, "arrival_rate": 12, "saver_share": .25})
+    assert (p["initial_debtors"], p["initial_savers"], p["debtor_rate"], p["saver_rate"]) == (18, 6, 9., 3.)
+    p                           = hp.population({"saver_share": 0, "saver_rate": 2})
+    assert (p["initial_debtors"], p["initial_savers"], p["saver_rate"]) == (10, 0, 2.)
+    for bad in ({"saver_share": 2}, {"initial_debtors": 1.5}, {"gain_cap": .5}, {"growth": "sideways"},
+                {"max_members": 3}, {"investor_rate": -1}):
+        with pytest.raises(ValueError):
+            hp.population(bad)
+    assert [hp.growth_factor(g, 0, 100) for g in hp.GROWTH] == [1., .25, 1.75]
+    assert [hp.growth_factor(g, 50, 100) for g in hp.GROWTH] == [1., 1., 1.]
+
+
+@pytest.mark.parametrize("case", FIXTURE["investor"])
+def test_investor_buys_unless_the_buck_is_dear(case):
+    assert hp.investor_action(*case[:-1]) == case[-1]
+
+
+def test_profiles_are_keyed_and_settings_separate():
+    profiles                    = [hp.profile(41404, f"0/debtor/{i}") for i in range(40)]
     assert len({p["retire_disc"] for p in profiles}) == 40
     assert len({p["phase"] for p in profiles}) > 8
-    p                           = hp.profile(41404, "0/0")
-    extra                       = hp.profile(41404, "0/0", {"new_knob": [1, 2]})
+    p                           = hp.profile(41404, "0/debtor/0")
+    extra                       = hp.profile(41404, "0/debtor/0", {"new_knob": [1, 2]})
     assert {k: extra[k] for k in p} == p
-    with pytest.raises(ValueError, match="max_members"):
-        hp.arrivals(41404, 0, 1827, initial=10, arrival_rate=100, max_members=12)
+    investor                    = hp.profile(41404, "0/investor/0", {"role": "investor"})
+    assert 10 <= investor["invest_cash_k"] <= 100 and 3 <= investor["hold_years"] <= 15
+    with pytest.raises(ValueError, match="hold_years"):
+        hp.profile(41404, "0/investor/0", {"role": "investor", "hold_years": 0})
 
 
 def test_premium_sale_keeps_even_last_unit_above_the_premium():
@@ -54,17 +107,31 @@ def test_javascript_and_python_make_the_same_decisions_and_populations():
 import fs from 'node:fs';
 import * as hp from './core/js/src/agents/household-policy.js';
 const f = JSON.parse(fs.readFileSync('test/fixtures/household-policy.json'));
+const bvib = (day) => f.population.bvib.filter(([start]) => start <= day).at(-1)[1];
+const arrivals = (gain) => {
+ const p = hp.population({...f.population.settings, gain});
+ const state = hp.arrivalState(f.seed, f.population.name), days = {debtor: [], saver: [], investor: []};
+ for (let day = 0; day < f.population.days; day++)
+  for (const [role] of hp.arrivalsStep(state, f.seed, f.population.name, day, f.population.days, bvib(day), p))
+   days[role].push(day);
+ return days;
+};
 console.log(JSON.stringify({
- profiles: Array.from({length: 8}, (_, i) => hp.profile(f.seed, `0/${i}`)),
- arrivals: hp.arrivals(f.seed, 0, 1827),
+ profiles: Array.from({length: 8}, (_, i) => hp.profile(f.seed, `0/debtor/${i}`)),
+ investors: Array.from({length: 4}, (_, i) => hp.profile(f.seed, `0/investor/${i}`, {role: 'investor'})),
+ arrivals: [arrivals(0), arrivals(50)],
+ population: hp.population({initial: 24, arrival_rate: 12, saver_share: .25}),
  decisions: f.issuance.map(c => hp.issuance({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings})))
 }));
 """
     js                          = json.loads(subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT,
                                                            check=True, text=True, capture_output=True).stdout)
-    assert js["arrivals"] == hp.arrivals(FIXTURE["seed"], 0, 1827)
+    assert js["arrivals"] == [arrivals(0.), arrivals(50.)]
+    assert js["population"] == hp.population({"initial": 24, "arrival_rate": 12, "saver_share": .25})
     for i, p in enumerate(js["profiles"]):
-        assert p == pytest.approx(hp.profile(FIXTURE["seed"], f"0/{i}"))
+        assert p == pytest.approx(hp.profile(FIXTURE["seed"], f"0/debtor/{i}"))
+    for i, p in enumerate(js["investors"]):
+        assert p == pytest.approx(hp.profile(FIXTURE["seed"], f"0/investor/{i}", {"role": "investor"}))
     for case, (jkind, jv) in zip(FIXTURE["issuance"], js["decisions"]):
         kind, verdict           = hp.issuance(FIXTURE["state"] | case["state"], hp.profile(
             FIXTURE["seed"], "0", FIXTURE["settings"] | case["settings"]))

@@ -1,10 +1,13 @@
-"""Households and insured savers with portable decisions and separate, real contract accounts."""
+"""Households, insured savers and investors with portable decisions and separate, real contract accounts."""
 
 from alberta_buck.sim import carry, household_policy as policy
 from alberta_buck.sim.agents import Agent, _register
-from alberta_buck.sim.equilibrium_agents import BuckCreditDebtorAgent, PARITY, mint_amount, mint_capacity
+from alberta_buck.sim.equilibrium_agents import BuckCreditDebtorAgent, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
+
+# The basket's price guard, by name or (as a bare revert reports it) by selector: keccak("Slippage()").
+SLIPPAGE                        = ("Slippage", "0x7dd37f70")
 
 
 @_register
@@ -25,19 +28,27 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self._started           = False
         self._growth_arrived    = False
         self._otc               = False
-        self._face0             = int(p["home_k"] * 1000 * PARITY)
+        # An investor brings dollars and a yearly saving; no insured asset, mortgage or cash buffer.
+        self.investor           = p["role"] == "investor"
+        self._face0             = 0 if self.investor else int(p["home_k"] * 1000 * PARITY)
         self._face              = self._face0
         self.mortgage           = int(self._face0 * p["ltv"]) if p["role"] == "debtor" else 0
         self._mortgage0         = self.mortgage
         self.hypo_mortgage      = self.mortgage
         self.hypo_cash          = 0
-        self.income_annual      = int(self._face0 * p["income_frac"])
+        self.income_annual      = (int(p["invest_income_k"] * 1000 * PARITY) if self.investor
+                                   else int(self._face0 * p["income_frac"]))
         self.apr                = p["apr"]
         rate                    = self.apr / 12
         self.payment            = (int(self.mortgage * rate / (1 - (1 + rate) ** -300))
                                    if rate else self.mortgage // 300)
         self.premium_rate       = p["premium_bp"]
-        self.cash_buffer        = int(p["buffer_k"] * 1000 * PARITY)
+        self.cash_buffer        = 0 if self.investor else int(p["buffer_k"] * 1000 * PARITY)
+        self._exit_day          = self.arrive_day + int(365 * p["hold_years"]) if self.investor else None
+        self.exited             = False
+        self.withdrawn_usd      = 0
+        self.refusals           = 0
+        self._receipt_book      = {}                    # receipt -> (principal, shares), taken off at exit
         self.max_impact_bp      = p["max_impact_bp"]
         self.theta              = p["theta"]
         self.pattern            = "salary"
@@ -80,6 +91,9 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self.last_error         = ""
         self._token_idx         = int(policy.uniform(scenario.seed, self.member, "token") * len(d.tokens))
         self._bind_proxy(d)
+        if self.investor:
+            self._token_ids     = []
+            return
         self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
             "setCreditIssuer", args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
         now                     = d.w3.eth.get_block("latest")["timestamp"]
@@ -96,7 +110,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         d.chain.send(d.usdc.functions.mint(self.proxy.address, income))
         self.income_total      += income
         self.hypo_cash         += income
-        living                  = int(income * self.p["living_frac"])
+        living                  = 0 if self.investor else int(income * self.p["living_frac"])
         self.living_arrears    += living
         paid                    = self._pay_bank(d, self.living_arrears)
         self.living_arrears    -= paid
@@ -232,8 +246,33 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         except Exception as exc:
             # As in the JS adapter, an independently refused savings operation does not undo
             # completed refinancing or hide the TOKEN already acquired. Retry it next decision.
-            self.last_error     = repr(exc)[:200]
-            ctr["household_err"] = self.last_error
+            self._refused(exc, ctr)
+
+    def _refused(self, exc, ctr) -> bool:
+        """The basket's price guard refusing is a refusal (True), retried smaller or later; else an error."""
+        why                     = repr(exc)[:200]
+        if any(s in why for s in SLIPPAGE):
+            self.refusals      += 1
+            ctr["household_refused"] = ctr.get("household_refused", 0) + 1
+            return True
+        self.last_error         = why
+        ctr["household_err"]    = why
+        return False
+
+    def _book_receipts(self, d, receipt, ctr, prefix):
+        """Record the receipts a deposit's logs name: principal, and shares on an equity basket."""
+        for log in receipt["logs"]:
+            if log["topics"][0] == d.deposited_topic:
+                rid             = int.from_bytes(log["topics"][2], "big")
+                principal       = d.basket.functions.deposits(rid).call()[0]
+                shares          = (d.basket.functions.holdings(rid).call()[0]
+                                   if str(d.basket_impl).startswith("equity") else 0)
+                self._basket_receipts.append(rid)
+                self._basket_in += principal
+                self._basket_shares += shares
+                self._receipt_book[rid] = (principal, shares)
+                ctr[f"{prefix}Invested"] = ctr.get(f"{prefix}Invested", 0) + principal
+                ctr[f"{prefix}Investments"] = ctr.get(f"{prefix}Investments", 0) + 1
 
     def _invest_cash_once(self, d, budget, ctr):
         if self._savings_proxy is None:
@@ -255,16 +294,81 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self._proxy_exec(d, token.address, token.encode_abi("approve", args=[d.basket.address, held]), proxy=saver)
         receipt                 = self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
             "depositToken", args=[token.address, held, 0]), proxy=saver)
-        for log in receipt["logs"]:
-            if log["topics"][0] == d.deposited_topic:
-                rid             = int.from_bytes(log["topics"][2], "big")
-                principal       = d.basket.functions.deposits(rid).call()[0]
-                self._basket_receipts.append(rid)
-                self._basket_in += principal
-                if str(d.basket_impl).startswith("equity"):
-                    self._basket_shares += d.basket.functions.holdings(rid).call()[0]
-                ctr["bcdInvested"] = ctr.get("bcdInvested", 0) + principal
-                ctr["bcdInvestments"] = ctr.get("bcdInvestments", 0) + 1
+        self._book_receipts(d, receipt, ctr, "bcd")
+
+    # -- the investor ------------------------------------------------------------------------------- #
+
+    def _investor_decision(self, d, day, ctr):
+        """Buy BUCKs and deposit them, unless they are dear; once the horizon comes, withdraw everything."""
+        if day >= self._exit_day:
+            self.last_action    = "exit"
+            self._withdraw(d, ctr)
+            return
+        state                   = self._state(d, day)
+        action                  = policy.investor_action(state["ru"] / state["rb"], state["basket_usd"],
+                                                         state["fee"], self.p["issue_premium"])
+        if action == "invest":
+            cash                = d.chain.balance_of(d.usdc, self.proxy.address)
+            budget              = min(cash, int(state["ru"] * PARITY * self.max_impact_bp / 20_000))
+            if budget > PARITY:
+                self._buy_cash(d, budget)
+                self.invested_usd += cash - d.chain.balance_of(d.usdc, self.proxy.address)
+        self._deposit_bucks(d, ctr)
+        self.last_action        = action
+
+    def _deposit_bucks(self, d, ctr):
+        """Deposit the BUCKs held. When the basket's price guard refuses, offer half, up to four times;
+        whatever is still refused stays here for the next decision."""
+        amount                  = d.buck.functions.balanceOf(self.proxy.address).call()
+        for _ in range(4):
+            if amount <= PARITY:
+                return
+            try:
+                self._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.basket.address, amount]))
+                receipt         = self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                    "depositToken", args=[d.buck.address, amount, 0]))
+            except Exception as exc:
+                if not self._refused(exc, ctr):
+                    return
+                amount         //= 2
+                continue
+            self._book_receipts(d, receipt, ctr, "inv")
+            return
+
+    def _withdraw(self, d, ctr):
+        """Redeem every receipt, then sell what comes back for dollars, a capped bite at a time; then stop."""
+        for rid in list(self._basket_receipts):
+            try:
+                self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                    "redeem(uint256,uint256,uint256)", args=[rid, 0, 0]))
+            except Exception as exc:
+                self._refused(exc, ctr)
+                return
+            principal, shares   = self._receipt_book.pop(rid, (self._basket_in, self._basket_shares))
+            self._basket_receipts.remove(rid)
+            self._basket_in    -= principal
+            self._basket_shares -= shares
+            ctr["invRedeemed"]  = ctr.get("invRedeemed", 0) + 1
+        before                  = d.chain.balance_of(d.usdc, self.proxy.address)
+        left                    = False
+        held                    = d.buck.functions.balanceOf(self.proxy.address).call()
+        if held > PARITY:
+            # Leave half a BUCK: demurrage accrues between the read and the swap.
+            _, rb               = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+            bite                = min(held - PARITY // 2, max(PARITY, _impact_cap(rb, self.max_impact_bp)))
+            self._swap_via_simlp(d, d.pool_ub, d.buck, bite, self.proxy.address)
+            left                = held - bite > PARITY
+        for i, token in enumerate(d.tokens):
+            amount              = d.chain.balance_of(token, self.proxy.address)
+            if amount:
+                _, rt           = active_reserves(d.chain, d.pool_usdc[i], d.usdc, token)
+                bite            = min(amount, max(1, _impact_cap(rt, self.max_impact_bp)))
+                self._swap_via_simlp(d, d.pool_usdc[i], token, bite, self.proxy.address)
+                left           |= bite < amount
+        self.withdrawn_usd     += d.chain.balance_of(d.usdc, self.proxy.address) - before
+        if not left and not self._basket_receipts:
+            self.exited         = True
+            ctr["invExits"]     = ctr.get("invExits", 0) + 1
 
     def _surplus(self, d, state, ctr):
         if self.funding_pending:
@@ -292,10 +396,10 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self.last_action        = action
 
     def act(self, d, scenario, day, tick, ctr):
-        if tick or day < self.arrive_day:
+        if tick or day < self.arrive_day or self.exited:
             return
         if not self._started:
-            cash                = int(self.p["cash_k"] * 1000 * PARITY)
+            cash                = int(self.p["invest_cash_k" if self.investor else "cash_k"] * 1000 * PARITY)
             d.chain.send(d.usdc.functions.mint(self.proxy.address, cash))
             self.hypo_cash      = cash
             self._started      = self._growth_arrived = True
@@ -305,6 +409,13 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         period                  = self.p["decision_days"]
         self._next_decision    += ((day - self._next_decision) // period + 1) * period
         self.last_error         = ""
+        if self.investor:
+            try:
+                self._investor_decision(d, day, ctr)
+            except Exception as exc:
+                self.last_error = repr(exc)[:200]
+                ctr["household_err"] = self.last_error
+            return
         try:
             state               = self._state(d, day)
             kind, verdict       = policy.issuance(state, self.p)
@@ -350,7 +461,8 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         st.update(nw=financial - arrears, hypo=self.hypo_cash - self.hypo_mortgage - hypo_arrears,
                   hypo_cash=self.hypo_cash, hypo_mortgage=self.hypo_mortgage, arrears=arrears,
                   hypo_arrears=hypo_arrears, external_paid=self.external_paid, hypo_paid=self.hypo_paid,
-                  insurance_age=insurance_age,
+                  insurance_age=insurance_age, exited=self.exited, withdrawn_usd=self.withdrawn_usd,
+                  refusals=self.refusals,
                   active=self._started, role=self.p["role"], member=self.member, action=self.last_action,
                   issue_action=self.last_issue, surplus_action=self.last_surplus,
                   funding_pending=self.funding_pending,
@@ -369,27 +481,74 @@ class CreditSaverAgent(CreditHouseholdAgent):
 
 
 @_register
-class HouseholdPopulationAgent(Agent):
-    """Expand into separate accounts once, keeping ordinary loop, telemetry and accounting semantics."""
+class HouseholdInvestorAgent(CreditHouseholdAgent):
+    def setup(self, d, scenario, rng):
+        self.settings           = getattr(self, "settings", {}) | {"role": "investor"}
+        super().setup(d, scenario, rng)
 
-    @classmethod
-    def expand(cls, scenario, population, first_idx):
-        name                    = cls.__name__
-        get                     = lambda key, default: spec(scenario, name, key, default)
-        schedule                = policy.arrivals(scenario.seed, population, scenario.days,
-                                                  get("initial", 10), get("arrival_rate", 6.),
-                                                  get("max_members", 256))
-        settings                = {k: get(k, v) for k, v in policy.DEFAULTS.items()}
-        members                 = []
-        share                   = float(get("saver_share", .5))
-        if not 0 <= share <= 1:
-            raise ValueError("saver_share must be between zero and one")
-        for i, day in enumerate(schedule):
-            member              = f"{population}/{i}"
-            saver               = policy.uniform(scenario.seed, member, "role") < share
-            agent               = (CreditSaverAgent if saver else CreditHouseholdAgent)(first_idx + i)
-            agent.settings      = settings | {"role": "saver" if saver else "debtor"}
-            agent.arrive_day     = day
-            agent.member        = member
-            members.append(agent)
-        return members
+
+ROLE_CLASSES                    = {"debtor": CreditHouseholdAgent, "saver": CreditSaverAgent,
+                                   "investor": HouseholdInvestorAgent}
+
+
+@_register
+class HouseholdPopulationAgent(Agent):
+    """A population whose households arrive while the world runs.
+
+    It stays in the cast. Each morning (day_start, called by the loop before any agent acts) it reads
+    the basket's price in BUCKs, advances each role's arrival intensity (household_policy.arrivals_step)
+    and adds the households that arrive to the world's own lists, where they act like any other agent.
+    Members are named <population>/<role>/<k>; their draws are keyed by that name alone.
+    """
+    is_eoa                      = False
+
+    def setup(self, d, scenario, rng):
+        cls                     = type(self).__name__
+        self.population         = str(spec(scenario, cls, "population", 0))
+        self.pop                = policy.population({k: spec(scenario, cls, k, None)
+                                                     for k in (*policy.POPULATION, *policy.LEGACY_POPULATION)})
+        self.settings           = {k: spec(scenario, cls, k, v) for k, v in policy.DEFAULTS.items()}
+        self.state              = policy.arrival_state(scenario.seed, self.population)
+        self.members            = []
+        self._opened            = False
+
+    def act(self, d, scenario, day, tick, ctr):
+        pass                    # members act for themselves; arrivals are decided in day_start
+
+    def day_start(self, d, scenario, day, ctr, agents, arbs, rng):
+        if not self._opened:
+            self._opened        = True
+            for role in policy.ROLES:
+                for k in range(self.pop[f"initial_{role}s"]):
+                    self._arrive(d, scenario, rng, agents, arbs, role, k, day)
+        bvib                    = None
+        if day >= self.pop["settle_days"]:
+            try:
+                bvib            = d.basket.functions.basketValueInBuck().call() / 1e18
+            except Exception:
+                bvib            = None  # an unreadable price leaves the average where it was
+        for role, k in policy.arrivals_step(self.state, scenario.seed, self.population, day, scenario.days,
+                                            bvib, self.pop):
+            self._arrive(d, scenario, rng, agents, arbs, role, self.pop[f"initial_{role}s"] + k, day)
+        ctr["pop"]              = self.summary()
+
+    def _arrive(self, d, scenario, rng, agents, arbs, role, k, day):
+        if len(self.members) >= self.pop["max_members"]:
+            raise ValueError("household arrivals exceed max_members; raise the bound or lower the rates")
+        agent                   = ROLE_CLASSES[role](max(a.idx for a in agents) + 1)
+        agent.settings          = self.settings | {"role": role}
+        agent.member            = f"{self.population}/{role}/{k}"
+        agent.arrive_day        = day
+        agent.setup(d, scenario, rng)
+        agents.append(agent)
+        arbs.append(agent)
+        self.members.append(agent)
+
+    def summary(self):
+        s                       = self.state
+        out                     = dict(average=s["average"], gap=s["gap"], multiplier=dict(s["multiplier"]))
+        for role in policy.ROLES:
+            mine                = [a for a in self.members if a.p["role"] == role]
+            out[role]           = dict(arrived=len(mine), active=sum(a._started and not a.exited for a in mine),
+                                       exited=sum(a.exited for a in mine))
+        return out

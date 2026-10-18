@@ -39,6 +39,9 @@ def household_summary(states):
                                    "external_interest", "hypo_interest", "external_paid", "hypo_paid",
                                    "arrears", "hypo_arrears", "basket_receipts")
     out                         = {k: sum(a.get(k, 0) for a in active) for k in fields}
+    out.update(investors=sum(a["role"] == "investor" for a in active),
+               exited=sum(bool(a.get("exited")) for a in active),
+               withdrawn_usd=sum(a.get("withdrawn_usd", 0) for a in active))
     out.update(active=len(active), scheduled=len(members), savers=sum(a["role"] == "saver" for a in active),
                errors=sum(bool(a.get("error")) for a in active),
                basket_mark=sum(a["basket_mark"] if a.get("basket_mark") is not None else a["basket"] for a in active),
@@ -507,24 +510,33 @@ class Snapshotter:
         # without telemetry_static() carry knobs None and telemetry false --
         # so a viewer can name and count every instance, and each frame
         # drains every agent's pending acts (alberta_buck/sim/acts.py).
-        if "telemetry" not in self.meta:
-            metas = []
-            for ag in agents:
-                try:
-                    st = ag.telemetry_static()
-                except Exception:
-                    st = None
-                cls = type(ag).__name__
-                metas.append({
-                    "id": f"{cls}#{ag.idx}", "cls": cls, "idx": ag.idx,
-                    "stride": max(1, int(getattr(
-                        ag, "TELEMETRY_STRIDE", 1))),
-                    "telemetry": st is not None,
-                    "knobs": st})
-            if metas:
+        # Agents that arrive later (a household population's members) join the roster when first seen.
+        seen = getattr(self, "_roster", None)
+        if seen is None:
+            seen = self._roster = set()
+        metas = []
+        for ag in agents:
+            cls = type(ag).__name__
+            ident = f"{cls}#{ag.idx}"
+            if ident in seen:
+                continue
+            seen.add(ident)
+            try:
+                st = ag.telemetry_static()
+            except Exception:
+                st = None
+            metas.append({
+                "id": ident, "cls": cls, "idx": ag.idx,
+                "stride": max(1, int(getattr(
+                    ag, "TELEMETRY_STRIDE", 1))),
+                "telemetry": st is not None,
+                "knobs": st})
+        if metas:
+            if "telemetry" not in self.meta:
                 self.meta["telemetry"] = {
                     "version": 2, "units": "usd6", "acts": _acts_mod.MODE,
-                    "agents": metas}
+                    "agents": []}
+            self.meta["telemetry"]["agents"].extend(metas)
         ag_t = {}
         for ag in agents:
             stride = max(1, int(getattr(ag, "TELEMETRY_STRIDE", 1)))
@@ -841,6 +853,15 @@ class Snapshotter:
             "bcd_investments": ctr.get("bcdInvestments", 0),
             "bcd_invest_err": ctr.get("bcd_invest_err", ""),
             "bcd_buy_err": ctr.get("bcd_buy_err", ""),
+            # The household population: its averaged basket price and arrival multipliers, and each
+            # role's arrivals; the investors' BUCK deposits, redemptions and finished exits; the
+            # basket guard's refusals (retried later).
+            "pop": ctr.get("pop"),
+            "inv_invested": ctr.get("invInvested", 0),
+            "inv_investments": ctr.get("invInvestments", 0),
+            "inv_redeemed": ctr.get("invRedeemed", 0),
+            "inv_exits": ctr.get("invExits", 0),
+            "household_refused": ctr.get("household_refused", 0),
             "growth_arrivals": ctr.get("growthArrivals", 0),
             "growth_departures": ctr.get("growthDepartures", 0),
             # Endogenous-origination arrivals (arrive_mode "endog"): how many

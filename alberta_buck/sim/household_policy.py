@@ -11,8 +11,18 @@ DEFAULTS                        = dict(
     risk=[0., .01], switch_k=[1., 3.], penalty_months=3., term_months=60., renew_frac=[0., 1.],
     retire_disc=[.005, .03], issue_premium=[.005, .025], utilization=[.65, .85],
     buffer_k=10., max_impact_bp=[25., 100.], decision_days=[5., 20.], surplus_policy="adaptive",
-    role="debtor", credit_invest=True)
+    role="debtor", credit_invest=True,
+    # The investor: opening savings and yearly saving ($k), and the years before it withdraws.
+    invest_cash_k=[10., 100.], invest_income_k=[2., 20.], hold_years=[3., 15.])
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
+ROLES                           = ("debtor", "saver", "investor")
+SUPPLY                          = ("debtor", "saver")   # drawn while the BUCK is dear; investors while it is cheap
+GROWTH                          = ("steady", "rising", "falling")
+POPULATION                      = dict(
+    initial_debtors=5, initial_savers=5, initial_investors=0, debtor_rate=3., saver_rate=3., investor_rate=0.,
+    growth="steady", gain=50., gain_cap=4., signal_halflife_days=30., settle_days=7, max_members=2000)
+# Older settings, still accepted when no role is named: a total split between savers and debtors.
+LEGACY_POPULATION               = dict(initial=10, arrival_rate=6., saver_share=.5)
 
 
 def uniform(seed, member, key):
@@ -42,14 +52,17 @@ def profile(seed, member, overrides=None):
             value               = lo * (hi / lo) ** u if key == "home_k" else lo + (hi - lo) * u
         result[key]             = value
     for key in ("home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
-                "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days"):
+                "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
+                "invest_cash_k", "invest_income_k", "hold_years"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
         raise ValueError("invalid household size, impact or renewal fraction")
+    if result["hold_years"] <= 0:
+        raise ValueError("an investor's hold_years must be positive")
     if result["surplus_policy"] not in POLICIES:
         raise ValueError("unknown household surplus_policy")
-    if result["role"] not in ("debtor", "saver"):
+    if result["role"] not in ROLES:
         raise ValueError("unknown household role")
     if not 0 <= result["retire_disc"] < 1 or result["issue_premium"] < 0:
         raise ValueError("invalid household price thresholds")
@@ -63,22 +76,96 @@ def profile(seed, member, overrides=None):
     return result
 
 
-def arrivals(seed, population, days, initial=10, arrival_rate=6., max_members=256):
-    """A continuing Poisson arrival stream, in households/year, with an explicit resource bound."""
-    if (not all(math.isfinite(v) for v in (days, initial, arrival_rate, max_members))
-            or initial != int(initial) or max_members != int(max_members)
-            or days <= 0 or initial < 0 or arrival_rate < 0 or max_members < initial):
-        raise ValueError("invalid household population settings")
-    result                      = [0.] * int(initial)
-    day                         = 0.
-    while arrival_rate > 0:
-        day                    += -math.log(1 - uniform(seed, population, f"arrival/{len(result)}")) * 365.25 / arrival_rate
-        if math.ceil(day) >= days:
-            break
-        if len(result) >= max_members:
-            raise ValueError("household arrivals exceed max_members; raise the bound or lower arrival_rate")
-        result.append(day)
-    return [math.ceil(d) for d in result]
+def _count(value, key):
+    if not math.isfinite(value) or value != int(value) or value < 0:
+        raise ValueError(f"{key} must be a whole number of households")
+    return int(value)
+
+
+def population(given):
+    """The population's settings: those a world names, defaults for the rest.
+
+    The older keys (initial, arrival_rate, saver_share) are read first when any is named: savers take
+    saver_share of the total and debtors the rest. Keys naming a role then override them.
+    """
+    given                       = {k: v for k, v in given.items() if v is not None}
+    result                      = dict(POPULATION)
+    if any(k in given for k in LEGACY_POPULATION):
+        old                     = LEGACY_POPULATION | {k: given[k] for k in LEGACY_POPULATION if k in given}
+        share                   = float(old["saver_share"])
+        if not 0 <= share <= 1:
+            raise ValueError("saver_share must be between zero and one")
+        initial                 = _count(float(old["initial"]), "initial")
+        rate                    = float(old["arrival_rate"])
+        savers                  = math.floor(initial * share + .5)
+        result.update(initial_savers=savers, initial_debtors=initial - savers, saver_rate=rate * share,
+                      debtor_rate=rate * (1 - share))
+    result.update({k: given[k] for k in POPULATION if k in given})
+    for role in ROLES:
+        result[f"initial_{role}s"] = _count(float(result[f"initial_{role}s"]), f"initial_{role}s")
+        result[f"{role}_rate"]  = float(result[f"{role}_rate"])
+    for key in ("gain", "gain_cap", "signal_halflife_days"):
+        result[key]             = float(result[key])
+    result["settle_days"]       = _count(float(result["settle_days"]), "settle_days")
+    result["max_members"]       = _count(float(result["max_members"]), "max_members")
+    if result["growth"] not in GROWTH:
+        raise ValueError(f"growth must be one of {GROWTH}")
+    if (not all(math.isfinite(result[f"{r}_rate"]) and result[f"{r}_rate"] >= 0 for r in ROLES)
+            or not math.isfinite(result["gain"]) or result["gain"] < 0
+            or not math.isfinite(result["gain_cap"]) or result["gain_cap"] < 1
+            or not math.isfinite(result["signal_halflife_days"]) or result["signal_halflife_days"] <= 0):
+        raise ValueError("invalid household population rates, gain or averaging")
+    if result["max_members"] < sum(result[f"initial_{r}s"] for r in ROLES):
+        raise ValueError("max_members is smaller than the opening population")
+    return result
+
+
+def growth_factor(growth, day, days):
+    """The base pace over the horizon: straight lines that each average one."""
+    t                           = day / days if days > 0 else 0.
+    return 1. if growth == "steady" else .25 + 1.5 * t if growth == "rising" else 1.75 - 1.5 * t
+
+
+def _exponential(seed, population, role, k):
+    return -math.log(1 - uniform(seed, population, f"{role}/arrival/{k}"))
+
+
+def arrival_state(seed, population):
+    """Before day 0: the averaged basket price at parity, and each role's first arrival threshold."""
+    return dict(average=1., gap=0., intensity={r: 0. for r in ROLES}, arrived={r: 0 for r in ROLES},
+                multiplier={r: 1. for r in ROLES}, due={r: _exponential(seed, population, r, 0) for r in ROLES})
+
+
+def arrivals_step(state, seed, population, day, days, bvib, p):
+    """One day of arrivals, updating `state` in place; returns [(role, k), ...] for today's arrivals.
+
+    The gap is 1 - (the averaged basket price in BUCKs): positive while the BUCK is dear. Debtors and
+    savers arrive faster while it is dear, investors while it is cheap, by 1 + gain x gap, at most
+    gain_cap. A role's k-th arrival (from 0) comes when its cumulative intensity reaches the sum of
+    k + 1 unit exponentials, so a world with gain 0 has the same arrivals at the base pace.
+    """
+    settled                     = day >= p["settle_days"]
+    if settled and bvib is not None and math.isfinite(bvib):
+        state["average"]       += (1 - .5 ** (1 / p["signal_halflife_days"])) * (bvib - state["average"])
+    gap                         = 1 - state["average"] if settled else 0.
+    state["gap"]                = gap
+    pace                        = growth_factor(p["growth"], day, days)
+    arrived                     = []
+    for role in ROLES:
+        side                    = gap if role in SUPPLY else -gap
+        m                       = min(p["gain_cap"], 1 + p["gain"] * max(0., side))
+        state["multiplier"][role] = m
+        state["intensity"][role] += p[f"{role}_rate"] * pace * m / 365.25
+        while state["intensity"][role] >= state["due"][role]:
+            arrived.append((role, state["arrived"][role]))
+            state["arrived"][role] += 1
+            state["due"][role] += _exponential(seed, population, role, state["arrived"][role])
+    return arrived
+
+
+def investor_action(spot, basket_usd, fee, premium):
+    """An investor buys BUCKs unless they are dear by more than its premium after the fee."""
+    return "hold" if spot * (1 - fee) > basket_usd * (1 + premium) else "invest"
 
 
 def surplus_action(policy, spot, basket_usd, fee, discount, premium):

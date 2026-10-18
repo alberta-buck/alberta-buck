@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { profile, issuance, surplusAction, arrivals } from "../src/agents/household-policy.js";
+import { profile, issuance, surplusAction, investorAction, population, arrivalState, arrivalsStep, ROLES }
+  from "../src/agents/household-policy.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
 for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
@@ -12,13 +13,28 @@ for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
 test("household surplus policies use basket parity after trading costs", () => {
   for (const c of f.surplus) assert.equal(surplusAction(...c.slice(0, -1)), c.at(-1));
 });
-test("household arrivals continue, reproduce, and have an explicit size bound", () => {
-  const schedule = arrivals(f.seed, 0, 1827);
-  assert.deepEqual(schedule, arrivals(f.seed, 0, 1827));
-  assert.ok(schedule.at(-1) > 1500);
-  assert.notDeepEqual(schedule, arrivals(f.seed + 1, 0, 1827));
-  assert.throws(() => arrivals(f.seed, 0, 1827, 10, 100, 12), /max_members/);
-  const ps = Array.from({ length: 40 }, (_, i) => profile(f.seed, `0/${i}`));
+test("investors buy BUCKs unless they are dear", () => {
+  for (const c of f.investor) assert.equal(investorAction(...c.slice(0, -1)), c.at(-1));
+});
+const bvib = (day) => f.population.bvib.filter(([start]) => start <= day).at(-1)[1];
+const arrivals = (gain, seed = f.seed) => {
+  const p = population({ ...f.population.settings, gain }), state = arrivalState(seed, f.population.name);
+  const days = Object.fromEntries(ROLES.map((r) => [r, []]));
+  for (let day = 0; day < f.population.days; day++) {
+    for (const [role] of arrivalsStep(state, seed, f.population.name, day, f.population.days, bvib(day), p)) days[role].push(day);
+  }
+  return days;
+};
+test("household arrivals reproduce, are keyed, and come sooner while the price gap draws them", () => {
+  const base = arrivals(0), drawn = arrivals(50);
+  assert.deepEqual(base, arrivals(0));
+  assert.notDeepEqual(base, arrivals(0, f.seed + 1));
+  const within = (days, lo, hi) => days.filter((d) => d >= lo && d < hi).length;
+  for (const role of ["debtor", "saver"]) assert.ok(within(drawn[role], 130, 300) > within(base[role], 130, 300));
+  assert.ok(within(drawn.investor, 330, 500) > within(base.investor, 330, 500));
+  for (const role of ROLES) assert.ok(drawn[role].every((d, k) => k >= base[role].length || d <= base[role][k]));
+  assert.throws(() => population({ max_members: 3 }), /max_members/);
+  const ps = Array.from({ length: 40 }, (_, i) => profile(f.seed, `0/debtor/${i}`));
   assert.equal(new Set(ps.map(p => p.retire_disc)).size, 40);
   assert.ok(new Set(ps.map(p => p.phase)).size > 8);
 });

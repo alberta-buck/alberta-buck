@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact, artifactsAvailable, repoRoot } from "../src/nodefs.js";
-import { CreditHouseholdAgent, CreditSaverAgent } from "../src/agents/credit-household.js";
+import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent, HouseholdPopulationAgent }
+  from "../src/agents/credit-household.js";
 import { issuance } from "../src/agents/household-policy.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { advanceTime, DAY } from "../src/buckworld.js";
@@ -137,5 +138,62 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
   const fee = await session.call(w.buck, "feeOwing", [w.poolAcct]);
   assert.equal(aged.insuranceAge, fee * aged.deposit / raw);
   assert.ok(aged.insuranceAge > 0n, "insurance asset carries its share of pool demurrage");
+  assert.equal(session.mismatches.length, 0);
+});
+
+for (const basket of ["prorata", "machine"]) test(`households: ${basket} investors and a live population`, { skip }, async () => {
+  const session = await tevmSession();
+  const w = await buildEquilibriumWorld(session, loadArtifact, { identity, basket,
+    urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
+  const make = async (member, overrides = {}) => {
+    const a = new HouseholdInvestorAgent({ account: privateKeyToAccount(generatePrivateKey()), member, settings: {
+      ...settings, invest_cash_k: 50, invest_income_k: 12, max_impact_bp: 2000, hold_years: 10, ...overrides } });
+    await a.setup(w); return a;
+  };
+  const inv = await make("investor");
+  assert.equal(inv.face, 0n);
+  assert.equal(await session.call(w.buck, "creditLimit", [w.holderAddress(inv.account)]), 0n);
+  await inv.act(w, 0, 0);
+  assert.equal(inv.lastError, "");
+  assert.equal(inv.lastAction, "invest");
+  assert.ok(inv.investedUsd > 0n && inv.receipts.length > 0);
+  // The guard may refuse the whole and take a half; what it refused waits, and is counted.
+  assert.ok((await w.households.read(inv.account)).signed <= E6 || inv.refusals > 0);
+  const row = inv.ledger.at(-1);
+  assert.equal(row.hypo, 50_000n * E6, "the counterfactual keeps its dollars");
+  assert.ok(row.nw > row.hypo * 9n / 10n && row.nw < row.hypo * 101n / 100n);
+
+  // Dear: it keeps its dollars.
+  const dear = await make("dear");
+  const state = dear.state.bind(dear);
+  dear.state = async (world, day) => ({ ...await state(world, day), basket_usd: .9 });
+  await dear.act(w, 0, 0);
+  assert.equal(dear.lastAction, "hold");
+  assert.equal(dear.investedUsd, 0n);
+
+  // The horizon: redeem, sell and leave; afterwards, nothing.
+  inv.exitDay = 1;
+  for (let day = 1; day < 40 && !inv.exited; day++) {
+    await inv.act(w, day, 0);
+    assert.equal(inv.lastError, "");
+  }
+  assert.ok(inv.exited && inv.receipts.length === 0 && inv.withdrawnUsd > 0n);
+  assert.ok((await w.households.read(inv.account)).signed <= E6);
+  const cash = await w.households.cash(inv.account);
+  await inv.act(w, 90, 0);
+  assert.equal(await w.households.cash(inv.account), cash);
+
+  // A population adds its opening members and its arrivals while the world runs.
+  const pop = new HouseholdPopulationAgent({ makeAccount: () => privateKeyToAccount(generatePrivateKey()),
+    seed: 0xA1BC, days: 365, initial_debtors: 1, initial_savers: 1, initial_investors: 1,
+    debtor_rate: 0, saver_rate: 0, investor_rate: 200, settings: { decision_days: 1 } });
+  await pop.setup(w);
+  for (let day = 0; day < 6; day++) await pop.act(w, day, 0);
+  const roles = pop.members.map((a) => a.p.role);
+  assert.deepEqual(roles.slice(0, 3), ["debtor", "saver", "investor"]);
+  assert.ok(roles.length > 3 && roles.slice(3).every((r) => r === "investor"));
+  assert.equal(pop.members[3].member, "0/investor/1");
+  assert.equal(pop.summary.investor.arrived, roles.length - 2);
+  for (const a of pop.members) assert.equal(a.lastError, "", a.member);
   assert.equal(session.mismatches.length, 0);
 });

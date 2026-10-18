@@ -78,10 +78,20 @@ separate accounts so deposits cannot accidentally extinguish a liability or depe
 * Population and integration
 
 A population is a collection of separate household books and credit accounts, with an initial
-population and Poisson arrivals measured in households per year. Each has independently keyed
+population and arrivals measured in households per year. Each has independently keyed
 thresholds, patience and decision timing. The arrival stream continues through the configured
 horizon, bounded by an explicit population limit. It is not a single unlimited credit account
 whose balance is multiplied by a nominal population count.
+
+Since branch =feature/household-economy= (=doc/review/household-economy-plan.org=) the
+population has three roles -- debtors, insured savers and investors who buy BUCKs and deposit
+them -- each with its own opening count and rate. The coordinator stays in the cast and decides
+each morning who arrives, from shared keyed thresholds and an intensity drawn by the averaged
+price gap: debtors and savers faster while the BUCK is dear, investors while it is cheap. With
+=gain= 0 the same draws give a Poisson stream at the base pace. The older keys (=initial=,
+=arrival_rate=, =saver_share=) still work and now split the total between savers and debtors
+deterministically. Passages below that describe the population as expanded before the run, or
+roles drawn per member, predate this.
 
 The savings sandbox's background economy runs in Python. Its JavaScript controls select the
 same policy and population settings used by the five-year presets. The JavaScript library also

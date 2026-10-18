@@ -170,6 +170,49 @@ def _policy_page(data, pdf) -> None:
     plt.close(fig)
 
 
+def _population_page(data, pdf) -> None:
+    """Who arrived and why: the averaged price gap, the arrival multipliers, and each role's numbers."""
+    import matplotlib.pyplot as plt
+
+    frames                      = [f for f in data["frames"] if f.get("pop")]
+    days                        = [f["day"] for f in frames]
+    roles                       = ("debtor", "saver", "investor")
+    fig, axes                   = plt.subplots(2, 2, figsize=(11.7, 8.3), sharex=True)
+    fig.suptitle("The household population: arrivals drawn by the price gap")
+    ax                          = axes[0, 0]
+    ax.plot(days, [f["basketVal"] / 1e18 for f in frames], linewidth=.6, alpha=.6, label="basket cost in BUCK")
+    ax.plot(days, [f["pop"]["average"] for f in frames], label="its arrival average")
+    ax.axhline(1, color="black", linewidth=.7, linestyle="--")
+    ax.set_title("Below 1 the BUCK is dear (draws issuers); above, cheap (draws investors)")
+    ax                          = axes[0, 1]
+    for role, label in (("debtor", "debtors and savers"), ("investor", "investors")):
+        ax.plot(days, [f["pop"]["multiplier"][role] for f in frames], label=label)
+    ax.set_title("Arrival pace multiplier")
+    ax                          = axes[1, 0]
+    for role in roles:
+        line,                   = ax.plot(days, [f["pop"][role]["arrived"] for f in frames], label=f"{role}s arrived")
+        ax.plot(days, [f["pop"][role]["active"] for f in frames], color=line.get_color(), linestyle=":",
+                label=f"{role}s present")
+    ax.set_title("Households (dotted: present, not yet withdrawn)")
+    ax                          = axes[1, 1]
+    drawn                       = [sum(a.get("drawn", 0) for a in f.get("octl", []) if a.get("active")) / 1e12
+                                   for f in frames]
+    held                        = [sum((a.get("basket_mark") if a.get("basket_mark") is not None else a.get("basket", 0))
+                                       for a in f.get("octl", []) if a.get("role") == "investor" and a.get("active"))
+                                   / 1e12 for f in frames]
+    ax.plot(days, drawn, label="BUCKs drawn by debtors and savers")
+    ax.plot(days, held, label="investors' basket holdings (BUCKs)")
+    ax.plot(days, [f.get("supply", 0) / 1e12 / 10 for f in frames], linestyle="--", label="BUCK supply / 10")
+    ax.set_title("Supply and demand (million BUCKs)")
+    for ax in axes.flat:
+        ax.grid(alpha=.2)
+        ax.legend(fontsize=7)
+        ax.set_xlabel("simulation day")
+    fig.tight_layout(rect=(0, 0, 1, .95))
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def render(vector: Path) -> dict:
     """Render atomically; accept old closed-book vectors as well as explicit completion metadata."""
     preflight()
@@ -204,6 +247,8 @@ def render(vector: Path) -> dict:
                 plot_rebalancing.render(vector, target, pdf=pdf)
                 if any(f.get("octl") for f in frames):
                     plot_octl.render(vector, target, pdf=pdf)
+            if any(f.get("pop") for f in frames):
+                _population_page(data, pdf)
             if any(a.get("surplus_policy") in ("adaptive", "basket", "retire", "discount")
                    for f in frames for a in f.get("octl", [])):
                 _policy_page(data, pdf)

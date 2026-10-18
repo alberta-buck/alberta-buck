@@ -104,12 +104,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     agents, idx = [], 0
     for cls_name, n in scenario.agents.items():
         cls = REGISTRY[cls_name]
-        for ordinal in range(n):
-            if hasattr(cls, "expand"):
-                members         = cls.expand(scenario, ordinal, idx)
-                agents.extend(members)
-                idx            += len(members)
-                continue
+        for _ in range(n):
             a = cls(idx); idx += 1
             agents.append(a)
     for a in agents:
@@ -220,6 +215,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         # this day is already visible in refUsd / the whale's snap below.
         if iv is not None:
             iv.apply_due(day)
+        # A population decides each morning who arrives, and adds them to these live lists.
+        for a in list(agents):
+            hook = getattr(a, "day_start", None)
+            if hook is not None:
+                hook(d, scenario, day, ctr, agents, arbs, rng)
         if on_day_start is not None:
             on_day_start(day, d, agents, ctr)
         # Current day + reference USD prices, for the agents' realized-return

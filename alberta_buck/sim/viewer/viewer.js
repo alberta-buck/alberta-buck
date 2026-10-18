@@ -26,6 +26,8 @@ const CLASS_PREFIX = {
   ExcursionCreditArbAgent: ["exc_"], ExcursionBasketArbAgent: ["exc_"],
   ExcursionBuckArbAgent: ["exc_"], WhaleRaidAgent: ["raid_"],
   CommodityRebalArbAgent: ["crb_"], UndertakingAgent: ["ut_"],
+  CreditHouseholdAgent: ["bcd_", "rtr_"], CreditSaverAgent: ["bcd_", "rtr_"],
+  HouseholdInvestorAgent: ["inv_", "household_"],
   FacilityAgent: ["fac_"], SeederAgent: ["sd_"], MonetaryOpsAgent: ["mo_"],
   MonetaryKeeperAgent: ["mk_"],
   PidKeeperAgent: ["pid_"], DirectorKeeperAgent: ["director"],

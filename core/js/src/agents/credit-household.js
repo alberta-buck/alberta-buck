@@ -1,5 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
-import { profile, uniform, arrivals, issuance, surplusAction, discountedBuyback, usdcOut } from "./household-policy.js";
+import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
+  arrivalState, arrivalsStep, ROLES } from "./household-policy.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -12,13 +13,21 @@ export class CreditHouseholdAgent {
     Object.assign(this, { account, seed, member, arrive_day });
     this.p = profile(seed, member, settings);
     const p = this.p;
-    this.face = units(p.home_k * 1000);
+    // An investor brings dollars and a yearly saving; no insured asset, mortgage or cash buffer.
+    this.investor = p.role === "investor";
+    this.face = this.investor ? 0n : units(p.home_k * 1000);
     this.mortgage = p.role === "debtor" ? BigInt(Math.trunc(Number(this.face) * p.ltv)) : 0n;
     this.hypoMortgage = this.mortgage;
-    this.incomeAnnual = BigInt(Math.trunc(Number(this.face) * p.income_frac));
+    this.incomeAnnual = this.investor ? units(p.invest_income_k * 1000)
+      : BigInt(Math.trunc(Number(this.face) * p.income_frac));
     const rate = p.apr / 12;
     this.payment = rate ? BigInt(Math.trunc(Number(this.mortgage) * rate / (1 - (1 + rate) ** -300))) : this.mortgage / 300n;
-    this.buffer = units(p.buffer_k * 1000);
+    this.buffer = this.investor ? 0n : units(p.buffer_k * 1000);
+    this.exitDay = this.investor ? arrive_day + Math.trunc(365 * p.hold_years) : null;
+    this.exited = false;
+    this.withdrawnUsd = 0n;
+    this.refusals = 0;
+    this.book = new Map();                  // receipt -> {principal, shares}, taken off at exit
     this.nextPay = arrive_day + 30;
     this.lastDay = arrive_day;
     this.nextDecision = arrive_day + p.phase;
@@ -47,6 +56,7 @@ export class CreditHouseholdAgent {
 
   async setup(world) {
     this.tokenIdx = Math.trunc(uniform(this.seed, this.member, "token") * world.tokens.length);
+    if (this.investor) { await world.proxyFor(this.account); return; }   // its dollars arrive at the proxy
     const per = this.face / 4n;
     await world.pledgeInsured(this.account, [per, per, per, this.face - 3n * per], BigInt(this.p.premium_bp),
       { tag: "household:pledge" });
@@ -56,7 +66,7 @@ export class CreditHouseholdAgent {
     const ops = world.households, income = this.incomeAnnual / 12n;
     await world.fiatIn(this.account, income, { tag: "household:income" });
     this.incomeTotal += income; this.hypoCash += income;
-    const living = BigInt(Math.trunc(Number(income) * this.p.living_frac));
+    const living = this.investor ? 0n : BigInt(Math.trunc(Number(income) * this.p.living_frac));
     this.livingArrears += living;
     let paid = await ops.pay(this.account, this.livingArrears, "household:living");
     this.livingArrears -= paid; this.livingPaid += paid;
@@ -155,6 +165,45 @@ export class CreditHouseholdAgent {
     this.lastAction = action;
   }
 
+  // The investor: buy BUCKs and deposit them, unless they are dear; at the horizon, withdraw everything.
+  async investorDecision(world, day) {
+    const ops = world.households;
+    if (day >= this.exitDay) { this.lastAction = "exit"; await this.withdraw(world); return; }
+    const st = await this.state(world, day);
+    const action = investorAction(st.ru / st.rb, st.basket_usd, st.fee, this.p.issue_premium);
+    if (action === "invest") {
+      const cash = await ops.cash(this.account), budget = min(cash, units(st.ru * this.p.max_impact_bp / 20000));
+      if (budget > E6) {
+        const r = await ops.buy(this.account, budget);
+        this.tradeLoss += r.spent - r.got; this.investedUsd += r.spent;
+      }
+    }
+    await this.depositBucks(world);
+    this.lastAction = action;
+  }
+
+  async depositBucks(world) {
+    const r = await world.households.depositBuck(this);
+    this.refusals += r.refusals ?? 0;                 // refused BUCKs stay; the next decision tries again
+    if (r.rid !== undefined) {
+      this.receipts.push(r.rid); this.basketPrincipal += r.principal; this.shares += r.shares;
+      this.book.set(r.rid, { principal: r.principal, shares: r.shares });
+    }
+  }
+
+  async withdraw(world) {
+    const r = await world.households.withdraw(this);
+    for (const rid of r.redeemed) {
+      const b = this.book.get(rid) ?? { principal: this.basketPrincipal, shares: this.shares };
+      this.book.delete(rid);
+      this.receipts = this.receipts.filter((x) => x !== rid);
+      this.basketPrincipal -= b.principal; this.shares -= b.shares;
+    }
+    if (r.refused) this.refusals += 1;
+    this.withdrawnUsd += r.usd;
+    if (!r.left && !this.receipts.length) this.exited = true;
+  }
+
   async record(world, day) {
     const s = await world.households.mark(this);
     this.usdc = s.cash;
@@ -171,14 +220,15 @@ export class CreditHouseholdAgent {
       incomeTotal: this.incomeTotal, livingPaid: this.livingPaid, hypoLiving: this.hypoLiving,
       receipts: this.receipts.length, policy: this.p.surplus_policy, role: this.p.role,
       action: this.lastAction, issueAction: this.lastIssue, surplusAction: this.lastSurplus,
-      fundingPending: this.fundingPending,
+      fundingPending: this.fundingPending, exited: this.exited, withdrawnUsd: this.withdrawnUsd,
+      refusals: this.refusals,
       error: this.lastError, decision: this.lastVerdict });
   }
 
   async act(world, day, tick) {
-    if (tick || day < this.arrive_day) return;
+    if (tick || day < this.arrive_day || this.exited) return;
     if (!this.started) {
-      const cash = units(this.p.cash_k * 1000);
+      const cash = units((this.investor ? this.p.invest_cash_k : this.p.cash_k) * 1000);
       await world.fiatIn(this.account, cash, { tag: "household:starting-cash" });
       this.hypoCash = cash; this.started = true;
     }
@@ -186,7 +236,9 @@ export class CreditHouseholdAgent {
     if (day >= this.nextDecision) {
       this.nextDecision += (Math.floor((day - this.nextDecision) / this.p.decision_days) + 1) * this.p.decision_days;
       this.lastError = "";
-      try {
+      if (this.investor) {
+        try { await this.investorDecision(world, day); } catch (e) { this.lastError = String(e).slice(0, 200); }
+      } else try {
         const state = await this.state(world, day), [kind, verdict] = issuance(state, this.p);
         this.lastVerdict = verdict;
         this.lastAction = verdict.go ? kind : "declined";
@@ -205,18 +257,55 @@ export class CreditSaverAgent extends CreditHouseholdAgent {
   constructor(opts) { super({ ...opts, settings: { ...opts.settings, role: "saver" } }); }
 }
 
+export class HouseholdInvestorAgent extends CreditHouseholdAgent {
+  constructor(opts) { super({ ...opts, settings: { ...opts.settings, role: "investor" } }); }
+}
+
+const ROLE_CLASSES = { debtor: CreditHouseholdAgent, saver: CreditSaverAgent, investor: HouseholdInvestorAgent };
+
+// A population whose households arrive while the world runs (household_policy.arrivals_step). At each
+// day's tick 0 it reads the basket's price in BUCKs, adds the arrivals, then lets every member act.
+// Population settings (POPULATION, or the older initial / arrival_rate / saver_share) are top-level
+// options; `settings` go to every member. Members are named <population>/<role>/<k>.
 export class HouseholdPopulationAgent {
-  constructor({ makeAccount, seed = 0xA1BC, population = 0, days = 1827, initial = 10,
-                arrival_rate = 6, max_members = 256, saver_share = .5, settings = {} }) {
-    if (!(saver_share >= 0 && saver_share <= 1)) throw new Error("saver_share must be between zero and one");
-    this.members = arrivals(seed, population, days, initial, arrival_rate, max_members).map((arrive_day, i) => {
-      const member = `${population}/${i}`;
-      const cls = uniform(seed, member, "role") < saver_share ? CreditSaverAgent : CreditHouseholdAgent;
-      return new cls({ account: makeAccount(member), seed, member, arrive_day,
-        settings: { ...settings, role: cls === CreditSaverAgent ? "saver" : "debtor" } });
-    });
+  constructor({ makeAccount, seed = 0xA1BC, population: pop = 0, days = 1827, settings = {}, ...given }) {
+    Object.assign(this, { makeAccount, seed, name: String(pop), days, settings });
+    this.pop = population(given);
+    this.state = arrivalState(seed, this.name);
+    this.members = [];
+    this.opened = false;
   }
-  async setup(world) { for (const a of this.members) await a.setup(world); }
-  async act(world, day, tick) { for (const a of this.members) await a.act(world, day, tick); }
+  async setup(world) { this.world = world; }
+  async arrive(world, role, k, day) {
+    if (this.members.length >= this.pop.max_members) throw new Error("household arrivals exceed max_members; raise the bound or lower the rates");
+    const member = `${this.name}/${role}/${k}`;
+    const agent = new ROLE_CLASSES[role]({ account: this.makeAccount(member), seed: this.seed, member,
+      arrive_day: day, settings: this.settings });
+    await agent.setup(world);
+    this.members.push(agent);
+  }
+  async morning(world, day) {
+    if (!this.opened) {
+      this.opened = true;
+      for (const role of ROLES) for (let k = 0; k < this.pop[`initial_${role}s`]; k++) await this.arrive(world, role, k, day);
+    }
+    const bvib = day >= this.pop.settle_days ? Number(await world.bvib()) / 1e18 : null;
+    for (const [role, k] of arrivalsStep(this.state, this.seed, this.name, day, this.days, bvib, this.pop)) {
+      await this.arrive(world, role, this.pop[`initial_${role}s`] + k, day);
+    }
+  }
+  async act(world, day, tick) {
+    if (!tick) await this.morning(world, day);
+    for (const a of this.members) await a.act(world, day, tick);
+  }
+  get summary() {
+    const out = { average: this.state.average, gap: this.state.gap, multiplier: { ...this.state.multiplier } };
+    for (const role of ROLES) {
+      const mine = this.members.filter((a) => a.p.role === role);
+      out[role] = { arrived: mine.length, active: mine.filter((a) => a.started && !a.exited).length,
+                    exited: mine.filter((a) => a.exited).length };
+    }
+    return out;
+  }
   get ledger() { return this.members.map((a) => ({ member: a.member, arrive_day: a.arrive_day, rows: a.ledger })); }
 }

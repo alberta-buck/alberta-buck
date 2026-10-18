@@ -149,6 +149,57 @@ export function installHouseholdOps(world) {
       + BigInt(Math.trunc(Number(basketMark + st.deposit - st.insuranceAge - st.drawn + min(st.jub, st.drawn)
         + max(0n, st.signed)) * st.spot)) };
   };
-  world.households = { cash, pay, read, buy, issue, invest, mark, reserves };
+  // The investor deposits the BUCKs it holds. When the basket's price guard refuses, it offers half,
+  // up to four times; what is still refused stays for the next decision.
+  const depositBuck = async (agent) => {
+    const proxy = await world.proxyFor(agent.account), me = world.holderAddress(agent.account);
+    let amount = await s.call(buck, "balanceOf", [me]), refusals = 0, receipt = null;
+    for (let i = 0; i < 4 && amount > E6; i++, amount /= 2n) {
+      await exec(proxy, buck, "approve", [basket.address, amount], "investor:approve");
+      receipt = await exec(proxy, basket, "depositToken", [buck.address, amount, 0n], "investor:deposit", "either");
+      if (receipt.status === "success") break;
+      refusals += 1;
+    }
+    if (!receipt || receipt.status !== "success") return { refusals };
+    const log = receipt.logs.find((l) => l.address.toLowerCase() === basket.address.toLowerCase()
+      && l.topics[0] === DEPOSITED);
+    if (!log) throw new Error("deposit receipt event missing");
+    const rid = BigInt(log.topics[2]);
+    const dep = await s.call(basket, "deposits", [rid]);
+    const shares = world.basketKind === "machine" ? (await s.call(basket, "holdings", [rid]))[0] : 0n;
+    world.receipts += 1;
+    return { rid, principal: dep[0], shares, refusals };
+  };
+  // Mirrors equilibrium_agents._impact_cap: the input that moves a constant-product pool at most `bp`.
+  const impactCap = (reserve, bp) => bp <= 0 || reserve <= 0n ? 0n
+    : BigInt(Math.trunc(Number(reserve) * (1 / Math.sqrt(1 - Math.min(.99, bp / 10000)) - 1)));
+  // The investor's exit: redeem every receipt, then sell what came back, a capped bite per decision.
+  const withdraw = async (agent) => {
+    const proxy = await world.proxyFor(agent.account), me = world.holderAddress(agent.account);
+    const out = { redeemed: [], usd: 0n, left: false, refused: false };
+    for (const rid of [...agent.receipts]) {
+      const r = await exec(proxy, basket, "redeem", [rid, 0n, 0n], "investor:redeem", "either");
+      if (r.status !== "success") return { ...out, refused: true, left: true };
+      out.redeemed.push(rid);
+    }
+    const before = await cash(agent.account), bp = agent.p.max_impact_bp;
+    const held = await s.call(buck, "balanceOf", [me]);
+    if (held > E6) {
+      // Leave half a BUCK: demurrage accrues between the read and the swap.
+      const [, rb] = await reserves(world.poolUB, usdc), bite = min(held - E6 / 2n, max(E6, impactCap(rb, bp)));
+      await swap(agent.account, world.poolUB, buck, usdc, bite, me, "investor:sell");
+      out.left ||= held - bite > E6;
+    }
+    for (const t of world.tokens) {
+      const amount = await s.call(t.erc20, "balanceOf", [me]);
+      if (amount <= 0n) continue;
+      const [, rt] = await reserves(t.poolUsdc, usdc), bite = min(amount, max(1n, impactCap(rt, bp)));
+      await swap(agent.account, t.poolUsdc, t.erc20, usdc, bite, me, "investor:sell");
+      out.left ||= bite < amount;
+    }
+    out.usd = await cash(agent.account) - before;
+    return out;
+  };
+  world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw };
   return world;
 }

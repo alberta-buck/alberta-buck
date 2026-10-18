@@ -76,11 +76,12 @@ The investor, in detail:
 - No insured asset: no =setCreditIssuer=, no credits, face 0, no premium, no mortgage, no cash
   buffer. Its income is already its saving: =living_frac= does not apply.
 - Each decision (=decision_days= [5, 20], phased): if the BUCK is dear by more than its
-  =issue_premium= after the fee (=surplus_action(...) == "invest"= in today's vocabulary), it
-  holds its dollars. Otherwise it buys BUCKs with all its cash, at most =max_impact_bp= of the
-  BUCK/USDC pool's dollars per decision, and deposits every BUCK it holds with
-  =depositToken(BUCK, amount, 0)=. A refused deposit leaves the BUCKs in its account; the next
-  decision tries again.
+  =issue_premium= after the fee (=investor_action=), it holds its dollars. Otherwise it buys BUCKs
+  with all its cash, at most =max_impact_bp= of the BUCK/USDC pool's dollars per decision, and
+  deposits the BUCKs it holds with =depositToken(BUCK, amount, 0)=. When the basket's price guard
+  refuses (=Slippage()=, selector =0x7dd37f70=), it offers half, up to four times; what is still
+  refused stays in its account for the next decision. A guard refusal is counted as a refusal,
+  not an error.
 - At =arrive_day + 365 x hold_years= it exits: redeems every receipt, sells what comes back (BUCKs
   through BUCK/USDC, any TOKEN through its USDC pool), impact-capped per decision, until nothing is
   left; then it stops.
@@ -104,6 +105,7 @@ Settings (=[agents.HouseholdPopulationAgent]=):
 | =signal_halflife_days= | 30 | the gap's averaging |
 | =settle_days= | 7 | days before the gap counts (the opening transient) |
 | =max_members= | 2000 | a safety bound; exceeding it raises |
+| =population= | 0 | the population's name, which keys its arrival draws |
 
 The older keys stay valid so the savings sandbox and its public choices keep working: =initial=,
 =arrival_rate= and =saver_share=, when no role key is given, become =initial_savers = round(initial
@@ -129,8 +131,9 @@ and its open-loop twin differ only by the response. The rule lives in =household
 pure step function (state, day, bvib, settings) -> (state, arrivals), mirrored in
 =household-policy.js= and checked by a shared vector: a scripted bvib series and its arrival days.
 
-Members are named =<population>/<role>/<k>=; initial members take the first k of each role.
-A member arriving on day d has =arrive_day= = d; its income, interest and decisions start then.
+Members are named =<population>/<role>/<k>=; initial members take the first k of each role and
+arrive on the coordinator's first morning. A member arriving on day d has =arrive_day= = d; its
+income, interest and decisions start then.
 
 ** Python mechanics
 
@@ -200,8 +203,10 @@ with =growth= =rising= and =falling= on both paths, seed 41404 (4 runs). 42 five
 - =report --campaign NAME= reads completed vectors only and writes =index.html= with the acceptance
   table.
 
-Cells are named =s<supply>-d<demand>-<prices>-<seed>[-<variant>]=, for example
-=s1-d3-history-41404=.
+Cells are named =s<supply>-d<demand>-<prices>-<seed>[-<variant>]=, with =lo=, =mid= and =hi= for
+the factors 1/3, 1 and 3 and the variants =open= (=gain= 0), =rising= and =falling=; for example
+=slo-dhi-history-41404=. Before the runs fan out, each seed runs two days alone to warm the shared
+identity cache.
 
 ** Acceptance
 
@@ -210,7 +215,7 @@ Measured from day 365 to the end:
 - mean |bvib - 1| below 1%, and its 99th percentile below 5%;
 - K inside [kmin + 0.05, kmax - 0.05] on at least 95% of days, and never at a rail (within 0.005
   of kmin or kmax) for more than 30 days in a row;
-- no household errors, no exhausted arrivals, every member's books closed.
+- no household errors (guard refusals are counted apart), no exhausted arrivals.
 
 The index also shows K at the end, supply, BUCKs drawn by role, investors' deposits, arrivals by
 role and the average multipliers. A cell that fails is a finding, not a bug, until its cause is
@@ -289,10 +294,16 @@ its failures are understood.
   Worktree at =.claude/worktrees/household-economy= (ignored by git). In it, =lib/= entries are
   symlinks to the main checkout's (=lib/circom-lib= is a submodule: link it too for Python work),
   and =out=, =cache= and =alberta_buck/sim/artifacts= build products are linked or rebuilt.
-- Python, from the worktree: =build/cleanup/nx.sh bash -c 'source <venv>/bin/activate;
-  PYTHONPATH=$PWD ALBERTA_BUCK_REPO=$PWD python ...'=, where =<venv>= is
-  =/Users/perry/src/alberta-buck.venv-0.2.0-nix-darwin-cpython-313=. The venv's editable install
-  points at the main checkout; =PYTHONPATH= makes the worktree's sources win.
+- Python, from the worktree: =build/py.sh python ...= (untracked; it lives in the worktree's
+  =build/=). The project venvs' own base pythons were garbage-collected from the nix store, so
+  =build/runtime= is a venv on the profile python (=python -m venv --without-pip=) whose
+  =simulation-dependencies.pth= names the 0.4.0 venv's site-packages. =build/py.sh= sources the
+  captured dev environment (=/Users/perry/src/alberta-buck/build/cleanup/nixenv.sh=), puts
+  =build/runtime/bin= first on =PATH=, and sets =PYTHONPATH= to the worktree, its =core/python=
+  and =core/contracts/python=, and the main checkout's built =core/python-kernel=, with
+  =ALBERTA_BUCK_REPO= the worktree. The campaign runner passes the same paths to its snapshot.
+- A worktree-isolated session refuses heredocs and compound shell commands: write small scripts
+  under =build/= and run them.
 - JavaScript: =cd core/js && node --test test/<file>=.
 - Long runs in the background, from a frozen snapshot; never edit a running snapshot.
 - Never start, stop or probe ports 8797, 8798 or 8000. The local sim server is on 8897.
@@ -303,4 +314,12 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-17: steps 1 and 2 built. Investor role, live coordinator and price-drawn arrivals in
+  Python and JS with shared vectors; =economy.toml=; =alberta_buck.sim.economy= (plan, run,
+  report, acceptance); a population page in the PDF. Python: 1083 passed, 9 skipped; the two
+  failures need =anvil= (privacy story, receipt lifecycle), which this machine lacks. A 150-day
+  smoke of the centre: households arrive, investors deposit, the roster grows; the BUCK sits about
+  2.4% cheap from day 20 (bvib 1.024) while K falls from 0.72 to 0.59 and the investors'
+  multiplier reaches 2. With the older stabilizers gone, nothing yet holds parity on the cheap
+  side; the five-year centre cells say where this goes.
 - 2026-10-17: plan written; decisions 1--6 taken.

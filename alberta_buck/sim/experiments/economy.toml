@@ -1,0 +1,60 @@
+# The household economy (doc/review/household-economy-plan.org): debtors and insured savers who
+# supply BUCKs, investors who demand them, arriving while the world runs and drawn by the price gap;
+# the market's plumbing; and the basket machine with its wheel and desk.  Nothing else issues or
+# buys BUCKs: no synthetic borrowers, older savers or depositors, desk stand-ins or excursion
+# arbitrageurs.  This file is the grid's centre; alberta_buck/sim/economy.py varies the population's
+# rates, the price path and the seed around it.
+name = "economy"
+notes = "households only: debtors and savers supply, investors demand; arrivals drawn by the price gap"
+
+[scenario]
+family = "rebalancing-eq"
+rng = "keyed"
+years = 5.0
+ticks_per_day = 2
+day_step = 1
+seed = 0xA1BC
+basket = "equity-machine"
+tokens = ["LABR", "CNST", "FOOD", "NRGC", "PAXG"]
+
+[deploy]
+target_buck_lp_m = 50.0     # a deep BUCK/USDC pool
+
+# The family's plumbing stays: the whale pinning TOKEN/USDC to the price path, the cycle
+# arbitrageurs and accumulators, the bootstrap LPs that open the TOKEN/BUCK pools, the keepers.
+[scenario.agents]
+FatCreditBorrowerAgent = 0
+SaverAgent = 0
+BuckCreditDebtorAgent = 0
+ExternalDebtRetireeAgent = 0
+DirectMintAgent = 0
+DirectMintBuckAgent = 0
+ArrivingDMAgent = 0
+ExcursionArbAgent = 0
+ExcursionCreditArbAgent = 0
+UndertakingAgent = 0
+ShockAgent = 0
+MonetaryKeeperAgent = 1     # turns the basket's desk
+BasketWheelAgent = 1
+HouseholdPopulationAgent = 1
+
+[agents.HouseholdPopulationAgent]
+initial_debtors = 6
+initial_savers = 6
+initial_investors = 12
+debtor_rate = 6.0           # arrivals a year at the base pace
+saver_rate = 6.0
+investor_rate = 12.0
+growth = "steady"
+gain = 50.0                 # pace x (1 + 50 x gap): twice as fast at a 2% gap
+gain_cap = 4.0
+signal_halflife_days = 30.0
+surplus_policy = "adaptive"
+
+[agents.BasketWheelAgent]
+impl = "solidity"
+start = "token"
+cap_bp = 200
+max_work = 12
+chain = "l2"
+call = "profitable"

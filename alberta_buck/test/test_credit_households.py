@@ -5,7 +5,8 @@ import pytest
 
 from alberta_buck.sim import experiment as expmod, identity as idmod
 from alberta_buck.sim.chain import Chain
-from alberta_buck.sim.credit_households import CreditHouseholdAgent, CreditSaverAgent
+from alberta_buck.sim.credit_households import (CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent,
+                                                HouseholdPopulationAgent)
 from alberta_buck.sim.deploy import deploy
 from alberta_buck.sim.direct_mint import BootstrapDMAgent
 from alberta_buck.sim.household_policy import issuance
@@ -222,6 +223,105 @@ def test_arrived_population_summary_excludes_future_books(household_world):
     after                       = household_summary([a.octl_state(d)])
     assert after["active"] == 1 and after["mortgage"] == a.mortgage
     assert after["hypo_mortgage"] == a.hypo_mortgage
+
+
+def investor(make, **settings):
+    return make(HouseholdInvestorAgent, **({"invest_cash_k": 50, "invest_income_k": 12, "max_impact_bp": 100,
+                                             "hold_years": 10} | settings))
+
+
+def test_investor_buys_bucks_deposits_them_and_marks_its_books(household_world):
+    d, scenario, make           = household_world
+    a                           = investor(make)
+    assert a._token_ids == [] and a._face0 == a.mortgage == 0
+    assert d.buck.functions.creditLimit(a.proxy.address).call() == 0
+    ctr                         = {}
+    a.act(d, scenario, 0, 0, ctr)
+    assert not a.last_error and a.last_action == "invest"
+    assert a.invested_usd > 0 and a._basket_receipts and ctr["invInvestments"] == len(a._basket_receipts)
+    assert d.buck.functions.balanceOf(a.proxy.address).call() <= M6, "every BUCK bought was deposited"
+    st                          = a.octl_state(d)
+    assert st["role"] == "investor" and st["drawn"] == 0 and st["mortgage"] == 0
+    # The counterfactual keeps the dollars; the actual books hold the basket, less the costs of getting in.
+    assert st["hypo"] == 50_000 * M6 and .9 * st["hypo"] < st["nw"] < 1.01 * st["hypo"]
+    a.act(d, scenario, 30, 0, {})
+    assert a.income_total == a.hypo_cash - 50_000 * M6 == 1000 * M6, "a month's saving, in both books"
+
+
+def test_investor_holds_its_dollars_while_the_buck_is_dear(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    a                           = investor(make)
+    monkeypatch.setattr(a, "_basket_usd", lambda d: .90)
+    a.act(d, scenario, 0, 0, {})
+    assert a.last_action == "hold" and a.invested_usd == 0 and not a._basket_receipts
+    assert d.chain.balance_of(d.usdc, a.proxy.address) == 50_000 * M6
+
+
+def test_refused_investor_deposit_is_retried_not_an_error(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    a                           = investor(make)
+    original                    = a._proxy_exec
+
+    def refuse(d, target, data, **kw):
+        if target == d.basket.address:
+            raise RuntimeError("execution reverted: Slippage()")
+        return original(d, target, data, **kw)
+
+    monkeypatch.setattr(a, "_proxy_exec", refuse)
+    a.act(d, scenario, 0, 0, {})
+    held                        = d.buck.functions.balanceOf(a.proxy.address).call()
+    assert held > M6 and a.refusals == 4 and not a.last_error and not a._basket_receipts, "offered half, four times"
+    monkeypatch.setattr(a, "_proxy_exec", original)
+    spent                       = a.invested_usd
+    monkeypatch.setattr(a, "_basket_usd", lambda d: .90)       # dear: it buys nothing more, but deposits what it has
+    a.act(d, scenario, 1, 0, {})
+    assert a._basket_receipts and a.invested_usd == spent
+    assert d.buck.functions.balanceOf(a.proxy.address).call() <= M6
+
+
+def test_investor_withdraws_sells_and_leaves(household_world):
+    d, scenario, make           = household_world
+    a                           = investor(make, max_impact_bp=2000)
+    a.act(d, scenario, 0, 0, {})
+    assert a._basket_receipts
+    a._exit_day                 = 1
+    for day in range(1, 40):
+        a.act(d, scenario, day, 0, {})
+        assert not a.last_error
+        if a.exited:
+            break
+    assert a.exited and not a._basket_receipts and a._basket_in == a._basket_shares == 0
+    assert a.withdrawn_usd > 0 and d.buck.functions.balanceOf(a.proxy.address).call() <= M6
+    assert all(d.chain.balance_of(t, a.proxy.address) <= 1 for t in d.tokens)
+    cash                        = d.chain.balance_of(d.usdc, a.proxy.address)
+    a.act(d, scenario, 90, 0, {})
+    assert d.chain.balance_of(d.usdc, a.proxy.address) == cash, "an investor that has left does nothing more"
+    st                          = a.octl_state(d)
+    assert st["exited"] and .85 * st["hypo"] < st["nw"] <= st["hypo"] * 1.05
+
+
+def test_population_adds_arrivals_to_the_live_lists(household_world):
+    from alberta_buck.sim import household_policy as policy
+    d, scenario, make           = household_world
+    pop                         = HouseholdPopulationAgent(50)
+    pop.setup(d, scenario, None)
+    pop.pop                     = policy.population(dict(initial_debtors=1, initial_savers=1, initial_investors=2,
+                                                         debtor_rate=0, saver_rate=0, investor_rate=200))
+    agents, arbs, ctr           = [pop], [pop], {}
+    pop.day_start(d, scenario, 0, ctr, agents, arbs, None)
+    roles                       = [a.p["role"] for a in agents[1:]]
+    assert roles[:4] == ["debtor", "saver", "investor", "investor"] and arbs == agents
+    assert [a.member for a in agents[1:3]] == ["0/debtor/0", "0/saver/0"]
+    assert len({a.idx for a in agents}) == len(agents)
+    for day in range(1, 8):
+        pop.day_start(d, scenario, day, ctr, agents, arbs, None)
+    later                       = [a for a in agents[1:] if a.arrive_day > 0]
+    assert later and all(a.p["role"] == "investor" for a in later)
+    assert later[0].member == "0/investor/2"
+    assert ctr["pop"]["investor"]["arrived"] == len(agents) - 3
+    for a in agents[1:]:
+        a.act(d, scenario, 7, 0, ctr)
+        assert not a.last_error
 
 
 def test_cash_flow_ledger_matches_javascript(household_world):
