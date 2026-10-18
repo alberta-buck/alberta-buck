@@ -164,8 +164,10 @@ def arrivals_step(state, seed, population, day, days, bvib, p):
 
 
 def investor_action(spot, basket_usd, fee, premium):
-    """An investor buys BUCKs unless they are dear by more than its premium after the fee."""
-    return "hold" if spot * (1 - fee) > basket_usd * (1 + premium) else "invest"
+    """An investor holds BUCKs as its money: it buys them, unless they are dear by more than its
+    premium after the fee; then it converts what it holds into basket shares instead. (A BUCK
+    deposited in the basket is spent by the basket on commodities, so only BUCKs held are demand.)"""
+    return "convert" if spot * (1 - fee) > basket_usd * (1 + premium) else "buy"
 
 
 def surplus_action(policy, spot, basket_usd, fee, discount, premium):

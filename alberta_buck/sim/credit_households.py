@@ -299,7 +299,8 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
     # -- the investor ------------------------------------------------------------------------------- #
 
     def _investor_decision(self, d, day, ctr):
-        """Buy BUCKs and deposit them, unless they are dear; once the horizon comes, withdraw everything."""
+        """Hold BUCKs as money: buy them with the dollars saved, unless they are dear; then convert
+        those held into basket shares. Once the horizon comes, withdraw everything."""
         if day >= self._exit_day:
             self.last_action    = "exit"
             self._withdraw(d, ctr)
@@ -307,13 +308,14 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         state                   = self._state(d, day)
         action                  = policy.investor_action(state["ru"] / state["rb"], state["basket_usd"],
                                                          state["fee"], self.p["issue_premium"])
-        if action == "invest":
+        if action == "buy":
             cash                = d.chain.balance_of(d.usdc, self.proxy.address)
             budget              = min(cash, int(state["ru"] * PARITY * self.max_impact_bp / 20_000))
             if budget > PARITY:
                 self._buy_cash(d, budget)
                 self.invested_usd += cash - d.chain.balance_of(d.usdc, self.proxy.address)
-        self._deposit_bucks(d, ctr)
+        else:
+            self._deposit_bucks(d, ctr)
         self.last_action        = action
 
     def _deposit_bucks(self, d, ctr):
@@ -393,7 +395,40 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
                 got             = self._buy_cash(d, min(int(budget * PARITY), cost))
                 self.unwound   += got
                 ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + got
+            self._redeem_to_retire(d, ctr)
         self.last_action        = action
+
+    def _redeem_to_retire(self, d, ctr):
+        """The other half of borrowing to invest: while the BUCK is cheap, redeem a basket receipt (an
+        equity basket pays its exits in BUCKs) and repay the lien with what comes back. One receipt a
+        decision, oldest first; what exceeds the lien stays in savings."""
+        if (not self._basket_receipts or self._savings_proxy is None
+                or not str(d.basket_impl).startswith("equity")):
+            return
+        drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        if drawn <= PARITY:
+            return
+        saver                   = self._savings_proxy
+        rid                     = self._basket_receipts[0]
+        before                  = d.buck.functions.balanceOf(saver.address).call()
+        try:
+            self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
+                "redeem(uint256,uint256,uint256)", args=[rid, 0, 0]), proxy=saver)
+        except Exception as exc:
+            self._refused(exc, ctr)
+            return
+        principal, shares       = self._receipt_book.pop(rid, (0, 0))
+        self._basket_receipts.remove(rid)
+        self._basket_in        -= principal
+        self._basket_shares    -= shares
+        received                = d.buck.functions.balanceOf(saver.address).call() - before
+        repay                   = min(max(0, received), drawn, d.buck.functions.balanceOf(saver.address).call())
+        if repay > 0:
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi("transfer", args=[self.proxy.address, repay]),
+                             proxy=saver)
+        self.unwound           += repay
+        ctr["bcdRetired"]       = ctr.get("bcdRetired", 0) + repay
+        ctr["bcdRedeemedToRetire"] = ctr.get("bcdRedeemedToRetire", 0) + 1
 
     def act(self, d, scenario, day, tick, ctr):
         if tick or day < self.arrive_day or self.exited:

@@ -140,8 +140,9 @@ export function arrivalsStep(state, seed, pop, day, days, bvib, p) {
   return arrived;
 }
 
-// An investor buys BUCKs unless they are dear by more than its premium after the fee.
-export const investorAction = (spot, basket, fee, premium) => spot * (1 - fee) > basket * (1 + premium) ? "hold" : "invest";
+// An investor holds BUCKs as its money: it buys them, unless they are dear by more than its premium
+// after the fee; then it converts what it holds into basket shares (household_policy.investor_action).
+export const investorAction = (spot, basket, fee, premium) => spot * (1 - fee) > basket * (1 + premium) ? "convert" : "buy";
 
 export const usdcOut = (buck, ru, rb, fee) => rb + buck * (1 - fee) > 0
   ? ru * buck * (1 - fee) / (rb + buck * (1 - fee)) : 0;

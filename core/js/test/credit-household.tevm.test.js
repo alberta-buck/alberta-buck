@@ -120,6 +120,14 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
   assert.equal(saver.lastError, "");
   assert.ok(saver.issuedInvest > 0n && saver.receipts.length > 0);
   assert.equal(saver.mortgage, 0n);
+  if (basket === "machine") {
+    // Cheap: the saver redeems a receipt and repays its lien with the BUCKs that come back.
+    const owed = (await w.households.read(saver.account)).drawn, n = saver.receipts.length;
+    const cheap = await saver.state(w, 0);
+    await saver.surplus(w, { ...cheap, basket_usd: cheap.ru / cheap.rb * 1.2 });
+    assert.equal(saver.receipts.length, n - 1);
+    assert.ok((await w.households.read(saver.account)).drawn < owed, "the redeemed BUCKs repay the lien");
+  }
 
   const untouched = await make(CreditHouseholdAgent, "counterfactual", { cash_k: 0, income_frac: 0 });
   untouched.nextDecision = 1000;
@@ -155,25 +163,28 @@ for (const basket of ["prorata", "machine"]) test(`households: ${basket} investo
   assert.equal(await session.call(w.buck, "creditLimit", [w.holderAddress(inv.account)]), 0n);
   await inv.act(w, 0, 0);
   assert.equal(inv.lastError, "");
-  assert.equal(inv.lastAction, "invest");
-  assert.ok(inv.investedUsd > 0n && inv.receipts.length > 0);
-  // The guard may refuse the whole and take a half; what it refused waits, and is counted.
-  assert.ok((await w.households.read(inv.account)).signed <= E6 || inv.refusals > 0);
+  assert.equal(inv.lastAction, "buy");
+  assert.ok(inv.investedUsd > 0n && inv.receipts.length === 0);
+  const held = (await w.households.read(inv.account)).signed;
+  assert.ok(held > 40_000n * E6, "the BUCKs bought are held");
   const row = inv.ledger.at(-1);
   assert.equal(row.hypo, 50_000n * E6, "the counterfactual keeps its dollars");
-  assert.ok(row.nw > row.hypo * 9n / 10n && row.nw < row.hypo * 101n / 100n);
+  assert.ok(row.nw > row.hypo * 95n / 100n && row.nw < row.hypo * 101n / 100n);
 
-  // Dear: it keeps its dollars.
-  const dear = await make("dear");
-  const state = dear.state.bind(dear);
-  dear.state = async (world, day) => ({ ...await state(world, day), basket_usd: .9 });
-  await dear.act(w, 0, 0);
-  assert.equal(dear.lastAction, "hold");
-  assert.equal(dear.investedUsd, 0n);
+  // Dear: it buys no more and converts what it holds into the basket. The guard may refuse
+  // the whole and take a half; what it refused waits, and is counted.
+  const state = inv.state.bind(inv), spent = inv.investedUsd;
+  inv.state = async (world, day) => ({ ...await state(world, day), basket_usd: .9 });
+  await inv.act(w, 1, 0);
+  inv.state = state;
+  assert.equal(inv.lastAction, "convert");
+  assert.equal(inv.investedUsd, spent);
+  assert.ok(inv.receipts.length > 0);
+  assert.ok((await w.households.read(inv.account)).signed < held);
 
   // The horizon: redeem, sell and leave; afterwards, nothing.
-  inv.exitDay = 1;
-  for (let day = 1; day < 40 && !inv.exited; day++) {
+  inv.exitDay = 2;
+  for (let day = 2; day < 40 && !inv.exited; day++) {
     await inv.act(w, day, 0);
     assert.equal(inv.lastError, "");
   }

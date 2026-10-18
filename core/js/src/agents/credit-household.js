@@ -114,6 +114,7 @@ export class CreditHouseholdAgent {
     this.investedUsd += r.spent;
     if (r.rid !== undefined) {
       this.receipts.push(r.rid); this.basketPrincipal += r.principal; this.shares += r.shares;
+      this.book.set(r.rid, { principal: r.principal, shares: r.shares });
     }
     if (r.error) this.lastError = r.error;
   }
@@ -161,24 +162,37 @@ export class CreditHouseholdAgent {
         const r = await world.households.buy(this.account, min(units(budget), cost));
         this.tradeLoss += r.spent - r.got; this.unwound += r.got;
       }
+      await this.redeemToRetire(world);
     }
     this.lastAction = action;
   }
 
-  // The investor: buy BUCKs and deposit them, unless they are dear; at the horizon, withdraw everything.
+  // The other half of borrowing to invest: while the BUCK is cheap, redeem the oldest basket receipt (an
+  // equity basket pays exits in BUCKs) and repay the lien with what comes back; the excess stays saved.
+  async redeemToRetire(world) {
+    if (!this.receipts.length || !this.savings || world.basketKind !== "machine") return;
+    const r = await world.households.redeemToRetire(this, this.receipts[0]);
+    if (r.refused) { this.refusals += 1; return; }
+    if (!r.redeemed) return;
+    const rid = this.receipts.shift(), b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
+    this.book.delete(rid);
+    this.basketPrincipal -= b.principal; this.shares -= b.shares; this.unwound += r.repaid;
+  }
+
+  // The investor holds BUCKs as money: it buys them with the dollars saved, unless they are dear; then it
+  // converts those held into basket shares. At the horizon it withdraws everything.
   async investorDecision(world, day) {
     const ops = world.households;
     if (day >= this.exitDay) { this.lastAction = "exit"; await this.withdraw(world); return; }
     const st = await this.state(world, day);
     const action = investorAction(st.ru / st.rb, st.basket_usd, st.fee, this.p.issue_premium);
-    if (action === "invest") {
+    if (action === "buy") {
       const cash = await ops.cash(this.account), budget = min(cash, units(st.ru * this.p.max_impact_bp / 20000));
       if (budget > E6) {
         const r = await ops.buy(this.account, budget);
         this.tradeLoss += r.spent - r.got; this.investedUsd += r.spent;
       }
-    }
-    await this.depositBucks(world);
+    } else await this.depositBucks(world);
     this.lastAction = action;
   }
 

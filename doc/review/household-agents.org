@@ -84,8 +84,8 @@ horizon, bounded by an explicit population limit. It is not a single unlimited c
 whose balance is multiplied by a nominal population count.
 
 Since branch =feature/household-economy= (=doc/review/household-economy-plan.org=) the
-population has three roles -- debtors, insured savers and investors who buy BUCKs and deposit
-them -- each with its own opening count and rate. The coordinator stays in the cast and decides
+population has three roles -- debtors, insured savers and investors who hold BUCKs (and convert
+them into the basket while the BUCK is dear) -- each with its own opening count and rate. The coordinator stays in the cast and decides
 each morning who arrives, from shared keyed thresholds and an intensity drawn by the averaged
 price gap: debtors and savers faster while the BUCK is dear, investors while it is cheap. With
 =gain= 0 the same draws give a Poisson stream at the base pace. The older keys (=initial=,

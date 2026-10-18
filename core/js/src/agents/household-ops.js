@@ -200,6 +200,19 @@ export function installHouseholdOps(world) {
     out.usd = await cash(agent.account) - before;
     return out;
   };
-  world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw };
+  // A credit household redeems one savings receipt and repays its lien with the BUCKs that come back.
+  const redeemToRetire = async (agent, rid) => {
+    const me = world.holderAddress(agent.account), saver = agent.savings;
+    const drawn = -(await s.call(buck, "signedBalanceOf", [me]));
+    if (drawn <= E6) return {};
+    const before = await s.call(buck, "balanceOf", [saver.address]);
+    const r = await exec(saver, basket, "redeem", [rid, 0n, 0n], "household:redeem", "either");
+    if (r.status !== "success") return { refused: true };
+    const held = await s.call(buck, "balanceOf", [saver.address]);
+    const repaid = min(max(0n, held - before), drawn, held);
+    if (repaid > 0n) await exec(saver, buck, "transfer", [me, repaid], "household:repay");
+    return { redeemed: true, repaid };
+  };
+  world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire };
   return world;
 }
