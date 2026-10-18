@@ -547,7 +547,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
                 self._swap_via_simlp(d, d.pool_usdc[i], token, amount, self.proxy.address, from_proxy=saver)
         return True
 
-    def _redeem_to_retire(self, d, ctr):
+    def _redeem_to_retire(self, d, ctr, rid=None):
         """The other half of borrowing to invest: while the BUCK is cheap, redeem a basket receipt (an
         equity basket pays its exits in BUCKs) and repay the lien with what comes back. One receipt a
         decision, oldest first; what exceeds the lien stays in savings. Returns the BUCKs repaid, or
@@ -559,7 +559,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         if drawn <= PARITY:
             return None
         saver                   = self._savings_proxy
-        rid                     = self._basket_receipts[0]
+        rid                     = self._basket_receipts[0] if rid is None else rid
         before                  = d.buck.functions.balanceOf(saver.address).call()
         try:
             self._proxy_exec(d, d.basket.address, d.basket.encode_abi(
@@ -593,8 +593,12 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         if share > 0 and drawn > PARITY:
             target              = int(drawn * share)
             repaid              = 0
-            while repaid < target:
-                got             = self._redeem_to_retire(d, ctr)
+            # Only receipts that fit within what is left to pay down, smallest first: a small urgency
+            # must not cash out a whole savings position.
+            for rid in sorted(self._basket_receipts, key=lambda r: self._receipt_book.get(r, (0, 0))[0]):
+                if repaid >= target or self._receipt_book.get(rid, (0, 0))[0] > target - repaid:
+                    break
+                got             = self._redeem_to_retire(d, ctr, rid)
                 if got is None:
                     break
                 repaid         += got

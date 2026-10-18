@@ -278,8 +278,10 @@ export function issuance(s, p) {
   let buck = premiumSale(Math.min(capacity(t), Math.max(0, limit)), ru, rb, fee,
                          s.basket_usd, p.issue_premium, p.max_impact_bp);
   const keep = s.face * s.k * p.carry_utilization - s.drawn;
-  const cheap = ru / rb / (1 - fee) < s.basket_usd * (1 - p.retire_disc);
-  // Carry: keep this share of the K-scaled limit drawn and invested while the BUCK is not cheap.
-  if (buck <= 0 && keep > 0 && !cheap) buck = Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999);
+  // Carry: keep this share of the K-scaled limit drawn and invested while the BUCK trades at no
+  // discount -- the same line where paying down begins, so the two never alternate.
+  if (buck <= 0 && keep > 0 && discount(ru / rb, s.basket_usd, fee) <= 0) {
+    buck = Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999);
+  }
   return ["invest", refinance(t, usdcOut(buck, ru, rb, fee), buck)];
 }

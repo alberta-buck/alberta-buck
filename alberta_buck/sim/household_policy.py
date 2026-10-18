@@ -288,9 +288,9 @@ def issuance(state, p):
     buck                        = premium_sale(min(t.capacity, max(0., limit)), ru, rb, fee,
                                                state["basket_usd"], p["issue_premium"], p["max_impact_bp"])
     keep                        = state["face"] * state["k"] * p["carry_utilization"] - state["drawn"]
-    cheap                       = ru / rb / (1 - fee) < state["basket_usd"] * (1 - p["retire_disc"])
-    if buck <= 0 and keep > 0 and not cheap:
-        # Carry: keep this share of the K-scaled limit drawn and invested while the BUCK is not cheap.
+    if buck <= 0 and keep > 0 and discount(ru / rb, state["basket_usd"], fee) <= 0:
+        # Carry: keep this share of the K-scaled limit drawn and invested while the BUCK trades at no
+        # discount -- the same line where paying down begins, so the two never alternate.
         buck                    = max(0., min(t.capacity, keep, rb * p["max_impact_bp"] / 20_000) * .999)
     v                           = carry.refinance(t, carry.usdc_out(buck, ru, rb, fee), buck)
     return "invest", v

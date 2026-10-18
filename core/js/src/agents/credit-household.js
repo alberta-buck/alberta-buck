@@ -198,12 +198,13 @@ export class CreditHouseholdAgent {
 
   // The other half of borrowing to invest: while the BUCK is cheap, redeem the oldest basket receipt (an
   // equity basket pays exits in BUCKs) and repay the lien with what comes back; the excess stays saved.
-  async redeemToRetire(world) {
+  async redeemToRetire(world, rid = this.receipts[0]) {
     if (!this.receipts.length || !this.savings || world.basketKind !== "machine") return null;
-    const r = await world.households.redeemToRetire(this, this.receipts[0]);
+    const r = await world.households.redeemToRetire(this, rid);
     if (r.refused) { this.refusals += 1; return null; }
     if (!r.redeemed) return null;
-    const rid = this.receipts.shift(), b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
+    const b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
+    this.receipts = this.receipts.filter((x) => x !== rid);
     this.book.delete(rid);
     this.basketPrincipal -= b.principal; this.shares -= b.shares; this.unwound += r.repaid;
     return r.repaid;
@@ -228,8 +229,11 @@ export class CreditHouseholdAgent {
     if (share > 0 && drawn > E6) {
       const target = BigInt(Math.trunc(Number(drawn) * share));
       let repaid = 0n;
-      while (repaid < target) {
-        const got = await this.redeemToRetire(world);
+      // Only receipts that fit within what is left to pay down, smallest first.
+      const principal = (rid) => (this.book.get(rid) ?? { principal: 0n }).principal;
+      for (const rid of [...this.receipts].sort((a, b) => (principal(a) < principal(b) ? -1 : principal(a) > principal(b) ? 1 : 0))) {
+        if (repaid >= target || principal(rid) > target - repaid) break;
+        const got = await this.redeemToRetire(world, rid);
         if (got === null) break;
         repaid += got;
       }
