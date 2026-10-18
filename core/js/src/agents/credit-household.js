@@ -1,6 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, divestDay, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, divestDay, discount, paydown, ROLES } from "./household-policy.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -126,7 +126,20 @@ export class CreditHouseholdAgent {
     // Reassess each decision. Preserve USDC fees and accumulated gate BUCKs before saving.
     this.fundingPending = v.go && v.buck >= 1;
     if (!v.go || v.buck < 1) return;
-    const r = await world.households.issue(this.account, state, v, this.buffer, this.p.premium_bp);
+    const keep = kind === "invest" && this.p.surplus_policy === "basket";   // borrowed to save: deposit the BUCKs
+    const r = await world.households.issue(this.account, state, v, this.buffer, this.p.premium_bp, { sell: !keep });
+    if (keep) {
+      this.tradeLoss += r.gateSpent - r.gateGot; this.premiumPaid += r.premium;
+      if (r.error) this.lastError = r.error;
+      if (r.reason === "gate-wait" || r.reason === "mint-wait") this.throttled += 1;
+      if (!r.kept || r.kept < E6) { this.lastAction = r.reason; return; }
+      const saved = await world.households.saveBucks(this, 0n, r.kept);
+      this.book_(saved.deposit);
+      this.fundingPending = false;
+      this.switchPaid += await world.households.pay(this.account, units(-v.parts.fixed), "household:switch");
+      this.joined = true; this.deploys += 1; this.issuedInvest += r.kept; this.lastAction = kind;
+      return;
+    }
     this.tradeLoss += r.gateSpent - r.gateGot + r.sold - r.got;
     this.premiumPaid += r.premium;
     this.lastAction = r.reason;
@@ -154,6 +167,7 @@ export class CreditHouseholdAgent {
     if (this.fundingPending) { this.lastAction = "fund-issue"; return; }
     const p = this.p, { ru, rb, fee } = state;
     const spare = max(0n, await world.households.cash(this.account) - this.buffer);
+    if (p.surplus_policy === "basket") { await this.saveOrPayDown(world, state, spare); return; }
     const action = surplusAction(p.surplus_policy, ru / rb, state.basket_usd, fee, p.retire_disc, p.issue_premium);
     if (action === "invest") await this.invest(world, spare);
     else if (action === "retire" && state.drawn > 1) {
@@ -173,13 +187,53 @@ export class CreditHouseholdAgent {
   // The other half of borrowing to invest: while the BUCK is cheap, redeem the oldest basket receipt (an
   // equity basket pays exits in BUCKs) and repay the lien with what comes back; the excess stays saved.
   async redeemToRetire(world) {
-    if (!this.receipts.length || !this.savings || world.basketKind !== "machine") return;
+    if (!this.receipts.length || !this.savings || world.basketKind !== "machine") return null;
     const r = await world.households.redeemToRetire(this, this.receipts[0]);
-    if (r.refused) { this.refusals += 1; return; }
-    if (!r.redeemed) return;
+    if (r.refused) { this.refusals += 1; return null; }
+    if (!r.redeemed) return null;
     const rid = this.receipts.shift(), b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
     this.book.delete(rid);
     this.basketPrincipal -= b.principal; this.shares -= b.shares; this.unwound += r.repaid;
+    return r.repaid;
+  }
+
+  // Record a BUCK deposit's receipt (the result of households.depositBuck).
+  book_(r) {
+    if (!r) return;
+    this.refusals += r.refusals ?? 0;
+    if (r.rid === undefined) return;
+    this.receipts.push(r.rid); this.basketPrincipal += r.principal; this.shares += r.shares;
+    this.book.set(r.rid, { principal: r.principal, shares: r.shares });
+  }
+
+  // The basket policy (credit_households._save_or_pay_down): while the BUCK trades at a discount, pay down
+  // the lien with an urgency compounding with the discount, basket shares first, then spare dollars;
+  // otherwise save, buying BUCKs and depositing them in the basket.
+  async saveOrPayDown(world, state, spare) {
+    const ops = world.households, p = this.p;
+    const share = paydown(discount(state.ru / state.rb, state.basket_usd, state.fee), p);
+    const drawn = -(await ops.read(this.account)).signed;
+    if (share > 0 && drawn > E6) {
+      const target = BigInt(Math.trunc(Number(drawn) * share));
+      let repaid = 0n;
+      while (repaid < target) {
+        const got = await this.redeemToRetire(world);
+        if (got === null) break;
+        repaid += got;
+      }
+      if (repaid < target && spare > E6) {
+        const want = whole(target - repaid), { ru, rb, fee } = state;
+        const cost = want < rb / 2 ? units(want * ru / ((rb - want) * (1 - fee))) : spare;
+        const r = await ops.buy(this.account, min(spare, cost, units(ru * p.max_impact_bp / 20000)));
+        this.tradeLoss += r.spent - r.got; this.unwound += r.got;
+      }
+      this.lastAction = "pay-down";
+      return;
+    }
+    const saved = await ops.saveBucks(this, spare);
+    this.investedUsd += saved.spent; this.tradeLoss += saved.spent - saved.got;
+    this.book_(saved.deposit);
+    this.lastAction = "save";
   }
 
   // The investor holds BUCKs as money: it buys them with the dollars saved, unless they are dear; then it

@@ -62,7 +62,7 @@ export function installHouseholdOps(world) {
   const buy = (account, budget) => swap(account, world.poolUB, usdc, buck, budget,
     world.holderAddress(account), "household:buy");
 
-  const issue = async (account, state, verdict, buffer, premiumBp) => {
+  const issue = async (account, state, verdict, buffer, premiumBp, { sell = true } = {}) => {
     const out = { sold: 0n, got: 0n, premium: 0n, gateSpent: 0n, gateGot: 0n, reason: "hold" };
     const fixed = units(-verdict.parts.fixed), penalty = units(-verdict.parts.penalty);
     const available = await cash(account);
@@ -96,6 +96,8 @@ export function installHouseholdOps(world) {
         out.premium = max(0n, before - await s.call(buck, "signedBalanceOf", [me]));
       }
       const saleAmount = min(want, await s.call(buck, "balanceOf", [me]));
+      // Borrowed to save: the BUCKs stay BUCKs, for the caller to deposit.
+      if (!sell) return { ...out, kept: saleAmount, reason: saleAmount >= E6 ? "issued" : "hold" };
       const result = await swap(account, world.poolUB, buck, usdc, saleAmount, me, "household:issue");
       out.sold = result.spent; out.got = result.got; out.reason = "issued";
       return out;
@@ -151,8 +153,9 @@ export function installHouseholdOps(world) {
   };
   // The investor deposits the BUCKs it holds. When the basket's price guard refuses, it offers half,
   // up to four times; what is still refused stays for the next decision.
-  const depositBuck = async (agent) => {
-    const proxy = await world.proxyFor(agent.account), me = world.holderAddress(agent.account);
+  const depositBuck = async (agent, savings = false) => {
+    const proxy = savings ? agent.savings : await world.proxyFor(agent.account);
+    const me = savings ? agent.savings.address : world.holderAddress(agent.account);
     let amount = await s.call(buck, "balanceOf", [me]), refusals = 0, receipt = null;
     for (let i = 0; i < 4 && amount > E6; i++, amount /= 2n) {
       await exec(proxy, buck, "approve", [basket.address, amount], "investor:approve");
@@ -267,7 +270,24 @@ export function installHouseholdOps(world) {
     }
     return { ...out, done: true };
   };
+  // Save in BUCK deposits (credit_households._save_or_pay_down): spare dollars buy BUCKs delivered to
+  // the savings account (never the borrower's, where they would repay the lien), or `kept` borrowed
+  // BUCKs move there; then every BUCK in savings is deposited.
+  const saveBucks = async (agent, budget, kept = 0n) => {
+    agent.savings ??= await world.proxyFor({ address: `savings:${agent.account.address}` });
+    const out = { spent: 0n, got: 0n };
+    if (kept > 0n) {
+      await exec(await world.proxyFor(agent.account), buck, "transfer", [agent.savings.address, kept], "household:to-savings");
+    }
+    if (budget > E6) {
+      const [ru] = await reserves(world.poolUB, usdc);
+      const r = await swap(agent.account, world.poolUB, usdc, buck, min(budget, impactCap(ru, agent.p.max_impact_bp)),
+        agent.savings.address, "household:save");
+      out.spent = r.spent; out.got = r.got;
+    }
+    return { ...out, deposit: await depositBuck(agent, true) };
+  };
   world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire,
-                       divest };
+                       divest, saveBucks };
   return world;
 }

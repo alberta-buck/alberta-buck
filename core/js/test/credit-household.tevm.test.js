@@ -55,7 +55,7 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
   assert.ok(held.length >= 2 && held[0] > 0n && held.at(-1) > held[0], "real gate BUCKs accumulate across paydays");
   assert.ok(funded.joined && funded.mortgage < funded.hypoMortgage);
   assert.equal(funded.fundingPending, false);
-  assert.equal(funded.lastSurplus, "invest");
+  assert.equal(funded.lastSurplus, "save");
   assert.ok(funded.investedUsd > 0n);
   assert.equal(funded.switchPaid, 5000n * E6);
   assert.ok((await w.households.read(funded.account)).signed < 0n);
