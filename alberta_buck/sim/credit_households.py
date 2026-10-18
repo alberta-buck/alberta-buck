@@ -13,6 +13,7 @@ SLIPPAGE                        = ("Slippage", "0x7dd37f70")
 @_register
 class CreditHouseholdAgent(BuckCreditDebtorAgent):
     """One insured household. Legacy debtor methods supply only contract plumbing, never its decisions."""
+    OCTL_STRIDE                 = 5                     # its books are read every fifth day (and the last)
 
     def setup(self, d, scenario, rng):
         cls                     = type(self).__name__

@@ -150,7 +150,8 @@ def run(args) -> int:
     env                         = environment(snapshot)
     centre                      = centre_rates(snapshot)
     adopt(runs)
-    todo                        = [c for c in cells(args.cells) if not (runs / f"{c.name}.json").exists()]
+    todo                        = [c for c in cells(args.cells) if not (runs / f"{c.name}.json").exists()
+                                   and (args.seed is None or c.seed == args.seed)]
     status_path                 = base / "status.json"
     status                      = json.loads(status_path.read_text()) if status_path.exists() else {}
     lock                        = threading.Lock()
@@ -304,6 +305,7 @@ def main(argv=None) -> int:
     ap.add_argument("--cells", default="all")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--days", type=int, help="a shorter horizon, for a smoke campaign")
+    ap.add_argument("--seed", type=int, help="run only this seed's cells")
     args                        = ap.parse_args(argv)
     return {"plan": plan, "run": run, "report": report}[args.command](args)
 

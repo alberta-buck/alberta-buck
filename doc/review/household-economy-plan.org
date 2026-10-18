@@ -30,8 +30,9 @@ recommendations.
    come from the households, K and the basket machine (its wheel and its desk). Defenders return
    later as optional arms.
 2. *Arrivals are drawn by the price gap, on a straight line.* Supply roles arrive faster while the
-   BUCK is dear, the investor role faster while it is cheap: rate x (1 + 50 x gap), at most 4x,
-   the gap being a 30-day average. See "Arrivals".
+   BUCK is dear, the investor role faster while it is cheap: rate x (1 + 200 x gap), at most 8x,
+   the gap being a 30-day average. See "Arrivals". (First 50 and 4x; raised the same day after
+   400-day centres needed a 1--3% standing gap to draw enough investors.)
 3. *The basket machine (=equity-machine=) is the only basket in routine runs.* The older upkeep and
    the pro-rata basket are not part of the grid.
 4. *Investors hold BUCKs.* That is the demand for BUCKs the grid varies: an investor buys BUCKs
@@ -44,6 +45,12 @@ recommendations.
    small and refinances through the market like everyone after it.
 6. *The household's refinancing path is the only one.* The older debtor classes are retired, not
    reconciled with it.
+7. *The centre is balanced and sized.* (Added the same day, from the 400-day centres in the
+   ledger.) At base rates the investors bring about as many dollars a year as the debtors bring
+   BUCKs to sell; the BUCK/USDC pool is $10M, sized to an economy of a few million dollars a year
+   rather than $50M; and credit savers keep 30% of their K-scaled limit drawn and invested
+   (=carry_utilization= 0.3), which is the flow K moves: a higher K, more carried supply; a lower
+   K, repayment from the basket.
 
 * What exists today
 
@@ -179,10 +186,10 @@ profitable calls), =MonetaryKeeperAgent= (turns the desk), and =HouseholdPopulat
 Everything else zero, explicitly: =FatCreditBorrowerAgent=, =SaverAgent=, the direct-mint
 depositors, the excursion arbitrageurs, the undertakings desk, the shock agent, the older debtors.
 
-Centre values: debtors 6 opening + 6 a year, savers 6 + 6, investors 12 + 12, adaptive surplus
-policy. For scale: the first household campaign's 12 arrivals a year drew 13.4M BUCKs in five
-years against an opening supply of 62M. If the centre cell's households move less than a tenth
-of the supply over five years, raise the centre rates before running the grid and record why.
+Centre values (decision 7): debtors 6 opening + 6 a year, savers 6 + 6, investors 30 + 30,
+adaptive surplus policy, =gain= 200 capped at 8x, =carry_utilization= 0.3, a $10M BUCK/USDC
+pool. The first centre (12 + 12 investors, =gain= 50, a $50M pool, no carrying) failed; see the
+ledger.
 
 ** The grid
 
@@ -318,6 +325,36 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-17: the balanced centre holds for 400 days (=build/diag/balanced*=, from day 60):
+
+  | Run | Mean bvib | Mean error | 99th pct | K at day 400 |
+  |-----+-----------+------------+----------+--------------|
+  | balanced, history | 1.006 | 1.26% | 2.79% | 0.69 (falling) |
+  | balanced, revert | 1.002 | 1.19% | 2.45% | 0.74 (0.84 at day 200) |
+  | balanced + carrying savers, history | 1.005 | 0.80% | 2.30% | 0.68 (flat since day 250) |
+  | balanced + carrying savers, revert | 1.004 | 0.62% | 1.78% | 0.70 |
+
+  On history the BUCK follows the basket's dollar price from $0.96 to $1.14 through the 2021--22
+  inflation while bvib stays within 0.97--1.02. The last two rows pass the acceptance tests over
+  their window; they are now the centre (decision 7, =economy.toml=). A household's books are
+  now read every fifth day (=OCTL_STRIDE=) and carried between: reading every member daily was
+  half the run time. A five-year centre still takes about six hours, so seed 41404's 24 cells run
+  first (=--seed 41404=), seed 45517 after.
+- 2026-10-17: more 400-day centres, history unless noted (=build/diag/=). A stronger price
+  response (=gain= 200, =gain_cap= 8) roughly halves the gap: mean bvib 1.016, K 0.40; with a
+  $10M BUCK/USDC pool, 1.006 and K 0.62; on revert, 1.008 and K 0.52 (K rose from 0.632 to 0.656
+  around day 200, then fell). Savers carrying 30% of their K-scaled limit (=carry_utilization=,
+  =8ac0c14=, off by default) made it worse (history K 0.25, revert 0.46): at parity they add
+  supply. Every run stays slightly cheap, and the centre is the reason: at base rates its debtors
+  bring about $1.7M a year to sell, its investors about $0.7M a year plus their saving, so the
+  gap has to draw the difference. Next: a balanced centre, 30 opening investors and 30 a year,
+  =gain= 200 and a $10M pool sized to the economy. At day 200 it holds parity within about 1%
+  (revert: mean bvib 0.992, error 0.83%; history: 1.006, 1.61%), but K drifts with whatever
+  imbalance is left, up on revert (0.78 to 0.84) and down on history (0.80 to 0.76): the
+  populations hold the price, and nothing in the interior responds to K, so its integral walks.
+  Savers carrying a share of their K-scaled limit are the K-sensitive flow (a higher K, more
+  carried supply; a lower K, repayment), so the balanced centre is being rerun with
+  =carry_utilization= 0.3.
 - 2026-10-17: 400-day diagnostics of the centre (=build/diag/=, measured from day 60). Holding
   investors and the savers' round trip (=e53397e=) narrow the gap; none holds K:
 

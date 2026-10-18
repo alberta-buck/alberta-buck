@@ -648,10 +648,20 @@ class Snapshotter:
                     fat[k] += cs.get(k, 0)
         # Optimal-control debtors: per-agent net worth + counterfactual (the
         # strategy-comparison observability; a handful of small dicts/frame).
+        # Agents with an OCTL_STRIDE (households, whose decisions come days apart) are read every
+        # stride-th day and on the last; between reads the frame repeats their last state. Reading
+        # every member every day was over half of a household economy's run time.
         octl = []
+        last_day = getattr(self.s, "days", 0) - 1
+        held = getattr(self, "_octl_held", None)
+        if held is None:
+            held = self._octl_held = {}
         for ag in agents:
             if hasattr(ag, "octl_state"):
-                st = ag.octl_state(d)
+                stride = max(1, int(getattr(ag, "OCTL_STRIDE", 1)))
+                if stride == 1 or day % stride == 0 or day >= last_day or id(ag) not in held:
+                    held[id(ag)] = ag.octl_state(d)
+                st = held[id(ag)]
                 if st:
                     octl.append(st)
         # Discount-BUCK time arbs (holder/basketeer A/B): per-agent

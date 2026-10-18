@@ -18,7 +18,9 @@ basket = "equity-machine"
 tokens = ["LABR", "CNST", "FOOD", "NRGC", "PAXG"]
 
 [deploy]
-target_buck_lp_m = 50.0     # a deep BUCK/USDC pool
+# A BUCK/USDC pool sized to this economy. At $50M it set the BUCK's dollar price by itself: the
+# households' flows of a few million a year could not move it after the basket (2026-10-17).
+target_buck_lp_m = 10.0
 
 # The family's plumbing stays: the whale pinning TOKEN/USDC to the price path, the cycle
 # arbitrageurs and accumulators, the bootstrap LPs that open the TOKEN/BUCK pools, the keepers.
@@ -38,18 +40,22 @@ MonetaryKeeperAgent = 1     # turns the basket's desk
 BasketWheelAgent = 1
 HouseholdPopulationAgent = 1
 
+# The centre is balanced: at base rates the investors bring about as many dollars a year as the
+# debtors bring BUCKs to sell (6 debtors a year at ~$290k of mortgage; 30 investors at ~$55k plus
+# their saving). With 12 investors a year the BUCK ran 1-3% cheap and K wound to its floor.
 [agents.HouseholdPopulationAgent]
 initial_debtors = 6
 initial_savers = 6
-initial_investors = 12
+initial_investors = 30
 debtor_rate = 6.0           # arrivals a year at the base pace
 saver_rate = 6.0
-investor_rate = 12.0
+investor_rate = 30.0
 growth = "steady"
-gain = 50.0                 # pace x (1 + 50 x gap): twice as fast at a 2% gap
-gain_cap = 4.0
+gain = 200.0                # pace x (1 + 200 x gap): twice as fast at a 0.5% gap
+gain_cap = 8.0
 signal_halflife_days = 30.0
 surplus_policy = "adaptive"
+carry_utilization = 0.3     # savers keep 30% of their K-scaled limit drawn: the flow K moves
 
 [agents.BasketWheelAgent]
 impl = "solidity"
