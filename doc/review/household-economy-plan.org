@@ -1,0 +1,306 @@
+#+TITLE: A household economy for the equilibrium simulations
+#+DATE: 2026-10-17
+#+OPTIONS: ^:nil toc:2
+
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+
+* What this is for
+
+The simulations exist to show that the BUCK holds equilibrium -- K inside its range, the basket's
+price in BUCKs near one -- while credit issuance and the demand for BUCKs grow at different rates,
+and then while natural and deliberate disturbances hit it. Earlier worlds answered this with casts
+that grew by accretion: big synthetic borrowers, finite cohorts, several overlapping savers and
+depositors, and defenders added one at a time. Their failures were often failures of the cast.
+
+This plan replaces them with one economy built from three kinds of household, a few agents that
+only keep markets connected, and the basket machine itself. Disturbances come afterwards, as arms
+on that economy. Preserving earlier runs is not a goal; reproducing earlier results is not required.
+
+This document is the plan of record for branch =feature/household-economy=. Its ledger, at the end,
+records what has been done. A session resuming the work reads "Decisions", "Order of work" and the
+ledger, then carries on.
+
+* Decisions
+
+Taken 2026-10-17, by the session that wrote this plan, on Perry's instruction to proceed with its
+recommendations.
+
+1. *The baseline cast is households plus plumbing plus the machine.* No undertakings desk, no
+   excursion arbitrageurs, no synthetic borrowers, no old savers or depositors. Equilibrium must
+   come from the households, K and the basket machine (its wheel and its desk). Defenders return
+   later as optional arms.
+2. *Arrivals are drawn by the price gap, on a straight line.* Supply roles arrive faster while the
+   BUCK is dear, the investor role faster while it is cheap: rate x (1 + 50 x gap), at most 4x,
+   the gap being a 30-day average. See "Arrivals".
+3. *The basket machine (=equity-machine=) is the only basket in routine runs.* The older upkeep and
+   the pro-rata basket are not part of the grid.
+4. *Investors buy BUCKs and deposit them in the basket.* That is the demand for BUCKs the grid
+   varies. Debtors and savers invest their own surplus through a TOKEN, as they do now.
+5. *Worlds start young and grow.* No opening placed outside the market; the opening population is
+   small and refinances through the market like everyone after it.
+6. *The household's refinancing path is the only one.* The older debtor classes are retired, not
+   reconciled with it.
+
+* What exists today
+
+Two engines, each with its own views:
+
+| Engine | Runs | Views | Supply and demand |
+|--------+------+-------+-------------------|
+| Loop simulator, =python -m alberta_buck.sim --experiment ...= | 63 experiment files in six families: synthetic routing and rebalancing, historical, equilibrium sweeps, the five-year rebalancing-eq matrix (14 files x 3 baskets), the excursion catalogue (2 years), K-step design, organic retiree, households, demo-savings | =report.py= PDFs and index; older PNG plotters; the vector viewer (=alberta_buck/sim/viewer=, any saved run); the savings sandbox server | 38 registered agent classes |
+| Control lab, =alberta_buck/sim/control_lab= | 11 cumulative stages, 120 days, three synthetic tokens; 310 distinct runs, 18 GB under =doc/control-lab/interactive= | a JavaScript page that selects cached runs by profile, walk, buyer and seller | one flow buyer and one flow seller |
+
+The household model (=credit_households.py=, =household_policy.py=, their JavaScript mirrors under
+=core/js/src/agents/=) is described in =doc/review/household-agents.org=. Its first campaign held
+the basket's price near one and K near 0.72 on all four surplus policies, but with a dozen other
+stabilizers in the cast. Whether households alone suffice is the first open question.
+
+* The agents
+
+** Roles
+
+One class family, three roles. Every member has its own keyed draws (=household_policy.uniform=),
+its own accounts and its own actual and counterfactual books.
+
+| Role | Class (Python and JS) | Brings | Does |
+|------+-----------------------+--------+------|
+| debtor | =CreditHouseholdAgent= | an insured home and an external mortgage | refinances on carrying cost; afterwards retires at a discount or invests |
+| saver | =CreditSaverAgent= | an insured asset, no mortgage | issues when the BUCK is dear and invests; retires when cheap |
+| investor | =HouseholdInvestorAgent= (new) | dollars and a yearly saving | buys BUCKs and deposits them in the basket; withdraws at the end of a horizon |
+
+The investor, in detail:
+
+- Settings (new keys in =DEFAULTS=, both languages): =invest_cash_k= [10, 100] (opening savings,
+  $k), =invest_income_k= [2, 20] (yearly saving, $k), =hold_years= [3, 15] (horizon). Validation:
+  non-negative, =hold_years= positive.
+- No insured asset: no =setCreditIssuer=, no credits, face 0, no premium, no mortgage, no cash
+  buffer. Its income is already its saving: =living_frac= does not apply.
+- Each decision (=decision_days= [5, 20], phased): if the BUCK is dear by more than its
+  =issue_premium= after the fee (=surplus_action(...) == "invest"= in today's vocabulary), it
+  holds its dollars. Otherwise it buys BUCKs with all its cash, at most =max_impact_bp= of the
+  BUCK/USDC pool's dollars per decision, and deposits every BUCK it holds with
+  =depositToken(BUCK, amount, 0)=. A refused deposit leaves the BUCKs in its account; the next
+  decision tries again.
+- At =arrive_day + 365 x hold_years= it exits: redeems every receipt, sells what comes back (BUCKs
+  through BUCK/USDC, any TOKEN through its USDC pool), impact-capped per decision, until nothing is
+  left; then it stops.
+- Books: actual = dollars + BUCKs held x spot + basket shares x share price x spot + anything
+  pending. The counterfactual keeps every dollar in dollars.
+
+** The population coordinator
+
+=HouseholdPopulationAgent= stops being expanded and discarded before the run. It stays in the cast,
+owns its members, and at the start of each day decides who arrives.
+
+Settings (=[agents.HouseholdPopulationAgent]=):
+
+| Key | Default | Meaning |
+|-----+---------+---------|
+| =initial_debtors=, =initial_savers=, =initial_investors= | 5, 5, 0 | members present on day 0 |
+| =debtor_rate=, =saver_rate=, =investor_rate= | 3, 3, 0 | arrivals per year at the base pace |
+| =growth= | ="steady"= | base pace over time: =steady= 1; =rising= 0.25 to 1.75; =falling= 1.75 to 0.25 (straight lines; each averages 1) |
+| =gain= | 50 | arrival multiplier per unit of price gap |
+| =gain_cap= | 4 | the most the multiplier reaches |
+| =signal_halflife_days= | 30 | the gap's averaging |
+| =settle_days= | 7 | days before the gap counts (the opening transient) |
+| =max_members= | 2000 | a safety bound; exceeding it raises |
+
+The older keys stay valid so the savings sandbox and its public choices keep working: =initial=,
+=arrival_rate= and =saver_share=, when no role key is given, become =initial_savers = round(initial
+x saver_share)=, =initial_debtors= the rest, and the two rates in the same proportion. The role of
+each member is then fixed by the split, not by a draw.
+
+** Arrivals
+
+Each day, before any agent acts:
+
+1. Read the basket's price in BUCKs, =basketValueInBuck= (bvib). From =settle_days= on, update an
+   exponential average with half-life =signal_halflife_days= (it starts at 1). The gap is
+   =1 - average=: positive when the BUCK is dear, negative when cheap.
+2. For each role, multiplier m = min(=gain_cap=, 1 + =gain= x max(0, s x gap)): debtors and savers
+   use the dear side (s = +1), investors the cheap side (s = -1). Before =settle_days=, m = 1.
+3. Add rate x growth(day) x m / 365.25 to the role's cumulative intensity.
+4. The role's k-th arrival happens on the first day its cumulative intensity reaches the sum of its
+   first k unit exponentials, E_k = -ln(1 - uniform(seed, population, "<role>/arrival/<k>")).
+   Several may arrive in one day.
+
+With =gain= = 0 the same draws give an ordinary Poisson stream at the base pace, so a responsive arm
+and its open-loop twin differ only by the response. The rule lives in =household_policy.py= as a
+pure step function (state, day, bvib, settings) -> (state, arrivals), mirrored in
+=household-policy.js= and checked by a shared vector: a scripted bvib series and its arrival days.
+
+Members are named =<population>/<role>/<k>=; initial members take the first k of each role.
+A member arriving on day d has =arrive_day= = d; its income, interest and decisions start then.
+
+** Python mechanics
+
+- =loop.py=: drop the =expand= branch. After =iv.apply_due(day)=, call =a.day_start(d, scenario,
+  day, ctr, agents, arbs, rng)= for every agent that has it. The coordinator creates arriving
+  members, runs their =setup=, and appends them to =agents= and =arbs= (as the =add_agents=
+  intervention already does). A new member first acts at its next tick 0.
+- =snapshot.py=: the telemetry roster grows when new agents appear (keep the set of ids seen;
+  append metas for new ones).
+- The coordinator puts =pop= into the counters: the average bvib, the two multipliers, cumulative
+  arrivals and active counts per role, exits. =snapshot.py= copies =ctr["pop"]= into the frame.
+  =household_summary= reports investors separately.
+- =report.py=: a population page (arrivals per role against the base expectation, the gap and the
+  multipliers, active members by role) and investor lines on the household page.
+
+** JavaScript mechanics
+
+=core/js/src/agents/credit-household.js=: =HouseholdInvestorAgent=; =HouseholdPopulationAgent= keeps
+its members, steps arrivals at tick 0 from =world.bvib()=, and constructs and sets up members on
+arrival with =makeAccount(member)=. =household-ops.js= gains a BUCK-route deposit and a
+redeem-and-sell exit. The page and sandbox adapters keep working with the older keys.
+
+** Tests
+
+- Shared vectors (=test/fixtures/household-policy.json=): investor profiles; investor hold/invest
+  decisions; an arrival vector from a scripted bvib series, with =gain= 0 and 50.
+- Python (=alberta_buck/test/test_credit_households.py=): an investor deposits BUCKs and its shares
+  are marked; a refused deposit is retried without loss; an investor exits, sells, and its books
+  close; arrivals append members whose telemetry appears; a world of the coordinator alone runs.
+- JavaScript (=core/js/test/credit-household.tevm.test.js=): the same, on the in-browser EVM.
+
+* The baseline economy
+
+=alberta_buck/sim/experiments/economy.toml=: rebalancing-eq family, keyed draws, five years, two
+ticks a day, =equity-machine=, the five commodities, a $50M BUCK/USDC pool. Cast: the family's
+plumbing (=MarketMakerWhale=, =AnonymousArbAgent= x3, =TokenAccumulatorAgent=, =BootstrapDMAgent=
+x24, =PidKeeperAgent=, =DirectorKeeperAgent=), =BasketWheelAgent= (Solidity, TOKEN start,
+profitable calls), =MonetaryKeeperAgent= (turns the desk), and =HouseholdPopulationAgent=.
+Everything else zero, explicitly: =FatCreditBorrowerAgent=, =SaverAgent=, the direct-mint
+depositors, the excursion arbitrageurs, the undertakings desk, the shock agent, the older debtors.
+
+Centre values: debtors 6 opening + 6 a year, savers 6 + 6, investors 12 + 12, adaptive surplus
+policy. For scale: the first household campaign's 12 arrivals a year drew 13.4M BUCKs in five
+years against an opening supply of 62M. If the centre cell's households move less than a tenth
+of the supply over five years, raise the centre rates before running the grid and record why.
+
+** The grid
+
+| Axis | Values |
+|------+--------|
+| supply growth (debtor and saver rates) | x1/3, x1, x3 |
+| demand growth (investor rate) | x1/3, x1, x3 |
+| prices | =history=, =revert= |
+| seed | 41404, 45517 |
+
+36 runs, plus the centre with =gain= 0 on both price paths and seed 41404 (2 runs), plus the centre
+with =growth= =rising= and =falling= on both paths, seed 41404 (4 runs). 42 five-year runs.
+
+=python -m alberta_buck.sim.economy= runs it:
+
+- =plan --campaign NAME [--cells centre|grid|all]= lists the cells.
+- =run --campaign NAME [--cells ...] [--jobs 8]= copies the committed tree into
+  =build/sim/economy/NAME/snapshot= (=git archive HEAD=), records =source-manifest.json=, and runs
+  each cell from the snapshot (=PYTHONPATH= and =ALBERTA_BUCK_REPO= set to it) into
+  =runs/<cell>.json= with a log, writing =.partial= until complete. The loop writes a completed
+  run's PDF beside it.
+- =report --campaign NAME= reads completed vectors only and writes =index.html= with the acceptance
+  table.
+
+Cells are named =s<supply>-d<demand>-<prices>-<seed>[-<variant>]=, for example
+=s1-d3-history-41404=.
+
+** Acceptance
+
+Measured from day 365 to the end:
+
+- mean |bvib - 1| below 1%, and its 99th percentile below 5%;
+- K inside [kmin + 0.05, kmax - 0.05] on at least 95% of days, and never at a rail (within 0.005
+  of kmin or kmax) for more than 30 days in a row;
+- no household errors, no exhausted arrivals, every member's books closed.
+
+The index also shows K at the end, supply, BUCKs drawn by role, investors' deposits, arrivals by
+role and the average multipliers. A cell that fails is a finding, not a bug, until its cause is
+understood.
+
+* After the baseline holds
+
+** The control lab
+
+Stages 1--7 (feeds to desk) stay as they are. Stages 8--11 (demand, supply, both, all) replace the
+flow buyer and seller with the same households: investors only; debtors and savers only; both;
+both plus the desk. Their selectors become issuer pace and investor pace (low, medium, high),
+compressed so that 120 days carry a meaningful population. The lab's =World= already builds the
+same deployment as the loop and carries an experiment, so a member's =setup(d, scenario, rng)= and
+=act(d, scenario, day, tick, ctr)= run in its step loop, with =day_start= called once a day.
+Editing =control_lab/*= changes its fingerprint: regenerate the whole lab once, when this lands.
+
+** One page for the five-year grid
+
+Export trimmed frames from each completed grid run and a manifest of its axes in the lab page's
+format (=axes=, =cases=), so the five-year grid is browsed with the same selectors. The vector
+viewer stays for following one agent.
+
+** Disturbances
+
+Each on the centre cell at two strengths and both seeds; the worst three also on the lopsided
+corners (supply x3 with demand x1/3, and the reverse).
+
+| Disturbance | Agent or intervention |
+|-------------+-----------------------|
+| demand or supply shock | =ShockAgent=, armed by a new =arm_shock= intervention (side, dollars, days) |
+| raid: accumulate, dump, buy back; periodic raids | =WhaleRaidAgent= |
+| liquidity leaves the BUCK/USDC pool | =LpExitAgent= |
+| pushing a guard | =PusherAgent= |
+| book loading | =BookLoaderAgent= |
+| commodity price shock | =price_shock= (exists) |
+| external mortgage rates move | new =set_population= intervention: =apr_shift= for arrivals and existing debtors |
+| recession | =set_population=: =income_scale= for a period, investors' exits brought forward |
+| adoption stops or surges | =set_population=: role rates from a day |
+| run on the basket | =set_population=: a fraction of investors exit now |
+
+Defender arms (undertakings desk, excursion arbitrageurs) are tried against the disturbances that
+the baseline does not survive.
+
+** Retirement
+
+When the economy and its disturbances cover a family, delete the family: its experiment files,
+Makefile targets, viewer prefixes, tests and classes. In view: the equilibrium sweeps and their
+experiments (=baseline-*=, =shock-*=, =population-churn=, =retune-mid=, =template=), =backdrop*=,
+=growth-*=, =isolation=, =realistic=, the 14 =rebalancing-eq-5yr*= files, =organic-retiree= and the
+K-step retiree files, =wheel-none=, the catalogue and K-design files once ported, and the classes
+=BuckCreditDebtorAgent= (after moving the contract helpers that households inherit into a base),
+=ExternalDebtRetireeAgent=, =FatCreditBorrowerAgent=, =SaverAgent=, the three direct-mint
+depositors (keeping =BootstrapDMAgent= for opening pools), =DiscountBuckArbAgent=,
+=DiscountBasketArbAgent=, =BuckIssuerArbAgent=, =BuckPoolInvestorAgent=, =FacilityAgent=,
+=SeederAgent=, =MonetaryOpsAgent=, =BuckBasketRebalancerAgent=, =FenceKeeperAgent=. The routing
+family has no debtors and stays. The papers cite numbers, not these runs' figures; restate the
+numbers from the new grid when it lands.
+
+* Order of work
+
+1. Investor role, coordinator and arrivals, in both languages, with shared vectors and tests.
+2. =economy.toml=, the grid runner, acceptance, the population page.
+3. The centre cell on both price paths; calibrate if needed; then the whole grid.
+4. The control lab's stages 8--11, and one regeneration.
+5. The five-year grid in the lab's page.
+6. Disturbances; then defender arms where the baseline fails.
+7. Retirement, and restating results in the documents.
+
+Steps 1--3 decide whether households suffice. Do not start step 6 before step 3 passes, or before
+its failures are understood.
+
+* Working conventions
+
+- Branch =feature/household-economy= from =doc/basket-machine= at the commit that adds this file.
+  Worktree at =.claude/worktrees/household-economy= (ignored by git). In it, =lib/= entries are
+  symlinks to the main checkout's (=lib/circom-lib= is a submodule: link it too for Python work),
+  and =out=, =cache= and =alberta_buck/sim/artifacts= build products are linked or rebuilt.
+- Python, from the worktree: =build/cleanup/nx.sh bash -c 'source <venv>/bin/activate;
+  PYTHONPATH=$PWD ALBERTA_BUCK_REPO=$PWD python ...'=, where =<venv>= is
+  =/Users/perry/src/alberta-buck.venv-0.2.0-nix-darwin-cpython-313=. The venv's editable install
+  points at the main checkout; =PYTHONPATH= makes the worktree's sources win.
+- JavaScript: =cd core/js && node --test test/<file>=.
+- Long runs in the background, from a frozen snapshot; never edit a running snapshot.
+- Never start, stop or probe ports 8797, 8798 or 8000. The local sim server is on 8897.
+- Commits: ASCII, concise, no attribution lines, explicit paths. Nothing regenerable committed.
+- Python style: =\== aligned at column 32 in new code; code wraps at 128, documents at 100.
+
+* Ledger
+
+Newest first.
+
+- 2026-10-17: plan written; decisions 1--6 taken.
