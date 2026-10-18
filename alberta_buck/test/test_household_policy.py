@@ -109,6 +109,18 @@ def test_paydown_urgency_compounds_with_the_discount():
     assert hp.discount(1.02, 1., 0) == 0
 
 
+def test_money_target_ramps_with_adoption_and_holds_more_when_cheap():
+    p                           = hp.profile(41404, "0/debtor/0")
+    spend                       = 120_000.                  # $10k a month
+    assert hp.money_target(0, spend, 0, p) == pytest.approx(1_000)          # 10% of a month at arrival
+    assert hp.money_target(365.25, spend, 0, p) == pytest.approx(10_000)    # all of it after a year
+    assert hp.money_target(3650, spend, 0, p) == pytest.approx(10_000)
+    slow                        = hp.profile(41404, "0/debtor/0", {"adopt_years": 3})
+    assert hp.money_target(365.25, spend, 0, slow) == pytest.approx(4_000)
+    assert hp.money_target(3650, spend, .01, p) == pytest.approx(30_000)    # 1% cheap: 1 + 200 x 0.01
+    assert hp.money_target(3650, spend, .1, p) == pytest.approx(80_000)     # capped at 8x
+
+
 def test_divestment_waits_average_ten_years_at_a_tenth_a_year():
     days                        = [hp.divest_day(41404, f"0/debtor/{i}", 100, .1) - 100 for i in range(2000)]
     assert 9 * 365 < sum(days) / len(days) < 11 * 365

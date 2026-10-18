@@ -48,6 +48,8 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self._exit_day          = self.arrive_day + int(365 * p["hold_years"]) if self.investor else None
         self._divest_day        = (None if self.investor
                                    else policy.divest_day(scenario.seed, self.member, self.arrive_day, p["divest_rate"]))
+        self._wallet            = None                  # the BUCK working balance, apart from the lien
+        self.wallet_bought      = 0
         self._sold              = False                 # the insured asset has been sold
         self._released          = False                 # its coverage has been released
         self.exited             = False
@@ -143,6 +145,35 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         self.hypo_cash         -= paid
         self.hypo_mortgage     -= paid
         self.hypo_paid         += paid
+        self._tend_wallet(d)
+
+    def _tend_wallet(self, d):
+        """Payday: bring the BUCK working balance to its target (household_policy.money_target), buying
+        the shortfall with dollars or selling the excess, a capped bite either way."""
+        spending                = self.income_annual * self.p["living_frac"] / PARITY
+        if self.investor or self._sold or spending <= 0 or self.p["money_months"] <= 0 or not d.pool_ub:
+            return
+        ru, rb                  = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
+        fee                     = d.fee_ub / 1e6
+        d_now                   = policy.discount(ru / rb, self._basket_usd(d), fee)
+        target                  = int(policy.money_target(self._last_day - self.arrive_day, spending, d_now, self.p) * PARITY)
+        if self._wallet is None:
+            self._wallet        = self._new_proxy(d)
+        held                    = d.buck.functions.balanceOf(self._wallet.address).call()
+        if held < target * 95 // 100:
+            want                = min(target - held, rb // 2)
+            cost                = int(want * ru / ((rb - want) * (1 - fee))) + 1
+            cash                = d.chain.balance_of(d.usdc, self.proxy.address)
+            spend               = min(cash, cost, _impact_cap(ru, self.max_impact_bp))
+            if spend > PARITY:
+                self._swap_via_simlp(d, d.pool_ub, d.usdc, spend, self._wallet.address)
+                got             = d.buck.functions.balanceOf(self._wallet.address).call() - held
+                self.trade_loss += spend - got
+                self.wallet_bought += got
+        elif held > target * 110 // 100:
+            bite                = min(held - target, _impact_cap(rb, self.max_impact_bp))
+            if bite > PARITY:
+                self._swap_via_simlp(d, d.pool_ub, d.buck, bite, self.proxy.address, from_proxy=self._wallet)
 
     def _advance(self, d, day):
         while self._last_day < day:
@@ -443,6 +474,11 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             self.hypo_mortgage -= paid
             self.hypo_paid     += paid
             ctr["hhDivestments"] = ctr.get("hhDivestments", 0) + 1
+            if self._wallet is not None:                # the working balance goes to the lien first
+                held            = d.buck.functions.balanceOf(self._wallet.address).call()
+                if held > 0:
+                    self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
+                        "transfer", args=[self.proxy.address, held]), proxy=self._wallet)
         if not self._redeem_all(d, ctr):
             return                                      # the guard refused a redemption: tomorrow
         drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
@@ -657,14 +693,18 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             fee                 = d.buck.functions.feeOwing(d.pool_acct).call()
             insurance_age       = min(st["deposit"], fee * st["deposit"] // raw) if raw else st["deposit"]
         held                    = max(0, d.buck.functions.signedBalanceOf(self.proxy.address).call())
+        wallet                  = (d.buck.functions.balanceOf(self._wallet.address).call()
+                                   if self._wallet is not None else 0)
         financial               = st["cash"] + pending - self.mortgage + int(
-            (basket + st["deposit"] - insurance_age - st["drawn"] + st["jub"] + st["savings_held"] + held) * spot)
+            (basket + st["deposit"] - insurance_age - st["drawn"] + st["jub"] + st["savings_held"] + held + wallet)
+            * spot)
         arrears                 = self.living_arrears + self.premium_arrears
         hypo_arrears            = self.hypo_living_arrears + self.hypo_premium_arrears
         st.update(nw=financial - arrears, hypo=self.hypo_cash - self.hypo_mortgage - hypo_arrears,
                   hypo_cash=self.hypo_cash, hypo_mortgage=self.hypo_mortgage, arrears=arrears,
                   hypo_arrears=hypo_arrears, external_paid=self.external_paid, hypo_paid=self.hypo_paid,
                   insurance_age=insurance_age, exited=self.exited, withdrawn_usd=self.withdrawn_usd, held_buck=held,
+                  wallet_buck=wallet, wallet_bought=self.wallet_bought,
                   refusals=self.refusals,
                   active=self._started, role=self.p["role"], member=self.member, action=self.last_action,
                   issue_action=self.last_issue, surplus_action=self.last_surplus,

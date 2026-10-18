@@ -1,6 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, divestDay, discount, paydown, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, divestDay, discount, paydown, moneyTarget, ROLES } from "./household-policy.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -25,6 +25,7 @@ export class CreditHouseholdAgent {
     this.buffer = this.investor ? 0n : units(p.buffer_k * 1000);
     this.exitDay = this.investor ? arrive_day + Math.trunc(365 * p.hold_years) : null;
     this.divestDay = this.investor ? null : divestDay(seed, member, arrive_day, p.divest_rate);
+    this.walletBought = 0n;     // BUCKs bought for the working balance
     this.sold = false;          // the insured asset has been sold
     this.released = false;     // its coverage has been released
     this.exited = false;
@@ -89,6 +90,17 @@ export class CreditHouseholdAgent {
     this.mortgage -= paid; this.externalPaid += paid;
     paid = min(this.payment, this.hypoMortgage, this.hypoCash);
     this.hypoCash -= paid; this.hypoMortgage -= paid; this.hypoPaid += paid;
+    await this.tendWallet(world);
+  }
+
+  // Payday: bring the BUCK working balance to its target (credit_households._tend_wallet).
+  async tendWallet(world) {
+    const spending = whole(this.incomeAnnual) * this.p.living_frac;
+    if (this.investor || this.sold || spending <= 0 || this.p.money_months <= 0) return;
+    const ops = world.households, st = await ops.read(this.account);
+    const target = units(moneyTarget(this.lastDay - this.arrive_day, spending, discount(st.ru / st.rb, st.basket_usd, st.fee), this.p));
+    const r = await ops.tendWallet(this, target);
+    this.tradeLoss += r.spent - r.got; this.walletBought += r.got;
   }
 
   async advance(world, day) {
@@ -289,6 +301,7 @@ export class CreditHouseholdAgent {
       this.mortgage -= paid; this.externalPaid += paid;
       paid = min(this.hypoMortgage, this.hypoCash);
       this.hypoCash -= paid; this.hypoMortgage -= paid; this.hypoPaid += paid;
+      await ops.emptyWallet(this);    // the working balance goes to the lien first
     }
     const r = await ops.divest(this);
     for (const rid of r.redeemed ?? []) {
@@ -319,6 +332,7 @@ export class CreditHouseholdAgent {
       receipts: this.receipts.length, policy: this.p.surplus_policy, role: this.p.role,
       action: this.lastAction, issueAction: this.lastIssue, surplusAction: this.lastSurplus,
       fundingPending: this.fundingPending, exited: this.exited, withdrawnUsd: this.withdrawnUsd,
+      wallet: s.wallet, walletBought: this.walletBought,
       refusals: this.refusals,
       error: this.lastError, decision: this.lastVerdict });
   }

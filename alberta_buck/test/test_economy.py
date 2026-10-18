@@ -3,7 +3,7 @@ import json
 
 from alberta_buck.sim import economy
 
-CENTRE                          = dict(debtor_rate=6., saver_rate=6., investor_rate=12.)
+CENTRE                          = dict(debtor_rate=6., saver_rate=6., investor_rate=12., adopt_years=1.)
 
 
 def test_cells_cover_the_grid_and_its_variants_once():
@@ -16,7 +16,7 @@ def test_cells_cover_the_grid_and_its_variants_once():
     sets                        = cell.sets(CENTRE)
     assert cell.name == "slo-dhi-revert-45517"
     assert "scenario.prices=revert" in sets and "scenario.seed=45517" in sets
-    assert f"{economy.POP}.debtor_rate=2.0" in sets and f"{economy.POP}.investor_rate=36.0" in sets
+    assert f"{economy.POP}.debtor_rate=2.0" in sets and f"{economy.POP}.adopt_years=0.3333333333333333" in sets
     assert f"{economy.POP}.gain=0" in economy.Cell("mid", "mid", "history", 41404, "open").sets(CENTRE)
 
 

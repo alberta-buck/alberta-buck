@@ -23,7 +23,12 @@ DEFAULTS                        = dict(
     # While the BUCK trades at a discount d to the basket, a household with a lien pays down
     # paydown_share x (2^(d / paydown_double) - 1) of it each decision: an urgency that compounds with
     # the discount (0: no paydown). Its basket shares go first, then its spare dollars.
-    paydown_share=.01, paydown_double=.005)
+    paydown_share=.01, paydown_double=.005,
+    # Money: a household paying a share s of its spending in BUCKs keeps s x money_months of that
+    # spending in a wallet apart from its lien, topped up each payday. s ramps from adopt_start to 1
+    # over adopt_years from its arrival. While the BUCK is cheap it holds more, by
+    # 1 + money_gain x discount (at most money_cap); above its target it sells the excess.
+    money_months=1., adopt_start=.1, adopt_years=1., money_gain=200., money_cap=8.)
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
 ROLES                           = ("debtor", "saver", "investor")
 SUPPLY                          = ("debtor", "saver")   # drawn while the BUCK is dear; investors while it is cheap
@@ -66,7 +71,8 @@ def profile(seed, member, overrides=None):
         result[key]             = value
     for key in ("home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
                 "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
-                "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double"):
+                "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
+                "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
@@ -75,6 +81,8 @@ def profile(seed, member, overrides=None):
         raise ValueError("an investor's hold_years must be positive")
     if result["paydown_double"] <= 0:
         raise ValueError("paydown_double must be positive")
+    if result["adopt_start"] > 1 or result["adopt_years"] <= 0 or result["money_cap"] < 1:
+        raise ValueError("invalid money settings: adopt_start <= 1, adopt_years > 0, money_cap >= 1")
     if result["surplus_policy"] not in POLICIES:
         raise ValueError("unknown household surplus_policy")
     if result["role"] not in ROLES:
@@ -205,6 +213,15 @@ def paydown(d, p):
     if d <= 0 or p["paydown_share"] <= 0:
         return 0.
     return min(1., p["paydown_share"] * (2 ** (d / p["paydown_double"]) - 1))
+
+
+def money_target(days_in, annual_spending, d, p):
+    """The BUCK working balance a household wants: the share of its spending it pays in BUCKs (ramping
+    from adopt_start to 1 over adopt_years since it arrived) times money_months of that spending, more
+    while the BUCK is cheap by d. Whole currency units."""
+    share                       = min(1., p["adopt_start"] + (1 - p["adopt_start"]) * days_in / (365.25 * p["adopt_years"]))
+    held                        = share * annual_spending * p["money_months"] / 12
+    return held * min(p["money_cap"], 1 + p["money_gain"] * max(0., d))
 
 
 def divest_day(seed, member, arrive_day, rate):

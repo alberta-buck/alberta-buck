@@ -58,6 +58,11 @@ signal_halflife_days = 30.0
 # Households repay BUCKs only when they sell the asset (10% a year); spare income goes into the basket.
 surplus_policy = "basket"
 divest_rate = 0.1
+# Money: each household keeps a month of its spending in BUCKs, apart from its lien; the share of its
+# spending paid in BUCKs ramps from 10% to all of it over its first year (the grid's demand axis).
+money_months = 1.0
+adopt_start = 0.1
+adopt_years = 1.0
 carry_utilization = 0.3     # savers keep 30% of their K-scaled limit drawn
 
 [agents.BasketWheelAgent]

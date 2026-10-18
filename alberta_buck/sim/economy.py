@@ -61,8 +61,10 @@ class Cell:
 
     def sets(self, centre: dict) -> list[str]:
         out                     = [f"scenario.prices={self.prices}", f"scenario.seed={self.seed}"]
-        for role, factor in (("debtor", self.supply), ("saver", self.supply), ("investor", self.demand)):
-            out.append(f"{POP}.{role}_rate={centre[f'{role}_rate'] * FACTORS[factor]!r}")
+        for role in ("debtor", "saver"):
+            out.append(f"{POP}.{role}_rate={centre[f'{role}_rate'] * FACTORS[self.supply]!r}")
+        # Demand: how fast each household comes to pay in BUCKs, and so to hold them.
+        out.append(f"{POP}.adopt_years={centre.get('adopt_years', 1.) / FACTORS[self.demand]!r}")
         for key, value in VARIANTS.get(self.variant, {}).items():
             out.append(f"{POP}.{key}={value}")
         return out

@@ -18,7 +18,8 @@ const urPath = join(repoRoot(), "alberta_buck/sim/artifacts/UniversalRouter.json
 const skip = !identity || !artifactsAvailable() || !existsSync(urPath) ? "build kernels and contract artifacts first" : false;
 const E6 = 1_000_000n;
 const settings = { home_k: 1000, ltv: .2, apr: .055, premium_bp: 50, theta: 3, cash_k: 100,
-  buffer_k: 10, switch_k: 0, risk: 0, decision_days: 1, income_frac: .1, living_frac: .5, divest_rate: 0 };
+  buffer_k: 10, switch_k: 0, risk: 0, decision_days: 1, income_frac: .1, living_frac: .5, divest_rate: 0,
+  money_months: 0 };
 
 for (const basket of ["prorata", "machine"]) test(`households: live ${basket} accounting and reusable credit`, { skip }, async () => {
   const session = await tevmSession();
@@ -193,6 +194,19 @@ for (const basket of ["prorata", "machine"]) test(`households: ${basket} investo
   const cash = await w.households.cash(inv.account);
   await inv.act(w, 90, 0);
   assert.equal(await w.households.cash(inv.account), cash);
+
+  // A household keeps a month of its spending in a BUCK wallet apart from its lien.
+  const spender = new CreditHouseholdAgent({ account: privateKeyToAccount(generatePrivateKey()), member: "spender",
+    settings: { ...settings, money_months: 1, adopt_start: 1, max_impact_bp: 2000 } });
+  await spender.setup(w);
+  spender.nextDecision = 10000;
+  await spender.act(w, 0, 0);
+  await spender.act(w, 30, 0);
+  const month = 100_000 * .5 / 12;
+  const kept = spender.ledger.at(-1).wallet;
+  // A month at least; more while the BUCK is cheap, at most eight months.
+  assert.ok(kept > BigInt(Math.trunc(month * .9)) * E6 && kept < BigInt(Math.trunc(month * 8)) * E6, `${kept}`);
+  assert.equal((await w.households.read(spender.account)).signed, 0n, "the lien account is untouched");
 
   // A debtor sells its home: the sale pays the mortgage, the lien is bought back, coverage released.
   const seller = new CreditHouseholdAgent({ account: privateKeyToAccount(generatePrivateKey()), member: "seller",

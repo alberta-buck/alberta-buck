@@ -141,15 +141,17 @@ export function installHouseholdOps(world) {
     const st = await read(agent.account);
     const basketMark = world.basketKind === "machine" && agent.shares
       ? agent.shares * (await s.call(basket, "sharePrice")) / E18 : agent.basketPrincipal;
-    let pending = 0n;
+    let pending = 0n, savedBucks = 0n;
     if (agent.savings) {
       const held = await s.call(world.tokens[agent.tokenIdx].erc20, "balanceOf", [agent.savings.address]);
       const [ru, rt] = await reserves(world.tokens[agent.tokenIdx].poolUsdc, usdc);
       pending = rt ? held * ru / rt : 0n;
+      savedBucks = await s.call(buck, "balanceOf", [agent.savings.address]);   // waiting to be deposited
     }
-    return { ...st, basketMark, pending, nw: st.cash + pending - agent.mortgage - agent.livingArrears - agent.premiumArrears
-      + BigInt(Math.trunc(Number(basketMark + st.deposit - st.insuranceAge - st.drawn + min(st.jub, st.drawn)
-        + max(0n, st.signed)) * st.spot)) };
+    const wallet = agent.wallet ? await s.call(buck, "balanceOf", [agent.wallet.address]) : 0n;
+    return { ...st, basketMark, pending, wallet, nw: st.cash + pending - agent.mortgage - agent.livingArrears
+      - agent.premiumArrears + BigInt(Math.trunc(Number(basketMark + st.deposit - st.insuranceAge - st.drawn
+        + min(st.jub, st.drawn) + max(0n, st.signed) + savedBucks + wallet) * st.spot)) };
   };
   // The investor deposits the BUCKs it holds. When the basket's price guard refuses, it offers half,
   // up to four times; what is still refused stays for the next decision.
@@ -287,7 +289,33 @@ export function installHouseholdOps(world) {
     }
     return { ...out, deposit: await depositBuck(agent, true) };
   };
+  // The household's BUCK working balance, in a wallet apart from its lien (credit_households._tend_wallet):
+  // buy the shortfall below 95% of `target` with dollars, sell the excess above 110%, a capped bite.
+  const walletOf = async (agent) => agent.wallet ??= await world.proxyFor({ address: `wallet:${agent.account.address}` });
+  const tendWallet = async (agent, target) => {
+    const wallet = await walletOf(agent), out = { spent: 0n, got: 0n };
+    const held = await s.call(buck, "balanceOf", [wallet.address]), bp = agent.p.max_impact_bp;
+    const [ru, rb] = await reserves(world.poolUB, usdc), fee = world.fees.ub / 1e6;
+    if (held < target * 95n / 100n) {
+      const want = min(target - held, rb / 2n);
+      const cost = BigInt(Math.floor(Number(want) * Number(ru) / (Number(rb - want) * (1 - fee)))) + 1n;
+      const spend = min(await cash(agent.account), cost, impactCap(ru, bp));
+      if (spend > E6) return swap(agent.account, world.poolUB, usdc, buck, spend, wallet.address, "household:wallet");
+    } else if (held > target * 110n / 100n) {
+      const bite = min(held - target, impactCap(rb, bp));
+      if (bite > E6) {
+        await exec(wallet, buck, "transfer", [world.holderAddress(agent.account), bite], "household:wallet-out");
+        await swap(agent.account, world.poolUB, buck, usdc, bite, world.holderAddress(agent.account), "household:wallet-sell");
+      }
+    }
+    return out;
+  };
+  const emptyWallet = async (agent) => {
+    if (!agent.wallet) return;
+    const held = await s.call(buck, "balanceOf", [agent.wallet.address]);
+    if (held > 0n) await exec(agent.wallet, buck, "transfer", [world.holderAddress(agent.account), held], "household:wallet-out");
+  };
   world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire,
-                       divest, saveBucks };
+                       divest, saveBucks, tendWallet, emptyWallet };
   return world;
 }

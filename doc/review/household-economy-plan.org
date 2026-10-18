@@ -60,6 +60,16 @@ recommendations.
    then dollars buy back the whole lien, its coverage is released and it leaves. It repays BUCKs at no
    other time; spare income goes into the basket (the =basket= surplus policy). The savers' 30%
    carrying share stays; its repayment when K falls is removed.
+9. *Saving in BUCK deposits, paydown at a discount, money held to pay with.* (Perry, 2026-10-18.)
+   Idle money goes into the basket as BUCK deposits (no TOKEN step): spare dollars buy BUCKs that are
+   deposited, and BUCKs borrowed at a premium go in directly. While the BUCK trades at a discount d,
+   a household with a lien pays down 0.01 x (2^(d / 0.005) - 1) of it each decision (an urgency that
+   compounds with the discount), its basket shares first, then spare dollars. Every household that
+   pays in BUCKs keeps a month of its spending in a BUCK wallet apart from its lien, topped up each
+   payday and more while the BUCK is cheap (1 + 200 x discount, at most 8x); the share of spending
+   paid in BUCKs ramps from 10% to all of it over a household's first year. The grid's demand axis
+   now scales that ramp (3 years, 1 year, 4 months) instead of the investors' arrival rate. This is
+   the economy's demand for liquidity; K should settle where issuance meets it.
 
 * What exists today
 

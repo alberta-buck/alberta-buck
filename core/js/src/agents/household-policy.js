@@ -16,6 +16,9 @@ export const DEFAULTS = {
   // While the BUCK trades at a discount d, a household with a lien pays down
   // paydown_share x (2^(d / paydown_double) - 1) of it each decision (0: no paydown).
   paydown_share: .01, paydown_double: .005,
+  // Money: a household keeps s x money_months of its spending in a BUCK wallet apart from its lien; s
+  // ramps from adopt_start to 1 over adopt_years; it holds more while the BUCK is cheap.
+  money_months: 1, adopt_start: .1, adopt_years: 1, money_gain: 200, money_cap: 8,
 };
 export const POLICIES = ["adaptive", "basket", "retire", "discount"];
 export const ROLES = ["debtor", "saver", "investor"];
@@ -53,12 +56,16 @@ export function profile(seed, member, overrides = {}) {
   }
   for (const key of ["home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
-    "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double"]) {
+    "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
+    "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
   if (p.hold_years <= 0) throw new Error("an investor's hold_years must be positive");
   if (p.paydown_double <= 0) throw new Error("paydown_double must be positive");
+  if (p.adopt_start > 1 || p.adopt_years <= 0 || p.money_cap < 1) {
+    throw new Error("invalid money settings: adopt_start <= 1, adopt_years > 0, money_cap >= 1");
+  }
   if (!POLICIES.includes(p.surplus_policy)) throw new Error("unknown household surplus_policy");
   if (!ROLES.includes(p.role)) throw new Error("unknown household role");
   if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0)) throw new Error("invalid household price thresholds");
@@ -168,6 +175,13 @@ export const discount = (spot, basket, fee) => spot <= 0 || basket <= 0 ? 0
 // The share of its lien a household pays down this decision at discount d: compounding urgency.
 export const paydown = (d, p) => d <= 0 || p.paydown_share <= 0 ? 0
   : Math.min(1, p.paydown_share * (2 ** (d / p.paydown_double) - 1));
+
+// The BUCK working balance a household wants (household_policy.money_target), whole currency units.
+export function moneyTarget(daysIn, annualSpending, d, p) {
+  const share = Math.min(1, p.adopt_start + (1 - p.adopt_start) * daysIn / (365.25 * p.adopt_years));
+  const held = share * annualSpending * p.money_months / 12;
+  return held * Math.min(p.money_cap, 1 + p.money_gain * Math.max(0, d));
+}
 
 // The day a debtor or saver sells its insured asset: an exponential wait at `rate` a year, keyed by the
 // member alone; null when it never does (household_policy.divest_day).

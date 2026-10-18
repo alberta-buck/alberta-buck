@@ -37,7 +37,7 @@ def household_world(request):
             agent               = cls(77)
             agent.settings      = dict(home_k=1000, ltv=.2, apr=.055, premium_bp=50, theta=3.,
                                        cash_k=100, buffer_k=10, switch_k=0, risk=0, decision_days=1,
-                                       income_frac=.1, living_frac=.5, divest_rate=0) | settings
+                                       income_frac=.1, living_frac=.5, divest_rate=0, money_months=0) | settings
             agent.setup(d, scenario, rng)
             return agent
         yield d, scenario, make
@@ -203,6 +203,28 @@ def test_basket_policy_saves_in_buck_deposits_and_pays_down_at_a_discount(househ
     assert a.last_action == "pay-down" and after < drawn and ctr["hhPaidDown"] > 0
     if str(d.basket_impl).startswith("equity"):
         assert len(a._basket_receipts) < receipts, "its basket shares went first"
+
+
+def test_household_keeps_a_working_balance_of_bucks_apart_from_its_lien(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    # Spends half of a $100k income: a month of it in BUCKs, fully adopted from the start.
+    a                           = make(money_months=1, adopt_start=1, max_impact_bp=2000)
+    a._next_decision            = 10_000                    # no refinancing: only the paydays
+    a.act(d, scenario, 0, 0, {})
+    a.act(d, scenario, 30, 0, {})
+    base                        = 100_000 * .5 / 12 * M6
+    wallet                      = d.buck.functions.balanceOf(a._wallet.address).call()
+    assert .95 * base * .99 < wallet < 1.05 * base, "one month of spending, at about a dollar a BUCK"
+    assert d.buck.functions.signedBalanceOf(a.proxy.address).call() == 0, "the lien account is untouched"
+    st                          = a.octl_state(d)
+    assert st["wallet_buck"] == wallet and abs(st["nw"] - st["hypo"]) < .01 * base
+    monkeypatch.setattr(a, "_basket_usd", lambda d: 1.02)   # 2% cheap: it holds up to five times as much
+    a.act(d, scenario, 60, 0, {})
+    cheap                       = d.buck.functions.balanceOf(a._wallet.address).call()
+    assert cheap > 2 * wallet
+    monkeypatch.setattr(a, "_basket_usd", lambda d: .95)    # dear: back toward one month, selling the excess
+    a.act(d, scenario, 90, 0, {})
+    assert d.buck.functions.balanceOf(a._wallet.address).call() < cheap
 
 
 def test_saver_deposits_bucks_issued_at_a_premium_without_selling_them(household_world, monkeypatch):
