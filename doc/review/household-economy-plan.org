@@ -344,6 +344,22 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-19: the probe on both machine fixes (=2d82636=, =build/sim/economy/money5/=): *6 of 6
+  pass*. Mean error 0.49--0.66% and 99th percentile 1.5--2.0% (0.87--1.08% and 4.6--5.9% before);
+  K inside its band on every day of every cell, settling by the economy: 0.48--0.69 with high supply
+  (mean 0.56), 0.65--0.81 at the centre, 0.75--0.81 with low supply and high demand. The churn is
+  gone: paydowns 2--6M and basket deposits 9--23M over five years against a supply of 33--51M.
+- 2026-10-19: the book leg (=02b256a=) on the probe (=build/sim/economy/money4/=): 1 of 6. In the
+  centre K's days on the ceiling fall from 52--138 to 0--5 and its days inside the band rise to
+  60--82%, but K still averages 0.86--0.92 and the 99th percentile rises to 4.6--5.9%. Watching every
+  response (=build/book_probe.py=, the centre's revert cell, days 100--120): the book was 0.8--1.4M
+  short of its size against a 0.15M band, yet the machine netted 32k of TOKEN, buying only the two
+  constituents under their leaned targets and selling another. The parity reading was taken once a
+  day (by the wheel's Sample slot, whose turn comes when the rotation brings it) and goes stale after
+  an hour; with no fresh reading the facet keeps the book the size it is, so the book leg -- and
+  the lean before it -- acted only on relative gaps. At eight ticks a day the gap grew larger, not
+  smaller. =2d82636= takes the reading in the response itself: over the same days the gap stays
+  within 0.26M, every constituent is bought, and K holds at 0.76.
 - 2026-10-19: the 36-cell grid on =9a2026c= (=build/sim/economy/saving/index.html=, both seeds,
   before the machine was fixed): *8 of 36 pass*. Parity holds everywhere (99th percentile 3.0--5.0%,
   mean error 0.77--1.27%). High supply keeps K inside its band (0.60--0.80) at every demand level;
