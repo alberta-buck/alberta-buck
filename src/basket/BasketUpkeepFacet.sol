@@ -21,9 +21,10 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 ///    costs more than one BUCK the BUCK is cheap and the aim is below zero
 ///    (hold BUCKs); where it costs less, above (issue them). Once the TOKEN
 ///    held is further from that size than the band, whatever moved it, the
-///    difference is bought or sold with no word from the policy: into the
-///    constituents under their targets, or out of those over, each in
-///    proportion to its gap, so the book lands as near its weights as it can.
+///    difference is bought or sold with no word from the policy, at its
+///    fastest release (half of what remains a day): into the constituents
+///    under their targets, or out of those over, each in proportion to its
+///    gap, so the book lands as near its weights as it can.
 /// 3. Work each constituent toward its target share of that book on its own:
 ///    sell one that is over, buy one that is under, each when the policy
 ///    sees it closing against the rest and at the policy's release. The two
@@ -257,7 +258,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     /// -- the difference is bought into the constituents under their targets, or sold from those over,
     /// each in proportion to its gap to the target at the book's new size. With none on the other side
     /// the book lands on its targets; otherwise each closes the same share of its gap. A sale leaves out
-    /// what the ceiling already asks of every constituent.
+    /// what the ceiling already asks of every constituent. _plan paces it by the release law.
     function _move(Book memory b, uint256 tokens, uint256 excess) private view returns (uint256[] memory move) {
         uint256 n = b.token.length;
         move = new uint256[](n);
@@ -306,8 +307,14 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
                 p.rates[i] = _rate(i, over, n);
                 amount = gap * pairPolicy.share(i, p.rates[i]) / 1e18;
             }
-            // The book's own move needs no word from the policy.
-            if (move[i] > amount) amount = move[i];
+            // The book's own move needs no word from the policy, only its pace: the release law at
+            // its fastest, half of what remains a day however often the wheel turns.
+            if (move[i] > 0) {
+                uint256 fastest = pairPolicy.maxRate();
+                if (fastest > p.rates[i]) p.rates[i] = fastest;
+                uint256 paced = move[i] * pairPolicy.share(i, p.rates[i]) / 1e18;
+                if (paced > amount) amount = paced;
+            }
             if (over) p.sells[i] += amount; else p.buys[i] = amount;
         }
         uint256 selling;

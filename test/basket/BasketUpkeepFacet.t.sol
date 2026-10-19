@@ -11,6 +11,7 @@ import {BasketUpkeepMaintenanceControl} from "../harness/BasketUpkeepMaintenance
 contract ControlledPairIntent {
     address public basket;
     uint256 public constant count = 3;
+    uint256 public constant maxRate = 0.693147e18;
     uint256 public rate = 1e18;
     uint256 public impacts;
     uint64 public lastExecutionAt;
@@ -276,9 +277,11 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         _books();
     }
 
-    /// @dev Responses, the outside market re-pinning every pool after each.
+    /// @dev Responses half a day apart (the book's move is paced by the day), the outside market
+    /// re-pinning every pool after each.
     function _responses(uint256 n) private {
         for (uint256 r; r < n; ++r) {
+            vm.warp(vm.getBlockTimestamp() + 12 hours - 1800);
             _response();
             for (uint256 i; i < 3; ++i) _repin(i);
         }

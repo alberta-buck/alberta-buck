@@ -22,6 +22,9 @@ interface IRebalancePolicy {
     ///         a the dearer: selling a or buying b, as a fraction of the gap
     ///         per day. ln 2 halves what remains each day.
     function desire(uint256 a, uint256 b) external view returns (uint256 rateWad);
+    /// @notice The fastest any gap is closed, a fraction of it per day: the pace
+    ///         the basket also gives its book's own move.
+    function maxRate() external view returns (uint256);
 
     /// @notice The share of constituent i's gap to move now: 1 - exp(-allowance),
     ///         its allowance being the rate it has been worked at, summed over
