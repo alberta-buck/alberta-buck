@@ -272,6 +272,66 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         _books();
     }
 
+    /// @dev Responses, the outside market re-pinning every pool after each.
+    function _responses(uint256 n) private {
+        for (uint256 r; r < n; ++r) {
+            _response();
+            for (uint256 i; i < 3; ++i) _repin(i);
+        }
+    }
+
+    function test_upkeep_aBuckDepositIsBoughtIntoTheBookWithNoWordFromThePolicy() public {
+        _installValues(30_000e18, 30_000e18, 30_000e18, 0);
+        uint128[3] memory placed = _placed3();
+        intent.setRate(0);                       // as the pair policy says while no pair has separated
+        uint256 lien = _lien();
+        // A deposit inside the band is left where it is: it repays the lien.
+        _deposit(bob, address(buck), 1_000 * B);
+        assertApproxEqAbs(_lien(), lien - 1_000 * B, B, "a BUCK deposit repays the lien");
+        _responses(2);
+        for (uint256 i; i < 3; ++i) assertEq(b.liquidityOf(i), placed[i], "inside the band");
+        // One beyond it is bought into every constituent, and lent again.
+        _deposit(bob, address(buck), 15_000 * B);
+        _responses(8);
+        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), placed[i], "the book grows by the deposit");
+        assertGt(_lien(), lien, "the deposit is lent again");
+        assertGt(intent.lastExecutionAt(), 0, "and the policy hears of each trade");
+        _books();
+    }
+
+    function test_upkeep_aDepositFillsTheConstituentsUnderTheirWeights() public {
+        _install();                              // 40,000 / 30,000 / 30,000 BUCKs of TOKEN
+        uint128[3] memory placed = _placed3();
+        intent.setRate(0);
+        uint160[3] memory spot = _spots();
+        // 20,000 BUCKs more: a third of the book is 40,000, so the first is at its target and the
+        // others 10,000 short each. The deposit goes to them, equally, and none to the first.
+        _deposit(bob, address(buck), 20_000 * B);
+        _responses(8);
+        assertEq(b.liquidityOf(0), placed[0], "at its target: not bought");
+        (uint160 first,,,,,,) = IPool(pools[0]).slot0();
+        assertEq(first, spot[0]);
+        uint256 grew1 = (b.liquidityOf(1) - placed[1]) * 1e18 / placed[1];
+        uint256 grew2 = (b.liquidityOf(2) - placed[2]) * 1e18 / placed[2];
+        assertGt(grew1, 0.2e18, "under its weight: filled");
+        assertApproxEqRel(grew1, grew2, 0.05e18, "each in proportion to its gap");
+        _books();
+    }
+
+    function test_upkeep_theLeanMovesTheBookWithNoWordFromThePolicy() public {
+        _installGains(30_000e18, 30_000e18, 30_000e18, 5e18, 5e18);
+        uint128[3] memory placed = _placed3();
+        intent.setRate(0);
+        parity.set(1.02e18, true);              // the BUCK is cheap: hold some
+        _responses(1);
+        for (uint256 i; i < 3; ++i) assertLt(b.liquidityOf(i), placed[i], "TOKEN sold for BUCKs");
+        placed = [b.liquidityOf(0), b.liquidityOf(1), b.liquidityOf(2)];
+        parity.set(0.98e18, true);              // dear: let some out
+        _responses(1);
+        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), placed[i], "TOKEN bought with issued BUCKs");
+        _books();
+    }
+
     function test_upkeep_aDearGainLeansBothWays() public {
         _installGains(30_000e18, 30_000e18, 30_000e18, 5e18, 5e18);
         uint128[3] memory placed = _placed3();

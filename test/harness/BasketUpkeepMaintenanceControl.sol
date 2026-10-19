@@ -4,8 +4,9 @@ pragma solidity ^0.8.20;
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 
 /// @notice Experimental control: the same upkeep with no view on prices. It
-/// pairs what waits, keeps every constituent inside its leash and the issue
-/// under its ceiling, and never works a gap on the policy's word.
+/// pairs what waits, keeps the book its size, every constituent inside its
+/// leash and the issue under its ceiling, and never works a gap on the
+/// policy's word.
 contract BasketUpkeepMaintenanceControl is BasketUpkeepFacet {
     constructor(address policy, address parity_, uint256 parityGain_, uint256 parityGainDear_)
         BasketUpkeepFacet(policy, parity_, parityGain_, parityGainDear_) {}

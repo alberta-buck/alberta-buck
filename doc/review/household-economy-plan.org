@@ -344,6 +344,14 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-19: the 36-cell grid on =9a2026c= (=build/sim/economy/saving/index.html=, both seeds,
+  before the machine was fixed): *8 of 36 pass*. Parity holds everywhere (99th percentile 3.0--5.0%,
+  mean error 0.77--1.27%). High supply keeps K inside its band (0.60--0.80) at every demand level;
+  the eight passes are there, and its four failures miss the mean error by at most 0.06 points.
+  Every low- and mid-supply cell takes K to its 0.95 ceiling (12--212 days), whatever the demand:
+  the demand axis (the working balances' adoption) barely matters beside the BUCK deposits the
+  machine keeps as a repaid lien. Perry (2026-10-19): a defect in the basket -- it should buy its
+  most under-weight TOKENs and move toward its target issuance whatever brought the liquidity.
 - 2026-10-18: saving that halves with the premium (=9a2026c=, =build/sim/economy/money3/=): *1 of
   6 pass*, and parity is back. Mean error 0.85--1.13%, 99th percentile 3.7--4.5% in every cell (5.0--
   9.3% before); paydowns 55--86M and deposits 74--108M against a supply of 38--59M. The high-supply

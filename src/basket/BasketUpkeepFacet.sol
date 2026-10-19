@@ -19,7 +19,11 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 /// 2. Size the book. The TOKEN it should hold is its equity plus the BUCKs it
 ///    aims to have issued. That aim leans against parity: where the basket
 ///    costs more than one BUCK the BUCK is cheap and the aim is below zero
-///    (hold BUCKs); where it costs less, above (issue them).
+///    (hold BUCKs); where it costs less, above (issue them). Once the TOKEN
+///    held is further from that size than the band, whatever moved it, the
+///    difference is bought or sold with no word from the policy: into the
+///    constituents under their targets, or out of those over, each in
+///    proportion to its gap, so the book lands as near its weights as it can.
 /// 3. Work each constituent toward its target share of that book on its own:
 ///    sell one that is over, buy one that is under, each when the policy
 ///    sees it closing against the rest and at the policy's release. The two
@@ -240,6 +244,30 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         }
     }
 
+    /// @dev The book's own move. Once the TOKEN held and the book's size differ by more than the band --
+    /// whatever moved them: a BUCK deposit, an exit, the lean against parity, a K that frees the ceiling
+    /// -- the difference is bought into the constituents under their targets, or sold from those over,
+    /// each in proportion to its gap to the target at the book's new size. With none on the other side
+    /// the book lands on its targets; otherwise each closes the same share of its gap. A sale leaves out
+    /// what the ceiling already asks of every constituent.
+    function _move(Book memory b, uint256 tokens, uint256 excess) private view returns (uint256[] memory move) {
+        uint256 n = b.token.length;
+        move = new uint256[](n);
+        bool grow = b.total > tokens;
+        uint256 amount = grow ? b.total - tokens : tokens - b.total;
+        if (amount * 10000 <= b.total * eq.weightBandBp) return move;
+        if (!grow) amount = amount > excess ? amount - excess : 0;
+        uint256[] memory gap = new uint256[](n);
+        uint256 sum;
+        for (uint256 i; i < n; ++i) {
+            if (grow ? b.target[i] > b.token[i] : b.token[i] > b.target[i])
+                gap[i] = grow ? b.target[i] - b.token[i] : b.token[i] - b.target[i];
+            sum += gap[i];
+        }
+        if (sum == 0) return move;
+        for (uint256 i; i < n; ++i) move[i] = amount * gap[i] / sum;
+    }
+
     function _plan(Snap memory s, Book memory b) internal view returns (Plan memory p) {
         uint256 n = s.m.length;
         require(n == pairPolicy.count() && address(this) == pairPolicy.basket(), "pair basket");
@@ -251,8 +279,10 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
             if (b.total > 0) p.gaps[i] = (int256(b.token[i]) - int256(b.target[i])) * 1e18 / int256(b.total);
         }
         // Beyond the ceiling every constituent gives its share, whatever the policy sees.
-        if (b.issued > int256(b.ceiling) && tokens > 0)
-            for (uint256 i; i < n; ++i) p.sells[i] = uint256(b.issued - int256(b.ceiling)) * b.token[i] / tokens;
+        uint256 excess = b.issued > int256(b.ceiling) ? uint256(b.issued - int256(b.ceiling)) : 0;
+        if (excess > 0 && tokens > 0)
+            for (uint256 i; i < n; ++i) p.sells[i] = excess * b.token[i] / tokens;
+        uint256[] memory move = _move(b, tokens, excess);
         uint256 mask = _eligible(b, p.gaps);
         for (uint256 i; i < n; ++i) {
             if (s.m[i].depth == 0 || b.token[i] == b.target[i]) continue;
@@ -268,6 +298,8 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
                 p.rates[i] = _rate(i, over, n);
                 amount = gap * pairPolicy.share(i, p.rates[i]) / 1e18;
             }
+            // The book's own move needs no word from the policy.
+            if (move[i] > amount) amount = move[i];
             if (over) p.sells[i] += amount; else p.buys[i] = amount;
         }
         uint256 selling;
