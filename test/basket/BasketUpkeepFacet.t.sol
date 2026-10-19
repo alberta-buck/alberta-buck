@@ -51,7 +51,11 @@ contract ControlledPairIntent {
 contract ParityStub {
     int256 public rawValue = 1e18;
     bool public fresh = true;
+    bool public renew;                   // whether an observation makes the reading fresh
     function set(int256 value, bool fresh_) external { rawValue = value; fresh = fresh_; }
+    function setRenew(bool renew_) external { renew = renew_; }
+    function isDue() external view returns (bool) { return !fresh; }
+    function observe() external { if (renew) fresh = true; }
 }
 
 contract BasketUpkeepFacetTest is BuckBasketEquityTest {
@@ -329,6 +333,19 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         parity.set(0.98e18, true);              // dear: let some out
         _responses(1);
         for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), placed[i], "TOKEN bought with issued BUCKs");
+        _books();
+    }
+
+    function test_upkeep_theResponseTakesTheReadingItLeansOn() public {
+        _installGains(30_000e18, 30_000e18, 30_000e18, 5e18, 5e18);
+        uint128[3] memory placed = _placed3();
+        intent.setRate(0);
+        // Dear, but last read long ago: a response that could not read would keep the book its size.
+        parity.set(0.98e18, false);
+        parity.setRenew(true);
+        _responses(1);
+        assertTrue(parity.fresh(), "the response read it");
+        for (uint256 i; i < 3; ++i) assertGt(b.liquidityOf(i), placed[i], "and let BUCKs out on it");
         _books();
     }
 

@@ -78,13 +78,21 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     }
 
     function _v() private view returns (IBuckBasketVenue) { return IBuckBasketVenue(address(this)); }
+    /// @dev Whether the book leans on parity at all: a gain, and a reference to read.
+    function _leans() private view returns (bool) {
+        return (parityGain != 0 || parityGainDear != 0) && address(parity).code.length > 0;
+    }
+    function _parityDue() private view returns (bool) {
+        if (!_leans()) return false;
+        try parity.isDue() returns (bool due) { return due; } catch { return false; }
+    }
     function _spendable() private view returns (uint256) { return _bk().balanceOf(address(this)); }
 
     function wheelDue(uint8 kind, uint256 i) public view returns (bool) {
         if (kind == 0) return block.timestamp / 1 days > lastDay;
         if (kind == 1) return i < constituents.length && liquidityOf[i] > 0 && block.timestamp / 1 days > lastSyncDay[i];
         if (kind != 2 || block.timestamp < uint256(lastResponseAt) + response.interval) return false;
-        if (pairPolicy.signals().isDue()) return true;
+        if (pairPolicy.signals().isDue() || _parityDue()) return true;
         Snap memory s = _snap();
         if (_staleMark(s)) return true;
         uint256 grain = _grainS(s);
@@ -359,6 +367,9 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     function _respond() internal virtual returns (uint256) {
         require(netMark, "net mark");
         pairPolicy.observe();
+        // The book's size leans on the parity reading: take it now when it is due, so it is fresh
+        // whenever the market allows a reading. One that fails leaves the book the size it is.
+        if (_leans()) try parity.observe() {} catch {}
         Snap memory s = _snap();
         bool stale = _staleMark(s);
         _markS(s);
