@@ -1,6 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, divestDay, discount, paydown, moneyTarget, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, ROLES } from "./household-policy.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -221,7 +221,8 @@ export class CreditHouseholdAgent {
 
   // The basket policy (credit_households._save_or_pay_down): while the BUCK trades at a discount, pay down
   // the lien with an urgency compounding with the discount, basket shares first, then spare dollars;
-  // otherwise save, buying BUCKs and depositing them in the basket.
+  // otherwise save, buying BUCKs with a share of the spare dollars that halves with the premium, and
+  // depositing them in the basket.
   async saveOrPayDown(world, state, spare) {
     const ops = world.households, p = this.p;
     const share = paydown(discount(state.ru / state.rb, state.basket_usd, state.fee), p);
@@ -246,7 +247,8 @@ export class CreditHouseholdAgent {
       this.lastAction = "pay-down";
       return;
     }
-    const saved = await ops.saveBucks(this, spare);
+    const budget = BigInt(Math.trunc(Number(spare) * saving(premium(state.ru / state.rb, state.basket_usd, state.fee), p)));
+    const saved = await ops.saveBucks(this, budget);
     this.investedUsd += saved.spent; this.tradeLoss += saved.spent - saved.got;
     this.book_(saved.deposit);
     this.lastAction = "save";

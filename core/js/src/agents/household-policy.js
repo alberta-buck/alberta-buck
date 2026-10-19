@@ -14,7 +14,8 @@ export const DEFAULTS = {
   // A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien first.
   divest_rate: .1,
   // While the BUCK trades at a discount d, a household with a lien pays down
-  // paydown_share x (2^(d / paydown_double) - 1) of it each decision (0: no paydown).
+  // paydown_share x (2^(d / paydown_double) - 1) of it each decision (0: no paydown). Otherwise it saves
+  // its spare dollars in BUCK deposits, the share halving each paydown_double of premium.
   paydown_share: .01, paydown_double: .005,
   // Money: a household keeps s x money_months of its spending in a BUCK wallet apart from its lien; s
   // ramps from adopt_start to 1 over adopt_years; it holds more while the BUCK is cheap.
@@ -175,6 +176,14 @@ export const discount = (spot, basket, fee) => spot <= 0 || basket <= 0 ? 0
 // The share of its lien a household pays down this decision at discount d: compounding urgency.
 export const paydown = (d, p) => d <= 0 || p.paydown_share <= 0 ? 0
   : Math.min(1, p.paydown_share * (2 ** (d / p.paydown_double) - 1));
+
+// How far above the basket's value a BUCK costs, after the fee (household_policy.premium).
+export const premium = (spot, basket, fee) => spot <= 0 || basket <= 0 ? 0
+  : Math.max(0, spot / ((1 - fee) * basket) - 1);
+
+// The share of its spare dollars a household saves at premium q: the paydown's mirror, halving each
+// paydown_double of premium (household_policy.saving).
+export const saving = (q, p) => 2 ** (-q / p.paydown_double);
 
 // The BUCK working balance a household wants (household_policy.money_target), whole currency units.
 export function moneyTarget(daysIn, annualSpending, d, p) {

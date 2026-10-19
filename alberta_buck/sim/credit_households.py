@@ -586,7 +586,8 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
     def _save_or_pay_down(self, d, state, spare, ctr):
         """The =basket= policy. While the BUCK trades at a discount, pay down the lien with an urgency
         that compounds with the discount (household_policy.paydown): basket shares first, then spare
-        dollars. Otherwise save: buy BUCKs with the spare dollars and deposit them in the basket."""
+        dollars. Otherwise save: buy BUCKs with a share of the spare dollars that halves with the
+        premium (household_policy.saving), and deposit them in the basket."""
         share                   = policy.paydown(policy.discount(state["ru"] / state["rb"], state["basket_usd"],
                                                                  state["fee"]), self.p)
         drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
@@ -613,11 +614,13 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             ctr["hhPaidDown"]   = ctr.get("hhPaidDown", 0) + repaid
             self.last_action    = "pay-down"
             return
-        if spare > PARITY:
+        budget                  = int(spare * policy.saving(policy.premium(state["ru"] / state["rb"], state["basket_usd"],
+                                                                         state["fee"]), self.p))
+        if budget > PARITY:
             if self._savings_proxy is None:
                 self._savings_proxy = self._new_proxy(d)
             ru, rb              = active_reserves(d.chain, d.pool_ub, d.usdc, d.buck)
-            net                 = min(spare, _impact_cap(ru, self.max_impact_bp)) * (1 - d.fee_ub / 1e6)
+            net                 = min(budget, _impact_cap(ru, self.max_impact_bp)) * (1 - d.fee_ub / 1e6)
             before              = d.chain.balance_of(d.usdc, self.proxy.address)
             got                 = self._buy_buck(d, d.pool_ub, d.usdc, int(rb * net / (ru + net)), d.fee_ub,
                                                  recipient=self._savings_proxy.address)

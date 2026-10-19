@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { profile, issuance, surplusAction, investorAction, population, arrivalState, arrivalsStep, ROLES }
-  from "../src/agents/household-policy.js";
+import { profile, issuance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
+  ROLES } from "../src/agents/household-policy.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
 for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
@@ -15,6 +15,11 @@ test("household surplus policies use basket parity after trading costs", () => {
 });
 test("investors buy BUCKs unless they are dear", () => {
   for (const c of f.investor) assert.equal(investorAction(...c.slice(0, -1)), c.at(-1));
+});
+test("households save less as the BUCK grows dear, halving each step of premium", () => {
+  for (const [spot, basket, fee, double, share] of f.saving) {
+    assert.ok(Math.abs(saving(premium(spot, basket, fee), { paydown_double: double }) / share - 1) < 1e-6);
+  }
 });
 const at = (series, day) => f.population[series].filter(([start]) => start <= day).at(-1)[1];
 const arrivals = (gain, seed = f.seed) => {

@@ -109,6 +109,12 @@ def test_paydown_urgency_compounds_with_the_discount():
     assert hp.discount(1.02, 1., 0) == 0
 
 
+@pytest.mark.parametrize("case", FIXTURE["saving"])
+def test_saving_halves_with_the_premium(case):
+    spot, basket, fee, double, share = case
+    assert hp.saving(hp.premium(spot, basket, fee), {"paydown_double": double}) == pytest.approx(share, rel=1e-6)
+
+
 def test_money_target_ramps_with_adoption_and_holds_more_when_cheap():
     p                           = hp.profile(41404, "0/debtor/0")
     spend                       = 120_000.                  # $10k a month

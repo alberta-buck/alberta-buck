@@ -22,7 +22,9 @@ DEFAULTS                        = dict(
     divest_rate=.1,
     # While the BUCK trades at a discount d to the basket, a household with a lien pays down
     # paydown_share x (2^(d / paydown_double) - 1) of it each decision: an urgency that compounds with
-    # the discount (0: no paydown). Its basket shares go first, then its spare dollars.
+    # the discount (0: no paydown). Its basket shares go first, then its spare dollars. Otherwise it
+    # saves its spare dollars in BUCK deposits, the share halving each paydown_double of premium: no
+    # household pays more for a BUCK than the basket it buys, and its dollars wait for the discount.
     paydown_share=.01, paydown_double=.005,
     # Money: a household paying a share s of its spending in BUCKs keeps s x money_months of that
     # spending in a wallet apart from its lien, topped up each payday. s ramps from adopt_start to 1
@@ -213,6 +215,19 @@ def paydown(d, p):
     if d <= 0 or p["paydown_share"] <= 0:
         return 0.
     return min(1., p["paydown_share"] * (2 ** (d / p["paydown_double"]) - 1))
+
+
+def premium(spot, basket_usd, fee):
+    """How far above the basket's value a BUCK costs, after the fee (0 when it does not)."""
+    if spot <= 0 or basket_usd <= 0:
+        return 0.
+    return max(0., spot / ((1 - fee) * basket_usd) - 1)
+
+
+def saving(q, p):
+    """The share of its spare dollars a household saves in BUCK deposits this decision at premium q:
+    the paydown's mirror, halving each paydown_double of premium."""
+    return 2 ** (-q / p["paydown_double"])
 
 
 def money_target(days_in, annual_spending, d, p):
