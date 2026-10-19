@@ -344,6 +344,35 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-18: saving that halves with the premium (=9a2026c=, =build/sim/economy/money3/=): *1 of
+  6 pass*, and parity is back. Mean error 0.85--1.13%, 99th percentile 3.7--4.5% in every cell (5.0--
+  9.3% before); paydowns 55--86M and deposits 74--108M against a supply of 38--59M. The high-supply
+  cell passes with K at 0.67--0.73. The five others fail only on K: it climbs to the 0.95 ceiling
+  and stays 52--138 days (centre, history, seed 45517: from 0.79 to 0.95 by day 1080, held until day
+  1440, with the error at 0.3--0.5% while it is there). The BUCK is dear 55--73% of days; issuers
+  arriving five times as fast at K 0.95 do not catch up while the machine keeps BUCK deposits as a
+  repaid lien.
+- 2026-10-18: working balances, and the churn and the machine's pace they showed (the six-cell probe,
+  five years: =build/sim/economy/money/= at =291bf2a=, =money2/= at =618f810=). Both 0 of 6. The
+  first: mean error 1.2--1.7%, 99th percentile 5.0--7.7%, K at 0.95 in five cells; households paid
+  down 147--324M BUCKs and deposited 311--398M against a supply of 42--73M, because carrying (on
+  until a discount of =retire_disc=) and the paydown (from any discount) overlapped, and a small
+  urgency redeemed whole receipts. With carrying stopped at any discount and the paydown redeeming
+  only receipts within its target (=618f810=), paydowns fall to 90--162M and deposits to 122--218M;
+  mean error 1.2--1.8%, 99th percentile 5.0--9.3%, K still at 0.95 in five cells.
+
+  The cycle that remains (centre, revert, days 1650--1730): while the BUCK is dear households deposit
+  0.7M BUCKs a day -- 33M borrowed at a premium and put in directly, 8.7M bought with dollars -- and
+  the BUCK grows dearer (bvib 1.00 to 0.90) while supply /falls/ from 68M to 60M. A BUCK deposit goes
+  straight to the machine's account and repays its lien (41M to 0). The machine's positions stay
+  flat while its equity doubles (44M to 92M); it buys 0.02--0.24M of TOKENs per ten days. Its
+  upkeep facet's parity lean sizes the book (7% dear asks for 1.35 x equity of TOKENs), but a
+  purchase needs =PairRebalancePolicy.desire()=, which is zero until a pair of constituents
+  separates from its reference. So a BUCK deposit is demand for BUCKs until relative prices move,
+  not the K BUCKs of new supply the previous entry reckoned. When the lien runs out the BUCK turns
+  cheap (1.05) and the paydown redeems 36M of receipts in ten days, which the machine pays by drawing
+  its lien again. Buying BUCKs at any premium to save was a modelling fault (=9a2026c=: the share of
+  spare dollars saved halves each 0.5% of premium); the machine's pace is a design question.
 - 2026-10-18: BUCK-deposit saving with the paydown on and off (=91f26a9=, before working balances;
   =build/sim/economy/paydown/=, seed 41404): 0 of 8 pass. Without the paydown K falls to 0 in all
   four cells (119--217 days at the floor; mean error 3.0--3.8%, 99th percentile 28--41%). With it,
