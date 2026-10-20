@@ -344,6 +344,12 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-19: the whole control lab on =d73f047= (datasim, 310 worlds, audit clean; this worktree's
+  =doc/control-lab/interactive=, the unpaced run kept as =interactive-unpaced=). Against the run of
+  2026-10-13, every stage that holds the basket is better and no case is worse: basket, desk and K
+  0.490 -> 0.439% (90 of 90 better), all and both 0.493 -> 0.476% (70 better), demand 1.715 ->
+  1.676%, supply 1.489 -> 1.449% (63 better each); the stages without it are unchanged. The basket
+  swaps 208k times (204k before, 286k unpaced); the desk still never operates.
 - 2026-10-19: the lean's gain swept in the lab (basket stages; =doc/control-lab/gain0=, =gain2=):
   less lean is worse, not better. Mean parity error, old / gain 0 / gain 2 / gain 5: basket 0.49 /
   1.38 / 0.74 / 0.59%; demand 1.72 / 3.35 / 2.27 / 1.91%; supply 1.49 / 2.75 / 1.90 / 1.40%; all
