@@ -344,6 +344,16 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-19: the lean's gain swept in the lab (basket stages; =doc/control-lab/gain0=, =gain2=):
+  less lean is worse, not better. Mean parity error, old / gain 0 / gain 2 / gain 5: basket 0.49 /
+  1.38 / 0.74 / 0.59%; demand 1.72 / 3.35 / 2.27 / 1.91%; supply 1.49 / 2.75 / 1.90 / 1.40%; all
+  0.49 / 0.62 / 0.54 / 0.61%. So the lab's wheel had kept the parity reading fresh and the lean
+  working all along; what changed the lab is the book leg, which closed its whole gap at once
+  where every other gap is released at most half of what remains a day. =d73f047= paces it by the
+  policy's fastest rate. Lab, old / paced (=doc/control-lab/paced=): basket 0.490 / 0.439% (90 of 90
+  cases better), all 0.493 / 0.476% (70 better, none worse), demand 1.715 / 1.676%, supply 1.489 /
+  1.449% (63 better each, none worse). The probe (=money6=) still passes 6 of 6, mean error
+  0.38--0.65% and 99th percentile 1.4--1.8% (0.49--0.66% and 1.5--2.0% unpaced).
 - 2026-10-19: the control lab regenerated on the fixed machine (datasim, =d62d921=, 310 worlds;
   results in this worktree's =doc/control-lab/interactive=, compared case by case with the main
   checkout's run of 2026-10-13 by =build/lab_compare.py=). Stages without the basket are identical.
