@@ -344,6 +344,14 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-19: the 36-cell grid on the paced move (=d73f047=, =build/sim/economy/release/index.html=):
+  *27 of 36 pass* (31 unpaced). Parity is better everywhere: mean error 0.38--0.66%, 99th percentile
+  1.4--1.9%. Every mid- and high-supply cell passes, K settling at 0.51--0.82. Nine of the twelve
+  low-supply cells fail on K alone: it ends at 0.90--0.94, and the revert path of seed 45517 reaches
+  the 0.95 ceiling (51--164 days). Pacing lends BUCK deposits out over days rather than at once, so
+  where issuers are scarce K climbs higher to draw them. By decision 8's rule (a K near 1 means the
+  issuers are not rational enough) the low-supply corner is the issuance model's to answer: issuers
+  there arrive at a third of the centre's rate, and the K pace gives back only 2.5x at K 0.9.
 - 2026-10-19: the whole control lab on =d73f047= (datasim, 310 worlds, audit clean; this worktree's
   =doc/control-lab/interactive=, the unpaced run kept as =interactive-unpaced=). Against the run of
   2026-10-13, every stage that holds the basket is better and no case is worse: basket, desk and K
