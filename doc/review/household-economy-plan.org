@@ -345,6 +345,14 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-26: interim =c5df8e4= five-year evaluation: 14/16 completed with matching PDFs, no
+  household errors and no overdue exits. All meet price tolerances; the three completed
+  retirement-only cells fail K headroom. The strict judge fails all 14 on 203 negative signed
+  balances of exited household instances. A real-contract fixture reproduces a negative signed
+  balance after aging while raw is positive and the credit limit is zero; the simulation
+  treats that signed value as a lien. The same fixture leaves activated coverage pending at
+  K=0. Both require contract/accounting analysis and regression coverage before merge, not
+  weaker thresholds. [[file:household-release-readiness.org][Measurements, reproduction and remaining work]].
 - 2026-10-26: repaired collateralized-household exits in Python and JavaScript. Reproduced the
   first historical failure on day 289: K moves 0.811122 to 0.809029 inside the burn, leaving
   the old quote 161.211585 BUCK above available cancellation capacity. Both agents now refresh

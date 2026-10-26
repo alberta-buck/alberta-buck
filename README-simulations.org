@@ -140,9 +140,12 @@ contract-retirement candidates, missing shock coverage and ordered merge/release
 The October 26 exit repair refreshes the K-dependent release quote, verifies cancellation before
 marking it complete, and sells only positively owned BUCKs. Partial basket claims remain recorded
 until redeemed; a cash shortfall leaves settlement pending. Small positive execution reserves may
-remain (up to one BUCK per account and one dollar per pending TOKEN constituent); liabilities are
+remain (up to one spendable BUCK per account and one dollar per pending TOKEN constituent); liabilities are
 not forgiven. The 315-day replay of the first historical failure now closes the affected household
-without errors. Fresh five-year evidence is still required; see the review's repair section.
+without errors. Fourteen corrected five-year policy runs have since completed without household
+errors, but all fail the new exit audit: aged post-exit balances can appear negative despite a
+positive raw balance. Two policy cells are still running. See the [[file:doc/review/household-release-readiness.org][review]] for the evidence,
+the separate K=0 release boundary and the remaining work before merge.
 
 * Diagnostics and deliberate retirement
 

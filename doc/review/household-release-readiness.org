@@ -159,6 +159,68 @@ and an unfunded exit has no foreclosure/default waterfall. A zero net release ca
 coverage pending, which the new acceptance detects. Those are separate scenarios/API questions
 if fresh runs expose them; they are not reasons to fabricate cash or declare an exit complete.
 
+** Interim five-year results and newly exposed accounting (October 26)
+
+The =exit-repair-20261026= policy campaign is frozen at =c5df8e4=. Fourteen of sixteen worlds
+have completed, each with a PDF verified against its JSON. The two remaining comparison worlds
+are running. The [[file:../../build/sim/economy/exit-repair-20261026/index.html][campaign index]] and [[file:../../build/sim/economy/exit-repair-20261026/exit-repair-audit-partial.json][14-world account audit]] contain the current
+evidence; these observations are interim, not a verdict on the unfinished cells.
+
+The repair materially changes the observed settlement behavior. Across the 14 matched cells,
+the old campaign recorded 12 household errors; the repaired worlds record none, and no exits
+have exceeded the 30-day settlement window. They record 313 completed asset-sale exits out of
+315 started; the two still pending began 6 and 17 days before the horizon. Every world satisfies
+the price-error tolerances. All seven completed always-invest/discount worlds and all four
+adaptive worlds retain the required K headroom; all three completed retirement-only worlds fail
+that check. Mortgage interest in each world is lower than its same-population counterfactual.
+
+One illustration of the original loop: in =smid-dmid-revert-41404=, exit buybacks fall from
+18.49 million to 0.98 million BUCK and completed exits rise from 12 to 15. Totals include all
+exits and the endogenous populations and markets can change between runs, so this is not a
+controlled estimate of a single household's benefit. Adaptive remains the agreed default; this
+campaign does not establish it as the best policy, and the issuance/surplus confound remains.
+
+Nevertheless, *none of the 14 passes the current full acceptance judge*. It flags 203 exited
+household instances with a negative signed balance; every one of these flags comes from the
+=drawn - jub= check, rather than an unreleased line, deposit, mortgage or receipt. Their marked
+amounts total 2,324.72 BUCK; the median is 8.08 BUCK and the maximum 56.76 BUCK. The raw chain
+balances were not saved in these vectors, so the cause of every individual flag is not proven.
+
+A real-contract household reproduction establishes a matching failure mechanism. Immediately
+after a completed, aged exit, its raw balance is +294.034737 BUCK, with 293.534737 BUCK of
+accrued demurrage, a signed balance of +0.5 and no credit limit. Three years later, without
+transactions, raw is still +294.034737 but the fee view is 311.164746 and =signedBalanceOf=
+returns -17.130009; =balanceOf= is zero. The simulator interprets the negative signed value as
+borrowed credit, although the signed *raw* balance is positive. A saved world shows the same
+pattern: one exited account goes from +0.424256 on day 745 to -22.969854 on day 1826 with its
+credit limit and deposit at zero. This supports the diagnosis, but does not by itself prove that
+all 203 saved cases have positive raw balances. [[file:../../build/exit-repair-dust-diagnostic.log][Contract fixture log]].
+
+This is more than a report-label question: contract code also uses =signedBalanceOf= in burn
+solvency checks. Decide and test how demurrage is bounded at an exhausted positive balance,
+distinguish raw borrowing from aged holdings and record both in simulation telemetry. Check
+subsequent incoming transfers, fee realization, coverage release and wealth accounting; do not
+simply loosen the acceptance threshold or declare an actual debt forgiven. Add an aged-exit
+regression that advances time after the household stops acting, in both agent implementations.
+
+The fixture also found a distinct boundary: with K at zero, a debt-free household can retain
+activated coverage and its deposit while release has zero net capacity. The pro-rata fixture
+remains pending after 79 attempts, with no exception. This is a deliberately isolated K=0 case,
+not a claim that it occurred in the 14 centre worlds. Decide how a fully repaid line can release
+its coverage and settle its deposit at low K, then test the current machine and contract API at
+the floor and near the premium rate. The overdue-exit acceptance must continue to expose a stall.
+
+Before merging, resolve these two accounting/exit boundaries, complete and review the two running
+worlds, then run a corrected frozen policy comparison and representative default-grid and shock
+checks. Retire legacy contracts only with the corresponding deployment and stress coverage moved
+first, as described below. Correct =contracts-dist-check= to verify the emitted files and metadata,
+and run the complete merge-candidate tests. Local and remote =master= both point to =9351961=;
+=c5df8e4= is a descendant, 325 commits ahead. The remote household branch is nine commits behind
+that tested commit; this review may be committed afterwards.
+The main checkout has unrelated uncommitted work, which must be preserved. A possible fast-forward
+does not settle review or release readiness. The published verifier bundle uses a development
+trusted setup and the current bootstrap is not a complete production machine deployment.
+
 ** What the policy comparison does and does not establish
 
 Refinancing is active, and the final accounts report no living/premium arrears. Actual mortgage
