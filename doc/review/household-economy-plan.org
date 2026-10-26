@@ -71,6 +71,14 @@ recommendations.
    now scales that ramp (3 years, 1 year, 4 months) instead of the investors' arrival rate. This is
    the economy's demand for liquidity; K should settle where issuance meets it.
 
+10. *Adaptive is the common default; simplify as coverage is demonstrated.* (Perry,
+    2026-10-25.) The price-sensitive saving and discounted-paydown behavior formerly called
+    =basket= is now =adaptive=. =basket= means always invest; =retire= and =discount= remain
+    explicit comparisons. Use one household-economy runner for baselines and stress arms,
+    retain routing/contract checks and the control lab, and retire old actors and scenarios
+    only when their distinct failure checks have replacements. The Makefile and the root
+    README guides are the supported build, test, run and interpretation entry points.
+
 * What exists today
 
 Two engines, each with its own views:
@@ -198,7 +206,7 @@ redeem-and-sell exit. The page and sandbox adapters keep working with the older 
 * The baseline economy
 
 =alberta_buck/sim/experiments/economy.toml=: rebalancing-eq family, keyed draws, five years, two
-ticks a day, =equity-machine=, the five commodities, a $50M BUCK/USDC pool. Cast: the family's
+ticks a day, =equity-machine=, the five commodities, a $10M BUCK/USDC pool. Cast: the family's
 plumbing (=MarketMakerWhale=, =AnonymousArbAgent= x3, =TokenAccumulatorAgent=, =BootstrapDMAgent=
 x24, =PidKeeperAgent=, =DirectorKeeperAgent=), =BasketWheelAgent= (Solidity, TOKEN start,
 profitable calls), =MonetaryKeeperAgent= (turns the desk), and =HouseholdPopulationAgent=.
@@ -215,7 +223,7 @@ ledger.
 | Axis | Values |
 |------+--------|
 | supply growth (debtor and saver rates) | x1/3, x1, x3 |
-| demand growth (investor rate) | x1/3, x1, x3 |
+| demand adoption pace (time to adopt BUCK working balances) | x1/3, x1, x3 |
 | prices | =history=, =revert= |
 | seed | 41404, 45517 |
 
@@ -324,17 +332,10 @@ its failures are understood.
   Worktree at =.claude/worktrees/household-economy= (ignored by git). In it, =lib/= entries are
   symlinks to the main checkout's (=lib/circom-lib= is a submodule: link it too for Python work),
   and =out=, =cache= and =alberta_buck/sim/artifacts= build products are linked or rebuilt.
-- Python, from the worktree: =build/py.sh python ...= (untracked; it lives in the worktree's
-  =build/=). The project venvs' own base pythons were garbage-collected from the nix store, so
-  =build/runtime= is a venv on the profile python (=python -m venv --without-pip=) whose
-  =simulation-dependencies.pth= names the 0.4.0 venv's site-packages. =build/py.sh= sources the
-  captured dev environment (=/Users/perry/src/alberta-buck/build/cleanup/nixenv.sh=), puts
-  =build/runtime/bin= first on =PATH=, and sets =PYTHONPATH= to the worktree, its =core/python=
-  and =core/contracts/python=, and the main checkout's built =core/python-kernel=, with
-  =ALBERTA_BUCK_REPO= the worktree. The campaign runner passes the same paths to its snapshot.
-- A worktree-isolated session refuses heredocs and compound shell commands: write small scripts
-  under =build/= and run them.
-- JavaScript: =cd core/js && node --test test/<file>=.
+- Use =make nix-venv-TARGET= for Python and =make nix-TARGET= for builds and JS checks.
+  =make nix-venv-setup= maintains this checkout's =.venv= and repairs a collected Nix Python.
+  The old =build/py.sh= and borrowed-package runtime are superseded. See
+  [[file:../../README-build.org][README-build.org]]; =make help= lists the supported commands.
 - Long runs in the background, from a frozen snapshot; never edit a running snapshot.
 - Never start, stop or probe ports 8797, 8798 or 8000. The local sim server is on 8897.
 - Commits: ASCII, concise, no attribution lines, explicit paths. Nothing regenerable committed.
@@ -344,6 +345,39 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-25: consolidation per decision 10. =adaptive= now names the prior price-sensitive
+  saving/discounted-paydown behavior, in Python and JavaScript; =basket= is a true always-invest
+  comparison. The 30-day smoke completes with a matching six-page PDF and no household errors.
+  Its first 29 daily BVIB, K, supply, refinancing-sale and paydown values exactly match the
+  old =basket= baseline in =release/smid-dmid-history-41404=; this is a continuity check, not a
+  new five-year acceptance result. The older four-policy funding campaign did not establish
+  adaptive as a universal winner: its always-invest arm had better marked wealth and price error.
+  The default remains a behavioral choice, with explicit comparisons.
+  The savings sandbox uses =economy.toml= plus a dormant shock actor, and exposes all three
+  roles' opening counts and arrival rates. Deleted its duplicate preset, the JS mortgage
+  prototype and MonthlyIncome actor, and the standalone old/new savings runner. The JS loop,
+  CLI and memory benchmark now use CreditHouseholdAgent; Python households inherit shared
+  account/contract helpers rather than the legacy debtor's decisions.
+  =economy-*= Make targets cover smoke, plan, run, report and focused tests. Policy cells reuse
+  baseline names; 32 optional stress cells exercise eight disturbances at two strengths and
+  two seeds. The old attack suites remain until equivalent checks have demonstrated coverage.
+  Campaigns freeze source/build hashes, refuse dirty tracked sources, bind their horizon, and
+  require a successful worker exit plus a matching PDF before naming a final JSON. Reports
+  repair missing/stale PDFs, reject short or incomplete acceptance series, and count errors
+  across the recorded run; daily error sampling no longer misses events between account marks.
+  The root README links build, simulation and sandbox guides. The Makefile defaults to help;
+  Nix shell entry no longer installs npm packages, and venv targets maintain an editable
+  checkout-local environment without interactive shell side effects. Builds and tests use
+  these targets; no hosted service has been restarted or deployed.
+  Final validation: 1132 Python tests pass, five skip (optional SciPy, an external RPC,
+  and older vectors without required fields). JS: 15 shared-policy checks, four live household
+  cases, both equilibrium loops and the remaining prototype shape checks pass. The pro-rata
+  fixture uses the existing gap-sized arbitrage mode for the new household flows, retaining its
+  original triangle/parity/accounting bounds. The savings browser test passes, and the JS CLI
+  writes its SVG and journal through =make nix-core-eqsim=. The full suite exposed a wall-clock
+  gas-parity flake; fixed Anvil block timing makes the strict Python/JS check deterministic.
+  The next frozen five-year comparison is =CAMPAIGN=consolidated-policies-20261025 CELLS=policies
+  JOBS=2= through =make nix-venv-economy-run= (16 runs, four policies, two paths and two seeds).
 - 2026-10-19: the 36-cell grid on the paced move (=d73f047=, =build/sim/economy/release/index.html=):
   *27 of 36 pass* (31 unpaced). Parity is better everywhere: mean error 0.38--0.66%, 99th percentile
   1.4--1.9%. Every mid- and high-supply cell passes, K settling at 0.51--0.82. Nine of the twelve

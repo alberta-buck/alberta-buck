@@ -2,14 +2,14 @@
 //
 // DayClock + PinWhale (TOKEN/USDC pinned to the seeded walk) + ParityArb
 // (triangle consistency) + WheelKeeper + PidKeeper + BasketSaver +
-// MonthlyIncome + MortgageRetiree (the prototype, live):
+// CreditHouseholdAgent (the shared household model):
 //
 //   * every op matches its declared expectation,
 //   * the arb holds TOKEN/BUCK to the implied triangle price,
 //   * K stays interior (the controller neither rails nor explodes),
 //   * basketValueInBuck stays in a sane band around parity,
 //   * the saver completes a full deposit -> term -> redeem cycle,
-//   * the debtor books monthly ledger rows (both chart columns).
+//   * the debtor books daily ledger rows (both chart columns).
 //
 // Twice.  On the equity basket with the basket machine, the world's
 // default, for 14 days: the wheel pairs the saver's deposit and the exit is
@@ -46,12 +46,12 @@ const skip = !id ? "identity kernel not built (make nix-core-build-wasm)"
   : false;
 
 async function loop({ basket, days, holdDays }) {
-  const { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome, WheelKeeper } =
+  const { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper } =
     await import("../src/scenarios/eqworld.js");
   const { PinWhale } = await import("../src/agents/whale.js");
   const { ParityArb } = await import("../src/agents/arb.js");
   const { BasketSaver } = await import("../src/agents/saver.js");
-  const { MortgageRetiree } = await import("../prototypes/mortgage-retiree.js");
+  const { CreditHouseholdAgent } = await import("../src/agents/credit-household.js");
   const { runDays } = await import("../src/world.js");
 
   const session = await tevmSession();
@@ -61,14 +61,16 @@ async function loop({ basket, days, holdDays }) {
     feedSeed: 0xF005, stepBp: 120 });
 
   const HOUSE = 400_000n * 10n ** 6n;
-  const PAYMENT = 3_000n * 10n ** 6n;
   const debtorAcct = privateKeyToAccount(generatePrivateKey());
   const saver = new BasketSaver({
     account: privateKeyToAccount(generatePrivateKey()), holdDays });
-  const debtor = new MortgageRetiree({
-    house: HOUSE, mortgageBp: 550n, premiumBp: 50n, payment: PAYMENT,
-    account: debtorAcct });
-  const arb = new ParityArb();
+  const debtor = new CreditHouseholdAgent({ account: debtorAcct, settings: {
+    home_k: 400, ltv: .5, apr: .055, premium_bp: 50, income_frac: .09, living_frac: 0,
+    cash_k: 30, theta: 3, decision_days: 1, divest_rate: 0, money_months: 0,
+  } });
+  // Households now save as well as refinance. Size profitable triangles to the gap on both
+  // baskets; the old fixed $2k bite left this fixture testing an arbitrage throughput cap.
+  const arb = new ParityArb({ closeBp: 8000n });
 
   await runDays(world, [
     new DayClock(),
@@ -77,7 +79,6 @@ async function loop({ basket, days, holdDays }) {
       tokenDec: t.dec, quote: world.usdc.address,
       refPrice: (d) => world.feeds[i][d % world.feeds[i].length] })),
     arb, new WheelKeeper({ arb }), new PidKeeper(), saver,
-    new MonthlyIncome({ account: debtorAcct, amount: PAYMENT }),
     debtor,
   ], { days, onDay: (d) => world.record(d) });
 
@@ -111,14 +112,16 @@ async function loop({ basket, days, holdDays }) {
   assert.deepEqual(events.slice(0, 2), ["deposit", "redeem"],
     `saver cycle (got ${events})`);
   assert.ok(saver.dollarDays > 0n, "dollar-days accounting ran");
-  assert.ok(debtor.ledger.every((r) => r.hypoOwing <= HOUSE),
-    "counterfactual amortizes");
+  assert.ok(debtor.ledger.every((r) => !r.error), "household decisions and contract operations succeeded");
+  assert.ok(debtor.ledger.every((r) => r.hypoOwing === HOUSE / 2n + r.hypoInterest - r.hypoPaid),
+    "counterfactual principal follows its interest and real payment ledger");
+  assert.ok(debtor.mortgage < debtor.hypoMortgage, "the household refinanced real mortgage principal");
 
   console.log(`eqsim (${world.basketKind}, ${days}d): K=${K.toFixed(4)} bvib=${bvib.toFixed(4)} ` +
     `div=${divBp}bp triangles=${arb.triangles} ` +
     `saver=${JSON.stringify(events)} ` +
     `debtor drawn=${debtor.ledger.at(-1).drawn} ` +
-    `mortgage=${debtor.mortgageOwing}`);
+    `mortgage=${debtor.mortgage}`);
   return { world, session, saver, debtor };
 }
 
@@ -139,11 +142,12 @@ test("eqsim: the two-agent equilibrium loop runs on tevm, on the basket machine"
   assert.ok(got > 0n, "the saver was paid");
   assert.ok(await session.call(world.buck, "balanceOf", [saver.account.address]) > 0n,
     "in BUCK");
-  assert.equal(debtor.ledger.length, 1, "debtor booked d0");
+  assert.equal(debtor.ledger.length, 14, "debtor booked each day");
 });
 
 test("eqsim: the same loop on the pro-rata basket, through the debtor's first month", { skip }, async () => {
   const { world, debtor } = await loop({ basket: "prorata", days: 35, holdDays: 20 });
   assert.equal(world.wheel, null, "the pro-rata basket has no wheel");
-  assert.equal(debtor.ledger.length, 2, "debtor booked d0 and d30");
+  assert.equal(debtor.ledger.length, 35, "debtor booked each day");
+  assert.ok(debtor.hypoPaid > 0n && debtor.hypoMortgage < 200_000n * 10n ** 6n, "monthly amortization ran");
 });

@@ -4,6 +4,14 @@
 
 #+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
 
+* Current entry point (2026-10-25)
+
+[[file:../../README-simulations.org][README-simulations.org]] describes the supported model, policy naming and campaign commands.
+The savings sandbox now loads =economy.toml=, including investors. The JS mortgage prototype
+and separate MonthlyIncome actor have been removed; the loop, CLI and benchmark use
+=CreditHouseholdAgent=. Python households now inherit only shared contract/accounting helpers,
+not the old debtor's decision class. The audit below records what motivated the replacement.
+
 * Audit and choice
 
 | Existing agent | What it models | What is missing |
@@ -21,7 +29,7 @@ contract enforcement and separate accounts for borrowing and savings. It has the
 decisions, seeded parameter sampling, arrival schedule and cash-flow convention in both
 languages. Common vectors test those rules; each implementation also executes against contracts.
 
-The existing agents remain available for reproducing old experiments. New economy presets use
+The older Python agents remain where distinct stress coverage has not yet been replaced. New economy presets use
 the household population instead of synthetic large borrowers. This avoids interpreting a
 changed population, balance sheet and decision rule as a controlled change to an old result.
 The older savings and trading agents still serve actors without credit; capital alone does not
@@ -44,8 +52,8 @@ income simply has less external debt service to pay.
 
 Four surplus policies are explicit:
 
-- =adaptive=: retire liabilities at a basket-relative discount after costs; invest at a premium;
-  hold cash within the household's individual neutral band.
+- =adaptive=: save spare cash in BUCK deposits, reducing new purchases as the BUCK grows dear;
+  retire at a basket-relative discount after costs, with urgency increasing with the discount.
 - =basket=: invest available surplus regardless of parity, after funding worthwhile issuance.
 - =retire=: spend available surplus retiring the existing BUCK liability regardless of parity.
 - =discount=: retire only at a discount and otherwise keep cash, for the previous comparison.
@@ -205,7 +213,7 @@ Neither is a reason to change a contract or the lab's fingerprinted modules.
 - The new five-year preset is =rebalancing-eq-5yr-households.toml=: 24 initial households,
   12 arrivals/year and a 50% probability of being an insured saver. Roles are independently
   sampled, so a particular finite population need not be exactly half savers.
-- =demo-savings.toml= uses 10 initial households and 6 arrivals/year. Its JavaScript savings
+- The current savings world uses =economy.toml= and separate arrival rates by role. Its JavaScript savings
   sandbox selects all four policies, arrival rates, initial population and saver share when
   creating a world. Existing sessions retain the parameters with which they were created.
 

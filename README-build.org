@@ -1,0 +1,86 @@
+#+TITLE: Building and testing Alberta Buck
+#+OPTIONS: ^:nil toc:2
+
+Start with =make help=. It prints the supported entry points and runs nothing. The root
+[[file:Makefile][Makefile]] is the executable command reference. [[file:README.org][README.org]] introduces the project;
+[[file:README-simulations.org][simulations]] and [[file:README-sandboxes.org][sandboxes]] explain the two execution engines and their results.
+
+* The environment wrappers
+
+| Command | Environment |
+|---------+-------------|
+| =make TARGET= | The current shell; its tools and Python must already be installed |
+| =make nix-TARGET= | The toolchain pinned by =flake.lock=: Foundry, Node, Rust, Python, Chromium |
+| =make venv-TARGET= | This checkout's editable Python packages, in =.venv= |
+| =make nix-venv-TARGET= | Both; use this for Python simulations and their tests |
+
+=nix-= does not install JavaScript dependencies on shell entry. =make nix-js-deps= installs
+the root and =core/js= packages from their lockfiles. Nothing here starts a production service.
+
+=venv-= is non-interactive and preserves Make variables. =make nix-venv= opens an interactive
+shell when wanted; =source .venv/bin/activate= activates it in an existing shell. Override
+=VENV=/absolute/path= to choose another environment. Each worktree gets its own default venv.
+The wrapper checks its interpreter and project metadata every time, updating packages only
+when needed. If Nix garbage collection removed the interpreter, it repairs the environment in
+place. It neither deletes an existing environment nor modifies the user's shell startup files.
+
+* First checkout
+
+Install Nix with flakes enabled, clone the repository, then:
+
+#+begin_src sh
+make nix-install                 # pinned Solidity libraries
+make nix-js-deps                 # root and core/js npm dependencies
+make nix-venv-setup              # Python reference, core, contracts, tests, plots, pyrevm, server
+make nix-venv-core-build-py      # compiled Python kernels, staged into the editable core
+make nix-sim-build              # Solidity and external venue artifacts
+make nix-core-build-wasm        # Node kernels, used by JS tests
+make nix-sandbox-build          # browser kernels, artifacts and page bundle
+#+end_src
+
+Python's three local distributions install together so an unpublished development version is
+resolved from this checkout. The optional compiled kernel has its own build step above; the
+base packages can also use their pure-Python implementation. A fresh dependency installation
+requires network access. Existing locked Nix tools and installed dependencies can be reused.
+
+For ordinary edits, rerun the affected build, not the entire first-checkout sequence. Contracts
+build into =out/=; kernels into =core/python/buck_core/= and =core/js/kernel/=; browser output
+into =core/js/sandbox/dist/=. These generated products are not committed.
+
+* Tests
+
+#+begin_src sh
+make nix-test                              # Foundry contract tests
+make nix-venv-test-python                  # Python reference and simulator tests
+make nix-venv-core-test-py                 # Python platform tests
+make nix-core-test-js                     # JS platform and available browser tests
+make nix-core-test-rust                   # Rust kernels and shared-vector checks
+make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
+make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
+make nix-core-test-js JS_TEST_ARGS=test/household-policy.test.js
+#+end_src
+
+=economy-test= builds its contracts and both native/Node kernels before exercising the agents.
+=PYTEST_FILES= selects files; =PYTEST_ARGS= supplies pytest options (default =-q=).
+=JS_TEST_ARGS= is relative to =core/js/=. Browser tests need built pages and the Chromium
+provided by Nix; check skipped-test reasons. The savings browser test additionally needs its
+Python server: see [[file:README-sandboxes.org][the sandbox guide]]. Missing =anvil= is an environment failure, not a
+passing integration test; use the =nix-= wrapper.
+
+Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
+and regeneration, executable papers, release builds and deployment procedures remain in
+[[file:doc/DEVELOP.org][doc/DEVELOP.org]] and [[file:alberta-buck-deployment.org][the deployment book]]. Simulations do not replace contract tests.
+
+* Useful checks
+
+#+begin_src sh
+make help
+make nix-print-PYTHON_V
+make print-VENV
+make nix-venv-economy-plan CELLS=centre
+#+end_src
+
+These inspect the environment and plan without running an economy. For a changed model, use
+=economy-smoke= before committing, then freeze the commit through =economy-run=. Do not edit
+a running campaign's snapshot. The simulation guide explains why a completed process, a
+completed vector and an equilibrium acceptance result are three separate checks.

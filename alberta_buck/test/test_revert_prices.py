@@ -53,7 +53,7 @@ def test_a_reverting_twin_keeps_the_start_and_the_volatility_and_drops_the_trend
 
 def test_the_scenario_refuses_an_unknown_price_mode():
     from alberta_buck.sim import experiment as expmod
-    exp = expmod.load("alberta_buck/sim/experiments/demo-savings.toml",
+    exp = expmod.load("alberta_buck/sim/experiments/economy.toml",
                       sets=["scenario.prices=sideways"])
     with pytest.raises(ValueError, match="history.*revert"):
         expmod.build(exp)
@@ -61,7 +61,7 @@ def test_the_scenario_refuses_an_unknown_price_mode():
 
 def test_the_savings_world_is_five_commodities_on_either_prices():
     from alberta_buck.sim import experiment as expmod
-    path = "alberta_buck/sim/experiments/demo-savings.toml"
+    path = "alberta_buck/sim/experiments/economy.toml"
     history = expmod.build(expmod.load(path))
     assert [(t[0], t[3]) for t in history.tokens] == [("LABR", 2553), ("CNST", 2340), ("FOOD", 2128),
                                                       ("NRGC", 2128), ("PAXG", 851)]

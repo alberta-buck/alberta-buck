@@ -72,7 +72,7 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     const households = await page.evaluate(() => globalThis.savings.rows.at(-1).households);
     assert.ok(households.active >= 10 && households.scheduled >= households.active);
     assert.equal(await page.getByLabel("Surplus cash", { exact: true }).inputValue(), "adaptive");
-    assert.equal(await page.getByLabel("New households / year", { exact: true }).inputValue(), "6");
+    assert.equal(await page.getByLabel("New debtors / year", { exact: true }).inputValue(), "6");
     // The basket's upkeep is the older director and its steps, or the basket
     // machine (the server's --basket, or the page's world settings): the same
     // charts either way, captioned and fed for the one that is running.
@@ -177,14 +177,14 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     assert.match(await page.textContent("#panel-savings"), /No savings yet/, "the old world's receipts are gone");
     await page.getByText("World settings", { exact: true }).click();
     await page.getByLabel("Surplus cash", { exact: true }).selectOption("retire");
-    await page.getByLabel("New households / year", { exact: true }).selectOption("3");
-    await page.getByLabel("Opening households", { exact: true }).selectOption("24");
+    await page.getByLabel("New debtors / year", { exact: true }).selectOption("3");
+    await page.getByLabel("Opening debtors", { exact: true }).selectOption("24");
     page.once("dialog", (dlg) => dlg.accept());
     await page.getByRole("button", { name: "New world", exact: true }).click();
     await page.waitForFunction(() => globalThis.savings?.info?.households?.surplus_policy === "retire"
       && globalThis.savings.rows.at(-1)?.households?.active >= 24, null, { timeout: WORLD_MS });
     const settings = await page.evaluate(() => globalThis.savings.info.households);
-    assert.equal(settings.initial, 24);
-    assert.equal(settings.arrival_rate, 3);
+    assert.equal(settings.initial_debtors, 24);
+    assert.equal(settings.debtor_rate, 3);
     assert.deepEqual(errors, []);
   });

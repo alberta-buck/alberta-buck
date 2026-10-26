@@ -226,7 +226,7 @@ storage (some private windows), the world lasts until the tab closes, and the pa
 - The Savings tab: =src/ui/savings.js= and =src/ui/chart.js=, over =src/savings/= (=link.js= the
   server's frames, control and JSON-RPC channels; =wallet.js= the key, its signed batches, save and
   redeem; =model.js= the arithmetic; =abi.js= the contract surface it touches).  Its world is
-  =alberta_buck/sim/experiments/demo-savings.toml= on =alberta_buck/sim/server.py=
+  =alberta_buck/sim/experiments/economy.toml= on =alberta_buck/sim/server.py=
   (=doc/CONVERGENCE.org= 7a).  Tests: =test/savings.model.test.js= (with the ABI against the
   compiled contracts), and the tab against a real server in headless Chromium
   (=make nix-venv-sandbox-savings-test=, minutes: a world takes about a minute to build).

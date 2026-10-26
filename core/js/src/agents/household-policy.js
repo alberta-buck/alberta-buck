@@ -251,10 +251,10 @@ export function discountedBuyback(cash, drawn, ru, rb, fee, basket, discount) {
 }
 
 export function surplusAction(policy, spot, basket, fee, discount, premium) {
+  if (policy === "adaptive") return spot / (1 - fee) < basket ? "retire" : "invest";
   if (policy === "basket") return "invest";
   if (policy === "retire") return "retire";
   if (spot / (1 - fee) < basket * (1 - discount)) return "retire";
-  if (policy === "adaptive" && spot * (1 - fee) > basket * (1 + premium)) return "invest";
   return "hold";
 }
 

@@ -547,8 +547,10 @@ class Session:
                 "prices": files,
                 "start_date": start,
                 "households": {key: expmod.spec(sc, "HouseholdPopulationAgent", key, default)
-                               for key, default in (("initial", 10), ("arrival_rate", 6.),
-                                                    ("saver_share", .5), ("surplus_policy", "adaptive"))},
+                               for key, default in (("initial_debtors", 6), ("initial_savers", 6),
+                                                    ("initial_investors", 30), ("debtor_rate", 6.),
+                                                    ("saver_rate", 6.), ("investor_rate", 30.),
+                                                    ("surplus_policy", "adaptive"))},
                 "tokens": toks}
         return self._info or {}
 
@@ -631,8 +633,12 @@ PUBLIC_SETS = ("scenario.seed=", "scenario.prices=", "agents.BasketWheelAgent.ch
 # ... and the page's choice of the equity basket's upkeep, as exactly these.
 PUBLIC_CHOICES = ("scenario.basket=equity-ops", "scenario.basket=equity-machine")
 PUBLIC_CHOICES += tuple(f"agents.HouseholdPopulationAgent.{key}={value}"
-                       for key, values in (("initial", (10, 24, 40)), ("arrival_rate", (0, 3, 6, 12)),
-                                           ("saver_share", ("0", "0.5", "1")),
+                       for key, values in (("initial_debtors", (0, 6, 12, 24, 30, 60)),
+                                           ("initial_savers", (0, 6, 12, 24, 30, 60)),
+                                           ("initial_investors", (0, 6, 12, 24, 30, 60)),
+                                           ("debtor_rate", (0, 3, 6, 12, 30, 60)),
+                                           ("saver_rate", (0, 3, 6, 12, 30, 60)),
+                                           ("investor_rate", (0, 3, 6, 12, 30, 60)),
                                            ("surplus_policy", ("adaptive", "basket", "retire", "discount")))
                        for value in values)
 
@@ -647,8 +653,9 @@ class SessionRefused(Exception):
 
 class SimServer:
     def __init__(self, exp_path, basket_impl=None, pace=0.0, public=False,
-                 max_sessions=0, static_dir=None):
+                 max_sessions=0, static_dir=None, sets=()):
         self.exp_path = exp_path
+        self.sets = list(sets)
         self.public = public
         self.static_dir = Path(static_dir).resolve() if static_dir else None
         self.max_sessions = max_sessions
@@ -665,6 +672,7 @@ class SimServer:
                 sets = urllib.parse.parse_qs(query).get("set", [])
                 if self.public:
                     sets = public_sets(sets)
+                sets = self.sets + sets
                 live = sum(1 for x in self.sessions.values() if not x.done)
                 if self.max_sessions and live >= self.max_sessions:
                     raise SessionRefused(f"{live} sessions running (max {self.max_sessions})")
@@ -862,6 +870,8 @@ def main(argv=None) -> int:
     ap.add_argument("--pace", type=float, default=0.0,
                     help="initial days/second cap per session (0 = flat out)")
     ap.add_argument("--basket", default=None)
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="base experiment overrides for all sessions; page choices apply afterwards")
     ap.add_argument("--public", action="store_true",
                     help="serving behind the tunnel: RPC allowlist (no unsigned "
                          "eth_sendTransaction), session overrides limited to the page's toggles")
@@ -872,7 +882,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     srv = SimServer(a.experiment, basket_impl=a.basket, pace=a.pace,
                     public=a.public, max_sessions=a.max_sessions,
-                    static_dir=a.static)
+                    static_dir=a.static, sets=a.set)
     asyncio.run(srv.serve(a.host, a.port))
     return 0
 

@@ -812,15 +812,3 @@ export class PidKeeper {
                              { tag: `pid:compute:d${day}` });
   }
 }
-
-/** The fiat rail: a fixed USDC income minted to `account`'s holder
- *  every `everyDays` (agent order puts income before its spender). */
-export class MonthlyIncome {
-  constructor({ account, amount, everyDays = 30 }) {
-    Object.assign(this, { account, amount, everyDays });
-  }
-  async act(world, day, tick) {
-    if (tick !== 0 || day % this.everyDays !== 0) return;
-    await world.fiatIn(this.account, this.amount, { tag: `income:d${day}` });
-  }
-}

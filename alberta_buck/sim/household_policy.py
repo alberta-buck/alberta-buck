@@ -255,6 +255,8 @@ def investor_action(spot, basket_usd, fee, premium):
 
 
 def surplus_action(policy, spot, basket_usd, fee, discount, premium):
+    if policy == "adaptive":
+        return "retire" if spot / (1 - fee) < basket_usd else "invest"
     if policy == "basket":
         return "invest"
     if policy == "retire":
@@ -262,8 +264,6 @@ def surplus_action(policy, spot, basket_usd, fee, discount, premium):
     cheap                       = spot / (1 - fee) < basket_usd * (1 - discount)
     if cheap:
         return "retire"
-    if policy == "adaptive" and spot * (1 - fee) > basket_usd * (1 + premium):
-        return "invest"
     return "hold"
 
 

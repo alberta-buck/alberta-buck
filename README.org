@@ -79,7 +79,13 @@ The kernels and contracts are published at 0.3.0:
 | crates.io | =alberta-buck-math=, =-identity=, =-registry=, =-wallet=     |
 
 Installing and using them: [[file:doc/INSTALL.org][doc/INSTALL.org]].
-Building and testing everything here: [[file:doc/DEVELOP.org][doc/DEVELOP.org]].
+Start with =make help= for the supported build, test and simulation commands.
+
+- [[file:README-build.org][Build and test]]: Nix, the checkout's venv, dependencies and the test suites.
+- [[file:README-simulations.org][Simulations and results]]: the household economy, comparisons, diagnostics, JSON and PDFs.
+- [[file:README-sandboxes.org][Sandboxes]]: browser-only and Python-backed worlds, their tests and saved results.
+
+Specialized contract, circuit and document workflows: [[file:doc/DEVELOP.org][doc/DEVELOP.org]].
 
 * Read
 

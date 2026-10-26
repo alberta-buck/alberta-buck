@@ -663,7 +663,8 @@ class Snapshotter:
                     held[id(ag)] = ag.octl_state(d)
                 st = held[id(ag)]
                 if st:
-                    octl.append(st)
+                    # Error text is in memory: sample every day even when chain marks are cached.
+                    octl.append(st | {"error": ag.last_error} if "member" in st else st)
         # Discount-BUCK time arbs (holder/basketeer A/B): per-agent
         # inventory so PnL and parked positions chart per frame.
         arbs2 = []

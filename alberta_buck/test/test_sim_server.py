@@ -143,10 +143,24 @@ def test_public_household_choices_are_bounded():
     from alberta_buck.sim.server import public_sets
     prefix                      = "agents.HouseholdPopulationAgent."
     allowed                     = [prefix + x for x in ("surplus_policy=adaptive", "surplus_policy=retire",
-                                                        "initial=24", "arrival_rate=12", "saver_share=0.5")]
-    refused                     = [prefix + x for x in ("initial=10000", "arrival_rate=10000", "max_members=10000",
+                                                        "initial_debtors=24", "debtor_rate=12", "investor_rate=30")]
+    refused                     = [prefix + x for x in ("initial_debtors=10000", "debtor_rate=10000", "initial=24", "max_members=10000",
                                                         "cash_k=10000", "surplus_policy=arbitrary")]
     assert public_sets(allowed + refused) == allowed
+
+
+def test_server_defaults_precede_bounded_page_choices(monkeypatch):
+    from types import SimpleNamespace
+    from alberta_buck.sim import server
+    received                    = []
+    def make(sid, path, sets, basket, loop, pace):
+        received.extend(sets)
+        return SimpleNamespace(done=False)
+    monkeypatch.setattr(server, "Session", make)
+    srv                         = server.SimServer("economy.toml", public=True,
+                                                   sets=["scenario.agents.ShockAgent=1"])
+    srv.session("test", "set=agents.HouseholdPopulationAgent.debtor_rate=12&set=scenario.agents.ShockAgent=100")
+    assert received == ["scenario.agents.ShockAgent=1", "agents.HouseholdPopulationAgent.debtor_rate=12"]
 
 
 def test_a_batch_is_answered_under_one_hold_and_status_needs_no_chain():

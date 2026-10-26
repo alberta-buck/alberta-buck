@@ -130,6 +130,27 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
     assert.ok((await w.households.read(saver.account)).drawn < owed, "the redeemed BUCKs repay the lien");
   }
 
+  for (const policy of ["adaptive", "basket"]) {
+    const h = await make(CreditHouseholdAgent, `policy-${policy}`, { surplus_policy: policy });
+    await h.act(w, 0, 0);
+    assert.equal(h.lastError, "");
+    const owed = (await w.households.read(h.account)).drawn, spent = h.investedUsd;
+    assert.ok(owed > E6);
+    await w.fiatIn(h.account, 20_000n * E6);
+    const st = await h.state(w, 1);
+    await h.surplus(w, { ...st, basket_usd: st.ru / st.rb * 1.05 });
+    assert.equal(h.lastError, "");
+    const after = (await w.households.read(h.account)).drawn;
+    if (policy === "adaptive") {
+      assert.ok(after < owed && h.unwound > 0n, "discounted BUCKs retire the lien");
+      assert.equal(h.lastAction, "pay-down");
+    } else {
+      assert.equal(after, owed, "always-invest preserves the lien even at a discount");
+      assert.ok(h.investedUsd > spent);
+      assert.equal(h.lastAction, "save");
+    }
+  }
+
   const untouched = await make(CreditHouseholdAgent, "counterfactual", { cash_k: 0, income_frac: 0 });
   untouched.nextDecision = 1000;
   await untouched.act(w, 0, 0);
@@ -140,7 +161,7 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
   assert.ok(untouched.premiumArrears > 0n, "unpaid insurance remains payable");
   const last = untouched.ledger.at(-1);
   assert.equal(last.nw, last.hypo);
-  assert.ok(saver.investedUsd > E6);
+  assert.ok(saver.issuedInvest > E6, "the saver deposited borrowed BUCKs directly");
   await advanceTime(w, 365 * DAY);
   const aged = await w.households.mark(a);
   const raw = await session.call(w.buck, "rawBalanceOf", [w.poolAcct]);

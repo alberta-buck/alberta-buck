@@ -2336,8 +2336,131 @@ class SaverAgent(_ProxyAgent):
             ctr["saver_err"] = repr(e)[:200]
 
 
+class _HouseholdAccounts(_ProxyAgent):
+    """Shared credit execution and account marks; no refinancing or surplus decisions."""
+    SINK                        = "0x000000000000000000000000000000000000dEaD"
+    TELEMETRY_STRIDE             = 4
+
+    def _gate_factor(self, d, ff: int) -> int:
+        """The funding factor a mint sent now would face.  Buck.mint runs the
+        controller's cycle before it reads the factor, so a factor read from
+        the last cycle is as old as the last poke -- hours, in a world of a few
+        ticks a day -- and at the factor's slope a half-percent move in the BUCK
+        is an eighth of a deposit: a household that bought the reserve it read
+        was refused for the one the mint then asked.  Anyone may run the cycle;
+        this household does, then reads.  Returns `ff` unchanged for credit that
+        pays no premium (no gate, no poke) or when the poke fails."""
+        if self.premium_rate <= 0:
+            return ff
+        try:
+            d.chain.send(d.kctrl.functions.compute())
+            return int(d.kctrl.functions.fundingFactor().call())
+        except Exception:
+            return ff
+
+    def _pay_bank(self, d, amt: int) -> int:
+        held = d.chain.balance_of(d.usdc, self.proxy.address)
+        pay = min(amt, held)
+        if pay > 0:
+            self._proxy_exec(
+                d, d.usdc.address,
+                d.usdc.encode_abi("transfer(address,uint256)",
+                                  args=[self.SINK, int(pay)]))
+        return pay
+
+    def telemetry(self, d) -> dict | None:
+        st = self.octl_state(d)
+        if st is None:
+            return None
+        return {"u": st["cash"], "nw": st["nw"],
+                "mortgage": st["mortgage"], "drawn": st["drawn"],
+                "jub": st["jub"], "basket": st["basket"],
+                "deploys": st["deploys"], "throttled": st["throttled"],
+                "hypo": st["hypo"],
+                "active": 1 if st["active"] else 0}
+
+    def octl_state(self, d) -> dict | None:
+        if self.proxy is None:
+            return None
+        try:
+            cash = d.chain.balance_of(d.usdc, self.proxy.address)
+            signed = d.buck.functions.signedBalanceOf(
+                self.proxy.address).call()
+            limit = d.buck.functions.creditLimit(self.proxy.address).call()
+        except Exception:
+            return None
+        drawn = max(0, -signed)
+        held = max(0, signed)
+        savings_held            = (max(0, d.buck.functions.signedBalanceOf(self._savings_proxy.address).call())
+                                   if self._savings_proxy is not None else 0)
+        held                   += savings_held
+        # Pure chain truth at par; the liability side is the chain's OWN
+        # close-cost quote: drawn net of the Jubilee relief accrued on the
+        # lien (Buck.reliefOf -- the redemption discount that melts ~2%/yr
+        # of the drawn balance while it is carried; capped at the lien).
+        try:
+            jub = d.buck.functions.reliefOf(self.proxy.address).call()
+        except Exception:
+            jub = 0
+        jub = min(jub, drawn)
+        # The BuckBasket position is part of this debtor's wealth.  Leaving
+        # it out would repeat the `directMintPnl` mistake in reverse: money
+        # that moved from a counted bucket into an uncounted one, read as a
+        # loss.  Valued at the principal deposited, which is the same
+        # convention Snapshot._agent_value uses for a BUCK-side deposit.
+        basket = 0
+        if self._basket_receipts:
+            basket              = self._basket_in
+        elif self._basket_receipt is not None:
+            try:
+                dep = d.basket.functions.deposits(self._basket_receipt).call()
+                basket = dep[0]
+            except Exception:
+                basket = self._basket_in
+        basket_mark             = None
+        if self._basket_shares:
+            try:
+                basket_mark     = self._basket_shares * d.basket.functions.sharePrice().call() // 10 ** 18
+            except Exception:
+                pass  # an unavailable basket mark is not zero value and must not stop the simulation
+        # The insurance deposits are this debtor's capital, held by the pool
+        # and returned when the insurance is dropped: an asset at par.
+        deposit = 0
+        try:
+            for tid in self._token_ids:
+                deposit += d.buck.functions.mintsPrincipal(tid).call()
+        except Exception:
+            deposit = self.premium_paid
+        nw = cash + held + basket + deposit - self.mortgage - drawn + jub
+        return {"idx": self.idx, "theta": round(self.theta, 2),
+                "pattern": self.pattern, "nw": nw,
+                "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
+                "basket": basket, "basket_in": self._basket_in,
+                "basket_mark": basket_mark, "basket_receipts": len(self._basket_receipts),
+                "savings_held": savings_held, "surplus_policy": self.surplus_policy,
+                "joined": self.joined, "refis": self.refis, "ext_premium": self.ext_premium,
+                "switch_paid": self.switch_paid, "penalty_paid": self.penalty_paid,
+                "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
+                "jub": jub, "deploys": self.deploys,
+                "throttled": self.throttled,
+                "premium_paid": self.premium_paid,
+                "deposit": deposit,
+                "hypo_premium": self.hypo_premium,
+                "trade_loss": self.trade_loss,
+                "unwound": self.unwound,
+                "unwind_loss": self.unwind_loss,
+                "apr": self.apr, "payment": self.payment,
+                "income": self.income_annual,
+                "active": bool(getattr(self, "_growth_arrived", False))}
+
+    def _basket_usd(self, d) -> float:
+        """The live basket-parity dollar reference, distinct from the BUCK's execution price."""
+        return (d.basket.functions.basketValueInBuck().call() / 1e18
+                * buck_usd6(d.chain, d.pool_ub, d.buck) / PARITY)
+
+
 @_register
-class BuckCreditDebtorAgent(_ProxyAgent):
+class BuckCreditDebtorAgent(_HouseholdAccounts):
     """The HONEST mortgage debtor: fakes as little of the BUCK system as
     possible.  Where earlier debtor models (and FatCreditBorrowerAgent's
     escrow/tranche machinery) SIMULATED the funding reserve and Jubilee, this
@@ -2370,7 +2493,6 @@ class BuckCreditDebtorAgent(_ProxyAgent):
 
     MONTH = 30
     HARVEST_MONTHS = (8, 9)
-    SINK = "0x000000000000000000000000000000000000dEaD"
     N_CREDITS = 4
 
     _arrival_seq = 0              # class ordinal (reset in build_equilibrium)
@@ -2604,22 +2726,6 @@ class BuckCreditDebtorAgent(_ProxyAgent):
         self.hypo_cash += self.savings
         ctr["bcdCashFound"] = ctr.get("bcdCashFound", 0) + self.savings
 
-    def _gate_factor(self, d, ff: int) -> int:
-        """The funding factor a mint sent now would face.  Buck.mint runs the
-        controller's cycle before it reads the factor, so a factor read from
-        the last cycle is as old as the last poke -- hours, in a world of a few
-        ticks a day -- and at the factor's slope a half-percent move in the BUCK
-        is an eighth of a deposit: a household that bought the reserve it read
-        was refused for the one the mint then asked.  Anyone may run the cycle;
-        this household does, then reads.  Returns `ff` unchanged for credit that
-        pays no premium (no gate, no poke) or when the poke fails."""
-        if self.premium_rate <= 0:
-            return ff
-        try:
-            d.chain.send(d.kctrl.functions.compute())
-            return int(d.kctrl.functions.fundingFactor().call())
-        except Exception:
-            return ff
 
     def _buy_for_gate(self, d, short: int, spare: int) -> int:
         """Buy BUCKs toward a funding-gate shortfall of `short`.  The household
@@ -2665,19 +2771,9 @@ class BuckCreditDebtorAgent(_ProxyAgent):
             d.chain.send(d.usdc.functions.mint(self.proxy.address, amt))
         return amt
 
-    def _pay_bank(self, d, amt: int) -> int:
-        held = d.chain.balance_of(d.usdc, self.proxy.address)
-        pay = min(amt, held)
-        if pay > 0:
-            self._proxy_exec(
-                d, d.usdc.address,
-                d.usdc.encode_abi("transfer(address,uint256)",
-                                  args=[self.SINK, int(pay)]))
-        return pay
 
     # -- observability ------------------------------------------------------- #
 
-    TELEMETRY_STRIDE = 4        # 24-30 debtors, monthly dynamics: every 4th day
 
     def telemetry_static(self) -> dict:
         return {"theta": round(self.theta, 3), "apr": round(self.apr, 4),
@@ -2689,90 +2785,7 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                 "surplus_policy": self.surplus_policy,
                 "arrive_day": self.arrive_day}
 
-    def telemetry(self, d) -> dict | None:
-        st = self.octl_state(d)
-        if st is None:
-            return None
-        return {"u": st["cash"], "nw": st["nw"],
-                "mortgage": st["mortgage"], "drawn": st["drawn"],
-                "jub": st["jub"], "basket": st["basket"],
-                "deploys": st["deploys"], "throttled": st["throttled"],
-                "hypo": st["hypo"],
-                "active": 1 if st["active"] else 0}
 
-    def octl_state(self, d) -> dict | None:
-        if self.proxy is None:
-            return None
-        try:
-            cash = d.chain.balance_of(d.usdc, self.proxy.address)
-            signed = d.buck.functions.signedBalanceOf(
-                self.proxy.address).call()
-            limit = d.buck.functions.creditLimit(self.proxy.address).call()
-        except Exception:
-            return None
-        drawn = max(0, -signed)
-        held = max(0, signed)
-        savings_held            = (max(0, d.buck.functions.signedBalanceOf(self._savings_proxy.address).call())
-                                   if self._savings_proxy is not None else 0)
-        held                   += savings_held
-        # Pure chain truth at par; the liability side is the chain's OWN
-        # close-cost quote: drawn net of the Jubilee relief accrued on the
-        # lien (Buck.reliefOf -- the redemption discount that melts ~2%/yr
-        # of the drawn balance while it is carried; capped at the lien).
-        try:
-            jub = d.buck.functions.reliefOf(self.proxy.address).call()
-        except Exception:
-            jub = 0
-        jub = min(jub, drawn)
-        # The BuckBasket position is part of this debtor's wealth.  Leaving
-        # it out would repeat the `directMintPnl` mistake in reverse: money
-        # that moved from a counted bucket into an uncounted one, read as a
-        # loss.  Valued at the principal deposited, which is the same
-        # convention Snapshot._agent_value uses for a BUCK-side deposit.
-        basket = 0
-        if self._basket_receipts:
-            basket              = self._basket_in
-        elif self._basket_receipt is not None:
-            try:
-                dep = d.basket.functions.deposits(self._basket_receipt).call()
-                basket = dep[0]
-            except Exception:
-                basket = self._basket_in
-        basket_mark             = None
-        if self._basket_shares:
-            try:
-                basket_mark     = self._basket_shares * d.basket.functions.sharePrice().call() // 10 ** 18
-            except Exception:
-                pass  # an unavailable basket mark is not zero value and must not stop the simulation
-        # The insurance deposits are this debtor's capital, held by the pool
-        # and returned when the insurance is dropped: an asset at par.
-        deposit = 0
-        try:
-            for tid in self._token_ids:
-                deposit += d.buck.functions.mintsPrincipal(tid).call()
-        except Exception:
-            deposit = self.premium_paid
-        nw = cash + held + basket + deposit - self.mortgage - drawn + jub
-        return {"idx": self.idx, "theta": round(self.theta, 2),
-                "pattern": self.pattern, "nw": nw,
-                "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
-                "basket": basket, "basket_in": self._basket_in,
-                "basket_mark": basket_mark, "basket_receipts": len(self._basket_receipts),
-                "savings_held": savings_held, "surplus_policy": self.surplus_policy,
-                "joined": self.joined, "refis": self.refis, "ext_premium": self.ext_premium,
-                "switch_paid": self.switch_paid, "penalty_paid": self.penalty_paid,
-                "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
-                "jub": jub, "deploys": self.deploys,
-                "throttled": self.throttled,
-                "premium_paid": self.premium_paid,
-                "deposit": deposit,
-                "hypo_premium": self.hypo_premium,
-                "trade_loss": self.trade_loss,
-                "unwound": self.unwound,
-                "unwind_loss": self.unwind_loss,
-                "apr": self.apr, "payment": self.payment,
-                "income": self.income_annual,
-                "active": bool(getattr(self, "_growth_arrived", False))}
 
     # -- atomic refinance planning ------------------------------------------- #
 
@@ -3187,10 +3200,6 @@ class BuckCreditDebtorAgent(_ProxyAgent):
                   sold=sold // PARITY, retired=paid // PARITY, **v.why())
 
 
-    def _basket_usd(self, d) -> float:
-        """The live basket-parity dollar reference, distinct from the BUCK's execution price."""
-        return (d.basket.functions.basketValueInBuck().call() / 1e18
-                * buck_usd6(d.chain, d.pool_ub, d.buck) / PARITY)
 
     def _carry_tail(self, d, drawn, limit, jub, ctr) -> None:
         """After refinancing: buy a discounted liability, or carry it and invest recurring surplus."""

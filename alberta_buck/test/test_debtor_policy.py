@@ -109,7 +109,7 @@ def test_carry_refinances_part_of_a_mortgage_that_exceeds_available_credit(house
 
 def test_savings_retiree_keeps_range_valued_cost_settings(households):
     d, _                        = households
-    scenario                    = expmod.build(expmod.load("alberta_buck/sim/experiments/demo-savings.toml"))
+    scenario                    = expmod.build(expmod.load("alberta_buck/sim/experiments/economy.toml"))
     agent                       = ExternalDebtRetireeAgent(70)
     agent.setup(d, scenario, idmod.seeded_rng(scenario.seed))
     assert agent._refi_carry

@@ -53,12 +53,12 @@ import { tevmSession, snapshotTevm, restoreTevm } from "../src/backends.js";
 import { advanceTime, DAY } from "../src/buckworld.js";
 import { encodePath, urExecArgs } from "../src/router.js";
 import { loadArtifact, repoRoot } from "../src/nodefs.js";
-import { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome }
+import { buildEquilibriumWorld, DayClock, PidKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
 import { ParityArb } from "../src/agents/arb.js";
 import { BasketSaver } from "../src/agents/saver.js";
-import { MortgageRetiree } from "../prototypes/mortgage-retiree.js";
+import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { runDays } from "../src/world.js";
 import id from "../src/identity.js";
 
@@ -328,9 +328,11 @@ const key = (label) => keccak256(toBytes(`tevm-membench:${label}`));
 const debtorAcct = privateKeyToAccount(key("debtor"));
 const saver = new BasketSaver({ account: privateKeyToAccount(key("saver")),
   budget: 25_000n * 10n ** 6n, holdDays: 60 });
-const debtor = new MortgageRetiree({
-  house: 400_000n * 10n ** 6n, mortgageBp: 550n, premiumBp: 50n, aggrBp: 0n,
-  payment: 3_000n * 10n ** 6n, account: debtorAcct });
+// This benchmark now uses the shared household; historical prototype curves are a different workload.
+const debtor = new CreditHouseholdAgent({ account: debtorAcct, settings: {
+  home_k: 400, ltv: .5, apr: .055, premium_bp: 50, income_frac: .09, living_frac: 0,
+  cash_k: 30, theta: 3, divest_rate: 0,
+} });
 const agents = [
   new DayClock(),
   ...world.tokens.map((t, i) => new PinWhale({
@@ -340,7 +342,6 @@ const agents = [
   new ParityArb({ thresholdBp: BigInt(a["arb-bp"]) }),
   new PidKeeper(),
   saver,
-  new MonthlyIncome({ account: debtorAcct, amount: 3_000n * 10n ** 6n }),
   debtor,
 ];
 const buildMs = Math.round(performance.now() - tBuild);

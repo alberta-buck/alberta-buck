@@ -77,14 +77,22 @@ def test_mini_scenario_journal_parity(tmp_path):
 
     # ---- A: Python drives a fresh anvil --------------------------------
     j_py = tmp_path / "mini-py.jsonl"
-    with Anvil() as anvil:
+    with Anvil(timestamp=1_900_000_000) as anvil:
+        # Uniswap writes its oracle only when block time changes. Wall-clock automining made
+        # Python and JS gas differ depending on machine load, despite identical operations.
+        response                = anvil.w3.provider.make_request("anvil_setBlockTimestampInterval", [1])
+        assert "error" not in response, response
         chain = Chain(anvil.w3, anvil.w3.eth.accounts[0], journal=j_py)
         run_mini(chain, sc)
         assert not chain.mismatches, "python run: declared expectations must match"
 
     # ---- B: node drives a fresh anvil -----------------------------------
     j_js_anvil = tmp_path / "mini-js-anvil.jsonl"
-    with Anvil() as anvil:
+    with Anvil(timestamp=1_900_000_000) as anvil:
+        # Uniswap writes its oracle only when block time changes. Wall-clock automining made
+        # Python and JS gas differ depending on machine load, despite identical operations.
+        response                = anvil.w3.provider.make_request("anvil_setBlockTimestampInterval", [1])
+        assert "error" not in response, response
         out = subprocess.run(
             ["node", "bin/mini-sim.mjs", "--backend", "anvil",
              "--rpc", f"http://127.0.0.1:{anvil.port}",

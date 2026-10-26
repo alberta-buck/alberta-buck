@@ -55,8 +55,9 @@ gain = 200.0                # pace x (1 + 200 x gap): twice as fast at a 0.5% ga
 gain_cap = 8.0
 k_ref = 0.75                # issuers also arrive (1 - 0.75) / (1 - K) times as fast: 5x at K 0.95
 signal_halflife_days = 30.0
-# Households repay BUCKs only when they sell the asset (10% a year); spare income goes into the basket.
-surplus_policy = "basket"
+# Adaptive: save spare income through BUCK deposits; buy down liabilities at a discount.
+# Asset sales (10% a year) also settle the mortgage and remaining BUCK liability.
+surplus_policy = "adaptive"
 divest_rate = 0.1
 # Money: each household keeps a month of its spending in BUCKs, apart from its lien; the share of its
 # spending paid in BUCKs ramps from 10% to all of it over its first year (the grid's demand axis).

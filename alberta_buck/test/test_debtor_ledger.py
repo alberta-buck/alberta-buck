@@ -51,7 +51,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "test" / "vectors" / "eq-eq-isolation.json"
-OUT = REPO / "images" / "equilibrium-isolation.png"
+OUT = REPO / "build" / "sim" / "equilibrium-isolation.png"
 
 MONTH = 30
 M6 = 10 ** 6

@@ -1,6 +1,10 @@
 #+TITLE: Developing Alberta Buck
 #+OPTIONS: toc:nil num:nil ^:nil
 
+The current entry points are [[file:../README-build.org][README-build.org]], [[file:../README-simulations.org][README-simulations.org]] and
+[[file:../README-sandboxes.org][README-sandboxes.org]]. Start with =make help=. This document keeps the specialized contract,
+kernel, paper and SNARK workflows.
+
 Building and testing everything in this repository.  Set up first
 ([[file:INSTALL.org][INSTALL.org]]); every command below is a Make target, run inside the Nix flake
 as =make nix-<target>= (or bare, inside =nix develop=).  The Makefile is the recipe book: each
@@ -74,8 +78,9 @@ points (see the Makefile's simulation sections for the rest):
 
 #+BEGIN_SRC sh
 make nix-venv-sim             # the routing simulation, with its plot
-make nix-venv-sim-equilibrium # the BUCK_K equilibrium loop
-make nix-venv-sim-debtors     # optimal-control mortgage debtors
+make nix-venv-economy-plan   # inspect the household-economy cells
+make nix-venv-economy-run CAMPAIGN=baseline CELLS=centre
+make nix-venv-economy-report CAMPAIGN=baseline
 make nix-venv-sim-server      # a live server of simulated worlds (WebSocket and JSON-RPC)
 #+END_SRC
 

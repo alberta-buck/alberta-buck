@@ -1,0 +1,77 @@
+#+TITLE: Browser and server-backed sandboxes
+#+OPTIONS: ^:nil toc:2
+
+Build prerequisites are in [[file:README-build.org][README-build.org]]. These interfaces share contracts and household
+policy code; they serve different purposes from the five-year acceptance campaign.
+
+| Interface | Execution | Start | What to inspect |
+|-----------+-----------+-------+-----------------|
+| Wallet sandbox | JavaScript/Tevm in the browser | =make nix-sandbox SANDBOX_PORT=8980= | Identities, credit quotes, payments, market transactions and observer view |
+| Savings sandbox | Python/pyrevm economy, browser controls and wallet | =make nix-venv-sim-savings SIM_SAVINGS_PORT=8981= | Live population, K/BVIB, basket holdings, household/counterfactual charts |
+| Equilibrium demo | JavaScript household loop in the browser | =make nix-core-demo-eqworld-serve EQWORLD_PORT=8983= | Small interactive household/market loop |
+| Vector viewer | Saved Python JSON, no live EVM | =make nix-venv-viewer VIEWER_PORT=8982= | One run's accounts, trades and time series |
+| Campaign index/PDFs | Saved results, no EVM | =make nix-venv-economy-report CAMPAIGN=NAME= | Cross-run acceptance and portable figures |
+
+* Browser-only wallet sandbox
+
+#+begin_src sh
+make nix-sandbox SANDBOX_PORT=8980
+#+end_src
+
+Open =http://127.0.0.1:8980/=. This builds =core/js/sandbox/dist/= and serves it. The EVM runs
+inside the tab. It is not a five-year economy; a page with no simulation server does not show
+the Savings tab. Its browser test exercises identity, payment, credit and reload behavior.
+
+* Savings sandbox
+
+#+begin_src sh
+make nix-venv-sim-savings SIM_SAVINGS_PORT=8981
+#+end_src
+
+Open =http://127.0.0.1:8981/=. One server serves both the page and its Python worlds, with a
+separate world for each session. Controls create worlds with explicit household policies and
+population settings. Existing sessions retain their chosen settings. The default model is
+the same household economy used by the five-year runner; the dormant shock actor enables
+interactive stress buttons without adding a standing stabilizer. Opening counts and arrival rates
+are controlled separately for mortgage debtors, insured savers and cash investors. The Make
+target adds =--set scenario.agents.ShockAgent=1= to the common =economy.toml= preset.
+
+For a previously built deployment, =sim-savings-serve= starts only the server. Building and
+starting are separate operations; updating source files does not reload a running process.
+The server is not started, stopped or redeployed by a test or report target unless that target
+explicitly says it owns a temporary server. Choose unused ports for local work.
+
+#+begin_src sh
+make nix-venv-sandbox-savings-test SAVINGS_TEST_PORT=8987
+#+end_src
+
+This owns its temporary server and stops that process afterwards. Nix supplies the Chromium
+matching =playwright-core=. =make nix-core-test-js= also runs available browser tests; it
+reports a skip when an external savings page is not supplied. See the test output rather
+than treating a skipped browser test as coverage.
+
+* JavaScript equilibrium demo
+
+#+begin_src sh
+make nix-core-demo-eqworld-serve EQWORLD_PORT=8983
+#+end_src
+
+Open =http://127.0.0.1:8983/eqworld.html=. Its credit household and saver use the same policy
+kernel as Python, with real contract execution through Tevm. This small world is useful for
+interaction and model conformance; its charts do not substitute for the population grid.
+
+The older identity/buckworld pages are focused protocol demonstrations. Their broader tour is
+in [[file:doc/SANDBOX.org][doc/SANDBOX.org]]. Deployment and hosting remain in the deployment book; local build/test
+commands do not publish a site or update a hosted service.
+
+The same small household loop also has a command-line demonstration:
+
+#+begin_src sh
+make nix-core-eqsim JS_EQ_ARGS='--days 14 --policy adaptive'
+#+end_src
+
+It writes =build/sim/js-eqsim.svg= (K, BVIB, price and household net worth) and
+=build/sim/js-eqsim.jsonl= (the operation journal). This is useful for contract/agent diagnosis;
+the Python campaign supplies five-year acceptance. The CLI's =--payment= means monthly net
+household income, with the mortgage payment calculated from its terms. =--policy= replaces
+the old prototype's =--aggr= knob. Its default mortgage is half the insured asset value.

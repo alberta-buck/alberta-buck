@@ -98,13 +98,15 @@ export function mountSavings(ctx) {
     h("option", { value: upkeepOf(true) }, "The basket machine"));
   const upkeepField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Upkeep"), upkeepSel);
   const householdChoices = {
-    surplus_policy: ["Surplus cash", [["adaptive", "Invest at premium / retire at discount"],
+    surplus_policy: ["Surplus cash", [["adaptive", "Adaptive saving / discounted paydown"],
       ["basket", "Always invest"], ["retire", "Always retire liability"], ["discount", "Retire only at discount"]]],
-    initial: ["Opening households", [[10, "10"], [24, "24"], [40, "40"]]],
-    arrival_rate: ["New households / year", [[0, "0"], [3, "3"], [6, "6"], [12, "12"]]],
-    saver_share: ["Insured savers", [[0, "All mortgage holders"], [.5, "Half the population"], [1, "All savers"]]],
+    ...Object.fromEntries(["debtors", "savers", "investors"].map((role) =>
+      [`initial_${role}`, [`Opening ${role}`, [0, 6, 12, 24, 30, 60].map((n) => [n, String(n)])]])),
+    ...Object.fromEntries(["debtor", "saver", "investor"].map((role) =>
+      [`${role}_rate`, [`New ${role}s / year`, [0, 3, 6, 12, 30, 60].map((n) => [n, String(n)])]])),
   };
-  const householdDefaults = { surplus_policy: "adaptive", initial: 10, arrival_rate: 6, saver_share: .5 };
+  const householdDefaults = { surplus_policy: "adaptive", initial_debtors: 6, initial_savers: 6,
+    initial_investors: 30, debtor_rate: 6, saver_rate: 6, investor_rate: 30 };
   const householdSelects = Object.fromEntries(Object.entries(householdChoices).map(([key, [label, choices]]) =>
     [key, h("select", { "aria-label": label }, ...choices.map(([value, text]) => h("option", { value: String(value) }, text)))]));
   const householdFields = Object.entries(householdChoices).map(([key, [label]]) =>
@@ -545,7 +547,7 @@ export function mountSavings(ctx) {
       stat("Basket", `${last.bv.toFixed(4)} BUCK`, "What the basket costs in BUCK (K steers it to 1)"),
       stat("K", last.k.toFixed(4)),
       last.households ? stat("Households", `${last.households.active} / ${last.households.scheduled}`,
-        `${last.households.savers} arrived insured savers; the rest hold mortgages. Total includes future arrivals.`) : null,
+        `${last.households.savers} insured savers, ${last.households.investors} investors; the rest hold mortgages.`) : null,
       last.households ? stat("Household decisions", last.households.errors ? `${last.households.errors} waiting after errors` : "ready",
         "Members with an execution error at their latest decision; pending assets remain in their accounts.") : null,
       stat("Savings index", last.D === null ? "–" : last.D.toFixed(4), "Paid per BUCK saved, in BUCK value"),

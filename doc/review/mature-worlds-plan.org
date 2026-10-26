@@ -6,6 +6,13 @@ This is a plan for four fixes to the simulator's cast, written so that someone w
 can carry them out. Perry agreed to all four on 2026-10-13. None of them touches a contract. Line
 numbers are as of commit =87d5a6f= on =doc/basket-machine=; find things by name if they have moved.
 
+* Current continuation
+
+The implementation now continues on =feature/household-economy= under
+[[file:household-economy-plan.org][the household-economy plan]]. This document's commands and branch instructions describe the
+older repair campaign. Use [[file:../../README-simulations.org][README-simulations.org]] and =make help= for current runs, builds
+and PDFs. The standalone =savings-old-new.py= comparison is retained in git history.
+
 * Why
 
 In the five matrix worlds with mature debtors K is at its limit within weeks, and on the pro-rata

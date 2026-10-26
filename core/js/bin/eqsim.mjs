@@ -7,8 +7,7 @@
 // Agents: DayClock, PinWhale (pins TOKEN/USDC to the seeded reference
 // walk), ParityArb (ties TOKEN/BUCK to the implied triangle price),
 // PidKeeper (permissionless compute()), BasketSaver (best-route
-// acquisition -> basket deposit -> term -> redeem), MonthlyIncome +
-// MortgageRetiree (the two-sided debtor, from the prototypes).
+// acquisition -> basket deposit -> term -> redeem), CreditHouseholdAgent.
 
 import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -18,12 +17,12 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { anvilSession, tevmSession } from "../src/backends.js";
 import { loadArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
-import { buildEquilibriumWorld, DayClock, PidKeeper, MonthlyIncome, WheelKeeper }
+import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
 import { ParityArb } from "../src/agents/arb.js";
 import { BasketSaver } from "../src/agents/saver.js";
-import { MortgageRetiree } from "../prototypes/mortgage-retiree.js";
+import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { runDays } from "../src/world.js";
 import { lineChart, svgDoc } from "../src/chart.js";
 import id from "../src/identity.js";
@@ -37,9 +36,9 @@ const { values: a } = parseArgs({ options: {
   hold:    { type: "string", default: "60" },     // saver term, days
   house:   { type: "string", default: "400000" }, // debtor face, $
   rate:    { type: "string", default: "550" },    // mortgage bp/yr
-  aggr:    { type: "string", default: "" },       // tolerated discount, bp (default: a year's interest)
+  policy:  { type: "string", default: "adaptive" }, // adaptive | basket | retire | discount
   target:  { type: "string", default: "100000000" },  // pool depth, $ a pool: one debtor is small in it
-  payment: { type: "string", default: "3000" },   // $/month
+  payment: { type: "string", default: "3000" },   // net household income, $/month
   budget:  { type: "string", default: "25000" },  // saver stake, $
   plot:    { type: "string", default: "" },
   journal: { type: "string", default: "" },
@@ -62,16 +61,16 @@ const world = await buildEquilibriumWorld(session, loadArtifact, {
   feedSeed: Number(a.seed), stepBp: Number(a.step) });
 
 const HOUSE = BigInt(a.house) * 10n ** 6n;
-const PAYMENT = BigInt(a.payment) * 10n ** 6n;
 const debtorAcct = privateKeyToAccount(generatePrivateKey());
 const saver = new BasketSaver({
   account: privateKeyToAccount(generatePrivateKey()),
   budget: BigInt(a.budget) * 10n ** 6n,
   holdDays: Number(a.hold) });
-const debtor = new MortgageRetiree({
-  house: HOUSE, mortgageBp: BigInt(a.rate), premiumBp: 50n,
-  aggrBp: a.aggr === "" ? undefined : BigInt(a.aggr),
-  payment: PAYMENT, account: debtorAcct });
+const debtor = new CreditHouseholdAgent({ account: debtorAcct, seed: Number(a.seed), settings: {
+  home_k: Number(a.house) / 1000, ltv: .5, apr: Number(a.rate) / 10000, premium_bp: 50,
+  income_frac: Number(a.payment) * 12 / Number(a.house), living_frac: 0,
+  cash_k: 30, theta: 3, surplus_policy: a.policy, divest_rate: 0,
+} });
 
 const arb = new ParityArb();
 const agents = [
@@ -84,7 +83,6 @@ const agents = [
   new WheelKeeper({ arb }),        // turns the basket machine's wheel; the arb follows it
   new PidKeeper(),
   saver,
-  new MonthlyIncome({ account: debtorAcct, amount: PAYMENT }),
   debtor,
 ];
 
@@ -105,10 +103,10 @@ console.log(JSON.stringify({
              ? Number(saver.profitUsd) * 365 * 100 / Number(saver.dollarDays)
              : null },
   debtor: debtor.ledger.length ? {
-    months: debtor.ledger.length,
-    mortgageOwing: f6(debtor.mortgageOwing),
-    jub: f6(debtor.jub),
-    hypoOwing: f6(debtor.hypoOwing),
+    observations: debtor.ledger.length,
+    mortgageOwing: f6(debtor.mortgage),
+    jub: f6(debtor.ledger.at(-1).jub),
+    hypoOwing: f6(debtor.hypoMortgage),
     drawn: f6(debtor.ledger[debtor.ledger.length - 1].drawn),
     banked: f6(debtor.ledger[debtor.ledger.length - 1].banked),
   } : null,
@@ -128,9 +126,9 @@ if (a.plot) {
     lineChart({ title: "debtor net worth vs the untouched-mortgage counterfactual ($)",
       series: [
         { label: "BuckCredit route", points: debtor.ledger.map((r) =>
-            [r.day, f6(HOUSE + r.banked - r.mortgageOwing - r.drawn + r.jub)]) },
+            [r.day, f6(HOUSE + r.nw)]) },
         { label: "counterfactual", points: debtor.ledger.map((r) =>
-            [r.day, f6(HOUSE + r.hypoBanked - r.hypoOwing)]) },
+            [r.day, f6(HOUSE + r.hypo)]) },
       ] }),
   ];
   writeFileSync(a.plot, svgDoc(charts));

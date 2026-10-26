@@ -3,7 +3,8 @@
 #+OPTIONS: ^:nil toc:2 num:t
 
 This is what we learned by running [[file:BASKET-MACHINE.org][the basket machine]] on the real contracts. The work still to
-do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. Every number can be rebuilt with the commands at the end.
+do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. The commands at the end belong to the recorded model commits. For current campaigns see
+[[file:../README-simulations.org][README-simulations.org]]; the standalone savings comparison runner has been retired.
 
 * The short version
 
@@ -71,7 +72,7 @@ No gas is charged in either. The [[*Gas][gas section]] says what it would cost.
 * Five years in the savings world
 
 The older upkeep is the director with its Deploy, Fund and Trim steps. The machine is the one
-described in the design ([[file:review/savings-old-new.py][savings-old-new.py]]), with the lean against parity on both sides.
+described in the design (=doc/review/savings-old-new.py= at the recorded commit), with the lean against parity on both sides.
 These are the frozen =1a5afec= runs in =build/sim/mended/savings-s1/= and =savings-s2/=.
 
 Share prices, including the deduction for carried demurrage, average the last 90 days. Growth

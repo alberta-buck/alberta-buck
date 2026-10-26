@@ -44,7 +44,8 @@ def test_funded_bootstrap_restores_both_routes_before_arbitrage(opening_runs):
         # must not spend days arbitraging a synthetic 1 -> initial-phase jump.
         if result["stage"] != "all":
             assert first["cumulative"]["arb_cycles"] == 0
-            assert first["token_buck"] == pytest.approx(first["target_usd"], rel=1e-9)
+            # Opening parity is checked before the live basket response can move its pools.
+            assert first["before_policy"]["token_buck"] == pytest.approx(first["target_usd"], rel=1e-9)
         assert boot["reference_at_means"] == pytest.approx(1.)
     assert opening_runs["shock"]["bootstrap"]["opening_target_usd"][0] == 112
 

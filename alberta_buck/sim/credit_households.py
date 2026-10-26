@@ -2,7 +2,7 @@
 
 from alberta_buck.sim import carry, household_policy as policy
 from alberta_buck.sim.agents import Agent, _register
-from alberta_buck.sim.equilibrium_agents import BuckCreditDebtorAgent, PARITY, _impact_cap, mint_amount, mint_capacity
+from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
 
@@ -11,8 +11,8 @@ SLIPPAGE                        = ("Slippage", "0x7dd37f70")
 
 
 @_register
-class CreditHouseholdAgent(BuckCreditDebtorAgent):
-    """One insured household. Legacy debtor methods supply only contract plumbing, never its decisions."""
+class CreditHouseholdAgent(_HouseholdAccounts):
+    """One household with its own decisions and shared contract/accounting operations."""
     OCTL_STRIDE                 = 5                     # its books are read every fifth day (and the last)
 
     def setup(self, d, scenario, rng):
@@ -245,7 +245,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             before              = d.buck.functions.signedBalanceOf(self.proxy.address).call()
             self._proxy_exec(d, d.buck.address, d.buck.encode_abi("mint(uint256)", args=[arg]))
             self.premium_paid  += max(0, before - d.buck.functions.signedBalanceOf(self.proxy.address).call())
-        if kind == "invest" and self.p["surplus_policy"] == "basket":
+        if kind == "invest" and self.p["surplus_policy"] in ("adaptive", "basket"):
             # Borrowed to save: the BUCKs go straight into the basket, never through dollars.
             if self._savings_proxy is None:
                 self._savings_proxy = self._new_proxy(d)
@@ -435,7 +435,7 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
         p                       = self.p
         cash                    = d.chain.balance_of(d.usdc, self.proxy.address)
         spare                   = max(0, cash - self.cash_buffer)
-        if p["surplus_policy"] == "basket":
+        if p["surplus_policy"] in ("adaptive", "basket"):
             self._save_or_pay_down(d, state, spare, ctr)
             return
         action                  = policy.surplus_action(p["surplus_policy"], state["ru"] / state["rb"],
@@ -584,12 +584,13 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
     # -- saving in BUCK deposits, and paying down at a discount ----------------------------------------- #
 
     def _save_or_pay_down(self, d, state, spare, ctr):
-        """The =basket= policy. While the BUCK trades at a discount, pay down the lien with an urgency
+        """Adaptive saving, or the always-invest comparison. At a discount, adaptive pays down with an urgency
         that compounds with the discount (household_policy.paydown): basket shares first, then spare
         dollars. Otherwise save: buy BUCKs with a share of the spare dollars that halves with the
         premium (household_policy.saving), and deposit them in the basket."""
-        share                   = policy.paydown(policy.discount(state["ru"] / state["rb"], state["basket_usd"],
-                                                                 state["fee"]), self.p)
+        adaptive                = self.p["surplus_policy"] == "adaptive"
+        share                   = (policy.paydown(policy.discount(state["ru"] / state["rb"], state["basket_usd"],
+                                                                 state["fee"]), self.p) if adaptive else 0.)
         drawn                   = max(0, -d.buck.functions.signedBalanceOf(self.proxy.address).call())
         if share > 0 and drawn > PARITY:
             target              = int(drawn * share)
@@ -614,8 +615,8 @@ class CreditHouseholdAgent(BuckCreditDebtorAgent):
             ctr["hhPaidDown"]   = ctr.get("hhPaidDown", 0) + repaid
             self.last_action    = "pay-down"
             return
-        budget                  = int(spare * policy.saving(policy.premium(state["ru"] / state["rb"], state["basket_usd"],
-                                                                         state["fee"]), self.p))
+        budget                  = (int(spare * policy.saving(policy.premium(state["ru"] / state["rb"],
+                                                    state["basket_usd"], state["fee"]), self.p)) if adaptive else spare)
         if budget > PARITY:
             if self._savings_proxy is None:
                 self._savings_proxy = self._new_proxy(d)

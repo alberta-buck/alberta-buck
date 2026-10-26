@@ -5,6 +5,33 @@
 #
 
 SHELL		= /bin/bash
+.DEFAULT_GOAL	= help
+
+# Start here. Targets run directly in a prepared shell; nix- adds the pinned
+# toolchain, venv- adds this checkout's Python packages, and nix-venv- composes both.
+# README-build.org, README-simulations.org and README-sandboxes.org explain each path.
+.PHONY: help
+help:
+	@printf '%s\n' \
+	  'Build and test (README-build.org):' \
+	  '  make nix-install nix-js-deps        # pinned Solidity and JavaScript dependencies' \
+	  '  make nix-venv-setup                # create/repair .venv; install editable Python packages' \
+	  '  make nix-venv-core-build-py        # compiled Python kernels' \
+	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
+	  '  make nix-test                      # Solidity tests' \
+	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
+	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \
+	  'Household economy (README-simulations.org):' \
+	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
+	  '  make nix-venv-economy-run CAMPAIGN=my-run CELLS=centre JOBS=2' \
+	  '  make nix-venv-economy-report CAMPAIGN=my-run  # saved JSON -> PDFs and index' \
+	  '  make nix-venv-economy-test          # model, shared policy and runner regressions' \
+	  '  make nix-venv-control-lab-plan      # diagnostic stages; separate from economic acceptance' \
+	  'Interactive views (README-sandboxes.org):' \
+	  '  make nix-sandbox SANDBOX_PORT=8980  # browser EVM, no Python economy' \
+	  '  make nix-venv-sim-savings SIM_SAVINGS_PORT=8981  # Python economy plus browser wallet' \
+	  '  make nix-core-demo-eqworld          # JS household loop and charts' \
+	  'Use make help without Nix or a venv; it starts no services or simulations.'
 
 # RPC endpoints for forking.  Override via environment or .env file.
 # Free tier: https://dashboard.alchemy.com/ or https://infura.io/
@@ -43,14 +70,12 @@ endif
 # 
 # Python alberta_buck venv; requires Nix environment
 #
-PYTHON			:= python3
+PYTHON			?= python3
 PYTHON_V		= $(shell $(PYTHON) -c "import sys; print('-'.join((next(iter(filter(None,sys.executable.split('/')))),sys.platform,sys.implementation.cache_tag)))" 2>/dev/null )
 
 BUCK_PYTHON		= $(CURDIR)
 BUCK_VERSION		= $(shell sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$(BUCK_PYTHON)/pyproject.toml" | head -1)
-VENV			= $(BUCK_PYTHON).venv-$(BUCK_VERSION)-$(PYTHON_V)
-VENV_STAMP		= $(VENV)/.installed
-VENV_OPTS		=
+VENV			?= $(BUCK_PYTHON)/.venv
 
 
 .PHONY: all build test clean fmt snapshot build-uniswap-artifacts
@@ -185,8 +210,10 @@ deploy-sepolia:
 
 # ── Python Tests ────────────────────────────────────────────────────
 
+PYTEST_ARGS		?= -q
+PYTEST_FILES		?= alberta_buck/test/
 test-python:
-	python -m pytest alberta_buck/test/ -v -s
+	python -m pytest $(PYTEST_FILES) $(PYTEST_ARGS)
 
 
 # ── Documentation rendering ─────────────────────────────────────────
@@ -664,7 +691,7 @@ SIM_BASKET	?= equity-machine  # equity-machine (default) | equity-ops | equity |
 #
 # Every Anvil-style sim below composes from a common matrix:
 #
-#   SIM_BACKEND  = anvil (subprocess, RPC-faithful; default)
+#   SIM_BACKEND  = anvil (subprocess, RPC-faithful)
 #                | pyrevm (in-process revm: identical outputs, ~6.5x wall
 #                  on short runs, far more on long ones -- see
 #                  alberta_buck/sim/pyrevm_backend.py)
@@ -686,6 +713,42 @@ SIM_DIRECTOR	?= pairs         # pairs: the one signal engine left
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
+
+# ── Supported household economy ─────────────────────────────────────
+# One baseline, parameterized policy comparisons and explicit stress arms. Long runs
+# use committed, frozen sources; run economy-smoke to test working-tree edits.
+# See README-simulations.org for the axes, acceptance rules and output schema.
+#   make nix-venv-economy-plan CELLS=grid    # also centre, policies, stress, probe, paydown
+#   make nix-venv-economy-run CAMPAIGN=review CELLS=centre JOBS=2
+#   make nix-venv-economy-report CAMPAIGN=review
+#   make nix-venv-economy-run CAMPAIGN=policies CELLS=policies JOBS=4
+# Reports read saved JSON: no EVM rerun. Every completed five-year run writes
+# a PDF; the campaign index distinguishes short smoke runs from acceptance.
+CAMPAIGN	?= household-economy
+CELLS		?= centre
+JOBS		?= 2
+ECONOMY_DAYS	?=
+ECONOMY_SEED	?=
+ECONOMY_ARGS	= --campaign "$(CAMPAIGN)" --cells "$(CELLS)" --jobs $(JOBS) \
+		  $(if $(ECONOMY_DAYS),--days $(ECONOMY_DAYS)) $(if $(ECONOMY_SEED),--seed $(ECONOMY_SEED))
+ECONOMY_SMOKE_DAYS ?= 30
+ECONOMY_SMOKE_OUT ?= build/sim/economy-smoke.json
+.PHONY: economy-plan economy-run economy-report economy-smoke economy-test
+economy-plan:
+	python -m alberta_buck.sim.economy plan $(ECONOMY_ARGS)
+economy-run: sim-build core-build-py
+	python -m alberta_buck.sim.economy run $(ECONOMY_ARGS)
+economy-report:
+	python -m alberta_buck.sim.economy report --campaign "$(CAMPAIGN)"
+economy-smoke: sim-build core-build-py
+	mkdir -p "$(dir $(ECONOMY_SMOKE_OUT))"
+	python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
+		--backend pyrevm --days $(ECONOMY_SMOKE_DAYS) --out "$(ECONOMY_SMOKE_OUT)"
+	python -m alberta_buck.sim.report "$(ECONOMY_SMOKE_OUT)"
+economy-test: sim-build core-build-py core-build-wasm
+	python -m pytest alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
+		alberta_buck/test/test_economy.py $(PYTEST_ARGS)
+	cd core/js && node --test test/household-policy.test.js test/credit-household.tevm.test.js
 
 # Two-step Solidity build:
 #  (1) v3 profile: compile 0.7.6 Uniswap V3 core contracts without via_ir.
@@ -1216,7 +1279,9 @@ sim-compare-rebalancing-eq:
 		test/vectors/eq-baseline-5yr-prorata.json \
 		test/vectors/rebalancing-sim-eq*.json
 
-# THE MATRIX: re-run every rebalancing-eq-5yr*.toml arm against the
+# LEGACY MATRIX: retained for distinct stress coverage awaiting conversion.
+# Routine validation uses economy-*; see README-simulations.org.
+# Re-run every rebalancing-eq-5yr*.toml arm against the
 # CURRENT contracts (sim-build recompiles first, so contract changes --
 # BuckBasket, Buck, the controller -- propagate to every arm), then print
 # the eqmetrics table.  Each arm is hours at full cadence; MATRIX_JOBS
@@ -1365,7 +1430,7 @@ sim-server:	sim-build
 
 # The SAVINGS WORLD (doc/CONVERGENCE.org 7a): the sandbox page and the
 # server-hosted worlds on ONE port -- the page's Savings tab watches, steers
-# and saves in a demo-savings world of its own (one per visitor session).
+# and saves in a household economy of its own (one per visitor session).
 # --public answers reads and signed transactions only; SIM_SAVINGS_SESSIONS
 # caps the live worlds (each takes a core while it runs).  Behind a tunnel,
 # point its origin at http://127.0.0.1:$(SIM_SAVINGS_PORT).
@@ -1376,13 +1441,15 @@ SIM_SAVINGS_PORT     ?= 8797
 SIM_SAVINGS_SESSIONS ?= 4
 
 .PHONY: sim-savings sim-savings-serve
-sim-savings:	sim-build sandbox-build sim-savings-serve
+sim-savings:	sim-build sandbox-build
+	$(MAKE) sim-savings-serve
 
 # The server alone, building nothing (the hosted unit's command: its builds
 # happen at deploy, in a shell whose toolchain is the flake's).
 sim-savings-serve:
 	python -m alberta_buck.sim.server \
-		--experiment alberta_buck/sim/experiments/demo-savings.toml \
+		--experiment alberta_buck/sim/experiments/economy.toml \
+		--set scenario.agents.ShockAgent=1 \
 		--host $(SIM_SAVINGS_HOST) --port $(SIM_SAVINGS_PORT) --public \
 		--max-sessions $(SIM_SAVINGS_SESSIONS) --static $(SANDBOX_DIST)
 
@@ -1394,7 +1461,9 @@ sim-sweep:	sim-build
 sim-metrics:
 	python -m alberta_buck.sim.eqmetrics $(EQ_VECTORS)
 
-# -- Named sweeps: the banked campaign incantations --------------------
+# -- Legacy sweeps: retained until stress coverage is ported -----------
+# Routine economic validation uses economy-* above. These are historical
+# casts, not additional acceptance baselines; see README-simulations.org.
 #
 # Each reproduces one campaign from EQUILIBRIUM.md: experiment file(s) x
 # seeds run in parallel (each with its own anvil), the eqmetrics table is
@@ -1639,8 +1708,21 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 		--alias:buffer=buffer \
 		--alias:fs=./demo/src/shims/fs-empty.js \
 		--log-limit=8
-	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
-	@echo "       then open http://localhost:8000/eqworld.html"
+	@echo "demo ready: make nix-core-demo-eqworld-serve EQWORLD_PORT=8983"
+
+EQWORLD_PORT ?= 8983
+.PHONY: core-demo-eqworld-serve core-eqsim
+core-demo-eqworld-serve: core-demo-eqworld
+	python3 -m http.server --bind 127.0.0.1 --directory core/js/demo $(EQWORLD_PORT)
+
+# Small JS contract/household demonstration, not a five-year acceptance campaign.
+# SVG charts and operation journal are under build/sim/. The shared household
+# supplies its own income; --payment is monthly net income, --policy selects surplus use.
+JS_EQ_ARGS ?= --days 14 --policy adaptive
+core-eqsim: sim-build core-build-wasm
+	mkdir -p build/sim
+	cd core/js && node bin/eqsim.mjs $(JS_EQ_ARGS) \
+		--plot ../../build/sim/js-eqsim.svg --journal ../../build/sim/js-eqsim.jsonl
 
 # The sandbox (core/js/sandbox): one static page running a whole simulated
 # BUCK world in the visitor's tab -- issuer, wallets, credit, market,
@@ -1794,13 +1876,15 @@ SAVINGS_TEST_PORT ?= 8987
 SAVINGS_TEST_BASKET ?=
 .PHONY: sandbox-savings-test
 sandbox-savings-test:	sim-build sandbox-build
-	@python -m alberta_buck.sim.server --experiment alberta_buck/sim/experiments/demo-savings.toml \
+	@set -e; python -m alberta_buck.sim.server --experiment alberta_buck/sim/experiments/economy.toml \
+		--set scenario.agents.ShockAgent=1 \
 		$(if $(SAVINGS_TEST_BASKET),--basket $(SAVINGS_TEST_BASKET)) \
 		--port $(SAVINGS_TEST_PORT) --public --max-sessions 2 --static $(SANDBOX_DIST) & pid=$$!; \
-	trap "kill $$pid" EXIT; \
-	for i in $$(seq 120); do \
-	  curl -sf http://127.0.0.1:$(SAVINGS_TEST_PORT)/sim-server.json >/dev/null && break; sleep 1; \
-	done; \
+	trap 'kill $$pid 2>/dev/null || true' EXIT; ready=; \
+	for i in $$(seq 60); do \
+	  kill -0 $$pid 2>/dev/null || { wait $$pid; exit 1; }; \
+	  if curl -sf http://127.0.0.1:$(SAVINGS_TEST_PORT)/sim-server.json >/dev/null; then ready=1; break; fi; sleep 1; \
+	done; test "$$ready" = 1; \
 	cd core/js && SAVINGS_PAGE=http://127.0.0.1:$(SAVINGS_TEST_PORT)/ node --test test/savings.browser.test.js
 
 # The screenshots in doc/SANDBOX.org: a scripted story in headless Chromium
@@ -1824,7 +1908,12 @@ core-test-py:
 
 core-test-js:
 	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
-	cd core/js && node --test
+	cd core/js && node --test $(JS_TEST_ARGS)
+
+.PHONY: js-deps
+js-deps:
+	npm ci --no-audit --no-fund
+	$(MAKE) core-js-deps
 
 core-test-rust:	core-vectors-check poseidon-constants-check
 	cd core/rust && cargo test --quiet
@@ -1874,38 +1963,29 @@ clean:
 #
 # venv:		Create a Virtual Env containing the repo, installed editable
 #
-# The venv is created once and updated in place (never deleted) when a
-# pyproject.toml changes, so a session already running in it -- an emacs
-# babel python, the sim server -- keeps working.  alberta_buck and buck_core
-# are both editable, so the venv always runs the checkout's sources.  For a
-# clean rebuild, rm -rf the venv.
+# The venv is updated in place when Python, this checkout or its package
+# metadata changes. Broken Nix interpreter links are repaired before use.
+# Wrappers are non-interactive: no .bashrc side effects, and make arguments
+# and jobserver settings survive through $(MAKE). VENV=... selects another path.
 #
-.PHONY: venv
-venv:			$(VENV_STAMP)
+.PHONY: venv venv-setup
+venv-setup:
+	$(PYTHON) scripts/ensure-venv.py "$(VENV)"
+
+venv:			venv-setup
 	@echo; echo "*** Activating $(VENV) VirtualEnv for Interactive $(SHELL)"
 	@bash --init-file "$(VENV)/bin/activate" -i
 
-venv-%:			$(VENV_STAMP)
-	@echo; echo "*** Running in $(VENV) VirtualEnv: make $*"
-	@bash --init-file "$(VENV)/bin/activate" -ic "make $*"
+venv-%:			venv-setup
+	+@set -e; source "$(VENV)/bin/activate"; \
+	  export PYTHONPATH="$(CURDIR):$(CURDIR)/core/python:$(CURDIR)/core/contracts/python$${PYTHONPATH:+:$$PYTHONPATH}"; \
+	  export ALBERTA_BUCK_REPO="$(CURDIR)"; $(MAKE) $*
 
 # The three local distributions install editable in ONE resolver pass: at a
 # version not yet on PyPI (a minor bump in flight), the root's pin on core and
 # core's pin on contracts can only be met by the checkout's own copies.
-$(VENV_STAMP):		pyproject.toml core/python/pyproject.toml core/contracts/python/pyproject.toml
-	@[[ "$(PYTHON_V)" =~ "^venv" ]] && ( echo -e "\n\n!!! $(VENV) Cannot start a venv within a venv"; false ) || true
-	@echo; echo "*** Building $(VENV) VirtualEnv..."
-	@( [ -d "$(VENV)" ] || ( $(PYTHON) -m venv $(VENV_OPTS) "$(VENV)" \
-		&& sed -i -e '1s:^:. $$HOME/.bashrc\n:' "$(VENV)/bin/activate" ) ) \
-	    && source "$(VENV)/bin/activate" \
-	    && python -m pip install --no-user --upgrade \
-		-e "$(BUCK_PYTHON)/core/contracts/python" \
-		-e "$(BUCK_PYTHON)/core/python" \
-		-e "$(BUCK_PYTHON)[tests,dev]" \
-	    && touch "$@"
-
-venv-activate:
-	pip install -e ".[tests]"
+venv-activate: venv-setup
+	@printf 'To activate in the current shell: source "%s/bin/activate"\n' "$(VENV)"
 
 
 
@@ -1918,9 +1998,9 @@ venv-activate:
 #
 nix-%:
 	@if [ -n "$(TARGET)" ]; then \
-		nix develop .#$(TARGET) $(NIX_OPTS) --command make $*; \
+		nix develop .#$(TARGET) $(NIX_OPTS) --command $(MAKE) $*; \
 	else \
-		nix develop $(NIX_OPTS) --command make $*; \
+		nix develop $(NIX_OPTS) --command $(MAKE) $*; \
 	fi
 
 #

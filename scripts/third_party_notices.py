@@ -187,6 +187,8 @@ def bundled(metafile):
     roots = set()
     for output in meta["outputs"].values():
         for path, used in output["inputs"].items():
+            if path.startswith("(disabled):"):
+                continue        # esbuild generated a browser stub, not this package
             root = package_root(path) if used["bytesInOutput"] > 0 else None
             if root:
                 roots.add(os.path.normpath(os.path.join(base, root)))

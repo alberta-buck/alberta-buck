@@ -24,7 +24,6 @@
           web3                # Ethereum JSON-RPC client
           eth-abi             # ABI encoding/decoding
           eth-account         # Account/key management
-          matplotlib          # Plotting / visualization
           python-dotenv       # Load .env files
           pyyaml
           requests
@@ -124,18 +123,16 @@
             printf "  %-12s %s\n" "cargo"  "$(cargo --version 2>/dev/null)"
             printf "  %-12s %s\n" "wasm-opt" "$(wasm-opt --version 2>/dev/null)"
             printf "  %-12s %s\n" "playwright" "${pkgs.playwright-driver.version} (headless chromium)"
-            # snarkjs and circomlib come from npm; bootstrap on first entry.
+            # Dependency installation is explicit in Make, not a side effect of entering a shell.
             if [ ! -d node_modules ] && [ -f package.json ]; then
-              echo ""
-              echo "[flake] installing npm dev deps (snarkjs, circomlib) ..."
-              npm install --no-audit --no-fund --loglevel=error
+              echo "JavaScript dependencies missing: run make js-deps"
             fi
             if [ -x node_modules/.bin/snarkjs ]; then
               export PATH="$PWD/node_modules/.bin:$PATH"
               printf "  %-12s %s\n" "snarkjs" "$(snarkjs --version 2>/dev/null | head -1 || echo 'installed')"
             fi
             echo ""
-            echo "Commands:  make build | make test | make fork-sepolia | make fork-mainnet"
+            echo "Start with make help; Python commands also use the venv- prefix."
           '';
         };
       });
