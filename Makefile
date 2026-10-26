@@ -31,6 +31,10 @@ help:
 	  '  make nix-sandbox SANDBOX_PORT=8980  # browser EVM, no Python economy' \
 	  '  make nix-venv-sim-savings SIM_SAVINGS_PORT=8981  # Python economy plus browser wallet' \
 	  '  make nix-core-demo-eqworld          # JS household loop and charts' \
+	  'Contract packages (README-build.org; local build only):' \
+	  '  make nix-contracts-dist            # emit npm and Python ABI/bytecode bundles' \
+	  '  make nix-contracts-dist-check      # compiler and size checks on built artifacts' \
+	  '  make nix-third-party-notices-check # package licences and generated notices' \
 	  'Use make help without Nix or a venv; it starts no services or simulations.'
 
 # RPC endpoints for forking.  Override via environment or .env file.
@@ -1591,13 +1595,15 @@ poseidon-constants-check:
 
 # ── Published contract artifacts (alberta-buck-contracts) ────────────
 #
-# The reproducible build behind the published package.  [profile.dist] in
-# foundry.toml pins the compiler and writes to its own out-dist/, so a dev
-# build can never decide what gets published; scripts/contracts-dist.py
-# emits only the contracts we own and asserts the pin held.
+# The reproducible build behind the published package.  [profile.default]
+# in foundry.toml pins the compiler; builds use out/. scripts/contracts-dist.py
+# emits an explicit allowlist to core/contracts/ and its Python package copy.
+# --check validates the built artifacts' compiler and code sizes; it does not
+# yet compare existing emitted package files against the build. Re-emit after
+# contract changes. See README-build.org and the current release review.
 #
-#   make contracts-dist          # build + emit dist/contracts/
-#   make contracts-dist-check    # verify the build (CI release gate)
+#   make contracts-dist          # build + emit both package bundles
+#   make contracts-dist-check    # validate the built artifact set
 #
 # The Uniswap implementations are deliberately absent: they are BUSL-1.1 /
 # GPL-2.0 / GPL-3.0 and consumers take them from Uniswap's own packages.

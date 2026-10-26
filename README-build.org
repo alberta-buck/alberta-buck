@@ -84,3 +84,22 @@ These inspect the environment and plan without running an economy. For a changed
 =economy-smoke= before committing, then freeze the commit through =economy-run=. Do not edit
 a running campaign's snapshot. The simulation guide explains why a completed process, a
 completed vector and an equilibrium acceptance result are three separate checks.
+
+* Preparing contract packages
+
+#+begin_src sh
+make nix-test
+make nix-contracts-dist
+make nix-contracts-dist-check
+make nix-third-party-notices-check
+#+end_src
+
+These commands build and check local artifacts; they do not publish packages. The contracts use
+the pinned default Foundry profile and =out/=. Emission writes the npm bundle in =core/contracts/=
+and the Python copy in =core/contracts/python/buck_contracts/=.
+
+Currently =contracts-dist-check= validates compiler and code-size constraints on built artifacts;
+it does not compare already emitted package files with the build. Re-emit after contract changes,
+and verify their contents/digests before publication. The [[file:doc/review/household-release-readiness.org][current release review]] records this gap,
+the remaining household and shock checks, and the proposed legacy-contract retirement order.
+The [[file:alberta-buck-deployment.org][deployment book]] describes package publication order and release tags.

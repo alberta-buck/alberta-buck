@@ -345,6 +345,17 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-26: the =c7ef815= policy campaign completed all 16 five-year worlds with matching
+  PDFs; six pass. All meet price tolerances. The four retirement-only worlds fail K headroom;
+  nine worlds record thirteen coverage-release errors. Every affected household instance is
+  still unexited at year five. Both engines mark release complete before the burn succeeds,
+  then can sell unused credit and repeatedly buy the resulting lien back. Fix that lifecycle
+  before policy ranking or release acceptance. The [[file:household-release-readiness.org][release-readiness review]] records the
+  evidence, the issuance-policy confound, missing shock checks and contract-retirement order.
+  Fresh =make nix-test=: 991 passed, one fork suite skipped. Local contract bundles and notices
+  pass their checks; emitted bundles also manually match the build and metadata digests.
+  =contracts-dist-check= itself still lacks that emitted-file comparison. No runtime code,
+  contract, publication or service was changed by this review.
 - 2026-10-25: consolidation per decision 10. =adaptive= now names the prior price-sensitive
   saving/discounted-paydown behavior, in Python and JavaScript; =basket= is a true always-invest
   comparison. The 30-day smoke completes with a matching six-page PDF and no household errors.

@@ -1,0 +1,252 @@
+#+TITLE: Household comparisons and the path to a smaller contract release
+#+DATE: 2026-10-26
+#+OPTIONS: ^:nil toc:2
+
+* Assessment
+
+The policy campaign finished, but it exposed a household exit defect that must be fixed before
+using these runs to select a policy or certify a release. The machine holds the measured price
+band in all sixteen worlds. That is useful evidence, but some of those worlds contain unintended
+buy/sell flows from households whose asset sales never finish.
+
+Keep =adaptive= as the agreed behavioral default. It is not an established performance winner.
+The next implementation should repair exits in Python and JavaScript, then remove the old machine
+from the deployment path. Retire legacy contracts with their callers and replacement checks,
+rather than carrying another complete legacy economy into the release.
+
+This assessment is of =feature/household-economy= at =c7ef815=. It supplements the current
+[[file:household-economy-plan.org][household plan]]; older merge checklists describe earlier casts and package states. No merge,
+push, tag, package publication or hosted-service update was performed for this review.
+
+* The completed five-year comparisons
+
+Evidence: [[file:../../build/sim/economy/consolidated-policies-20261025/index.html][campaign index]],
+[[file:../../build/sim/economy/consolidated-policies-20261025/summary.json][acceptance results]], and
+[[file:../../build/sim/economy/consolidated-policies-20261025/policy-audit.json][account audit]].
+The frozen source is =c7ef815=. All 16 workers returned zero, recorded all 1,827 daily frames,
+and produced PDFs whose embedded SHA256 matches their JSON. There are no remaining partials.
+The run took about six hours with two workers. This review read saved results, without rerunning
+the economies or changing their snapshots.
+
+The price measurements below use days 365--1826. Mean error is the average of the four worlds'
+mean absolute errors; the tail column is the worst world's 99th percentile. Errors count recorded
+household error observations, not every failed or refused market transaction.
+
+| Policy | Full passes | Mean price error | Worst 99th percentile | K checks passed | Household errors |
+|--------+-------------+------------------+-----------------------+-----------------+------------------|
+| adaptive | 1 / 4 | 0.480% | 1.655% | 4 / 4 | 5 |
+| basket: always invest | 3 / 4 | 0.478% | 1.594% | 4 / 4 | 1 |
+| discount: repay cheap, otherwise hold cash | 2 / 4 | 0.374% | 1.702% | 4 / 4 | 2 |
+| retire: repay regardless of price | 0 / 4 | 0.413% | 1.679% | 0 / 4 | 5 |
+
+All twelve non-retirement-only worlds keep K inside the required interior throughout the measured
+window. Retirement-only ends at K 0.926--0.950, with only 23--79% of days in the interior. The
+reverting-price worlds spend as long as 607 and 228 consecutive days near the upper rail. A small
+price error alone does not demonstrate spare capacity to respond to the next disturbance.
+
+Nine worlds have household errors; three of them also fail K. One further world fails K alone.
+Thus there are six full passes, six failures on errors alone, and four worlds failing K.
+The earlier =release= grid's 27/36 used the older error reporting; it must not be compared directly
+with today's stricter all-days error check as if the model alone caused that pass-rate change.
+
+** The exit defect is economically material
+
+All thirteen error observations say =BUCK: insufficient coverage to unwind=. They occur after
+the affected member's scheduled asset sale. All thirteen affected member instances remain
+unexited at day 1826, retaining a combined 2.94 million BUCK of credit limits.
+
+The relevant sequence exists in both implementations:
+
+1. [[file:../../alberta_buck/sim/credit_households.py][CreditHouseholdAgent._divest]] and
+   [[file:../../core/js/src/agents/household-ops.js][household-ops divest]] set =released= before attempting the coverage burns.
+2. A burn failure breaks out, leaving that flag set. Later days therefore skip release.
+3. The exit sale is sized from =balanceOf=. This is spendable balance, including unused credit;
+   it is not just positively owned BUCKs. With coverage still open, the sale can draw a new lien.
+4. Subsequent exit steps buy that lien back, then sell from the still-open line again.
+
+For example, =smid-dmid-revert-41404= member =0/debtor/11= starts its sale on day 747 and reports
+the burn failure on day 758. Its credit limit remains roughly 426--433 thousand BUCK. Its drawn
+balance falls to nearly zero and rises again; at day 1826 it is still about 42 thousand BUCK.
+That world's cumulative exit buybacks reach 18.49 million BUCK, versus 0.72 million in its
+always-invest counterpart. Those world totals include other exits; the member's repeated
+liability and unchanged coverage independently establish the failed exit.
+
+Some error frames display an older action such as =save= or =pay-down=: account marks and action
+labels are cached for five days, while the error is sampled daily. The displayed action is not
+a reliable call-site trace. Record the failing operation and its arguments with the error.
+
+Required repair and regression coverage:
+
+- Release is complete only after verifying the remaining activated coverage and deposit. Retry
+  a refused release from fresh state; do not mark a failed attempt complete.
+- Refresh/quote the controller-dependent burn amount. =Buck._burnAllocated= calls =compute()=
+  before sizing release, whereas the agent estimates from an earlier limit and subtracts 0.1%.
+  A K change between sizing and execution is a candidate trigger, not yet a reproduced cause.
+- Sell only positively owned BUCKs when closing an account. An exiting household must not create
+  fresh liability to sell; check lien, coverage, deposits and receipts before declaring it gone.
+- Test a K change during release, a failed first release, aged insurance refunds, and a partial
+  basket exit in both engines. Preserve any receipt shares left by an in-kind/partial redemption;
+  current receipt bookkeeping removes a receipt after any successful redemption.
+- Acceptance should detect overdue unfinished exits and exit buy/sell cycling, even when no
+  exception remains on the final frame. Re-run the comparison after the repair.
+
+These are agent/account-management findings. The error is not, by itself, proof that the Buck
+contract's coverage check is wrong. Do not weaken it or classify this error as harmless slippage.
+
+** What the policy comparison does and does not establish
+
+Refinancing is active, and the final accounts report no living/premium arrears. Actual mortgage
+interest totals are lower than the same households' counterfactual totals in every policy group.
+Some mortgages remain, including those of recent arrivals; this is a continuing population, not
+the older finite cohort in which every mortgage eventually cleared.
+
+Two qualifications prevent a simple ranking:
+
+- =household_policy.issuance= disables post-mortgage investment issuance for both =retire= and
+  =discount=. Insured savers in those arms therefore supply no such credit. The comparison
+  changes supply behavior as well as the destination of surplus income. Separate the issuance
+  option from the surplus option before attributing the high K to repayment policy alone.
+- Arrivals respond to prices and K, so policies create different populations and exposure times.
+  Compare matched members/arrival cohorts and per-household outcomes, alongside the endogenous
+  economy totals. Aggregate marked wealth is not a controlled policy comparison, and marks
+  are not realized exit proceeds. The exit defect further compromises these totals.
+
+Adaptive and always-invest have very similar mean price errors here. Discount has the smallest
+mean, while retirement-only consumes the most K headroom. None of that proves a universally best
+household policy. Retain the settings in one model, with comparisons as diagnostics.
+
+* Simplification with preserved coverage
+
+** Contracts
+
+There are 41 Solidity artifacts plus two generated Poseidon artifacts in the published allowlist.
+The pro-rata shell, Ops shell and basket-hook Buck are already absent from that bundle, but still
+cost source, fixture and simulator maintenance. Removing an artifact from distribution and
+removing its implementation are separate changes.
+
+| Group | Proposed disposition | Work needed first |
+|-------+----------------------+-------------------|
+| Buck, BuckCredit, identity/Notes/verifiers | Keep | Release regressions and package checks; these are distinct protocol functions |
+| Current equity shell, machine facets, signals, policy, reference, desk, machine wheel | Keep | One explicit builder used by Python economy and control lab |
+| BuckBasketEquityWheel, EquityTurnDirector, BasketWheel | Retire | Stop deploying them as temporary scaffolding; transfer unique maintenance/wheel tests |
+| BuckBasketProRata, BuckBasketOps, legacy/BuckWithBasketHooks | Retire | Move remaining routing/accounting fixtures and JS benchmark/loop off the old shell |
+| PairsRebalanceDirector, RebalanceDirectorBase, IRebalanceDirector | Retire with legacy basket modes | Preserve pair selection, swap guard and timing checks on PairRebalancePolicy/current upkeep |
+| BuckKControllerShadow, ShadowObserver, IShadowObserver, SimStabilizer | Candidate for separate retirement | Preserve book-loading/adversarial controller checks; historical results alone use older accounting |
+| BuckKControllerStatic and test harnesses | Keep as fixtures | Fixed-K isolation has distinct diagnostic value |
+
+The first two legacy basket groups and their directors total about 2,200 Solidity lines. The
+shadow-controller group adds about 950. Removing their callers, branching deployment code, old
+telemetry and duplicated scenarios is likely a larger maintenance saving than the Solidity alone.
+
+The concrete obstruction is [[file:../../alberta_buck/sim/deploy.py][deploy.py]]: even the current Python machine first constructs
+=BuckBasketEquityWheel=, =EquityTurnDirector= and =BasketWheel=. The machine builder replaces
+them afterwards. The control lab also rewires an older deployment. JS already builds the current
+machine directly; use its explicit seed/age/wire order to guide the common Python path.
+
+Do not delete shared bases by filename association. =BasketVenueFacet= inherits
+=BuckBasketUniswapV3=, =BasketDesk= inherits =MonetaryDesk=, and the current shell/facets share
+=BuckBasketStorage=. Extract or prune obsolete hooks and fields after removing their consumers,
+while retaining delegatecall storage-layout checks. This is a new deployment build, not permission
+to replace a facet on an existing deployment with a different layout.
+
+** Simulations and interfaces
+
+Keep one household runner, the cross-language contract/policy tests, routing tests, a focused
+control lab, and the wallet/savings interface. The separate vector viewer and PDFs answer different
+questions and can remain small views of the same data. The JavaScript household CLI/demo is a
+conformance and interaction example, not a second five-year acceptance engine.
+
+The tree still has 63 top-level experiment TOMLs, and substantial legacy debtor/borrower code.
+The canonical cast avoids those decision classes, but their old stress consumers remain.
+Consolidate these consumers onto named economy interventions, then delete their old presets,
+registrations, report fields, Make targets and obsolete tests together. Preserve attack actors
+when their distinct attack has not yet been reproduced.
+
+The new 32 stress arms are configured and tested for construction; no completed campaign for
+them is present here. They cover demand/supply pressure, commodity prices, rates, income, arrivals
+and investor departures. They do not yet replace whale raids, LP withdrawal or book loading.
+The general five-year judge also lacks shock-specific peak, duration, recovery and attacker-P&L
+criteria. A brief severe disturbance can disappear inside a five-year average or percentile.
+
+Reduce routine work by purpose: a small centre/probe for iteration, the final population grid
+for release evidence, policies when policy changes, and selected stress cases for each failure
+mechanism. Keep the full control-lab sweep available for controller changes instead of running
+310 diagnostic worlds after every UI or household change. The old identity demos and the JS
+equilibrium page are optional consolidation candidates after their unique UI checks are mapped.
+
+* Findings that suggest better stability and shock response
+
+1. *Fix unintended flows before tuning K.* Failed exit cycling adds artificial buying and issuance.
+   Disabling savers' issuance in policy arms also changes the supply response. Correct and isolate
+   those effects before changing controller gains or increasing the K ceiling.
+2. *Keep the paced basket response.* The October 19 grid on =d73f047= held mean error at
+   0.38--0.66% and the 99th percentile at 1.4--1.9%. The paced book move also improved all basket
+   stages in the control lab. It trades some prompt issuance for smoother price response: nine
+   low-supply cells failed K headroom. Study issuer capacity, funding and arrival response in
+   those corners rather than undoing pacing merely to lower K.
+3. *Vary lasting money demand.* The present demand axis varies adoption time: four months, one
+   year or three years. Eventually households hold the same target balances. Replace that axis
+   with balance size (=money_months= or payment share); keep adoption speed as one transition
+   diagnostic. This removes weakly distinct grid cells and tests a more meaningful equilibrium.
+4. *Exercise the desk deliberately.* The current control-lab audit verifies 310/310 worlds but
+   records zero desk operations. Test a sustained excursion crossing its entry and persistence
+   thresholds, then reversal, depletion, stale observations and adverse execution. Measure recovery
+   time, overshoot, reserve usage and realized P&L net of keeper costs before adjusting its bands
+   or persistence. Inactivity in the current lab is not evidence the desk can be deleted.
+5. *Preserve K's price-only input.* Earlier position-coupled controllers saturated and rewarded
+   book loading. Those measurements predate accounting changes, so their precise profits are not
+   current evidence. They still motivate a dedicated adversarial test and caution against wiring
+   inventory directly into K. Prefer bounded market response and tested persistence to a new
+   untested high-gain loop.
+6. *Keep decisions heterogeneous and execution-aware.* Household profiles already randomize phases,
+   periods and issuance/retirement thresholds. Recheck executed discount after fees and impact,
+   receipt valuation, and turnover under common shocks. The adaptive urgency parameters are
+   common by default; test modest dispersion and hysteresis only if corrected runs show synchronized
+   churn. Include keeper fees and live liquidity reductions in the stressed execution budget.
+
+* Validation and merge sequence
+
+Fresh checks on October 26, before documentation edits:
+
+- =make nix-test=: 991 passed, zero failed, one skipped external-fork suite.
+  [[file:../../build/release-review-contract-tests.log][Contract-test log]].
+- =make nix-contracts-dist= and =make nix-contracts-dist-check=: 43 artifacts satisfy compiler
+  and code-size checks. A separate comparison confirmed both emitted npm/Python bundles equal
+  the built artifacts and match their metadata digests. [[file:../../build/release-review-contracts-dist.log][Bundle log]].
+- =make nix-third-party-notices-check=: passed. [[file:../../build/release-review-notices.log][Notices log]].
+
+The preceding consolidation validation remains relevant: 1,132 Python tests passed, five skipped;
+shared JS decisions and live household contract cases passed; the machine/pro-rata loop checks,
+CLI build, browser bundle and real savings-browser workflow passed. These were not all rerun
+for this documentation review. The remaining skips and exact scope are in the build logs and
+the household-plan ledger. Passing short tests did not catch the five-year exit defect.
+
+One release-check gap needs fixing: =scripts/contracts-dist.py --check= validates what it reads
+from =out/= but currently does not compare the existing emitted package files against that build.
+It should fail on missing/stale bundles and digest/compiler metadata. Today's manual equality
+check is evidence about today's output, not a replacement for that regression gate.
+
+Recommended order:
+
+1. Repair and instrument household exits in both languages; add meaningful state-transition tests
+   and acceptance for unfinished exits. Re-run affected policy cases from a new frozen commit.
+2. Build the current machine directly in Python and the control lab. Check the opening, storage,
+   accounting and essential machine behavior, then remove the older upkeep and wheel.
+3. Move the distinct legacy stress checks to the common runner; run relevant severe and recovery
+   cases, then remove the old shells, directors and synthetic economic casts. Decide the shadow
+   family's removal separately with its adversarial regression preserved.
+4. Run the corrected default grid and shock acceptance. Comparison policies may demonstrate a
+   failure mode; they need not all pass to justify the default. Explain any remaining default
+   failures instead of lowering acceptance thresholds.
+5. Check the final merge candidate with Make's contract, Python, JS, kernel, browser, bundle and
+   notices targets. Review the removal list and public API changes. Local master is 323 commits
+   behind this branch's history; this review did not fetch remote refs or establish remote state.
+6. Finish the release roll on that candidate, then merge/push and publish through the documented
+   package order. Most package manifests already say 0.4.0; =core/js= still pins contracts 0.3.0
+   pending the contract publication. Local tags show 0.3.0 and no 0.4.0 tags. Verify registry and
+   remote state at release time, and refresh the JS pin/lock after the new contracts are available.
+
+The existing =scripts/deploy/Deploy.s.sol= remains a core/test-network bootstrap using stub
+verifiers and the older controller, not the complete basket-machine deployment recipe. Publishing
+the development artifact packages and deploying a live machine are separate deliverables; the
+current bundle explicitly records its development trusted setup.

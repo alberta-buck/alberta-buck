@@ -122,6 +122,14 @@ The latest pre-consolidation grid (=release=, commit =d73f047=) passed 27 of 36 
 parity within the stated average and tail tolerances; nine low-supply cells failed K's interior
 requirement. Those failures remain findings. Policy renaming alone does not resolve them.
 
+The completed =consolidated-policies-20261025= campaign (=c7ef815=) has all 16 five-year vectors
+and matching PDFs, with six full passes. All worlds meet the price-error tolerances. Retirement-only
+fails K headroom in all four worlds; nine worlds record errors during household coverage release.
+Those errors leave thirteen household instances unable to finish their asset sales and can cause
+repeated buying and selling through still-open credit. Repair exits before drawing policy rankings
+or treating these runs as release acceptance. The [[file:doc/review/household-release-readiness.org][October 26 review]] gives the measurements,
+contract-retirement candidates, missing shock coverage and ordered merge/release work.
+
 * Diagnostics and deliberate retirement
 
 #+begin_src sh

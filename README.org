@@ -84,6 +84,7 @@ Start with =make help= for the supported build, test and simulation commands.
 - [[file:README-build.org][Build and test]]: Nix, the checkout's venv, dependencies and the test suites.
 - [[file:README-simulations.org][Simulations and results]]: the household economy, comparisons, diagnostics, JSON and PDFs.
 - [[file:README-sandboxes.org][Sandboxes]]: browser-only and Python-backed worlds, their tests and saved results.
+- [[file:doc/review/household-release-readiness.org][Release readiness]]: completed policy comparisons, known defects and the contract simplification plan.
 
 Specialized contract, circuit and document workflows: [[file:doc/DEVELOP.org][doc/DEVELOP.org]].
 

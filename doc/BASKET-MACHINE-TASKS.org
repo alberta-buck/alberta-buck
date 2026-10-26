@@ -10,6 +10,10 @@ when its step is merged, and delete this file when the list is empty.
 Some items were carried here from the older working documents when those were reviewed on
 2026-10-10. Each names its source, so the detail can be found while the source still exists.
 
+For the current household cast, consolidation decisions and merge order, use the
+[[file:review/household-economy-plan.org][household plan]] and [[file:review/household-release-readiness.org][October 26 release review]]. The older cast, JS-default and
+package-version entries below are historical; they do not override those later decisions.
+
 * Where things stand
 
 - [X] The unpushed commits were rebuilt without generated output: 14 commits, 3.4 MB in place of

@@ -5,6 +5,8 @@
 This is what we learned by running [[file:BASKET-MACHINE.org][the basket machine]] on the real contracts. The work still to
 do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. The commands at the end belong to the recorded model commits. For current campaigns see
 [[file:../README-simulations.org][README-simulations.org]]; the standalone savings comparison runner has been retired.
+The [[file:review/household-release-readiness.org][October 26 household comparison review]] records the completed new policy campaign and its
+coverage-release defect. The older populations below are not evidence that the new exits pass.
 
 * The short version
 
