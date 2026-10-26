@@ -13,7 +13,7 @@ const DEPOSITED = keccak256(toBytes("Deposited(address,uint256,address,uint256,u
 
 export function installHouseholdOps(world) {
   const { session: s, buck, usdc, basket, kctrl, credit } = world;
-  const exec = (proxy, contract, name, args, tag, expect = "success") => s.send(proxy, "exec",
+  const exec = (proxy, contract, name, args, tag, expect = "ok") => s.send(proxy, "exec",
     [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })],
     { tag, gas: 5_000_000n, expect });
   const cash = (account) => s.call(usdc, "balanceOf", [world.holderAddress(account)]);
@@ -178,14 +178,20 @@ export function installHouseholdOps(world) {
   // Mirrors equilibrium_agents._impact_cap: the input that moves a constant-product pool at most `bp`.
   const impactCap = (reserve, bp) => bp <= 0 || reserve <= 0n ? 0n
     : BigInt(Math.trunc(Number(reserve) * (1 / Math.sqrt(1 - Math.min(.99, bp / 10000)) - 1)));
+  const refreshReceipt = async (agent, rid) => {
+    if (world.basketKind === "machine") {
+      const [shares, principal] = await s.call(basket, "holdings", [rid]);
+      agent.settleReceipt(rid, principal, shares);
+    } else agent.settleReceipt(rid, (await s.call(basket, "deposits", [rid]))[0], 0n);
+  };
   // The investor's exit: redeem every receipt, then sell what came back, a capped bite per decision.
   const withdraw = async (agent) => {
     const proxy = await world.proxyFor(agent.account), me = world.holderAddress(agent.account);
-    const out = { redeemed: [], usd: 0n, left: false, refused: false };
+    const out = { usd: 0n, left: false, refused: false };
     for (const rid of [...agent.receipts]) {
       const r = await exec(proxy, basket, "redeem", [rid, 0n, 0n], "investor:redeem", "either");
       if (r.status !== "success") return { ...out, refused: true, left: true };
-      out.redeemed.push(rid);
+      await refreshReceipt(agent, rid);
     }
     const before = await cash(agent.account), bp = agent.p.max_impact_bp;
     const held = await s.call(buck, "balanceOf", [me]);
@@ -213,8 +219,9 @@ export function installHouseholdOps(world) {
     const before = await s.call(buck, "balanceOf", [saver.address]);
     const r = await exec(saver, basket, "redeem", [rid, 0n, 0n], "household:redeem", "either");
     if (r.status !== "success") return { refused: true };
+    await refreshReceipt(agent, rid);
     const held = await s.call(buck, "balanceOf", [saver.address]);
-    const repaid = min(max(0n, held - before), drawn, held);
+    const repaid = min(max(0n, held - before), drawn, max(0n, held - E6 / 2n));
     if (repaid > 0n) await exec(saver, buck, "transfer", [me, repaid], "household:repay");
     return { redeemed: true, repaid };
   };
@@ -223,54 +230,87 @@ export function installHouseholdOps(world) {
   // sell what is held. `done` when nothing is left.
   const divest = async (agent) => {
     const proxy = await world.proxyFor(agent.account), me = world.holderAddress(agent.account);
-    const out = { redeemed: [], bought: 0n, refused: false, done: false }, bp = agent.p.max_impact_bp;
+    const out = { bought: 0n, refused: false, done: false }, bp = agent.p.max_impact_bp;
     const saver = agent.savings;
+    let pending = false;
     if (saver) {
       for (const rid of [...agent.receipts]) {
         const r = await exec(saver, basket, "redeem", [rid, 0n, 0n], "household:redeem", "either");
-        if (r.status !== "success") return { ...out, refused: true };
-        out.redeemed.push(rid);
+        if (r.status !== "success") { out.refused = true; break; }
+        await refreshReceipt(agent, rid);
       }
       const held = await s.call(buck, "balanceOf", [saver.address]);
-      if (held > 0n) await exec(saver, buck, "transfer", [me, held], "household:repay");
+      // Leave half a BUCK for demurrage between the balance read and the mined transaction.
+      if (held > E6) await exec(saver, buck, "transfer", [me, held - E6 / 2n], "household:repay");
       for (const t of world.tokens) {
         const amount = await s.call(t.erc20, "balanceOf", [saver.address]);
         if (amount > 0n) {
-          await exec(saver, t.erc20, "transfer", [me, amount], "household:collect");
-          await swap(agent.account, t.poolUsdc, t.erc20, usdc, amount, me, "household:sell");
+          const [ru, rt] = await reserves(t.poolUsdc, usdc);
+          if (amount * ru / rt <= E6) continue;  // at most one dollar's TOKEN dust per constituent
+          const bite = min(amount, max(1n, impactCap(rt, bp)));
+          await swap({ address: `savings:${agent.account.address}` }, t.poolUsdc, t.erc20, usdc,
+            bite, me, "household:sell");
+          pending ||= bite < amount;
         }
       }
     }
+    if (agent.receipts.length || pending) return out;
+    agent.exitStage = "repay-lien";
     const drawn = -(await s.call(buck, "signedBalanceOf", [me]));
-    if (drawn > E6) {
+    if (agent.mortgage || drawn > 0n) {
       const available = await cash(agent.account);
-      if (available <= E6) return { ...out, done: true };     // nothing left to buy the lien back with
-      const [ru, rb] = await reserves(world.poolUB, usdc), want = min(drawn * 101n / 100n, rb / 2n);
+      if (available <= 0n) { agent.exitShort = true; agent.exitStage = "cash-shortfall"; return out; }
+      const [ru, rb] = await reserves(world.poolUB, usdc), want = min(drawn + max(E6 / 100n, drawn / 100n), rb / 2n);
       const cost = BigInt(Math.floor(Number(want) * Number(ru) / (Number(rb - want) * (1 - world.fees.ub / 1e6)))) + 1n;
       const r = await buy(agent.account, min(cost, impactCap(ru, bp)));
       return { ...out, bought: r.got };
     }
     if (!agent.released) {
-      agent.released = true;
-      // Releasing coverage lowers the spendable by its limit less the refunded deposit; a whisker less
-      // each pass, so rounding never asks for more than the coverage can give.
-      for (let i = 0; i < 3; i++) {
-        const cs = await world.creditState(agent.account);
-        let deposit = 0n;
-        for (const tid of world._credits.get(agent.account.address) ?? []) deposit += await s.call(buck, "mintsPrincipal", [tid]);
-        const amount = max(0n, cs.limit - deposit) * 999n / 1000n;
-        if (amount <= E6) break;
-        const r = await exec(proxy, buck, "burn", [amount], "household:release", "either");
-        if (r.status !== "success") break;
-      }
+      agent.exitStage = "release-coverage";
+      if (!await releaseCoverage(agent, proxy)) return out;
     }
-    const held = await s.call(buck, "balanceOf", [me]);
+    agent.exitStage = "sell-owned-buck";
+    const held = await s.call(buck, "signedBalanceOf", [me]); // unused credit is not the seller's cash
+    if (held < 0n) return out;
     if (held > E6) {
       const [, rb] = await reserves(world.poolUB, usdc), bite = min(held - E6 / 2n, max(E6, impactCap(rb, bp)));
       await swap(agent.account, world.poolUB, buck, usdc, bite, me, "household:sell");
       if (held - bite > E6) return out;
     }
     return { ...out, done: true };
+  };
+  const releaseCoverage = async (agent, proxy) => {
+    const ids = world._credits.get(agent.account.address) ?? [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await s.send(kctrl, "compute", [], { tag: "household:release-quote" });
+      const k = await world.K(), slices = await s.call(credit, "batchCreditInfo", [ids]);
+      let amount = 0n;
+      for (let i = 0; i < ids.length; i++) {
+        const c = slices[i], used = min(c.activatedValue, await s.call(buck, "mintsBacked", [ids[i]]));
+        const deposit = await s.call(buck, "mintsPrincipal", [ids[i]]);
+        if (used && c.depreciatedFace && Number(c.premiumRate) * 10 < 10000)
+          amount += max(0n, used * c.depreciatedFace / c.faceValue * k / E18 - deposit);
+      }
+      if (!amount) break;
+      try {
+        await s.call(buck, "quoteBurn", [amount, ids]);
+        const r = await exec(proxy, buck, "burn", [amount, ids], "household:release", "either");
+        if (r.status !== "success") throw new Error(s.lastRevertReason || "coverage release reverted");
+      } catch (e) {
+        if (!String(e).includes("BUCK: insufficient coverage to unwind")) throw e;
+        agent.exitRetries += 1;
+        continue;
+      }
+      break;
+    }
+    let released = true;
+    for (const tid of ids) {
+      if ((await s.call(credit, "creditInfo", [tid]))[1] !== 0n
+          || await s.call(buck, "mintsBacked", [tid]) !== 0n
+          || await s.call(buck, "mintsPrincipal", [tid]) !== 0n) released = false;
+    }
+    agent.released = released;
+    return agent.released;
   };
   // Save in BUCK deposits (credit_households._save_or_pay_down): spare dollars buy BUCKs delivered to
   // the savings account (never the borrower's, where they would repay the lien), or `kept` borrowed
@@ -313,7 +353,8 @@ export function installHouseholdOps(world) {
   const emptyWallet = async (agent) => {
     if (!agent.wallet) return;
     const held = await s.call(buck, "balanceOf", [agent.wallet.address]);
-    if (held > 0n) await exec(agent.wallet, buck, "transfer", [world.holderAddress(agent.account), held], "household:wallet-out");
+    if (held > E6) await exec(agent.wallet, buck, "transfer", [world.holderAddress(agent.account), held - E6 / 2n],
+      "household:wallet-out");
   };
   world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire,
                        divest, saveBucks, tendWallet, emptyWallet };

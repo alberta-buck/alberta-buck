@@ -53,6 +53,8 @@ make nix-venv-economy-run CAMPAIGN=policy-check CELLS=policies JOBS=4
 make nix-venv-economy-plan CELLS=stress
 make nix-venv-economy-run CAMPAIGN=stress-check CELLS=stress JOBS=4
 make nix-venv-economy-report CAMPAIGN=baseline
+# Standalone diagnostics, including runs shorter than five years:
+make nix-venv-sim-report SIM_REPORT_VECTORS="build/sim/run.json"
 #+end_src
 
 =economy-smoke= uses the working tree and writes =build/sim/economy-smoke.{json,pdf}=.
@@ -108,6 +110,11 @@ Each campaign lives in =build/sim/economy/NAME/=:
 Five-year acceptance uses days 365--1826: mean absolute BVIB error below 1%, 99th-percentile
 error below 5%, K at least 0.05 inside its limits on 95% of days, and no continuous rail visit
 longer than 30 days. Household errors anywhere in the recorded run and unfunded exits fail.
+Insured-asset exits taking more than 30 days also fail, even if they eventually finish. A household
+reported as exited must have released its coverage and have no mortgage, net BUCK lien, activated
+credit limit, credit deposit or basket receipt remaining. The final account marks verify these
+conditions; daily =exit_started=, =exit_stage=, =exit_retries= and =exit_short= identify delays.
+Older vectors without exit telemetry cannot establish these newer checks retrospectively.
 Short or incomplete daily series cannot pass. A completed economic failure is valid evidence;
 investigate it rather than changing thresholds to make it green.
 
@@ -129,6 +136,13 @@ Those errors leave thirteen household instances unable to finish their asset sal
 repeated buying and selling through still-open credit. Repair exits before drawing policy rankings
 or treating these runs as release acceptance. The [[file:doc/review/household-release-readiness.org][October 26 review]] gives the measurements,
 contract-retirement candidates, missing shock coverage and ordered merge/release work.
+
+The October 26 exit repair refreshes the K-dependent release quote, verifies cancellation before
+marking it complete, and sells only positively owned BUCKs. Partial basket claims remain recorded
+until redeemed; a cash shortfall leaves settlement pending. Small positive execution reserves may
+remain (up to one BUCK per account and one dollar per pending TOKEN constituent); liabilities are
+not forgiven. The 315-day replay of the first historical failure now closes the affected household
+without errors. Fresh five-year evidence is still required; see the review's repair section.
 
 * Diagnostics and deliberate retirement
 

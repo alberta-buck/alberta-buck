@@ -28,6 +28,10 @@ export class CreditHouseholdAgent {
     this.walletBought = 0n;     // BUCKs bought for the working balance
     this.sold = false;          // the insured asset has been sold
     this.released = false;     // its coverage has been released
+    this.exitStarted = null;
+    this.exitStage = "";
+    this.exitRetries = 0;
+    this.exitShort = false;
     this.exited = false;
     this.withdrawnUsd = 0n;
     this.refusals = 0;
@@ -203,11 +207,16 @@ export class CreditHouseholdAgent {
     const r = await world.households.redeemToRetire(this, rid);
     if (r.refused) { this.refusals += 1; return null; }
     if (!r.redeemed) return null;
-    const b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
-    this.receipts = this.receipts.filter((x) => x !== rid);
-    this.book.delete(rid);
-    this.basketPrincipal -= b.principal; this.shares -= b.shares; this.unwound += r.repaid;
+    this.unwound += r.repaid;
     return r.repaid;
+  }
+
+  // Called immediately after each successful redemption: a partial claim remains retryable.
+  settleReceipt(rid, principal, shares) {
+    const old = this.book.get(rid);
+    this.basketPrincipal += principal - old.principal; this.shares += shares - old.shares;
+    if (principal || shares) this.book.set(rid, { principal, shares });
+    else { this.book.delete(rid); this.receipts = this.receipts.filter((x) => x !== rid); }
   }
 
   // Record a BUCK deposit's receipt (the result of households.depositBuck).
@@ -283,12 +292,6 @@ export class CreditHouseholdAgent {
 
   async withdraw(world) {
     const r = await world.households.withdraw(this);
-    for (const rid of r.redeemed) {
-      const b = this.book.get(rid) ?? { principal: this.basketPrincipal, shares: this.shares };
-      this.book.delete(rid);
-      this.receipts = this.receipts.filter((x) => x !== rid);
-      this.basketPrincipal -= b.principal; this.shares -= b.shares;
-    }
     if (r.refused) this.refusals += 1;
     this.withdrawnUsd += r.usd;
     if (!r.left && !this.receipts.length) this.exited = true;
@@ -300,26 +303,24 @@ export class CreditHouseholdAgent {
   // sells the same asset on the same day.
   async divest(world) {
     const ops = world.households;
+    this.fundingPending = false;
     if (!this.sold) {
-      this.sold = true;
+      this.exitStage = "sell-asset";
       await world.fiatIn(this.account, this.face, { tag: "household:sale" });
+      this.sold = true;
       this.hypoCash += this.face;
-      let paid = await ops.pay(this.account, this.mortgage, "household:retire-external");
-      this.mortgage -= paid; this.externalPaid += paid;
-      paid = min(this.hypoMortgage, this.hypoCash);
+      const paid = min(this.hypoMortgage, this.hypoCash);
       this.hypoCash -= paid; this.hypoMortgage -= paid; this.hypoPaid += paid;
-      await ops.emptyWallet(this);    // the working balance goes to the lien first
     }
+    this.exitStage = "settle-mortgage";
+    const paid = await ops.pay(this.account, this.mortgage, "household:retire-external");
+    this.mortgage -= paid; this.externalPaid += paid;
+    this.exitStage = "collect-savings";
+    await ops.emptyWallet(this);    // retry if collection failed on an earlier day
     const r = await ops.divest(this);
-    for (const rid of r.redeemed ?? []) {
-      const b = this.book.get(rid) ?? { principal: 0n, shares: 0n };
-      this.book.delete(rid);
-      this.receipts = this.receipts.filter((x) => x !== rid);
-      this.basketPrincipal -= b.principal; this.shares -= b.shares;
-    }
     this.unwound += r.bought ?? 0n;
     if (r.refused) this.refusals += 1;
-    if (r.done) this.exited = true;
+    if (r.done) { this.exited = true; this.exitStage = "complete"; }
   }
 
   async record(world, day) {
@@ -339,6 +340,8 @@ export class CreditHouseholdAgent {
       receipts: this.receipts.length, policy: this.p.surplus_policy, role: this.p.role,
       action: this.lastAction, issueAction: this.lastIssue, surplusAction: this.lastSurplus,
       fundingPending: this.fundingPending, exited: this.exited, withdrawnUsd: this.withdrawnUsd,
+      exitStarted: this.exitStarted, exitStage: this.exitStage, exitRetries: this.exitRetries,
+      exitShort: this.exitShort, released: this.released,
       wallet: s.wallet, walletBought: this.walletBought,
       refusals: this.refusals,
       error: this.lastError, decision: this.lastVerdict });
@@ -355,7 +358,8 @@ export class CreditHouseholdAgent {
     if (this.divestDay !== null && day >= this.divestDay) {
       // Selling the asset is worked every day until the lien is cleared and the household leaves.
       this.lastError = ""; this.lastAction = "divest";
-      try { await this.divest(world); } catch (e) { this.lastError = String(e).slice(0, 200); }
+      this.exitStarted ??= day;
+      try { await this.divest(world); } catch (e) { this.lastError = `${this.exitStage}: ${e}`.slice(0, 200); }
     } else if (day >= this.nextDecision) {
       this.nextDecision += (Math.floor((day - this.nextDecision) / this.p.decision_days) + 1) * this.p.decision_days;
       this.lastError = "";

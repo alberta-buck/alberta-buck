@@ -81,6 +81,16 @@ def test_judge_passes_a_steady_world_and_fails_a_railed_or_drifting_one(tmp_path
     assert judged(broken)["errors"] == 1 and not judged(broken)["passed"]
     assert not judged(steady[:30])["passed"] and not judged(steady[:30])["full_horizon"]
     assert not judged(steady[:400] + steady[401:])["passed"], "missing daily data is not five-year acceptance"
+    stalled                     = steady[:]
+    stalled[431]                = frame(431, 1., .75, octl=[dict(member="seller", exit_started=400, exited=False)])
+    assert judged(stalled)["exit_overdue"] == ["seller"] and not judged(stalled)["passed"]
+    # Clearing the error, or falsely claiming to have exited, cannot turn stranded credit green.
+    stranded                    = steady[:-1] + [frame(1826, 1., .75, octl=[dict(member="seller", role="debtor",
+                                    exit_started=400, exited=True, released=True, limit=100e6)])]
+    assert judged(stranded)["exit_invalid"] == ["seller"] and not judged(stranded)["passed"]
+    recent                      = steady[:-1] + [frame(1826, 1., .75, octl=[dict(member="seller", role="debtor",
+                                    exit_started=1820, exited=False)])]
+    assert judged(recent)["passed"], "an exit still within its settlement window is not overdue"
 
 
 def test_policy_comparisons_and_seed_selection_are_explicit():

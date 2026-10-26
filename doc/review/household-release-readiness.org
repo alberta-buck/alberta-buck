@@ -10,11 +10,13 @@ band in all sixteen worlds. That is useful evidence, but some of those worlds co
 buy/sell flows from households whose asset sales never finish.
 
 Keep =adaptive= as the agreed behavioral default. It is not an established performance winner.
-The next implementation should repair exits in Python and JavaScript, then remove the old machine
-from the deployment path. Retire legacy contracts with their callers and replacement checks,
-rather than carrying another complete legacy economy into the release.
+The exit repair below is implemented in Python and JavaScript; fresh five-year validation remains
+required. Next remove the old machine from the deployment path. Retire legacy contracts with
+their callers and replacement checks, rather than carrying another complete legacy economy into
+the release.
 
-This assessment is of =feature/household-economy= at =c7ef815=. It supplements the current
+The original assessment is of =feature/household-economy= at =c7ef815=; the repair section records
+the subsequent work. It supplements the current
 [[file:household-economy-plan.org][household plan]]; older merge checklists describe earlier casts and package states. No merge,
 push, tag, package publication or hosted-service update was performed for this review.
 
@@ -55,7 +57,7 @@ All thirteen error observations say =BUCK: insufficient coverage to unwind=. The
 the affected member's scheduled asset sale. All thirteen affected member instances remain
 unexited at day 1826, retaining a combined 2.94 million BUCK of credit limits.
 
-The relevant sequence exists in both implementations:
+The defective sequence in both implementations at =c7ef815= was:
 
 1. [[file:../../alberta_buck/sim/credit_households.py][CreditHouseholdAgent._divest]] and
    [[file:../../core/js/src/agents/household-ops.js][household-ops divest]] set =released= before attempting the coverage burns.
@@ -75,13 +77,13 @@ Some error frames display an older action such as =save= or =pay-down=: account 
 labels are cached for five days, while the error is sampled daily. The displayed action is not
 a reliable call-site trace. Record the failing operation and its arguments with the error.
 
-Required repair and regression coverage:
+Repair requirements identified in the original review:
 
 - Release is complete only after verifying the remaining activated coverage and deposit. Retry
   a refused release from fresh state; do not mark a failed attempt complete.
 - Refresh/quote the controller-dependent burn amount. =Buck._burnAllocated= calls =compute()=
   before sizing release, whereas the agent estimates from an earlier limit and subtracts 0.1%.
-  A K change between sizing and execution is a candidate trigger, not yet a reproduced cause.
+  A K change between sizing and execution was the suspected trigger; the replay below confirms it.
 - Sell only positively owned BUCKs when closing an account. An exiting household must not create
   fresh liability to sell; check lien, coverage, deposits and receipts before declaring it gone.
 - Test a K change during release, a failed first release, aged insurance refunds, and a partial
@@ -92,6 +94,70 @@ Required repair and regression coverage:
 
 These are agent/account-management findings. The error is not, by itself, proof that the Buck
 contract's coverage check is wrong. Do not weaken it or classify this error as harmless slippage.
+
+** Exit repair and reproduced cause (October 26)
+
+The exact first failure is reproducible with the frozen historical source: seed 45517, history,
+=retire=, member =0/debtor/10=, day 289. K changes inside the release transaction from
+0.811122133739745280 to 0.809028911545070080. The agent asks to unwind 87,174.500095 BUCK;
+capacity at the transaction's K is only 87,013.288510, a 161.211585 BUCK shortfall. The old
+0.1% allowance does not cover the movement. The contract correctly rejects the stale amount.
+
+The household defect is a settlement bookkeeping error, not a rational refusal to pay an
+expensive BUCK liability. A household can choose when to repay while keeping its insured asset.
+Once it sells that asset, it must settle the secured obligations before leaving. It cannot treat
+unused borrowing capacity as sale proceeds or silently assume cancellation succeeded.
+
+Both engines now follow the same settlement sequence:
+
+1. Record the asset sale only after receiving its proceeds, and pay the external mortgage.
+2. Collect the payment wallet and redeem savings, retaining partial receipt claims. Sell TOKENs
+   in bounded trades. Successful redemptions update the books immediately, so a later failure
+   cannot make a retry redeem a destroyed receipt or discard a remaining claim.
+3. Buy back the actual BUCK lien from available cash, with bounded market impact. Settlement is
+   required regardless of the discretionary surplus policy or the BUCK's premium/discount.
+4. Refresh K and quote the exact per-credit release amount, including depreciation and deposit
+   accounting. A stale-coverage rejection gets a fresh quote and up to two attempts per day.
+   Other errors remain visible. Verify zero activated coverage, backing and deposit before
+   setting =released=; otherwise try again the next day.
+5. Sell only positive =signedBalanceOf= BUCKs. Negative balances return to repayment. Mark the
+   household exited only after settlement completes; exhausted cash leaves it pending and
+   records a shortfall. Small positive execution reserves remain recorded, not forgiven debts.
+
+An aged JavaScript exit also exposed full-balance transfers racing demurrage between reading and
+execution. Savings and payment-wallet collections now retain half a BUCK when transferring a
+balance larger than one BUCK. The final sale uses the same existing allowance. Pending TOKEN
+liquidation leaves at most one dollar per constituent. JavaScript expected-success proxy calls
+now use the session's actual =ok= mode, so a failed transfer is reported instead of ignored.
+
+Daily telemetry includes the exit start, current stage, release retries, shortfall and confirmed
+release/completion. The campaign judge rejects asset-sale settlements pending for more than
+30 days and completed accounts with obligations or claims left. The 30-day threshold reports
+slow settlement; it never forces liquidation, deletes a claim or forgives a liability. These
+checks require the new telemetry and cannot be inferred from old vectors lacking it.
+
+The matched 315-day replay closes the formerly affected household on day 290, six days after
+the sale begins, with no household errors. Its final mortgage, lien, credit limit, credit deposit
+and receipt count are all zero. The original run remains unexited at day 314 with 96,728.713108
+BUCK of credit limit and 9,021.485813 BUCK of deposit. Total exit buybacks over this window fall
+from 270,925.870740 to 88,654.480714 BUCK. This confirms removal of the repeated borrowing and
+repayment in this case; it is not five-year equilibrium acceptance.
+
+Evidence: [[file:../../build/sim/exit-repair-index.html][before/after PDFs and vectors]],
+[[file:../../build/sim/exit-repair-audit.json][account audit]], and
+[[file:../../build/exit-trigger.log][historical trigger trace]]. The replay uses the working-tree repair;
+long comparisons must use a new committed snapshot. The original frozen campaign is unchanged.
+
+Regression coverage exercises an actual K change between quote and burn, aged refunds, repeated
+release failures without fresh borrowing, partial redemptions, and insufficient settlement cash.
+The Python cases cover both basket interfaces; JavaScript exercises the live machine and both
+population/accounting paths. Current validation results and campaign status are in the
+[[file:household-economy-plan.org][household ledger]]. No contract coverage guard was weakened.
+
+Remaining realism limits are explicit: an insured asset still sells at its modeled face price,
+and an unfunded exit has no foreclosure/default waterfall. A zero net release capacity can leave
+coverage pending, which the new acceptance detects. Those are separate scenarios/API questions
+if fresh runs expose them; they are not reasons to fabricate cash or declare an exit complete.
 
 ** What the policy comparison does and does not establish
 

@@ -186,6 +186,110 @@ def test_divesting_household_sells_clears_its_lien_releases_coverage_and_leaves(
     assert abs(st["nw"] - st["hypo"]) < .15 * a._face0
 
 
+@pytest.mark.parametrize("aged_days", [0, 365])
+def test_exit_requotes_after_k_moves_and_closes_every_credit(household_world, monkeypatch, aged_days):
+    d, scenario, make           = household_world
+    a                           = make(cash_k=30, max_impact_bp=2000, surplus_policy="basket")
+    a.act(d, scenario, 0, 0, {})
+    if aged_days:
+        now                     = d.w3.eth.get_block("latest")["timestamp"]
+        d.anvil.set_next_block_timestamp(now + aged_days * 86400)
+        d.anvil.mine()
+    original                    = a._proxy_exec
+    selector                    = d.buck.encode_abi("burn(uint256,uint256[])", args=[0, []])[:10]
+    failures                    = []
+    changed                     = False
+    def moving_k(d, target, data, **kwargs):
+        nonlocal changed
+        if target == d.buck.address and data[:10] == selector and not changed:
+            changed             = True
+            k                   = d.kctrl.functions.buckK().call() * 99 // 100
+            d.chain.send(d.kctrl.functions.setRails(0, k), sender=d.gov)
+            try:
+                return original(d, target, data, **kwargs)
+            except Exception as exc:
+                failures.append(str(exc))
+                raise
+        return original(d, target, data, **kwargs)
+    monkeypatch.setattr(a, "_proxy_exec", moving_k)
+    a._divest_day               = 1
+    for day in range(1, 80):
+        a.act(d, scenario, day, 0, {})
+        assert not a.last_error
+        if a.exited:
+            break
+    assert len(failures) == 1 and "insufficient coverage to unwind" in failures[0]
+    assert a.exit_retries == 1 and a.exited and a._released
+    assert d.buck.functions.signedBalanceOf(a.proxy.address).call() >= 0
+    assert all(d.credit.functions.creditInfo(t).call()[1] == 0
+               and d.buck.functions.mintsPrincipal(t).call() == 0 for t in a._token_ids)
+
+
+def test_failed_release_keeps_exit_open_and_never_sells_credit(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    a                           = make(max_impact_bp=2000, surplus_policy="retire")
+    a.act(d, scenario, 0, 0, {})
+    original                    = a._release_coverage
+    attempts                    = []
+    def unavailable(d):
+        attempts.append(d.buck.functions.signedBalanceOf(a.proxy.address).call())
+        raise RuntimeError("release unavailable")
+    monkeypatch.setattr(a, "_release_coverage", unavailable)
+    a._divest_day               = 1
+    for day in range(1, 20):
+        a.act(d, scenario, day, 0, {})
+    assert len(attempts) > 1 and all(s >= 0 for s in attempts)
+    assert not a.exited and not a._released
+    assert a.last_error.startswith("release-coverage:")
+    assert d.buck.functions.creditLimit(a.proxy.address).call() > M6
+    assert d.buck.functions.signedBalanceOf(a.proxy.address).call() >= 0
+    monkeypatch.setattr(a, "_release_coverage", original)
+    for day in range(20, 40):
+        a.act(d, scenario, day, 0, {})
+        if a.exited:
+            break
+    assert a.exited and a.exit_stage == "complete"
+
+
+def test_exit_without_settlement_cash_is_not_reported_complete(household_world):
+    d, scenario, make           = household_world
+    a                           = make()
+    a.act(d, scenario, 0, 0, {})
+    a._pay_bank(d, d.chain.balance_of(d.usdc, a.proxy.address))
+    a._sold                     = True                  # asset proceeds exhausted by other obligations
+    a._divest_day               = 1
+    ctr                         = {}
+    a.act(d, scenario, 1, 0, ctr)
+    a.act(d, scenario, 2, 0, ctr)
+    assert a.exit_short and not a.exited and not a._released
+    assert ctr["hhDivestShort"] == 1 and "hhDivested" not in ctr
+
+
+def test_exit_keeps_a_partially_redeemed_claim(household_world, monkeypatch):
+    d, scenario, make           = household_world
+    a                           = make(CreditSaverAgent, carry_utilization=.3, surplus_policy="basket",
+                                       max_impact_bp=2000)
+    a.act(d, scenario, 0, 0, {})
+    assert a._basket_receipts
+    original                    = a._proxy_exec
+    selector                    = d.basket.encode_abi("redeem(uint256,uint256,uint256)", args=[0, 0, 0])[:10]
+    partial                     = True
+    def redeem_half(d, target, data, **kwargs):
+        if partial and target == d.basket.address and data[:10] == selector:
+            rid                 = int(data[10:74], 16)
+            data                = d.basket.encode_abi("redeem(uint256,uint256,uint256)", args=[rid, 5000, 0])
+        return original(d, target, data, **kwargs)
+    monkeypatch.setattr(a, "_proxy_exec", redeem_half)
+    before                      = a._basket_in
+    assert not a._redeem_all(d, {}), "a successful partial redemption is not a completed withdrawal"
+    assert a._basket_receipts and 0 < a._basket_in < before
+    partial                     = False
+    for _ in range(30):
+        if a._redeem_all(d, {}):
+            break
+    assert not a._basket_receipts and a._basket_in == a._basket_shares == 0
+
+
 def test_adaptive_policy_saves_in_buck_deposits_and_pays_down_at_a_discount(household_world, monkeypatch):
     d, scenario, make           = household_world
     a                           = make(cash_k=60, surplus_policy="adaptive", max_impact_bp=400)

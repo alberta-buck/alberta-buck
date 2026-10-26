@@ -329,6 +329,14 @@ def judge(vector: Path) -> dict:
     members                     = [a for a in last.get("octl", []) if "member" in a]
     # A later successful decision must not erase an earlier recorded household error.
     errors                      = sum(bool(a.get("error")) for f in frames for a in f.get("octl", []))
+    overdue                     = {a["member"] for f in frames for a in f.get("octl", [])
+                                   if a.get("exit_started") is not None and not a.get("exited")
+                                   and f["day"] - a["exit_started"] > 30}
+    # Account marks can be cached; use the final fresh marks for the settlement audit.
+    invalid                     = [a["member"] for a in members if a.get("exit_started") is not None
+                                   and a.get("exited") and (not a.get("released") or a.get("mortgage", 0)
+                                   or a.get("limit", 0) or a.get("deposit", 0)
+                                   or a.get("drawn", 0) - a.get("jub", 0) > 0 or a.get("basket_receipts", 0))]
     drawn                       = {r: sum(a.get("drawn", 0) for a in members if a.get("role") == r) / 1e12
                                    for r in ("debtor", "saver")}
     pop                         = last.get("pop") or {}
@@ -347,9 +355,11 @@ def judge(vector: Path) -> dict:
         divested=last.get("hh_divested", 0), divest_bought=last.get("hh_divest_bought", 0) / 1e12,
         paid_down=last.get("hh_paid_down", 0) / 1e12,
         divest_short=last.get("hh_divest_short", 0),
+        exit_overdue=sorted(overdue), exit_invalid=invalid,
         k_factor=sum(f["pop"].get("k_factor", 1) for f in window if f.get("pop")) / max(1, len(multipliers)))
     result["passed"]            = (result["full_horizon"] and result["mean_err"] < .01 and result["p99_err"] < .05
-                                   and interior >= .95 and longest <= 30 and errors == 0 and result["divest_short"] == 0)
+                                   and interior >= .95 and longest <= 30 and errors == 0 and result["divest_short"] == 0
+                                   and not overdue and not invalid)
     return result
 
 
@@ -382,7 +392,8 @@ def report(args) -> int:
             f'<td>{dr["debtor"]:.1f} / {dr["saver"]:.1f}</td><td>{r["investor_deposits"]:.1f}</td>'
             f'<td>{a["debtor"]} / {a["saver"]} / {a["investor"]}</td>'
             f'<td>{(r["supply_multiplier"] or 0):.2f} / {(r["demand_multiplier"] or 0):.2f}</td>'
-            f'<td>{r["errors"]}</td><td>{r["refused"]}</td></tr>')
+            f'<td>{r["errors"]}</td><td>{r["refused"]}</td>'
+            f'<td>{len(r["exit_overdue"])} / {len(r["exit_invalid"])}</td></tr>')
     passed                      = sum(r["passed"] for r in results)
     (base / "index.html").write_text(f'''<!doctype html><html lang="en"><meta charset="utf-8">
 <title>Household economy: {escape(args.campaign)}</title>
@@ -394,6 +405,7 @@ td:nth-child(n+3){{text-align:right}}tr.fail td:nth-child(3){{color:#b00020;font
 <p>{len(results)} completed runs; {passed} pass. Measured from day {MEASURED_FROM}. A run passes when the basket's
 price in BUCKs averages within 1% of one with its 99th percentile within 5%, K stays at least 0.05 inside its rails
 on 95% of days and never sits at a rail for more than 30 days running, and no household records an error.
+Recorded asset-sale exits must settle within 30 days, with no unfunded or falsely completed exit.
 Cells are named s&lt;supply&gt;-d&lt;demand&gt;-&lt;prices&gt;-&lt;seed&gt;: supply scales the debtors' and
 savers' arrival rates, demand the pace of adopting BUCK working balances, by 1/3 (lo), 1 (mid) or 3 (hi).
 Demand changes how soon the balance is held, not its eventual size. SMOKE runs are shorter than five years
@@ -401,7 +413,7 @@ and do not establish equilibrium acceptance. Errors count recorded household obs
 <table><thead><tr><th>Run (PDF)</th><th>Data</th><th>Result</th><th>Mean |bvib-1|</th><th>99th pct</th>
 <th>K interior</th><th>Days at a rail</th><th>K min / max / end</th><th>Supply (M)</th>
 <th>Drawn: debtors / savers (M)</th><th>Investor deposits (M)</th><th>Arrived d / s / i</th>
-<th>Multiplier s / d</th><th>Errors</th><th>Refusals</th></tr></thead><tbody>
+<th>Multiplier s / d</th><th>Errors</th><th>Refusals</th><th>Exits overdue / invalid</th></tr></thead><tbody>
 {chr(10).join(rows)}
 </tbody></table></html>
 ''')

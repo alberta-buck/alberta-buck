@@ -345,6 +345,29 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-26: repaired collateralized-household exits in Python and JavaScript. Reproduced the
+  first historical failure on day 289: K moves 0.811122 to 0.809029 inside the burn, leaving
+  the old quote 161.211585 BUCK above available cancellation capacity. Both agents now refresh
+  K, quote per-credit capacity, retry stale quotes, and verify zero coverage/backing/deposit
+  before confirming release. Closing sells only positive signed BUCKs, retains partial basket
+  claims, and leaves unfunded settlement pending. Small transfer reserves accommodate demurrage;
+  failed JavaScript proxy transfers are now reported. Daily exit stages and acceptance catch
+  overdue (>30-day) and falsely completed exits. The [[file:household-release-readiness.org][repair analysis]] explains the settlement
+  behavior and the remaining asset-price/default assumptions.
+  In the matched 315-day replay, member =0/debtor/10= exits on day 290 with no mortgage, lien,
+  credit limit, deposit or receipt left; there are no household errors. Exit buybacks fall
+  from 270,925.870740 to 88,654.480714 BUCK. Both vectors have matching six-page PDFs at
+  =build/sim/exit-repair-index.html=. =make nix-venv-sim-report SIM_REPORT_VECTORS="..."= now
+  renders standalone saved vectors; =economy-report= remains the campaign acceptance view.
+  Validation: =make nix-venv-test-python= passes 1,142 tests, five skipped; the focused Python
+  household/runner set passes 75. JS live accounting cases pass; both live population cases
+  pass, and the new exit regression passes with an aged refund, partial receipt, K movement,
+  failed release/verification and cash shortfall. Final sandbox build passes. Logs are under
+  =build/exit-repair-*.log=. No Solidity change; the coverage guard remains intact.
+  Re-run all sixteen policy comparisons from the committed repair:
+  =make nix-venv-economy-run CAMPAIGN=exit-repair-20261026 CELLS=policies JOBS=2=.
+  This short replay does not establish five-year acceptance; adaptive remains the agreed
+  behavioral default, and the issuance/surplus policy confound remains a separate follow-up.
 - 2026-10-26: the =c7ef815= policy campaign completed all 16 five-year worlds with matching
   PDFs; six pass. All meet price tolerances. The four retirement-only worlds fail K headroom;
   nine worlds record thirteen coverage-release errors. Every affected household instance is

@@ -25,6 +25,7 @@ help:
 	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
 	  '  make nix-venv-economy-run CAMPAIGN=my-run CELLS=centre JOBS=2' \
 	  '  make nix-venv-economy-report CAMPAIGN=my-run  # saved JSON -> PDFs and index' \
+	  '  make nix-venv-sim-report SIM_REPORT_VECTORS="build/sim/run.json"  # standalone PDFs' \
 	  '  make nix-venv-economy-test          # model, shared policy and runner regressions' \
 	  '  make nix-venv-control-lab-plan      # diagnostic stages; separate from economic acceptance' \
 	  'Interactive views (README-sandboxes.org):' \
@@ -753,6 +754,17 @@ economy-test: sim-build core-build-py core-build-wasm
 	python -m pytest alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
 		alberta_buck/test/test_economy.py $(PYTEST_ARGS)
 	cd core/js && node --test test/household-policy.test.js test/credit-household.tevm.test.js
+
+# Render saved standalone vectors, including short diagnostics, without starting an EVM.
+# SIM_REPORT_VECTORS accepts a space-separated list or shell glob; PDFs are adjacent to JSON.
+# Use economy-report for a campaign's acceptance index and summary.
+SIM_REPORT_VECTORS ?=
+SIM_REPORT_INDEX ?=
+.PHONY: sim-report
+sim-report:
+	@test -n "$(SIM_REPORT_VECTORS)" || { echo 'Set SIM_REPORT_VECTORS to saved JSON paths'; exit 2; }
+	python -m alberta_buck.sim.report $(SIM_REPORT_VECTORS) --jobs $(JOBS) \
+		$(if $(SIM_REPORT_INDEX),--index "$(SIM_REPORT_INDEX)")
 
 # Two-step Solidity build:
 #  (1) v3 profile: compile 0.7.6 Uniswap V3 core contracts without via_ir.
