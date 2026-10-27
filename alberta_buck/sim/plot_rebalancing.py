@@ -59,6 +59,25 @@ def _i(v):
     return int(v)
 
 
+def household_position(frame):
+    """Open household basket basis, marked value and return in BUCK; never invent a missing mark."""
+    people = [a for a in frame.get("octl", []) if a.get("member") and a.get("active")]
+    positions = [a for a in people if a.get("basket_at_risk", a.get("basket", 0))]
+    basis = sum(a.get("basket_at_risk", a.get("basket", 0)) for a in positions)
+    marked = (sum(a["basket_mark"] for a in positions)
+              if all(a.get("basket_mark") is not None for a in positions) else None)
+    roi = (marked - basis) / basis if basis and marked is not None else None
+    return basis, marked, roi
+
+
+def machine_weights(frame, count):
+    """Actual response allocation and machine target; None means the observation is unavailable."""
+    actual, target = frame.get("eq_w"), frame.get("eq_lean")
+    if actual is None or target is None or len(actual) != count or len(target) != count:
+        return [(None, None)] * count
+    return [(a / 10000, t / 10000) for a, t in zip(actual, target)]
+
+
 def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     cache_dir = Path(os.environ.get("TMPDIR", "/tmp")) / "alberta-buck-mpl"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +94,8 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     dec = d.get("decimals", [18, 8, 18])
     fr = d["frames"]
     days = [f["day"] for f in fr]
+    machine = d.get("meta", {}).get("run", {}).get("basket") == "equity-machine"
+    households = any(a.get("member") for f in fr for a in f.get("octl", []))
 
     def col(key, t):
         return [f.get(key, [])[t] for f in fr]
@@ -143,8 +164,8 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
                 "tab:red", "tab:purple", "tab:brown"]
     handles = []
     for t in range(nt):
-        aw = [f.get("poolWeights", [[0, 0]] * nt)[t][0] for f in fr]
-        tw = [f.get("poolWeights", [[0, 0]] * nt)[t][1] for f in fr]
+        aw = [(machine_weights(f, nt)[t][0] if machine else f.get("poolWeights", [[0, 0]] * nt)[t][0]) for f in fr]
+        tw = [(machine_weights(f, nt)[t][1] if machine else f.get("poolWeights", [[0, 0]] * nt)[t][1]) for f in fr]
         cw = colors_w[t % len(colors_w)]
         l1, = ax.plot(days, aw, color=cw, linewidth=1.4,
                       label=f"{names[t]} actual")
@@ -156,7 +177,8 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     ax.set_ylabel("value weight")
     ax.legend(handles=handles, loc="upper left", fontsize=7, ncol=2)
     ax.grid(True, alpha=0.3)
-    ax.set_title("TOKEN/BUCK pool value weights: actual vs basket target")
+    ax.set_title("Basket response allocation vs machine target (includes idle TOKEN)" if machine
+                 else "TOKEN/BUCK pool value weights: actual vs legacy target")
 
     # ---- Panel 5: treasury compounding (NAV, outstanding, treasury) -- #
     ax = axes[nt + 1]
@@ -476,6 +498,28 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
                  f"treasury {pct(treasury_apr[-1])} APR, demand leg "
                  f"{pct(basketeer[-1])} basketeer / {pct(holder[-1])} holder")
 
+    if households:
+        # The older direct-mint APR above has no household denominator. Show the live open
+        # receipt book instead: basis follows deposits/redemptions, so this is not a realized APR.
+        ax.clear()
+        ax2.remove()
+        positions = [household_position(f) for f in fr]
+        basis = [p[0] / 1e12 for p in positions]
+        marked = [p[1] / 1e12 if p[1] is not None else float("nan") for p in positions]
+        returns = [100 * p[2] if p[2] is not None else float("nan") for p in positions]
+        ax.plot(days, returns, color="tab:blue", label="open-position mark return (%)")
+        ax.axhline(0, color="black", alpha=.25, linewidth=.8)
+        ax.set_ylabel("Mark-to-market return (%)")
+        ax.set_xlabel("Day")
+        ax.grid(True, alpha=.3)
+        ax2 = ax.twinx()
+        ax2.plot(days, basis, color="tab:orange", label="open capital at risk (M BUCK)")
+        ax2.plot(days, marked, color="tab:green", label="open share mark (M BUCK)")
+        ax2.set_ylabel("Million BUCK")
+        lines = ax.get_lines()[:1] + ax2.get_lines()
+        ax.legend(lines, [line.get_label() for line in lines], loc="upper left", fontsize=7)
+        ax.set_title("Household basket positions: current mark vs remaining basis, before exit costs")
+
     fig.tight_layout()
     if pdf is None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -513,12 +557,18 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     print(f"  Treasury BUCK: {tb_final:,.2f}  "
           f"share of NAV: {ts_final:.2f}%  "
           f"treasury ROI: {treasury_roi_final:.2f}%")
-    print(f"  realized depositor return: {pct(realized_apr[-1])} APR "
-          f"(${last.get('dmProfitUsd', 0) / E6:,.0f} booked over "
-          f"{last.get('dmRoundTrips', 0)} redeemed round-trips)")
-    print(f"  treasury return: {pct(treasury_apr[-1])} APR")
-    print(f"  ... both on ${dollar_days[-1] / E6:,.0f} dollar-days "
-          f"of capital-at-risk")
+    if households:
+        risk, mark, roi = household_position(last)
+        print(f"  household open basket basis: {risk/E6:,.2f} BUCK, "
+              f"mark: {mark/E6 if mark is not None else 'n/a'}, "
+              f"return: {pct(100*roi) if roi is not None else 'n/a'}")
+    else:
+        print(f"  realized depositor return: {pct(realized_apr[-1])} APR "
+              f"(${last.get('dmProfitUsd', 0) / E6:,.0f} booked over "
+              f"{last.get('dmRoundTrips', 0)} redeemed round-trips)")
+        print(f"  treasury return: {pct(treasury_apr[-1])} APR")
+        print(f"  ... both on ${dollar_days[-1] / E6:,.0f} dollar-days "
+              f"of capital-at-risk")
     print(f"  [directMintPnl {dm_roi_final:.2f}% of gross deposits / "
           f"{pct(dm_apr[-1])} APR -- ARTIFACT: the DM agents mint the USDC "
           f"they spend, so value is still conjured at the purchase site]")
@@ -539,9 +589,11 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     dp_final = last.get("directMintPnl", 0) / E6
     print(f"  rebalancer P&L: ${rp_final:,.0f}  "
           f"direct-mint P&L: ${dp_final:,.0f}")
-    pw = last.get("poolWeights", [[0, 0]] * nt)
+    pw = machine_weights(last, nt) if machine else last.get("poolWeights", [[0, 0]] * nt)
     for t in range(nt):
         aw, tw = pw[t]
+        if aw is None or tw is None:
+            continue
         dev = (aw - tw) * 100
         print(f"  {names[t]:5s}  weight actual={aw:.4f} target={tw:.4f}  "
               f"deviation {dev:+.2f}%")

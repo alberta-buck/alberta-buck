@@ -47,6 +47,12 @@ def household_summary(states):
                basket_mark=sum(a["basket_mark"] if a.get("basket_mark") is not None else a["basket"] for a in active),
                mark_basis="shares" if all(a.get("basket_mark") is not None or not a["basket"] for a in active)
                else "principal fallback")
+    positions                   = [a for a in active if a.get("basket_at_risk", 0)]
+    basis                       = sum(a["basket_at_risk"] for a in positions)
+    marked                      = (sum(a["basket_mark"] for a in positions)
+                                   if all(a.get("basket_mark") is not None for a in positions) else None)
+    out.update(basket_at_risk=basis, basket_mtm=marked,
+               basket_roi=(marked - basis) / basis if basis and marked is not None else None)
     return out
 
 
@@ -646,6 +652,8 @@ class Snapshotter:
             if cs:
                 for k in fat:
                     fat[k] += cs.get(k, 0)
+        # Read the share mark once per frame, then mark each live household's in-memory shares.
+        eqsave = _eqsave_frame(d, ctr)
         # Optimal-control debtors: per-agent net worth + counterfactual (the
         # strategy-comparison observability; a handful of small dicts/frame).
         # Agents with an OCTL_STRIDE (households, whose decisions come days apart) are read every
@@ -664,7 +672,9 @@ class Snapshotter:
                 st = held[id(ag)]
                 if st:
                     # Lifecycle and errors are in memory: sample them even between account marks.
-                    octl.append(st | ag.exit_state() if hasattr(ag, "exit_state") else st)
+                    if hasattr(ag, "exit_state"):
+                        st = st | ag.exit_state() | ag.basket_position(eqsave.get("eq_share_price"))
+                    octl.append(st)
         # Discount-BUCK time arbs (holder/basketeer A/B): per-agent
         # inventory so PnL and parked positions chart per frame.
         arbs2 = []
@@ -1008,7 +1018,7 @@ class Snapshotter:
             # present; see _wp14_frame above).
             **_wp14_frame(d, ctr),
             **_t15_frame(ctr),
-            **_eqsave_frame(d, ctr),
+            **eqsave,
             **{k: v for k, v in ctr.items() if k.startswith(("wh_", "shk_", "dk_"))},
         })
         if ag_t:

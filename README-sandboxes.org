@@ -24,6 +24,13 @@ the Savings tab. Its browser test exercises identity, payment, credit and reload
 
 * Savings sandbox
 
+The household-position selector shows each arrived household's remaining open basket basis,
+its current BUCK share mark and marked ROI. The return is the mark divided by remaining basis
+less one, before exit costs; it excludes closed receipts. The aggregate chart shows the same
+open basis and marks for households together. The personal savings receipts also show their
+on-chain BUCK basis and share mark. A pro-rata receipt without an equity share mark is shown
+as unavailable rather than assigned an invented return.
+
 #+begin_src sh
 make nix-venv-sim-savings SIM_SAVINGS_PORT=8981
 #+end_src

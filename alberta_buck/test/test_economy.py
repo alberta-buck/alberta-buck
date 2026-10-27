@@ -53,6 +53,8 @@ def test_a_short_economy_runs_to_its_closing_summary(monkeypatch):
     finally:
         rng.set_mode(mode)
     assert summary is not None
+    assert all(abs(actual - declared) < 200 for actual, declared in zip(frames[0]["eq_w"], frames[0]["eq_decl"])), \
+        "the economy opens near its declared basket allocation"
     assert any(a.get("error") == "transient" for a in frames[1]["octl"]), "errors between chain marks survive"
     assert all(not a.get("error") for a in frames[2]["octl"])
 

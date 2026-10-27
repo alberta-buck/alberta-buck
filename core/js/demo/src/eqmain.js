@@ -178,6 +178,9 @@ function renderDebtors() {
     `<div class="card"><b>${row.name}</b><br>` +
     `mortgage $${USD(row.mortgage)} (untouched: $${USD(row.hypo)})<br>` +
     `credit drawn $${USD(row.drawn)} · banked $${USD(row.banked)}<br>` +
+    `basket capital at risk ${USD(row.basketAtRisk)} BUCK · mark ` +
+    `${row.basketMark === null ? "unavailable" : `${USD(row.basketMark)} BUCK`} · ` +
+    `marked return ${row.basketRoi === null ? "–" : `${(100 * row.basketRoi).toFixed(2)}%`}<br>` +
     `net worth <b>$${USD(row.net)}</b> vs counterfactual $${USD(row.hypoNet)}</div>` +
     (ch ? `<div class="chart">${ch.net}</div><div class="chart">${ch.position}</div>` : "");
 }

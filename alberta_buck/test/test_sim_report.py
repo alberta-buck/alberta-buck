@@ -9,6 +9,18 @@ import pytest
 
 from alberta_buck.sim import report
 from alberta_buck.sim.snapshot import Snapshotter
+from alberta_buck.sim.plot_rebalancing import household_position, machine_weights
+
+
+def test_report_uses_machine_targets_and_open_positions_not_legacy_counters():
+    f                           = {"eq_w": [2500, 7500], "eq_lean": [3000, 7000],
+                                   "poolWeights": [[.1, .9], [.9, .1]],
+                                   "octl": [dict(member="a", active=True, basket=100, basket_mark=120),
+                                            dict(member="b", active=True, basket=50, basket_mark=45)]}
+    assert machine_weights(f, 2) == [(.25, .3), (.75, .7)]
+    assert household_position(f) == (150, 165, pytest.approx(.1))
+    f["octl"][1]["basket_mark"] = None
+    assert household_position(f) == (150, None, None)
 
 
 @pytest.fixture

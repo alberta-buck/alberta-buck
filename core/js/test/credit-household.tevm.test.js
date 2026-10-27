@@ -22,6 +22,21 @@ const settings = { home_k: 1000, ltv: .2, apr: .055, premium_bp: 50, theta: 3, c
   buffer_k: 10, switch_k: 0, risk: 0, decision_days: 1, income_frac: .1, living_frac: .5, divest_rate: 0,
   money_months: 0 };
 
+test("machine bootstrap distributes its capital by declared token weights", { skip }, async () => {
+  const s = await tevmSession();
+  const tokens = [{ sym: "A", name: "A", dec: 18, p0: 2_500_000n, weightBp: 7500 },
+    { sym: "B", name: "B", dec: 18, p0: 4_000_000n, weightBp: 2500 }];
+  const w = await buildEquilibriumWorld(s, loadArtifact, { identity, basket: "machine", tokens,
+    urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
+  const declared = await Promise.all(tokens.map((_, i) => s.call(w.basket, "constituents", [BigInt(i)])));
+  assert.deepEqual(declared.map((c) => Number(c[9])), [7500, 2500]);
+  const seeded = w.tokens.map((t) => t.seedTok * t.p0 / (10n ** BigInt(t.dec)));
+  assert.ok(seeded[0] >= 3n * seeded[1] - 1n && seeded[0] <= 3n * seeded[1] + 1n);
+  const actual = await s.call(w.basket, "responseWeightsBp");
+  assert.ok(Math.abs(Number(actual[0]) - 7500) < 300, `opening weight ${actual[0]} bp`);
+  assert.equal(s.mismatches.length, 0);
+});
+
 test("household exit retains partial claims, retries release and never sells credit", { skip }, async () => {
   const s = await tevmSession();
   const w = await buildEquilibriumWorld(s, loadArtifact, { identity, basket: "machine",
@@ -30,6 +45,11 @@ test("household exit retains partial claims, retries release and never sells cre
     settings: { ...settings, carry_utilization: .3, max_impact_bp: 2000, surplus_policy: "basket" } });
   await a.setup(w); await a.act(w, 0, 0);
   assert.ok(a.receipts.length && (await w.households.read(a.account)).drawn > 0n);
+  const open = a.ledger.at(-1);
+  assert.equal(open.basketAtRisk, a.basketPrincipal);
+  assert.equal(open.basketMarkAvailable, true);
+  assert.equal(open.basketMark, a.shares * await s.call(w.basket, "sharePrice") / (10n ** 18n));
+  assert.equal(open.basketRoi, Number(open.basketMark - open.basketAtRisk) / Number(open.basketAtRisk));
   await advanceTime(w, 365 * DAY);                       // include an aged insurance refund
   const send = s.send.bind(s), call = s.call.bind(s);
   let partial = true, unavailable = true, changedK = false, refusals = 0;
@@ -67,6 +87,7 @@ test("household exit retains partial claims, retries release and never sells cre
   const principal = a.basketPrincipal;
   await a.act(w, 1, 0);
   assert.ok(a.receipts.length && a.basketPrincipal > 0n && a.basketPrincipal < principal);
+  assert.equal(a.ledger.at(-1).basketAtRisk, a.basketPrincipal, "partial exit removes only the settled basis");
   assert.equal(a.exited, false, "partial redemption retains the claim");
   partial = false;
   let day = 2;
@@ -89,6 +110,8 @@ test("household exit retains partial claims, retries release and never sells cre
   const final = await w.households.read(a.account);
   assert.ok(final.signed >= 0n && final.limit === 0n && final.deposit === 0n);
   assert.equal(a.receipts.length, 0);
+  assert.equal(a.ledger.at(-1).basketAtRisk, 0n);
+  assert.equal(a.ledger.at(-1).basketRoi, null, "a closed position has no open-position return");
   const cash = await w.households.cash(a.account);
   await a.act(w, 100, 0);
   assert.equal(await w.households.cash(a.account), cash);

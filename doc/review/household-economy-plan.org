@@ -345,6 +345,21 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-26: opening bootstrap tickets now share the unchanged total seed capital according
+  to the declared TOKEN weights; JavaScript equilibrium worlds also accept token weights and
+  seed proportionally. The household's remaining basket basis, live share mark and fractional
+  marked ROI are recorded in Python and JavaScript. Savings-server lite frames expose compact
+  individual positions, and the savings page and JS demo show them. The PDF plots household
+  open-position basis, mark and ROI, and machine response weights against its leaned targets.
+  A 30-day smoke opens LABR 25.47% and PAXG 8.14% against declared 25.52% and 8.53%; its
+  =build/sim/weighted-roi-smoke.pdf= matches the JSON. The separate initial price/mark transient
+  remains, and this short run is not a five-year acceptance result. Existing vectors can be
+  re-rendered but keep their historical off-target bootstrap. Validation: 1,146 Python tests
+  passed, five skipped; 13 JS savings-model tests passed; live JS weighted-bootstrap and
+  partial/complete household exit tests passed; the savings browser workflow passed on the
+  machine; both browser bundles built. The smoke's 369 marked household/day observations match
+  their live share price, and its PDF was visually checked. Prior signed-balance and low-K exit
+  findings remain open and are not addressed by this change.
 - 2026-10-26: all 16 repaired worlds are complete with PDFs; all fail on the negative-signed
   exit-balance check (238 household instances). On reviewing the plots, the 24 bootstrap
   depositors are found to seed nearly equal TOKEN values, not the declared 25.52/23.38/21.28/

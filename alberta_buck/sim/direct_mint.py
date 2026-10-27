@@ -331,11 +331,35 @@ class _DMBase(Agent):
             ctr["dmExitFails"] = ctr.get("dmExitFails", 0) + 1
 
 
+def bootstrap_tickets(weights, count, ticket):
+    """Split the same total seed capital among populated TOKENs by declared basket weight.
+
+    Return one ticket per round-robin depositor. Allocate integer remainders deterministically,
+    first among tokens, then among their depositors, so no seed capital is lost to rounding.
+    """
+    n                           = len(weights)
+    if not n or count <= 0 or ticket < 0 or any(w < 0 for w in weights):
+        raise ValueError("invalid bootstrap weights, count or ticket")
+    counts                      = [count // n + (i < count % n) for i in range(n)]
+    eligible                    = [w if counts[i] else 0 for i, w in enumerate(weights)]
+    total_weight                = sum(eligible)
+    if not total_weight:
+        raise ValueError("bootstrap needs a positive weight for a seeded token")
+    budget                      = count * ticket
+    shares                      = [divmod(budget * w, total_weight) for w in eligible]
+    amounts                     = [x[0] for x in shares]
+    for i in sorted(range(n), key=lambda i: (-shares[i][1], i))[:budget - sum(amounts)]:
+        amounts[i]             += 1
+    return [amounts[i % n] // counts[i % n] + (i // n < amounts[i % n] % counts[i % n])
+            for i in range(count)]
+
+
 @_register
 class BootstrapDMAgent(_DMBase):
     """Deposit once at bootstrap into a fixed token (one agent per token
     by ``idx`` order); never exit.  Used to seed empty TOKEN/BUCK pools
-    so any downstream scenario has live liquidity by tick 0.
+    so any downstream scenario has live liquidity by tick 0. Tickets sum to the original total
+    seed capital, distributed across tokens by the basket's declared weights.
 
     Token assignment is round-robin on the agent's instance index
     relative to the per-class counter; with N agents and N tokens,
@@ -354,6 +378,11 @@ class BootstrapDMAgent(_DMBase):
     def bootstrap(self, d, scenario, ctr) -> None:
         if self._entered:
             return
+        count = scenario.agents.get("BootstrapDMAgent", 0) or len(d.tokens)
+        if not hasattr(d, "_bootstrap_tickets"):
+            weights = [int(d.basket.functions.constituents(i).call()[9]) for i in range(len(d.tokens))]
+            d._bootstrap_tickets = bootstrap_tickets(weights, count, self.SEED_USDC)
+        self.SEED_USDC = d._bootstrap_tickets[self._seq]
         tok_idx = self._seq % len(d.tokens)
         self._enter(d, scenario, ctr, tok_idx)
 

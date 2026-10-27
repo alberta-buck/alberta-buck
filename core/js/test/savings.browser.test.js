@@ -71,6 +71,10 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     assert.ok(panelText.includes("Households: financial net worth"));
     const households = await page.evaluate(() => globalThis.savings.rows.at(-1).households);
     assert.ok(households.active >= 10 && households.scheduled >= households.active);
+    const positions = await page.evaluate(() => globalThis.savings.rows.at(-1).positions);
+    assert.ok(positions.length >= 10, "the lite feed includes individual household positions");
+    await page.getByLabel("household basket position").selectOption(positions[0].member);
+    assert.match(await page.textContent("#panel-savings"), /Open capital at risk.*Share mark.*Marked return/s);
     assert.equal(await page.getByLabel("Surplus cash", { exact: true }).inputValue(), "adaptive");
     assert.equal(await page.getByLabel("New debtors / year", { exact: true }).inputValue(), "6");
     // The basket's upkeep is the older director and its steps, or the basket
@@ -116,6 +120,7 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     await receiptRow.locator("button", { hasText: "Redeem" }).waitFor({ timeout: DAY_MS });
     await page.waitForFunction(() => /\$[\d,]+\.\d\d/.test(
       document.querySelector("#panel-savings li.receipt dd.worth")?.textContent ?? ""), null, { timeout: DAY_MS });
+    assert.match(await receiptRow.textContent(), /Open basis \(BUCK\).*Share mark \(BUCK\)/s);
 
     // Pause, then one day, then paused again.
     await page.click("#panel-savings button:text-is('Pause')");

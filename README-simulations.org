@@ -28,6 +28,19 @@ for a worthwhile issuance before discretionary saving. Credit savers can borrow 
 mortgage borrowers refinance when reduced carrying cost justifies execution and switching costs.
 Working balances, asset sales and arrival behavior are shared across policy comparisons.
 
+Bootstrap depositors seed the TOKEN/BUCK pools in proportion to the basket's declared weights,
+while retaining the same total opening seed capital. Day-zero observations follow that day's
+trading; the opening price/mark transient still needs separate study.
+
+The household basket return is a *marked open-position return*: remaining receipt basis and
+current share value are in BUCK, and ROI is =(mark - basis) / basis=. The PDF aggregates those
+positions; each household's =basket_at_risk=, =basket_mark= and fractional =basket_roi= are in
+the vector. Successful partial redemptions reduce the remaining basis. The mark is before exit
+charges and market impact; the ratio is not an annualized or realized return and changes when
+the composition of open positions changes. A missing mark, or zero basis, produces no ROI.
+For the machine, the allocation plot uses response weights including idle TOKEN and the machine's
+leaned target; older basket types retain the explicitly labeled legacy pool-weight view.
+
 The comparison settings are =basket= (always invest spare cash, no discretionary paydown),
 =retire= (retire liabilities regardless of parity) and =discount= (retire below the individual
 discount threshold, otherwise retain cash). Asset-sale settlement still clears liabilities in
@@ -65,6 +78,10 @@ Commands run in the foreground; use a terminal multiplexer for long campaigns. P
 reuse the adaptive centre cell names, so extending the same campaign to the grid skips those
 already completed worlds. Use one runner per named campaign: extend it after its current run ends. =economy-report= may
 read the completed results while the remaining workers run.
+
+After changing the plotting code, use =sim-report= explicitly on the saved JSON paths to refresh
+their PDFs. =economy-report= repairs missing or JSON-mismatched PDFs, but a matching data hash
+alone does not identify which version of the renderer made an existing PDF.
 
 | CELLS | Runs | Coverage |
 |-------+------+----------|
@@ -144,8 +161,9 @@ remain (up to one spendable BUCK per account and one dollar per pending TOKEN co
 not forgiven. The 315-day replay of the first historical failure now closes the affected household
 without errors. All sixteen corrected five-year policy runs have since completed without household
 errors, but all fail the new exit audit: aged post-exit balances can appear negative despite a
-positive raw balance. See the [[file:doc/review/household-release-readiness.org][review]] for the evidence, the separate K=0 release boundary,
-the off-target bootstrap, the misleading legacy allocation and return plots, and remaining work.
+positive raw balance. The bootstrap and the allocation/return plots have since been corrected;
+these older vectors retain their original openings and can be re-rendered without an EVM run.
+See the [[file:doc/review/household-release-readiness.org][review]] for the evidence, the separate K=0 release boundary, and remaining work.
 
 * Diagnostics and deliberate retirement
 

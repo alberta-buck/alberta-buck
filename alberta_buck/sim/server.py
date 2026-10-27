@@ -21,8 +21,9 @@ WebSocket channels (websockets):
   /s/<sid>/frames    every captured day frame as JSON + measured pace
                      and the savings facility's block "sv" (the depositors'
                      book, read from the basket at the frame); ?lite=1
-                     drops the per-agent telemetry (ag, octl, arb2, lp, mx)
-                     for a browser client, and &replay=1 first sends every
+                     drops the full per-agent telemetry (ag, octl, arb2, lp, mx)
+                     but includes compact household basket positions for a browser
+                     client, and &replay=1 first sends every
                      lite frame the world has made (a reloaded page redraws
                      its charts)
   /s/<sid>/control   {"op": ..., ...} applied at the next day boundary:
@@ -484,6 +485,11 @@ class Session:
         full = {**frame, "pace": pace, "sid": self.sid, "paused": self.paused,
                 "sv": self._sv}
         lite = {k: v for k, v in full.items() if k not in self.HEAVY}
+        # The savings page needs each household's open basket position, not its full account history.
+        lite["household_positions"] = [
+            {k: a.get(k) for k in ("member", "role", "basket_at_risk", "basket_mark", "basket_roi")}
+            for a in frame.get("octl", []) if isinstance(a, dict) and a.get("member")
+            and a.get("active") and not a.get("exited")]
         return json.dumps(_jsonable(full)), json.dumps(_jsonable(lite))
 
     def _fanout_threadsafe(self, payload, lite=None):

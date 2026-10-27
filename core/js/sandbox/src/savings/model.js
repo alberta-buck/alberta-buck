@@ -61,10 +61,12 @@ function premiumOf(f) {
 export function row(f) {
   const sv = f.sv ?? {};
   const hh = f.households;
+  const weights = f.eq_w?.length && f.eq_w.length === f.eq_lean?.length
+    ? f.eq_w.map((w, i) => [w / 10000, f.eq_lean[i] / 10000]) : (f.poolWeights ?? []);
   return {
     day: f.day,
     ref: f.refUsd ?? [], su: f.spotUsdc ?? [], sb: f.spotBuck ?? [],
-    weights: f.poolWeights ?? [],
+    weights,
     bu: (f.buck_usd ?? 0) / 1e6,                   // USD per BUCK, the pool
     bv: e18(f.basketVal),                          // the basket, in BUCK
     k: e18(f.buckK),
@@ -106,8 +108,11 @@ export function row(f) {
     paused: !!f.paused,
     households: hh ? { ...hh, ...Object.fromEntries([
       "nw", "hypo", "mortgage", "hypo_mortgage", "cash", "hypo_cash", "drawn", "basket", "basket_mark",
+      "basket_at_risk", "basket_mtm",
       "invested_usd", "issued_invest", "pending_usd", "unwound", "external_interest", "hypo_interest",
       "external_paid", "hypo_paid", "arrears", "hypo_arrears"].map((key) => [key, bk(hh[key])])) } : null,
+    positions: (f.household_positions ?? []).map((a) => ({ member: a.member, role: a.role,
+      atRisk: bk(a.basket_at_risk), mark: bk(a.basket_mark), roi: a.basket_roi ?? null })),
   };
 }
 

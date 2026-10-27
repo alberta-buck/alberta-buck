@@ -27,6 +27,22 @@ test("household lite frames preserve counts and convert only currency units", ()
   assert.equal(row({}).households, null);
 });
 
+test("household basket positions keep BUCK basis, share mark and fractional ROI", () => {
+  const r = row({ households: { basket_at_risk: "10000000", basket_mtm: "12500000", basket_roi: .25 },
+    household_positions: [{ member: "0/saver/1", role: "saver", basket_at_risk: "10000000",
+      basket_mark: "12500000", basket_roi: .25 },
+    { member: "0/debtor/2", role: "debtor", basket_at_risk: 0, basket_mark: null, basket_roi: null }] });
+  assert.equal(r.households.basket_at_risk, 10); assert.equal(r.households.basket_mtm, 12.5);
+  assert.deepEqual(r.positions[0], { member: "0/saver/1", role: "saver", atRisk: 10, mark: 12.5, roi: .25 });
+  assert.equal(r.positions[1].roi, null); assert.equal(r.positions[1].mark, null);
+});
+
+test("equity weights use the basket response and target instead of the legacy pool formula", () => {
+  const r = row({ eq_w: [2500, 7500], eq_lean: [3000, 7000], poolWeights: [[.1, .9], [.9, .1]] });
+  assert.deepEqual(r.weights, [[.25, .3], [.75, .7]]);
+  assert.deepEqual(row({ poolWeights: [[.1, .9]] }).weights, [[.1, .9]]);
+});
+
 test("the world's address: ?sim=, then this browser's choice, then the page's configuration", () => {
   assert.equal(serverBase({ param: "wss://sim.example/", saved: "ws://x:1", location: loc("https://a.example/") }),
     "wss://sim.example");

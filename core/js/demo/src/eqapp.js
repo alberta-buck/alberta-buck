@@ -146,6 +146,9 @@ export class EqWorldApp {
         kind: "debtor", name,
         mortgage: f6(a.mortgageOwing), hypo: f6(a.hypoOwing),
         drawn: last ? f6(last.drawn) : 0, banked: f6(a.usdc),
+        basketAtRisk: last ? f6(last.basketAtRisk) : 0,
+        basketMark: last?.basketMarkAvailable ? f6(last.basketMark) : null,
+        basketRoi: last?.basketRoi ?? null,
         net: last ? f6(house + last.nw)
                   : f6(house - a.mortgageOwing),
         hypoNet: f6(house + (last?.hypo ?? a.hypoBanked - a.hypoOwing)),

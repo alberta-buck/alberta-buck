@@ -452,7 +452,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     # are never mistaken for gains.
     profit_usd = ctr.get("dmProfitUsd", 0)
     dollar_days = ctr.get("dmDollarDays", 0)
-    realized_apr = (365.0 * profit_usd / dollar_days) if dollar_days else 0.0
+    realized_apr = (365.0 * profit_usd / dollar_days) if dollar_days else None
+    open_basket = snap.frames[-1].get("households", {})
     summary = {
         "json": str(path),
         "pdf": str(pdf) if pdf else None,
@@ -468,6 +469,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         "dm_realized_apr": realized_apr,
         "dm_round_trips": ctr.get("dmRoundTrips", 0),
         "dm_profit_usd": profit_usd,
+        "household_basket_at_risk": open_basket.get("basket_at_risk"),
+        "household_basket_mark": open_basket.get("basket_mtm"),
+        "household_basket_roi": open_basket.get("basket_roi"),
         "all_eoa_verified": verified,
         "n_agents": len(agents),
     }
@@ -486,9 +490,16 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         # round-trips, plus the arb throughput + implied basket fee that bounds
         # it (gross BUCK volume crossing the pools, USD-valued).
         rt = ctr.get("dmRoundTrips", 0)
-        print(f"[sim] DM realized return: {100*realized_apr:+.2f}% APR  "
+        rate = f"{100*realized_apr:+.2f}% APR" if realized_apr is not None else "n/a"
+        print(f"[sim] DM realized return: {rate}  "
               f"({rt} round-trips, ${profit_usd/E6:,.0f} profit on "
               f"${ctr.get('dmDollarDays',0)/E6:,.0f} dollar-days)")
+        if open_basket.get("basket_at_risk"):
+            roi = open_basket.get("basket_roi")
+            mark = open_basket.get("basket_mtm")
+            print(f"[sim] household basket: {open_basket['basket_at_risk']/E6:,.2f} BUCK at risk, "
+                  f"mark {mark/E6 if mark is not None else 'n/a'}, "
+                  f"return {f'{100*roi:+.2f}%' if roi is not None else 'n/a'} (open positions)")
         print(f"[sim] arb throughput: ${cycle_vol/E6:,.0f} routed  "
               f"=> basket fee ~${fee_take/E6:,.0f}")
         if ctr.get("cycle_err"):

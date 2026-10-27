@@ -332,7 +332,10 @@ export class CreditHouseholdAgent {
       arrears: this.livingArrears + this.premiumArrears, hypoArrears: this.hypoLivingArrears + this.hypoPremiumArrears,
       externalPaid: this.externalPaid, hypoPaid: this.hypoPaid, issuedInvest: this.issuedInvest,
       insuranceAge: s.insuranceAge,
-      basket: this.basketPrincipal, basketMark: s.basketMark,
+      basket: this.basketPrincipal, basketAtRisk: this.basketPrincipal, basketMark: s.basketMark,
+      basketMarkAvailable: world.basketKind === "machine" && (this.shares > 0n || this.basketPrincipal === 0n),
+      basketRoi: this.basketPrincipal > 0n && this.shares > 0n && world.basketKind === "machine"
+        ? Number(s.basketMark - this.basketPrincipal) / Number(this.basketPrincipal) : null,
       pending: s.pending, premiumPaid: this.premiumPaid, extPremium: this.extPremium, hypoPremium: this.hypoPremium,
       switchPaid: this.switchPaid, penaltyPaid: this.penaltyPaid, tradeLoss: this.tradeLoss, unwound: this.unwound,
       externalInterest: this.externalInterest, hypoInterest: this.hypoInterest, investedUsd: this.investedUsd,

@@ -8,12 +8,34 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import (CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent,
                                                 HouseholdPopulationAgent)
 from alberta_buck.sim.deploy import deploy
-from alberta_buck.sim.direct_mint import BootstrapDMAgent
+from alberta_buck.sim.direct_mint import BootstrapDMAgent, bootstrap_tickets
 from alberta_buck.sim.household_policy import issuance
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
 from alberta_buck.sim.scenario import ROUTING
 
 M6                              = 10 ** 6
+
+
+def test_bootstrap_distributes_the_existing_budget_by_declared_weight():
+    weights                     = [2552, 2338, 2128, 2129, 853]
+    tickets                     = bootstrap_tickets(weights, 24, 250_000 * M6)
+    assert sum(tickets) == 6_000_000 * M6
+    for i, weight in enumerate(weights):
+        assert abs(sum(tickets[i::len(weights)]) - 6_000_000 * M6 * weight // sum(weights)) <= 1
+    assert max(bootstrap_tickets([1, 1, 1], 3, 10)) - min(bootstrap_tickets([1, 1, 1], 3, 10)) <= 1
+
+
+def test_open_position_returns_use_remaining_basis_and_live_share_price():
+    a                           = CreditHouseholdAgent.__new__(CreditHouseholdAgent)
+    a._basket_in, a._basket_shares, a._basket_receipts = 100 * M6, 80 * M6, [1, 2]
+    position                    = a.basket_position(2 * 10**18)
+    assert position["basket_at_risk"] == 100 * M6 and position["basket_mark"] == 160 * M6
+    assert position["basket_roi"] == pytest.approx(.6)
+    a._basket_in, a._basket_shares, a._basket_receipts = 40 * M6, 20 * M6, [2]
+    assert a.basket_position(2 * 10**18)["basket_roi"] == 0
+    assert a.basket_position(None)["basket_roi"] is None
+    a._basket_in, a._basket_shares = 0, 0
+    assert a.basket_position(10**18)["basket_roi"] is None
 
 
 @pytest.fixture(params=["prorata", "equity-ops"])

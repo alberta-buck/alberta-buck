@@ -92,6 +92,17 @@ def test_lite_frames_drop_the_per_agent_telemetry():
     assert l["wh_sol_cycles"] == 2 and l["day"] == 3 and l["sid"] == "t"
 
 
+def test_lite_frames_keep_compact_open_household_positions():
+    s = session()
+    people = [dict(member="0/saver/1", role="saver", active=True, exited=False,
+                   basket_at_risk=100, basket_mark=120, basket_roi=.2, cash=999),
+              dict(member="0/debtor/2", role="debtor", active=True, exited=True, basket_at_risk=0)]
+    full, lite = s._payloads({"day": 1, "octl": people})
+    assert json.loads(full)["octl"] == people
+    assert json.loads(lite)["household_positions"] == [dict(member="0/saver/1", role="saver",
+                                                           basket_at_risk=100, basket_mark=120, basket_roi=.2)]
+
+
 def test_the_frame_releases_the_days_chain_lock():
     s = session()
     s.chain_lock.acquire()

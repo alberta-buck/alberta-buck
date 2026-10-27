@@ -111,8 +111,8 @@ function isqrt(n) {
  * @param opts.urArtifact the parsed UniversalRouter.json (REQUIRED)
  * @param opts.basket     "machine" (default: the equity basket on the basket
  *                        machine) or "prorata" (the pro-rata basket)
- * @param opts.tokens     [{sym, name, dec, p0}] basket constituents (the
- *                        machine needs two or more)
+ * @param opts.tokens     [{sym, name, dec, p0, weightBp?}] basket constituents (the
+ *                        machine needs two or more; weights must be supplied for all or none)
  * @param opts.targetBuck common pool depth, 6-dec (default $10M)
  * @param opts.feedSeed / opts.stepBp / opts.feedDays  the reference walks
  * @param opts.rng        scalar drawer for the issuer keypair
@@ -133,6 +133,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     throw new Error("the basket machine needs two constituents or more: " +
                     "its policy compares them in pairs (opts.tokens)");
   }
+  const hasWeights = toks.some((t) => t.weightBp !== undefined);
+  if (hasWeights && toks.some((t) => !Number.isSafeInteger(t.weightBp) || t.weightBp <= 0))
+    throw new Error("each basket token needs a positive integer weightBp");
+  const weights = toks.map((t) => BigInt(hasWeights ? t.weightBp : 1));
+  const totalWeight = weights.reduce((a, b) => a + b, 0n);
   const targetBuck = opts.targetBuck ?? 10n ** 13n;
 
   const world = await buildBuckWorld(session, artifacts,
@@ -210,7 +215,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
 
   const poolAbi = artifacts("UniswapV3Pool").abi;
   const tokens = [];
-  for (const t of toks) {
+  let addedWeight = 0n;
+  for (const [i, t] of toks.entries()) {
     const erc20 = await session.deploy(erc20Art, [t.name, t.sym, t.dec],
       { name: t.sym, gas });
     await session.send(erc20, "mint", [simlp.address, 10n ** 30n],
@@ -234,8 +240,10 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
                        { tag: `eq:seed:${t.sym}-usdc` });
 
     // TOKEN/BUCK basket pool (created + initialized by the basket).
+    addedWeight += weights[i];
+    const sequentialWeight = hasWeights ? (10_000n * weights[i] + addedWeight / 2n) / addedWeight : 0n;
     await session.send(basket, "addBasketToken",
-      [erc20.address, t.dec, t.p0, 0, FEES.buck], { tag: `eq:addBasketToken:${t.sym}` });
+      [erc20.address, t.dec, t.p0, sequentialWeight, FEES.buck], { tag: `eq:addBasketToken:${t.sym}` });
     const pb = await session.call(v3f, "getPool",
       [erc20.address, buck.address, FEES.buck]);
     await bind(pb, true, `eq:bind:pool-${t.sym}-buck`);
@@ -247,7 +255,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     // guard (defaultMaxDeviationBp) assumes exactly this.
     // The pro-rata basket pairs the deposit itself, here.  The equity basket
     // takes it once its machine is wired, below, and the wheel pairs it.
-    const seedTok = (targetBuck * unit) / t.p0;
+    const seedValue = targetBuck * BigInt(toks.length) * weights[i] / totalWeight;
+    const seedTok = (seedValue * unit) / t.p0;
     await session.send(erc20, "mint", [me, seedTok],
                        { tag: `eq:bootstrap-stock:${t.sym}` });
     await session.send(erc20, "approve", [basket.address, seedTok],

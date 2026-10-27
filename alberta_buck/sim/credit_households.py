@@ -784,6 +784,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                     exit_short=self.exit_short, released=self._released, exited=self.exited,
                     action=self.last_action, error=self.last_error)
 
+    def basket_position(self, share_price):
+        """Open receipt basis and TWAP share mark, in BUCK; this is not a realized return."""
+        basis                   = self._basket_in
+        mark                    = (self._basket_shares * share_price // 10**18
+                                   if self._basket_shares and share_price is not None else
+                                   0 if not basis else None)
+        return dict(basket=basis, basket_at_risk=basis, basket_shares=self._basket_shares,
+                    basket_receipts=len(self._basket_receipts), basket_mark=mark,
+                    basket_roi=(mark - basis) / basis if basis and mark is not None else None)
+
 
 @_register
 class CreditSaverAgent(CreditHouseholdAgent):

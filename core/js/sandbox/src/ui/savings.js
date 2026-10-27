@@ -154,6 +154,15 @@ export function mountSavings(ctx) {
   const keyLine = h("p", { class: "hint" });
   const receiptsBox = h("div", {});
   const balancesBox = h("div", {});
+  const householdPosition = h("div", {});
+  const householdSelector = h("select", { "aria-label": "household basket position",
+    onchange: () => drawHouseholdPosition(S.rows.at(-1)) });
+  let householdRoster = "";
+  const householdCard = h("div", { class: "card" }, h("h3", {}, "Household basket position"),
+    h("label", { class: "field" }, h("span", { class: "field-label" }, "Household"), householdSelector),
+    householdPosition, h("p", { class: "hint" }, "Open receipts only, in BUCK. The mark uses the basket's "
+      + "share price before exit costs. Return is mark divided by remaining deposit basis, less one; "
+      + "closed positions and realized gains are not included."));
   // How a saving works, by the world's basket (sim_info's basket_kind).
   const HOW = {
     prorata: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
@@ -188,6 +197,10 @@ export function mountSavings(ctx) {
       { label: "basket purchases (USD)", color: S1 }, { label: "liabilities retired (BUCK)", color: S2 }],
       note: "Purchases include TOKEN awaiting an accepted deposit. The lines use different currencies, "
         + "so their levels are not a return comparison." }),
+    householdBasket: lineChart({ title: "Households: open basket positions (BUCK)", fmt: bucks, series: [
+      { label: "capital at risk", color: S1 }, { label: "share mark", color: S2 }],
+      note: "Remaining deposit basis and current share mark, before exit costs. Deposits and redemptions "
+        + "change these totals; their difference is the mark on open positions, not realized profit." }),
     buck: lineChart({ title: "BUCK", ref: 1, fmt: f3, series: [
       { label: "USD per BUCK (pool)", color: S1 }, { label: "the basket, in BUCK", color: S2 }],
       note: "K steers the basket's BUCK price to 1; the BUCK/USDC pool says what a BUCK fetches." }),
@@ -279,11 +292,12 @@ export function mountSavings(ctx) {
       "world of their own: ", h("a", { href: "https://sandbox.albertabuck.ca/" }, "sandbox.albertabuck.ca"), ".")
       : null,
     h("div", { class: "cols savings-cols" },
-      h("div", { class: "stack" }, worldCard, walletCard),
+      h("div", { class: "stack" }, worldCard, walletCard, householdCard),
       h("div", { class: "stack" },
         h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el),
         h("h3", { class: "grid-title" }, "Households: refinancing and investing"),
-        h("div", { class: "chart-grid" }, charts.householdNet.el, charts.householdMortgage.el, charts.householdFlows.el),
+        h("div", { class: "chart-grid" }, charts.householdNet.el, charts.householdMortgage.el,
+          charts.householdFlows.el, charts.householdBasket.el),
         h("h3", { class: "grid-title" }, "The basket: its credit, and what its wheel did"),
         h("div", { class: "chart-grid" }, charts.credit.el, charts.steps.el),
         leanTitle,
@@ -527,6 +541,23 @@ export function mountSavings(ctx) {
       S.info.tokens.map((t, i) => h("option", { value: String(i) }, t.symbol)));
   }
 
+  function drawHouseholdPosition(last) {
+    const positions = last?.positions ?? [];
+    const roster = positions.map((a) => `${a.member}:${a.role}`).join("|");
+    if (roster !== householdRoster) {
+      const selected = householdSelector.value;
+      fill(householdSelector, positions.map((a) => h("option", { value: a.member }, `${a.member} (${a.role})`)));
+      if (positions.some((a) => a.member === selected)) householdSelector.value = selected;
+      householdRoster = roster;
+    }
+    const a = positions.find((p) => p.member === householdSelector.value);
+    fill(householdPosition, a ? h("dl", { class: "kv" },
+      h("dt", {}, "Open capital at risk"), h("dd", {}, `${bucks(a.atRisk ?? 0)} BUCK`),
+      h("dt", {}, "Share mark"), h("dd", {}, a.mark === null ? "Unavailable" : `${bucks(a.mark)} BUCK`),
+      h("dt", {}, "Marked return"), h("dd", {}, a.roi === null ? "–" : signed(a.roi * 100, pct2)))
+      : h("p", { class: "empty" }, "No arrived households yet."));
+  }
+
   function queueDraw() {
     if (S.drawQueued) return;
     S.drawQueued = true;
@@ -574,6 +605,8 @@ export function mountSavings(ctx) {
     charts.householdNet.update(xs, ["nw", "hypo"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
     charts.householdMortgage.update(xs, ["mortgage", "hypo_mortgage"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
     charts.householdFlows.update(xs, ["invested_usd", "unwound"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
+    charts.householdBasket.update(xs, ["basket_at_risk", "basket_mtm"].map((key) => rows.map((r) => r.households?.[key] ?? null)));
+    drawHouseholdPosition(last);
     charts.index.update(xs, [rows.map((r) => r.D), heldLine(rows)]);
     charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
     charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim)]);
@@ -663,11 +696,16 @@ export function mountSavings(ctx) {
         ? equityWorth(c.shares, c.basis, { sp: last.sp, lam: last.lam, chg: last.chg })
         : receiptWorth(c.buckPrincipal, sv);
       const worthUsd = worth ? (Number(worth.paid) / 1e6) * last.bu : null;
+      const markRoi = last.kind === "equity" && worth && c.basis > 0n
+        ? Number(worth.claim - c.basis) / Number(c.basis) : null;
       const held = (Number(BigInt(rec.amount)) / 10 ** (tok?.decimals ?? 18)) * prices(last, rec.i).usdc;
       return h("li", { class: "receipt" },
         head(c?.live ? h("button", { type: "button", onclick: () => redeem(rec, worthUsd) }, "Redeem") : null),
         h("dl", { class: "kv" },
           h("dt", {}, "Saved"), h("dd", {}, usd(rec.usd)),
+          last.kind === "equity" && worth ? [h("dt", {}, "Open basis (BUCK)"),
+            h("dd", {}, compact(Number(c.basis) / 1e6)), h("dt", {}, "Share mark (BUCK)"),
+            h("dd", {}, compact(Number(worth.claim) / 1e6), " ", markRoi === null ? "" : pct(markRoi))] : [],
           h("dt", { title: last.kind === "equity"
             ? "What redeeming would pay now, in BUCK valued at the BUCK/USDC pool"
             : "What redeeming would pay now, in TOKENs valued at their USDC pools" }, "Worth now"),
