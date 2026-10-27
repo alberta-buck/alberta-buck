@@ -27,14 +27,24 @@ a short diagnostic trace cannot establish an economic equilibrium.
 models the fund acquiring the remaining holder BUCK at the end. The latter is
 an explicit transfer from the holder; non-BUCK consideration is not modeled.
 =DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"= puts fund cash into
-an idealized 1:1 BUCK strategy and attributes a 10 BUCK return to a transfer
-from the holder. This illustrates fund deployment, sourced returns and
-liquidation; it does not model real basket prices, impact, loss or liquidity.
+an idealized BUCK-only strategy and attributes a 10 BUCK return to a transfer
+from the holder. Strategy BUCK also pay demurrage into fund cash. This
+illustrates fund deployment, sourced returns and
+liquidation; it does not model real basket prices, impact or liquidity.
+=DEMURRAGE_ARGS="--deploy-fund --wipe-strategy --retire 50 --redeem-fraction 0.25"=
+illustrates a worthless position being partially redeemed before relief is
+computed from available cash. The default fractional redemption is requested
+baseline relief divided by total outstanding baseline relief; pass
+=--redeem-fraction= to compare another rule, or =--redemption-basis issuance=
+for the credit reduction divided by total issued BUCK. The reserve signal in this
+prototype uses 10% of outstanding baseline relief; it remains a policy
+assumption to compare, not the finalized contract rule.
 =make nix-venv-demurrage-test= tests issuance, proportional
-retirement, long-idle accounts, and fund self-demurrage. The reference is a
+redemption, Carrying fund payouts, long-idle accounts, and fund self-demurrage.
+The reference is a
 mathematical specification, not the current contract implementation or a
 five-year economy run. See [[file:alberta-buck-demurrage.org][the demurrage design]] for the accounting and
-the currently exposed funding shortfall.
+the remaining policy and contract decisions.
 
 * The household default
 

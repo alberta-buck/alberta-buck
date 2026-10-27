@@ -7,9 +7,10 @@ This is an audit of =src/Buck.sol= and its Rust math mirror, not a claim that
 net-balance demurrage is implemented. The existing contract charges the raw
 positive balance and advances the Jubilee on outstanding issuance. The desired
 model treats accrued demurrage as already belonging to Jubilee, and bases
-gross demurrage and linear relief on outstanding issuance, including BUCK in
-the fund. Jubilee's demurrage paid to itself is gross activity but does not
-increase its assets. The signed
+gross demurrage and target relief on outstanding issuance, including BUCK in
+the fund. Actual relief is computed from full-value cash after proportional
+position redemption. Jubilee's demurrage paid to itself is gross activity but
+does not increase its net assets. The signed
 balance guard described below has been corrected; the accrual and Jubilee
 redesign remains to be implemented and validated. Do not use the old 50-year
 relief assumptions as proof that the redesigned system is funded.
@@ -133,17 +134,25 @@ this example without a separately identified source of funds. Distributing
 fund money along the way changes the path and must be modeled explicitly; it
 does not invalidate the accounting constraint.
 
-The intended relief remains linear in each credit position's outstanding
-issuance and is capped at the principal being retired. The reference model
-apportions accumulated issuance-seconds proportionally on a partial reduction.
-The fund's gross self-demurrage cannot be credited as additional assets;
-liquid assets and realizable investment positions must support the relief
-payments. If they do not, the protocol must define the treatment of the
-unfunded obligation. In particular, =redeemCost= currently subtracts the
-quoted relief even if payment is capped by available fund cash; this becomes
-materially misleading if funding is no longer guaranteed. A redesign must
-give callers an executable quote or explicitly distinguish the accrued claim
-from currently available relief.
+The 2% target remains linear in each credit position's outstanding issuance.
+The actual relief is calculated after a proportional liquidation and can be
+less or more than the target, capped at the principal and the fund's net cash.
+The reference model apportions accumulated issuance-seconds proportionally on
+a partial reduction; it makes the liquidation fraction an explicit input so
+alternative rules can be compared. The fund's gross self-demurrage cannot be
+credited as additional assets. In particular, =redeemCost= currently subtracts
+the target even when it cannot be paid; a redesign must distinguish target
+from executable relief after the sale.
+
+Jubilee is Carrying. To deliver full net BUCK, a transfer must include the
+proportional carried fee, so its nominal amount exceeds the relief. The current
+=_payRelief= directly reduces Jubilee's raw balance by the nominal relief and
+neither apportions fee-seconds nor limits payment to the fund's net balance.
+The corrected payout must gross up from net relief, retire the proportional
+fee history, and avoid crediting fund self-demurrage twice. The reference
+tests a proportional fee allocation and an independent integer rounding
+convention, but the current buck-seconds apportionment has its own rounding
+and must be derived separately before contract changes.
 
 An O(1) global index and aggregate normalized economic holdings could permit
 lazy account and fund accounting without enumerating holders. One account

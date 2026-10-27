@@ -74,24 +74,28 @@ Table of Contents
   │ BUCK-years issued       = integral(I(t) dt)
   │ gross demurrage         = r * integral(I(t) dt)
   │ position j BUCK-years   = integral(P_j(t) dt)
-  │ position j gross relief = r * integral(P_j(t) dt)
+  │ position j target relief = r * integral(P_j(t) dt)
   └────
 
   BUCK-years are the integral of outstanding issued BUCK, not merely the
   age of an open but unused credit limit. When an issuance position is
-  reduced, its appropriate share of accrued relief is paid from Jubilee
-  and the remaining principal is repaid from the account. In the
-  reference model, a partial reduction takes a pro-rata share of that
-  position's accumulated BUCK-years.  Separate positions retain separate
-  issuance histories. Relief on a reduction is capped at the amount
-  being reduced. For issuance held for 50 years at a nominal 2% per
-  year, the position's liability can therefore be entirely relieved; it
-  does not become a negative liability after 50 years.
+  reduced, its target relief is computed from its BUCK-years. Jubilee
+  first redeems a proportion of its investment positions and computes
+  the actual relief from its available full-value BUCK; the account
+  repays the remaining principal.  Actual relief can be lower or higher
+  than the target, but is bounded by the principal being reduced and by
+  the available net BUCK. In the reference, a partial reduction takes a
+  pro-rata share of that position's accumulated BUCK-years.  Separate
+  positions retain separate issuance histories. For issuance held for 50
+  years at a nominal 2% per year, the target reaches the entire
+  position; the actual payment depends on the fund and cannot exceed the
+  position.
 
   An account's actual BUCK holding, the outstanding issuance it owes,
   and its unused credit are not interchangeable. Relief reduces a
-  liability only when it is paid. A quoted relief entitlement and the
-  assets presently available to pay it must each be visible.
+  liability only when it is paid. The target and the actual relief
+  computed after liquidation must each be visible; a target shortfall is
+  not an additional guaranteed claim.
 
 
 3 Demurrage on remaining balances
@@ -138,15 +142,15 @@ Table of Contents
   transferred, invested, retired, or added for 50 years. At a nominal
   continuous 2% rate, the Python reference produces, ignoring rounding:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Years  Wallet balance  Jubilee BUCK  Gross demurrage  Jubilee self-demurrage  Relief claim
-  ────────────────────────────────────────────────────────────────────────────────────────────
-       0      100.000000      0.000000         0.000000                0.000000      0.000000
-       1       98.019867      1.980133         2.000000                0.019867      2.000000
-      25       60.653066     39.346934        50.000000               10.653066     50.000000
-      49       37.531110     62.468890        98.000000               35.531110     98.000000
-      50       36.787944     63.212056       100.000000               36.787944    100.000000
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Years  Wallet balance  Jubilee BUCK  Gross demurrage  Jubilee self-demurrage  Target relief
+  ─────────────────────────────────────────────────────────────────────────────────────────────
+       0      100.000000      0.000000         0.000000                0.000000       0.000000
+       1       98.019867      1.980133         2.000000                0.019867       2.000000
+      25       60.653066     39.346934        50.000000               10.653066      50.000000
+      49       37.531110     62.468890        98.000000               35.531110      98.000000
+      50       36.787944     63.212056       100.000000               36.787944     100.000000
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   The 100 BUCK gross demurrage is the sum of 63.212056 transferred from
   the wallet and 36.787944 paid by Jubilee to itself. The latter is
@@ -156,14 +160,16 @@ Table of Contents
   leaving 36.787944 in the wallet would create 36.787944 BUCK without a
   source.
 
-  The full relief claim at year 50 is 100, but the fund directly holds
-  only 63.212056 in this no-return, no-transfers example. It needs
-  another 36.787944 BUCK to pay the entire claim. Acquiring that amount
-  from the wallet, for example by selling other assets or realizing
-  returns, would leave 100 in the fund; a 100 BUCK Jubilee payment can
-  then extinguish the credit. The external consideration and market
-  price are not represented by the closed BUCK ledger. No specific
-  return or access to liquidity is guaranteed by the arithmetic.
+  The target relief at year 50 is 100, but the fund directly holds only
+  63.212056 in this no-return, no-transfers example. It needs another
+  36.787944 BUCK to pay the full target. Acquiring that amount from the
+  wallet, for example by selling other assets or realizing returns,
+  would leave 100 in the fund; a 100 BUCK Jubilee payment can then
+  extinguish the credit. The external consideration and market price are
+  not represented by the closed BUCK ledger. Under the available-relief
+  rule the actual relief is computed from the fund's net liquid BUCK
+  after any proportional redemption; the borrower pays the remainder. No
+  separate fixed 100 BUCK payout is assumed.
 
 
 5 Fund investments and liquidity
@@ -182,28 +188,50 @@ Table of Contents
   • each credit position's accrued and payable relief; and
   • the cash and positions reserved for anticipated relief payments.
 
-  When a BuckCredit position is reduced, the fund may need to redeem a
-  basket position or exchange other assets for BUCK. A modeled
-  investment return must have a source, such as a transfer from a
-  counterparty, a realized external asset sale, or new, separately
-  recorded issuance. It must not appear solely because the fund paid
-  demurrage to itself. The reference includes an idealized fund strategy
-  that holds a 1:1 BUCK claim and liquidates at par, plus returns
-  transferred explicitly from a counterparty. It does not model actual
-  basket prices, collateral values, losses, transaction costs, delay, or
-  market depth.
+  For the fund's cash ledger, separate cumulative 256-bit counters can
+  record full-value demurrage received, relief paid, BUCK invested, and
+  net BUCK withdrawn. With no other flows, liquid net BUCK equals
+  received demurrage plus investment withdrawals, less relief payments
+  and investments. Other inflows and outflows are recorded
+  separately. Demurrage paid by the fund to itself cannot be added to
+  net incoming cash a second time. A running average cost basis on the
+  pooled investment additionally identifies gains or losses only as the
+  corresponding shares are withdrawn. The net of either pair of
+  cumulative counters can be negative after gains; unsigned totals must
+  not be subtracted without signed or otherwise guarded arithmetic.
 
-  The 50-year example therefore confirms the desired gross fee and
-  liability arithmetic while exposing an unfunded cash obligation under
-  its stated no-return assumptions. The protocol must specify what
-  happens if fund assets cannot be realized in time or are insufficient:
-  a payout, unpaid remainder, quote, and subsequent position state must
-  not silently create BUCK or discard a claim. Positive ROI is a
-  possible source of funds, not a mathematical proof of solvency. An
-  individual claim can fit within the fund's assets while all
-  outstanding claims together exceed them; individual quotes alone
-  cannot establish solvency. Without a reservation or allocation rule,
-  paying some creditors first can leave later creditors underfunded.
+  When a BuckCredit position is reduced, the fund first redeems a
+  proportional slice of its positions, then computes relief from the net
+  BUCK in the fund.  Even a redemption returning zero BUCK leaves a
+  well-defined available relief, possibly zero. The borrower supplies
+  the difference; if the borrower lacks that amount, the reduction
+  cannot complete. A modeled investment return must have a source, such
+  as a transfer from a counterparty, a realized external asset sale, or
+  new, separately recorded issuance. It must not appear solely because
+  the fund paid demurrage to itself. The reference includes an idealized
+  BUCK-only strategy that pays demurrage into fund cash and liquidates
+  at its current mark, plus returns transferred explicitly from a
+  counterparty. The strategy's mark falls as its BUCK pay fees, while
+  the same fee increases fund cash: counting the mark decrease alone as
+  a loss of total fund value would be misleading. The reference does not
+  model actual basket prices, collateral values, transaction costs,
+  delay, or market depth.
+
+  The reference's available-relief experiment uses a reserve target of
+  10% of the remaining baseline relief and scales the target relief by
+  the ratio of post-redemption net cash to that reserve. It caps the
+  result at the net cash and the principal. This is a model of the
+  proposed reserve signal, not a final contract rule: a redemption
+  itself changes cash, so the signal, the redemption fraction, and their
+  effect on payout order require comparison.  The simulator permits the
+  fraction to be supplied explicitly. A fixed-2% quote and retirement
+  are retained only as comparison diagnostics.  The command-line
+  reference defaults to the requested target relief's share of total
+  outstanding target relief and can also compare the share of total
+  issued BUCK. Credits of different ages can make these two fractions
+  very different. The reference sums its positions to obtain this
+  benchmark; an efficient contract implementation of the same aggregate
+  remains to be designed.
 
 
 6 Signed accounts and carrying services
@@ -227,10 +255,19 @@ Table of Contents
   transfer. These nominal amounts are not necessarily the same as
   unencumbered economic value. The corrected model must preserve a clear
   distinction between nominal pool balances, remaining value,
-  transferred fee attribution, and the fund's actual assets.  The
-  current sign encoding and Carrying rules are implementation details to
-  validate or replace; they do not justify charging an already
-  transferred fee again.
+  transferred fee attribution, and the fund's actual assets.  For
+  Jubilee's own Carrying balance, a relief payment must deliver its full
+  net value. If the fund has 100 nominal BUCK with 20 BUCK of carried
+  fee, its net balance is 80. To deliver 40 net BUCK under proportional
+  continuous fee allocation, it sends 50 nominal BUCK carrying 10 of
+  fee; 50 nominal and 10 of fee remain, or 40 net. The fund's
+  already-credited self-demurrage must not be credited again on
+  payout. The actual on-chain rounding must follow the chosen
+  accumulator representation; the Python integer example is not yet a
+  derivation for Solidity's buck-seconds rounding.  The current sign
+  encoding and Carrying rules are implementation details to validate or
+  replace; they do not justify charging an already transferred fee
+  again.
 
   Delegated demurrage also needs an explicit net-balance treatment: its
   payer must have enough actual remaining value, and the outcome must
@@ -247,17 +284,19 @@ Table of Contents
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --json"
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --acquire-all"
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"
+  │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--deploy-fund --wipe-strategy --retire 50 --redeem-fraction 0.25"
   │ make nix-venv-demurrage-test
   └────
 
   The reference is an event-driven, floating-point monetary model, not
-  an EVM or fixed-point implementation. Its tests cover 1 to 100-year
+  an EVM or fixed-point implementation. Its tests cover 1 to 1,000-year
   idle holdings, changes to outstanding issuance, proportional
   reductions, separate positions, small net balances,
   settlement-frequency independence, fund self-demurrage, strategy
-  returns and liquidation, conservation, and insufficient funds.  Before
-  contract deployment, implement and cross-check fixed-point precision
-  and rounding, supply and claim conservation, settlement and retirement
+  returns and liquidation, zero proceeds, grossed-up Carrying relief,
+  conservation, and insufficient debtor funds.  Before contract
+  deployment, implement and cross-check fixed-point precision and
+  rounding, supply and claim conservation, settlement and retirement
   transitions, pool and delegated-fee semantics, fund liquidity, and
   migration of any existing account history. The five-year economy and
   sandboxes must subsequently use the implemented rules; existing runs
