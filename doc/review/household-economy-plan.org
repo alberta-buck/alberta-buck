@@ -345,6 +345,14 @@ its failures are understood.
 
 Newest first.
 
+- 2026-10-26: all 16 repaired worlds are complete with PDFs; all fail on the negative-signed
+  exit-balance check (238 household instances). On reviewing the plots, the 24 bootstrap
+  depositors are found to seed nearly equal TOKEN values, not the declared 25.52/23.38/21.28/
+  21.29/8.53% recipe. An isolated 30-day control with the same $6M distributed by weight opens
+  close to the recipe, while the separate day-zero price transient remains. The PDF's target
+  weights use a legacy formula, not the machine's lean, and its capital-at-risk plot reads
+  disabled direct-mint agents instead of the household receipt books. Share marks exist but
+  do not by themselves establish realized net returns. [[file:household-release-readiness.org][Evidence and proposed corrections]].
 - 2026-10-26: interim =c5df8e4= five-year evaluation: 14/16 completed with matching PDFs, no
   household errors and no overdue exits. All meet price tolerances; the three completed
   retirement-only cells fail K headroom. The strict judge fails all 14 on 203 negative signed

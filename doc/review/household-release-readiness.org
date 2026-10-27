@@ -221,6 +221,66 @@ The main checkout has unrelated uncommitted work, which must be preserved. A pos
 does not settle review or release readiness. The published verifier bundle uses a development
 trusted setup and the current bootstrap is not a complete production machine deployment.
 
+** Opening allocations and missing return plots (October 26)
+
+All 16 =exit-repair-20261026= worlds have now completed, each with a PDF. They record no
+household errors or overdue exits, but none passes acceptance: 238 exited household instances
+have the negative-signed-balance flags described above. The initial 14-world numbers above are
+retained as a dated interim analysis; the [[file:../../build/sim/economy/exit-repair-20261026/index.html][campaign index]] is the complete result.
+
+The five-constituent recipe was narrowed from the six-constituent basket and renormalized.
+The actual stored declared weights are LABR 25.52%, CNST 23.38%, FOOD 21.28%, NRGC 21.29%,
+and PAXG 8.53%; sequential integer rounding accounts for differences of a few basis points from
+the requested weights. The recipe is not an equal-weight basket.
+
+The opening *funded positions*, however, do not match it. Twenty-four bootstrap depositors
+each spend $250,000, cycling through the five tokens: five deposits in each of the first four
+tokens and four in PAXG. In =smid-dmid-history-41404-policy-basket=, the first recorded
+pool-weight frame is 20.63%, 20.79%, 20.95%, 21.08%, 16.56% respectively. This is an
+initialization assumption, not evidence that the declared recipe itself was stored at those
+weights. The machine then trades and subsequent investors deposit, so the initial adjustment
+is mixed into the economy's results.
+
+An isolated 30-day control keeps the same $6 million seed total and redistributes the seed
+deposits in proportion to the declared weights. Its first recorded LABR and PAXG pool shares
+are 25.46% and 8.16%, versus 20.63% and 16.56% in the original run. This demonstrates a
+neutral-weight opening is feasible, but it is not a five-year comparison; the control is
+[[file:../../build/sim/weighted-bootstrap-30d.json][saved separately]] and has not altered the frozen campaign. Also, the first-frame BVIB is
+1.151 in the original and 1.161 in the weighted control, falling near one on the next day.
+Thus the large opening price/mark transient is not explained solely by equal-size seeding.
+Investigate the initial markets and observation window before interpreting day-zero returns.
+
+There is also a plot bug. The PDF's =poolWeights= target is a legacy inverse-price formula;
+the machine instead uses a capped, half-power response to relative prices. It is not the same
+target once prices move. On historical day 1826 the old PAXG target plotted is 6.10%, while
+the saved machine-target calculation is 7.25%. The solid lines use whole pool reserves; the
+machine's own response weight also includes idle basket TOKEN. Plot these separately, using
+the saved =eq_w= and =eq_lean= for the machine, and name any legacy reserve-based target
+explicitly rather than presenting it as the machine's target.
+
+The blank =BuckBasket return on capital-at-risk= panel is a reporting mismatch. It uses the
+legacy direct-mint agents' realized profit and dollar-days. Those agents are disabled in this
+economy; the pinned bootstrap depositors never redeem. All 16 worlds consequently have zero
+=dmDollarDays= and zero =dmRoundTrips=, even though household basket activity exists. In the
+reverting 41404 world, 180 investors have arrived, 11 have exited, and 20 investor receipts
+have been redeemed. At the final frame, 227 open investor receipts are marked at about
+4.247 million BUCK against about 4.050 million BUCK of remaining principal.
+
+The vectors also contain basket equity and the share-price mark each day. They support a
+marked, flow-adjusted return for a fixed share, before investor-specific exit fees and trading
+costs. They do not contain a complete per-receipt cash-flow ledger for a realized household
+return. Record deposit basis, dates, redeemed shares and actual proceeds in both currencies,
+including partial redemptions and costs; show realized returns separately from marked open
+positions. Compare in BUCK, dollars and basket units with explicit denominators. Do not call a
+zero legacy counter an investor loss or claim a realized APR from marked shares. The existing
+negative-signed-balance issue also needs correction before treating household wealth as final.
+
+For interpretation: in that reverting world the share mark is 1.1530 on the first recorded
+day, 1.0247 the next day, 0.9998 on day 30, and 1.1346 on day 1826. These are TWAP-based
+BUCK marks, not a realized return; the opening transient makes the chosen starting date matter.
+An initial-allocation fix changes simulation conditions, so compare the weighted neutral opening
+with an explicit off-target stress arm and rerun the affected economies before adopting results.
+
 ** What the policy comparison does and does not establish
 
 Refinancing is active, and the final accounts report no living/premium arrears. Actual mortgage
