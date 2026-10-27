@@ -3,6 +3,15 @@
 #+DATE: 2026-09-29
 #+OPTIONS: ^:nil toc:2 num:t
 
+*Design correction, 2026-10-27:* This document describes the existing
+raw-balance holder demurrage design. The intended design uses remaining net
+holdings for account charges and outstanding issuance for linear relief and
+gross demurrage, including Jubilee's self-payments. The current fund accrual
+must be reconsidered: a self-payment does not create fund assets. See
+[[file:../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] and
+[[file:review/net-demurrage-analysis.org][Net-balance demurrage: audit and redesign]]. The corrected accrual is not yet
+implemented.
+
 * 0. Status
 
 *The core fix is built* (section 8), on branch =fix/jubilee-accounting=:

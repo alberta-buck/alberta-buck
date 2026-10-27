@@ -1,0 +1,204 @@
+#+TITLE: Net-balance demurrage: audit and redesign
+#+DATE: 2026-10-27
+
+* Status and scope
+
+This is an audit of =src/Buck.sol= and its Rust math mirror, not a claim that
+net-balance demurrage is implemented. The existing contract charges the raw
+positive balance and advances the Jubilee on outstanding issuance. The desired
+model treats accrued demurrage as already belonging to Jubilee, and bases
+gross demurrage and linear relief on outstanding issuance, including BUCK in
+the fund. Jubilee's demurrage paid to itself is gross activity but does not
+increase its assets. The signed
+balance guard described below has been corrected; the accrual and Jubilee
+redesign remains to be implemented and validated. Do not use the old 50-year
+relief assumptions as proof that the redesigned system is funded.
+
+* What the current contract does
+
+Each =AccountState= contains a signed raw balance, a =buckSeconds= accumulator,
+a timestamp and flags. The sign chooses the interpretation of the accumulator:
+
+| Raw balance | Meaning | Accumulator | Important qualification |
+|-------------+---------+-------------+-------------------------|
+| positive | gross BUCK held | fee-seconds | includes a fee already attributed to Jubilee |
+| zero | neither held BUCK nor a drawn lien | zero by invariant | undrawn credit may still be available |
+| negative | actual BUCK issued against credit | issuance-seconds | time integral of the outstanding raw lien, not a fee |
+
+This multiplexing works only if every transition settles the old meaning before
+the accumulator is reused. =_debit= crystallizes the old holding, realizes its
+fee when spending into credit, then starts issuance-seconds. =_credit= first
+crystallizes a lien; when the receipt crosses zero it realizes relief, clears
+issuance-seconds, and starts a holding. A partial receipt into a lien retains
+the existing issuance history. A zero-balance transition must leave zero
+seconds. Merely activating credit is not issuance: a draw is what makes the
+raw balance negative.
+
+For an ordinary, non-Carrying positive account, the current formula is
+
+#+begin_example
+live_seconds = stored_seconds + raw * elapsed
+fee          = live_seconds * BASE_RATE_PER_SEC / SCALE
+net_held     = max(0, raw - fee)
+#+end_example
+
+=balanceOf= additionally includes unused credit headroom; it is a spendable
+amount, not a holding or debt measure. =signedBalanceOf= excludes headroom:
+for a non-Carrying account it now returns the nonnegative net holding for raw
+positive, zero at zero, and the raw lien for negative. It does not subtract
+unpaid relief from a lien; =redeemCost= is the relief-adjusted quote, subject
+to actual fund availability. The previous positive-raw calculation did not
+clamp at zero and could produce a negative signed result without a lien. The
+burn solvency check now reads the actual signed raw state directly. This only
+repairs the sign and solvency interpretation; it does not repair the fee
+formula or authorize an undercollateralized exit.
+
+Carrying accounts, including AMM pools and the fund, report raw via
+=balanceOf= and =signedBalanceOf= so conventional pool reserve accounting can
+work. The sender passes a pro-rata portion of accumulated fee-seconds along
+with nominal BUCK. A recipient already below zero receives only nominal amount
+less its carried fee toward repayment. Thus a Carrying balance is a nominal
+quantity, not an unencumbered economic mark; pool users must understand the
+fee carried on outflow. =balanceOfFees= for a Carrying account is not capped
+at raw, unlike its non-Carrying counterpart.
+
+[[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] describes the intended model and the
+reference simulation. [[file:../JUBILEE-ISSUANCE.org][Jubilee on issuance]] documents the earlier matching
+assumptions; its implementation details must be revisited for the corrected
+net-balance model.
+
+* Arithmetic and the long-idle cases
+
+At a nominal continuous rate r = 0.02/year, if no funds are added, spent,
+sponsored, or otherwise moved, a natural interpretation of the requested model
+is dN/dt = -r N, hence N(t) = N(0) exp(-rt) and the transferred amount is
+N(0) - N(t). This is a proposed convention: the existing per-second constant
+is nominal, while an effective 2% per year or discrete charging schedule would
+produce slightly different results. The latter need an explicit calendar and
+rounding rule. A 2% annual rate on the remaining balance does *not* imply the
+whole balance has been transferred after 50 years.
+
+For 100 initially held BUCK, ignoring rounding:
+
+| Years | Current raw-linear net | Proposed continuous net | Proposed transferred |
+|-------+------------------------+-------------------------+----------------------|
+|     1 |                     98 |               98.019867 |             1.980133 |
+|    25 |                     50 |               60.653066 |            39.346934 |
+|    49 |                      2 |               37.531110 |            62.468890 |
+|    50 |                      0 |               36.787944 |            63.212056 |
+|    51 |                      0 |               36.059494 |            63.940506 |
+|   100 |                      0 |               13.533528 |            86.466472 |
+
+The current =feeOwing= continues beyond 100 at 51 years even though
+=balanceOfFees= caps the ordinary account's displayed fee at 100. Before the
+signed guard, =signedBalanceOf= reported about -2 BUCK: an invented lien.
+The cap alone does not fix accounting. For example, just after the old fee has
+reached 102 on raw 100, adding 10 fresh BUCK produces raw 110 and still owes
+102, so the visible holding rises by only 8, not 10. A real incoming fresh
+payment must not be eaten by fees attributed to a prior exhausted holding.
+The same risk appears much sooner if an account has spent most of its net
+holding and has a large accumulated fee locked in a small raw remainder. As an
+example, raw 294, fee 293.5 and net 0.5 currently accrue about 5.88 BUCK in
+the next year, versus approximately 0.0099 BUCK on the remaining net amount
+under the proposed continuous model. The particular gross amount and fee can
+change with rounding; the discrepancy is structural.
+
+A naive change that adds =net_at_last_touch * rate * elapsed= at each touch is
+not enough: frequent permissionless =settleDemurrage= calls then change the
+amount charged. For constant rate, exponential decay has the semigroup property
+D(t+u)=D(t)D(u), making arbitrary checkpoints economically equivalent apart
+from a specified, bounded fixed-point rounding error. The implementation must
+also bound precision and gas at very long idle times, dust, the =uint40=
+timestamp horizon, and accumulator/storage limits; rounding must not allow
+repeated tiny transfers or pokes to create value or erase charges.
+
+* Jubilee and relief cannot be changed independently
+
+Currently =_accrueJubilee= advances the fund by approximately
+=totalIssued() * rate * elapsed=, where =totalIssued()= is outstanding liens
+computed from supply and realized counters. =reliefOf= separately quotes the
+same linear rate on each raw lien, capped at the lien; =settleRelief= shrinks
+the lien and reduces later accrual. Relief is capped by fund cash at payment.
+This matching was designed around the old raw-linear fee assumptions.
+
+A minimal closed example demonstrates the incompatibility. Suppose 100 BUCK
+is issued against a 100 BUCK lien, held untouched outside Jubilee for 50
+years, with no relief paid and no other activity. Under net exponential
+holder demurrage, the holder has 36.787944 and has transferred 63.212056 to
+Jubilee. The current linear fund advancement and relief quote both reach
+approximately 100. Crediting the fund with 100 while also leaving the holder
+36.787944 makes about 36.787944 of unbacked extra value. The fund cannot both
+receive only actual holder transfers and promise a 100 BUCK fixed relief in
+this example without a separately identified source of funds. Distributing
+fund money along the way changes the path and must be modeled explicitly; it
+does not invalidate the accounting constraint.
+
+The intended relief remains linear in each credit position's outstanding
+issuance and is capped at the principal being retired. The reference model
+apportions accumulated issuance-seconds proportionally on a partial reduction.
+The fund's gross self-demurrage cannot be credited as additional assets;
+liquid assets and realizable investment positions must support the relief
+payments. If they do not, the protocol must define the treatment of the
+unfunded obligation. In particular, =redeemCost= currently subtracts the
+quoted relief even if payment is capped by available fund cash; this becomes
+materially misleading if funding is no longer guaranteed. A redesign must
+give callers an executable quote or explicitly distinguish the accrued claim
+from currently available relief.
+
+An O(1) global index and aggregate normalized economic holdings could permit
+lazy account and fund accounting without enumerating holders. One account
+needs sufficient state to reconstruct its gross nominal quantity and its net
+economic value; proportional Carrying transfers must move both consistently.
+This is a design direction, not a verified implementation. The current
+=totalIssued()= is a lien aggregate. It can form the gross system-wide fee
+base, but it does not by itself determine the incremental BUCK transferred
+from holders to the fund: that requires separating self-demurrage. Account
+mint/draw, transfer, repayment, settlement, rounding, the fund's own balance,
+and simulator basket hooks all need explicit conservation equations.
+
+* Delegation and old balances
+
+A sponsored account routes its elapsed fee-seconds to a consenting payer,
+up to the payer's remaining capacity; excess stays with the sponsored account.
+This is lazy and best effort. Pending sponsored exposures are not enumerated in
+the payer's live view until the sponsee is touched, and the payer may spend
+before that touch. Under net decay, routing the old raw rectangle to the payer
+is incorrect. The redesign must define whose net balance forms the fee base,
+when capacity is consumed, how to split an interval in which capacity runs out,
+and how multiple sponsees and touch ordering affect fairness, conservation,
+and the results. Simply exponentiating each account independently does not
+solve this allocation problem. Consider removing or redesigning delegation
+only after measuring its use and explicitly deciding its economics.
+
+An already stored positive account can have historical =buckSeconds= implying
+a fee greater than raw. The past net balance cannot be reconstructed exactly
+from that one linear accumulator: different deposits and withdrawals can have
+the same final raw and fee-seconds but different net-decay histories. A
+migration must specify a snapshot cutoff, treatment of excess legacy fees and
+fund advances, and how to reconcile outstanding relief and fund assets. A new
+contract deployment can instead start from a documented clean genesis. Neither
+approach should silently reinterpret old seconds as the new accumulator.
+Existing deployed immutable contracts, if any, do not change merely because
+this source is updated.
+
+* Required verification before deployment or long simulations
+
+- Compare contract and Rust math with an independent high-precision reference;
+  define the same convention in any Python and JavaScript model which computes
+  demurrage independently.
+- Cover 1, 25, 49, 50, 51 and much longer idle years, large accrued fees with
+  tiny net holdings, dust, fresh deposits, withdrawals, zero and both sign
+  crossings, partial and full debt repayment, relief, and fund exhaustion.
+- Prove accounting invariants across positive holders, Carrying pools, fund,
+  liens and realized relief. Check the fund's self-demurrage is recorded
+  without being credited as new assets, and that relief is capped at the
+  principal being retired and paid from identified assets.
+- Fuzz time-splitting, arbitrary third-party settlement, transfer splitting,
+  precision, accumulator overflow and maximal supported timestamps. Check
+  Carrying transfers conserve gross and economic value to bounded rounding.
+- Exercise sponsored payer depletion, multiple sponsees, ordering and
+  permissionless settlement, then verify pool reserve and AMM quote behavior.
+- Re-run the five-year simulations only after contract, simulations and
+  reporting use the same model; existing runs use the old fee model and cannot
+  establish the new model's behavior. The signed-balance correction alone does
+  not validate or repair their economics.

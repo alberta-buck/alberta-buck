@@ -21,6 +21,8 @@ help:
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
 	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \
+	  '  make nix-venv-demurrage-reference  # 50-year holder, Jubilee and relief accounting' \
+	  '  make nix-venv-demurrage-test       # reference model regression tests' \
 	  'Household economy (README-simulations.org):' \
 	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
 	  '  make nix-venv-economy-run CAMPAIGN=my-run CELLS=centre JOBS=2' \
@@ -219,6 +221,17 @@ PYTEST_ARGS		?= -q
 PYTEST_FILES		?= alberta_buck/test/
 test-python:
 	python -m pytest $(PYTEST_FILES) $(PYTEST_ARGS)
+
+# Event-driven monetary reference (no EVM, agents, market prices or services).
+#   make nix-venv-demurrage-reference
+#   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --acquire-all"
+#   make nix-venv-demurrage-test
+DEMURRAGE_ARGS ?=
+.PHONY: demurrage-reference demurrage-test
+demurrage-reference:
+	python -m alberta_buck.sim.demurrage_reference $(DEMURRAGE_ARGS)
+demurrage-test:
+	python -m pytest alberta_buck/test/test_demurrage_reference.py -q
 
 
 # ── Documentation rendering ─────────────────────────────────────────

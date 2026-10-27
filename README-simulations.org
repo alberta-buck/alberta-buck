@@ -13,11 +13,28 @@ interaction and cross-language contract tests. They are not independent economic
 | Household economy | Can households, K and the basket machine balance supply and liquidity demand? | =economy-plan/run/report= | JSON, adjacent PDF, campaign HTML and summary JSON |
 | Household policy/contract tests | Do both languages make the same decisions and move real funds correctly? | =economy-test= | pytest and Node test results |
 | Routing and contract tests | Do swaps, identities, accounting, guards and interfaces work? | =test-python=, =test= | Test failures and targeted vectors |
+| Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
 | Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |
 
 Keep these distinct checks. A five-year parity average cannot detect a broken wallet workflow;
 a short diagnostic trace cannot establish an economic equilibrium.
+
+* Demurrage and Jubilee reference
+
+=make nix-venv-demurrage-reference= prints a 50-year closed-ledger example;
+=DEMURRAGE_ARGS="--years 50 --json"= produces JSON, and =--acquire-all=
+models the fund acquiring the remaining holder BUCK at the end. The latter is
+an explicit transfer from the holder; non-BUCK consideration is not modeled.
+=DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"= puts fund cash into
+an idealized 1:1 BUCK strategy and attributes a 10 BUCK return to a transfer
+from the holder. This illustrates fund deployment, sourced returns and
+liquidation; it does not model real basket prices, impact, loss or liquidity.
+=make nix-venv-demurrage-test= tests issuance, proportional
+retirement, long-idle accounts, and fund self-demurrage. The reference is a
+mathematical specification, not the current contract implementation or a
+five-year economy run. See [[file:alberta-buck-demurrage.org][the demurrage design]] for the accounting and
+the currently exposed funding shortfall.
 
 * The household default
 

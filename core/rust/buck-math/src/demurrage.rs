@@ -8,6 +8,9 @@
 //! ```text
 //! fee = (buckSeconds + raw * elapsed) * BASE_RATE_PER_SEC / SCALE
 //! ```
+//! This mirrors the current gross-balance model, not the intended net-balance
+//! correction. See doc/review/net-demurrage-analysis.org before using it as
+//! a specification for future accrual or Jubilee funding.
 //!
 //! Carrying transfers apportion the sender's live buckSeconds to the
 //! recipient in proportion value/raw, so demurrage follows the BUCKs.
