@@ -14,12 +14,10 @@ import {BuckSlots} from "./harness/BuckSlots.sol";
 
 /// @title BuckDemurrage.t.sol -- demurrage / Jubilee / transferCarrying invariants.
 ///
-/// Flat-rate cumulative-index model: cumIndex grows linearly at BASE_RATE_PER_SEC,
-/// so there is no time-quantization error and no long-idle overshoot.  Jubilee
-/// is a Carrying account that grows via advance-mint on every _update toward
-/// BASE_RATE * integral(totalSupply dt).  Fees on Deducting transfers are
-/// BURNED (totalSupply drops); Jubilee growth is independent of individual
-/// account burns.
+/// Tests the existing gross-balance linear fee and Carrying transfer paths.
+/// These tests do not validate the intended net-balance accrual: the current
+/// fee can exceed raw after a long idle period. Jubilee accrual and relief
+/// must change together with the fee model; see net-demurrage-analysis.org.
 contract BuckDemurrageTest is Test {
 
     Buck                  internal buck;
@@ -181,6 +179,32 @@ contract BuckDemurrageTest is Test {
     }
 
     // ---- baseline ---------------------------------------------------------
+
+    function test_positiveRawNeverReportsCreditAfterLongIdle() public {
+        _setupAliceWithBuck(1000e6, 100e6);
+        vm.warp(block.timestamp + 51 * (365 days + 6 hours));
+
+        assertEq(buck.signedRawBalanceOf(alice), int256(100e6));
+        assertEq(buck.signedBalanceOf(alice), int256(0),
+                 "an exhausted holding is not credit used");
+        buck.settleDemurrage(alice);
+        assertEq(buck.signedBalanceOf(alice), int256(0),
+                 "settlement cannot turn a holding into a lien");
+    }
+
+    function test_nearlyExhaustedHoldingNeverReportsCredit() public {
+        _setupAliceWithBuck(1000e6, 100e6);
+        vm.warp(block.timestamp + 49 * (365 days + 6 hours));
+        uint256 net = uint256(buck.signedBalanceOf(alice));
+        vm.prank(alice);
+        buck.transfer(bob, net - 500_000);
+        assertEq(buck.signedBalanceOf(alice), int256(500_000));
+
+        vm.warp(block.timestamp + (365 days + 6 hours));
+        assertGt(buck.signedRawBalanceOf(alice), 0);
+        assertEq(buck.signedBalanceOf(alice), int256(0),
+                 "fee exhaustion cannot create credit used");
+    }
 
     function test_demurrage_zeroAtMint() public {
         _setupAliceWithBuck(1000e6, 100e6);

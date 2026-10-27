@@ -203,6 +203,8 @@ contract BuckJubileeReliefTest is Test {
         vm.warp(t0 + 60 * YEAR);
         assertEq(buck.reliefOf(alice), DRAW, "relief never exceeds the lien");
         assertEq(buck.redeemCost(alice), 0, "a lien carried ~50y closes for free");
+        assertEq(buck.signedBalanceOf(alice), -int256(DRAW),
+                 "unsettled relief does not change the signed raw lien");
     }
 
     function test_aging_integratesTheLien() public {

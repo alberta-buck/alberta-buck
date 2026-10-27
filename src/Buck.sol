@@ -24,18 +24,21 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 /// lowers limits, never liens: an account whose lien exceeds its limit
 /// simply cannot draw more.
 ///
-/// *Demurrage and relief.*  Held BUCK accrue a 2%/yr fee, locked inside the
+/// *Demurrage and relief.*  The current implementation accrues a linear
+/// 2%/yr fee on gross held BUCK, locked inside the
 /// balance (balanceOf = raw - fee) and taken out of circulation ("realized")
 /// only when the BUCK carrying it would shed it -- a spend past held BUCK
 /// into credit, or aged BUCK arriving at an account below zero.  Liens
 /// accrue relief at the same 2%/yr, paid from the Jubilee fund when the
 /// lien is repaid, at burn, or when the holder settles.  The fund accrues
 /// 2%/yr on the BUCK issued, so it always holds the relief it owes.
+/// This gross-balance model is under correction: the intended fee base is
+/// the remaining net holding. See doc/review/net-demurrage-analysis.org.
 ///
 /// Invariants the code maintains (tests: BuckDemurrage, BuckSignedBalance,
 /// JubileeBasis -- the last fuzzes all of them):
 ///   I0  _totalSupply == sum over non-Jubilee a of max(0, raw(a))
-///   J   sum_a max(0, raw(a)) == totalSupply + jubileeActual
+///   J   sum over all a of max(0, raw(a)) == totalSupply + jubileeActual
 ///   S   totalSupply == sum(liens) + reliefRealized - feesRealized
 ///   I1  raw(a) == 0  =>  buckSeconds(a) == 0
 ///   M   mintsBacked[tid] == BuckCredit.activatedValue(tid)
@@ -434,7 +437,9 @@ contract Buck is IERC20, IERC20Metadata {
         if (raw <= 0) return raw;          // credit used accrues no demurrage (clamped in _feeOwing)
         if (identity.isCarrying(a)) return raw;
         uint256 fee = _feeOwing(a, uint256(raw));
-        return raw - int256(fee);
+        // A fee can exhaust held BUCK, but cannot create a credit lien.
+        // The raw sign alone distinguishes a holder from a credit user.
+        return fee >= uint256(raw) ? int256(0) : raw - int256(fee);
     }
 
     function allowance(address owner, address spender) external view returns (uint256) {
@@ -851,7 +856,7 @@ contract Buck is IERC20, IERC20Metadata {
         // insurance is paid up in perpetuity and stays in force, and the
         // Jubilee relief accruing on the lien shrinks what closing it costs,
         // year on year, without the holder doing anything.
-        int256 signedRaw = signedBalanceOf(msg.sender);
+        int256 signedRaw = _state[msg.sender].balance.asInt();
         uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
         require(used <= creditLimit(msg.sender),
                 "BUCK: post-burn credit used exceeds limit");
