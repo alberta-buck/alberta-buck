@@ -167,7 +167,8 @@ must not be disturbed.
   insurer liquidity callback.
 - [X] Connect the real equity basket to BuckNet in a restricted cash-only
   mode before deposits. Test actual fund receipt additions, partial sales,
-  zero-equity sale failure, Carrying fee pricing and daily wheel dispatch.
+  zero-equity sale failure, Carrying fee pricing, daily wheel dispatch and
+  an in-kind exit through a real V3 pool.
 - [ ] Implement the external Carrying manager with one basket receipt and the
   agreed proportional payout *against the real equity basket*. Bound outputs
   to actual cash and sale proceeds; gross up Carrying payout without
@@ -201,7 +202,8 @@ must not be disturbed.
 | 2026-10-29 | 3e | Standalone =JubileeClaims= maintains exact capped claimable seconds with bounded heap processing; 9 tests passed, including two 256-run fuzz tests. For 64 simultaneous maturities, processing eight used at most 328,483 gas. | =4e66da46= |
 | 2026-10-29 | 3f | Experimental =BuckNet= connects the ledger, NFT records, capped claims, K, owner-approved reductions and insurer-specific pools. Fourteen tests pass, including 256 fuzzed idle-facility closures. Runtime: BuckNet 18,382 bytes, BuckCredit 23,490 bytes. | =11b07073= |
 | 2026-10-29 | 4a | Experimental =JubileeFund= applies proportional relief and manages one receipt with real =BuckNet= and a controllable mock basket. Seventeen fund, 17 ledger and 14 token tests passed; the ledger includes a 256-case nominal gross-up fuzz test. | =21ba6d2c= |
-| 2026-10-29 | 4b | The real basket has an opt-in cash-only net-token mode. Five integration, 29 legacy equity, 35 director and 17 fund tests passed. Equity runtime is 23,114 bytes. This mode cannot open basket credit, and real AMM positions/in-kind exits are not yet tested. | This commit: restricted real-basket integration |
+| 2026-10-29 | 4b | The real basket has an opt-in cash-only net-token mode. Five integration, 29 legacy equity, 35 director and 17 fund tests passed. Equity runtime is 23,114 bytes. This mode cannot open basket credit. | =bb1a2aa5= |
+| 2026-10-29 | 4c | Six real-basket integration tests passed, including a partially in-kind Jubilee redemption through a real Uniswap V3 pool with Carrying BUCK. The fund counts actual net BUCK only; its received TOKEN still needs a conversion path. | This commit: real AMM in-kind test |
 
 * Open implementation constraints
 
@@ -244,8 +246,9 @@ allowance; real insurer pool implementations still need integration. The real eq
 basket's opt-in net mode holds and invests actual BUCK without a credit
 facility; it rejects opening one. This avoids incorrectly treating incoming
 BUCK as debt retirement or using unissued credit as a spendable balance. It
-does not establish leveraged basket operation, low-K exit behavior, or real
-AMM in-kind exit behavior under the new token. Its mode cannot be enabled
+does not establish leveraged basket operation or low-K exit behavior under
+the new token. One real-AMM in-kind exit is tested in the cash-only mode; more
+market and multi-asset cases remain. Its mode cannot be enabled
 after shares or credit exist. In-kind TOKEN received from a
 partial exit is currently held by the fund but cannot yet be converted into
 BUCK; it is not counted as cash relief. Governance currently authorizes each
