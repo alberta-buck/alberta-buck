@@ -30,6 +30,7 @@ make nix-match-NetDemurrageMathTest
 make nix-match-BuckLedgerTest
 make nix-match-BuckCredit
 make nix-match-JubileeClaimsTest
+make nix-match-BuckNetTest
 make nix-doc-alberta-buck-demurrage
 # Later, when compatibility is restored:
 make nix-test
@@ -139,9 +140,11 @@ must not be disturbed.
   renewal checkpoint hooks, separate from coverage. Test differently aged
   positions, multiple issuances, 50-year cap, ownership, authorization,
   reappraisal and partial reductions with fuzzed amounts/ages.
-- [ ] Connect the NFT hooks to actual Buck issuance, reductions and atomic
-  renewal. Verify issuance and relief against K, depreciation and premium
-  flows; the standalone book is not populated by legacy Buck.
+- [X] Connect the NFT hooks to issuance and reductions in an isolated token
+  prototype. Exercise K changes, premium flows, independent facilities,
+  funding-factor checks, owner authorization and long-idle retirement.
+- [ ] Complete atomic renewal and migrate the production Buck integration;
+  the new book is not populated by legacy Buck.
 - [ ] Implement conserved issuance, transfer, fund checkpoint and reduction
   paths; retain or deliberately replace compatibility APIs only with tests and
   recorded rationale. Include event and allowance behavior.
@@ -185,7 +188,8 @@ must not be disturbed.
 | 2026-10-29 | 3b | BuckCredit now has restricted per-NFT issuance/age/reduction/renewal hooks. All 65 BuckCredit tests pass; legacy Buck does not call them yet. BuckCredit runtime is 23,306 bytes, leaving 1,270 bytes before the EVM deployment limit. | =6cbee7dd= |
 | 2026-10-29 | 3c | Standalone =BuckLedger= passes 16 Foundry tests, including 256-run mixed-transfer conservation fuzz and a 3-raw-unit 50-year fractional settlement. No production token uses it yet. | =271ca437= |
 | 2026-10-29 | 3d | Cap a facility's claimable age before new issuance, keeping gross age separate in the Python reference. Reference: 76 tests; BuckCredit: 66 tests; BuckCredit runtime 23,414 bytes. Average age within each NFT is an explicit policy choice. | =2cd8fba7= |
-| 2026-10-29 | 3e | Standalone =JubileeClaims= maintains exact capped claimable seconds with bounded heap processing; 9 tests passed, including two 256-run fuzz tests. For 64 simultaneous maturities, processing eight used at most 328,483 gas. Not integrated. | This commit: capped claims benchmark |
+| 2026-10-29 | 3e | Standalone =JubileeClaims= maintains exact capped claimable seconds with bounded heap processing; 9 tests passed, including two 256-run fuzz tests. For 64 simultaneous maturities, processing eight used at most 328,483 gas. | =4e66da46= |
+| 2026-10-29 | 3f | Experimental =BuckNet= connects the ledger, NFT records, capped claims, K, owner-approved reductions and insurer-specific pools. Fourteen tests pass, including 256 fuzzed idle-facility closures. Runtime: BuckNet 18,382 bytes, BuckCredit 23,490 bytes. Uses a mock fund; not a deployment target. | This commit: token integration prototype |
 
 * Open implementation constraints
 
@@ -213,9 +217,22 @@ pro-rata floored fee; it does not establish parity with the old BUCK-seconds
 representation. Global 256-bit counters, scaled account bounds, per-NFT capped
 aggregate relief and actual-token transitions remain to be designed and tested.
 The new NFT book is intentionally not authoritative for legacy Buck activity;
-minting and repayment are not migrated until token and fund settlement can
-call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
+minting and repayment are not migrated into production until token and fund
+settlement can call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
 further logic needs size checks or extraction instead of assuming it will fit.
+
+=BuckNet= is a separate clean-genesis integration prototype, not a replacement
+for =Buck.sol=. It issues actual unspent BUCK against each activated NFT,
+keeps insurer deposits pinned to their original pool, and lets only the
+designated fund execute an exact, owner-authorized reduction. The test fund is
+deliberately a mock and does not enforce proportional sales or payouts; the
+real coordinator must do so. Pool withdrawals require the pool's allowance;
+the future coordinator must call a real pool's liquidity preparation before
+entering the token's locked settlement. The prototype has no renewal API,
+automatic pool liquidation, registry-mode conversion, legacy basket adapter,
+deployment integration, or supported migration. Its internal fractional
+retirement can require integral ERC-20 burn events to be rounded; the exact
+split is recorded in =FacilityReduced= and still needs indexer review.
 
 The claim benchmark retains BUCK-seconds precision and rounds the selected
 relief only at settlement; it is not the sum of individually rounded raw-unit

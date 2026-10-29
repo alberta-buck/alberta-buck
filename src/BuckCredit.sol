@@ -851,6 +851,12 @@ contract BuckCredit is ERC721Enumerable {
         return (c.faceValue.asUint(), c.activatedValue.asUint(), c.premiumRate);
     }
 
+    /// @notice The insurer responsible for this facility's premium pool.
+    function insurerOf(uint256 tokenId) external view returns (address) {
+        ownerOf(tokenId);
+        return credits[tokenId].insurer;
+    }
+
     /// @notice Bulk variant of creditInfo + ownerOf: returns one CreditSlice
     ///         per tokenId, all in a single external call.  Used by
     ///         Buck._allocateMint / _allocateBurn to walk a holder's NFT
