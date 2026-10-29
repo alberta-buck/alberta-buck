@@ -115,9 +115,13 @@ must not be disturbed.
 
 ** 3. Fixed-point demurrage and per-NFT credit
 
-- [ ] Specify and implement fixed-point continuous net decay without the
-  existing exponential clamp. Test 1, 49, 50, 51, 100 and 1,000 years, tiny and
-  large balances, mixed ages, rounding and checkpoint-frequency independence.
+- [X] Implement standalone fixed-point continuous net decay without the
+  existing exponential clamp. Test 1, 49, 50, 51, 100 and 1,000 years, tiny
+  and large balances, and checkpoint-frequency rounding against independently
+  generated high-precision numbers. Test the nominal Carrying gross-up and
+  per-NFT relief arithmetic separately.
+- [ ] Implement account state and test mixed-age Carrying and non-Carrying
+  transfers, precision bounds and conservation across all contract operations.
 - [ ] Specify account state for held, issued-but-unspent and Carrying nominal
   amounts; write model-parity tests for =balanceOf=, =transfer=, =transferFrom=,
   deposits, fees, total supply, and owner/recipient net amounts.
@@ -162,7 +166,8 @@ must not be disturbed.
 | 2026-10-29 | Plan | Branch created from reference =291560c1=; isolated plan recorded. | =bb9b5554= |
 | 2026-10-29 | Baseline | =make nix-venv-demurrage-test=: 74 passed; =make nix-build-uniswap-artifacts=: successful, existing compiler/lint warnings. | =bb9b5554= |
 | 2026-10-29 | 1 | Proportional is default in quotes, retirements, renewals and CLI; =reserve= remains explicit. Reference tests: 75 passed; demurrage PDF regenerated. | =06ed24b6= |
-| 2026-10-29 | 2 | Same-receipt top-up and exact-share exit implemented; 29 equity, 35 director (including inherited cases), and 20 shared-receipt pro-rata tests passed. Basket runtime 22,233 bytes. | This commit: basket position API |
+| 2026-10-29 | 2 | Same-receipt top-up and exact-share exit implemented; 29 equity, 35 director (including inherited cases), and 20 shared-receipt pro-rata tests passed. Basket runtime 22,233 bytes. | =6dfd7a9e= |
+| 2026-10-29 | 3a | Standalone =NetDemurrageMath=: 10 Foundry tests passed, including two 256-run fuzz tests, independent Decimal vectors, 4,000/8,000-year bounds and 365 versus one checkpoint. Not integrated into Buck. | This commit: fixed-point primitives |
 
 * Open implementation constraints
 
@@ -178,3 +183,14 @@ account's net equity, which can include changes in accrued legacy relief. It
 reverts an equity-less exit, so a future manager must handle a failed sale as
 zero proceeds without pretending its shares were retired. New capital cannot
 enter a live zero-equity basket until a recapitalization policy is specified.
+
+The fixed-point primitive uses a 36-decimal per-second decay factor and splits
+intervals into 1,000-year chunks, so a very small factor is applied before it
+is rounded to zero. An interval of at least 9,000 years leaves less than one
+unit even for =uint256.max=. Frequent checkpoints require fractional raw-unit
+state; integer-only account checkpoints would still lose dust. Its fund
+function assumes issuance and net fund cash use the same unit and that every
+economic BUCK is accounted for exactly once. The Carrying gross-up uses a
+pro-rata floored fee; it does not establish parity with the old BUCK-seconds
+representation. Global 256-bit counters, scaled account bounds, per-NFT capped
+aggregate relief and actual-token transitions remain to be designed and tested.
