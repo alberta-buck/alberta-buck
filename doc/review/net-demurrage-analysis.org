@@ -3,6 +3,11 @@
 
 * Status and scope
 
+This audit describes the branch's existing signed-account implementation. The
+later [[file:credit-facility-accounting-design.org][credit-facility accounting design]] supersedes any suggestion that
+its account-sign encoding should remain the intended design: activated,
+issued-but-unspent BUCK incur demurrage and relief belongs to each credit NFT.
+
 This is an audit of =src/Buck.sol= and its Rust math mirror, not a claim that
 net-balance demurrage is implemented. The existing contract charges the raw
 positive balance and advances the Jubilee on outstanding issuance. The desired

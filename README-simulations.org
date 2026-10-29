@@ -22,9 +22,13 @@ a short diagnostic trace cannot establish an economic equilibrium.
 
 * Demurrage and Jubilee reference
 
-=make nix-venv-demurrage-reference= prints a 50-year closed-ledger example;
+=make nix-venv-demurrage-reference= prints a 50-year closed-ledger example
+with 100 BUCK issued into an ordinary account's issued-but-unspent balance.
+The ordinary held balance starts at zero; =balanceOf= is the full spendable
+held plus net unspent balance. Pass =--held= to issue directly to held BUCK
+instead, or =--issued 1000000 --years 1= for the million-BUCK facility example;
 =DEMURRAGE_ARGS="--years 50 --json"= produces JSON, and =--acquire-all=
-models the fund acquiring the remaining holder BUCK at the end. The latter is
+models the fund acquiring the remaining spendable BUCK at the end. The latter is
 an explicit transfer from the holder; non-BUCK consideration is not modeled.
 =DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"= puts fund cash into
 an idealized BUCK-only strategy and attributes a 10 BUCK return to a transfer
@@ -36,16 +40,20 @@ illustrates a worthless position being partially redeemed before relief is
 computed from available cash. The default fractional redemption is requested
 baseline relief divided by total outstanding baseline relief; pass
 =--redeem-fraction= to compare another rule, or =--redemption-basis issuance=
-for the credit reduction divided by total issued BUCK. The reserve signal in this
-prototype uses 10% of outstanding baseline relief; it remains a policy
-assumption to compare, not the finalized contract rule.
-=make nix-venv-demurrage-test= tests issuance, proportional
-redemption, Carrying fund payouts, long-idle accounts, and fund self-demurrage.
+for the credit reduction divided by total issued BUCK. The original =reserve=
+payout signal uses 10% of outstanding baseline relief; it can award the first
+reducer too much when the fund holds uninvested cash. Pass
+=--payout-policy proportional= with =--retire= to compare the selected fraction of pre-sale
+cash plus actual sale proceeds. Both are experimental; the
+[[file:doc/review/credit-facility-accounting-design.org][contract design]] explains the observed ordering failure and tradeoffs.
+=make nix-venv-demurrage-test= tests issuance, independent facility histories,
+atomic renewal, insurer-specific nominal refunds, proportional redemption,
+Carrying fund payouts, long-idle accounts, and fund self-demurrage.
 The reference is a
 mathematical specification, not the current contract implementation or a
 five-year economy run. See [[file:alberta-buck-demurrage.org][the demurrage design]] for the accounting and
-the remaining policy and contract decisions. The proposed token, fund, and
-single-position basket changes are in the [[file:doc/review/jubilee-single-position-design.org][contract design]].
+the remaining policy and contract decisions. The proposed token, facilities,
+fund, insurer pools, and basket changes are in the [[file:doc/review/credit-facility-accounting-design.org][contract design]].
 
 * The household default
 

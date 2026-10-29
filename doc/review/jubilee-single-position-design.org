@@ -3,6 +3,14 @@
 
 * Status and decision
 
+The account and relief portions of this proposal are superseded by
+[[file:credit-facility-accounting-design.org][Buck, credit facilities, Jubilee, and insurer pools]]. Activated,
+issued-but-unspent BUCK accrue demurrage; an account can hold BUCK and have
+outstanding credit simultaneously; and each NFT owns its issuance and relief
+history. In particular, do not implement the signed-account and undrawn-credit
+claims below as the intended model. The basket receipt, net deposit, callback,
+and fund-checkpoint analysis remain useful with those corrections.
+
 This is a proposed design, not an implemented or audited contract. It follows
 [[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] and the available-relief reference in
 [[file:../../alberta_buck/sim/demurrage_reference.py][demurrage_reference.py]]. The intended behavior is net-balance demurrage,

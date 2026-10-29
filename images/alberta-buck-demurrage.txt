@@ -9,14 +9,14 @@
                                2026-10-27
 
 
-Held BUCK pay demurrage on the BUCK remaining in the account. Each
-BuckCredit position earns Jubilee relief on the BUCK it actually issued,
-proportional to issuance and elapsed time. The total gross demurrage
-basis is all outstanding BUCK, including BUCK held by Jubilee. The fund
-receives the charges and may invest its assets; it pays the relief when
-issuance is retired. Gross demurrage includes charges paid by Jubilee to
-itself, so cumulative gross demurrage and BUCK actually held by the fund
-are distinct.
+Held and issued-but-unspent BUCK pay demurrage on the BUCK remaining in
+the account. Each BuckCredit position earns Jubilee relief on the BUCK
+it actually issued, proportional to issuance and elapsed time. The total
+gross demurrage basis is all outstanding BUCK, including BUCK held by
+Jubilee. The fund receives the charges and may invest its assets; it
+pays the relief when issuance is retired. Gross demurrage includes
+charges paid by Jubilee to itself, so cumulative gross demurrage and
+BUCK actually held by the fund are distinct.
 
 Table of Contents
 ─────────────────
@@ -26,21 +26,23 @@ Table of Contents
 3. Demurrage on remaining balances
 4. The 100 BUCK, 50-year example
 5. Fund investments and liquidity
-6. Signed accounts and carrying services
+6. Account state and carrying services
 7. Run and verify
 
 
 1 Status
 ════════
 
-  This is the intended monetary design, clarified on 2026-10-27. The
-  executable [Python reference model] and its tests exercise the
-  mathematics below. The current Solidity contract and Rust mirror still
-  use a linear charge on a holder's gross raw balance and advance
-  Jubilee on issuance; they do not yet implement the model in this
-  document. Their existing tests establish the old behavior, not
+  This is the intended monetary design, clarified through
+  2026-10-29. The executable [Python reference model] and its tests
+  exercise the mathematics below. The current Solidity contract and Rust
+  mirror still use a linear charge on a holder's gross raw balance and
+  advance Jubilee on issuance; they do not yet implement the model in
+  this document. Their existing tests establish the old behavior, not
   conformance with the new one. The detailed implementation audit is
-  [Net-balance demurrage: audit and redesign].
+  [Net-balance demurrage: audit and redesign]. The proposed division of
+  responsibility among Buck, each credit NFT, Jubilee and each insurer's
+  pool is in [Buck, credit facilities, Jubilee, and insurer pools].
 
   Earlier versions of this document described linear demurrage on the
   holder's raw balance and contained older storage sketches. Those
@@ -53,17 +55,23 @@ Table of Contents
 [Net-balance demurrage: audit and redesign]
 <file:doc/review/net-demurrage-analysis.org>
 
+[Buck, credit facilities, Jubilee, and insurer pools]
+<file:doc/review/credit-facility-accounting-design.org>
+
 
 2 Issuance, holdings, and relief
 ════════════════════════════════
 
-  A BuckCredit authorizes credit; only the BUCK actually issued into
-  existence forms the demurrage base and earns relief. Undrawn credit is
-  not itself BUCK.  While issuance remains outstanding, all of those
-  BUCK are held somewhere: ordinary accounts, pool or other service
-  accounts, or Jubilee. The underlying asset's insured coverage and a
-  user's unused credit headroom are different quantities from the number
-  of BUCK actually issued.
+  A BuckCredit authorizes credit; BUCK actually issued into existence
+  form the demurrage base and earn relief. When a facility issues BUCK
+  into an account's issued-but-unspent balance, they are already issued
+  and pay demurrage even before they are transferred. Merely potential
+  capacity that has not been issued is not BUCK. While issuance remains
+  outstanding, the corresponding net BUCK are in issued-but-unspent
+  balances, ordinary accounts, pool or other service accounts, or
+  Jubilee. The underlying asset's insured coverage and a user's
+  not-yet-issued capacity are different quantities from outstanding
+  issued BUCK.
 
   Let `I(t)' be total outstanding BUCK issuance, `r' the nominal annual
   rate, and `P_j(t)' the outstanding issuance attributable to credit
@@ -77,32 +85,37 @@ Table of Contents
   │ position j target relief = r * integral(P_j(t) dt)
   └────
 
-  BUCK-years are the integral of outstanding issued BUCK, not merely the
-  age of an open but unused credit limit. When an issuance position is
-  reduced, its target relief is computed from its BUCK-years. Jubilee
-  first redeems a proportion of its investment positions and computes
-  the actual relief from its available full-value BUCK; the account
-  repays the remaining principal.  Actual relief can be lower or higher
-  than the target, but is bounded by the principal being reduced and by
-  the available net BUCK. In the reference, a partial reduction takes a
-  pro-rata share of that position's accumulated BUCK-years.  Separate
-  positions retain separate issuance histories. For issuance held for 50
-  years at a nominal 2% per year, the target reaches the entire
-  position; the actual payment depends on the fund and cannot exceed the
-  position.
+  BUCK-years are the integral of outstanding issued BUCK, including
+  issued but unspent BUCK, not the age of a potential credit limit. When
+  an issuance position is reduced, its target relief is computed from
+  its BUCK-years. Jubilee first redeems a proportion of its investment
+  positions and computes the actual relief from its available full-value
+  BUCK; the account repays the remaining principal.  Actual relief can
+  be lower or higher than the target, but is bounded by the principal
+  being reduced and by the available net BUCK. In the reference, a
+  partial reduction takes a pro-rata share of that position's
+  accumulated BUCK-years.  Separate positions retain separate issuance
+  histories. For issuance held for 50 years at a nominal 2% per year,
+  the target reaches the entire position; the actual payment depends on
+  the fund and cannot exceed the position.
 
-  An account's actual BUCK holding, the outstanding issuance it owes,
-  and its unused credit are not interchangeable. Relief reduces a
-  liability only when it is paid. The target and the actual relief
-  computed after liquidation must each be visible; a target shortfall is
-  not an additional guaranteed claim.
+  An account's received/held BUCK, issued-but-unspent BUCK, and the
+  outstanding issuance of each NFT it owns are not interchangeable. Its
+  ERC-20 `balanceOf' reports the full spendable balance: held plus
+  issued-but-unspent net BUCK for an ordinary account. Separate views
+  can expose each amount. Spending issued BUCK does not issue it again,
+  and receiving BUCK does not automatically retire an NFT. Relief
+  reduces a liability only when it is paid. The target and the actual
+  relief computed after liquidation must each be visible; a target
+  shortfall is not an additional guaranteed claim.
 
 
 3 Demurrage on remaining balances
 ═════════════════════════════════
 
   Demurrage already transferred to Jubilee no longer belongs to the
-  former holder and is not charged again to that holder. For an idle
+  former holder and is not charged again to that holder. Held and
+  issued-but-unspent BUCK follow the same net-balance rule. For an idle
   account with a remaining balance `H' and no other flows, the Python
   reference uses a nominal continuous rate:
 
@@ -138,37 +151,39 @@ Table of Contents
 4 The 100 BUCK, 50-year example
 ═══════════════════════════════
 
-  One credit issues 100 BUCK to an ordinary wallet. Nothing is
-  transferred, invested, retired, or added for 50 years. At a nominal
-  continuous 2% rate, the Python reference produces, ignoring rounding:
+  One credit issues 100 BUCK into an ordinary account's unspent
+  balance. Its ordinary held balance starts at zero and `balanceOf'
+  reports the full spendable unspent amount. Nothing is transferred,
+  invested, retired, or added for 50 years. At a nominal continuous 2%
+  rate, the Python reference produces, ignoring rounding:
 
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Years  Wallet balance  Jubilee BUCK  Gross demurrage  Jubilee self-demurrage  Target relief
-  ─────────────────────────────────────────────────────────────────────────────────────────────
-       0      100.000000      0.000000         0.000000                0.000000       0.000000
-       1       98.019867      1.980133         2.000000                0.019867       2.000000
-      25       60.653066     39.346934        50.000000               10.653066      50.000000
-      49       37.531110     62.468890        98.000000               35.531110      98.000000
-      50       36.787944     63.212056       100.000000               36.787944     100.000000
-  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Years  Unspent / balanceOf  Jubilee BUCK  Gross demurrage  Jubilee self-demurrage  Target relief
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+       0           100.000000      0.000000         0.000000                0.000000       0.000000
+       1            98.019867      1.980133         2.000000                0.019867       2.000000
+      25            60.653066     39.346934        50.000000               10.653066      50.000000
+      49            37.531110     62.468890        98.000000               35.531110      98.000000
+      50            36.787944     63.212056       100.000000               36.787944     100.000000
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   The 100 BUCK gross demurrage is the sum of 63.212056 transferred from
-  the wallet and 36.787944 paid by Jubilee to itself. The latter is
-  counted as a charge, but does not create an additional 36.787944 BUCK
-  in the fund. Wallet plus fund still hold 100 BUCK, matching the
-  outstanding issuance. Crediting Jubilee with all 100 *in addition* to
-  leaving 36.787944 in the wallet would create 36.787944 BUCK without a
-  source.
+  the unspent balance and 36.787944 paid by Jubilee to itself. The
+  latter is counted as a charge, but does not create an additional
+  36.787944 BUCK in the fund.  Unspent balance plus fund still hold 100
+  BUCK, matching outstanding issuance.  Crediting Jubilee with all 100
+  *in addition* to leaving 36.787944 unspent would create 36.787944 BUCK
+  without a source.
 
   The target relief at year 50 is 100, but the fund directly holds only
   63.212056 in this no-return, no-transfers example. It needs another
   36.787944 BUCK to pay the full target. Acquiring that amount from the
-  wallet, for example by selling other assets or realizing returns,
-  would leave 100 in the fund; a 100 BUCK Jubilee payment can then
-  extinguish the credit. The external consideration and market price are
-  not represented by the closed BUCK ledger. Under the available-relief
-  rule the actual relief is computed from the fund's net liquid BUCK
-  after any proportional redemption; the borrower pays the remainder. No
+  owner, for example by selling other assets or realizing returns, would
+  leave 100 in the fund; a 100 BUCK Jubilee payment can then extinguish
+  the credit. The external consideration and market price are not
+  represented by the closed BUCK ledger. Under the available-relief rule
+  the actual relief is computed from the fund's net liquid BUCK after
+  any proportional redemption; the borrower pays the remainder. No
   separate fixed 100 BUCK payout is assumed.
 
 
@@ -217,25 +232,41 @@ Table of Contents
   model actual basket prices, collateral values, transaction costs,
   delay, or market depth.
 
-  The reference's available-relief experiment uses a reserve target of
-  10% of the remaining baseline relief and scales the target relief by
-  the ratio of post-redemption net cash to that reserve. It caps the
-  result at the net cash and the principal. This is a model of the
-  proposed reserve signal, not a final contract rule: a redemption
-  itself changes cash, so the signal, the redemption fraction, and their
-  effect on payout order require comparison.  The simulator permits the
-  fraction to be supplied explicitly. A fixed-2% quote and retirement
-  are retained only as comparison diagnostics.  The command-line
-  reference defaults to the requested target relief's share of total
-  outstanding target relief and can also compare the share of total
-  issued BUCK. Credits of different ages can make these two fractions
-  very different. The reference sums its positions to obtain this
-  benchmark; an efficient contract implementation of the same aggregate
-  remains to be designed.
+  The original available-relief experiment scales the target by
+  post-redemption net cash divided by a 10% reserve target, capped at
+  net cash and principal.  That signal can mistake uninvested cash or
+  redemption proceeds for returns.  In a two-facility idle example it
+  lets the first reducer receive the entire fund, leaving the second
+  unable to close. It is retained only as a comparison, not a safe
+  contract rule.
+
+  A second experimental rule allocates the fraction `f' of pre-sale cash
+  plus the actual proceeds from selling fraction `f' of the position,
+  capped by the principal. Its default `f' is the selected facility's
+  baseline target divided by all outstanding capped targets. It computes
+  relief from realized funds and does not mistake a cash reserve for
+  investment ROI; with two identical idle facilities it lets each
+  receive its half. The 10% reserve can remain an investment/liquidity
+  target without being the payout multiplier. Neither rule has yet been
+  validated against actual basket liquidity, costs, or adversarial
+  ordering. See the [facility design] for the concrete comparison.
+
+  The simulator permits the fraction to be supplied explicitly. A
+  fixed-2% quote and retirement are retained only as comparison
+  diagnostics.  The command-line reference defaults to the requested
+  target relief's share of total outstanding target relief and can also
+  compare the share of total issued BUCK. Credits of different ages can
+  make these two fractions very different. The reference sums its
+  positions to obtain this benchmark; an efficient contract
+  implementation of the same aggregate remains to be designed.
 
 
-6 Signed accounts and carrying services
-═══════════════════════════════════════
+[facility design]
+<file:doc/review/credit-facility-accounting-design.org>
+
+
+6 Account state and carrying services
+═════════════════════════════════════
 
   The present contract uses one signed raw account balance and a
   timestamped `BUCK-seconds' accumulator. Its positive side represents
@@ -243,11 +274,14 @@ Table of Contents
   accrued fee; its negative side represents actual credit drawn and uses
   the accumulator to integrate the outstanding lien for relief. Zero
   must have zero accumulated seconds. A sign change must settle the old
-  interpretation before recording the new one. A negative raw balance is
-  an actual liability, not unused credit and not an exhausted positive
-  holding. The signed view of an ordinary positive holding must never
-  turn negative merely because its accumulated fee exceeds its raw
-  amount.
+  interpretation before recording the new one. This is a description of
+  the current code, not the proposed model: the current account sign
+  cannot represent held BUCK, issued-but-unspent BUCK and multiple
+  independent NFT liabilities at once. The proposed design stores the
+  BUCK and credit-facility responsibilities separately and attributes
+  each NFT's relief to that NFT. The signed view of an ordinary positive
+  holding must never turn negative merely because its accumulated fee
+  exceeds its raw amount.
 
   The existing Carrying mode lets service contracts, including AMM
   pools, report nominal raw balances to preserve ERC-20 reserve
@@ -265,9 +299,17 @@ Table of Contents
   payout. The actual on-chain rounding must follow the chosen
   accumulator representation; the Python integer example is not yet a
   derivation for Solidity's buck-seconds rounding.  The current sign
-  encoding and Carrying rules are implementation details to validate or
-  replace; they do not justify charging an already transferred fee
-  again.
+  encoding and Carrying rules must be replaced or adapted; they do not
+  justify charging an already transferred fee again.
+
+  Each upstream insurer has its own Carrying premium pool. An initial
+  deposit of 10 full-value BUCK is refunded as 10 nominal BUCK, with
+  that pool's average carried fee. This differs from Jubilee relief,
+  which must deliver full net value. A pool can invest and redeem its
+  positions before paying; an insurer's deposit and refund must not be
+  mixed with another insurer's pool. A renewal can settle an NFT's
+  actual relief, update insurance terms, and optionally add issuance
+  atomically without first releasing its old coverage.
 
   Delegated demurrage also needs an explicit net-balance treatment: its
   payer must have enough actual remaining value, and the outcome must
@@ -281,17 +323,20 @@ Table of Contents
 
   ┌────
   │ make nix-venv-demurrage-reference
+  │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--issued 1000000 --years 1"
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --json"
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --acquire-all"
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"
   │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--deploy-fund --wipe-strategy --retire 50 --redeem-fraction 0.25"
+  │ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50 --payout-policy proportional"
   │ make nix-venv-demurrage-test
   └────
 
   The reference is an event-driven, floating-point monetary model, not
   an EVM or fixed-point implementation. Its tests cover 1 to 1,000-year
   idle holdings, changes to outstanding issuance, proportional
-  reductions, separate positions, small net balances,
+  reductions, separate NFT positions, full spendable balances,
+  insurer-pool refunds and atomic renewals, small net balances,
   settlement-frequency independence, fund self-demurrage, strategy
   returns and liquidation, zero proceeds, grossed-up Carrying relief,
   conservation, and insufficient debtor funds.  Before contract

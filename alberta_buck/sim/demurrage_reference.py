@@ -7,6 +7,10 @@ activity but has no effect on its balance. Credit positions accumulate linear
 BUCK-years of outstanding issuance. This float-based, event-driven model is for
 financial specification and tests, not production fixed-point contract math.
 
+Issued but unspent credit is tracked separately from ordinary BUCK holdings.
+It is part of issued supply and pays demurrage even when the ordinary holding
+is zero. Each credit position retains its own issued principal and age.
+
 Jubilee's liquid BUCK are Carrying: the ledger tracks their net value and
 outstanding fee separately. A payment of net relief removes a proportional
 amount of gross BUCK and its fee, so the credit receives the requested full
@@ -37,6 +41,12 @@ class Position:
 
     principal: float = 0.0
     buck_years: float = 0.0
+    owner: str | None = None
+    credit_limit: float | None = None
+    premium_rate: float = 0.0
+    insurer: str | None = None
+    insurance_pool: str | None = None
+    insurance_principal: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -50,6 +60,10 @@ class RetirementQuote:
     fund_shortfall: float
     fund_nominal_required: float | None
     fund_carried_fee: float | None
+    insurance_pool: str | None
+    insurance_refund: float
+    insurance_nominal_required: float | None
+    insurance_principal_released: float
 
 
 @dataclass(frozen=True)
@@ -62,6 +76,7 @@ class AvailableRetirement:
     redeemed_fraction: float
     redeemed_units: float
     redemption_proceeds: float
+    payout_policy: str
     fund_net_after_redemption: float
     reserve_target: float
     rate_multiplier: float | None
@@ -69,6 +84,32 @@ class AvailableRetirement:
     account_payment: float
     fund_nominal_required: float
     fund_carried_fee: float
+    insurance_pool: str | None
+    insurance_refund: float
+    insurance_nominal_required: float | None
+    insurance_principal_released: float
+
+
+@dataclass(frozen=True)
+class Renewal:
+    """Atomic renewal of one owned credit position."""
+
+    position: str
+    baseline_relief: float
+    relief: float
+    old_principal: float
+    additional_issuance: float
+    new_principal: float
+    new_limit: float
+    new_premium_rate: float
+    old_insurance_pool: str | None
+    new_insurance_pool: str | None
+    old_insurance_principal: float
+    new_insurance_principal: float
+    insurance_refunded: float
+    insurance_principal_released: float
+    insurance_funded: float
+    redemption_proceeds: float
 
 
 class InsufficientFunds(ValueError):
@@ -88,12 +129,18 @@ class DemurrageLedger:
         self.rate = _nonnegative(rate, "rate")
         self.time = 0.0
         self.accounts: dict[str, float] = {JUBILEE: 0.0, JUBILEE_INVESTED: 0.0}
+        self.unspent: dict[str, float] = {}
+        self.insurer_pools: dict[str, str] = {}
+        self.insurance_carried_fee: dict[str, float] = {}
+        self.insurance_nominal_sent: dict[str, float] = {}
+        self.insurance_strategies: dict[str, str] = {}
         self.positions: dict[str, Position] = {}
         self.gross_demurrage = 0.0
         self.from_holders = 0.0
         self.recycled_by_jubilee = 0.0
         self.jubilee_carried_fee = 0.0
         self.jubilee_fee_created = 0.0
+        self.jubilee_fee_inherited = 0.0
         self.jubilee_fee_realized = 0.0
         self.jubilee_nominal_sent = 0.0
         # Full-value cash flows. Separate lifetime counters can each remain
@@ -138,24 +185,259 @@ class DemurrageLedger:
                    for p in self.positions.values())
 
     def issue(self, position: str, amount: float, recipient: str) -> None:
-        """Create BUCK against this position; undrawn credit is not issuance."""
+        """Create BUCK against a position and deliver it to a holder."""
         amount = _positive(amount, "amount")
         if not position or not recipient:
             raise ValueError("position and recipient must be nonempty")
         p = self.positions.setdefault(position, Position())
+        if p.owner is not None:
+            raise ValueError("use issue_unspent for an owned credit position")
         p.principal += amount
         self.accounts[recipient] = self.accounts.get(recipient, 0.0) + amount
         if recipient == JUBILEE:
             self.fund_other_in += amount
 
-    def transfer(self, sender: str, recipient: str, amount: float) -> None:
-        """Transfer a full-value amount, including an actual fund acquisition.
+    def register_insurer_pool(self, insurer: str, pool: str) -> None:
+        """Register a Carrying pool; active deposits keep their original pool."""
+        if not insurer or not pool or pool in FUND_ACCOUNTS:
+            raise ValueError("insurer and non-Jubilee pool must be specified")
+        if any(other != insurer and registered == pool
+               for other, registered in self.insurer_pools.items()):
+            raise ValueError("each insurer must use its own pool")
+        if pool in self.insurance_carried_fee and pool not in self.insurance_strategies:
+            raise ValueError("an insurer investment cannot be another insurer's pool")
+        old = self.insurer_pools.get(insurer)
+        if old is not None and old != pool and any(
+            p.insurer == insurer and p.insurance_principal > 0 for p in self.positions.values()
+        ):
+            raise ValueError("active insurance principal must stay with its original pool")
+        if pool not in self.insurance_carried_fee:
+            if (self.accounts.get(pool, 0.0) or self.unspent.get(pool, 0.0) or
+                    any(p.owner == pool and p.principal for p in self.positions.values())):
+                raise ValueError("register a Carrying pool before funding it or issuing credit")
+            strategy = f"insurer-investment:{pool}"
+            if strategy in self.accounts or strategy in self.insurance_carried_fee:
+                raise ValueError("insurer investment account already exists")
+            self.accounts[pool] = 0.0
+            self.insurance_carried_fee[pool] = 0.0
+            self.insurance_nominal_sent[pool] = 0.0
+            self.accounts[strategy] = 0.0
+            self.insurance_carried_fee[strategy] = 0.0
+            self.insurance_nominal_sent[strategy] = 0.0
+            self.insurance_strategies[pool] = strategy
+        self.insurer_pools[insurer] = pool
 
-        A transfer from Jubilee consumes enough Carrying gross BUCK that the
-        recipient gets ``amount`` after the proportionally carried fee.
-        Incoming transfers and the toy strategy pay full-value fresh BUCK.
+    def invest_insurance(self, pool: str, nominal: float) -> None:
+        """Move nominal Carrying BUCK into the insurer's own mock strategy."""
+        self.transfer(pool, self.insurance_strategies[pool], nominal)
+
+    def issue_unspent(
+        self, position: str, amount: float, owner: str, *, credit_limit: float | None = None,
+        premium_rate: float | None = None, insurer: str | None = None, premium_deposit: float = 0.0,
+    ) -> None:
+        """Issue into unspent credit and optionally fund its insurer's pool.
+
+        The simplified model takes a quoted net deposit; it does not price the
+        insurance policy or implement the contract's funding-factor gate.
         """
+        amount = _positive(amount, "amount")
+        premium_deposit = _nonnegative(premium_deposit, "premium_deposit")
+        if credit_limit is not None:
+            credit_limit = _nonnegative(credit_limit, "credit_limit")
+        if premium_rate is not None:
+            premium_rate = _nonnegative(premium_rate, "premium_rate")
+        if not position or not owner or owner in FUND_ACCOUNTS:
+            raise ValueError("position and non-fund owner must be specified")
+        if owner in self.insurance_carried_fee:
+            raise ValueError("this reference requires non-Carrying facility owners")
+        p = self.positions.get(position)
+        if p is not None and p.owner != owner:
+            raise ValueError("credit position belongs to a different owner")
+        if p is not None and (credit_limit is not None or premium_rate is not None):
+            raise ValueError("change existing insurance terms through renewal")
+        selected_insurer = insurer if insurer is not None else (p.insurer if p else None)
+        if p is not None and p.principal and selected_insurer != p.insurer:
+            raise ValueError("change insurers through renewal")
+        selected_pool = self.insurer_pools.get(selected_insurer) if selected_insurer else None
+        if selected_insurer and selected_pool is None:
+            raise ValueError("insurer has no registered pool")
+        if premium_deposit and selected_pool is None:
+            raise ValueError("a premium deposit requires an insurer pool")
+        if p is not None and p.insurance_principal and p.insurance_pool != selected_pool:
+            raise ValueError("existing principal belongs to the original pool")
+        if premium_deposit > self.unspent.get(owner, 0.0) + amount:
+            raise InsufficientFunds("unspent BUCK cannot fund the premium deposit")
+        limit = p.credit_limit if p else credit_limit
+        if limit is not None and (p.principal if p else 0.0) + amount > limit:
+            raise ValueError("issuance exceeds the facility limit")
+        if p is None:
+            p = self.positions[position] = Position(
+                owner=owner, credit_limit=credit_limit,
+                premium_rate=premium_rate or 0.0, insurer=selected_insurer,
+                insurance_pool=selected_pool,
+            )
+        p.principal += amount
+        self.accounts.setdefault(owner, 0.0)
+        self.unspent[owner] = self.unspent.get(owner, 0.0) + amount
+        if premium_deposit:
+            self.spend_unspent(owner, selected_pool, premium_deposit)
+            p.insurance_principal += premium_deposit
+
+    def spend_unspent(self, owner: str, recipient: str, amount: float) -> None:
+        """Move unspent issued BUCK without issuing or retiring the facility."""
+        amount = _nonnegative(amount, "amount")
+        if not owner or not recipient:
+            raise ValueError("owner and recipient must be nonempty")
+        available = self.unspent.get(owner, 0.0)
+        if amount > available:
+            raise InsufficientFunds(f"{owner} has {available:g} unspent, needs {amount:g}")
+        self.unspent[owner] = available - amount
+        self.accounts[recipient] = self.accounts.get(recipient, 0.0) + amount
+        if recipient == JUBILEE:
+            self.fund_other_in += amount
+
+    def _repayment_funds(self, payer: str) -> float:
+        return self.accounts.get(payer, 0.0) + self.unspent.get(payer, 0.0)
+
+    def balance_of(self, owner: str) -> float:
+        """Full spendable balance; Carrying accounts report nominal BUCK."""
+        if owner == JUBILEE:
+            return self.jubilee_nominal
+        if owner in self.insurance_carried_fee:
+            return self.accounts.get(owner, 0.0) + self.insurance_carried_fee[owner]
+        return self._repayment_funds(owner)
+
+    def _consume_repayment(self, payer: str, amount: float) -> None:
+        """Consume received/held BUCK first, then this owner's unspent BUCK."""
+        held = self.accounts.get(payer, 0.0)
+        from_held = min(held, amount)
+        self.accounts[payer] = max(0.0, held - from_held)
+        rest = amount - from_held
+        if rest:
+            self.unspent[payer] = max(0.0, self.unspent.get(payer, 0.0) - rest)
+
+    def _quote_insurance_nominal(self, pool: str | None, nominal: float) -> tuple[float, float | None]:
+        """Quote a nominal refund carrying the pool's average demurrage."""
+        if not nominal:
+            return 0.0, 0.0
+        if pool is None:
+            raise ValueError("insurance principal has no recorded pool")
+        available = self.accounts.get(pool, 0.0)
+        gross = available + self.insurance_carried_fee[pool]
+        if nominal > gross and pool in self.insurance_strategies:
+            strategy = self.insurance_strategies[pool]
+            strategy_net = self.accounts[strategy]
+            strategy_gross = strategy_net + self.insurance_carried_fee[strategy]
+            needed = nominal - gross
+            if strategy_gross <= 0 or _exceeds_float(needed, strategy_gross):
+                return 0.0, None
+            available += strategy_net * needed / strategy_gross
+            gross += needed
+        if gross <= 0 or _exceeds_float(nominal, gross):
+            return 0.0, None
+        return nominal * available / gross, nominal
+
+    def _insurance_refund(self, p: Position, amount: float) -> tuple[float, float, float | None]:
+        released = p.insurance_principal * amount / p.principal
+        net, nominal = self._quote_insurance_nominal(p.insurance_pool, released)
+        return released, net, nominal
+
+    def _return_insurance_nominal(self, pool: str | None, owner: str, nominal: float) -> float:
+        """Move nominal BUCK from the recorded Carrying pool to its owner."""
+        net, available_nominal = self._quote_insurance_nominal(pool, nominal)
+        if available_nominal is None:
+            raise InsufficientFunds(f"insurance pool {pool} lacks the refund")
+        if not nominal or pool == owner:
+            return 0.0
+        cash_gross = self.accounts[pool] + self.insurance_carried_fee[pool]
+        if nominal > cash_gross and pool in self.insurance_strategies:
+            strategy = self.insurance_strategies[pool]
+            self._return_insurance_nominal(strategy, pool, nominal - cash_gross)
+            net, available_nominal = self._quote_insurance_nominal(pool, nominal)
+            if available_nominal is None:
+                raise InsufficientFunds(f"insurance pool {pool} lacks the refund")
+        carried = nominal - net
+        self.accounts[pool] = max(0.0, self.accounts[pool] - net)
+        self.insurance_carried_fee[pool] = max(0.0, self.insurance_carried_fee[pool] - carried)
+        self.insurance_nominal_sent[pool] += nominal
+        self.accounts[owner] = self.accounts.get(owner, 0.0) + net
+        if owner == JUBILEE:
+            self.fund_other_in += net
+            self.jubilee_carried_fee += carried
+            self.jubilee_fee_inherited += carried
+        elif owner in self.insurance_carried_fee:
+            self.insurance_carried_fee[owner] += carried
+        return net
+
+    def _fund_insurance(self, owner: str, pool: str, amount: float) -> None:
+        """Pay a quoted full-value deposit from held, then unspent BUCK."""
+        if _exceeds_float(amount, self._repayment_funds(owner)):
+            raise InsufficientFunds(f"{owner} lacks BUCK to fund insurance")
+        held = min(amount, self.accounts.get(owner, 0.0))
+        if held:
+            self.transfer(owner, pool, held)
+        rest = amount - held
+        if rest:
+            self.spend_unspent(owner, pool, min(rest, self.unspent.get(owner, 0.0)))
+
+    def reappraise_limit(self, position: str, limit: float) -> None:
+        """Model a live limit change without calling back issued credit."""
+        self.positions[position].credit_limit = _nonnegative(limit, "credit_limit")
+
+    def transfer(self, sender: str, recipient: str, amount: float) -> None:
+        """Transfer a nominal amount; ordinary accounts can use unspent BUCK.
+
+        Carrying senders pass their proportional fee to the recipient. The
+        internal full-value paths used by relief and deposits gross up instead.
+        """
+        amount = _nonnegative(amount, "amount")
+        if not sender or not recipient:
+            raise ValueError("sender and recipient must be nonempty")
+        if sender == JUBILEE:
+            self._transfer_jubilee_nominal(recipient, amount)
+            return
+        if sender in self.insurance_carried_fee:
+            self._return_insurance_nominal(sender, recipient, amount)
+            return
+        if sender == JUBILEE_INVESTED:
+            self._transfer(sender, recipient, amount, relief=False)
+            return
+        if amount > self._repayment_funds(sender):
+            raise InsufficientFunds(f"{sender} lacks spendable BUCK")
+        if sender == recipient:
+            return
+        held = min(amount, self.accounts.get(sender, 0.0))
+        if held:
+            self._transfer(sender, recipient, held, relief=False)
+        unspent = amount - held
+        if unspent:
+            self.spend_unspent(sender, recipient, unspent)
+
+    def transfer_full_value(self, sender: str, recipient: str, amount: float) -> None:
+        """Send a net amount from a Carrying account, grossing up its fee."""
+        if sender != JUBILEE and sender not in self.insurance_carried_fee:
+            raise ValueError("full-value transfer requires a Carrying sender")
         self._transfer(sender, recipient, amount, relief=False)
+
+    def _transfer_jubilee_nominal(self, recipient: str, nominal: float) -> None:
+        gross = self.jubilee_nominal
+        if nominal > gross:
+            raise InsufficientFunds("Jubilee lacks nominal BUCK")
+        if not nominal or recipient == JUBILEE:
+            return
+        net = nominal * self.jubilee / gross
+        carried = nominal - net
+        self.accounts[JUBILEE] = max(0.0, self.jubilee - net)
+        self.jubilee_carried_fee = max(0.0, self.jubilee_carried_fee - carried)
+        self.jubilee_fee_realized += carried
+        self.jubilee_nominal_sent += nominal
+        self.accounts[recipient] = self.accounts.get(recipient, 0.0) + net
+        if recipient in self.insurance_carried_fee:
+            self.insurance_carried_fee[recipient] += carried
+        if recipient == JUBILEE_INVESTED:
+            self.fund_invested += net
+        else:
+            self.fund_other_out += net
 
     def _transfer(self, sender: str, recipient: str, amount: float, *, relief: bool) -> None:
         amount = _nonnegative(amount, "amount")
@@ -174,8 +456,20 @@ class DemurrageLedger:
             self.jubilee_carried_fee -= carried
             self.jubilee_fee_realized += carried
             self.jubilee_nominal_sent += amount + carried
+        elif sender in self.insurance_carried_fee and amount:
+            fee = self.insurance_carried_fee[sender]
+            carried = fee if amount == available else amount * fee / available
+            self.insurance_carried_fee[sender] -= carried
+            self.insurance_nominal_sent[sender] += amount + carried
+        else:
+            carried = 0.0
         self.accounts[sender] = available - amount
         self.accounts[recipient] = self.accounts.get(recipient, 0.0) + amount
+        if carried and recipient == JUBILEE:
+            self.jubilee_carried_fee += carried
+            self.jubilee_fee_inherited += carried
+        elif carried and recipient in self.insurance_carried_fee:
+            self.insurance_carried_fee[recipient] += carried
         if sender == JUBILEE:
             if recipient == JUBILEE_INVESTED:
                 self.fund_invested += amount
@@ -195,7 +489,7 @@ class DemurrageLedger:
         mark = self.accounts[JUBILEE_INVESTED]
         new_units = (amount * self.strategy_units / mark
                      if self.strategy_units and mark else amount)
-        self.transfer(JUBILEE, JUBILEE_INVESTED, amount)
+        self.transfer_full_value(JUBILEE, JUBILEE_INVESTED, amount)
         self.strategy_units += new_units
         self.strategy_open_basis += amount
 
@@ -239,8 +533,8 @@ class DemurrageLedger:
         z = self.rate * years
         loss_fraction = -math.expm1(-z)
         remaining_fraction = math.exp(-z)
-        holder_start = sum(value for name, value in self.accounts.items()
-                           if name not in FUND_ACCOUNTS)
+        holder_start = (sum(value for name, value in self.accounts.items()
+                            if name not in FUND_ACCOUNTS) + sum(self.unspent.values()))
         strategy_start = self.accounts[JUBILEE_INVESTED]
         # Holder and strategy fees arrive continuously. Self-demurrage is
         # charged on evolving net fund cash, not previously paid fees.
@@ -256,6 +550,11 @@ class DemurrageLedger:
                 # after very long idle periods; expm1 keeps tiny fees accurate.
                 self.accounts[name] = held * remaining_fraction
                 incoming += fee
+                if name in self.insurance_carried_fee:
+                    self.insurance_carried_fee[name] += fee
+        for owner, held in self.unspent.items():
+            incoming += held * loss_fraction
+            self.unspent[owner] = held * remaining_fraction
         strategy_fee = strategy_start * loss_fraction
         self.accounts[JUBILEE_INVESTED] = strategy_start * remaining_fraction
         self.accounts[JUBILEE] += incoming + strategy_fee
@@ -286,6 +585,7 @@ class DemurrageLedger:
             gross = 0.0 if relief == 0 else relief * (
                 net_at_payment + self.jubilee_carried_fee
             ) / net_at_payment
+        released, refund, insurance_nominal = self._insurance_refund(p, amount)
         return RetirementQuote(
             principal=amount,
             relief=relief,
@@ -296,6 +596,9 @@ class DemurrageLedger:
             fund_shortfall=fund_shortfall,
             fund_nominal_required=gross,
             fund_carried_fee=None if gross is None else gross - relief,
+            insurance_pool=p.insurance_pool, insurance_refund=refund,
+            insurance_nominal_required=insurance_nominal,
+            insurance_principal_released=released,
         )
 
     def retire(self, position: str, amount: float, payer: str) -> RetirementQuote:
@@ -306,31 +609,38 @@ class DemurrageLedger:
         """
         if payer in FUND_ACCOUNTS:
             raise ValueError("payer must be distinct from Jubilee")
+        p = self.positions[position]
+        if p.owner is not None and p.owner != payer:
+            raise ValueError("credit position belongs to a different owner")
         quote = self.quote_retirement(position, amount)
         if quote.fund_shortfall > 0.0:
             raise InsufficientFunds(f"Jubilee lacks {quote.fund_shortfall:g} BUCK")
-        available = self.accounts.get(payer, 0.0)
+        if quote.insurance_nominal_required is None:
+            raise InsufficientFunds(f"insurance pool {quote.insurance_pool} lacks the refund")
+        available = self._repayment_funds(payer) + quote.insurance_refund
         if _exceeds_float(quote.account_payment, available):
             raise InsufficientFunds(
                 f"{payer} lacks {quote.account_payment - available:g} BUCK"
             )
-        p = self.positions[position]
         remaining_fraction = 1.0 - amount / p.principal
         if quote.relief > self.jubilee:
             # The toy strategy redeems at par with no delay or price impact.
             fraction = (quote.relief - self.jubilee) / self.accounts[JUBILEE_INVESTED]
             self.redeem_strategy(fraction)
+        if quote.insurance_principal_released:
+            self._return_insurance_nominal(quote.insurance_pool, payer, quote.insurance_principal_released)
+        p.insurance_principal -= quote.insurance_principal_released
         # Deliver the full net relief using the Carrying path, then extinguish
         # the credit using the account payment plus that exact net relief.
         self._transfer(JUBILEE, payer, quote.relief, relief=True)
-        self.accounts[payer] = max(0.0, self.accounts[payer] - quote.principal)
+        self._consume_repayment(payer, quote.principal)
         p.principal -= amount
         p.buck_years *= remaining_fraction
         return quote
 
     def quote_available_retirement(
         self, position: str, amount: float, redeemed_fraction: float | None = None,
-        reserve_fraction: float = 0.1,
+        reserve_fraction: float = 0.1, payout_policy: str = "reserve",
     ) -> AvailableRetirement:
         """Preview relief from cash after redeeming the specified LP fraction.
 
@@ -338,7 +648,8 @@ class DemurrageLedger:
         by default the fund redeems requested target relief divided by the
         total outstanding unadjusted relief benchmark. The caller may supply a
         different fraction to compare alternatives. The signal is post-sale net
-        cash / (reserve_fraction * benchmark).
+        cash / (reserve_fraction * benchmark). The opt-in proportional policy
+        allocates the same fraction of pre-sale cash plus actual sale proceeds.
         """
         if redeemed_fraction is None:
             redeemed_fraction = self.redemption_fraction(position, amount, "relief")
@@ -348,6 +659,8 @@ class DemurrageLedger:
         reserve_fraction = _positive(reserve_fraction, "reserve_fraction")
         if reserve_fraction > 1:
             raise ValueError("reserve fraction cannot exceed one")
+        if payout_policy not in ("reserve", "proportional"):
+            raise ValueError("payout policy must be reserve or proportional")
         baseline = self.quote_retirement(position, amount).relief
         benchmark = self.aggregate_relief
         proceeds = self.accounts[JUBILEE_INVESTED] * redeemed_fraction
@@ -356,15 +669,35 @@ class DemurrageLedger:
         multiplier = cash / target if target > 0 else None
         relief = min(amount, baseline * multiplier, cash) if multiplier is not None else 0.0
         nominal = relief * (cash + self.jubilee_carried_fee) / cash if relief else 0.0
-        return AvailableRetirement(
+        released, refund, insurance_nominal = self._insurance_refund(self.positions[position], amount)
+        result = AvailableRetirement(
             principal=amount, baseline_relief=baseline, benchmark=benchmark,
             redeemed_fraction=redeemed_fraction,
             redeemed_units=self.strategy_units * redeemed_fraction,
-            redemption_proceeds=proceeds, fund_net_after_redemption=cash,
+            redemption_proceeds=proceeds, payout_policy="reserve", fund_net_after_redemption=cash,
             reserve_target=target, rate_multiplier=multiplier,
             relief=relief, account_payment=amount - relief,
             fund_nominal_required=nominal, fund_carried_fee=nominal - relief,
+            insurance_pool=self.positions[position].insurance_pool,
+            insurance_refund=refund, insurance_nominal_required=insurance_nominal,
+            insurance_principal_released=released,
         )
+        if payout_policy == "proportional":
+            return self._proportional_payout(result, self.jubilee, proceeds, redeemed_fraction)
+        return result
+
+    def _proportional_payout(self, quote: AvailableRetirement, cash_before: float,
+                             proceeds: float, fraction: float) -> AvailableRetirement:
+        """Allocate a matching share of cash and the actual strategy proceeds."""
+        relief = (min(quote.principal, cash_before * fraction + proceeds)
+                  if quote.baseline_relief else 0.0)
+        cash = quote.fund_net_after_redemption
+        nominal = relief * (cash + self.jubilee_carried_fee) / cash if relief else 0.0
+        return replace(quote, payout_policy="proportional", relief=relief,
+                       rate_multiplier=(relief / quote.baseline_relief
+                                        if quote.baseline_relief else None),
+                       account_payment=quote.principal - relief,
+                       fund_nominal_required=nominal, fund_carried_fee=nominal - relief)
 
     def redemption_fraction(self, position: str, amount: float, basis: str) -> float:
         """Compare two candidate proportional-redemption bases."""
@@ -377,7 +710,7 @@ class DemurrageLedger:
 
     def retire_available(
         self, position: str, amount: float, payer: str, redeemed_fraction: float | None = None,
-        reserve_fraction: float = 0.1,
+        reserve_fraction: float = 0.1, payout_policy: str = "reserve",
     ) -> AvailableRetirement:
         """Redeem first, then pay relief bounded by actual full-value cash.
 
@@ -387,29 +720,138 @@ class DemurrageLedger:
         """
         if payer in FUND_ACCOUNTS:
             raise ValueError("payer must be distinct from Jubilee")
+        p = self.positions[position]
+        if p.owner is not None and p.owner != payer:
+            raise ValueError("credit position belongs to a different owner")
         if redeemed_fraction is None:
             redeemed_fraction = self.redemption_fraction(position, amount, "relief")
         redeemed_fraction = _nonnegative(redeemed_fraction, "redeemed_fraction")
         if redeemed_fraction > 1:
             raise ValueError("redemption fraction cannot exceed one")
+        if payout_policy not in ("reserve", "proportional"):
+            raise ValueError("payout policy must be reserve or proportional")
         # The reference uses a snapshot to model transaction rollback. Actual
         # contract execution must enforce atomicity without copying the ledger.
         before = copy.deepcopy(self.__dict__)
         try:
+            cash_before = self.jubilee
             units, proceeds = self.redeem_strategy(redeemed_fraction)
             result = self.quote_available_retirement(position, amount, 0.0, reserve_fraction)
             result = replace(result, redeemed_fraction=redeemed_fraction,
                              redeemed_units=units, redemption_proceeds=proceeds)
-            available = self.accounts.get(payer, 0.0)
+            if payout_policy == "proportional":
+                result = self._proportional_payout(result, cash_before, proceeds, redeemed_fraction)
+            if result.insurance_nominal_required is None:
+                raise InsufficientFunds(f"insurance pool {result.insurance_pool} lacks the refund")
+            if result.insurance_principal_released:
+                self._return_insurance_nominal(result.insurance_pool, payer,
+                                               result.insurance_principal_released)
+            available = self._repayment_funds(payer)
             if _exceeds_float(result.account_payment, available):
                 raise InsufficientFunds(f"{payer} lacks {result.account_payment - available:g} BUCK")
             p = self.positions[position]
             remaining_fraction = 1.0 - amount / p.principal
+            p.insurance_principal -= result.insurance_principal_released
             self._transfer(JUBILEE, payer, result.relief, relief=True)
-            self.accounts[payer] = max(0.0, self.accounts[payer] - amount)
+            self._consume_repayment(payer, amount)
             p.principal -= amount
             p.buck_years *= remaining_fraction
             return result
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(before)
+            raise
+
+    def renew_unspent(
+        self, position: str, owner: str, *, new_limit: float, new_premium_rate: float,
+        additional_issuance: float = 0.0, new_insurer: str | None = None,
+        new_insurance_principal: float | None = None, redeemed_fraction: float | None = None,
+        payout_policy: str = "reserve",
+    ) -> Renewal:
+        """Crystallize relief and replace one facility's terms atomically.
+
+        ``new_limit`` is the caller's already-priced, K-adjusted capacity;
+        the model does not authenticate the insurer or price premium reserves.
+        If already over its prior limit, renewal may improve or preserve, but
+        not worsen, the shortfall. Existing issued BUCK are never called back.
+        """
+        new_limit = _nonnegative(new_limit, "new_limit")
+        new_premium_rate = _nonnegative(new_premium_rate, "new_premium_rate")
+        additional_issuance = _nonnegative(additional_issuance, "additional_issuance")
+        p = self.positions[position]
+        if p.owner != owner:
+            raise ValueError("credit position belongs to a different owner")
+        old_principal = p.principal
+        old_limit = p.credit_limit if p.credit_limit is not None else old_principal
+        old_pool = p.insurance_pool
+        old_deposit = p.insurance_principal
+        new_deposit = (old_deposit if new_insurance_principal is None else
+                       _nonnegative(new_insurance_principal, "new_insurance_principal"))
+        insurer = p.insurer if new_insurer is None else new_insurer
+        if insurer == "":
+            raise ValueError("insurer must be specified")
+        new_pool = self.insurer_pools.get(insurer) if insurer else None
+        if insurer and new_pool is None:
+            raise ValueError("insurer has no registered pool")
+        if new_deposit and new_pool is None:
+            raise ValueError("a premium deposit requires an insurer pool")
+        if old_deposit and old_pool is None:
+            raise ValueError("insurance principal has no recorded pool")
+        if redeemed_fraction is None:
+            redeemed_fraction = (self.redemption_fraction(position, old_principal, "relief")
+                                 if old_principal else 0.0)
+        redeemed_fraction = _nonnegative(redeemed_fraction, "redeemed_fraction")
+        if redeemed_fraction > 1:
+            raise ValueError("redemption fraction cannot exceed one")
+        if payout_policy not in ("reserve", "proportional"):
+            raise ValueError("payout policy must be reserve or proportional")
+
+        before = copy.deepcopy(self.__dict__)
+        try:
+            cash_before = self.jubilee
+            _, proceeds = self.redeem_strategy(redeemed_fraction)
+            quote = (self.quote_available_retirement(position, old_principal, 0.0)
+                     if old_principal else None)
+            if quote and payout_policy == "proportional":
+                quote = self._proportional_payout(quote, cash_before, proceeds, redeemed_fraction)
+            baseline = quote.baseline_relief if quote else 0.0
+            relief = quote.relief if quote else 0.0
+            new_principal = old_principal - relief + additional_issuance
+            old_shortfall = max(0.0, old_principal - old_limit)
+            new_shortfall = max(0.0, new_principal - new_limit)
+            if _exceeds_float(new_shortfall, old_shortfall):
+                raise ValueError("renewal would worsen the issued-credit shortfall")
+
+            # Model a fresh policy: return the old nominal deposit carrying
+            # its pool's fee, then pay the replacement deposit in full BUCK.
+            # This also keeps the source unambiguous when insurers change.
+            refund = self._return_insurance_nominal(old_pool, owner, old_deposit)
+            funding = new_deposit
+            self._transfer(JUBILEE, owner, relief, relief=True)
+            self._consume_repayment(owner, relief)
+
+            # Commit final capacity and issuance together; old coverage was
+            # never deactivated. Relief already removed its own BUCK.
+            p.principal = new_principal
+            p.credit_limit = new_limit
+            p.premium_rate = new_premium_rate
+            p.insurer = insurer
+            p.insurance_pool = new_pool
+            p.buck_years = 0.0
+            self.unspent[owner] = self.unspent.get(owner, 0.0) + additional_issuance
+            if funding:
+                self._fund_insurance(owner, new_pool, funding)
+            p.insurance_principal = new_deposit
+            return Renewal(
+                position=position, baseline_relief=baseline, relief=relief,
+                old_principal=old_principal, additional_issuance=additional_issuance,
+                new_principal=new_principal, new_limit=new_limit,
+                new_premium_rate=new_premium_rate, old_insurance_pool=old_pool,
+                new_insurance_pool=new_pool, old_insurance_principal=old_deposit,
+                new_insurance_principal=new_deposit, insurance_refunded=refund,
+                insurance_principal_released=old_deposit,
+                insurance_funded=funding, redemption_proceeds=proceeds,
+            )
         except Exception:
             self.__dict__.clear()
             self.__dict__.update(before)
@@ -461,11 +903,14 @@ def snapshot(ledger: DemurrageLedger, position: str, holder: str) -> dict:
         "years": ledger.time,
         "issued": ledger.issued,
         "holder": ledger.accounts[holder],
+        "holder_unspent": ledger.unspent.get(holder, 0.0),
+        "holder_available": ledger.balance_of(holder),
         "jubilee": ledger.jubilee_assets,
         "jubilee_cash": ledger.jubilee,
         "jubilee_cash_nominal": ledger.jubilee_nominal,
         "jubilee_cash_carried_fee": ledger.jubilee_carried_fee,
         "jubilee_fee_created": ledger.jubilee_fee_created,
+        "jubilee_fee_inherited": ledger.jubilee_fee_inherited,
         "jubilee_fee_realized": ledger.jubilee_fee_realized,
         "jubilee_nominal_sent": ledger.jubilee_nominal_sent,
         "jubilee_invested": ledger.accounts[JUBILEE_INVESTED],
@@ -488,7 +933,7 @@ def snapshot(ledger: DemurrageLedger, position: str, holder: str) -> dict:
         "aggregate_relief": ledger.aggregate_relief,
         "aggregate_fund_shortfall": max(0.0, ledger.aggregate_relief - ledger.jubilee_assets),
         "retirement": asdict(quote) if quote is not None else None,
-        "conservation_error": sum(ledger.accounts.values()) - ledger.issued,
+        "conservation_error": sum(ledger.accounts.values()) + sum(ledger.unspent.values()) - ledger.issued,
     }
 
 
@@ -496,6 +941,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--years", type=float, default=50, help="end of run (default: 50)")
     parser.add_argument("--issued", type=float, default=100, help="initial issuance (default: 100)")
+    parser.add_argument("--held", action="store_true", help="issue directly into ordinary held BUCK rather than issued-unspent credit")
     parser.add_argument("--rate", type=float, default=0.02, help="nominal annual rate (default: 0.02)")
     parser.add_argument("--acquire-all", action="store_true", help="transfer the remaining holder BUCK to Jubilee at the end; any non-BUCK consideration is outside this model")
     parser.add_argument("--deploy-fund", action="store_true", help="deploy fund cash to a 1:1 BUCK strategy at each checkpoint")
@@ -504,11 +950,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retire", type=float, default=0, help="credit principal to reduce after the final checkpoint")
     parser.add_argument("--redemption-basis", choices=("issuance", "relief"), default="relief", help="select the fraction's denominator (default: relief)")
     parser.add_argument("--redeem-fraction", type=float, help="explicit fraction of strategy units sold before retirement; overrides --redemption-basis")
+    parser.add_argument("--payout-policy", choices=("reserve", "proportional"), default="reserve", help="compare the reserve signal with proportional cash plus realized proceeds")
     parser.add_argument("--json", action="store_true", help="print machine-readable results")
     args = parser.parse_args(argv)
     years = _nonnegative(args.years, "years")
     ledger = DemurrageLedger(args.rate)
-    ledger.issue("credit", args.issued, "holder")
+    if args.held:
+        ledger.issue("credit", args.issued, "holder")
+    else:
+        ledger.issue_unspent("credit", args.issued, "holder")
     checkpoints = sorted({t for t in (0.0, 1.0, 25.0, 49.0, 50.0, years) if t <= years})
     rows = []
     for t in checkpoints:
@@ -524,13 +974,17 @@ def main(argv: list[str] | None = None) -> int:
         ledger.strategy_loss("holder", lost)
     acquired = None
     if args.acquire_all:
-        acquired = ledger.accounts["holder"]
-        ledger.transfer("holder", JUBILEE, acquired)
+        held = ledger.accounts["holder"]
+        unspent = ledger.unspent.get("holder", 0.0)
+        acquired = held + unspent
+        ledger.transfer("holder", JUBILEE, held)
+        ledger.spend_unspent("holder", JUBILEE, unspent)
     available_retirement = None
     if args.retire:
         fraction = (args.redeem_fraction if args.redeem_fraction is not None
                     else ledger.redemption_fraction("credit", args.retire, args.redemption_basis))
-        available_retirement = ledger.retire_available("credit", args.retire, "holder", fraction)
+        available_retirement = ledger.retire_available("credit", args.retire, "holder", fraction,
+                                                       payout_policy=args.payout_policy)
     result = {"rate": ledger.rate, "snapshots": rows, "acquired_at_end": acquired,
               "strategy_return": args.strategy_return,
               "strategy_loss": lost,
@@ -541,11 +995,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print("Continuous nominal annual rate: {:.2%}".format(ledger.rate))
-        print(" year     holder    Jubilee  gross fees  self-paid    target  baseline gap")
+        print(" year       held    unspent    Jubilee  gross fees  self-paid    target  baseline gap")
         for row in rows:
             q = row["retirement"]
-            print("{:5.1f} {:10.6f} {:10.6f} {:11.6f} {:10.6f} {:9.6f} {:10.6f}".format(
-                row["years"], row["holder"], row["jubilee"], row["gross_demurrage"],
+            print("{:5.1f} {:10.6f} {:10.6f} {:10.6f} {:11.6f} {:10.6f} {:9.6f} {:10.6f}".format(
+                row["years"], row["holder"], row["holder_unspent"], row["jubilee"], row["gross_demurrage"],
                 row["fund_self_demurrage"], q["relief"], q["fund_shortfall"]))
         if args.strategy_return:
             print(f"\nStrategy return: {args.strategy_return:.6f} BUCK transferred from the holder.")

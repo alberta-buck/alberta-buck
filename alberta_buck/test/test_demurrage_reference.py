@@ -1,5 +1,6 @@
 """Economic specification of net-holder demurrage and linear credit relief."""
 import math
+import copy
 from decimal import Decimal, localcontext
 
 import pytest
@@ -17,11 +18,13 @@ def opened(amount=100.0):
 
 
 def assert_conservation(ledger):
-    assert sum(ledger.accounts.values()) == pytest.approx(ledger.issued, abs=1e-9)
+    assert sum(ledger.accounts.values()) + sum(ledger.unspent.values()) == pytest.approx(
+        ledger.issued, abs=1e-9
+    )
     assert ledger.gross_demurrage == pytest.approx(
         ledger.from_holders + ledger.recycled_by_jubilee, abs=1e-9
     )
-    assert ledger.jubilee_fee_created - ledger.jubilee_fee_realized == pytest.approx(
+    assert ledger.jubilee_fee_created + ledger.jubilee_fee_inherited - ledger.jubilee_fee_realized == pytest.approx(
         ledger.jubilee_carried_fee, abs=1e-9
     )
     assert ledger.jubilee_nominal == pytest.approx(
@@ -32,6 +35,473 @@ def assert_conservation(ledger):
         - ledger.fund_relief_paid - ledger.fund_invested - ledger.fund_other_out,
         abs=1e-9,
     )
+
+
+def test_issued_unspent_credit_accrues_demurrage_with_zero_ordinary_balance():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 1_000_000, "owner")
+    assert ledger.accounts["owner"] == 0
+    assert ledger.unspent["owner"] == 1_000_000
+    assert ledger.balance_of("owner") == 1_000_000
+    assert ledger.positions["facility"].principal == 1_000_000
+    assert ledger.issued == 1_000_000
+
+    ledger.advance(1)
+    expected_unspent = 1_000_000 * math.exp(-0.02)
+    assert ledger.accounts["owner"] == 0
+    assert ledger.unspent["owner"] == pytest.approx(expected_unspent)
+    assert ledger.balance_of("owner") == pytest.approx(expected_unspent)
+    assert ledger.jubilee == pytest.approx(1_000_000 - expected_unspent)
+    assert ledger.positions["facility"].buck_years == pytest.approx(1_000_000)
+    assert ledger.quote_retirement("facility", 1_000_000).relief == pytest.approx(20_000)
+    assert_conservation(ledger)
+
+    result = ledger.retire_available("facility", 1_000_000, "owner")
+    assert result.relief == pytest.approx(1_000_000 - expected_unspent)
+    assert result.account_payment == pytest.approx(expected_unspent)
+    assert ledger.accounts["owner"] == 0
+    assert ledger.unspent["owner"] == pytest.approx(0, abs=1e-9)
+    assert ledger.positions["facility"].principal == 0
+    assert_conservation(ledger)
+
+
+def test_spending_unspent_moves_buck_without_reissuing_or_closing_credit():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner")
+    ledger.spend_unspent("owner", "recipient", 40)
+    assert ledger.accounts["owner"] == 0
+    assert ledger.unspent["owner"] == 60
+    assert ledger.accounts["recipient"] == 40
+    assert ledger.issued == 100
+    assert ledger.positions["facility"].principal == 100
+
+    ledger.transfer("recipient", "owner", 5)
+    assert ledger.accounts["owner"] == 5
+    assert ledger.unspent["owner"] == 60
+    assert ledger.positions["facility"].principal == 100
+    ledger.advance(1)
+    assert ledger.quote_retirement("facility", 100).relief == pytest.approx(2)
+    assert_conservation(ledger)
+
+
+def test_erc20_transfer_spends_held_and_unspent_without_reissuing_credit():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner")
+    ledger.transfer("owner", "recipient", 40)
+    ledger.transfer("recipient", "owner", 5)
+    assert ledger.accounts["owner"] == 5
+    assert ledger.unspent["owner"] == 60
+    assert ledger.balance_of("owner") == 65
+    ledger.transfer("owner", "recipient", 50)
+    assert ledger.accounts["owner"] == 0
+    assert ledger.unspent["owner"] == 15
+    assert ledger.balance_of("owner") == 15
+    assert ledger.positions["facility"].principal == 100
+    assert ledger.issued == 100
+    assert_conservation(ledger)
+
+
+def test_separate_facilities_keep_independent_issuance_and_relief_ages():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("old", 1_000_000, "owner")
+    ledger.advance(1)
+    ledger.issue_unspent("new", 500_000, "owner")
+    ledger.advance(2)
+    assert ledger.quote_retirement("old", 1_000_000).relief == pytest.approx(60_000)
+    assert ledger.quote_retirement("new", 500_000).relief == pytest.approx(20_000)
+    old_before = (ledger.positions["old"].principal, ledger.positions["old"].buck_years)
+
+    result = ledger.retire_available("new", 250_000, "owner")
+    assert result.baseline_relief == pytest.approx(10_000)
+    assert result.redeemed_fraction == pytest.approx(10_000 / 80_000)
+    assert ledger.positions["new"].principal == pytest.approx(250_000)
+    assert ledger.positions["new"].buck_years == pytest.approx(500_000)
+    assert (ledger.positions["old"].principal, ledger.positions["old"].buck_years) == old_before
+    assert ledger.issued == pytest.approx(1_250_000)
+    assert_conservation(ledger)
+
+
+def test_proportional_payout_preserves_cash_for_equal_facilities():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("a", 100, "alice")
+    ledger.issue_unspent("b", 100, "bob")
+    ledger.advance(10)
+    expected_relief = 100 * (1 - math.exp(-0.2))
+    reserve_quote = ledger.quote_available_retirement("a", 100)
+    proportional_quote = ledger.quote_available_retirement("a", 100, payout_policy="proportional")
+    assert reserve_quote.relief == pytest.approx(expected_relief * 2)
+    assert proportional_quote.relief == pytest.approx(expected_relief)
+
+    first = ledger.retire_available("a", 100, "alice", payout_policy="proportional")
+    assert first.relief == pytest.approx(proportional_quote.relief)
+    assert ledger.jubilee == pytest.approx(expected_relief)
+    second = ledger.retire_available("b", 100, "bob", payout_policy="proportional")
+    assert second.relief == pytest.approx(expected_relief)
+    assert ledger.balance_of("alice") == pytest.approx(0, abs=1e-9)
+    assert ledger.balance_of("bob") == pytest.approx(0, abs=1e-9)
+    assert_conservation(ledger)
+
+
+def test_proportional_payout_uses_realized_strategy_return_and_matches_preview():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("a", 100, "alice")
+    ledger.issue_unspent("b", 100, "bob")
+    ledger.advance(10)
+    ledger.deploy(20)
+    ledger.issue_unspent("gain-source", 5, "donor")
+    ledger.strategy_return("donor", 5)
+    cash_before = ledger.jubilee
+    quote = ledger.quote_available_retirement("a", 100, payout_policy="proportional")
+    assert quote.redeemed_fraction == pytest.approx(0.5)
+    assert quote.redemption_proceeds == pytest.approx(12.5)
+    assert quote.relief == pytest.approx(cash_before / 2 + 12.5)
+    result = ledger.retire_available("a", 100, "alice", payout_policy="proportional")
+    assert result.relief == pytest.approx(quote.relief)
+    assert result.rate_multiplier == pytest.approx(result.relief / result.baseline_relief)
+    assert ledger.jubilee == pytest.approx(cash_before / 2)
+    assert_conservation(ledger)
+
+
+@pytest.mark.parametrize("portfolio_ratio", [1.025, 0.95])
+def test_proportional_payout_realizes_the_funds_actual_premium_or_discount(portfolio_ratio):
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("a", 100, "alice")
+    ledger.issue_unspent("b", 100, "bob")
+    ledger.advance(10)
+    ledger.issue_unspent("gain-source", 10, "donor")
+    target_value = portfolio_ratio * ledger.aggregate_relief
+    ledger.transfer("donor", JUBILEE, target_value - ledger.jubilee)
+    reserve = 0.1 * ledger.aggregate_relief
+    ledger.deploy(ledger.jubilee - reserve)
+
+    quote = ledger.quote_available_retirement("a", 100, payout_policy="proportional")
+    assert quote.baseline_relief == pytest.approx(20)
+    assert quote.rate_multiplier == pytest.approx(portfolio_ratio)
+    assert quote.relief == pytest.approx(20 * portfolio_ratio)
+    result = ledger.retire_available("a", 100, "alice", payout_policy="proportional")
+    assert result.relief == pytest.approx(quote.relief)
+    assert_conservation(ledger)
+
+
+def test_proportional_payout_cannot_pay_a_zero_age_facility():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("old", 100, "alice")
+    ledger.advance(1)
+    ledger.issue_unspent("new", 100, "bob")
+    quote = ledger.quote_available_retirement("new", 100, 0.5, payout_policy="proportional")
+    assert quote.baseline_relief == 0
+    assert quote.relief == 0
+    assert_conservation(ledger)
+
+
+def test_proportional_payout_handles_zero_sale_proceeds_and_keeps_other_cash():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner")
+    ledger.advance(10)
+    ledger.deploy(10)
+    ledger.strategy_loss("owner", 10)
+    cash_before = ledger.jubilee
+    result = ledger.retire_available("facility", 50, "owner", payout_policy="proportional")
+    assert result.redemption_proceeds == 0
+    assert result.relief == pytest.approx(cash_before / 2)
+    assert ledger.jubilee == pytest.approx(cash_before / 2)
+    assert_conservation(ledger)
+
+
+def test_renewal_can_apply_the_proportional_payout_policy():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("a", 100, "alice", credit_limit=100)
+    ledger.issue_unspent("b", 100, "bob", credit_limit=100)
+    ledger.advance(10)
+    expected_relief = 100 * (1 - math.exp(-0.2))
+    renewal = ledger.renew_unspent("a", "alice", new_limit=100, new_premium_rate=0,
+                                  payout_policy="proportional")
+    assert renewal.relief == pytest.approx(expected_relief)
+    assert renewal.new_principal == pytest.approx(100 - expected_relief)
+    second = ledger.retire_available("b", 100, "bob", payout_policy="proportional")
+    assert second.relief == pytest.approx(expected_relief)
+    assert_conservation(ledger)
+
+
+def test_owned_credit_cannot_be_reduced_by_another_account():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner")
+    with pytest.raises(ValueError, match="different owner"):
+        ledger.retire_available("facility", 10, "other")
+    assert_conservation(ledger)
+
+
+def test_premium_deposits_and_releases_use_each_credit_insurer_pool():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer-a", "pool-a")
+    ledger.register_insurer_pool("insurer-b", "pool-b")
+    ledger.issue_unspent("credit-a", 100, "alice", insurer="insurer-a", premium_deposit=10)
+    ledger.issue_unspent("credit-b", 200, "bob", insurer="insurer-b", premium_deposit=20)
+    assert ledger.unspent["alice"] == 90
+    assert ledger.unspent["bob"] == 180
+    assert ledger.accounts["pool-a"] == 10
+    assert ledger.accounts["pool-b"] == 20
+    assert ledger.positions["credit-a"].insurance_pool == "pool-a"
+    assert ledger.positions["credit-b"].insurance_pool == "pool-b"
+
+    result = ledger.retire_available("credit-a", 100, "alice")
+    assert result.insurance_pool == "pool-a"
+    assert result.insurance_refund == 10
+    assert ledger.accounts["pool-a"] == 0
+    assert ledger.accounts["pool-b"] == 20
+    assert ledger.positions["credit-b"].insurance_principal == 20
+    assert ledger.positions["credit-b"].principal == 200
+    assert_conservation(ledger)
+
+
+def test_insurer_pool_cannot_be_replaced_while_its_deposit_is_active():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer", "old-pool")
+    ledger.issue_unspent("credit", 100, "owner", insurer="insurer", premium_deposit=10)
+    with pytest.raises(ValueError, match="original pool"):
+        ledger.register_insurer_pool("insurer", "new-pool")
+    assert ledger.insurer_pools["insurer"] == "old-pool"
+    assert ledger.positions["credit"].insurance_pool == "old-pool"
+    assert_conservation(ledger)
+
+
+def test_distinct_insurers_cannot_share_pool_or_another_insurers_strategy():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer-a", "pool-a")
+    with pytest.raises(ValueError, match="own pool"):
+        ledger.register_insurer_pool("insurer-b", "pool-a")
+    with pytest.raises(ValueError, match="investment cannot"):
+        ledger.register_insurer_pool("insurer-b", ledger.insurance_strategies["pool-a"])
+    assert "insurer-b" not in ledger.insurer_pools
+    assert_conservation(ledger)
+
+
+def test_reference_does_not_silently_issue_to_a_carrying_pool():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer", "pool")
+    with pytest.raises(ValueError, match="non-Carrying facility owners"):
+        ledger.issue_unspent("facility", 100, "pool")
+    ledger.issue_unspent("facility", 100, "owner")
+    with pytest.raises(ValueError, match="before funding it or issuing credit"):
+        ledger.register_insurer_pool("insurer-2", "owner")
+    assert ledger.balance_of("owner") == 100
+    assert_conservation(ledger)
+
+
+def test_insolvent_insurer_pool_does_not_use_another_insurers_funds():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer-a", "pool-a")
+    ledger.register_insurer_pool("insurer-b", "pool-b")
+    ledger.issue_unspent("credit-a", 100, "alice", insurer="insurer-a", premium_deposit=10)
+    ledger.issue_unspent("credit-b", 200, "bob", insurer="insurer-b", premium_deposit=20)
+    ledger.transfer("pool-a", "outsider", 10)
+    before = (ledger.accounts.copy(), ledger.unspent.copy(), ledger.strategy_units)
+    with pytest.raises(InsufficientFunds, match="insurance pool pool-a"):
+        ledger.retire_available("credit-a", 100, "alice")
+    assert (ledger.accounts, ledger.unspent, ledger.strategy_units) == before
+    assert ledger.positions["credit-a"].principal == 100
+    assert ledger.accounts["pool-b"] == 20
+    assert_conservation(ledger)
+
+
+def test_insurance_pool_returns_nominal_amount_with_average_carried_demurrage():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer", "pool")
+    ledger.issue_unspent("credit", 100, "owner", insurer="insurer", premium_deposit=10)
+    ledger.advance(1)
+    pool_net = ledger.accounts["pool"]
+    pool_fee = ledger.insurance_carried_fee["pool"]
+    quote = ledger.quote_available_retirement("credit", 50)
+    assert quote.insurance_principal_released == 5
+    assert quote.insurance_nominal_required == 5
+    assert quote.insurance_refund == pytest.approx(pool_net / 2)
+    sent_before = ledger.insurance_nominal_sent["pool"]
+    result = ledger.retire_available("credit", 50, "owner")
+    assert ledger.insurance_nominal_sent["pool"] - sent_before == pytest.approx(
+        result.insurance_nominal_required
+    )
+    assert ledger.accounts["pool"] == pytest.approx(pool_net / 2)
+    assert ledger.insurance_carried_fee["pool"] == pytest.approx(pool_fee / 2)
+    assert ledger.positions["credit"].insurance_principal == 5
+    assert_conservation(ledger)
+
+
+def test_insurer_redeems_own_investment_before_nominal_refund():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer-a", "pool-a")
+    ledger.register_insurer_pool("insurer-b", "pool-b")
+    ledger.issue_unspent("credit-a", 100, "alice", insurer="insurer-a", premium_deposit=10)
+    ledger.issue_unspent("credit-b", 200, "bob", insurer="insurer-b", premium_deposit=20)
+    ledger.invest_insurance("pool-a", 7)
+    ledger.advance(5)
+    ledger.issue_unspent("new", 20, "donor")
+    ledger.spend_unspent("donor", "pool-a", 5)
+    expected_net = 5 + 5 * math.exp(-0.02 * 5)
+    pool_b_before = (ledger.accounts["pool-b"], ledger.insurance_carried_fee["pool-b"])
+    sent_before = ledger.insurance_nominal_sent["pool-a"]
+
+    quote = ledger.quote_available_retirement("credit-a", 100)
+    assert quote.insurance_nominal_required == 10
+    assert quote.insurance_refund == pytest.approx(expected_net)
+    result = ledger.retire_available("credit-a", 100, "alice")
+    assert result.insurance_refund == pytest.approx(expected_net)
+    assert ledger.insurance_nominal_sent["pool-a"] - sent_before == pytest.approx(10)
+    assert ledger.balance_of("pool-a") == pytest.approx(0, abs=1e-9)
+    assert ledger.balance_of(ledger.insurance_strategies["pool-a"]) == pytest.approx(5)
+    assert (ledger.accounts["pool-b"], ledger.insurance_carried_fee["pool-b"]) == pool_b_before
+    assert_conservation(ledger)
+
+
+def test_carrying_transfers_preserve_fee_history_between_fund_and_insurer():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer", "pool")
+    ledger.issue_unspent("credit", 100, "owner", insurer="insurer", premium_deposit=10)
+    ledger.advance(1)
+    pool_net = ledger.accounts["pool"]
+    pool_fee = ledger.insurance_carried_fee["pool"]
+    fund_fee = ledger.jubilee_carried_fee
+    ledger.transfer("pool", JUBILEE, 5)
+    assert ledger.jubilee_fee_inherited == pytest.approx(pool_fee / 2)
+    assert ledger.jubilee_carried_fee == pytest.approx(fund_fee + pool_fee / 2)
+    assert ledger.accounts["pool"] == pytest.approx(pool_net / 2)
+    assert_conservation(ledger)
+
+    inherited_before = ledger.insurance_carried_fee["pool"]
+    fund_nominal = ledger.jubilee_nominal
+    fund_carry = ledger.jubilee_carried_fee
+    ledger.transfer(JUBILEE, "pool", fund_nominal / 2)
+    assert ledger.insurance_carried_fee["pool"] == pytest.approx(inherited_before + fund_carry / 2)
+    assert_conservation(ledger)
+
+
+def test_idle_facility_can_close_using_nominal_insurance_refund_and_net_relief():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer", "pool")
+    ledger.issue_unspent("facility", 100, "owner", insurer="insurer", premium_deposit=10)
+    ledger.advance(50)
+    result = ledger.retire_available("facility", 100, "owner")
+    assert result.insurance_principal_released == 10
+    assert result.insurance_nominal_required == 10
+    assert result.insurance_refund == pytest.approx(10 * math.exp(-1))
+    assert result.relief == pytest.approx(100 * (1 - math.exp(-1)))
+    assert ledger.insurance_nominal_sent["pool"] == pytest.approx(10)
+    assert ledger.positions["facility"].principal == 0
+    assert_conservation(ledger)
+
+
+def test_renewal_crystallizes_facility_relief_and_adds_capacity_atomically():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner", credit_limit=100, premium_rate=0.02)
+    ledger.spend_unspent("owner", "recipient", 80)
+    ledger.advance(10)
+    unspent = ledger.unspent["owner"]
+    cash = ledger.jubilee
+    result = ledger.renew_unspent("facility", "owner", new_limit=150,
+                                  new_premium_rate=0.01, additional_issuance=50)
+    assert result.baseline_relief == pytest.approx(20)
+    assert result.relief == pytest.approx(cash)
+    assert result.new_principal == pytest.approx(100 - cash + 50)
+    assert ledger.positions["facility"].principal == pytest.approx(result.new_principal)
+    assert ledger.positions["facility"].credit_limit == 150
+    assert ledger.positions["facility"].premium_rate == 0.01
+    assert ledger.positions["facility"].buck_years == 0
+    assert ledger.unspent["owner"] == pytest.approx(unspent + 50)
+    assert ledger.accounts["owner"] == pytest.approx(0)
+    assert_conservation(ledger)
+    ledger.advance(1)
+    assert ledger.quote_retirement("facility", result.new_principal).relief == pytest.approx(
+        result.new_principal * 0.02
+    )
+    assert_conservation(ledger)
+
+
+def test_renewal_lower_premium_refunds_original_insurer_pool():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("insurer", "pool")
+    ledger.issue_unspent("facility", 100, "owner", credit_limit=100,
+                         premium_rate=0.02, insurer="insurer", premium_deposit=10)
+    ledger.advance(1)
+    old_pool_net = ledger.accounts["pool"]
+    before = ledger.insurance_nominal_sent["pool"]
+    result = ledger.renew_unspent("facility", "owner", new_limit=120,
+                                  new_premium_rate=0.01, new_insurance_principal=5)
+    assert result.insurance_principal_released == 10
+    assert result.insurance_refunded == pytest.approx(old_pool_net)
+    assert result.insurance_funded == 5
+    assert result.old_insurance_pool == result.new_insurance_pool == "pool"
+    assert ledger.insurance_nominal_sent["pool"] - before == 10
+    assert ledger.accounts["pool"] == pytest.approx(5)
+    assert ledger.positions["facility"].insurance_principal == 5
+    assert ledger.positions["facility"].premium_rate == 0.01
+    assert_conservation(ledger)
+
+
+def test_renewal_moves_premium_between_insurers_without_replacing_nft():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("a", "pool-a")
+    ledger.register_insurer_pool("b", "pool-b")
+    ledger.issue_unspent("facility", 100, "owner", credit_limit=100,
+                         premium_rate=0.02, insurer="a", premium_deposit=10)
+    result = ledger.renew_unspent("facility", "owner", new_limit=100,
+                                  new_premium_rate=0.01, new_insurer="b",
+                                  new_insurance_principal=8)
+    assert result.position == "facility"
+    assert result.insurance_refunded == 10
+    assert result.insurance_funded == 8
+    assert ledger.accounts["pool-a"] == 0
+    assert ledger.accounts["pool-b"] == 8
+    assert ledger.accounts["owner"] == 2
+    assert ledger.unspent["owner"] == 90
+    assert ledger.positions["facility"].insurance_pool == "pool-b"
+    assert ledger.positions["facility"].principal == 100
+    assert_conservation(ledger)
+
+
+def test_failed_renewal_rolls_back_jubilee_sale_and_all_new_terms():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner", credit_limit=100, premium_rate=0.02)
+    ledger.advance(10)
+    ledger.deploy(ledger.jubilee)
+    before = copy.deepcopy(ledger.__dict__)
+    with pytest.raises(ValueError, match="worsen the issued-credit shortfall"):
+        ledger.renew_unspent("facility", "owner", new_limit=110,
+                             new_premium_rate=0.01, additional_issuance=50)
+    assert ledger.__dict__ == before
+    assert_conservation(ledger)
+
+
+def test_k_cut_does_not_call_credit_back_and_renewal_cannot_worsen_shortfall():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner", credit_limit=100)
+    ledger.reappraise_limit("facility", 80)
+    assert ledger.positions["facility"].principal == 100
+    assert ledger.unspent["owner"] == 100
+    result = ledger.renew_unspent("facility", "owner", new_limit=90, new_premium_rate=0)
+    assert result.new_principal == 100
+    assert ledger.positions["facility"].credit_limit == 90
+    before = copy.deepcopy(ledger.__dict__)
+    with pytest.raises(ValueError, match="worsen the issued-credit shortfall"):
+        ledger.renew_unspent("facility", "owner", new_limit=80,
+                             new_premium_rate=0, additional_issuance=1)
+    assert ledger.__dict__ == before
+    assert_conservation(ledger)
+
+
+def test_insurer_switch_refund_failure_rolls_back_without_cross_pool_use():
+    ledger = DemurrageLedger()
+    ledger.register_insurer_pool("a", "pool-a")
+    ledger.register_insurer_pool("b", "pool-b")
+    ledger.issue_unspent("facility", 100, "owner", credit_limit=100,
+                         insurer="a", premium_deposit=10)
+    ledger.transfer("pool-a", "outsider", 10)
+    before = copy.deepcopy(ledger.__dict__)
+    with pytest.raises(InsufficientFunds, match="pool-a"):
+        ledger.renew_unspent("facility", "owner", new_limit=100,
+                             new_premium_rate=0.01, new_insurer="b",
+                             new_insurance_principal=8)
+    assert ledger.__dict__ == before
+    assert ledger.accounts["pool-b"] == 0
+    assert_conservation(ledger)
 
 
 @pytest.mark.parametrize("years", [1, 25, 49, 50, 51, 100])
@@ -292,11 +762,12 @@ def test_zero_value_redemption_computes_zero_relief_without_fund_failure():
     assert_conservation(ledger)
 
 
-def test_actual_redemption_result_overrides_presale_quote(monkeypatch):
+@pytest.mark.parametrize("payout_policy", ["reserve", "proportional"])
+def test_actual_redemption_result_overrides_presale_quote(monkeypatch, payout_policy):
     ledger = opened()
     ledger.advance(10)
     ledger.deploy(ledger.jubilee)
-    preview = ledger.quote_available_retirement("mortgage", 50, 0.5)
+    preview = ledger.quote_available_retirement("mortgage", 50, 0.5, payout_policy=payout_policy)
     assert preview.redemption_proceeds > 0
     redeem = ledger.redeem_strategy
 
@@ -305,7 +776,7 @@ def test_actual_redemption_result_overrides_presale_quote(monkeypatch):
         return redeem(fraction)
 
     monkeypatch.setattr(ledger, "redeem_strategy", loses_value_before_sale)
-    result = ledger.retire_available("mortgage", 50, "holder", 0.5)
+    result = ledger.retire_available("mortgage", 50, "holder", 0.5, payout_policy=payout_policy)
     assert result.redemption_proceeds == 0
     assert result.relief == 0
     assert result.account_payment == 50
@@ -474,9 +945,9 @@ def test_splitting_a_carrying_payment_preserves_net_value_and_fee():
     two = opened()
     one.advance(25)
     two.advance(25)
-    one.transfer(JUBILEE, "recipient", 10)
-    two.transfer(JUBILEE, "recipient", 5)
-    two.transfer(JUBILEE, "recipient", 5)
+    one.transfer_full_value(JUBILEE, "recipient", 10)
+    two.transfer_full_value(JUBILEE, "recipient", 5)
+    two.transfer_full_value(JUBILEE, "recipient", 5)
     assert two.accounts["recipient"] == pytest.approx(10)
     assert one.accounts["recipient"] == pytest.approx(10)
     assert two.jubilee == pytest.approx(one.jubilee)
@@ -484,6 +955,18 @@ def test_splitting_a_carrying_payment_preserves_net_value_and_fee():
     assert two.jubilee_nominal_sent == pytest.approx(one.jubilee_nominal_sent)
     assert_conservation(one)
     assert_conservation(two)
+
+
+def test_carrying_erc20_transfer_is_nominal_not_a_net_promise():
+    ledger = DemurrageLedger()
+    ledger.issue("credit", 100, JUBILEE)
+    ledger.advance(50)
+    assert ledger.balance_of(JUBILEE) == pytest.approx(200)
+    ledger.transfer(JUBILEE, "recipient", 100)
+    assert ledger.accounts["recipient"] == pytest.approx(50)
+    assert ledger.balance_of(JUBILEE) == pytest.approx(100)
+    assert ledger.jubilee == pytest.approx(50)
+    assert_conservation(ledger)
 
 
 def test_integer_carrying_gross_is_exact_and_minimal():

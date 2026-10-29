@@ -13,11 +13,13 @@ private by default, accountable by law.*
 The Alberta Buck (BUCK) is a digital currency its citizens issue themselves.  An insurer vouches for
 the value of a real asset -- a home, a farm, a fleet, a vault of gold -- and how it wears; its owner
 can then spend part of that insured value as BUCKs.  Ten years' premium goes to the insurance pool
-as a deposit, not a cost: the pool invests it to earn the premiums, and returns it when the
-insurance is dropped.  How much credit each unit of insured value supports (=BUCK_K=) is set by an
+as a deposit, not a cost: the pool may invest it to earn the premiums, and returns the nominal
+deposit with its average carried demurrage when the insurance is dropped.  How much credit each
+unit of insured value supports (=BUCK_K=) is set by an
 on-chain controller that holds the BUCK's value to a basket of base commodities, so the currency is
-anchored to things rather than to policy.  Held BUCKs pay a small demurrage (2 % a year) into a
-Jubilee fund, so money keeps moving and old obligations melt.
+anchored to things rather than to policy.  In the intended design, held and issued-but-unspent
+BUCKs pay a small demurrage (2 % a year) into a Jubilee fund, so money keeps moving and old
+obligations melt; the current contract's accounting still needs to be updated.
 
 Every account belongs to a person or institution an identity issuer has certified -- but the chain
 never learns who.  Identities travel encrypted; each party to a payment can later prove whom it
@@ -108,7 +110,8 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
 - [[file:alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]]
   ([[file:images/alberta-buck-demurrage.pdf][pdf]]) -- the intended net-balance model,
   linear credit relief and fund accounting. The current contract uses the
-  earlier model; see the [[file:doc/review/net-demurrage-analysis.org][demurrage audit]] for implementation status.
+  earlier model; see the [[file:doc/review/net-demurrage-analysis.org][demurrage audit]] for implementation status and the
+  [[file:doc/review/credit-facility-accounting-design.org][credit-facility design]] for the proposed contract boundaries.
 - [[file:alberta-buck-ethereum-basket.org][The BuckBasket]]
   ([[file:images/alberta-buck-ethereum-basket.pdf][pdf]]) -- the commodity anchor, why it must be
   heavy, and how a shared pantry of basics earns for its savers.

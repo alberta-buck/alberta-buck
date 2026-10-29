@@ -1,0 +1,335 @@
+#+TITLE: Buck, credit facilities, Jubilee, and insurer pools
+#+DATE: 2026-10-29
+#+OPTIONS: ^:nil toc:3
+
+* Status
+
+This is the proposed accounting boundary and an executable Python reference,
+not a description of the deployed Solidity contracts. It supersedes the
+signed-account proposal in [[file:jubilee-single-position-design.org][the earlier single-position design]] wherever that
+design treats unused activated credit as unissued or assigns relief to a
+negative account balance. Its basket top-up, callback, and O(1) fund-checkpoint
+analysis remain useful subject to the corrections here. The economic formulas
+and commands are also explained in [[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]].
+
+* The accounting boundary
+
+| Party | Authoritative responsibility |
+|-------+------------------------------|
+| Buck | Owns transferable BUCK: ordinary holdings, issued-but-unspent BUCK, their demurrage, Carrying fee history, ERC-20 transfers, and aggregate issuance. |
+| Each BuckCredit NFT | Owns its insured coverage, insurer and pool, outstanding issued principal, and the time integral of that principal. Relief belongs to the NFT presented for reduction. |
+| Jubilee fund | Owns the demurrage proceeds and one adjustable basket position; liquidates a proportion, computes payable relief from available net BUCK, and pays full-value BUCK. |
+| Each insurer's pool | Receives that insurer's premium deposits and supplies the corresponding nominal refunds, with the pool's average Carrying fee history. |
+
+For an ordinary account, let H be its received/held net BUCK and U its net
+issued-but-unspent BUCK. The account may have H, U, and outstanding liabilities
+at the same time. Its ERC-20 =balanceOf= reports the *full spendable balance*
+H + U; separate views expose H and U without subtracting its NFT liabilities.
+Spending U transfers BUCK already issued: it neither mints again nor reduces an
+NFT. Receiving H does not automatically retire any NFT. The user explicitly
+selects facilities for repayment. These views do not include merely potential,
+not-yet-issued capacity.
+
+A Carrying service reports its nominal transferable balance in =balanceOf=.
+An ordinary recipient receives the corresponding net value after the service's
+proportionate carried fee; a Carrying recipient retains both nominal BUCK and
+the fee history. Thus =balanceOf= remains the complete amount the account can
+transfer, but a nominal Carrying transfer does not promise an ordinary recipient
+that same amount of net value. Interfaces needing full-value payment must say so
+and gross up the nominal transfer. Wallets, AMM reserves, allowances, events,
+and routing quotes need to use the appropriate units consistently.
+The reference restricts facility owners to non-Carrying accounts, like the
+current basket's credit-holding account. It rejects making an account
+Carrying while it has issued credit. Whether to support a Carrying facility
+owner requires defining the nominal and net views of its unspent BUCK and
+full-value premium/repayment paths; it must not silently omit that unspent
+amount from =balanceOf=.
+
+When a facility issues 1,000,000 BUCK into U with no premium or other flows,
+H is zero, U and =balanceOf= are 1,000,000, the facility's outstanding
+principal is 1,000,000, and total issued increases by 1,000,000 immediately.
+U starts paying demurrage immediately. Its initial demurrage base is 1,000,000
+BUCK; this base decreases as fees are attributed to Jubilee. At nominal 2%
+continuously compounded, the reference produces:
+
+| Time | H | U and balanceOf | Jubilee net | Facility target relief |
+|------+---+-----------------+-------------+------------------------|
+| issue | 0 |      1,000,000 |           0 |                      0 |
+| 1 year | 0 | 980,198.673307 | 19,801.326693 |             20,000.000000 |
+| 50 years | 0 | 367,879.441171 | 632,120.558829 |          1,000,000.000000 |
+
+At one year, gross demurrage is 20,000: 19,801.326693 moved from U to the
+fund and 198.673307 was paid by the fund to itself. The latter is already in
+the fund, not newly created cash. The target is not a guaranteed fund payment;
+the actual payment is computed after liquidation and is limited by available
+net fund BUCK and the principal reduced. With no other assets or transactions,
+the fund and U together can extinguish the whole outstanding million.
+
+* Evidence from the existing contracts
+
+A temporary Foundry comparison deployed copies of =master= and the feature
+branch, activated one 1,000,000-BUCK facility at K = 1 and zero premium, and
+waited one year. Values below are BUCK, ignoring one raw-unit rounding in the
+master NFT quote:
+
+| Contract version | balanceOf | Account fee | NFT/account target relief | Jubilee net |
+|------------------+-----------+-------------+---------------------------+-------------|
+| master | 1,000,000 | 0 | NFT: about 20,000 | 0 |
+| feature branch | 1,000,000 | 0 | account: 0 | 0 |
+| proposed reference | 980,198.673307 | 19,801.326693 | NFT: 20,000 | 19,801.326693 |
+
+Both versions expose unspent activated capacity in =balanceOf=, but neither
+puts the untouched amount into outstanding BUCK supply or charges it
+account-level demurrage. Master stores coverage-seconds on each NFT; it ages
+activated coverage, which is not necessarily equal to BUCK issued after K,
+valuation changes, or premium funding. The branch instead ages an aggregate
+negative account balance. Neither reconstructs a separate actual principal and
+age for each NFT. Incoming BUCK in the branch can also reduce that account
+lien automatically, which does not match an owner's choice of facility.
+
+The older pre-signed implementation at =b1af78ff= explicitly created BUCK
+at activation and is informative about issuance, but its old balance/limit
+ratchet and gross-linear demurrage are not this design. Reverting wholesale to
+it or to master would also lose subsequent K and accounting fixes. Preserve
+useful tests and fixes while changing the accounting boundary.
+
+* Candidate core and operations
+
+** Buck
+
+Store sufficient nonnegative net state to account for H and U independently,
+plus Carrying nominal/fee state where required. Use one authoritative issuance
+counter and checkpoint the fund before that counter or direct fund cash changes.
+An account's balance need not encode its debt or its age in a sign. An
+implementation may pack fields, but must prove precision, saturation, bounds,
+and the cost of long-idle accounts before choosing widths. Global issuance and
+fund flow counters should use 256-bit amounts; token account units and these
+counters need not use the same representation.
+
+Useful views and actions, with names illustrative rather than ABI commitments:
+
+#+begin_example
+balanceOf(owner)                   -> H + U, or nominal Carrying balance
+heldNetOf(owner), unspentNetOf(owner), carriedFeeOf(owner)
+totalIssued()                      -> sum of outstanding NFT principal
+issue(facility, amount)            -> add issued amount to owner's U
+transfer / transferFrom            -> move spendable BUCK; U is already issued
+reduce(facility, principal, ...)   -> select this NFT and settle its reduction
+#+end_example
+
+The issue authorization needs the existing insurer/owner, appraisal, K,
+premium-funding and identity gates. Premium payment is a real full-value BUCK
+transfer from available account funds to the insurer's pool; it is not a
+second mint hidden in =balanceOf=. All new issuance, including any amount
+needed to fund a premium, must be attributed to selected NFT principal. An
+amount already issued remains spendable and incurs demurrage even if a later K
+change reduces capacity for new issuance. The precise per-facility allocation
+of K and face value requires an implementation decision, especially where
+coverage, depreciation, and insurance charges differ from issued BUCK.
+
+For ordinary senders the reference spends H first, then U. That ordering is an
+implementation candidate, not a separate liability repayment. A standard
+transfer, including =transferFrom=, must have the same spendable balance and
+spend order. A facility's ownership and principal cannot be inferred from a
+particular transferable BUCK after it leaves U.
+
+** BuckCredit
+
+For each NFT keep outstanding principal P and its time integral
+S = integral(P dt), plus insured coverage, valuation, insurer, premium terms,
+and the original premium pool/principal. Checkpoint S when P changes. For a
+reduction x, the reference assigns the proportional S*x/P and caps the
+baseline relief r*S*x/P at x. Different NFTs owned by the same account retain
+different ages. It assumes proportional average age within one NFT; tracking
+individual issuance vintages would be more complex and would change partial
+reduction results.
+
+Keep principal and coverage as separate quantities; they need not be equal at
+K other than one. Avoid duplicate mirrored coverage mappings if BuckCredit can
+be the single source of truth, but preserve the ability to attribute every
+issuance and premium to the correct NFT. Exact NFT transfer rules and which
+owner can reduce or renew a facility must be specified; transferring an NFT
+must not silently transfer or destroy somebody's existing BUCK account.
+
+** Jubilee and the single basket position
+
+Use a separate Carrying Jubilee manager. The existing =BuckBasketEquity=
+=deposit= always creates a receipt; =redeem(id, bp)= adjusts it partially but
+burns it when empty. A top-up operation can accept the manager's existing
+receipt ID, price new shares using *actual net* BUCK received, update its basis
+and return the same ID. A share-based reduction can return the ID, actual
+shares retired and proceeds; retaining an empty NFT is optional. Existing
+basis-point zero means full redemption, so a small rounded fraction must never
+be silently passed as zero. The earlier [[file:jubilee-single-position-design.org][single-position design]] records a real
+probe showing that the present basket prices an aged Carrying deposit at
+nominal rather than net value; fix that before top-ups can safely share it.
+
+Reduction should be coordinated outside a locked Buck call, since the basket
+calls Buck and Buck has a reentrancy lock. Authorize the real holder, preserve
+identity and allowance checks, redeem the selected proportion of the fund's
+position, and then compute relief using actual net cash. The current reference
+defaults to selected baseline relief divided by the sum of outstanding capped
+baseline relief; a zero benchmark requests zero redemption. Its original
+10% reserve-signal payout is only a comparison and has a demonstrated
+first-mover problem, described below. A proportional cash-plus-proceeds rule
+is available for comparison and is the simpler candidate. Neither is a
+guaranteed 2% annual return or a finalized contract policy.
+Zero proceeds or zero payable relief are valid. The owner supplies the rest of
+the reduction; a failed owner payment or failed transaction must roll back all
+steps. The fund grosses up its Carrying transfer to deliver the selected full
+net relief. It must not count carried demurrage as fresh income twice.
+
+A basket redemption can be illiquid, return TOKEN, leave shares outstanding,
+or revert. The design must specify the treatment of actual proceeds and any
+partial result; it cannot assume a quoted mark is immediately available BUCK.
+It must also retain the basket's low-K exit and solvency checks. Household
+incentives to buy discounted BUCK and retire liabilities are a separate
+stability problem.
+
+*** A simpler payout signal and a concrete ordering failure
+
+The reserve-signal prototype treats all post-sale cash divided by 10% of the
+baseline benchmark as its ROI multiplier. That treats intentionally undeposited
+cash, and the sale itself, as investment gain. For two equal 100-BUCK
+facilities after ten idle years, the fund contains 36.253849 net BUCK and each
+facility's baseline target is 20. The prototype pays the first reduction the
+entire 36.253849; the second receives zero and its owner is 18.126925 BUCK
+short of closing. This is a defect in that policy, not evidence of a missing
+source of BUCK. Which facility happens to close first changes the outcome.
+
+One candidate removes the reserve ratio from payout. Let b be the selected
+facility's baseline relief, B the sum of all capped baselines, C the fund's
+net cash just before sale, f = b/B, and Z the actual net BUCK proceeds of
+selling fraction f of the basket position. If b and B are nonzero:
+
+#+begin_example
+payable relief = min(principal being reduced, f * C + Z)
+effective factor = payable relief / b
+#+end_example
+
+If b is zero the relief and default sale fraction are zero. The sale proceeds
+are already included in available fund cash; do not count them twice. With the
+two idle facilities, f = 1/2 and Z = 0 for the first reduction: each receives
+18.126925 and can close. If the realized fund portfolio is 2.5% above its
+benchmark and sales are proportional at that mark, this computes a 1.025
+factor, corresponding to 2.05% instead of the baseline 2%. A zero-value sale
+contributes zero; cash and actual proceeds still bound the payment. This is
+one simple way to realize returns gradually as positions are withdrawn, with
+no separate EMA state. Price impact, partial exits, different facility ages,
+rounding, capped claims, and adversarial ordering still need testing.
+
+The administrative 10% target can independently control cash retained for
+operations and the proposed gradual investment of surplus. Its investment
+schedule, minimum threshold and handling of sale-induced cash spikes are not
+implemented here. A reserve target is a liquidity control; cash sitting above
+that target is not by itself proof that the portfolio earned a return.
+
+For an implementable starting point, keep a last-checkpoint time, the last
+observed excess cash E = max(0, C - 0.1*B), and an uninvested deployment
+budget P. For an interval dt in which the observed excess was unchanged, let
+P += (E - P)*(1 - 2^(-dt/day)). Checkpoint the old E before recognizing a
+cash or benchmark change; then cap P at the new excess. If B and P are positive
+and P is at least 1% of the current reserve target, deposit P into the same
+receipt, subtract it from P and cash, and record the resulting excess. In a constant interval this
+deploys half the outstanding gap in a day and accumulates sub-threshold
+budgets rather than forgetting them. Increases seen only at a later lazy
+checkpoint are not treated as if they were present throughout the interval.
+This is a conservative discrete approximation while cash and targets evolve;
+its treatment of continuous accrual, caps, rounding, and scheduled keepers
+requires simulation. Nothing invests automatically in an inactive contract:
+a mint, other authorized action, or keeper must call the checkpoint.
+
+** Renewal in place
+
+An owner and authorized insurer can agree an appraisal, new coverage, premium
+rate and optional additional issuance. An atomic renewal checkpoints this NFT,
+redeems the required Jubilee share, applies the actual relief to that same
+principal, updates the coverage and issues any agreed additional U in one
+transaction. No step releases old coverage before the replacement is effective.
+The reference enforces that the final =max(0, principal - limit)= cannot exceed
+an existing shortfall; it neither recalls issuance after a K cut nor permits a
+renewal that worsens it. Exact K allocation and authorization still need design.
+
+The Python prototype explores returning the old nominal insurance principal
+and paying a freshly quoted full-value deposit on renewal. It supports an
+insurer change while refunding only from the recorded old pool. That is one
+possible settlement convention; retaining a same-insurer deposit and settling
+only an agreed difference may be cheaper and needs separate specification.
+The reference does not perform actuarial pricing, signatures, or on-chain
+callbacks. It resets the renewed facility's issuance-age checkpoint after
+crystallizing actual relief: an unpaid baseline is not a guaranteed extra
+claim.
+
+** Insurer premium pools
+
+A 10 BUCK deposit transfers *10 full-value BUCK* to the facility's upstream
+insurer's Carrying pool. A full release returns *10 nominal BUCK* from the
+same pool, with its proportional average carried demurrage. For example, if
+the pool has 100 nominal and 20 carried fee, its 10 nominal refund has 8 net
+BUCK and 2 carried fee. Partial releases return a proportional nominal
+principal. The refund is not grossed up like Jubilee relief.
+
+Record the actual pool against the NFT, so an insurer's later pool-registry
+change cannot redirect an existing deposit. A negotiated insurer change must
+settle or transfer the old obligation atomically; no other insurer's pool
+implicitly covers it. An insurer can hold, invest and redeem its own assets,
+including at the last instant, provided it can deliver the nominal obligation
+and associated pool-average fee history. The reference models a simple
+Carrying investment account that can be moved back before refund; actual
+basket positions, returns, liquidity and insolvent-insurer policy remain to be
+specified. A strategy that has lost its nominal assets may be unable to pay;
+the current reference fails the release atomically instead of inventing funds
+or consuming another insurer's deposit.
+
+* Global checkpoint and open decisions
+
+For no intervening issuance change or external fund flow, let I be total
+outstanding issuance, F the fund's liquid *net* BUCK, and D = exp(-r*dt).
+Conservation includes ordinary H, issued U, pool and strategy BUCK, and F.
+The fund can checkpoint without enumerating holders:
+
+#+begin_example
+F_new = F + (I - F) * (1 - D)
+gross demurrage increment = r * I * dt
+fund self-fee increment = gross increment - (F_new - F)
+#+end_example
+
+Checkpoint before I or fund cash changes and verify every transfer path,
+including unspent issuance, Carrying fee transfer, baskets and insurers. The
+basket receipt is a claim on underlying assets: do not add both the receipt's
+mark and the underlying BUCK to token supply. Carrying =balanceOf= values are
+nominal and cannot simply be summed to compute economic net supply.
+
+The reference sums =min(P_i, r*S_i)= across NFTs for its redemption benchmark.
+A global BUCK-seconds counter alone can track the *uncapped* sum in O(1), but
+not generally the sum of separately capped claims after 50 years. Maturity
+buckets, another index, or accepting a different benchmark require explicit
+tradeoffs. Relief above the nominal target can also make gross accrual minus
+actual payments negative, so cumulative full-width inflow and outflow counters
+need guarded arithmetic. The target reserve's responsiveness, sale frequency,
+minimum transaction size, ordering effects, and possible deliberate gaming
+also require simulation.
+
+Existing delegated demurrage is a separate user-facing feature, not needed by
+this reference. Removing it could simplify Buck but requires a decision about
+lost functionality; retaining it requires a net-balance conservation design.
+Likewise, retire older baskets or agents only when their distinct checks are
+covered. This work does not alter the low-K exit rule.
+
+* Implementation and validation
+
+1. Derive fixed-point net decay and Carrying allocation independently, including
+   dust, mixed-age transfers, up to and beyond 50 years, touch-frequency
+   independence, overflow and rounding. Migrate old state explicitly or start
+   a clean genesis: a raw-linear checkpoint cannot reconstruct net history.
+2. Implement and test basket same-receipt top-up and precise reduction with
+   actual net deposits, basis and share changes, callbacks, fees, zero value,
+   in-kind/partial exits and existing solvency checks.
+3. Implement per-facility issuance/age, separate held and unspent balance,
+   =balanceOf= and ERC-20 parity, NFT ownership/authorization, K changes,
+   Jubilee pre-redemption and grossed-up payment, insurer-pool refunds and
+   atomic renewal. Test zero payout, no cross-insurer subsidy and rollback.
+4. Update the Rust mirror, Python/JavaScript integrations and sandboxes, then
+   rerun contract tests and five-year economy simulations with freshly
+   generated reports. Existing simulations and Solidity tests exercise the
+   old accounting and are not validation of this proposed design.
