@@ -123,6 +123,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         return _book.partsOf(owner);
     }
     function fundBalancesScaled() external view returns (uint256 gross, uint256 net) { return _book.fundParts(); }
+    function fundFlows() external view returns (BuckLedger.FundFlows memory) { return _book.fundFlows(); }
     /// @notice Whole nominal Carrying BUCK needed to transfer at least `net`
     ///         full-value raw BUCK from the Jubilee fund at the current block.
     function fundNominalForNet(uint256 net) external view returns (uint256) {

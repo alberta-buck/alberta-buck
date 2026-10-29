@@ -12,6 +12,8 @@ import {BuckNet} from "../src/BuckNet.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
 import {BuckBasketReceipt} from "../src/basket/BuckBasketReceipt.sol";
 import {NetK} from "./BuckNet.t.sol";
+import {WideCounter} from "../src/lib/WideCounter.sol";
+import {BuckLedger} from "../src/lib/BuckLedger.sol";
 
 /// @dev Exercise the real token and coordinator with a controllable basket;
 ///      this is not a substitute for integration with the real equity basket.
@@ -167,6 +169,9 @@ contract JubileeFundTest is Test {
         vm.prank(owner);
         buck.authorizeReduction(id, amount, minRelief, uint64(block.timestamp + YEAR));
     }
+    function _scaled(WideCounter.Count memory c) internal pure returns (uint256) {
+        return c.units * Q + c.fraction;
+    }
     function _invest(uint256 net) internal returns (uint256 id, uint256 nominal, uint256 shares) {
         vm.prank(GOV);
         return fund.invest(net, type(uint256).max, net, 1);
@@ -251,6 +256,30 @@ contract JubileeFundTest is Test {
         (uint128 left,) = basket.holdings(id);
         assertEq(left, uint256(oldShares) - uint256(oldShares) / 2);
         assertEq(fund.positionId(), id);
+    }
+
+    function test_lifetimeFundAndInvestmentFlowsTrackActualNetValue() public {
+        uint256 a = _credit(ALICE, 100e6, 0);
+        _credit(BOB, 100e6, 0);
+        vm.warp(t0 + YEAR);
+        (, uint256 beforeInvestment) = buck.fundBalancesScaled();
+        _invest(2e6);
+        (, uint256 afterInvestment) = buck.fundBalancesScaled();
+        (WideCounter.Count memory invested, WideCounter.Count memory sold) = fund.investmentFlows();
+        assertEq(_scaled(invested), beforeInvestment - afterInvestment);
+        assertEq(_scaled(sold), 0);
+        _authorize(ALICE, a, 50e6, 0);
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduce(a, 50e6);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        (invested, sold) = fund.investmentFlows();
+        assertEq(_scaled(sold), cash + relief - afterInvestment);
+        BuckLedger.FundFlows memory flows = buck.fundFlows();
+        assertEq(_scaled(flows.transfersOut), _scaled(invested));
+        assertEq(_scaled(flows.transfersIn), _scaled(sold));
+        assertEq(_scaled(flows.relief), relief);
+        assertEq(_scaled(flows.netDemurrage) + _scaled(flows.transfersIn),
+                 cash + _scaled(flows.transfersOut) + _scaled(flows.relief));
     }
 
     function test_fullSaleBurnsTheSingleReceipt() public {

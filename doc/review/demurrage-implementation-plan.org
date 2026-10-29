@@ -35,6 +35,7 @@ make nix-match-BuckNetTest
 make nix-match-JubileeFundTest
 make nix-match-JubileeEquityIntegrationTest
 make nix-match-JubileeReserveMathTest
+make nix-match-WideCounterTest
 make nix-doc-alberta-buck-demurrage
 # Later, when compatibility is restored:
 make nix-test
@@ -152,6 +153,9 @@ must not be disturbed.
 - [ ] Implement conserved issuance, transfer, fund checkpoint and reduction
   paths; retain or deliberately replace compatibility APIs only with tests and
   recorded rationale. Include event and allowance behavior.
+- [X] Record full-width cumulative fund demurrage, transfers, relief,
+  investments and actual sale proceeds, with fractional remainders. Verify
+  the cash reconciliation and gross versus net demurrage distinctions.
 - [ ] Implement atomic renewal with explicit owner/insurer authorization,
   updated valuation and premium, optional issuance and no worse K shortfall.
 - [ ] Ensure insurer-specific pools and recorded deposits can invest/withdraw;
@@ -213,7 +217,8 @@ must not be disturbed.
 | 2026-10-29 | 4b | The real basket has an opt-in cash-only net-token mode. Five integration, 29 legacy equity, 35 director and 17 fund tests passed. Equity runtime is 23,114 bytes. This mode cannot open basket credit. | =bb1a2aa5= |
 | 2026-10-29 | 4c | Six real-basket integration tests passed, including a partially in-kind Jubilee redemption through a real Uniswap V3 pool with Carrying BUCK. The fund counts actual net BUCK only; its received TOKEN still needs a conversion path. | =d815b8a4= |
 | 2026-10-29 | 4d | Documented a circular mark between a leveraged basket's relief claim and the fund's basket shares. Standalone half-life budget math passes six tests, including two 256-case fuzz tests. | =3d57d046= |
-| 2026-10-29 | 4e | Integrated the reserve budget and mint checkpoints. Twenty-eight fund tests pass, including 256 fuzzed reserve-bound cases, permissions, no-op threshold checkpoints and atomic failures; six real-basket and 14 token integration tests pass. BuckNet runtime is 18,725 bytes; fund runtime is 10,178 bytes. | This commit: reserve scheduling |
+| 2026-10-29 | 4e | Integrated the reserve budget and mint checkpoints. Twenty-eight fund tests pass, including 256 fuzzed reserve-bound cases, permissions, no-op threshold checkpoints and atomic failures; six real-basket and 14 token integration tests pass. | =26732c12= |
+| 2026-10-29 | 4f | Added full-width whole-unit fund flow counters and fractional remainders. Four counter, 18 ledger, 29 fund and six real-basket tests pass; net cash reconciles across actual sales and relief. BuckNet runtime is 19,782 bytes; fund runtime is 10,662 bytes. | This commit: fund flow accounting |
 
 * Open implementation constraints
 
@@ -238,8 +243,8 @@ state; integer-only account checkpoints would still lose dust. Its fund
 function assumes issuance and net fund cash use the same unit and that every
 economic BUCK is accounted for exactly once. The Carrying gross-up uses a
 pro-rata floored fee; it does not establish parity with the old BUCK-seconds
-representation. Global 256-bit counters, scaled account bounds, per-NFT capped
-aggregate relief and actual-token transitions remain to be designed and tested.
+representation. Scaled account bounds, per-NFT capped aggregate relief and
+actual-token transitions still require full-system testing.
 The new NFT book is intentionally not authoritative for legacy Buck activity;
 minting and repayment are not migrated into production until token and fund
 settlement can call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
@@ -290,8 +295,8 @@ old facilities can be swept in one block is made.
 The standalone ledger stores fractional net values at =1e36= units per BUCK
 raw unit. It separately tracks the fund's gross Carrying amount and net value,
 and checkpoints total issuance before fund flows and principal changes. The
-scaled aggregate must fit in =uint256=; raw cumulative audit counters still
-need their own full-width representation. It currently binds an account to
+scaled aggregate must fit in =uint256=. Cumulative audit counters instead use
+full-width whole raw units plus fractional remainders. The ledger binds an account to
 the Carrying mode passed at first use and rejects a later change. The final
 token must reconcile that with registry posture changes rather than silently
 destroying fee history or changing existing user permissions.

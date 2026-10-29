@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {BuckTypes} from "../src/BuckTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {WideCounter} from "../src/lib/WideCounter.sol";
 
 /// @dev This harness exposes internal operations only for accounting tests;
 ///      it is not a production token and has no issuance authorization.
@@ -29,6 +30,7 @@ contract BuckLedgerHarness {
     function netOf(address owner) external view returns (uint256) { return book.netOf(owner); }
     function partsOf(address owner) external view returns (uint256, uint256) { return book.partsOf(owner); }
     function fundParts() external view returns (uint256, uint256) { return book.fundParts(); }
+    function fundFlows() external view returns (BuckLedger.FundFlows memory) { return book.fundFlows(); }
     function issued() external view returns (uint256) { return book.issued; }
     function maxNetPayout() external view returns (uint256) { return book.maxNetPayout(); }
     function fundNominalForNet(uint256 net) external view returns (uint256) { return book.fundNominalForNet(net); }
@@ -56,6 +58,10 @@ contract BuckLedgerTest is Test {
         (uint256 ch, uint256 cu) = h.partsOf(c);
         (, uint256 fundNet) = h.fundParts();
         assertApproxEqAbs(ah + au + bh + bu + ch + cu + fundNet, h.issued() * Q, Q);
+    }
+
+    function _scaled(WideCounter.Count memory c) internal pure returns (uint256) {
+        return c.units * Q + c.fraction;
     }
 
     function test_unspentIssuanceIsSpendableAndPaysDemurrageImmediately() public {
@@ -272,6 +278,34 @@ contract BuckLedgerTest is Test {
         h.send(ALICE, POOL, 1, false, true);
         assertEq(h.balanceOf(POOL), 1);
         _netConserved(ALICE, BOB, POOL);
+    }
+
+    function test_fullWidthFundFlowsReconstructNetCashIncludingPendingAccrual() public {
+        h.issue(ALICE, 1000e6, false);
+        vm.warp(t0 + YEAR);
+        BuckLedger.FundFlows memory pending = h.fundFlows();
+        (, uint256 beforeCash) = h.fundParts();
+        assertEq(_scaled(pending.grossDemurrage), 20e6 * Q);
+        assertEq(_scaled(pending.netDemurrage), beforeCash);
+        assertLt(_scaled(pending.netDemurrage), _scaled(pending.grossDemurrage));
+
+        h.send(ALICE, FUND, 10e6, false, true);
+        uint256 out = h.send(FUND, BOB, 5e6, true, false);
+        h.retireWithFund(ALICE, 100e6, 5e6 * Q, false);
+        BuckLedger.FundFlows memory flows = h.fundFlows();
+        (, uint256 cash) = h.fundParts();
+        assertEq(_scaled(flows.transfersIn), 10e6 * Q);
+        assertEq(_scaled(flows.transfersOut), out);
+        assertEq(_scaled(flows.relief), 5e6 * Q);
+        assertEq(_scaled(flows.netDemurrage) + _scaled(flows.transfersIn),
+                 cash + _scaled(flows.transfersOut) + _scaled(flows.relief));
+
+        vm.warp(t0 + 2 * YEAR);
+        flows = h.fundFlows();
+        (, cash) = h.fundParts();
+        assertEq(_scaled(flows.grossDemurrage), 38e6 * Q);
+        assertEq(_scaled(flows.netDemurrage) + _scaled(flows.transfersIn),
+                 cash + _scaled(flows.transfersOut) + _scaled(flows.relief));
     }
 
     function testFuzz_mixedTransfersAndDemurrageConserveIssued(uint32 principal_, uint32 transfer_, uint24 days_) public {

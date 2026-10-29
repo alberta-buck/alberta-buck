@@ -265,6 +265,26 @@ checkpoints without trading while Buck is locked; an authorized keeper must
 execute a bounded investment separately. Governance can explicitly override
 the schedule. More varied keeper timing and market simulations remain needed.
 
+The isolated token's =fundFlows()= reports full-width cumulative gross
+demurrage, net demurrage received from outside the fund, net BUCK transfers
+into and out of the fund, and net relief extinguished. Each count consists of
+256-bit whole raw BUCK units and a separate fractional remainder with a =1e36=
+denominator. The views include demurrage accrued since the last checkpoint.
+The net cash reconciliation is:
+
+#+begin_example
+net fund cash = net demurrage + transfers in - transfers out - relief
+#+end_example
+
+Gross demurrage also includes demurrage on BUCK already in the Carrying fund;
+it must not be added a second time to the fund's net cash. The fund separately
+reports =investmentFlows()=: cumulative actual net BUCK invested in its
+managed position and received from sales. In-kind TOKEN is excluded until a
+future conversion records actual BUCK. These two cumulative flows alone do not
+measure profit: the unsold position still has value. Counters have full
+256-bit whole-unit range, but still revert if that range is eventually
+exhausted; instantaneous scaled issuance has a separate lower bound.
+
 ** Renewal in place
 
 An owner and authorized insurer can agree an appraisal, new coverage, premium

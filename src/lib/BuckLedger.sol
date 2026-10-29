@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BuckTypes} from "../BuckTypes.sol";
 import {NetDemurrageMath} from "./NetDemurrageMath.sol";
+import {WideCounter} from "./WideCounter.sol";
 
 /// @notice Net-value accounting for a future Buck token. Internal library
 ///         only: the token must enforce identity, authorization, facility
@@ -14,6 +15,7 @@ import {NetDemurrageMath} from "./NetDemurrageMath.sol";
 ///      and aggregate counters use uint256. Total issuance must fit after
 ///      multiplication by SCALE, explicitly checked before each issue.
 library BuckLedger {
+    using WideCounter for WideCounter.Count;
     uint256 internal constant SCALE = 1e36;
     uint256 internal constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
     uint8 private constant ORDINARY = 1;
@@ -49,6 +51,22 @@ library BuckLedger {
         uint256 issued;
         uint256 fundGross;
         uint256 fundNet;
+        WideCounter.Count grossDemurrage;
+        WideCounter.Count netDemurrage;
+        WideCounter.Count fundTransfersIn;
+        WideCounter.Count fundTransfersOut;
+        WideCounter.Count fundRelief;
+    }
+
+    /// @notice Cumulative fund flows in raw BUCK units, each with a 1e36
+    ///         fractional-unit remainder. Gross demurrage includes the fund's
+    ///         own demurrage; net demurrage is new value from other holders.
+    struct FundFlows {
+        WideCounter.Count grossDemurrage;
+        WideCounter.Count netDemurrage;
+        WideCounter.Count transfersIn;
+        WideCounter.Count transfersOut;
+        WideCounter.Count relief;
     }
 
     function initialize(Ledger storage self, address fund) internal {
@@ -116,6 +134,7 @@ library BuckLedger {
             nominalFundSpent = Math.mulDiv(self.fundGross, reliefScaled, self.fundNet, Math.Rounding.Ceil);
             self.fundGross -= nominalFundSpent;
             self.fundNet -= reliefScaled;
+            self.fundRelief.add(reliefScaled);
         }
         self.issued -= amount;
         if (self.fundNet > self.issued * SCALE) revert FundExceedsIssuance();
@@ -146,6 +165,7 @@ library BuckLedger {
             netReceived = nominal == 0 ? 0 : Math.mulDiv(self.fundNet, nominal, self.fundGross);
             self.fundGross -= nominal;
             self.fundNet -= netReceived;
+            self.fundTransfersOut.add(netReceived);
         } else {
             Account storage a = _bind(self, from, fromCarrying);
             _checkpointAccount(a);
@@ -162,6 +182,7 @@ library BuckLedger {
         if (to == self.fund) {
             self.fundGross += nominal;
             self.fundNet += netReceived;
+            self.fundTransfersIn.add(netReceived);
             if (self.fundNet > self.issued * SCALE) revert FundExceedsIssuance();
         } else {
             Account storage b = _bind(self, to, toCarrying);
@@ -233,6 +254,19 @@ library BuckLedger {
         return _fundView(self);
     }
 
+    /// @notice Lifetime flows, including accrued demurrage since the last
+    ///         checkpoint. Net demurrage + incoming transfers - outgoing
+    ///         transfers - relief equals the fund's current net cash.
+    function fundFlows(Ledger storage self) internal view returns (FundFlows memory flows) {
+        _requireInitialized(self);
+        (uint256 gross, uint256 net) = _fundView(self);
+        flows.grossDemurrage = WideCounter.plus(self.grossDemurrage, gross - self.fundGross);
+        flows.netDemurrage = WideCounter.plus(self.netDemurrage, net - self.fundNet);
+        flows.transfersIn = self.fundTransfersIn;
+        flows.transfersOut = self.fundTransfersOut;
+        flows.relief = self.fundRelief;
+    }
+
     function maxNetPayout(Ledger storage self) internal view returns (uint256) {
         (uint256 gross, uint256 net) = _fundView(self);
         uint256 nominal = gross / SCALE * SCALE;
@@ -277,7 +311,11 @@ library BuckLedger {
     }
 
     function _checkpointFund(Ledger storage self) private {
-        (self.fundGross, self.fundNet) = _fundView(self);
+        (uint256 gross, uint256 net) = _fundView(self);
+        self.grossDemurrage.add(gross - self.fundGross);
+        self.netDemurrage.add(net - self.fundNet);
+        self.fundGross = gross;
+        self.fundNet = net;
         self.fundCheckpoint = _now();
     }
 

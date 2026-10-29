@@ -8,6 +8,7 @@ import {BuckNet} from "./BuckNet.sol";
 import {BuckCredit} from "./BuckCredit.sol";
 import {IBuckBasketPosition} from "./basket/IBuckBasketPosition.sol";
 import {JubileeReserveMath} from "./lib/JubileeReserveMath.sol";
+import {WideCounter} from "./lib/WideCounter.sol";
 
 interface IJubileeBasket is IBuckBasketPosition {
     function buck() external view returns (address);
@@ -31,6 +32,7 @@ interface IInsurerRefundLiquidity {
 ///      in-kind TOKEN conversion and real insurer liquidity are not complete;
 ///      this is not a production deployment.
 contract JubileeFund is IERC721Receiver {
+    using WideCounter for WideCounter.Count;
     uint256 private constant Q = 1e36;
     uint256 private constant BP = 10_000;
     uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
@@ -46,6 +48,8 @@ contract JubileeFund is IERC721Receiver {
     uint64 public reserveCheckpoint;
     uint256 public observedExcessScaled;
     uint256 public reserveBudgetScaled;
+    WideCounter.Count private _investedNet;
+    WideCounter.Count private _saleProceedsNet;
     bool private transient _entered;
     bool private transient _acceptingReceipt;
     uint256 private transient _receivedReceipt;
@@ -211,6 +215,7 @@ contract JubileeFund is IERC721Receiver {
         (, uint256 afterNet) = token.fundBalancesScaled();
         if (afterNet > beforeNet || beforeNet - afterNet < netAmount * Q) revert InconsistentPosition();
         spent = beforeNet - afterNet;
+        _investedNet.add(spent);
         emit Invested(id, nominal, spent, creditedActual, sharesAdded);
     }
 
@@ -316,6 +321,7 @@ contract JubileeFund is IERC721Receiver {
             (, uint256 cashAfter) = token.fundBalancesScaled();
             if (cashAfter < cashBefore) revert UnexpectedCashDecrease();
             proceeds = cashAfter - cashBefore;
+            _saleProceedsNet.add(proceeds);
             emit PositionSale(id, requested, retired, remaining, proceeds, false);
         } catch (bytes memory reason) {
             // A zero-value or dust exit cannot retire any shares. Preserve the
@@ -335,6 +341,14 @@ contract JubileeFund is IERC721Receiver {
             IInsurerRefundLiquidity(pool).prepareRefund(tokenId, refund);
             if (token.balanceOf(pool) < refund) revert InsufficientPoolLiquidity();
         }
+    }
+
+    /// @notice Cumulative full-value BUCK invested and actually received from
+    ///         position sales, with fractional remainders. In-kind TOKEN is
+    ///         excluded until a future conversion records real BUCK proceeds.
+    function investmentFlows() external view returns (WideCounter.Count memory invested,
+                                                        WideCounter.Count memory saleProceeds) {
+        return (_investedNet, _saleProceedsNet);
     }
 
     function onERC721Received(address operator, address from, uint256 id, bytes calldata)
