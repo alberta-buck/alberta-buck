@@ -209,7 +209,7 @@ In a two-facility idle example it lets the first reducer receive the entire
 fund, leaving the second unable to close. It is retained only as a comparison,
 not a safe contract rule.
 
-A second experimental rule allocates the fraction =f= of pre-sale cash plus
+A proportional rule, now the reference default, allocates the fraction =f= of pre-sale cash plus
 the actual proceeds from selling fraction =f= of the position, capped by the
 principal. Its default =f= is the selected facility's baseline target divided
 by all outstanding capped targets. It computes relief from realized funds and
@@ -281,7 +281,8 @@ make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --json"
 make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --acquire-all"
 make nix-venv-demurrage-reference DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"
 make nix-venv-demurrage-reference DEMURRAGE_ARGS="--deploy-fund --wipe-strategy --retire 50 --redeem-fraction 0.25"
-make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50 --payout-policy proportional"
+make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50"
+make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50 --payout-policy reserve"
 make nix-venv-demurrage-test
 #+end_src
 

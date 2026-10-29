@@ -78,17 +78,17 @@ must not be disturbed.
 
 - [X] Start an implementation branch from the committed reference/design.
 - [X] Write and commit this checklist before contract edits.
-- [ ] Establish local dependencies and record baseline test commands/results.
+- [X] Establish local dependencies and record baseline test commands/results.
 
 ** 1. Reference payout default
 
-- [ ] Make proportional allocation the default in previews, retirement, renewal
+- [X] Make proportional allocation the default in previews, retirement, renewal
   and CLI. Keep =reserve= explicitly selectable for comparison.
-- [ ] Test two equal debtors, positive/negative portfolio return, partial
+- [X] Test two equal debtors, positive/negative portfolio return, partial
   reductions, zero-age/zero-proceeds, actual versus quoted proceeds, renewal,
   available cash, and rollback. Update CLI, paper, README, and design language.
-- [ ] Run =make nix-venv-demurrage-test= and regenerate the demurrage PDF.
-- [ ] Commit this standalone policy change and record verification.
+- [X] Run =make nix-venv-demurrage-test= and regenerate the demurrage PDF.
+- [X] Commit this standalone policy change and record verification.
 
 ** 2. Existing BuckBasket position additions
 
@@ -157,7 +157,9 @@ must not be disturbed.
 
 | Date | Stage | Result / next action | Commit |
 |------+-------+----------------------+--------|
-| 2026-10-29 | Plan | Branch created from reference =291560c1=; implementation has not started. | See plan commit |
+| 2026-10-29 | Plan | Branch created from reference =291560c1=; isolated plan recorded. | =bb9b5554= |
+| 2026-10-29 | Baseline | =make nix-venv-demurrage-test=: 74 passed; =make nix-build-uniswap-artifacts=: successful, existing compiler/lint warnings. | =bb9b5554= |
+| 2026-10-29 | 1 | Proportional is default in quotes, retirements, renewals and CLI; =reserve= remains explicit. Reference tests: 75 passed; demurrage PDF regenerated. | This commit: proportional default |
 
 * Open implementation constraints
 

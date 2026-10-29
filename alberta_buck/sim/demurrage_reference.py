@@ -640,16 +640,17 @@ class DemurrageLedger:
 
     def quote_available_retirement(
         self, position: str, amount: float, redeemed_fraction: float | None = None,
-        reserve_fraction: float = 0.1, payout_policy: str = "reserve",
+        reserve_fraction: float = 0.1, payout_policy: str = "proportional",
     ) -> AvailableRetirement:
         """Preview relief from cash after redeeming the specified LP fraction.
 
         The reserve signal and proportional redemption policy are experimental:
         by default the fund redeems requested target relief divided by the
         total outstanding unadjusted relief benchmark. The caller may supply a
-        different fraction to compare alternatives. The signal is post-sale net
-        cash / (reserve_fraction * benchmark). The opt-in proportional policy
-        allocates the same fraction of pre-sale cash plus actual sale proceeds.
+        different fraction to compare alternatives. The default proportional
+        policy allocates the same fraction of pre-sale cash plus actual sale
+        proceeds. The reserve comparison uses post-sale net cash divided by
+        (reserve_fraction * benchmark); it is sensitive to withdrawal order.
         """
         if redeemed_fraction is None:
             redeemed_fraction = self.redemption_fraction(position, amount, "relief")
@@ -710,7 +711,7 @@ class DemurrageLedger:
 
     def retire_available(
         self, position: str, amount: float, payer: str, redeemed_fraction: float | None = None,
-        reserve_fraction: float = 0.1, payout_policy: str = "reserve",
+        reserve_fraction: float = 0.1, payout_policy: str = "proportional",
     ) -> AvailableRetirement:
         """Redeem first, then pay relief bounded by actual full-value cash.
 
@@ -736,7 +737,8 @@ class DemurrageLedger:
         try:
             cash_before = self.jubilee
             units, proceeds = self.redeem_strategy(redeemed_fraction)
-            result = self.quote_available_retirement(position, amount, 0.0, reserve_fraction)
+            result = self.quote_available_retirement(position, amount, 0.0, reserve_fraction,
+                                                     payout_policy="reserve")
             result = replace(result, redeemed_fraction=redeemed_fraction,
                              redeemed_units=units, redemption_proceeds=proceeds)
             if payout_policy == "proportional":
@@ -766,7 +768,7 @@ class DemurrageLedger:
         self, position: str, owner: str, *, new_limit: float, new_premium_rate: float,
         additional_issuance: float = 0.0, new_insurer: str | None = None,
         new_insurance_principal: float | None = None, redeemed_fraction: float | None = None,
-        payout_policy: str = "reserve",
+        payout_policy: str = "proportional",
     ) -> Renewal:
         """Crystallize relief and replace one facility's terms atomically.
 
@@ -810,7 +812,8 @@ class DemurrageLedger:
         try:
             cash_before = self.jubilee
             _, proceeds = self.redeem_strategy(redeemed_fraction)
-            quote = (self.quote_available_retirement(position, old_principal, 0.0)
+            quote = (self.quote_available_retirement(position, old_principal, 0.0,
+                                                     payout_policy="reserve")
                      if old_principal else None)
             if quote and payout_policy == "proportional":
                 quote = self._proportional_payout(quote, cash_before, proceeds, redeemed_fraction)
@@ -950,7 +953,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retire", type=float, default=0, help="credit principal to reduce after the final checkpoint")
     parser.add_argument("--redemption-basis", choices=("issuance", "relief"), default="relief", help="select the fraction's denominator (default: relief)")
     parser.add_argument("--redeem-fraction", type=float, help="explicit fraction of strategy units sold before retirement; overrides --redemption-basis")
-    parser.add_argument("--payout-policy", choices=("reserve", "proportional"), default="reserve", help="compare the reserve signal with proportional cash plus realized proceeds")
+    parser.add_argument("--payout-policy", choices=("reserve", "proportional"), default="proportional", help="payout policy (default: proportional); reserve is a comparison")
     parser.add_argument("--json", action="store_true", help="print machine-readable results")
     args = parser.parse_args(argv)
     years = _nonnegative(args.years, "years")

@@ -171,9 +171,10 @@ position, and then compute relief using actual net cash. The current reference
 defaults to selected baseline relief divided by the sum of outstanding capped
 baseline relief; a zero benchmark requests zero redemption. Its original
 10% reserve-signal payout is only a comparison and has a demonstrated
-first-mover problem, described below. A proportional cash-plus-proceeds rule
-is available for comparison and is the simpler candidate. Neither is a
-guaranteed 2% annual return or a finalized contract policy.
+first-mover problem, described below. Proportional cash-plus-proceeds payout
+is the chosen reference default and intended contract behavior. It is not a
+guaranteed 2% annual return, and its contract implementation still needs
+fixed-point, liquidity, and adversarial validation.
 Zero proceeds or zero payable relief are valid. The owner supplies the rest of
 the reduction; a failed owner payment or failed transaction must roll back all
 steps. The fund grosses up its Carrying transfer to deliver the selected full
@@ -197,7 +198,7 @@ entire 36.253849; the second receives zero and its owner is 18.126925 BUCK
 short of closing. This is a defect in that policy, not evidence of a missing
 source of BUCK. Which facility happens to close first changes the outcome.
 
-One candidate removes the reserve ratio from payout. Let b be the selected
+The chosen rule removes the reserve ratio from payout. Let b be the selected
 facility's baseline relief, B the sum of all capped baselines, C the fund's
 net cash just before sale, f = b/B, and Z the actual net BUCK proceeds of
 selling fraction f of the basket position. If b and B are nonzero:

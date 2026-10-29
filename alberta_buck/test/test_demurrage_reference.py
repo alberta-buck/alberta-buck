@@ -1,6 +1,7 @@
 """Economic specification of net-holder demurrage and linear credit relief."""
 import math
 import copy
+import json
 from decimal import Decimal, localcontext
 
 import pytest
@@ -127,15 +128,15 @@ def test_proportional_payout_preserves_cash_for_equal_facilities():
     ledger.issue_unspent("b", 100, "bob")
     ledger.advance(10)
     expected_relief = 100 * (1 - math.exp(-0.2))
-    reserve_quote = ledger.quote_available_retirement("a", 100)
-    proportional_quote = ledger.quote_available_retirement("a", 100, payout_policy="proportional")
+    reserve_quote = ledger.quote_available_retirement("a", 100, payout_policy="reserve")
+    proportional_quote = ledger.quote_available_retirement("a", 100)
     assert reserve_quote.relief == pytest.approx(expected_relief * 2)
     assert proportional_quote.relief == pytest.approx(expected_relief)
 
-    first = ledger.retire_available("a", 100, "alice", payout_policy="proportional")
+    first = ledger.retire_available("a", 100, "alice")
     assert first.relief == pytest.approx(proportional_quote.relief)
     assert ledger.jubilee == pytest.approx(expected_relief)
-    second = ledger.retire_available("b", 100, "bob", payout_policy="proportional")
+    second = ledger.retire_available("b", 100, "bob")
     assert second.relief == pytest.approx(expected_relief)
     assert ledger.balance_of("alice") == pytest.approx(0, abs=1e-9)
     assert ledger.balance_of("bob") == pytest.approx(0, abs=1e-9)
@@ -214,11 +215,10 @@ def test_renewal_can_apply_the_proportional_payout_policy():
     ledger.issue_unspent("b", 100, "bob", credit_limit=100)
     ledger.advance(10)
     expected_relief = 100 * (1 - math.exp(-0.2))
-    renewal = ledger.renew_unspent("a", "alice", new_limit=100, new_premium_rate=0,
-                                  payout_policy="proportional")
+    renewal = ledger.renew_unspent("a", "alice", new_limit=100, new_premium_rate=0)
     assert renewal.relief == pytest.approx(expected_relief)
     assert renewal.new_principal == pytest.approx(100 - expected_relief)
-    second = ledger.retire_available("b", 100, "bob", payout_policy="proportional")
+    second = ledger.retire_available("b", 100, "bob")
     assert second.relief == pytest.approx(expected_relief)
     assert_conservation(ledger)
 
@@ -726,7 +726,7 @@ def test_redemption_bases_differ_when_credit_ages_differ():
 
 
 @pytest.mark.parametrize("multiplier", [1.025, 0.95])
-def test_post_redemption_cash_controls_the_effective_relief_rate(multiplier):
+def test_reserve_comparison_uses_post_redemption_cash(multiplier):
     ledger = opened()
     ledger.advance(25)
     # A 10% reserve on the 50 BUCK benchmark, observed after a 1% sale.
@@ -734,7 +734,7 @@ def test_post_redemption_cash_controls_the_effective_relief_rate(multiplier):
     target_cash = 0.1 * ledger.aggregate_relief * multiplier
     pre_cash = (target_cash - fraction * ledger.jubilee) / (1 - fraction)
     ledger.deploy(ledger.jubilee - pre_cash)
-    result = ledger.retire_available("mortgage", 10, "holder", fraction)
+    result = ledger.retire_available("mortgage", 10, "holder", fraction, payout_policy="reserve")
     assert result.fund_net_after_redemption == pytest.approx(target_cash)
     assert result.rate_multiplier == pytest.approx(multiplier)
     assert result.baseline_relief == pytest.approx(5)
@@ -783,13 +783,13 @@ def test_actual_redemption_result_overrides_presale_quote(monkeypatch, payout_po
     assert_conservation(ledger)
 
 
-def test_zero_redemption_can_still_pay_from_existing_cash():
+def test_reserve_comparison_can_pay_all_existing_cash_after_zero_redemption():
     ledger = opened()
     ledger.advance(10)
     ledger.deploy(10)
     ledger.strategy_loss("holder", ledger.accounts[JUBILEE_INVESTED])
     cash = ledger.jubilee
-    quote = ledger.retire_available("mortgage", 50, "holder", 0.25)
+    quote = ledger.retire_available("mortgage", 50, "holder", 0.25, payout_policy="reserve")
     assert quote.redemption_proceeds == 0
     assert quote.relief == pytest.approx(cash)
     assert quote.account_payment == pytest.approx(50 - cash)
@@ -1063,3 +1063,14 @@ def test_cli_reports_underfunded_and_acquired_cases(capsys):
                  "--retire", "100", "--redeem-fraction", "1"]) == 0
     output = capsys.readouterr().out
     assert "relief 0.000000, debtor payment 100.000000" in output
+
+
+def test_cli_defaults_to_proportional_and_reserve_remains_explicit(capsys):
+    assert main(["--years", "10", "--retire", "50", "--json"]) == 0
+    default = json.loads(capsys.readouterr().out)["available_retirement"]
+    assert default["payout_policy"] == "proportional"
+    assert default["relief"] == pytest.approx(50 * (1 - math.exp(-0.2)))
+    assert main(["--years", "10", "--retire", "50", "--payout-policy", "reserve", "--json"]) == 0
+    comparison = json.loads(capsys.readouterr().out)["available_retirement"]
+    assert comparison["payout_policy"] == "reserve"
+    assert comparison["relief"] == pytest.approx(100 * (1 - math.exp(-0.2)))

@@ -40,11 +40,11 @@ illustrates a worthless position being partially redeemed before relief is
 computed from available cash. The default fractional redemption is requested
 baseline relief divided by total outstanding baseline relief; pass
 =--redeem-fraction= to compare another rule, or =--redemption-basis issuance=
-for the credit reduction divided by total issued BUCK. The original =reserve=
-payout signal uses 10% of outstanding baseline relief; it can award the first
-reducer too much when the fund holds uninvested cash. Pass
-=--payout-policy proportional= with =--retire= to compare the selected fraction of pre-sale
-cash plus actual sale proceeds. Both are experimental; the
+for the credit reduction divided by total issued BUCK. The default payout uses
+the selected fraction of pre-sale cash plus actual sale proceeds. Pass
+=--payout-policy reserve= with =--retire= to compare the original 10% reserve
+signal, which can award the first reducer too much when the fund holds
+uninvested cash. Both still require contract-level validation; the
 [[file:doc/review/credit-facility-accounting-design.org][contract design]] explains the observed ordering failure and tradeoffs.
 =make nix-venv-demurrage-test= tests issuance, independent facility histories,
 atomic renewal, insurer-specific nominal refunds, proportional redemption,

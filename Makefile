@@ -228,7 +228,8 @@ test-python:
 #   make nix-venv-demurrage-reference
 #   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--issued 1000000 --years 1"
 #   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --acquire-all"
-#   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50 --payout-policy proportional"
+#   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50"
+#   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50 --payout-policy reserve"
 #   make nix-venv-demurrage-test
 DEMURRAGE_ARGS ?=
 .PHONY: demurrage-reference demurrage-test
