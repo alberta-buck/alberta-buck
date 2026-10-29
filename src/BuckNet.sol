@@ -10,6 +10,7 @@ import {BN254} from "./BN254.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 import {BuckLedger} from "./lib/BuckLedger.sol";
 import {JubileeClaims} from "./lib/JubileeClaims.sol";
+import {BuckRenewal, BuckRenewalConsent} from "./BuckRenewalConsent.sol";
 
 interface IBuckNetK {
     function currentBuckK() external view returns (uint256);
@@ -39,6 +40,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     BuckCredit public immutable buckCredit;
     IBuckNetK public immutable buckK;
     IdentityRegistry public immutable identity;
+    BuckRenewalConsent public immutable renewalConsent;
     address public immutable jubilee;
     bool public jubileeReserveHookEnabled;
     BuckLedger.Ledger private _book;
@@ -75,6 +77,8 @@ contract BuckNet is IERC20, IERC20Metadata {
                               uint256 minimumReliefScaled, uint64 deadline);
     event FacilityReduced(address indexed owner, uint256 indexed tokenId, uint256 principal,
                           uint256 reliefScaled, uint256 nominalFundSpentScaled, uint256 premiumRefund);
+    event FacilityRenewed(address indexed owner, uint256 indexed tokenId, uint256 relief,
+                          uint256 additionalIssuance, uint256 principal, uint256 nominalFundSpentScaled);
 
     error Reentrant();
     error BadAddress();
@@ -91,7 +95,6 @@ contract BuckNet is IERC20, IERC20Metadata {
     error BadAuthorization();
     error UnauthorizedTransfer();
     error InsufficientAllowance();
-    error AlreadyEnabled();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -108,6 +111,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         buckK = IBuckNetK(controller_);
         identity = IdentityRegistry(identity_);
         jubilee = jubilee_;
+        renewalConsent = new BuckRenewalConsent(address(this), credit_);
         _book.initialize(jubilee_);
         _claims.initialize();
     }
@@ -181,7 +185,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     ///         setup. Once enabled, a failed checkpoint reverts issuance.
     function enableJubileeReserveHook() external nonReentrant {
         if (msg.sender != jubilee) revert NotJubilee();
-        if (jubileeReserveHookEnabled) revert AlreadyEnabled();
+        if (jubileeReserveHookEnabled) return;
         jubileeReserveHookEnabled = true;
         emit JubileeReserveHookEnabled();
     }
@@ -256,6 +260,72 @@ contract BuckNet is IERC20, IERC20Metadata {
         emit ReductionAuthorized(msg.sender, tokenId, principal, minimumReliefScaled, deadline);
     }
 
+    /// @notice Settle a same-insurer renewal after the fund's proportional
+    ///         sale and original pool's liquidity preparation. `relief` is
+    ///         whole full-value raw BUCK; no other facility is touched.
+    function renewFromJubilee(address owner, uint256 tokenId, BuckRenewal.Terms calldata terms, uint256 relief)
+        external nonReentrant returns (uint256 refund, uint256 premium)
+    {
+        if (msg.sender != jubilee) revert NotJubilee();
+        if (!identity.isVerified(owner) || identity.isCarrying(owner)) revert NotVerified();
+        if (!identity.isVerified(jubilee) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
+        (uint256 oldPrincipal, bytes32 digest) = renewalConsent.checkRenewal(owner, tokenId, terms);
+        if (relief < terms.minimumRelief || relief > oldPrincipal) revert BadAuthorization();
+        _claims.totalSeconds();
+        uint256 k = buckK.compute();
+        uint256 oldLimit = Math.mulDiv(buckCredit.currentValue(tokenId), k, K_SCALE);
+        uint256 oldShortfall = oldPrincipal > oldLimit ? oldPrincipal - oldLimit : 0;
+        (, uint256 oldCoverage,) = buckCredit.creditInfo(tokenId);
+        if (terms.activatedFace < oldCoverage) revert CreditExceeded();
+
+        refund = premiumPrincipal[tokenId];
+        _refundPremium(owner, tokenId, refund);
+        renewalConsent.consume(tokenId, digest);
+        uint256 nominalSpent;
+        if (relief != 0) {
+            nominalSpent = _book.retireWithFund(owner, relief, relief * FRACTION_SCALE, false);
+            emit Transfer(jubilee, address(0), relief);
+        }
+        // Reduce and checkpoint the old principal first. The credit then
+        // applies replacement terms and coverage in one call; additional
+        // principal is issued only after its final K bound is checked.
+        buckCredit.recordRenewalFromBuck(tokenId, owner, relief, 0);
+        _syncClaim(tokenId);
+        buckCredit.renewTermsFromBuck(tokenId, owner, terms.face, terms.floor, terms.depType,
+                                     terms.depRate, terms.depStartAt, terms.premiumRate,
+                                     terms.activatedFace - oldCoverage);
+        uint256 value = buckCredit.currentValue(tokenId);
+        uint256 rate = uint256(terms.premiumRate) * POOL_ROI_INV;
+        if (rate >= BP) revert BadPremiumRate();
+        premium = Math.mulDiv(value, rate, BP);
+        if (premium > terms.maxPremium) revert BadAuthorization();
+        if (premium != 0 && _book.balanceOf(owner) < Math.mulDiv(premium, buckK.fundingFactor(), K_SCALE)) {
+            revert FundingInsufficient();
+        }
+        uint256 newPrincipal = oldPrincipal - relief + terms.additionalIssuance;
+        uint256 newLimit = Math.mulDiv(value, k, K_SCALE);
+        uint256 newShortfall = newPrincipal > newLimit ? newPrincipal - newLimit : 0;
+        if (newShortfall > oldShortfall) revert CreditExceeded();
+
+        address pool;
+        if (premium != 0) {
+            pool = insurerPool[buckCredit.insurerOf(tokenId)];
+            if (pool == address(0)) revert NoInsurerPool();
+            if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
+        }
+        if (terms.additionalIssuance != 0) {
+            _book.issue(owner, terms.additionalIssuance, false);
+            buckCredit.recordIssuanceFromBuck(tokenId, owner, terms.additionalIssuance);
+            emit Transfer(address(0), owner, terms.additionalIssuance);
+            _syncClaim(tokenId);
+        }
+        premiumPrincipal[tokenId] = premium;
+        facilityPool[tokenId] = pool;
+        if (premium != 0) _transfer(owner, pool, premium);
+        emit FacilityRenewed(owner, tokenId, relief, terms.additionalIssuance, newPrincipal, nominalSpent);
+        if (jubileeReserveHookEnabled) IBuckNetReserveHook(jubilee).checkpointIssuance();
+    }
+
     /// @notice Complete a pre-authorized reduction after the Jubilee manager
     ///         has sold its proportional position and prepared insurer funds.
     /// @dev Only the configured coordinator may call it. The coordinator must
@@ -283,11 +353,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         uint256 oldShortfall = priorPrincipal > beforeCapacity ? priorPrincipal - beforeCapacity : 0;
         delete reductionAuthorization[tokenId];
         if (refund != 0) {
-            address pool = facilityPool[tokenId];
-            if (pool == address(0)) revert NoInsurerPool();
-            if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
-            _spendAllowance(pool, address(this), refund);
-            _transfer(pool, owner, refund);
+            _refundPremium(owner, tokenId, refund);
             premiumPrincipal[tokenId] -= refund;
         }
         uint256 nominalFundSpent = _book.retireWithFund(owner, principal, reliefScaled, false);
@@ -322,6 +388,15 @@ contract BuckNet is IERC20, IERC20Metadata {
     function _syncClaim(uint256 tokenId) private {
         (uint256 principal, uint256 seconds_) = buckCredit.issuanceOf(tokenId);
         _claims.update(tokenId, principal, seconds_);
+    }
+
+    function _refundPremium(address owner, uint256 tokenId, uint256 amount) private {
+        if (amount == 0) return;
+        address pool = facilityPool[tokenId];
+        if (pool == address(0)) revert NoInsurerPool();
+        if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
+        _spendAllowance(pool, address(this), amount);
+        _transfer(pool, owner, amount);
     }
 
     function _transfer(address from, address to, uint256 amount) private {

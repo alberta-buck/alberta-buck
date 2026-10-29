@@ -36,6 +36,7 @@ make nix-match-BuckCredit
 make nix-match-JubileeClaimsTest
 make nix-match-BuckNetTest
 make nix-match-JubileeFundTest
+make nix-match-JubileeRenewalTest
 make nix-match-JubileeEquityIntegrationTest
 make nix-match-JubileeReserveMathTest
 make nix-match-WideCounterTest
@@ -159,8 +160,11 @@ must not be disturbed.
 - [X] Record full-width cumulative fund demurrage, transfers, relief,
   investments and actual sale proceeds, with fractional remainders. Verify
   the cash reconciliation and gross versus net demurrage distinctions.
-- [ ] Implement atomic renewal with explicit owner/insurer authorization,
-  updated valuation and premium, optional issuance and no worse K shortfall.
+- [X] Implement same-insurer atomic renewal in the isolated contracts with
+  separate owner/insurer authorization, actual relief, updated valuation and
+  premium, optional issuance and no worse K shortfall. Test the real basket.
+- [ ] Audit renewal for production, support any separately authorized insurer
+  change, and integrate concrete insurer strategies and migration.
 - [X] Specify renewal approvals, staleness, proceeds, rounding and premium
   flow. Restrict active net-model term changes to Buck and validate its update
   against the recorded insurer's envelope. The Buck renewal executor is pending.
@@ -225,7 +229,8 @@ must not be disturbed.
 | 2026-10-29 | 4d | Documented a circular mark between a leveraged basket's relief claim and the fund's basket shares. Standalone half-life budget math passes six tests, including two 256-case fuzz tests. | =3d57d046= |
 | 2026-10-29 | 4e | Integrated the reserve budget and mint checkpoints. Twenty-eight fund tests pass, including 256 fuzzed reserve-bound cases, permissions, no-op threshold checkpoints and atomic failures; six real-basket and 14 token integration tests pass. | =26732c12= |
 | 2026-10-29 | 4f | Added full-width whole-unit fund flow counters and fractional remainders. Four counter, 18 ledger, 29 fund and six real-basket tests pass; net cash reconciles across actual sales and relief. BuckNet runtime is 19,782 bytes; fund runtime is 10,662 bytes. | =0cb76a4e= |
-| 2026-10-29 | 3g | Specified atomic renewal and restricted active net-model term updates to Buck, including the insurer's attested envelope. Sixty-six BuckCredit and 12 insurer-gate tests pass; BuckCredit runtime is 23,755 bytes. The renewal executor is not implemented yet. | This commit: renewal authorization boundary |
+| 2026-10-29 | 3g | Specified atomic renewal and restricted active net-model term updates to Buck, including the insurer's attested envelope. Sixty-six BuckCredit and 12 insurer-gate tests passed. | =8d3449ee= |
+| 2026-10-29 | 3h | Same-insurer renewal implemented with an immutable consent contract. Forty-four renewal-suite tests (including inherited fund tests and 256 fuzzed K cases), seven real-basket, 67 BuckCredit, 12 insurer-gate and 14 token tests pass. Runtime bytes: BuckNet 23,808; BuckCredit 23,871; consent 2,359; fund 11,778. | This commit: atomic renewal prototype |
 
 * Open implementation constraints
 
@@ -285,8 +290,8 @@ backdated, and the budget is capped by current excess. This is a discrete
 observation policy, not an exact continuous integral: an unobserved decrease
 and later increase in excess can mature budget earlier than a continuously
 observed controller. Fund actions checkpoint on both sides of their changes.
-The prototype has no renewal API, registry-mode conversion, deployment
-integration, or supported migration. Its internal fractional
+The prototype has no insurer-change renewal, registry-mode conversion,
+production deployment integration, or supported migration. Its internal fractional
 retirement can require integral ERC-20 burn events to be rounded; the exact
 split is recorded in =FacilityReduced= and still needs indexer review.
 

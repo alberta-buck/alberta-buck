@@ -8,6 +8,7 @@ import {IdentityRegistry} from "../../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../../src/BuckCredit.sol";
 import {BuckNet} from "../../src/BuckNet.sol";
+import {BuckRenewal, BuckRenewalConsent} from "../../src/BuckRenewalConsent.sol";
 import {JubileeFund, IJubileeBasket} from "../../src/JubileeFund.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
 import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
@@ -119,6 +120,36 @@ contract JubileeEquityIntegrationTest is Test {
         assertEq(remaining, uint256(held) - requested);
         assertEq(fund.positionId(), id);
         assertEq(buck.totalIssued(), 150e6);
+    }
+
+    function test_renewalSellsRealBasketSharesBeforeUpdatingTheFacility() public {
+        uint256 a = _credit(ALICE, 100e6);
+        _credit(BOB, 100e6);
+        vm.warp(t0 + YEAR);
+        (uint256 id,,) = _invest(2e6);
+        (uint128 sharesBefore,) = basket.holdings(id);
+        BuckRenewalConsent consent = buck.renewalConsent();
+        BuckRenewal.Terms memory terms = BuckRenewal.Terms({
+            face: 200e6, floor: 200e6, activatedFace: 200e6, additionalIssuance: 50e6,
+            maxPremium: 0, minimumRelief: 0, expectedPrincipal: 100e6,
+            expectedCreditHash: consent.currentCreditTermsHash(a),
+            depType: BuckCredit.DepreciationType.NONE, depRate: 0, depStartAt: 0,
+            premiumRate: 0, deadline: uint64(block.timestamp + YEAR)
+        });
+        bytes32 digest = consent.renewalDigest(ALICE, a, terms);
+        vm.prank(INSURER);
+        consent.propose(a, digest);
+        vm.prank(ALICE);
+        consent.authorize(a, digest);
+        vm.prank(ALICE);
+        (uint256 relief,,) = fund.renew(a, terms);
+        (uint128 sharesAfter,) = basket.holdings(id);
+        assertEq(sharesAfter, uint256(sharesBefore) - uint256(sharesBefore) / 2);
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(a);
+        assertEq(principal, 150e6 - relief);
+        assertEq(seconds_, 0);
+        assertEq(credit.ownerOf(a), ALICE);
+        assertEq(buck.totalIssued(), 250e6 - relief);
     }
 
     function test_agedCarryingFundInvestmentDoesNotDiluteExistingDepositor() public {

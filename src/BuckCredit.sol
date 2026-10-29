@@ -909,7 +909,7 @@ contract BuckCredit is ERC721Enumerable {
         uint32 newDepRate,
         uint48 newDepStartAt,
         uint32 newPremiumRate
-    ) external {
+    ) public {
         CreditParams storage c = credits[tokenId];
         require(msg.sender == c.insurer || (msg.sender == buck && buck != address(0)), "Not insurer");
         // The net issuance book represents an outstanding purchased policy.
@@ -953,6 +953,25 @@ contract BuckCredit is ERC721Enumerable {
         c.lastUpdated       = uint48(block.timestamp);
 
         emit CreditUpdated(tokenId, c.insurer, newFaceValue, newDepRate, newPremiumRate);
+    }
+
+    /// @notice Buck applies replacement terms and additional coverage in one
+    ///         call, so no external call observes the intermediate coverage.
+    function renewTermsFromBuck(
+        uint256 tokenId,
+        address holder,
+        uint256 newFaceValue,
+        uint256 newDepreciationFloor,
+        DepreciationType newDepType,
+        uint32 newDepRate,
+        uint48 newDepStartAt,
+        uint32 newPremiumRate,
+        uint256 additionalCoverage
+    ) external {
+        _requireBuckHolder(tokenId, holder);
+        updateCredit(tokenId, newFaceValue, newDepreciationFloor, newDepType,
+                     newDepRate, newDepStartAt, newPremiumRate);
+        _activate(tokenId, holder, additionalCoverage);
     }
 
     /// @notice Mark a MARKED credit at `value`: its present value from now,

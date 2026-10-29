@@ -155,6 +155,23 @@ contract BuckCreditIssuanceAgeTest is Test {
         credit.recordRenewalFromBuck(id, ALICE, 1, 0);
     }
 
+    function test_renewedTermsRequireTheRegisteredBuckAndActualOwner() public {
+        uint256 id = _facility(100e6);
+        credit.recordIssuanceFromBuck(id, ALICE, 100e6);
+        vm.prank(INSURER);
+        vm.expectRevert(bytes("BuckCredit: not buck"));
+        credit.renewTermsFromBuck(id, ALICE, 200e6, 200e6,
+                                  BuckCredit.DepreciationType.NONE, 0, 0, 0, 100e6);
+        vm.expectRevert(bytes("BuckCredit: not holder"));
+        credit.renewTermsFromBuck(id, BOB, 200e6, 200e6,
+                                  BuckCredit.DepreciationType.NONE, 0, 0, 0, 100e6);
+        credit.renewTermsFromBuck(id, ALICE, 200e6, 200e6,
+                                  BuckCredit.DepreciationType.NONE, 0, 0, 0, 100e6);
+        (uint256 face, uint256 active,) = credit.creditInfo(id);
+        assertEq(face, 200e6);
+        assertEq(active, 200e6);
+    }
+
     function test_coverageAndNftCannotLeaveWhileIssuanceRemains() public {
         uint256 id = _facility(100e6);
         credit.recordIssuanceFromBuck(id, ALICE, 100e6);

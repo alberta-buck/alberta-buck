@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {BN254} from "../src/BN254.sol";
@@ -14,6 +15,7 @@ import {BuckBasketReceipt} from "../src/basket/BuckBasketReceipt.sol";
 import {NetK} from "./BuckNet.t.sol";
 import {WideCounter} from "../src/lib/WideCounter.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
+import {BuckRenewal, BuckRenewalConsent} from "../src/BuckRenewalConsent.sol";
 
 /// @dev Exercise the real token and coordinator with a controllable basket;
 ///      this is not a substitute for integration with the real equity basket.
@@ -674,5 +676,358 @@ contract JubileeFundTest is Test {
         assertLe(beforeCash - afterCash, budget);
         assertLe(beforeCash - afterCash, excess);
         assertGe(afterCash, target);
+    }
+}
+
+/// @dev The existing fixture exercises the coordinator, token and actual NFT;
+///      the strategy/basket and insurer liquidity contracts remain controllable.
+contract JubileeRenewalTest is JubileeFundTest {
+    function _terms(uint256 id, uint256 face, uint256 activated, uint32 rate, uint256 additional)
+        internal view returns (BuckRenewal.Terms memory terms)
+    {
+        (uint256 principal,) = credit.issuanceOf(id);
+        terms = BuckRenewal.Terms({
+            face: face,
+            floor: face,
+            activatedFace: activated,
+            additionalIssuance: additional,
+            maxPremium: type(uint256).max,
+            minimumRelief: 0,
+            expectedPrincipal: principal,
+            expectedCreditHash: buck.renewalConsent().currentCreditTermsHash(id),
+            depType: BuckCredit.DepreciationType.NONE,
+            depRate: 0,
+            depStartAt: 0,
+            premiumRate: rate,
+            deadline: uint64(block.timestamp + YEAR)
+        });
+    }
+    function _approveRenewal(uint256 id, BuckRenewal.Terms memory terms) internal returns (bytes32 digest) {
+        BuckRenewalConsent consent = buck.renewalConsent();
+        digest = consent.renewalDigest(ALICE, id, terms);
+        vm.prank(INSURER);
+        consent.propose(id, digest);
+        vm.prank(ALICE);
+        consent.authorize(id, digest);
+    }
+
+    function test_renewalCrystallizesActualReliefAndIssuesAgainstIncreasedCoverage() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        (, uint256 cashBefore) = buck.fundBalancesScaled();
+        uint256 beforeBalance = buck.balanceOf(ALICE);
+        BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 0, 200e6);
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        (uint256 relief, uint256 refund, uint256 premium) = fund.renew(id, terms);
+        assertEq(relief, cashBefore / Q);
+        assertApproxEqAbs(relief, 19_801_326, 1); // independent exp(-0.02) vector
+        assertEq(refund, 0);
+        assertEq(premium, 0);
+        assertEq(buck.balanceOf(ALICE), beforeBalance + 200e6);
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
+        assertEq(principal, 1200e6 - relief);
+        assertEq(seconds_, 0);
+        assertEq(buck.totalIssued(), principal);
+        (uint256 face, uint256 active,) = credit.creditInfo(id);
+        assertEq(face, 2000e6);
+        assertEq(active, 2000e6);
+        assertEq(credit.ownerOf(id), ALICE);
+        assertEq(buck.renewalConsent().authorization(id), bytes32(0));
+        assertEq(buck.renewalConsent().proposal(id), bytes32(0));
+        (, uint256 cashAfter) = buck.fundBalancesScaled();
+        assertEq(cashAfter, cashBefore - relief * Q);
+    }
+
+    function test_renewalLeavesOtherNftPrincipalAndAgeUnchanged() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        uint256 other = _credit(BOB, 500e6, 0);
+        vm.warp(t0 + 2 * YEAR);
+        (uint256 otherPrincipal, uint256 otherSeconds) = credit.issuanceOf(other);
+        BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint256 afterPrincipal, uint256 afterSeconds) = credit.issuanceOf(other);
+        assertEq(afterPrincipal, otherPrincipal);
+        assertEq(afterSeconds, otherSeconds);
+        assertEq(buck.claimSeconds(), otherSeconds);
+    }
+
+    function test_renewalRefundsOriginalPoolAndFundsNewPoolInFull() public {
+        JubileeInsurerPoolMock original = _pool();
+        uint256 id = _credit(ALICE, 1000e6, 100);
+        original.invest(100e6);
+        original.setReenter(fund);
+        JubileeInsurerPoolMock replacement = _pool();
+        vm.warp(t0 + YEAR);
+        uint256 netRefund = buck.netBalanceOf(address(original.strategy()));
+        uint256 beforeBalance = buck.balanceOf(ALICE);
+        BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 50, 200e6);
+        terms.maxPremium = 100e6;
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        (, uint256 refund, uint256 premium) = fund.renew(id, terms);
+        assertEq(refund, 100e6); // nominal, carrying the original pool's fee
+        assertEq(premium, 100e6); // full-value replacement deposit
+        assertLt(netRefund, refund);
+        assertApproxEqAbs(buck.balanceOf(ALICE), beforeBalance + netRefund + 200e6 - premium, 1);
+        assertEq(original.calls(), 1);
+        assertEq(original.reentryError(), JubileeFund.Reentrant.selector);
+        assertEq(buck.balanceOf(address(original)), 0);
+        assertEq(buck.balanceOf(address(original.strategy())), 0);
+        assertEq(buck.netBalanceOf(address(replacement)), 100e6);
+        assertEq(buck.facilityPool(id), address(replacement));
+        assertEq(buck.premiumPrincipal(id), 100e6);
+    }
+
+    function test_renewalMayImproveAnExistingKShortfall() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        k.setK(0.5e18);
+        BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 0, 100e6);
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        (uint256 relief,,) = fund.renew(id, terms);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(principal, 1100e6 - relief);
+        assertLt(principal - 1000e6, 500e6);
+    }
+
+    function test_reliefIsRecordedBeforeTermsThatWouldOtherwiseOverissue() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 0);
+        terms.floor = 0;
+        terms.depType = BuckCredit.DepreciationType.LINEAR;
+        terms.depRate = 1000;
+        terms.depStartAt = uint48(block.timestamp - YEAR / 10);
+        _approveRenewal(id, terms);
+        vm.recordLogs();
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 renewed = keccak256("IssuanceRenewed(uint256,address,uint256,uint256,uint256,uint256)");
+        bytes32 updated = keccak256("CreditUpdated(uint256,address,uint256,uint32,uint32)");
+        uint256 renewedIndex = type(uint256).max;
+        uint256 updatedIndex = type(uint256).max;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(credit) || logs[i].topics.length == 0) continue;
+            if (logs[i].topics[0] == renewed) renewedIndex = i;
+            if (logs[i].topics[0] == updated) updatedIndex = i;
+        }
+        assertLt(renewedIndex, updatedIndex);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertLt(principal, credit.currentValue(id));
+        assertGt(1000e6, credit.currentValue(id));
+    }
+
+    function test_fiftyYearRenewalUsesOnlyAvailableFullValueFundCash() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + 50 * YEAR);
+        buck.processMaturities(1);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 0);
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        (uint256 relief,,) = fund.renew(id, terms);
+        assertEq(relief, cash / Q);
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
+        assertEq(principal, 1000e6 - relief);
+        assertEq(seconds_, 0);
+        assertEq(buck.totalIssued(), principal);
+    }
+
+    function test_fundingFactorIsCheckedBeforeRenewalIssuance() public {
+        _pool();
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.prank(ALICE);
+        buck.transfer(BOB, 999e6);
+        k.setFactor(1e18);
+        BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 100, 500e6);
+        _approveRenewal(id, terms);
+        vm.expectRevert(BuckNet.FundingInsufficient.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint256 face, uint256 active,) = credit.creditInfo(id);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(face, 1000e6);
+        assertEq(active, 1000e6);
+        assertEq(principal, 1000e6);
+        assertEq(buck.balanceOf(ALICE), 1e6);
+    }
+
+    function testFuzz_renewalNeverWorsensTheExistingKShortfall(
+        uint64 principal_, uint64 additional_, uint16 kBp_, uint8 years_
+    ) public {
+        uint256 original = bound(principal_, 100e6, 1e12);
+        uint256 additional = bound(additional_, 0, original);
+        uint256 factor = bound(kBp_, 1, 10_000) * 1e14;
+        uint256 elapsed = bound(years_, 1, 49) * YEAR;
+        uint256 id = _credit(ALICE, original, 0);
+        vm.warp(t0 + elapsed);
+        k.setK(factor);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        uint256 relief = cash / Q;
+        uint256 newPrincipal = original - relief + additional;
+        uint256 oldLimit = original * factor / 1e18;
+        uint256 newLimit = 2 * original * factor / 1e18;
+        uint256 oldShortfall = original > oldLimit ? original - oldLimit : 0;
+        uint256 newShortfall = newPrincipal > newLimit ? newPrincipal - newLimit : 0;
+        BuckRenewal.Terms memory terms = _terms(id, 2 * original, 2 * original, 0, additional);
+        _approveRenewal(id, terms);
+        if (newShortfall > oldShortfall) vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint256 recorded, uint256 seconds_) = credit.issuanceOf(id);
+        if (newShortfall > oldShortfall) {
+            assertEq(recorded, original);
+            assertEq(buck.totalIssued(), original);
+        } else {
+            assertEq(recorded, newPrincipal);
+            assertEq(seconds_, 0);
+            assertEq(buck.totalIssued(), newPrincipal);
+        }
+    }
+
+    function test_worsenedKShortfallRollsBackTheSaleAndApprovals() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        (uint256 position,,) = _invest(1e6);
+        (uint128 beforeShares,) = basket.holdings(position);
+        (, uint256 beforeCash) = buck.fundBalancesScaled();
+        k.setK(0.5e18);
+        BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 100e6);
+        bytes32 digest = _approveRenewal(id, terms);
+        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint128 afterShares,) = basket.holdings(position);
+        (, uint256 afterCash) = buck.fundBalancesScaled();
+        assertEq(afterShares, beforeShares);
+        assertEq(afterCash, beforeCash);
+        assertEq(buck.renewalConsent().proposal(id), digest);
+        assertEq(buck.renewalConsent().authorization(id), digest);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(principal, 1000e6);
+    }
+
+    function test_insurerLiquidityFailureRollsBackTheRenewalSale() public {
+        JubileeInsurerPoolMock original = _pool();
+        uint256 id = _credit(ALICE, 1000e6, 100);
+        original.invest(100e6);
+        original.setFail(true);
+        vm.warp(t0 + YEAR);
+        (uint256 position,,) = _invest(1e6);
+        (uint128 beforeShares,) = basket.holdings(position);
+        BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 50, 0);
+        bytes32 digest = _approveRenewal(id, terms);
+        vm.expectRevert(JubileeFund.InsufficientPoolLiquidity.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint128 afterShares,) = basket.holdings(position);
+        assertEq(afterShares, beforeShares);
+        assertEq(buck.renewalConsent().proposal(id), digest);
+        assertEq(buck.premiumPrincipal(id), 100e6);
+        assertEq(original.calls(), 0);
+    }
+
+    function test_bothApprovalsAreRequiredAndEitherCanCancel() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
+        BuckRenewalConsent consent = buck.renewalConsent();
+        bytes32 digest = consent.renewalDigest(ALICE, id, terms);
+        vm.expectRevert(BuckRenewalConsent.NotBuck.selector);
+        consent.consume(id, digest);
+        vm.prank(INSURER);
+        consent.propose(id, digest);
+        vm.expectRevert(BuckRenewalConsent.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        vm.prank(ALICE);
+        consent.authorize(id, digest);
+        vm.prank(INSURER);
+        consent.propose(id, bytes32(0));
+        vm.expectRevert(BuckRenewalConsent.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        vm.prank(INSURER);
+        consent.propose(id, digest);
+        vm.prank(ALICE);
+        consent.authorize(id, bytes32(0));
+        vm.expectRevert(BuckRenewalConsent.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+    }
+
+    function test_expiredAndWrongOwnerRenewalsCannotExecute() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
+        _approveRenewal(id, terms);
+        vm.expectRevert(BuckRenewalConsent.NotOwner.selector);
+        vm.prank(BOB);
+        fund.renew(id, terms);
+        vm.warp(uint256(terms.deadline) + 1);
+        vm.expectRevert(BuckRenewalConsent.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+    }
+
+    function test_additionalIssuanceMakesAnOldProposalStale() public {
+        vm.prank(INSURER);
+        uint256 id = credit.createCredit(ALICE, 0, 1000e6, 1000e6,
+                                         BuckCredit.DepreciationType.NONE, 0, 0, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, 500e6);
+        BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        buck.issue(id, 0, 1);
+        vm.expectRevert(BuckRenewalConsent.BadCreditSnapshot.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+    }
+
+    function test_renewalRejectsForgedConsentAndWrongCreditSnapshot() public {
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
+        BuckRenewalConsent consent = buck.renewalConsent();
+        bytes32 digest = consent.renewalDigest(ALICE, id, terms);
+        vm.expectRevert(BuckRenewalConsent.NotInsurer.selector);
+        vm.prank(BOB);
+        consent.propose(id, digest);
+        vm.expectRevert(BuckRenewalConsent.NotOwner.selector);
+        vm.prank(BOB);
+        consent.authorize(id, digest);
+        vm.expectRevert(BuckNet.NotJubilee.selector);
+        buck.renewFromJubilee(ALICE, id, terms, 0);
+        terms.expectedCreditHash = bytes32(uint256(1));
+        _approveRenewal(id, terms);
+        vm.expectRevert(BuckRenewalConsent.BadCreditSnapshot.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(principal, 1000e6);
+    }
+
+    function test_reliefAndPremiumLimitsRevertAtomically() public {
+        _pool();
+        uint256 id = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 100, 0);
+        terms.minimumRelief = 1000e6;
+        _approveRenewal(id, terms);
+        vm.expectRevert(JubileeFund.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        terms.minimumRelief = 0;
+        terms.maxPremium = 1;
+        _approveRenewal(id, terms);
+        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(principal, 1000e6);
     }
 }

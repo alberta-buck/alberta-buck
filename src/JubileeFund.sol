@@ -9,6 +9,7 @@ import {BuckCredit} from "./BuckCredit.sol";
 import {IBuckBasketPosition} from "./basket/IBuckBasketPosition.sol";
 import {JubileeReserveMath} from "./lib/JubileeReserveMath.sol";
 import {WideCounter} from "./lib/WideCounter.sol";
+import {BuckRenewal} from "./BuckRenewalConsent.sol";
 
 interface IJubileeBasket is IBuckBasketPosition {
     function buck() external view returns (address);
@@ -61,6 +62,8 @@ contract JubileeFund is IERC721Receiver {
                        uint256 remainingShares, uint256 proceedsScaled, bool underwater);
     event ReliefPaid(address indexed owner, uint256 indexed tokenId, uint256 principal,
                      uint256 selectedSeconds, uint256 totalSeconds, uint256 reliefScaled, uint256 refund);
+    event RenewalRelief(address indexed owner, uint256 indexed tokenId, uint256 relief,
+                        uint256 refund, uint256 premium);
     event ReserveCheckpointed(uint256 targetScaled, uint256 excessScaled, uint256 budgetScaled);
     event ReserveParametersSet(uint16 targetBp, uint16 thresholdBp);
     event InvestmentKeeperSet(address indexed keeper);
@@ -243,6 +246,28 @@ contract JubileeFund is IERC721Receiver {
         premiumRefund = token.settleFromJubilee(msg.sender, tokenId, principal, reliefScaled);
         _checkpointReserve();
         emit ReliefPaid(msg.sender, tokenId, principal, selected, total, reliefScaled, premiumRefund);
+    }
+
+    /// @notice Renew the caller's facility using the exact insurer proposal
+    ///         and owner authorization. The fund sells the selected share
+    ///         before Buck's lock and rounds actual relief down to raw units.
+    function renew(uint256 tokenId, BuckRenewal.Terms calldata terms)
+        external configured nonReentrant returns (uint256 relief, uint256 refund, uint256 premium)
+    {
+        (uint256 principal,) = token.renewalConsent().checkRenewal(msg.sender, tokenId, terms);
+        _checkpointReserve();
+        (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
+        (, uint256 cashBefore) = token.fundBalancesScaled();
+        uint256 proceeds = _sellProportion(selected, total, cashBefore);
+        uint256 cashShare = total == 0 ? 0 : Math.mulDiv(cashBefore, selected, total);
+        uint256 cap = principal * Q;
+        uint256 available = proceeds >= cap || cashShare >= cap - proceeds ? cap : cashShare + proceeds;
+        relief = available / Q;
+        if (relief < terms.minimumRelief) revert BadAuthorization();
+        _prepareRefund(tokenId, principal, principal);
+        (refund, premium) = token.renewFromJubilee(msg.sender, tokenId, terms, relief);
+        _checkpointReserve();
+        emit RenewalRelief(msg.sender, tokenId, relief, refund, premium);
     }
 
     /// @notice Observe current excess and age only the excess seen at the
