@@ -120,8 +120,12 @@ must not be disturbed.
   and large balances, and checkpoint-frequency rounding against independently
   generated high-precision numbers. Test the nominal Carrying gross-up and
   per-NFT relief arithmetic separately.
-- [ ] Implement account state and test mixed-age Carrying and non-Carrying
-  transfers, precision bounds and conservation across all contract operations.
+- [X] Implement a standalone account/fund ledger with held, issued-unspent,
+  Carrying nominal and net state. Test mixed-age transfers, lazy fund accrual,
+  50-year closure, full-net relief, dust, bounds and conservation.
+- [ ] Integrate that ledger into Buck, preserving identity, allowance, mode
+  changes, events and caller authorization; prove conservation across real
+  token operations and external contracts.
 - [ ] Specify account state for held, issued-but-unspent and Carrying nominal
   amounts; write model-parity tests for =balanceOf=, =transfer=, =transferFrom=,
   deposits, fees, total supply, and owner/recipient net amounts.
@@ -171,7 +175,8 @@ must not be disturbed.
 | 2026-10-29 | 1 | Proportional is default in quotes, retirements, renewals and CLI; =reserve= remains explicit. Reference tests: 75 passed; demurrage PDF regenerated. | =06ed24b6= |
 | 2026-10-29 | 2 | Same-receipt top-up and exact-share exit implemented; 29 equity, 35 director (including inherited cases), and 20 shared-receipt pro-rata tests passed. Basket runtime 22,233 bytes. | =6dfd7a9e= |
 | 2026-10-29 | 3a | Standalone =NetDemurrageMath=: 10 Foundry tests passed, including two 256-run fuzz tests, independent Decimal vectors, 4,000/8,000-year bounds and 365 versus one checkpoint. Not integrated into Buck. | =35146571= |
-| 2026-10-29 | 3b | BuckCredit now has restricted per-NFT issuance/age/reduction/renewal hooks. All 65 BuckCredit tests pass; legacy Buck does not call them yet. BuckCredit runtime is 23,306 bytes, leaving 1,270 bytes before the EVM deployment limit. | This commit: per-NFT issuance book |
+| 2026-10-29 | 3b | BuckCredit now has restricted per-NFT issuance/age/reduction/renewal hooks. All 65 BuckCredit tests pass; legacy Buck does not call them yet. BuckCredit runtime is 23,306 bytes, leaving 1,270 bytes before the EVM deployment limit. | =6cbee7dd= |
+| 2026-10-29 | 3c | Standalone =BuckLedger= passes 16 Foundry tests, including 256-run mixed-transfer conservation fuzz and a 3-raw-unit 50-year fractional settlement. No production token uses it yet. | This commit: standalone net ledger |
 
 * Open implementation constraints
 
@@ -202,3 +207,22 @@ The new NFT book is intentionally not authoritative for legacy Buck activity;
 minting and repayment are not migrated until token and fund settlement can
 call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
 further logic needs size checks or extraction instead of assuming it will fit.
+
+The standalone ledger stores fractional net values at =1e36= units per BUCK
+raw unit. It separately tracks the fund's gross Carrying amount and net value,
+and checkpoints total issuance before fund flows and principal changes. The
+scaled aggregate must fit in =uint256=; raw cumulative audit counters still
+need their own full-width representation. It currently binds an account to
+the Carrying mode passed at first use and rejects a later change. The final
+token must reconcile that with registry posture changes rather than silently
+destroying fee history or changing existing user permissions.
+
+Rounding exposes a real dust case: after a tiny issuance ages, the debtor and
+the fund can each own less than one external raw unit even though together
+they can retire one. =retireWithFund= settles their fractional net amounts
+atomically and consumes the fund's proportional nominal history; separate
+ordinary transfers cannot express that operation. The integrated token must
+define detailed fractional-settlement events alongside ERC-20 burn events,
+verify which net relief the policy authorized, and test indexer and allowance
+behavior. The library is internal and performs no identity, insurer, K, NFT,
+or reentrancy checks on behalf of the token.
