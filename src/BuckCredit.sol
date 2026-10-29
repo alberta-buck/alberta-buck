@@ -4,10 +4,12 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
 import "@openzeppelin/contracts/utils/Strings.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {BuckTypes, BuckQty, toBuckQty, CreditSlice} from "./BuckTypes.sol";
 import {BN254} from "./BN254.sol";
 import {IAccumulatorRegistry} from "./IAccumulatorRegistry.sol";
+import {NetDemurrageMath} from "./lib/NetDemurrageMath.sol";
 
 /// @title BuckCredit — ERC-721 Insured Asset NFT
 /// @notice Each token represents an insurer's offer of parametric insurance on a
@@ -29,8 +31,9 @@ import {IAccumulatorRegistry} from "./IAccumulatorRegistry.sol";
 /// (`DepreciationType` NONE / LINEAR / DECLINING_BALANCE), or -- for a MARKED
 /// credit -- its insurer's latest mark, capped by the face.  `currentValue`
 /// is that scaled by the activated share, and Buck's credit limit for a
-/// holder is K x the sum of its credits' current values.  A credit does not
-/// age: Jubilee relief belongs to the holder's lien, in Buck.
+/// holder is K x the sum of its credits' current values. The existing Buck
+/// implementation ages the holder's lien. The separate per-NFT issuance
+/// book below is for the new design and remains unused until Buck is migrated.
 ///
 /// *Invariants* (alberta-buck-ethereum.org, "BUCK_CREDIT: ERC-721 Insured
 /// Asset NFT"):
@@ -126,6 +129,17 @@ contract BuckCredit is ERC721Enumerable {
     mapping(uint256 => CreditParams) public credits;
     uint256 private _nextTokenId;
 
+    /// @dev New per-NFT issuance book. The existing Buck implementation does
+    ///      not call these hooks yet; this mapping is not authoritative for
+    ///      legacy Buck deployments. Buck must move BUCK and settle the fund
+    ///      atomically with any future call to these restricted hooks.
+    struct IssuanceState {
+        uint80 principal;
+        uint64 checkpoint;
+        uint256 buckSeconds;
+    }
+    mapping(uint256 => IssuanceState) private _issuance;
+
     // ── Marked credits ──────────────────────────────────────────────
     //
     // A MARKED credit is valued at a mark its insurer keeps current, in place
@@ -173,6 +187,13 @@ contract BuckCredit is ERC721Enumerable {
                           uint256 additionalValue, uint256 totalActivated);
     event BuckSet(address indexed buck);
     event CreditMarked(uint256 indexed tokenId, uint256 value);
+    event IssuanceRecorded(uint256 indexed tokenId, address indexed owner,
+                           uint256 amount, uint256 principal);
+    event IssuanceReduced(uint256 indexed tokenId, address indexed owner,
+                          uint256 amount, uint256 targetRelief, uint256 principal);
+    event IssuanceRenewed(uint256 indexed tokenId, address indexed owner,
+                          uint256 baselineRelief, uint256 paidRelief,
+                          uint256 additionalIssuance, uint256 principal);
     event InsurerGateConfigured(address indexed registry, string regulatorNamespace,
                                 uint32 attestationPeriod);
     event InsurerAttested(address indexed insurer, uint256 indexed root, uint48 expiresAt,
@@ -460,7 +481,8 @@ contract BuckCredit is ERC721Enumerable {
     ///      coverage that has already been spent.  The same activated value
     ///      would back BUCK twice.
     ///
-    ///      `activatedValue` is the right predicate rather than Buck's
+    ///      `activatedValue` and the new per-NFT issuance record are local
+    ///      predicates rather than Buck's
     ///      `mintsBacked` because it is local: BuckCredit enforces this
     ///      without consulting Buck, so the property does not depend on
     ///      another contract being correct or even reachable.  The two agree
@@ -477,7 +499,8 @@ contract BuckCredit is ERC721Enumerable {
     {
         from = super._update(to, tokenId, auth);
         require(
-            from == address(0) || credits[tokenId].activatedValue.isZero(),
+            from == address(0) || (credits[tokenId].activatedValue.isZero()
+                                   && _issuance[tokenId].principal == 0),
             "BuckCredit: credit in use"
         );
     }
@@ -698,14 +721,17 @@ contract BuckCredit is ERC721Enumerable {
 
     /// @notice Deactivate `amount` of coverage on behalf of `holder`, restricted
     ///         to Buck.  Mirror of activateFromBuck for the burn-side unwind.
-    ///         (Jubilee relief is Buck's: it accrues on the holder's lien,
-    ///         not on coverage.)
+    ///         Legacy Buck accrues Jubilee relief on the holder's lien. The
+    ///         new issuance book also prevents releasing all backing coverage
+    ///         while its own principal is outstanding.
     function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
         require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
         require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
         CreditParams storage c = credits[tokenId];
         uint256 current = c.activatedValue.asUint();
         require(amount <= current, "BuckCredit: deactivate > active");
+        require(current != amount || _issuance[tokenId].principal == 0,
+                "BuckCredit: outstanding issuance");
         c.activatedValue  = toBuckQty(current - amount);
 
         emit CreditActivated(tokenId, holder, 0, current - amount);
@@ -720,6 +746,94 @@ contract BuckCredit is ERC721Enumerable {
         c.activatedValue  = toBuckQty(newActivated);
 
         emit CreditActivated(tokenId, holder, amount, newActivated);
+    }
+
+    /// @notice Outstanding issued principal and its current BUCK-seconds.
+    /// @dev This is separate from activated coverage and its current valuation.
+    ///      It starts aging at issuance, even if the BUCK remain unspent.
+    ///      Legacy Buck does not populate this book until integration.
+    function issuanceOf(uint256 tokenId) public view returns (uint256 principal, uint256 buckSeconds) {
+        ownerOf(tokenId);
+        IssuanceState storage s = _issuance[tokenId];
+        principal = s.principal;
+        buckSeconds = s.buckSeconds + principal * (block.timestamp - uint256(s.checkpoint));
+    }
+
+    /// @notice Baseline target, not guaranteed payable Jubilee relief.
+    function issuanceRelief(uint256 tokenId, uint256 reduction) external view returns (uint256) {
+        (uint256 principal, uint256 seconds_) = issuanceOf(tokenId);
+        return NetDemurrageMath.targetRelief(principal, seconds_, reduction);
+    }
+
+    /// @notice Record actual BUCK issued for an activated facility.
+    /// @dev Only Buck may call this, in the same transaction as the BUCK mint
+    ///      and any premium payment. It does not mint BUCK by itself.
+    function recordIssuanceFromBuck(uint256 tokenId, address holder, uint256 amount) external {
+        _requireBuckHolder(tokenId, holder);
+        require(amount != 0, "BuckCredit: issuance zero");
+        require(!credits[tokenId].activatedValue.isZero(), "BuckCredit: inactive credit");
+        IssuanceState storage s = _issuance[tokenId];
+        _checkpointIssuance(s);
+        require(amount <= BuckTypes.MAX_BALANCE - s.principal, "BuckCredit: issuance overflow");
+        s.principal += uint80(amount);
+        emit IssuanceRecorded(tokenId, holder, amount, s.principal);
+    }
+
+    /// @notice Record a settled partial or complete reduction of this NFT.
+    /// @dev Returns its baseline target; Buck must separately obtain actual
+    ///      Jubilee relief and extinguish the entire selected principal.
+    function recordReductionFromBuck(uint256 tokenId, address holder, uint256 amount)
+        external returns (uint256 targetRelief)
+    {
+        _requireBuckHolder(tokenId, holder);
+        IssuanceState storage s = _issuance[tokenId];
+        _checkpointIssuance(s);
+        uint256 principal = s.principal;
+        require(amount != 0 && amount <= principal, "BuckCredit: invalid reduction");
+        uint256 secondsRemoved = Math.mulDiv(s.buckSeconds, amount, principal);
+        targetRelief = secondsRemoved / (50 * SECONDS_PER_YEAR);
+        if (targetRelief > amount) targetRelief = amount;
+        s.buckSeconds -= secondsRemoved;
+        s.principal = uint80(principal - amount);
+        emit IssuanceReduced(tokenId, holder, amount, targetRelief, s.principal);
+    }
+
+    /// @notice Checkpoint a facility renewal after its actual relief is paid.
+    /// @dev Only Buck may call this. The future coordinator must authorize the
+    ///      owner and insurer, reconcile coverage/premiums, pay `paidRelief`,
+    ///      and mint `additionalIssuance` atomically. An unpaid baseline target
+    ///      is not carried forward as a guaranteed claim.
+    function recordRenewalFromBuck(uint256 tokenId, address holder, uint256 paidRelief, uint256 additionalIssuance)
+        external returns (uint256 baselineRelief, uint256 newPrincipal)
+    {
+        _requireBuckHolder(tokenId, holder);
+        IssuanceState storage s = _issuance[tokenId];
+        _checkpointIssuance(s);
+        uint256 principal = s.principal;
+        require(paidRelief <= principal, "BuckCredit: invalid relief");
+        if (principal != 0) {
+            baselineRelief = NetDemurrageMath.targetRelief(principal, s.buckSeconds, principal);
+        }
+        newPrincipal = principal - paidRelief;
+        require(additionalIssuance <= BuckTypes.MAX_BALANCE - newPrincipal,
+                "BuckCredit: issuance overflow");
+        newPrincipal += additionalIssuance;
+        require(newPrincipal == 0 || !credits[tokenId].activatedValue.isZero(),
+                "BuckCredit: inactive credit");
+        s.principal = uint80(newPrincipal);
+        s.buckSeconds = 0;
+        emit IssuanceRenewed(tokenId, holder, baselineRelief, paidRelief, additionalIssuance, newPrincipal);
+    }
+
+    function _requireBuckHolder(uint256 tokenId, address holder) private view {
+        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
+        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+    }
+
+    function _checkpointIssuance(IssuanceState storage s) private {
+        require(block.timestamp <= type(uint64).max, "BuckCredit: timestamp overflow");
+        s.buckSeconds += uint256(s.principal) * (block.timestamp - uint256(s.checkpoint));
+        s.checkpoint = uint64(block.timestamp);
     }
 
     /// @notice Compact (faceValue, activatedValue, premiumRate) view used by

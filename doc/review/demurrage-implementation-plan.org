@@ -125,10 +125,13 @@ must not be disturbed.
 - [ ] Specify account state for held, issued-but-unspent and Carrying nominal
   amounts; write model-parity tests for =balanceOf=, =transfer=, =transferFrom=,
   deposits, fees, total supply, and owner/recipient net amounts.
-- [ ] Attribute actual issued principal and issuance-seconds to each NFT,
-  independently of activated face value and K. Test separately aged positions,
-  multiple issuances, proportional partial reductions, cap, NFT ownership,
-  depreciation and K changes.
+- [X] Add restricted per-NFT issuance, seconds, proportional reduction and
+  renewal checkpoint hooks, separate from coverage. Test differently aged
+  positions, multiple issuances, 50-year cap, ownership, authorization,
+  reappraisal and partial reductions with fuzzed amounts/ages.
+- [ ] Connect the NFT hooks to actual Buck issuance, reductions and atomic
+  renewal. Verify issuance and relief against K, depreciation and premium
+  flows; the standalone book is not populated by legacy Buck.
 - [ ] Implement conserved issuance, transfer, fund checkpoint and reduction
   paths; retain or deliberately replace compatibility APIs only with tests and
   recorded rationale. Include event and allowance behavior.
@@ -167,7 +170,8 @@ must not be disturbed.
 | 2026-10-29 | Baseline | =make nix-venv-demurrage-test=: 74 passed; =make nix-build-uniswap-artifacts=: successful, existing compiler/lint warnings. | =bb9b5554= |
 | 2026-10-29 | 1 | Proportional is default in quotes, retirements, renewals and CLI; =reserve= remains explicit. Reference tests: 75 passed; demurrage PDF regenerated. | =06ed24b6= |
 | 2026-10-29 | 2 | Same-receipt top-up and exact-share exit implemented; 29 equity, 35 director (including inherited cases), and 20 shared-receipt pro-rata tests passed. Basket runtime 22,233 bytes. | =6dfd7a9e= |
-| 2026-10-29 | 3a | Standalone =NetDemurrageMath=: 10 Foundry tests passed, including two 256-run fuzz tests, independent Decimal vectors, 4,000/8,000-year bounds and 365 versus one checkpoint. Not integrated into Buck. | This commit: fixed-point primitives |
+| 2026-10-29 | 3a | Standalone =NetDemurrageMath=: 10 Foundry tests passed, including two 256-run fuzz tests, independent Decimal vectors, 4,000/8,000-year bounds and 365 versus one checkpoint. Not integrated into Buck. | =35146571= |
+| 2026-10-29 | 3b | BuckCredit now has restricted per-NFT issuance/age/reduction/renewal hooks. All 65 BuckCredit tests pass; legacy Buck does not call them yet. BuckCredit runtime is 23,306 bytes, leaving 1,270 bytes before the EVM deployment limit. | This commit: per-NFT issuance book |
 
 * Open implementation constraints
 
@@ -194,3 +198,7 @@ economic BUCK is accounted for exactly once. The Carrying gross-up uses a
 pro-rata floored fee; it does not establish parity with the old BUCK-seconds
 representation. Global 256-bit counters, scaled account bounds, per-NFT capped
 aggregate relief and actual-token transitions remain to be designed and tested.
+The new NFT book is intentionally not authoritative for legacy Buck activity;
+minting and repayment are not migrated until token and fund settlement can
+call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
+further logic needs size checks or extraction instead of assuming it will fit.
