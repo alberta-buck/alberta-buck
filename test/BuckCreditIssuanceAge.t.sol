@@ -109,12 +109,14 @@ contract BuckCreditIssuanceAgeTest is Test {
         assertEq(credit.issuanceRelief(id, principal), 2700000);
     }
 
-    function test_reappraisalAndPremiumChangeDoNotAlterIssuedPrincipalOrAge() public {
+    function test_activeTermsCanOnlyBeUpdatedThroughBuckAndDoNotEraseAge() public {
         uint256 id = _facility(1000e6);
         credit.recordIssuanceFromBuck(id, ALICE, 600e6);
         vm.warp(t0 + 5 * YEAR);
         (uint256 beforePrincipal, uint256 beforeSeconds) = credit.issuanceOf(id);
         vm.prank(INSURER);
+        vm.expectRevert(bytes("BuckCredit: active issuance needs renewal"));
+        credit.updateCredit(id, 1500e6, 1500e6, BuckCredit.DepreciationType.NONE, 0, 0, 50);
         credit.updateCredit(id, 1500e6, 1500e6, BuckCredit.DepreciationType.NONE, 0, 0, 50);
         (uint256 afterPrincipal, uint256 afterSeconds) = credit.issuanceOf(id);
         assertEq(afterPrincipal, beforePrincipal);

@@ -13,6 +13,9 @@ examples are in [[file:credit-facility-accounting-design.org][the facility accou
 new issue for leveraged basket credit. This plan is an implementation checklist, not an assertion
 that the existing deployed contracts follow the proposed rules.
 
+The proposed holder-and-insurer authorization, premium settlement and rounding
+for renewal are in [[file:atomic-renewal-design.org][the atomic renewal design]].
+
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
 leave unfinished boxes explicit so another session can continue. Preserve existing
@@ -158,6 +161,9 @@ must not be disturbed.
   the cash reconciliation and gross versus net demurrage distinctions.
 - [ ] Implement atomic renewal with explicit owner/insurer authorization,
   updated valuation and premium, optional issuance and no worse K shortfall.
+- [X] Specify renewal approvals, staleness, proceeds, rounding and premium
+  flow. Restrict active net-model term changes to Buck and validate its update
+  against the recorded insurer's envelope. The Buck renewal executor is pending.
 - [ ] Ensure insurer-specific pools and recorded deposits can invest/withdraw;
   nominal refunds use the original pool and its average carried fee. Verify
   insolvency and callback rollback without using another pool.
@@ -218,7 +224,8 @@ must not be disturbed.
 | 2026-10-29 | 4c | Six real-basket integration tests passed, including a partially in-kind Jubilee redemption through a real Uniswap V3 pool with Carrying BUCK. The fund counts actual net BUCK only; its received TOKEN still needs a conversion path. | =d815b8a4= |
 | 2026-10-29 | 4d | Documented a circular mark between a leveraged basket's relief claim and the fund's basket shares. Standalone half-life budget math passes six tests, including two 256-case fuzz tests. | =3d57d046= |
 | 2026-10-29 | 4e | Integrated the reserve budget and mint checkpoints. Twenty-eight fund tests pass, including 256 fuzzed reserve-bound cases, permissions, no-op threshold checkpoints and atomic failures; six real-basket and 14 token integration tests pass. | =26732c12= |
-| 2026-10-29 | 4f | Added full-width whole-unit fund flow counters and fractional remainders. Four counter, 18 ledger, 29 fund and six real-basket tests pass; net cash reconciles across actual sales and relief. BuckNet runtime is 19,782 bytes; fund runtime is 10,662 bytes. | This commit: fund flow accounting |
+| 2026-10-29 | 4f | Added full-width whole-unit fund flow counters and fractional remainders. Four counter, 18 ledger, 29 fund and six real-basket tests pass; net cash reconciles across actual sales and relief. BuckNet runtime is 19,782 bytes; fund runtime is 10,662 bytes. | =0cb76a4e= |
+| 2026-10-29 | 3g | Specified atomic renewal and restricted active net-model term updates to Buck, including the insurer's attested envelope. Sixty-six BuckCredit and 12 insurer-gate tests pass; BuckCredit runtime is 23,755 bytes. The renewal executor is not implemented yet. | This commit: renewal authorization boundary |
 
 * Open implementation constraints
 

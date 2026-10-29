@@ -193,6 +193,20 @@ contract InsurerGateTest is Test {
                    keccak256(bytes(string.concat(NS, ":scope:asset:bicycle")))));
     }
 
+    function test_buckRenewalChecksTheRecordedInsurersEnvelope() public {
+        _attest();
+        uint256 id = _create(100e6, BuckCredit.DepreciationType.NONE, 0, 50);
+        credit.setBuck(address(this));
+        credit.activateFromBuck(id, CLIENT, 100e6);
+        credit.recordIssuanceFromBuck(id, CLIENT, 50e6);
+        credit.updateCredit(id, 200e6, 0, BuckCredit.DepreciationType.NONE, 0, 0, 100);
+        (uint256 face,, uint32 premium) = credit.creditInfo(id);
+        assertEq(face, 200e6);
+        assertEq(premium, 100);
+        vm.expectRevert(bytes("premium rate above attested maximum"));
+        credit.updateCredit(id, 200e6, 0, BuckCredit.DepreciationType.NONE, 0, 0, 501);
+    }
+
     function test_anotherAccountCannotClaimTheInsurersIdentity() public {
         (uint256 root, BuckCredit.Path[] memory paths) = _enrollAndPost(predicates);
         address mallory = address(0xBAD);

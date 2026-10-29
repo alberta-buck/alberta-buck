@@ -439,6 +439,7 @@ contract BuckCredit is ERC721Enumerable {
     ///      specifies it, with its reasons as revert strings.  `scoped` is
     ///      false on reappraisal: the scope is emitted at creation, not stored.
     function _requireEnvelope(
+        address insurer,
         bool scoped,
         bytes32 scope,
         uint256 face,
@@ -447,11 +448,11 @@ contract BuckCredit is ERC721Enumerable {
         uint32 premiumRate
     ) internal view {
         if (address(insurerRegistry) == address(0)) return;
-        Envelope memory env = envelopeOf[msg.sender];
+        Envelope memory env = envelopeOf[insurer];
         require(env.expiresAt != 0, "insurer not in good standing");
         require(block.timestamp <= env.expiresAt, "attestation expired");
         if (scoped) {
-            require(_scopeEpoch[msg.sender][scope] == env.epoch, "scope not attested");
+            require(_scopeEpoch[insurer][scope] == env.epoch, "scope not attested");
         }
         require(bandForFace(face) <= env.faceBand, "face above attested band");
         require((env.depTypes >> uint8(depType)) & 1 == 1, "depreciation model not attested");
@@ -574,7 +575,7 @@ contract BuckCredit is ERC721Enumerable {
         require(depreciationFloor <= faceValue, "floor > face");
         require(depType != DepreciationType.MARKED || client == msg.sender,
                 "BuckCredit: a marked credit is self-issued");
-        _requireEnvelope(true, scope, faceValue, depType, depRate, premiumRate);
+        _requireEnvelope(msg.sender, true, scope, faceValue, depType, depRate, premiumRate);
 
         uint256 tokenId = _nextTokenId++;
         _mint(client, tokenId);
@@ -897,7 +898,9 @@ contract BuckCredit is ERC721Enumerable {
 
     // ── Insurer Updates ─────────────────────────────────────────────
 
-    /// @notice Insurer updates credit parameters (reappraisal, schedule change).
+    /// @notice Update credit parameters. With outstanding net-model issuance,
+    ///         only Buck may execute this as part of an authorized renewal.
+    ///         Legacy issuance does not populate that book and is unaffected.
     function updateCredit(
         uint256 tokenId,
         uint256 newFaceValue,
@@ -908,7 +911,12 @@ contract BuckCredit is ERC721Enumerable {
         uint32 newPremiumRate
     ) external {
         CreditParams storage c = credits[tokenId];
-        require(msg.sender == c.insurer,                "Not insurer");
+        require(msg.sender == c.insurer || (msg.sender == buck && buck != address(0)), "Not insurer");
+        // The net issuance book represents an outstanding purchased policy.
+        // Repricing it must go through Buck's owner-and-insurer-authorized
+        // renewal so its premium deposit and K position change atomically.
+        require(_issuance[tokenId].principal == 0 || msg.sender == buck,
+                "BuckCredit: active issuance needs renewal");
         require(newDepreciationFloor <= newFaceValue,   "floor > face");
         // A credit is MARKED from creation or never (see `mark`).
         require((c.depType == DepreciationType.MARKED) == (newDepType == DepreciationType.MARKED),
@@ -932,7 +940,7 @@ contract BuckCredit is ERC721Enumerable {
                 "BuckCredit: face below activated coverage");
         // A reappraisal stays inside the envelope too, or an insurer writes
         // small and updates large.
-        _requireEnvelope(false, bytes32(0), newFaceValue, newDepType, newDepRate, newPremiumRate);
+        _requireEnvelope(c.insurer, false, bytes32(0), newFaceValue, newDepType, newDepRate, newPremiumRate);
 
         BuckQty newFace = toBuckQty(newFaceValue);  // bound-check up front
 
@@ -944,7 +952,7 @@ contract BuckCredit is ERC721Enumerable {
         c.premiumRate       = newPremiumRate;
         c.lastUpdated       = uint48(block.timestamp);
 
-        emit CreditUpdated(tokenId, msg.sender, newFaceValue, newDepRate, newPremiumRate);
+        emit CreditUpdated(tokenId, c.insurer, newFaceValue, newDepRate, newPremiumRate);
     }
 
     /// @notice Mark a MARKED credit at `value`: its present value from now,

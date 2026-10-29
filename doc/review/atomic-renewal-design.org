@@ -1,0 +1,79 @@
+#+TITLE: Atomic renewal of one BuckCredit facility
+#+DATE: 2026-10-29
+#+OPTIONS: ^:nil toc:2
+
+* Scope
+
+This is the implementation design for renewing one existing facility with its
+current insurer. The insurer proposes an exact replacement, and the NFT owner
+independently authorizes the same proposal and requests execution. An insurer
+change would require an additional ownership/authorization design and remains
+separate. The BuckCredit NFT and its coverage stay in place throughout the
+transaction.
+
+The replacement specifies the face, depreciation terms, premium rate, desired
+activated face, new issuance, maximum new premium, minimum acceptable relief,
+deadline, current credit-terms hash, and expected outstanding principal. The
+digest binds the token contract, chain, owner, NFT, all replacement terms and
+limits. The insurer can replace/cancel its proposal; the owner can replace or
+cancel its own authorization. A stale proposal fails if the credit terms or
+principal changed. Credit terms include existing coverage, not merely a
+reappraised face. No signature scheme or new on-chain identity service is
+necessary for this first implementation.
+
+* Transaction and accounting
+
+1. Validate owner and insurer approvals and the deadline before the fund sells
+   anything. Read the selected facility's capped claim seconds and the aggregate
+   benchmark. Checkpoint the fund reserve controller.
+2. Sell the facility's proportional share of the Jubilee basket position and
+   compute the facility's share of pre-sale cash plus actual net BUCK proceeds,
+   capped by its outstanding principal. Respect failed, partial and in-kind
+   exits and preserve the other fund claims. The owner's minimum relief protects
+   the entire transaction. TOKEN is not BUCK relief.
+3. NFT principal and total issued supply are whole raw BUCK units. Round the
+   computed fractional relief *down* to whole raw units before paying it and
+   leave the fractional remainder in the fund. The owner explicitly accepts the
+   minimum; this can be zero. This avoids creating fractional NFT principal or
+   charging the owner for the fund's rounding. The selected facility's claim
+   age is then reset; an unpaid target is not a guaranteed future entitlement.
+4. If the original insurer deposit is invested, request its liquidity before
+   taking Buck's lock. Inside the atomic settlement, return the entire original
+   *nominal* deposit from the originally recorded Carrying pool, with that
+   pool's average carried demurrage. Apply the full-value Jubilee amount to
+   extinguish the same number of BUCK units directly from the fund.
+5. Apply the insurer-approved replacement terms in place and activate any
+   additional coverage. Do not remove or lower the old activated coverage.
+   Determine the replacement premium from the resulting current coverage and
+   new rate, bound it by the approved maximum, and pay full-value BUCK to the
+   insurer's currently registered pool. The owner may fund it from held BUCK,
+   the nominal pool refund, and the explicitly authorized additional issuance.
+   Apply the funding-factor check before the new issuance supplies any reserve.
+6. Record the selected NFT's new principal and reset its age, synchronize the
+   capped aggregate, and ensure its final K shortfall is no worse than before:
+   =max(0, new principal - K * new current value) <=
+    max(0, old principal - K * old current value)=. A failed check reverts the
+   sale, refund, issuance, approvals and every other change.
+
+The replacement premium's rounding, any fixed-point floor on fund relief and
+its actual effects on value must be tested independently. Other NFTs belonging
+to the owner are not implicitly settled. Existing issued principal is never
+called back merely because K falls.
+
+* Contract boundaries and validation
+
+- BuckCredit validates the appraisal and regulator envelope using the recorded
+  insurer even when called by Buck, and permits rate changes on outstanding
+  net-model issuance only through the authorized renewal path. Legacy issuance
+  remains unaffected until migration.
+- BuckNet validates both digests, current terms, owner, actual principal,
+  premium limit, funding factor and K. Only the configured fund may execute
+  the settlement. Neither the insurer's proposal alone nor a fund call without
+  the owner's authorization suffices.
+- The fund sells before Buck is locked and prepares the original pool outside
+  that lock. Reentrancy guards and transaction rollback cover both calls.
+- Test 0 and 50-year relief, multiple facilities and insurer pools, K cuts,
+  repricing, fresh issuance, fractional rounding, expired/cancelled/stale
+  proposals, failed pool liquidity, insufficient funding, cap violations,
+  malicious callbacks and the identity/attestation gate. Measure deployed
+  bytecode; BuckCredit is close to the EVM size limit.
