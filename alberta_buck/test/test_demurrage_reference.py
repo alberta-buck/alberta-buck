@@ -146,6 +146,25 @@ def test_cash_counters_and_average_basis_realize_gains_only_on_withdrawal():
     assert_conservation(ledger)
 
 
+def test_repeated_deployments_share_one_pooled_position_and_average_basis():
+    ledger = opened()
+    ledger.advance(10)
+    ledger.deploy(10)
+    ledger.strategy_return("holder", 2)
+    ledger.deploy(6)  # 6 BUCK buys 5 units at the new 1.2 BUCK mark.
+    assert ledger.strategy_units == pytest.approx(15)
+    assert ledger.strategy_open_basis == pytest.approx(16)
+    assert ledger.accounts[JUBILEE_INVESTED] == pytest.approx(18)
+
+    units, proceeds = ledger.redeem_strategy(1 / 3)
+    assert units == pytest.approx(5)
+    assert proceeds == pytest.approx(6)
+    assert ledger.strategy_units == pytest.approx(10)
+    assert ledger.strategy_open_basis == pytest.approx(32 / 3)
+    assert ledger.strategy_realized_gain == pytest.approx(2 / 3)
+    assert_conservation(ledger)
+
+
 def test_partial_relief_is_delivered_at_full_value_after_carried_fee():
     ledger = opened()
     ledger.advance(25)
@@ -346,6 +365,21 @@ def test_demurrage_on_deployed_buck_reaches_fund_cash():
     assert ledger.fund_demurrage_received == pytest.approx(investment_fee)
     assert ledger.jubilee_assets == pytest.approx(100)
     assert ledger.strategy_demurrage_received + ledger.jubilee_carried_fee == pytest.approx(20)
+    assert_conservation(ledger)
+
+
+def test_global_fund_checkpoint_includes_buck_deployed_outside_fund_cash():
+    ledger = opened()
+    ledger.transfer("holder", JUBILEE, 5)
+    ledger.deploy(4)
+    start_net = ledger.jubilee
+    start_nominal = ledger.jubilee_nominal
+    issued = ledger.issued
+    years = 20
+    ledger.advance(years)
+    expected_net = start_net + (issued - start_net) * (1 - math.exp(-0.02 * years))
+    assert ledger.jubilee == pytest.approx(expected_net)
+    assert ledger.jubilee_nominal == pytest.approx(start_nominal + issued * 0.02 * years)
     assert_conservation(ledger)
 
 

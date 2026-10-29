@@ -44,7 +44,8 @@ redemption, Carrying fund payouts, long-idle accounts, and fund self-demurrage.
 The reference is a
 mathematical specification, not the current contract implementation or a
 five-year economy run. See [[file:alberta-buck-demurrage.org][the demurrage design]] for the accounting and
-the remaining policy and contract decisions.
+the remaining policy and contract decisions. The proposed token, fund, and
+single-position basket changes are in the [[file:doc/review/jubilee-single-position-design.org][contract design]].
 
 * The household default
 

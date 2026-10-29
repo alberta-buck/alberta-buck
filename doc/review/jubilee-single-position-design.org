@@ -1,0 +1,388 @@
+#+TITLE: Simplified Buck demurrage and one Jubilee basket position
+#+DATE: 2026-10-29
+
+* Status and decision
+
+This is a proposed design, not an implemented or audited contract. It follows
+[[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] and the available-relief reference in
+[[file:../../alberta_buck/sim/demurrage_reference.py][demurrage_reference.py]]. The intended behavior is net-balance demurrage,
+Carrying transfers with their proportional fee, a full-value Jubilee payment,
+and relief determined after a proportional basket redemption.
+
+The smallest practical design keeps one Buck token and the existing equity
+basket, adds a small Jubilee position manager, and lets an existing basket
+receipt be topped up. A separate manager adds one contract, but allows the
+basket to call Buck while redeeming without re-entering a locked Buck
+transaction. Do not add a second economic basket or an independent LP
+accounting system.
+
+* Findings in the present code
+
+- =BuckBasketEquity.deposit= always mints a new ERC-721 receipt; there is no
+  existing receipt argument or top-up API. =redeem(id, bp)= partially
+  reduces the same receipt, retaining it if shares remain, and burns it when
+  emptied. It returns BUCK paid, not the adjusted ID and actual shares retired.
+- The current equity basket is the =equity-machine= economy's basket. It is a
+  BuckCredit holder in its own right. It also prices its equity using unpaid
+  =reliefOf=, and the wheel calls =settleRelief=.
+- A deposit computes value and shares from the *nominal* BUCK amount before
+  =transferFrom=. A Carrying sender's BUCK can have a smaller net value. Simply
+  passing its gross amount would overstate a deposit and dilute existing
+  receipt holders. A Jubilee top-up must credit its *actual net* BUCK.
+  A temporary real-contract probe on this branch deposited 1,000 nominal
+  BUCK after a year of Carrying age: the basket's net balance rose by
+  980.000001 BUCK, but the receipt recorded a 1,000 BUCK basis and minted
+  997.375 shares. The gap is separate from the ordinary entry charge.
+- A receipt stores shares and BUCK cost basis in =holdings[id]=. A top-up can
+  add to both. Partial retirement reduces =holdings[id].basis=, but the
+  metadata in =deposits[id]= is not currently updated on partial equity
+  redemption; it must not be treated as the remaining basis.
+- Existing redemption uses whole basis points and treats =bp == 0= as a full
+  exit. Small requested fractions must not accidentally pass zero. The basket
+  can revert on zero equity or return TOKEN and/or leave shares outstanding in
+  an impaired exit, not necessarily the requested amount of net BUCK.
+- Buck has a single transient =nonReentrant= guard on =transfer=, =burn=,
+  and =settleRelief=. Basket deposit and redemption call Buck transfers;
+  the basket also owns a BuckCredit. Calling the basket from a locked Buck
+  operation would re-enter Buck. The current Buck contract also does not
+  implement =onERC721Received=, needed to own a safe-minted basket receipt.
+- The first deposit invokes =receipt.mint=, which uses =_safeMint= and can
+  call the receiver before the basket writes the new holding and total shares.
+  The new manager and basket entry points need an explicitly tested callback
+  order and reentrancy boundary, while preserving required V3 venue callbacks.
+- BuckCredit coverage is activated per NFT, but actual BUCK draws are an
+  aggregate negative signed balance per account. =mintsBacked= records
+  coverage and =mintsPrincipal= records insurance deposits, not the BUCK each
+  NFT individually issued. A per-NFT issuance-age claim cannot be recovered
+  from those fields alone.
+
+* State and accounting
+
+Use BUCK's six-decimal base unit for external amounts. Amounts are represented
+at higher fixed-point precision internally; all rounding rules below require
+implementation and tests. Let r be the chosen nominal continuous rate and
+D(dt) = exp(-r * dt).
+
+** Account state
+
+Keep the signed-account idea, but make its meaning explicit:
+
+| Stored sign | Principal meaning | Second field's meaning |
+|-------------+-------------------+------------------------|
+| positive | nominal raw BUCK held, G | remaining net BUCK N at the checkpoint, in fractional units |
+| zero | neither holdings nor debt | zero |
+| negative | actual BUCK issued against credit, P = -raw | accumulated issuance-seconds for that debt |
+
+For positive ordinary and Carrying accounts, 0 <= N <= G. Fees already
+attributed to Jubilee are F = G - N. Over an idle interval:
+
+#+begin_example
+N1 = N0 * D(dt)
+F1 = G - N1
+#+end_example
+
+The existing signed =int80= balance and =uint120= accumulator could remain
+packed if the positive accumulator uses, for example, 40 fractional bits:
+max positive =int80= times 2^40 fits in 120 bits. Negative state keeps
+issuance-seconds. This is a candidate layout, not a proof of required
+precision, overflow bounds, or migration compatibility. The fund's gross
+nominal history and global cumulative counters should use 256-bit storage; a
+long-idle Carrying fund need not fit the ordinary 80-bit account range.
+
+Do not apply the rate again to F. Net can reach zero through fixed-point dust;
+new incoming full-value BUCK increases N immediately and must not be consumed
+by historical fees. When an ordinary account exhausts its net balance, clear
+its fee-only remainder before starting a negative lien. A negative signed
+balance is actual drawn credit, never a holder whose accumulated fees happen
+to exceed its raw amount. Credit headroom remains a separate quantity.
+
+** Two transfer forms
+
+- An ordinary sender transfers full-value net BUCK. It leaves its existing
+  fee behind; if it spends past N, it first settles the remaining fee-only
+  representation and draws only the excess from credit.
+- A Carrying sender transfers x nominal BUCK with a proportional amount of N
+  and F. A Carrying recipient receives x nominal with that age attached; an
+  ordinary recipient or an existing lien receives the corresponding net value.
+  If the recipient is a lien, discard the transferred fee history only after
+  accounting for it as already attributed to Jubilee. Do not credit the same
+  fee to Jubilee a second time.
+- Pool and other Carrying =balanceOf= must stay nominal to preserve their
+  recorded reserve. A non-Carrying =balanceOf= currently includes unused
+  credit; add an explicit net-held view for accounting instead of confusing it
+  with debt or total issuance. Recipient net may be less than an ordinary
+  ERC-20 transfer's nominal amount; wallets, AMM routes and integrations must
+  expose that fact.
+
+The single N/G ratio treats a Carrying account's BUCK as a fungible mixture:
+every outflow receives the same proportional mixture of its fee history. It
+does not allow selecting individual old or new BUCK. Equal net-decay rates
+make the aggregate sufficient for this pro-rata rule; test mixed-age deposits
+and outflows rather than assuming a token-by-token storage structure.
+
+Provide a narrowly defined net-value transfer for the manager's deposit and
+relief paths: specify desired net BUCK, maximum nominal BUCK, and return both
+the actual nominal and actual net. The allowance and identity checks must
+apply to the nominal amount and the real sender/recipient. This avoids asking
+an existing basket =deposit= to pretend a fee-bearing gross transfer has full
+value. An implementation can use an internal equivalent when the fund pays a
+lien, but both paths must use the same arithmetic and events.
+
+For continuous proportional allocation, to deliver net R from a Carrying
+account with gross G and net N, send R*G/N nominal, if R <= N. Integer
+rounding must deliver the required net without overdrawing. The reference's
+integer helper assumes a direct proportional fee with floor rounding; current
+Solidity first apportions buck-seconds and then computes the fee, so that
+helper is not proof of Solidity parity.
+
+** O(1) fund checkpoint
+
+Maintain I, the total *actually issued, outstanding* BUCK, as a 256-bit
+counter. Update it whenever a negative lien is drawn or repaid; activating an
+unused credit limit alone is not issuance. Track the fund's direct Carrying
+BUCK as gross Gf and net Nf. BUCK held in the basket's pool accounts are
+outside the fund's direct cash, even where the fund owns a basket receipt.
+
+Assume between checkpoints no issue, repayment, transfer into or out of the
+fund, or other external source changes I or Nf. With U = I - Nf, the sum of
+all *other* net BUCK held, the continuous solution is:
+
+#+begin_example
+D       = exp(-r * dt)
+net in  = U * (1 - D)
+Nf1     = Nf0 + net in
+Gf1     = Gf0 + r * I * dt
+self fee accrued = r * I * dt - net in
+#+end_example
+
+The raw increment includes self-demurrage, but the matching self fee is
+already attributed to the same fund. Its net increase is only =net in=.
+For 100 BUCK issued to a wallet, initially no fund cash, after 50 years the
+formula gives Gf = 100, Nf = 63.212056, and fund-carried fee = 36.787944.
+It does not create the extra 36.787944 of economic value. If all 100 start in
+the fund, after 50 years Gf = 200 and Nf remains 100.
+
+This saves an enumeration of holders, provided the invariant below is proved
+for every path:
+
+#+begin_example
+I == sum(net economic holdings of non-fund accounts) + Nf
+#+end_example
+
+Include BUCK in the basket, pools, Notes and the insurance pool in the sum;
+exclude unused credit. Since the fund's position is a claim on basket assets,
+do not add its marked value a second time to the token-supply identity. For
+example, demurrage on BUCK actually held by a basket pool reaches fund cash;
+it can also reduce the mark of the fund's basket receipt. It is an internal
+movement in the fund's aggregate economic wealth, not an extra return.
+
+Expose I explicitly as =totalIssued()=. A candidate is to have =totalSupply()=
+also report I as the economic supply, but that changes the existing API and
+needs an integration audit. In either case, summing ERC-20 =balanceOf= values
+does not reproduce I: Carrying views are nominal and ordinary views currently
+include unused credit headroom. The distinction is already present in the
+existing contract; pool, wallet, explorer and accounting consumers must be
+tested against the chosen public supply semantics.
+
+Checkpoint the fund before a change to I or to the fund's own net cash.
+Normal transfers between non-fund holders that neither draw nor repay credit
+need no separate global checkpoint. The account-side accrual must still occur
+before their balances change. This optimization is contingent on the invariant,
+correct handling of all transfer paths, and an explicit rounding budget.
+
+Keep separate 256-bit lifetime counters for gross demurrage, net demurrage
+cash actually received, net relief paid, net invested, and net withdrawals.
+Their differences can be negative after investment gains. Use separate
+unsigned counters or guarded signed arithmetic, not unchecked subtraction.
+Account-level raw units and global book counters need not use the same type.
+
+* One basket position
+
+The existing equity receipt is a suitable identity for one pooled position.
+Add a top-up path that shares the existing deposit pricing and guards:
+
+#+begin_example
+increasePosition(id, BUCK, requestedNet, maxNominal, minShares) -> id, sharesAdded
+  1. id == 0: create and safe-mint the first receipt to the caller.
+     Otherwise require the caller owns the receipt and it belongs to this basket.
+  2. Capture the basket's pre-deposit snapshot and apply existing entry guards.
+  3. Transfer enough Carrying BUCK to deliver requestedNet; measure actual net.
+  4. Price additional shares from that net amount at the existing entry mark.
+  5. Add shares and their net BUCK cost basis to the existing holding; update
+     totalShares, credit mark, flow, metadata and events. Return the same ID.
+#+end_example
+
+The existing three-argument =deposit= may remain as a wrapper creating a new
+receipt; avoid changing behavior for other depositors. Initially restrict the
+new top-up to BUCK, which is all Jubilee needs. Mixing TOKEN deposits in one
+receipt requires a separate decision about =token=, =tokenPrincipal= and
+=depositTime= metadata. Check all =uint128= conversions and addition before
+writing. Maintain a truthful remaining basis after both top-up and redemption,
+including correcting or explicitly deprecating stale =deposits[id]= metadata.
+
+For reductions, reuse the existing exit logic but add an exact-shares entry
+point that returns the actual BUCK paid, shares retired, shares remaining, and
+ID. Unlike the legacy basis-point API, zero shares must never mean redeem
+everything. The new entry point can retain an empty receipt when the manager
+asks to keep the same ID through a full exit; its shares and basis are zero
+until the next top-up. The legacy =redeem= can keep burning empty receipts for
+existing clients. If merely holding *at most one* receipt is enough, retaining
+the legacy burn and creating a new ID after a full exit is simpler; decide
+which identity semantics the manager needs.
+
+A zero-proceeds execution is not a reason to assume that shares were retired:
+inspect what the basket actually retired. If in-kind TOKEN is received, it is
+an asset of the fund, not spendable BUCK until exchanged; track it separately.
+Do not change the basket's low-K solvency rules to manufacture an exit.
+
+One position means average cost basis. That is consistent with the requested
+pooled behavior, but it changes the 25% realized-gain cut versus separate
+receipts when old and new deposits have different gain/loss histories. Test
+and document this as an economic policy choice. One receipt removes an
+unbounded *receipt* loop; pricing and redemption can still scan the basket's
+constituent pools, and an actual withdrawal can incur slippage or return
+in-kind assets.
+
+The alternative of putting special =jubileeShares= and basis directly in the
+basket avoids an NFT, but couples the basket to one privileged depositor and
+does not by itself solve Buck reentrancy. Reusing =treasuryShares= would mix
+Jubilee assets with the basket's own 25% gain cuts and is not an equivalent
+position. A wrapper around many existing receipt NFTs hides their number but
+still has to manage or enumerate them. One adjustable ordinary receipt keeps
+the existing pooled-share accounting and avoids those duplications.
+
+For ordinary deployment, set the desired reserve to the administrative
+fraction of the selected benchmark, initially 10%. On each eligible touch,
+the manager schedules a fraction =1 - 2^(-elapsed / 1 day)= of any net cash
+above that target for a top-up. Accumulate scheduled work until it reaches 1%
+of the target reserve; then top up the same receipt. Clamp scheduled work to
+available excess when cash or the target changes. Below target, do not deploy;
+future cash income or an explicitly required redemption can replenish it.
+Updating the time checkpoint while discarding sub-threshold work on every
+touch would prevent deployment, so the pending amount must survive such
+touches. This is a proposed controller to test, not a reason to promise a
+particular realized ROI.
+
+* Jubilee manager and settlement order
+
+A small, public-identity Carrying manager holds the one receipt, implements
+=onERC721Received=, and has narrow authority to manage its own assets and pay
+credit relief. It keeps the configured reserve fraction, receipt ID and
+necessary cumulative accounting. Ordinary holders keep control of their own
+credit and identity consent. Deployment needs one-time wiring of the fund,
+Buck, the basket and the identity registry; resolve the constructor cycle
+without leaving an unprotected setter.
+
+A credit reduction must be orchestrated from *outside* Buck's locked token
+call:
+
+1. The authorized credit holder requests a reduction. Buck checkpoints and
+   computes its baseline target R0 from actual issuance-seconds; it is capped
+   at the principal to be reduced. Obtain the Jubilee benchmark B.
+2. The manager requests a fraction min(1, R0/B) of its receipt, when B > 0.
+   For zero target there is no sale. Do not call legacy =redeem(id, 0)=.
+3. The basket redeems while no Buck lock is held. Measure the actual net BUCK
+   delivered and actual shares retired; retain any unretired position and
+   separately account for non-BUCK output. If a redemption cannot execute,
+   preserve the receipt and compute the relief from currently available net
+   cash; report the sale outcome. This does not bypass low-K exit rules.
+4. Re-check the relevant issuance and benchmark after the sale, because the
+   equity basket's own BUCK transfers can change its lien. Use the specified
+   pre-sale fraction and the agreed post-sale benchmark; stale quotes must not
+   be mistaken for executed results.
+5. Compute the effective relief using post-redemption fund net cash, the
+   administrative reserve target and the baseline request. Cap it at the
+   reduction principal and the available net cash. Send enough nominal
+   Carrying BUCK to deliver that full-value relief; the holder supplies the
+   rest. If the holder lacks its share the transaction cannot complete.
+   Zero sale proceeds and zero relief are valid, not a fund shortfall error.
+
+The present Python experiment makes the proposed rule concrete as
+=reserveTarget = 0.1 * B=, =multiplier = netCash / reserveTarget=, and
+=actualRelief = min(principal, netCash, R0 * multiplier)= when the target is
+nonzero. Thus a 10.25 BUCK reserve against a 10 BUCK target uses multiplier
+1.025. The multiplier is a *cash-to-target signal*, not necessarily the
+portfolio's mark or annual ROI: deposits and redemptions themselves change
+cash. Test split versus combined reductions, multiple creditor ages, and
+different reserve deployment cadences before treating this rule as final.
+
+The router/manager must be authorized to act for the holder without changing
+identity receipt or allowance semantics. Its entire operation should be atomic:
+if the debtor cannot pay, the receipt, cash, and all counters revert as well.
+Alternatively, a two-transaction reservation requires explicit expiry,
+ownership, accounting and cancellation; it is not the simple default.
+Never call the basket on an implicit transfer into a negative account while
+Buck's lock is held. Separate ordinary repayment from the explicit operation
+that settles the associated relief, preserving the relevant issuance-seconds
+until the chosen settlement point. This transition, including partial
+repayments and whether relief follows the account or a selected NFT, must be
+specified before implementation; the current aggregate signed lien does not
+identify which NFT issued a particular BUCK.
+
+If repayment precedes the explicit settlement, preserve the repaid portion's
+earned target as a separate pending claim, instead of retaining all its age
+against the smaller remaining lien or discarding it. A later fund payment may
+then refund the holder rather than extinguish the same already-paid debt
+twice. The relation of that pending claim to coverage release and to an NFT is
+part of the required specification.
+
+The fund's own basket may be the credit holder being settled. Basket
+redemption can itself change that lien or trigger Buck transfers. This case
+must not recursively redeem the Jubilee position or settle the same relief
+again. The current equity wheel's =settleRelief= and its treatment of the
+basket's accrued relief in equity marks must be updated to the executable
+relief policy; otherwise marks can include relief that the fund cannot pay.
+
+* Benchmark and simplification boundaries
+
+The reference defines B as the sum of each open credit position's capped
+unadjusted relief. It can simply enumerate its Python objects; the contract
+cannot assume that sum is O(1). A global issuance-seconds accumulator can be
+updated in O(1) when total issued changes and when a position is reduced,
+but its *uncapped* total is not generally the same as the sum of separately
+capped claims after 50 years. A saturated-position index or maturity buckets
+would add complexity. For example, a sole 100 BUCK lien held 100 years has a
+200 BUCK uncapped target but a 100 BUCK capped claim: the former would request
+half the fund position and the latter all of it. An O(1) uncapped benchmark
+is a possible simplification only if that different economic behavior is
+accepted and tested. Decide the exact benchmark and rounding before claiming
+an O(1) implementation; also handle zero B and a cumulative gross-demurrage
+minus actual-relief balance that can become negative after investment gains.
+
+Existing delegated demurrage moves fee-seconds between accounts; it does not
+implement net-decay sponsorship. Searches found its API in Buck, dedicated
+contract tests and design documents, but not the current Python or sandbox
+agents. Retiring it could remove meaningful complexity, but it is a user-facing
+feature. Discuss the loss of that capability before removing it. If retained,
+payer capacity, multiple sponsees, settlement order and global conservation
+need their own net-based design.
+
+Keep the active equity basket, its real credit and the routing/contract tests.
+The pro-rata basket and =BuckWithBasketHooks= are still exercised by older
+simulation variants; retire them only after their distinct checks have a
+replacement. Do not silently remove identity checks, pool reserve semantics,
+the insurance deposit, or low-K solvency checks to simplify the core.
+
+* Verification and implementation order
+
+1. Prove the global checkpoint equations and fixed-point bounds against an
+   independent high-precision model, including no-touch versus many touches,
+   49, 50, 51, 100 and 1,000 years, dust, many accounts, transfers and all
+   positive/negative sign transitions. Do not reuse =PortfolioMath.expWad=
+   as-is: it clamps its exponent at -4, so an idle balance stops decaying
+   after roughly 200 years at this rate.
+2. Implement the basket top-up and exact-share redemption independently.
+   Test same ID, no dilution, cost basis, 25% gain cut, third-party ownership,
+   small fractions, full exit and re-entry, zero value, in-kind and residual
+   shares, carrying-fee transfers and recipient net. The existing Solidity
+   tests establish today's behavior, not these new behaviors.
+3. Prototype the coordinator and fund with the existing reference scenarios;
+   test actual post-sale proceeds, zero proceeds, fund gross-up, source and
+   recipient net, negative-liability transitions, rollback, identity and
+   reentrancy, and the basket paying relief on its own credit.
+4. Replace Buck's accrual and reconcile BuckCredit semantics, Rust math and
+   Python/JavaScript consumers. Define any migration or clean genesis; old
+   raw-linear accumulators cannot reconstruct historical net accrual exactly.
+5. Re-run full Solidity and Python/JS tests and the five-year economic
+   campaigns with fresh frozen snapshots and PDFs. Old runs use the old
+   contract and cannot establish the redesigned system's stability.
