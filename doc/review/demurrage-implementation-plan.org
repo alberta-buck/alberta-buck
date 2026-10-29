@@ -31,6 +31,7 @@ make nix-match-BuckLedgerTest
 make nix-match-BuckCredit
 make nix-match-JubileeClaimsTest
 make nix-match-BuckNetTest
+make nix-match-JubileeFundTest
 make nix-doc-alberta-buck-demurrage
 # Later, when compatibility is restored:
 make nix-test
@@ -159,9 +160,14 @@ must not be disturbed.
 
 ** 4. External Jubilee and integration
 
+- [X] Implement and test a coordinator against BuckNet and a controllable
+  basket: proportional pre-sale cash plus actual BUCK proceeds, one adjustable
+  receipt, full-value Carrying gross-up, owner authorization and pre-refund
+  insurer liquidity callback.
 - [ ] Implement the external Carrying manager with one basket receipt and the
-  agreed proportional payout. Bound outputs to actual cash and sale proceeds;
-  gross up Carrying payout without double-crediting fund self-demurrage.
+  agreed proportional payout *against the real equity basket*. Bound outputs
+  to actual cash and sale proceeds; gross up Carrying payout without
+  double-crediting fund self-demurrage.
 - [ ] Connect the capped aggregate benchmark and specify final payout
   rounding, reserve investment schedule and threshold; verify fresh inflows
   and keeper timing.
@@ -189,7 +195,8 @@ must not be disturbed.
 | 2026-10-29 | 3c | Standalone =BuckLedger= passes 16 Foundry tests, including 256-run mixed-transfer conservation fuzz and a 3-raw-unit 50-year fractional settlement. No production token uses it yet. | =271ca437= |
 | 2026-10-29 | 3d | Cap a facility's claimable age before new issuance, keeping gross age separate in the Python reference. Reference: 76 tests; BuckCredit: 66 tests; BuckCredit runtime 23,414 bytes. Average age within each NFT is an explicit policy choice. | =2cd8fba7= |
 | 2026-10-29 | 3e | Standalone =JubileeClaims= maintains exact capped claimable seconds with bounded heap processing; 9 tests passed, including two 256-run fuzz tests. For 64 simultaneous maturities, processing eight used at most 328,483 gas. | =4e66da46= |
-| 2026-10-29 | 3f | Experimental =BuckNet= connects the ledger, NFT records, capped claims, K, owner-approved reductions and insurer-specific pools. Fourteen tests pass, including 256 fuzzed idle-facility closures. Runtime: BuckNet 18,382 bytes, BuckCredit 23,490 bytes. Uses a mock fund; not a deployment target. | This commit: token integration prototype |
+| 2026-10-29 | 3f | Experimental =BuckNet= connects the ledger, NFT records, capped claims, K, owner-approved reductions and insurer-specific pools. Fourteen tests pass, including 256 fuzzed idle-facility closures. Runtime: BuckNet 18,382 bytes, BuckCredit 23,490 bytes. | =11b07073= |
+| 2026-10-29 | 4a | Experimental =JubileeFund= applies proportional relief and manages one receipt with real =BuckNet= and a controllable mock basket. Seventeen fund, 17 ledger and 14 token tests passed; the ledger includes a 256-case nominal gross-up fuzz test. Real basket integration is outstanding. | This commit: external fund prototype |
 
 * Open implementation constraints
 
@@ -224,13 +231,16 @@ further logic needs size checks or extraction instead of assuming it will fit.
 =BuckNet= is a separate clean-genesis integration prototype, not a replacement
 for =Buck.sol=. It issues actual unspent BUCK against each activated NFT,
 keeps insurer deposits pinned to their original pool, and lets only the
-designated fund execute an exact, owner-authorized reduction. The test fund is
-deliberately a mock and does not enforce proportional sales or payouts; the
-real coordinator must do so. Pool withdrawals require the pool's allowance;
-the future coordinator must call a real pool's liquidity preparation before
-entering the token's locked settlement. The prototype has no renewal API,
-automatic pool liquidation, registry-mode conversion, legacy basket adapter,
-deployment integration, or supported migration. Its internal fractional
+designated fund execute an exact, owner-authorized reduction. =JubileeFund=
+implements the proportional coordinator against a mock basket and calls an
+insurer pool's liquidity preparation before entering locked settlement. Pool
+withdrawals require the pool's allowance; real pool implementations and the
+real equity basket still need integration. In-kind TOKEN received from a
+partial exit is currently held by the fund but cannot yet be converted into
+BUCK; it is not counted as cash relief. Governance currently authorizes each
+investment manually; the half-distance-per-day reserve schedule is pending.
+The prototype has no renewal API, registry-mode conversion, deployment
+integration, or supported migration. Its internal fractional
 retirement can require integral ERC-20 burn events to be rounded; the exact
 split is recorded in =FacilityReduced= and still needs indexer review.
 

@@ -183,12 +183,22 @@ library BuckLedger {
         _requireInitialized(self);
         if (to == address(0) || to == self.fund) revert BadAccount();
         _checkpointFund(self);
-        if (net > maxNetPayout(self)) revert InsufficientBalance();
         if (net == 0) return (0, 0);
-        uint256 grossFractional = Math.mulDiv(net * SCALE, self.fundGross, self.fundNet, Math.Rounding.Ceil);
-        nominal = Math.ceilDiv(grossFractional, SCALE);
+        nominal = fundNominalForNet(self, net);
         delivered = transfer(self, self.fund, to, nominal, true, toCarrying);
         if (delivered < net * SCALE) revert InsufficientBalance();
+    }
+
+    /// @notice Smallest whole nominal fund transfer delivering at least `net`
+    ///         whole raw units, at the current Carrying average. A subsequent
+    ///         transfer can still fail if the fund's state changes first.
+    function fundNominalForNet(Ledger storage self, uint256 net) internal view returns (uint256) {
+        _requireInitialized(self);
+        if (net == 0) return 0;
+        if (net > maxNetPayout(self)) revert InsufficientBalance();
+        (uint256 gross, uint256 fundNet) = _fundView(self);
+        uint256 scaled = Math.mulDiv(net * SCALE, gross, fundNet, Math.Rounding.Ceil);
+        return Math.ceilDiv(scaled, SCALE);
     }
 
     function balanceOf(Ledger storage self, address owner) internal view returns (uint256) {

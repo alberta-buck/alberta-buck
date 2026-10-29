@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {BuckTypes} from "../src/BuckTypes.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @dev This harness exposes internal operations only for accounting tests;
 ///      it is not a production token and has no issuance authorization.
@@ -30,6 +31,7 @@ contract BuckLedgerHarness {
     function fundParts() external view returns (uint256, uint256) { return book.fundParts(); }
     function issued() external view returns (uint256) { return book.issued; }
     function maxNetPayout() external view returns (uint256) { return book.maxNetPayout(); }
+    function fundNominalForNet(uint256 net) external view returns (uint256) { return book.fundNominalForNet(net); }
 }
 
 contract BuckLedgerTest is Test {
@@ -281,6 +283,24 @@ contract BuckLedgerTest is Test {
         vm.warp(t0 + elapsed);
         uint256 nominal = h.balanceOf(POOL) / 2;
         h.send(POOL, BOB, nominal, true, false);
+        _netConserved(ALICE, BOB, POOL);
+    }
+
+    function testFuzz_fundQuoteIsTheSmallestNominalAmountDeliveringFullNet(uint64 principal_, uint64 requested_, uint16 days_)
+        public
+    {
+        uint256 principal = bound(principal_, 1e6, 1e13);
+        h.issue(ALICE, principal, false);
+        vm.warp(t0 + bound(days_, 1, 10_000) * 1 days);
+        uint256 maxPayout = h.maxNetPayout();
+        uint256 requested = bound(requested_, 1, maxPayout);
+        (uint256 gross, uint256 net) = h.fundParts();
+        uint256 nominal = h.fundNominalForNet(requested);
+        assertLe(nominal * Q, gross);
+        assertLt(Math.mulDiv(net, (nominal - 1) * Q, gross), requested * Q);
+        (uint256 paid, uint256 delivered) = h.payFundNet(BOB, requested, false);
+        assertEq(paid, nominal);
+        assertGe(delivered, requested * Q);
         _netConserved(ALICE, BOB, POOL);
     }
 }

@@ -18,9 +18,9 @@ interface IBuckNetK {
 }
 
 /// @notice Experimental integration of net BUCK accounting and per-NFT credit.
-/// @dev NOT A DEPLOYMENT TARGET: the Jubilee coordinator, insurer liquidity
-///      callback, renewal, registry mode changes, legacy basket interfaces,
-///      deployment/migration and fractional event semantics are not complete.
+/// @dev NOT A DEPLOYMENT TARGET: production basket compatibility, renewal,
+///      registry mode changes, deployment/migration, in-kind asset handling,
+///      insurer liquidity implementations and event semantics are incomplete.
 ///      Fund-authorized reductions trust the designated coordinator to apply
 ///      the proportional policy; the owner separately authorizes each request.
 contract BuckNet is IERC20, IERC20Metadata {
@@ -116,6 +116,11 @@ contract BuckNet is IERC20, IERC20Metadata {
         return _book.partsOf(owner);
     }
     function fundBalancesScaled() external view returns (uint256 gross, uint256 net) { return _book.fundParts(); }
+    /// @notice Whole nominal Carrying BUCK needed to transfer at least `net`
+    ///         full-value raw BUCK from the Jubilee fund at the current block.
+    function fundNominalForNet(uint256 net) external view returns (uint256) {
+        return _book.fundNominalForNet(net);
+    }
     function allowance(address owner, address spender) external view returns (uint256) { return _allowances[owner][spender]; }
     function receiptFragment(address from, address to) external view returns (bytes32) {
         return _receiptFragments[from][to];
@@ -234,10 +239,10 @@ contract BuckNet is IERC20, IERC20Metadata {
 
     /// @notice Complete a pre-authorized reduction after the Jubilee manager
     ///         has sold its proportional position and prepared insurer funds.
-    /// @dev Until the manager is implemented this is an integration prototype:
-    ///      only the fund may call it, and the fund must compute the approved
-    ///      proportional relief from actual proceeds. No basket call occurs
-    ///      while this token's reentrancy guard is held.
+    /// @dev Only the configured coordinator may call it. The coordinator must
+    ///      compute proportional relief from actual proceeds; BuckNet cannot
+    ///      verify that policy itself. No basket call occurs while this token's
+    ///      reentrancy guard is held.
     function settleFromJubilee(address owner, uint256 tokenId, uint256 principal, uint256 reliefScaled)
         external nonReentrant returns (uint256 refund)
     {
