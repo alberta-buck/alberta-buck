@@ -14,7 +14,8 @@ interface IBuckBasketPosition {
     /// @param minShares Minimum shares added to the receipt.
     /// @return positionId The same receipt ID.
     /// @return received Asset amount credited to basket equity. For BUCK this
-    ///         is net of carried fees and any change to legacy relief claims.
+    ///         is net of carried fees and, with the legacy token, any change
+    ///         to the basket's legacy relief claims.
     /// @return sharesAdded Additional shares in the existing receipt.
     function increasePosition(uint256 id, address asset, uint256 amount, uint256 minReceived, uint256 minShares)
         external returns (uint256 positionId, uint256 received, uint256 sharesAdded);

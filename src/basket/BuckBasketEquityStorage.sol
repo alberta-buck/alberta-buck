@@ -27,6 +27,11 @@ interface IBuckHolder {
     function mint(uint256 amount, uint256[] calldata tokenIds) external;
 }
 
+/// @notice Net-accounting token view used by the restricted cash-only mode.
+interface IBuckNetAccount {
+    function netBalanceOf(address a) external view returns (uint256);
+}
+
 /// @notice BuckCredit, as the basket sees it: the issuer of its own MARKED
 ///         credit (DepreciationType 3).
 interface IMarkedCredit {
@@ -144,6 +149,11 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///         which carry no price risk against the lien they came from.
     bool public netMark;
 
+    /// @notice Experimental BuckNet compatibility with no basket-issued
+    ///         credit. The legacy signed balance and implicit-repayment model
+    ///         are not valid for BuckNet; net credit integration is separate.
+    bool public netAccounting;
+
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
 
@@ -194,6 +204,13 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     /// @dev Read the basket's account at Buck into `s`.
     function _account(Snap memory s) internal view {
         IBuckHolder b = _bk();
+        if (netAccounting) {
+            s.buckEq = int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)));
+            s.lien = 0;
+            s.relief = 0;
+            s.spend = b.balanceOf(address(this));
+            return;
+        }
         int256 signed = b.signedBalanceOf(address(this));
         s.lien   = signed < 0 ? uint256(-signed) : 0;
         s.relief = b.reliefOf(address(this));
@@ -296,6 +313,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     /// @dev Mark the credit at `value` (activating it the first time it is
     ///      above zero).
     function _markAt(uint256 value) internal {
+        // The experimental net mode cannot open a basket credit yet. Issuing
+        // cash and later retiring a facility are explicit operations, not the
+        // legacy token's automatic spend/repay behavior.
+        if (netAccounting) return;
         IMarkedCredit c = credit;
         if (address(c) == address(0)) return;
         if (c.markOf(creditId) != value) c.mark(creditId, value);

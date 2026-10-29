@@ -9,7 +9,7 @@ import {IBuckKController}   from "../IBuckKController.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
-import {BuckBasketEquityStorage, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
+import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount} from "./BuckBasketEquityStorage.sol";
 import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
@@ -61,11 +61,14 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     error PositionAssetMismatch();
     error PositionOverflow();
     error PositionSharesExceeded();
+    error NetCreditUnavailable();
+    error InvalidNetToken();
 
     event PositionIncreased(address indexed who, uint256 indexed receiptId, address indexed asset,
                             uint256 nominalAmount, uint256 received, uint256 sharesAdded);
     event PositionReduced(address indexed who, uint256 indexed receiptId, uint256 requestedShares,
                           uint256 paid, uint256 sharesRetired, uint256 sharesRemaining);
+    event NetAccountingEnabled();
 
     modifier positionLock() {
         if (_positionEntered) revert PositionReentrant();
@@ -173,12 +176,27 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         eq = p;
     }
 
+    /// @notice Select the experimental net-token integration before any
+    ///         deposits or credit are opened. This mode can invest existing
+    ///         BUCK but deliberately cannot issue basket credit until explicit
+    ///         issuance, repayment and low-K behavior are integrated.
+    function enableNetAccounting() external onlyGov {
+        if (netAccounting || totalShares != 0 || address(credit) != address(0)) revert AlreadyPresent();
+        (bool ok, bytes memory data) = address(buck).staticcall(
+            abi.encodeWithSelector(IBuckNetAccount.netBalanceOf.selector, address(this))
+        );
+        if (!ok || data.length != 32) revert InvalidNetToken();
+        netAccounting = true;
+        emit NetAccountingEnabled();
+    }
+
     /// @notice Open the basket's credit: a MARKED BuckCredit it issues itself
     ///         (the basket is its own insurer; zero premium), whose face caps
     ///         all it may ever issue at K x face.  Once, by governance, with
     ///         the basket bound as a public, non-Carrying identity.  It is
     ///         activated at the first mark above zero.
     function openCredit(address credit_, uint256 face) external onlyGov {
+        if (netAccounting) revert NetCreditUnavailable();
         if (address(credit) != address(0)) revert AlreadyPresent();
         IMarkedCredit c = IMarkedCredit(credit_);
         c.setCreditIssuer(address(this), true);
@@ -481,7 +499,9 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         uint256 S = totalShares;
         uint256 n = constituents.length;
         uint256[] memory toks = new uint256[](n);
-        int256 signed0 = _bk().signedBalanceOf(address(this));
+        int256 signed0 = netAccounting
+            ? int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)))
+            : _bk().signedBalanceOf(address(this));
         for (uint256 i = 0; i < n; i++) {
             uint256 tok = idleToken[i] * fWad / 1e18;
             idleToken[i] -= tok;
@@ -495,8 +515,10 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         }
         // What its positions returned (net of the fee their BUCK carried),
         // less its share of equity's BUCK -- the lien, net of relief.
-        int256 residue = (_bk().signedBalanceOf(address(this)) - signed0)
-                       + sn.buckEq * int256(fWad) / 1e18;
+        int256 signed1 = netAccounting
+            ? int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)))
+            : _bk().signedBalanceOf(address(this));
+        int256 residue = (signed1 - signed0) + sn.buckEq * int256(fWad) / 1e18;
         uint256 flow = 0;
         if (residue < 0) {
             uint256 tv = 0;
@@ -574,18 +596,21 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     function kNow() external view returns (uint256) { return _k(); }
     /// @notice The basket's lien: the BUCK it has issued (0 when it holds BUCK).
     function lien() external view returns (uint256) {
+        if (netAccounting) return 0;
         int256 s_ = _bk().signedBalanceOf(address(this));
         return s_ < 0 ? uint256(-s_) : 0;
     }
     /// @notice Relief accrued on the lien and not yet paid.
-    function reliefAccrued() external view returns (uint256) { return _bk().reliefOf(address(this)); }
+    function reliefAccrued() external view returns (uint256) {
+        return netAccounting ? 0 : _bk().reliefOf(address(this));
+    }
     /// @notice The mark the credit carries now (the equity it was last marked at).
     function markNow() external view returns (uint256) {
         return address(credit) == address(0) ? 0 : credit.markOf(creditId);
     }
     /// @notice K x the mark, less the lien: the room to issue (< 0: under water).
     function headroom() external view returns (int256) {
-        int256 s_ = _bk().signedBalanceOf(address(this));
+        int256 s_ = netAccounting ? int256(0) : _bk().signedBalanceOf(address(this));
         uint256 m = address(credit) == address(0) ? 0 : credit.markOf(creditId);
         int256 lim = int256(_k() * m / 1e18);
         return s_ < 0 ? lim + s_ : lim;

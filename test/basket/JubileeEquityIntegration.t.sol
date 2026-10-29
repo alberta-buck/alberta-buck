@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {BN254} from "../../src/BN254.sol";
+import {IdentityRegistry} from "../../src/IdentityRegistry.sol";
+import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
+import {BuckCredit} from "../../src/BuckCredit.sol";
+import {BuckNet} from "../../src/BuckNet.sol";
+import {JubileeFund, IJubileeBasket} from "../../src/JubileeFund.sol";
+import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
+import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
+import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
+import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
+import {EqController, EqHolder} from "./BuckBasketEquity.t.sol";
+
+/// @dev Real BuckNet, fund and equity basket, currently with no constituents
+///      or basket-issued credit. Leveraged and in-kind cases need their own
+///      integration before this is a production basket configuration.
+contract JubileeEquityIntegrationTest is Test {
+    uint256 constant YEAR = 365 days + 6 hours;
+    uint256 constant Q = 1e36;
+    address constant GOV = address(0xA0);
+    address constant ALICE = address(0xA11CE);
+    address constant BOB = address(0xB0B);
+    address constant INSURER = address(0x1551E1);
+    IdentityRegistryHarness identity;
+    BuckCredit credit;
+    BuckNet buck;
+    JubileeFund fund;
+    BuckBasketEquity basket;
+    EqController k;
+    uint256 t0;
+
+    function setUp() public {
+        vm.warp(1_000_000);
+        t0 = block.timestamp;
+        identity = new IdentityRegistryHarness(GOV);
+        credit = new BuckCredit();
+        k = new EqController();
+        k.setK(1e18);
+        fund = new JubileeFund(GOV);
+        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        basket = new BuckBasketEquity(address(buck), address(k), address(0xFA), GOV, 3000, 600, 64, 500, 1e3);
+        credit.setBuck(address(buck));
+        vm.prank(GOV);
+        identity.setBuck(address(buck));
+        _bind(ALICE, false, address(this));
+        _bind(BOB, false, address(this));
+        _bind(INSURER, false, address(this));
+        _bind(address(fund), true, address(this));
+        _bind(address(basket), false, address(this));
+        vm.prank(ALICE);
+        credit.setCreditIssuer(INSURER, true);
+        vm.prank(BOB);
+        credit.setCreditIssuer(INSURER, true);
+        vm.startPrank(GOV);
+        basket.enableNetAccounting();
+        basket.setVenue(address(new BuckBasketUniswapV3()));
+        basket.setEquityWheel(address(new BuckBasketEquityWheel()));
+        (bool ok,) = address(basket).call(abi.encodeWithSignature("setWheel(address)", address(this)));
+        require(ok);
+        fund.configure(buck, IJubileeBasket(address(basket)));
+        vm.stopPrank();
+    }
+
+    function _bind(address target, bool carrying, address binder) internal {
+        if (target.code.length == 0) vm.etch(target, address(new EqHolder()).code);
+        vm.prank(binder);
+        identity.bindContract(target, BN254.g1(),
+            IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), true, carrying);
+    }
+    function _credit(address owner, uint256 face) internal returns (uint256 id) {
+        vm.prank(INSURER);
+        id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, 0);
+        vm.prank(owner);
+        buck.issue(id, face, face);
+    }
+    function _authorize(address owner, uint256 id, uint256 amount, uint256 minRelief) internal {
+        vm.prank(owner);
+        buck.authorizeReduction(id, amount, minRelief, uint64(block.timestamp + YEAR));
+    }
+    function _invest(uint256 amount) internal returns (uint256 id, uint256 nominal, uint256 shares) {
+        vm.prank(GOV);
+        return fund.invest(amount, type(uint256).max, amount, 1);
+    }
+
+    function test_realBasketReusesTheFundReceiptAndPaysActualProportionalRelief() public {
+        uint256 a = _credit(ALICE, 100e6);
+        _credit(BOB, 100e6);
+        vm.warp(t0 + YEAR);
+        (uint256 id, uint256 nominal, uint256 shares) = _invest(1e6);
+        assertGt(nominal, 1e6);
+        assertEq(basket.receipt().ownerOf(id), address(fund));
+        (uint256 secondId,, uint256 moreShares) = _invest(1e6);
+        assertEq(secondId, id);
+        (uint128 held,) = basket.holdings(id);
+        assertEq(held, shares + moreShares);
+        assertEq(basket.lien(), 0);
+        assertEq(basket.reliefAccrued(), 0);
+        assertEq(basket.equity(), buck.netBalanceOf(address(basket)));
+
+        (, uint256 cash) = buck.fundBalancesScaled();
+        uint256 requested = uint256(held) / 4;
+        uint256 ratio = requested * 1e18 / basket.totalShares();
+        uint256 paid = basket.equity() * ratio / 1e18;
+        _authorize(ALICE, a, 50e6, 0);
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduce(a, 50e6);
+        assertEq(relief, cash / 4 + paid * Q);
+        (uint128 remaining,) = basket.holdings(id);
+        assertEq(remaining, uint256(held) - requested);
+        assertEq(fund.positionId(), id);
+        assertEq(buck.totalIssued(), 150e6);
+    }
+
+    function test_agedCarryingFundInvestmentDoesNotDiluteExistingDepositor() public {
+        _credit(ALICE, 1000e6);
+        _credit(BOB, 1000e6);
+        vm.startPrank(ALICE);
+        buck.approve(address(basket), 100e6);
+        uint256 aliceId = basket.deposit(address(buck), 100e6, 0);
+        vm.stopPrank();
+        vm.warp(t0 + YEAR);
+        uint256 beforeValue = basket.valueOf(aliceId);
+        (uint256 fundId, uint256 nominal, uint256 shares) = _invest(2e6);
+        assertGt(nominal, 2e6);
+        assertApproxEqAbs(basket.valueOf(aliceId), beforeValue, 1);
+        (uint128 fundShares, uint128 basis) = basket.holdings(fundId);
+        assertEq(fundShares, shares);
+        assertEq(basis, 2e6);
+        assertEq(basket.equity(), buck.netBalanceOf(address(basket)));
+    }
+
+    function test_dailyWheelWorksWithoutLegacySignedBalanceMethods() public {
+        _credit(ALICE, 100e6);
+        vm.warp(t0 + YEAR);
+        _invest(1e6);
+        assertEq(IBasketUpkeep(address(basket)).wheelStep(0, 0), 1);
+        assertEq(basket.lien(), 0);
+    }
+
+    function test_netModeCannotEnableLegacyBasketCredit() public {
+        vm.expectRevert(BuckBasketEquity.NetCreditUnavailable.selector);
+        vm.prank(GOV);
+        basket.openCredit(address(credit), 1e12);
+        vm.expectRevert();
+        vm.prank(GOV);
+        basket.enableNetAccounting();
+    }
+
+    function test_zeroEquityExitRetainsTheFundReceipt() public {
+        uint256 a = _credit(ALICE, 100e6);
+        vm.warp(t0 + YEAR);
+        (uint256 id,,) = _invest(1e6);
+        (uint128 beforeShares,) = basket.holdings(id);
+        vm.warp(t0 + 9001 * YEAR);
+        buck.processMaturities(1);
+        assertEq(basket.equity(), 0);
+        _authorize(ALICE, a, 100e6, 0);
+        vm.prank(ALICE);
+        fund.reduce(a, 100e6);
+        assertEq(fund.positionId(), id);
+        (uint128 afterShares,) = basket.holdings(id);
+        assertEq(afterShares, beforeShares);
+        assertEq(buck.totalIssued(), 0);
+    }
+}

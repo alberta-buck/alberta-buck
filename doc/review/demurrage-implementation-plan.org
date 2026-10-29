@@ -32,6 +32,7 @@ make nix-match-BuckCredit
 make nix-match-JubileeClaimsTest
 make nix-match-BuckNetTest
 make nix-match-JubileeFundTest
+make nix-match-JubileeEquityIntegrationTest
 make nix-doc-alberta-buck-demurrage
 # Later, when compatibility is restored:
 make nix-test
@@ -164,6 +165,9 @@ must not be disturbed.
   basket: proportional pre-sale cash plus actual BUCK proceeds, one adjustable
   receipt, full-value Carrying gross-up, owner authorization and pre-refund
   insurer liquidity callback.
+- [X] Connect the real equity basket to BuckNet in a restricted cash-only
+  mode before deposits. Test actual fund receipt additions, partial sales,
+  zero-equity sale failure, Carrying fee pricing and daily wheel dispatch.
 - [ ] Implement the external Carrying manager with one basket receipt and the
   agreed proportional payout *against the real equity basket*. Bound outputs
   to actual cash and sale proceeds; gross up Carrying payout without
@@ -196,7 +200,8 @@ must not be disturbed.
 | 2026-10-29 | 3d | Cap a facility's claimable age before new issuance, keeping gross age separate in the Python reference. Reference: 76 tests; BuckCredit: 66 tests; BuckCredit runtime 23,414 bytes. Average age within each NFT is an explicit policy choice. | =2cd8fba7= |
 | 2026-10-29 | 3e | Standalone =JubileeClaims= maintains exact capped claimable seconds with bounded heap processing; 9 tests passed, including two 256-run fuzz tests. For 64 simultaneous maturities, processing eight used at most 328,483 gas. | =4e66da46= |
 | 2026-10-29 | 3f | Experimental =BuckNet= connects the ledger, NFT records, capped claims, K, owner-approved reductions and insurer-specific pools. Fourteen tests pass, including 256 fuzzed idle-facility closures. Runtime: BuckNet 18,382 bytes, BuckCredit 23,490 bytes. | =11b07073= |
-| 2026-10-29 | 4a | Experimental =JubileeFund= applies proportional relief and manages one receipt with real =BuckNet= and a controllable mock basket. Seventeen fund, 17 ledger and 14 token tests passed; the ledger includes a 256-case nominal gross-up fuzz test. Real basket integration is outstanding. | This commit: external fund prototype |
+| 2026-10-29 | 4a | Experimental =JubileeFund= applies proportional relief and manages one receipt with real =BuckNet= and a controllable mock basket. Seventeen fund, 17 ledger and 14 token tests passed; the ledger includes a 256-case nominal gross-up fuzz test. | =21ba6d2c= |
+| 2026-10-29 | 4b | The real basket has an opt-in cash-only net-token mode. Five integration, 29 legacy equity, 35 director and 17 fund tests passed. Equity runtime is 23,114 bytes. This mode cannot open basket credit, and real AMM positions/in-kind exits are not yet tested. | This commit: restricted real-basket integration |
 
 * Open implementation constraints
 
@@ -232,10 +237,16 @@ further logic needs size checks or extraction instead of assuming it will fit.
 for =Buck.sol=. It issues actual unspent BUCK against each activated NFT,
 keeps insurer deposits pinned to their original pool, and lets only the
 designated fund execute an exact, owner-authorized reduction. =JubileeFund=
-implements the proportional coordinator against a mock basket and calls an
-insurer pool's liquidity preparation before entering locked settlement. Pool
-withdrawals require the pool's allowance; real pool implementations and the
-real equity basket still need integration. In-kind TOKEN received from a
+implements the proportional coordinator, tested with a mock basket and the
+cash-only real equity basket, and calls an insurer pool's liquidity preparation
+before entering locked settlement. Pool withdrawals require the pool's
+allowance; real insurer pool implementations still need integration. The real equity
+basket's opt-in net mode holds and invests actual BUCK without a credit
+facility; it rejects opening one. This avoids incorrectly treating incoming
+BUCK as debt retirement or using unissued credit as a spendable balance. It
+does not establish leveraged basket operation, low-K exit behavior, or real
+AMM in-kind exit behavior under the new token. Its mode cannot be enabled
+after shares or credit exist. In-kind TOKEN received from a
 partial exit is currently held by the fund but cannot yet be converted into
 BUCK; it is not counted as cash relief. Governance currently authorizes each
 investment manually; the half-distance-per-day reserve schedule is pending.

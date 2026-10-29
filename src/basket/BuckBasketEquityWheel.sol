@@ -86,7 +86,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         lastDay = today;
         // The Jubilee relief on the lien: collected daily, so the share price
         // (which counts it accrued) and the lien stay in step.
-        if (_bk().signedBalanceOf(address(this)) < 0 && _bk().reliefOf(address(this)) > 0) {
+        if (!netAccounting && _bk().signedBalanceOf(address(this)) < 0 && _bk().reliefOf(address(this)) > 0) {
             _bk().settleRelief();
         }
         address d = equityDirector;
