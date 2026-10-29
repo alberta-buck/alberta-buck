@@ -17,6 +17,10 @@ interface IBuckNetK {
     function fundingFactor() external view returns (uint256);
 }
 
+interface IBuckNetReserveHook {
+    function checkpointIssuance() external;
+}
+
 /// @notice Experimental integration of net BUCK accounting and per-NFT credit.
 /// @dev NOT A DEPLOYMENT TARGET: production basket compatibility, renewal,
 ///      registry mode changes, deployment/migration, in-kind asset handling,
@@ -36,6 +40,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     IBuckNetK public immutable buckK;
     IdentityRegistry public immutable identity;
     address public immutable jubilee;
+    bool public jubileeReserveHookEnabled;
     BuckLedger.Ledger private _book;
     JubileeClaims.Book private _claims;
     mapping(address => mapping(address => uint256)) private _allowances;
@@ -63,6 +68,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     event BuckTransferReceipt(address indexed from, address indexed to, uint256 amount,
                               bytes32 fromCipherHash, bytes32 toCipherHash);
     event InsurerPoolSet(address indexed insurer, address indexed pool);
+    event JubileeReserveHookEnabled();
     event FacilityIssued(address indexed owner, uint256 indexed tokenId, uint256 coverage,
                          uint256 principal, uint256 premium, address pool);
     event ReductionAuthorized(address indexed owner, uint256 indexed tokenId, uint256 principal,
@@ -85,6 +91,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error BadAuthorization();
     error UnauthorizedTransfer();
     error InsufficientAllowance();
+    error AlreadyEnabled();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -121,6 +128,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     function fundNominalForNet(uint256 net) external view returns (uint256) {
         return _book.fundNominalForNet(net);
     }
+    function maxFundNetPayout() external view returns (uint256) { return _book.maxNetPayout(); }
     function allowance(address owner, address spender) external view returns (uint256) { return _allowances[owner][spender]; }
     function receiptFragment(address from, address to) external view returns (bytes32) {
         return _receiptFragments[from][to];
@@ -166,6 +174,15 @@ contract BuckNet is IERC20, IERC20Metadata {
         poolInsurer[pool] = msg.sender;
         insurerPool[msg.sender] = pool;
         emit InsurerPoolSet(msg.sender, pool);
+    }
+
+    /// @notice The configured coordinator opts in after its own one-shot
+    ///         setup. Once enabled, a failed checkpoint reverts issuance.
+    function enableJubileeReserveHook() external nonReentrant {
+        if (msg.sender != jubilee) revert NotJubilee();
+        if (jubileeReserveHookEnabled) revert AlreadyEnabled();
+        jubileeReserveHookEnabled = true;
+        emit JubileeReserveHookEnabled();
     }
 
     /// @notice Activate coverage and issue BUCK against one selected NFT.
@@ -217,6 +234,7 @@ contract BuckNet is IERC20, IERC20Metadata {
             _transfer(msg.sender, pool, premium);
         }
         emit FacilityIssued(msg.sender, tokenId, coverage, principal, premium, pool);
+        if (jubileeReserveHookEnabled) IBuckNetReserveHook(jubilee).checkpointIssuance();
     }
 
     /// @notice Authorize one exact facility reduction with a net-relief floor.

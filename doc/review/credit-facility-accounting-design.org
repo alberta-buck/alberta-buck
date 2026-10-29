@@ -242,26 +242,28 @@ one simple way to realize returns gradually as positions are withdrawn, with
 no separate EMA state. Price impact, partial exits, different facility ages,
 rounding, capped claims, and adversarial ordering still need testing.
 
-The administrative 10% target can independently control cash retained for
-operations and the proposed gradual investment of surplus. Its investment
-schedule, minimum threshold and handling of sale-induced cash spikes are not
-implemented here. A reserve target is a liquidity control; cash sitting above
-that target is not by itself proof that the portfolio earned a return.
+The administrative 10% target independently controls cash retained for
+operations and gradual investment of surplus. The isolated =JubileeFund=
+prototype implements the schedule below, but it is not deployed or yet
+validated with a leveraged basket. A reserve target is a liquidity control;
+cash sitting above that target is not by itself proof of portfolio return.
 
-For an implementable starting point, keep a last-checkpoint time, the last
+Keep a last-checkpoint time, the last
 observed excess cash E = max(0, C - 0.1*B), and an uninvested deployment
 budget P. For an interval dt in which the observed excess was unchanged, let
 P += (E - P)*(1 - 2^(-dt/day)). Checkpoint the old E before recognizing a
-cash or benchmark change; then cap P at the new excess. If B and P are positive
-and P is at least 1% of the current reserve target, deposit P into the same
-receipt, subtract it from P and cash, and record the resulting excess. In a constant interval this
+cash or benchmark change; then cap P at the new excess. If P can fund at least
+1% of the current reserve target, deposit it into the same receipt, subtract
+the actual net outflow from P, and record the resulting excess. In a constant interval this
 deploys half the outstanding gap in a day and accumulates sub-threshold
 budgets rather than forgetting them. Increases seen only at a later lazy
 checkpoint are not treated as if they were present throughout the interval.
-This is a conservative discrete approximation while cash and targets evolve;
-its treatment of continuous accrual, caps, rounding, and scheduled keepers
-requires simulation. Nothing invests automatically in an inactive contract:
-a mint, other authorized action, or keeper must call the checkpoint.
+This is a discrete approximation while cash and targets evolve. An unobserved
+decrease and subsequent increase can mature the budget faster than continuous
+observation would, though current excess always caps spending. A mint
+checkpoints without trading while Buck is locked; an authorized keeper must
+execute a bounded investment separately. Governance can explicitly override
+the schedule. More varied keeper timing and market simulations remain needed.
 
 ** Renewal in place
 

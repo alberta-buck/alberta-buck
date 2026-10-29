@@ -7,6 +7,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BuckNet} from "./BuckNet.sol";
 import {BuckCredit} from "./BuckCredit.sol";
 import {IBuckBasketPosition} from "./basket/IBuckBasketPosition.sol";
+import {JubileeReserveMath} from "./lib/JubileeReserveMath.sol";
 
 interface IJubileeBasket is IBuckBasketPosition {
     function buck() external view returns (address);
@@ -26,16 +27,25 @@ interface IInsurerRefundLiquidity {
 ///      their constructor cycle. This coordinator owns one managed receipt,
 ///      pays the selected pro-rata cash plus actual net sale proceeds, and
 ///      never substitutes the target relief for available value. It requires
-///      a basket implementing IBuckBasketPosition and is not a production
-///      deployment until the real basket supports BuckNet accounting.
+///      a basket implementing IBuckBasketPosition. Leveraged basket behavior,
+///      in-kind TOKEN conversion and real insurer liquidity are not complete;
+///      this is not a production deployment.
 contract JubileeFund is IERC721Receiver {
     uint256 private constant Q = 1e36;
+    uint256 private constant BP = 10_000;
+    uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
     bytes4 private constant UNDERWATER = bytes4(keccak256("Underwater()"));
 
     address public immutable governance;
+    address public investmentKeeper;
     BuckNet public token;
     IJubileeBasket public basket;
     uint256 public positionId;
+    uint16 public reserveTargetBp = 1000;       // 10% of the capped target
+    uint16 public investmentThresholdBp = 100;   // 1% of the reserve target
+    uint64 public reserveCheckpoint;
+    uint256 public observedExcessScaled;
+    uint256 public reserveBudgetScaled;
     bool private transient _entered;
     bool private transient _acceptingReceipt;
     uint256 private transient _receivedReceipt;
@@ -47,6 +57,9 @@ contract JubileeFund is IERC721Receiver {
                        uint256 remainingShares, uint256 proceedsScaled, bool underwater);
     event ReliefPaid(address indexed owner, uint256 indexed tokenId, uint256 principal,
                      uint256 selectedSeconds, uint256 totalSeconds, uint256 reliefScaled, uint256 refund);
+    event ReserveCheckpointed(uint256 targetScaled, uint256 excessScaled, uint256 budgetScaled);
+    event ReserveParametersSet(uint16 targetBp, uint16 thresholdBp);
+    event InvestmentKeeperSet(address indexed keeper);
 
     error NotGovernance();
     error Reentrant();
@@ -62,6 +75,11 @@ contract JubileeFund is IERC721Receiver {
     error InconsistentPosition();
     error UnexpectedCashDecrease();
     error InsufficientPoolLiquidity();
+    error NotToken();
+    error ReserveBelowThreshold();
+    error ReserveBudgetExceeded();
+    error TimestampOverflow();
+    error NotInvestmentKeeper();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -94,12 +112,15 @@ contract JubileeFund is IERC721Receiver {
         token = token_;
         basket = basket_;
         token_.approve(address(basket_), type(uint256).max);
+        reserveCheckpoint = _now();
+        _checkpointReserve();
+        token_.enableJubileeReserveHook();
         emit Configured(address(token_), address(basket_), basket_.receipt());
     }
 
-    /// @notice Invest an explicitly bounded full-value amount in the same
-    ///         basket receipt. Governance supplies slippage limits until the
-    ///         separately specified reserve schedule is implemented.
+    /// @notice Governance override for an explicitly bounded investment in
+    ///         the same receipt. Scheduled investment is the normal path;
+    ///         this override may intentionally spend into the reserve.
     /// @param netAmount Minimum net BUCK to send, in raw external units.
     /// @param maxNominal Maximum nominal Carrying BUCK to transfer.
     /// @param minReceived Minimum BUCK credited to basket equity.
@@ -108,6 +129,52 @@ contract JubileeFund is IERC721Receiver {
         external configured nonReentrant returns (uint256 id, uint256 nominal, uint256 sharesAdded)
     {
         if (msg.sender != governance) revert NotGovernance();
+        _checkpointReserve();
+        uint256 spent;
+        (id, nominal, sharesAdded, spent) = _invest(netAmount, maxNominal, minReceived, minShares);
+        _spendBudget(spent);
+        _checkpointReserve();
+    }
+
+    /// @notice Invest the matured budget once it reaches 1% of the target
+    ///         reserve by default. Governance or its appointed keeper bounds
+    ///         nominal outflow and slippage. If nothing is large enough, the
+    ///         checkpoint is saved and the function returns three zeroes.
+    function investScheduled(uint256 maxNominal, uint256 minReceived, uint256 minShares)
+        external configured nonReentrant returns (uint256 id, uint256 nominal, uint256 sharesAdded)
+    {
+        if (msg.sender != governance && msg.sender != investmentKeeper) revert NotInvestmentKeeper();
+        (uint256 target, uint256 excess, uint256 budget) = _checkpointReserve();
+        uint256 threshold = Math.mulDiv(target, investmentThresholdBp, BP, Math.Rounding.Ceil);
+        if (budget < threshold || budget < Q) return (0, 0, 0);
+        uint256 amount = budget / Q;
+        uint256 maxPayable = token.maxFundNetPayout();
+        if (amount > maxPayable) amount = maxPayable;
+        if (amount == 0) return (0, 0, 0);
+        // A whole nominal Carrying transfer can deliver slightly more than
+        // the requested whole-net amount. Leave that rounding inside both
+        // the matured budget and the current excess, not the cash reserve.
+        (uint256 gross, uint256 net) = token.fundBalancesScaled();
+        uint256 quotedNominal = token.fundNominalForNet(amount);
+        uint256 exactNet = Math.mulDiv(net, quotedNominal * Q, gross);
+        if (exactNet > budget || exactNet > excess) {
+            amount--;
+            if (amount == 0) return (0, 0, 0);
+            quotedNominal = token.fundNominalForNet(amount);
+            exactNet = Math.mulDiv(net, quotedNominal * Q, gross);
+        }
+        if (exactNet < threshold) return (0, 0, 0);
+        uint256 spent;
+        (id, nominal, sharesAdded, spent) = _invest(amount, maxNominal, minReceived, minShares);
+        if (spent > budget || spent > excess) revert ReserveBudgetExceeded();
+        if (spent < threshold) revert ReserveBelowThreshold();
+        _spendBudget(spent);
+        _checkpointReserve();
+    }
+
+    function _invest(uint256 netAmount, uint256 maxNominal, uint256 minReceived, uint256 minShares)
+        private returns (uint256 id, uint256 nominal, uint256 sharesAdded, uint256 spent)
+    {
         if (netAmount == 0) revert BadAmount();
         nominal = token.fundNominalForNet(netAmount);
         if (nominal > maxNominal) revert NominalLimit();
@@ -143,7 +210,8 @@ contract JubileeFund is IERC721Receiver {
         if (creditedActual < minReceived || sharesAdded < minShares) revert MinReceived();
         (, uint256 afterNet) = token.fundBalancesScaled();
         if (afterNet > beforeNet || beforeNet - afterNet < netAmount * Q) revert InconsistentPosition();
-        emit Invested(id, nominal, beforeNet - afterNet, creditedActual, sharesAdded);
+        spent = beforeNet - afterNet;
+        emit Invested(id, nominal, spent, creditedActual, sharesAdded);
     }
 
     /// @notice Reduce the caller's authorized facility after selling its
@@ -159,6 +227,7 @@ contract JubileeFund is IERC721Receiver {
         if (principal == 0 || principal != authorized || block.timestamp > deadline) revert BadAuthorization();
         (uint256 priorPrincipal,) = credit.issuanceOf(tokenId);
         if (principal > priorPrincipal) revert BadAmount();
+        _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
         uint256 proceeds = _sellProportion(selected, total, cashBefore);
@@ -167,7 +236,71 @@ contract JubileeFund is IERC721Receiver {
         reliefScaled = proceeds >= cap || cashShare >= cap - proceeds ? cap : cashShare + proceeds;
         _prepareRefund(tokenId, principal, priorPrincipal);
         premiumRefund = token.settleFromJubilee(msg.sender, tokenId, principal, reliefScaled);
+        _checkpointReserve();
         emit ReliefPaid(msg.sender, tokenId, principal, selected, total, reliefScaled, premiumRefund);
+    }
+
+    /// @notice Observe current excess and age only the excess seen at the
+    ///         previous checkpoint. Anyone may keep the budget up to date.
+    function checkpointReserve() external configured nonReentrant returns (uint256, uint256, uint256) {
+        return _checkpointReserve();
+    }
+
+    /// @notice BuckNet invokes this after each issuance; it only checkpoints
+    ///         views and never trades while the token's reentrancy lock is held.
+    function checkpointIssuance() external configured {
+        if (msg.sender != address(token)) revert NotToken();
+        // Fund actions checkpoint before and after their own nested calls.
+        if (_entered) return;
+        _entered = true;
+        _checkpointReserve();
+        _entered = false;
+    }
+
+    function setReserveParameters(uint16 targetBp, uint16 thresholdBp) external configured nonReentrant {
+        if (msg.sender != governance) revert NotGovernance();
+        if (targetBp > BP || thresholdBp > BP) revert BadAmount();
+        _checkpointReserve();
+        reserveTargetBp = targetBp;
+        investmentThresholdBp = thresholdBp;
+        _checkpointReserve();
+        emit ReserveParametersSet(targetBp, thresholdBp);
+    }
+
+    /// @notice Zero revokes the keeper. Only governance retains the manual
+    ///         override and the ability to change reserve parameters.
+    function setInvestmentKeeper(address keeper) external configured nonReentrant {
+        if (msg.sender != governance) revert NotGovernance();
+        investmentKeeper = keeper;
+        emit InvestmentKeeperSet(keeper);
+    }
+
+    /// @notice The view includes elapsed budget growth without treating newly
+    ///         observed cash as though it existed throughout that interval.
+    function previewReserve() public view configured returns (uint256 target, uint256 excess, uint256 budget) {
+        target = Math.mulDiv(token.claimSeconds(), Q * uint256(reserveTargetBp), RELIEF_SECONDS * BP);
+        (, uint256 cash) = token.fundBalancesScaled();
+        excess = cash > target ? cash - target : 0;
+        budget = JubileeReserveMath.accrue(reserveBudgetScaled, observedExcessScaled,
+                                           block.timestamp - uint256(reserveCheckpoint));
+        if (budget > excess) budget = excess;
+    }
+
+    function _checkpointReserve() private returns (uint256 target, uint256 excess, uint256 budget) {
+        (target, excess, budget) = previewReserve();
+        reserveCheckpoint = _now();
+        observedExcessScaled = excess;
+        reserveBudgetScaled = budget;
+        emit ReserveCheckpointed(target, excess, budget);
+    }
+
+    function _spendBudget(uint256 amount) private {
+        reserveBudgetScaled = amount >= reserveBudgetScaled ? 0 : reserveBudgetScaled - amount;
+    }
+
+    function _now() private view returns (uint64) {
+        if (block.timestamp > type(uint64).max) revert TimestampOverflow();
+        return uint64(block.timestamp);
     }
 
     function _sellProportion(uint256 selected, uint256 total, uint256 cashBefore) private returns (uint256 proceeds) {

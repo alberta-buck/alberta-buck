@@ -178,8 +178,9 @@ must not be disturbed.
 - [ ] Connect the capped aggregate benchmark and specify final payout
   rounding, reserve investment schedule and threshold; verify fresh inflows
   and keeper timing.
-- [X] Implement and fuzz-test the isolated one-day half-life budget arithmetic;
-  connect it to observed fund cash, benchmark, mint and keeper actions next.
+- [X] Implement and fuzz-test the one-day half-life budget against observed
+  fund cash and capped claims. Checkpoint on issuance and fund actions; let a
+  trusted keeper invest after the configured minimum with price bounds.
 - [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
   fund-to-basket interactions, in-kind/partial/zero exits and transaction
   rollback. Do not relax low-K constraints.
@@ -211,7 +212,8 @@ must not be disturbed.
 | 2026-10-29 | 4a | Experimental =JubileeFund= applies proportional relief and manages one receipt with real =BuckNet= and a controllable mock basket. Seventeen fund, 17 ledger and 14 token tests passed; the ledger includes a 256-case nominal gross-up fuzz test. | =21ba6d2c= |
 | 2026-10-29 | 4b | The real basket has an opt-in cash-only net-token mode. Five integration, 29 legacy equity, 35 director and 17 fund tests passed. Equity runtime is 23,114 bytes. This mode cannot open basket credit. | =bb1a2aa5= |
 | 2026-10-29 | 4c | Six real-basket integration tests passed, including a partially in-kind Jubilee redemption through a real Uniswap V3 pool with Carrying BUCK. The fund counts actual net BUCK only; its received TOKEN still needs a conversion path. | =d815b8a4= |
-| 2026-10-29 | 4d | Documented a circular mark between a leveraged basket's relief claim and the fund's basket shares. Standalone half-life budget math passes six tests, including two 256-case fuzz tests; it is not connected to the fund yet. | This commit: reserve math and cross-holding analysis |
+| 2026-10-29 | 4d | Documented a circular mark between a leveraged basket's relief claim and the fund's basket shares. Standalone half-life budget math passes six tests, including two 256-case fuzz tests. | =3d57d046= |
+| 2026-10-29 | 4e | Integrated the reserve budget and mint checkpoints. Twenty-eight fund tests pass, including 256 fuzzed reserve-bound cases, permissions, no-op threshold checkpoints and atomic failures; six real-basket and 14 token integration tests pass. BuckNet runtime is 18,725 bytes; fund runtime is 10,178 bytes. | This commit: reserve scheduling |
 
 * Open implementation constraints
 
@@ -259,8 +261,18 @@ the new token. One real-AMM in-kind exit is tested in the cash-only mode; more
 market and multi-asset cases remain. Its mode cannot be enabled
 after shares or credit exist. In-kind TOKEN received from a
 partial exit is currently held by the fund but cannot yet be converted into
-BUCK; it is not counted as cash relief. Governance currently authorizes each
-investment manually; the half-distance-per-day reserve schedule is pending.
+BUCK; it is not counted as cash relief. The reserve controller defaults to 10%
+of capped target relief, accumulates a budget with a one-day half-life and
+requires a transaction worth at least 1% of that target. A configured keeper
+or governance performs scheduled trades with caller-supplied slippage bounds;
+governance also has an explicit manual override. A keeper must be trusted to
+set appropriate bounds, or a future production deployment must enforce a price
+policy. Issuance checkpoints the budget without trading inside Buck's lock;
+keepers must still execute investments. Newly observed surplus is not
+backdated, and the budget is capped by current excess. This is a discrete
+observation policy, not an exact continuous integral: an unobserved decrease
+and later increase in excess can mature budget earlier than a continuously
+observed controller. Fund actions checkpoint on both sides of their changes.
 The prototype has no renewal API, registry-mode conversion, deployment
 integration, or supported migration. Its internal fractional
 retirement can require integral ERC-20 burn events to be rounded; the exact

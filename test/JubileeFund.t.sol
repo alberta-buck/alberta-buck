@@ -437,4 +437,213 @@ contract JubileeFundTest is Test {
         vm.expectRevert(JubileeFund.UnexpectedReceipt.selector);
         fund.onERC721Received(address(basket), address(0), 1, "");
     }
+
+    function test_issuanceCheckpointDoesNotBackdateFreshlyObservedExcess() public {
+        _credit(ALICE, 1000e6, 0);
+        assertTrue(buck.jubileeReserveHookEnabled());
+        vm.warp(t0 + YEAR);
+        _credit(BOB, 1000e6, 0); // BuckNet observes the first year's excess now.
+        (uint256 target, uint256 excess, uint256 budget) = fund.previewReserve();
+        assertEq(target, 2e6 * Q); // 10% of 20 BUCK in capped target relief.
+        assertGt(excess, 0);
+        assertEq(budget, 0);
+        assertEq(fund.reserveCheckpoint(), block.timestamp);
+
+        vm.warp(block.timestamp + 1 days);
+        (,, budget) = fund.previewReserve();
+        assertApproxEqAbs(budget, excess / 2, 1e14);
+    }
+
+    function test_failedIssuanceCheckpointRollsBackMintAndNftActivation() public {
+        vm.prank(INSURER);
+        uint256 id = credit.createCredit(ALICE, 0, 100e6, 100e6,
+                                         BuckCredit.DepreciationType.NONE, 0, 0, 0);
+        vm.mockCallRevert(address(fund), abi.encodeWithSelector(fund.checkpointIssuance.selector),
+                          abi.encodeWithSignature("Error(string)", "checkpoint failed"));
+        vm.expectRevert(abi.encodeWithSignature("Error(string)", "checkpoint failed"));
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        assertEq(buck.totalIssued(), 0);
+        (, uint256 active,) = credit.creditInfo(id);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(active, 0);
+        assertEq(principal, 0);
+    }
+
+    function test_scheduleWaitsForThresholdAndInvestsHalfTheGap() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        (uint256 target, uint256 excess,) = fund.checkpointReserve();
+        assertEq(target, 2e6 * Q);
+        assertGt(excess, target);
+        vm.prank(GOV);
+        (uint256 noId, uint256 noNominal, uint256 noShares) = fund.investScheduled(type(uint256).max, 0, 1);
+        assertEq(noId, 0);
+        assertEq(noNominal, 0);
+        assertEq(noShares, 0);
+
+        vm.warp(t0 + YEAR + 1 days);
+        (uint256 newTarget, uint256 newExcess, uint256 budget) = fund.previewReserve();
+        assertApproxEqAbs(budget, excess / 2, 1e14);
+        (, uint256 beforeCash) = buck.fundBalancesScaled();
+        vm.prank(GOV);
+        (uint256 id,, uint256 shares) = fund.investScheduled(type(uint256).max, 0, 1);
+        (, uint256 afterCash) = buck.fundBalancesScaled();
+        uint256 spent = beforeCash - afterCash;
+        assertGt(shares, 0);
+        assertLe(spent, budget);
+        assertLe(spent, newExcess);
+        assertGe(spent, newTarget / 100);
+        assertEq(fund.reserveBudgetScaled(), budget - spent);
+        assertEq(fund.positionId(), id);
+
+        uint256 remainingExcess = fund.observedExcessScaled();
+        uint256 remainingBudget = fund.reserveBudgetScaled();
+        vm.warp(block.timestamp + 1 days);
+        (,, uint256 nextBudget) = fund.previewReserve();
+        assertApproxEqAbs(nextBudget, (remainingExcess + remainingBudget) / 2, 1e14);
+        vm.prank(GOV);
+        (uint256 nextId,, uint256 moreShares) = fund.investScheduled(type(uint256).max, 0, 1);
+        assertEq(nextId, id);
+        assertGt(moreShares, 0);
+    }
+
+    function test_newDonationOnlyMaturesAfterItIsObserved() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        _credit(BOB, 1000e6, 0);
+        (, uint256 oldExcess,) = fund.previewReserve();
+        vm.prank(BOB);
+        buck.transfer(address(fund), 10e6);
+        vm.warp(block.timestamp + 1 days);
+        (, uint256 newExcess, uint256 budget) = fund.previewReserve();
+        assertGt(newExcess, oldExcess + 9e6 * Q);
+        assertApproxEqAbs(budget, oldExcess / 2, 1e14);
+        fund.checkpointReserve();
+        assertEq(fund.observedExcessScaled(), newExcess);
+    }
+
+    function test_belowThresholdAttemptSavesCheckpointAndMaturingBudget() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        // The first attempt observes the newly accumulated surplus but has
+        // no matured budget. It must not roll the observation back.
+        vm.prank(GOV);
+        (uint256 id,,) = fund.investScheduled(type(uint256).max, 0, 1);
+        assertEq(id, 0);
+        assertGt(fund.observedExcessScaled(), 0);
+        vm.warp(block.timestamp + 1 seconds);
+        vm.prank(GOV);
+        (id,,) = fund.investScheduled(type(uint256).max, 0, 1);
+        assertEq(id, 0);
+        assertGt(fund.reserveBudgetScaled(), 0);
+        assertEq(fund.reserveCheckpoint(), block.timestamp);
+    }
+
+    function test_failedScheduledInvestmentRollsBackItsBudgetCheckpoint() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        uint256 oldCheckpoint = fund.reserveCheckpoint();
+        vm.warp(block.timestamp + 1 days);
+        (,, uint256 budget) = fund.previewReserve();
+        (, uint256 cash) = buck.fundBalancesScaled();
+        vm.expectRevert();
+        vm.prank(GOV);
+        fund.investScheduled(type(uint256).max, 0, type(uint128).max);
+        assertEq(fund.reserveCheckpoint(), oldCheckpoint);
+        (,, uint256 afterBudget) = fund.previewReserve();
+        (, uint256 afterCash) = buck.fundBalancesScaled();
+        assertEq(afterBudget, budget);
+        assertEq(afterCash, cash);
+        assertEq(fund.positionId(), 0);
+    }
+
+    function test_parameterChangesCapBudgetAndDoNotBackdateNewExcess() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        vm.warp(block.timestamp + 1 days);
+        (,, uint256 matured) = fund.previewReserve();
+        assertGt(matured, 0);
+        vm.prank(GOV);
+        fund.setReserveParameters(10_000, 100);
+        (, uint256 excess, uint256 budget) = fund.previewReserve();
+        assertEq(excess, 0);
+        assertEq(budget, 0);
+        vm.prank(GOV);
+        fund.setReserveParameters(1000, 100);
+        (, excess, budget) = fund.previewReserve();
+        assertGt(excess, 0);
+        assertEq(budget, 0);
+    }
+
+    function test_reductionCheckpointsTheNewCashAndClaimBenchmark() public {
+        uint256 a = _credit(ALICE, 100e6, 0);
+        _credit(BOB, 100e6, 0);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        vm.warp(block.timestamp + 1 days);
+        _authorize(ALICE, a, 50e6, 0);
+        vm.prank(ALICE);
+        fund.reduce(a, 50e6);
+        (, uint256 excess, uint256 budget) = fund.previewReserve();
+        assertEq(fund.reserveCheckpoint(), block.timestamp);
+        assertEq(fund.observedExcessScaled(), excess);
+        assertLe(budget, excess);
+    }
+
+    function test_reservePermissionsAndScheduleBoundsAreEnforced() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(JubileeFund.NotInvestmentKeeper.selector);
+        vm.prank(ALICE);
+        fund.investScheduled(type(uint256).max, 0, 1);
+        vm.expectRevert(JubileeFund.NotToken.selector);
+        fund.checkpointIssuance();
+        vm.expectRevert(BuckNet.NotJubilee.selector);
+        buck.enableJubileeReserveHook();
+        vm.expectRevert(JubileeFund.BadAmount.selector);
+        vm.prank(GOV);
+        fund.setReserveParameters(10_001, 100);
+    }
+
+    function test_governanceCanAuthorizeAndRevokeAnInvestmentKeeper() public {
+        _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(GOV);
+        fund.setInvestmentKeeper(BOB);
+        vm.prank(BOB);
+        (uint256 id,,) = fund.investScheduled(type(uint256).max, 0, 1);
+        assertGt(id, 0);
+        vm.expectRevert(JubileeFund.NotGovernance.selector);
+        vm.prank(BOB);
+        fund.invest(1, type(uint256).max, 0, 1);
+        vm.prank(GOV);
+        fund.setInvestmentKeeper(address(0));
+        vm.expectRevert(JubileeFund.NotInvestmentKeeper.selector);
+        vm.prank(BOB);
+        fund.investScheduled(type(uint256).max, 0, 1);
+    }
+
+    function testFuzz_scheduledInvestmentNeverSpendsTheTargetReserve(uint64 principal_, uint8 days_) public {
+        uint256 principal = bound(principal_, 100e6, 1e13);
+        uint256 elapsed = bound(days_, 1, 30) * 1 days;
+        _credit(ALICE, principal, 0);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        vm.warp(block.timestamp + elapsed);
+        (uint256 target, uint256 excess, uint256 budget) = fund.previewReserve();
+        (, uint256 beforeCash) = buck.fundBalancesScaled();
+        vm.prank(GOV);
+        fund.investScheduled(type(uint256).max, 0, 1);
+        (, uint256 afterCash) = buck.fundBalancesScaled();
+        assertLe(beforeCash - afterCash, budget);
+        assertLe(beforeCash - afterCash, excess);
+        assertGe(afterCash, target);
+    }
 }
