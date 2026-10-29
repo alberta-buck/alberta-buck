@@ -26,6 +26,10 @@ entry points. Targeted examples:
 make nix-venv-demurrage-test
 make nix-build-uniswap-artifacts
 make nix-match-BuckBasketEquityTest
+make nix-match-NetDemurrageMathTest
+make nix-match-BuckLedgerTest
+make nix-match-BuckCredit
+make nix-match-JubileeClaimsTest
 make nix-doc-alberta-buck-demurrage
 # Later, when compatibility is restored:
 make nix-test
@@ -65,9 +69,11 @@ must not be disturbed.
 - [ ] Specify exact rounding, 50-year cap, per-facility partial retirement,
   total issuance, fee transfer/settlement, and migration invariants against an
   independent high-precision reference before contract integration.
-- [ ] Resolve an efficient aggregate benchmark for separately capped NFT
-  claims; a global uncapped BUCK-seconds counter is not equivalent after 50
-  years. Do not silently claim exactness or enumerate unbounded owners.
+- [X] Prototype an exact aggregate benchmark for separately capped NFT
+  claimable seconds without enumerating all owners on each operation.
+- [ ] Integrate and stress-test bounded maturity processing, keeper liveness,
+  per-NFT atomic synchronization, and final payout rounding; the benchmark
+  library must never be trusted unless its host authenticates updates.
 - [ ] Decide explicit semantics for Carrying facility owners, NFT transfers,
   and any existing delegated demurrage feature; preserve capabilities unless
   their removal is separately agreed and replacement coverage is demonstrated.
@@ -153,8 +159,9 @@ must not be disturbed.
 - [ ] Implement the external Carrying manager with one basket receipt and the
   agreed proportional payout. Bound outputs to actual cash and sale proceeds;
   gross up Carrying payout without double-crediting fund self-demurrage.
-- [ ] Define exact capped aggregate benchmark and rounding, plus the reserve
-  investment schedule and threshold; verify fresh inflows and keeper timing.
+- [ ] Connect the capped aggregate benchmark and specify final payout
+  rounding, reserve investment schedule and threshold; verify fresh inflows
+  and keeper timing.
 - [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
   fund-to-basket interactions, in-kind/partial/zero exits and transaction
   rollback. Do not relax low-K constraints.
@@ -177,7 +184,8 @@ must not be disturbed.
 | 2026-10-29 | 3a | Standalone =NetDemurrageMath=: 10 Foundry tests passed, including two 256-run fuzz tests, independent Decimal vectors, 4,000/8,000-year bounds and 365 versus one checkpoint. Not integrated into Buck. | =35146571= |
 | 2026-10-29 | 3b | BuckCredit now has restricted per-NFT issuance/age/reduction/renewal hooks. All 65 BuckCredit tests pass; legacy Buck does not call them yet. BuckCredit runtime is 23,306 bytes, leaving 1,270 bytes before the EVM deployment limit. | =6cbee7dd= |
 | 2026-10-29 | 3c | Standalone =BuckLedger= passes 16 Foundry tests, including 256-run mixed-transfer conservation fuzz and a 3-raw-unit 50-year fractional settlement. No production token uses it yet. | =271ca437= |
-| 2026-10-29 | 3d | Cap a facility's claimable age before new issuance, keeping gross age separate in the Python reference. Reference: 76 tests; BuckCredit: 66 tests; BuckCredit runtime 23,414 bytes. Average age within each NFT is an explicit policy choice. | This commit: prevent retroactive relief |
+| 2026-10-29 | 3d | Cap a facility's claimable age before new issuance, keeping gross age separate in the Python reference. Reference: 76 tests; BuckCredit: 66 tests; BuckCredit runtime 23,414 bytes. Average age within each NFT is an explicit policy choice. | =2cd8fba7= |
+| 2026-10-29 | 3e | Standalone =JubileeClaims= maintains exact capped claimable seconds with bounded heap processing; 9 tests passed, including two 256-run fuzz tests. For 64 simultaneous maturities, processing eight used at most 328,483 gas. Not integrated. | This commit: capped claims benchmark |
 
 * Open implementation constraints
 
@@ -208,6 +216,15 @@ The new NFT book is intentionally not authoritative for legacy Buck activity;
 minting and repayment are not migrated until token and fund settlement can
 call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
 further logic needs size checks or extraction instead of assuming it will fit.
+
+The claim benchmark retains BUCK-seconds precision and rounds the selected
+relief only at settlement; it is not the sum of individually rounded raw-unit
+claims. Matured entries must be processed in bounded transactions before an
+exact view or change; otherwise they revert. A permissionless wrapper, caller
+incentives, front-running, large-population gas, and coordination with a real
+fund sale all need explicit integration tests. A quiet or adversarially large
+backlog can delay settlement until keepers process it; no assumption that all
+old facilities can be swept in one block is made.
 
 The standalone ledger stores fractional net values at =1e36= units per BUCK
 raw unit. It separately tracks the fund's gross Carrying amount and net value,

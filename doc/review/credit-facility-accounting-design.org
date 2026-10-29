@@ -326,11 +326,25 @@ nominal and cannot simply be summed to compute economic net supply.
 
 The reference sums =min(P_i, r*S_i)= across NFTs for its redemption benchmark.
 A global BUCK-seconds counter alone can track the *uncapped* sum in O(1), but
-not generally the sum of separately capped claims after 50 years. Maturity
-buckets, another index, or accepting a different benchmark require explicit
-tradeoffs. Relief above the nominal target can also make gross accrual minus
-actual payments negative, so cumulative full-width inflow and outflow counters
-need guarded arithmetic. The target reserve's responsiveness, sale frequency,
+not generally the sum of separately capped claims after 50 years. The standalone
+=JubileeClaims= library now tracks the exact sum of capped claimable
+BUCK-seconds: its slope is the total principal of unsaturated positions, and a
+min-heap records each facility's next saturation. An update is O(log N). The
+chosen and total BUCK-seconds form the payout ratio before rounding to external
+BUCK units; this avoids separately rounding every NFT's fractional claim.
+
+Maturities are processed in bounded, permissionless batches. Exact reads and
+position changes revert while a maturity backlog remains, rather than using an
+overstated denominator. A keeper or any caller must clear the backlog before
+those operations can proceed; this liveness and gas tradeoff must be addressed
+in the fund integration. In a 64-facility simultaneous-maturity test, a batch
+of eight cost at most 328,483 gas in this environment; larger and adversarial
+workloads still need measurement. The benchmark library is not yet connected
+to Buck or Jubilee.
+
+Relief above the nominal target can also make gross accrual minus actual
+payments negative, so cumulative full-width inflow and outflow counters need
+guarded arithmetic. The target reserve's responsiveness, sale frequency,
 minimum transaction size, ordering effects, and possible deliberate gaming
 also require simulation.
 
