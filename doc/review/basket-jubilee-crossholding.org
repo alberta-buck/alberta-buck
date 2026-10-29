@@ -1,0 +1,73 @@
+#+TITLE: Basket credit and Jubilee cross-holdings
+#+DATE: 2026-10-29
+#+OPTIONS: ^:nil toc:2
+
+* Why this needs separate treatment
+
+The fund's receipt is a claim on the basket. If the basket issues its own BUCK
+credit, the basket also has a claim on the fund when it reduces that facility.
+The fund sells the selected proportion of its basket position *before* it pays
+actual relief. Thus a basket share price that includes the expected value of
+that relief depends on itself. The current cash-only net-token basket does not
+open credit, so it does not experience this cycle.
+
+The existing economic reference models a fund-owned BUCK strategy whose mark
+is externally specified. It does not model this mutual ownership, liquidity,
+K, pool exit costs or the basket's own credit. Its five-year results are not a
+validation of any solution to this problem.
+
+* A deliberately simplified mark
+
+For a thought experiment with no fees, price movement, liquidity constraints
+or rounding, let:
+
+- =A= be the basket's net assets other than any Jubilee relief claim;
+- =P= be the basket facility's outstanding principal;
+- =C= be the fund's net BUCK cash;
+- =f= be the fund's fraction of the basket's shares;
+- =r= be this facility's fraction of the aggregate capped claim benchmark;
+- =E= be basket equity and =R= its actual full-reduction relief.
+
+If every fund-held share could be sold for its current mark, the proportional
+policy suggests =R = min(P, r * (C + f * E))=, while =E = max(0, A - P + R)=.
+These are simultaneous equations, not an instruction to mint or transfer BUCK
+based on the mark. The real basket's fee, realized sale, partial/in-kind exit,
+K checks and the fund's other investments make the real relation more complex.
+
+For an uncapped positive example, =A=180=, =P=100=, =C=20=, =f=1/2= and
+=r=1/4=. Then =E = (180 - 100 + (1/4)*20) / (1 - (1/4)*(1/2)) = 680/7=
+(about 97.142857), and =R=120/7= (about 17.142857). Counting only the cash
+share would mark the basket at 85 and omit the eventual share-sale proceeds.
+Counting =r= times a basket mark that already includes that claim, without
+solving the dependency, also gives an inconsistent price. When the assumptions
+hold, the external owners' value is =(1-f)*E + (1-r)*(C + f*E) = 100=,
+equal to =A - P + C=; the mutual claims have not created new value.
+
+At the extreme, =A=90=, =P=100=, =C=10= and =f=r=1=. Every =E= between 0 and
+90 satisfies the simplified equations. There is no unique price to obtain by
+plugging the basket mark into the fund mark. Actual redemption may also be
+blocked: selling the fund's shares out of a basket that is already short of K
+capacity must not be made safe merely by assuming the future relief was paid.
+This example is an accounting and liquidity warning, not a prediction that a
+real pool will follow the simplified mark or that any particular relief amount
+is payable.
+
+* Requirements for leveraged integration
+
+- Attribute principal and claim age to the basket's actual BuckCredit NFT;
+  receiving BUCK does not retire that principal. Explicitly issue only the
+  amount needed and settle reductions through the fund.
+- Specify what, if any, unrealized claim can enter deposit/exit pricing and the
+  credit mark. Do not count the target 2% as guaranteed actual relief. Test
+  entrance immediately before and after realization for dilution or windfalls.
+- Evaluate the mutual-holding case and prospective exits under real fees,
+  partial sales, TOKEN proceeds, zero marks and the 50-year claim cap. Avoid
+  relying on a singular or over-optimistic share-price fixed point.
+- Preserve the user's low-K rule: household and other outside debtors can buy
+  discounted BUCK and retire obligations, improving K; do not relax basket
+  exit or solvency checks to make an over-issued basket pay its exits.
+- Arrange the basket's own debt reduction outside its position lock, because
+  the fund may redeem a basket receipt before settling that debt. Protect both
+  the outer debt operation and the inner position operation from reentrancy and
+  require complete transaction rollback on any failure.
+- Do not present the cash-only prototype as leveraged or production-ready.

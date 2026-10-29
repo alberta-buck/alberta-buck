@@ -9,7 +9,8 @@ started from =291560c1= on =feature/net-demurrage-model=. Work in the isolated
 =.claude/worktrees/demurrage-contracts= checkout. Do not change the separate
 main checkout or rely on its uncommitted work. The accounting decisions and
 examples are in [[file:credit-facility-accounting-design.org][the facility accounting design]]; the token/pool audit is in
-[[file:net-demurrage-analysis.org][the earlier audit]]. This plan is an implementation checklist, not an assertion
+[[file:net-demurrage-analysis.org][the earlier audit]]. The [[file:basket-jubilee-crossholding.org][basket/Jubilee cross-holding note]] analyzes a
+new issue for leveraged basket credit. This plan is an implementation checklist, not an assertion
 that the existing deployed contracts follow the proposed rules.
 
 Commit each independently reviewable and validated milestone, recording its
@@ -33,6 +34,7 @@ make nix-match-JubileeClaimsTest
 make nix-match-BuckNetTest
 make nix-match-JubileeFundTest
 make nix-match-JubileeEquityIntegrationTest
+make nix-match-JubileeReserveMathTest
 make nix-doc-alberta-buck-demurrage
 # Later, when compatibility is restored:
 make nix-test
@@ -176,11 +178,16 @@ must not be disturbed.
 - [ ] Connect the capped aggregate benchmark and specify final payout
   rounding, reserve investment schedule and threshold; verify fresh inflows
   and keeper timing.
+- [X] Implement and fuzz-test the isolated one-day half-life budget arithmetic;
+  connect it to observed fund cash, benchmark, mint and keeper actions next.
 - [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
   fund-to-basket interactions, in-kind/partial/zero exits and transaction
   rollback. Do not relax low-K constraints.
 - [ ] Integrate and verify Buck, BuckCredit, Jubilee, basket and insurer
   contracts together; update deployment paths and interfaces.
+- [ ] Resolve and test how a leveraged basket prices its own Jubilee claim
+  when the fund holds basket shares, including circular marks, dilution,
+  actual redemption liquidity and guarded low-K behavior.
 - [ ] Update Rust and Python/JavaScript consumers and sandboxes; retire only
   duplicated code whose distinct coverage has a replacement.
 - [ ] Run relevant complete tests/builds and fresh five-year campaigns with
@@ -203,7 +210,8 @@ must not be disturbed.
 | 2026-10-29 | 3f | Experimental =BuckNet= connects the ledger, NFT records, capped claims, K, owner-approved reductions and insurer-specific pools. Fourteen tests pass, including 256 fuzzed idle-facility closures. Runtime: BuckNet 18,382 bytes, BuckCredit 23,490 bytes. | =11b07073= |
 | 2026-10-29 | 4a | Experimental =JubileeFund= applies proportional relief and manages one receipt with real =BuckNet= and a controllable mock basket. Seventeen fund, 17 ledger and 14 token tests passed; the ledger includes a 256-case nominal gross-up fuzz test. | =21ba6d2c= |
 | 2026-10-29 | 4b | The real basket has an opt-in cash-only net-token mode. Five integration, 29 legacy equity, 35 director and 17 fund tests passed. Equity runtime is 23,114 bytes. This mode cannot open basket credit. | =bb1a2aa5= |
-| 2026-10-29 | 4c | Six real-basket integration tests passed, including a partially in-kind Jubilee redemption through a real Uniswap V3 pool with Carrying BUCK. The fund counts actual net BUCK only; its received TOKEN still needs a conversion path. | This commit: real AMM in-kind test |
+| 2026-10-29 | 4c | Six real-basket integration tests passed, including a partially in-kind Jubilee redemption through a real Uniswap V3 pool with Carrying BUCK. The fund counts actual net BUCK only; its received TOKEN still needs a conversion path. | =d815b8a4= |
+| 2026-10-29 | 4d | Documented a circular mark between a leveraged basket's relief claim and the fund's basket shares. Standalone half-life budget math passes six tests, including two 256-case fuzz tests; it is not connected to the fund yet. | This commit: reserve math and cross-holding analysis |
 
 * Open implementation constraints
 
