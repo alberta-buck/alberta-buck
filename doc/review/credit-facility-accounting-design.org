@@ -153,16 +153,30 @@ must not silently transfer or destroy somebody's existing BUCK account.
 
 ** Jubilee and the single basket position
 
-Use a separate Carrying Jubilee manager. The existing =BuckBasketEquity=
-=deposit= always creates a receipt; =redeem(id, bp)= adjusts it partially but
-burns it when empty. A top-up operation can accept the manager's existing
-receipt ID, price new shares using *actual net* BUCK received, update its basis
-and return the same ID. A share-based reduction can return the ID, actual
-shares retired and proceeds; retaining an empty NFT is optional. Existing
-basis-point zero means full redemption, so a small rounded fraction must never
-be silently passed as zero. The earlier [[file:jubilee-single-position-design.org][single-position design]] records a real
-probe showing that the present basket prices an aged Carrying deposit at
-nominal rather than net value; fix that before top-ups can safely share it.
+Use a separate Carrying Jubilee manager. =BuckBasketEquity.deposit= creates a
+receipt, while =increasePosition= adds the same asset to an existing receipt
+and returns its ID, credited amount, and added shares. The equity basket now
+prices both paths using the amount actually credited to its net BUCK equity;
+an aged Carrying transfer is no longer priced at its nominal amount. Under the
+legacy token, that equity change can also reflect a change in an outstanding
+relief claim; the net-demurrage integration must revalidate this measurement.
+TOKEN deposits use the balance actually received. Shares and cost basis use a
+pooled average, and partial exits update the receipt's remaining basis and
+TOKEN principal. Deposits into a basket with existing shares but zero equity
+are rejected: its entry price is undefined, and minting one share per BUCK
+would give existing worthless shares a recapitalization windfall. A deliberate
+recapitalization policy remains separate work.
+
+=redeemShares= returns the actual BUCK paid, shares retired, and remaining
+shares. It returns the same ID while shares remain, or zero when the emptied
+receipt is burned. Zero shares reverts; it cannot trigger legacy =redeem(id,
+bp)=, where =bp == 0= means full redemption. In-kind TOKEN transfers are
+reported by the existing =PaidInKind= events; a recipient must measure its
+own net receipts if a TOKEN charges a transfer fee. An equity-less exit still
+reverts =Underwater=;
+the manager must treat failed or partial sales as such, not invent proceeds
+or remove unretired shares. The older [[file:jubilee-single-position-design.org][single-position design]] records the
+pre-fix probe that motivated the net-deposit correction.
 
 Reduction should be coordinated outside a locked Buck call, since the basket
 calls Buck and Buck has a reentrancy lock. Authorize the real holder, preserve

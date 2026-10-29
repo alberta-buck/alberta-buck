@@ -53,6 +53,9 @@ contract BuckBasketReceipt is ERC721 {
         _safeMint(to, id);
     }
 
+    /// @notice The ID the basket will assign to its next receipt.
+    function nextId() external view returns (uint256) { return _nextId; }
+
     function burn(uint256 id) external onlyBasket {
         _burn(id);
     }

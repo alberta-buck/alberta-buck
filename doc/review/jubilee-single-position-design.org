@@ -11,6 +11,12 @@ history. In particular, do not implement the signed-account and undrawn-credit
 claims below as the intended model. The basket receipt, net deposit, callback,
 and fund-checkpoint analysis remain useful with those corrections.
 
+The basket findings below describe the code before the implementation branch:
+=BuckBasketEquity= now has same-asset =increasePosition= and exact-share
+=redeemShares= entry points, and uses credited net equity for deposits. See
+the [[file:demurrage-implementation-plan.org][implementation checklist]] for current validation and outstanding
+manager, fixed-point, and contract integration work.
+
 This is a proposed design, not an implemented or audited contract. It follows
 [[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] and the available-relief reference in
 [[file:../../alberta_buck/sim/demurrage_reference.py][demurrage_reference.py]]. The intended behavior is net-balance demurrage,

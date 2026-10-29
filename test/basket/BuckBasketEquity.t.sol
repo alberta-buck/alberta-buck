@@ -35,10 +35,61 @@ contract EqToken is ERC20 {
     function mint(address to, uint256 amount) external { _mint(to, amount); }
 }
 
+contract EqFeeToken is EqToken {
+    constructor() EqToken("Fee TOKEN", "FEE", 18) {}
+    function _update(address from, address to, uint256 amount) internal override {
+        if (from != address(0) && to != address(0)) {
+            uint256 fee = amount / 100;
+            super._update(from, to, amount - fee);
+            super._update(from, address(0), fee);
+        } else {
+            super._update(from, to, amount);
+        }
+    }
+}
+
 /// @dev A depositor's code: a bound identity must be a contract, and the
 ///      receipt is a safe-minted ERC-721.
 contract EqHolder {
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+}
+
+/// @dev A receipt recipient that tries to mutate the basket from safeMint.
+contract EqReentrantHolder {
+    BuckBasketEquity public immutable basket;
+    IERC20 public immutable asset;
+    bool public depositBlocked;
+    bool public redeemBlocked;
+    bool public wheelBlocked;
+    bool public treasuryBlocked;
+    uint256 public observedShares;
+    uint256 public observedBasis;
+
+    constructor(BuckBasketEquity basket_, IERC20 asset_) {
+        basket = basket_;
+        asset = asset_;
+    }
+
+    function deposit(uint256 amount) external {
+        asset.approve(address(basket), type(uint256).max);
+        basket.deposit(address(asset), amount, 0);
+    }
+
+    function onERC721Received(address, address, uint256 id, bytes calldata) external returns (bytes4) {
+        (uint128 shares, uint128 basis) = basket.holdings(id);
+        observedShares = shares;
+        observedBasis = basis;
+        (bool ok,) = address(basket).call(abi.encodeWithSignature(
+            "deposit(address,uint256,uint256)", address(asset), 1, 0));
+        depositBlocked = !ok;
+        (ok,) = address(basket).call(abi.encodeWithSignature("redeem(uint256,uint256)", id, 1));
+        redeemBlocked = !ok;
+        (ok,) = address(basket).call(abi.encodeWithSelector(IBasketUpkeep.wheelStep.selector, 0, 0));
+        wheelBlocked = !ok;
+        (ok,) = address(basket).call(abi.encodeWithSignature("creditTreasury(uint256)", 1));
+        treasuryBlocked = !ok;
         return this.onERC721Received.selector;
     }
 }
@@ -283,6 +334,223 @@ contract BuckBasketEquityTest is Test {
         assertApproxEqRel(shares, 1000 * B * (1e18 - charge) / 1e18, 1e12);
     }
 
+    function test_increasePositionAddsSharesAndBasisToSameReceipt() public {
+        uint256 id = _deposit(alice, address(buck), 1000 * B);
+        (uint128 oldShares, uint128 oldBasis) = b.holdings(id);
+        uint256 oldTotal = b.totalShares();
+        vm.startPrank(alice);
+        buck.approve(address(b), 500 * B);
+        (uint256 returnedId, uint256 received, uint256 added) =
+            b.increasePosition(id, address(buck), 500 * B, 500 * B, 1);
+        vm.stopPrank();
+        (uint128 shares, uint128 basis) = b.holdings(id);
+        (uint256 principal, uint256 tokenPrincipal, address token,) = b.deposits(id);
+        assertEq(returnedId, id);
+        assertEq(received, 500 * B);
+        assertEq(shares, uint256(oldShares) + added);
+        assertEq(basis, uint256(oldBasis) + received);
+        assertEq(principal, basis);
+        assertEq(tokenPrincipal, 0);
+        assertEq(token, address(buck));
+        assertEq(b.totalShares(), oldTotal + added);
+        assertEq(b.receipt().balanceOf(alice), 1);
+        _books();
+    }
+
+    function test_increasePositionChecksOwnerAssetAndSlippage() public {
+        uint256 id = _deposit(alice, address(buck), 1000 * B);
+        (uint128 sharesBefore, uint128 basisBefore) = b.holdings(id);
+        vm.prank(bob);
+        vm.expectRevert(bytes4(keccak256("NotOwner()")));
+        b.increasePosition(id, address(buck), 100 * B, 0, 0);
+        vm.startPrank(alice);
+        vm.expectRevert(BuckBasketEquity.PositionAssetMismatch.selector);
+        b.increasePosition(id, address(tok[0]), 100e18, 0, 0);
+        buck.approve(address(b), 100 * B);
+        vm.expectRevert(bytes4(keccak256("MinOut()")));
+        b.increasePosition(id, address(buck), 100 * B, 101 * B, 0);
+        vm.expectRevert(bytes4(keccak256("MinOut()")));
+        b.increasePosition(id, address(buck), 100 * B, 0, type(uint256).max);
+        vm.stopPrank();
+        (uint128 sharesAfter, uint128 basisAfter) = b.holdings(id);
+        assertEq(sharesAfter, sharesBefore);
+        assertEq(basisAfter, basisBefore);
+        _books();
+    }
+
+    function test_transferredReceiptCanOnlyBeIncreasedByItsNewOwner() public {
+        uint256 id = _deposit(alice, address(buck), 1000 * B);
+        BuckBasketReceipt receipt = b.receipt();
+        vm.prank(alice);
+        receipt.transferFrom(alice, bob, id);
+        vm.prank(alice);
+        vm.expectRevert(bytes4(keccak256("NotOwner()")));
+        b.increasePosition(id, address(buck), 100 * B, 0, 0);
+        vm.startPrank(bob);
+        buck.approve(address(b), 100 * B);
+        (uint256 returnedId, uint256 received,) = b.increasePosition(id, address(buck), 100 * B, 100 * B, 0);
+        vm.stopPrank();
+        assertEq(returnedId, id);
+        assertEq(received, 100 * B);
+        assertEq(b.receipt().ownerOf(id), bob);
+        _books();
+    }
+
+    function test_carryingTopUpCreditsNetReceivedAndDoesNotDiluteOthers() public {
+        uint256 aliceId = _deposit(alice, address(buck), 1000 * B);
+        address carrying = address(new EqHolder());
+        _bind(carrying, true);
+        buck.transfer(carrying, 2000 * B);
+        uint256 id = _deposit(carrying, address(buck), 1000 * B);
+        vm.warp(block.timestamp + 365 days);
+        uint256 nominal = buck.balanceOf(carrying);
+        uint256 expectedNet = nominal - buck.balanceOfFees(carrying);
+        (, uint128 basisBefore) = b.holdings(id);
+        uint256 aliceValueBefore = b.valueOf(aliceId);
+        vm.startPrank(carrying);
+        buck.approve(address(b), nominal);
+        vm.expectRevert(bytes4(keccak256("MinOut()")));
+        b.increasePosition(id, address(buck), nominal, nominal, 0);
+        assertEq(buck.balanceOf(carrying), nominal);
+        (, uint256 received,) = b.increasePosition(id, address(buck), nominal, expectedNet - 1, 0);
+        vm.stopPrank();
+        (, uint128 basisAfter) = b.holdings(id);
+        assertApproxEqAbs(received, expectedNet, 1);
+        assertLt(received, nominal);
+        assertEq(basisAfter, uint256(basisBefore) + received);
+        assertGe(b.valueOf(aliceId), aliceValueBefore - 1);
+        _books();
+    }
+
+    function test_newCarryingDepositCreditsNetRatherThanNominal() public {
+        _deposit(alice, address(buck), 1000 * B);
+        address carrying = address(new EqHolder());
+        _bind(carrying, true);
+        buck.transfer(carrying, 1000 * B);
+        vm.warp(block.timestamp + 365 days);
+        uint256 expectedNet = 1000 * B - buck.balanceOfFees(carrying);
+        uint256 id = _deposit(carrying, address(buck), 1000 * B);
+        (, uint128 basis) = b.holdings(id);
+        assertApproxEqAbs(basis, expectedNet, 1);
+        assertLt(basis, 1000 * B);
+        _books();
+    }
+
+    function test_tokenTopUpAndPartialExitKeepReceiptMetadataCurrent() public {
+        uint256 id = _deposit(alice, address(tok[0]), 1000e18);
+        vm.startPrank(alice);
+        tok[0].approve(address(b), 500e18);
+        (uint256 returnedId, uint256 received,) = b.increasePosition(id, address(tok[0]), 500e18, 500e18, 0);
+        vm.stopPrank();
+        assertEq(returnedId, id);
+        assertEq(received, 500e18);
+        (uint128 sharesBefore,) = b.holdings(id);
+        (, uint256 tokenBefore,,) = b.deposits(id);
+        vm.prank(alice);
+        b.redeem(id, 5000);
+        (uint128 sharesAfter, uint128 basisAfter) = b.holdings(id);
+        (uint256 principal, uint256 tokenAfter,,) = b.deposits(id);
+        assertEq(principal, basisAfter);
+        assertEq(tokenAfter, tokenBefore - tokenBefore * (sharesBefore - sharesAfter) / sharesBefore);
+        _books();
+    }
+
+    function test_feeOnTransferTokenBooksActualReceivedForDepositAndTopUp() public {
+        address asset = address(tok[0]);
+        vm.etch(asset, address(new EqFeeToken()).code);
+        uint256 id = _deposit(alice, asset, 1000e18);
+        (, uint256 tokenPrincipal,,) = b.deposits(id);
+        assertEq(tokenPrincipal, 990e18);
+        assertEq(b.idleToken(0), 990e18);
+        vm.startPrank(alice);
+        IERC20(asset).approve(address(b), 500e18);
+        (, uint256 received,) = b.increasePosition(id, asset, 500e18, 495e18, 0);
+        vm.stopPrank();
+        (, tokenPrincipal,,) = b.deposits(id);
+        assertEq(received, 495e18);
+        assertEq(tokenPrincipal, 1485e18);
+        assertEq(b.idleToken(0), 1485e18);
+        _books();
+    }
+
+    function test_receiptCallbackSeesBooksButCannotReenterPositionOrWheel() public {
+        EqReentrantHolder attacker = new EqReentrantHolder(b, IERC20(address(buck)));
+        _bind(address(attacker), false);
+        buck.transfer(address(attacker), 2000 * B);
+        vm.prank(GOV);
+        (bool ok,) = address(b).call(abi.encodeWithSignature("setWheel(address)", address(attacker)));
+        assertTrue(ok);
+        attacker.deposit(1000 * B);
+        assertGt(attacker.observedShares(), 0);
+        assertEq(attacker.observedBasis(), 1000 * B);
+        assertTrue(attacker.depositBlocked());
+        assertTrue(attacker.redeemBlocked());
+        assertTrue(attacker.wheelBlocked());
+        assertTrue(attacker.treasuryBlocked());
+        assertEq(b.receipt().balanceOf(address(attacker)), 1);
+        _books();
+    }
+
+    function test_redeemSharesReturnsActualPartialAndFullPosition() public {
+        uint256 id = _deposit(alice, address(buck), 1000 * B);
+        BuckBasketReceipt receipt = b.receipt();
+        (uint128 initialShares,) = b.holdings(id);
+        vm.prank(bob);
+        vm.expectRevert(bytes4(keccak256("NotOwner()")));
+        b.redeemShares(id, 1, 0);
+        vm.startPrank(alice);
+        vm.expectRevert(bytes4(keccak256("RedeemZero()")));
+        b.redeemShares(id, 0, 0);
+        vm.expectRevert(BuckBasketEquity.PositionSharesExceeded.selector);
+        b.redeemShares(id, uint256(initialShares) + 1, 0);
+        vm.expectRevert(bytes4(keccak256("MinOut()")));
+        b.redeemShares(id, uint256(initialShares) / 2, type(uint256).max);
+        (uint128 unchanged,) = b.holdings(id);
+        assertEq(unchanged, initialShares);
+
+        uint256 requested = uint256(initialShares) / 2 + 1;
+        uint256 balanceBefore = buck.balanceOf(alice);
+        (uint256 remainingId, uint256 paid, uint256 retired, uint256 remaining) =
+            b.redeemShares(id, requested, 0);
+        assertEq(remainingId, id);
+        assertEq(retired, requested);
+        assertEq(remaining, uint256(initialShares) - requested);
+        assertEq(buck.balanceOf(alice) - balanceBefore, paid);
+        (uint128 storedRemaining,) = b.holdings(id);
+        assertEq(storedRemaining, remaining);
+        (remainingId, paid, retired, remaining) = b.redeemShares(id, remaining, 0);
+        assertEq(remainingId, 0);
+        assertEq(remaining, 0);
+        assertGt(retired, 0);
+        vm.expectRevert();
+        receipt.ownerOf(id);
+        buck.approve(address(b), 100 * B);
+        uint256 replacementId = b.deposit(address(buck), 100 * B, 0);
+        assertGt(replacementId, id);
+        assertEq(receipt.balanceOf(alice), 1);
+        vm.stopPrank();
+        _books();
+    }
+
+    function test_redeemSharesReportsInKindExitAndAnyResidualShares() public {
+        _placed();
+        uint256 id = _deposit(bob, address(buck), 300_000 * B);
+        _wheel(80, false);
+        _cutUnderWater();
+        (uint128 beforeShares,) = b.holdings(id);
+        uint256[3] memory tokensBefore;
+        for (uint256 i = 0; i < 3; i++) tokensBefore[i] = tok[i].balanceOf(bob);
+        uint256 buckBefore = buck.balanceOf(bob);
+        vm.prank(bob);
+        (uint256 remainingId, uint256 paid, uint256 retired, uint256 remaining) =
+            b.redeemShares(id, beforeShares, 0);
+        assertEq(paid, buck.balanceOf(bob) - buckBefore);
+        assertEq(retired + remaining, beforeShares);
+        assertEq(remainingId, remaining == 0 ? 0 : id);
+        for (uint256 i = 0; i < 3; i++) assertGt(tok[i].balanceOf(bob), tokensBefore[i]);
+        _books();
+    }
+
     function test_deposit_guardRefusesAPushedPool() public {
         _push(0, true, 200_000 * B);                                // spot far above TWAP
         vm.startPrank(alice);
@@ -290,6 +558,22 @@ contract BuckBasketEquityTest is Test {
         vm.expectRevert();
         b.deposit(address(buck), B, 0);
         vm.stopPrank();
+    }
+
+    function test_depositCannotGiveWorthlessExistingSharesARecapitalizationWindfall() public {
+        _deposit(alice, address(buck), 1000 * B);
+        vm.mockCall(address(buck), abi.encodeWithSelector(Buck.signedBalanceOf.selector, address(b)),
+                    abi.encode(-int256(10_000 * B)));
+        assertEq(b.equity(), 0);
+        uint256 bobBefore = buck.balanceOf(bob);
+        vm.startPrank(bob);
+        buck.approve(address(b), 1000 * B);
+        vm.expectRevert(bytes4(keccak256("Underwater()")));
+        b.deposit(address(buck), 1000 * B, 0);
+        vm.stopPrank();
+        assertEq(buck.balanceOf(bob), bobBefore);
+        vm.clearMockedCalls();
+        _books();
     }
 
     /// Ruled (JUBILEE-ISSUANCE 6.2.2): an under-water account stops issuing,

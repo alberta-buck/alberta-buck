@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IERC20}             from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20}          from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {IBuckKController}   from "../IBuckKController.sol";
@@ -11,6 +12,7 @@ import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
 import {BuckBasketEquityStorage, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
 import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
+import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
 
 
 /// @title BuckBasketEquity -- the BuckBasket as equity: shares, one pooled
@@ -51,7 +53,26 @@ import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 ///         (`equityWheel`: wheelDue / wheelStep) and the AMM venue (every
 ///         other selector, the V3 callbacks included), as the pro-rata shell
 ///         does.
-contract BuckBasketEquity is BuckBasketEquityStorage {
+contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
+    using SafeERC20 for IERC20;
+
+    bool private transient _positionEntered;
+    error PositionReentrant();
+    error PositionAssetMismatch();
+    error PositionOverflow();
+    error PositionSharesExceeded();
+
+    event PositionIncreased(address indexed who, uint256 indexed receiptId, address indexed asset,
+                            uint256 nominalAmount, uint256 received, uint256 sharesAdded);
+    event PositionReduced(address indexed who, uint256 indexed receiptId, uint256 requestedShares,
+                          uint256 paid, uint256 sharesRetired, uint256 sharesRemaining);
+
+    modifier positionLock() {
+        if (_positionEntered) revert PositionReentrant();
+        _positionEntered = true;
+        _;
+        _positionEntered = false;
+    }
 
     constructor(
         address _buck,
@@ -227,9 +248,31 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     }
 
     function deposit(address asset, uint256 amount, uint256 minShares)
-        public returns (uint256 id)
+        public override positionLock returns (uint256 id)
+    {
+        (id,,) = _deposit(0, asset, amount, 0, minShares);
+    }
+
+    /// @notice Add to an existing receipt without creating another NFT.
+    /// @dev The same original asset is required so the receipt metadata has
+    ///      one unambiguous TOKEN principal. BUCK is credited at its increase
+    ///      in the basket's net equity, not the sender's nominal amount.
+    function increasePosition(uint256 id, address asset, uint256 amount, uint256 minReceived, uint256 minShares)
+        external override positionLock returns (uint256 positionId, uint256 received, uint256 sharesAdded)
+    {
+        if (id == 0) revert EmptyDeposit();
+        return _deposit(id, asset, amount, minReceived, minShares);
+    }
+
+    function _deposit(uint256 id, address asset, uint256 amount, uint256 minReceived, uint256 minShares)
+        internal returns (uint256 positionId, uint256 received, uint256 shares)
     {
         if (amount == 0) revert Amount0();
+        bool existing = id != 0;
+        if (existing) {
+            if (receipt.ownerOf(id) != msg.sender) revert NotOwner();
+            if (deposits[id].token != asset) revert PositionAssetMismatch();
+        }
         uint256 idx = type(uint256).max;
         if (asset != address(buck)) {
             idx = indexOf[asset];
@@ -241,42 +284,68 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         // One pass over the pools: the guard, the deposit's value, the charge,
         // and the basket at the incumbents' (high) marks.
         uint256 n = constituents.length;
-        uint256 value = asset == address(buck) ? amount : 0;
         uint256 feeMax = 0;
         for (uint256 i = 0; i < n; i++) {
             IBuckBasketVenue.Marks memory m = sn.m[i];
             if (defaultMaxDeviationBp > 0 && m.pLow > 0
                 && (m.pHigh - m.pLow) * 10000 > m.pLow * defaultMaxDeviationBp) revert Slippage();
             if (constituents[i].feeTier > feeMax) feeMax = constituents[i].feeTier;
-            if (i == idx) value = amount * m.pLow / (10 ** constituents[i].decimals);
         }
-        if (value == 0) revert NoValue();
 
         uint256 k = sn.k;
         uint256 charge = asset == address(buck)
             ? feeMax * 1e12 * (1e18 + k) / 2e18
             : (k < 1e18 ? uint256(constituents[idx].feeTier) * 1e12 * (1e18 - k) / 2e18 : 0);
-        uint256 net = value * (1e18 - charge) / 1e18;
         uint256 S = totalShares;
         uint256 eHigh = _equityS(sn, MARK_HIGH);
-        uint256 shares = (S == 0 || eHigh == 0) ? net : net * S / eHigh;
-        if (shares < minShares) revert MinOut();
+        // A live, zero-equity basket has no defined fair entry price. Issuing
+        // one share per BUCK would give its existing worthless shares a
+        // windfall at the new depositor's expense.
+        if (S != 0 && eHigh == 0) revert Underwater();
+        if (asset == address(buck)) {
+            int256 beforeBuckEquity = sn.buckEq;
+            IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+            _account(sn);
+            if (sn.buckEq <= beforeBuckEquity) revert NoValue();
+            received = uint256(sn.buckEq - beforeBuckEquity);
+        } else {
+            uint256 beforeBalance = IERC20(asset).balanceOf(address(this));
+            IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+            received = IERC20(asset).balanceOf(address(this)) - beforeBalance;
+            idleToken[idx] += received;
+        }
+        if (received == 0 || received > amount) revert NoValue();
+        if (received < minReceived) revert MinOut();
+        uint256 value = asset == address(buck)
+            ? received : received * sn.m[idx].pLow / (10 ** constituents[idx].decimals);
+        if (value == 0) revert NoValue();
+        uint256 net = value * (1e18 - charge) / 1e18;
+        shares = S == 0 ? net : net * S / eHigh;
+        if (shares == 0 || shares < minShares) revert MinOut();
 
-        IERC20(asset).transferFrom(msg.sender, address(this), amount);
-        if (asset != address(buck)) idleToken[idx] += amount;   // BUCK: straight to the account
-
-        id = receipt.mint(msg.sender);
-        holdings[id] = Holding(uint128(shares), uint128(value));
-        deposits[id] = Deposit({buckPrincipal: value, tokenPrincipal:
-                                asset == address(buck) ? 0 : amount,
-                                token: asset, depositTime: uint64(block.timestamp)});
+        if (!existing) id = receipt.nextId();
+        Holding storage h = holdings[id];
+        if (shares > type(uint128).max - uint256(h.shares)
+            || value > type(uint128).max - uint256(h.basis)) revert PositionOverflow();
+        h.shares += uint128(shares);
+        h.basis += uint128(value);
+        Deposit storage d = deposits[id];
+        d.buckPrincipal = h.basis;
+        if (!existing) {
+            d.token = asset;
+            d.depositTime = uint64(block.timestamp);
+        }
+        if (asset != address(buck)) d.tokenPrincipal += received;
         totalShares = S + shares;
         dayFlow += int256(value);
         _account(sn);
         _markS(sn);                                     // the deposit's K, as credit
+        if (!existing) assert(receipt.mint(msg.sender) == id);
         // The pro-rata shells' event (the sim reads it): buckMinted is the
         // credit the deposit brings, K x its value.
         emit Deposited(msg.sender, id, asset, amount, k * value / 1e18, 0);
+        if (existing) emit PositionIncreased(msg.sender, id, asset, amount, received, shares);
+        return (id, received, shares);
     }
 
     // --- Redemption ----------------------------------------------------------- //
@@ -287,7 +356,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
 
     /// @notice Redeem `bp` of receipt `id` (0: all of it, the pro-rata shells'
     ///         convention); revert unless at least `minBuck` is paid.
-    function redeem(uint256 id, uint256 bp, uint256 minBuck) public returns (uint256 paid) {
+    function redeem(uint256 id, uint256 bp, uint256 minBuck) public positionLock returns (uint256 paid) {
         if (receipt.ownerOf(id) != msg.sender) revert NotOwner();
         if (bp == 0) bp = 10000;
         if (bp > 10000) revert Bp10000();
@@ -296,6 +365,29 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         if (shares == 0) revert RedeemZero();
         uint256 basis = uint256(h.basis) * bp / 10000;
 
+        (paid,,) = _redeemShares(id, h, shares, basis, minBuck);
+    }
+
+    /// @notice Redeem exactly `shares`; unlike basis-point redemption, zero
+    ///         never denotes a full exit. Returns zero ID only if burned.
+    function redeemShares(uint256 id, uint256 shares, uint256 minBuck)
+        external override positionLock returns (uint256 positionId, uint256 paid,
+                                                uint256 sharesRetired, uint256 sharesRemaining)
+    {
+        if (receipt.ownerOf(id) != msg.sender) revert NotOwner();
+        Holding storage h = holdings[id];
+        uint256 priorShares = h.shares;
+        if (shares == 0) revert RedeemZero();
+        if (shares > priorShares) revert PositionSharesExceeded();
+        uint256 basis = uint256(h.basis) * shares / priorShares;
+        (paid, sharesRetired, sharesRemaining) = _redeemShares(id, h, shares, basis, minBuck);
+        positionId = sharesRemaining == 0 ? 0 : id;
+        emit PositionReduced(msg.sender, id, shares, paid, sharesRetired, sharesRemaining);
+    }
+
+    function _redeemShares(uint256 id, Holding storage h, uint256 shares, uint256 basis, uint256 minBuck)
+        internal returns (uint256 paid, uint256 retired, uint256 remaining)
+    {
         Snap memory sn = _snap();
         (uint256 cut, uint256 cutValue) = _treasuryCut(sn, shares, basis);
         uint256 left;
@@ -304,6 +396,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         if (paid < minBuck) revert MinOut();
         // The pro-rata shells' event: nothing burned, BUCK paid, the cut's value.
         emit Redeemed(msg.sender, id, 0, paid, cutValue, remainingBp);
+        return (paid, shares - left, h.shares);
     }
 
     /// @dev The treasury's cut: LAMBDA of the gain over the cost basis, in
@@ -325,14 +418,18 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
         internal returns (uint256 remainingBp)
     {
         uint256 gone = shares - left;
+        uint256 priorShares = h.shares;
         h.shares -= uint128(gone);
         h.basis -= uint128(basis * gone / shares);
+        Deposit storage d = deposits[id];
+        d.buckPrincipal = h.basis;
+        d.tokenPrincipal -= d.tokenPrincipal * gone / priorShares;
         remainingBp = h.shares == 0 ? 0 : uint256(h.shares) * 10000 / (uint256(h.shares) + gone);
         if (h.shares == 0) receipt.burn(id);
     }
 
     /// @notice The treasury's shares leave by the same door, with no cut.
-    function redeemTreasury(uint256 bp, address to) external onlyGov returns (uint256 paid) {
+    function redeemTreasury(uint256 bp, address to) external onlyGov positionLock returns (uint256 paid) {
         if (to == address(0)) revert To0();
         uint256 out = treasuryShares * bp / 10000;
         if (out == 0) revert RedeemZero();
@@ -450,7 +547,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     /// @notice TOKEN the wheel captured, into the wallet (equity for every
     ///         holder; Deploy places it).  The pro-rata shell's name, so the
     ///         wheel's arbitrage kind needs no change.
-    function creditDepositors(uint256 i, uint256 amount) external returns (uint128, uint256) {
+    function creditDepositors(uint256 i, uint256 amount) external positionLock returns (uint128, uint256) {
         _requireIncomeSource();
         IERC20(constituents[i].token).transferFrom(msg.sender, address(this), amount);
         idleToken[i] += amount;
@@ -459,7 +556,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     }
 
     /// @notice BUCK the wheel captured, into the basket's account.
-    function creditTreasury(uint256 amount) external {
+    function creditTreasury(uint256 amount) external positionLock {
         _requireIncomeSource();
         IERC20(address(buck)).transferFrom(msg.sender, address(this), amount);
         emit WalletCredited(address(buck), amount);     // repays the lien, or is held
@@ -530,17 +627,20 @@ contract BuckBasketEquity is BuckBasketEquityStorage {
     // --- Dispatch: the components facet, else the venue ------------------------- //
 
     fallback() external {
+        if (_positionEntered && (msg.sig == IBasketUpkeep.wheelStep.selector
+            || msg.sig == bytes4(keccak256("setWheel(address)")))) revert PositionReentrant();
         address v = (msg.sig == IBasketUpkeep.wheelStep.selector
                      || msg.sig == IBasketUpkeep.wheelDue.selector)
             ? equityWheel : address(venue);
         if (v == address(0)) revert VenueUnset();
-        assembly {
-            calldatacopy(0, 0, calldatasize())
-            let ok := delegatecall(gas(), v, 0, calldatasize(), 0, 0)
-            returndatacopy(0, 0, returndatasize())
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            calldatacopy(ptr, 0, calldatasize())
+            let ok := delegatecall(gas(), v, ptr, calldatasize(), 0, 0)
+            returndatacopy(ptr, 0, returndatasize())
             switch ok
-            case 0 { revert(0, returndatasize()) }
-            default { return(0, returndatasize()) }
+            case 0 { revert(ptr, returndatasize()) }
+            default { return(ptr, returndatasize()) }
         }
     }
 }

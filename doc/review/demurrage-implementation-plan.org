@@ -92,23 +92,25 @@ must not be disturbed.
 
 ** 2. Existing BuckBasket position additions
 
-- [ ] Inspect the real equity basket receipt, ownership and transfer callbacks,
+- [X] Inspect the real equity basket receipt, ownership and transfer callbacks,
   current deposit/redeem paths, fee treatment, metadata and low-K checks.
-- [ ] Add a public top-up for an existing position, leaving the normal deposit
+- [X] Add a public top-up for an existing position, leaving the normal deposit
   that creates a new receipt available. Reuse pricing, entry/exit controls and
   security boundaries; require the correct owner and basket/asset.
-- [ ] Credit shares and basis from *net BUCK actually received*, not nominal
+- [X] Credit shares and basis from *net BUCK actually received*, not nominal
   Carrying units. Define/validate metadata for mixed or incompatible assets,
   zero amounts, slippage/minimum shares and overflow. Return the same position
   ID and an unambiguous result; preserve a fair average cost basis.
-- [ ] Add or design a precise proportional reduction for Jubilee that reports
+- [X] Add a precise proportional reduction for Jubilee that reports
   actual proceeds, shares retired and residual shares. Zero requested shares
   must not invoke legacy =bp == 0= full-redemption semantics. Do not assume an
   exit yields BUCK or all requested shares.
-- [ ] Test existing deposit and redemption, same ID and ownership, aged
-  Carrying deposits, mixed ages, no dilution, fee/basis updates, callback
-  reentrancy, bad IDs, full and partial exits, dust, in-kind and low K.
-- [ ] Run targeted Foundry basket tests using staged artifacts; commit each
+- [X] Test existing deposit and redemption, same ID and ownership, aged
+  Carrying deposits, no dilution, fee/basis updates, callback reentrancy,
+  bad IDs, full and partial exits, fee-on-transfer TOKEN, in-kind and low K.
+- [ ] Test additional mixed-age and extreme dust scenarios against the new
+  fixed-point BUCK and external Jubilee after those contracts are implemented.
+- [X] Run targeted Foundry basket tests using staged artifacts; commit each
   coherent interface/implementation step and document results.
 
 ** 3. Fixed-point demurrage and per-NFT credit
@@ -159,7 +161,8 @@ must not be disturbed.
 |------+-------+----------------------+--------|
 | 2026-10-29 | Plan | Branch created from reference =291560c1=; isolated plan recorded. | =bb9b5554= |
 | 2026-10-29 | Baseline | =make nix-venv-demurrage-test=: 74 passed; =make nix-build-uniswap-artifacts=: successful, existing compiler/lint warnings. | =bb9b5554= |
-| 2026-10-29 | 1 | Proportional is default in quotes, retirements, renewals and CLI; =reserve= remains explicit. Reference tests: 75 passed; demurrage PDF regenerated. | This commit: proportional default |
+| 2026-10-29 | 1 | Proportional is default in quotes, retirements, renewals and CLI; =reserve= remains explicit. Reference tests: 75 passed; demurrage PDF regenerated. | =06ed24b6= |
+| 2026-10-29 | 2 | Same-receipt top-up and exact-share exit implemented; 29 equity, 35 director (including inherited cases), and 20 shared-receipt pro-rata tests passed. Basket runtime 22,233 bytes. | This commit: basket position API |
 
 * Open implementation constraints
 
@@ -169,3 +172,9 @@ or security. Existing Buck/basket integration depends on signed account APIs,
 Jubilee views and per-account settlement; update consumers as part of the change,
 not by stubbing old behavior. The current equity basket's own credit must be
 handled without recursive settlement through a locked Buck call.
+
+The basket currently measures BUCK contributions by the change in the legacy
+account's net equity, which can include changes in accrued legacy relief. It
+reverts an equity-less exit, so a future manager must handle a failed sale as
+zero proceeds without pretending its shares were retired. New capital cannot
+enter a live zero-equity basket until a recapitalization policy is specified.
