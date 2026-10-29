@@ -122,6 +122,23 @@ def test_separate_facilities_keep_independent_issuance_and_relief_ages():
     assert_conservation(ledger)
 
 
+def test_issuance_after_fifty_year_cap_does_not_inherit_excess_claim_age():
+    ledger = DemurrageLedger()
+    ledger.issue_unspent("facility", 100, "owner")
+    ledger.advance(100)
+    p = ledger.positions["facility"]
+    assert p.buck_years == pytest.approx(10_000)
+    assert p.relief_years == pytest.approx(5_000)
+    assert ledger.quote_retirement("facility", 100).relief == pytest.approx(100)
+
+    ledger.issue_unspent("facility", 100, "owner")
+    assert ledger.quote_retirement("facility", 200).relief == pytest.approx(100)
+    ledger.advance(1)
+    assert p.buck_years == pytest.approx(10_200)
+    assert ledger.quote_retirement("facility", 200).relief == pytest.approx(104)
+    assert_conservation(ledger)
+
+
 def test_proportional_payout_preserves_cash_for_equal_facilities():
     ledger = DemurrageLedger()
     ledger.issue_unspent("a", 100, "alice")

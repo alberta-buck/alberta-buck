@@ -85,6 +85,11 @@ reduction takes a pro-rata share of that position's accumulated BUCK-years.
 Separate positions retain separate issuance histories. For issuance held for
 50 years at a nominal 2% per year, the target reaches the entire position; the
 actual payment depends on the fund and cannot exceed the position.
+Gross issuance-seconds continue accumulating for system demurrage after the
+target reaches that cap. Claimable position seconds are capped before new
+principal is added, so excess age beyond 50 years cannot immediately relieve
+newly issued BUCK. The reference keeps one average age within each NFT; after
+new issuance, the combined principal accrues toward its combined cap.
 
 An account's received/held BUCK, issued-but-unspent BUCK, and the outstanding
 issuance of each NFT it owns are not interchangeable. Its ERC-20 =balanceOf=

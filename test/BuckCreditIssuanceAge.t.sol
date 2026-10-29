@@ -81,6 +81,19 @@ contract BuckCreditIssuanceAgeTest is Test {
         assertEq(seconds_, 0);
     }
 
+    function test_newIssuanceAfterFiftyYearCapDoesNotInheritExcessAge() public {
+        uint256 id = _facility(200e6);
+        credit.recordIssuanceFromBuck(id, ALICE, 100e6);
+        vm.warp(t0 + 100 * YEAR);
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
+        assertEq(principal, 100e6);
+        assertEq(seconds_, 100e6 * 50 * YEAR);
+        credit.recordIssuanceFromBuck(id, ALICE, 100e6);
+        assertEq(credit.issuanceRelief(id, 200e6), 100e6);
+        vm.warp(t0 + 101 * YEAR);
+        assertEq(credit.issuanceRelief(id, 200e6), 104e6);
+    }
+
     function test_renewalCheckpointsReliefAndKeepsSameNft() public {
         uint256 id = _facility(200e6);
         credit.recordIssuanceFromBuck(id, ALICE, 100e6);
@@ -121,7 +134,7 @@ contract BuckCreditIssuanceAgeTest is Test {
         assertEq(credit.recordReductionFromBuck(id, ALICE, reduction), target);
         (uint256 left, uint256 seconds_) = credit.issuanceOf(id);
         assertEq(left, amount - reduction);
-        assertEq(seconds_, left * yearsElapsed * YEAR);
+        assertEq(seconds_, left * (yearsElapsed > 50 ? 50 : yearsElapsed) * YEAR);
     }
 
     function test_onlyBuckAndFacilityOwnerCanUseAccountingHooks() public {

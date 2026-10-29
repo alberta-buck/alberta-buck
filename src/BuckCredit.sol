@@ -136,7 +136,7 @@ contract BuckCredit is ERC721Enumerable {
     struct IssuanceState {
         uint80 principal;
         uint64 checkpoint;
-        uint256 buckSeconds;
+        uint256 buckSeconds;       // claimable seconds, capped before new issuance
     }
     mapping(uint256 => IssuanceState) private _issuance;
 
@@ -748,7 +748,7 @@ contract BuckCredit is ERC721Enumerable {
         emit CreditActivated(tokenId, holder, amount, newActivated);
     }
 
-    /// @notice Outstanding issued principal and its current BUCK-seconds.
+    /// @notice Outstanding issued principal and its current claimable BUCK-seconds.
     /// @dev This is separate from activated coverage and its current valuation.
     ///      It starts aging at issuance, even if the BUCK remain unspent.
     ///      Legacy Buck does not populate this book until integration.
@@ -757,6 +757,8 @@ contract BuckCredit is ERC721Enumerable {
         IssuanceState storage s = _issuance[tokenId];
         principal = s.principal;
         buckSeconds = s.buckSeconds + principal * (block.timestamp - uint256(s.checkpoint));
+        uint256 cap = principal * (50 * SECONDS_PER_YEAR);
+        if (buckSeconds > cap) buckSeconds = cap;
     }
 
     /// @notice Baseline target, not guaranteed payable Jubilee relief.
@@ -833,6 +835,8 @@ contract BuckCredit is ERC721Enumerable {
     function _checkpointIssuance(IssuanceState storage s) private {
         require(block.timestamp <= type(uint64).max, "BuckCredit: timestamp overflow");
         s.buckSeconds += uint256(s.principal) * (block.timestamp - uint256(s.checkpoint));
+        uint256 cap = uint256(s.principal) * (50 * SECONDS_PER_YEAR);
+        if (s.buckSeconds > cap) s.buckSeconds = cap;
         s.checkpoint = uint64(block.timestamp);
     }
 

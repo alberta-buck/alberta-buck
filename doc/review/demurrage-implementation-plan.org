@@ -176,7 +176,8 @@ must not be disturbed.
 | 2026-10-29 | 2 | Same-receipt top-up and exact-share exit implemented; 29 equity, 35 director (including inherited cases), and 20 shared-receipt pro-rata tests passed. Basket runtime 22,233 bytes. | =6dfd7a9e= |
 | 2026-10-29 | 3a | Standalone =NetDemurrageMath=: 10 Foundry tests passed, including two 256-run fuzz tests, independent Decimal vectors, 4,000/8,000-year bounds and 365 versus one checkpoint. Not integrated into Buck. | =35146571= |
 | 2026-10-29 | 3b | BuckCredit now has restricted per-NFT issuance/age/reduction/renewal hooks. All 65 BuckCredit tests pass; legacy Buck does not call them yet. BuckCredit runtime is 23,306 bytes, leaving 1,270 bytes before the EVM deployment limit. | =6cbee7dd= |
-| 2026-10-29 | 3c | Standalone =BuckLedger= passes 16 Foundry tests, including 256-run mixed-transfer conservation fuzz and a 3-raw-unit 50-year fractional settlement. No production token uses it yet. | This commit: standalone net ledger |
+| 2026-10-29 | 3c | Standalone =BuckLedger= passes 16 Foundry tests, including 256-run mixed-transfer conservation fuzz and a 3-raw-unit 50-year fractional settlement. No production token uses it yet. | =271ca437= |
+| 2026-10-29 | 3d | Cap a facility's claimable age before new issuance, keeping gross age separate in the Python reference. Reference: 76 tests; BuckCredit: 66 tests; BuckCredit runtime 23,414 bytes. Average age within each NFT is an explicit policy choice. | This commit: prevent retroactive relief |
 
 * Open implementation constraints
 

@@ -37,10 +37,11 @@ FUND_ACCOUNTS = (JUBILEE, JUBILEE_INVESTED)
 
 @dataclass
 class Position:
-    """Outstanding issued principal and its integral over time in BUCK-years."""
+    """Outstanding principal, gross BUCK-years and capped claimable age."""
 
     principal: float = 0.0
     buck_years: float = 0.0
+    relief_years: float = 0.0
     owner: str | None = None
     credit_limit: float | None = None
     premium_rate: float = 0.0
@@ -181,7 +182,7 @@ class DemurrageLedger:
     @property
     def aggregate_relief(self) -> float:
         """Total capped claims if all credit positions retire now."""
-        return sum(min(p.principal, self.rate * p.buck_years)
+        return sum(min(p.principal, self.rate * p.relief_years)
                    for p in self.positions.values())
 
     def issue(self, position: str, amount: float, recipient: str) -> None:
@@ -530,6 +531,9 @@ class DemurrageLedger:
         gross = self.issued * self.rate * years
         for p in self.positions.values():
             p.buck_years += p.principal * years
+            p.relief_years += p.principal * years
+            if self.rate:
+                p.relief_years = min(p.relief_years, p.principal / self.rate)
         z = self.rate * years
         loss_fraction = -math.expm1(-z)
         remaining_fraction = math.exp(-z)
@@ -575,7 +579,7 @@ class DemurrageLedger:
         if amount > p.principal:
             raise ValueError("retirement exceeds outstanding issuance")
         # Relief cannot exceed the principal being retired, even after 50 years.
-        relief = min(amount, self.rate * p.buck_years * amount / p.principal)
+        relief = min(amount, self.rate * p.relief_years * amount / p.principal)
         fund_shortfall = max(0.0, relief - self.jubilee_assets)
         gross = None
         if fund_shortfall == 0:
@@ -636,6 +640,7 @@ class DemurrageLedger:
         self._consume_repayment(payer, quote.principal)
         p.principal -= amount
         p.buck_years *= remaining_fraction
+        p.relief_years *= remaining_fraction
         return quote
 
     def quote_available_retirement(
@@ -758,6 +763,7 @@ class DemurrageLedger:
             self._consume_repayment(payer, amount)
             p.principal -= amount
             p.buck_years *= remaining_fraction
+            p.relief_years *= remaining_fraction
             return result
         except Exception:
             self.__dict__.clear()
@@ -841,6 +847,7 @@ class DemurrageLedger:
             p.insurer = insurer
             p.insurance_pool = new_pool
             p.buck_years = 0.0
+            p.relief_years = 0.0
             self.unspent[owner] = self.unspent.get(owner, 0.0) + additional_issuance
             if funding:
                 self._fund_insurance(owner, new_pool, funding)
@@ -905,6 +912,8 @@ def snapshot(ledger: DemurrageLedger, position: str, holder: str) -> dict:
     return {
         "years": ledger.time,
         "issued": ledger.issued,
+        "position_buck_years": p.buck_years,
+        "position_relief_years": p.relief_years,
         "holder": ledger.accounts[holder],
         "holder_unspent": ledger.unspent.get(holder, 0.0),
         "holder_available": ledger.balance_of(holder),

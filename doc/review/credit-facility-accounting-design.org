@@ -137,12 +137,21 @@ particular transferable BUCK after it leaves U.
 
 For each NFT keep outstanding principal P and its time integral
 S = integral(P dt), plus insured coverage, valuation, insurer, premium terms,
-and the original premium pool/principal. Checkpoint S when P changes. For a
-reduction x, the reference assigns the proportional S*x/P and caps the
-baseline relief r*S*x/P at x. Different NFTs owned by the same account retain
-different ages. It assumes proportional average age within one NFT; tracking
-individual issuance vintages would be more complex and would change partial
-reduction results.
+and the original premium pool/principal. Gross issued BUCK-seconds remain
+relevant to system-wide demurrage, including after 50 years. The NFT's
+*claimable* seconds are capped at P*50 years before principal changes, so
+unused age past the cap cannot give later issuance immediate relief. For a
+reduction x, the reference assigns the proportional claimable seconds S*x/P
+and caps the baseline relief r*S*x/P at x. Different NFTs owned by the same
+account retain different ages.
+
+The present reference uses one proportional average age within an NFT. Once
+new credit joins an old facility, the aggregate principal resumes accruing
+at 2% until the combined claim reaches its cap. For example, after a 100-BUCK
+facility has aged 100 years, issuing another 100 gives it an immediate target
+of 100, then 104 one year later. Separate issuance-vintage relief would yield
+102 after that year and requires a different, more complex accounting model.
+This averaging rule must remain visible when evaluating renewal and reductions.
 
 Keep principal and coverage as separate quantities; they need not be equal at
 K other than one. Avoid duplicate mirrored coverage mappings if BuckCredit can
