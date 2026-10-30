@@ -19,6 +19,7 @@ contract BuckNetQuoteTest is Test {
     uint256 constant YEAR = 365 days + 6 hours;
     address constant GOV = address(0xA0);
     address constant ALICE = address(0xA11CE);
+    address constant BOB = address(0xB0B);
     address constant INSURER = address(0x1551E1);
 
     IdentityRegistryHarness identity;
@@ -43,6 +44,7 @@ contract BuckNetQuoteTest is Test {
         vm.prank(GOV);
         identity.setBuck(address(buck));
         _bind(ALICE, false, address(this));
+        _bind(BOB, false, address(this));
         _bind(INSURER, false, address(this));
         _bind(address(fund), true, address(this));
         vm.prank(ALICE);
@@ -107,6 +109,41 @@ contract BuckNetQuoteTest is Test {
         (principal,) = credit.issuanceOf(id);
         assertEq(principal, 750e6);
         assertEq(buck.balanceOf(address(pool)), 100e6);
+    }
+
+    function test_insuredIssuerAccumulatesTheQuotedReserveBeforeBorrowing() public {
+        _pool();
+        k.setFactor(2e18);
+        uint256 id = _credit(1000e6, 100);
+        (, uint256 premium, uint256 reserve, uint256 spendable) = quoter.quoteIssue(id, 1000e6);
+        assertEq(premium, 100e6);
+        assertEq(reserve, 200e6);
+        assertEq(spendable, 900e6);
+        vm.expectRevert(BuckNet.FundingInsufficient.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, spendable);
+
+        // Bob's issuance supplies BUCK that Alice can acquire in stages. The
+        // transfers model acquired BUCK; pricing and swaps belong to agents.
+        vm.prank(BOB);
+        credit.setCreditIssuer(INSURER, true);
+        vm.prank(INSURER);
+        uint256 supply = credit.createCredit(BOB, 0, 200e6, 200e6,
+                                             BuckCredit.DepreciationType.NONE, 0, 0, 0);
+        vm.prank(BOB);
+        buck.issue(supply, 200e6, 200e6);
+        vm.prank(BOB);
+        buck.transfer(ALICE, 75e6);
+        vm.expectRevert(BuckNet.FundingInsufficient.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, spendable);
+        vm.prank(BOB);
+        buck.transfer(ALICE, 125e6);
+        assertEq(buck.balanceOf(ALICE), reserve);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, spendable);
+        assertEq(buck.balanceOf(ALICE), reserve + spendable, "the reserve was held, not spent");
+        assertEq(buck.balanceOf(address(pool)), premium);
     }
 
     function test_quoteIncludesActualDepreciationAndRejectsExcessCoverage() public {
