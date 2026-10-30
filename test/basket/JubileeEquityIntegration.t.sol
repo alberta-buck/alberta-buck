@@ -95,6 +95,11 @@ contract JubileeEquityIntegrationTest is Test {
         if (amount1 > 0) IERC20(IPool(msg.sender).token1()).transfer(msg.sender, amount1);
     }
 
+    function uniswapV3SwapCallback(int256 amount0, int256 amount1, bytes calldata) external {
+        if (amount0 > 0) IERC20(IPool(msg.sender).token0()).transfer(msg.sender, uint256(amount0));
+        if (amount1 > 0) IERC20(IPool(msg.sender).token1()).transfer(msg.sender, uint256(amount1));
+    }
+
     function test_realBasketReusesTheFundReceiptAndPaysMarkedReliefWithoutASale() public {
         uint256 a = _credit(ALICE, 100e6);
         _credit(BOB, 100e6);
@@ -357,5 +362,108 @@ contract JubileeEquityIntegrationTest is Test {
         (uint128 sharesAfter,) = basket.holdings(id);
         assertLe(sharesAfter, sharesBefore);
         assertEq(buck.totalIssued(), 2_000_000e6);
+    }
+
+    function test_agedPoolSaleAgainstMarkWithBuckAsToken0() public {
+        _compareAgedPoolSaleWithMark(true, false);
+    }
+
+    function test_agedPoolSaleAgainstMarkWithBuckAsToken1() public {
+        _compareAgedPoolSaleWithMark(false, false);
+    }
+
+    function test_poolShockMakesTwapMarkExceedExecutableValueWithBuckAsToken0() public {
+        _compareAgedPoolSaleWithMark(true, true);
+    }
+
+    function test_poolShockMakesTwapMarkExceedExecutableValueWithBuckAsToken1() public {
+        _compareAgedPoolSaleWithMark(false, true);
+    }
+
+    function _compareAgedPoolSaleWithMark(bool buckIs0, bool shock) private {
+        _bind(address(this), false, address(this));
+        uint256 facility = _credit(ALICE, 2_000_000e6);
+        vm.prank(ALICE);
+        buck.transfer(address(this), 1_500_000e6);
+
+        // Give the same test TOKEN deterministic addresses on either side of
+        // BuckNet so both Uniswap token orders exercise the real contracts.
+        EqToken template = new EqToken("Asset", "AST", 18);
+        address assetAddress = buckIs0 ? address(type(uint160).max - 1) : address(0x100000);
+        vm.etch(assetAddress, address(template).code);
+        EqToken asset = EqToken(assetAddress);
+        asset.mint(address(this), 2_000_000e18);
+        asset.mint(ALICE, 100_000e18);
+        vm.prank(GOV);
+        address pool = basket.addBasketToken(assetAddress, 18, 1e6, 10_000, 3000);
+        _bind(pool, true, address(this));
+        (,,,,,, int24 lower, int24 upper, bool actualOrder,,) = basket.constituents(0);
+        assertEq(actualOrder, buckIs0);
+        IPool(pool).mint(address(this), lower, upper, 1e18, "");
+        vm.warp(t0 + YEAR);
+        vm.startPrank(ALICE);
+        asset.approve(address(basket), type(uint256).max);
+        basket.deposit(assetAddress, 100_000e18, 0);
+        vm.stopPrank();
+        (uint256 id,,) = _invest(39_000e6);
+        assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 0), 1);
+        assertGt(basket.liquidityOf(0), 0);
+
+        // Ten idle years make the pool's carried fee substantial. The fund
+        // marks its receipt at TWAP, then converts the in-kind TOKEN through
+        // that very pool; a mark is not a guaranteed executable sale price.
+        vm.warp(t0 + 11 * YEAR);
+        (uint256 poolGross, uint256 poolNet) = buck.accountBalancesScaled(pool);
+        assertLt(poolNet * 100, poolGross * 85);
+        if (shock) {
+            (uint256 reliefBefore,,) = fund.previewRelief(facility, 10_000e6);
+            // The pool has the required TWAP history, but an external TOKEN
+            // sale can move spot before that historical average catches up.
+            IPool(pool).swap(address(this), !buckIs0, int256(500_000e18),
+                buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1, "");
+            (uint256 reliefAfter,, bool overLimit) = fund.previewRelief(facility, 10_000e6);
+            assertFalse(overLimit);
+            assertApproxEqRel(reliefAfter, reliefBefore, 1e9);
+            // Show that a real reduction can pay that stale value, without
+            // changing the state used for the following sale comparison.
+            uint256 snapshot = vm.snapshotState();
+            _authorize(ALICE, facility, 10_000e6, 0);
+            vm.prank(ALICE);
+            (uint256 paid,) = fund.reduce(facility, 10_000e6);
+            assertEq(paid, reliefAfter);
+            assertTrue(vm.revertToState(snapshot));
+        }
+        vm.prank(GOV);
+        fund.setReserveParameters(10_000, 100);
+        (uint256 target,,) = fund.previewReserve();
+        (, uint256 cashBefore) = buck.fundBalancesScaled();
+        assertLt(cashBefore, target);
+        (uint128 shares, uint128 basis) = basket.holdings(id);
+        uint256 requested = uint256(shares) / 5;
+        uint256 mark = basket.valueOf(id);
+        if (mark > basis) mark -= (mark - basis) * basket.LAMBDA_BP() / 10_000;
+        uint256 requestedMark = mark * requested / shares;
+        uint256 shareValue = basket.equity() * requested / basket.totalShares();
+        assertGt(shareValue * 99 / 100, buck.netBalanceOf(address(basket)));
+
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({
+            sqrtPriceLimitX96: buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1,
+            minimumNetBuck: 1
+        });
+        vm.prank(GOV);
+        uint256 proceeds = fund.redeemScheduled(requested, 0, routes);
+        emit log_named_uint("requested marked BUCK", requestedMark);
+        emit log_named_uint("actual net BUCK", proceeds / Q);
+        assertGt(proceeds, 0);
+        assertLt(proceeds, requestedMark * Q);
+        if (shock) assertLt(proceeds, requestedMark * Q * 8 / 10);
+        else assertGt(proceeds, requestedMark * Q * 98 / 100);
+        assertEq(asset.balanceOf(address(fund)), 0);
+        (, uint256 cashAfter) = buck.fundBalancesScaled();
+        assertEq(cashAfter - cashBefore, proceeds);
+        (uint128 remaining,) = basket.holdings(id);
+        assertEq(remaining, shares - requested);
+        assertEq(fund.positionId(), id);
     }
 }

@@ -180,3 +180,30 @@ withdrawals and conversions with demurrage, liquidity, fees and TWAP history;
 specify freshness/manipulation protection and how a keeper restores the reserve.
 The Python mark experiment assumes an ideal, BUCK-only strategy and cannot
 establish those properties.
+
+** Real-pool shock observation
+
+The contract test =JubileeEquityIntegrationTest= now compares the marked value
+of 20% of the fund's receipt with the actual BUCK received by separately
+unwinding and converting those shares through a real V3 pool. The pool has
+ten years of carried demurrage, and the fund has a valid TWAP history. With
+BUCK as token0, the controlled example gives:
+
+| Market state | Receipt mark for the selected shares | Net BUCK from sale |
+|--------------+--------------------------------------+--------------------|
+| No price shock | 6,247.781511 | 6,216.244497 |
+| Immediately after a large TOKEN sale | 6,247.781511 | 3,842.253096 |
+
+The result is similar with the opposite token ordering. In the shock case the
+existing historical TWAP has not yet moved, even though the spot market and
+executable proceeds have. The test also executes an authorized credit reduction
+before the TWAP catches up: the old mark is accepted and paid from the liquid
+reserve. It uses a snapshot to compare that path with the independent sale.
+
+This establishes a concrete overvaluation risk for the current prototype.
+The 10% cash limit caps an individual payout, not repeated payouts. The exact
+loss in a live market is not established by this isolated pool or single swap;
+liquidity, external prices, execution, slippage and other participants matter.
+An interim price-deviation guard, its recovery after the TWAP catches up, and
+its denial-of-service and manipulated-TWAP limits should be tested before
+settlement is considered ready for deployment.
