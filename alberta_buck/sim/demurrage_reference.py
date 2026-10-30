@@ -93,6 +93,25 @@ class AvailableRetirement:
 
 
 @dataclass(frozen=True)
+class MarkedReliefQuote:
+    """Cash-only settlement quote based on the entire fund's modeled mark."""
+
+    principal: float
+    baseline_relief: float
+    aggregate_benchmark: float
+    cash_net: float
+    investment_mark: float
+    fund_mark: float
+    benchmark_share: float
+    multiplier: float | None
+    effective_annual_rate: float | None
+    relief: float
+    account_payment: float
+    liquid_limit: float
+    exceeds_liquid_limit: bool
+
+
+@dataclass(frozen=True)
 class Renewal:
     """Atomic renewal of one owned credit position."""
 
@@ -789,6 +808,35 @@ class DemurrageLedger:
         if payout_policy == "proportional":
             return self._proportional_payout(result, self.jubilee, proceeds, redeemed_fraction)
         return result
+
+    def quote_marked_retirement(self, position: str, amount: float) -> MarkedReliefQuote:
+        """Explore a no-sale payout based on cash plus the strategy's mark.
+
+        The allocation is the selected capped BUCK-years divided by all
+        capped BUCK-years, times fund mark, capped by retired principal. The
+        result is not clamped to cash: a separate 10% cash limit indicates
+        whether the full quoted payout would instead revert. The idealized
+        strategy mark is not a claim about an executable real basket price.
+        """
+        amount = _positive(amount, "amount")
+        p = self.positions[position]
+        if amount > p.principal:
+            raise ValueError("retirement exceeds outstanding issuance")
+        baseline = min(amount, self.rate * p.relief_years * amount / p.principal)
+        benchmark = self.aggregate_relief
+        mark = self.jubilee_assets
+        share = baseline / benchmark if benchmark else 0.0
+        multiplier = mark / benchmark if benchmark else None
+        relief = min(amount, share * mark)
+        limit = self.jubilee * 0.1
+        return MarkedReliefQuote(
+            principal=amount, baseline_relief=baseline, aggregate_benchmark=benchmark,
+            cash_net=self.jubilee, investment_mark=self.accounts[JUBILEE_INVESTED],
+            fund_mark=mark, benchmark_share=share, multiplier=multiplier,
+            effective_annual_rate=self.rate * multiplier if multiplier is not None else None,
+            relief=relief, account_payment=amount - relief, liquid_limit=limit,
+            exceeds_liquid_limit=_exceeds_float(relief, limit),
+        )
 
     def _proportional_payout(self, quote: AvailableRetirement, cash_before: float,
                              proceeds: float, fraction: float) -> AvailableRetirement:

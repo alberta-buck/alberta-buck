@@ -1,0 +1,119 @@
+#+TITLE: Jubilee relief from a marked portfolio and a liquid reserve
+#+DATE: 2026-10-30
+#+OPTIONS: ^:nil toc:2
+
+* Status
+
+This note analyzes the user's proposed no-sale valuation. The Python
+=quote_marked_retirement= is a diagnostic; ordinary =JubileeFund.reduce= and
+=renew= still use the earlier proportional *sale* implementation. Do not
+describe the marked rule as deployed or as validated by a five-year run.
+
+* The numerator and denominator
+
+Let =P= be the principal selected for retirement, =s= the selected facility's
+accrued, capped BUCK-seconds, and =T= 50 nominal 365.25-day years in seconds.
+Its baseline target is =q = s / T=. Let =S= be the sum of the capped
+BUCK-seconds of *all* open facilities plus =T= times unburned Jubilee-assumed
+matured principal. The total benchmark is =B = S / T=. Let =C= be the fund's
+liquid BUCK *net* of its own carried fee and =L= the net, full-value BUCK mark
+of the fund's basket receipt. With =V = C + L=, the natural proportional
+allocation is:
+
+#+begin_example
+relief = min(P, V * s / S) = min(P, q * V / B),  if S > 0
+relief = 0,                                      if S = 0
+effective annual relief rate = 2% * V / B         before the principal cap
+#+end_example
+
+The =JubileeClaimBook= already computes =S= with bounded maturity batches;
+the current branch includes matured deferred fund obligations in it. Use
+full-precision multiplication/division and the scaled net =C=; rounding each
+facility's target before forming the ratio would lose fractional BUCK. =V=
+must not count the Carrying account's accrued fee as spendable value or count
+the basket position's value twice. Under the proposed cash guard, a reduction
+reverts if the computed net relief exceeds one tenth of =C= immediately before
+settlement. An owner-specified minimum relief still applies. The quoted relief
+must not be silently clamped to the cap.
+
+This is equivalent to allocating the same share of cash and marked LP value.
+If an actual proportional LP sale returns exactly its proportional mark with
+no slippage or fees, the earlier sale-based rule gives the same amount. They
+differ when the mark and realized proceeds differ. In an unchanged market,
+before the principal cap, paying a selected claim reduces both =V= and =B= in
+the same proportion, so =V/B= is unchanged for the other claimants.
+
+* Numerical example
+
+Suppose total outstanding issuance is 100 million BUCK, the selected
+facility issued 1 million one year ago, and the whole economy's cumulative
+benchmark =B= is 10 million BUCK (an average of five BUCK-years per issued
+BUCK). The other facilities' history is needed to know this denominator; the
+100-million supply alone does not determine it.
+
+| Item | Amount |
+|------+--------|
+| Selected facility's BUCK-years | 1 million |
+| Total benchmark BUCK-years | 500 million |
+| Selected fraction =s / S= | 0.2% |
+| Selected baseline target | 20,000 BUCK |
+| Liquid cash net of fees | 1 million BUCK |
+| LP receipt marked value, net of fees | 9 million BUCK |
+| Whole fund mark =V= | 10 million BUCK |
+| Fund-to-benchmark ratio =V/B= | 1.0 |
+| Relief | 20,000 BUCK |
+| Liquid limit, 10% of cash | 100,000 BUCK |
+
+At a 10.25 million fund mark the implied annual rate is 2.05% and the relief
+is 20,500 BUCK. At 9.5 million, the rate is 1.90% and relief is 19,000 BUCK.
+A one-million facility aged 50 years has a one-million baseline target; with
+the same 10-million benchmark and mark it represents 10% of the accrued
+claims, not 1%. It would hit the 100,000 liquid limit if it sought immediate
+payment. The separate matured-lien procedure instead releases the NFT and
+records unburned issuance as Jubilee debt; it does not require that payment.
+
+Multiplying the 1% /supply/ share by the facility's one-year/50-year age and
+then by the fund's 10-million mark yields 2,000 BUCK, one tenth of the
+age-weighted allocation in this example. It would agree only if the benchmark
+equalled the entire 100-million supply, i.e. all outstanding principal were
+at its 50-year cap. Applying age to the numerator without normalizing against
+the other facilities' ages applies age twice in a young economy.
+
+If the 1 million cash figure is *nominal* rather than net and its carried fee
+is 0.5%, =C= is 995,000 BUCK, not 1 million; with a 9-million net LP mark,
+=V= is 9.995 million. At a continuous 2% annual rate, an unchanged balance
+aged six months loses about 0.995%, not 0.5%. A mixed pool can have a different
+weighted average age. A stated 4% annual investment return alone is not enough
+to determine today's multiplier: position entry dates, cash flows, demurrage,
+losses and the current mark all affect =V/B=.
+
+* What the current basket can and cannot establish
+
+=BuckBasketEquity.valueOf(id)= currently returns the fund's share of equity
+at the basket's venue mark, without selling the receipt. In the experimental
+cash-only net-token mode, equity reads net BUCK held in the basket wallet.
+This is a useful candidate input, but it is not yet a demonstrated
+executable, net-of-demurrage valuation of the whole receipt:
+
+- The legacy V3 venue can fall back to spot when the TWAP is unavailable. The
+  stricter venue requires observation history, but TWAPs can still be stale
+  or manipulated and a mark is not a liquidation price.
+- V3 position marks use twice the modeled BUCK side of full-range liquidity;
+  they do not by themselves prove that the pool's nominal BUCK side is net of
+  its Carrying fee. Uncollected fees and execution costs also need explicit
+  treatment. Test against actual in-kind redemptions, both token ordering
+  directions and aged Carrying pools before accepting this mark as =L=.
+- If a future leveraged basket owns credit while Jubilee holds its shares,
+  the marked basket claim can depend on Jubilee's marked holdings. The
+  experimental net basket disallows that mode; the fixed-point and dilution
+  problem is detailed in [[file:basket-jubilee-crossholding.org][the cross-holding note]].
+- =valueOf= can revert when venue pricing is unavailable. Define an explicit
+  user-authorized fallback or let the operation fail; never invent a price.
+  A 10% cash limit bounds one operation but does not by itself prevent repeated
+  extraction against a manipulated mark.
+
+Before using the mark for on-chain relief, compare quotes to actual real-pool
+withdrawals and conversions with demurrage, liquidity, fees and TWAP history;
+specify freshness/manipulation protection and how a keeper restores the reserve.
+The Python mark experiment assumes an ideal, BUCK-only strategy and cannot
+establish those properties.

@@ -715,8 +715,7 @@ contract BuckCredit is ERC721Enumerable {
     ///         in Buck._mintAllocated against the holder's pre-mint
     ///         balanceOf (held + unused credit).
     function activateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
-        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
-        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+        _requireBuckHolder(tokenId, holder);
         _activate(tokenId, holder, amount);
     }
 
@@ -726,8 +725,7 @@ contract BuckCredit is ERC721Enumerable {
     ///         new issuance book also prevents releasing all backing coverage
     ///         while its own principal is outstanding.
     function deactivateFromBuck(uint256 tokenId, address holder, uint256 amount) external {
-        require(msg.sender == buck && buck != address(0), "BuckCredit: not buck");
-        require(ownerOf(tokenId) == holder, "BuckCredit: not holder");
+        _requireBuckHolder(tokenId, holder);
         CreditParams storage c = credits[tokenId];
         uint256 current = c.activatedValue.asUint();
         require(amount <= current, "BuckCredit: deactivate > active");
@@ -736,6 +734,19 @@ contract BuckCredit is ERC721Enumerable {
         c.activatedValue  = toBuckQty(current - amount);
 
         emit CreditActivated(tokenId, holder, 0, current - amount);
+    }
+
+    /// @notice Permanently close an inactive, fully released NFT.
+    /// @dev Only Buck can execute this. Its caller must separately settle or
+    ///      assume all outstanding issuance and make any premium refundable.
+    ///      The ERC-721 transfer guard rejects active coverage or issuance.
+    function closeFromBuck(uint256 tokenId, address holder) external {
+        _requireBuckHolder(tokenId, holder);
+        _burn(tokenId);
+        // Keep immutable historical metadata, but revoke the insurer's
+        // authority to update a token that no longer exists. Token IDs are
+        // never reused, and ownerOf is the existence check for consumers.
+        delete credits[tokenId].insurer;
     }
 
     function _activate(uint256 tokenId, address holder, uint256 amount) internal {

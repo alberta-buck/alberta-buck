@@ -20,6 +20,7 @@ contract BuckLedgerHarness {
     {
         return book.retireWithFund(owner, amount, reliefScaled, carrying);
     }
+    function retireFundDebt(uint256 amount) external returns (uint256) { return book.retireFundDebt(amount); }
     function send(address from, address to, uint256 amount, bool fc, bool tc) external returns (uint256) {
         return book.transfer(from, to, amount, fc, tc);
     }
@@ -212,6 +213,26 @@ contract BuckLedgerTest is Test {
         h.retireWithFund(ALICE, 100e6, net, false);
         assertEq(h.issued(), 0);
         _netConserved(ALICE, BOB, POOL);
+    }
+
+    function test_fundDebtBurnConsumesOnlyItsOwnNetAndPreservesSupply() public {
+        h.issue(ALICE, 1_000_000e6, false);
+        h.send(ALICE, BOB, 1_000_000e6, false, false);
+        vm.warp(t0 + 50 * YEAR);
+        (, uint256 beforeNet) = h.fundParts();
+        uint256 bobBefore = h.netOf(BOB);
+        uint256 amount = beforeNet / (10 * Q);
+        uint256 nominal = h.retireFundDebt(amount);
+        (, uint256 afterNet) = h.fundParts();
+        assertEq(afterNet, beforeNet - amount * Q);
+        assertGt(nominal, amount * Q);
+        assertEq(h.netOf(BOB), bobBefore);
+        assertEq(h.issued(), 1_000_000e6 - amount);
+        assertEq(_scaled(h.fundFlows().relief), amount * Q);
+        _netConserved(ALICE, BOB, POOL);
+        vm.expectRevert(BuckLedger.InsufficientBalance.selector);
+        h.retireFundDebt(afterNet / Q + 1);
+        assertEq(h.issued(), 1_000_000e6 - amount);
     }
 
     function test_manyTouchesDoNotChangeSpendableBalanceByAWholeRawUnit() public {

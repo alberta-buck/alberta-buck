@@ -130,14 +130,32 @@ library BuckLedger {
         uint256 total = amount * SCALE;
         if (reliefScaled > total || reliefScaled > self.fundNet) revert InsufficientBalance();
         _debitOrdinaryScaled(a, total - reliefScaled);
-        if (reliefScaled != 0) {
-            nominalFundSpent = Math.mulDiv(self.fundGross, reliefScaled, self.fundNet, Math.Rounding.Ceil);
-            self.fundGross -= nominalFundSpent;
-            self.fundNet -= reliefScaled;
-            self.fundRelief.add(reliefScaled);
-        }
+        nominalFundSpent = _consumeFundNet(self, reliefScaled);
         self.issued -= amount;
         if (self.fundNet > self.issued * SCALE) revert FundExceedsIssuance();
+    }
+
+    /// @notice Extinguish issued BUCK entirely from net Jubilee cash.
+    /// @dev The host must authorize this against deferred fund obligations,
+    ///      enforce its liquidity limit and atomically reduce that obligation.
+    function retireFundDebt(Ledger storage self, uint256 amount) internal returns (uint256 nominalFundSpent) {
+        _requireInitialized(self);
+        if (amount == 0) revert AmountZero();
+        if (amount > self.issued) revert InsufficientIssued();
+        _checkpointFund(self);
+        uint256 scaled = amount * SCALE;
+        if (scaled > self.fundNet) revert InsufficientBalance();
+        nominalFundSpent = _consumeFundNet(self, scaled);
+        self.issued -= amount;
+        if (self.fundNet > self.issued * SCALE) revert FundExceedsIssuance();
+    }
+
+    function _consumeFundNet(Ledger storage self, uint256 net) private returns (uint256 nominal) {
+        if (net == 0) return 0;
+        nominal = Math.mulDiv(self.fundGross, net, self.fundNet, Math.Rounding.Ceil);
+        self.fundGross -= nominal;
+        self.fundNet -= net;
+        self.fundRelief.add(net);
     }
 
     /// @notice Transfer nominal raw units. Returns the recipient's net amount

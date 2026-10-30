@@ -46,6 +46,7 @@ contract JubileeFund is IERC721Receiver {
     using SafeERC20 for IERC20;
     uint256 private constant Q = 1e36;
     uint256 private constant BP = 10_000;
+    uint256 private constant AUTO_REFUND_GAS = 500_000;
     uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
     bytes4 private constant UNDERWATER = bytes4(keccak256("Underwater()"));
 
@@ -88,6 +89,7 @@ contract JubileeFund is IERC721Receiver {
     event InvestmentKeeperSet(address indexed keeper);
     event SaleDeferred(uint256 indexed positionId, bytes4 reason);
     event TokenConverted(uint256 indexed constituent, address indexed asset, uint256 amountIn, uint256 netBuckScaled);
+    event MaturedPremiumPending(uint256 indexed tokenId, address indexed pool, uint256 nominal);
 
     error NotGovernance();
     error Reentrant();
@@ -363,6 +365,54 @@ contract JubileeFund is IERC721Receiver {
         (refund, premium) = token.renewFromJubilee(msg.sender, tokenId, terms, relief);
         _checkpointReserve();
         emit RenewalRelief(msg.sender, tokenId, relief, refund, premium);
+    }
+
+    /// @notice Release the caller's fully aged facility without selling the
+    ///         basket or spending the caller's BUCK. The fund assumes all
+    ///         unburned principal; the same insurer pool owes the premium.
+    /// @dev A failed insurer callback or transfer leaves a claim on that pool
+    ///      without undoing lien release. Anyone can retry the refund later.
+    function closeMatured(uint256 tokenId) external configured nonReentrant returns (uint256 principal) {
+        if (token.buckCredit().ownerOf(tokenId) != msg.sender) revert NotOwner();
+        _checkpointReserve();
+        principal = token.matureFromJubilee(msg.sender, tokenId);
+        _checkpointReserve();
+        (, address pool, uint256 nominal) = token.claimBook().premiumRefunds(tokenId);
+        if (nominal != 0) {
+            // A hostile or expensive insurer callback must not exhaust the
+            // gas needed to finish recording the released lien.
+            try this.attemptMaturedPremium{gas: AUTO_REFUND_GAS}(tokenId) {} catch {
+                emit MaturedPremiumPending(tokenId, pool, nominal);
+            }
+        }
+    }
+
+    /// @notice Retry the original pool's nominal premium refund independently
+    ///         of the already released NFT and Jubilee's own liquidity.
+    function claimMaturedPremium(uint256 tokenId) external configured nonReentrant returns (uint256) {
+        return _claimMaturedPremium(tokenId);
+    }
+
+    /// @dev Isolates a failed pool callback so that a matured lien still closes.
+    function attemptMaturedPremium(uint256 tokenId) external returns (uint256) {
+        if (msg.sender != address(this) || !_entered) revert NotSelf();
+        return _claimMaturedPremium(tokenId);
+    }
+
+    function _claimMaturedPremium(uint256 tokenId) private returns (uint256) {
+        (, address pool, uint256 nominal) = token.claimBook().premiumRefunds(tokenId);
+        if (nominal == 0 || pool == address(0)) revert BadAmount();
+        if (token.balanceOf(pool) < nominal) IInsurerRefundLiquidity(pool).prepareRefund(tokenId, nominal);
+        return token.claimMaturedPremium(tokenId);
+    }
+
+    /// @notice Permissioned reserve management burns already liquid BUCK
+    ///         against deferred matured issuance; no basket call is made.
+    function burnDeferred(uint256 principal) external configured nonReentrant {
+        if (msg.sender != governance && msg.sender != investmentKeeper) revert NotInvestmentKeeper();
+        _checkpointReserve();
+        token.burnDeferredFromJubilee(principal);
+        _checkpointReserve();
     }
 
     /// @notice Observe current excess and age only the excess seen at the

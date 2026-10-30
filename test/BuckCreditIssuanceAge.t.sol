@@ -203,6 +203,28 @@ contract BuckCreditIssuanceAgeTest is Test {
         assertEq(credit.ownerOf(id), BOB);
     }
 
+    function test_onlyBuckCanCloseAFullyReleasedNft() public {
+        uint256 id = _facility(100e6);
+        credit.recordIssuanceFromBuck(id, ALICE, 100e6);
+        vm.expectRevert(bytes("BuckCredit: credit in use"));
+        credit.closeFromBuck(id, ALICE);
+        credit.recordReductionFromBuck(id, ALICE, 100e6);
+        vm.expectRevert(bytes("BuckCredit: credit in use"));
+        credit.closeFromBuck(id, ALICE);
+        credit.deactivateFromBuck(id, ALICE, 100e6);
+        vm.prank(ALICE);
+        vm.expectRevert(bytes("BuckCredit: not buck"));
+        credit.closeFromBuck(id, ALICE);
+        vm.expectRevert(bytes("BuckCredit: not holder"));
+        credit.closeFromBuck(id, BOB);
+        credit.closeFromBuck(id, ALICE);
+        vm.expectRevert();
+        credit.ownerOf(id);
+        assertEq(credit.balanceOf(ALICE), 0);
+        uint256 next = _facility(100e6);
+        assertGt(next, id);
+    }
+
     function test_rejectsUnactivatedInvalidAndOverflowingIssuance() public {
         vm.prank(INSURER);
         uint256 inactive = credit.createCredit(ALICE, 0, 100e6, 100e6,

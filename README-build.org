@@ -80,6 +80,9 @@ and regeneration, executable papers, release builds and deployment procedures re
 [[file:doc/DEVELOP.org][doc/DEVELOP.org]] and [[file:alberta-buck-deployment.org][the deployment book]]. Simulations do not replace contract tests.
 The deployment dry run exercises the legacy bootstrap with stub Notes verifiers. It does not
 deploy the experimental =BuckNet= stack or establish readiness for a live deployment.
+The experimental =BuckNet= now links =BuckNetTransfers= and =BuckNetMaturity= libraries;
+Foundry links them for its tests. A future deployment or simulation using its artifact must
+deploy and link these libraries on that chain. The legacy deployment script does not do so.
 
 * Useful checks
 

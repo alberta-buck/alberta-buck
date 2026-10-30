@@ -21,6 +21,8 @@ The [[file:jubilee-inkind-conversion.org][in-kind conversion note]] records boun
 the remaining tradeoffs when an owner explicitly accepts cash-only relief.
 The [[file:net-demurrage-simulation-migration.org][simulation migration checklist]] maps the actual legacy deployment and agent
 assumptions, and records acceptance criteria for a replacement economy.
+The [[file:jubilee-marked-relief.org][marked-relief note]] analyzes the proposed no-sale proportional value,
+the required aggregate-age denominator, and the remaining basket-mark audit.
 
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
@@ -47,6 +49,9 @@ make nix-match-JubileeFundTest
 make nix-match-JubileeRenewalTest
 make nix-match-JubileeEquityIntegrationTest
 make nix-match-JubileeMaturityIntegrationTest
+make nix-match-JubileeMaturedReleaseTest
+make nix-match-JubileeObligationsTest
+make nix-match-JubileeLiquidityRebalanceTest
 make nix-match-JubileeReserveMathTest
 make nix-match-WideCounterTest
 make nix-doc-alberta-buck-demurrage
@@ -132,11 +137,15 @@ that outcome: the facility may be large relative to the fund, the basket can
 - [X] Implement and test a separately authorized keeper sale when the liquid
   reserve is below target, with explicit share, route and minimum-proceeds
   bounds and atomic rollback. It must not bypass a low-K basket exit.
-- [ ] Resolve the liquid-only relief formula and update reductions and renewals
-  to use it without calling the basket; enforce the 10% net-liquidity cap.
-- [ ] Specify and implement 50-year release, fund shortfalls and insurer-pool
-  refunds without relying on the former owner's BUCK balance. Reconcile NFT
-  release, outstanding issuance, aggregate BUCK-seconds and supply.
+- [ ] Validate the basket's net mark and implement the proposed age-weighted
+  marked-portfolio formula for reductions and renewals without selling; enforce
+  the 10% net-liquidity cap and owner's minimum on the actual net relief.
+- [X] Prototype 50-year release, fund shortfalls and insurer-pool refunds
+  without relying on the former owner's BUCK balance. The NFT is burned,
+  issuance is retained as deferred Jubilee principal, and the aggregate
+  benchmark includes the obligation until BUCK are actually burned.
+- [ ] Audit and stress the maturity release, insurer refund retries, linked
+  library deployments and deferred-burn liveness, including raw-unit dust.
 - [ ] Rework the independent Python reference, integration tests and paper;
   stress large/small facilities, a poor or illiquid basket, claim ordering,
   refunds, concurrent maturity and keeper liveness.
@@ -320,8 +329,20 @@ that outcome: the facility may be large relative to the fund, the basket can
 | 2026-10-30 | Credit wiring | Restricted one-shot =BuckCredit.setBuck= to its deployer and repaired the legacy deployment script's missing link. Two adversarial/factory tests, the 20-test BuckNet suite, an offline deployment dry run, and Python/JS world bootstrap checks passed. =make nix-test=: 1,315 passed, one fork-dependent test skipped, with the same missing-fixture SNARK/Regression exclusions. BuckCredit runtime is 24,058 bytes; this protection applies to new contracts only. | =5ecf5850= |
 | 2026-10-30 | Fresh simulation build | A clean Foundry output contains both simulation harness artifacts. Uniswap staging and simulation artifact loaders still expect the normal =out/= path even when =FOUNDRY_OUT= is overridden; the Makefile and build guide now point users to separate worktrees for isolation. | This commit |
 | 2026-10-30 | Separate reserve sale and maturity reference | Five keeper-sale tests, eight real-basket integration tests, 12 per-facility age tests and 93 Python reference tests pass. Maturity/deferred debt is modeled only in Python; Solidity reductions and renewals still use the older sale-on-claim path. | This commit |
+| 2026-10-30 | Matured lien release | Six integrated release tests cover spent-out owners, average-age maturity, retained supply, 10% deferred burns, reserve replenishment, nominal premium refunds, failed or gas-hungry insurer callbacks and later retries. Four obligation-book and 22 ledger tests pass. BuckNet links two libraries; production linking and the ordinary no-sale settlement remain unfinished. | This commit |
+| 2026-10-30 | Full maturity suite | =make nix-test=: 1,334 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= remain excluded because their fixtures are absent. These are prototype contract tests, not a five-year net-accounting economy. | This commit |
+| 2026-10-30 | Marked relief diagnostic | =make nix-venv-demurrage-test=: 98 passed. The new quote models 1.90%/2.05%, the capped-claim denominator and a 10% liquid limit. Real-basket mark and no-sale settlement remain to be implemented and verified. | This commit |
 
 * Open implementation constraints
+
+The fixed 10% limit can prevent a final tiny deferred BUCK burn if liquid net
+cash is smaller than ten raw BUCK units. The former owner's lien is already
+released, but that dust remains in supply as a fund obligation. Keeper sales
+may fail under low K or insufficient market liquidity. The lien does not need
+a basket sale, but maturity processing can require bounded public batches.
+An insolvent insurer cannot physically return its nominal deposit immediately:
+the original-pool refund survives as a separate claim and can be retried.
+These are not guarantees of an available liquid market or a solvent insurer.
 
 The new =BuckCredit.setBuck= assignment is reserved for the account or factory
 that deployed that credit contract. A factory must provide its own authorized

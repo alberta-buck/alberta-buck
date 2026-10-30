@@ -6,9 +6,10 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BuckCredit} from "./BuckCredit.sol";
 import {BuckTypes} from "./BuckTypes.sol";
-import {BN254} from "./BN254.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 import {BuckLedger} from "./lib/BuckLedger.sol";
+import {BuckNetMaturity} from "./lib/BuckNetMaturity.sol";
+import {BuckNetTransfers} from "./lib/BuckNetTransfers.sol";
 import {BuckRenewal, BuckRenewalConsent} from "./BuckRenewalConsent.sol";
 import {JubileeClaimBook} from "./JubileeClaimBook.sol";
 
@@ -76,6 +77,9 @@ contract BuckNet is IERC20, IERC20Metadata {
                           uint256 reliefScaled, uint256 nominalFundSpentScaled, uint256 premiumRefund);
     event FacilityRenewed(address indexed owner, uint256 indexed tokenId, uint256 relief,
                           uint256 additionalIssuance, uint256 principal, uint256 nominalFundSpentScaled);
+    event MaturedFacilityReleased(address indexed owner, uint256 indexed tokenId, uint256 deferredPrincipal);
+    event MaturedPremiumRefunded(address indexed owner, uint256 indexed tokenId, address indexed pool, uint256 nominal);
+    event DeferredJubileeBurned(uint256 principal, uint256 nominalFundSpentScaled);
 
     error Reentrant();
     error BadAddress();
@@ -93,6 +97,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error UnauthorizedTransfer();
     error InsufficientAllowance();
     error NotRegistry();
+    error ReliefLiquidityLimit();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -364,6 +369,40 @@ contract BuckNet is IERC20, IERC20Metadata {
         emit FacilityReduced(owner, tokenId, principal, reliefScaled, nominalFundSpent, refund);
     }
 
+    /// @notice Release a fully aged lien without requiring the former owner
+    ///         to hold or repay BUCK. The fund assumes the unburned issuance.
+    /// @dev Only the external Jubilee coordinator can call; it authorizes the
+    ///      owner. The claim book checks maturity and records the original
+    ///      insurer's refund before the NFT and active deposit are removed.
+    function matureFromJubilee(address owner, uint256 tokenId) external nonReentrant returns (uint256 principal) {
+        if (msg.sender != jubilee) revert NotJubilee();
+        if (buckCredit.ownerOf(tokenId) != owner) revert NotOwner();
+        principal = BuckNetMaturity.close(buckCredit, claimBook, facilityPool, premiumPrincipal, owner, tokenId);
+        delete reductionAuthorization[tokenId];
+        emit MaturedFacilityReleased(owner, tokenId, principal);
+    }
+
+    /// @notice Pay a matured facility's recorded nominal premium from its
+    ///         original insurer pool. Anyone can trigger the payment; the
+    ///         recorded beneficiary cannot be changed by the caller.
+    function claimMaturedPremium(uint256 tokenId) external nonReentrant returns (uint256 nominal) {
+        (address owner, address pool, uint256 amount) = claimBook.consumePremiumRefund(tokenId);
+        if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
+        _spendAllowance(pool, address(this), amount);
+        _transfer(pool, owner, amount);
+        emit MaturedPremiumRefunded(owner, tokenId, pool, amount);
+        return amount;
+    }
+
+    /// @notice Burn fund cash against Jubilee's assumed matured issuance.
+    ///         Each call can consume at most 10% of pre-burn net fund cash.
+    function burnDeferredFromJubilee(uint256 principal) external nonReentrant {
+        if (msg.sender != jubilee) revert NotJubilee();
+        uint256 nominal = BuckNetMaturity.burn(_book, claimBook, principal);
+        emit Transfer(jubilee, address(0), principal);
+        emit DeferredJubileeBurned(principal, nominal);
+    }
+
     function claimSeconds() external view returns (uint256) { return claimBook.totalSeconds(); }
     function maturitiesPending() external view returns (bool) { return claimBook.pending(); }
     function processMaturities(uint256 maxSteps) external nonReentrant returns (uint256, bool) {
@@ -390,22 +429,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     function _transfer(address from, address to, uint256 amount) private {
-        _enableModeHook();
-        if (from == address(0) || to == address(0)) revert BadAddress();
-        if (!identity.isVerified(from) || !identity.isVerified(to)) revert NotVerified();
-        bytes32 toHash = _receiptFragments[from][to];
-        if (toHash == bytes32(0)) {
-            if (!identity.isPublicIdentity(from)) revert UnauthorizedTransfer();
-            toHash = _identityHash(to);
-        }
-        bytes32 fromHash = _receiptFragments[to][from];
-        if (fromHash == bytes32(0)) {
-            if (!identity.isPublicIdentity(to)) revert UnauthorizedTransfer();
-            fromHash = _identityHash(from);
-        }
-        _book.transfer(from, to, amount, identity.isCarrying(from), identity.isCarrying(to));
-        emit Transfer(from, to, amount);
-        emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
+        BuckNetTransfers.send(_book, _receiptFragments, identity, from, to, amount);
     }
 
     /// @notice Called by the opted-in identity registry before it changes a
@@ -440,9 +464,4 @@ contract BuckNet is IERC20, IERC20Metadata {
         }
     }
 
-    function _identityHash(address account) private view returns (bytes32) {
-        BN254.G1Point memory pk = identity.pkOf(account);
-        IdentityRegistry.ElGamalCT memory E = identity.ciphertextOf(account);
-        return keccak256(abi.encode(pk.X, pk.Y, E.R.X, E.R.Y, E.C.X, E.C.Y));
-    }
 }
