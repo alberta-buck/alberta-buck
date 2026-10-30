@@ -196,6 +196,33 @@ contract JubileeMarkedReliefTest is Test {
         assertEq(_scaled(nextYear.grossDemurrage), 99e6 * Q);
     }
 
+    function test_smallDailyRepaymentsUseAccruedCashWhileKeeperInvestsExcess() public {
+        uint256 id = _credit(ALICE, 1000e6);
+        _credit(BOB, 9000e6);
+        vm.warp(t0 + YEAR);
+        fund.checkpointReserve();
+        BuckLedger.FundFlows memory start = buck.fundFlows();
+        basket.setMode(4); // A basket redemption would revert.
+        for (uint256 day = 1; day <= 30; ++day) {
+            vm.warp(t0 + YEAR + day * 1 days);
+            _credit(BOB, 10e6);
+            _authorize(id, 1e6, 0);
+            vm.prank(ALICE);
+            fund.reduce(id, 1e6);
+            vm.prank(GOV);
+            fund.investScheduled(type(uint256).max, 0, 1);
+        }
+        assertEq(buck.totalIssued(), 10_270e6);
+        BuckLedger.FundFlows memory end = buck.fundFlows();
+        uint256 incoming = _scaled(end.netDemurrage) - _scaled(start.netDemurrage);
+        uint256 relief = _scaled(end.relief) - _scaled(start.relief);
+        assertGt(incoming, relief);
+        (WideCounter.Count memory invested, WideCounter.Count memory sold) = fund.investmentFlows();
+        assertGt(_scaled(invested), 0);
+        assertEq(_scaled(sold), 0);
+        assertGt(fund.positionId(), 0);
+    }
+
     function _scaled(WideCounter.Count memory count) private pure returns (uint256) {
         return count.units * Q + count.fraction;
     }
