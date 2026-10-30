@@ -43,6 +43,22 @@ solving the dependency, also gives an inconsistent price. When the assumptions
 hold, the external owners' value is =(1-f)*E + (1-r)*(C + f*E) = 100=,
 equal to =A - P + C=; the mutual claims have not created new value.
 
+The exact-arithmetic diagnostic in =demurrage_reference.py= also checks entry
+pricing in that example. With 100 existing shares, the fund owns 50, and a
+new investor contributes 10 BUCK. Pricing at the ideal equity issues about
+10.294118 shares and preserves the share price. Pricing only at the bare
+=A - P = 80= issues 12.5 shares; after recomputing the ideal mark those shares
+are worth 11.875 BUCK, an immediate 1.875-BUCK transfer from existing
+claimants. This stylized example demonstrates a possible dilution mechanism;
+it is not a prediction of an actual pool's prices or execution.
+
+The mark is not necessarily liquid. In the same example the basket's ideal
+claim is about 17.142857 BUCK, but if the proportional position sale yields no
+BUCK, the fund can pay only its 5-BUCK share of pre-sale cash. Counting the
+ideal mark as guaranteed collateral would therefore be unsafe. Pricing shares
+and setting the K-backed credit limit may need different, explicitly justified
+valuations; neither outcome has yet been implemented for leveraged net mode.
+
 At the extreme, =A=90=, =P=100=, =C=10= and =f=r=1=. Every =E= between 0 and
 90 satisfies the simplified equations. There is no unique price to obtain by
 plugging the basket mark into the fund mark. Actual redemption may also be
@@ -51,6 +67,11 @@ capacity must not be made safe merely by assuming the future relief was paid.
 This example is an accounting and liquidity warning, not a prediction that a
 real pool will follow the simplified mark or that any particular relief amount
 is payable.
+
+Run =make nix-venv-demurrage-test= for the exact fixed-point, conservation,
+dilution, cap, insolvency and singular-case checks. The diagnostic uses
+=Fraction= and checks a grid of scenarios; it does not model swap execution,
+K, transaction fees or five-year household behavior.
 
 * Requirements for leveraged integration
 

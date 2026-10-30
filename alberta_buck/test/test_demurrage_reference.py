@@ -3,13 +3,111 @@ import math
 import copy
 import json
 from decimal import Decimal, localcontext
+from fractions import Fraction
 
 import pytest
 
 from alberta_buck.sim.demurrage_reference import (
     JUBILEE, JUBILEE_INVESTED, DemurrageLedger, InsufficientFunds,
-    carrying_gross_for_net_units, main, snapshot,
+    carrying_gross_for_net_units, ideal_crossheld_basket_equity, main, snapshot,
 )
+
+
+def _crossheld_equation(equity, assets, principal, cash, fund_share, claim_share):
+    relief = min(principal, claim_share * (cash + fund_share * equity))
+    return max(Fraction(0), assets - principal + relief)
+
+
+@pytest.mark.parametrize(
+    "assets,principal,cash,fund_share,claim_share,expected",
+    [
+        (180, 100, 20, Fraction(1, 2), Fraction(1, 4), Fraction(680, 7)),
+        (100, 50, 100, Fraction(1, 2), 1, 100),  # Relief is capped at principal.
+        (50, 100, 10, Fraction(1, 2), Fraction(1, 2), 0),  # No positive equity.
+        (150, 100, 20, 0, Fraction(1, 2), 60),  # No fund-held basket share.
+    ],
+)
+def test_ideal_crossholding_mark_solves_the_capped_equations(
+    assets, principal, cash, fund_share, claim_share, expected
+):
+    low, high = ideal_crossheld_basket_equity(assets, principal, cash, fund_share, claim_share)
+    assert low == high == expected
+    assert _crossheld_equation(low, assets, principal, cash, fund_share, claim_share) == low
+
+
+def test_ideal_crossholding_does_not_create_external_value():
+    assets, principal, cash = 180, 100, 20
+    fund_share, claim_share = Fraction(1, 2), Fraction(1, 4)
+    equity, _ = ideal_crossheld_basket_equity(assets, principal, cash, fund_share, claim_share)
+    fund_assets = cash + fund_share * equity
+    relief = claim_share * fund_assets
+    assert equity == Fraction(680, 7)
+    assert relief == Fraction(120, 7)
+    external_value = (1 - fund_share) * equity + (1 - claim_share) * fund_assets
+    assert external_value == assets - principal + cash
+
+
+def test_ideal_crossholding_identifies_the_singular_interval():
+    low, high = ideal_crossheld_basket_equity(90, 100, 10, 1, 1)
+    assert (low, high) == (0, 90)
+    for equity in (low, Fraction(45), high):
+        assert _crossheld_equation(equity, 90, 100, 10, 1, 1) == equity
+    assert ideal_crossheld_basket_equity(91, 100, 10, 1, 1) == (91, 91)
+    assert ideal_crossheld_basket_equity(89, 100, 10, 1, 1) == (0, 0)
+
+
+def test_ideal_crossholding_entry_illustrates_dilution_if_claim_is_ignored():
+    assets, principal, cash = 180, 100, 20
+    shares, fund_shares, contribution = Fraction(100), Fraction(50), Fraction(10)
+    claim_share = Fraction(1, 4)
+    equity, _ = ideal_crossheld_basket_equity(assets, principal, cash, fund_shares / shares, claim_share)
+    fair_new_shares = contribution * shares / equity
+    fair_total = shares + fair_new_shares
+    fair_equity, _ = ideal_crossheld_basket_equity(
+        assets + contribution, principal, cash, fund_shares / fair_total, claim_share
+    )
+    assert fair_equity / fair_total == equity / shares
+
+    bare_equity = assets - principal
+    wrong_new_shares = contribution * shares / bare_equity
+    wrong_total = shares + wrong_new_shares
+    wrong_equity, _ = ideal_crossheld_basket_equity(
+        assets + contribution, principal, cash, fund_shares / wrong_total, claim_share
+    )
+    assert wrong_new_shares * wrong_equity / wrong_total > contribution
+    assert fund_shares * wrong_equity / wrong_total < fund_shares * equity / shares
+
+
+def test_ideal_crossholding_mark_is_not_a_guarantee_of_liquid_relief():
+    equity, _ = ideal_crossheld_basket_equity(180, 100, 20, Fraction(1, 2), Fraction(1, 4))
+    marked_relief = Fraction(1, 4) * (20 + Fraction(1, 2) * equity)
+    available_if_the_position_sale_returns_zero = Fraction(1, 4) * 20
+    assert marked_relief == Fraction(120, 7)
+    assert available_if_the_position_sale_returns_zero == 5
+    assert available_if_the_position_sale_returns_zero < marked_relief
+
+
+def test_ideal_crossholding_fixed_points_across_solvent_and_insolvent_grid():
+    shares = (Fraction(0), Fraction(1, 2), Fraction(1))
+    for assets in (0, 50, 100, 150):
+        for principal in (0, 100, 200):
+            for cash in (0, 25, 100):
+                for fund_share in shares:
+                    for claim_share in shares:
+                        low, high = ideal_crossheld_basket_equity(
+                            assets, principal, cash, fund_share, claim_share
+                        )
+                        assert 0 <= low <= high <= assets
+                        for equity in (low, (low + high) / 2, high):
+                            assert _crossheld_equation(
+                                equity, assets, principal, cash, fund_share, claim_share
+                            ) == equity
+
+
+@pytest.mark.parametrize("args", [(-1, 0, 0, 0, 0), (1, 1, 0, 2, 0), (1, 1, 0, 0, -1)])
+def test_ideal_crossholding_rejects_invalid_amounts_and_shares(args):
+    with pytest.raises(ValueError):
+        ideal_crossheld_basket_equity(*args)
 
 
 def opened(amount=100.0):

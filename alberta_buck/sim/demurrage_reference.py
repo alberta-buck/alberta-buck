@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import copy
 from dataclasses import asdict, dataclass, replace
+from fractions import Fraction
 import json
 import math
 
@@ -115,6 +116,42 @@ class Renewal:
 
 class InsufficientFunds(ValueError):
     """The proposed retirement cannot be fully funded by its designated payers."""
+
+
+def ideal_crossheld_basket_equity(
+    assets: int | float | Fraction,
+    principal: int | float | Fraction,
+    fund_cash: int | float | Fraction,
+    fund_share: int | float | Fraction,
+    claim_share: int | float | Fraction,
+) -> tuple[Fraction, Fraction]:
+    """Return the lowest and highest idealized basket-equity fixed points.
+
+    The fund owns ``fund_share`` of this basket, and the basket's facility
+    owns ``claim_share`` of the fund's claim benchmark. With frictionless,
+    fully liquid sale at the same mark, the simultaneous equations are::
+
+        relief = min(principal, claim_share * (fund_cash + fund_share * equity))
+        equity = max(0, assets - principal + relief)
+
+    An interval wider than zero exposes an indeterminate cross-holding. This
+    diagnostic does not quote an executable sale, implement K, or guarantee
+    that the actual Jubilee relief equals this ideal mark. Exact fractions
+    keep the singular case distinct from an arbitrarily close approximation.
+    """
+    a, p, c, f, r = (value if isinstance(value, Fraction) else Fraction(str(value))
+                     for value in (assets, principal, fund_cash, fund_share, claim_share))
+    if min(a, p, c) < 0 or not 0 <= f <= 1 or not 0 <= r <= 1:
+        raise ValueError("assets, principal and cash must be nonnegative; shares must be in [0, 1]")
+    feedback = f * r
+    numerator = a - p + r * c
+    if feedback == 1:
+        if numerator == 0:
+            return Fraction(0), a
+        result = a if numerator > 0 else Fraction(0)
+    else:
+        result = max(Fraction(0), min(a, numerator / (1 - feedback)))
+    return result, result
 
 
 class DemurrageLedger:
