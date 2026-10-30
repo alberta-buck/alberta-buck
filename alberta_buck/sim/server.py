@@ -237,9 +237,11 @@ class Session:
             anvil.start()
             self.provider = anvil.w3.provider
         try:
-            run(scenario, anvil, out_path=None, verbose=False,
-                basket_impl=self.basket_impl,
-                on_day_start=self._on_day_start, on_frame=self._on_frame)
+            summary = run(scenario, anvil, out_path=None, verbose=False,
+                          basket_impl=self.basket_impl,
+                          on_day_start=self._on_day_start, on_frame=self._on_frame)
+            if summary["pdf"]:
+                print(f"[sim.server] session '{self.sid}' wrote {summary['json']} and {summary['pdf']}")
         finally:
             anvil.stop()
 

@@ -11,6 +11,7 @@ import argparse
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from hashlib import sha256
 from html import escape
 import io
@@ -20,13 +21,22 @@ import multiprocessing
 import os
 from pathlib import Path
 import tempfile
+import threading
 from urllib.parse import quote
+from uuid import uuid4
 
 FIVE_YEARS                      = 5 * 365
+DEFAULT_OUTPUT_DIR              = Path(os.environ.get("ALBERTA_BUCK_REPO", Path(__file__).resolve().parents[2])) / "build/sim/completed"
+_RENDER_LOCK                    = threading.RLock()  # pyplot is shared by server sessions in one process
 
 
 def preflight() -> None:
     """Check the plotting extra before spending hours on a simulation."""
+    with _RENDER_LOCK:
+        _preflight()
+
+
+def _preflight() -> None:
     cache                       = Path(tempfile.gettempdir()) / "alberta-buck-mpl"
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache))
@@ -42,6 +52,31 @@ def pdf_path(vector: Path) -> Path:
     """Keep the same PDF name when a campaign promotes name.partial to name.json."""
     name                        = vector.name.removesuffix(".partial").removesuffix(".json")
     return vector.with_name(name + ".pdf")
+
+
+def output_path(requested, days: int):
+    """Give every long run a distinct output path, even if no path was requested."""
+    if requested:
+        return requested
+    if days < FIVE_YEARS:
+        return None
+    stamp                       = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return DEFAULT_OUTPUT_DIR / f"run-{stamp}-{uuid4().hex}.json"
+
+
+def buck_accounting(data: dict) -> str:
+    """Describe recorded BUCK accounting without guessing for older vectors."""
+    meta                        = data.get("meta")
+    contract                    = meta.get("buck_contract") if isinstance(meta, dict) else None
+    if not isinstance(contract, dict):
+        return "unrecorded"
+    accounting                  = contract.get("accounting")
+    artifact                    = contract.get("artifact")
+    if not isinstance(accounting, str) or not accounting:
+        return "unrecorded"
+    if not isinstance(artifact, str) or not artifact:
+        return accounting
+    return f"{accounting} ({artifact})"
 
 
 def finish(snap, out_path) -> tuple[Path | None, Path | None]:
@@ -131,7 +166,13 @@ def _credit_page(data, name, digest, pdf) -> None:
     cast                        = "; ".join(f"{n} {cls}" for cls, n in counts.items())
     import textwrap
     footer                      = "\n".join(textwrap.wrap(cast or "Cast metadata unavailable", 150))
-    fig.text(.025, .018, footer + f"\nVector SHA256: {digest}", fontsize=6.5)
+    run                         = data.get("meta", {}).get("run", {})
+    if run.get("scenario"):
+        footer                 += f"\nScenario: {run['scenario']}; seed: {run.get('seed', 'unrecorded')}"
+    if run.get("mode") == "interactive":
+        footer                 += "\nInteractive diagnostic: no batch teardown or acceptance judgment."
+    fig.text(.025, .018, footer + f"\nBUCK accounting: {buck_accounting(data)}"
+             + f"\nVector SHA256: {digest}", fontsize=6.5)
     fig.tight_layout(rect=(0, .12, 1, .96))
     pdf.savefig(fig)
     plt.close(fig)
@@ -218,6 +259,13 @@ def _population_page(data, pdf) -> None:
 
 def render(vector: Path) -> dict:
     """Render atomically; accept old closed-book vectors as well as explicit completion metadata."""
+    # Live server sessions share pyplot and close figures after rendering.
+    # Serialize within a process; campaign workers remain separate processes.
+    with _RENDER_LOCK:
+        return _render(vector)
+
+
+def _render(vector: Path) -> dict:
     preflight()
     from matplotlib.backends.backend_pdf import PdfPages
     import matplotlib.pyplot as plt
@@ -242,7 +290,8 @@ def render(vector: Path) -> dict:
     fd, temporary               = tempfile.mkstemp(prefix=target.stem + "-", suffix=".pdf", dir=target.parent)
     os.close(fd)
     try:
-        with PdfPages(temporary, metadata={"Title": vector.stem, "Subject": f"Vector SHA256: {digest}"}) as pdf:
+        subject                 = f"Vector SHA256: {digest}; BUCK accounting: {buck_accounting(data)}"
+        with PdfPages(temporary, metadata={"Title": vector.stem, "Subject": subject}) as pdf:
             _credit_page(data, vector.stem, digest, pdf)
             # Keep the existing PNG renderers as the detailed pages; their console tables are redundant here.
             with redirect_stdout(io.StringIO()):
@@ -263,6 +312,7 @@ def render(vector: Path) -> dict:
     last                        = frames[-1]
     tail                        = [f for f in frames if f["day"] > last["day"] - 90]
     return {"vector": str(vector), "pdf": str(target), "pages": pages, "last_day": last["day"],
+            "buck_accounting": buck_accounting(data),
             "bv_tail": sum(f["basketVal"] / 1e18 for f in tail) / len(tail),
             "k": last["buckK"] / 1e18, "fat_limit": last.get("fat_limit", 0) / 1e6,
             "refinanced": sum(a["deploys"] > 0 for a in last.get("octl", [])),
@@ -280,7 +330,8 @@ def write_index(records: list[dict], target: Path) -> None:
     for r in sorted(records, key=lambda r: r["vector"]):
         name                    = os.path.relpath(r["vector"], target.parent)
         rows.append(f'<tr><td>{link(r["pdf"], name.removesuffix(".json"))}</td>'
-                    f'<td>{link(r["vector"], "JSON")}</td><td>{r["pages"]}</td><td>{r["last_day"]}</td>'
+                    f'<td>{link(r["vector"], "JSON")}</td><td>{escape(r.get("buck_accounting", "unrecorded"))}</td>'
+                    f'<td>{r["pages"]}</td><td>{r["last_day"]}</td>'
                     f'<td>{r["bv_tail"]:.4f}</td><td>{r["k"]:.3f}</td><td>{r["fat_limit"]:,.0f}</td>'
                     f'<td>{r["refinanced"]}/{r["cohort"]}</td></tr>')
     target.write_text('''<!doctype html><html lang="en"><meta charset="utf-8"><title>Simulation reports</title>
@@ -291,7 +342,7 @@ th{text-align:left;position:sticky;top:0;background:white}td:nth-child(n+3){text
 <p>BVIB is the final 90-calendar-day mean: above 1 means the BUCK is cheap against the basket, below 1 means dear.
 K and the synthetic borrowers' activated limit are final-frame values. Refinanced counts people who ever deployed
 credit, not continuing issuers. Frames precede the forced end-of-run teardown.</p>
-''' + f'<p>{len(records)} reports.</p><table><thead><tr><th>PDF / run</th><th>Data</th><th>Pages</th><th>Last day</th>'
+''' + f'<p>{len(records)} reports.</p><table><thead><tr><th>PDF / run</th><th>Data</th><th>BUCK accounting</th><th>Pages</th><th>Last day</th>'
                       '<th>BVIB</th><th>K</th><th>Large borrowers: limit (BUCKs)</th><th>Ever issued / cohort</th>'
                       '</tr></thead><tbody>' + "\n".join(rows) + '</tbody></table></html>\n')
 

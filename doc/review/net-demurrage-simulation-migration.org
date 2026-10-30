@@ -1,0 +1,87 @@
+#+TITLE: Migrating the household economy to net demurrage
+#+DATE: 2026-10-29
+#+OPTIONS: ^:nil toc:2
+
+* Status and purpose
+
+The supported five-year economy and both interactive worlds currently deploy
+the *legacy signed-balance* BUCK token. They do not exercise =BuckNet=,
+=JubileeFund=, insurer-specific pools or the new facility settlement model.
+Passing their tests or acceptance criteria does not validate those contracts.
+The new cash-only equity-basket integration proves useful plumbing but does
+not reproduce the leveraged basket machine used by the mature economy. Keep
+the old economy runnable and clearly identified until its replacement has
+equivalent coverage; do not remove its distinct shock or exit tests yet.
+
+The authoritative implementation checklist is
+[[file:demurrage-implementation-plan.org][the demurrage plan]]. The unresolved leveraged-basket valuation and liquidity
+choice is described in [[file:basket-jubilee-crossholding.org][the cross-holding analysis]]. No five-year acceptance
+campaign should be presented as evidence for the new contracts until the
+deployment, agents, telemetry and basket have all been migrated and the
+acceptance vectors below pass.
+
+* Migration map
+
+| Area | Current integration | Required net-model work |
+|------+---------------------+-------------------------|
+| Python deployment | =alberta_buck/sim/deploy.py= selects =Buck= or =BuckWithBasketHooks=, a single =SimLP= insurance pool, and opens the basket's legacy credit | Add an explicit new-model deployment path with =BuckNet=, a verified Carrying =JubileeFund=, the correct registry and BuckCredit wiring, insurer-specific Carrying pools with refund liquidity/allowances, and a correctly initialized basket. Record actual addresses and artifacts. Preserve the legacy path for comparisons until its coverage is replaced. |
+| Basket bootstrap | =deploy.py= seeds real V3 pools and gives an equity basket a MARKED credit facility | Port only after the share-price/relief circularity is resolved. The current =enableNetAccounting= path is cash-only and cannot represent this leveraged bootstrap. Never relax the low-K exit guard or assume a prospective Jubilee mark is spendable cash. |
+| Python household execution | =credit_households.py= uses =signedBalanceOf= to infer drawn debt and measures trade flows as signed-balance changes; =quoteMint/mint= activate credit, and =burn= unwinds it | Read =balanceOf= as spendable BUCK and each NFT's =issuanceOf= for issued principal and age. Select actual NFTs for =issue= and owner-authorized, fund-coordinated reduction. Measure trade proceeds using actual spendable balance changes and tokens received; transfers alone do not repay an NFT. |
+| Household policy | =household_policy.py= and its JS counterpart receive legacy =drawn=, =spendable= and unactivated headroom | Keep shared decision rules and randomized population arrivals, but define the inputs in terms of actual balances, NFT principal, coverage and funding costs. Do not count spendable purchased BUCK as unissued capacity, or an ideal relief benchmark as guaranteed funds. Preserve adaptive, basket, retire and discount comparisons. |
+| Python other actors | =equilibrium_agents.py= and bootstrappers contain many legacy mint, burn, lien and relief assumptions | Audit only actors used by the supported household economy and its explicit shocks first. Convert those to the same actual issuance/settlement operations; keep a distinct old stress actor only where its failure check lacks a replacement. Do not substitute a synthetic signed balance for contract state. |
+| Fund and pools | Current deployment has no independent fund or per-insurer liquidity agent | Add a clearly scheduled keeper for capped-claim maturity processing, reserve checkpoints and bounded investment. Configure conversion routes and slippage limits for TOKEN proceeds. Model insurer cash and asset recovery independently and record failures, cash-only deferral and residual positions. |
+| Telemetry and acceptance | =credit_households.py= builds household net worth and =economy.py= checks exits using =drawn - jub= | Record outstanding principal, target claim, actual paid relief, spendable BUCK, active coverage, premium deposit/refund and basket mark separately. An exited facility has zero outstanding principal and released coverage; do not subtract an unpaid target from the principal a second time. Show fund cash, shares and actual returns alongside household ROI. |
+| JS deployment and persistence | =core/js/src/buckworld.js= deploys and restores legacy =Buck=; =bundle-artifacts.mjs= omits the new fund/token | Extend the browser's deployment, artifact bundle and snapshot/restore record to include the actual token, fund, claim book, consent and insurer pools. Recreate the same basket and reserve settings on restore. Keep the savings server's Python deployment in sync. |
+| JS household execution | =core/js/src/agents/household-ops.js= and =scenarios/eqworld.js= read signed debt and use legacy mint/burn | Implement the same per-NFT issue, net trade, authorization and reduction semantics as Python, with executable shared vectors. Update both the browser-only demo and the savings sandbox views, including each investor's basis, mark and ROI. |
+| Reports and provenance | =loop.py= closes a vector before PDF generation; =economy.py= freezes source and repairs missing PDFs | Keep automatic PDF generation on every completed five-year run. New vectors and reports identify the actual BUCK artifact and accounting model; an old vector without that field is =unrecorded=. Continue to preserve completed JSON if rendering fails. |
+
+The new =BuckNet.issue= requires a selected NFT, activated coverage and desired
+new spendable amount; insurance funding and K checks must use the actual
+contract rules. To retire, the owner authorizes a specific NFT/principal and a
+minimum net relief, and invokes the fund's appropriate reduction with any
+bounded conversion routes. Actual relief is determined *after* the
+proportional cash allocation and sale. Failures, unavailable routes, insurer
+liquidity or unsettled maturities must remain visible; they cannot be silently
+turned into an imagined payment. A cash-only deferral keeps shares in the
+fund for later claimants and can redistribute future recovery, as documented in
+[[file:jubilee-inkind-conversion.org][the in-kind note]].
+
+* Acceptance before retiring the legacy economy
+
+- [ ] A deployed and bootstrapped household world names =BuckNet= and its
+  separate, verified Carrying fund in the vector and demonstrates the intended
+  leveraged basket under the chosen valuation policy. The five-year report
+  exposes that provenance and actual relevant contract addresses.
+- [ ] Python and JS consume common deterministic decision and operation
+  vectors covering refinance, invest, discount buyback and explicit per-NFT
+  retirement. Compare real balances, principal, premium, claim and cash flows,
+  rather than only comparing decisions made from fabricated inputs.
+- [ ] An idle million-BUCK facility has zero ordinary held BUCK, spendable
+  issued-but-unspent BUCK, and accruing account demurrage and facility relief.
+  A transfer and a market purchase do not retire it; an authorized reduction
+  does. Two NFTs belonging to one owner retain independent ages.
+- [ ] Real insurer pools receive their own full-value deposits, refund nominal
+  amounts carrying their average demurrage, and restore their own liquidity or
+  fail atomically. In-place renewal needs both owner and insurer consent and
+  cannot worsen a pre-existing K shortfall.
+- [ ] A Jubilee investment uses one expandable receipt. Proportional cash,
+  real sale proceeds, Carrying gross-up, zero/partial proceeds, bounded in-kind
+  conversion and claim-maturity backlog are exercised and reported. Any
+  explicit deferred recovery and its effects on later claimants are visible.
+- [ ] Market shocks include a discounted-BUCK buyback that explicitly retires
+  actual obligations, reduces issuance and provides the expected demand/K
+  response. Low-K exits remain guarded; households retry or report a genuine
+  shortfall instead of being marked exited or receiving invented proceeds.
+- [ ] A short working-tree smoke run and cross-language tests pass before
+  fresh, frozen five-year baseline, policy and stress campaigns. Every
+  completed run saves JSON and a readable adjacent PDF; the campaign index
+  links both, records the source and distinguishes incomplete runs.
+- [ ] Compare the retained stress and control-lab detections against their
+  new counterparts. Remove an old actor, contract or scenario only after its
+  unique checks have a demonstrated replacement, and record that evidence.
+
+The modeling and computational costs of an agent that submits many individual
+NFT transactions, calls real routing and processes claim maturities should be
+measured during the smoke run. Arrival rates and heterogeneous thresholds must
+remain explicit; approximations must not bypass owner authorization, actual
+funding or observable contract failures.

@@ -381,6 +381,11 @@ class Snapshotter:
         # interventions, ...) embedded in the written vector.  Callers may
         # store live references here (e.g. a growing intervention log).
         self.meta: dict = {}
+        artifact = getattr(d, "buck_artifact", "")
+        accounting = getattr(d, "buck_accounting", "")
+        if artifact and accounting:
+            self.meta["buck_contract"] = {"artifact": artifact, "accounting": accounting,
+                                          "address": d.buck.address}
         self.tokens = [t[0] for t in scenario.tokens]
         self._pool_abi, _ = load_artifact("UniswapV3Pool")
         # address -> day-0 USDC-micro value per RAW unit helper key

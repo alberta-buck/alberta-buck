@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import random
 
-from alberta_buck.sim import identity as idmod
+from alberta_buck.sim import identity as idmod, report
 from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy
@@ -50,6 +50,11 @@ class SimDriver:
     def __init__(self, scenario, anvil, basket_impl="prorata",
                  director_impl="pairs", verbose=False):
         self.scenario = scenario
+        self.report_path = report.output_path(None, scenario.days)
+        self.report_json = self.report_pdf = None
+        self.report_error = None
+        if self.report_path is not None:
+            report.preflight()
         self.anvil = anvil
         self.basket_impl = basket_impl
         w3 = anvil.w3
@@ -100,6 +105,10 @@ class SimDriver:
 
         # --- snapshot + capital baselines --------------------------- #
         self.snap = Snapshotter(self.d, scenario)
+        self.snap.meta["run"] = {"completed": False, "days": scenario.days,
+                                 "scenario": scenario.name, "seed": scenario.seed,
+                                 "basket": basket_impl, "agents": dict(scenario.agents),
+                                 "mode": "interactive"}
         if exp is not None:
             self.snap.meta["experiment"] = exp.resolved()
             if self._iv is not None:
@@ -187,6 +196,16 @@ class SimDriver:
             self.day += 1
             if self.day >= s.days:
                 self.done = True
+                if self.report_path is not None:
+                    try:
+                        self.report_json, self.report_pdf = report.finish(self.snap, self.report_path)
+                    except Exception as exc:
+                        # The JSON was saved first if rendering failed; the UI
+                        # exposes the error and [w] retries without re-running.
+                        cause = exc.__cause__ or exc
+                        self.report_error = f"{type(cause).__name__}: {cause}"
+                else:
+                    self.snap.meta["run"]["completed"] = True
         # The chain advanced: mark every memoized display read stale so the
         # next render refreshes it in the background.
         self.proxy.bump()
@@ -209,6 +228,13 @@ class SimDriver:
 
     def write(self, path=None):
         """Persist captured day-end frames as the standard sim JSON vector."""
+        if self.done and self.report_path is not None:
+            if (path is None and self.report_json is not None and self.report_pdf is not None
+                    and self.report_json.exists() and self.report_pdf.exists() and not self.report_error):
+                return self.report_json
+            self.report_json, self.report_pdf = report.finish(self.snap, path or self.report_path)
+            self.report_error = None
+            return self.report_json
         return self.snap.write(path)
 
     def close(self) -> None:

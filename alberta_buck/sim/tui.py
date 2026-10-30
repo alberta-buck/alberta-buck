@@ -264,7 +264,12 @@ class TuiApp:
     def _after_step(self):
         if self.drv.done:
             self.running = False
-            self.status = "sim complete -- [w]rite vector, [q]uit"
+            if self.drv.report_error:
+                self.status = f"report failed; [w] retry: {self.drv.report_error}"[:120]
+            elif self.drv.report_pdf:
+                self.status = f"sim complete -- saved {self.drv.report_pdf}"
+            else:
+                self.status = "sim complete -- [w]rite vector, [q]uit"
         else:
             self.status = (f"day {self.drv.day} tick {self.drv.tick}  "
                            f"cyc {self.drv.ctr.get('cycleTrades', 0)}")

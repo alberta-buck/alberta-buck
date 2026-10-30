@@ -153,6 +153,8 @@ class Deployment:
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
     basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "equity" | "equity-ops"
+    buck_artifact: str = ""       # actual deployed contract, recorded in saved vectors
+    buck_accounting: str = ""     # accounting model implemented by that deployment
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs": the one signal engine left
@@ -249,8 +251,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     machine = os.environ.get("SIM_EQUITY_MACHINE", "0") == "1"
     if machine and (not credit_holder or controller_impl != "direct"):
         raise ValueError("SIM_EQUITY_MACHINE requires an equity basket and the direct K controller")
-    buck = chain.deploy("Buck" if credit_holder else "BuckWithBasketHooks",
-                        credit.address, kctrl.address, reg.address, pool_acct)
+    buck_artifact = "Buck" if credit_holder else "BuckWithBasketHooks"
+    buck = chain.deploy(buck_artifact, credit.address, kctrl.address, reg.address, pool_acct)
     chain.send(reg.functions.setBuck(buck.address), sender=gov)
     # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
     # activateFromBuck (which requires msg.sender == buck).  The wiring is an
@@ -508,7 +510,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     d = Deployment(w3, chain, anvil, gov, pool_acct, issuer_addr, issuer_kp,
                    reg, buck, credit, kctrl, basket, router, simlp, usdc,
                    erc20_abi, tok, dec,
-                   basket_impl=basket_impl, venue=venue,
+                   basket_impl=basket_impl, buck_artifact=buck_artifact, buck_accounting="legacy-signed",
+                   venue=venue,
                    controller_impl=controller_impl, observer=observer, desk=desk,
                    deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
     d.equity_machine = machine

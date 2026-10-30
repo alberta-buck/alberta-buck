@@ -311,6 +311,7 @@ def _k(frame) -> float:
 
 def judge(vector: Path) -> dict:
     """The plan's acceptance tests on one completed vector, with the numbers that explain them."""
+    from alberta_buck.sim.report import buck_accounting
     data                        = json.loads(vector.read_bytes())
     frames                      = data["frames"]
     if not data.get("meta", {}).get("run", {}).get("completed") or not frames:
@@ -342,7 +343,7 @@ def judge(vector: Path) -> dict:
     pop                         = last.get("pop") or {}
     multipliers                 = [f["pop"]["multiplier"] for f in window if f.get("pop")]
     result                      = dict(
-        vector=str(vector), days=last["day"] + 1,
+        vector=str(vector), buck_accounting=buck_accounting(data), days=last["day"] + 1,
         full_horizon=[f["day"] for f in frames] == list(range(1827)),
         mean_err=sum(err) / len(err), p99_err=err[min(len(err) - 1, int(.99 * len(err)))],
         interior=interior, longest_rail=longest, k_end=_k(last), k_min=min(ks), k_max=max(ks),
@@ -385,6 +386,7 @@ def report(args) -> int:
         rows.append(
             f'<tr class="{"pass" if r["passed"] else "fail"}"><td>{link}</td>'
             f'<td><a href="runs/{escape(v.name)}">JSON</a></td><td>{verdict}</td>'
+            f'<td>{escape(r["buck_accounting"])}</td>'
             f'<td>{100 * r["mean_err"]:.2f}%</td><td>{100 * r["p99_err"]:.2f}%</td>'
             f'<td>{100 * r["interior"]:.0f}%</td><td>{r["longest_rail"]}</td>'
             f'<td>{r["k_min"]:.3f} / {r["k_max"]:.3f} / {r["k_end"]:.3f}</td>'
@@ -410,7 +412,7 @@ Cells are named s&lt;supply&gt;-d&lt;demand&gt;-&lt;prices&gt;-&lt;seed&gt;: sup
 savers' arrival rates, demand the pace of adopting BUCK working balances, by 1/3 (lo), 1 (mid) or 3 (hi).
 Demand changes how soon the balance is held, not its eventual size. SMOKE runs are shorter than five years
 and do not establish equilibrium acceptance. Errors count recorded household observations throughout the run.</p>
-<table><thead><tr><th>Run (PDF)</th><th>Data</th><th>Result</th><th>Mean |bvib-1|</th><th>99th pct</th>
+<table><thead><tr><th>Run (PDF)</th><th>Data</th><th>Result</th><th>BUCK accounting</th><th>Mean |bvib-1|</th><th>99th pct</th>
 <th>K interior</th><th>Days at a rail</th><th>K min / max / end</th><th>Supply (M)</th>
 <th>Drawn: debtors / savers (M)</th><th>Investor deposits (M)</th><th>Arrived d / s / i</th>
 <th>Multiplier s / d</th><th>Errors</th><th>Refusals</th><th>Exits overdue / invalid</th></tr></thead><tbody>

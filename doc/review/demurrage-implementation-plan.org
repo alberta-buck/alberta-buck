@@ -19,6 +19,8 @@ The [[file:carrying-mode-transition.org][Carrying-mode transition note]] records
 conservation and credit-owner restrictions.
 The [[file:jubilee-inkind-conversion.org][in-kind conversion note]] records bounded TOKEN-to-BUCK conversion and
 the remaining tradeoffs when an owner explicitly accepts cash-only relief.
+The [[file:net-demurrage-simulation-migration.org][simulation migration checklist]] maps the actual legacy deployment and agent
+assumptions, and records acceptance criteria for a replacement economy.
 
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
@@ -72,8 +74,10 @@ must not be disturbed.
 - [X] Jubilee is a separate Carrying fund and holds at most one adjustable
   basket receipt. Sell before calculating actual relief. Gross up the nominal
   Carrying outflow to deliver the full net amount. If a sale is partial or
-  in-kind, count actual net BUCK and preserve residual claims; never bypass
-  low-K exits or fabricate proceeds.
+  in-kind, count actual net BUCK and keep unsold shares in the fund; never
+  bypass low-K exits or fabricate proceeds. The current cash-only deferral
+  does not preserve an individual owner's claim on those shares' future
+  recovery, a remaining policy limitation described below.
 - [X] Each insurer receives its own facilities' *full-value* premium deposits;
   a release returns the agreed *nominal* deposit with the pool's average
   carried demurrage from the same recorded pool. No cross-insurer subsidy.
@@ -226,6 +230,8 @@ must not be disturbed.
 - [ ] Run relevant complete tests/builds and fresh five-year campaigns with
   automatically generated reports. Document evidence, known failures and any
   migration or clean-genesis requirement before proposing a merge/deployment.
+- [ ] Review the sandbox's locked JavaScript dependencies and their actual
+  exposure before publishing a new release; test any dependency updates.
 
 * Progress and verification log
 
@@ -254,9 +260,21 @@ must not be disturbed.
 | 2026-10-29 | Full suite | =make nix-test=: 1,278 passed, one fork-dependent test skipped. The Make target also excluded generated SNARK suites and =RegressionTest.sol= because their fixtures were absent. This validates the pre-conversion baseline, not the five-year economy. | =bcb1fdf1= |
 | 2026-10-29 | 4g | Added bounded per-claim TOKEN-to-BUCK conversion, authenticated callbacks and explicit cash-only deferral. Fifty-six renewal/inherited-fund, seven real-basket and 20 token tests passed, including zero/partial swaps, fees, multiple assets and equal claim orders. Runtime: BuckNet 23,380 bytes; fund 17,865. | =a9766ee0= |
 | 2026-10-29 | Full suite | =make nix-test=: 1,299 passed, one fork-dependent test skipped; generated SNARK suites and =RegressionTest.sol= were excluded because their fixtures were absent. This validates the conversion prototype, not the five-year economy. | =a9766ee0= |
-| 2026-10-29 | Cross-holding | Added exact fixed-point and dilution diagnostics to the existing demurrage reference. All 88 reference tests pass; the illustrative 10-BUCK entry gains 1.875 BUCK immediately if the claim is ignored. Liquid relief can be lower than the idealized mark. | This commit: cross-holding diagnostic |
+| 2026-10-29 | Cross-holding | Added exact fixed-point and dilution diagnostics to the existing demurrage reference. All 88 reference tests pass; the illustrative 10-BUCK entry gains 1.875 BUCK immediately if the claim is ignored. Liquid relief can be lower than the idealized mark. | =c512b396= |
+| 2026-10-29 | Simulation readiness | Mapped legacy Python/JS integration and replacement acceptance checks. Newly saved vectors, PDFs and indexes record the actual BUCK model; unnamed five-year batch/server/TUI runs save unique JSON and PDFs, with diagnostic-only TUI labeling, failure recovery and serialized server rendering. Economy/report tests: 21 passed; expanded report suite: 12 passed. Earlier household Python run: 114 passed; JS suite still running at this checkpoint. | This commit |
 
 * Open implementation constraints
+
+On 2026-10-29, installing the isolated worktree's locked =core/js=
+dependencies reported npm audit findings. A separate =npm audit --omit=dev
+--json= from =core/js= reported 54 affected packages: 37 high, three moderate
+and 14 low, including the direct =tevm= dependency and transitive packages.
+Package counts are not distinct exploitable vulnerabilities, and inclusion in
+the dependency tree does not establish reachability in the browser bundle or
+server. Review the advisories, deployed bundle and upgrade paths before
+release; do not blindly apply a lockfile-wide fix without testing. The ignored
+local =build/core-js-audit-production.json= contains this point-in-time report;
+rerun the command for current results.
 
 The Python model uses floating-point continuous decay and an idealized BUCK
 strategy. Its tests are not proof of EVM fixed-point accuracy, market liquidity,

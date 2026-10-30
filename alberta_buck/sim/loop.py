@@ -63,6 +63,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     on_frame(frame): called with each just-captured snapshot frame (the
     sim server streams these to its clients)."""
     from alberta_buck.sim import report
+    out_path = report.output_path(out_path, scenario.days)
     if out_path and scenario.days >= report.FIVE_YEARS:
         report.preflight()
     w3 = anvil.w3
@@ -167,6 +168,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     snap = Snapshotter(d, scenario)
     snap.meta["run"]             = {"completed": False, "days": scenario.days,
                                    "day_step": max(1, getattr(scenario, "day_step", 1)),
+                                   "scenario": scenario.name, "seed": scenario.seed,
                                    "basket": basket_impl, "agents": dict(scenario.agents)}
     if exp is not None:
         # Live references: iv.applied keeps growing; every checkpoint write

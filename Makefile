@@ -740,13 +740,16 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 # ── Supported household economy ─────────────────────────────────────
 # One baseline, parameterized policy comparisons and explicit stress arms. Long runs
 # use committed, frozen sources; run economy-smoke to test working-tree edits.
+# These currently deploy legacy signed Buck, not the experimental BuckNet/JubileeFund.
+# Saved new vectors and PDFs name the accounting model; older vectors may not.
 # See README-simulations.org for the axes, acceptance rules and output schema.
 #   make nix-venv-economy-plan CELLS=grid    # also centre, policies, stress, probe, paydown
 #   make nix-venv-economy-run CAMPAIGN=review CELLS=centre JOBS=2
 #   make nix-venv-economy-report CAMPAIGN=review
 #   make nix-venv-economy-run CAMPAIGN=policies CELLS=policies JOBS=4
 # Reports read saved JSON: no EVM rerun. Every completed five-year run writes
-# a PDF; the campaign index distinguishes short smoke runs from acceptance.
+# a PDF; unnamed batch, server and TUI runs use build/sim/completed/. The
+# campaign index distinguishes short smoke runs from acceptance.
 CAMPAIGN	?= household-economy
 CELLS		?= centre
 JOBS		?= 2
@@ -770,7 +773,7 @@ economy-smoke: sim-build core-build-py
 	python -m alberta_buck.sim.report "$(ECONOMY_SMOKE_OUT)"
 economy-test: sim-build core-build-py core-build-wasm
 	python -m pytest alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
-		alberta_buck/test/test_economy.py $(PYTEST_ARGS)
+		alberta_buck/test/test_economy.py alberta_buck/test/test_sim_report.py $(PYTEST_ARGS)
 	cd core/js && node --test test/household-policy.test.js test/credit-household.tevm.test.js
 
 # Render saved standalone vectors, including short diagnostics, without starting an EVM.

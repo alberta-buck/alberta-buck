@@ -4,6 +4,11 @@
 Build prerequisites are in [[file:README-build.org][README-build.org]]. These interfaces share contracts and household
 policy code; they serve different purposes from the five-year acceptance campaign.
 
+Both the browser-only and Python-backed worlds currently deploy legacy signed
+BUCK accounting, not the experimental =BuckNet= and =JubileeFund= contracts.
+The sandboxes cannot yet demonstrate or validate the new demurrage model.
+See [[file:doc/review/net-demurrage-simulation-migration.org][the migration checklist]] for the outstanding work.
+
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|
 | Wallet sandbox | JavaScript/Tevm in the browser | =make nix-sandbox SANDBOX_PORT=8980= | Identities, credit quotes, payments, market transactions and observer view |
@@ -47,6 +52,10 @@ For a previously built deployment, =sim-savings-serve= starts only the server. B
 starting are separate operations; updating source files does not reload a running process.
 The server is not started, stopped or redeployed by a test or report target unless that target
 explicitly says it owns a temporary server. Choose unused ports for local work.
+When a server-backed world completes five years, it saves a uniquely named
+JSON and adjacent PDF under =build/sim/completed/= and logs their paths; an
+interrupted world may leave an incomplete checkpoint. See [[file:README-simulations.org][the simulations guide]]
+for report recovery and interpretation.
 
 #+begin_src sh
 make nix-venv-sandbox-savings-test SAVINGS_TEST_PORT=8987

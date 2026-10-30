@@ -60,7 +60,10 @@ make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
 make nix-core-test-js JS_TEST_ARGS=test/household-policy.test.js
 #+end_src
 
-=economy-test= builds its contracts and both native/Node kernels before exercising the agents.
+=economy-test= builds its contracts and both native/Node kernels before exercising the agents,
+runner and completed-run PDF reporting. Install the locked JavaScript dependencies with
+=make nix-js-deps= first; =make nix-core-js-deps= is the core-only equivalent when the root
+dependencies are already present. Nix does not install these packages automatically.
 =PYTEST_FILES= selects files; =PYTEST_ARGS= supplies pytest options (default =-q=).
 =JS_TEST_ARGS= is relative to =core/js/=. Browser tests need built pages and the Chromium
 provided by Nix; check skipped-test reasons. The savings browser test additionally needs its

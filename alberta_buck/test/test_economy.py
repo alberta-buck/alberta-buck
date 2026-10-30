@@ -32,12 +32,15 @@ def test_adopt_names_only_completed_checkpoints(tmp_path, monkeypatch):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["done.json", "running.partial", "torn.partial"]
 
 
-def test_a_short_economy_runs_to_its_closing_summary(monkeypatch):
-    from alberta_buck.sim import experiment as expmod, rng
+def test_a_short_economy_runs_to_its_closing_summary(monkeypatch, tmp_path):
+    from alberta_buck.sim import experiment as expmod, report, rng
     from alberta_buck.sim.loop import run
     from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
     from alberta_buck.sim.credit_households import CreditHouseholdAgent
     frames                      = []
+    # Exercise the automatic five-year output path without running a five-year EVM.
+    monkeypatch.setattr(report, "FIVE_YEARS", 3)
+    monkeypatch.setattr(report, "DEFAULT_OUTPUT_DIR", tmp_path / "completed")
     original                    = CreditHouseholdAgent.act
     def transient_error(self, d, scenario, day, tick, ctr):
         original(self, d, scenario, day, tick, ctr)
@@ -53,6 +56,14 @@ def test_a_short_economy_runs_to_its_closing_summary(monkeypatch):
     finally:
         rng.set_mode(mode)
     assert summary is not None
+    vector                      = economy.Path(summary["json"])
+    assert vector.parent == tmp_path / "completed"
+    assert economy.Path(summary["pdf"]).exists()
+    meta                        = json.loads(vector.read_text())["meta"]
+    assert meta["run"]["scenario"] == scenario.name and meta["run"]["seed"] == scenario.seed
+    contract                    = meta["buck_contract"]
+    assert contract["artifact"] == "Buck" and contract["accounting"] == "legacy-signed"
+    assert contract["address"].startswith("0x")
     assert all(abs(actual - declared) < 200 for actual, declared in zip(frames[0]["eq_w"], frames[0]["eq_decl"])), \
         "the economy opens near its declared basket allocation"
     assert any(a.get("error") == "transient" for a in frames[1]["octl"]), "errors between chain marks survive"
@@ -72,6 +83,7 @@ def test_judge_passes_a_steady_world_and_fails_a_railed_or_drifting_one(tmp_path
 
     steady                      = [frame(d, 1 + (.004 if d % 2 else -.004), .75) for d in range(1827)]
     assert judged(steady)["passed"]
+    assert judged(steady)["buck_accounting"] == "unrecorded"
     railed                      = [frame(d, 1., .95 if d >= 400 else .75) for d in range(1827)]
     r                           = judged(railed)
     assert not r["passed"] and r["longest_rail"] == 1427
@@ -123,6 +135,26 @@ def test_pdf_is_repaired_without_rerunning_a_simulation(tmp_path, monkeypatch):
     economy.ensure_pdf(vector)
     economy.ensure_pdf(vector)
     assert calls == [vector]
+
+
+def test_campaign_summary_labels_each_recorded_accounting_model(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(economy, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(economy, "ensure_pdf", lambda vector: None)
+    base                        = economy.campaign_path(tmp_path, "models")
+    runs                        = base / "runs"
+    runs.mkdir(parents=True)
+    metadata                    = {"run": {"completed": True},
+                                   "buck_contract": {"accounting": "legacy-signed", "artifact": "Buck<fixture>"}}
+    (runs / "recorded.json").write_text(json.dumps({"meta": metadata, "frames": [frame(0, 1., .75)]}))
+    (runs / "old.json").write_text(json.dumps({"meta": {"run": {"completed": True}},
+                                              "frames": [frame(0, 1., .75)]}))
+    assert economy.report(SimpleNamespace(campaign="models")) == 0
+    summary                     = json.loads((base / "summary.json").read_text())
+    assert {r["buck_accounting"] for r in summary} == {"legacy-signed (Buck<fixture>)", "unrecorded"}
+    html                        = (base / "index.html").read_text()
+    assert "legacy-signed (Buck&lt;fixture&gt;)" in html and "unrecorded" in html
 
 
 def test_failed_process_is_not_adopted_as_success(tmp_path):
