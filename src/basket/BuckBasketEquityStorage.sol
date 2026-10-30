@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage}  from "./BuckBasketStorage.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 interface IBuckKSource {
     function currentBuckK() external view returns (uint256);   // 1e18
@@ -30,6 +31,7 @@ interface IBuckHolder {
 /// @notice Net-accounting token view used by the restricted cash-only mode.
 interface IBuckNetAccount {
     function netBalanceOf(address a) external view returns (uint256);
+    function accountBalancesScaled(address a) external view returns (uint256 gross, uint256 net);
 }
 
 /// @notice BuckCredit, as the basket sees it: the issuer of its own MARKED
@@ -197,8 +199,23 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return IBuckKSource(address(controller)).currentBuckK();
     }
 
-    function _marks(uint256 i) internal view returns (IBuckBasketVenue.Marks memory) {
-        return IBuckBasketVenue(address(this)).marks(i, liquidityOf[i]);
+    function _marks(uint256 i) internal view returns (IBuckBasketVenue.Marks memory m) {
+        m = IBuckBasketVenue(address(this)).marks(i, liquidityOf[i]);
+        if (!netAccounting) return m;
+        // V3 prices and position amounts are in the pool's nominal BUCK.
+        // The pool is a Carrying account: any BUCK it sends carries its
+        // average fee. Convert both the BUCK side and TOKEN's BUCK quote to
+        // full-value units using the exact current net/nominal ratio.
+        (uint256 gross, uint256 net) = IBuckNetAccount(address(buck)).accountBalancesScaled(constituents[i].pool);
+        if (gross == net && gross != 0) return m;
+        if (gross == 0) return IBuckBasketVenue.Marks(0, 0, 0, 0, 0, 0, 0);
+        m.posLow = Math.mulDiv(m.posLow, net, gross);
+        m.posTwap = Math.mulDiv(m.posTwap, net, gross);
+        m.posHigh = Math.mulDiv(m.posHigh, net, gross);
+        m.pLow = Math.mulDiv(m.pLow, net, gross);
+        m.pTwap = Math.mulDiv(m.pTwap, net, gross);
+        m.pHigh = Math.mulDiv(m.pHigh, net, gross);
+        m.depth = Math.mulDiv(m.depth, net, gross);
     }
 
     /// @dev Read the basket's account at Buck into `s`.

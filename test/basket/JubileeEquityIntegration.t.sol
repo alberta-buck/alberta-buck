@@ -144,6 +144,48 @@ contract JubileeEquityIntegrationTest is Test {
         assertEq(basket.receipt().ownerOf(id), address(fund));
     }
 
+    function test_netBasketMarkAccountsForTheCarryingPoolFee() public {
+        _bind(address(this), false, address(this));
+        _credit(ALICE, 2_000_000e6);
+        vm.prank(ALICE);
+        buck.transfer(address(this), 1_500_000e6);
+        EqToken asset = new EqToken("Asset", "AST", 18);
+        asset.mint(address(this), 2_000_000e18);
+        asset.mint(ALICE, 100_000e18);
+        vm.prank(GOV);
+        address pool = basket.addBasketToken(address(asset), 18, 1e6, 10_000, 3000);
+        _bind(pool, true, address(this));
+        (,,,,,, int24 lower, int24 upper,,,) = basket.constituents(0);
+        IPool(pool).mint(address(this), lower, upper, 1e18, "");
+        vm.warp(t0 + YEAR);
+        vm.startPrank(ALICE);
+        asset.approve(address(basket), type(uint256).max);
+        basket.deposit(address(asset), 100_000e18, 0);
+        vm.stopPrank();
+        (uint256 id,,) = _invest(10_000e6);
+        assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 0), 1);
+        assertGt(basket.liquidityOf(0), 0);
+        // Let the observation window move past the wheel's trade, so the
+        // TWAP mark is constant during the following idle interval.
+        vm.warp(block.timestamp + 601);
+        uint256 grossBefore = basket.gross();
+        uint256 receiptBefore = basket.valueOf(id);
+        (uint256 poolGrossBefore, uint256 poolNetBefore) = buck.accountBalancesScaled(pool);
+        assertGt(poolGrossBefore, 0);
+        assertGt(poolNetBefore, 0);
+
+        vm.warp(t0 + 11 * YEAR);
+        (uint256 poolGrossAfter, uint256 poolNetAfter) = buck.accountBalancesScaled(pool);
+        assertEq(poolGrossAfter, poolGrossBefore);
+        assertLt(poolNetAfter, poolNetBefore);
+        uint256 grossAfter = basket.gross();
+        assertLt(grossAfter, grossBefore);
+        // No pool trades occurred, so its nominal mark is unchanged and the
+        // marked TOKEN/LP value follows the Carrying pool's net fraction.
+        assertApproxEqRel(grossAfter, grossBefore * poolNetAfter / poolNetBefore, 2e12);
+        assertLt(basket.valueOf(id), receiptBefore);
+    }
+
     function test_renewalSellsRealBasketSharesBeforeUpdatingTheFacility() public {
         uint256 a = _credit(ALICE, 100e6);
         _credit(BOB, 100e6);

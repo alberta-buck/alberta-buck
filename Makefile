@@ -23,6 +23,7 @@ help:
 	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
 	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \
 	  '  make nix-venv-demurrage-reference  # 50-year holder, Jubilee and relief accounting' \
+	  '  make nix-venv-demurrage-returns    # 50-year comparison of funded investment returns' \
 	  '  make nix-venv-demurrage-test       # reference model regression tests' \
 	  'Household economy (README-simulations.org):' \
 	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
@@ -236,11 +237,14 @@ test-python:
 #   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--years 50 --acquire-all"
 #   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50"
 #   make nix-venv-demurrage-reference DEMURRAGE_ARGS="--retire 50 --payout-policy reserve"
+#   make nix-venv-demurrage-returns     # closed 50-year ROI comparison
 #   make nix-venv-demurrage-test
 DEMURRAGE_ARGS ?=
-.PHONY: demurrage-reference demurrage-test
+.PHONY: demurrage-reference demurrage-returns demurrage-test
 demurrage-reference:
 	python -m alberta_buck.sim.demurrage_reference $(DEMURRAGE_ARGS)
+demurrage-returns:
+	python -m alberta_buck.sim.jubilee_return_demo $(DEMURRAGE_ARGS)
 demurrage-test:
 	python -m pytest alberta_buck/test/test_demurrage_*.py -q
 

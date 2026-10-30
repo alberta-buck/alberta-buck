@@ -24,6 +24,7 @@ The remaining migration is mapped in [[file:doc/review/net-demurrage-simulation-
 | Household policy/contract tests | Do both languages make the same decisions and move real funds correctly? | =economy-test= | pytest and Node test results |
 | Routing and contract tests | Do swaps, identities, accounting, guards and interfaces work? | =test-python=, =test= | Test failures and targeted vectors |
 | Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
+| Fund return comparison | Can Jubilee reach its 50-year target in a closed BUCK economy? | =demurrage-returns= | No-return and explicitly funded 2% return tables |
 | Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |
 
@@ -40,6 +41,12 @@ instead, or =--issued 1000000 --years 1= for the million-BUCK facility example;
 =DEMURRAGE_ARGS="--years 50 --json"= produces JSON, and =--acquire-all=
 models the fund acquiring the remaining spendable BUCK at the end. The latter is
 an explicit transfer from the holder; non-BUCK consideration is not modeled.
+=make nix-venv-demurrage-returns= compares no investment return with a 2%
+annual return on the entire fund, sourced by transfers of existing BUCK from
+the holder. Both cases issue exactly 100 BUCK, assess 100 gross BUCK of
+demurrage over 50 years and conserve supply. The return case is idealized and
+does not establish that the actual basket earns 2% or can liquidate at its mark.
+Pass =DEMURRAGE_ARGS="--json"= for structured output.
 =DEMURRAGE_ARGS="--deploy-fund --strategy-return 10"= puts fund cash into
 an idealized BUCK-only strategy and attributes a 10 BUCK return to a transfer
 from the holder. Strategy BUCK also pay demurrage into fund cash. This

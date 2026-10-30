@@ -129,6 +129,9 @@ contract BuckNet is IERC20, IERC20Metadata {
     function heldAndUnspentScaled(address owner) external view returns (uint256 held, uint256 unspent) {
         return _book.partsOf(owner);
     }
+    function accountBalancesScaled(address owner) external view returns (uint256 gross, uint256 net) {
+        return _book.grossAndNetOf(owner);
+    }
     function fundBalancesScaled() external view returns (uint256 gross, uint256 net) { return _book.fundParts(); }
     function fundFlows() external view returns (BuckLedger.FundFlows memory) { return _book.fundFlows(); }
     /// @notice Whole nominal Carrying BUCK needed to transfer at least `net`

@@ -140,6 +140,10 @@ that outcome: the facility may be large relative to the fund, the basket can
 - [ ] Validate the basket's net mark and implement the proposed age-weighted
   marked-portfolio formula for reductions and renewals without selling; enforce
   the 10% net-liquidity cap and owner's minimum on the actual net relief.
+- [X] Correct the experimental net basket's pool marks for Carrying BUCK fees
+  using exact pool gross and net balances; verify one real V3 pool after an
+  idle period and retain the legacy basket path. The full fair-mark and
+  execution audit, other TOKEN order and oracle protection are still open.
 - [X] Prototype 50-year release, fund shortfalls and insurer-pool refunds
   without relying on the former owner's BUCK balance. The NFT is burned,
   issuance is retained as deferred Jubilee principal, and the aggregate
@@ -332,6 +336,7 @@ that outcome: the facility may be large relative to the fund, the basket can
 | 2026-10-30 | Matured lien release | Six integrated release tests cover spent-out owners, average-age maturity, retained supply, 10% deferred burns, reserve replenishment, nominal premium refunds, failed or gas-hungry insurer callbacks and later retries. Four obligation-book and 22 ledger tests pass. BuckNet links two libraries; production linking and the ordinary no-sale settlement remain unfinished. | This commit |
 | 2026-10-30 | Full maturity suite | =make nix-test=: 1,334 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= remain excluded because their fixtures are absent. These are prototype contract tests, not a five-year net-accounting economy. | This commit |
 | 2026-10-30 | Marked relief diagnostic | =make nix-venv-demurrage-test=: 98 passed. The new quote models 1.90%/2.05%, the capped-claim denominator and a 10% liquid limit. Real-basket mark and no-sale settlement remain to be implemented and verified. | This commit |
+| 2026-10-30 | Gross fees, returns and pool marks | =demurrage-returns= compares no returns and an explicitly funded, idealized 2% portfolio return without extra issuance; 102 Python tests pass. Real net-basket pool marks now use the Carrying pool's gross/net ratio: nine integration, 23 ledger and 29 legacy basket tests pass. This is not a complete valuation audit or the no-sale settlement. | This commit |
 
 * Open implementation constraints
 

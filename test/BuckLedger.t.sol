@@ -30,6 +30,9 @@ contract BuckLedgerHarness {
     function balanceOf(address owner) external view returns (uint256) { return book.balanceOf(owner); }
     function netOf(address owner) external view returns (uint256) { return book.netOf(owner); }
     function partsOf(address owner) external view returns (uint256, uint256) { return book.partsOf(owner); }
+    function grossAndNetOf(address owner) external view returns (uint256, uint256) {
+        return book.grossAndNetOf(owner);
+    }
     function fundParts() external view returns (uint256, uint256) { return book.fundParts(); }
     function fundFlows() external view returns (BuckLedger.FundFlows memory) { return book.fundFlows(); }
     function issued() external view returns (uint256) { return book.issued; }
@@ -108,6 +111,26 @@ contract BuckLedgerTest is Test {
         assertEq(h.balanceOf(POOL), 0);
         assertApproxEqAbs(h.balanceOf(BOB), 9801986, 1);
         _netConserved(ALICE, BOB, POOL);
+    }
+
+    function test_exactGrossAndNetReportPoolDemurrageWithoutRawUnitRounding() public {
+        h.issue(ALICE, 100e6, false);
+        h.send(ALICE, POOL, 10e6, false, true);
+        vm.warp(t0 + YEAR);
+        (uint256 poolGross, uint256 poolNet) = h.grossAndNetOf(POOL);
+        (uint256 held, uint256 unspent) = h.partsOf(POOL);
+        assertEq(poolGross, 10e6 * Q);
+        assertEq(poolNet, held + unspent);
+        assertLt(poolNet, poolGross);
+        (uint256 ordinaryGross, uint256 ordinaryNet) = h.grossAndNetOf(ALICE);
+        assertEq(ordinaryGross, ordinaryNet);
+        (uint256 fundGross, uint256 fundNet) = h.grossAndNetOf(FUND);
+        (uint256 expectedGross, uint256 expectedNet) = h.fundParts();
+        assertEq(fundGross, expectedGross);
+        assertEq(fundNet, expectedNet);
+        (uint256 emptyGross, uint256 emptyNet) = h.grossAndNetOf(BOB);
+        assertEq(emptyGross, 0);
+        assertEq(emptyNet, 0);
     }
 
     function test_carryingTransfersPreserveMixedAgeAndFullSpendability() public {

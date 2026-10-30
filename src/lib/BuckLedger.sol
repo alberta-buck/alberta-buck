@@ -268,6 +268,17 @@ library BuckLedger {
         return _accountView(self.accounts[owner]);
     }
 
+    /// @notice Exact nominal and net balances in fractional raw BUCK units.
+    ///         For an ordinary holder the two are the same; for a Carrying
+    ///         account the nominal amount includes its proportional fee.
+    function grossAndNetOf(Ledger storage self, address owner) internal view returns (uint256 gross, uint256 net) {
+        if (owner == self.fund) return _fundView(self);
+        Account storage a = self.accounts[owner];
+        (uint256 held, uint256 unspent) = _accountView(a);
+        net = held + unspent;
+        gross = a.mode == CARRYING ? a.gross : net;
+    }
+
     function fundParts(Ledger storage self) internal view returns (uint256 gross, uint256 net) {
         return _fundView(self);
     }

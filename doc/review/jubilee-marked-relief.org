@@ -43,6 +43,36 @@ differ when the mark and realized proceeds differ. In an unchanged market,
 before the principal cap, paying a selected claim reduces both =V= and =B= in
 the same proportion, so =V/B= is unchanged for the other claimants.
 
+* Why the global BUCK-seconds counter needs maturity checkpoints
+
+The uncapped outstanding BUCK-seconds can be kept without scanning NFTs.
+Between issuance or reduction events, add =current outstanding issuance *
+elapsed seconds= to one aggregate. Issuance starts with zero age; when
+principal is retired, subtract the age of that principal, which is already
+needed for its own relief. Include the issuance shifted to Jubilee until it
+is actually burned. This is a running aggregate for the still-outstanding
+stock, not the all-time integral that also includes already-retired stock.
+
+The requested *per-facility 50-year cap* needs one further piece of
+information: when each facility stops contributing to that aggregate's
+growth. For example, issue 100 BUCK at year 0, issue another 100 at year 50,
+and look at year 100 without any reductions. The uncapped stock integral is
+15,000 BUCK-years, but the sum of the two capped claims is 10,000: both are
+at their 50-year cap. A payout based on the uncapped denominator gives either
+facility one third of the fund; the capped denominator gives it one half.
+The user's owner-at-convenience closure means an old facility can remain
+unclosed after its cap; its age must not continue diluting others. The same
+applies to Jubilee's assumed matured issuance, which stays in supply but no
+longer earns additional relief.
+
+The current claim book is a way to maintain that cap incrementally. It tracks
+the next saturation times and lets anyone process due maturities in bounded
+batches; a normal aggregate read does not enumerate or consult every
+BuckCredit. Issue, reduction and renewal synchronize the one affected
+facility. A simpler uncapped global integral is feasible if that different
+economic treatment is deliberately chosen, but it does not produce the sum
+of separately capped claims when closure or processing is delayed.
+
 * Numerical example
 
 Suppose total outstanding issuance is 100 million BUCK, the selected
@@ -98,11 +128,13 @@ executable, net-of-demurrage valuation of the whole receipt:
 - The legacy V3 venue can fall back to spot when the TWAP is unavailable. The
   stricter venue requires observation history, but TWAPs can still be stale
   or manipulated and a mark is not a liquidation price.
-- V3 position marks use twice the modeled BUCK side of full-range liquidity;
-  they do not by themselves prove that the pool's nominal BUCK side is net of
-  its Carrying fee. Uncollected fees and execution costs also need explicit
-  treatment. Test against actual in-kind redemptions, both token ordering
-  directions and aged Carrying pools before accepting this mark as =L=.
+- V3 position marks use twice the modeled BUCK side of full-range liquidity.
+  The experimental net mode now converts pool quotes and position marks from
+  nominal to full-value BUCK using the pool's exact net/nominal balance ratio.
+  One real-pool idle-age test checks that correction. Uncollected fees,
+  finite-range approximation, the basket's gain fee and execution costs also
+  need explicit treatment; more actual in-kind redemption and token-ordering
+  tests are required before treating the mark as an executable price.
 - If a future leveraged basket owns credit while Jubilee holds its shares,
   the marked basket claim can depend on Jubilee's marked holdings. The
   experimental net basket disallows that mode; the fixed-point and dilution

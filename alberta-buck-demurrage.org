@@ -229,8 +229,56 @@ quote and retirement are retained only as comparison diagnostics.
 The command-line reference defaults to the requested target relief's share of
 total outstanding target relief and can also compare the share of total
 issued BUCK. Credits of different ages can make these two fractions very
-different. The reference sums its positions to obtain this benchmark; an
-efficient contract implementation of the same aggregate remains to be designed.
+different. The reference sums its positions to obtain this benchmark; the
+experimental claim book maintains the capped aggregate incrementally, with
+bounded permissionless processing when facilities reach 50 years.
+
+The proposed replacement does not sell the fund's basket position inside a
+reduction. It allocates the selected fraction of the fund's *net liquid BUCK
+plus the net marked value of its basket receipt*, and reverts if that relief
+exceeds 10% of liquid net BUCK. The selected fraction is the reduced
+facility's capped BUCK-seconds divided by all capped outstanding
+BUCK-seconds, including any matured principal assumed by Jubilee and not yet
+burned. Consequently the effective rate is the nominal 2% multiplied by the
+whole-fund mark divided by the aggregate relief benchmark, subject to the
+principal cap. This is still a proposed rule: the reference can quote it,
+but the Solidity reduction and renewal paths above still sell and must be
+replaced after the basket's Carrying-aware mark is validated. See the
+[[file:doc/review/jubilee-marked-relief.org][marked-relief analysis]] for a numerical example, the 50-year aggregate and
+valuation limitations.
+
+At 50 years of a facility's average issuance age, its owner can instead
+release the lien without providing BUCK. The prototype burns the NFT and
+records the unburned principal as Jubilee's obligation, retaining it in
+outstanding supply and the benchmark until the fund later burns it. A premium
+deposit remains owed by the original insurer pool in nominal BUCK; if the
+pool cannot immediately return it, the refund can be retried after lien
+release. Deferred burns are limited to 10% of current net fund cash per
+operation. A strict limit can leave a small residual obligation if fewer than
+ten raw BUCK units are liquid.
+
+If an owner leaves an already mature facility open, its claim does not grow
+beyond its principal, but the BUCK it issued remains in circulation and
+continues to pay demurrage. For example, with 100 BUCK issued and held in an
+ordinary account, after 50 years that account still has approximately 36.79
+BUCK and Jubilee has approximately 63.21 net BUCK in the no-investment
+example. The 100-BUCK target does not imply that 100 BUCK are already liquid
+in Jubilee. At release the fund must burn what it can under the liquidity
+rule and retain the rest as an obligation until BUCK are acquired or accrue.
+Value exceeding a facility's principal remains available to other claims;
+it may result from later demurrage as well as investment returns.
+
+In both examples the *gross* demurrage assessed over those 50 years is the
+full 100 BUCK. The difference is that, without an investment return, the
+approximately 36.79 BUCK of fees paid by the fund to itself do not add net
+value to its own account a second time. A separate closed-ledger comparison
+models the entire fund earning 2% annualized: the return is transferred from
+another holder's existing BUCK, so Jubilee accumulates 100 net BUCK at year
+50 and total supply remains 100. No new credit is necessary, though the
+return has a real economic source and is not guaranteed. The fund in that
+comparison is fully invested; a liquid reserve does not itself earn that
+investment return. Run =make nix-venv-demurrage-returns= to reproduce the
+comparison, or add =DEMURRAGE_ARGS="--json"= for its rows.
 
 * Account state and carrying services
 
