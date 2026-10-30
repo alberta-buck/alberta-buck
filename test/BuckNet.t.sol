@@ -10,6 +10,7 @@ import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckNet} from "../src/BuckNet.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {JubileeClaims} from "../src/lib/JubileeClaims.sol";
+import {JubileeClaimBook} from "../src/JubileeClaimBook.sol";
 
 contract NetK {
     uint256 public k = 1e18;
@@ -225,6 +226,30 @@ contract BuckNetTest is Test {
         assertLe(address(credit).code.length, 24_576);
         assertLe(address(identity).code.length, 24_576);
         assertLe(address(buck.renewalConsent()).code.length, 24_576);
+        assertLe(address(buck.claimBook()).code.length, 24_576);
+    }
+
+    function test_claimBookOnlyAcceptsTokenSyncAndAllowsBoundedPublicMaturityProcessing() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        JubileeClaimBook claims = buck.claimBook();
+        assertEq(claims.buck(), address(buck));
+        assertEq(address(claims.credit()), address(credit));
+        vm.expectRevert(JubileeClaimBook.NotBuck.selector);
+        vm.prank(BOB);
+        claims.sync(id);
+        vm.warp(t0 + YEAR);
+        assertEq(claims.positionSeconds(id), 100e6 * YEAR);
+        assertEq(claims.totalSeconds(), buck.claimSeconds());
+        vm.warp(t0 + 50 * YEAR);
+        assertTrue(buck.maturitiesPending());
+        vm.prank(BOB);
+        (uint256 processed, bool current) = claims.process(1);
+        assertEq(processed, 1);
+        assertTrue(current);
+        assertFalse(buck.maturitiesPending());
+        assertEq(buck.claimSeconds(), 100e6 * 50 * YEAR);
     }
 
     function test_transferAndTransferFromUseHeldAndUnspentWithoutRetiringNft() public {

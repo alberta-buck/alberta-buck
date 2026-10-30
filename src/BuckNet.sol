@@ -9,8 +9,8 @@ import {BuckTypes} from "./BuckTypes.sol";
 import {BN254} from "./BN254.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 import {BuckLedger} from "./lib/BuckLedger.sol";
-import {JubileeClaims} from "./lib/JubileeClaims.sol";
 import {BuckRenewal, BuckRenewalConsent} from "./BuckRenewalConsent.sol";
+import {JubileeClaimBook} from "./JubileeClaimBook.sol";
 
 interface IBuckNetK {
     function currentBuckK() external view returns (uint256);
@@ -30,7 +30,6 @@ interface IBuckNetReserveHook {
 ///      the proportional policy; the owner separately authorizes each request.
 contract BuckNet is IERC20, IERC20Metadata {
     using BuckLedger for BuckLedger.Ledger;
-    using JubileeClaims for JubileeClaims.Book;
 
     uint256 public constant FRACTION_SCALE = 1e36;
     uint256 private constant K_SCALE = 1e18;
@@ -41,9 +40,9 @@ contract BuckNet is IERC20, IERC20Metadata {
     IBuckNetK public immutable buckK;
     IdentityRegistry public immutable identity;
     BuckRenewalConsent public immutable renewalConsent;
+    JubileeClaimBook public immutable claimBook;
     address public immutable jubilee;
     BuckLedger.Ledger private _book;
-    JubileeClaims.Book private _claims;
     mapping(address => mapping(address => uint256)) private _allowances;
     mapping(address => mapping(address => bytes32)) private _receiptFragments;
 
@@ -111,8 +110,8 @@ contract BuckNet is IERC20, IERC20Metadata {
         identity = IdentityRegistry(identity_);
         jubilee = jubilee_;
         renewalConsent = new BuckRenewalConsent(address(this), credit_);
+        claimBook = new JubileeClaimBook(address(this), credit_);
         _book.initialize(jubilee_);
-        _claims.initialize();
     }
 
     function name() external pure returns (string memory) { return "Alberta Buck"; }
@@ -194,7 +193,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         if (identity.isCarrying(msg.sender) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
         if (buckCredit.ownerOf(tokenId) != msg.sender) revert NotOwner();
         if (spendable == 0) revert BadAmount();
-        _claims.totalSeconds(); // Do not update a stale capped benchmark.
+        claimBook.totalSeconds(); // Do not update a stale capped benchmark.
         uint256 k = buckK.compute();
         uint256 preFunding = _book.balanceOf(msg.sender);
         uint256 beforeValue = buckCredit.currentValue(tokenId);
@@ -262,7 +261,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         if (!identity.isVerified(jubilee) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
         (uint256 oldPrincipal, bytes32 digest) = renewalConsent.checkRenewal(owner, tokenId, terms);
         if (relief < terms.minimumRelief || relief > oldPrincipal) revert BadAuthorization();
-        _claims.totalSeconds();
+        claimBook.totalSeconds();
         uint256 k = buckK.compute();
         uint256 oldLimit = Math.mulDiv(buckCredit.currentValue(tokenId), k, K_SCALE);
         uint256 oldShortfall = oldPrincipal > oldLimit ? oldPrincipal - oldLimit : 0;
@@ -333,7 +332,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         ReductionAuthorization memory auth = reductionAuthorization[tokenId];
         if (principal == 0 || principal != auth.principal || block.timestamp > auth.deadline
             || reliefScaled < auth.minimumReliefScaled) revert BadAuthorization();
-        _claims.totalSeconds();
+        claimBook.totalSeconds();
         (uint256 priorPrincipal,) = buckCredit.issuanceOf(tokenId);
         if (principal > priorPrincipal) revert BadAmount();
         (, uint256 active,) = buckCredit.creditInfo(tokenId);
@@ -364,21 +363,20 @@ contract BuckNet is IERC20, IERC20Metadata {
         emit FacilityReduced(owner, tokenId, principal, reliefScaled, nominalFundSpent, refund);
     }
 
-    function claimSeconds() external view returns (uint256) { return _claims.totalSeconds(); }
-    function maturitiesPending() external view returns (bool) { return _claims.pending(); }
+    function claimSeconds() external view returns (uint256) { return claimBook.totalSeconds(); }
+    function maturitiesPending() external view returns (bool) { return claimBook.pending(); }
     function processMaturities(uint256 maxSteps) external nonReentrant returns (uint256, bool) {
-        return _claims.process(maxSteps);
+        return claimBook.process(maxSteps);
     }
     function selectedClaimSeconds(uint256 tokenId, uint256 principal) external view returns (uint256 selected, uint256 total) {
-        total = _claims.totalSeconds();
+        total = claimBook.totalSeconds();
         (uint256 issued, uint256 seconds_) = buckCredit.issuanceOf(tokenId);
         if (issued == 0 || principal > issued) revert BadAmount();
         selected = Math.mulDiv(seconds_, principal, issued);
     }
 
     function _syncClaim(uint256 tokenId) private {
-        (uint256 principal, uint256 seconds_) = buckCredit.issuanceOf(tokenId);
-        _claims.update(tokenId, principal, seconds_);
+        claimBook.sync(tokenId);
     }
 
     function _refundPremium(address owner, uint256 tokenId, uint256 amount) private {

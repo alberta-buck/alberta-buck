@@ -157,6 +157,9 @@ must not be disturbed.
 - [X] Connect the NFT hooks to issuance and reductions in an isolated token
   prototype. Exercise K changes, premium flows, independent facilities,
   funding-factor checks, owner authorization and long-idle retirement.
+- [X] Move the aggregate capped-claim heap into a token-owned contract that
+  fetches each facility's actual NFT data, rejects unauthorized updates, and
+  permits bounded public maturity processing. Preserve the token's views.
 - [ ] Complete atomic renewal and migrate the production Buck integration;
   the new book is not populated by legacy Buck.
 - [ ] Implement conserved issuance, transfer, fund checkpoint and reduction
@@ -236,7 +239,8 @@ must not be disturbed.
 | 2026-10-29 | 4f | Added full-width whole-unit fund flow counters and fractional remainders. Four counter, 18 ledger, 29 fund and six real-basket tests pass; net cash reconciles across actual sales and relief. BuckNet runtime is 19,782 bytes; fund runtime is 10,662 bytes. | =0cb76a4e= |
 | 2026-10-29 | 3g | Specified atomic renewal and restricted active net-model term updates to Buck, including the insurer's attested envelope. Sixty-six BuckCredit and 12 insurer-gate tests passed. | =8d3449ee= |
 | 2026-10-29 | 3h | Same-insurer renewal implemented with an immutable consent contract. Forty-four renewal-suite tests (including inherited fund tests and 256 fuzzed K cases), seven real-basket, 67 BuckCredit, 12 insurer-gate and 14 token tests passed. | =ea834705= |
-| 2026-10-29 | 3i | Registry mode synchronization and mandatory fund issuance checkpoints implemented. Passed: 21 ledger (including 256 mode-round-trip fuzz cases), 19 token, 45 renewal/inherited-fund, 54 registry, 67 credit, 12 insurer-gate, 29 legacy basket, seven real-basket and 76 Python reference tests. Runtime: BuckNet 24,302 bytes; BuckCredit 24,009; identity registry 23,605. A runtime-limit test is included. | This commit: Carrying-mode synchronization |
+| 2026-10-29 | 3i | Registry mode synchronization and mandatory fund issuance checkpoints implemented. Passed: 21 ledger (including 256 mode-round-trip fuzz cases), 19 token, 45 renewal/inherited-fund, 54 registry, 67 credit, 12 insurer-gate, 29 legacy basket, seven real-basket and 76 Python reference tests. Runtime: BuckNet 24,302 bytes; BuckCredit 24,009; identity registry 23,605. A runtime-limit test is included. | =2f7ca3a4= |
+| 2026-10-29 | 3j | Extracted the capped aggregate into =JubileeClaimBook=, which authenticates the token and fetches actual NFT state. Twenty token, nine claim-library, 45 renewal/inherited-fund, seven real-basket and 67 credit tests pass; BuckNet runtime falls to 23,352 bytes and the claim book is 3,716 bytes. | This commit: separate claim book |
 
 * Open implementation constraints
 
@@ -301,11 +305,15 @@ integration, or supported migration. Its internal fractional
 retirement can require integral ERC-20 burn events to be rounded; the exact
 split is recorded in =FacilityReduced= and still needs indexer review.
 
-The claim benchmark retains BUCK-seconds precision and rounds the selected
+The token creates an immutable =JubileeClaimBook= that alone maintains its
+aggregate capped benchmark. Only the token may synchronize an NFT, and the
+book reads principal and claim age directly from BuckCredit. Anyone can
+process due maturities either through the token or the book. The claim
+benchmark retains BUCK-seconds precision and rounds the selected
 relief only at settlement; it is not the sum of individually rounded raw-unit
 claims. Matured entries must be processed in bounded transactions before an
-exact view or change; otherwise they revert. A permissionless wrapper, caller
-incentives, front-running, large-population gas, and coordination with a real
+exact view or change; otherwise they revert. Caller incentives, front-running,
+large-population gas, and coordination with a real
 fund sale all need explicit integration tests. A quiet or adversarially large
 backlog can delay settlement until keepers process it; no assumption that all
 old facilities can be swept in one block is made.

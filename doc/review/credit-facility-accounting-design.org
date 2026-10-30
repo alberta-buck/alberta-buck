@@ -301,6 +301,8 @@ and paying a freshly quoted full-value deposit on renewal. It supports an
 insurer change while refunding only from the recorded old pool. That is one
 possible settlement convention; retaining a same-insurer deposit and settling
 only an agreed difference may be cheaper and needs separate specification.
+The isolated Solidity prototype implements the same-insurer form with
+independent owner and insurer consent; an insurer change is not implemented.
 The reference does not perform actuarial pricing, signatures, or on-chain
 callbacks. It resets the renewed facility's issuance-age checkpoint after
 crystallizing actual relief: an unpaid baseline is not a guaranteed extra
@@ -358,11 +360,13 @@ BUCK units; this avoids separately rounding every NFT's fractional claim.
 Maturities are processed in bounded, permissionless batches. Exact reads and
 position changes revert while a maturity backlog remains, rather than using an
 overstated denominator. A keeper or any caller must clear the backlog before
-those operations can proceed; this liveness and gas tradeoff must be addressed
-in the fund integration. In a 64-facility simultaneous-maturity test, a batch
+those operations can proceed; the liveness and gas tradeoff remains. In a
+64-facility simultaneous-maturity test, a batch
 of eight cost at most 328,483 gas in this environment; larger and adversarial
-workloads still need measurement. The benchmark library is not yet connected
-to Buck or Jubilee.
+workloads still need measurement. The isolated token constructs a separate
+=JubileeClaimBook= around the library; only the token may synchronize a
+facility, the book reads NFT state directly, and processing is permissionless.
+The fund uses this benchmark through the token's views.
 
 Relief above the nominal target can also make gross accrual minus actual
 payments negative, so cumulative full-width inflow and outflow counters need
