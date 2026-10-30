@@ -54,7 +54,10 @@ contract Deploy is Script {
             address(buckCredit), address(buckK), address(identity), insurancePool
         );
         console.log("Buck deployed at:", address(buck));
+        buckCredit.setBuck(address(buck));
         identity.setBuck(address(buck));
+        require(buckCredit.buck() == address(buck), "credit wiring failed");
+        require(identity.buck() == address(buck), "identity wiring failed");
 
         // 5. Deploy Notes (Phase 7-bis: stub mint verifier; production will
         //    deploy MintVerifierAdapter + per-N MintBatchN${N}Groth16Verifier

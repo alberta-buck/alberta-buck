@@ -51,6 +51,7 @@ into =core/js/sandbox/dist/=. These generated products are not committed.
 
 #+begin_src sh
 make nix-test                              # Foundry contract tests
+make nix-deploy-dry-run                    # local EVM; no broadcast
 make nix-venv-test-python                  # Python reference and simulator tests
 make nix-venv-core-test-py                 # Python platform tests
 make nix-core-test-js                     # JS platform and available browser tests
@@ -73,6 +74,8 @@ passing integration test; use the =nix-= wrapper.
 Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
 and regeneration, executable papers, release builds and deployment procedures remain in
 [[file:doc/DEVELOP.org][doc/DEVELOP.org]] and [[file:alberta-buck-deployment.org][the deployment book]]. Simulations do not replace contract tests.
+The deployment dry run exercises the legacy bootstrap with stub Notes verifiers. It does not
+deploy the experimental =BuckNet= stack or establish readiness for a live deployment.
 
 * Useful checks
 

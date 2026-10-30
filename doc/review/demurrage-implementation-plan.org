@@ -39,6 +39,7 @@ make nix-match-BuckBasketEquityTest
 make nix-match-NetDemurrageMathTest
 make nix-match-BuckLedgerTest
 make nix-match-BuckCredit
+make nix-match-BuckCreditWiringTest
 make nix-match-JubileeClaimsTest
 make nix-match-BuckNetTest
 make nix-match-BuckNetQuoteTest
@@ -97,6 +98,8 @@ must not be disturbed.
 - [ ] Decide explicit semantics for Carrying facility owners, NFT transfers,
   and any existing delegated demurrage feature; preserve capabilities unless
   their removal is separately agreed and replacement coverage is demonstrated.
+- [X] Protect the one-shot BuckCredit token assignment from third-party
+  preemption and wire the legacy deployment script to its deployed token.
 
 * Milestones
 
@@ -270,9 +273,18 @@ must not be disturbed.
 | 2026-10-30 | Fifty-year integration | =make nix-match-JubileeMaturityIntegrationTest=: one passed. Sixteen simultaneously matured NFTs block the real fund's sale until four public bounded batches clear the benchmark; authorization, cash, shares and owner balance survive every refusal. The eventual relief equals the selected cash and actual sale proceeds and remains below the full target. The basket is a controlled mock. | =e97ab0ba= |
 | 2026-10-30 | Issuance quote | Optional stateless =BuckNetQuoter= supplies per-NFT current coverage, premium, reserve and bounded issuance capacity without bloating or modifying the token. Twelve quote tests pass, including 256 fuzzed comparisons against real issuance; 20 token tests pass. Runtime: BuckNet 23,380 bytes, quoter 2,721. A quote is not an execution guarantee and the clients are not wired yet. | =98c8be92= |
 | 2026-10-30 | Full suite | =make nix-test=: 1,312 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= were excluded because their fixtures were absent. This tests the contract prototype and quoter, not a five-year net-accounting economy. | =98c8be92= |
-| 2026-10-30 | Funding reserve | The quote suite now has 13 passing tests. An insured owner acquires BUCK in two transfers; issuance refuses until the quoted reserve is present, then succeeds while retaining that reserve. The transfers model acquisition; no market swap or household behavior is implied. | This commit |
+| 2026-10-30 | Funding reserve | The quote suite now has 13 passing tests. An insured owner acquires BUCK in two transfers; issuance refuses until the quoted reserve is present, then succeeds while retaining that reserve. The transfers model acquisition; no market swap or household behavior is implied. | =9842aeca= |
+| 2026-10-30 | Credit wiring | Restricted one-shot =BuckCredit.setBuck= to its deployer and repaired the legacy deployment script's missing link. Two adversarial/factory tests, the 20-test BuckNet suite, an offline deployment dry run, and Python/JS world bootstrap checks passed. =make nix-test=: 1,315 passed, one fork-dependent test skipped, with the same missing-fixture SNARK/Regression exclusions. BuckCredit runtime is 24,058 bytes; this protection applies to new contracts only. | This commit |
 
 * Open implementation constraints
+
+The new =BuckCredit.setBuck= assignment is reserved for the account or factory
+that deployed that credit contract. A factory must provide its own authorized
+initialization path. This protects *new* deployments; it cannot repair an
+already deployed immutable credit contract. The legacy =Deploy.s.sol= now
+wires and verifies both the credit and registry links, but still uses legacy
+Buck and stub verifiers. =make nix-deploy-dry-run= simulates that script in a
+local EVM without broadcasting; it is not a deployment recipe for BuckNet.
 
 On 2026-10-29, installing the isolated worktree's locked =core/js=
 dependencies reported npm audit findings. A separate =npm audit --omit=dev

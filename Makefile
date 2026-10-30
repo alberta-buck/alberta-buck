@@ -19,6 +19,7 @@ help:
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
+	  '  make nix-deploy-dry-run            # legacy stub-verifier bootstrap, no broadcast' \
 	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
 	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \
 	  '  make nix-venv-demurrage-reference  # 50-year holder, Jubilee and relief accounting' \
@@ -207,6 +208,11 @@ stop-anvil:
 
 
 # ── Deployment ───────────────────────────────────────────────────────
+
+.PHONY: deploy-dry-run
+# Local EVM simulation only: legacy Buck and stub Notes verifiers, not a release deployment.
+deploy-dry-run:
+	forge script scripts/deploy/Deploy.s.sol:Deploy $(FORGE_OPTS) -vv
 
 deploy-local:
 	forge script scripts/deploy/Deploy.s.sol --broadcast --rpc-url http://localhost:$(ANVIL_PORT) -vvv

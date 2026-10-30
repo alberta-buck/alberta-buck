@@ -460,13 +460,13 @@ contract BuckCredit is ERC721Enumerable {
         require(premiumRate <= env.maxPremiumRate, "premium rate above attested maximum");
     }
 
-    /// @notice One-shot wiring of the Buck contract permitted to call
-    ///         activateFromBuck / deactivateFromBuck.  Callable by anyone
-    ///         (the Buck address is public and the function is idempotent
-    ///         once set), but immutable after first set.  Mirrors
-    ///         Buck.setBasket(...) for the symmetric BuckBasket wiring style.
+    /// @notice One-shot wiring of the Buck contract permitted to call the
+    ///         activation and issuance hooks. Only the contract's deployer
+    ///         can assign it, preventing a third party from taking the slot
+    ///         between deployment and initialization. It is immutable once set.
     function setBuck(address _buck) external {
         require(buck == address(0), "BuckCredit: buck already set");
+        require(msg.sender == _deployer, "BuckCredit: not deployer");
         require(_buck != address(0), "BuckCredit: buck=0");
         buck = _buck;
         emit BuckSet(_buck);
