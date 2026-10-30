@@ -22,6 +22,8 @@ import {EqController, EqHolder, EqToken, IPool} from "./BuckBasketEquity.t.sol";
 contract JubileeEquityIntegrationTest is Test {
     uint256 constant YEAR = 365 days + 6 hours;
     uint256 constant Q = 1e36;
+    uint160 constant MIN_SQRT = 4295128739;
+    uint160 constant MAX_SQRT = 1461446703485210103287273052203988822378723970342;
     address constant GOV = address(0xA0);
     address constant ALICE = address(0xA11CE);
     address constant BOB = address(0xB0B);
@@ -236,11 +238,40 @@ contract JubileeEquityIntegrationTest is Test {
         uint256 shareValue = basket.equity() * requestedShares / basket.totalShares();
         assertGt(shareValue * 99 / 100, walletBefore);
         _authorize(ALICE, a, 400_000e6, 0);
+
+        // Without a route, the standard call rejects the unconverted TOKEN.
+        // The claimant may explicitly accept cash-only relief instead.
+        vm.expectRevert(JubileeFund.MissingRoute.selector);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 400_000e6);
-        assertGt(asset.balanceOf(address(fund)), 0);
+        fund.reduce(a, 400_000e6);
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(ALICE);
+        (uint256 cashOnly,) = fund.reduceCashOnly(a, 400_000e6);
+        assertEq(cashOnly, cashBefore * selected / total);
+        (uint128 deferredShares,) = basket.holdings(id);
+        assertEq(deferredShares, sharesBefore);
+        assertEq(asset.balanceOf(address(fund)), 0);
+        assertTrue(vm.revertToState(snapshot));
+
+        (,,,,,,,, bool buckIs0,,) = basket.constituents(0);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({
+            sqrtPriceLimitX96: buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1,
+            minimumNetBuck: type(uint256).max
+        });
+        vm.expectRevert(JubileeFund.SwapMinOut.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 400_000e6, routes);
+        (uint128 afterFailedSale,) = basket.holdings(id);
+        assertEq(afterFailedSale, sharesBefore);
+        assertEq(asset.balanceOf(address(fund)), 0);
+        routes[0].minimumNetBuck = 1;
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduceWithRoutes(a, 400_000e6, routes);
+        assertEq(asset.balanceOf(address(fund)), 0);
         (, uint256 cashAfter) = buck.fundBalancesScaled();
         uint256 actualProceeds = cashAfter + relief - cashBefore;
+        assertGt(actualProceeds, 0);
         assertEq(relief, cashBefore * selected / total + actualProceeds);
         (uint128 sharesAfter,) = basket.holdings(id);
         assertLe(sharesAfter, sharesBefore);

@@ -3,7 +3,10 @@ pragma solidity ^0.8.20;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {BuckNet} from "./BuckNet.sol";
 import {BuckCredit} from "./BuckCredit.sol";
 import {IBuckBasketPosition} from "./basket/IBuckBasketPosition.sol";
@@ -15,6 +18,12 @@ interface IJubileeBasket is IBuckBasketPosition {
     function buck() external view returns (address);
     function receipt() external view returns (address);
     function holdings(uint256 id) external view returns (uint128 shares, uint128 basis);
+    function constituentsLength() external view returns (uint256);
+    function constituents(uint256 index) external view returns (
+        address asset, uint8 decimals, uint256 basketAmount, uint256 initialPrice,
+        uint24 fee, address pool, int24 lower, int24 upper, bool buckIsToken0,
+        uint256 targetWeightBp, uint128 treasuryLiquidity
+    );
 }
 
 /// @notice A pool can realize its investments before its own nominal premium
@@ -29,11 +38,12 @@ interface IInsurerRefundLiquidity {
 ///      their constructor cycle. This coordinator owns one managed receipt,
 ///      pays the selected pro-rata cash plus actual net sale proceeds, and
 ///      never substitutes the target relief for available value. It requires
-///      a basket implementing IBuckBasketPosition. Leveraged basket behavior,
-///      in-kind TOKEN conversion and real insurer liquidity are not complete;
+///      a compatible basket. Leveraged basket accounting and concrete insurer
+///      liquidity implementations remain incomplete;
 ///      this is not a production deployment.
 contract JubileeFund is IERC721Receiver {
     using WideCounter for WideCounter.Count;
+    using SafeERC20 for IERC20;
     uint256 private constant Q = 1e36;
     uint256 private constant BP = 10_000;
     uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
@@ -54,6 +64,15 @@ contract JubileeFund is IERC721Receiver {
     bool private transient _entered;
     bool private transient _acceptingReceipt;
     uint256 private transient _receivedReceipt;
+    address private transient _swapPool;
+    address private transient _swapAsset;
+    uint256 private transient _swapRemaining;
+    bool private transient _swapBuckIsToken0;
+
+    /// @notice One entry per basket constituent. A zero price limit means no
+    ///         conversion route for that TOKEN. Minimum is full-value BUCK.
+    struct SaleRoute { uint160 sqrtPriceLimitX96; uint256 minimumNetBuck; }
+    struct SaleAsset { address asset; address pool; bool buckIsToken0; uint256 beforeBalance; }
 
     event Configured(address indexed token, address indexed basket, address indexed receipt);
     event Invested(uint256 indexed positionId, uint256 nominal, uint256 netSpentScaled,
@@ -67,6 +86,8 @@ contract JubileeFund is IERC721Receiver {
     event ReserveCheckpointed(uint256 targetScaled, uint256 excessScaled, uint256 budgetScaled);
     event ReserveParametersSet(uint16 targetBp, uint16 thresholdBp);
     event InvestmentKeeperSet(address indexed keeper);
+    event SaleDeferred(uint256 indexed positionId, bytes4 reason);
+    event TokenConverted(uint256 indexed constituent, address indexed asset, uint256 amountIn, uint256 netBuckScaled);
 
     error NotGovernance();
     error Reentrant();
@@ -87,6 +108,12 @@ contract JubileeFund is IERC721Receiver {
     error ReserveBudgetExceeded();
     error TimestampOverflow();
     error NotInvestmentKeeper();
+    error NotSelf();
+    error BadRoute();
+    error MissingRoute();
+    error IncompleteSwap();
+    error SwapMinOut();
+    error BadSwapCallback();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -224,9 +251,32 @@ contract JubileeFund is IERC721Receiver {
     /// @notice Reduce the caller's authorized facility after selling its
     ///         proportional share of the managed position. The claimant gets
     ///         their share of pre-sale cash plus actual net BUCK sale proceeds,
-    ///         capped at the principal; TOKEN received in kind is not BUCK.
+    ///         capped at the principal. An in-kind sale requires routes or an
+    ///         explicit cash-only reduction.
     function reduce(uint256 tokenId, uint256 principal)
         external configured nonReentrant returns (uint256 reliefScaled, uint256 premiumRefund)
+    {
+        return _reduce(tokenId, principal, new SaleRoute[](0), false);
+    }
+
+    /// @notice Reduce with owner-supplied routes for any TOKEN returned by
+    ///         the basket. Each route is indexed by the basket constituent.
+    function reduceWithRoutes(uint256 tokenId, uint256 principal, SaleRoute[] calldata routes)
+        external configured nonReentrant returns (uint256 reliefScaled, uint256 premiumRefund)
+    {
+        return _reduce(tokenId, principal, routes, false);
+    }
+
+    /// @notice Accept cash relief if TOKEN cannot be converted. Deferred
+    ///         receipt shares remain with the fund for its other claims.
+    function reduceCashOnly(uint256 tokenId, uint256 principal)
+        external configured nonReentrant returns (uint256 reliefScaled, uint256 premiumRefund)
+    {
+        return _reduce(tokenId, principal, new SaleRoute[](0), true);
+    }
+
+    function _reduce(uint256 tokenId, uint256 principal, SaleRoute[] memory routes, bool acceptDeferred)
+        private returns (uint256 reliefScaled, uint256 premiumRefund)
     {
         BuckCredit credit = token.buckCredit();
         if (credit.ownerOf(tokenId) != msg.sender) revert NotOwner();
@@ -237,7 +287,7 @@ contract JubileeFund is IERC721Receiver {
         _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
-        uint256 proceeds = _sellProportion(selected, total, cashBefore);
+        uint256 proceeds = _sellProportion(selected, total, cashBefore, routes, acceptDeferred);
         uint256 cashShare = total == 0 ? 0 : Math.mulDiv(cashBefore, selected, total);
         uint256 cap = principal * Q;
         reliefScaled = proceeds >= cap || cashShare >= cap - proceeds ? cap : cashShare + proceeds;
@@ -253,11 +303,31 @@ contract JubileeFund is IERC721Receiver {
     function renew(uint256 tokenId, BuckRenewal.Terms calldata terms)
         external configured nonReentrant returns (uint256 relief, uint256 refund, uint256 premium)
     {
+        return _renew(tokenId, terms, new SaleRoute[](0), false);
+    }
+
+    function renewWithRoutes(uint256 tokenId, BuckRenewal.Terms calldata terms, SaleRoute[] calldata routes)
+        external configured nonReentrant returns (uint256 relief, uint256 refund, uint256 premium)
+    {
+        return _renew(tokenId, terms, routes, false);
+    }
+
+    /// @notice Renew while explicitly accepting cash-only relief if an
+    ///         in-kind sale needs a route.
+    function renewCashOnly(uint256 tokenId, BuckRenewal.Terms calldata terms)
+        external configured nonReentrant returns (uint256 relief, uint256 refund, uint256 premium)
+    {
+        return _renew(tokenId, terms, new SaleRoute[](0), true);
+    }
+
+    function _renew(uint256 tokenId, BuckRenewal.Terms calldata terms, SaleRoute[] memory routes, bool acceptDeferred)
+        private returns (uint256 relief, uint256 refund, uint256 premium)
+    {
         (uint256 principal,) = token.renewalConsent().checkRenewal(msg.sender, tokenId, terms);
         _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
-        uint256 proceeds = _sellProportion(selected, total, cashBefore);
+        uint256 proceeds = _sellProportion(selected, total, cashBefore, routes, acceptDeferred);
         uint256 cashShare = total == 0 ? 0 : Math.mulDiv(cashBefore, selected, total);
         uint256 cap = principal * Q;
         uint256 available = proceeds >= cap || cashShare >= cap - proceeds ? cap : cashShare + proceeds;
@@ -332,15 +402,23 @@ contract JubileeFund is IERC721Receiver {
         return uint64(block.timestamp);
     }
 
-    function _sellProportion(uint256 selected, uint256 total, uint256 cashBefore) private returns (uint256 proceeds) {
+    function _sellProportion(uint256 selected, uint256 total, uint256 cashBefore, SaleRoute[] memory routes,
+                             bool acceptDeferred)
+        private returns (uint256 proceeds)
+    {
         uint256 id = positionId;
         if (id == 0 || selected == 0 || total == 0) return 0;
         (uint256 beforeShares,) = basket.holdings(id);
         uint256 requested = Math.mulDiv(beforeShares, selected, total);
         if (requested == 0) return 0;
-        try basket.redeemShares(id, requested, 0) returns (uint256 newId, uint256, uint256 retired, uint256 remaining) {
-            if (retired > requested || remaining != beforeShares - retired
-                || newId != (remaining == 0 ? 0 : id)) revert InconsistentPosition();
+        try this.attemptSale(id, requested, beforeShares, routes)
+            returns (bool underwater, uint256 newId, uint256 retired, uint256 remaining)
+        {
+            if (underwater) {
+                emit SaleDeferred(id, UNDERWATER);
+                emit PositionSale(id, requested, 0, beforeShares, 0, true);
+                return 0;
+            }
             positionId = newId;
             (, uint256 cashAfter) = token.fundBalancesScaled();
             if (cashAfter < cashBefore) revert UnexpectedCashDecrease();
@@ -348,11 +426,83 @@ contract JubileeFund is IERC721Receiver {
             _saleProceedsNet.add(proceeds);
             emit PositionSale(id, requested, retired, remaining, proceeds, false);
         } catch (bytes memory reason) {
-            // A zero-value or dust exit cannot retire any shares. Preserve the
-            // receipt and count zero proceeds; all other failures propagate.
-            if (reason.length != 4 || bytes4(reason) != UNDERWATER) _bubble(reason);
-            emit PositionSale(id, requested, 0, beforeShares, 0, true);
+            // The external self-call rolls back the sale when a route is
+            // missing, so the receipt and all its shares survive.
+            if (reason.length != 4) _bubble(reason);
+            bytes4 selector = bytes4(reason);
+            if (selector != MissingRoute.selector || !acceptDeferred) _bubble(reason);
+            emit SaleDeferred(id, selector);
+            emit PositionSale(id, requested, 0, beforeShares, 0, false);
         }
+    }
+
+    /// @dev External solely to provide an atomic subtransaction: if an
+    ///      in-kind TOKEN has no route, the basket exit is rolled back without
+    ///      preventing the outer operation from paying available cash relief.
+    function attemptSale(uint256 id, uint256 requested, uint256 beforeShares, SaleRoute[] calldata routes)
+        external returns (bool underwater, uint256 newId, uint256 retired, uint256 remaining)
+    {
+        if (msg.sender != address(this) || !_entered) revert NotSelf();
+        uint256 count = basket.constituentsLength();
+        if (routes.length != 0 && routes.length != count) revert BadRoute();
+        SaleAsset[] memory assets = new SaleAsset[](count);
+        for (uint256 i = 0; i < count; i++) {
+            (address asset, , , , , address pool, , , bool buckIs0, , ) = basket.constituents(i);
+            if (asset == address(0) || asset == address(token)) revert BadRoute();
+            assets[i] = SaleAsset(asset, pool, buckIs0, IERC20(asset).balanceOf(address(this)));
+        }
+        try basket.redeemShares(id, requested, 0)
+            returns (uint256 idAfter, uint256, uint256 retiredShares, uint256 remainingShares)
+        {
+            newId = idAfter;
+            retired = retiredShares;
+            remaining = remainingShares;
+        } catch (bytes memory reason) {
+            if (reason.length == 4 && bytes4(reason) == UNDERWATER) return (true, id, 0, beforeShares);
+            _bubble(reason);
+        }
+        if (retired > requested || remaining != beforeShares - retired
+            || newId != (remaining == 0 ? 0 : id)) revert InconsistentPosition();
+        for (uint256 i = 0; i < count; i++) {
+            uint256 balance = IERC20(assets[i].asset).balanceOf(address(this));
+            if (balance < assets[i].beforeBalance) revert BadRoute();
+            uint256 received = balance - assets[i].beforeBalance;
+            if (received == 0) continue;
+            if (routes.length == 0 || routes[i].sqrtPriceLimitX96 == 0) revert MissingRoute();
+            _convertSaleAsset(i, assets[i], received, routes[i]);
+        }
+    }
+
+    function _convertSaleAsset(uint256 index, SaleAsset memory asset, uint256 amount, SaleRoute calldata route) private {
+        if (asset.pool.code.length == 0 || amount > uint256(type(int256).max)) revert BadRoute();
+        (, uint256 cashBefore) = token.fundBalancesScaled();
+        _swapPool = asset.pool;
+        _swapAsset = asset.asset;
+        _swapRemaining = amount;
+        _swapBuckIsToken0 = asset.buckIsToken0;
+        IUniswapV3Pool(asset.pool).swap(address(this), !asset.buckIsToken0, int256(amount),
+                                        route.sqrtPriceLimitX96, "");
+        if (_swapRemaining != 0 || IERC20(asset.asset).balanceOf(address(this)) != asset.beforeBalance) {
+            revert IncompleteSwap();
+        }
+        _swapPool = address(0);
+        _swapAsset = address(0);
+        (, uint256 cashAfter) = token.fundBalancesScaled();
+        if (cashAfter < cashBefore) revert UnexpectedCashDecrease();
+        uint256 netReceived = cashAfter - cashBefore;
+        if (netReceived / Q < route.minimumNetBuck) revert SwapMinOut();
+        emit TokenConverted(index, asset.asset, amount, netReceived);
+    }
+
+    /// @notice Pay only the active constituent pool and only the TOKEN amount
+    ///         received by this sale; no existing fund inventory is approved.
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external {
+        if (!_entered || msg.sender != _swapPool || _swapPool == address(0)) revert BadSwapCallback();
+        int256 owed = _swapBuckIsToken0 ? amount1Delta : amount0Delta;
+        int256 other = _swapBuckIsToken0 ? amount0Delta : amount1Delta;
+        if (owed <= 0 || other > 0 || uint256(owed) > _swapRemaining) revert BadSwapCallback();
+        _swapRemaining -= uint256(owed);
+        IERC20(_swapAsset).safeTransfer(msg.sender, uint256(owed));
     }
 
     function _prepareRefund(uint256 tokenId, uint256 principal, uint256 priorPrincipal) private {
@@ -368,8 +518,8 @@ contract JubileeFund is IERC721Receiver {
     }
 
     /// @notice Cumulative full-value BUCK invested and actually received from
-    ///         position sales, with fractional remainders. In-kind TOKEN is
-    ///         excluded until a future conversion records real BUCK proceeds.
+    ///         position sales, including converted TOKEN, with fractional
+    ///         remainders. Unrelated pre-existing TOKEN is excluded.
     function investmentFlows() external view returns (WideCounter.Count memory invested,
                                                         WideCounter.Count memory saleProceeds) {
         return (_investedNet, _saleProceedsNet);

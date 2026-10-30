@@ -279,8 +279,9 @@ net fund cash = net demurrage + transfers in - transfers out - relief
 Gross demurrage also includes demurrage on BUCK already in the Carrying fund;
 it must not be added a second time to the fund's net cash. The fund separately
 reports =investmentFlows()=: cumulative actual net BUCK invested in its
-managed position and received from sales. In-kind TOKEN is excluded until a
-future conversion records actual BUCK. These two cumulative flows alone do not
+managed position and received from sales, including actual BUCK from bounded
+conversions of new in-kind TOKEN. Historical unconverted TOKEN is excluded.
+These two cumulative flows alone do not
 measure profit: the unsold position still has value. Counters have full
 256-bit whole-unit range, but still revert if that range is eventually
 exhausted; instantaneous scaled issuance has a separate lower bound.

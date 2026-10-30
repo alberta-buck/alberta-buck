@@ -271,6 +271,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         refund = premiumPrincipal[tokenId];
         _refundPremium(owner, tokenId, refund);
         renewalConsent.consume(tokenId, digest);
+        delete reductionAuthorization[tokenId];
         uint256 nominalSpent;
         if (relief != 0) {
             nominalSpent = _book.retireWithFund(owner, relief, relief * FRACTION_SCALE, false);

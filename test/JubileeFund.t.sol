@@ -20,8 +20,17 @@ import {BuckRenewal, BuckRenewalConsent} from "../src/BuckRenewalConsent.sol";
 /// @dev Exercise the real token and coordinator with a controllable basket;
 ///      this is not a substitute for integration with the real equity basket.
 contract JubileeInKindToken is ERC20 {
+    bool public chargeTransferFee;
     constructor() ERC20("In-kind TOKEN", "TOK") {}
     function mint(address to, uint256 amount) external { _mint(to, amount); }
+    function setTransferFee(bool enabled) external { chargeTransferFee = enabled; }
+    function _update(address from, address to, uint256 amount) internal override {
+        if (chargeTransferFee && from != address(0) && to != address(0)) {
+            uint256 fee = amount / 100;
+            super._update(from, address(0), fee);
+            super._update(from, to, amount - fee);
+        } else super._update(from, to, amount);
+    }
 }
 
 contract JubileeBasketMock {
@@ -29,6 +38,12 @@ contract JubileeBasketMock {
     address public immutable buck;
     BuckBasketReceipt public immutable receipt;
     JubileeInKindToken public immutable inKind;
+    JubileeInKindToken public immutable secondInKind;
+    address public swapPool;
+    bool public mockBuckIsToken0;
+    address public secondSwapPool;
+    bool public secondBuckIsToken0;
+    bool public secondEnabled;
     struct Holding { uint128 shares; uint128 basis; }
     mapping(uint256 => Holding) public holdings;
     uint8 public mode; // 0 normal, 1 underwater, 2 partial, 3 zero proceeds, 4 unexpected revert
@@ -39,8 +54,26 @@ contract JubileeBasketMock {
         buck = token;
         receipt = new BuckBasketReceipt(address(this));
         inKind = new JubileeInKindToken();
+        secondInKind = new JubileeInKindToken();
     }
     function setMode(uint8 value) external { mode = value; }
+    function setSwapPool(address pool, bool buckIsToken0) external {
+        swapPool = pool;
+        mockBuckIsToken0 = buckIsToken0;
+    }
+    function setSecondPool(address pool, bool buckIsToken0) external {
+        secondEnabled = true;
+        secondSwapPool = pool;
+        secondBuckIsToken0 = buckIsToken0;
+    }
+    function constituentsLength() external view returns (uint256) { return secondEnabled ? 2 : 1; }
+    function constituents(uint256 index) external view returns (
+        address, uint8, uint256, uint256, uint24, address, int24, int24, bool, uint256, uint128
+    ) {
+        if (index == 0) return (address(inKind), 18, 0, 0, 0, swapPool, 0, 0, mockBuckIsToken0, 0, 0);
+        require(index == 1 && secondEnabled);
+        return (address(secondInKind), 18, 0, 0, 0, secondSwapPool, 0, 0, secondBuckIsToken0, 0, 0);
+    }
     function deposit(address asset, uint256 amount, uint256 minShares) external returns (uint256 id) {
         require(asset == buck);
         uint256 received = _receive(amount);
@@ -81,11 +114,47 @@ contract JubileeBasketMock {
         } else {
             uint256 tokenAmount = inKind.balanceOf(address(this)) * retired / beforeShares;
             inKind.transfer(msg.sender, tokenAmount);
+            if (secondEnabled) {
+                uint256 otherAmount = secondInKind.balanceOf(address(this)) * retired / beforeShares;
+                secondInKind.transfer(msg.sender, otherAmount);
+            }
         }
         h.shares -= uint128(retired);
         h.basis -= uint128(uint256(h.basis) * retired / beforeShares);
         remaining = h.shares;
         if (remaining == 0) { receipt.burn(id); newId = 0; } else newId = id;
+    }
+}
+
+interface IJubileeSwapCallbackMock {
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external;
+}
+
+/// @dev Configurable callback behavior for failure and zero-output cases;
+///      real V3 conversion is separately covered by JubileeEquityIntegration.
+contract JubileeSwapPoolMock {
+    IERC20 public immutable buck;
+    IERC20 public asset;
+    bool public immutable buckIsToken0;
+    uint8 public mode; // 0 full, 1 excessive, 2 partial, 3 forged Underwater
+    uint256 public output;
+    error Underwater();
+    constructor(IERC20 buck_, bool buckIs0) { buck = buck_; buckIsToken0 = buckIs0; }
+    function setAsset(IERC20 asset_) external { asset = asset_; }
+    function setBehavior(uint8 mode_, uint256 output_) external { mode = mode_; output = output_; }
+    function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160, bytes calldata data)
+        external returns (int256 d0, int256 d1)
+    {
+        require(zeroForOne == !buckIsToken0 && amountSpecified > 0);
+        if (mode == 3) revert Underwater();
+        uint256 amount = uint256(amountSpecified);
+        uint256 owed = mode == 1 ? amount + 1 : mode == 2 ? amount / 2 : amount;
+        if (output != 0) buck.transfer(recipient, output);
+        d0 = buckIsToken0 ? -int256(output) : int256(owed);
+        d1 = buckIsToken0 ? int256(owed) : -int256(output);
+        uint256 beforeAsset = asset.balanceOf(address(this));
+        IJubileeSwapCallbackMock(msg.sender).uniswapV3SwapCallback(d0, d1, data);
+        require(asset.balanceOf(address(this)) >= beforeAsset + owed, "input short");
     }
 }
 
@@ -186,6 +255,21 @@ contract JubileeFundTest is Test {
         buck.setInsurerPool(address(pool));
         pool.approveToken();
     }
+    function _inKindSaleFixture() internal returns (uint256 a, uint256 id, JubileeSwapPoolMock pool) {
+        a = _credit(ALICE, 100e6, 0);
+        _credit(BOB, 100e6, 0);
+        pool = new JubileeSwapPoolMock(IERC20(address(buck)), false);
+        pool.setAsset(IERC20(address(basket.inKind())));
+        _bind(address(pool), true, address(this));
+        vm.prank(BOB);
+        buck.transfer(address(pool), 2e6);
+        vm.warp(t0 + YEAR);
+        (id,,) = _invest(2e6);
+        basket.inKind().mint(address(basket), 4e6);
+        basket.setMode(3);
+        basket.setSwapPool(address(pool), false);
+        _authorize(ALICE, a, 50e6, 0);
+    }
 
     function test_noAgeRequiresNoSaleOrRelief() public {
         uint256 id = _credit(ALICE, 100e6, 0);
@@ -194,6 +278,10 @@ contract JubileeFundTest is Test {
         (uint256 relief,) = fund.reduce(id, 100e6);
         assertEq(relief, 0);
         assertEq(buck.totalIssued(), 0);
+    }
+
+    function test_fundFitsTheEvmRuntimeSizeLimit() public view {
+        assertLe(address(fund).code.length, 24_576);
     }
 
     function test_equalFacilitiesReceiveTheirShareOfAvailableCash() public {
@@ -367,7 +455,7 @@ contract JubileeFundTest is Test {
         assertEq(fund.positionId(), id);
     }
 
-    function test_zeroProceedsRetiresOnlyTheSoldShares() public {
+    function test_inKindSaleWithoutRouteLeavesSharesAndTokenInTheBasket() public {
         uint256 a = _credit(ALICE, 100e6, 0);
         _credit(BOB, 100e6, 0);
         vm.warp(t0 + YEAR);
@@ -377,12 +465,188 @@ contract JubileeFundTest is Test {
         (, uint256 cash) = buck.fundBalancesScaled();
         (uint128 oldShares,) = basket.holdings(id);
         _authorize(ALICE, a, 50e6, 0);
+        vm.expectRevert(JubileeFund.MissingRoute.selector);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 50e6);
+        fund.reduce(a, 50e6);
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduceCashOnly(a, 50e6);
         assertEq(relief, cash / 4);
-        assertEq(basket.inKind().balanceOf(address(fund)), 1e6);
+        assertEq(basket.inKind().balanceOf(address(fund)), 0);
+        assertEq(basket.inKind().balanceOf(address(basket)), 4e6);
         (uint128 left,) = basket.holdings(id);
-        assertEq(left, uint256(oldShares) - uint256(oldShares) / 4);
+        assertEq(left, oldShares);
+    }
+
+    function test_cashOnlyDeferralStillHonorsTheOwnersMinimumRelief() public {
+        (uint256 a, uint256 id,) = _inKindSaleFixture();
+        (, uint256 cash) = buck.fundBalancesScaled();
+        _authorize(ALICE, a, 50e6, cash / 4 + 1);
+        (uint128 beforeShares,) = basket.holdings(id);
+        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.reduceCashOnly(a, 50e6);
+        (uint128 afterShares,) = basket.holdings(id);
+        assertEq(afterShares, beforeShares);
+        assertEq(basket.inKind().balanceOf(address(fund)), 0);
+    }
+
+    function test_zeroBuckConversionSellsOnlyNewTokenAndPreservesOldInventory() public {
+        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        basket.inKind().mint(address(fund), 777);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        (uint128 shares,) = basket.holdings(id);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
+        pool.setBehavior(0, 0);
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduceWithRoutes(a, 50e6, routes);
+        assertEq(relief, cash / 4);
+        assertEq(basket.inKind().balanceOf(address(fund)), 777);
+        assertEq(basket.inKind().balanceOf(address(pool)), 1e6);
+        (uint128 remaining,) = basket.holdings(id);
+        assertEq(remaining, uint256(shares) - uint256(shares) / 4);
+    }
+
+    function test_feeOnTransferAssetCanBeDeferredWithoutLosingShares() public {
+        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        basket.inKind().setTransferFee(true);
+        pool.setBehavior(0, 1e6);
+        (uint128 shares,) = basket.holdings(id);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
+        vm.expectRevert(bytes("input short"));
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, routes);
+        (uint128 afterFailure,) = basket.holdings(id);
+        assertEq(afterFailure, shares);
+        assertEq(basket.inKind().balanceOf(address(fund)), 0);
+        vm.prank(ALICE);
+        fund.reduceCashOnly(a, 50e6);
+        (uint128 afterDeferral,) = basket.holdings(id);
+        assertEq(afterDeferral, shares);
+        assertEq(basket.inKind().balanceOf(address(basket)), 4e6);
+    }
+
+    function test_swapCallbackCannotTakeMoreThanTheSelectedSaleReceived() public {
+        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        basket.inKind().mint(address(fund), 777);
+        (uint128 shares,) = basket.holdings(id);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
+        pool.setBehavior(1, 0);
+        vm.expectRevert(JubileeFund.BadSwapCallback.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, routes);
+        (uint128 remaining,) = basket.holdings(id);
+        assertEq(remaining, shares);
+        assertEq(basket.inKind().balanceOf(address(fund)), 777);
+        assertEq(basket.inKind().balanceOf(address(pool)), 0);
+    }
+
+    function test_partialConversionAndInvalidRouteRollBackTheBasketSale() public {
+        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        (uint128 shares,) = basket.holdings(id);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
+        pool.setBehavior(2, 0);
+        vm.expectRevert(JubileeFund.IncompleteSwap.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, routes);
+        (uint128 remaining,) = basket.holdings(id);
+        assertEq(remaining, shares);
+        JubileeFund.SaleRoute[] memory wrong = new JubileeFund.SaleRoute[](2);
+        vm.expectRevert(JubileeFund.BadRoute.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, wrong);
+        (remaining,) = basket.holdings(id);
+        assertEq(remaining, shares);
+    }
+
+    function test_poolCannotForgeBasketUnderwaterToBypassConversionBounds() public {
+        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        (uint128 shares,) = basket.holdings(id);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 1});
+        pool.setBehavior(3, 0);
+        vm.expectRevert(JubileeSwapPoolMock.Underwater.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, routes);
+        (uint128 remaining,) = basket.holdings(id);
+        assertEq(remaining, shares);
+    }
+
+    function test_conversionMinimumUsesNetBuckAfterPoolDemurrage() public {
+        (uint256 a,, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 1e6});
+        pool.setBehavior(0, 1e6);
+        vm.expectRevert(JubileeFund.SwapMinOut.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, routes);
+        routes[0].minimumNetBuck = 980_000;
+        (, uint256 cash) = buck.fundBalancesScaled();
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduceWithRoutes(a, 50e6, routes);
+        assertGt(relief - cash / 4, 980_000 * Q);
+        assertLt(relief - cash / 4, 1e6 * Q);
+    }
+
+    function test_multiAssetConversionIsAtomicAndPreservesUnrelatedInventory() public {
+        (uint256 a, uint256 id, JubileeSwapPoolMock first) = _inKindSaleFixture();
+        JubileeSwapPoolMock second = new JubileeSwapPoolMock(IERC20(address(buck)), true);
+        second.setAsset(IERC20(address(basket.secondInKind())));
+        _bind(address(second), true, address(this));
+        vm.prank(BOB);
+        buck.transfer(address(second), 2e6);
+        basket.setSecondPool(address(second), true);
+        basket.secondInKind().mint(address(basket), 8e6);
+        basket.secondInKind().mint(address(fund), 777);
+        first.setBehavior(0, 1e6);
+        second.setBehavior(0, 1e6);
+        (uint128 shares,) = basket.holdings(id);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](2);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 980_000});
+        vm.expectRevert(JubileeFund.MissingRoute.selector);
+        vm.prank(ALICE);
+        fund.reduceWithRoutes(a, 50e6, routes);
+        (uint128 afterFailure,) = basket.holdings(id);
+        assertEq(afterFailure, shares);
+        assertEq(basket.inKind().balanceOf(address(first)), 0);
+        assertEq(basket.secondInKind().balanceOf(address(fund)), 777);
+        (, uint256 cashAfterFailure) = buck.fundBalancesScaled();
+        assertEq(cashAfterFailure, cash);
+
+        routes[1] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 1e6});
+        vm.prank(ALICE);
+        (uint256 relief,) = fund.reduceWithRoutes(a, 50e6, routes);
+        assertGt(relief - cash / 4, 1_980_000 * Q);
+        assertEq(basket.inKind().balanceOf(address(first)), 1e6);
+        assertEq(basket.secondInKind().balanceOf(address(second)), 2e6);
+        assertEq(basket.secondInKind().balanceOf(address(fund)), 777);
+    }
+
+    function test_equalClaimsReceiveEqualConvertedProceedsInEitherOrder() public {
+        (uint256 a,, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        uint256 b = credit.tokenOfOwnerByIndex(BOB, 0);
+        _authorize(BOB, b, 50e6, 0);
+        pool.setBehavior(0, 1e6);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 980_000});
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(ALICE);
+        (uint256 aliceFirst,) = fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(BOB);
+        (uint256 bobSecond,) = fund.reduceWithRoutes(b, 50e6, routes);
+        assertApproxEqAbs(aliceFirst, bobSecond, 2 * Q);
+        assertTrue(vm.revertToState(snapshot));
+        vm.prank(BOB);
+        (uint256 bobFirst,) = fund.reduceWithRoutes(b, 50e6, routes);
+        vm.prank(ALICE);
+        (uint256 aliceSecond,) = fund.reduceWithRoutes(a, 50e6, routes);
+        assertApproxEqAbs(bobFirst, aliceSecond, 2 * Q);
+        assertApproxEqAbs(aliceFirst, aliceSecond, 2 * Q);
+        assertApproxEqAbs(bobFirst, bobSecond, 2 * Q);
     }
 
     function test_unexpectedBasketFailurePropagatesAndKeepsAuthorization() public {
@@ -467,6 +731,11 @@ contract JubileeFundTest is Test {
         fund.invest(1e6, type(uint256).max, 0, 0);
         vm.expectRevert(JubileeFund.UnexpectedReceipt.selector);
         fund.onERC721Received(address(basket), address(0), 1, "");
+        vm.expectRevert(JubileeFund.BadSwapCallback.selector);
+        fund.uniswapV3SwapCallback(1, 0, "");
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
+        vm.expectRevert(JubileeFund.NotSelf.selector);
+        fund.attemptSale(1, 1, 1, routes);
     }
 
     function test_issuanceCheckpointDoesNotBackdateFreshlyObservedExcess() public {
@@ -780,6 +1049,31 @@ contract JubileeRenewalTest is JubileeFundTest {
         assertEq(afterPrincipal, otherPrincipal);
         assertEq(afterSeconds, otherSeconds);
         assertEq(buck.claimSeconds(), otherSeconds);
+    }
+
+    function test_renewalConvertsItsInKindProceedsAndClearsOldReductionConsent() public {
+        (uint256 id, uint256 position, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        pool.setBehavior(0, 1e6);
+        (uint128 sharesBefore,) = basket.holdings(position);
+        BuckRenewal.Terms memory terms = _terms(id, 120e6, 120e6, 0, 0);
+        _approveRenewal(id, terms);
+        vm.expectRevert(JubileeFund.MissingRoute.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
+        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 980_000});
+        vm.prank(ALICE);
+        (uint256 relief,,) = fund.renewWithRoutes(id, terms, routes);
+        assertGt(relief, 0);
+        (uint128 sharesAfter,) = basket.holdings(position);
+        assertEq(sharesAfter, uint256(sharesBefore) - uint256(sharesBefore) / 2);
+        assertEq(basket.inKind().balanceOf(address(fund)), 0);
+        assertEq(basket.inKind().balanceOf(address(pool)), 2e6);
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
+        assertEq(principal, 100e6 - relief);
+        assertEq(seconds_, 0);
+        (uint256 oldAuthorization,,) = buck.reductionAuthorization(id);
+        assertEq(oldAuthorization, 0);
     }
 
     function test_renewalRefundsOriginalPoolAndFundsNewPoolInFull() public {

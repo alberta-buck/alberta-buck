@@ -12,7 +12,7 @@ earlier claimant's proportional redemption. The earlier claimant receives no
 BUCK for it. This ordering effect must be addressed before relying on the fund
 with a real multi-asset basket.
 
-* Proposed implementation
+* Implemented prototype
 
 Use the actual basket constituent pool to convert only TOKEN received by this
 particular redemption. The facility owner supplies a per-constituent V3 price
@@ -23,10 +23,14 @@ the fund's net BUCK before and after all transfers and conversions; pool
 nominal transfers are not mistaken for full-value receipts. The actual net
 proceeds, plus the selected share of pre-sale net cash, determine relief.
 
-Execute the sale and conversions in an external self-call, so failure to find
+The sale and conversions run in an external self-call, so failure to find
 a route for any newly received TOKEN can roll back just that sale and preserve
-all its shares. In that case a claimant who accepts the resulting relief may
-still reduce using their share of available pre-sale cash. An explicit price or
+all its shares. The ordinary reduction and renewal revert when a TOKEN needs a
+route; the owner may instead explicitly call =reduceCashOnly= or
+=renewCashOnly= and accept their share of available pre-sale cash. This leaves
+the unredeemed shares in the fund for remaining claims, so the owner choosing
+cash-only also gives up any later recovery of those shares. A separate
+deferred entitlement would be needed to preserve that future upside. An explicit price or
 minimum-output failure should revert the owner's entire transaction rather
 than silently weakening their bound. No low-K basket check is bypassed.
 
@@ -39,9 +43,12 @@ fund itself during that locked action. Any old in-kind inventory from the
 prototype is not retroactively attributed to a new claimant; production
 migration needs an explicit disposition for such assets.
 
-This is a proposed extension, not yet implemented or validated. Test a real V3
-in-kind exit, partial or zero proceeds, bad routes and price limits, Carrying
-pool fees, fee-on-transfer TOKEN, callback forgery/reentrancy, multi-asset
-sales, rollback, renewals and both claim orders. Carefully distinguish a
-no-route sale deferred without losing shares from a successful TOKEN-to-BUCK
-sale that delivers genuinely zero BUCK.
+The prototype tests a real V3 in-kind exit, partial and zero proceeds, bad
+routes and price limits, Carrying pool fees, callback forgery, multi-asset
+atomicity, rollback and renewal. A simulated fee-on-transfer asset demonstrates
+rollback and cash-only deferral; equal claims are tested in both orders under
+identical execution. A no-route sale deferred without losing shares is
+distinct from a successful TOKEN-to-BUCK sale that delivers zero BUCK.
+Market impact, real fee-on-transfer pools and different execution across claim
+orders need broader simulation and audit. Per-owner price bounds protect the
+caller's trade but do not provide a protocol-wide market-impact policy.

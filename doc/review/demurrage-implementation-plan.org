@@ -17,8 +17,8 @@ The proposed holder-and-insurer authorization, premium settlement and rounding
 for renewal are in [[file:atomic-renewal-design.org][the atomic renewal design]].
 The [[file:carrying-mode-transition.org][Carrying-mode transition note]] records the registry callback and its
 conservation and credit-owner restrictions.
-The [[file:jubilee-inkind-conversion.org][in-kind conversion note]] records the remaining payout-ordering issue and
-the planned bounded TOKEN-to-BUCK conversion path.
+The [[file:jubilee-inkind-conversion.org][in-kind conversion note]] records bounded TOKEN-to-BUCK conversion and
+the remaining tradeoffs when an owner explicitly accepts cash-only relief.
 
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
@@ -208,9 +208,12 @@ must not be disturbed.
 - [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
   fund-to-basket interactions, in-kind/partial/zero exits and transaction
   rollback. Do not relax low-K constraints.
-- [ ] Convert the selected sale's in-kind TOKEN into actual net BUCK with
+- [X] Convert the selected sale's in-kind TOKEN into actual net BUCK with
   owner-specified bounds, or defer that sale atomically without losing its
-  shares. Do not attribute one claimant's TOKEN proceeds to another claimant.
+  shares. Require explicit owner acceptance for cash-only relief.
+- [ ] Evaluate deferred entitlements for cash-only or zero-value exits, since
+  unsold shares remain available to later fund claimants; assess price impact,
+  real fee-on-transfer pools, unequal claim orders and historical in-kind inventory.
 - [ ] Integrate and verify Buck, BuckCredit, Jubilee, basket and insurer
   contracts together; update deployment paths and interfaces.
 - [ ] Resolve and test how a leveraged basket prices its own Jubilee claim
@@ -245,7 +248,9 @@ must not be disturbed.
 | 2026-10-29 | 3g | Specified atomic renewal and restricted active net-model term updates to Buck, including the insurer's attested envelope. Sixty-six BuckCredit and 12 insurer-gate tests passed. | =8d3449ee= |
 | 2026-10-29 | 3h | Same-insurer renewal implemented with an immutable consent contract. Forty-four renewal-suite tests (including inherited fund tests and 256 fuzzed K cases), seven real-basket, 67 BuckCredit, 12 insurer-gate and 14 token tests passed. | =ea834705= |
 | 2026-10-29 | 3i | Registry mode synchronization and mandatory fund issuance checkpoints implemented. Passed: 21 ledger (including 256 mode-round-trip fuzz cases), 19 token, 45 renewal/inherited-fund, 54 registry, 67 credit, 12 insurer-gate, 29 legacy basket, seven real-basket and 76 Python reference tests. Runtime: BuckNet 24,302 bytes; BuckCredit 24,009; identity registry 23,605. A runtime-limit test is included. | =2f7ca3a4= |
-| 2026-10-29 | 3j | Extracted the capped aggregate into =JubileeClaimBook=, which authenticates the token and fetches actual NFT state. Twenty token, nine claim-library, 45 renewal/inherited-fund, seven real-basket and 67 credit tests pass; BuckNet runtime falls to 23,352 bytes and the claim book is 3,716 bytes. | This commit: separate claim book |
+| 2026-10-29 | 3j | Extracted the capped aggregate into =JubileeClaimBook=, which authenticates the token and fetches actual NFT state. Twenty token, nine claim-library, 45 renewal/inherited-fund, seven real-basket and 67 credit tests passed; BuckNet runtime fell to 23,352 bytes and the claim book was 3,716 bytes. | =926a7451= |
+| 2026-10-29 | Full suite | =make nix-test=: 1,278 passed, one fork-dependent test skipped. The Make target also excluded generated SNARK suites and =RegressionTest.sol= because their fixtures were absent. This validates the pre-conversion baseline, not the five-year economy. | =bcb1fdf1= |
+| 2026-10-29 | 4g | Added bounded per-claim TOKEN-to-BUCK conversion, authenticated callbacks and explicit cash-only deferral. Fifty-six renewal/inherited-fund, seven real-basket and 20 token tests pass, including zero/partial swaps, fees, multiple assets and equal claim orders. Runtime: BuckNet 23,380 bytes; fund 17,865. | This commit: bounded in-kind conversion |
 
 * Open implementation constraints
 
@@ -291,9 +296,11 @@ BUCK as debt retirement or using unissued credit as a spendable balance. It
 does not establish leveraged basket operation or low-K exit behavior under
 the new token. One real-AMM in-kind exit is tested in the cash-only mode; more
 market and multi-asset cases remain. Its mode cannot be enabled
-after shares or credit exist. In-kind TOKEN received from a
-partial exit is currently held by the fund but cannot yet be converted into
-BUCK; it is not counted as cash relief. The reserve controller defaults to 10%
+after shares or credit exist. In-kind TOKEN from a new partial exit is either
+converted to net BUCK using the owner's bounded routes or the sale is deferred.
+An explicit cash-only operation leaves the unredeemed shares for later claims,
+which can redistribute future recovery; old in-kind inventory still needs a
+disposition policy. The reserve controller defaults to 10%
 of capped target relief, accumulates a budget with a one-day half-life and
 requires a transaction worth at least 1% of that target. A configured keeper
 or governance performs scheduled trades with caller-supplied slippage bounds;
