@@ -59,6 +59,7 @@ make nix-deploy-dry-run                    # local EVM; no broadcast
 make nix-venv-test-python                  # Python reference and simulator tests
 make nix-venv-core-test-py                 # Python platform tests
 make nix-core-test-js                     # JS platform and available browser tests
+make nix-venv-net-demurrage-smoke          # linked BuckNet, reference and JS local EVM smoke
 make nix-core-test-rust                   # Rust kernels and shared-vector checks
 make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
@@ -81,8 +82,11 @@ and regeneration, executable papers, release builds and deployment procedures re
 The deployment dry run exercises the legacy bootstrap with stub Notes verifiers. It does not
 deploy the experimental =BuckNet= stack or establish readiness for a live deployment.
 The experimental =BuckNet= now links =BuckNetTransfers= and =BuckNetMaturity= libraries;
-Foundry links them for its tests. A future deployment or simulation using its artifact must
-deploy and link these libraries on that chain. The legacy deployment script does not do so.
+Foundry links them for its tests. The Python and JavaScript local smoke fixtures deploy and
+link them from creation-bytecode metadata, but are not production deployment scripts. A
+future deployment or economy must deploy and link these libraries on that chain; the legacy
+deployment script does not do so. The published contract bundle does not yet carry these
+link references.
 
 * Useful checks
 

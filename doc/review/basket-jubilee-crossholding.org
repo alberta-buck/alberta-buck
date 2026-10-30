@@ -87,8 +87,9 @@ K, transaction fees or five-year household behavior.
 - Preserve the user's low-K rule: household and other outside debtors can buy
   discounted BUCK and retire obligations, improving K; do not relax basket
   exit or solvency checks to make an over-issued basket pay its exits.
-- Arrange the basket's own debt reduction outside its position lock, because
-  the fund may redeem a basket receipt before settling that debt. Protect both
-  the outer debt operation and the inner position operation from reentrancy and
-  require complete transaction rollback on any failure.
+- Arrange the basket's own debt reduction outside its position lock. The fund
+  no longer sells its basket receipt during credit settlement, but it still
+  reads the basket to mark that receipt before entering the token's settlement
+  lock. Protect those calls and insurer callbacks from reentrancy and require
+  complete transaction rollback on any failure. Any keeper sale is separate.
 - Do not present the cash-only prototype as leveraged or production-ready.
