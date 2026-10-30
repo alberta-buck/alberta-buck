@@ -23,9 +23,9 @@ interface IBuckNetReserveHook {
 }
 
 /// @notice Experimental integration of net BUCK accounting and per-NFT credit.
-/// @dev NOT A DEPLOYMENT TARGET: production basket compatibility, renewal,
-///      registry mode changes, deployment/migration, in-kind asset handling,
-///      insurer liquidity implementations and event semantics are incomplete.
+/// @dev NOT A DEPLOYMENT TARGET: leveraged basket compatibility, production
+///      deployment/migration, in-kind asset conversion, real insurer liquidity
+///      and fractional event semantics remain incomplete.
 ///      Fund-authorized reductions trust the designated coordinator to apply
 ///      the proportional policy; the owner separately authorizes each request.
 contract BuckNet is IERC20, IERC20Metadata {
@@ -42,7 +42,6 @@ contract BuckNet is IERC20, IERC20Metadata {
     IdentityRegistry public immutable identity;
     BuckRenewalConsent public immutable renewalConsent;
     address public immutable jubilee;
-    bool public jubileeReserveHookEnabled;
     BuckLedger.Ledger private _book;
     JubileeClaims.Book private _claims;
     mapping(address => mapping(address => uint256)) private _allowances;
@@ -70,7 +69,6 @@ contract BuckNet is IERC20, IERC20Metadata {
     event BuckTransferReceipt(address indexed from, address indexed to, uint256 amount,
                               bytes32 fromCipherHash, bytes32 toCipherHash);
     event InsurerPoolSet(address indexed insurer, address indexed pool);
-    event JubileeReserveHookEnabled();
     event FacilityIssued(address indexed owner, uint256 indexed tokenId, uint256 coverage,
                          uint256 principal, uint256 premium, address pool);
     event ReductionAuthorized(address indexed owner, uint256 indexed tokenId, uint256 principal,
@@ -95,6 +93,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error BadAuthorization();
     error UnauthorizedTransfer();
     error InsufficientAllowance();
+    error NotRegistry();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -181,15 +180,6 @@ contract BuckNet is IERC20, IERC20Metadata {
         emit InsurerPoolSet(msg.sender, pool);
     }
 
-    /// @notice The configured coordinator opts in after its own one-shot
-    ///         setup. Once enabled, a failed checkpoint reverts issuance.
-    function enableJubileeReserveHook() external nonReentrant {
-        if (msg.sender != jubilee) revert NotJubilee();
-        if (jubileeReserveHookEnabled) return;
-        jubileeReserveHookEnabled = true;
-        emit JubileeReserveHookEnabled();
-    }
-
     /// @notice Activate coverage and issue BUCK against one selected NFT.
     /// @param tokenId The owner's BuckCredit NFT.
     /// @param coverage Face units to activate; zero can use existing capacity.
@@ -199,6 +189,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     function issue(uint256 tokenId, uint256 coverage, uint256 spendable)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {
+        _enableModeHook();
         if (!identity.isVerified(msg.sender) || !identity.isVerified(jubilee)) revert NotVerified();
         if (identity.isCarrying(msg.sender) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
         if (buckCredit.ownerOf(tokenId) != msg.sender) revert NotOwner();
@@ -239,7 +230,7 @@ contract BuckNet is IERC20, IERC20Metadata {
             _transfer(msg.sender, pool, premium);
         }
         emit FacilityIssued(msg.sender, tokenId, coverage, principal, premium, pool);
-        if (jubileeReserveHookEnabled) IBuckNetReserveHook(jubilee).checkpointIssuance();
+        IBuckNetReserveHook(jubilee).checkpointIssuance();
     }
 
     /// @notice Authorize one exact facility reduction with a net-relief floor.
@@ -323,7 +314,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         facilityPool[tokenId] = pool;
         if (premium != 0) _transfer(owner, pool, premium);
         emit FacilityRenewed(owner, tokenId, relief, terms.additionalIssuance, newPrincipal, nominalSpent);
-        if (jubileeReserveHookEnabled) IBuckNetReserveHook(jubilee).checkpointIssuance();
+        IBuckNetReserveHook(jubilee).checkpointIssuance();
     }
 
     /// @notice Complete a pre-authorized reduction after the Jubilee manager
@@ -400,6 +391,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     function _transfer(address from, address to, uint256 amount) private {
+        _enableModeHook();
         if (from == address(0) || to == address(0)) revert BadAddress();
         if (!identity.isVerified(from) || !identity.isVerified(to)) revert NotVerified();
         bytes32 toHash = _receiptFragments[from][to];
@@ -415,6 +407,24 @@ contract BuckNet is IERC20, IERC20Metadata {
         _book.transfer(from, to, amount, identity.isCarrying(from), identity.isCarrying(to));
         emit Transfer(from, to, amount);
         emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
+    }
+
+    /// @notice Called by the opted-in identity registry before it changes a
+    ///         Carrying flag. Outstanding credit owners stay ordinary; the
+    ///         Jubilee fund and registered insurer pools stay Carrying.
+    function onCarryingModeChange(address account, bool carrying) external nonReentrant {
+        if (msg.sender != address(identity)) revert NotRegistry();
+        if (account == jubilee) {
+            if (!carrying) revert NotCarryingPool();
+            return;
+        }
+        if (!carrying && poolInsurer[account] != address(0)) revert NotCarryingPool();
+        if (carrying && buckCredit.hasIssuedPrincipal(account)) revert CreditExceeded();
+        _book.syncMode(account, carrying);
+    }
+
+    function _enableModeHook() private {
+        identity.enableCarryingModeHook();
     }
 
     function _approve(address owner, address spender, uint256 amount) private {

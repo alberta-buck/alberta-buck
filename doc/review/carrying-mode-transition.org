@@ -1,0 +1,56 @@
+#+TITLE: Carrying and ordinary account transitions
+#+DATE: 2026-10-29
+#+OPTIONS: ^:nil toc:2
+
+* The boundary
+
+The registry permits the original binder of a contract identity to change its
+Carrying flag until an identity-bound approval freezes it. The net ledger
+caches its balance representation. Simply changing the registry flag leaves
+that representation stale: subsequent transfers revert or report the wrong
+kind of balance. Silently reinterpreting nominal BUCK as full-value BUCK would
+be worse, because already-paid demurrage could become spendable again.
+
+The clean-genesis prototype opts the registered Buck into a registry
+callback before its first issuance or transfer. A permitted flag change
+then checkpoints the account and converts the representation atomically before
+the registry commits the new flag. Legacy tokens do not opt in and retain the
+existing registry behavior. The binder and approval-freeze permissions are
+unchanged. The hook must reject an operation completely if it cannot preserve
+its invariants; a failed callback must not leave the registry flag changed.
+
+* Conversion
+
+Both representations keep the same fractional *net* BUCK. On ordinary-to-
+Carrying conversion the current net held and issued-unspent parts become the
+initial Carrying nominal total; subsequent demurrage is carried proportionally.
+On Carrying-to-ordinary conversion the old nominal fee history is discarded
+and only current net BUCK remains spendable. Those fees had already accrued to
+Jubilee and are not credited again. The held and unspent parts remain separate
+across both transitions. A Carrying outflow transfers a proportional share of
+the combined net value and consumes held before unspent.
+
+For example, an ordinary account holding 100 BUCK for one year has about
+98.019867 net BUCK. Switching it to Carrying starts with that same net and
+nominal value. After another year, its nominal value is unchanged while its
+net value has declined to about 96.078944. Switching back reports the latter
+as ordinary spendable value; no new fund payment is created at the switch.
+
+The prototype currently requires an ordinary owner to issue, reduce and renew a
+facility. A switch *to* Carrying while that account owns an NFT with
+outstanding principal is therefore rejected rather than trapping its debt.
+Checking the owner's NFTs on this infrequent change is potentially expensive
+for an owner with many positions; it is not done on every transfer. The
+Jubilee fund and an insurer's registered premium pool remain Carrying so their
+funding and nominal refund obligations cannot silently change posture. A new
+pool may be registered for future policies; old policies retain their pool.
+Whether a future contract should support Carrying facility owners or release a
+fully settled insurer pool is a separate extension.
+
+* Validation
+
+Test repeated round trips, aged and mixed balances, a transferred Carrying
+fee, held versus unspent parts, already-accrued Jubilee value, zero balances,
+unauthorized changes, frozen identities, open credit, fund/pool protection,
+and rollback on callback failure. Net value and fund cash must not jump at a
+mode change. Run legacy registry and token tests as well as the new token tests.

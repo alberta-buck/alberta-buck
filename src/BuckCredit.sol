@@ -858,6 +858,17 @@ contract BuckCredit is ERC721Enumerable {
         return credits[tokenId].insurer;
     }
 
+    /// @notice Whether any NFT owned by this account has outstanding issued
+    ///         principal. Used for infrequent Carrying-mode changes; work is
+    ///         proportional to this owner's number of NFTs.
+    function hasIssuedPrincipal(address owner) external view returns (bool) {
+        uint256 count = balanceOf(owner);
+        for (uint256 i = 0; i < count; i++) {
+            if (_issuance[tokenOfOwnerByIndex(owner, i)].principal != 0) return true;
+        }
+        return false;
+    }
+
     /// @notice Bulk variant of creditInfo + ownerOf: returns one CreditSlice
     ///         per tokenId, all in a single external call.  Used by
     ///         Buck._allocateMint / _allocateBurn to walk a holder's NFT

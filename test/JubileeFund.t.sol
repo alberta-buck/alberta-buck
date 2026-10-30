@@ -471,7 +471,7 @@ contract JubileeFundTest is Test {
 
     function test_issuanceCheckpointDoesNotBackdateFreshlyObservedExcess() public {
         _credit(ALICE, 1000e6, 0);
-        assertTrue(buck.jubileeReserveHookEnabled());
+        assertEq(fund.reserveCheckpoint(), block.timestamp);
         vm.warp(t0 + YEAR);
         _credit(BOB, 1000e6, 0); // BuckNet observes the first year's excess now.
         (uint256 target, uint256 excess, uint256 budget) = fund.previewReserve();
@@ -499,6 +499,35 @@ contract JubileeFundTest is Test {
         (uint256 principal,) = credit.issuanceOf(id);
         assertEq(active, 0);
         assertEq(principal, 0);
+    }
+
+    function test_unconfiguredRealFundCannotBeSkippedOnIssuance() public {
+        IdentityRegistryHarness freshIdentity = new IdentityRegistryHarness(GOV);
+        BuckCredit freshCredit = new BuckCredit();
+        NetK freshK = new NetK();
+        JubileeFund freshFund = new JubileeFund(GOV);
+        BuckNet freshBuck = new BuckNet(address(freshCredit), address(freshK),
+                                        address(freshIdentity), address(freshFund));
+        freshCredit.setBuck(address(freshBuck));
+        vm.prank(GOV);
+        freshIdentity.setBuck(address(freshBuck));
+        address[3] memory accounts = [ALICE, INSURER, address(freshFund)];
+        for (uint256 i = 0; i < accounts.length; i++) {
+            freshIdentity.bindContract(accounts[i], BN254.g1(),
+                IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), true, i == 2);
+        }
+        vm.prank(ALICE);
+        freshCredit.setCreditIssuer(INSURER, true);
+        vm.prank(INSURER);
+        uint256 id = freshCredit.createCredit(ALICE, 0, 100e6, 100e6,
+                                              BuckCredit.DepreciationType.NONE, 0, 0, 0);
+        vm.expectRevert(JubileeFund.NotConfigured.selector);
+        vm.prank(ALICE);
+        freshBuck.issue(id, 100e6, 100e6);
+        assertEq(freshBuck.totalIssued(), 0);
+        (, uint256 active,) = freshCredit.creditInfo(id);
+        assertEq(active, 0);
+        assertFalse(freshIdentity.carryingModeHookEnabled());
     }
 
     function test_scheduleWaitsForThresholdAndInvestsHalfTheGap() public {
@@ -634,8 +663,6 @@ contract JubileeFundTest is Test {
         fund.investScheduled(type(uint256).max, 0, 1);
         vm.expectRevert(JubileeFund.NotToken.selector);
         fund.checkpointIssuance();
-        vm.expectRevert(BuckNet.NotJubilee.selector);
-        buck.enableJubileeReserveHook();
         vm.expectRevert(JubileeFund.BadAmount.selector);
         vm.prank(GOV);
         fund.setReserveParameters(10_001, 100);

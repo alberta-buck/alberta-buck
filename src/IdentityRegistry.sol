@@ -6,6 +6,10 @@ import {IContractBindingAdapter} from "./IContractBindingAdapter.sol";
 import {IPoseidonT3} from "./IPoseidonT3.sol";
 import {IPoseidonT4} from "./IPoseidonT4.sol";
 
+interface IBuckCarryingModeHook {
+    function onCarryingModeChange(address account, bool carrying) external;
+}
+
 /// @title IdentityRegistry — on-chain registry of identity-bound public keys.
 /// @notice Each Ethereum address binds to (pk, E_addr) where:
 ///         * pk     = ElGamal recipient public key (G1)
@@ -290,6 +294,8 @@ contract IdentityRegistry {
     ///         call markApproved() to freeze the carrying flag.  Set once
     ///         by governance via setBuck() after Buck is deployed.
     address                           public  buck;
+    /// @notice The configured token opted into atomic mode synchronization.
+    bool                              public  carryingModeHookEnabled;
 
     /// @notice The most recently posted aggregator root.  A consumer checks a
     ///         proof against any root the ring retains, within its own maximum
@@ -1055,8 +1061,17 @@ contract IdentityRegistry {
     function setIsCarrying(address target, bool value) external {
         require(msg.sender == binderOf[target], "not binder");
         require(!carryingFrozen[target],        "carrying frozen by approval");
+        if (carryingModeHookEnabled && isCarrying[target] != value) {
+            IBuckCarryingModeHook(buck).onCarryingModeChange(target, value);
+        }
         isCarrying[target] = value;
         emit CarryingFlagSet(target, value);
+    }
+
+    /// @notice One-way opt-in by Buck; legacy tokens retain the old behavior.
+    function enableCarryingModeHook() external {
+        require(msg.sender == buck && buck != address(0), "only Buck");
+        if (!carryingModeHookEnabled) carryingModeHookEnabled = true;
     }
 
     /// @notice Freeze `spender`'s carrying flag.  Called from Buck.approve()

@@ -34,6 +34,7 @@ contract BuckLedgerHarness {
     function issued() external view returns (uint256) { return book.issued; }
     function maxNetPayout() external view returns (uint256) { return book.maxNetPayout(); }
     function fundNominalForNet(uint256 net) external view returns (uint256) { return book.fundNominalForNet(net); }
+    function syncMode(address owner, bool carrying) external { book.syncMode(owner, carrying); }
 }
 
 contract BuckLedgerTest is Test {
@@ -280,6 +281,51 @@ contract BuckLedgerTest is Test {
         _netConserved(ALICE, BOB, POOL);
     }
 
+    function test_modeChangesPreserveNetValueAndAlreadyCreditedDemurrage() public {
+        h.issue(ALICE, 100e6, false);
+        h.send(ALICE, BOB, 40e6, false, false);
+        vm.warp(t0 + YEAR);
+        uint256 beforeNet = h.netOf(BOB);
+        (, uint256 fundBefore) = h.fundParts();
+        h.syncMode(BOB, true);
+        assertEq(h.balanceOf(BOB), beforeNet);
+        assertEq(h.netOf(BOB), beforeNet);
+        (, uint256 fundAfter) = h.fundParts();
+        assertEq(fundAfter, fundBefore);
+
+        vm.warp(t0 + 2 * YEAR);
+        uint256 gross = h.balanceOf(BOB);
+        uint256 net = h.netOf(BOB);
+        assertGt(gross, net);
+        uint256 delivered = h.send(BOB, ALICE, 10e6, true, false);
+        assertLt(delivered, 10e6 * Q);
+        beforeNet = h.netOf(BOB);
+        (, fundBefore) = h.fundParts();
+        h.syncMode(BOB, false);
+        assertEq(h.balanceOf(BOB), beforeNet);
+        assertEq(h.netOf(BOB), beforeNet);
+        (, fundAfter) = h.fundParts();
+        assertEq(fundAfter, fundBefore);
+        _netConserved(ALICE, BOB, POOL);
+    }
+
+    function test_modeChangesPreserveIssuedUnspentAsASeparateNetPart() public {
+        h.issue(ALICE, 100e6, false);
+        vm.warp(t0 + YEAR);
+        h.syncMode(ALICE, true);
+        (uint256 held, uint256 unspent) = h.partsOf(ALICE);
+        assertEq(held, 0);
+        assertGt(unspent, 98e6 * Q);
+        vm.warp(t0 + 2 * YEAR);
+        uint256 delivered = h.send(ALICE, BOB, 20e6, true, false);
+        assertLt(delivered, 20e6 * Q);
+        h.syncMode(ALICE, false);
+        (held, unspent) = h.partsOf(ALICE);
+        assertEq(held, 0);
+        assertGt(unspent, 0);
+        _netConserved(ALICE, BOB, POOL);
+    }
+
     function test_fullWidthFundFlowsReconstructNetCashIncludingPendingAccrual() public {
         h.issue(ALICE, 1000e6, false);
         vm.warp(t0 + YEAR);
@@ -335,6 +381,31 @@ contract BuckLedgerTest is Test {
         (uint256 paid, uint256 delivered) = h.payFundNet(BOB, requested, false);
         assertEq(paid, nominal);
         assertGe(delivered, requested * Q);
+        _netConserved(ALICE, BOB, POOL);
+    }
+
+    function testFuzz_carryingModeRoundTripPreservesNetValue(
+        uint64 principal_, uint64 sent_, uint64 nominal_, uint16 days1_, uint16 days2_
+    ) public {
+        uint256 principal = bound(principal_, 100e6, 1e12);
+        uint256 sent = bound(sent_, 2, principal / 2);
+        h.issue(ALICE, principal, false);
+        h.send(ALICE, BOB, sent, false, false);
+        vm.warp(t0 + bound(days1_, 0, 30_000) * 1 days);
+        (uint256 heldBefore, uint256 unspentBefore) = h.partsOf(BOB);
+        h.syncMode(BOB, true);
+        (uint256 heldAfter, uint256 unspentAfter) = h.partsOf(BOB);
+        assertEq(heldAfter + unspentAfter, heldBefore + unspentBefore);
+        vm.warp(block.timestamp + bound(days2_, 0, 30_000) * 1 days);
+        uint256 gross = h.balanceOf(BOB);
+        if (gross != 0) h.send(BOB, ALICE, bound(nominal_, 1, gross), true, false);
+        (heldBefore, unspentBefore) = h.partsOf(BOB);
+        (, uint256 fundBefore) = h.fundParts();
+        h.syncMode(BOB, false);
+        (heldAfter, unspentAfter) = h.partsOf(BOB);
+        (, uint256 fundAfter) = h.fundParts();
+        assertEq(heldAfter + unspentAfter, heldBefore + unspentBefore);
+        assertEq(fundAfter, fundBefore);
         _netConserved(ALICE, BOB, POOL);
     }
 }

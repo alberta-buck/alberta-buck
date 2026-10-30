@@ -6,8 +6,8 @@ import {BuckTypes} from "../BuckTypes.sol";
 import {NetDemurrageMath} from "./NetDemurrageMath.sol";
 import {WideCounter} from "./WideCounter.sol";
 
-/// @notice Net-value accounting for a future Buck token. Internal library
-///         only: the token must enforce identity, authorization, facility
+/// @notice Net-value accounting used by the experimental BuckNet token.
+///         Internal library only: the token must enforce identity, authorization, facility
 ///         attribution, K, premium pools, reentrancy, events and settlement.
 /// @dev BUCK raw units have six decimals. Internal balances use 1e36
 ///      fractional raw units to avoid rounding a fee up on every checkpoint.
@@ -36,7 +36,7 @@ library BuckLedger {
 
     struct Account {
         // Ordinary: net received BUCK and net issued-but-unspent BUCK.
-        // Carrying: net value and zero unspent; gross includes carried fees.
+        // Carrying: both net parts are preserved, while gross includes fees.
         uint256 held;
         uint256 unspent;
         uint256 gross;
@@ -171,9 +171,9 @@ library BuckLedger {
             _checkpointAccount(a);
             if (fromCarrying) {
                 if (nominal > a.gross) revert InsufficientBalance();
-                netReceived = nominal == 0 ? 0 : Math.mulDiv(a.held, nominal, a.gross);
+                netReceived = nominal == 0 ? 0 : Math.mulDiv(a.held + a.unspent, nominal, a.gross);
                 a.gross -= nominal;
-                a.held -= netReceived;
+                _debitOrdinaryScaled(a, netReceived);
             } else {
                 _debitOrdinary(a, amount);
                 netReceived = nominal;
@@ -267,6 +267,21 @@ library BuckLedger {
         flows.relief = self.fundRelief;
     }
 
+    /// @notice Checkpoint and change an existing account's representation
+    ///         without changing its net BUCK. The host must authenticate the
+    ///         registry callback and reject unsupported credit-holder modes.
+    function syncMode(Ledger storage self, address owner, bool carrying) internal {
+        _requireInitialized(self);
+        if (owner == self.fund || owner == address(0)) revert BadAccount();
+        Account storage a = self.accounts[owner];
+        uint8 wanted = carrying ? CARRYING : ORDINARY;
+        if (a.mode == 0 || a.mode == wanted) return;
+        _checkpointAccount(a);
+        a.gross = carrying ? a.held + a.unspent : 0;
+        a.mode = wanted;
+        _checkLimit(a);
+    }
+
     function maxNetPayout(Ledger storage self) internal view returns (uint256) {
         (uint256 gross, uint256 net) = _fundView(self);
         uint256 nominal = gross / SCALE * SCALE;
@@ -292,8 +307,8 @@ library BuckLedger {
             a.mode = wanted;
             a.checkpoint = _now();
         } else if (a.mode != wanted) {
-            // A production token must either freeze the registry posture or
-            // provide a separately authorized, conservation-preserving change.
+            // The host must synchronize an authorized registry posture change
+            // explicitly. A mismatch means that boundary was not honored.
             revert CarryingModeChanged();
         }
     }

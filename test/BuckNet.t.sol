@@ -24,6 +24,7 @@ contract NetK {
 /// @dev Test only. A production fund must check caller authorization, redeem
 ///      proportional positions and calculate the payout from actual proceeds.
 contract MockNetFund {
+    function checkpointIssuance() external pure {}
     function settle(BuckNet token, address owner, uint256 id, uint256 principal, uint256 reliefScaled) external {
         token.settleFromJubilee(owner, id, principal, reliefScaled);
     }
@@ -126,6 +127,104 @@ contract BuckNetTest is Test {
         assertEq(buck.claimSeconds(), 0);
         (uint256 remaining,) = credit.issuanceOf(id);
         assertEq(remaining, 0);
+    }
+
+    function test_registryModeChangesKeepNetBalancesAndFundValueConserved() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        assertTrue(identity.carryingModeHookEnabled());
+        vm.prank(ALICE);
+        buck.transfer(BOB, 40e6);
+        vm.warp(t0 + YEAR);
+        uint256 netBefore = buck.netBalanceOf(BOB);
+        (, uint256 fundBefore) = buck.fundBalancesScaled();
+        identity.setIsCarrying(BOB, true);
+        assertEq(buck.balanceOf(BOB), netBefore);
+        assertEq(buck.netBalanceOf(BOB), netBefore);
+        (, uint256 fundAfter) = buck.fundBalancesScaled();
+        assertEq(fundAfter, fundBefore);
+        vm.warp(t0 + 2 * YEAR);
+        assertGt(buck.balanceOf(BOB), buck.netBalanceOf(BOB));
+        uint256 aliceBefore = buck.netBalanceOf(ALICE);
+        vm.prank(BOB);
+        buck.transfer(ALICE, 10e6);
+        assertLt(buck.netBalanceOf(ALICE) - aliceBefore, 10e6);
+        netBefore = buck.netBalanceOf(BOB);
+        (, fundBefore) = buck.fundBalancesScaled();
+        identity.setIsCarrying(BOB, false);
+        assertEq(buck.balanceOf(BOB), netBefore);
+        (, fundAfter) = buck.fundBalancesScaled();
+        assertEq(fundAfter, fundBefore);
+    }
+
+    function test_activeFacilityCannotSwitchToCarryingAndCanSwitchAfterRetirement() public {
+        // An earlier inactive NFT must not conceal a later issued facility.
+        _credit(ALICE, INSURER_A, 10e6, 0);
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        identity.setIsCarrying(ALICE, true);
+        assertFalse(identity.isCarrying(ALICE));
+        assertTrue(credit.hasIssuedPrincipal(ALICE));
+        assertEq(buck.balanceOf(ALICE), 100e6);
+        _authorize(ALICE, id, 100e6, 0);
+        fund.settle(buck, ALICE, id, 100e6, 0);
+        assertFalse(credit.hasIssuedPrincipal(ALICE));
+        identity.setIsCarrying(ALICE, true);
+        assertTrue(identity.isCarrying(ALICE));
+    }
+
+    function test_jubileeAndRegisteredInsurerPoolStayCarrying() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        MockNetInsurerPool pool = _pool(INSURER_A);
+        vm.expectRevert(BuckNet.NotCarryingPool.selector);
+        identity.setIsCarrying(address(fund), false);
+        vm.expectRevert(BuckNet.NotCarryingPool.selector);
+        vm.prank(INSURER_A);
+        identity.setIsCarrying(address(pool), false);
+        assertTrue(identity.isCarrying(address(fund)));
+        assertTrue(identity.isCarrying(address(pool)));
+        vm.expectRevert(BuckNet.NotRegistry.selector);
+        buck.onCarryingModeChange(BOB, true);
+    }
+
+    function test_unspentSurvivesACompletedFacilityAndModeRoundTrip() public {
+        uint256 aliceId = _credit(ALICE, INSURER_A, 100e6, 0);
+        uint256 bobId = _credit(BOB, INSURER_B, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(aliceId, 100e6, 100e6);
+        vm.prank(BOB);
+        buck.issue(bobId, 100e6, 100e6);
+        vm.prank(BOB);
+        buck.transfer(ALICE, 100e6);
+        _authorize(ALICE, aliceId, 100e6, 0);
+        fund.settle(buck, ALICE, aliceId, 100e6, 0);
+        (uint256 held, uint256 unspent) = buck.heldAndUnspentScaled(ALICE);
+        assertEq(held, 0);
+        assertEq(unspent, 100e6 * Q);
+        identity.setIsCarrying(ALICE, true);
+        vm.warp(t0 + YEAR);
+        uint256 beforeBob = buck.netBalanceOf(BOB);
+        vm.prank(ALICE);
+        buck.transfer(BOB, 10e6);
+        assertApproxEqAbs(buck.netBalanceOf(BOB) - beforeBob, 9_801_986, 1);
+        uint256 netBefore = buck.netBalanceOf(ALICE);
+        identity.setIsCarrying(ALICE, false);
+        assertEq(buck.balanceOf(ALICE), netBefore);
+        (held, unspent) = buck.heldAndUnspentScaled(ALICE);
+        assertEq(held, 0);
+        assertGt(unspent, 0);
+    }
+
+    function test_coreContractsFitTheEvmRuntimeSizeLimit() public view {
+        assertLe(address(buck).code.length, 24_576);
+        assertLe(address(credit).code.length, 24_576);
+        assertLe(address(identity).code.length, 24_576);
+        assertLe(address(buck.renewalConsent()).code.length, 24_576);
     }
 
     function test_transferAndTransferFromUseHeldAndUnspentWithoutRetiringNft() public {

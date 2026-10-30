@@ -121,7 +121,6 @@ contract JubileeFund is IERC721Receiver {
         token_.approve(address(basket_), type(uint256).max);
         reserveCheckpoint = _now();
         _checkpointReserve();
-        token_.enableJubileeReserveHook();
         emit Configured(address(token_), address(basket_), basket_.receipt());
     }
 
