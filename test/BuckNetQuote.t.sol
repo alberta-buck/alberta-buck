@@ -258,6 +258,19 @@ contract BuckNetQuoteTest is Test {
         assertEq(principal, spendable);
     }
 
+    function test_matureFacilityQuotesNoNewIssuanceEvenIfCoverageRemains() public {
+        uint256 id = _credit(200e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 200e6, 100e6);
+        vm.warp(t0 + 50 * YEAR);
+        buck.processMaturities(1);
+        (,,, uint256 spendable) = quoter.quoteIssue(id, 0);
+        assertEq(spendable, 0);
+        vm.expectRevert(BuckNet.FacilityMatured.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 0, 1);
+    }
+
     function test_quoteRejectsInvalidPremiumAndCarryingOwnersCannotIssue() public {
         uint256 invalid = _credit(100e6, 1000);
         vm.expectRevert(BuckNet.BadPremiumRate.selector);

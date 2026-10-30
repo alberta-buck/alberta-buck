@@ -4,10 +4,10 @@
 
 * Status
 
-This note analyzes the user's proposed no-sale valuation. The Python
-=quote_marked_retirement= is a diagnostic; ordinary =JubileeFund.reduce= and
-=renew= still use the earlier proportional *sale* implementation. Do not
-describe the marked rule as deployed or as validated by a five-year run.
+This note analyzes the no-sale valuation implemented by the experimental
+=JubileeFund.reduce= and =renew= and the Python reference. The prototype is
+not deployed, has not been validated by a five-year run, and still requires
+the oracle, executable-liquidity and leveraged-basket work described below.
 
 * The numerator and denominator
 
@@ -117,6 +117,36 @@ weighted average age. A stated 4% annual investment return alone is not enough
 to determine today's multiplier: position entry dates, cash flows, demurrage,
 losses and the current mark all affect =V/B=.
 
+* When the keeper needs to sell
+
+Issuance and reductions checkpoint accumulated demurrage before changing the
+outstanding supply. Between those events the same amounts are visible through
+the lazy balance views. At a nominal rate =r=, supply =P= and liquid fund
+balance =C=, the instantaneous gross fee is =r P= per year. The net liquid
+inflow before investment, relief and other transfers is =r (P - C)=: the
+liquid fund's own fee returns to itself. Some of that inflow may come from
+BUCK inside the fund's own basket position, in which case it is a move from
+the fund's investment mark to its cash, not additional consolidated profit.
+
+When the fund is at its benchmark and facilities retired early have average
+age =a= years, an approximate annual relief outflow for =R= BUCK of principal
+retired per year is =r a R=, up to the 50-year cap. This simple comparison
+suggests that fee cash inflow exceeds relief outflow when =P - C > a R=.
+For illustration, with 100 million issued, 1 million liquid, a 2% rate and
+5-year-old reductions, the initial cash inflow rate is about 1.98 million per
+year; retiring 1 million of principal per year requests about 0.10 million of
+relief. Retiring 20 million per year instead requests about 2 million. These
+are instantaneous estimates, not a stable-world simulation: supply, ages,
+cash, asset marks and repayment behavior change, and matured deferred debt is
+paid separately.
+
+The keeper should normally invest the matured portion of excess cash. It can
+attempt an independently bounded position sale when cash is below the reserve
+target, but low K, thin liquidity or failed conversions can prevent that sale.
+The present tests establish these mechanisms, not how often a realistic
+economy needs to invoke them. No running keeper or five-year =BuckNet= economy
+has yet been integrated.
+
 * What the current basket can and cannot establish
 
 =BuckBasketEquity.valueOf(id)= currently returns the fund's share of equity
@@ -131,18 +161,19 @@ executable, net-of-demurrage valuation of the whole receipt:
 - V3 position marks use twice the modeled BUCK side of full-range liquidity.
   The experimental net mode now converts pool quotes and position marks from
   nominal to full-value BUCK using the pool's exact net/nominal balance ratio.
-  One real-pool idle-age test checks that correction. Uncollected fees,
-  finite-range approximation, the basket's gain fee and execution costs also
-  need explicit treatment; more actual in-kind redemption and token-ordering
-  tests are required before treating the mark as an executable price.
+  One real-pool idle-age test checks that correction. The fund deducts the
+  receipt's unrealized 25% gain fee. Uncollected fees, finite-range
+  approximation and execution costs still need explicit treatment; more
+  actual in-kind redemption and token-ordering tests are required before
+  treating the mark as an executable price.
 - If a future leveraged basket owns credit while Jubilee holds its shares,
   the marked basket claim can depend on Jubilee's marked holdings. The
   experimental net basket disallows that mode; the fixed-point and dilution
   problem is detailed in [[file:basket-jubilee-crossholding.org][the cross-holding note]].
-- =valueOf= can revert when venue pricing is unavailable. Define an explicit
-  user-authorized fallback or let the operation fail; never invent a price.
-  A 10% cash limit bounds one operation but does not by itself prevent repeated
-  extraction against a manipulated mark.
+- The fund requires active liquidity and full TWAP history for every pool
+  contributing assets; absent a price, the operation reverts instead of using
+  the venue's spot fallback. A 10% cash limit bounds one operation but does
+  not by itself prevent repeated extraction against a manipulated mark.
 
 Before using the mark for on-chain relief, compare quotes to actual real-pool
 withdrawals and conversions with demurrage, liquidity, fees and TWAP history;

@@ -100,6 +100,8 @@ class MarkedReliefQuote:
     baseline_relief: float
     aggregate_benchmark: float
     cash_net: float
+    investment_mark_gross: float
+    basket_gain_fee: float
     investment_mark: float
     fund_mark: float
     benchmark_share: float
@@ -109,6 +111,7 @@ class MarkedReliefQuote:
     account_payment: float
     liquid_limit: float
     exceeds_liquid_limit: bool
+    payout_policy: str = "marked"
 
 
 @dataclass(frozen=True)
@@ -258,6 +261,8 @@ class DemurrageLedger:
         p = self.positions.setdefault(position, Position())
         if p.owner is not None:
             raise ValueError("use issue_unspent for an owned credit position")
+        if p.principal and not _exceeds_float(p.principal, self.rate * p.relief_years):
+            raise ValueError("a matured facility must be closed")
         p.principal += amount
         self.accounts[recipient] = self.accounts.get(recipient, 0.0) + amount
         if recipient == JUBILEE:
@@ -321,6 +326,8 @@ class DemurrageLedger:
         p = self.positions.get(position)
         if p is not None and p.owner != owner:
             raise ValueError("credit position belongs to a different owner")
+        if p is not None and p.principal and not _exceeds_float(p.principal, self.rate * p.relief_years):
+            raise ValueError("a matured facility must be closed")
         if p is not None and (credit_limit is not None or premium_rate is not None):
             raise ValueError("change existing insurance terms through renewal")
         selected_insurer = insurer if insurer is not None else (p.insurer if p else None)
@@ -809,7 +816,7 @@ class DemurrageLedger:
             return self._proportional_payout(result, self.jubilee, proceeds, redeemed_fraction)
         return result
 
-    def quote_marked_retirement(self, position: str, amount: float) -> MarkedReliefQuote:
+    def quote_marked_retirement(self, position: str, amount: float, gain_fee: float = 0.25) -> MarkedReliefQuote:
         """Explore a no-sale payout based on cash plus the strategy's mark.
 
         The allocation is the selected capped BUCK-years divided by all
@@ -819,24 +826,67 @@ class DemurrageLedger:
         strategy mark is not a claim about an executable real basket price.
         """
         amount = _positive(amount, "amount")
+        gain_fee = _nonnegative(gain_fee, "gain_fee")
+        if gain_fee > 1:
+            raise ValueError("gain fee cannot exceed one")
         p = self.positions[position]
         if amount > p.principal:
             raise ValueError("retirement exceeds outstanding issuance")
         baseline = min(amount, self.rate * p.relief_years * amount / p.principal)
         benchmark = self.aggregate_relief
-        mark = self.jubilee_assets
+        invested = self.accounts[JUBILEE_INVESTED]
+        fee = max(0.0, invested - self.strategy_open_basis) * gain_fee
+        investment_net = invested - fee
+        mark = self.jubilee + investment_net
         share = baseline / benchmark if benchmark else 0.0
         multiplier = mark / benchmark if benchmark else None
         relief = min(amount, share * mark)
         limit = self.jubilee * 0.1
         return MarkedReliefQuote(
             principal=amount, baseline_relief=baseline, aggregate_benchmark=benchmark,
-            cash_net=self.jubilee, investment_mark=self.accounts[JUBILEE_INVESTED],
+            cash_net=self.jubilee, investment_mark_gross=invested, basket_gain_fee=fee,
+            investment_mark=investment_net,
             fund_mark=mark, benchmark_share=share, multiplier=multiplier,
             effective_annual_rate=self.rate * multiplier if multiplier is not None else None,
             relief=relief, account_payment=amount - relief, liquid_limit=limit,
             exceeds_liquid_limit=_exceeds_float(relief, limit),
         )
+
+    def retire_marked(self, position: str, amount: float, payer: str, *,
+                      minimum_relief: float = 0.0, gain_fee: float = 0.25) -> MarkedReliefQuote:
+        """Settle from cash without selling the marked strategy position."""
+        if payer in FUND_ACCOUNTS:
+            raise ValueError("payer must be distinct from Jubilee")
+        minimum_relief = _nonnegative(minimum_relief, "minimum_relief")
+        p = self.positions[position]
+        if p.owner is not None and p.owner != payer:
+            raise ValueError("credit position belongs to a different owner")
+        quote = self.quote_marked_retirement(position, amount, gain_fee)
+        if quote.exceeds_liquid_limit:
+            raise InsufficientFunds("relief exceeds 10% of liquid Jubilee BUCK")
+        if _exceeds_float(minimum_relief, quote.relief):
+            raise ValueError("relief is below the owner's minimum")
+        released, _, nominal = self._insurance_refund(p, amount)
+        if nominal is None:
+            raise InsufficientFunds(f"insurance pool {p.insurance_pool} lacks the refund")
+        before = copy.deepcopy(self.__dict__)
+        try:
+            if released:
+                self._return_insurance_nominal(p.insurance_pool, payer, released)
+            if _exceeds_float(quote.account_payment, self._repayment_funds(payer)):
+                raise InsufficientFunds(f"{payer} lacks BUCK for the reduction")
+            remaining = 1.0 - amount / p.principal
+            p.insurance_principal -= released
+            self._transfer(JUBILEE, payer, quote.relief, relief=True)
+            self._consume_repayment(payer, amount)
+            p.principal -= amount
+            p.buck_years *= remaining
+            p.relief_years *= remaining
+            return quote
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(before)
+            raise
 
     def _proportional_payout(self, quote: AvailableRetirement, cash_before: float,
                              proceeds: float, fraction: float) -> AvailableRetirement:
@@ -920,7 +970,7 @@ class DemurrageLedger:
         self, position: str, owner: str, *, new_limit: float, new_premium_rate: float,
         additional_issuance: float = 0.0, new_insurer: str | None = None,
         new_insurance_principal: float | None = None, redeemed_fraction: float | None = None,
-        payout_policy: str = "proportional",
+        payout_policy: str = "marked", minimum_relief: float = 0.0,
     ) -> Renewal:
         """Crystallize relief and replace one facility's terms atomically.
 
@@ -932,6 +982,7 @@ class DemurrageLedger:
         new_limit = _nonnegative(new_limit, "new_limit")
         new_premium_rate = _nonnegative(new_premium_rate, "new_premium_rate")
         additional_issuance = _nonnegative(additional_issuance, "additional_issuance")
+        minimum_relief = _nonnegative(minimum_relief, "minimum_relief")
         p = self.positions[position]
         if p.owner != owner:
             raise ValueError("credit position belongs to a different owner")
@@ -951,26 +1002,38 @@ class DemurrageLedger:
             raise ValueError("a premium deposit requires an insurer pool")
         if old_deposit and old_pool is None:
             raise ValueError("insurance principal has no recorded pool")
+        if payout_policy == "marked" and redeemed_fraction not in (None, 0):
+            raise ValueError("marked renewal does not sell a strategy position")
         if redeemed_fraction is None:
             redeemed_fraction = (self.redemption_fraction(position, old_principal, "relief")
-                                 if old_principal else 0.0)
+                                 if old_principal and payout_policy != "marked" else 0.0)
         redeemed_fraction = _nonnegative(redeemed_fraction, "redeemed_fraction")
         if redeemed_fraction > 1:
             raise ValueError("redemption fraction cannot exceed one")
-        if payout_policy not in ("reserve", "proportional"):
-            raise ValueError("payout policy must be reserve or proportional")
+        if payout_policy not in ("reserve", "proportional", "marked"):
+            raise ValueError("payout policy must be reserve, proportional, or marked")
 
         before = copy.deepcopy(self.__dict__)
         try:
-            cash_before = self.jubilee
-            _, proceeds = self.redeem_strategy(redeemed_fraction)
-            quote = (self.quote_available_retirement(position, old_principal, 0.0,
-                                                     payout_policy="reserve")
-                     if old_principal else None)
-            if quote and payout_policy == "proportional":
-                quote = self._proportional_payout(quote, cash_before, proceeds, redeemed_fraction)
+            if payout_policy == "marked":
+                if old_principal and not _exceeds_float(old_principal, self.rate * p.relief_years):
+                    raise ValueError("a matured facility must be closed")
+                proceeds = 0.0
+                quote = self.quote_marked_retirement(position, old_principal) if old_principal else None
+                if quote and quote.exceeds_liquid_limit:
+                    raise InsufficientFunds("relief exceeds 10% of liquid Jubilee BUCK")
+            else:
+                cash_before = self.jubilee
+                _, proceeds = self.redeem_strategy(redeemed_fraction)
+                quote = (self.quote_available_retirement(position, old_principal, 0.0,
+                                                         payout_policy="reserve")
+                         if old_principal else None)
+                if quote and payout_policy == "proportional":
+                    quote = self._proportional_payout(quote, cash_before, proceeds, redeemed_fraction)
             baseline = quote.baseline_relief if quote else 0.0
             relief = quote.relief if quote else 0.0
+            if _exceeds_float(minimum_relief, relief):
+                raise ValueError("relief is below the owner's minimum")
             new_principal = old_principal - relief + additional_issuance
             old_shortfall = max(0.0, old_principal - old_limit)
             new_shortfall = max(0.0, new_principal - new_limit)
@@ -1108,9 +1171,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retire", type=float, default=0, help="credit principal to reduce after the final checkpoint")
     parser.add_argument("--redemption-basis", choices=("issuance", "relief"), default="relief", help="select the fraction's denominator (default: relief)")
     parser.add_argument("--redeem-fraction", type=float, help="explicit fraction of strategy units sold before retirement; overrides --redemption-basis")
-    parser.add_argument("--payout-policy", choices=("reserve", "proportional"), default="proportional", help="payout policy (default: proportional); reserve is a comparison")
+    parser.add_argument("--payout-policy", choices=("marked", "reserve", "proportional"), default="marked",
+                        help="payout policy (default: marked, without a sale); reserve and proportional compare old sale rules")
     parser.add_argument("--json", action="store_true", help="print machine-readable results")
     args = parser.parse_args(argv)
+    if args.payout_policy == "marked" and (args.redeem_fraction is not None or args.redemption_basis != "relief"):
+        parser.error("strategy redemption options require --payout-policy proportional or reserve")
     years = _nonnegative(args.years, "years")
     ledger = DemurrageLedger(args.rate)
     if args.held:
@@ -1139,10 +1205,16 @@ def main(argv: list[str] | None = None) -> int:
         ledger.spend_unspent("holder", JUBILEE, unspent)
     available_retirement = None
     if args.retire:
-        fraction = (args.redeem_fraction if args.redeem_fraction is not None
-                    else ledger.redemption_fraction("credit", args.retire, args.redemption_basis))
-        available_retirement = ledger.retire_available("credit", args.retire, "holder", fraction,
-                                                       payout_policy=args.payout_policy)
+        try:
+            if args.payout_policy == "marked":
+                available_retirement = ledger.retire_marked("credit", args.retire, "holder")
+            else:
+                fraction = (args.redeem_fraction if args.redeem_fraction is not None
+                            else ledger.redemption_fraction("credit", args.retire, args.redemption_basis))
+                available_retirement = ledger.retire_available("credit", args.retire, "holder", fraction,
+                                                               payout_policy=args.payout_policy)
+        except (InsufficientFunds, ValueError) as exc:
+            parser.error(str(exc))
     result = {"rate": ledger.rate, "snapshots": rows, "acquired_at_end": acquired,
               "strategy_return": args.strategy_return,
               "strategy_loss": lost,
@@ -1175,7 +1247,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Jubilee cash: {ledger.jubilee_nominal:.6f} nominal, "
               f"{ledger.jubilee_carried_fee:.6f} carried fee, {ledger.jubilee:.6f} net.")
         quote = result["final"]["retirement"]
-        if available_retirement is not None:
+        if isinstance(available_retirement, MarkedReliefQuote):
+            print(f"Marked fund value {available_retirement.fund_mark:.6f} BUCK; "
+                  f"relief {available_retirement.relief:.6f}, "
+                  f"debtor payment {available_retirement.account_payment:.6f}.")
+            print(f"The fund pays from cash without selling; liquid limit {available_retirement.liquid_limit:.6f}.")
+        elif available_retirement is not None:
             print(f"Sold {available_retirement.redeemed_fraction:.2%} of strategy units for "
                   f"{available_retirement.redemption_proceeds:.6f} BUCK; "
                   f"relief {available_retirement.relief:.6f}, "

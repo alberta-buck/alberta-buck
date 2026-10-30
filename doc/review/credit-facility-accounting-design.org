@@ -11,6 +11,8 @@ design treats unused activated credit as unissued or assigns relief to a
 negative account balance. Its basket top-up, callback, and O(1) fund-checkpoint
 analysis remain useful subject to the corrections here. The economic formulas
 and commands are also explained in [[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]].
+The later [[file:jubilee-marked-relief.org][marked-relief design]] supersedes this document's historical
+sale-on-reduction examples and records the current liquidity and maturity policy.
 
 * The accounting boundary
 
@@ -18,7 +20,7 @@ and commands are also explained in [[file:../../alberta-buck-demurrage.org][Demu
 |-------+------------------------------|
 | Buck | Owns transferable BUCK: ordinary holdings, issued-but-unspent BUCK, their demurrage, Carrying fee history, ERC-20 transfers, and aggregate issuance. |
 | Each BuckCredit NFT | Owns its insured coverage, insurer and pool, outstanding issued principal, and the time integral of that principal. Relief belongs to the NFT presented for reduction. |
-| Jubilee fund | Owns the demurrage proceeds and one adjustable basket position; liquidates a proportion, computes payable relief from available net BUCK, and pays full-value BUCK. |
+| Jubilee fund | Owns the demurrage proceeds and one adjustable basket position; computes marked proportional relief, pays from limited net cash, and separately rebalances its position. |
 | Each insurer's pool | Receives that insurer's premium deposits and supplies the corresponding nominal refunds, with the pool's average Carrying fee history. |
 
 For an ordinary account, let H be its received/held net BUCK and U its net

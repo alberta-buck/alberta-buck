@@ -9,6 +9,7 @@ import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckNet} from "../src/BuckNet.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
 import {JubileeClaims} from "../src/lib/JubileeClaims.sol";
+import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {NetK} from "./BuckNet.t.sol";
 import {JubileeBasketMock} from "./JubileeFund.t.sol";
 
@@ -66,7 +67,7 @@ contract JubileeMaturityIntegrationTest is Test {
         buck.issue(id, face, face);
     }
 
-    function test_simultaneousFiftyYearMaturitiesBlockSaleUntilPermissionlessBatchesClear() public {
+    function test_simultaneousFiftyYearMaturitiesRequirePermissionlessBatchesBeforeRelease() public {
         uint256 first;
         for (uint256 i; i < 16; ++i) {
             uint256 id = _credit(100e6);
@@ -77,16 +78,14 @@ contract JubileeMaturityIntegrationTest is Test {
         (uint256 position,,) = fund.invest(10e6, type(uint256).max, 10e6, 1);
         (uint128 sharesBefore,) = basket.holdings(position);
         vm.warp(t0 + 50 * YEAR);
-        vm.prank(ALICE);
-        buck.authorizeReduction(first, 100e6, 0, uint64(block.timestamp + YEAR));
         (, uint256 cashBefore) = buck.fundBalancesScaled();
         uint256 ownerBefore = buck.balanceOf(ALICE);
 
-        // A stale denominator must not sell the fund's receipt or consume the
-        // owner's authorization, even when some maturities were processed.
+        // A stale denominator must not release the NFT or alter the fund,
+        // even when only part of the maturity backlog has been processed.
         vm.expectRevert(JubileeClaims.PendingMaturities.selector);
         vm.prank(ALICE);
-        fund.reduce(first, 100e6);
+        fund.closeMatured(first);
         for (uint256 batch; batch < 4; ++batch) {
             vm.prank(BOB);
             (uint256 processed, bool current) = buck.processMaturities(4);
@@ -95,29 +94,56 @@ contract JubileeMaturityIntegrationTest is Test {
             if (!current) {
                 vm.expectRevert(JubileeClaims.PendingMaturities.selector);
                 vm.prank(ALICE);
-                fund.reduce(first, 100e6);
+                fund.closeMatured(first);
             }
         }
         (uint128 sharesAfterBacklog,) = basket.holdings(position);
         (, uint256 cashAfterBacklog) = buck.fundBalancesScaled();
-        (uint256 authorized,,) = buck.reductionAuthorization(first);
         assertEq(sharesAfterBacklog, sharesBefore);
         assertEq(cashAfterBacklog, cashBefore);
         assertEq(buck.balanceOf(ALICE), ownerBefore);
-        assertEq(authorized, 100e6);
+        assertEq(credit.ownerOf(first), ALICE);
         assertEq(buck.claimSeconds(), 16 * 100e6 * 50 * YEAR);
 
-        uint256 sharesToSell = uint256(sharesBefore) / 16;
-        uint256 actualSale = buck.netBalanceOf(address(basket)) * sharesToSell / sharesBefore;
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(first, 100e6);
-        assertEq(relief, cashBefore / 16 + actualSale * Q);
-        assertLt(relief, 100e6 * Q, "the matured target is not guaranteed actual relief");
-        (uint128 sharesAfterSale,) = basket.holdings(position);
-        assertEq(sharesAfterSale, uint256(sharesBefore) - sharesToSell);
-        (uint256 principal,) = credit.issuanceOf(first);
-        assertEq(principal, 0);
-        assertEq(buck.totalIssued(), 15 * 100e6);
-        assertEq(buck.claimSeconds(), 15 * 100e6 * 50 * YEAR);
+        fund.closeMatured(first);
+        (uint128 sharesAfterRelease,) = basket.holdings(position);
+        assertEq(sharesAfterRelease, sharesBefore);
+        (, uint256 cashAfterRelease) = buck.fundBalancesScaled();
+        assertEq(cashAfterRelease, cashBefore);
+        assertEq(buck.balanceOf(ALICE), ownerBefore);
+        vm.expectRevert();
+        credit.ownerOf(first);
+        assertEq(buck.totalIssued(), 16 * 100e6);
+        assertEq(buck.claimBook().deferredPrincipal(), 100e6);
+        assertEq(buck.claimSeconds(), 16 * 100e6 * 50 * YEAR);
+    }
+
+    function test_unclosedOldCreditKeepsPayingFeesButItsClaimStopsAtFiftyYears() public {
+        uint256 old = _credit(100e6);
+        vm.warp(t0 + 50 * YEAR);
+        buck.processMaturities(1);
+        uint256 newer = _credit(100e6);
+        vm.warp(t0 + 100 * YEAR);
+        buck.processMaturities(1);
+        (uint256 oldSeconds, uint256 total) = buck.selectedClaimSeconds(old, 100e6);
+        (uint256 newSeconds,) = buck.selectedClaimSeconds(newer, 100e6);
+        assertEq(oldSeconds, 100e6 * 50 * YEAR);
+        assertEq(newSeconds, oldSeconds);
+        assertEq(total, 2 * oldSeconds);
+        BuckLedger.FundFlows memory flows = buck.fundFlows();
+        assertEq(flows.grossDemurrage.units, 300e6);
+        assertEq(flows.grossDemurrage.fraction, 0);
+        assertEq(buck.totalIssued(), 200e6);
+        (, uint256 cashBefore) = buck.fundBalancesScaled();
+        uint256 ownerBefore = buck.balanceOf(ALICE);
+        vm.prank(ALICE);
+        fund.closeMatured(old);
+        assertEq(buck.totalIssued(), 200e6);
+        assertEq(buck.claimBook().deferredPrincipal(), 100e6);
+        assertEq(buck.balanceOf(ALICE), ownerBefore);
+        (, uint256 cashAfter) = buck.fundBalancesScaled();
+        assertEq(cashAfter, cashBefore);
+        assertEq(buck.claimSeconds(), total);
     }
 }

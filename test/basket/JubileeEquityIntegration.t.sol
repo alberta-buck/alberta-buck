@@ -95,7 +95,7 @@ contract JubileeEquityIntegrationTest is Test {
         if (amount1 > 0) IERC20(IPool(msg.sender).token1()).transfer(msg.sender, amount1);
     }
 
-    function test_realBasketReusesTheFundReceiptAndPaysActualProportionalRelief() public {
+    function test_realBasketReusesTheFundReceiptAndPaysMarkedReliefWithoutASale() public {
         uint256 a = _credit(ALICE, 100e6);
         _credit(BOB, 100e6);
         vm.warp(t0 + YEAR);
@@ -111,17 +111,16 @@ contract JubileeEquityIntegrationTest is Test {
         assertEq(basket.equity(), buck.netBalanceOf(address(basket)));
 
         (, uint256 cash) = buck.fundBalancesScaled();
-        uint256 requested = uint256(held) / 4;
-        uint256 ratio = requested * 1e18 / basket.totalShares();
-        uint256 paid = basket.equity() * ratio / 1e18;
-        _authorize(ALICE, a, 50e6, 0);
+        uint256 marked = basket.valueOf(id);
+        uint256 expected = (cash + marked * Q) * 9 / 200;
+        _authorize(ALICE, a, 9e6, 0);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 50e6);
-        assertEq(relief, cash / 4 + paid * Q);
+        (uint256 relief,) = fund.reduce(a, 9e6);
+        assertEq(relief, expected);
         (uint128 remaining,) = basket.holdings(id);
-        assertEq(remaining, uint256(held) - requested);
+        assertEq(remaining, held);
         assertEq(fund.positionId(), id);
-        assertEq(buck.totalIssued(), 150e6);
+        assertEq(buck.totalIssued(), 191e6);
     }
 
     function test_keeperReplenishesReserveFromTheRealSingleReceipt() public {
@@ -186,9 +185,38 @@ contract JubileeEquityIntegrationTest is Test {
         assertLt(basket.valueOf(id), receiptBefore);
     }
 
-    function test_renewalSellsRealBasketSharesBeforeUpdatingTheFacility() public {
+    function test_markedReliefRequiresPoolTwapHistoryInsteadOfSpotFallback() public {
+        _bind(address(this), false, address(this));
+        uint256 a = _credit(ALICE, 2_000_000e6);
+        vm.prank(ALICE);
+        buck.transfer(address(this), 1_500_000e6);
+        EqToken asset = new EqToken("Asset", "AST", 18);
+        asset.mint(address(this), 2_000_000e18);
+        asset.mint(ALICE, 100_000e18);
+        vm.warp(t0 + YEAR);
+        vm.prank(GOV);
+        address pool = basket.addBasketToken(address(asset), 18, 1e6, 10_000, 3000);
+        _bind(pool, true, address(this));
+        (,,,,,, int24 lower, int24 upper,,,) = basket.constituents(0);
+        IPool(pool).mint(address(this), lower, upper, 1e18, "");
+        vm.startPrank(ALICE);
+        asset.approve(address(basket), type(uint256).max);
+        basket.deposit(address(asset), 100_000e18, 0);
+        vm.stopPrank();
+        _invest(10_000e6);
+        assertGt(basket.idleToken(0), 0);
+
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(a, 50_000e6);
+        vm.warp(block.timestamp + 601);
+        (uint256 relief,, bool exceeds) = fund.previewRelief(a, 50_000e6);
+        assertGt(relief, 0);
+        assertFalse(exceeds);
+    }
+
+    function test_renewalKeepsRealBasketSharesWhileUpdatingTheFacility() public {
         uint256 a = _credit(ALICE, 100e6);
-        _credit(BOB, 100e6);
+        _credit(BOB, 1900e6);
         vm.warp(t0 + YEAR);
         (uint256 id,,) = _invest(2e6);
         (uint128 sharesBefore,) = basket.holdings(id);
@@ -208,12 +236,12 @@ contract JubileeEquityIntegrationTest is Test {
         vm.prank(ALICE);
         (uint256 relief,,) = fund.renew(a, terms);
         (uint128 sharesAfter,) = basket.holdings(id);
-        assertEq(sharesAfter, uint256(sharesBefore) - uint256(sharesBefore) / 2);
+        assertEq(sharesAfter, sharesBefore);
         (uint256 principal, uint256 seconds_) = credit.issuanceOf(a);
         assertEq(principal, 150e6 - relief);
         assertEq(seconds_, 0);
         assertEq(credit.ownerOf(a), ALICE);
-        assertEq(buck.totalIssued(), 250e6 - relief);
+        assertEq(buck.totalIssued(), 2050e6 - relief);
     }
 
     function test_agedCarryingFundInvestmentDoesNotDiluteExistingDepositor() public {
@@ -259,18 +287,18 @@ contract JubileeEquityIntegrationTest is Test {
         vm.warp(t0 + 9001 * YEAR);
         buck.processMaturities(1);
         assertEq(basket.equity(), 0);
-        _authorize(ALICE, a, 100e6, 0);
         vm.prank(ALICE);
-        fund.reduce(a, 100e6);
+        fund.closeMatured(a);
         assertEq(fund.positionId(), id);
         (uint128 afterShares,) = basket.holdings(id);
         assertEq(afterShares, beforeShares);
-        assertEq(buck.totalIssued(), 0);
+        assertEq(buck.totalIssued(), 100e6);
+        assertEq(buck.claimBook().deferredPrincipal(), 100e6);
     }
 
     function test_realAmmInKindExitCountsOnlyNetBuckProceeds() public {
         _bind(address(this), false, address(this));
-        uint256 a = _credit(ALICE, 2_000_000e6);
+        _credit(ALICE, 2_000_000e6);
         vm.prank(ALICE);
         buck.transfer(address(this), 1_500_000e6);
         EqToken asset = new EqToken("Asset", "AST", 18);
@@ -287,33 +315,25 @@ contract JubileeEquityIntegrationTest is Test {
         asset.approve(address(basket), type(uint256).max);
         basket.deposit(address(asset), 100_000e18, 0);
         vm.stopPrank();
-        (uint256 id,,) = _invest(10_000e6);
+        (uint256 id,,) = _invest(39_000e6);
         assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 0), 1);
         assertGt(basket.liquidityOf(0), 0);
         uint256 walletBefore = buck.netBalanceOf(address(basket));
         (, uint256 cashBefore) = buck.fundBalancesScaled();
         (uint128 sharesBefore,) = basket.holdings(id);
-        (uint256 selected, uint256 total) = buck.selectedClaimSeconds(a, 400_000e6);
-        uint256 requestedShares = uint256(sharesBefore) * selected / total;
+        uint256 requestedShares = uint256(sharesBefore) / 5;
         // The value requested exceeds the basket's spendable cash, so its
         // existing in-kind exit path must unwind real V3 liquidity.
         uint256 shareValue = basket.equity() * requestedShares / basket.totalShares();
         assertGt(shareValue * 99 / 100, walletBefore);
-        _authorize(ALICE, a, 400_000e6, 0);
-
-        // Without a route, the standard call rejects the unconverted TOKEN.
-        // The claimant may explicitly accept cash-only relief instead.
+        // Without a route, the separate keeper sale rejects the unconverted TOKEN.
+        JubileeFund.SaleRoute[] memory noRoutes = new JubileeFund.SaleRoute[](0);
         vm.expectRevert(JubileeFund.MissingRoute.selector);
-        vm.prank(ALICE);
-        fund.reduce(a, 400_000e6);
-        uint256 snapshot = vm.snapshotState();
-        vm.prank(ALICE);
-        (uint256 cashOnly,) = fund.reduceCashOnly(a, 400_000e6);
-        assertEq(cashOnly, cashBefore * selected / total);
+        vm.prank(GOV);
+        fund.redeemScheduled(requestedShares, 0, noRoutes);
         (uint128 deferredShares,) = basket.holdings(id);
         assertEq(deferredShares, sharesBefore);
         assertEq(asset.balanceOf(address(fund)), 0);
-        assertTrue(vm.revertToState(snapshot));
 
         (,,,,,,,, bool buckIs0,,) = basket.constituents(0);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
@@ -322,21 +342,20 @@ contract JubileeEquityIntegrationTest is Test {
             minimumNetBuck: type(uint256).max
         });
         vm.expectRevert(JubileeFund.SwapMinOut.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 400_000e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(requestedShares, 0, routes);
         (uint128 afterFailedSale,) = basket.holdings(id);
         assertEq(afterFailedSale, sharesBefore);
         assertEq(asset.balanceOf(address(fund)), 0);
         routes[0].minimumNetBuck = 1;
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduceWithRoutes(a, 400_000e6, routes);
+        vm.prank(GOV);
+        uint256 proceeds = fund.redeemScheduled(requestedShares, 0, routes);
         assertEq(asset.balanceOf(address(fund)), 0);
         (, uint256 cashAfter) = buck.fundBalancesScaled();
-        uint256 actualProceeds = cashAfter + relief - cashBefore;
-        assertGt(actualProceeds, 0);
-        assertEq(relief, cashBefore * selected / total + actualProceeds);
+        assertGt(proceeds, 0);
+        assertEq(proceeds, cashAfter - cashBefore);
         (uint128 sharesAfter,) = basket.holdings(id);
         assertLe(sharesAfter, sharesBefore);
-        assertEq(buck.totalIssued(), 1_600_000e6);
+        assertEq(buck.totalIssued(), 2_000_000e6);
     }
 }

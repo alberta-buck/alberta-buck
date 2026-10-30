@@ -192,11 +192,13 @@ the corresponding shares are withdrawn. The net of either pair of cumulative
 counters can be negative after gains; unsigned totals must not be subtracted
 without signed or otherwise guarded arithmetic.
 
-When a BuckCredit position is reduced, the fund first redeems a proportional
-slice of its positions, then computes relief from the net BUCK in the fund.
-Even a redemption returning zero BUCK leaves a well-defined available relief,
-possibly zero. The borrower supplies the difference; if the borrower lacks
-that amount, the reduction cannot complete. A modeled investment return must
+When a BuckCredit position is reduced, the fund computes relief from the
+selected fraction of its net cash and marked basket receipt, without selling
+the receipt during that transaction. The calculated net relief must be no
+more than 10% of the available net cash, otherwise the reduction reverts. The
+borrower supplies the difference; if the borrower lacks that amount, the
+reduction cannot complete. A separate keeper can redeem basket shares to
+replenish the cash reserve. A modeled investment return must
 have a source, such as a transfer from a counterparty, a realized external
 asset sale, or new, separately recorded issuance. It must not appear solely
 because the fund paid demurrage to itself. The reference includes an idealized
@@ -207,33 +209,30 @@ cash: counting the mark decrease alone as a loss of total fund value would be
 misleading. The reference does not model actual basket prices, collateral
 values, transaction costs, delay, or market depth.
 
-The original available-relief experiment scales the target by post-redemption
+An earlier available-relief experiment scales the target by post-redemption
 net cash divided by a 10% reserve target, capped at net cash and principal.
 That signal can mistake uninvested cash or redemption proceeds for returns.
 In a two-facility idle example it lets the first reducer receive the entire
 fund, leaving the second unable to close. It is retained only as a comparison,
 not a safe contract rule.
 
-A proportional rule, now the reference default, allocates the fraction =f= of pre-sale cash plus
-the actual proceeds from selling fraction =f= of the position, capped by the
-principal. Its default =f= is the selected facility's baseline target divided
-by all outstanding capped targets. It computes relief from realized funds and
-does not mistake a cash reserve for investment ROI; with two identical idle
-facilities it lets each receive its half. The 10% reserve can remain an
-investment/liquidity target without being the payout multiplier. Neither rule
-has yet been validated against actual basket liquidity, costs, or adversarial
-ordering. See the [[file:doc/review/credit-facility-accounting-design.org][facility design]] for the concrete comparison.
+A second earlier rule allocated the fraction =f= of pre-sale cash plus actual
+proceeds from selling fraction =f= of the position, capped by principal. It
+remains an explicit reference comparison, not the current contract policy.
+The marked rule allocates the same fraction of net cash plus the receipt's
+marked value; if an actual sale realizes exactly the mark with no costs, the
+two rules agree. A mark is not a guarantee of liquidity or realized price.
+See the [[file:doc/review/jubilee-marked-relief.org][marked-relief analysis]] for the comparison and remaining audit work.
 
-The simulator permits the fraction to be supplied explicitly. A fixed-2%
-quote and retirement are retained only as comparison diagnostics.
-The command-line reference defaults to the requested target relief's share of
-total outstanding target relief and can also compare the share of total
-issued BUCK. Credits of different ages can make these two fractions very
-different. The reference sums its positions to obtain this benchmark; the
-experimental claim book maintains the capped aggregate incrementally, with
-bounded permissionless processing when facilities reach 50 years.
+The simulator retains fixed-2%, reserve-ratio and proportional-sale rules as
+comparison diagnostics. Its command-line retirement defaults to the marked
+rule. Credits of different ages make their share of outstanding relief very
+different from their share of issued BUCK. The reference sums its positions
+to obtain the benchmark; the experimental claim book maintains the capped
+aggregate incrementally, with bounded permissionless processing when
+facilities reach 50 years.
 
-The proposed replacement does not sell the fund's basket position inside a
+The experimental replacement does not sell the fund's basket position inside a
 reduction. It allocates the selected fraction of the fund's *net liquid BUCK
 plus the net marked value of its basket receipt*, and reverts if that relief
 exceeds 10% of liquid net BUCK. The selected fraction is the reduced
@@ -241,9 +240,9 @@ facility's capped BUCK-seconds divided by all capped outstanding
 BUCK-seconds, including any matured principal assumed by Jubilee and not yet
 burned. Consequently the effective rate is the nominal 2% multiplied by the
 whole-fund mark divided by the aggregate relief benchmark, subject to the
-principal cap. This is still a proposed rule: the reference can quote it,
-but the Solidity reduction and renewal paths above still sell and must be
-replaced after the basket's Carrying-aware mark is validated. See the
+principal cap. The isolated Solidity reduction and renewal paths implement
+this rule; their oracle, mark-to-market and executable-liquidity assumptions
+still require further review and simulation. See the
 [[file:doc/review/jubilee-marked-relief.org][marked-relief analysis]] for a numerical example, the 50-year aggregate and
 valuation limitations.
 

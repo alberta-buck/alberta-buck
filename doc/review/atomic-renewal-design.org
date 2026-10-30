@@ -26,14 +26,15 @@ necessary for this first implementation.
 
 * Transaction and accounting
 
-1. Validate owner and insurer approvals and the deadline before the fund sells
-   anything. Read the selected facility's capped claim seconds and the aggregate
-   benchmark. Checkpoint the fund reserve controller.
-2. Sell the facility's proportional share of the Jubilee basket position and
-   compute the facility's share of pre-sale cash plus actual net BUCK proceeds,
-   capped by its outstanding principal. Respect failed, partial and in-kind
-   exits and preserve the other fund claims. The owner's minimum relief protects
-   the entire transaction. TOKEN is not BUCK relief.
+1. Validate owner and insurer approvals and the deadline. A facility whose
+   average issuance age has reached 50 years must be closed instead of
+   renewed. Read its capped claim seconds and the aggregate benchmark, then
+   checkpoint the reserve controller.
+2. Compute its share of net liquid cash plus the basket receipt's marked
+   value, net of the receipt's gain fee, capped by outstanding principal.
+   Do not sell the position. Revert if the actual net relief exceeds 10% of
+   pre-settlement net cash or the owner's minimum is not met. The keeper may
+   independently replenish the cash reserve before a later attempt.
 3. NFT principal and total issued supply are whole raw BUCK units. Round the
    computed fractional relief *down* to whole raw units before paying it and
    leave the fractional remainder in the fund. The owner explicitly accepts the
@@ -54,10 +55,10 @@ necessary for this first implementation.
    the nominal pool refund, and the explicitly authorized additional issuance.
    Apply the funding-factor check before the new issuance supplies any reserve.
 6. Synchronize the capped aggregate and ensure the final K shortfall is no
-   worse than before, using K at settlement after the fund sale:
+   worse than before, using K at settlement:
    =max(0, new principal - K * new current value) <=
     max(0, old principal - K * old current value)=. A failed check reverts the
-   sale, refund, issuance, approvals and every other change. Additional
+   refund, issuance, approvals and every other change. Additional
    issuance is recorded only after the final limit check. BuckCredit applies
    the replacement terms and added coverage within one call.
 
@@ -84,9 +85,9 @@ called back merely because K falls.
   premium limit, funding factor and K. Only the configured fund may execute
   the settlement. Neither the insurer's proposal alone nor a fund call without
   the owner's authorization suffices.
-- The fund sells before Buck is locked and prepares the original pool outside
-  that lock. Reentrancy guards and transaction rollback cover both calls.
-- Tested cases include 0 and 50-year relief, multiple facilities and insurer pools, K cuts,
+- The fund does not sell during renewal. It prepares the original insurer
+  pool outside Buck's lock; reentrancy guards and rollback cover that callback.
+- Tested cases include zero-age relief, rejection at 50-year maturity, multiple facilities and insurer pools, K cuts,
   repricing, fresh issuance, fractional rounding, expired/cancelled/stale
   proposals, failed pool liquidity, insufficient funding, cap violations,
   malicious callbacks and the identity/attestation gate. Both BuckNet and

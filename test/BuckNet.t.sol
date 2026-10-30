@@ -29,6 +29,9 @@ contract MockNetFund {
     function settle(BuckNet token, address owner, uint256 id, uint256 principal, uint256 reliefScaled) external {
         token.settleFromJubilee(owner, id, principal, reliefScaled);
     }
+    function mature(BuckNet token, address owner, uint256 id) external {
+        token.matureFromJubilee(owner, id);
+    }
 }
 
 /// @dev Test only. Simulates an insurer investing and restoring its own BUCK.
@@ -119,15 +122,14 @@ contract BuckNetTest is Test {
         vm.warp(t0 + 50 * YEAR);
         assertTrue(buck.maturitiesPending());
         buck.processMaturities(1);
-        (, uint256 fundNet) = buck.fundBalancesScaled();
-        _authorize(ALICE, id, principal, fundNet);
-        fund.settle(buck, ALICE, id, principal, fundNet);
-        assertEq(buck.totalSupply(), 0);
-        assertEq(buck.balanceOf(ALICE), 0);
-        assertEq(buck.netBalanceOf(address(fund)), 0);
-        assertEq(buck.claimSeconds(), 0);
-        (uint256 remaining,) = credit.issuanceOf(id);
-        assertEq(remaining, 0);
+        uint256 holderBefore = buck.balanceOf(ALICE);
+        fund.mature(buck, ALICE, id);
+        assertEq(buck.totalSupply(), principal);
+        assertEq(buck.balanceOf(ALICE), holderBefore);
+        assertEq(buck.claimSeconds(), principal * 50 * YEAR);
+        assertEq(buck.claimBook().deferredPrincipal(), principal);
+        vm.expectRevert();
+        credit.ownerOf(id);
     }
 
     function test_registryModeChangesKeepNetBalancesAndFundValueConserved() public {
@@ -286,7 +288,7 @@ contract BuckNetTest is Test {
         assertEq(total, 300e6 * YEAR);
         (, uint256 fundNet) = buck.fundBalancesScaled();
         _authorize(ALICE, newer, 100e6, 0);
-        fund.settle(buck, ALICE, newer, 100e6, fundNet / 3);
+        fund.settle(buck, ALICE, newer, 100e6, fundNet / 10);
         (uint256 oldPrincipal, uint256 oldSeconds) = credit.issuanceOf(old);
         (uint256 newPrincipal,) = credit.issuanceOf(newer);
         assertEq(oldPrincipal, 100e6);
@@ -330,7 +332,9 @@ contract BuckNetTest is Test {
         (, uint256 fundNet) = buck.fundBalancesScaled();
         uint256 bobPoolNet = buck.netBalanceOf(address(b));
         _authorize(ALICE, aliceId, 1000e6, 0);
-        fund.settle(buck, ALICE, aliceId, 1000e6, fundNet / 2);
+        vm.prank(BOB);
+        buck.transfer(ALICE, 20e6);
+        fund.settle(buck, ALICE, aliceId, 1000e6, fundNet / 10);
         assertEq(buck.balanceOf(address(a)), 0);
         assertEq(buck.balanceOf(address(b)), 100e6);
         assertEq(buck.netBalanceOf(address(b)), bobPoolNet);
@@ -357,7 +361,7 @@ contract BuckNetTest is Test {
         (uint256 ownerHeld, uint256 ownerUnspent) = buck.heldAndUnspentScaled(ALICE);
         (uint256 poolNet,) = buck.heldAndUnspentScaled(address(pool));
         (, uint256 fundNet) = buck.fundBalancesScaled();
-        uint256 relief = fundNet / 2;
+        uint256 relief = fundNet / 10;
         uint256 expectedOwner = ownerHeld + ownerUnspent + poolNet / 2 + relief - 500e6 * Q;
         _authorize(ALICE, id, 500e6, 0);
         fund.settle(buck, ALICE, id, 500e6, relief);
@@ -378,6 +382,9 @@ contract BuckNetTest is Test {
         MockNetInsurerPool replacement = _pool(INSURER_A);
         vm.prank(ALICE);
         buck.issue(id, 500e6, 450e6);
+        uint256 bobId = _credit(BOB, INSURER_B, 1000e6, 0);
+        vm.prank(BOB);
+        buck.issue(bobId, 1000e6, 1000e6);
         assertEq(buck.facilityPool(id), address(original));
         assertEq(buck.balanceOf(address(original)), 150e6);
         assertEq(buck.balanceOf(address(replacement)), 0);
@@ -386,16 +393,18 @@ contract BuckNetTest is Test {
         _bind(address(strategy), true, INSURER_A);
         original.transferToken(IERC20(address(buck)), address(strategy), 150e6);
         vm.warp(t0 + YEAR);
+        vm.prank(BOB);
+        buck.transfer(ALICE, 30e6);
         (, uint256 fundNet) = buck.fundBalancesScaled();
         _authorize(ALICE, id, 1500e6, 0);
         vm.expectRevert(BuckLedger.InsufficientBalance.selector);
-        fund.settle(buck, ALICE, id, 1500e6, fundNet);
-        assertEq(buck.totalIssued(), 1500e6);
+        fund.settle(buck, ALICE, id, 1500e6, fundNet / 10);
+        assertEq(buck.totalIssued(), 2500e6);
         strategy.transferToken(IERC20(address(buck)), address(original), 150e6);
-        fund.settle(buck, ALICE, id, 1500e6, fundNet);
+        fund.settle(buck, ALICE, id, 1500e6, fundNet / 10);
         assertEq(buck.balanceOf(address(original)), 0);
         assertEq(buck.balanceOf(address(strategy)), 0);
-        assertEq(buck.totalIssued(), 0);
+        assertEq(buck.totalIssued(), 1000e6);
     }
 
     function test_refundWithoutPoolAllowanceRevertsAtomically() public {
@@ -427,6 +436,22 @@ contract BuckNetTest is Test {
         vm.expectRevert(BuckNet.BadAuthorization.selector);
         fund.settle(buck, ALICE, id, 10e6, 0);
         assertEq(buck.totalIssued(), 100e6);
+    }
+
+    function test_tokenRejectsACompromisedFundAttemptAboveTenPercentOfNetCash() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        vm.warp(t0 + YEAR);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        _authorize(ALICE, id, 1e6, 0);
+        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        fund.settle(buck, ALICE, id, 1e6, cash / 10 + 1);
+        assertEq(buck.totalIssued(), 100e6);
+        (uint256 authorized,,) = buck.reductionAuthorization(id);
+        assertEq(authorized, 1e6);
+        fund.settle(buck, ALICE, id, 1e6, cash / 10);
+        assertEq(buck.totalIssued(), 99e6);
     }
 
     function test_expiredMaturityRequiresPermissionlessProcessingBeforeIssuance() public {
@@ -473,19 +498,21 @@ contract BuckNetTest is Test {
         assertEq(buck.totalIssued(), 1100e6);
     }
 
-    function testFuzz_idleFacilityCanRetireWithItsAvailableFundShare(uint32 amount_, uint8 years_) public {
-        uint256 amount = bound(amount_, 1, 1_000_000_000);
-        uint256 elapsedYears = bound(years_, 0, 100);
+    function testFuzz_idleFacilityCanPartiallyRetireWithinTheLiquidLimit(uint32 amount_, uint8 years_) public {
+        uint256 amount = bound(amount_, 20, 1_000_000_000);
+        uint256 elapsedYears = bound(years_, 0, 49);
         uint256 id = _credit(ALICE, INSURER_A, amount, 0);
         vm.prank(ALICE);
         buck.issue(id, amount, amount);
         vm.warp(t0 + elapsedYears * YEAR);
         if (buck.maturitiesPending()) buck.processMaturities(1);
         (, uint256 fundNet) = buck.fundBalancesScaled();
-        _authorize(ALICE, id, amount, 0);
-        fund.settle(buck, ALICE, id, amount, fundNet);
-        assertEq(buck.totalIssued(), 0);
-        assertEq(buck.balanceOf(ALICE), 0);
-        assertEq(buck.netBalanceOf(address(fund)), 0);
+        uint256 reduction = amount / 20;
+        uint256 relief = fundNet * reduction / amount;
+        _authorize(ALICE, id, reduction, 0);
+        fund.settle(buck, ALICE, id, reduction, relief);
+        assertEq(buck.totalIssued(), amount - reduction);
+        (, uint256 afterNet) = buck.fundBalancesScaled();
+        assertEq(afterNet, fundNet - relief);
     }
 }

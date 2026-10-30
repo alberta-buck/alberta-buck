@@ -6,10 +6,10 @@
 
 The fund's receipt is a claim on the basket. If the basket issues its own BUCK
 credit, the basket also has a claim on the fund when it reduces that facility.
-The fund sells the selected proportion of its basket position *before* it pays
-actual relief. Thus a basket share price that includes the expected value of
-that relief depends on itself. The current cash-only net-token basket does not
-open credit, so it does not experience this cycle.
+The current payout uses a mark of the fund's basket position without selling
+it. A basket share price that includes the expected value of that relief can
+therefore still depend on itself. The current cash-only net-token basket does
+not open credit, so it does not experience this cycle.
 
 The existing economic reference models a fund-owned BUCK strategy whose mark
 is externally specified. It does not model this mutual ownership, liquidity,

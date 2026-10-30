@@ -35,6 +35,8 @@ contract JubileeInKindToken is ERC20 {
 
 contract JubileeBasketMock {
     uint256 constant Q = 1e36;
+    uint256 public constant LAMBDA_BP = 2500;
+    uint32 public constant twapWindow = 600;
     address public immutable buck;
     BuckBasketReceipt public immutable receipt;
     JubileeInKindToken public immutable inKind;
@@ -57,6 +59,7 @@ contract JubileeBasketMock {
         secondInKind = new JubileeInKindToken();
     }
     function setMode(uint8 value) external { mode = value; }
+    function realizeLoss(address recipient, uint256 amount) external { IERC20(buck).transfer(recipient, amount); }
     function setSwapPool(address pool, bool buckIsToken0) external {
         swapPool = pool;
         mockBuckIsToken0 = buckIsToken0;
@@ -67,6 +70,12 @@ contract JubileeBasketMock {
         secondBuckIsToken0 = buckIsToken0;
     }
     function constituentsLength() external view returns (uint256) { return secondEnabled ? 2 : 1; }
+    function liquidityOf(uint256) external pure returns (uint128) { return 0; }
+    function idleToken(uint256) external pure returns (uint256) { return 0; }
+    function valueOf(uint256 id) external view returns (uint256) {
+        if (holdings[id].shares == 0) return 0;
+        return BuckNet(buck).netBalanceOf(address(this));
+    }
     function constituents(uint256 index) external view returns (
         address, uint8, uint256, uint256, uint24, address, int24, int24, bool, uint256, uint128
     ) {
@@ -264,11 +273,11 @@ contract JubileeFundTest is Test {
         vm.prank(BOB);
         buck.transfer(address(pool), 2e6);
         vm.warp(t0 + YEAR);
-        (id,,) = _invest(2e6);
+        (id,,) = _invest(3_800_000);
         basket.inKind().mint(address(basket), 4e6);
         basket.setMode(3);
         basket.setSwapPool(address(pool), false);
-        _authorize(ALICE, a, 50e6, 0);
+        _authorize(ALICE, a, 10e6, 0);
     }
 
     function test_noAgeRequiresNoSaleOrRelief() public {
@@ -289,28 +298,32 @@ contract JubileeFundTest is Test {
         uint256 b = _credit(BOB, 100e6, 0);
         vm.warp(t0 + YEAR);
         (, uint256 beforeNet) = buck.fundBalancesScaled();
-        _authorize(ALICE, a, 100e6, 0);
+        _authorize(ALICE, a, 10e6, 0);
         vm.prank(ALICE);
-        (uint256 first,) = fund.reduce(a, 100e6);
-        assertEq(first, beforeNet / 2);
-        _authorize(BOB, b, 100e6, 0);
+        (uint256 first,) = fund.reduce(a, 10e6);
+        assertEq(first, beforeNet / 20);
+        _authorize(BOB, b, 10e6, 0);
         vm.prank(BOB);
-        (uint256 second,) = fund.reduce(b, 100e6);
-        assertEq(second, beforeNet - first);
-        assertEq(buck.totalIssued(), 0);
+        (uint256 second,) = fund.reduce(b, 10e6);
+        assertApproxEqAbs(second, first, 1);
+        assertEq(buck.totalIssued(), 180e6);
     }
 
-    function test_threeRawUnitsCloseAfterFiftyYearsUsingFractionalCash() public {
+    function test_threeRawUnitMaturityReleasesLienDespiteLiquidLimit() public {
         uint256 a = _credit(ALICE, 3, 0);
         vm.warp(t0 + 50 * YEAR);
         buck.processMaturities(1);
         (, uint256 cash) = buck.fundBalancesScaled();
-        _authorize(ALICE, a, 3, cash);
+        _authorize(ALICE, a, 3, 0);
+        vm.expectRevert(JubileeFund.ReliefLiquidityLimit.selector);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 3);
-        assertEq(relief, cash);
-        assertEq(buck.totalIssued(), 0);
-        assertEq(buck.balanceOf(ALICE), 0);
+        fund.reduce(a, 3);
+        vm.prank(ALICE);
+        fund.closeMatured(a);
+        assertEq(buck.totalIssued(), 3);
+        assertEq(buck.claimBook().deferredPrincipal(), 3);
+        (, uint256 afterCash) = buck.fundBalancesScaled();
+        assertEq(afterCash, cash);
     }
 
     function test_investGrossesUpAndReusesTheSingleReceipt() public {
@@ -326,7 +339,7 @@ contract JubileeFundTest is Test {
         assertEq(fund.positionId(), id);
     }
 
-    function test_saleUsesSelectedCashShareAndActualNetProceeds() public {
+    function test_reductionUsesSelectedCashAndMarkWithoutSelling() public {
         uint256 a = _credit(ALICE, 100e6, 0);
         _credit(BOB, 100e6, 0);
         vm.warp(t0 + YEAR);
@@ -334,17 +347,14 @@ contract JubileeFundTest is Test {
         (, uint256 cash) = buck.fundBalancesScaled();
         (uint128 oldShares,) = basket.holdings(id);
         uint256 basketCash = buck.netBalanceOf(address(basket));
-        uint256 expectedProceeds = (basketCash * (uint256(oldShares) / 2) / oldShares) * Q;
-        // The basket keeps sub-raw-unit receipt rounding dust. Acquire one raw
-        // unit so Alice can close the entire facility despite that real loss.
-        vm.prank(BOB);
-        buck.transfer(ALICE, 1);
-        _authorize(ALICE, a, 100e6, 0);
+        uint256 expected = (cash + basketCash * Q) * 9 / 200;
+        basket.setMode(4);
+        _authorize(ALICE, a, 9e6, 0);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 100e6);
-        assertEq(relief, cash / 2 + expectedProceeds);
+        (uint256 relief,) = fund.reduce(a, 9e6);
+        assertEq(relief, expected);
         (uint128 left,) = basket.holdings(id);
-        assertEq(left, uint256(oldShares) - uint256(oldShares) / 2);
+        assertEq(left, oldShares);
         assertEq(fund.positionId(), id);
     }
 
@@ -358,12 +368,13 @@ contract JubileeFundTest is Test {
         (WideCounter.Count memory invested, WideCounter.Count memory sold) = fund.investmentFlows();
         assertEq(_scaled(invested), beforeInvestment - afterInvestment);
         assertEq(_scaled(sold), 0);
-        _authorize(ALICE, a, 50e6, 0);
+        _authorize(ALICE, a, 9e6, 0);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 50e6);
+        (uint256 relief,) = fund.reduce(a, 9e6);
         (, uint256 cash) = buck.fundBalancesScaled();
         (invested, sold) = fund.investmentFlows();
-        assertEq(_scaled(sold), cash + relief - afterInvestment);
+        assertEq(_scaled(sold), 0);
+        assertEq(cash + relief, afterInvestment);
         BuckLedger.FundFlows memory flows = buck.fundFlows();
         assertEq(_scaled(flows.transfersOut), _scaled(invested));
         assertEq(_scaled(flows.transfersIn), _scaled(sold));
@@ -373,15 +384,12 @@ contract JubileeFundTest is Test {
     }
 
     function test_fullSaleBurnsTheSingleReceipt() public {
-        uint256 a = _credit(ALICE, 100e6, 0);
+        _credit(ALICE, 100e6, 0);
         vm.warp(t0 + YEAR);
-        (uint256 id,,) = _invest(1e6);
-        _credit(BOB, 100e6, 0); // New principal has no claim on older fund value.
-        vm.prank(BOB);
-        buck.transfer(ALICE, 1);
-        _authorize(ALICE, a, 100e6, 0);
-        vm.prank(ALICE);
-        fund.reduce(a, 100e6);
+        (uint256 id,, uint256 shares) = _invest(1_900_000);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
+        vm.prank(GOV);
+        fund.redeemScheduled(shares, 0, routes);
         assertEq(fund.positionId(), 0);
         BuckBasketReceipt receipt = basket.receipt();
         vm.expectRevert();
@@ -402,7 +410,7 @@ contract JubileeFundTest is Test {
         assertEq(afterShares, beforeShares);
     }
 
-    function test_investmentGainIsPaidOnlyWhenActuallySold() public {
+    function test_markedGainAffectsReliefWithoutSellingShares() public {
         uint256 a = _credit(ALICE, 100e6, 0);
         _credit(BOB, 100e6, 0);
         vm.warp(t0 + YEAR);
@@ -411,188 +419,174 @@ contract JubileeFundTest is Test {
         buck.transfer(address(basket), 2e6);
         (, uint256 cash) = buck.fundBalancesScaled();
         (uint128 shares,) = basket.holdings(id);
-        uint256 retired = uint256(shares) / 4;
-        uint256 proceeds = buck.netBalanceOf(address(basket)) * retired / shares * Q;
-        _authorize(ALICE, a, 50e6, 0);
+        (, uint128 basis) = basket.holdings(id);
+        uint256 mark = buck.netBalanceOf(address(basket));
+        uint256 netMark = mark - (mark - basis) / 4;
+        _authorize(ALICE, a, 10e6, 0);
         vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 50e6);
-        assertEq(relief, cash / 4 + proceeds);
+        (uint256 relief,) = fund.reduce(a, 10e6);
+        assertEq(relief, (cash + netMark * Q) / 20);
+        (uint128 afterShares,) = basket.holdings(id);
+        assertEq(afterShares, shares);
     }
 
-    function test_partialSaleUsesOnlyActualProceedsAndKeepsUnsoldShares() public {
-        uint256 a = _credit(ALICE, 100e6, 0);
+    function test_partialKeeperSaleUsesActualProceedsAndKeepsUnsoldShares() public {
+        _credit(ALICE, 100e6, 0);
         _credit(BOB, 100e6, 0);
         vm.warp(t0 + YEAR);
-        (uint256 id,,) = _invest(2e6);
+        (uint256 id,,) = _invest(3_800_000);
         basket.setMode(2);
-        (, uint256 cash) = buck.fundBalancesScaled();
         (uint128 oldShares,) = basket.holdings(id);
-        _authorize(ALICE, a, 50e6, 0);
-        // Half a facility out of two equal ones requests one quarter of shares.
         uint256 retired = (uint256(oldShares) / 4) / 2;
         uint256 expected = (buck.netBalanceOf(address(basket)) * retired / oldShares) * Q;
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 50e6);
-        assertEq(relief, cash / 4 + expected);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
+        vm.prank(GOV);
+        uint256 proceeds = fund.redeemScheduled(uint256(oldShares) / 4, 0, routes);
+        assertEq(proceeds, expected);
         (uint128 left,) = basket.holdings(id);
         assertEq(left, uint256(oldShares) - retired);
     }
 
-    function test_underwaterSaleKeepsPositionAndPaysOnlyCashShare() public {
-        uint256 a = _credit(ALICE, 100e6, 0);
+    function test_underwaterKeeperSaleKeepsThePosition() public {
+        _credit(ALICE, 100e6, 0);
         _credit(BOB, 100e6, 0);
         vm.warp(t0 + YEAR);
-        (uint256 id,,) = _invest(2e6);
+        (uint256 id,,) = _invest(3_800_000);
         basket.setMode(1);
-        (, uint256 cash) = buck.fundBalancesScaled();
         (uint128 oldShares,) = basket.holdings(id);
-        _authorize(ALICE, a, 50e6, 0);
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduce(a, 50e6);
-        assertEq(relief, cash / 4);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
+        vm.prank(GOV);
+        assertEq(fund.redeemScheduled(uint256(oldShares) / 4, 0, routes), 0);
         (uint128 left,) = basket.holdings(id);
         assertEq(left, oldShares);
         assertEq(fund.positionId(), id);
     }
 
-    function test_inKindSaleWithoutRouteLeavesSharesAndTokenInTheBasket() public {
-        uint256 a = _credit(ALICE, 100e6, 0);
-        _credit(BOB, 100e6, 0);
-        vm.warp(t0 + YEAR);
-        (uint256 id,,) = _invest(2e6);
-        basket.inKind().mint(address(basket), 4e6);
-        basket.setMode(3);
-        (, uint256 cash) = buck.fundBalancesScaled();
-        (uint128 oldShares,) = basket.holdings(id);
-        _authorize(ALICE, a, 50e6, 0);
+    function test_inKindKeeperSaleWithoutRouteRollsBack() public {
+        (, uint256 id,) = _inKindSaleFixture();
+        (uint128 shares,) = basket.holdings(id);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
         vm.expectRevert(JubileeFund.MissingRoute.selector);
-        vm.prank(ALICE);
-        fund.reduce(a, 50e6);
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduceCashOnly(a, 50e6);
-        assertEq(relief, cash / 4);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
+        (uint128 left,) = basket.holdings(id);
+        assertEq(left, shares);
         assertEq(basket.inKind().balanceOf(address(fund)), 0);
         assertEq(basket.inKind().balanceOf(address(basket)), 4e6);
-        (uint128 left,) = basket.holdings(id);
-        assertEq(left, oldShares);
     }
 
-    function test_cashOnlyDeferralStillHonorsTheOwnersMinimumRelief() public {
+    function test_insufficientOwnerReliefMinimumDoesNotConsumeAuthorization() public {
         (uint256 a, uint256 id,) = _inKindSaleFixture();
-        (, uint256 cash) = buck.fundBalancesScaled();
-        _authorize(ALICE, a, 50e6, cash / 4 + 1);
-        (uint128 beforeShares,) = basket.holdings(id);
+        (uint256 quote,, bool tooLarge) = fund.previewRelief(a, 500_000);
+        assertFalse(tooLarge);
+        _authorize(ALICE, a, 500_000, quote + 1);
+        (uint128 shares,) = basket.holdings(id);
         vm.expectRevert(BuckNet.BadAuthorization.selector);
         vm.prank(ALICE);
-        fund.reduceCashOnly(a, 50e6);
+        fund.reduce(a, 500_000);
         (uint128 afterShares,) = basket.holdings(id);
-        assertEq(afterShares, beforeShares);
-        assertEq(basket.inKind().balanceOf(address(fund)), 0);
+        assertEq(afterShares, shares);
+        (uint256 authorization,,) = buck.reductionAuthorization(a);
+        assertEq(authorization, 500_000);
     }
 
     function test_zeroBuckConversionSellsOnlyNewTokenAndPreservesOldInventory() public {
-        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        (, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
         basket.inKind().mint(address(fund), 777);
-        (, uint256 cash) = buck.fundBalancesScaled();
         (uint128 shares,) = basket.holdings(id);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
         pool.setBehavior(0, 0);
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduceWithRoutes(a, 50e6, routes);
-        assertEq(relief, cash / 4);
+        vm.prank(GOV);
+        assertEq(fund.redeemScheduled(uint256(shares) / 4, 0, routes), 0);
         assertEq(basket.inKind().balanceOf(address(fund)), 777);
         assertEq(basket.inKind().balanceOf(address(pool)), 1e6);
         (uint128 remaining,) = basket.holdings(id);
         assertEq(remaining, uint256(shares) - uint256(shares) / 4);
     }
 
-    function test_feeOnTransferAssetCanBeDeferredWithoutLosingShares() public {
-        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+    function test_feeOnTransferAssetFailureRollsBackKeeperSale() public {
+        (, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
         basket.inKind().setTransferFee(true);
         pool.setBehavior(0, 1e6);
         (uint128 shares,) = basket.holdings(id);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
         vm.expectRevert(bytes("input short"));
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
         (uint128 afterFailure,) = basket.holdings(id);
         assertEq(afterFailure, shares);
         assertEq(basket.inKind().balanceOf(address(fund)), 0);
-        vm.prank(ALICE);
-        fund.reduceCashOnly(a, 50e6);
-        (uint128 afterDeferral,) = basket.holdings(id);
-        assertEq(afterDeferral, shares);
         assertEq(basket.inKind().balanceOf(address(basket)), 4e6);
     }
 
-    function test_swapCallbackCannotTakeMoreThanTheSelectedSaleReceived() public {
-        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+    function test_swapCallbackCannotTakeMoreThanTheKeeperSaleReceived() public {
+        (, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
         basket.inKind().mint(address(fund), 777);
         (uint128 shares,) = basket.holdings(id);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
         pool.setBehavior(1, 0);
         vm.expectRevert(JubileeFund.BadSwapCallback.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
         (uint128 remaining,) = basket.holdings(id);
         assertEq(remaining, shares);
         assertEq(basket.inKind().balanceOf(address(fund)), 777);
         assertEq(basket.inKind().balanceOf(address(pool)), 0);
     }
 
-    function test_partialConversionAndInvalidRouteRollBackTheBasketSale() public {
-        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+    function test_partialConversionAndInvalidRouteRollBackTheKeeperSale() public {
+        (, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
         (uint128 shares,) = basket.holdings(id);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 0});
         pool.setBehavior(2, 0);
         vm.expectRevert(JubileeFund.IncompleteSwap.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
         (uint128 remaining,) = basket.holdings(id);
         assertEq(remaining, shares);
         JubileeFund.SaleRoute[] memory wrong = new JubileeFund.SaleRoute[](2);
         vm.expectRevert(JubileeFund.BadRoute.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, wrong);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, wrong);
         (remaining,) = basket.holdings(id);
         assertEq(remaining, shares);
     }
 
     function test_poolCannotForgeBasketUnderwaterToBypassConversionBounds() public {
-        (uint256 a, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        (, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
         (uint128 shares,) = basket.holdings(id);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 1});
         pool.setBehavior(3, 0);
         vm.expectRevert(JubileeSwapPoolMock.Underwater.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
         (uint128 remaining,) = basket.holdings(id);
         assertEq(remaining, shares);
     }
 
     function test_conversionMinimumUsesNetBuckAfterPoolDemurrage() public {
-        (uint256 a,, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        (, uint256 id, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+        (uint128 shares,) = basket.holdings(id);
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 1e6});
         pool.setBehavior(0, 1e6);
         vm.expectRevert(JubileeFund.SwapMinOut.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
         routes[0].minimumNetBuck = 980_000;
-        (, uint256 cash) = buck.fundBalancesScaled();
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduceWithRoutes(a, 50e6, routes);
-        assertGt(relief - cash / 4, 980_000 * Q);
-        assertLt(relief - cash / 4, 1e6 * Q);
+        vm.prank(GOV);
+        uint256 proceeds = fund.redeemScheduled(uint256(shares) / 4, 0, routes);
+        assertGt(proceeds, 980_000 * Q);
+        assertLt(proceeds, 1e6 * Q);
     }
 
-    function test_multiAssetConversionIsAtomicAndPreservesUnrelatedInventory() public {
-        (uint256 a, uint256 id, JubileeSwapPoolMock first) = _inKindSaleFixture();
+    function test_multiAssetKeeperConversionIsAtomicAndPreservesUnrelatedInventory() public {
+        (, uint256 id, JubileeSwapPoolMock first) = _inKindSaleFixture();
         JubileeSwapPoolMock second = new JubileeSwapPoolMock(IERC20(address(buck)), true);
         second.setAsset(IERC20(address(basket.secondInKind())));
         _bind(address(second), true, address(this));
@@ -608,58 +602,57 @@ contract JubileeFundTest is Test {
         JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](2);
         routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 980_000});
         vm.expectRevert(JubileeFund.MissingRoute.selector);
-        vm.prank(ALICE);
-        fund.reduceWithRoutes(a, 50e6, routes);
+        vm.prank(GOV);
+        fund.redeemScheduled(uint256(shares) / 4, 0, routes);
         (uint128 afterFailure,) = basket.holdings(id);
         assertEq(afterFailure, shares);
         assertEq(basket.inKind().balanceOf(address(first)), 0);
         assertEq(basket.secondInKind().balanceOf(address(fund)), 777);
         (, uint256 cashAfterFailure) = buck.fundBalancesScaled();
         assertEq(cashAfterFailure, cash);
-
         routes[1] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 1e6});
-        vm.prank(ALICE);
-        (uint256 relief,) = fund.reduceWithRoutes(a, 50e6, routes);
-        assertGt(relief - cash / 4, 1_980_000 * Q);
+        vm.prank(GOV);
+        uint256 proceeds = fund.redeemScheduled(uint256(shares) / 4, 0, routes);
+        assertGt(proceeds, 1_980_000 * Q);
         assertEq(basket.inKind().balanceOf(address(first)), 1e6);
         assertEq(basket.secondInKind().balanceOf(address(second)), 2e6);
         assertEq(basket.secondInKind().balanceOf(address(fund)), 777);
     }
 
-    function test_equalClaimsReceiveEqualConvertedProceedsInEitherOrder() public {
-        (uint256 a,, JubileeSwapPoolMock pool) = _inKindSaleFixture();
+    function test_equalMarkedClaimsReceiveEqualReliefInEitherOrder() public {
+        (uint256 a,,) = _inKindSaleFixture();
         uint256 b = credit.tokenOfOwnerByIndex(BOB, 0);
-        _authorize(BOB, b, 50e6, 0);
-        pool.setBehavior(0, 1e6);
-        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
-        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 980_000});
+        _authorize(ALICE, a, 500_000, 0);
+        _authorize(BOB, b, 500_000, 0);
         uint256 snapshot = vm.snapshotState();
         vm.prank(ALICE);
-        (uint256 aliceFirst,) = fund.reduceWithRoutes(a, 50e6, routes);
+        (uint256 aliceFirst,) = fund.reduce(a, 500_000);
         vm.prank(BOB);
-        (uint256 bobSecond,) = fund.reduceWithRoutes(b, 50e6, routes);
-        assertApproxEqAbs(aliceFirst, bobSecond, 2 * Q);
+        (uint256 bobSecond,) = fund.reduce(b, 500_000);
+        assertApproxEqAbs(aliceFirst, bobSecond, 2);
         assertTrue(vm.revertToState(snapshot));
         vm.prank(BOB);
-        (uint256 bobFirst,) = fund.reduceWithRoutes(b, 50e6, routes);
+        (uint256 bobFirst,) = fund.reduce(b, 500_000);
         vm.prank(ALICE);
-        (uint256 aliceSecond,) = fund.reduceWithRoutes(a, 50e6, routes);
-        assertApproxEqAbs(bobFirst, aliceSecond, 2 * Q);
-        assertApproxEqAbs(aliceFirst, aliceSecond, 2 * Q);
-        assertApproxEqAbs(bobFirst, bobSecond, 2 * Q);
+        (uint256 aliceSecond,) = fund.reduce(a, 500_000);
+        assertApproxEqAbs(bobFirst, aliceSecond, 2);
+        assertApproxEqAbs(aliceFirst, aliceSecond, 2);
+        assertApproxEqAbs(bobFirst, bobSecond, 2);
     }
 
-    function test_unexpectedBasketFailurePropagatesAndKeepsAuthorization() public {
+    function test_unexpectedKeeperSaleFailureKeepsReductionAuthorization() public {
         uint256 a = _credit(ALICE, 100e6, 0);
         vm.warp(t0 + YEAR);
-        _invest(1e6);
+        (uint256 id,, uint256 shares) = _invest(1_900_000);
         basket.setMode(4);
-        _authorize(ALICE, a, 50e6, 0);
+        _authorize(ALICE, a, 10e6, 0);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
         vm.expectRevert(JubileeBasketMock.Unexpected.selector);
-        vm.prank(ALICE);
-        fund.reduce(a, 50e6);
+        vm.prank(GOV);
+        fund.redeemScheduled(shares / 2, 0, routes);
         (uint256 principal,,) = buck.reductionAuthorization(a);
-        assertEq(principal, 50e6);
+        assertEq(principal, 10e6);
+        assertEq(fund.positionId(), id);
     }
 
     function test_minimumReliefFailureRollsBackTheSale() public {
@@ -668,10 +661,10 @@ contract JubileeFundTest is Test {
         (uint256 id,,) = _invest(1e6);
         (uint128 oldShares,) = basket.holdings(id);
         (, uint256 oldCash) = buck.fundBalancesScaled();
-        _authorize(ALICE, a, 50e6, 50e6 * Q);
+        _authorize(ALICE, a, 1e6, 1e6 * Q);
         vm.expectRevert(BuckNet.BadAuthorization.selector);
         vm.prank(ALICE);
-        fund.reduce(a, 50e6);
+        fund.reduce(a, 1e6);
         (uint128 remaining,) = basket.holdings(id);
         (, uint256 cash) = buck.fundBalancesScaled();
         assertEq(remaining, oldShares);
@@ -702,10 +695,10 @@ contract JubileeFundTest is Test {
         vm.warp(t0 + YEAR);
         (uint256 id,,) = _invest(1e6);
         (uint128 beforeShares,) = basket.holdings(id);
-        _authorize(ALICE, a, 100e6, 0);
+        _authorize(ALICE, a, 90e6, 0);
         vm.expectRevert(JubileeFund.InsufficientPoolLiquidity.selector);
         vm.prank(ALICE);
-        fund.reduce(a, 100e6);
+        fund.reduce(a, 90e6);
         (uint128 afterShares,) = basket.holdings(id);
         assertEq(afterShares, beforeShares);
         assertEq(pool.calls(), 0);
@@ -913,9 +906,9 @@ contract JubileeFundTest is Test {
         vm.warp(t0 + YEAR);
         fund.checkpointReserve();
         vm.warp(block.timestamp + 1 days);
-        _authorize(ALICE, a, 50e6, 0);
+        _authorize(ALICE, a, 10e6, 0);
         vm.prank(ALICE);
-        fund.reduce(a, 50e6);
+        fund.reduce(a, 10e6);
         (, uint256 excess, uint256 budget) = fund.previewReserve();
         assertEq(fund.reserveCheckpoint(), block.timestamp);
         assertEq(fund.observedExcessScaled(), excess);
@@ -978,6 +971,8 @@ contract JubileeFundTest is Test {
 /// @dev The existing fixture exercises the coordinator, token and actual NFT;
 ///      the strategy/basket and insurer liquidity contracts remain controllable.
 contract JubileeRenewalTest is JubileeFundTest {
+    function _buffer(uint256 principal) internal { _credit(BOB, 20 * principal, 0); }
+
     function _terms(uint256 id, uint256 face, uint256 activated, uint32 rate, uint256 additional)
         internal view returns (BuckRenewal.Terms memory terms)
     {
@@ -1009,6 +1004,7 @@ contract JubileeRenewalTest is JubileeFundTest {
 
     function test_renewalCrystallizesActualReliefAndIssuesAgainstIncreasedCoverage() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
+        _buffer(1000e6);
         vm.warp(t0 + YEAR);
         (, uint256 cashBefore) = buck.fundBalancesScaled();
         uint256 beforeBalance = buck.balanceOf(ALICE);
@@ -1016,7 +1012,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         _approveRenewal(id, terms);
         vm.prank(ALICE);
         (uint256 relief, uint256 refund, uint256 premium) = fund.renew(id, terms);
-        assertEq(relief, cashBefore / Q);
+        assertEq(relief, cashBefore / (21 * Q));
         assertApproxEqAbs(relief, 19_801_326, 1); // independent exp(-0.02) vector
         assertEq(refund, 0);
         assertEq(premium, 0);
@@ -1024,7 +1020,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
         assertEq(principal, 1200e6 - relief);
         assertEq(seconds_, 0);
-        assertEq(buck.totalIssued(), principal);
+        assertEq(buck.totalIssued(), principal + 20_000e6);
         (uint256 face, uint256 active,) = credit.creditInfo(id);
         assertEq(face, 2000e6);
         assertEq(active, 2000e6);
@@ -1037,10 +1033,12 @@ contract JubileeRenewalTest is JubileeFundTest {
 
     function test_renewalLeavesOtherNftPrincipalAndAgeUnchanged() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
+        uint256 buffer = _credit(BOB, 20_000e6, 0);
         vm.warp(t0 + YEAR);
         uint256 other = _credit(BOB, 500e6, 0);
         vm.warp(t0 + 2 * YEAR);
         (uint256 otherPrincipal, uint256 otherSeconds) = credit.issuanceOf(other);
+        (, uint256 bufferSeconds) = credit.issuanceOf(buffer);
         BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
         _approveRenewal(id, terms);
         vm.prank(ALICE);
@@ -1048,27 +1046,25 @@ contract JubileeRenewalTest is JubileeFundTest {
         (uint256 afterPrincipal, uint256 afterSeconds) = credit.issuanceOf(other);
         assertEq(afterPrincipal, otherPrincipal);
         assertEq(afterSeconds, otherSeconds);
-        assertEq(buck.claimSeconds(), otherSeconds);
+        assertEq(buck.claimSeconds(), otherSeconds + bufferSeconds);
     }
 
-    function test_renewalConvertsItsInKindProceedsAndClearsOldReductionConsent() public {
-        (uint256 id, uint256 position, JubileeSwapPoolMock pool) = _inKindSaleFixture();
-        pool.setBehavior(0, 1e6);
+    function test_renewalKeepsBasketPositionAndClearsOldReductionConsent() public {
+        uint256 id = _credit(ALICE, 100e6, 0);
+        _buffer(100e6);
+        vm.warp(t0 + YEAR);
+        (uint256 position,,) = _invest(1e6);
+        basket.setMode(4); // Any attempted sale would revert.
+        _authorize(ALICE, id, 10e6, 0);
         (uint128 sharesBefore,) = basket.holdings(position);
         BuckRenewal.Terms memory terms = _terms(id, 120e6, 120e6, 0, 0);
         _approveRenewal(id, terms);
-        vm.expectRevert(JubileeFund.MissingRoute.selector);
         vm.prank(ALICE);
-        fund.renew(id, terms);
-        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
-        routes[0] = JubileeFund.SaleRoute({sqrtPriceLimitX96: 1, minimumNetBuck: 980_000});
-        vm.prank(ALICE);
-        (uint256 relief,,) = fund.renewWithRoutes(id, terms, routes);
+        (uint256 relief,,) = fund.renew(id, terms);
         assertGt(relief, 0);
         (uint128 sharesAfter,) = basket.holdings(position);
-        assertEq(sharesAfter, uint256(sharesBefore) - uint256(sharesBefore) / 2);
+        assertEq(sharesAfter, sharesBefore);
         assertEq(basket.inKind().balanceOf(address(fund)), 0);
-        assertEq(basket.inKind().balanceOf(address(pool)), 2e6);
         (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
         assertEq(principal, 100e6 - relief);
         assertEq(seconds_, 0);
@@ -1079,6 +1075,7 @@ contract JubileeRenewalTest is JubileeFundTest {
     function test_renewalRefundsOriginalPoolAndFundsNewPoolInFull() public {
         JubileeInsurerPoolMock original = _pool();
         uint256 id = _credit(ALICE, 1000e6, 100);
+        _buffer(1000e6);
         original.invest(100e6);
         original.setReenter(fund);
         JubileeInsurerPoolMock replacement = _pool();
@@ -1105,6 +1102,7 @@ contract JubileeRenewalTest is JubileeFundTest {
 
     function test_renewalMayImproveAnExistingKShortfall() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
+        _buffer(1000e6);
         vm.warp(t0 + YEAR);
         k.setK(0.5e18);
         BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 0, 100e6);
@@ -1118,6 +1116,7 @@ contract JubileeRenewalTest is JubileeFundTest {
 
     function test_reliefIsRecordedBeforeTermsThatWouldOtherwiseOverissue() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
+        _buffer(1000e6);
         vm.warp(t0 + YEAR);
         BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 0);
         terms.floor = 0;
@@ -1144,20 +1143,21 @@ contract JubileeRenewalTest is JubileeFundTest {
         assertGt(1000e6, credit.currentValue(id));
     }
 
-    function test_fiftyYearRenewalUsesOnlyAvailableFullValueFundCash() public {
+    function test_fiftyYearFacilityMustBeClosedInsteadOfRenewed() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
         vm.warp(t0 + 50 * YEAR);
         buck.processMaturities(1);
-        (, uint256 cash) = buck.fundBalancesScaled();
         BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 0);
         _approveRenewal(id, terms);
+        vm.expectRevert(BuckNet.FacilityMatured.selector);
         vm.prank(ALICE);
-        (uint256 relief,,) = fund.renew(id, terms);
-        assertEq(relief, cash / Q);
-        (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
-        assertEq(principal, 1000e6 - relief);
-        assertEq(seconds_, 0);
-        assertEq(buck.totalIssued(), principal);
+        fund.renew(id, terms);
+        vm.expectRevert(BuckNet.FacilityMatured.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 0, 1);
+        vm.prank(ALICE);
+        fund.closeMatured(id);
+        assertEq(buck.claimBook().deferredPrincipal(), 1000e6);
     }
 
     function test_fundingFactorIsCheckedBeforeRenewalIssuance() public {
@@ -1187,10 +1187,11 @@ contract JubileeRenewalTest is JubileeFundTest {
         uint256 factor = bound(kBp_, 1, 10_000) * 1e14;
         uint256 elapsed = bound(years_, 1, 49) * YEAR;
         uint256 id = _credit(ALICE, original, 0);
+        _buffer(original);
         vm.warp(t0 + elapsed);
         k.setK(factor);
         (, uint256 cash) = buck.fundBalancesScaled();
-        uint256 relief = cash / Q;
+        uint256 relief = cash / (21 * Q);
         uint256 newPrincipal = original - relief + additional;
         uint256 oldLimit = original * factor / 1e18;
         uint256 newLimit = 2 * original * factor / 1e18;
@@ -1204,16 +1205,17 @@ contract JubileeRenewalTest is JubileeFundTest {
         (uint256 recorded, uint256 seconds_) = credit.issuanceOf(id);
         if (newShortfall > oldShortfall) {
             assertEq(recorded, original);
-            assertEq(buck.totalIssued(), original);
+            assertEq(buck.totalIssued(), 21 * original);
         } else {
             assertEq(recorded, newPrincipal);
             assertEq(seconds_, 0);
-            assertEq(buck.totalIssued(), newPrincipal);
+            assertEq(buck.totalIssued(), newPrincipal + 20 * original);
         }
     }
 
     function test_worsenedKShortfallRollsBackTheSaleAndApprovals() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
+        _buffer(1000e6);
         vm.warp(t0 + YEAR);
         (uint256 position,,) = _invest(1e6);
         (uint128 beforeShares,) = basket.holdings(position);
@@ -1237,6 +1239,7 @@ contract JubileeRenewalTest is JubileeFundTest {
     function test_insurerLiquidityFailureRollsBackTheRenewalSale() public {
         JubileeInsurerPoolMock original = _pool();
         uint256 id = _credit(ALICE, 1000e6, 100);
+        _buffer(1000e6);
         original.invest(100e6);
         original.setFail(true);
         vm.warp(t0 + YEAR);
@@ -1335,6 +1338,7 @@ contract JubileeRenewalTest is JubileeFundTest {
     function test_reliefAndPremiumLimitsRevertAtomically() public {
         _pool();
         uint256 id = _credit(ALICE, 1000e6, 0);
+        _buffer(1000e6);
         vm.warp(t0 + YEAR);
         BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 100, 0);
         terms.minimumRelief = 1000e6;

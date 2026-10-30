@@ -220,7 +220,7 @@ def test_separate_facilities_keep_independent_issuance_and_relief_ages():
     assert_conservation(ledger)
 
 
-def test_issuance_after_fifty_year_cap_does_not_inherit_excess_claim_age():
+def test_matured_facility_requires_closure_before_a_new_facility_issues():
     ledger = DemurrageLedger()
     ledger.issue_unspent("facility", 100, "owner")
     ledger.advance(100)
@@ -229,11 +229,13 @@ def test_issuance_after_fifty_year_cap_does_not_inherit_excess_claim_age():
     assert p.relief_years == pytest.approx(5_000)
     assert ledger.quote_retirement("facility", 100).relief == pytest.approx(100)
 
-    ledger.issue_unspent("facility", 100, "owner")
-    assert ledger.quote_retirement("facility", 200).relief == pytest.approx(100)
-    ledger.advance(1)
-    assert p.buck_years == pytest.approx(10_200)
-    assert ledger.quote_retirement("facility", 200).relief == pytest.approx(104)
+    with pytest.raises(ValueError, match="matured facility"):
+        ledger.issue_unspent("facility", 100, "owner")
+    ledger.close_matured("facility", "owner")
+    ledger.issue_unspent("new facility", 100, "owner")
+    assert ledger.quote_retirement("new facility", 100).relief == 0
+    assert ledger.deferred_jubilee_principal == 100
+    assert ledger.aggregate_relief == 100
     assert_conservation(ledger)
 
 
@@ -330,7 +332,8 @@ def test_renewal_can_apply_the_proportional_payout_policy():
     ledger.issue_unspent("b", 100, "bob", credit_limit=100)
     ledger.advance(10)
     expected_relief = 100 * (1 - math.exp(-0.2))
-    renewal = ledger.renew_unspent("a", "alice", new_limit=100, new_premium_rate=0)
+    renewal = ledger.renew_unspent("a", "alice", new_limit=100, new_premium_rate=0,
+                                   payout_policy="proportional")
     assert renewal.relief == pytest.approx(expected_relief)
     assert renewal.new_principal == pytest.approx(100 - expected_relief)
     second = ledger.retire_available("b", 100, "bob")
@@ -512,7 +515,7 @@ def test_renewal_crystallizes_facility_relief_and_adds_capacity_atomically():
     unspent = ledger.unspent["owner"]
     cash = ledger.jubilee
     result = ledger.renew_unspent("facility", "owner", new_limit=150,
-                                  new_premium_rate=0.01, additional_issuance=50)
+                                  new_premium_rate=0.01, additional_issuance=50, payout_policy="proportional")
     assert result.baseline_relief == pytest.approx(20)
     assert result.relief == pytest.approx(cash)
     assert result.new_principal == pytest.approx(100 - cash + 50)
@@ -539,7 +542,7 @@ def test_renewal_lower_premium_refunds_original_insurer_pool():
     old_pool_net = ledger.accounts["pool"]
     before = ledger.insurance_nominal_sent["pool"]
     result = ledger.renew_unspent("facility", "owner", new_limit=120,
-                                  new_premium_rate=0.01, new_insurance_principal=5)
+                                  new_premium_rate=0.01, new_insurance_principal=5, payout_policy="proportional")
     assert result.insurance_principal_released == 10
     assert result.insurance_refunded == pytest.approx(old_pool_net)
     assert result.insurance_funded == 5
@@ -580,7 +583,7 @@ def test_failed_renewal_rolls_back_jubilee_sale_and_all_new_terms():
     before = copy.deepcopy(ledger.__dict__)
     with pytest.raises(ValueError, match="worsen the issued-credit shortfall"):
         ledger.renew_unspent("facility", "owner", new_limit=110,
-                             new_premium_rate=0.01, additional_issuance=50)
+                             new_premium_rate=0.01, additional_issuance=50, payout_policy="proportional")
     assert ledger.__dict__ == before
     assert_conservation(ledger)
 
@@ -1166,25 +1169,27 @@ def test_cli_reports_underfunded_and_acquired_cases(capsys):
     assert "Strategy return: 10.000000" in output
     assert "aggregate baseline shortfall: 26.787944" in output
     assert main(["--years", "50", "--deploy-fund", "--wipe-strategy",
-                 "--retire", "50", "--redeem-fraction", "0.25"]) == 0
+                 "--retire", "50", "--redeem-fraction", "0.25", "--payout-policy", "proportional"]) == 0
     output = capsys.readouterr().out
     assert "Sold 25.00% of strategy units for 0.000000 BUCK" in output
     assert "relief 0.000000, debtor payment 50.000000" in output
     assert main(["--years", "50", "--deploy-fund", "--wipe-strategy",
-                 "--retire", "50"]) == 0
+                 "--retire", "50", "--payout-policy", "proportional"]) == 0
     output = capsys.readouterr().out
     assert "Sold 50.00% of strategy units for 0.000000 BUCK" in output
     assert main(["--years", "50", "--deploy-fund", "--wipe-strategy",
-                 "--retire", "100", "--redeem-fraction", "1"]) == 0
+                 "--retire", "100", "--redeem-fraction", "1", "--payout-policy", "proportional"]) == 0
     output = capsys.readouterr().out
     assert "relief 0.000000, debtor payment 100.000000" in output
 
 
-def test_cli_defaults_to_proportional_and_reserve_remains_explicit(capsys):
-    assert main(["--years", "10", "--retire", "50", "--json"]) == 0
+def test_cli_defaults_to_marked_and_reserve_remains_explicit(capsys):
+    assert main(["--years", "10", "--retire", "5", "--json"]) == 0
     default = json.loads(capsys.readouterr().out)["available_retirement"]
-    assert default["payout_policy"] == "proportional"
-    assert default["relief"] == pytest.approx(50 * (1 - math.exp(-0.2)))
+    assert default["payout_policy"] == "marked"
+    assert default["relief"] == pytest.approx(5 * (1 - math.exp(-0.2)))
+    with pytest.raises(SystemExit):
+        main(["--years", "10", "--retire", "50", "--json"])
     assert main(["--years", "10", "--retire", "50", "--payout-policy", "reserve", "--json"]) == 0
     comparison = json.loads(capsys.readouterr().out)["available_retirement"]
     assert comparison["payout_policy"] == "reserve"

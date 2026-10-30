@@ -16,6 +16,7 @@ contract BuckNetQuoter {
     uint256 private constant K_SCALE = 1e18;
     uint256 private constant BP = 10_000;
     uint256 private constant POOL_ROI_INV = 10;
+    uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
 
     BuckNet public immutable token;
 
@@ -56,7 +57,10 @@ contract BuckNetQuoter {
             return (presentCoverage, premium, reserveRequired, 0);
         }
         uint256 limit = Math.min(Math.mulDiv(presentCoverage, k.currentBuckK(), K_SCALE), BuckTypes.MAX_BALANCE);
-        (uint256 prior,) = credit.issuanceOf(tokenId);
+        (uint256 prior, uint256 seconds_) = credit.issuanceOf(tokenId);
+        if (prior != 0 && seconds_ == prior * RELIEF_SECONDS) {
+            return (presentCoverage, premium, reserveRequired, 0);
+        }
         uint256 room = limit > prior ? limit - prior : 0;
         (uint256 held, uint256 unspent) = token.heldAndUnspentScaled(owner);
         uint256 accountRoom = (BuckTypes.MAX_BALANCE * SCALE - held - unspent) / SCALE;

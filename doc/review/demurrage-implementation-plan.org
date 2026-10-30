@@ -67,29 +67,24 @@ must not be disturbed.
 
 * Decisions and invariants
 
-The following earlier decisions describe the current prototype. The
-liquidity-only settlement and maturity work below supersedes its sale-on-claim
-behavior; until that work is complete, the old entry points still sell.
-
-- [X] Choose proportional available relief as the default: the selected share
-  of pre-sale net cash plus net proceeds from selling the same fraction of the
-  Jubilee position, capped by principal. Reserve-ratio payout remains an
-  explicit comparison only. No sale, zero proceeds or zero fund cash is valid.
+- [X] Use the selected share of net cash plus the marked basket position,
+  capped by principal, as the default relief. Pay only from existing cash and
+  revert if the payout exceeds 10% of that net cash. The old proportional-sale
+  and reserve-ratio formulas remain reference comparisons.
 - [X] =balanceOf= is the full spendable amount. An ordinary account's held and
   issued-but-unspent net BUCK are simultaneously spendable; Carrying senders
   transfer nominal units with the proportional fee. New, not-yet-issued credit
   capacity is separate. Transfers do not retire any facility implicitly.
 - [X] A facility's outstanding issued principal and integral of BUCK-seconds
   belong to the selected BuckCredit NFT, not to an account-sign state. Issued
-  but unspent BUCK start incurring demurrage immediately. Actual relief is not
-  an unconditional promise of the 2% target.
+  but unspent BUCK start incurring demurrage immediately. Early actual relief
+  is not an unconditional promise of the 2% target; at maturity the fund
+  assumes any unburned principal when the lien is released.
 - [X] Jubilee is a separate Carrying fund and holds at most one adjustable
-  basket receipt. Sell before calculating actual relief. Gross up the nominal
-  Carrying outflow to deliver the full net amount. If a sale is partial or
-  in-kind, count actual net BUCK and keep unsold shares in the fund; never
-  bypass low-K exits or fabricate proceeds. The current cash-only deferral
-  does not preserve an individual owner's claim on those shares' future
-  recovery, a remaining policy limitation described below.
+  basket receipt. The keeper sells separately when cash is below target;
+  reductions and renewals do not sell. Gross up the nominal Carrying outflow
+  to deliver full net relief. A partial or in-kind keeper sale counts actual
+  net BUCK, preserves unsold shares and never bypasses low-K exits.
 - [X] Each insurer receives its own facilities' *full-value* premium deposits;
   a release returns the agreed *nominal* deposit with the pool's average
   carried demurrage from the same recorded pool. No cross-insurer subsidy.
@@ -125,21 +120,23 @@ The user also requires that a 50-year-old facility can release its lien and
 refund its premium from its own insurer pool, even when its owner has spent
 all issued BUCK. A strict per-transaction liquidity limit alone cannot ensure
 that outcome: the facility may be large relative to the fund, the basket can
-  be illiquid or lose value, and a final raw-unit remainder cannot always be
-  split. Insurer refunds can independently be illiquid. The owner cannot be
-  assumed to hold the BUCK issued by the facility. The user chose to release
-  the matured lien and record any unburned issuance as an explicit Jubilee
-  obligation, retaining it in supply until the fund burns it. Maturity is when
-  the facility's pooled average issuance age reaches 50 years; individual
-  top-ups do not each require a separately aged tranche. The policy for
-  refund-pool insolvency still needs explicit design and tests.
+be illiquid or lose value, and a final raw-unit remainder cannot always be
+split. Insurer refunds can independently be illiquid. The owner cannot be
+assumed to hold the BUCK issued by the facility. The user chose to release
+the matured lien and record any unburned issuance as an explicit Jubilee
+obligation, retaining it in supply until the fund burns it. Maturity is when
+the facility's pooled average issuance age reaches 50 years; individual
+top-ups do not each require a separately aged tranche. An unpaid insurer
+refund remains a claim on the original pool and can be retried.
 
 - [X] Implement and test a separately authorized keeper sale when the liquid
   reserve is below target, with explicit share, route and minimum-proceeds
   bounds and atomic rollback. It must not bypass a low-K basket exit.
-- [ ] Validate the basket's net mark and implement the proposed age-weighted
-  marked-portfolio formula for reductions and renewals without selling; enforce
-  the 10% net-liquidity cap and owner's minimum on the actual net relief.
+- [X] Implement the age-weighted marked-portfolio formula for reductions and
+  renewals without selling; enforce the 10% net-liquidity cap and owner's
+  minimum on actual net relief in both the fund and token.
+- [ ] Audit net-mark accuracy, stale or manipulated prices, executable value
+  and the effects of repeated withdrawals against a marked portfolio.
 - [X] Correct the experimental net basket's pool marks for Carrying BUCK fees
   using exact pool gross and net balances; verify one real V3 pool after an
   idle period and retain the legacy basket path. The full fair-mark and
@@ -153,6 +150,9 @@ that outcome: the facility may be large relative to the fund, the basket can
 - [ ] Rework the independent Python reference, integration tests and paper;
   stress large/small facilities, a poor or illiquid basket, claim ordering,
   refunds, concurrent maturity and keeper liveness.
+- [X] Update the Python reference, CLI and paper for marked cash-only
+  reductions and renewal; retain older sale-based policies as explicit
+  comparisons. Verify full 100-year fee accrual and the 50-year claim cap.
 - [X] Prototype matured-lien release, retained supply, deferred fund burns and
   deferred original-pool refunds in the independent Python reference. This
   does not yet change or validate the Solidity settlement and closure paths.
@@ -160,6 +160,10 @@ that outcome: the facility may be large relative to the fund, the basket can
   and commit each independently verified change in this worktree.
 
 ** 0. Worktree and plan
+
+The following completed milestones record prior stages and their tests. The
+current settlement policy is the no-sale design above; historical completion
+entries do not preserve the retired sale-on-claim interfaces.
 
 - [X] Start an implementation branch from the committed reference/design.
 - [X] Write and commit this checklist before contract edits.
@@ -331,12 +335,13 @@ that outcome: the facility may be large relative to the fund, the basket can
 | 2026-10-30 | Full suite | =make nix-test=: 1,312 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= were excluded because their fixtures were absent. This tests the contract prototype and quoter, not a five-year net-accounting economy. | =98c8be92= |
 | 2026-10-30 | Funding reserve | The quote suite now has 13 passing tests. An insured owner acquires BUCK in two transfers; issuance refuses until the quoted reserve is present, then succeeds while retaining that reserve. The transfers model acquisition; no market swap or household behavior is implied. | =9842aeca= |
 | 2026-10-30 | Credit wiring | Restricted one-shot =BuckCredit.setBuck= to its deployer and repaired the legacy deployment script's missing link. Two adversarial/factory tests, the 20-test BuckNet suite, an offline deployment dry run, and Python/JS world bootstrap checks passed. =make nix-test=: 1,315 passed, one fork-dependent test skipped, with the same missing-fixture SNARK/Regression exclusions. BuckCredit runtime is 24,058 bytes; this protection applies to new contracts only. | =5ecf5850= |
-| 2026-10-30 | Fresh simulation build | A clean Foundry output contains both simulation harness artifacts. Uniswap staging and simulation artifact loaders still expect the normal =out/= path even when =FOUNDRY_OUT= is overridden; the Makefile and build guide now point users to separate worktrees for isolation. | This commit |
-| 2026-10-30 | Separate reserve sale and maturity reference | Five keeper-sale tests, eight real-basket integration tests, 12 per-facility age tests and 93 Python reference tests pass. Maturity/deferred debt is modeled only in Python; Solidity reductions and renewals still use the older sale-on-claim path. | This commit |
-| 2026-10-30 | Matured lien release | Six integrated release tests cover spent-out owners, average-age maturity, retained supply, 10% deferred burns, reserve replenishment, nominal premium refunds, failed or gas-hungry insurer callbacks and later retries. Four obligation-book and 22 ledger tests pass. BuckNet links two libraries; production linking and the ordinary no-sale settlement remain unfinished. | This commit |
-| 2026-10-30 | Full maturity suite | =make nix-test=: 1,334 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= remain excluded because their fixtures are absent. These are prototype contract tests, not a five-year net-accounting economy. | This commit |
-| 2026-10-30 | Marked relief diagnostic | =make nix-venv-demurrage-test=: 98 passed. The new quote models 1.90%/2.05%, the capped-claim denominator and a 10% liquid limit. Real-basket mark and no-sale settlement remain to be implemented and verified. | This commit |
-| 2026-10-30 | Gross fees, returns and pool marks | =demurrage-returns= compares no returns and an explicitly funded, idealized 2% portfolio return without extra issuance; 102 Python tests pass. Real net-basket pool marks now use the Carrying pool's gross/net ratio: nine integration, 23 ledger and 29 legacy basket tests pass. This is not a complete valuation audit or the no-sale settlement. | This commit |
+| 2026-10-30 | Fresh simulation build | A clean Foundry output contains both simulation harness artifacts. Uniswap staging and simulation artifact loaders still expect the normal =out/= path even when =FOUNDRY_OUT= is overridden; the Makefile and build guide now point users to separate worktrees for isolation. | =516fa98d= |
+| 2026-10-30 | Separate reserve sale and maturity reference | Five keeper-sale tests, eight real-basket integration tests, 12 per-facility age tests and 93 Python reference tests passed. At that stage maturity was modeled only in Python and Solidity still used sale on claim. | =bd0f8f1f= |
+| 2026-10-30 | Matured lien release | Six integrated release tests cover spent-out owners, average-age maturity, retained supply, 10% deferred burns, reserve replenishment, nominal premium refunds, failed or gas-hungry insurer callbacks and later retries. Four obligation-book and 22 ledger tests passed. BuckNet links two libraries; production linking remains unfinished. | =bb7a9811= |
+| 2026-10-30 | Full maturity suite | =make nix-test=: 1,334 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= remained excluded because their fixtures were absent. These were prototype contract tests, not a five-year net-accounting economy. | =bb7a9811= |
+| 2026-10-30 | Marked relief diagnostic | =make nix-venv-demurrage-test=: 98 passed. The quote modeled 1.90%/2.05%, the capped-claim denominator and a 10% liquid limit. | =bb7a9811= |
+| 2026-10-30 | Gross fees, returns and pool marks | =demurrage-returns= compares no returns and an explicitly funded, idealized 2% portfolio return without extra issuance; 102 Python tests passed. Real net-basket pool marks use the Carrying pool's gross/net ratio: nine integration, 23 ledger and 29 legacy basket tests passed. This did not constitute a complete valuation audit. | =41323ac1= |
+| 2026-10-30 | Marked, cash-limited settlement | Reductions and renewals use the age-weighted mark, do not sell the receipt, and are subject to the 10% net-cash limit in fund and token. Keeper sale/conversion tests were migrated. The model/CLI defaults match; 105 Python tests pass. The real basket rejects missing TWAP history. The maturity-aware quoter and 100-year uncapped-fee/capped-claim cases pass. =make nix-test=: 1,345 passed, one fork-dependent test skipped; generated SNARK and regression fixtures remain absent. This is not a five-year economy result. | This commit |
 
 * Open implementation constraints
 
@@ -400,9 +405,9 @@ further logic needs size checks or extraction instead of assuming it will fit.
 for =Buck.sol=. It issues actual unspent BUCK against each activated NFT,
 keeps insurer deposits pinned to their original pool, and lets only the
 designated fund execute an exact, owner-authorized reduction. =JubileeFund=
-implements the proportional coordinator, tested with a mock basket and the
-cash-only real equity basket, and calls an insurer pool's liquidity preparation
-before entering locked settlement. Pool withdrawals require the pool's
+implements the marked proportional coordinator, tested with a mock basket and
+the cash-only real equity basket, and calls an insurer pool's liquidity
+preparation before entering locked settlement. Pool withdrawals require the pool's
 allowance; real insurer pool implementations still need integration. The real equity
 basket's opt-in net mode holds and invests actual BUCK without a credit
 facility; it rejects opening one. This avoids incorrectly treating incoming
@@ -410,11 +415,13 @@ BUCK as debt retirement or using unissued credit as a spendable balance. It
 does not establish leveraged basket operation or low-K exit behavior under
 the new token. One real-AMM in-kind exit is tested in the cash-only mode; more
 market and multi-asset cases remain. Its mode cannot be enabled
-after shares or credit exist. In-kind TOKEN from a new partial exit is either
-converted to net BUCK using the owner's bounded routes or the sale is deferred.
-An explicit cash-only operation leaves the unredeemed shares for later claims,
-which can redistribute future recovery; old in-kind inventory still needs a
-disposition policy. The reserve controller defaults to 10%
+after shares or credit exist. A separate keeper sale converts newly received
+in-kind TOKEN to net BUCK using bounded routes or reverts the sale; ordinary
+credit operations do not invoke it. Old in-kind inventory still needs a
+disposition policy. Marked relief deducts the basket gain fee and requires
+liquidity and a complete TWAP history for each contributing pool; this does
+not prove the mark is manipulation-resistant or executable. The reserve
+controller defaults to 10%
 of capped target relief, accumulates a budget with a one-day half-life and
 requires a transaction worth at least 1% of that target. A configured keeper
 or governance performs scheduled trades with caller-supplied slippage bounds;
@@ -435,12 +442,13 @@ The token creates an immutable =JubileeClaimBook= that alone maintains its
 aggregate capped benchmark. Only the token may synchronize an NFT, and the
 book reads principal and claim age directly from BuckCredit. Anyone can
 process due maturities either through the token or the book. The claim
-benchmark retains BUCK-seconds precision and rounds the selected
+benchmark includes deferred matured fund obligations, retains BUCK-seconds
+precision and rounds the selected
 relief only at settlement; it is not the sum of individually rounded raw-unit
 claims. Matured entries must be processed in bounded transactions before an
 exact view or change; otherwise they revert. Caller incentives, front-running,
 large-population gas, and coordination with a real
-fund sale all need explicit integration tests. A quiet or adversarially large
+fund keeper all need explicit integration tests. A quiet or adversarially large
 backlog can delay settlement until keepers process it; no assumption that all
 old facilities can be swept in one block is made.
 

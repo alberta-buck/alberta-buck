@@ -52,18 +52,18 @@ an idealized BUCK-only strategy and attributes a 10 BUCK return to a transfer
 from the holder. Strategy BUCK also pay demurrage into fund cash. This
 illustrates fund deployment, sourced returns and
 liquidation; it does not model real basket prices, impact or liquidity.
-=DEMURRAGE_ARGS="--deploy-fund --wipe-strategy --retire 50 --redeem-fraction 0.25"=
-illustrates a worthless position being partially redeemed before relief is
-computed from available cash. The default fractional redemption is requested
-baseline relief divided by total outstanding baseline relief; pass
-=--redeem-fraction= to compare another rule, or =--redemption-basis issuance=
-for the credit reduction divided by total issued BUCK. The default payout uses
-the selected fraction of pre-sale cash plus actual sale proceeds. Pass
-=--payout-policy reserve= with =--retire= to compare the original 10% reserve
-signal, which can award the first reducer too much when the fund holds
-uninvested cash. The isolated =BuckNet= and =JubileeFund= prototype implements
-proportional settlement, but still requires leveraged-basket and full-system
-validation; the [[file:doc/review/credit-facility-accounting-design.org][contract design]] explains the ordering failure and tradeoffs.
+=DEMURRAGE_ARGS="--retire 5"= exercises the marked-portfolio payout without a
+sale. The requested net relief must fit within 10% of liquid fund cash; a
+larger request reports an error instead of silently reducing the payout.
+For the earlier sale-based comparison, use
+=DEMURRAGE_ARGS="--deploy-fund --wipe-strategy --retire 50 --redeem-fraction 0.25 --payout-policy proportional"=.
+In that comparison the default redemption fraction is the requested baseline
+relief divided by total outstanding baseline relief; =--redemption-basis issuance=
+compares the share of total issued BUCK. =--payout-policy reserve= retains an
+older reserve-ratio comparison. The isolated =BuckNet= and =JubileeFund=
+prototype implements marked, cash-limited settlement, but still requires
+oracle, leveraged-basket and full-system validation; the
+[[file:doc/review/jubilee-marked-relief.org][marked-relief design]] explains the calculation and tradeoffs.
 =make nix-venv-demurrage-test= tests issuance, independent facility histories,
 atomic renewal, insurer-specific nominal refunds, proportional redemption,
 Carrying fund payouts, long-idle accounts, and fund self-demurrage.

@@ -25,10 +25,10 @@ interface IBuckNetReserveHook {
 
 /// @notice Experimental integration of net BUCK accounting and per-NFT credit.
 /// @dev NOT A DEPLOYMENT TARGET: leveraged basket compatibility, production
-///      deployment/migration, in-kind asset conversion, real insurer liquidity
+///      deployment/migration, valuation safeguards, real insurer liquidity
 ///      and fractional event semantics remain incomplete.
 ///      Fund-authorized reductions trust the designated coordinator to apply
-///      the proportional policy; the owner separately authorizes each request.
+///      its marked proportional policy; the owner separately authorizes each request.
 contract BuckNet is IERC20, IERC20Metadata {
     using BuckLedger for BuckLedger.Ledger;
 
@@ -36,6 +36,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     uint256 private constant K_SCALE = 1e18;
     uint256 private constant BP = 10_000;
     uint256 private constant POOL_ROI_INV = 10;
+    uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
 
     BuckCredit public immutable buckCredit;
     IBuckNetK public immutable buckK;
@@ -98,6 +99,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error InsufficientAllowance();
     error NotRegistry();
     error ReliefLiquidityLimit();
+    error FacilityMatured();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -215,7 +217,8 @@ contract BuckNet is IERC20, IERC20Metadata {
         uint256 factor = buckK.fundingFactor();
         if (premium != 0 && preFunding < Math.mulDiv(premium, factor, K_SCALE)) revert FundingInsufficient();
         principal = spendable + premium;
-        (uint256 oldPrincipal,) = buckCredit.issuanceOf(tokenId);
+        (uint256 oldPrincipal, uint256 oldSeconds) = buckCredit.issuanceOf(tokenId);
+        if (oldPrincipal != 0 && oldSeconds == oldPrincipal * RELIEF_SECONDS) revert FacilityMatured();
         if (oldPrincipal + principal > Math.mulDiv(afterValue, k, K_SCALE)) revert CreditExceeded();
 
         address pool;
@@ -258,8 +261,8 @@ contract BuckNet is IERC20, IERC20Metadata {
         emit ReductionAuthorized(msg.sender, tokenId, principal, minimumReliefScaled, deadline);
     }
 
-    /// @notice Settle a same-insurer renewal after the fund's proportional
-    ///         sale and original pool's liquidity preparation. `relief` is
+    /// @notice Settle a same-insurer renewal after the original pool's
+    ///         liquidity preparation. `relief` is
     ///         whole full-value raw BUCK; no other facility is touched.
     function renewFromJubilee(address owner, uint256 tokenId, BuckRenewal.Terms calldata terms, uint256 relief)
         external nonReentrant returns (uint256 refund, uint256 premium)
@@ -268,7 +271,10 @@ contract BuckNet is IERC20, IERC20Metadata {
         if (!identity.isVerified(owner) || identity.isCarrying(owner)) revert NotVerified();
         if (!identity.isVerified(jubilee) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
         (uint256 oldPrincipal, bytes32 digest) = renewalConsent.checkRenewal(owner, tokenId, terms);
+        (, uint256 oldSeconds) = buckCredit.issuanceOf(tokenId);
+        if (oldPrincipal != 0 && oldSeconds == oldPrincipal * RELIEF_SECONDS) revert FacilityMatured();
         if (relief < terms.minimumRelief || relief > oldPrincipal) revert BadAuthorization();
+        _enforceReliefLimit(relief * FRACTION_SCALE);
         claimBook.totalSeconds();
         uint256 k = buckK.compute();
         uint256 oldLimit = Math.mulDiv(buckCredit.currentValue(tokenId), k, K_SCALE);
@@ -326,11 +332,11 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     /// @notice Complete a pre-authorized reduction after the Jubilee manager
-    ///         has sold its proportional position and prepared insurer funds.
+    ///         has quoted marked relief and prepared insurer funds.
     /// @dev Only the configured coordinator may call it. The coordinator must
-    ///      compute proportional relief from actual proceeds; BuckNet cannot
-    ///      verify that policy itself. No basket call occurs while this token's
-    ///      reentrancy guard is held.
+    ///      compute marked proportional relief; BuckNet enforces the liquid
+    ///      cap but cannot verify the price policy itself. No basket call
+    ///      occurs while this token's reentrancy guard is held.
     function settleFromJubilee(address owner, uint256 tokenId, uint256 principal, uint256 reliefScaled)
         external nonReentrant returns (uint256 refund)
     {
@@ -341,6 +347,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         ReductionAuthorization memory auth = reductionAuthorization[tokenId];
         if (principal == 0 || principal != auth.principal || block.timestamp > auth.deadline
             || reliefScaled < auth.minimumReliefScaled) revert BadAuthorization();
+        _enforceReliefLimit(reliefScaled);
         claimBook.totalSeconds();
         (uint256 priorPrincipal,) = buckCredit.issuanceOf(tokenId);
         if (principal > priorPrincipal) revert BadAmount();
@@ -420,6 +427,11 @@ contract BuckNet is IERC20, IERC20Metadata {
 
     function _syncClaim(uint256 tokenId) private {
         claimBook.sync(tokenId);
+    }
+
+    function _enforceReliefLimit(uint256 reliefScaled) private view {
+        (, uint256 net) = _book.fundParts();
+        if (reliefScaled > net / 10) revert ReliefLiquidityLimit();
     }
 
     function _refundPremium(address owner, uint256 tokenId, uint256 amount) private {
