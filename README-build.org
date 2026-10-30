@@ -46,6 +46,10 @@ requires network access. Existing locked Nix tools and installed dependencies ca
 For ordinary edits, rerun the affected build, not the entire first-checkout sequence. Contracts
 build into =out/=; kernels into =core/python/buck_core/= and =core/js/kernel/=; browser output
 into =core/js/sandbox/dist/=. These generated products are not committed.
+Simulation builds and their artifact loaders expect this checkout's =out/=;
+the Uniswap staging script does not follow a =FOUNDRY_OUT= override. Use a
+separate worktree for an isolated simulation build rather than pointing only
+Foundry at a different output directory.
 
 * Tests
 

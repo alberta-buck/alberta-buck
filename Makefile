@@ -799,6 +799,8 @@ sim-report:
 #      (required for BuckBasket's deep call stack).  Skips the 0.7.6
 #      trigger to avoid the IR-incompatibility error.
 # Both profiles share the same ``out/`` directory.
+# The simulation loaders and Uniswap staging also expect out/; FOUNDRY_OUT
+# alone does not redirect them. Use a separate worktree for isolated builds.
 sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
 	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
