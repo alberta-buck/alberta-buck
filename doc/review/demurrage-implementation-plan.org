@@ -156,8 +156,11 @@ refund remains a claim on the original pool and can be retried.
 - [X] Prototype matured-lien release, retained supply, deferred fund burns and
   deferred original-pool refunds in the independent Python reference. This
   does not yet change or validate the Solidity settlement and closure paths.
-- [ ] Complete targeted and full required tests, record remaining exclusions,
-  and commit each independently verified change in this worktree.
+- [X] Run the locally available full contract suite, including the generated
+  proof and regression fixtures, and record the fork-dependent exclusion.
+  Continue committing each independently verified change in this worktree.
+- [ ] Run the fork-dependent coverage with a suitable RPC and complete the
+  outstanding integration, simulation and production-readiness checks below.
 
 ** 0. Worktree and plan
 
@@ -339,7 +342,8 @@ entries do not preserve the retired sale-on-claim interfaces.
 | 2026-10-30 | Marked relief diagnostic | =make nix-venv-demurrage-test=: 98 passed. The quote modeled 1.90%/2.05%, the capped-claim denominator and a 10% liquid limit. | =bb7a9811= |
 | 2026-10-30 | Gross fees, returns and pool marks | =demurrage-returns= compares no returns and an explicitly funded, idealized 2% portfolio return without extra issuance; 102 Python tests passed. Real net-basket pool marks use the Carrying pool's gross/net ratio: nine integration, 23 ledger and 29 legacy basket tests passed. This did not constitute a complete valuation audit. | =41323ac1= |
 | 2026-10-30 | Marked, cash-limited settlement | Reductions and renewals use the age-weighted mark, do not sell the receipt, and are subject to the 10% net-cash limit in fund and token. Keeper sale/conversion tests were migrated. The model/CLI defaults match; 105 Python tests pass. The real basket rejects missing TWAP history. The maturity-aware quoter and 100-year uncapped-fee/capped-claim cases pass. =make nix-test=: 1,345 passed, one fork-dependent test skipped; generated SNARK and regression fixtures remain absent. This is not a five-year economy result. | =58239bad= |
-| 2026-10-30 | Controlled reserve flow | A 30-day on-chain test starts with 10,000 BUCK of one-year-old issuance, adds 10 BUCK and retires 1 BUCK per day, and executes the investment schedule. Net fee inflow exceeds paid relief, excess is invested and no basket shares are sold. This scripted, mock-basket case is not evidence that real five-year economies behave the same way. | This commit |
+| 2026-10-30 | Controlled reserve flow | A 30-day on-chain test starts with 10,000 BUCK of one-year-old issuance, adds 10 BUCK and retires 1 BUCK per day, and executes the investment schedule. Net fee inflow exceeds paid relief, excess is invested and no basket shares are sold. This scripted, mock-basket case is not evidence that real five-year economies behave the same way. | =515662a3= |
+| 2026-10-30 | Full suite with proof fixtures | =make nix-test=: 1,421 passed, zero failed and one fork-dependent test skipped. Small ignored proof and regression fixtures were copied from the existing local checkout after checking that its committed verifiers and proof vectors matched this branch; trusted-setup keys were neither copied nor regenerated. The fixtures use the project's development setup. This is contract coverage, not a five-year net-accounting economy or a production security audit. | This commit |
 
 * Open implementation constraints
 
