@@ -147,6 +147,23 @@ The present tests establish these mechanisms, not how often a realistic
 economy needs to invoke them. No running keeper or five-year =BuckNet= economy
 has yet been integrated.
 
+* Insurer callback ordering
+
+An original insurer pool may need to restore its nominal deposit before a
+reduction or renewal. That preparation is an external callback, so it can
+change markets or other relevant state while the fund's reentrancy lock is
+held. Previously the fund quoted the basket before calling the pool; a
+controlled callback then changed the basket value and the stale amount was
+still paid. Both paths now perform preparation after initial authorization
+checks and before taking the marked quote. Renewal rechecks its owner/insurer
+consent and principal snapshot after the callback. The token checks the owner,
+minimum, liquidity cap and K constraints at settlement. A callback loss that
+violates the owner's minimum reverts the callback and settlement together.
+
+The test basket's controllable loss models an external market change; it is
+not itself an open withdrawal path in the real basket. The real-basket oracle,
+callback and market assumptions still require a broader adversarial audit.
+
 * What the current basket can and cannot establish
 
 =BuckBasketEquity.valueOf(id)= currently returns the fund's share of equity

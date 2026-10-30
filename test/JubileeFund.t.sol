@@ -194,6 +194,30 @@ contract JubileeInsurerPoolMock {
     }
 }
 
+/// @dev A refund callback can make external market changes before restoring
+///      its own funds. The mock basket's loss stands in for such a change.
+contract JubileeMarketChangingInsurer {
+    IERC20 public immutable token;
+    JubileeInsurerStrategyMock public immutable strategy;
+    JubileeBasketMock public immutable basket;
+    address public immutable recipient;
+    uint256 public loss;
+
+    constructor(IERC20 token_, JubileeBasketMock basket_, address recipient_) {
+        token = token_;
+        basket = basket_;
+        recipient = recipient_;
+        strategy = new JubileeInsurerStrategyMock();
+    }
+    function approveToken() external { token.approve(address(token), type(uint256).max); }
+    function invest(uint256 amount) external { token.transfer(address(strategy), amount); }
+    function setLoss(uint256 amount) external { loss = amount; }
+    function prepareRefund(uint256, uint256 nominalRequired) external {
+        if (loss != 0) basket.realizeLoss(recipient, loss);
+        strategy.send(token, address(this), nominalRequired - token.balanceOf(address(this)));
+    }
+}
+
 contract JubileeFundTest is Test {
     uint256 constant YEAR = 365 days + 6 hours;
     uint256 constant Q = 1e36;
@@ -1000,6 +1024,68 @@ contract JubileeRenewalTest is JubileeFundTest {
         consent.propose(id, digest);
         vm.prank(ALICE);
         consent.authorize(id, digest);
+    }
+
+    function _changingMarketFixture() internal returns (uint256 id, JubileeMarketChangingInsurer pool) {
+        pool = new JubileeMarketChangingInsurer(IERC20(address(buck)), basket, BOB);
+        _bind(address(pool), true, INSURER);
+        _bind(address(pool.strategy()), true, INSURER);
+        vm.prank(INSURER);
+        buck.setInsurerPool(address(pool));
+        pool.approveToken();
+        id = _credit(ALICE, 1000e6, 100);
+        _buffer(1000e6);
+        pool.invest(100e6);
+        vm.warp(t0 + YEAR);
+        _invest(200e6);
+        pool.setLoss(100e6);
+    }
+
+    function _quoteAfterMarketLoss(uint256 id, uint256 principal) internal returns (uint256 quote) {
+        uint256 snapshot = vm.snapshotState();
+        basket.realizeLoss(BOB, 100e6);
+        (quote,,) = fund.previewRelief(id, principal);
+        assertTrue(vm.revertToState(snapshot));
+    }
+
+    function test_reductionQuotesAfterInsurerCallbackChangesTheBasketMark() public {
+        (uint256 id,) = _changingMarketFixture();
+        (uint256 stale,,) = fund.previewRelief(id, 500e6);
+        uint256 current = _quoteAfterMarketLoss(id, 500e6);
+        assertLt(current, stale);
+        _authorize(ALICE, id, 500e6, 0);
+        vm.prank(ALICE);
+        (uint256 paid,) = fund.reduce(id, 500e6);
+        assertEq(paid, current);
+    }
+
+    function test_callbackPriceDropBelowOwnerMinimumRollsBackEverything() public {
+        (uint256 id, JubileeMarketChangingInsurer pool) = _changingMarketFixture();
+        (uint256 minimum,,) = fund.previewRelief(id, 500e6);
+        _authorize(ALICE, id, 500e6, minimum);
+        uint256 oldBasket = basket.valueOf(fund.positionId());
+        uint256 oldStrategy = buck.balanceOf(address(pool.strategy()));
+        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.reduce(id, 500e6);
+        assertEq(basket.valueOf(fund.positionId()), oldBasket);
+        assertEq(buck.balanceOf(address(pool.strategy())), oldStrategy);
+        assertEq(buck.balanceOf(address(pool)), 0);
+        assertEq(buck.premiumPrincipal(id), 100e6);
+        (uint256 authorized,,) = buck.reductionAuthorization(id);
+        assertEq(authorized, 500e6);
+    }
+
+    function test_renewalQuotesAfterInsurerCallbackChangesTheBasketMark() public {
+        (uint256 id,) = _changingMarketFixture();
+        (uint256 stale,,) = fund.previewRelief(id, 1000e6);
+        uint256 current = _quoteAfterMarketLoss(id, 1000e6);
+        assertLt(current, stale);
+        BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 100, 0);
+        _approveRenewal(id, terms);
+        vm.prank(ALICE);
+        (uint256 paid,,) = fund.renew(id, terms);
+        assertEq(paid, current / Q);
     }
 
     function test_renewalCrystallizesActualReliefAndIssuesAgainstIncreasedCoverage() public {

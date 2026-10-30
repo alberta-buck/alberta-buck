@@ -140,6 +140,8 @@ refund remains a claim on the original pool and can be retried.
 - [X] Add an interim spot/TWAP deviation guard using the basket's configured
   bounded tolerance; refuse stale-mark reductions and renewals and test retry
   after price convergence. Keep the broader oracle and liveness audit open.
+- [X] Prepare insurer refund liquidity before taking a reduction/renewal
+  mark, and test callback-driven price changes, consent and full rollback.
 - [X] Correct the experimental net basket's pool marks for Carrying BUCK fees
   using exact pool gross and net balances; verify one real V3 pool after an
   idle period and retain the legacy basket path. The full fair-mark and
@@ -354,6 +356,7 @@ entries do not preserve the retired sale-on-claim interfaces.
 | 2026-10-30 | Real-pool mark versus sale | Four new real-V3 cases, for both token orderings and with/without a price shock, pass within the 14-test equity integration suite. After ten years of carried fees, the controlled normal sale received about 6,216 BUCK on a 6,248 BUCK mark; immediately after a large TOKEN sale it received about 3,842 BUCK on the same mark. An authorized reduction also paid the stale mark before TWAP caught up. This exposes an interim oracle guard and broader valuation audit as deployment prerequisites; it is not a prediction of live-market losses. | =b7f99bc1= |
 | 2026-10-30 | Interim mark guard | Reductions and renewals now reject spot/TWAP divergence outside the basket's configured band; a zero or greater-than-10% band and invalid prices are unavailable. The real-pool tests cover both token orderings, rises and falls, successful retry after convergence, small permitted moves, and 50-year lien release during a separate dislocation. Exact-band and one-unit-over tests pass. =make nix-match-Jubilee=: 184 passed; =make nix-test=: 1,431 passed and one fork test skipped; the final additional maturity assertions separately pass in all 18 equity-integration tests. The demurrage PDF and text were regenerated. A sustained manipulation and denial of service remain open concerns. | =ab2e6c96= |
 | 2026-10-30 | Linked net-contract smoke | Python and browser-safe JS link creation bytecode by qualified library name and validate missing, invalid, overlapping and unresolved references against common vectors. =make nix-venv-net-demurrage-smoke=: four Python and three JS tests pass; the actual Anvil/Tevm fixtures issue 100 BUCK, age one year and retire one BUCK. Python compares with the independent reference. The broader Python core suite passes 45 tests, and five relevant JS tests including the legacy world pass. Static K, zero premium, no market or household and a cash-only basket mean this is not five-year validation. | =3ba19785= |
+| 2026-10-30 | Insurer callback ordering | A controlled callback changed the basket after the old quote, reproducing stale relief in both reduction and renewal. Liquidity preparation now precedes the marked quote; renewal rechecks consent and principal, and one-use forwarding wrappers were removed. Callback-driven repricing and owner-minimum rollback pass in the 59-test renewal suite. The full oracle and callback audit remains open. | This commit |
 
 * Open implementation constraints
 

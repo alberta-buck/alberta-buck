@@ -292,24 +292,20 @@ contract JubileeFund is IERC721Receiver {
     function reduce(uint256 tokenId, uint256 principal)
         external configured nonReentrant returns (uint256 reliefScaled, uint256 premiumRefund)
     {
-        return _reduce(tokenId, principal);
-    }
-
-    function _reduce(uint256 tokenId, uint256 principal)
-        private returns (uint256 reliefScaled, uint256 premiumRefund)
-    {
         BuckCredit credit = token.buckCredit();
         if (credit.ownerOf(tokenId) != msg.sender) revert NotOwner();
         (uint256 authorized,, uint64 deadline) = token.reductionAuthorization(tokenId);
         if (principal == 0 || principal != authorized || block.timestamp > deadline) revert BadAuthorization();
         (uint256 priorPrincipal,) = credit.issuanceOf(tokenId);
         if (principal > priorPrincipal) revert BadAmount();
+        // Pool liquidity preparation is an external call and can change
+        // market state. Price the relief only after that callback completes.
+        _prepareRefund(tokenId, principal, priorPrincipal);
         _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
         reliefScaled = _markedRelief(principal, selected, total, cashBefore);
         if (reliefScaled > cashBefore / 10) revert ReliefLiquidityLimit();
-        _prepareRefund(tokenId, principal, priorPrincipal);
         premiumRefund = token.settleFromJubilee(msg.sender, tokenId, principal, reliefScaled);
         _checkpointReserve();
         emit ReliefPaid(msg.sender, tokenId, principal, selected, total, reliefScaled, premiumRefund);
@@ -321,15 +317,13 @@ contract JubileeFund is IERC721Receiver {
     function renew(uint256 tokenId, BuckRenewal.Terms calldata terms)
         external configured nonReentrant returns (uint256 relief, uint256 refund, uint256 premium)
     {
-        return _renew(tokenId, terms);
-    }
-
-    function _renew(uint256 tokenId, BuckRenewal.Terms calldata terms)
-        private returns (uint256 relief, uint256 refund, uint256 premium)
-    {
         (uint256 principal,) = token.renewalConsent().checkRenewal(msg.sender, tokenId, terms);
         (, uint256 seconds_) = token.buckCredit().issuanceOf(tokenId);
         if (principal != 0 && seconds_ == principal * RELIEF_SECONDS) revert BuckNet.FacilityMatured();
+        _prepareRefund(tokenId, principal, principal);
+        // The callback can affect other contracts; verify the consent and
+        // principal snapshot again before taking the post-callback mark.
+        (principal,) = token.renewalConsent().checkRenewal(msg.sender, tokenId, terms);
         _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
@@ -337,7 +331,6 @@ contract JubileeFund is IERC721Receiver {
         relief = available / Q;
         if (relief * Q > cashBefore / 10) revert ReliefLiquidityLimit();
         if (relief < terms.minimumRelief) revert BadAuthorization();
-        _prepareRefund(tokenId, principal, principal);
         (refund, premium) = token.renewFromJubilee(msg.sender, tokenId, terms, relief);
         _checkpointReserve();
         emit RenewalRelief(msg.sender, tokenId, relief, refund, premium);
