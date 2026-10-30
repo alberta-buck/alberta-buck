@@ -52,6 +52,22 @@ contract BuckCreditIssuanceAgeTest is Test {
         assertEq(credit.issuanceRelief(old, 1_000_000e6), 60_000e6);
     }
 
+    function test_fixedIssuanceAccruesEverySecondAndStopsAtFiftyYears() public {
+        uint256 issued = 1_000_000e6;
+        uint256 id = _facility(issued);
+        credit.recordIssuanceFromBuck(id, ALICE, issued);
+        uint256[7] memory elapsed = [uint256(1), 60, 1 days, YEAR, 50 * YEAR - 1, 50 * YEAR, 51 * YEAR];
+        for (uint256 i; i < elapsed.length; ++i) {
+            vm.warp(t0 + elapsed[i]);
+            uint256 effectiveSeconds = elapsed[i] > 50 * YEAR ? 50 * YEAR : elapsed[i];
+            (uint256 principal, uint256 buckSeconds) = credit.issuanceOf(id);
+            assertEq(principal, issued);
+            assertEq(buckSeconds, issued * effectiveSeconds);
+            // The public target is in whole raw BUCK units and rounds down.
+            assertEq(credit.issuanceRelief(id, issued), issued * effectiveSeconds / (50 * YEAR));
+        }
+    }
+
     function test_additionalIssuanceDilutesAgeWithinOneFacility() public {
         uint256 id = _facility(200e6);
         credit.recordIssuanceFromBuck(id, ALICE, 100e6);

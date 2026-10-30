@@ -242,7 +242,7 @@ DEMURRAGE_ARGS ?=
 demurrage-reference:
 	python -m alberta_buck.sim.demurrage_reference $(DEMURRAGE_ARGS)
 demurrage-test:
-	python -m pytest alberta_buck/test/test_demurrage_reference.py -q
+	python -m pytest alberta_buck/test/test_demurrage_*.py -q
 
 
 # ── Documentation rendering ─────────────────────────────────────────

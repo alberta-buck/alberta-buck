@@ -173,6 +173,12 @@ class DemurrageLedger:
         self.insurance_nominal_sent: dict[str, float] = {}
         self.insurance_strategies: dict[str, str] = {}
         self.positions: dict[str, Position] = {}
+        # A matured lien may be released before the fund can burn its BUCK.
+        # The deferred principal is still issued supply and still pays
+        # demurrage. Premium refunds remain owed by the original insurer pool.
+        self.deferred_jubilee_principal = 0.0
+        self.closed_positions: set[str] = set()
+        self.pending_insurance_refunds: dict[str, tuple[str, str, float]] = {}
         self.gross_demurrage = 0.0
         self.from_holders = 0.0
         self.recycled_by_jubilee = 0.0
@@ -200,7 +206,7 @@ class DemurrageLedger:
 
     @property
     def issued(self) -> float:
-        return sum(p.principal for p in self.positions.values())
+        return self.deferred_jubilee_principal + sum(p.principal for p in self.positions.values())
 
     @property
     def jubilee(self) -> float:
@@ -219,14 +225,17 @@ class DemurrageLedger:
     @property
     def aggregate_relief(self) -> float:
         """Total capped claims if all credit positions retire now."""
-        return sum(min(p.principal, self.rate * p.relief_years)
-                   for p in self.positions.values())
+        return self.deferred_jubilee_principal + sum(
+            min(p.principal, self.rate * p.relief_years) for p in self.positions.values()
+        )
 
     def issue(self, position: str, amount: float, recipient: str) -> None:
         """Create BUCK against a position and deliver it to a holder."""
         amount = _positive(amount, "amount")
         if not position or not recipient:
             raise ValueError("position and recipient must be nonempty")
+        if position in self.closed_positions:
+            raise ValueError("a closed facility cannot issue again")
         p = self.positions.setdefault(position, Position())
         if p.owner is not None:
             raise ValueError("use issue_unspent for an owned credit position")
@@ -286,6 +295,8 @@ class DemurrageLedger:
             premium_rate = _nonnegative(premium_rate, "premium_rate")
         if not position or not owner or owner in FUND_ACCOUNTS:
             raise ValueError("position and non-fund owner must be specified")
+        if position in self.closed_positions:
+            raise ValueError("a closed facility cannot issue again")
         if owner in self.insurance_carried_fee:
             raise ValueError("this reference requires non-Carrying facility owners")
         p = self.positions.get(position)
@@ -608,6 +619,56 @@ class DemurrageLedger:
         # Integral(rate * fund balance dt): the fund pays this to itself.
         self.recycled_by_jubilee += gross - incoming
         self.time += years
+
+    def close_matured(self, position: str, owner: str) -> tuple[float, float]:
+        """Release a fully aged lien and defer its unburned BUCK to Jubilee.
+
+        No fund assets are sold and no owner's BUCK are spent. The original
+        pool refunds its nominal deposit immediately if it can do so;
+        otherwise its obligation remains claimable independently of the lien.
+        Returns the deferred principal and net premium actually refunded.
+        """
+        p = self.positions[position]
+        if p.owner != owner:
+            raise ValueError("credit position belongs to a different owner")
+        if not p.principal or _exceeds_float(p.principal, self.rate * p.relief_years):
+            raise ValueError("the facility's average issuance age has not reached maturity")
+        principal = p.principal
+        refund = 0.0
+        if p.insurance_principal:
+            _, available = self._quote_insurance_nominal(p.insurance_pool, p.insurance_principal)
+            if available is None:
+                self.pending_insurance_refunds[position] = (owner, p.insurance_pool, p.insurance_principal)
+            else:
+                refund = self._return_insurance_nominal(p.insurance_pool, owner, p.insurance_principal)
+        self.deferred_jubilee_principal += principal
+        del self.positions[position]
+        self.closed_positions.add(position)
+        return principal, refund
+
+    def claim_matured_insurance_refund(self, position: str, owner: str) -> float:
+        """Claim a deferred nominal refund from the recorded insurer pool."""
+        beneficiary, pool, nominal = self.pending_insurance_refunds[position]
+        if beneficiary != owner:
+            raise ValueError("refund belongs to a different owner")
+        net = self._return_insurance_nominal(pool, owner, nominal)
+        del self.pending_insurance_refunds[position]
+        return net
+
+    def burn_deferred_jubilee(self, amount: float) -> None:
+        """Burn deferred supply using at most 10% of pre-operation fund cash."""
+        amount = _positive(amount, "amount")
+        if _exceeds_float(amount, self.deferred_jubilee_principal):
+            raise ValueError("burn exceeds deferred Jubilee principal")
+        if _exceeds_float(amount, self.jubilee * 0.1):
+            raise InsufficientFunds("burn exceeds 10% of liquid Jubilee BUCK")
+        carried = amount * self.jubilee_carried_fee / self.jubilee
+        self.accounts[JUBILEE] -= amount
+        self.jubilee_carried_fee -= carried
+        self.jubilee_fee_realized += carried
+        self.jubilee_nominal_sent += amount + carried
+        self.fund_relief_paid += amount
+        self.deferred_jubilee_principal -= amount
 
     def quote_retirement(self, position: str, amount: float) -> RetirementQuote:
         """Quote the fixed 2% baseline, for comparison with available relief."""

@@ -108,6 +108,8 @@ contract JubileeFund is IERC721Receiver {
     error ReserveBudgetExceeded();
     error TimestampOverflow();
     error NotInvestmentKeeper();
+    error ReserveNotDeficient();
+    error SaleMinOut();
     error NotSelf();
     error BadRoute();
     error MissingRoute();
@@ -202,6 +204,30 @@ contract JubileeFund is IERC721Receiver {
         if (spent > budget || spent > excess) revert ReserveBudgetExceeded();
         if (spent < threshold) revert ReserveBelowThreshold();
         _spendBudget(spent);
+        _checkpointReserve();
+    }
+
+    /// @notice Replenish a below-target reserve in a transaction separate
+    ///         from credit settlement. Governance or its keeper selects an
+    ///         exact maximum number of receipt shares and bounds the actual
+    ///         net BUCK proceeds, including any in-kind conversions.
+    /// @dev Sale prices are not known beforehand, so a bounded sale may put
+    ///      the reserve above target. Normal scheduled investing can later
+    ///      use that excess. Underwater basket exits remain no-ops unless a
+    ///      positive minimum is requested; other failures revert atomically.
+    function redeemScheduled(uint256 requestedShares, uint256 minimumNetBuck, SaleRoute[] calldata routes)
+        external configured nonReentrant returns (uint256 proceedsScaled)
+    {
+        if (msg.sender != governance && msg.sender != investmentKeeper) revert NotInvestmentKeeper();
+        (uint256 target,,) = _checkpointReserve();
+        (, uint256 cashBefore) = token.fundBalancesScaled();
+        if (cashBefore >= target) revert ReserveNotDeficient();
+        uint256 id = positionId;
+        if (id == 0 || requestedShares == 0) revert BadAmount();
+        (uint256 beforeShares,) = basket.holdings(id);
+        if (requestedShares > beforeShares) revert BadAmount();
+        proceedsScaled = _sellShares(id, requestedShares, beforeShares, cashBefore, routes, false);
+        if (proceedsScaled / Q < minimumNetBuck) revert SaleMinOut();
         _checkpointReserve();
     }
 
@@ -411,6 +437,12 @@ contract JubileeFund is IERC721Receiver {
         (uint256 beforeShares,) = basket.holdings(id);
         uint256 requested = Math.mulDiv(beforeShares, selected, total);
         if (requested == 0) return 0;
+        return _sellShares(id, requested, beforeShares, cashBefore, routes, acceptDeferred);
+    }
+
+    function _sellShares(uint256 id, uint256 requested, uint256 beforeShares, uint256 cashBefore,
+                         SaleRoute[] memory routes, bool acceptDeferred) private returns (uint256 proceeds)
+    {
         try this.attemptSale(id, requested, beforeShares, routes)
             returns (bool underwater, uint256 newId, uint256 retired, uint256 remaining)
         {

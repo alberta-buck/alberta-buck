@@ -124,6 +124,26 @@ contract JubileeEquityIntegrationTest is Test {
         assertEq(buck.totalIssued(), 150e6);
     }
 
+    function test_keeperReplenishesReserveFromTheRealSingleReceipt() public {
+        _credit(ALICE, 1_000_000e6);
+        vm.warp(t0 + YEAR);
+        (uint256 id,,) = _invest(19_000e6);
+        (uint128 sharesBefore,) = basket.holdings(id);
+        (, uint256 cashBefore) = buck.fundBalancesScaled();
+        (uint256 target,,) = fund.previewReserve();
+        assertLt(cashBefore, target);
+        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](0);
+        vm.prank(GOV);
+        uint256 proceeds = fund.redeemScheduled(1_000e6, 990e6, routes);
+        (, uint256 cashAfter) = buck.fundBalancesScaled();
+        (uint128 sharesAfter,) = basket.holdings(id);
+        assertEq(cashAfter - cashBefore, proceeds);
+        assertGe(proceeds, 990e6 * Q);
+        assertEq(sharesAfter, sharesBefore - 1_000e6);
+        assertEq(fund.positionId(), id);
+        assertEq(basket.receipt().ownerOf(id), address(fund));
+    }
+
     function test_renewalSellsRealBasketSharesBeforeUpdatingTheFacility() public {
         uint256 a = _credit(ALICE, 100e6);
         _credit(BOB, 100e6);
