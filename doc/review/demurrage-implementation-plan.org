@@ -17,6 +17,8 @@ The proposed holder-and-insurer authorization, premium settlement and rounding
 for renewal are in [[file:atomic-renewal-design.org][the atomic renewal design]].
 The [[file:carrying-mode-transition.org][Carrying-mode transition note]] records the registry callback and its
 conservation and credit-owner restrictions.
+The [[file:jubilee-inkind-conversion.org][in-kind conversion note]] records the remaining payout-ordering issue and
+the planned bounded TOKEN-to-BUCK conversion path.
 
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
@@ -206,6 +208,9 @@ must not be disturbed.
 - [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
   fund-to-basket interactions, in-kind/partial/zero exits and transaction
   rollback. Do not relax low-K constraints.
+- [ ] Convert the selected sale's in-kind TOKEN into actual net BUCK with
+  owner-specified bounds, or defer that sale atomically without losing its
+  shares. Do not attribute one claimant's TOKEN proceeds to another claimant.
 - [ ] Integrate and verify Buck, BuckCredit, Jubilee, basket and insurer
   contracts together; update deployment paths and interfaces.
 - [ ] Resolve and test how a leveraged basket prices its own Jubilee claim

@@ -1,0 +1,47 @@
+#+TITLE: Jubilee in-kind redemption and BUCK conversion
+#+DATE: 2026-10-29
+#+OPTIONS: ^:nil toc:2
+
+* The issue
+
+The equity basket can return some TOKEN rather than BUCK when a receipt is
+redeemed. The current experimental fund counts only net BUCK as relief and
+retains the TOKEN. If that TOKEN is later converted or otherwise appreciated,
+a subsequent claimant can receive its value even though it was paid out of the
+earlier claimant's proportional redemption. The earlier claimant receives no
+BUCK for it. This ordering effect must be addressed before relying on the fund
+with a real multi-asset basket.
+
+* Proposed implementation
+
+Use the actual basket constituent pool to convert only TOKEN received by this
+particular redemption. The facility owner supplies a per-constituent V3 price
+limit and a minimum *net* BUCK receipt, and retains the existing minimum total
+relief bound. The fund snapshots each constituent TOKEN balance before the
+sale, so pre-existing inventory cannot be spent for this claimant. It measures
+the fund's net BUCK before and after all transfers and conversions; pool
+nominal transfers are not mistaken for full-value receipts. The actual net
+proceeds, plus the selected share of pre-sale net cash, determine relief.
+
+Execute the sale and conversions in an external self-call, so failure to find
+a route for any newly received TOKEN can roll back just that sale and preserve
+all its shares. In that case a claimant who accepts the resulting relief may
+still reduce using their share of available pre-sale cash. An explicit price or
+minimum-output failure should revert the owner's entire transaction rather
+than silently weakening their bound. No low-K basket check is bypassed.
+
+A V3 callback must accept payment only from the exact basket pool currently
+being used, for the selected constituent TOKEN, no more than the newly received
+amount. Consume all of that amount or roll back the sale: a partial swap must
+not strand residual TOKEN and allocate its later value to another facility.
+Keep the fund's outer reentrancy lock, and accept self-call entry only from the
+fund itself during that locked action. Any old in-kind inventory from the
+prototype is not retroactively attributed to a new claimant; production
+migration needs an explicit disposition for such assets.
+
+This is a proposed extension, not yet implemented or validated. Test a real V3
+in-kind exit, partial or zero proceeds, bad routes and price limits, Carrying
+pool fees, fee-on-transfer TOKEN, callback forgery/reentrancy, multi-asset
+sales, rollback, renewals and both claim orders. Carefully distinguish a
+no-route sale deferred without losing shares from a successful TOKEN-to-BUCK
+sale that delivers genuinely zero BUCK.
