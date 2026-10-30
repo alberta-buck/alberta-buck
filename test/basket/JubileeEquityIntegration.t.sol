@@ -365,22 +365,38 @@ contract JubileeEquityIntegrationTest is Test {
     }
 
     function test_agedPoolSaleAgainstMarkWithBuckAsToken0() public {
-        _compareAgedPoolSaleWithMark(true, false);
+        _compareAgedPoolSaleWithMark(true, 0);
     }
 
     function test_agedPoolSaleAgainstMarkWithBuckAsToken1() public {
-        _compareAgedPoolSaleWithMark(false, false);
+        _compareAgedPoolSaleWithMark(false, 0);
     }
 
-    function test_poolShockMakesTwapMarkExceedExecutableValueWithBuckAsToken0() public {
-        _compareAgedPoolSaleWithMark(true, true);
+    function test_poolDropBlocksStaleReliefWithBuckAsToken0() public {
+        _compareAgedPoolSaleWithMark(true, 1);
     }
 
-    function test_poolShockMakesTwapMarkExceedExecutableValueWithBuckAsToken1() public {
-        _compareAgedPoolSaleWithMark(false, true);
+    function test_poolDropBlocksStaleReliefWithBuckAsToken1() public {
+        _compareAgedPoolSaleWithMark(false, 1);
     }
 
-    function _compareAgedPoolSaleWithMark(bool buckIs0, bool shock) private {
+    function test_poolRiseBlocksStaleReliefWithBuckAsToken0() public {
+        _compareAgedPoolSaleWithMark(true, 2);
+    }
+
+    function test_poolRiseBlocksStaleReliefWithBuckAsToken1() public {
+        _compareAgedPoolSaleWithMark(false, 2);
+    }
+
+    function test_smallPoolMoveAllowsReliefWithBuckAsToken0() public {
+        _compareAgedPoolSaleWithMark(true, 3);
+    }
+
+    function test_smallPoolMoveAllowsReliefWithBuckAsToken1() public {
+        _compareAgedPoolSaleWithMark(false, 3);
+    }
+
+    function _compareAgedPoolSaleWithMark(bool buckIs0, uint8 shock) private {
         _bind(address(this), false, address(this));
         uint256 facility = _credit(ALICE, 2_000_000e6);
         vm.prank(ALICE);
@@ -415,23 +431,49 @@ contract JubileeEquityIntegrationTest is Test {
         vm.warp(t0 + 11 * YEAR);
         (uint256 poolGross, uint256 poolNet) = buck.accountBalancesScaled(pool);
         assertLt(poolNet * 100, poolGross * 85);
-        if (shock) {
+        if (shock != 0) {
             (uint256 reliefBefore,,) = fund.previewRelief(facility, 10_000e6);
             // The pool has the required TWAP history, but an external TOKEN
-            // sale can move spot before that historical average catches up.
-            IPool(pool).swap(address(this), !buckIs0, int256(500_000e18),
-                buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1, "");
-            (uint256 reliefAfter,, bool overLimit) = fund.previewRelief(facility, 10_000e6);
-            assertFalse(overLimit);
-            assertApproxEqRel(reliefAfter, reliefBefore, 1e9);
-            // Show that a real reduction can pay that stale value, without
-            // changing the state used for the following sale comparison.
+            // or BUCK sale can move spot before that average catches up.
+            bool zeroForOne = shock == 2 ? buckIs0 : !buckIs0;
+            int256 input = shock == 1 ? int256(500_000e18)
+                : shock == 2 ? int256(100_000e6) : int256(5_000e18);
+            IPool(pool).swap(address(this), zeroForOne, input,
+                zeroForOne ? MIN_SQRT + 1 : MAX_SQRT - 1, "");
+            if (shock == 3) {
+                (uint256 normalRelief,, bool normalOverLimit) = fund.previewRelief(facility, 10_000e6);
+                assertFalse(normalOverLimit);
+                assertGt(normalRelief, 0);
+                _authorize(ALICE, facility, 10_000e6, 0);
+                vm.prank(ALICE);
+                (uint256 paid,) = fund.reduce(facility, 10_000e6);
+                assertEq(paid, normalRelief);
+                return;
+            }
+            vm.expectRevert(JubileeFund.MarkPriceDeviation.selector);
+            fund.previewRelief(facility, 10_000e6);
+            _assertRenewalBlocked(facility);
+            // An authorized reduction is blocked without consuming its
+            // authorization; after the TWAP catches up it can be retried.
+            // Restore the snapshot afterward for the sale comparison.
             uint256 snapshot = vm.snapshotState();
             _authorize(ALICE, facility, 10_000e6, 0);
+            vm.expectRevert(JubileeFund.MarkPriceDeviation.selector);
+            vm.prank(ALICE);
+            fund.reduce(facility, 10_000e6);
+            (uint256 authorized,,) = buck.reductionAuthorization(facility);
+            assertEq(authorized, 10_000e6);
+            vm.warp(block.timestamp + 601);
+            (uint256 reliefAfter,, bool overLimit) = fund.previewRelief(facility, 10_000e6);
+            assertFalse(overLimit);
+            if (shock == 1) assertLt(reliefAfter, reliefBefore);
+            else assertGt(reliefAfter, reliefBefore);
             vm.prank(ALICE);
             (uint256 paid,) = fund.reduce(facility, 10_000e6);
             assertEq(paid, reliefAfter);
             assertTrue(vm.revertToState(snapshot));
+            if (shock == 2) return;
+            _assertMaturedReleaseDuringPriceDislocation(facility, asset, pool, buckIs0);
         }
         vm.prank(GOV);
         fund.setReserveParameters(10_000, 100);
@@ -457,7 +499,7 @@ contract JubileeEquityIntegrationTest is Test {
         emit log_named_uint("actual net BUCK", proceeds / Q);
         assertGt(proceeds, 0);
         assertLt(proceeds, requestedMark * Q);
-        if (shock) assertLt(proceeds, requestedMark * Q * 8 / 10);
+        if (shock == 1) assertLt(proceeds, requestedMark * Q * 8 / 10);
         else assertGt(proceeds, requestedMark * Q * 98 / 100);
         assertEq(asset.balanceOf(address(fund)), 0);
         (, uint256 cashAfter) = buck.fundBalancesScaled();
@@ -465,5 +507,48 @@ contract JubileeEquityIntegrationTest is Test {
         (uint128 remaining,) = basket.holdings(id);
         assertEq(remaining, shares - requested);
         assertEq(fund.positionId(), id);
+    }
+
+    function _assertRenewalBlocked(uint256 facility) private {
+        BuckRenewalConsent consent = buck.renewalConsent();
+        BuckRenewal.Terms memory terms = BuckRenewal.Terms({
+            face: 2_000_000e6, floor: 2_000_000e6, activatedFace: 2_000_000e6,
+            additionalIssuance: 0, maxPremium: 0, minimumRelief: 0,
+            expectedPrincipal: 2_000_000e6, expectedCreditHash: consent.currentCreditTermsHash(facility),
+            depType: BuckCredit.DepreciationType.NONE, depRate: 0, depStartAt: 0,
+            premiumRate: 0, deadline: uint64(block.timestamp + YEAR)
+        });
+        bytes32 digest = consent.renewalDigest(ALICE, facility, terms);
+        vm.prank(INSURER);
+        consent.propose(facility, digest);
+        vm.prank(ALICE);
+        consent.authorize(facility, digest);
+        vm.expectRevert(JubileeFund.MarkPriceDeviation.selector);
+        vm.prank(ALICE);
+        fund.renew(facility, terms);
+        assertEq(consent.proposal(facility), digest);
+        assertEq(consent.authorization(facility), digest);
+    }
+
+    function _assertMaturedReleaseDuringPriceDislocation(
+        uint256 facility, EqToken asset, address pool, bool buckIs0
+    ) private {
+        uint256 snapshot = vm.snapshotState();
+        vm.warp(t0 + 50 * YEAR);
+        buck.processMaturities(1);
+        uint256 tokenAmount = asset.balanceOf(address(this)) / 2;
+        assertGt(tokenAmount, 0);
+        IPool(pool).swap(address(this), !buckIs0, int256(tokenAmount),
+            buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1, "");
+        vm.expectRevert(JubileeFund.MarkPriceDeviation.selector);
+        fund.previewRelief(facility, 10_000e6);
+        vm.prank(ALICE);
+        uint256 released = fund.closeMatured(facility);
+        assertEq(released, 2_000_000e6);
+        assertEq(buck.claimBook().deferredPrincipal(), released);
+        assertEq(buck.totalIssued(), released);
+        vm.expectRevert();
+        credit.ownerOf(facility);
+        assertTrue(vm.revertToState(snapshot));
     }
 }

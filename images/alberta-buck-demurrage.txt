@@ -274,8 +274,13 @@ Table of Contents
   assumed by Jubilee and not yet burned. Consequently the effective rate
   is the nominal 2% multiplied by the whole-fund mark divided by the
   aggregate relief benchmark, subject to the principal cap. The isolated
-  Solidity reduction and renewal paths implement this rule; their
-  oracle, mark-to-market and executable-liquidity assumptions still
+  Solidity reduction and renewal paths implement this rule. When the
+  fund holds a basket receipt, the prototype requires each contributing
+  pool to have full TWAP history and spot within the basket's configured
+  deviation band; otherwise it pauses the reduction or renewal until
+  prices converge. This interim guard can delay transactions and does
+  not prove that a TWAP is manipulation-resistant or that the mark is
+  executable. The oracle, mark-to-market and liquidity assumptions still
   require further review and simulation. See the [marked-relief
   analysis] for a numerical example, the 50-year aggregate and valuation
   limitations.

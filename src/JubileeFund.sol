@@ -10,6 +10,7 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 import {BuckNet} from "./BuckNet.sol";
 import {BuckCredit} from "./BuckCredit.sol";
 import {IBuckBasketPosition} from "./basket/IBuckBasketPosition.sol";
+import {IBuckBasketVenue} from "./basket/IBuckBasketVenue.sol";
 import {JubileeReserveMath} from "./lib/JubileeReserveMath.sol";
 import {WideCounter} from "./lib/WideCounter.sol";
 import {BuckRenewal} from "./BuckRenewalConsent.sol";
@@ -21,6 +22,7 @@ interface IJubileeBasket is IBuckBasketPosition {
     function valueOf(uint256 id) external view returns (uint256);
     function LAMBDA_BP() external view returns (uint256);
     function twapWindow() external view returns (uint32);
+    function defaultMaxDeviationBp() external view returns (uint256);
     function liquidityOf(uint256 index) external view returns (uint128);
     function idleToken(uint256 index) external view returns (uint256);
     function constituentsLength() external view returns (uint256);
@@ -118,6 +120,7 @@ contract JubileeFund is IERC721Receiver {
     error ReserveNotDeficient();
     error SaleMinOut();
     error MarkUnavailable();
+    error MarkPriceDeviation();
     error ReliefLiquidityLimit();
     error NotSelf();
     error BadRoute();
@@ -364,9 +367,9 @@ contract JubileeFund is IERC721Receiver {
     }
 
     /// @dev Exclude the basket's accrued gain fee. Require actual TWAP history
-    ///      for every pool contributing assets; its legacy venue otherwise
-    ///      silently falls back to the manipulable spot price. A TWAP mark is
-    ///      still an estimate, not a promise of executable sale proceeds.
+    ///      and a spot price within the basket's configured TWAP band for
+    ///      every pool contributing assets. A mark inside that band is still
+    ///      an estimate, not a promise of executable sale proceeds.
     function _positionMark() private view returns (uint256 mark) {
         uint256 id = positionId;
         if (id == 0) return 0;
@@ -382,6 +385,16 @@ contract JubileeFund is IERC721Receiver {
             ages[0] = window;
             try IUniswapV3Pool(pool).observe(ages) returns (int56[] memory, uint160[] memory) {}
             catch { revert MarkUnavailable(); }
+            uint256 tolerance = basket.defaultMaxDeviationBp();
+            if (tolerance == 0 || tolerance > 1000) revert MarkUnavailable();
+            IBuckBasketVenue.Marks memory prices = IBuckBasketVenue(address(basket)).marks(i, 0);
+            if (prices.pTwap == 0 || prices.pLow == 0 || prices.pTwap < prices.pLow
+                || prices.pTwap > prices.pHigh) {
+                revert MarkUnavailable();
+            }
+            if (prices.pHigh - prices.pLow > Math.mulDiv(prices.pTwap, tolerance, BP)) {
+                revert MarkPriceDeviation();
+            }
         }
         mark = basket.valueOf(id);
         (, uint128 basis) = basket.holdings(id);

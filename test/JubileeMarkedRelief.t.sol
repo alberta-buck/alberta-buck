@@ -9,6 +9,7 @@ import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckNet} from "../src/BuckNet.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
+import {IBuckBasketVenue} from "../src/basket/IBuckBasketVenue.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {WideCounter} from "../src/lib/WideCounter.sol";
 import {NetK} from "./BuckNet.t.sol";
@@ -221,6 +222,71 @@ contract JubileeMarkedReliefTest is Test {
         assertGt(_scaled(invested), 0);
         assertEq(_scaled(sold), 0);
         assertGt(fund.positionId(), 0);
+    }
+
+    function test_markGuardAcceptsTheConfiguredBoundaryAndRejectsOneUnitBeyond() public {
+        uint256 id = _credit(ALICE, 100e6);
+        _credit(BOB, 1900e6);
+        vm.warp(t0 + YEAR);
+        vm.prank(GOV);
+        fund.invest(10e6, type(uint256).max, 0, 1);
+
+        _mockPrice(950_000, 1_000_000, 1_000_000, 500);
+        (uint256 down,,) = fund.previewRelief(id, 10e6);
+        assertGt(down, 0);
+        _mockPrice(949_999, 1_000_000, 1_000_000, 500);
+        vm.expectRevert(JubileeFund.MarkPriceDeviation.selector);
+        fund.previewRelief(id, 10e6);
+        _mockPrice(1_000_000, 1_000_000, 1_050_000, 500);
+        (uint256 up,,) = fund.previewRelief(id, 10e6);
+        assertEq(up, down);
+        _mockPrice(1_000_000, 1_000_000, 1_050_001, 500);
+        vm.expectRevert(JubileeFund.MarkPriceDeviation.selector);
+        fund.previewRelief(id, 10e6);
+    }
+
+    function test_markGuardRejectsUnboundedOrInconsistentPrices() public {
+        uint256 id = _credit(ALICE, 100e6);
+        _credit(BOB, 1900e6);
+        vm.warp(t0 + YEAR);
+        vm.prank(GOV);
+        fund.invest(10e6, type(uint256).max, 0, 1);
+
+        _mockPrice(1_000_000, 1_000_000, 1_000_000, 0);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(id, 10e6);
+        _mockPrice(1_000_000, 1_000_000, 1_000_000, 1001);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(id, 10e6);
+        _mockPrice(0, 1_000_000, 1_000_000, 500);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(id, 10e6);
+        _mockPrice(1_000_001, 1_000_000, 1_000_001, 500);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(id, 10e6);
+        _mockPrice(999_999, 1_000_000, 999_999, 500);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(id, 10e6);
+    }
+
+    function _mockPrice(uint256 low, uint256 twap, uint256 high, uint256 tolerance) private {
+        address pool = address(0x777);
+        vm.etch(pool, hex"00");
+        vm.mockCall(address(basket), abi.encodeWithSelector(IJubileeBasket.liquidityOf.selector, 0), abi.encode(1));
+        vm.mockCall(address(basket), abi.encodeWithSelector(IJubileeBasket.constituents.selector, 0),
+            abi.encode(address(0xA55E7), uint8(18), uint256(0), uint256(0), uint24(3000), pool,
+                int24(0), int24(0), true, uint256(0), uint128(0)));
+        vm.mockCall(address(basket), abi.encodeWithSelector(IJubileeBasket.defaultMaxDeviationBp.selector),
+            abi.encode(tolerance));
+        vm.mockCall(pool, abi.encodeWithSignature("liquidity()"), abi.encode(uint128(1)));
+        vm.mockCall(pool, abi.encodeWithSelector(bytes4(keccak256("observe(uint32[])"))),
+            abi.encode(new int56[](2), new uint160[](2)));
+        IBuckBasketVenue.Marks memory marks = IBuckBasketVenue.Marks({
+            posLow: 0, posTwap: 0, posHigh: 0,
+            pLow: low, pTwap: twap, pHigh: high, depth: 0
+        });
+        vm.mockCall(address(basket), abi.encodeWithSelector(IBuckBasketVenue.marks.selector, 0, uint128(0)),
+            abi.encode(marks));
     }
 
     function _scaled(WideCounter.Count memory count) private pure returns (uint256) {

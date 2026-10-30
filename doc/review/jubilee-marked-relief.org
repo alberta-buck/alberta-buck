@@ -172,14 +172,16 @@ executable, net-of-demurrage valuation of the whole receipt:
   problem is detailed in [[file:basket-jubilee-crossholding.org][the cross-holding note]].
 - The fund requires active liquidity and full TWAP history for every pool
   contributing assets; absent a price, the operation reverts instead of using
-  the venue's spot fallback. A 10% cash limit bounds one operation but does
-  not by itself prevent repeated extraction against a manipulated mark.
+  the venue's spot fallback. It also requires spot and TWAP to be within the
+  basket's configured nonzero deviation band (at most 10%). A 10% cash limit
+  bounds one operation but does not by itself prevent repeated extraction
+  against a manipulated mark.
 
-Before using the mark for on-chain relief, compare quotes to actual real-pool
-withdrawals and conversions with demurrage, liquidity, fees and TWAP history;
-specify freshness/manipulation protection and how a keeper restores the reserve.
-The Python mark experiment assumes an ideal, BUCK-only strategy and cannot
-establish those properties.
+Before deploying marked on-chain relief, broaden the comparison of quotes to
+actual real-pool withdrawals and conversions, and audit manipulation,
+liquidity, fees and how a keeper restores the reserve. The Python mark
+experiment assumes an ideal, BUCK-only strategy and cannot establish those
+properties.
 
 ** Real-pool shock observation
 
@@ -196,14 +198,23 @@ BUCK as token0, the controlled example gives:
 
 The result is similar with the opposite token ordering. In the shock case the
 existing historical TWAP has not yet moved, even though the spot market and
-executable proceeds have. The test also executes an authorized credit reduction
-before the TWAP catches up: the old mark is accepted and paid from the liquid
-reserve. It uses a snapshot to compare that path with the independent sale.
+executable proceeds have. Before the guard was added, commit =b7f99bc1= also
+demonstrated an authorized reduction paying that old mark from the liquid
+reserve. The current test preserves the separate sale comparison and confirms
+that reductions and renewals are refused while the prices diverge. After the
+600-second TWAP window catches up, the reduction can be retried; small moves
+inside the configured band remain permitted. Both token orders and price
+directions are covered. Another dislocation at 50 years blocks an ordinary
+quote but leaves mature lien release and its deferred Jubilee obligation
+available in both token orders.
 
-This establishes a concrete overvaluation risk for the current prototype.
-The 10% cash limit caps an individual payout, not repeated payouts. The exact
-loss in a live market is not established by this isolated pool or single swap;
-liquidity, external prices, execution, slippage and other participants matter.
-An interim price-deviation guard, its recovery after the TWAP catches up, and
-its denial-of-service and manipulated-TWAP limits should be tested before
-settlement is considered ready for deployment.
+The interim band prevents that particular stale-price payout, but the 10% cash
+limit caps an individual payout, not repeated payouts. A sustained manipulated
+price can move both spot and TWAP together; a thin pool can also have a poor
+executable price inside the band. Conversely, a legitimate or adversarial
+large spot move can delay ordinary reductions and renewals until the prices
+reconverge. Matured lien release remains independent of the mark. The exact
+loss or delay in a live market is not established by this isolated pool or
+single swap; liquidity, external prices, execution, slippage and other
+participants matter. An independent price policy, manipulation costs and
+executable-value protections remain deployment prerequisites.
