@@ -341,7 +341,8 @@ th{text-align:left;position:sticky;top:0;background:white}td:nth-child(n+3){text
 <p>Each run links to its PDF and source JSON. Open this index directly in a browser; no server is needed.</p>
 <p>BVIB is the final 90-calendar-day mean: above 1 means the BUCK is cheap against the basket, below 1 means dear.
 K and the synthetic borrowers' activated limit are final-frame values. Refinanced counts people who ever deployed
-credit, not continuing issuers. Frames precede the forced end-of-run teardown.</p>
+credit, not continuing issuers. Batch frames precede the forced end-of-run teardown; interactive diagnostic
+runs do not perform that teardown.</p>
 ''' + f'<p>{len(records)} reports.</p><table><thead><tr><th>PDF / run</th><th>Data</th><th>BUCK accounting</th><th>Pages</th><th>Last day</th>'
                       '<th>BVIB</th><th>K</th><th>Large borrowers: limit (BUCKs)</th><th>Ever issued / cohort</th>'
                       '</tr></thead><tbody>' + "\n".join(rows) + '</tbody></table></html>\n')

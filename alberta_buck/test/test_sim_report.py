@@ -193,6 +193,7 @@ def test_index_links_stay_relative_and_escape_filenames(tmp_path):
     assert "a &amp; b" in text
     assert "1.0100" in text and "2/3" in text
     assert "unrecorded" in text
+    assert "interactive diagnostic" in text and "do not perform that teardown" in text
     record["buck_accounting"]    = "legacy-signed (Buck<fixture>)"
     report.write_index([record], target)
     assert "legacy-signed (Buck&lt;fixture&gt;)" in target.read_text()
