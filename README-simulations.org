@@ -65,6 +65,12 @@ proof that the contract prototype is production-ready. See [[file:alberta-buck-d
 the remaining policy and contract decisions. The proposed token, facilities,
 fund, insurer pools, and basket changes are in the [[file:doc/review/credit-facility-accounting-design.org][contract design]].
 
+The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,
+pre-issuance reserve and available credit for a particular NFT. It has contract
+tests, but neither household implementation calls it yet. It is a current
+estimate rather than a guarantee that an issue transaction will succeed; the
+[[file:doc/review/net-demurrage-simulation-migration.org][migration checklist]] lists its remaining integration and execution checks.
+
 * The household default
 
 =adaptive= saves through BUCK deposits, reducing new purchases as the BUCK becomes expensive.

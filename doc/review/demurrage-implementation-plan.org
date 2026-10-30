@@ -41,6 +41,7 @@ make nix-match-BuckLedgerTest
 make nix-match-BuckCredit
 make nix-match-JubileeClaimsTest
 make nix-match-BuckNetTest
+make nix-match-BuckNetQuoteTest
 make nix-match-JubileeFundTest
 make nix-match-JubileeRenewalTest
 make nix-match-JubileeEquityIntegrationTest
@@ -164,6 +165,9 @@ must not be disturbed.
 - [X] Connect the NFT hooks to issuance and reductions in an isolated token
   prototype. Exercise K changes, premium flows, independent facilities,
   funding-factor checks, owner authorization and long-idle retirement.
+- [X] Add an optional shared read-only issuance estimate for Python/JS clients,
+  including current coverage, premium, funding reserve and numerical bounds.
+  The token does not depend on it; the agents and deployments still need wiring.
 - [X] Move the aggregate capped-claim heap into a token-owned contract that
   fetches each facility's actual NFT data, rejects unauthorized updates, and
   permits bounded public maturity processing. Preserve the token's views.
@@ -263,7 +267,9 @@ must not be disturbed.
 | 2026-10-29 | Full suite | =make nix-test=: 1,299 passed, one fork-dependent test skipped; generated SNARK suites and =RegressionTest.sol= were excluded because their fixtures were absent. This validates the conversion prototype, not the five-year economy. | =a9766ee0= |
 | 2026-10-29 | Cross-holding | Added exact fixed-point and dilution diagnostics to the existing demurrage reference. All 88 reference tests pass; the illustrative 10-BUCK entry gains 1.875 BUCK immediately if the claim is ignored. Liquid relief can be lower than the idealized mark. | =c512b396= |
 | 2026-10-29 | Simulation readiness | Mapped legacy Python/JS integration and replacement acceptance checks. Newly saved vectors, PDFs and indexes record the actual BUCK model; unnamed five-year batch/server/TUI runs save unique JSON and PDFs, with diagnostic-only TUI labeling, failure recovery and serialized server rendering. Economy/report tests: 21 passed; expanded report suite: 12 passed. Household Python: 114 passed; JS: 21 passed; server: 19 passed. These use legacy accounting. | =4274de72= |
-| 2026-10-30 | Fifty-year integration | =make nix-match-JubileeMaturityIntegrationTest=: one passed. Sixteen simultaneously matured NFTs block the real fund's sale until four public bounded batches clear the benchmark; authorization, cash, shares and owner balance survive every refusal. The eventual relief equals the selected cash and actual sale proceeds and remains below the full target. The basket is a controlled mock. | This commit |
+| 2026-10-30 | Fifty-year integration | =make nix-match-JubileeMaturityIntegrationTest=: one passed. Sixteen simultaneously matured NFTs block the real fund's sale until four public bounded batches clear the benchmark; authorization, cash, shares and owner balance survive every refusal. The eventual relief equals the selected cash and actual sale proceeds and remains below the full target. The basket is a controlled mock. | =e97ab0ba= |
+| 2026-10-30 | Issuance quote | Optional stateless =BuckNetQuoter= supplies per-NFT current coverage, premium, reserve and bounded issuance capacity without bloating or modifying the token. Twelve quote tests pass, including 256 fuzzed comparisons against real issuance; 20 token tests pass. Runtime: BuckNet 23,380 bytes, quoter 2,721. A quote is not an execution guarantee and the clients are not wired yet. | This commit |
+| 2026-10-30 | Full suite | =make nix-test=: 1,312 passed, one fork-dependent test skipped. Generated SNARK suites and =RegressionTest.sol= were excluded because their fixtures were absent. This tests the contract prototype and quoter, not a five-year net-accounting economy. | This commit |
 
 * Open implementation constraints
 
