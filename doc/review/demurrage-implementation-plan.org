@@ -260,32 +260,29 @@ entries do not preserve the retired sale-on-claim interfaces.
 ** 4. External Jubilee and integration
 
 - [X] Implement and test a coordinator against BuckNet and a controllable
-  basket: proportional pre-sale cash plus actual BUCK proceeds, one adjustable
-  receipt, full-value Carrying gross-up, owner authorization and pre-refund
-  insurer liquidity callback.
+  basket: age-weighted marked relief paid from cash, one adjustable receipt,
+  full-value Carrying gross-up, owner authorization and pre-refund insurer
+  liquidity callback.
 - [X] Connect the real equity basket to BuckNet in a restricted cash-only
   mode before deposits. Test actual fund receipt additions, partial sales,
   zero-equity sale failure, Carrying fee pricing, daily wheel dispatch and
   an in-kind exit through a real V3 pool.
-- [ ] Implement the external Carrying manager with one basket receipt and the
-  agreed proportional payout *against the real equity basket*. Bound outputs
-  to actual cash and sale proceeds; gross up Carrying payout without
-  double-crediting fund self-demurrage.
-- [ ] Connect the capped aggregate benchmark and specify final payout
-  rounding, reserve investment schedule and threshold; verify fresh inflows
-  and keeper timing.
+- [X] Exercise marked cash-limited payouts against the real cash-only equity
+  basket. Gross up Carrying payout without double-crediting fund self-demurrage.
+- [X] Connect the capped aggregate benchmark, deferred mature principal,
+  fractional reduction and whole-raw-unit renewal rounding, and the reserve
+  investment schedule and threshold in the isolated prototype.
 - [X] Implement and fuzz-test the one-day half-life budget against observed
   fund cash and capped claims. Checkpoint on issuance and fund actions; let a
   trusted keeper invest after the configured minimum with price bounds.
 - [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
   fund-to-basket interactions, in-kind/partial/zero exits and transaction
   rollback. Do not relax low-K constraints.
-- [X] Convert the selected sale's in-kind TOKEN into actual net BUCK with
-  owner-specified bounds, or defer that sale atomically without losing its
-  shares. Require explicit owner acceptance for cash-only relief.
-- [ ] Evaluate deferred entitlements for cash-only or zero-value exits, since
-  unsold shares remain available to later fund claimants; assess price impact,
-  real fee-on-transfer pools, unequal claim orders and historical in-kind inventory.
+- [X] Convert a keeper sale's newly received in-kind TOKEN into net BUCK with
+  keeper-specified bounds; failed conversion rolls back without losing shares.
+- [ ] Audit marked value versus actual liquidation and its effects on claim
+  ordering, price impact, real fee-on-transfer pools, fund insolvency, deferred
+  mature principal and historical in-kind inventory.
 - [ ] Integrate and verify Buck, BuckCredit, Jubilee, basket and insurer
   contracts together; update deployment paths and interfaces.
 - [ ] Resolve and test how a leveraged basket prices its own Jubilee claim
