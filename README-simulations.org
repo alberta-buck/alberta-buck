@@ -24,6 +24,7 @@ The remaining migration is mapped in [[file:doc/review/net-demurrage-simulation-
 | Household policy/contract tests | Do both languages make the same decisions and move real funds correctly? | =economy-test= | pytest and Node test results |
 | Routing and contract tests | Do swaps, identities, accounting, guards and interfaces work? | =test-python=, =test= | Test failures and targeted vectors |
 | Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
+| Net-contract smoke | Can Python and JS link BuckNet and exercise its basic cash-only accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
 | Fund return comparison | Can Jubilee reach its 50-year target in a closed BUCK economy? | =demurrage-returns= | No-return and explicitly funded 2% return tables |
 | Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |
@@ -71,6 +72,15 @@ The reference is a mathematical specification, not a five-year economy run or
 proof that the contract prototype is production-ready. See [[file:alberta-buck-demurrage.org][the demurrage design]] for the accounting and
 the remaining policy and contract decisions. The proposed token, facilities,
 fund, insurer pools, and basket changes are in the [[file:doc/review/credit-facility-accounting-design.org][contract design]].
+
+=make nix-venv-net-demurrage-smoke= builds the simulation artifacts and
+deploys the linked experimental =BuckNet=, separate =JubileeFund=, and
+cash-only equity basket in fresh local Python/Anvil and JavaScript/Tevm
+fixtures. Both issue 100 BUCK, advance a year and reduce the credit by one
+BUCK; Python also compares the balances and marked relief with the independent
+reference. It requires the checkout's built artifacts and JavaScript
+dependencies. The fixture has static K, no premium, no market or household,
+and no leveraged basket; it is not a five-year simulation or deployment recipe.
 
 The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,
 pre-issuance reserve and available credit for a particular NFT. It has contract

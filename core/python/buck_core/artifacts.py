@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 
@@ -34,7 +35,43 @@ def repo_root() -> Path:
         "from inside the repo checkout")
 
 
-def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
+def link_bytecode(bytecode: str, references: dict, libraries: dict[str, str]) -> str:
+    """Link Foundry's byte offsets using fully qualified ``source:Library`` names.
+
+    The artifact's creation bytecode, not its deployed-bytecode offsets, must
+    be passed here. Reject missing or malformed references rather than deploy
+    a token with an unresolved or accidentally mislinked library.
+    """
+    if not isinstance(bytecode, str) or not bytecode.startswith("0x") or len(bytecode) % 2:
+        raise ValueError("invalid creation bytecode")
+    if libraries and not references:
+        raise ValueError("library link-reference metadata unavailable")
+    data = bytecode[2:]
+    occupied: list[tuple[int, int]] = []
+    for source, named in references.items():
+        for name, locations in named.items():
+            qualified = f"{source}:{name}"
+            address = libraries.get(qualified)
+            if (not isinstance(address, str) or re.fullmatch(r"0x[0-9a-fA-F]{40}", address) is None
+                    or int(address[2:], 16) == 0):
+                raise ValueError(f"missing or invalid library address: {qualified}")
+            for location in locations:
+                start, length = location.get("start"), location.get("length")
+                if (type(start) is not int or type(length) is not int or start < 0 or length != 20
+                        or 2 * (start + length) > len(data)):
+                    raise ValueError(f"invalid library location: {qualified}")
+                end = start + length
+                if any(start < other_end and other_start < end for other_start, other_end in occupied):
+                    raise ValueError(f"overlapping library location: {qualified}")
+                occupied.append((start, end))
+                data = data[:2 * start] + address[2:].lower() + data[2 * end:]
+    if re.fullmatch(r"[0-9a-fA-F]*", data) is None:
+        raise ValueError("unresolved or invalid creation bytecode")
+    return "0x" + data
+
+
+def load_artifact(name: str, sol_file: str | None = None, *,
+                  libraries: dict[str, str] | None = None) -> tuple[list, str]:
     """Return (abi, bytecode) for a contract.
 
     Resolution order:
@@ -43,6 +80,10 @@ def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
        developer path, unchanged: a freshly built artifact always wins, so
        editing a contract and rebuilding takes effect immediately.
     2. the installed ``alberta-buck-contracts`` package.
+
+    When ``libraries`` is provided, its keys must be fully qualified
+    ``source:Library`` names from the artifact's creation link references.
+    The currently published bundle does not include that metadata.
 
     The fallback is what lets a pip-installed ``alberta_buck`` deploy a
     world at all: ``repo_root()`` raises ``FileNotFoundError`` when no
@@ -53,7 +94,10 @@ def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
     try:
         f = repo_root() / "out" / f"{sol_file or name}.sol" / f"{name}.json"
         art = json.loads(f.read_text(encoding="utf-8"))
-        return art["abi"], art["bytecode"]["object"]
+        bytecode = art["bytecode"]["object"]
+        if libraries is not None:
+            bytecode = link_bytecode(bytecode, art["bytecode"].get("linkReferences", {}), libraries)
+        return art["abi"], bytecode
     except (FileNotFoundError, OSError):
         pass
 
@@ -65,4 +109,10 @@ def load_artifact(name: str, sol_file: str | None = None) -> tuple[list, str]:
             f"(run `make build`), and alberta-buck-contracts is not installed "
             f"(pip install alberta-buck-contracts)") from None
 
-    return buck_contracts.artifact(name)
+    abi, bytecode = buck_contracts.artifact(name)
+    if libraries is not None:
+        # The published bundle currently has no link-reference metadata. A
+        # future bundle must retain it before linked contracts can be loaded
+        # outside a built checkout.
+        bytecode = link_bytecode(bytecode, {}, libraries)
+    return abi, bytecode

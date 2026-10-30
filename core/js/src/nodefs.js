@@ -31,7 +31,7 @@ export function repoRoot() {
     "set ALBERTA_BUCK_REPO or run from inside the repo checkout");
 }
 
-/** Return {abi, bytecode} for a contract.
+/** Return {abi, bytecode} for a contract, with linkReferences when needed.
  *
  *  Resolution order, mirroring buck_core.artifacts.load_artifact:
  *
@@ -47,7 +47,10 @@ export function loadArtifact(name, solFile = null) {
   try {
     const f = join(repoRoot(), "out", `${solFile ?? name}.sol`, `${name}.json`);
     const art = JSON.parse(readFileSync(f, "utf8"));
-    return { abi: art.abi, bytecode: art.bytecode.object };
+    const result = { abi: art.abi, bytecode: art.bytecode.object };
+    const refs = art.bytecode.linkReferences;
+    if (refs && Object.keys(refs).length) result.linkReferences = refs;
+    return result;
   } catch {
     // No checkout, or that contract is not built here -- try the package.
   }
@@ -68,7 +71,9 @@ export function loadArtifact(name, solFile = null) {
       `${Object.keys(bundle.contracts).join(", ")}. Third-party contracts ` +
       `(Uniswap, WETH9) come from their own packages.`);
   }
-  return { abi: c.abi, bytecode: c.bytecode };
+  const result = { abi: c.abi, bytecode: c.bytecode };
+  if (c.linkReferences) result.linkReferences = c.linkReferences;
+  return result;
 }
 
 /** A vendored third-party build (alberta_buck/sim/artifacts/<name>.json:

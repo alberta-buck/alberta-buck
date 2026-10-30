@@ -25,6 +25,7 @@ help:
 	  '  make nix-venv-demurrage-reference  # 50-year holder, Jubilee and relief accounting' \
 	  '  make nix-venv-demurrage-returns    # 50-year comparison of funded investment returns' \
 	  '  make nix-venv-demurrage-test       # reference model regression tests' \
+	  '  make nix-venv-net-demurrage-smoke  # linked BuckNet accounting, Python + JS EVM' \
 	  'Household economy (README-simulations.org):' \
 	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
 	  '  make nix-venv-economy-run CAMPAIGN=my-run CELLS=centre JOBS=2' \
@@ -247,6 +248,21 @@ demurrage-returns:
 	python -m alberta_buck.sim.jubilee_return_demo $(DEMURRAGE_ARGS)
 demurrage-test:
 	python -m pytest alberta_buck/test/test_demurrage_*.py -q
+
+# Deploy the experimental linked BuckNet + external Jubilee fund in fresh
+# Python/Anvil and JavaScript/Tevm fixtures, then exercise issuance and a
+# one-year cash-only reduction. This does not run the household economy,
+# represent an insurer, simulate a market, or validate the leveraged basket.
+#   make nix-venv-net-demurrage-smoke
+.PHONY: net-demurrage-smoke
+net-demurrage-smoke: sim-build
+	@command -v anvil >/dev/null || { echo 'anvil missing; use make nix-venv-net-demurrage-smoke'; exit 1; }
+	@for name in BuckNet BuckNetMaturity BuckNetTransfers JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic UniswapV3Factory BuckBasketEquity SimLP; do \
+	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
+	done
+	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }
+	python -m pytest core/python/tests/test_artifacts.py alberta_buck/test/test_net_demurrage_smoke.py -q
+	cd core/js && node --test test/artifacts.test.js test/net-demurrage.tevm.test.js
 
 
 # ── Documentation rendering ─────────────────────────────────────────

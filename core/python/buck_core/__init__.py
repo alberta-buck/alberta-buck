@@ -8,12 +8,12 @@ arrive as PyO3 bindings re-exported from this package.
 Dependency rule: buck_core never imports alberta_buck.
 """
 
-from buck_core.artifacts import load_artifact, repo_root
+from buck_core.artifacts import link_bytecode, load_artifact, repo_root
 from buck_core.session import (
     CALL_GAS, DEPLOY_GAS, Expect, Journal, Web3Session,
 )
 
 __all__ = [
     "CALL_GAS", "DEPLOY_GAS", "Expect", "Journal", "Web3Session",
-    "load_artifact", "repo_root",
+    "link_bytecode", "load_artifact", "repo_root",
 ]

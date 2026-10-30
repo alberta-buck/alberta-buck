@@ -4,6 +4,7 @@
 export { FIELDS, JournalWriter, parseJournal, mismatches, totalGas,
          summarize } from "./journal.js";
 export { CALL_GAS, DEPLOY_GAS, Session } from "./session.js";
+export { linkArtifact } from "./artifacts.js";
 export { DEV_KEYS, devAccount, anvilSession, tevmSession } from "./backends.js";
 export { MIN_SQRT_RATIO, MAX_SQRT_RATIO, HUGE, Q96, isqrt, sqrtPriceX96,
          fullRangeTicks, spotFromSqrtPriceX96 } from "./v3.js";

@@ -1,0 +1,12 @@
+{
+  "bytecode": "0x6000__$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$__6001__$bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb$__00",
+  "references": {
+    "src/First.sol": {"First": [{"start": 2, "length": 20}]},
+    "src/Second.sol": {"Second": [{"start": 24, "length": 20}]}
+  },
+  "libraries": {
+    "src/First.sol:First": "0x1111111111111111111111111111111111111111",
+    "src/Second.sol:Second": "0x2222222222222222222222222222222222222222"
+  },
+  "linked": "0x600011111111111111111111111111111111111111116001222222222222222222222222222222222222222200"
+}
