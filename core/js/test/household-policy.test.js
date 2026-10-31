@@ -23,11 +23,35 @@ test("net refinance requires valid explicit forecasts", () => {
   const p = profile(f.seed, "0", f.settings);
   assert.throws(() => terms({ ...f.state, accounting: "net" }, p), /explicit/);
   assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, premium_refund_fraction: 1.1 }, p), /refund fraction/);
+  const missingCapacity = { ...f.state, ...f.net_refinance[0].state };
+  delete missingCapacity.activated_capacity;
+  assert.throws(() => terms(missingCapacity, p), /activated credit capacity/);
   for (const [field, value, error] of [["expected_relief_rate", -.01, /relief/],
     ["expected_refund_growth", -1.01, /growth/], ["expected_wallet_growth", -1.01, /wallet/],
-    ["premium_refund_fraction", NaN, /fraction/]]) {
+    ["premium_refund_fraction", NaN, /fraction/], ["activated_capacity", -1, /activated credit/],
+    ["activated_capacity", NaN, /activated credit/]]) {
     assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, [field]: value }, p), error);
   }
+});
+test("net activated capacity issues without another premium", () => {
+  const p = profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 });
+  const state = { ...f.state, ...f.net_refinance.at(-1).state }, t = terms(state, p);
+  const v = refinance(t, 99000, 100000);
+  assert.equal(v.go, true);
+  assert.equal(v.coverage, 0);
+  assert.equal(v.deposit, 0);
+  assert.ok(Math.abs(v.parts.relief - 2000) < 1e-8);
+  const [kind, decision] = issuance(state, p);
+  assert.equal(kind, "refinance");
+  assert.equal(decision.go, true);
+  assert.ok(decision.buck > 0);
+  assert.equal(decision.coverage, 0);
+  assert.equal(decision.deposit, 0);
+  const mixed = terms({ ...state, spendable: 20000, activated_capacity: 30000, unactivated: 1000000 }, p);
+  const mixedV = refinance(mixed, 74000, 75000);
+  assert.ok(Math.abs(mixedV.coverage - 25000 / (mixed.k * .99 - mixed.premium_bp / 1000)) < 1e-8);
+  assert.ok(Math.abs(mixedV.parts.relief - (55000 + mixedV.deposit) * mixed.expected_relief_rate) < 1e-8);
+  assert.ok(Math.abs(mixedV.parts.wallet_carry + 20000 * mixed.expected_wallet_growth) < 1e-8);
 });
 test("household surplus policies use basket parity after trading costs", () => {
   for (const c of f.surplus) assert.equal(surplusAction(...c.slice(0, -1)), c.at(-1));

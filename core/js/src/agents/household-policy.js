@@ -214,12 +214,18 @@ function validateForecast(reliefRate, refundFraction, refundGrowth, walletGrowth
   if (!Number.isFinite(walletGrowth) || walletGrowth < -1) throw new Error("invalid expected wallet growth");
 }
 
+function validateActivatedCapacity(value) {
+  if (!Number.isFinite(value) || value < 0) throw new Error("invalid activated credit capacity");
+}
+
 export function refinance(t, usd, buck) {
   const reliefRate = t.expected_relief_rate ?? .02, refundFraction = t.premium_refund_fraction ?? 1;
   const refundGrowth = t.expected_refund_growth ?? -.02, walletGrowth = t.expected_wallet_growth ?? 0;
   validateForecast(reliefRate, refundFraction, refundGrowth, walletGrowth);
+  const activatedCapacity = t.activated_capacity ?? 0;
+  validateActivatedCapacity(activatedCapacity);
   const e = t.premium_bp / 1000, spc = t.k * .99 - e;
-  const need = Math.max(0, buck - t.headroom);
+  const need = Math.max(0, buck - t.headroom - activatedCapacity);
   const cov = need === 0 ? 0 : spc > 0 ? need / spc : Infinity;
   if (!Number.isFinite(cov)) return NO;
   const dep = cov * e, value = buck * t.buck_value, valueDep = dep * t.buck_value;
@@ -241,7 +247,7 @@ export function refinance(t, usd, buck) {
            carry, one_time, value: net, parts };
 }
 
-const capacity = (t) => t.headroom + t.unactivated * Math.max(0, t.k * .99 - t.premium_bp / 1000);
+const capacity = (t) => t.headroom + (t.activated_capacity ?? 0) + t.unactivated * Math.max(0, t.k * .99 - t.premium_bp / 1000);
 export function bestRefinance(t, ru, rb, fee) {
   if (t.debt <= 0 || capacity(t) <= 0 || ru <= 0 || rb <= 0) return NO;
   const usdMax = Math.min(t.debt, usdcOut(capacity(t) / 1.005, ru, rb, fee), .5 * ru);
@@ -281,12 +287,14 @@ export function premiumSale(cap, ru, rb, fee, basket, premium, impact) {
 
 export function terms(s, p, investment = false) {
   const net = s.accounting === "net";
-  if (net && ["expected_relief_rate", "premium_refund_fraction", "expected_refund_growth", "expected_wallet_growth"]
+  if (net && ["expected_relief_rate", "premium_refund_fraction", "expected_refund_growth", "expected_wallet_growth", "activated_capacity"]
     .some((key) => s[key] === undefined || s[key] === null)) {
-    throw new Error("net household needs explicit relief and insurer refund forecasts");
+    throw new Error("net household needs explicit forecasts and activated credit capacity");
   }
   validateForecast(s.expected_relief_rate ?? .02, s.premium_refund_fraction ?? 1,
     s.expected_refund_growth ?? -.02, s.expected_wallet_growth ?? 0);
+  const activatedCapacity = net ? s.activated_capacity : 0;
+  validateActivatedCapacity(activatedCapacity);
   return { debt: s.mortgage, rate: investment ? 0 : p.apr, face: s.face,
     premium_bp: p.premium_bp, joined: s.joined, payback_y: p.theta, k: s.k,
     headroom: s.spendable, unactivated: s.unactivated,
@@ -295,7 +303,7 @@ export function terms(s, p, investment = false) {
     risk: p.risk, opp_rate: p.apr, buck_value: s.basket_usd,
     expected_relief_rate: s.expected_relief_rate, premium_refund_fraction: s.premium_refund_fraction ?? 1,
     expected_refund_growth: s.expected_refund_growth, wallet_already_issued: net,
-    expected_wallet_growth: s.expected_wallet_growth ?? 0 };
+    expected_wallet_growth: s.expected_wallet_growth ?? 0, activated_capacity: activatedCapacity };
 }
 
 export function issuance(s, p) {

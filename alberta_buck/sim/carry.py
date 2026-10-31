@@ -131,6 +131,7 @@ class RefiTerms:
     expected_refund_growth: float | None = None  # annual change in that net refund claim
     wallet_already_issued: bool = False          # net-mode headroom is money already issued
     expected_wallet_growth: float = 0.0         # annual return on the wallet's alternative use
+    activated_capacity: float = 0.0             # new spendable issuance without more coverage or premium
 
     def __post_init__(self):
         if (self.expected_relief_rate is not None and
@@ -143,6 +144,8 @@ class RefiTerms:
             raise ValueError("invalid expected refund growth")
         if not math.isfinite(self.expected_wallet_growth) or self.expected_wallet_growth < -1:
             raise ValueError("invalid expected wallet growth")
+        if not math.isfinite(self.activated_capacity) or self.activated_capacity < 0:
+            raise ValueError("invalid activated credit capacity")
 
     @property
     def spend_per_cover(self) -> float:
@@ -152,11 +155,11 @@ class RefiTerms:
     @property
     def capacity(self) -> float:
         """The most BUCK the household can draw now."""
-        return self.headroom + self.unactivated * max(0.0, self.spend_per_cover)
+        return self.headroom + self.activated_capacity + self.unactivated * max(0.0, self.spend_per_cover)
 
     def coverage_for(self, buck: float) -> float:
         """New coverage to activate so `buck` can be drawn."""
-        need = max(0.0, buck - self.headroom)
+        need = max(0.0, buck - self.headroom - self.activated_capacity)
         if need == 0:
             return 0.0
         spc = self.spend_per_cover

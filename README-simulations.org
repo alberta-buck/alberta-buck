@@ -82,7 +82,10 @@ reference. A second case uses a dynamic K controller at a neutral reference,
 two insurer pools, a nonzero premium and the real funding reserve; both
 runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
-quote and issue. Current fund relief and the immediate mixed insurer-pool
+quote and issue, and that already-activated credit can issue without another
+premium. The shared Python/JS refinancing policy now accepts that capacity
+separately from wallet BUCK, but the new-model household world still needs to
+derive it from per-facility quotes. Current fund relief and the immediate mixed insurer-pool
 refund can also be observed at one block; these observations are not guarantees
 of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3
 diagnostic seeds BUCK/USDC, ages its

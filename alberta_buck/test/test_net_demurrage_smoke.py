@@ -301,6 +301,15 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         ops.issue(debtor.address, third_id, face, RAW)
         gross, net = buck.functions.accountBalancesScaled(pool.address).call()
         assert abs(net * 10**18 // gross - refund.refund_fraction_wad) < 10**10
+        # Already-activated facility room is new issuance, not wallet money;
+        # exercising it with zero additional coverage has no second premium.
+        before = ops.facility(third_id)
+        existing = ops.quote_issue(third_id, 0)
+        assert existing.premium == existing.reserve_required == 0 and existing.max_spendable >= RAW
+        ops.issue(debtor.address, third_id, 0, RAW)
+        after = ops.facility(third_id)
+        assert after.activated == before.activated and after.premium_nominal == before.premium_nominal
+        assert after.issued == before.issued + RAW
         _exec(chain, debtor, credit, "setCreditIssuer", [provider.address, True])
         _exec(chain, provider, credit, "createCredit", [debtor.address, 0, face, face, 0, 0, 0, 50])
         fourth_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 3).call()

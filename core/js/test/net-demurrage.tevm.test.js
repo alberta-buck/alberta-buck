@@ -251,6 +251,17 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const [gross, net] = await s.call(buck, "accountBalancesScaled", [pool.address]);
   const delta = net * 10n ** 18n / gross - refund.refundFractionWad;
   assert.ok((delta < 0n ? -delta : delta) < 10n ** 10n);
+  // Activated but unissued facility room mints new BUCK without buying
+  // additional coverage or paying the insurer premium a second time.
+  const thirdBefore = await ops.facility(thirdId), existing = await ops.quoteIssue(thirdId, 0n);
+  assert.equal(existing.premium, 0n);
+  assert.equal(existing.reserveRequired, 0n);
+  assert.ok(existing.maxSpendable >= RAW);
+  await ops.issue(debtor.address, thirdId, 0n, RAW);
+  const thirdAfter = await ops.facility(thirdId);
+  assert.equal(thirdAfter.activated, thirdBefore.activated);
+  assert.equal(thirdAfter.premiumNominal, thirdBefore.premiumNominal);
+  assert.equal(thirdAfter.issued, thirdBefore.issued + RAW);
   await exec(debtor, credit, "setCreditIssuer", [provider.address, true]);
   await exec(provider, credit, "createCredit", [debtor.address, 0, face, face, 0, 0, 0, 50]);
   const fourthId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 3n]);

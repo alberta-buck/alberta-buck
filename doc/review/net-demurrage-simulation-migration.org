@@ -62,9 +62,10 @@ It counts relief only on newly issued principal and the premium, not on money
 already in the ordinary wallet. An estimated loss of refund value is a
 one-time cost. The marked refund's opportunity cost and expected growth, plus
 the return foregone or demurrage avoided by spending wallet money, enter
-annual carry. A net-model state must supply all four forecasts; it may
-not silently inherit the legacy 2% assumptions. Legacy scenarios retain their
-prior defaults and the same policy comparisons.
+annual carry. A net-model state must supply all four forecasts and an explicit
+estimate of activated, unissued credit capacity; it may not silently inherit
+the legacy 2% assumptions or assume that this capacity is zero. Legacy
+scenarios retain their prior defaults and the same policy comparisons.
 
 These are *decision forecasts*, not guarantees or settlement quotes. A future
 net household adapter must explain how it derives and updates them from the
@@ -106,14 +107,16 @@ interactive sandbox has been migrated to it yet.
 
 For the next household issuance integration, check each NFT's already
 activated capacity with =quoteIssue(id, 0)= before activating more coverage.
-The present decision kernel counts existing wallet BUCK and unactivated
-coverage but does not yet include activated, unissued facility capacity. That
-can suppress profitable refinancing or investment even when a zero-coverage
-issue would require no new premium. Add this as a separate policy input: it is
-new issuance eligible for future relief, not wallet BUCK already issued, and
-it does not require a second premium deposit. Per-NFT quotes share numerical
-account and total-supply limits, so do not sum their maxima without applying
-those common bounds; re-quote the selected facility before execution.
+The decision kernel now accepts activated, unissued facility capacity as a
+separate input: it is new issuance eligible for future relief, not wallet BUCK
+already issued, and it does not require a second premium deposit. Real Anvil
+and Tevm tests exercise a ~coverage=0~ issue and verify that the premium and
+activated coverage do not change. The household world has not yet been wired
+to derive this input. Per-NFT quotes share numerical account and total-supply
+limits, so do not sum their maxima without applying those common bounds;
+re-quote the selected facility before execution. The current comparison uses
+wallet BUCK first; evaluating whether to retain it and issue instead when its
+alternative return is better is a separate policy choice to test.
 Quote additional coverage on the selected NFT, budget the full premium and a
 reserve buffer that can survive a block of demurrage, and compare the total
 cost of the reserve purchase with the projected benefit. A successful issue
