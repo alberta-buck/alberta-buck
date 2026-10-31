@@ -29,7 +29,7 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
   };
   const receiptFor = async (hash) => {
     const receipt = await s.client.getTransactionReceipt({ hash });
-    if (!receipt.transactionHash || receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
+    if (!receipt?.transactionHash || receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
       throw new Error("transaction hash mismatch");
     }
     return receipt;
@@ -70,6 +70,20 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
       if (receipt.status === "reverted") return { reverted: true };
       const h = holder(account);
       return { ...creditOps.reductionFromReceipt(h.account ?? h, id, principal, receipt, hash), reverted: false };
+    },
+    reconcileAuthorization: async (account, id, principal, minimumReliefScaled, deadline, hash) => {
+      const receipt = await receiptFor(hash);
+      const actual = await s.call(world.buck, "reductionAuthorization", [id]);
+      if (receipt.status === "reverted") {
+        if (actual[0]) throw new Error("authorization changed; reconcile before retrying");
+        return { reverted: true };
+      }
+      const h = holder(account);
+      creditOps.authorizationFromReceipt(h.account ?? h, { tokenId: id, principal, minimumReliefScaled }, deadline, receipt, hash);
+      if (actual[0] !== principal || actual[1] !== minimumReliefScaled || actual[2] !== deadline) {
+        throw new Error("authorization changed; reconcile before canceling");
+      }
+      return { reverted: false };
     },
     buy: async (account, amount, { minNet = 0n } = {}) => {
       const r = await buy(world, market, holder(account), amount, { minOut: minNet });

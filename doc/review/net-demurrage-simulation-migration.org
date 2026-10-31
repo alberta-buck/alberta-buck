@@ -161,7 +161,14 @@ snapshots for reliable recovery. Submitted hashes and known-revert status now
 reach the household. A caller can explicitly reconcile a saved hash against
 the mined receipt and the matching guarded-purchase or selected-facility event;
 successful repayments are recorded once, and confirmed buybacks become funds
-available to retire debt. Missing receipts leave the stop in place. Automatic
+available to retire debt. If the response to the *authorization* was lost,
+the batch records that distinct phase and any earlier successful settlements.
+Reconciliation requires the exact authorization event and still-matching
+on-chain terms; it records no repayment. A known reverted authorization can
+be cleared only after verifying no authorization is currently present. If
+the authorization did succeed, it can be explicitly canceled after that
+receipt and state are verified, subject to the single-dispatcher assumption
+below. A missing receipt or transaction hash leaves the stop in place. Automatic
 scheduling, finality/reorganization handling, hash provenance across restores
 and persistence have not yet been implemented.
 

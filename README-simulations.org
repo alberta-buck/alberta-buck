@@ -95,8 +95,11 @@ fixtures have no household economy, leveraged basket or insurer investment
 strategy; they are not a five-year simulation or deployment recipe. The same
 target runs session tests for submitted transaction hashes, mined reverts and
 correctly journaled operations that may succeed or revert. The household keeps
-the hash when available and can explicitly reconcile its matching receipt;
-automatic recovery, finality handling and snapshot persistence remain open.
+the hash when available and can explicitly reconcile its matching receipt.
+Interrupted authorizations and settlements are tracked separately; an
+authorization is never counted as repayment, and earlier completed facilities
+remain recorded if a later authorization is interrupted. Automatic recovery,
+finality handling and snapshot persistence remain open.
 The target also builds the sandbox artifact bundle and checks that a browser-safe Tevm session can link
 and deploy the new stack from it. Its single-pool guard enforces net output
 and settlement limits atomically; it is not a price oracle. The interactive sandbox is not yet migrated.

@@ -290,6 +290,105 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await agent3.saveOrPayDown(lostBuyWorld, state3, cashAfterLostBuy);
     assert.equal((await creditOps.facility(lostBuyId)).issued, 99_000_000n);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLostBuy);
+
+    // A lost authorization response must never be mistaken for settlement.
+    const authReceipts = [];
+    const lostAuthorizationOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      if (name === "authorizeReduction" && args[1]) {
+        authReceipts.push(receipt);
+        throw new TransactionReceiptPending(receipt.transactionHash);
+      }
+      return receipt;
+    });
+    const authWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: lostAuthorizationOps }) };
+    const beforePrincipal = (await creditOps.facility(lostBuyId)).issued, beforeUnwound = agent3.unwound;
+    assert.notEqual(agent3.netRepaymentReserve, null);
+    assert.equal(await agent3.retireAcquired(authWorld, 1_000_000n, 0n), 0n);
+    assert.equal(agent3.netPendingPhase, "authorization");
+    assert.ok(agent3.netPendingHash);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
+    assert.equal(agent3.unwound, beforeUnwound);
+    const auth = await s.call(world.buck, "reductionAuthorization", [lostBuyId]);
+    assert.equal(auth[0], 1_000_000n);
+    await assert.rejects(agent3.cancelPendingRepayment(authWorld), /outcome uncertain/);
+    const authPlan = { tokenId: lostBuyId, principal: auth[0], minimumReliefScaled: auth[1] };
+    assert.throws(() => creditOps.authorizationFromReceipt(buyer.account, authPlan, auth[2], authReceipts[0],
+      `0x${"11".repeat(32)}`), /hash mismatch/);
+    await creditOps.authorizeReduction(buyer.account, lostBuyId, auth[0], auth[1] + 1n, auth[2]);
+    await assert.rejects(agent3.reconcilePendingRepayment(authWorld), /changed/);
+    await creditOps.authorizeReduction(buyer.account, lostBuyId, ...auth);
+    assert.equal(await agent3.reconcilePendingRepayment(authWorld), 0n);
+    assert.equal(agent3.netAuthorizationConfirmed, true);
+    assert.equal(agent3.unwound, beforeUnwound);
+    await agent3.cancelPendingRepayment(authWorld);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 0n);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
+
+    // A confirmed authorization revert also leaves principal untouched; its
+    // receipt must be reconciled before the household tries again.
+    const refuseAuthorizationOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      if (name === "authorizeReduction" && args[1]) {
+        const receipt = await s.send(target, name, [args[0], args[1], args[2], 0n], { account: owner, expect: "revert" });
+        throw new TransactionReverted(name, "simulated expired authorization", receipt);
+      }
+      return s.send(target, name, args, { account: owner });
+    });
+    const refusedAuthWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: refuseAuthorizationOps }) };
+    assert.equal(await agent3.retireAcquired(refusedAuthWorld, 1_000_000n, 0n), 0n);
+    assert.equal(agent3.netPendingPhase, "authorization");
+    assert.equal(agent3.netPendingReverted, true);
+    await assert.rejects(agent3.cancelPendingRepayment(refusedAuthWorld), /outcome uncertain/);
+    assert.equal(await agent3.reconcilePendingRepayment(refusedAuthWorld), 0n);
+    assert.equal(agent3.netPendingToken, null);
+    assert.equal(agent3.lastAction, "authorize-reverted");
+    assert.equal(agent3.unwound, beforeUnwound);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
+
+    const noHashOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      if (name === "authorizeReduction" && args[1]) throw new Error("transport lost both receipt and hash");
+      return receipt;
+    });
+    const noHashWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: noHashOps }) };
+    assert.equal(await agent3.retireAcquired(noHashWorld, 1_000_000n, 0n), 0n);
+    assert.equal(agent3.netPendingPhase, "authorization");
+    assert.equal(agent3.netPendingHash, null);
+    assert.equal(await agent3.pendingRepayment(noHashWorld), true);
+    await assert.rejects(agent3.reconcilePendingRepayment(noHashWorld), /known transaction hash/);
+    await assert.rejects(agent3.cancelPendingRepayment(noHashWorld), /outcome uncertain/);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
+    await creditOps.cancelReduction(buyer.account, lostBuyId); // explicit external recovery in this fixture
+
+    // Preserve the first actual settlement if the second NFT's authorization
+    // response is lost in the middle of a multi-facility batch.
+    const batchIds = [];
+    for (let n = 0; n < 2; n++) {
+      const id = await insureAsset(world, world.operator.account, buyer, { face: 2_000_000n, premiumRate: 0 });
+      await creditOps.issue(buyer.account, id, 2_000_000n, 1_000_000n);
+      batchIds.push(id);
+    }
+    const batchOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      if (name === "authorizeReduction" && args[0] === batchIds[1]) {
+        throw new TransactionReceiptPending(receipt.transactionHash);
+      }
+      return receipt;
+    });
+    const batch = await batchOps.retireHousehold(buyer.account, batchIds, 2_000_000n,
+      (await s.client.getBlock()).timestamp + 3600n);
+    assert.equal(batch.retired, 1_000_000n);
+    assert.equal(batch.settlements.length, 1);
+    assert.equal(batch.status, "authorization-pending");
+    assert.equal(batch.pendingPhase, "authorization");
+    assert.equal(batch.blockedTokenId, batchIds[1]);
+    assert.ok(batch.pendingTransactionHash);
+    assert.equal((await creditOps.facility(batchIds[0])).issued, 0n);
+    assert.equal((await creditOps.facility(batchIds[1])).issued, 1_000_000n);
+    await creditOps.cancelReduction(buyer.account, batchIds[1]);
   }
   // A nominal pool can remain nonzero when its full-value balance is zero.
   // Exact net output must refuse without consuming the buyer's settlement.

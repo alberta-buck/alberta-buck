@@ -14,12 +14,13 @@ const min = (...values) => values.reduce((a, b) => a < b ? a : b);
 const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeInteger(id) && id >= 0);
 
 export class ReductionPending extends Error {
-  constructor(plan, cause, { transactionHash = null, reverted = false } = {}) {
-    super(`reduction of facility ${plan.tokenId} has an uncertain outcome after authorization; check the on-chain authorization and retry or cancel it`, { cause });
+  constructor(plan, cause, { transactionHash = null, reverted = false, phase = "settlement" } = {}) {
+    super(`${phase} of facility ${plan.tokenId} needs transaction reconciliation`, { cause });
     this.name = "ReductionPending";
     this.plan = plan;
     this.transactionHash = transactionHash;
     this.reverted = reverted;
+    this.phase = phase;
   }
 }
 
@@ -186,11 +187,36 @@ export function netCreditOps(session, stack, execute = null) {
     const { principal, reliefScaled, premiumRefund } = events[0].args;
     return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt };
   };
+  // An authorization permits a future reduction; it does not retire debt.
+  ops.authorizationFromReceipt = (owner, plan, deadline, receipt, expectedHash = null) => {
+    if (receipt?.status !== "success") throw new Error("authorization receipt is not successful");
+    if (expectedHash !== null && (!receipt.transactionHash
+        || receipt.transactionHash.toLowerCase() !== expectedHash.toLowerCase())) {
+      throw new Error("authorization transaction hash mismatch");
+    }
+    const address = owner.address ?? owner;
+    const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "ReductionAuthorized" })
+      .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()
+        && e.args.owner.toLowerCase() === address.toLowerCase() && e.args.tokenId === BigInt(plan.tokenId));
+    if (events.length !== 1 || events[0].args.principal !== plan.principal
+        || events[0].args.minimumReliefScaled !== plan.minimumReliefScaled || events[0].args.deadline !== BigInt(deadline)) {
+      throw new Error("authorization receipt missing or ambiguous");
+    }
+    return events[0];
+  };
   ops.settlePlan = async (owner, plan, deadline) => {
     if (plan.reason !== "ready" || plan.principal <= 0n) throw new Error("reduction plan is not ready");
     const [pending] = await session.call(token, "reductionAuthorization", [plan.tokenId]);
     if (pending) throw new Error("reduction authorization already pending");
-    await ops.authorizeReduction(owner, plan.tokenId, plan.principal, plan.minimumReliefScaled, deadline);
+    let authorized;
+    try { authorized = await ops.authorizeReduction(owner, plan.tokenId, plan.principal, plan.minimumReliefScaled, deadline); }
+    catch (err) { throw new ReductionPending(plan, err, { phase: "authorization", transactionHash: err.transactionHash ?? null,
+      reverted: err instanceof TransactionReverted && err.receipt.status === "reverted" && Boolean(err.transactionHash) }); }
+    if (authorized?.status !== "success") throw new ReductionPending(plan, null, { phase: "authorization",
+      transactionHash: authorized?.transactionHash ?? null,
+      reverted: authorized?.status === "reverted" && Boolean(authorized?.transactionHash) });
+    try { ops.authorizationFromReceipt(owner, plan, deadline, authorized); }
+    catch (err) { throw new ReductionPending(plan, err, { phase: "authorization", transactionHash: authorized.transactionHash ?? null }); }
     let receipt;
     try { receipt = await ops.reduceAuthorized(owner, plan.tokenId, plan.principal); }
     catch (err) { throw new ReductionPending(plan, err, { transactionHash: err.transactionHash ?? null,
@@ -216,7 +242,7 @@ export function netCreditOps(session, stack, execute = null) {
     const result = { requested, retired: 0n, reliefScaled: 0n, ownerCostScaled: 0n,
       premiumNominal: 0n, status: "complete", blockedTokenId: null, pendingPrincipal: null,
       pendingMinimumReliefScaled: null, pendingDeadline: null, pendingTransactionHash: null,
-      pendingReverted: false, settlements: [] };
+      pendingReverted: false, pendingPhase: null, settlements: [] };
     for (const tokenId of tokenIds) {
       if (result.retired >= requested) break;
       const plan = await ops.planReduction(owner, tokenId, requested - result.retired, options);
@@ -228,7 +254,8 @@ export function netCreditOps(session, stack, execute = null) {
         if (!(err instanceof ReductionPending)) throw err;
         result.status = "authorization-pending"; result.blockedTokenId = tokenId; result.pendingPrincipal = plan.principal;
         result.pendingMinimumReliefScaled = plan.minimumReliefScaled; result.pendingDeadline = BigInt(deadline);
-        result.pendingTransactionHash = err.transactionHash; result.pendingReverted = err.reverted; break;
+        result.pendingTransactionHash = err.transactionHash; result.pendingReverted = err.reverted;
+        result.pendingPhase = err.phase; break;
       }
       result.settlements.push(settled);
       result.retired += settled.principal;

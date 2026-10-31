@@ -10,7 +10,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent
 from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
-from buck_core import Expect, NetCreditOps, NetMarketOps, TransactionReceiptPending, TransactionReverted, deploy_net_stack
+from buck_core import Expect, NetCreditOps, NetMarketOps, ReductionPlan, TransactionReceiptPending, TransactionReverted, deploy_net_stack
 
 RAW = 10**6
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
@@ -299,4 +299,101 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent3._save_or_pay_down(d, state3, cash_after_lost_buy, {})
         assert credit.functions.issuanceOf(third_id).call()[0] == 90 * RAW
         assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost_buy
+
+        # A lost authorization response is a separate phase: the fund was
+        # never called, so no principal may be counted as retired.
+        auth_receipts = []
+
+        def lose_authorization(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            if method == "authorizeReduction" and args[1]:
+                auth_receipts.append(receipt)
+                raise TransactionReceiptPending(receipt["transactionHash"])
+            return receipt
+
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_authorization)
+        before_principal = credit.functions.issuanceOf(third_id).call()[0]
+        before_unwound = agent3.unwound
+        assert agent3._net_repayment_reserve is not None
+        assert agent3._retire_acquired(d, RAW, 0) == 0
+        assert agent3._net_pending_phase == "authorization" and agent3._net_pending_hash
+        assert credit.functions.issuanceOf(third_id).call()[0] == before_principal
+        assert agent3.unwound == before_unwound
+        auth = buck.functions.reductionAuthorization(third_id).call()
+        assert auth[0] == RAW and auth_receipts[0]["status"] == 1
+        with pytest.raises(ValueError, match="outcome uncertain"):
+            agent3.cancel_pending_repayment(d)
+        plan = ReductionPlan(third_id, auth[0], 0, auth[1], 0, "ready")
+        with pytest.raises(ValueError, match="hash mismatch"):
+            credit_ops.authorization_from_receipt(buyer.address, plan, auth[2], auth_receipts[0], "0x" + "11" * 32)
+        credit_ops.authorize_reduction(buyer.address, third_id, auth[0], auth[1] + 1, auth[2])
+        with pytest.raises(ValueError, match="changed"):
+            agent3.reconcile_pending_repayment(d, {})
+        credit_ops.authorize_reduction(buyer.address, third_id, *auth)
+        assert agent3.reconcile_pending_repayment(d, {}) == 0
+        assert agent3._net_authorization_confirmed and agent3.unwound == before_unwound
+        agent3.cancel_pending_repayment(d)
+        assert buck.functions.reductionAuthorization(third_id).call()[0] == 0
+        assert credit.functions.issuanceOf(third_id).call()[0] == before_principal
+
+        # A mined authorization revert did not authorize or settle anything;
+        # reconcile that receipt before allowing another attempt.
+        def refuse_authorization(owner, target, method, args):
+            if method == "authorizeReduction" and args[1]:
+                data = target.encode_abi(method, args=[args[0], args[1], args[2], 0])
+                receipt = chain.send(actors[owner.lower()].functions.exec(target.address, bytes.fromhex(data[2:])),
+                                     expect=Expect.REVERT)
+                raise TransactionReverted(method, "simulated expired authorization", receipt)
+            return _exec(chain, actors[owner.lower()], target, method, args)
+
+        d.net_credit_ops = NetCreditOps(chain, stack, refuse_authorization)
+        assert agent3._retire_acquired(d, RAW, 0) == 0
+        assert agent3._net_pending_phase == "authorization" and agent3._net_pending_reverted
+        with pytest.raises(ValueError, match="outcome uncertain"):
+            agent3.cancel_pending_repayment(d)
+        assert agent3.reconcile_pending_repayment(d, {}) == 0
+        assert agent3._net_pending_token is None and agent3.last_action == "authorize-reverted"
+        assert agent3.unwound == before_unwound and credit.functions.issuanceOf(third_id).call()[0] == before_principal
+
+        def lose_authorization_without_hash(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            if method == "authorizeReduction" and args[1]:
+                raise RuntimeError("transport lost both receipt and hash")
+            return receipt
+
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_authorization_without_hash)
+        assert agent3._retire_acquired(d, RAW, 0) == 0
+        assert agent3._net_pending_phase == "authorization" and agent3._net_pending_hash is None
+        assert agent3._pending_repayment(d)
+        with pytest.raises(ValueError, match="known transaction hash"):
+            agent3.reconcile_pending_repayment(d, {})
+        with pytest.raises(ValueError, match="outcome uncertain"):
+            agent3.cancel_pending_repayment(d)
+        assert credit.functions.issuanceOf(third_id).call()[0] == before_principal
+        credit_ops.cancel_reduction(buyer.address, third_id)  # explicit external recovery in this fixture
+
+        # If the second authorization's response is lost, the first NFT's
+        # successfully settled principal and receipt still belong in the batch.
+        batch_ids = []
+        for _ in range(2):
+            chain.send(credit.functions.createCredit(buyer.address, 0, 2 * RAW, 2 * RAW, 0, 0, 0, 0))
+            token_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 3 + len(batch_ids)).call()
+            credit_ops.issue(buyer.address, token_id, 2 * RAW, RAW)
+            batch_ids.append(token_id)
+
+        def lose_second_authorization(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            if method == "authorizeReduction" and args[0] == batch_ids[1]:
+                raise TransactionReceiptPending(receipt["transactionHash"])
+            return receipt
+
+        batch_ops = NetCreditOps(chain, stack, lose_second_authorization)
+        deadline = anvil.w3.eth.get_block("latest")["timestamp"] + 3600
+        batch = batch_ops.retire_household(buyer.address, batch_ids, 2 * RAW, deadline)
+        assert batch.retired == RAW and len(batch.settlements) == 1
+        assert batch.status == "authorization-pending" and batch.pending_phase == "authorization"
+        assert batch.blocked_token_id == batch_ids[1] and batch.pending_transaction_hash
+        assert credit.functions.issuanceOf(batch_ids[0]).call()[0] == 0
+        assert credit.functions.issuanceOf(batch_ids[1]).call()[0] == RAW
+        credit_ops.cancel_reduction(buyer.address, batch_ids[1])
         assert not chain.mismatches

@@ -64,6 +64,8 @@ export class CreditHouseholdAgent {
     this.netPendingDeadline = null;
     this.netPendingHash = null;
     this.netPendingReverted = false;
+    this.netPendingPhase = null;
+    this.netAuthorizationConfirmed = false;
     this.netTradeUncertain = false;
     this.netPendingBuyHash = null;
   }
@@ -185,12 +187,15 @@ export class CreditHouseholdAgent {
         || this.netPendingDeadline === null || typeof world.households.cancel !== "function") {
       throw new Error("pending repayment needs transaction reconciliation");
     }
-    if (!this.netPendingReverted) throw new Error("settlement outcome uncertain; reconcile transaction before canceling");
+    const safe = (this.netPendingPhase === "settlement" && this.netPendingReverted)
+      || (this.netPendingPhase === "authorization" && this.netAuthorizationConfirmed);
+    if (!safe) throw new Error("settlement outcome uncertain; reconcile transaction before canceling");
     await world.households.cancel(this.account, this.netPendingToken,
       [this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline]);
     this.netPendingToken = null; this.netPendingPrincipal = 0n;
     this.netPendingMinimum = null; this.netPendingDeadline = null;
     this.netPendingHash = null; this.netPendingReverted = false;
+    this.netPendingPhase = null; this.netAuthorizationConfirmed = false;
     this.lastError = ""; this.lastAction = "repay-canceled";
   }
 
@@ -212,10 +217,26 @@ export class CreditHouseholdAgent {
   }
 
   async reconcilePendingRepayment(world) {
-    if (this.netPendingToken === null || !this.netPendingPrincipal || !this.netPendingHash
-        || typeof world.households.reconcileReduction !== "function") {
+    if (this.netPendingToken === null || !this.netPendingPrincipal || !this.netPendingHash) {
       throw new Error("repayment needs a known transaction hash for reconciliation");
     }
+    if (this.netPendingPhase === "authorization") {
+      if (typeof world.households.reconcileAuthorization !== "function") throw new Error("authorization reconciliation unavailable");
+      const r = await world.households.reconcileAuthorization(this.account, this.netPendingToken,
+        this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline, this.netPendingHash);
+      if (r.reverted) {
+        this.netPendingToken = null; this.netPendingPrincipal = 0n;
+        this.netPendingMinimum = null; this.netPendingDeadline = null;
+        this.netPendingHash = null; this.netPendingReverted = false;
+        this.netPendingPhase = null; this.netAuthorizationConfirmed = false;
+        this.lastError = ""; this.lastAction = "authorize-reverted";
+      } else {
+        this.netAuthorizationConfirmed = true;
+        this.lastError = ""; this.lastAction = "authorize-reconciled";
+      }
+      return 0n;
+    }
+    if (typeof world.households.reconcileReduction !== "function") throw new Error("repayment reconciliation unavailable");
     const r = await world.households.reconcileReduction(this.account, this.netPendingToken,
       this.netPendingPrincipal, this.netPendingHash);
     if (r.reverted) {
@@ -227,6 +248,7 @@ export class CreditHouseholdAgent {
     this.netPendingToken = null; this.netPendingPrincipal = 0n;
     this.netPendingMinimum = null; this.netPendingDeadline = null;
     this.netPendingHash = null; this.netPendingReverted = false;
+    this.netPendingPhase = null; this.netAuthorizationConfirmed = false;
     this.lastError = ""; this.lastAction = "repay-reconciled";
     return r.principal;
   }
@@ -244,6 +266,8 @@ export class CreditHouseholdAgent {
       this.netPendingDeadline = r.pendingDeadline;
       this.netPendingHash = r.pendingTransactionHash;
       this.netPendingReverted = r.pendingReverted;
+      this.netPendingPhase = r.pendingPhase;
+      this.netAuthorizationConfirmed = false;
     }
     if (!["complete", "partial"].includes(r.status)) this.lastError = `repayment ${r.status} at facility ${r.blockedTokenId}`;
     return r.retired;

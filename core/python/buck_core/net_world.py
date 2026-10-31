@@ -129,6 +129,7 @@ class HouseholdRetirement:
     pending_deadline: int | None
     pending_transaction_hash: str | None
     pending_reverted: bool
+    pending_phase: str | None
     settlements: tuple[NetReduction, ...]
 
 
@@ -156,14 +157,15 @@ class PremiumRefundQuote:
 
 
 class ReductionPending(RuntimeError):
-    """Settlement outcome is uncertain or reverted after authorization."""
+    """An authorization or settlement outcome requires reconciliation."""
 
-    def __init__(self, plan: ReductionPlan, transaction_hash: str | None = None, reverted: bool = False):
+    def __init__(self, plan: ReductionPlan, transaction_hash: str | None = None, reverted: bool = False,
+                 phase: str = "settlement"):
         self.plan = plan
         self.transaction_hash = transaction_hash
         self.reverted = reverted
-        super().__init__(f"reduction of facility {plan.token_id} has an uncertain outcome after authorization; "
-                         "check the on-chain authorization and retry or cancel it")
+        self.phase = phase
+        super().__init__(f"{phase} of facility {plan.token_id} needs transaction reconciliation")
 
 
 @dataclass(frozen=True)
@@ -426,14 +428,31 @@ class NetCreditOps:
         """Authorize and settle a ready plan; surface a possibly pending authorization.
 
         Reads and transactions are separate: an intervening callback, balance,
-        mark or liquidity change can make settlement fail. After any exception
-        from the second transaction, inspect the chain before retrying/canceling.
+        mark or liquidity change can make settlement fail. An uncertain
+        authorization and an uncertain settlement are distinct phases; neither
+        is a successful repayment. Preserve the submitted hash, if available,
+        and reconcile the corresponding receipt before retrying or canceling.
         """
         if plan.reason != "ready" or plan.principal <= 0:
             raise ValueError("reduction plan is not ready")
         if self.stack.token.functions.reductionAuthorization(plan.token_id).call()[0]:
             raise ValueError("reduction authorization already pending")
-        self.authorize_reduction(owner, plan.token_id, plan.principal, plan.minimum_relief_scaled, deadline)
+        try:
+            authorized = self.authorize_reduction(owner, plan.token_id, plan.principal,
+                                                  plan.minimum_relief_scaled, deadline)
+        except Exception as exc:
+            raise ReductionPending(plan, getattr(exc, "transaction_hash", None),
+                                   isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0
+                                   and bool(exc.transaction_hash), "authorization") from exc
+        if not authorized or authorized.get("status") != 1:
+            tx_hash = _txhex(authorized.get("transactionHash")) if authorized else ""
+            raise ReductionPending(plan, tx_hash or None,
+                                   bool(tx_hash and authorized.get("status") == 0), "authorization")
+        try:
+            self.authorization_from_receipt(owner, plan, deadline, authorized)
+        except Exception as exc:
+            raise ReductionPending(plan, _txhex(authorized.get("transactionHash")) or None,
+                                   phase="authorization") from exc
         try:
             receipt = self.reduce_authorized(owner, plan.token_id, plan.principal)
         except Exception as exc:
@@ -447,6 +466,22 @@ class NetCreditOps:
             return self.reduction_from_receipt(owner, plan.token_id, plan.principal, receipt)
         except Exception as exc:
             raise ReductionPending(plan, _txhex(receipt.get("transactionHash"))) from exc
+
+    def authorization_from_receipt(self, owner, plan: ReductionPlan, deadline: int, receipt,
+                                   expected_hash: str | None = None):
+        """Authenticate the exact authorization; it is not a repayment."""
+        if not receipt or receipt.get("status") != 1:
+            raise ValueError("authorization receipt is not successful")
+        if expected_hash is not None and _txhex(receipt.get("transactionHash")).lower() != expected_hash.lower():
+            raise ValueError("authorization transaction hash mismatch")
+        address = getattr(owner, "address", owner)
+        events = self.stack.token.events.ReductionAuthorized().process_receipt(receipt, errors=DISCARD)
+        events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()
+                  and e["args"]["owner"].lower() == address.lower() and e["args"]["tokenId"] == plan.token_id]
+        if len(events) != 1 or (events[0]["args"]["principal"], events[0]["args"]["minimumReliefScaled"],
+                                events[0]["args"]["deadline"]) != (plan.principal, plan.minimum_relief_scaled, deadline):
+            raise ValueError("authorization receipt missing or ambiguous")
+        return events[0]
 
     def reduction_from_receipt(self, owner, token_id: int, principal: int, receipt,
                                expected_hash: str | None = None) -> NetReduction:
@@ -469,9 +504,9 @@ class NetCreditOps:
         """Retire an ordered household's actual facilities, returning settled events only.
 
         Each facility is planned against fresh state. A refusal stops the batch;
-        a failed second transaction returns ``authorization-pending`` and its
-        NFT, so the caller can inspect and retry or cancel without inventing a
-        repayment. Earlier successful transactions remain in ``settlements``.
+        an uncertain transaction returns ``authorization-pending``, its
+        phase and its NFT. The caller must reconcile before retrying or
+        canceling. Earlier successful transactions remain in ``settlements``.
         """
         if (not all(type(v) is int for v in (requested, deadline, buffer, relief_slippage_bp))
                 or requested < 0 or not 0 <= deadline < 2**64 or buffer < 0
@@ -482,7 +517,7 @@ class NetCreditOps:
         settled = []
         retired = 0
         status, blocked, pending_principal, pending_minimum, pending_deadline = "complete", None, None, None, None
-        pending_hash, pending_reverted = None, False
+        pending_hash, pending_reverted, pending_phase = None, False, None
         for token_id in ids:
             if retired >= requested:
                 break
@@ -499,6 +534,7 @@ class NetCreditOps:
                 status, blocked, pending_principal = "authorization-pending", token_id, plan.principal
                 pending_minimum, pending_deadline = plan.minimum_relief_scaled, deadline
                 pending_hash, pending_reverted = exc.transaction_hash, exc.reverted
+                pending_phase = exc.phase
                 break
             settled.append(result)
             retired += result.principal
@@ -508,4 +544,5 @@ class NetCreditOps:
         return HouseholdRetirement(requested, retired, sum(x.relief_scaled for x in settled),
                                    sum(x.owner_cost_scaled for x in settled),
                                    sum(x.premium_nominal for x in settled), status, blocked, pending_principal,
-                                   pending_minimum, pending_deadline, pending_hash, pending_reverted, tuple(settled))
+                                   pending_minimum, pending_deadline, pending_hash, pending_reverted, pending_phase,
+                                   tuple(settled))
