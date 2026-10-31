@@ -111,12 +111,25 @@ The decision kernel now accepts activated, unissued facility capacity as a
 separate input: it is new issuance eligible for future relief, not wallet BUCK
 already issued, and it does not require a second premium deposit. Real Anvil
 and Tevm tests exercise a ~coverage=0~ issue and verify that the premium and
-activated coverage do not change. The household world has not yet been wired
-to derive this input. Per-NFT quotes share numerical account and total-supply
-limits, so do not sum their maxima without applying those common bounds;
-re-quote the selected facility before execution. The current comparison uses
+activated coverage do not change. The isolated household state now obtains
+that input from per-NFT quotes at a single block, applying shared account and
+total-supply numerical limits once. It sets new issuance capacity to zero
+while a maturity backlog blocks the claim book, while retaining spendable
+wallet funds. Quotes are advisory: K is recomputed on issue, so re-quote the
+selected facility before execution. The complete household world is still not
+migrated. The current comparison uses
 wallet BUCK first; evaluating whether to retain it and issue instead when its
 alternative return is better is a separate policy choice to test.
+
+The activated-capacity quote requires a verified non-Carrying owner and
+distinct NFTs owned by that account. It reads the owner, each zero-coverage
+quote, scaled account balances, total issuance and the maturity gate at one
+block. Its potential capacity is at most both the sum of individual quotes
+and the account/supply limit; its usable capacity is zero if maturities are
+pending. These properties do not promise that a later issuance will succeed.
+The policy's remaining unactivated input still uses face units, so depreciation
+and the common issuance limit across both kinds of capacity must be fixed
+before treating it as a reliable complete decision.
 Quote additional coverage on the selected NFT, budget the full premium and a
 reserve buffer that can survive a block of demurrage, and compare the total
 cost of the reserve purchase with the projected benefit. A successful issue

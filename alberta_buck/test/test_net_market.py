@@ -109,14 +109,34 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent = CreditHouseholdAgent(7)
         agent.proxy, agent._token_ids = buyer, [buyer_id]
         agent._basket_receipts, agent._receipt_book, agent._savings_proxy = [], {}, None
-        agent.p = {"surplus_policy": "adaptive", "paydown_share": .1, "paydown_double": .005}
+        agent.p = {"surplus_policy": "adaptive", "paydown_share": .1, "paydown_double": .005,
+                   "renew_in": 0, "term_months": 60}
         agent.max_impact_bp = 9000
         agent.unwound = agent.trade_loss = 0
         agent.last_error = agent.last_action = ""
         agent.arrive_day, agent.exited = 0, False
-        d = SimpleNamespace(buck=buck, credit=credit, usdc=usdc, pool_ub=pool_address, fee_ub=500,
+        agent.mortgage, agent._face0, agent.joined = 100 * RAW, 200 * RAW, True
+        agent._basket_usd = lambda _: 1.0
+        d = SimpleNamespace(buck=buck, credit=credit, kctrl=controller, usdc=usdc, pool_ub=pool_address, fee_ub=500,
                             chain=chain, w3=chain.w3, buck_accounting="net", net_credit_ops=credit_ops,
                             net_market_ops=market, basket_impl="equity")
+        observed = agent._state(d, 0)
+        capacity = credit_ops.quote_household_activated_capacity(buyer.address, [buyer_id])
+        assert observed["activated_capacity"] == capacity.capacity / RAW > 0
+        assert not observed["maturities_pending"] and observed["accounting"] == "net"
+
+        class BacklogView:
+            def household(self, owner, ids):
+                return SimpleNamespace(issued=credit_ops.household(owner, ids).issued, unactivated=10 * RAW)
+
+            def quote_household_activated_capacity(self, _owner, _ids):
+                return SimpleNamespace(capacity=0, maturities_pending=True)
+
+        d.net_credit_ops = BacklogView()
+        blocked_state = agent._state(d, 0)
+        assert blocked_state["maturities_pending"] and blocked_state["activated_capacity"] == 0
+        assert blocked_state["unactivated"] == 0 and blocked_state["spendable"] == observed["spendable"]
+        d.net_credit_ops = credit_ops
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
         state = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
         remaining = credit.functions.issuanceOf(buyer_id).call()[0]

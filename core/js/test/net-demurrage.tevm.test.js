@@ -6,7 +6,7 @@ import { encodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact } from "../src/nodefs.js";
-import { deployNetStack, netCreditOps, ReductionPending } from "../src/index.js";
+import { boundActivatedCapacity, deployNetStack, netCreditOps, ReductionPending } from "../src/index.js";
 import { advanceTime } from "../src/buckworld.js";
 
 const RAW = 1_000_000n;
@@ -21,6 +21,16 @@ try {
 } catch {
   skip = "net/simulation artifacts unavailable; run make nix-sim-build";
 }
+
+test("activated capacity respects shared integer limits", () => {
+  const q = 10n ** 36n, maxBalance = 2n ** 79n - 1n, maxUint = 2n ** 256n - 1n;
+  const held = (maxBalance - 10n) * q;
+  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 5n * q, 0n), { potentialCapacity: 5n, sharedLimit: 5n });
+  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 5n * q + 1n, 0n), { potentialCapacity: 4n, sharedLimit: 4n });
+  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 0n, maxUint / q - 3n), { potentialCapacity: 3n, sharedLimit: 3n });
+  assert.throws(() => boundActivatedCapacity([4n], maxBalance * q, 1n, 0n), /invalid/);
+  assert.throws(() => boundActivatedCapacity([4n], 0n, 0n, maxUint / q + 1n), /invalid/);
+});
 
 test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, async () => {
   const s = await tevmSession();
@@ -76,7 +86,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.ok((await s.call(buck, "fundBalancesScaled"))[1] < cash);
   await advanceTime({ session: s }, 48 * YEAR);
   await s.send(credit, "createCredit", [actor.address, 0, 100n * RAW, 100n * RAW, 0, 0, 0, 0]);
-  await exec(buck, "issue", [1n, 100n * RAW, 100n * RAW]);
+  await exec(buck, "issue", [1n, 100n * RAW, 50n * RAW]);
   await exec(buck, "transfer", [fund.address, 40n * RAW]);
   const capped = await ops.quoteReliefRate(0n, RAW);
   assert.equal(capped.capped, true);
@@ -84,6 +94,10 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.notEqual(capped.annualRateWad, null);
   await advanceTime({ session: s }, 2 * YEAR);
   assert.equal(await s.call(buck, "maturitiesPending"), true);
+  const capacity = await ops.quoteHouseholdActivatedCapacity(actor.address, [0n, 1n]);
+  assert.equal(capacity.maturitiesPending, true);
+  assert.ok(capacity.potentialCapacity > 0n);
+  assert.equal(capacity.capacity, 0n);
   await assert.rejects(ops.quoteReliefRate(0n, RAW)); // stale denominator must not become a forecast
   assert.deepEqual(s.mismatches, []);
 });
@@ -257,6 +271,17 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(existing.premium, 0n);
   assert.equal(existing.reserveRequired, 0n);
   assert.ok(existing.maxSpendable >= RAW);
+  const householdCapacity = await ops.quoteHouseholdActivatedCapacity(debtor.address, [debtorId, thirdId]);
+  assert.equal(householdCapacity.maturitiesPending, false);
+  assert.equal(householdCapacity.blockNumber, (await s.client.getBlock()).number);
+  assert.deepEqual(householdCapacity.facilities, [
+    { tokenId: debtorId, maxSpendable: (await ops.quoteIssue(debtorId, 0n)).maxSpendable },
+    { tokenId: thirdId, maxSpendable: existing.maxSpendable },
+  ]);
+  const independentSum = householdCapacity.facilities.reduce((total, x) => total + x.maxSpendable, 0n);
+  assert.equal(householdCapacity.capacity, independentSum < householdCapacity.sharedLimit ? independentSum : householdCapacity.sharedLimit);
+  await assert.rejects(ops.quoteHouseholdActivatedCapacity(debtor.address, [thirdId, thirdId]), /duplicate/);
+  await assert.rejects(ops.quoteHouseholdActivatedCapacity(debtor.address, [providerId]), /foreign/);
   await ops.issue(debtor.address, thirdId, 0n, RAW);
   const thirdAfter = await ops.facility(thirdId);
   assert.equal(thirdAfter.activated, thirdBefore.activated);

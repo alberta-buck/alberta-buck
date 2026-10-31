@@ -142,7 +142,14 @@ export class CreditHouseholdAgent {
       k: c.k, drawn: whole(c.drawn), spendable: whole(c.spendable), unactivated: whole(c.unactivated),
       ru: c.ru, rb: c.rb, fee: c.fee, basket_usd: c.basket_usd,
       at_renewal: ((month - this.p.renew_in) % this.p.term_months) === 0 };
-    if (world.accounting === "net") state.accounting = "net"; // policy refuses absent explicit forecasts
+    if (world.accounting === "net") {
+      if (typeof world.households.activatedCapacity !== "function") throw new Error("BuckNet activated capacity unavailable");
+      const available = await world.households.activatedCapacity(this.account);
+      state.accounting = "net"; // policy still requires explicit forecasts
+      state.activated_capacity = whole(available.capacity);
+      state.maturities_pending = available.maturitiesPending;
+      if (available.maturitiesPending) state.unactivated = 0; // keeper must advance the claim book
+    }
     return state;
   }
 

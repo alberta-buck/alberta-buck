@@ -14,7 +14,7 @@ import pytest
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
-from buck_core import deploy_net_stack, net_transfer_value, NetCreditOps, ReductionPending
+from buck_core import bound_activated_capacity, deploy_net_stack, net_transfer_value, NetCreditOps, ReductionPending
 from buck_core.session import Expect
 
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
@@ -30,6 +30,18 @@ REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "
 def _exec(chain, actor, target, method, args):
     data = target.encode_abi(method, args=args)
     return chain.send(actor.functions.exec(target.address, bytes.fromhex(data[2:])))
+
+
+def test_activated_capacity_shared_integer_limits():
+    max_balance, max_uint = 2**79 - 1, 2**256 - 1
+    held = (max_balance - 10) * Q
+    assert bound_activated_capacity([4, 4], held, 5 * Q, 0) == (5, 5)
+    assert bound_activated_capacity([4, 4], held, 5 * Q + 1, 0) == (4, 4)
+    assert bound_activated_capacity([4, 4], held, 0, max_uint // Q - 3) == (3, 3)
+    with pytest.raises(ValueError, match="invalid"):
+        bound_activated_capacity([4], max_balance * Q, 1, 0)
+    with pytest.raises(ValueError, match="invalid"):
+        bound_activated_capacity([4], 0, 0, max_uint // Q + 1)
 
 
 @pytest.mark.skipif(
@@ -103,12 +115,14 @@ def test_linked_net_issuance_and_reduction_match_reference():
         # the implied annual rate is then only a lower bound on the fund mark.
         anvil.warp_to(issued_at + 49 * YEAR)
         chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
-        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 100 * RAW])
+        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 50 * RAW])
         _exec(chain, actor, buck, "transfer", [fund.address, 40 * RAW])
         capped = ops.quote_relief_rate(0, RAW)
         assert capped.capped and capped.relief_scaled == RAW * Q and capped.annual_rate_wad is not None
         anvil.warp_to(issued_at + 51 * YEAR)
         assert buck.functions.maturitiesPending().call()
+        capacity = ops.quote_household_activated_capacity(actor.address, [0, 1])
+        assert capacity.maturities_pending and capacity.potential_capacity > 0 and capacity.capacity == 0
         with pytest.raises(Exception):
             ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
         assert not chain.mismatches
@@ -306,6 +320,16 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         before = ops.facility(third_id)
         existing = ops.quote_issue(third_id, 0)
         assert existing.premium == existing.reserve_required == 0 and existing.max_spendable >= RAW
+        capacity = ops.quote_household_activated_capacity(debtor.address, [debtor_id, third_id])
+        assert not capacity.maturities_pending
+        assert capacity.block_number == chain.w3.eth.block_number
+        assert capacity.facilities == ((debtor_id, ops.quote_issue(debtor_id, 0).max_spendable),
+                                       (third_id, existing.max_spendable))
+        assert capacity.capacity == min(sum(amount for _, amount in capacity.facilities), capacity.shared_limit)
+        with pytest.raises(ValueError, match="duplicate"):
+            ops.quote_household_activated_capacity(debtor.address, [third_id, third_id])
+        with pytest.raises(ValueError, match="foreign"):
+            ops.quote_household_activated_capacity(debtor.address, [provider_id])
         ops.issue(debtor.address, third_id, 0, RAW)
         after = ops.facility(third_id)
         assert after.activated == before.activated and after.premium_nominal == before.premium_nominal

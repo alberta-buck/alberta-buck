@@ -9,9 +9,23 @@ import { parseEventLogs } from "viem";
 const Q = 10n ** 36n;
 const WAD = 10n ** 18n;
 const YEAR = 365n * 86400n + 6n * 3600n;
+const MAX_BALANCE = 2n ** 79n - 1n; // BuckTypes.MAX_BALANCE, raw BUCK
+const MAX_UINT256 = 2n ** 256n - 1n;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const min = (...values) => values.reduce((a, b) => a < b ? a : b);
 const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeInteger(id) && id >= 0);
+
+/** Apply the account and supply limits shared by zero-premium facility quotes. */
+export function boundActivatedCapacity(capacities, heldScaled, unspentScaled, totalIssued) {
+  const values = [...capacities, heldScaled, unspentScaled, totalIssued];
+  if (values.some((v) => typeof v !== "bigint" || v < 0n)
+      || heldScaled + unspentScaled > MAX_BALANCE * Q || totalIssued > MAX_UINT256 / Q) {
+    throw new Error("invalid activated capacity inputs");
+  }
+  const sharedLimit = min((MAX_BALANCE * Q - heldScaled - unspentScaled) / Q, MAX_UINT256 / Q - totalIssued);
+  const potentialCapacity = min(capacities.reduce((sum, value) => sum + value, 0n), sharedLimit);
+  return { potentialCapacity, sharedLimit };
+}
 
 export class ReductionPending extends Error {
   constructor(plan, cause, { transactionHash = null, reverted = false, phase = "settlement" } = {}) {
@@ -85,6 +99,35 @@ export function netCreditOps(session, stack, execute = null) {
     authorizeReduction: (owner, id, principal, minimumReliefScaled, deadline) =>
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),
     reduceAuthorized: (owner, id, principal) => send(owner, fund, "reduce", [id, principal]),
+  };
+  // Quote each NFT at the same block. The numerical maximum shared by the
+  // account and all issuance is applied once, not once per facility. K and
+  // other contract conditions can change before a later issue transaction.
+  ops.quoteHouseholdActivatedCapacity = async (owner, tokenIds) => {
+    const address = owner.address ?? owner, ids = tokenIds.map((id) => {
+      if (!validId(id)) throw new Error("invalid household facility");
+      return BigInt(id);
+    });
+    if (new Set(ids.map(String)).size !== ids.length) throw new Error("duplicate household facility");
+    const blockNumber = (await session.client.getBlock()).number;
+    const read = (c, functionName, args = []) => session.client.readContract({ address: c.address, abi: c.abi,
+      functionName, args, blockNumber });
+    const [verified, carrying] = await Promise.all([read(stack.registry, "isVerified", [address]),
+      read(stack.registry, "isCarrying", [address])]);
+    if (!verified || carrying) throw new Error("household owner must be verified and non-Carrying");
+    const owners = await Promise.all(ids.map((id) => read(credit, "ownerOf", [id])));
+    if (owners.some((actual) => actual.toLowerCase() !== address.toLowerCase())) throw new Error("foreign household facility");
+    const facilities = await Promise.all(ids.map(async (tokenId) => {
+      const [, premium, reserve, maxSpendable] = await read(quoter, "quoteIssue", [tokenId, 0n]);
+      if (premium || reserve) throw new Error("zero-coverage quote unexpectedly requires a premium or reserve");
+      return { tokenId, maxSpendable };
+    }));
+    const [[held, unspent], totalIssued, maturitiesPending] = await Promise.all([
+      read(token, "heldAndUnspentScaled", [address]), read(token, "totalIssued"), read(token, "maturitiesPending"),
+    ]);
+    const { potentialCapacity, sharedLimit } = boundActivatedCapacity(facilities.map((f) => f.maxSpendable), held, unspent, totalIssued);
+    return { blockNumber, facilities, sharedLimit, potentialCapacity,
+      capacity: maturitiesPending ? 0n : potentialCapacity, maturitiesPending };
   };
   // These are same-block observations, not predictions. Mark failures and
   // maturity backlogs propagate rather than becoming an invented rate.

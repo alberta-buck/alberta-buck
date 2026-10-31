@@ -58,6 +58,7 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
       const state = await creditOps.household(address(account), await facilityIds(account));
       return { ...state, drawn: state.issued };
     },
+    activatedCapacity: async (account) => creditOps.quoteHouseholdActivatedCapacity(address(account), await facilityIds(account)),
     pending: async (account) => {
       for (const id of await facilityIds(account)) {
         if ((await s.call(world.buck, "reductionAuthorization", [id]))[0] > 0n) return true;

@@ -138,6 +138,13 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const [ru, rb] = (t0.toLowerCase() === market.usdc.address.toLowerCase() ? [r0, r1] : [r1, r0])
       .map((v) => Number(v) / 1e6);
     const state = { ru, rb, fee: .0005, basket_usd: 1.5 * ru / rb };
+    const observedWorld = { ...hworld, households: { ...hworld.households, read: async (account) => ({
+      ...await hworld.households.read(account), ...state, k: 1,
+    }) } };
+    const observed = await agent.state(observedWorld, 0);
+    const available = await creditOps.quoteHouseholdActivatedCapacity(buyer.account, [buyerId]);
+    assert.equal(observed.activated_capacity, Number(available.capacity) / 1e6);
+    assert.ok(observed.activated_capacity > 0 && !observed.maturities_pending);
     const remaining = (await creditOps.facility(buyerId)).issued;
     const beforeHousehold = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     const refuseBuy = async (_world, _market, holder, amount, { minOut }) => {

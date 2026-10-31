@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { profile, issuance, terms, refinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
   ROLES } from "../src/agents/household-policy.js";
+import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
 for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
@@ -52,6 +53,19 @@ test("net activated capacity issues without another premium", () => {
   assert.ok(Math.abs(mixedV.coverage - 25000 / (mixed.k * .99 - mixed.premium_bp / 1000)) < 1e-8);
   assert.ok(Math.abs(mixedV.parts.relief - (55000 + mixedV.deposit) * mixed.expected_relief_rate) < 1e-8);
   assert.ok(Math.abs(mixedV.parts.wallet_carry + 20000 * mixed.expected_wallet_growth) < 1e-8);
+});
+test("a maturity backlog blocks new credit without hiding wallet BUCK", async () => {
+  const agent = new CreditHouseholdAgent({ account: "0x1", settings: { divest_rate: 0 } });
+  const world = { accounting: "net", households: {
+    read: async () => ({ drawn: 2_000_000n, spendable: 3_000_000n, unactivated: 10_000_000n,
+      k: .75, ru: 100, rb: 100, fee: .0005, basket_usd: 1 }),
+    activatedCapacity: async () => ({ capacity: 0n, maturitiesPending: true }),
+  } };
+  const state = await agent.state(world, 0);
+  assert.equal(state.maturities_pending, true);
+  assert.equal(state.activated_capacity, 0);
+  assert.equal(state.unactivated, 0);
+  assert.equal(state.spendable, 3);
 });
 test("household surplus policies use basket parity after trading costs", () => {
   for (const c of f.surplus) assert.equal(surplusAction(...c.slice(0, -1)), c.at(-1));

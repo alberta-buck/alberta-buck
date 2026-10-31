@@ -18,6 +18,8 @@ from web3.logs import DISCARD
 Q = 10**36
 WAD = 10**18
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
+MAX_BALANCE = 2**79 - 1  # BuckTypes.MAX_BALANCE in raw BUCK units
+MAX_UINT256 = 2**256 - 1
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
@@ -91,6 +93,27 @@ class HouseholdCreditState:
     unactivated: int
     premium_nominal: int
     facilities: tuple[FacilityState, ...]
+
+
+@dataclass(frozen=True)
+class ActivatedCapacityQuote:
+    """Same-block zero-coverage issuance estimates, in raw BUCK units."""
+    block_number: int
+    facilities: tuple[tuple[int, int], ...]  # (NFT, independently quoted max spendable)
+    shared_limit: int                       # account and total-issuance numerical room
+    potential_capacity: int                 # bounded sum before the maturity gate
+    capacity: int                           # zero while maturities need processing
+    maturities_pending: bool
+
+
+def bound_activated_capacity(capacities, held_scaled: int, unspent_scaled: int, total_issued: int):
+    """Apply BuckNetQuoter's shared numerical bounds to independent zero-premium quotes."""
+    values = tuple(capacities)
+    if (any(type(v) is not int or v < 0 for v in (*values, held_scaled, unspent_scaled, total_issued))
+            or held_scaled + unspent_scaled > MAX_BALANCE * Q or total_issued > MAX_UINT256 // Q):
+        raise ValueError("invalid activated capacity inputs")
+    shared = min((MAX_BALANCE * Q - held_scaled - unspent_scaled) // Q, MAX_UINT256 // Q - total_issued)
+    return min(sum(values), shared), shared
 
 
 @dataclass(frozen=True)
@@ -315,6 +338,37 @@ class NetCreditOps:
         owner = self.stack.credit.functions.ownerOf(token_id).call()
         quote = self.stack.quoter.functions.quoteIssue(token_id, coverage).call()
         return IssueQuote(*quote, self.stack.token.functions.balanceOf(owner).call())
+
+    def quote_household_activated_capacity(self, owner, token_ids) -> ActivatedCapacityQuote:
+        """Observe activated issuance room without adding per-NFT shared limits twice.
+
+        Every contract read is pinned to one block. This is a numerical quote,
+        not a guarantee: K is recomputed during issue and identity, fund,
+        authorization and liquidity can change. A pending maturity blocks all
+        new issuance, so capacity is zero until the keeper processes it.
+        """
+        address = getattr(owner, "address", owner)
+        ids = tuple(token_ids)
+        if any(type(v) is not int or v < 0 for v in ids) or len(ids) != len(set(ids)):
+            raise ValueError("invalid or duplicate household facility")
+        block = self.chain.w3.eth.block_number
+        read = lambda fn: fn.call(block_identifier=block)
+        registry, credit, token, quoter = self.stack.registry, self.stack.credit, self.stack.token, self.stack.quoter
+        if not read(registry.functions.isVerified(address)) or read(registry.functions.isCarrying(address)):
+            raise ValueError("household owner must be verified and non-Carrying")
+        if any(read(credit.functions.ownerOf(token_id)).lower() != address.lower() for token_id in ids):
+            raise ValueError("foreign household facility")
+        facilities = []
+        for token_id in ids:
+            _, premium, reserve, maximum = read(quoter.functions.quoteIssue(token_id, 0))
+            if premium or reserve:
+                raise ValueError("zero-coverage quote unexpectedly requires a premium or reserve")
+            facilities.append((token_id, maximum))
+        held, unspent = read(token.functions.heldAndUnspentScaled(address))
+        total = read(token.functions.totalIssued())
+        potential, shared = bound_activated_capacity((capacity for _, capacity in facilities), held, unspent, total)
+        pending = read(token.functions.maturitiesPending())
+        return ActivatedCapacityQuote(block, tuple(facilities), shared, potential, 0 if pending else potential, pending)
 
     def issue(self, owner, token_id: int, coverage: int, spendable: int):
         return self.execute(owner, self.stack.token, "issue", [token_id, coverage, spendable])

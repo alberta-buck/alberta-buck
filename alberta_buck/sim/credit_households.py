@@ -216,6 +216,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     def _state(self, d, day):
         if getattr(d, "buck_accounting", "") == "net":
             position            = d.net_credit_ops.household(self.proxy.address, self._token_ids)
+            available           = d.net_credit_ops.quote_household_activated_capacity(self.proxy.address, self._token_ids)
             drawn, unactivated  = position.issued, position.unactivated
         else:
             signed              = d.buck.functions.signedBalanceOf(self.proxy.address).call()
@@ -232,6 +233,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                                        at_renewal=(month - self.p["renew_in"]) % self.p["term_months"] == 0)
         if getattr(d, "buck_accounting", "") == "net":
             state["accounting"] = "net"  # policy refuses absent explicit forecasts
+            state["activated_capacity"] = available.capacity / PARITY
+            state["maturities_pending"] = available.maturities_pending
+            if available.maturities_pending:
+                state["unactivated"] = 0  # no issuance can pass until the keeper advances the claim book
         return state
 
     def _buy_cash(self, d, budget, minimum_net=0, *, for_repayment=False):
