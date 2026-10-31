@@ -240,6 +240,10 @@ library BuckLedger {
         return Math.ceilDiv(scaled, SCALE);
     }
 
+    /// @notice Current ERC-20 balance: ordinary net BUCK, or the nominal
+    ///         transferable units of a Carrying account (including the fund).
+    /// @dev A Carrying transfer can deliver less net value than this nominal
+    ///      amount. Use netOf or grossAndNetOf when economic value matters.
     function balanceOf(Ledger storage self, address owner) internal view returns (uint256) {
         if (owner == self.fund) {
             (uint256 gross,) = _fundView(self);

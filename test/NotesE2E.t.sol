@@ -437,6 +437,40 @@ contract NotesE2E_A1 is NotesE2EBase {
         notes.spendCoupledA1(proof, root, _u(".identityRoot"), nf, face, payout, eEnc, fold);
         gasUsed = g - gasleft();
     }
+
+    /// @dev Both pools are independently funded. This does not show theft
+    ///      from one pool; it shows why migrating the same root to a second
+    ///      funded pool needs shared nullifiers or an atomic migration.
+    function test_sameRealProofSpendsIndependentlyFundedPoolsWithTheSameRoot() public {
+        Notes first = notes;
+        Notes second = new Notes(address(buck), address(first.mintVerifier()), address(first.spendVerifier()), GOV);
+        vm.startPrank(GOV);
+        second.setIdentityRegistry(address(reg));
+        second.setDepositFoldVerifier(address(foldAdapter));
+        vm.stopPrank();
+        reg.bindContract(address(second), BN254.g1(),
+            IdentityRegistry.ElGamalCT(BN254.g1(), BN254.g1()), true, true);
+        vm.store(address(buck), BuckSlots.fragment(issuer, address(second)), bytes32(uint256(1)));
+        vm.store(address(buck), BuckSlots.fragment(payout, address(second)), bytes32(uint256(1)));
+        vm.store(address(buck), BuckSlots.allowance(issuer, address(second)), bytes32(2 * face));
+
+        _mint();
+        notes = second;
+        _mint();
+        assertEq(first.noteRoot(), second.noteRoot());
+        assertEq(buck.balanceOf(address(first)), face);
+        assertEq(buck.balanceOf(address(second)), face);
+        uint256 beforeBalance = buck.balanceOf(payout);
+
+        notes = first;
+        _spend();
+        assertTrue(first.nullifiers(_u(".opening.nullifier")));
+        assertFalse(second.nullifiers(_u(".opening.nullifier")));
+        notes = second;
+        _spend();
+        assertTrue(second.nullifiers(_u(".opening.nullifier")));
+        assertEq(buck.balanceOf(payout), beforeBalance + 2 * face);
+    }
 }
 
 contract NotesE2E_A2 is NotesE2EBase {

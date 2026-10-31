@@ -1,0 +1,251 @@
+#+TITLE: BuckNet: responsibilities, transitions and invariants
+#+DATE: 2026-10-30
+#+OPTIONS: ^:nil toc:3
+
+* Scope and status
+
+This is a review and verification map for the *experimental clean-genesis*
+=BuckNet= stack. It describes what the current code does and the properties
+the system is intended to maintain. It is not a formal proof, a deployment
+specification, or evidence from a five-year household economy. The existing
+=src/Buck.sol=, deployed Notes contracts, and current economy use the legacy
+model. The [[file:demurrage-implementation-plan.org][implementation plan]] owns the outstanding work; the
+[[file:net-demurrage-interface-migration.org][interface and proof migration plan]] covers clients and Notes.
+
+Several entries below are *requirements to prove*, not claims that all
+rounding, market or adversarial cases are already proven. The selected
+Carrying interface uses nominal ERC-20 amounts; its pool integration and
+eventual service-contract allowlist still require the tests and controls
+described below.
+
+* Vocabulary and units
+
+One external raw BUCK unit is =10^-6= BUCK. Let =Q= =10^36= fractional
+units per raw unit, =Y= =365.25 days=, =T= =50Y= and =K= the current
+18-decimal credit factor. The NFT's *coverage* and current insured value are
+not BUCK supply. Outstanding *principal* is BUCK already issued, including
+the amount initially left unspent and premium funding. A transfer or purchase
+of BUCK does not by itself reduce that principal.
+
+For NFT =i=, =P_i= is outstanding raw principal and =A_i= its capped
+claimable BUCK-seconds. =D= is matured principal assumed by Jubilee. In a
+correctly initialized, synchronized net system, the intended supply identity
+after each successful transaction is:
+
+#+begin_example
+totalIssued = sum(P_i for open NFTs) + D = totalSupply
+S = sum(A_i for open NFTs) + D*T, with 0 <= A_i <= P_i*T
+#+end_example
+
+The first equality is about principal, not the sum of account gross balances.
+The second is the aggregate *claim benchmark*, not a promise of available
+cash. A current aggregate requires all due maturity-heap entries to have been
+processed. =JubileeClaimBook= exposes pending work and permits bounded public
+processing; exact reads and updates fail while a backlog remains.
+
+The target economic conservation identity is total *net* BUCK in the token's
+accounts, including Jubilee cash and the BUCK actually held in pools, equal to
+outstanding supply. Basket shares are claims on assets and must not be counted
+again as BUCK. Arithmetic rounds at several points; the existing small-ledger
+tests compare within one external raw unit. A global bound across arbitrary
+accounts, long histories and checkpoint frequencies remains to be proved; do
+not assert bit-exact conservation from those tests alone.
+
+** Current balance and event semantics
+
+An ordinary account has net held =H= and net issued-but-unspent =U=. Its
+=balanceOf= is =floor((H+U)/Q)=; it may hold both while still owing multiple
+NFT principals. Its unissued capacity is not included. The exact scaled parts
+are exposed by =heldAndUnspentScaled=.
+
+A Carrying account currently reports its *gross nominal transferable units*
+from =balanceOf=, and =netBalanceOf= reports its full-value economic balance.
+Sending nominal =n= moves its proportional net value, rounded down in scaled
+units. A recipient can therefore receive less net value than =n=, although the
+ERC-20 =Transfer= event reports =n=. The fund's nominal gross includes gross
+self-demurrage; it can exceed total issued supply even though its net value
+cannot. Summing Carrying =balanceOf= values is not a supply calculation.
+
+The intended use is a BUCK-neutral service such as an AMM, Notes pool or
+insurer pool, not an ordinary long-term payment or savings account. Its
+=balanceOf=, ERC-20 transfer amounts, allowances and events use nominal units;
+apart from transfers and other explicit credits, those nominal units do not
+decay. A Carrying recipient receives the same nominal units and their
+proportionate carried fee. An ordinary recipient receives the associated net
+amount. Users who leave funds in a service bear its pooled carried fee and
+must be able to understand the resulting net value when they use it.
+
+For example, a Carrying Notes pool with 100 nominal BUCK after ten idle years
+has about 81.873075 net BUCK. A nominal 100 transfer delivers that net amount
+to an ordinary recipient. The nominal event is not evidence of a full-value
+payment. The Jubilee fund is a special Carrying recipient: its nominal balance
+also increases through lazy demurrage credits, including its own gross fees,
+even without an explicit ERC-20 transfer. These credits must be accounted for
+separately when reconciling its balance and event history.
+
+The desired future rule is to allow Carrying only for whitelisted contracts
+providing BUCK-neutral services. This is not a current security property:
+the registry authenticates deployed-contract binding and the binder can set
+the initial Carrying flag or change it before freezing, subject to token mode
+checks. There is no separate BUCK-service allowlist. Its authorization,
+revocation and safe exit behavior remain implementation and audit work.
+
+* State owners and transitions
+
+** Initialization and trust boundaries
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+---------------------------------------|
+| =BuckNet= constructor | Nonzero credit, K, registry and Jubilee addresses; deployment must link the exact maturity and transfer libraries. | One token owns its ledger, one new =JubileeClaimBook= and one new =BuckRenewalConsent=; the designated fund is immutable. The constructor alone does not establish verified identities or usable wiring. |
+| Credit and registry wiring | The =BuckCredit= deployer calls one-shot =setBuck=; registry governance wires the same token; relevant identities and Carrying postures are registered. | Only that token can update facility issuance and coverage. Third parties cannot seize the credit's one-shot assignment. |
+| =JubileeFund.configure= | Governance, unconfigured fund, token points to this verified Carrying fund, compatible basket/receipt and token are contracts. | The fund records one token and one basket and approves that basket. The one-time configuration must be verified against all actual deployed addresses and library code. |
+
+Governance selects the basket, keeper, reserve parameters and insurer binding;
+these are trust assumptions, not consequences of the arithmetic. =BuckNet=
+trusts its designated fund to calculate the marked policy; the token itself
+checks the owner's authorization, bounds and liquid cap, not the mark's
+fairness. Linked library =delegatecall= code runs in the token's context and
+depends on the token's authorization and reentrancy guard.
+
+** Account decay, issuance and transfers
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+---------------------------------------|
+| Event-free account decay | Correct checkpoint and mode; outstanding supply is unchanged during the interval. | Both held and unspent net parts use continuous =exp(-0.02*t/Y)=, rounded down at =Q= precision. An untouched 100 BUCK is about 98.019867 after one year, not exactly 98. The independently accruing NFT target remains linear. |
+| Fund checkpoint | Its prior net cash is no greater than issued supply. | With constant issued =P= and net cash =C=, ideal net cash becomes =P-(P-C)*exp(-t/T)=. Gross fees include the fund's own fees; self-payment is not a second net inflow. Lifetime flow counters retain whole units plus fractional remainders. |
+| =issue(id,coverage,spendable)= | Owner is verified and ordinary; fund is verified Carrying; selected NFT is owned, authorized, not mature, and claim book is current. Coverage, premium, insurer pool, funding reserve, K and numeric bounds pass. | That NFT's principal and total supply increase by =spendable + premium=; the account receives issued-unspent BUCK and pays the full-value premium to that facility's recorded insurer pool. Its existing issuance age is checkpointed before adding fresh zero-age principal. Failures roll back all changes. |
+| =transfer= / =transferFrom= | Verified parties and required identity fragments; allowance for =transferFrom=; sufficient sender balance in the mode's currently implemented units. | No NFT principal or total supply changes. A nominal Carrying transfer carries the proportional fee; an ordinary transfer debits full net value. Transfer/event and recipient semantics must be resolved as above before interoperability is claimed. |
+| Registry mode change | The binder acts before the registry freezes the flag; only the registry callback changes the ledger. A facility with outstanding principal cannot become Carrying; the fund and registered insurer pools cannot stop being Carrying. A separate neutral-service allowlist is not yet enforced. | The ledger checkpoints the account before changing representation and preserves its net held/unspent value, subject to fixed-point rounding. The owner-NFT scan is currently unbounded in that owner's NFT count. |
+
+Checkpoints must occur *before* changing the outstanding supply. =totalIssued=
+is not the gross all-time BUCK-seconds integral. At present the exact capped
+claim benchmark is separately maintained because an old NFT can stay open
+after 50 years without its claim growing further. In the fund-cash equation,
+=P-C= also includes BUCK held in the fund's own LP position: a fee on those
+BUCK raises cash while reducing the position's BUCK value. It is not, by
+itself, investment profit for the consolidated fund.
+
+For a closed, no-return example, issue 100 BUCK and leave it untouched outside
+the fund for 50 years. Ignoring rounding, the holder retains 36.787944 net and
+the fund holds 63.212056 net. The full 100 BUCK experienced 100 BUCK of gross
+fees over the period, but about 36.787944 of those fees were the fund paying
+itself. The facility's baseline relief target is 100, not a guarantee of 100
+liquid BUCK. Mature closure releases the lien and records the unburned
+principal as a fund obligation; it does not invent the missing cash or burn
+the holder's remaining balance. Future fees and actual investment returns can
+help fund subsequent burns, subject to liquidity and the transaction cap.
+
+** Facility age and bounded aggregate
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+---------------------------------------|
+| NFT age view | NFT exists and its stored principal/checkpoint are valid. | =A_i=min(storedSeconds+P_i*elapsed,P_i*T)=. An issued but unspent BUCK starts aging at issuance. After average age 50 years its claim is capped even if the owner leaves the NFT open. |
+| Additional issuance | NFT is not already mature; coverage, K and numeric bounds pass. | The prior capped age is checkpointed, then principal is added without adding age. This uses one pooled average age, not separate issuance tranches. |
+| Partial reduction =p= | =0<p<=P_i= and the token synchronizes the book atomically. | The NFT removes =floor(A_i*p/P_i)= seconds, reduces principal by =p= and leaves the remainder's proportional age. The book's position and heap are updated in the same transaction. |
+| Maturity processing | Caller gives a positive bounded step limit. | Each processed due NFT stops adding to the growing aggregate; exact aggregate reads resume only after the due backlog is cleared. Work and gas grow with the number of facilities, not all at once. Keeper incentives and adversarial backlog bounds are not yet established. |
+
+Only the token can synchronize the claim book; the book reads the actual NFT
+state rather than trusting arbitrary caller-supplied principal or age. Any
+new token or migration must preserve that authorization and atomicity.
+
+** Reduction and atomic renewal
+
+Let =s=floor(A_i*p/P_i)=, =F= be scaled net Jubilee cash, and =L= the
+receipt's net-of-gain-fee mark in raw full-value BUCK. With a current nonzero
+benchmark =S=, the fund computes =r=min(p*Q, floor((F+L*Q)*s/S))=;
+otherwise =r= is zero. This is marked proportional relief, not a guaranteed
+2% return. The quote requires a usable price for contributing pools and the
+specified spot/TWAP guard; a mark is not executable liquidity.
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+---------------------------------------|
+| Authorization | NFT owner specifies exact principal, minimum scaled relief and deadline. | Only that request can be settled; it may be replaced or cancelled. A quote alone is neither authorization nor a payment guarantee. |
+| Insurer preparation | After initial owner/consent validation, the original pool may be called to restore its nominal refund. | This is an external call under the fund lock, before the mark is read. Any market/claim change it causes must be reflected in the subsequent quote. Failure reverts the operation. |
+| =reduce= | Exact current authorization, current benchmark, valid post-callback mark, =r<=F/10=, owner's minimum, pool refund/allowance, sufficient owner net BUCK and no worsened K shortfall. | Owner net and fund net jointly extinguish exactly =p= scaled value; total issued and selected NFT principal fall by =p=; its age and coverage fall proportionally and the original pool returns the proportional nominal deposit. No basket sale occurs in settlement. |
+| =renew= | Same insurer and owner independently approve the exact terms, deadline, current NFT terms hash and principal. The facility is not mature; the post-callback quote and all premium/K gates pass. | Actual relief is rounded down to whole raw units and retired; old premium is refunded from its recorded pool, new premium goes to the insurer's current pool, coverage/terms and optional issuance change atomically. Remaining principal's claim age is reset to zero: any unpaid baseline target is not carried as a guaranteed claim. The old K shortfall may not increase. |
+
+The token independently checks the =10%= limit and authorization. The owner
+minimum protects against a smaller payout, while reserve and market checks
+protect only what they explicitly test. Any failed callback, invalidated
+consent, insufficient funds, adverse mark or K violation must revert the
+entire transaction, including callback effects and authorization changes.
+
+The ERC-20 burn events must add to the integral principal retired; because
+relief may be fractional, their individual owner/fund split is rounded. The
+exact split is in =FacilityReduced=. Indexers cannot reconstruct each party's
+exact net movement from those ERC-20 events alone.
+
+** Maturity, refunds and the fund's investment
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+---------------------------------------|
+| =closeMatured= | NFT owner calls after its pooled average issuance age reaches =T=; due claim entries are processed. | NFT and active coverage are removed; its full still-unburned principal becomes =D=. Total supply is unchanged and continues to accrue gross demurrage until later burned. Neither owner BUCK nor a basket sale is required. An unpaid original-pool premium remains independently retryable. |
+| Deferred premium claim | Recorded original pool, beneficiary, nominal amount and required allowance/liquidity remain valid. | The original pool alone sends the nominal refund with its carried fee; no other insurer or Jubilee is charged. Failed automatic preparation/transfer leaves the claim, not the lien, outstanding. |
+| =burnDeferred= | Authorized fund keeper/governance; positive principal <= =D= and <= 10% of current net fund cash. | Fund net, =D= and total supply fall by the same principal; the capped aggregate benchmark loses =principal*T=. No basket sale occurs in this burn. Tiny raw-unit dust can be unburnable under the strict cap. |
+| Scheduled investment | Authorized keeper/governance, current aggregate, sufficiently matured budget and configured minimum; caller bounds nominal outlay, credited value and shares. | At most one fund-owned receipt exists; an existing receipt is increased in place. The spending is actual net BUCK, not the fund's nominal gross. Budget cannot exceed current observed excess. The half-life is of observed cash excess, not a direct ROI EMA. |
+| Scheduled sale | Authorized keeper/governance; cash below target; requested receipt shares, routes and minimum actual net proceeds are bounded. | Only shares actually retired leave the receipt; newly received TOKEN is converted or the sale reverts. Existing in-kind inventory is not silently sold. Low-K exit and basket solvency guards remain in force. A sale can fail or have poor proceeds. |
+
+** Basket, identity and proofs
+
+The experimental basket's =enableNetAccounting= mode holds actual BUCK and
+does not issue its own credit. Entry/top-up must account for the *net change*
+received, preserve receipt ownership, basis and shares, and avoid dilution.
+An in-kind exit accounts for net BUCK actually received and returns residual
+shares when applicable. Legacy leveraged mode is not evidence for a net-mode
+leveraged basket: its own credit and Jubilee's receipt create a valuation
+cycle analyzed in [[file:basket-jubilee-crossholding.org][the cross-holding note]].
+
+Identity authorization is separate from monetary authorization. A valid
+allowance does not replace verified parties or required bilateral receipt
+fragments; public identities use the existing fallback rules. Mode hooks,
+insurer binding, ERC-721 ownership and reentrancy checks must not be bypassed
+by adapters. A new token address also changes the trusted registry wiring.
+
+The existing =Notes= contract is immutable to its BUCK token and its mint and
+spend amounts are note *face*. Its proof establishes the documented commitment,
+membership, identity and nullifier relationships; it does not prove the
+recipient's actual net BUCK balance delta. With the current Carrying ledger,
+notes of different ages in one pool share the pool's average carried fee.
+=NotesBuckNetAccountingTest= demonstrates both outcomes with stub proof
+verifiers: it is an accounting test, not a cryptographic-security test.
+
+The current spend proof's public inputs include chain, root, recipient,
+nullifier, face and flavor but not a Notes contract or BUCK address. Each
+Notes contract has its own nullifier mapping. The =NotesE2E_A1= replay test
+uses real existing A1 proofs against two *independently funded* pools with the
+same root and shows that each pool accepts the same spend. That experiment is
+not a theft from one pool; it establishes that a migration must not duplicate
+live claims between funded pools without a shared nullifier or an atomic,
+otherwise non-replayable migration. See the interface migration plan for the
+proof, key, ceremony and receipt consequences of each choice.
+
+* Simplification candidates, with evidence requirements
+
+| Candidate | Why it may simplify verification | Condition before changing/removing |
+|-----------+----------------------------------+------------------------------------|
+| Reduction/renewal forwarding wrappers | Private wrappers had a single external caller and obscured settlement order. | Removed during this review; preserve the same external ABI, lock and return values. |
+| =BuckLedger.retire= and =payFundNet= | The experimental =BuckNet= uses =retireWithFund= and =retireFundDebt=; these two paths are used only by the ledger test harness. | First move their distinct conservation, gross-up and dust checks to actual externally reachable paths; retain the selected nominal Carrying interface. Internal dead code is already optimized out of deployed bytecode. |
+| =NetDemurrageMath.nominalNet/nominalForNet= | Used only by their standalone tests, not by the current ledger transfer. The helpers' floored-fee convention and the ledger's floored-net convention can differ by one smallest unit. | Decide the canonical transfer/rounding rule, add shared vectors against the actual token path, then remove or clearly label the alternative. Do not use the old helpers as proof of the current ledger's rounding. |
+| Shared fixed-point exponentiation | Account decay and reserve-budget growth both exponentiate 36-decimal factors. | Extract only if output/rounding is bit-for-bit unchanged, including the 1,000-year decay chunks; compare gas and size. The functions have different economic meanings. |
+| Dual legacy/net =BuckCredit= paths | Legacy coverage APIs and net per-NFT issuance hooks coexist and make the NFT contract near the EIP-170 runtime limit. | Separate or retire code only after legacy coverage, insurer envelopes, transfers, approvals and all clients have demonstrated replacements; measure actual linked runtime and migration implications. |
+| Fund policy and ledger validation | Fund and token both check the 10% limit. | Retain both unless a threat model and tests show that moving a trust boundary preserves protection against a misconfigured or malicious fund. Do not treat duplicate safety checks as automatically redundant. |
+
+For the rounding distinction, =NetDemurrageMath.nominalForNet(40e6,100e6,
+20e6)= returns =49,999,999= raw nominal units under the helper's floored-fee
+rule. With a net/gross ratio of 80%, the ledger's floored-net transfer of that
+nominal amount delivers only =39,999,999.2= raw units, less than the requested
+=40,000,000=. The current ledger fund gross-up must instead request
+=50,000,000= nominal raw units. This difference becomes material at the
+external raw-unit boundary even though internal balances have =Q= precision.
+
+* Verification map
+
+Run =make nix-match-BuckNetTest=, =nix-match-BuckLedgerTest=,
+=nix-match-BuckCredit=, =nix-match-Jubilee=,
+=nix-match-JubileeEquityIntegrationTest=, =nix-match-NotesBuckNetAccountingTest=,
+=nix-match-NotesE2E_A1= and =nix-venv-demurrage-test= for the
+focused cases. =make nix-test= covers the full available Foundry suite;
+check reported fixture exclusions and fork skips. =make
+nix-venv-net-demurrage-smoke= exercises a linked cash-only fixture in Python
+and JavaScript. These tests complement, but do not substitute for, the open
+invariant/fuzz, actual-proof migration, leveraged-basket and five-year work.

@@ -1088,6 +1088,24 @@ contract JubileeRenewalTest is JubileeFundTest {
         assertEq(paid, current / Q);
     }
 
+    function test_callbackPriceDropBelowRenewalMinimumKeepsBothConsents() public {
+        (uint256 id, JubileeMarketChangingInsurer pool) = _changingMarketFixture();
+        (uint256 stale,,) = fund.previewRelief(id, 1000e6);
+        BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 100, 0);
+        terms.minimumRelief = stale / Q;
+        bytes32 digest = _approveRenewal(id, terms);
+        uint256 oldBasket = basket.valueOf(fund.positionId());
+        uint256 oldStrategy = buck.balanceOf(address(pool.strategy()));
+        vm.expectRevert(JubileeFund.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        assertEq(basket.valueOf(fund.positionId()), oldBasket);
+        assertEq(buck.balanceOf(address(pool.strategy())), oldStrategy);
+        assertEq(buck.premiumPrincipal(id), 100e6);
+        assertEq(buck.renewalConsent().proposal(id), digest);
+        assertEq(buck.renewalConsent().authorization(id), digest);
+    }
+
     function test_renewalCrystallizesActualReliefAndIssuesAgainstIncreasedCoverage() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
         _buffer(1000e6);

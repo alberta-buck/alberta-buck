@@ -1,0 +1,198 @@
+#+TITLE: Net demurrage: core, Notes and proof migration plan
+#+DATE: 2026-10-30
+#+OPTIONS: ^:nil toc:3
+
+* Purpose and release boundary
+
+This checklist extends [[file:net-demurrage-simulation-migration.org][the five-year and sandbox migration plan]] to the
+shared Rust, Python and JavaScript interfaces, Notes and zero-knowledge proofs.
+The experimental contracts and their [[file:net-demurrage-invariants.org][transition invariants]] are not yet a
+production replacement. There is no supported state migration from legacy
+=Buck= to =BuckNet=, nor from an existing Notes pool to another token. Do not
+label legacy results, proof fixtures or a cash-only smoke test as validation of
+the new system.
+
+* Contract and client compatibility
+
+| Current surface | Verified legacy assumption | Required net-model work |
+|-----------------+----------------------------+-------------------------|
+| =core/rust/buck-math/src/demurrage.rs= | =fee_owing= and =carrying_transfer= use signed raw balances, linear BUCK-seconds and implicit debt repayment. | Add explicitly versioned net functions matching the chosen on-chain decay, modes, rounding, capped per-NFT age, issuance, retirement and fund cash semantics. Keep legacy APIs labeled and tested until their consumers are retired; never silently change their meaning. |
+| Rust wide math and Python/JS bindings | The current =u128= API and =mul_div_wide= produce a 128-bit result from a 256-bit intermediate. | Net scaled balances and lifetime counters use 256-bit values; =mulDiv= can require a 512-bit intermediate. Specify exact input/output ranges, overflow and floor/ceil behavior before choosing a fixed-width implementation or lossless limb/byte/decimal interface. Python =int= and JS =BigInt= must preserve all bits. Test overflow, zero and maximum values across Solidity, Rust, PyO3, WASM and pure references. |
+| =core/python/buck_core=, =core/js/src/buckworld.js= | Session/ABI helpers and world operations assume legacy mint, signed balance, old quotes and one insurance pool. | Version the model in handles and snapshots; read nominal =balanceOf= and economic =netBalanceOf= for Carrying services, query principal/age per NFT, use =BuckNetQuoter= for estimates, and explicitly authorize/execute fund reductions and renewals. Never synthesize a signed lien or treat unactivated coverage as issued money. |
+| Packaging and browser artifacts | =scripts/contracts-dist.py= publishes legacy contracts and strips link-reference metadata; =bundle-artifacts.mjs= bundles legacy sandbox/demo artifacts. | Include the chosen net contracts, interfaces, linked libraries and exact creation/deployed link metadata in versioned Python/npm/browser bundles. Verify compiler, artifact hashes, library addresses/code and EIP-170/EIP-3860 limits. A package with unresolved placeholders or missing metadata must fail clearly. Do not replace the legacy package silently. |
+| =alberta_buck/sim= and sandbox services | Deployment, household actions, reports, saving snapshots and browser restores use legacy =Buck= assumptions. | Complete the five-year/JS map and acceptance cases in the companion migration plan. Persist token model/version, chain, verified fund, library and insurer addresses, claim/consent/keeper state and actual receipt IDs; reject incompatible restores or migrate them explicitly. |
+| Wallets, receipts and indexers | Some interfaces interpret =Transfer.value= or a note's =face= as the value paid. =FacilityReduced= can contain a fractional owner/fund split that ERC-20 burn events cannot express. | Show nominal, net and debt/coverage separately. Define receipt version, actual economic amount and evidence provenance; handle fractional events, reverted operations and chain reorganizations. Reconcile totals using correct net views and authoritative facility/fund events. Preserve identity approval and privacy rules. |
+| Delegated demurrage | Legacy =request/accept/clearDemurragePayer=, =isSponsored= and related fee views exist in =Buck.sol=; =BuckNet= has no equivalent. | Decide and document whether to preserve with conserved net accounting or explicitly retire with replacement coverage and a migration path. Do not present a silent loss of this feature as API compatibility. |
+
+Python and browser-safe JS can already link a built =BuckNet= artifact for a
+small local test, but that does not package the new contracts or establish a
+production deployment. =BuckCredit= is near the runtime limit, so check exact
+artifacts after every Solidity change rather than assuming a new ABI fits.
+
+* Notes amounts and Carrying semantics
+
+=Notes.buck= is immutable. A new BUCK token requires a newly deployed Notes
+contract or an explicitly designed migration/adapter; changing a client ABI
+cannot retarget an existing pool. Current mint pulls =totalFace= via
+=transferFrom=, increments =noteFaceSum=, and publishes a proof-bound face.
+Current spend consumes a nullifier, decrements the face sum and calls
+=buck.transfer(recipient, face)=. All effects revert if the transfer fails.
+
+In the current =BuckNet= prototype, a Carrying Notes pool's ERC-20 balance
+and transfer amount are nominal. A 100-BUCK face can yield about 81.873075 net
+BUCK after ten idle years; mixing a fresh note into an older pool shares the
+pool's *average* carried fee, as intended for Carrying services. The
+[[file:../../test/NotesBuckNetAccounting.t.sol][accounting integration tests]] demonstrate this with stub verifiers; they do
+not prove a SNARK statement. The Python and Rust receipt
+verifiers currently compare =txn.value= to =face=; the Python receipt model
+also calls face the delivered value. Those claims must not be interpreted as
+proof that a recipient obtained that many *net* BUCK.
+
+For example, the controlled mixed-age test puts a fresh 100 nominal BUCK
+beside 100 nominal BUCK worth about 81.873075 net. Each 100-nominal note can
+then withdraw roughly 90.936537 net at that instant. Relative to separate
+age attribution, that transfers about 9.063462 BUCK of value from the fresh
+deposit to the old one. This follows the chosen pooled-fee policy; users need
+to understand it, and the current proof system does not establish net value.
+
+- [X] The user selected nominal =balanceOf=, standard transfer/allowance/event
+  amounts and insurer refunds for Carrying pools. A Carrying-to-Carrying
+  transfer preserves the nominal amount and carries its proportional fee;
+  an ordinary recipient receives the associated full-value net amount.
+- [ ] Implement the intended independent allowlist for BUCK-neutral service
+  contracts. The existing binding checks contract control and identity but
+  lets an authorized binder select Carrying; it is not that allowlist. Specify
+  initial binding, adapters, flag changes, governance, provenance and proxy
+  upgrades, and how delisting permits safe exits without confiscating balances
+  or stranding insurer/Jubilee obligations. Test adversarial binding, mode
+  changes, freeze, revocation, upgrades and migration; do not silently grant
+  normal wallets or arbitrary contracts Carrying mode.
+- [ ] Test real V3 mint, swap, collect and burn after an idle period in both
+  token orders, with ordinary and Carrying participants. Nominal pool reserves
+  can stay stable while their net economic value falls. In particular check
+  swaps from a Carrying pool directly to an ordinary recipient: a nominal
+  output or router minimum may differ from net received. Specify quotes,
+  slippage, potential wrappers and failure handling before claiming economic
+  or integrator compatibility.
+- [ ] Treat Notes face as nominal for the selected Carrying-pool design and
+  disclose the pool-average carried fee and estimated net outcome. Test
+  mixed-age entry and exit, dust, donations, extreme ages, insolvency and
+  ordering. An individually aged or guaranteed net entitlement would be a
+  different product with its own funding and proof requirements.
+- [ ] Specify what a receipt claims: committed face, actual net delivered,
+  or both. Where net delivery is asserted, define an authenticated on-chain
+  observation/event and its units and rounding, and assess its privacy and
+  indexer implications. A nominal ERC-20 or Notes event alone is insufficient.
+- [ ] Adapt =Notes= transfers and pool solvency checks to the selected API;
+  protect approved amounts and identity-bound transfers, and test reverting
+  transfer, a Carrying issuer, a Carrying recipient, mixed-age batches, all
+  three flavors and real pool economics. Do not assume an ERC-20 return value
+  implies the nominal face arrived as full-value BUCK.
+- [ ] Update Python receipt builders/verifiers, Rust wallet core, PyO3 and WASM
+  surfaces, JS wallet/sandbox and =notes_stack.py= together; version the
+  schema and label historical receipts. Do not overwrite old receipt semantics
+  or infer historical net delivery from a later balance.
+
+** Candidate simplification: note shares rather than per-note clocks
+
+If Notes promises a proportional claim on one continuously decaying BUCK-only
+pool, a common net-value-per-share index can avoid a separate demurrage clock
+for every note. Before a deposit, let =V= be the pool's net BUCK and =N= its
+outstanding claim shares. A deposit of =x= *actual net* BUCK would receive
+approximately =x*N/V= new shares; a spend of =s= shares would receive
+approximately =s*V/N= net BUCK. A fresh pool needs an explicit initial index.
+In the mixed-age example this leaves the old 100 shares worth about 81.873075
+BUCK and gives the fresh depositor roughly 122.14 shares worth 100 BUCK, rather
+than redistributing the old fee to the new depositor.
+
+This is an optional design candidate for a future individually attributed
+product, not a requirement of the selected pooled-fee service and not current
+behavior or an approved change. A
+note's committed =v= would denote shares rather than necessarily BUCK at
+issue; the current mint proof/contract equates the sum of =v= with the BUCK
+transfer and cannot simply be reused with a different interpretation. Specify
+mint/spend rounding, fees, minimum output, direct donations, zero =V= or =N=,
+insolvency, transaction ordering, concurrent proof races and what a receipt
+can prove before selecting it. Compare privacy, cost and compatibility with
+per-note age tracking and with an explicitly priced pooled-fee policy. If
+Notes holds non-BUCK investments, =V= also needs a reliable valuation and
+liquidation policy; the share index does not solve those problems.
+
+* Proof statements and migration safety
+
+Current =mint_batch.circom= / =mint_batch_a2.circom= constrain commitment
+openings and the sum of faces; =spend.circom= constrains the note opening,
+face, nullifier, recipient, chain, flavor and root; the folded A1/A2 deposit
+gates and B1 membership/binding prove their separate identity relations.
+These circuits do not currently establish a BUCK account's net balance or a
+per-note demurrage history. Changing a monetary interpretation in Solidity
+does not automatically change what an existing Groth16 proof establishes.
+
+The current spend public inputs do *not* name the Notes instance or its BUCK
+token. Nullifiers are stored separately by each Notes contract. The real-proof
+[[file:../../test/NotesE2E.t.sol][cross-pool test]] mints the same A1 commitment using independently funded
+deposits into two pools, then accepts the same spend/fold proof in each. That
+does not steal from a single pool: each was separately funded. It does show
+that copying a live root/claim into another funded pool while old claims remain
+valid needs an explicit anti-replay mechanism; merely deploying a new token
+and importing roots is not a safe migration. The diagnostic uses legacy
+=Buck= and the existing fixture's test-injected allowance/identity fragments;
+it is not a real-proof integration test of =BuckNet=.
+
+- [ ] Choose and prove a migration protocol: for example, an atomic old-note
+  spend/burn followed by a new note issuance, or a shared authenticated
+  nullifier/claim registry with clearly defined freeze, snapshot and finality
+  rules. Evaluate privacy, partial migration, chain reorganizations, failed
+  retries, already-spent and unspent notes, duplicate roots and same-chain
+  multi-pool replay. Independent funding does not make duplicated claims a
+  valid migration of one old note.
+- [ ] Decide whether a new proof version should bind the Notes instance, token
+  and protocol/version domain. Trace every statement and transcript rather
+  than assuming =chainId= alone binds the contract. New binding does not by
+  itself migrate old notes or share old nullifiers.
+- [ ] If a circuit/public input/relation changes, update Circom constraints,
+  witness generators, prover input serialization, verifier adapters, contracts,
+  Solidity field/range guards, Python and Rust/JS wallets and shared vectors
+  together. Rebuild a matched circuit, proving key, verification key,
+  on-chain verifier and proof fixtures. Keep old verification and claim paths
+  as required by the chosen migration. If the relation does *not* change,
+  demonstrate why existing proofs remain meaningful under the chosen amount
+  semantics; do not regenerate keys merely because the token changed.
+- [ ] Test soundness failures as well as happy paths: changed face or net
+  amount, wrong token/pool/version/chain/root, stale root, reused nullifier,
+  forged recipient/issuer, mismatched A1/A2/B1 identity binding, underfunded
+  mint, failed transfer and rollback, field and token bounds, and concurrent
+  old/new migration claims. Repeat with actual Groth16 and folded proofs, not
+  only stubs. Retain the existing identity and privacy regression suites.
+- [ ] Treat the checked-in development verifier/fixtures as development only:
+  production proofs require a matched, audited setup with an appropriate
+  trusted ceremony and artifact provenance. Do not overwrite or silently reuse
+  existing proving keys during review or migration experiments.
+
+* Execution order and evidence
+
+- [ ] Apply the selected nominal Carrying and pooled-fee rules consistently;
+  implement the service allowlist and record Notes receipt claims and net
+  evidence before changing the public API.
+- [ ] Complete per-NFT and balance model vectors, then implement the Rust
+  fixed-point model and lossless Python/JS bindings against Solidity and the
+  independent high-precision reference. Update contract/client packages and
+  verify linked deployments on both local EVMs.
+- [ ] Port the household economy and both sandbox paths in small, testable
+  stages from the [[file:net-demurrage-simulation-migration.org][simulation checklist]], including dynamic K, per-insurer
+  pools, actual issue/reduction, reserve/maturity keeper and real routing.
+  Resolve leveraged-basket cross-holding before claiming equivalent coverage.
+- [ ] Implement the chosen Notes migration and proof/receipt policy; run real
+  A1, A2 and B1 mint/spend and negative tests with the actual new token, not
+  just legacy =Buck=, stub gates or a copied tree.
+- [ ] Run =make nix-test=, =nix-venv-demurrage-test=,
+  =nix-venv-net-demurrage-smoke=, =nix-venv-core-test-py=,
+  =nix-core-test-js=, =nix-core-test-rust=, =nix-venv-economy-test= and
+  the relevant Notes/circuit and sandbox tests. Record fixture exclusions,
+  fork requirements, generated artifacts and exact versions. Add focused
+  Make targets when the new net-world and proof tests exist.
+- [ ] Only after the short smoke and acceptance vectors pass, run frozen fresh
+  five-year baseline, policy and shock campaigns with automatically rendered
+  PDFs and provenance; compare retained legacy detections. The fork test,
+  production deployment, security review and trusted setup remain independent
+  release gates.

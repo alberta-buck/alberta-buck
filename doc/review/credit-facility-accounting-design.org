@@ -40,6 +40,11 @@ transfer, but a nominal Carrying transfer does not promise an ordinary recipient
 that same amount of net value. Interfaces needing full-value payment must say so
 and gross up the nominal transfer. Wallets, AMM reserves, allowances, events,
 and routing quotes need to use the appropriate units consistently.
+The intended services handle BUCK-neutral in/out flows; users bear and must be
+able to understand the pool's accumulated fee if they leave money there.
+Eventually only approved neutral-service contracts may use Carrying mode. The
+current registry authenticates contract binding but does not enforce that
+independent allowlist; authorization and safe revocation remain open work.
 The reference restricts facility owners to non-Carrying accounts, like the
 current basket's credit-holding account. It rejects making an account
 Carrying while it has issued credit. Whether to support a Carrying facility
@@ -147,13 +152,14 @@ reduction x, the reference assigns the proportional claimable seconds S*x/P
 and caps the baseline relief r*S*x/P at x. Different NFTs owned by the same
 account retain different ages.
 
-The present reference uses one proportional average age within an NFT. Once
-new credit joins an old facility, the aggregate principal resumes accruing
-at 2% until the combined claim reaches its cap. For example, after a 100-BUCK
-facility has aged 100 years, issuing another 100 gives it an immediate target
-of 100, then 104 one year later. Separate issuance-vintage relief would yield
-102 after that year and requires a different, more complex accounting model.
-This averaging rule must remain visible when evaluating renewal and reductions.
+The prototype uses one proportional average age within an NFT. Once new
+credit joins an old facility, the combined principal accrues until the pooled
+claim reaches its cap. For example, issue 100 BUCK and add another 100 at
+year 49. At year 51 the pooled baseline is 106 BUCK; separately capping each
+issuance vintage would yield 104. Vintage accounting requires a different,
+more complex model. Issuance to an already matured facility is rejected, so a
+post-50-year top-up is not a valid example. This averaging rule must remain
+visible when evaluating renewal and reductions.
 
 Keep principal and coverage as separate quantities; they need not be equal at
 K other than one. Avoid duplicate mirrored coverage mappings if BuckCredit can

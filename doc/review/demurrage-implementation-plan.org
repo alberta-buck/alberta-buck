@@ -23,6 +23,10 @@ The [[file:net-demurrage-simulation-migration.org][simulation migration checklis
 assumptions, and records acceptance criteria for a replacement economy.
 The [[file:jubilee-marked-relief.org][marked-relief note]] analyzes the proposed no-sale proportional value,
 the required aggregate-age denominator, and the remaining basket-mark audit.
+The [[file:net-demurrage-invariants.org][responsibilities and invariants map]] records the current contract boundaries,
+transition preconditions and postconditions, tested findings and candidate
+simplifications. The [[file:net-demurrage-interface-migration.org][core, Notes and proof migration plan]] covers consumers,
+the monetary meaning of Notes, proof statements and safe migration.
 
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
@@ -71,10 +75,16 @@ must not be disturbed.
   capped by principal, as the default relief. Pay only from existing cash and
   revert if the payout exceeds 10% of that net cash. The old proportional-sale
   and reserve-ratio formulas remain reference comparisons.
-- [X] =balanceOf= is the full spendable amount. An ordinary account's held and
-  issued-but-unspent net BUCK are simultaneously spendable; Carrying senders
-  transfer nominal units with the proportional fee. New, not-yet-issued credit
-  capacity is separate. Transfers do not retire any facility implicitly.
+- [X] Carrying services use nominal =balanceOf=, transfers, allowances and
+  events. Carried fees affect their net value and pass proportionally on
+  transfer; ordinary accounts report net spendable value. Services are meant
+  for BUCK-neutral flows, and their users must understand pooled fees.
+- [ ] Enforce the intended allowlist of BUCK-neutral service contracts and
+  verify ordinary/Carrying, pool/recipient, insurer, Notes and AMM behavior.
+  Current registry binding is not an independent neutral-service allowlist.
+- [X] An ordinary account's held and issued-but-unspent net BUCK are
+  simultaneously spendable. New, not-yet-issued capacity is separate.
+  Transfers do not retire any facility implicitly.
 - [X] A facility's outstanding issued principal and integral of BUCK-seconds
   belong to the selected BuckCredit NFT, not to an account-sign state. Issued
   but unspent BUCK start incurring demurrage immediately. Early actual relief
@@ -91,9 +101,10 @@ must not be disturbed.
 - [X] Renewal checkpoints and settles only the selected facility, updates
   insured value, rate and any new issuance atomically, and must not temporarily
   deactivate coverage or worsen a pre-existing K shortfall.
-- [ ] Specify exact rounding, 50-year cap, per-facility partial retirement,
-  total issuance, fee transfer/settlement, and migration invariants against an
-  independent high-precision reference before contract integration.
+- [ ] Finalize and verify exact rounding, 50-year cap, per-facility partial
+  retirement, total issuance, fee transfer/settlement, and migration invariants
+  against independent high-precision references. An isolated contract
+  prototype exists; full cross-implementation proof remains open.
 - [X] Prototype an exact aggregate benchmark for separately capped NFT
   claimable seconds without enumerating all owners on each operation.
 - [ ] Integrate and stress-test bounded maturity processing, keeper liveness,
@@ -159,8 +170,9 @@ refund remains a claim on the original pool and can be retried.
   reductions and renewal; retain older sale-based policies as explicit
   comparisons. Verify full 100-year fee accrual and the 50-year claim cap.
 - [X] Prototype matured-lien release, retained supply, deferred fund burns and
-  deferred original-pool refunds in the independent Python reference. This
-  does not yet change or validate the Solidity settlement and closure paths.
+  deferred original-pool refunds in the independent Python reference. The
+  isolated Solidity closure and settlement paths were subsequently implemented;
+  the remaining audit and production integration are still open.
 - [X] Run the locally available full contract suite, including the generated
   proof and regression fixtures, and record the fork-dependent exclusion.
   Continue committing each independently verified change in this worktree.
@@ -310,6 +322,37 @@ entries do not preserve the retired sale-on-claim interfaces.
 - [ ] Review the sandbox's locked JavaScript dependencies and their actual
   exposure before publishing a new release; test any dependency updates.
 
+** 5. Core, Notes, proofs and migration
+
+Use the detailed [[file:net-demurrage-interface-migration.org][interface migration checklist]] for exact file mappings, proof
+statements, ordering and acceptance. The main gates are:
+
+- [X] Inventory the current token, Notes and client semantics, and document
+  transition pre/postconditions and simplification candidates.
+- [ ] Implement and test the Carrying service allowlist; verify the existing
+  nominal transfer and mixed-age pooling rules and provide clear net-value
+  disclosures. Specify receipt claims and evidence before changing any public
+  API or proof.
+- [ ] Implement bit-accurate net arithmetic and wide integer/rounding support
+  in Rust, PyO3, WASM and Python/JS interfaces, with shared independent vectors
+  and explicit legacy-version handling.
+- [ ] Update contract artifact generation, link metadata, deployment, all
+  core/alberta_buck wallet interfaces, events, snapshots and restores. Preserve
+  or explicitly replace delegated-demurrage capabilities and identity gates.
+- [ ] Design a non-replayable Notes migration across immutable token/pool
+  addresses and separately stored nullifiers. Decide whether new proof domains
+  are needed; update circuits, provers, verifiers, receipt schemas and matched
+  ceremony artifacts only when the chosen statements require it.
+- [ ] Verify real A1/A2/B1 proofs and adverse/rollback paths against the new
+  token, including ages, mixed deposits, actual recipient net value and
+  cross-pool replay. Distinguish stub accounting tests and development keys
+  from production cryptographic assurance.
+- [ ] Implement the five-year and JS sandbox migration gates in the companion
+  plan; run a short smoke, common vectors and then fresh frozen five-year
+  baseline/policy/shock campaigns. Generate JSON and PDF on every completed
+  five-year run and retain provenance; do not retire distinct legacy checks
+  until their replacement coverage is demonstrated.
+
 * Progress and verification log
 
 | Date | Stage | Result / next action | Commit |
@@ -356,7 +399,8 @@ entries do not preserve the retired sale-on-claim interfaces.
 | 2026-10-30 | Real-pool mark versus sale | Four new real-V3 cases, for both token orderings and with/without a price shock, pass within the 14-test equity integration suite. After ten years of carried fees, the controlled normal sale received about 6,216 BUCK on a 6,248 BUCK mark; immediately after a large TOKEN sale it received about 3,842 BUCK on the same mark. An authorized reduction also paid the stale mark before TWAP caught up. This exposes an interim oracle guard and broader valuation audit as deployment prerequisites; it is not a prediction of live-market losses. | =b7f99bc1= |
 | 2026-10-30 | Interim mark guard | Reductions and renewals now reject spot/TWAP divergence outside the basket's configured band; a zero or greater-than-10% band and invalid prices are unavailable. The real-pool tests cover both token orderings, rises and falls, successful retry after convergence, small permitted moves, and 50-year lien release during a separate dislocation. Exact-band and one-unit-over tests pass. =make nix-match-Jubilee=: 184 passed; =make nix-test=: 1,431 passed and one fork test skipped; the final additional maturity assertions separately pass in all 18 equity-integration tests. The demurrage PDF and text were regenerated. A sustained manipulation and denial of service remain open concerns. | =ab2e6c96= |
 | 2026-10-30 | Linked net-contract smoke | Python and browser-safe JS link creation bytecode by qualified library name and validate missing, invalid, overlapping and unresolved references against common vectors. =make nix-venv-net-demurrage-smoke=: four Python and three JS tests pass; the actual Anvil/Tevm fixtures issue 100 BUCK, age one year and retire one BUCK. Python compares with the independent reference. The broader Python core suite passes 45 tests, and five relevant JS tests including the legacy world pass. Static K, zero premium, no market or household and a cash-only basket mean this is not five-year validation. | =3ba19785= |
-| 2026-10-30 | Insurer callback ordering | A controlled callback changed the basket after the old quote, reproducing stale relief in both reduction and renewal. Liquidity preparation now precedes the marked quote; renewal rechecks consent and principal, and one-use forwarding wrappers were removed. Callback-driven repricing and owner-minimum rollback pass in the 59-test renewal suite. The full oracle and callback audit remains open. | This commit |
+| 2026-10-30 | Insurer callback ordering | A controlled callback changed the basket after the old quote, reproducing stale relief in both reduction and renewal. Liquidity preparation now precedes the marked quote; renewal rechecks consent and principal, and one-use forwarding wrappers were removed. Callback-driven repricing and owner-minimum rollback pass in the 59-test renewal suite. The full oracle and callback audit remains open. | =8b43a9ba= |
+| 2026-10-30 | Invariant and integration review | Added the responsibilities/invariant map and the simulation, client, Notes and proof migration checklists. Two BuckNet/Notes tests with stub proof gates demonstrate nominal/net amounts and mixed-age pooling; a real A1 proof spends in two independently funded legacy Notes pools with the same root. Renewal minimum-failure rollback preserves both consents. User confirmed nominal Carrying-service semantics; a new test covers aged Carrying-to-Carrying and Carrying-to-ordinary transfers. =make nix-test=: 1,439 passed and one fork-dependent test skipped; =make nix-venv-demurrage-test=: 105 passed. The service allowlist, real BuckNet proof integration and a five-year net economy remain open. | This commit |
 
 * Open implementation constraints
 
@@ -411,10 +455,11 @@ economic BUCK is accounted for exactly once. The Carrying gross-up uses a
 pro-rata floored fee; it does not establish parity with the old BUCK-seconds
 representation. Scaled account bounds, per-NFT capped aggregate relief and
 actual-token transitions still require full-system testing.
-The new NFT book is intentionally not authoritative for legacy Buck activity;
-minting and repayment are not migrated into production until token and fund
-settlement can call the hooks atomically. =BuckCredit= is near the EIP-170 size limit, so
-further logic needs size checks or extraction instead of assuming it will fit.
+The new NFT book is intentionally not authoritative for legacy Buck activity.
+The experimental token and fund call the per-facility hooks atomically, but
+neither legacy state migration nor production deployment is implemented.
+=BuckCredit= is near the EIP-170 size limit, so further logic needs size
+checks or extraction instead of assuming it will fit.
 
 =BuckNet= is a separate clean-genesis integration prototype, not a replacement
 for =Buck.sol=. It issues actual unspent BUCK against each activated NFT,

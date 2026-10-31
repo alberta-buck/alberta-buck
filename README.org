@@ -112,7 +112,9 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
   linear credit relief and fund accounting. The current contract uses the
   earlier model; see the [[file:doc/review/net-demurrage-analysis.org][demurrage audit]] for implementation status and the
   [[file:doc/review/credit-facility-accounting-design.org][credit-facility design]] for the proposed contract boundaries.
-  The [[file:doc/review/demurrage-implementation-plan.org][implementation checklist]] tracks the contract work and validation.
+  The [[file:doc/review/demurrage-implementation-plan.org][implementation checklist]] tracks the contract work and validation;
+  [[file:doc/review/net-demurrage-invariants.org][contract invariants]] and the [[file:doc/review/net-demurrage-interface-migration.org][core and Notes migration plan]] describe the
+  experimental model's boundaries and remaining integration work.
 - [[file:alberta-buck-ethereum-basket.org][The BuckBasket]]
   ([[file:images/alberta-buck-ethereum-basket.pdf][pdf]]) -- the commodity anchor, why it must be
   heavy, and how a shared pantry of basics earns for its savers.

@@ -161,6 +161,35 @@ contract BuckNetTest is Test {
         assertEq(fundAfter, fundBefore);
     }
 
+    function test_carryingServicesKeepNominalBalancesAndPassTheirCarriedFee() public {
+        MockNetInsurerPool first = new MockNetInsurerPool();
+        MockNetInsurerPool second = new MockNetInsurerPool();
+        _bind(address(first), true, address(this));
+        _bind(address(second), true, address(this));
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6);
+        vm.prank(ALICE);
+        buck.transfer(address(first), 40e6);
+
+        vm.warp(t0 + 10 * YEAR);
+        assertEq(buck.balanceOf(address(first)), 40e6);
+        uint256 firstNet = buck.netBalanceOf(address(first));
+        assertApproxEqAbs(firstNet, 32_749_230, 1);
+
+        first.transferToken(buck, address(second), 10e6);
+        assertEq(buck.balanceOf(address(first)), 30e6);
+        assertEq(buck.balanceOf(address(second)), 10e6);
+        uint256 secondNet = buck.netBalanceOf(address(second));
+        assertApproxEqAbs(secondNet, firstNet / 4, 1);
+
+        second.transferToken(buck, BOB, 10e6);
+        assertEq(buck.balanceOf(address(second)), 0);
+        assertEq(buck.balanceOf(BOB), secondNet);
+        assertLt(buck.balanceOf(BOB), 10e6);
+        assertEq(buck.totalSupply(), 100e6);
+    }
+
     function test_activeFacilityCannotSwitchToCarryingAndCanSwitchAfterRetirement() public {
         // An earlier inactive NFT must not conceal a later issued facility.
         _credit(ALICE, INSURER_A, 10e6, 0);

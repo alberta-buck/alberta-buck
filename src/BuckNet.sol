@@ -126,6 +126,10 @@ contract BuckNet is IERC20, IERC20Metadata {
     function decimals() external pure returns (uint8) { return BuckTypes.DECIMALS; }
     function totalSupply() external view returns (uint256) { return _book.issued; }
     function totalIssued() external view returns (uint256) { return _book.issued; }
+    /// @notice Ordinary held plus issued-unspent net BUCK; for a Carrying
+    ///         account, its currently transferable nominal units instead.
+    /// @dev A Carrying sender's recipient can receive less net than the
+    ///      nominal Transfer event. netBalanceOf exposes its current net value.
     function balanceOf(address owner) public view returns (uint256) { return _book.balanceOf(owner); }
     function netBalanceOf(address owner) external view returns (uint256) { return _book.netOf(owner); }
     function heldAndUnspentScaled(address owner) external view returns (uint256 held, uint256 unspent) {

@@ -4,7 +4,8 @@ pragma solidity ^0.8.20;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @notice Arithmetic for continuously declining BUCK balances and linear
-///         issuance-based relief. This library is not yet wired into Buck.
+///         issuance-based relief. BuckNet and BuckCredit use these primitives;
+///         the legacy Buck contract still uses its earlier accounting.
 /// @dev Decay uses exp(-0.02 / (365.25 days)), rounded down to 36 decimal
 ///      places, and exponentiation by squaring. `amount` can be any unit as
 ///      long as it and the result fit uint256. For frequently checkpointed

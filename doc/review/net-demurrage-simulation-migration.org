@@ -26,7 +26,9 @@ The authoritative implementation checklist is
 choice is described in [[file:basket-jubilee-crossholding.org][the cross-holding analysis]]. No five-year acceptance
 campaign should be presented as evidence for the new contracts until the
 deployment, agents, telemetry and basket have all been migrated and the
-acceptance vectors below pass.
+acceptance vectors below pass. [[file:net-demurrage-invariants.org][The transition invariants]] specify the contract
+boundaries; the [[file:net-demurrage-interface-migration.org][core, Notes and proof migration plan]] covers the wider client,
+proof, artifact and receipt work that must accompany this migration.
 
 * Migration map
 
@@ -107,3 +109,55 @@ NFT transactions, calls real routing and processes claim maturities should be
 measured during the smoke run. Arrival rates and heterogeneous thresholds must
 remain explicit; approximations must not bypass owner authorization, actual
 funding or observable contract failures.
+
+* Ordered implementation and shared agent invariants
+
+- [ ] Implement the selected nominal Carrying-service/refund semantics and
+  verify actual net value at ordinary recipients; account for the intended
+  neutral-service allowlist. Resolve the leveraged basket's cross-holding and
+  exit valuation. A cash-only diagnostic may be run in parallel, but it cannot
+  be labeled as a replacement for the leveraged five-year economy. Keep the
+  existing low-K guard intact.
+- [ ] Construct one explicit net-model deployment per runtime: actual linked
+  token, credit, registry, dynamic K, verified external fund, one net-mode
+  basket receipt, per-insurer pools and any quoter/keeper dependencies. Bind,
+  authorize and verify each address in the same order as the contracts require.
+  Version this graph in Python/JS snapshots and report provenance; fail closed
+  if a restore names the wrong token, pool, library, chain or accounting model.
+- [ ] Adapt the *existing shared* household policies instead of creating a
+  second competing economic hypothesis. Preserve adaptive default and explicit
+  always-invest, always-retire and other approved comparisons, randomized
+  individual thresholds and arrival rates. Read actual per-NFT principal and
+  age, full-value spendable balances and premium/coverage separately.
+- [ ] Exercise refinancing as actual issuance followed by real BUCK-to-USDC
+  routing and mortgage payment. Fund any required reserve before issuing;
+  distinguish full-value premium paid and nominal refund. For surplus, invest
+  in the basket or explicitly purchase BUCK and retire selected liabilities
+  according to the policy and net trading costs. A wallet purchase alone must
+  never reduce an NFT principal or be reported as an exit.
+- [ ] Make the fund's observable keeper actions explicit: bounded maturity
+  batches, cash checkpoints, scheduled investment, guarded independent sales,
+  deferred burns and insurer refund retries. Report mark failures, stale-price
+  guards, 10% cash-cap refusals, low-K exit failures, principal/deferred dust,
+  actual proceeds and recovery. Retry or report a genuine shortfall; never
+  invent a sale, cash or relief to keep a run moving.
+- [ ] Drive the Python and JS paths through common deterministic operation
+  vectors and actual EVM calls: issue, market sale, price shock, discounted
+  buyback, per-NFT retirement, savings deposit/withdrawal, renew, maturity,
+  refusal and retry. Compare real account/fund net and nominal balances,
+  outstanding principal, insured premium, claim seconds and money flows.
+  Supplement policy parity with these contract-state comparisons.
+- [ ] In both sandboxes, show each investor's actual remaining basis, marked
+  position and ROI, plus relevant facility liability and fund availability.
+  Version and restore saved account/receipt state, authorization, clock, agent
+  random streams and active keeper state. Notes and proof migration must meet
+  the independent checklist, not be inferred from an economy run.
+- [ ] Run a small working-tree smoke with errors and configuration visible;
+  then run frozen source five-year baseline, adaptive and explicit policy
+  comparisons plus agreed shocks. Every completed five-year run must preserve
+  its JSON even if rendering fails and produce an adjacent PDF on success;
+  the campaign index names model, contracts, seeds, configuration and both
+  files, and flags incomplete/render-failure cases for repair.
+- [ ] Compare the distinct existing shock, routing, low-K and diagnostic
+  detections with the new suite. Remove legacy agents, scenarios or contracts
+  only when replacement coverage is demonstrated and recorded.

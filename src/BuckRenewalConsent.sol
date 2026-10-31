@@ -23,8 +23,9 @@ library BuckRenewal {
 
 /// @notice Independent insurer and NFT-owner consent for a BuckNet renewal.
 /// @dev Created by and bound permanently to its token. It cannot change a
-///      credit or settle BUCK. The fund validates before a sale; the token
-///      validates again and alone can consume both authorizations.
+///      credit or settle BUCK. The fund validates before insurer liquidity
+///      preparation and rechecks afterward; the token validates again and
+///      alone can consume both authorizations.
 contract BuckRenewalConsent {
     address public immutable buck;
     BuckCredit public immutable credit;
