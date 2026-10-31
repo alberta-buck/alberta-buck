@@ -100,6 +100,7 @@ class ActivatedCapacityQuote:
     """Same-block zero-coverage issuance estimates, in raw BUCK units."""
     block_number: int
     facilities: tuple[tuple[int, int], ...]  # (NFT, independently quoted max spendable)
+    unactivated_present: int               # marked value not yet activated on eligible NFTs
     shared_limit: int                       # account and total-issuance numerical room
     potential_capacity: int                 # bounded sum before the maturity gate
     capacity: int                           # zero while maturities need processing
@@ -340,12 +341,14 @@ class NetCreditOps:
         return IssueQuote(*quote, self.stack.token.functions.balanceOf(owner).call())
 
     def quote_household_activated_capacity(self, owner, token_ids) -> ActivatedCapacityQuote:
-        """Observe activated issuance room without adding per-NFT shared limits twice.
+        """Observe activated room and unactivated marked coverage at one block.
 
-        Every contract read is pinned to one block. This is a numerical quote,
-        not a guarantee: K is recomputed during issue and identity, fund,
-        authorization and liquidity can change. A pending maturity blocks all
-        new issuance, so capacity is zero until the keeper processes it.
+        Require a verified non-Carrying owner and distinct owned NFTs. Apply
+        the account and supply bounds once across their independent quotes,
+        and exclude fully matured NFTs from newly activatable coverage. This
+        is a numerical observation, not a guarantee: K is recomputed during
+        issue and identity, fund, authorization and liquidity can change.
+        A pending maturity blocks issuance until the keeper processes it.
         """
         address = getattr(owner, "address", owner)
         ids = tuple(token_ids)
@@ -359,16 +362,24 @@ class NetCreditOps:
         if any(read(credit.functions.ownerOf(token_id)).lower() != address.lower() for token_id in ids):
             raise ValueError("foreign household facility")
         facilities = []
+        unactivated_present = 0
         for token_id in ids:
-            _, premium, reserve, maximum = read(quoter.functions.quoteIssue(token_id, 0))
+            present, premium, reserve, maximum = read(quoter.functions.quoteIssue(token_id, 0))
             if premium or reserve:
                 raise ValueError("zero-coverage quote unexpectedly requires a premium or reserve")
             facilities.append((token_id, maximum))
+            principal, age = read(credit.functions.issuanceOf(token_id))
+            if not principal or age < principal * 50 * YEAR:
+                mark = read(credit.functions.depreciatedFaceValue(token_id))
+                if present > mark:
+                    raise ValueError("activated coverage exceeds current face mark")
+                unactivated_present += mark - present
         held, unspent = read(token.functions.heldAndUnspentScaled(address))
         total = read(token.functions.totalIssued())
         potential, shared = bound_activated_capacity((capacity for _, capacity in facilities), held, unspent, total)
         pending = read(token.functions.maturitiesPending())
-        return ActivatedCapacityQuote(block, tuple(facilities), shared, potential, 0 if pending else potential, pending)
+        return ActivatedCapacityQuote(block, tuple(facilities), unactivated_present, shared, potential,
+                                      0 if pending else potential, pending)
 
     def issue(self, owner, token_id: int, coverage: int, spendable: int):
         return self.execute(owner, self.stack.token, "issue", [token_id, coverage, spendable])

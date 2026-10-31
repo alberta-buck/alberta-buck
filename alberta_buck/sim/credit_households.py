@@ -217,7 +217,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if getattr(d, "buck_accounting", "") == "net":
             position            = d.net_credit_ops.household(self.proxy.address, self._token_ids)
             available           = d.net_credit_ops.quote_household_activated_capacity(self.proxy.address, self._token_ids)
-            drawn, unactivated  = position.issued, position.unactivated
+            drawn, unactivated  = position.issued, available.unactivated_present
         else:
             signed              = d.buck.functions.signedBalanceOf(self.proxy.address).call()
             drawn               = max(0, -signed)
@@ -234,6 +234,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if getattr(d, "buck_accounting", "") == "net":
             state["accounting"] = "net"  # policy refuses absent explicit forecasts
             state["activated_capacity"] = available.capacity / PARITY
+            state["issuance_limit"] = (0 if available.maturities_pending else available.shared_limit / PARITY)
             state["maturities_pending"] = available.maturities_pending
             if available.maturities_pending:
                 state["unactivated"] = 0  # no issuance can pass until the keeper advances the claim book

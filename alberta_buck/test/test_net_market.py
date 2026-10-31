@@ -123,6 +123,8 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         observed = agent._state(d, 0)
         capacity = credit_ops.quote_household_activated_capacity(buyer.address, [buyer_id])
         assert observed["activated_capacity"] == capacity.capacity / RAW > 0
+        assert observed["issuance_limit"] == capacity.shared_limit / RAW
+        assert observed["unactivated"] == capacity.unactivated_present / RAW
         assert not observed["maturities_pending"] and observed["accounting"] == "net"
 
         class BacklogView:
@@ -130,11 +132,13 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
                 return SimpleNamespace(issued=credit_ops.household(owner, ids).issued, unactivated=10 * RAW)
 
             def quote_household_activated_capacity(self, _owner, _ids):
-                return SimpleNamespace(capacity=0, maturities_pending=True)
+                return SimpleNamespace(capacity=0, shared_limit=10 * RAW, unactivated_present=10 * RAW,
+                                       maturities_pending=True)
 
         d.net_credit_ops = BacklogView()
         blocked_state = agent._state(d, 0)
         assert blocked_state["maturities_pending"] and blocked_state["activated_capacity"] == 0
+        assert blocked_state["issuance_limit"] == 0
         assert blocked_state["unactivated"] == 0 and blocked_state["spendable"] == observed["spendable"]
         d.net_credit_ops = credit_ops
         ru, rb = active_reserves(chain, pool_address, usdc, buck)

@@ -125,6 +125,11 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert capacity.maturities_pending and capacity.potential_capacity > 0 and capacity.capacity == 0
         with pytest.raises(Exception):
             ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
+        chain.send(buck.functions.processMaturities(10))
+        assert not buck.functions.maturitiesPending().call()
+        assert credit.functions.depreciatedFaceValue(0).call() > credit.functions.currentValue(0).call()
+        matured = ops.quote_household_activated_capacity(actor.address, [0])
+        assert matured.capacity == matured.unactivated_present == 0  # a matured NFT cannot issue again
         assert not chain.mismatches
 
 
@@ -339,4 +344,17 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         fourth_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 3).call()
         missing = ops.quote_premium_refund(fourth_id, face)
         assert missing.reason == "no-insurer-pool" and missing.refund_fraction_wad is None
+        # Unactivated coverage is measured at the current marked asset value,
+        # not at the original face amount; activated and unactivated portions
+        # share the same depreciation schedule.
+        start = anvil.w3.eth.get_block("latest")["timestamp"]
+        _exec(chain, insurer, credit, "createCredit", [debtor.address, 0, 100 * RAW, 0, 1, 1000, start, 0])
+        depreciating_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 4).call()
+        ops.issue(debtor.address, depreciating_id, 40 * RAW, 10 * RAW)
+        anvil.warp_to(start + 2 * YEAR)
+        marked = credit.functions.depreciatedFaceValue(depreciating_id).call()
+        active = credit.functions.currentValue(depreciating_id).call()
+        valued = ops.quote_household_activated_capacity(debtor.address, [depreciating_id])
+        assert marked == 80 * RAW and active == 32 * RAW
+        assert valued.unactivated_present == marked - active == 48 * RAW
         assert not chain.mismatches

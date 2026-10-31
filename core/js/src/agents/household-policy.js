@@ -217,6 +217,11 @@ function validateForecast(reliefRate, refundFraction, refundGrowth, walletGrowth
 function validateActivatedCapacity(value) {
   if (!Number.isFinite(value) || value < 0) throw new Error("invalid activated credit capacity");
 }
+function validateIssuanceLimit(value) {
+  if (value !== null && value !== undefined && (!Number.isFinite(value) || value < 0)) {
+    throw new Error("invalid shared issuance limit");
+  }
+}
 
 export function refinance(t, usd, buck) {
   const reliefRate = t.expected_relief_rate ?? .02, refundFraction = t.premium_refund_fraction ?? 1;
@@ -224,10 +229,12 @@ export function refinance(t, usd, buck) {
   validateForecast(reliefRate, refundFraction, refundGrowth, walletGrowth);
   const activatedCapacity = t.activated_capacity ?? 0;
   validateActivatedCapacity(activatedCapacity);
+  validateIssuanceLimit(t.issuance_limit);
   const e = t.premium_bp / 1000, spc = t.k * .99 - e;
-  const need = Math.max(0, buck - t.headroom - activatedCapacity);
+  const newSpendable = Math.max(0, buck - t.headroom);
+  const need = Math.max(0, newSpendable - activatedCapacity);
   const cov = need === 0 ? 0 : spc > 0 ? need / spc : Infinity;
-  if (!Number.isFinite(cov)) return NO;
+  if (!Number.isFinite(cov) || (t.issuance_limit != null && newSpendable + cov * e > t.issuance_limit)) return NO;
   const dep = cov * e, value = buck * t.buck_value, valueDep = dep * t.buck_value;
   const refundValue = valueDep * refundFraction;
   const newlyIssued = t.wallet_already_issued ? Math.max(0, buck - t.headroom) : buck;
@@ -247,7 +254,13 @@ export function refinance(t, usd, buck) {
            carry, one_time, value: net, parts };
 }
 
-const capacity = (t) => t.headroom + (t.activated_capacity ?? 0) + t.unactivated * Math.max(0, t.k * .99 - t.premium_bp / 1000);
+const capacity = (t) => {
+  const active = t.activated_capacity ?? 0, e = t.premium_bp / 1000, spc = Math.max(0, t.k * .99 - e);
+  if (t.issuance_limit == null) return t.headroom + active + t.unactivated * spc;
+  const used = Math.min(active, t.issuance_limit), totalPerCover = spc + e;
+  const extra = spc > 0 && totalPerCover > 0 ? Math.min(t.unactivated, (t.issuance_limit - used) / totalPerCover) : 0;
+  return t.headroom + used + extra * spc;
+};
 export function bestRefinance(t, ru, rb, fee) {
   if (t.debt <= 0 || capacity(t) <= 0 || ru <= 0 || rb <= 0) return NO;
   const usdMax = Math.min(t.debt, usdcOut(capacity(t) / 1.005, ru, rb, fee), .5 * ru);
@@ -287,14 +300,16 @@ export function premiumSale(cap, ru, rb, fee, basket, premium, impact) {
 
 export function terms(s, p, investment = false) {
   const net = s.accounting === "net";
-  if (net && ["expected_relief_rate", "premium_refund_fraction", "expected_refund_growth", "expected_wallet_growth", "activated_capacity"]
+  if (net && ["expected_relief_rate", "premium_refund_fraction", "expected_refund_growth", "expected_wallet_growth", "activated_capacity", "issuance_limit"]
     .some((key) => s[key] === undefined || s[key] === null)) {
-    throw new Error("net household needs explicit forecasts and activated credit capacity");
+    throw new Error("net household needs explicit forecasts, activated credit capacity and issuance limit");
   }
   validateForecast(s.expected_relief_rate ?? .02, s.premium_refund_fraction ?? 1,
     s.expected_refund_growth ?? -.02, s.expected_wallet_growth ?? 0);
   const activatedCapacity = net ? s.activated_capacity : 0;
   validateActivatedCapacity(activatedCapacity);
+  const issuanceLimit = net ? s.issuance_limit : null;
+  validateIssuanceLimit(issuanceLimit);
   return { debt: s.mortgage, rate: investment ? 0 : p.apr, face: s.face,
     premium_bp: p.premium_bp, joined: s.joined, payback_y: p.theta, k: s.k,
     headroom: s.spendable, unactivated: s.unactivated,
@@ -303,7 +318,7 @@ export function terms(s, p, investment = false) {
     risk: p.risk, opp_rate: p.apr, buck_value: s.basket_usd,
     expected_relief_rate: s.expected_relief_rate, premium_refund_fraction: s.premium_refund_fraction ?? 1,
     expected_refund_growth: s.expected_refund_growth, wallet_already_issued: net,
-    expected_wallet_growth: s.expected_wallet_growth ?? 0, activated_capacity: activatedCapacity };
+    expected_wallet_growth: s.expected_wallet_growth ?? 0, activated_capacity: activatedCapacity, issuance_limit: issuanceLimit };
 }
 
 export function issuance(s, p) {

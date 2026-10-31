@@ -84,8 +84,9 @@ runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
 quote and issue, and that already-activated credit can issue without another
 premium. The shared Python/JS refinancing policy distinguishes that capacity
-from wallet BUCK; the isolated household state derives it from same-block
-per-facility quotes with shared numerical limits. The complete new-model
+from wallet BUCK; the isolated household state derives it and the present
+value of unactivated coverage from same-block per-facility quotes. Its shared
+numerical limit includes newly issued premium principal. The complete new-model
 household world is still being migrated. Current fund relief and the immediate mixed insurer-pool
 refund can also be observed at one block; these observations are not guarantees
 of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3

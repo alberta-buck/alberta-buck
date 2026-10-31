@@ -99,6 +99,12 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.ok(capacity.potentialCapacity > 0n);
   assert.equal(capacity.capacity, 0n);
   await assert.rejects(ops.quoteReliefRate(0n, RAW)); // stale denominator must not become a forecast
+  await s.send(buck, "processMaturities", [10n]);
+  assert.equal(await s.call(buck, "maturitiesPending"), false);
+  assert.ok(await s.call(credit, "depreciatedFaceValue", [0n]) > await s.call(credit, "currentValue", [0n]));
+  const matured = await ops.quoteHouseholdActivatedCapacity(actor.address, [0n]);
+  assert.equal(matured.capacity, 0n);
+  assert.equal(matured.unactivatedPresent, 0n); // a matured NFT cannot issue again
   assert.deepEqual(s.mismatches, []);
 });
 
@@ -293,5 +299,16 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const missing = await ops.quotePremiumRefund(fourthId, face);
   assert.equal(missing.reason, "no-insurer-pool");
   assert.equal(missing.refundFractionWad, null);
+  // The unactivated share follows the asset's actual present mark.
+  const start = (await s.client.getBlock()).timestamp;
+  await exec(insurer, credit, "createCredit", [debtor.address, 0, 100n * RAW, 0n, 1, 1000, start, 0]);
+  const depreciatingId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 4n]);
+  await ops.issue(debtor.address, depreciatingId, 40n * RAW, 10n * RAW);
+  await advanceTime({ session: s }, 2 * YEAR);
+  const marked = await s.call(credit, "depreciatedFaceValue", [depreciatingId]);
+  const active = await s.call(credit, "currentValue", [depreciatingId]);
+  const valued = await ops.quoteHouseholdActivatedCapacity(debtor.address, [depreciatingId]);
+  assert.equal(valued.unactivatedPresent, marked - active);
+  assert.ok(valued.unactivatedPresent <= 48n * RAW && valued.unactivatedPresent > 48n * RAW - 10n);
   assert.deepEqual(s.mismatches, []);
 });

@@ -132,6 +132,7 @@ class RefiTerms:
     wallet_already_issued: bool = False          # net-mode headroom is money already issued
     expected_wallet_growth: float = 0.0         # annual return on the wallet's alternative use
     activated_capacity: float = 0.0             # new spendable issuance without more coverage or premium
+    issuance_limit: float | None = None         # common room for new principal, including premium
 
     def __post_init__(self):
         if (self.expected_relief_rate is not None and
@@ -146,6 +147,8 @@ class RefiTerms:
             raise ValueError("invalid expected wallet growth")
         if not math.isfinite(self.activated_capacity) or self.activated_capacity < 0:
             raise ValueError("invalid activated credit capacity")
+        if self.issuance_limit is not None and (not math.isfinite(self.issuance_limit) or self.issuance_limit < 0):
+            raise ValueError("invalid shared issuance limit")
 
     @property
     def spend_per_cover(self) -> float:
@@ -155,15 +158,26 @@ class RefiTerms:
     @property
     def capacity(self) -> float:
         """The most BUCK the household can draw now."""
-        return self.headroom + self.activated_capacity + self.unactivated * max(0.0, self.spend_per_cover)
+        spend_per_cover = max(0.0, self.spend_per_cover)
+        if self.issuance_limit is None:
+            return self.headroom + self.activated_capacity + self.unactivated * spend_per_cover
+        activated = min(self.activated_capacity, self.issuance_limit)
+        total_per_cover = spend_per_cover + deposit_rate(self.premium_bp)
+        extra_coverage = (min(self.unactivated, (self.issuance_limit - activated) / total_per_cover)
+                          if spend_per_cover > 0 and total_per_cover > 0 else 0.)
+        return self.headroom + activated + extra_coverage * spend_per_cover
 
     def coverage_for(self, buck: float) -> float:
         """New coverage to activate so `buck` can be drawn."""
-        need = max(0.0, buck - self.headroom - self.activated_capacity)
+        new_spendable = max(0.0, buck - self.headroom)
+        need = max(0.0, new_spendable - self.activated_capacity)
         if need == 0:
-            return 0.0
+            return 0.0 if self.issuance_limit is None or new_spendable <= self.issuance_limit else math.inf
         spc = self.spend_per_cover
-        return need / spc if spc > 0 else math.inf
+        coverage = need / spc if spc > 0 else math.inf
+        if self.issuance_limit is not None and new_spendable + coverage * deposit_rate(self.premium_bp) > self.issuance_limit:
+            return math.inf
+        return coverage
 
 
 @dataclass

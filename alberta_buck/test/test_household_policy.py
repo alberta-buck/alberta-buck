@@ -1,6 +1,7 @@
 """Shared examples, economic boundaries, and Python/JavaScript conformance."""
 from dataclasses import asdict
 import json
+import math
 from pathlib import Path
 import subprocess
 
@@ -44,6 +45,10 @@ def test_net_refinance_requires_available_explicit_forecasts():
     del missing_capacity["activated_capacity"]
     with pytest.raises(ValueError, match="activated credit capacity"):
         hp.terms(missing_capacity, p)
+    missing_limit = FIXTURE["state"] | FIXTURE["net_refinance"][0]["state"]
+    del missing_limit["issuance_limit"]
+    with pytest.raises(ValueError, match="issuance limit"):
+        hp.terms(missing_limit, p)
 
 
 @pytest.mark.parametrize("field,value,error", [("expected_relief_rate", -.01, "relief"),
@@ -51,7 +56,9 @@ def test_net_refinance_requires_available_explicit_forecasts():
                                                 ("expected_wallet_growth", -1.01, "wallet"),
                                                 ("premium_refund_fraction", float("nan"), "fraction"),
                                                 ("activated_capacity", -1, "activated credit"),
-                                                ("activated_capacity", float("nan"), "activated credit")])
+                                                ("activated_capacity", float("nan"), "activated credit"),
+                                                ("issuance_limit", -1, "issuance limit"),
+                                                ("issuance_limit", float("nan"), "issuance limit")])
 def test_net_refinance_rejects_invalid_forecasts(field, value, error):
     p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"])
     with pytest.raises(ValueError, match=error):
@@ -73,6 +80,20 @@ def test_net_activated_capacity_is_new_issuance_without_a_second_premium():
     assert v.coverage == pytest.approx(25_000 / mixed.spend_per_cover)
     assert v.parts["relief"] == pytest.approx((55_000 + v.deposit) * mixed.expected_relief_rate)
     assert v.parts["wallet_carry"] == pytest.approx(-20_000 * mixed.expected_wallet_growth)
+
+
+def test_net_shared_limit_includes_the_new_premium_principal():
+    p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
+    state = FIXTURE["state"] | FIXTURE["net_refinance"][-1]["state"] | {
+        "spendable": 20_000, "activated_capacity": 30_000, "unactivated": 1_000_000, "issuance_limit": 40_000}
+    t = hp.terms(state, p)
+    e = carry.deposit_rate(t.premium_bp)
+    expected = 20_000 + 30_000 + 10_000 * t.spend_per_cover / (t.spend_per_cover + e)
+    assert t.capacity == pytest.approx(expected)
+    assert math.isinf(t.coverage_for(60_000))  # the new premium would exceed the shared room
+    wallet_only = hp.terms(state | {"issuance_limit": 0}, p)
+    assert wallet_only.capacity == 20_000 and wallet_only.coverage_for(20_000) == 0
+    assert math.isinf(wallet_only.coverage_for(20_001))
 
 
 @pytest.mark.parametrize("case", FIXTURE["surplus"])

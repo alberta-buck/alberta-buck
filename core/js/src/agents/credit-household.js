@@ -147,6 +147,8 @@ export class CreditHouseholdAgent {
       const available = await world.households.activatedCapacity(this.account);
       state.accounting = "net"; // policy still requires explicit forecasts
       state.activated_capacity = whole(available.capacity);
+      state.issuance_limit = available.maturitiesPending ? 0 : whole(available.sharedLimit);
+      state.unactivated = whole(available.unactivatedPresent);
       state.maturities_pending = available.maturitiesPending;
       if (available.maturitiesPending) state.unactivated = 0; // keeper must advance the claim book
     }

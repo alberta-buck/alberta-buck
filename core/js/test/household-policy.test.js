@@ -27,12 +27,30 @@ test("net refinance requires valid explicit forecasts", () => {
   const missingCapacity = { ...f.state, ...f.net_refinance[0].state };
   delete missingCapacity.activated_capacity;
   assert.throws(() => terms(missingCapacity, p), /activated credit capacity/);
+  const missingLimit = { ...f.state, ...f.net_refinance[0].state };
+  delete missingLimit.issuance_limit;
+  assert.throws(() => terms(missingLimit, p), /issuance limit/);
   for (const [field, value, error] of [["expected_relief_rate", -.01, /relief/],
     ["expected_refund_growth", -1.01, /growth/], ["expected_wallet_growth", -1.01, /wallet/],
     ["premium_refund_fraction", NaN, /fraction/], ["activated_capacity", -1, /activated credit/],
-    ["activated_capacity", NaN, /activated credit/]]) {
+    ["activated_capacity", NaN, /activated credit/], ["issuance_limit", -1, /issuance limit/],
+    ["issuance_limit", NaN, /issuance limit/]]) {
     assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, [field]: value }, p), error);
   }
+});
+test("the shared issuance limit includes premium principal", () => {
+  const p = profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 });
+  const state = { ...f.state, ...f.net_refinance.at(-1).state,
+    spendable: 20000, activated_capacity: 30000, unactivated: 1000000, issuance_limit: 40000 };
+  const t = terms(state, p), e = t.premium_bp / 1000, spc = t.k * .99 - e;
+  const max = 20000 + 30000 + 10000 * spc / (spc + e);
+  assert.equal(refinance(t, 59000, 60000).go, false); // premium would exceed the common limit
+  const [kind, decision] = issuance(state, p);
+  assert.equal(kind, "refinance");
+  assert.ok(decision.go && decision.buck <= max);
+  const walletOnly = terms({ ...state, issuance_limit: 0 }, p);
+  assert.equal(refinance(walletOnly, 19000, 20000).deposit, 0);
+  assert.equal(refinance(walletOnly, 19000, 20001).go, false);
 });
 test("net activated capacity issues without another premium", () => {
   const p = profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 });
@@ -59,11 +77,13 @@ test("a maturity backlog blocks new credit without hiding wallet BUCK", async ()
   const world = { accounting: "net", households: {
     read: async () => ({ drawn: 2_000_000n, spendable: 3_000_000n, unactivated: 10_000_000n,
       k: .75, ru: 100, rb: 100, fee: .0005, basket_usd: 1 }),
-    activatedCapacity: async () => ({ capacity: 0n, maturitiesPending: true }),
+    activatedCapacity: async () => ({ capacity: 0n, sharedLimit: 10_000_000n,
+      unactivatedPresent: 10_000_000n, maturitiesPending: true }),
   } };
   const state = await agent.state(world, 0);
   assert.equal(state.maturities_pending, true);
   assert.equal(state.activated_capacity, 0);
+  assert.equal(state.issuance_limit, 0);
   assert.equal(state.unactivated, 0);
   assert.equal(state.spendable, 3);
 });

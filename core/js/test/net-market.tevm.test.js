@@ -144,6 +144,8 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const observed = await agent.state(observedWorld, 0);
     const available = await creditOps.quoteHouseholdActivatedCapacity(buyer.account, [buyerId]);
     assert.equal(observed.activated_capacity, Number(available.capacity) / 1e6);
+    assert.equal(observed.issuance_limit, Number(available.sharedLimit) / 1e6);
+    assert.equal(observed.unactivated, Number(available.unactivatedPresent) / 1e6);
     assert.ok(observed.activated_capacity > 0 && !observed.maturities_pending);
     const remaining = (await creditOps.facility(buyerId)).issued;
     const beforeHousehold = await s.call(market.usdc, "balanceOf", [buyer.account.address]);

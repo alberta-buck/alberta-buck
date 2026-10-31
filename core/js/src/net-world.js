@@ -100,9 +100,10 @@ export function netCreditOps(session, stack, execute = null) {
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),
     reduceAuthorized: (owner, id, principal) => send(owner, fund, "reduce", [id, principal]),
   };
-  // Quote each NFT at the same block. The numerical maximum shared by the
-  // account and all issuance is applied once, not once per facility. K and
-  // other contract conditions can change before a later issue transaction.
+  // Quote each NFT and its present unactivated mark at the same block. The
+  // shared account/supply limit is applied once, not once per facility, and
+  // a fully aged facility cannot support another issue. K and other contract
+  // conditions can change before a later issue transaction.
   ops.quoteHouseholdActivatedCapacity = async (owner, tokenIds) => {
     const address = owner.address ?? owner, ids = tokenIds.map((id) => {
       if (!validId(id)) throw new Error("invalid household facility");
@@ -117,16 +118,23 @@ export function netCreditOps(session, stack, execute = null) {
     if (!verified || carrying) throw new Error("household owner must be verified and non-Carrying");
     const owners = await Promise.all(ids.map((id) => read(credit, "ownerOf", [id])));
     if (owners.some((actual) => actual.toLowerCase() !== address.toLowerCase())) throw new Error("foreign household facility");
-    const facilities = await Promise.all(ids.map(async (tokenId) => {
-      const [, premium, reserve, maxSpendable] = await read(quoter, "quoteIssue", [tokenId, 0n]);
+    const quoted = await Promise.all(ids.map(async (tokenId) => {
+      const [[present, premium, reserve, maxSpendable], [principal, age], mark] = await Promise.all([
+        read(quoter, "quoteIssue", [tokenId, 0n]), read(credit, "issuanceOf", [tokenId]),
+        read(credit, "depreciatedFaceValue", [tokenId]),
+      ]);
       if (premium || reserve) throw new Error("zero-coverage quote unexpectedly requires a premium or reserve");
-      return { tokenId, maxSpendable };
+      if (present > mark) throw new Error("activated coverage exceeds current face mark");
+      const unactivatedPresent = principal > 0n && age >= principal * 50n * YEAR ? 0n : mark - present;
+      return { facility: { tokenId, maxSpendable }, unactivatedPresent };
     }));
+    const facilities = quoted.map((item) => item.facility);
+    const unactivatedPresent = quoted.reduce((sum, item) => sum + item.unactivatedPresent, 0n);
     const [[held, unspent], totalIssued, maturitiesPending] = await Promise.all([
       read(token, "heldAndUnspentScaled", [address]), read(token, "totalIssued"), read(token, "maturitiesPending"),
     ]);
     const { potentialCapacity, sharedLimit } = boundActivatedCapacity(facilities.map((f) => f.maxSpendable), held, unspent, totalIssued);
-    return { blockNumber, facilities, sharedLimit, potentialCapacity,
+    return { blockNumber, facilities, unactivatedPresent, sharedLimit, potentialCapacity,
       capacity: maturitiesPending ? 0n : potentialCapacity, maturitiesPending };
   };
   // These are same-block observations, not predictions. Mark failures and
