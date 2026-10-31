@@ -216,6 +216,8 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(pending.retired, 0n);
   assert.equal(pending.pendingPrincipal, reduction);
   assert.equal(pending.pendingDeadline, deadline);
+  assert.equal(pending.pendingTransactionHash, null);
+  assert.equal(pending.pendingReverted, false);
   assert.equal((await s.call(buck, "reductionAuthorization", [debtorId]))[0], reduction);
   await ops.reduceAuthorized(debtor.address, debtorId, reduction);
   const after = await ops.facility(debtorId);

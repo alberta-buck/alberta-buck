@@ -10,7 +10,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent
 from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
-from buck_core import NetCreditOps, NetMarketOps, deploy_net_stack
+from buck_core import Expect, NetCreditOps, NetMarketOps, TransactionReceiptPending, TransactionReverted, deploy_net_stack
 
 RAW = 10**6
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
@@ -119,9 +119,23 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
         state = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
         remaining = credit.functions.issuanceOf(buyer_id).call()[0]
+        cash_before = usdc.functions.balanceOf(buyer.address).call()
+
+        def expect_refused_buy(owner, target, method, args):
+            data = target.encode_abi(method, args=args)
+            return chain.send(actors[owner.lower()].functions.exec(target.address, bytes.fromhex(data[2:])),
+                              expect=Expect.REVERT)
+
+        d.net_market_ops = NetMarketOps(chain, buck, guard, expect_refused_buy)
+        expensive = state | {"basket_usd": 1.01 * ru / rb}
+        with pytest.raises(TransactionReverted):
+            agent._save_or_pay_down(d, expensive, cash_before, {})
+        assert not agent._net_trade_uncertain and agent._net_repayment_reserve is None
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_before
+        assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
+        d.net_market_ops = market
         now = anvil.w3.eth.get_block("latest")["timestamp"]
         credit_ops.authorize_reduction(buyer.address, buyer_id, RAW, 0, now + 3600)
-        cash_before = usdc.functions.balanceOf(buyer.address).call()
         agent._save_or_pay_down(d, state, cash_before, {})
         assert agent.last_action == "repay-pending"
         assert usdc.functions.balanceOf(buyer.address).call() == cash_before
@@ -130,7 +144,10 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
 
         def fail_reduce(owner, target, method, args):
             if target.address == fund.address:
-                raise RuntimeError("simulated settlement transport failure")
+                data = target.encode_abi(method, args=[args[0], args[1] + 1])
+                receipt = chain.send(actors[owner.lower()].functions.exec(target.address, bytes.fromhex(data[2:])),
+                                     expect=Expect.REVERT)
+                raise TransactionReverted(method, "simulated mined refusal", receipt)
             return _exec(chain, actors[owner.lower()], target, method, args)
 
         d.net_credit_ops = NetCreditOps(chain, stack, fail_reduce)
@@ -139,11 +156,17 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         cash_after_buy = usdc.functions.balanceOf(buyer.address).call()
         assert cash_after_buy < cash_before and agent._net_repayment_reserve is not None
         assert agent.last_action == "repay-pending" and agent.unwound == 0
+        assert agent._net_pending_reverted and agent._net_pending_hash
         assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
         assert buck.functions.reductionAuthorization(buyer_id).call()[0] > 0
         agent._save_or_pay_down(d, state, cash_after_buy, counters)
         assert usdc.functions.balanceOf(buyer.address).call() == cash_after_buy
         original = buck.functions.reductionAuthorization(buyer_id).call()
+        agent._net_pending_reverted = False
+        with pytest.raises(ValueError, match="outcome uncertain"):
+            agent.cancel_pending_repayment(d)
+        assert agent.reconcile_pending_repayment(d, counters) == 0
+        assert agent._net_pending_reverted
         credit_ops.authorize_reduction(buyer.address, buyer_id, original[0], original[1] + 1, original[2])
         with pytest.raises(ValueError, match="changed"):
             agent.cancel_pending_repayment(d)
@@ -188,7 +211,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
             receipt = _exec(chain, actors[owner.lower()], target, method, args)
             if target.address == fund.address:
                 receipts.append(receipt)
-                raise RuntimeError("simulated lost response after successful settlement")
+                raise TransactionReceiptPending(receipt["transactionHash"])
             return receipt
 
         class LostReceipt(NetCreditOps):
@@ -210,11 +233,19 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert receipts and receipts[0]["status"] == 1
         assert credit.functions.issuanceOf(second_id).call()[0] == 99 * RAW
         assert buck.functions.reductionAuthorization(second_id).call()[0] == 0
-        assert agent2.unwound == 0 and "outcome uncertain" in agent2.last_error
+        assert agent2.unwound == 0 and "outcome uncertain" in agent2.last_error and agent2._net_pending_hash
         agent2._save_or_pay_down(d, state2, cash_after_lost, {})
         assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost
         with pytest.raises(ValueError, match="reconcile"):
             agent2.cancel_pending_repayment(d)
+        with pytest.raises(ValueError, match="hash mismatch"):
+            d.net_credit_ops.reduction_from_receipt(buyer.address, second_id, RAW, receipts[0],
+                                                    expected_hash="0x" + "11" * 32)
+        reconciled = {}
+        assert agent2.reconcile_pending_repayment(d, reconciled) == RAW
+        assert agent2.unwound == RAW and reconciled["bcdRetired"] == RAW
+        with pytest.raises(ValueError, match="known transaction hash"):
+            agent2.reconcile_pending_repayment(d, {})
 
         # The same uncertainty exists if the market purchase succeeds but
         # the client loses its response before it can start settlement.
@@ -227,7 +258,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         def lose_buy_receipt(owner, target, method, args):
             receipt = _exec(chain, actors[owner.lower()], target, method, args)
             buy_receipts.append(receipt)
-            raise RuntimeError("simulated lost buy response")
+            raise TransactionReceiptPending(receipt["transactionHash"])
 
         agent3 = CreditHouseholdAgent(9)
         agent3.proxy, agent3._token_ids = buyer, [third_id]
@@ -241,12 +272,31 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
         state3 = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
         cash3 = usdc.functions.balanceOf(buyer.address).call()
-        with pytest.raises(RuntimeError, match="lost buy"):
+        with pytest.raises(TransactionReceiptPending):
             agent3._save_or_pay_down(d, state3, cash3, {})
         cash_after_lost_buy = usdc.functions.balanceOf(buyer.address).call()
         assert buy_receipts and buy_receipts[0]["status"] == 1 and cash_after_lost_buy < cash3
-        assert agent3._net_trade_uncertain and credit.functions.issuanceOf(third_id).call()[0] == 100 * RAW
+        assert agent3._net_trade_uncertain and agent3._net_pending_buy_hash
+        assert credit.functions.issuanceOf(third_id).call()[0] == 100 * RAW
         agent3._save_or_pay_down(d, state3, cash_after_lost_buy, {})
         assert "buyback outcome uncertain" in agent3.last_error
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost_buy
+        with pytest.raises(ValueError, match="hash mismatch"):
+            d.net_market_ops.purchase_from_receipt(buyer.address, pool_address, buyer.address, buy_receipts[0],
+                                                   expected_hash="0x" + "11" * 32)
+        malformed = dict(buy_receipts[0]) | {"logs": []}
+        bad_evidence = NetMarketOps(chain, buck, guard, lambda *_: malformed)
+        with pytest.raises(TransactionReceiptPending) as missing:
+            bad_evidence.buy_exact_input(buyer.address, pool_address, RAW, 0, buyer.address)
+        assert missing.value.transaction_hash == agent3._net_pending_buy_hash
+        assert agent3.reconcile_pending_buy(d) > 0
+        assert not agent3._net_trade_uncertain and agent3._net_repayment_reserve is not None
+        with pytest.raises(ValueError, match="known transaction hash"):
+            agent3.reconcile_pending_buy(d)
+        d.net_credit_ops = OneSlice()
+        ru, rb = active_reserves(chain, pool_address, usdc, buck)
+        state3.update(ru=ru / RAW, rb=rb / RAW)
+        agent3._save_or_pay_down(d, state3, cash_after_lost_buy, {})
+        assert credit.functions.issuanceOf(third_id).call()[0] == 90 * RAW
         assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost_buy
         assert not chain.mismatches

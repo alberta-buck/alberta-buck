@@ -22,6 +22,7 @@ import { encodeFunctionData, keccak256, maxUint160, maxUint256, maxUint48, parse
 
 import { MINT_MAX, identityApprove, onboard } from "./buckworld.js";
 import { netTransferValue } from "./net-world.js";
+import { TransactionReceiptPending } from "./session.js";
 import { deployUniversalRouter, encodePath, urSwapArgs } from "./router.js";
 import { Q96, fullRangeTicks, sqrtPriceX96, spotFromSqrtPriceX96 } from "./v3.js";
 
@@ -321,16 +322,11 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
     const name = o.exactOut ? "buyExactOutput" : "buyExactInput";
     const args = [market.pool.address, o.amount, o.limit, h.address, 0n];
     const rcpt = await s.send(market.guard, name, args, { account: h, gas: 2_000_000n, tag });
-    const purchases = parseEventLogs({ abi: market.guard.abi, logs: rcpt.logs, eventName: "NetBuckPurchased" })
-      .filter((e) => same(e.address, market.guard.address) && same(e.args.buyer, h.address)
-        && same(e.args.recipient, h.address) && same(e.args.pool, market.pool.address));
-    if (purchases.length !== 1) throw new Error("net BUCK purchase event missing or ambiguous");
-    const [purchase] = purchases;
-    const net = netTransferValue(world.buck, rcpt, market.pool.address, h.address);
-    if (!net.count || net.nominal !== purchase.args.nominal || net.netScaled !== purchase.args.netScaled)
-      throw new Error("net BUCK transfer evidence mismatch");
-    return { paid: purchase.args.paid, received: net.netScaled / (10n ** 36n),
-      receivedScaled: net.netScaled, nominalReceived: net.nominal };
+    try { return netPurchaseFromReceipt(world, market, h, rcpt); }
+    catch (err) {
+      if (rcpt.transactionHash) throw new TransactionReceiptPending(rcpt.transactionHash, err);
+      throw err;
+    }
   }
   const path = o.exactOut
     ? encodePath([tokenOut.address, market.fee, tokenIn.address])
@@ -356,6 +352,27 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
 }
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+/** Authenticate one guarded net purchase, optionally against a saved transaction hash. */
+export function netPurchaseFromReceipt(world, market, holder, receipt, expectedHash = null) {
+  if (world.accounting !== "net" || !market.guard || receipt?.status !== "success") {
+    throw new Error("net purchase receipt is not successful");
+  }
+  if (expectedHash !== null && (!receipt.transactionHash || !same(receipt.transactionHash, expectedHash))) {
+    throw new Error("net purchase transaction hash mismatch");
+  }
+  const raw = acctOf(holder), h = typeof raw === "string" ? { address: raw } : raw;
+  const purchases = parseEventLogs({ abi: market.guard.abi, logs: receipt.logs, eventName: "NetBuckPurchased" })
+    .filter((e) => same(e.address, market.guard.address) && same(e.args.buyer, h.address)
+      && same(e.args.recipient, h.address) && same(e.args.pool, market.pool.address));
+  if (purchases.length !== 1) throw new Error("net BUCK purchase event missing or ambiguous");
+  const [purchase] = purchases;
+  const net = netTransferValue(world.buck, receipt, market.pool.address, h.address);
+  if (!net.count || net.nominal !== purchase.args.nominal || net.netScaled !== purchase.args.netScaled)
+    throw new Error("net BUCK transfer evidence mismatch");
+  return { paid: purchase.args.paid, received: net.netScaled / (10n ** 36n),
+    receivedScaled: net.netScaled, nominalReceived: net.nominal, transactionHash: receipt.transactionHash };
+}
 
 /** Buy BUCK with exactly `usdcIn`; returns {paid, received}. */
 export function buyBuck(world, market, holder, usdcIn, { minOut = 0n } = {}) {

@@ -1,6 +1,6 @@
 // Partial BuckNet household operations for discount buyback. The complete
 // household lifecycle, savings basket and sandbox integration remain separate.
-import { buyBuck } from "../market.js";
+import { buyBuck, netPurchaseFromReceipt } from "../market.js";
 import { netCreditOps } from "../net-world.js";
 
 /**
@@ -27,6 +27,13 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
     const owner = h.account ?? h;
     return typeof owner === "string" ? owner : owner.address;
   };
+  const receiptFor = async (hash) => {
+    const receipt = await s.client.getTransactionReceipt({ hash });
+    if (!receipt.transactionHash || receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
+      throw new Error("transaction hash mismatch");
+    }
+    return receipt;
+  };
   return {
     cash: (account) => s.call(market.usdc, "balanceOf", [address(account)]),
     balance: (account) => s.call(world.buck, "balanceOf", [address(account)]),
@@ -51,6 +58,18 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
       }
       await creditOps.cancelReduction(h.account ?? h, id);
       if ((await s.call(world.buck, "reductionAuthorization", [id]))[0]) throw new Error("repayment cancellation not confirmed");
+    },
+    reconcileBuy: async (account, hash) => {
+      const receipt = await receiptFor(hash);
+      if (receipt.status === "reverted") return { reverted: true };
+      const r = netPurchaseFromReceipt(world, market, holder(account), receipt, hash);
+      return { reverted: false, spent: r.paid, got: r.received };
+    },
+    reconcileReduction: async (account, id, principal, hash) => {
+      const receipt = await receiptFor(hash);
+      if (receipt.status === "reverted") return { reverted: true };
+      const h = holder(account);
+      return { ...creditOps.reductionFromReceipt(h.account ?? h, id, principal, receipt, hash), reverted: false };
     },
     buy: async (account, amount, { minNet = 0n } = {}) => {
       const r = await buy(world, market, holder(account), amount, { minOut: minNet });

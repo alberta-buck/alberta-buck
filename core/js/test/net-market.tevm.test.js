@@ -10,7 +10,9 @@ import { netCreditOps } from "../src/net-world.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { netHouseholdRepaymentOps } from "../src/agents/net-repayment.js";
 import { Q96 } from "../src/v3.js";
-import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, fiatIn, buyBuck, buyBuckExact, sellBuck }
+import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
+import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, fiatIn, buyBuck, buyBuckExact, sellBuck,
+  netPurchaseFromReceipt }
   from "../src/market.js";
 
 let identity;
@@ -118,8 +120,11 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       surplus_policy: "adaptive", paydown_share: .1, paydown_double: .005, max_impact_bp: 9000, divest_rate: 0,
     } });
     let failSettlement = true, limitSlice = true;
-    const failingOps = netCreditOps(s, world.net, (owner, target, name, args) => {
-      if (target.address === world.net.fund.address) throw new Error("simulated settlement transport failure");
+    const failingOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      if (target.address === world.net.fund.address) {
+        const receipt = await s.send(target, name, [args[0], args[1] + 1n], { account: owner, expect: "revert" });
+        throw new TransactionReverted(name, "simulated mined refusal", receipt);
+      }
       return s.send(target, name, args, { account: owner });
     });
     const limitedOps = { ...creditOps, retireHousehold: (owner, ids, target, expires, opts) =>
@@ -134,9 +139,22 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       .map((v) => Number(v) / 1e6);
     const state = { ru, rb, fee: .0005, basket_usd: 1.5 * ru / rb };
     const remaining = (await creditOps.facility(buyerId)).issued;
+    const beforeHousehold = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    const refuseBuy = async (_world, _market, holder, amount, { minOut }) => {
+      const receipt = await s.send(market.guard, "buyExactInput",
+        [market.pool.address, amount, minOut, holder.address, 0n], { account: holder, expect: "revert" });
+      throw new TransactionReverted("buyExactInput", "simulated price refusal", receipt);
+    };
+    const refuseWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [buyerId], creditOps, buy: refuseBuy }) };
+    await assert.rejects(agent.saveOrPayDown(refuseWorld, { ...state, basket_usd: 1.01 * ru / rb }, beforeHousehold),
+      TransactionReverted);
+    assert.equal(agent.netTradeUncertain, false);
+    assert.equal(agent.netRepaymentReserve, null);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), beforeHousehold);
+    assert.equal((await creditOps.facility(buyerId)).issued, remaining);
     await creditOps.authorizeReduction(buyer.account, buyerId, 1_000_000n, 0n,
       (await s.client.getBlock()).timestamp + 3600n);
-    const beforeHousehold = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     await agent.saveOrPayDown(hworld, state, beforeHousehold);
     assert.equal(agent.lastAction, "repay-pending");
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), beforeHousehold);
@@ -148,11 +166,16 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.notEqual(agent.netRepaymentReserve, null);
     assert.equal(agent.lastAction, "repay-pending");
     assert.equal(agent.unwound, 0n);
+    assert.ok(agent.netPendingReverted && agent.netPendingHash);
     assert.equal((await creditOps.facility(buyerId)).issued, remaining);
     assert.ok((await s.call(world.buck, "reductionAuthorization", [buyerId]))[0] > 0n);
     await agent.saveOrPayDown(hworld, state, cashAfterBuy);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterBuy);
     const original = await s.call(world.buck, "reductionAuthorization", [buyerId]);
+    agent.netPendingReverted = false;
+    await assert.rejects(agent.cancelPendingRepayment(hworld), /outcome uncertain/);
+    assert.equal(await agent.reconcilePendingRepayment(hworld), 0n);
+    assert.equal(agent.netPendingReverted, true);
     await creditOps.authorizeReduction(buyer.account, buyerId, original[0], original[1] + 1n, original[2]);
     await assert.rejects(agent.cancelPendingRepayment(hworld), /changed/);
     await creditOps.authorizeReduction(buyer.account, buyerId, ...original);
@@ -185,7 +208,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       const receipt = await s.send(target, name, args, { account: owner });
       if (target.address === world.net.fund.address) {
         receipts.push(receipt);
-        throw new Error("simulated lost response after successful settlement");
+        throw new TransactionReceiptPending(receipt.transactionHash);
       }
       return receipt;
     });
@@ -208,10 +231,16 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal((await creditOps.facility(lostId)).issued, 99_000_000n);
     assert.equal((await s.call(world.buck, "reductionAuthorization", [lostId]))[0], 0n);
     assert.equal(agent2.unwound, 0n);
+    assert.ok(agent2.netPendingHash);
     assert.match(agent2.lastError, /outcome uncertain/);
     await agent2.saveOrPayDown(lostWorld, state2, cashAfterLost);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLost);
     await assert.rejects(agent2.cancelPendingRepayment(lostWorld), /reconcile/);
+    assert.throws(() => lostOps.reductionFromReceipt(buyer.account, lostId, 1_000_000n, receipts[0],
+      `0x${"11".repeat(32)}`), /hash mismatch/);
+    assert.equal(await agent2.reconcilePendingRepayment(lostWorld), 1_000_000n);
+    assert.equal(agent2.unwound, 1_000_000n);
+    await assert.rejects(agent2.reconcilePendingRepayment(lostWorld), /known transaction hash/);
 
     const lostBuyId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
     await creditOps.issue(buyer.account, lostBuyId, 200_000_000n, 100_000_000n);
@@ -219,10 +248,12 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const purchases = [];
     const loseBuy = async (...args) => {
       purchases.push(await buyBuck(...args));
-      throw new Error("simulated lost buy response");
+      throw new TransactionReceiptPending(purchases.at(-1).transactionHash);
     };
+    const resumeLimited = { ...creditOps, retireHousehold: (owner, ids, target, expires, opts) =>
+      creditOps.retireHousehold(owner, ids, target > 1_000_000n ? 1_000_000n : target, expires, opts) };
     const lostBuyWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
-      { facilityIds: () => [lostBuyId], creditOps, buy: loseBuy }) };
+      { facilityIds: () => [lostBuyId], creditOps: resumeLimited, buy: loseBuy }) };
     const agent3 = new CreditHouseholdAgent({ account: buyer.account, settings: {
       surplus_policy: "adaptive", paydown_share: .1, paydown_double: .005, max_impact_bp: 9000, divest_rate: 0,
     } });
@@ -232,12 +263,32 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       .map((v) => Number(v) / 1e6);
     const state3 = { ru: buyRu, rb: buyRb, fee: .0005, basket_usd: 1.5 * buyRu / buyRb };
     const cash3 = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
-    await assert.rejects(agent3.saveOrPayDown(lostBuyWorld, state3, cash3), /lost buy response/);
+    await assert.rejects(agent3.saveOrPayDown(lostBuyWorld, state3, cash3), TransactionReceiptPending);
     const cashAfterLostBuy = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
-    assert.ok(purchases.length && cashAfterLostBuy < cash3 && agent3.netTradeUncertain);
+    assert.ok(purchases.length && cashAfterLostBuy < cash3 && agent3.netTradeUncertain && agent3.netPendingBuyHash);
     assert.equal((await creditOps.facility(lostBuyId)).issued, 100_000_000n);
     await agent3.saveOrPayDown(lostBuyWorld, state3, cashAfterLostBuy);
     assert.match(agent3.lastError, /buyback outcome uncertain/);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLostBuy);
+    const buyReceipt = await s.client.getTransactionReceipt({ hash: agent3.netPendingBuyHash });
+    assert.throws(() => netPurchaseFromReceipt(world, market, buyer.account, buyReceipt, `0x${"11".repeat(32)}`),
+      /hash mismatch/);
+    const badWorld = { ...world, session: { send: async () => ({ ...buyReceipt, logs: [] }) } };
+    await assert.rejects(buyBuck(badWorld, market, buyer, 1n), (err) => {
+      assert.ok(err instanceof TransactionReceiptPending);
+      assert.equal(err.transactionHash, agent3.netPendingBuyHash);
+      return true;
+    });
+    assert.ok(await agent3.reconcilePendingBuy(lostBuyWorld) > 0n);
+    assert.equal(agent3.netTradeUncertain, false);
+    assert.notEqual(agent3.netRepaymentReserve, null);
+    await assert.rejects(agent3.reconcilePendingBuy(lostBuyWorld), /known transaction hash/);
+    const [resumeLiquidity, resumeSlot] = await Promise.all([s.call(market.pool, "liquidity"), s.call(market.pool, "slot0")]);
+    const d0 = resumeLiquidity * Q96 / resumeSlot[0], d1 = resumeLiquidity * resumeSlot[0] / Q96;
+    [state3.ru, state3.rb] = (t0.toLowerCase() === market.usdc.address.toLowerCase() ? [d0, d1] : [d1, d0])
+      .map((v) => Number(v) / 1e6);
+    await agent3.saveOrPayDown(lostBuyWorld, state3, cashAfterLostBuy);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, 99_000_000n);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLostBuy);
   }
   // A nominal pool can remain nonzero when its full-value balance is zero.

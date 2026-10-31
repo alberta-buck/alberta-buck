@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from buck_core.artifacts import load_artifact
+from buck_core.session import TransactionReceiptPending, TransactionReverted, _txhex
 from web3.logs import DISCARD
 
 Q = 10**36
@@ -126,6 +127,8 @@ class HouseholdRetirement:
     pending_principal: int | None
     pending_minimum_relief_scaled: int | None
     pending_deadline: int | None
+    pending_transaction_hash: str | None
+    pending_reverted: bool
     settlements: tuple[NetReduction, ...]
 
 
@@ -153,10 +156,12 @@ class PremiumRefundQuote:
 
 
 class ReductionPending(RuntimeError):
-    """Settlement failed after authorization; inspect the chain before retrying."""
+    """Settlement outcome is uncertain or reverted after authorization."""
 
-    def __init__(self, plan: ReductionPlan):
+    def __init__(self, plan: ReductionPlan, transaction_hash: str | None = None, reverted: bool = False):
         self.plan = plan
+        self.transaction_hash = transaction_hash
+        self.reverted = reverted
         super().__init__(f"reduction of facility {plan.token_id} has an uncertain outcome after authorization; "
                          "check the on-chain authorization and retry or cancel it")
 
@@ -211,6 +216,23 @@ class NetMarketOps:
 
     def _buy(self, owner, pool, method: str, args: list, recipient: str) -> NetPurchase:
         receipt = self.execute(owner, self.guard, method, args)
+        if receipt and receipt.get("status") == 0:
+            raise TransactionReverted(method, "net purchase refused", receipt)
+        try:
+            return self.purchase_from_receipt(owner, pool, recipient, receipt)
+        except Exception as exc:
+            tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
+            if tx_hash:
+                raise TransactionReceiptPending(tx_hash) from exc
+            raise
+
+    def purchase_from_receipt(self, owner, pool: str, recipient: str, receipt,
+                              expected_hash: str | None = None) -> NetPurchase:
+        """Read one authenticated guard purchase; optionally bind it to a saved transaction."""
+        if not receipt or receipt.get("status") != 1:
+            raise ValueError("net purchase receipt is not successful")
+        if expected_hash is not None and _txhex(receipt.get("transactionHash")).lower() != expected_hash.lower():
+            raise ValueError("net purchase transaction hash mismatch")
         buyer = getattr(owner, "address", owner)
         events = self.guard.events.NetBuckPurchased().process_receipt(receipt, errors=DISCARD)
         events = [e for e in events if e["address"].lower() == self.guard.address.lower()
@@ -415,18 +437,30 @@ class NetCreditOps:
         try:
             receipt = self.reduce_authorized(owner, plan.token_id, plan.principal)
         except Exception as exc:
-            raise ReductionPending(plan) from exc
+            raise ReductionPending(plan, getattr(exc, "transaction_hash", None),
+                                   isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0
+                                   and bool(exc.transaction_hash)) from exc
         if not receipt or receipt.get("status") != 1:
-            raise ReductionPending(plan)
-        address = getattr(owner, "address", owner)
+            tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
+            raise ReductionPending(plan, tx_hash or None, bool(tx_hash and receipt.get("status") == 0))
         try:
-            events = self.stack.token.events.FacilityReduced().process_receipt(receipt, errors=DISCARD)
-            events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()
-                      and e["args"]["owner"].lower() == address.lower() and e["args"]["tokenId"] == plan.token_id]
-            if len(events) != 1 or events[0]["args"]["principal"] != plan.principal:
-                raise ValueError("settlement receipt missing or ambiguous")
+            return self.reduction_from_receipt(owner, plan.token_id, plan.principal, receipt)
         except Exception as exc:
-            raise ReductionPending(plan) from exc
+            raise ReductionPending(plan, _txhex(receipt.get("transactionHash"))) from exc
+
+    def reduction_from_receipt(self, owner, token_id: int, principal: int, receipt,
+                               expected_hash: str | None = None) -> NetReduction:
+        """Read one authenticated facility event, optionally bound to a saved transaction."""
+        if not receipt or receipt.get("status") != 1:
+            raise ValueError("settlement receipt is not successful")
+        if expected_hash is not None and _txhex(receipt.get("transactionHash")).lower() != expected_hash.lower():
+            raise ValueError("settlement transaction hash mismatch")
+        address = getattr(owner, "address", owner)
+        events = self.stack.token.events.FacilityReduced().process_receipt(receipt, errors=DISCARD)
+        events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()
+                  and e["args"]["owner"].lower() == address.lower() and e["args"]["tokenId"] == token_id]
+        if len(events) != 1 or events[0]["args"]["principal"] != principal:
+            raise ValueError("settlement receipt missing or ambiguous")
         event = events[0]["args"]
         return NetReduction(event["principal"], event["reliefScaled"], event["premiumRefund"], receipt)
 
@@ -448,6 +482,7 @@ class NetCreditOps:
         settled = []
         retired = 0
         status, blocked, pending_principal, pending_minimum, pending_deadline = "complete", None, None, None, None
+        pending_hash, pending_reverted = None, False
         for token_id in ids:
             if retired >= requested:
                 break
@@ -460,9 +495,10 @@ class NetCreditOps:
                 break
             try:
                 result = self.settle_plan(owner, plan, deadline)
-            except ReductionPending:
+            except ReductionPending as exc:
                 status, blocked, pending_principal = "authorization-pending", token_id, plan.principal
                 pending_minimum, pending_deadline = plan.minimum_relief_scaled, deadline
+                pending_hash, pending_reverted = exc.transaction_hash, exc.reverted
                 break
             settled.append(result)
             retired += result.principal
@@ -472,4 +508,4 @@ class NetCreditOps:
         return HouseholdRetirement(requested, retired, sum(x.relief_scaled for x in settled),
                                    sum(x.owner_cost_scaled for x in settled),
                                    sum(x.premium_nominal for x in settled), status, blocked, pending_principal,
-                                   pending_minimum, pending_deadline, tuple(settled))
+                                   pending_minimum, pending_deadline, pending_hash, pending_reverted, tuple(settled))

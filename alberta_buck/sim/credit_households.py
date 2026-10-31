@@ -7,6 +7,8 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
+from buck_core import TransactionReceiptPending, TransactionReverted
+from buck_core.session import _txhex
 
 # The basket's price guard, by name or (as a bare revert reports it) by selector: keccak("Slippage()").
 SLIPPAGE                        = ("Slippage", "0x7dd37f70")
@@ -58,7 +60,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_pending_principal = 0
         self._net_pending_minimum = None
         self._net_pending_deadline = None
+        self._net_pending_hash = None
+        self._net_pending_reverted = False
         self._net_trade_uncertain = False               # uncertain guarded buy must be reconciled
+        self._net_pending_buy_hash = None
         self.wallet_bought      = 0
         self._sold              = False                 # the insured asset has been sold
         self._released          = False                 # its coverage has been released
@@ -233,8 +238,19 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             if for_repayment:
                 self._net_repayment_reserve = d.buck.functions.balanceOf(self.proxy.address).call() + 1
                 self._net_trade_uncertain = True
-            purchase            = d.net_market_ops.buy_exact_input(
-                self.proxy.address, d.pool_ub, spend, minimum_net, self.proxy.address)
+                self._net_pending_buy_hash = None
+            try:
+                purchase        = d.net_market_ops.buy_exact_input(
+                    self.proxy.address, d.pool_ub, spend, minimum_net, self.proxy.address)
+            except TransactionReverted:
+                if for_repayment:
+                    self._net_trade_uncertain = False
+                    self._net_repayment_reserve = None
+                raise
+            except TransactionReceiptPending as exc:
+                if for_repayment:
+                    self._net_pending_buy_hash = exc.transaction_hash
+                raise
             if for_repayment:
                 self._net_trade_uncertain = False
                 if not purchase.received:
@@ -283,6 +299,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                                    getattr(self, "_net_pending_deadline", None))
         if token_id is None or not expected[0] or expected[1] is None or expected[2] is None:
             raise ValueError("pending repayment needs transaction reconciliation")
+        if not getattr(self, "_net_pending_reverted", False):
+            raise ValueError("settlement outcome uncertain; reconcile transaction before canceling")
         actual                  = tuple(d.buck.functions.reductionAuthorization(token_id).call())
         if actual != expected:
             raise ValueError("pending repayment changed; reconcile transaction before canceling")
@@ -292,8 +310,65 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_pending_token = None
         self._net_pending_principal = 0
         self._net_pending_minimum = self._net_pending_deadline = None
+        self._net_pending_hash = None
+        self._net_pending_reverted = False
         self.last_error         = ""
         self.last_action        = "repay-canceled"
+
+    def reconcile_pending_buy(self, d):
+        """Resolve a submitted guarded buy by its exact mined transaction receipt."""
+        tx_hash                 = getattr(self, "_net_pending_buy_hash", None)
+        if not getattr(self, "_net_trade_uncertain", False) or not tx_hash:
+            raise ValueError("buyback needs a known transaction hash for reconciliation")
+        receipt                 = d.w3.eth.get_transaction_receipt(tx_hash)
+        if _txhex(receipt.get("transactionHash")).lower() != tx_hash.lower():
+            raise ValueError("buyback transaction hash mismatch")
+        if receipt.get("status") == 0:
+            self._net_trade_uncertain = False
+            self._net_pending_buy_hash = None
+            self._net_repayment_reserve = None
+            self.last_error     = ""
+            self.last_action    = "buy-reverted"
+            return 0
+        purchase                = d.net_market_ops.purchase_from_receipt(
+            self.proxy.address, d.pool_ub, self.proxy.address, receipt, expected_hash=tx_hash)
+        self.trade_loss        += purchase.paid - purchase.received
+        self._net_trade_uncertain = False
+        self._net_pending_buy_hash = None
+        if not purchase.received:
+            self._net_repayment_reserve = None
+        self.last_error         = ""
+        self.last_action        = "buy-reconciled"
+        return purchase.received
+
+    def reconcile_pending_repayment(self, d, ctr):
+        """Record an exact confirmed settlement, or mark its mined revert for cancellation."""
+        token_id                = getattr(self, "_net_pending_token", None)
+        principal               = getattr(self, "_net_pending_principal", 0)
+        tx_hash                 = getattr(self, "_net_pending_hash", None)
+        if token_id is None or not principal or not tx_hash:
+            raise ValueError("repayment needs a known transaction hash for reconciliation")
+        receipt                 = d.w3.eth.get_transaction_receipt(tx_hash)
+        if _txhex(receipt.get("transactionHash")).lower() != tx_hash.lower():
+            raise ValueError("repayment transaction hash mismatch")
+        if receipt.get("status") == 0:
+            self._net_pending_reverted = True
+            self.last_error     = ""
+            self.last_action    = "repay-reverted"
+            return 0
+        settled                 = d.net_credit_ops.reduction_from_receipt(
+            self.proxy.address, token_id, principal, receipt, expected_hash=tx_hash)
+        self.unwound           += settled.principal
+        ctr["bcdRetired"]       = ctr.get("bcdRetired", 0) + settled.principal
+        ctr["hhPaidDown"]       = ctr.get("hhPaidDown", 0) + settled.principal
+        self._net_pending_token = None
+        self._net_pending_principal = 0
+        self._net_pending_minimum = self._net_pending_deadline = None
+        self._net_pending_hash = None
+        self._net_pending_reverted = False
+        self.last_error         = ""
+        self.last_action        = "repay-reconciled"
+        return settled.principal
 
     def _retire_acquired(self, d, target, acquired):
         """Legacy purchases repay implicitly; BuckNet settles selected NFTs explicitly."""
@@ -318,6 +393,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._net_pending_principal = result.pending_principal or 0
             self._net_pending_minimum = result.pending_minimum_relief_scaled
             self._net_pending_deadline = result.pending_deadline
+            self._net_pending_hash = result.pending_transaction_hash
+            self._net_pending_reverted = result.pending_reverted
         held                    = d.buck.functions.balanceOf(self.proxy.address).call()
         if result.retired >= target or held <= buffer:
             self._net_repayment_reserve = None

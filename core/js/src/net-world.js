@@ -3,6 +3,7 @@
 // A deployed stack is not usable until the Carrying fund is bound and a basket
 // configured; premium-bearing facilities also need their insurer's own pool.
 import { linkArtifact } from "./artifacts.js";
+import { TransactionReverted } from "./session.js";
 import { parseEventLogs } from "viem";
 
 const Q = 10n ** 36n;
@@ -13,10 +14,12 @@ const min = (...values) => values.reduce((a, b) => a < b ? a : b);
 const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeInteger(id) && id >= 0);
 
 export class ReductionPending extends Error {
-  constructor(plan, cause) {
+  constructor(plan, cause, { transactionHash = null, reverted = false } = {}) {
     super(`reduction of facility ${plan.tokenId} has an uncertain outcome after authorization; check the on-chain authorization and retry or cancel it`, { cause });
     this.name = "ReductionPending";
     this.plan = plan;
+    this.transactionHash = transactionHash;
+    this.reverted = reverted;
   }
 }
 
@@ -167,6 +170,22 @@ export function netCreditOps(session, stack, execute = null) {
     }
     return result(0n, 0n, 0n, 0n, reason);
   };
+  ops.reductionFromReceipt = (owner, tokenId, expectedPrincipal, receipt, expectedHash = null) => {
+    if (receipt?.status !== "success") throw new Error("settlement receipt is not successful");
+    if (expectedHash !== null && (!receipt.transactionHash
+        || receipt.transactionHash.toLowerCase() !== expectedHash.toLowerCase())) {
+      throw new Error("settlement transaction hash mismatch");
+    }
+    const address = owner.address ?? owner;
+    const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityReduced" })
+      .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()
+        && e.args.owner.toLowerCase() === address.toLowerCase() && e.args.tokenId === BigInt(tokenId));
+    if (events.length !== 1 || events[0].args.principal !== expectedPrincipal) {
+      throw new Error("settlement receipt missing or ambiguous");
+    }
+    const { principal, reliefScaled, premiumRefund } = events[0].args;
+    return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt };
+  };
   ops.settlePlan = async (owner, plan, deadline) => {
     if (plan.reason !== "ready" || plan.principal <= 0n) throw new Error("reduction plan is not ready");
     const [pending] = await session.call(token, "reductionAuthorization", [plan.tokenId]);
@@ -174,18 +193,14 @@ export function netCreditOps(session, stack, execute = null) {
     await ops.authorizeReduction(owner, plan.tokenId, plan.principal, plan.minimumReliefScaled, deadline);
     let receipt;
     try { receipt = await ops.reduceAuthorized(owner, plan.tokenId, plan.principal); }
-    catch (err) { throw new ReductionPending(plan, err); }
-    if (receipt?.status !== "success") throw new ReductionPending(plan);
-    const address = owner.address ?? owner;
-    let events;
+    catch (err) { throw new ReductionPending(plan, err, { transactionHash: err.transactionHash ?? null,
+      reverted: err instanceof TransactionReverted && err.receipt.status === "reverted" && Boolean(err.transactionHash) }); }
+    if (receipt?.status !== "success") throw new ReductionPending(plan, null,
+      { transactionHash: receipt?.transactionHash ?? null,
+        reverted: receipt?.status === "reverted" && Boolean(receipt?.transactionHash) });
     try {
-      events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityReduced" })
-        .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()
-          && e.args.owner.toLowerCase() === address.toLowerCase() && e.args.tokenId === plan.tokenId);
-      if (events.length !== 1 || events[0].args.principal !== plan.principal) throw new Error("settlement receipt missing or ambiguous");
-    } catch (err) { throw new ReductionPending(plan, err); }
-    const { principal, reliefScaled, premiumRefund } = events[0].args;
-    return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt };
+      return ops.reductionFromReceipt(owner, plan.tokenId, plan.principal, receipt);
+    } catch (err) { throw new ReductionPending(plan, err, { transactionHash: receipt.transactionHash ?? null }); }
   };
   // Each NFT is a separate transaction. Report completed events even if a
   // later authorization remains pending; a purchase is never a repayment.
@@ -200,7 +215,8 @@ export function netCreditOps(session, stack, execute = null) {
     await ops.household(owner, tokenIds); // reject duplicates and foreign NFTs before sending anything
     const result = { requested, retired: 0n, reliefScaled: 0n, ownerCostScaled: 0n,
       premiumNominal: 0n, status: "complete", blockedTokenId: null, pendingPrincipal: null,
-      pendingMinimumReliefScaled: null, pendingDeadline: null, settlements: [] };
+      pendingMinimumReliefScaled: null, pendingDeadline: null, pendingTransactionHash: null,
+      pendingReverted: false, settlements: [] };
     for (const tokenId of tokenIds) {
       if (result.retired >= requested) break;
       const plan = await ops.planReduction(owner, tokenId, requested - result.retired, options);
@@ -211,7 +227,8 @@ export function netCreditOps(session, stack, execute = null) {
       catch (err) {
         if (!(err instanceof ReductionPending)) throw err;
         result.status = "authorization-pending"; result.blockedTokenId = tokenId; result.pendingPrincipal = plan.principal;
-        result.pendingMinimumReliefScaled = plan.minimumReliefScaled; result.pendingDeadline = BigInt(deadline); break;
+        result.pendingMinimumReliefScaled = plan.minimumReliefScaled; result.pendingDeadline = BigInt(deadline);
+        result.pendingTransactionHash = err.transactionHash; result.pendingReverted = err.reverted; break;
       }
       result.settlements.push(settled);
       result.retired += settled.principal;

@@ -64,11 +64,11 @@ def _txhex(h: Any) -> str:
 
 
 class TransactionReceiptPending(RuntimeError):
-    """Submission returned a hash but the receipt could not be obtained."""
+    """Submission returned a hash but its receipt or required evidence is unavailable."""
 
     def __init__(self, transaction_hash: Any):
         self.transaction_hash = _txhex(transaction_hash)
-        super().__init__(f"transaction {self.transaction_hash} submitted; receipt unavailable")
+        super().__init__(f"transaction {self.transaction_hash} submitted; receipt or required evidence unavailable")
 
 
 class TransactionReverted(RuntimeError):

@@ -1,6 +1,7 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, ROLES } from "./household-policy.js";
+import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -61,7 +62,10 @@ export class CreditHouseholdAgent {
     this.netPendingPrincipal = 0n;
     this.netPendingMinimum = null;
     this.netPendingDeadline = null;
+    this.netPendingHash = null;
+    this.netPendingReverted = false;
     this.netTradeUncertain = false;
+    this.netPendingBuyHash = null;
   }
 
   get mortgageOwing() { return this.mortgage; }
@@ -163,7 +167,14 @@ export class CreditHouseholdAgent {
     if (typeof world.households.balance !== "function") throw new Error("BuckNet wallet balance unavailable");
     this.netRepaymentReserve = await world.households.balance(this.account) + 1n;
     this.netTradeUncertain = true;
-    const r = await world.households.buy(this.account, spend, { minNet });
+    this.netPendingBuyHash = null;
+    let r;
+    try { r = await world.households.buy(this.account, spend, { minNet }); }
+    catch (err) {
+      if (err instanceof TransactionReverted) { this.netTradeUncertain = false; this.netRepaymentReserve = null; }
+      else if (err instanceof TransactionReceiptPending) this.netPendingBuyHash = err.transactionHash;
+      throw err;
+    }
     this.netTradeUncertain = false;
     if (!r.got) this.netRepaymentReserve = null;
     return r;
@@ -174,11 +185,50 @@ export class CreditHouseholdAgent {
         || this.netPendingDeadline === null || typeof world.households.cancel !== "function") {
       throw new Error("pending repayment needs transaction reconciliation");
     }
+    if (!this.netPendingReverted) throw new Error("settlement outcome uncertain; reconcile transaction before canceling");
     await world.households.cancel(this.account, this.netPendingToken,
       [this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline]);
     this.netPendingToken = null; this.netPendingPrincipal = 0n;
     this.netPendingMinimum = null; this.netPendingDeadline = null;
+    this.netPendingHash = null; this.netPendingReverted = false;
     this.lastError = ""; this.lastAction = "repay-canceled";
+  }
+
+  async reconcilePendingBuy(world) {
+    if (!this.netTradeUncertain || !this.netPendingBuyHash || typeof world.households.reconcileBuy !== "function") {
+      throw new Error("buyback needs a known transaction hash for reconciliation");
+    }
+    const r = await world.households.reconcileBuy(this.account, this.netPendingBuyHash);
+    if (r.reverted) {
+      this.netTradeUncertain = false; this.netPendingBuyHash = null; this.netRepaymentReserve = null;
+      this.lastError = ""; this.lastAction = "buy-reverted";
+      return 0n;
+    }
+    this.tradeLoss += r.spent - r.got;
+    this.netTradeUncertain = false; this.netPendingBuyHash = null;
+    if (!r.got) this.netRepaymentReserve = null;
+    this.lastError = ""; this.lastAction = "buy-reconciled";
+    return r.got;
+  }
+
+  async reconcilePendingRepayment(world) {
+    if (this.netPendingToken === null || !this.netPendingPrincipal || !this.netPendingHash
+        || typeof world.households.reconcileReduction !== "function") {
+      throw new Error("repayment needs a known transaction hash for reconciliation");
+    }
+    const r = await world.households.reconcileReduction(this.account, this.netPendingToken,
+      this.netPendingPrincipal, this.netPendingHash);
+    if (r.reverted) {
+      this.netPendingReverted = true;
+      this.lastError = ""; this.lastAction = "repay-reverted";
+      return 0n;
+    }
+    this.unwound += r.principal;
+    this.netPendingToken = null; this.netPendingPrincipal = 0n;
+    this.netPendingMinimum = null; this.netPendingDeadline = null;
+    this.netPendingHash = null; this.netPendingReverted = false;
+    this.lastError = ""; this.lastAction = "repay-reconciled";
+    return r.principal;
   }
 
   async retireAcquired(world, target, acquired) {
@@ -192,6 +242,8 @@ export class CreditHouseholdAgent {
       this.netPendingPrincipal = r.pendingPrincipal ?? 0n;
       this.netPendingMinimum = r.pendingMinimumReliefScaled;
       this.netPendingDeadline = r.pendingDeadline;
+      this.netPendingHash = r.pendingTransactionHash;
+      this.netPendingReverted = r.pendingReverted;
     }
     if (!["complete", "partial"].includes(r.status)) this.lastError = `repayment ${r.status} at facility ${r.blockedTokenId}`;
     return r.retired;

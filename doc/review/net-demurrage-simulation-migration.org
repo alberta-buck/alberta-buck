@@ -147,17 +147,30 @@ is visible for reconciliation or cancellation. The household also retains the
 selected NFT, principal, minimum relief and deadline when a settlement's outcome is uncertain:
 an absent authorization can mean the transaction succeeded, so it cannot be
 treated as a failure or canceled blindly. Explicit cancellation is permitted
-only while the same authorization is still present. A guarded purchase with
-an uncertain outcome also stops subsequent purchases until its receipt is
-reconciled. The JavaScript
+only while the same authorization is still present and its settlement is known
+to have reverted; a matching authorization alone does not prove that a
+submitted settlement will not mine. A guarded purchase with an uncertain
+outcome also stops subsequent purchases until its receipt is reconciled. The JavaScript
 =netHouseholdRepaymentOps= provides just these operations for a registered
 holder with the market handshake and settlement allowance already in place;
 proxy simulations must supply their own dispatch. Automatic
 retry/reconciliation, persistence of this reserve across snapshots and its
 handling when prices move to a premium are still required. Pending NFT and
 principal, completed events and any transaction identifier must also survive
-snapshots for reliable recovery. The current stop is conservative even for a
-known revert; automatic receipt-based recovery has not yet been implemented.
+snapshots for reliable recovery. Submitted hashes and known-revert status now
+reach the household. A caller can explicitly reconcile a saved hash against
+the mined receipt and the matching guarded-purchase or selected-facility event;
+successful repayments are recorded once, and confirmed buybacks become funds
+available to retire debt. Missing receipts leave the stop in place. Automatic
+scheduling, finality/reorganization handling, hash provenance across restores
+and persistence have not yet been implemented.
+
+The diagnostic assumes a single transaction dispatcher for each household.
+With concurrent clients, another settlement may be submitted under the same
+authorization after an earlier attempt reverted. Exact field matching and the
+earlier revert alone do not rule that out: serialize the owner's transactions
+and account for pending nonces and finality before allowing cancellation or
+automatic retry in a real interface.
 
 This does *not* enable the existing household world for =BuckNet=: setup,
 issuance, the savings basket, full financial marks, asset exits, populations

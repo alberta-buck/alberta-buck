@@ -23,10 +23,10 @@ export const CALL_GAS = 12_000_000n;
 // ceiling rather than a constraint.
 export const DEPLOY_GAS = 29_000_000n;
 
-/** Submission returned a hash but the receipt could not be obtained. */
+/** Submission returned a hash but its receipt or required evidence is unavailable. */
 export class TransactionReceiptPending extends Error {
   constructor(transactionHash, cause) {
-    super(`transaction ${transactionHash} submitted; receipt unavailable`, { cause });
+    super(`transaction ${transactionHash} submitted; receipt or required evidence unavailable`, { cause });
     this.name = "TransactionReceiptPending";
     this.transactionHash = transactionHash;
   }
