@@ -258,7 +258,8 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         pending = failing.retire_household(debtor.address, [debtor_id, second_id], reduction,
                                           issued_at + YEAR + 3600)
         assert pending.status == "authorization-pending" and pending.blocked_token_id == debtor_id
-        assert pending.retired == 0 and not pending.settlements
+        assert pending.retired == 0 and pending.pending_principal == reduction and not pending.settlements
+        assert pending.pending_deadline == issued_at + YEAR + 3600
         assert buck.functions.reductionAuthorization(debtor_id).call()[0] == reduction
         reduced = ops.reduce_authorized(debtor.address, debtor_id, reduction)
         refund = net_transfer_value(buck, reduced, pool.address, debtor.address)

@@ -14,7 +14,7 @@ const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeIn
 
 export class ReductionPending extends Error {
   constructor(plan, cause) {
-    super(`reduction of facility ${plan.tokenId} failed after authorization; check the on-chain authorization and retry or cancel it`, { cause });
+    super(`reduction of facility ${plan.tokenId} has an uncertain outcome after authorization; check the on-chain authorization and retry or cancel it`, { cause });
     this.name = "ReductionPending";
     this.plan = plan;
   }
@@ -177,12 +177,13 @@ export function netCreditOps(session, stack, execute = null) {
     catch (err) { throw new ReductionPending(plan, err); }
     if (receipt?.status !== "success") throw new ReductionPending(plan);
     const address = owner.address ?? owner;
-    const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityReduced" })
-      .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()
-        && e.args.owner.toLowerCase() === address.toLowerCase() && e.args.tokenId === plan.tokenId);
-    if (events.length !== 1 || events[0].args.principal !== plan.principal) {
-      throw new Error("settlement receipt missing or ambiguous; inspect the transaction before retrying");
-    }
+    let events;
+    try {
+      events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityReduced" })
+        .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()
+          && e.args.owner.toLowerCase() === address.toLowerCase() && e.args.tokenId === plan.tokenId);
+      if (events.length !== 1 || events[0].args.principal !== plan.principal) throw new Error("settlement receipt missing or ambiguous");
+    } catch (err) { throw new ReductionPending(plan, err); }
     const { principal, reliefScaled, premiumRefund } = events[0].args;
     return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt };
   };
@@ -198,7 +199,8 @@ export function netCreditOps(session, stack, execute = null) {
     }
     await ops.household(owner, tokenIds); // reject duplicates and foreign NFTs before sending anything
     const result = { requested, retired: 0n, reliefScaled: 0n, ownerCostScaled: 0n,
-      premiumNominal: 0n, status: "complete", blockedTokenId: null, settlements: [] };
+      premiumNominal: 0n, status: "complete", blockedTokenId: null, pendingPrincipal: null,
+      pendingMinimumReliefScaled: null, pendingDeadline: null, settlements: [] };
     for (const tokenId of tokenIds) {
       if (result.retired >= requested) break;
       const plan = await ops.planReduction(owner, tokenId, requested - result.retired, options);
@@ -208,7 +210,8 @@ export function netCreditOps(session, stack, execute = null) {
       try { settled = await ops.settlePlan(owner, plan, deadline); }
       catch (err) {
         if (!(err instanceof ReductionPending)) throw err;
-        result.status = "authorization-pending"; result.blockedTokenId = tokenId; break;
+        result.status = "authorization-pending"; result.blockedTokenId = tokenId; result.pendingPrincipal = plan.principal;
+        result.pendingMinimumReliefScaled = plan.minimumReliefScaled; result.pendingDeadline = BigInt(deadline); break;
       }
       result.settlements.push(settled);
       result.retired += settled.principal;

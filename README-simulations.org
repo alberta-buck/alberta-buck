@@ -87,7 +87,9 @@ refund can also be observed at one block; these observations are not guarantees
 of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3 diagnostic seeds BUCK/USDC, ages its
 Carrying pool and reports the buyer's actual net BUCK. The Python and JS market
 fixtures both buy back BUCK and explicitly retire a selected NFT; a purchase
-alone does not reduce that liability. These fixtures have no
+alone does not reduce that liability. They also exercise the existing adaptive
+household's isolated discount action, including a pending-authorization stop.
+The rest of the new-model household lifecycle is not yet implemented. These fixtures have no
 household economy, leveraged basket or insurer investment strategy; they are
 not a five-year simulation or deployment recipe. The same target builds the
 sandbox artifact bundle and checks that a browser-safe Tevm session can link

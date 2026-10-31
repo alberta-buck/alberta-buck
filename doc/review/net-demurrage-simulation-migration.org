@@ -135,6 +135,37 @@ later settlement becomes pending. A partial batch is not an exit. These
 primitives still need to be wired into both existing household agents and all
 exit paths; they are not an economic simulation by themselves.
 
+One part of that wiring is now exercised in isolation: the existing adaptive
+household's discount buyback can buy through the net-output guard and settle
+the actual selected NFT in Python and JavaScript. The guard enforces a net
+average purchase below basket parity, the repayment preserves BUCK held before
+the purchase, and counters increase by the principal actually settled. If a
+limited settlement leaves acquired BUCK, the next discount decision tries
+that balance before buying more; the pre-purchase reserve is held at a
+conservative fixed floor. A pending authorization stops further purchases and
+is visible for reconciliation or cancellation. The household also retains the
+selected NFT, principal, minimum relief and deadline when a settlement's outcome is uncertain:
+an absent authorization can mean the transaction succeeded, so it cannot be
+treated as a failure or canceled blindly. Explicit cancellation is permitted
+only while the same authorization is still present. A guarded purchase with
+an uncertain outcome also stops subsequent purchases until its receipt is
+reconciled. The JavaScript
+=netHouseholdRepaymentOps= provides just these operations for a registered
+holder with the market handshake and settlement allowance already in place;
+proxy simulations must supply their own dispatch. Automatic
+retry/reconciliation, persistence of this reserve across snapshots and its
+handling when prices move to a premium are still required. Pending NFT and
+principal, completed events and any transaction identifier must also survive
+snapshots for reliable recovery. The current stop is conservative even for a
+known revert; automatic receipt-based recovery has not yet been implemented.
+
+This does *not* enable the existing household world for =BuckNet=: setup,
+issuance, the savings basket, full financial marks, asset exits, populations
+and snapshot/restore have not been ported. The unsupported setup, issuance,
+marks and exit paths fail explicitly in net mode. Do not remove these guards or
+label the partial action as a complete agent until every lifecycle path and
+its failure handling have been tested on the new contracts.
+
 * Acceptance before retiring the legacy economy
 
 - [ ] A deployed and bootstrapped household world names =BuckNet= and its

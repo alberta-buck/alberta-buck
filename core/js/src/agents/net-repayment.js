@@ -1,0 +1,73 @@
+// Partial BuckNet household operations for discount buyback. The complete
+// household lifecycle, savings basket and sandbox integration remain separate.
+import { buyBuck } from "../market.js";
+import { netCreditOps } from "../net-world.js";
+
+/**
+ * Prepare the existing household's cash/balance/read/pending/buy/retire operations.
+ * `facilityIds(account)` must return the actual NFT IDs belonging to the
+ * selected owner. Browser EOAs work directly; simulations using proxies can
+ * supply `ownerFor`, `creditOps` and `buy` with their own transaction dispatch.
+ * The holder must already have the market identity handshake and settlement
+ * allowance; this helper does not grant either permission.
+ *
+ * The returned object is intentionally partial: it cannot bootstrap a world,
+ * issue credit, invest, exit a basket, record wealth or restore a sandbox.
+ */
+export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor = (a) => a,
+  creditOps = null, buy = buyBuck } = {}) {
+  if (world.accounting !== "net" || !world.net || typeof facilityIds !== "function") {
+    throw new Error("net household repayment requires a BuckNet world and facility IDs");
+  }
+  creditOps ??= netCreditOps(world.session, world.net);
+  const s = world.session;
+  const holder = (account) => ownerFor(account);
+  const address = (account) => {
+    const h = holder(account);
+    const owner = h.account ?? h;
+    return typeof owner === "string" ? owner : owner.address;
+  };
+  return {
+    cash: (account) => s.call(market.usdc, "balanceOf", [address(account)]),
+    balance: (account) => s.call(world.buck, "balanceOf", [address(account)]),
+    read: async (account) => {
+      const state = await creditOps.household(address(account), await facilityIds(account));
+      return { ...state, drawn: state.issued };
+    },
+    pending: async (account) => {
+      for (const id of await facilityIds(account)) {
+        if ((await s.call(world.buck, "reductionAuthorization", [id]))[0] > 0n) return true;
+      }
+      return false;
+    },
+    authorization: async (_account, id) => (await s.call(world.buck, "reductionAuthorization", [id]))[0],
+    cancel: async (account, id, expected) => {
+      const ids = await facilityIds(account), h = holder(account);
+      await creditOps.household(address(account), ids); // reject foreign facilities
+      if (!ids.some((candidate) => BigInt(candidate) === BigInt(id))) throw new Error("foreign household facility");
+      const actual = await s.call(world.buck, "reductionAuthorization", [id]);
+      if (!expected[0] || actual.some((value, i) => value !== expected[i])) {
+        throw new Error("pending repayment changed; reconcile transaction before canceling");
+      }
+      await creditOps.cancelReduction(h.account ?? h, id);
+      if ((await s.call(world.buck, "reductionAuthorization", [id]))[0]) throw new Error("repayment cancellation not confirmed");
+    },
+    buy: async (account, amount, { minNet = 0n } = {}) => {
+      const r = await buy(world, market, holder(account), amount, { minOut: minNet });
+      return { spent: r.paid, got: r.received };
+    },
+    retire: async (account, target, acquired, reserve = null) => {
+      const h = holder(account), me = address(account);
+      const held = await s.call(world.buck, "balanceOf", [me]);
+      // Keep the pre-purchase working balance, including the issue reserve.
+      const buffer = reserve ?? ((held > acquired ? held - acquired : 0n) + 1n);
+      const deadline = (await s.client.getBlock()).timestamp + 3600n;
+      const result = await creditOps.retireHousehold(h.account ?? h, await facilityIds(account), target, deadline, { buffer });
+      // Once settlement's outcome is uncertain, return the saved plan before
+      // any further RPC read can fail and erase the information the agent needs.
+      if (result.status === "authorization-pending") return { ...result, reserve: buffer };
+      const remaining = await s.call(world.buck, "balanceOf", [me]);
+      return { ...result, reserve: result.retired >= target || remaining <= buffer ? null : buffer };
+    },
+  };
+}

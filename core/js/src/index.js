@@ -16,3 +16,4 @@ export { RoundTripTrader } from "./agents/trader.js";
 export { buildOnePool } from "./scenarios/onepool.js";
 export { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent, HouseholdPopulationAgent }
   from "./agents/credit-household.js";
+export { netHouseholdRepaymentOps } from "./agents/net-repayment.js";

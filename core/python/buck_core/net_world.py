@@ -123,6 +123,9 @@ class HouseholdRetirement:
     premium_nominal: int
     status: str
     blocked_token_id: int | None
+    pending_principal: int | None
+    pending_minimum_relief_scaled: int | None
+    pending_deadline: int | None
     settlements: tuple[NetReduction, ...]
 
 
@@ -154,7 +157,7 @@ class ReductionPending(RuntimeError):
 
     def __init__(self, plan: ReductionPlan):
         self.plan = plan
-        super().__init__(f"reduction of facility {plan.token_id} failed after authorization; "
+        super().__init__(f"reduction of facility {plan.token_id} has an uncertain outcome after authorization; "
                          "check the on-chain authorization and retry or cancel it")
 
 
@@ -416,11 +419,14 @@ class NetCreditOps:
         if not receipt or receipt.get("status") != 1:
             raise ReductionPending(plan)
         address = getattr(owner, "address", owner)
-        events = self.stack.token.events.FacilityReduced().process_receipt(receipt, errors=DISCARD)
-        events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()
-                  and e["args"]["owner"].lower() == address.lower() and e["args"]["tokenId"] == plan.token_id]
-        if len(events) != 1 or events[0]["args"]["principal"] != plan.principal:
-            raise ValueError("settlement receipt missing or ambiguous; inspect the transaction before retrying")
+        try:
+            events = self.stack.token.events.FacilityReduced().process_receipt(receipt, errors=DISCARD)
+            events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()
+                      and e["args"]["owner"].lower() == address.lower() and e["args"]["tokenId"] == plan.token_id]
+            if len(events) != 1 or events[0]["args"]["principal"] != plan.principal:
+                raise ValueError("settlement receipt missing or ambiguous")
+        except Exception as exc:
+            raise ReductionPending(plan) from exc
         event = events[0]["args"]
         return NetReduction(event["principal"], event["reliefScaled"], event["premiumRefund"], receipt)
 
@@ -441,7 +447,7 @@ class NetCreditOps:
         self.household(owner, ids)  # reject duplicates and foreign NFTs before any transaction
         settled = []
         retired = 0
-        status, blocked = "complete", None
+        status, blocked, pending_principal, pending_minimum, pending_deadline = "complete", None, None, None, None
         for token_id in ids:
             if retired >= requested:
                 break
@@ -455,7 +461,8 @@ class NetCreditOps:
             try:
                 result = self.settle_plan(owner, plan, deadline)
             except ReductionPending:
-                status, blocked = "authorization-pending", token_id
+                status, blocked, pending_principal = "authorization-pending", token_id, plan.principal
+                pending_minimum, pending_deadline = plan.minimum_relief_scaled, deadline
                 break
             settled.append(result)
             retired += result.principal
@@ -464,4 +471,5 @@ class NetCreditOps:
                 status = "partial"
         return HouseholdRetirement(requested, retired, sum(x.relief_scaled for x in settled),
                                    sum(x.owner_cost_scaled for x in settled),
-                                   sum(x.premium_nominal for x in settled), status, blocked, tuple(settled))
+                                   sum(x.premium_nominal for x in settled), status, blocked, pending_principal,
+                                   pending_minimum, pending_deadline, tuple(settled))

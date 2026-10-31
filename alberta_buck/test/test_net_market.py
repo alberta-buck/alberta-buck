@@ -1,11 +1,14 @@
 """A real V3/Anvil cash-only guard fixture; not a household economy."""
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
+from alberta_buck.sim.credit_households import CreditHouseholdAgent
+from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
 from buck_core import NetCreditOps, NetMarketOps, deploy_net_stack
 
@@ -99,4 +102,151 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         exact = market.buy_exact_output(buyer.address, pool_address, 20 * RAW, 50 * RAW, buyer.address)
         assert exact.received >= 20 * RAW and exact.nominal_received > exact.received
         assert usdc.functions.balanceOf(buyer.address).call() == before - exact.paid
+
+        # Exercise the existing adaptive household's discount path using the
+        # real guard and selected-NFT settlement. This isolated action is not
+        # a full net household deployment, basket or five-year economy.
+        agent = CreditHouseholdAgent(7)
+        agent.proxy, agent._token_ids = buyer, [buyer_id]
+        agent._basket_receipts, agent._receipt_book, agent._savings_proxy = [], {}, None
+        agent.p = {"surplus_policy": "adaptive", "paydown_share": .1, "paydown_double": .005}
+        agent.max_impact_bp = 9000
+        agent.unwound = agent.trade_loss = 0
+        agent.last_error = agent.last_action = ""
+        d = SimpleNamespace(buck=buck, credit=credit, usdc=usdc, pool_ub=pool_address, fee_ub=500,
+                            chain=chain, w3=chain.w3, buck_accounting="net", net_credit_ops=credit_ops,
+                            net_market_ops=market, basket_impl="equity")
+        ru, rb = active_reserves(chain, pool_address, usdc, buck)
+        state = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
+        remaining = credit.functions.issuanceOf(buyer_id).call()[0]
+        now = anvil.w3.eth.get_block("latest")["timestamp"]
+        credit_ops.authorize_reduction(buyer.address, buyer_id, RAW, 0, now + 3600)
+        cash_before = usdc.functions.balanceOf(buyer.address).call()
+        agent._save_or_pay_down(d, state, cash_before, {})
+        assert agent.last_action == "repay-pending"
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_before
+        assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
+        credit_ops.cancel_reduction(buyer.address, buyer_id)
+
+        def fail_reduce(owner, target, method, args):
+            if target.address == fund.address:
+                raise RuntimeError("simulated settlement transport failure")
+            return _exec(chain, actors[owner.lower()], target, method, args)
+
+        d.net_credit_ops = NetCreditOps(chain, stack, fail_reduce)
+        counters = {}
+        agent._save_or_pay_down(d, state, cash_before, counters)
+        cash_after_buy = usdc.functions.balanceOf(buyer.address).call()
+        assert cash_after_buy < cash_before and agent._net_repayment_reserve is not None
+        assert agent.last_action == "repay-pending" and agent.unwound == 0
+        assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
+        assert buck.functions.reductionAuthorization(buyer_id).call()[0] > 0
+        agent._save_or_pay_down(d, state, cash_after_buy, counters)
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_buy
+        original = buck.functions.reductionAuthorization(buyer_id).call()
+        credit_ops.authorize_reduction(buyer.address, buyer_id, original[0], original[1] + 1, original[2])
+        with pytest.raises(ValueError, match="changed"):
+            agent.cancel_pending_repayment(d)
+        credit_ops.authorize_reduction(buyer.address, buyer_id, *original)
+        agent.cancel_pending_repayment(d)
+
+        class OneSlice:
+            def household(self, *args):
+                return credit_ops.household(*args)
+
+            def retire_household(self, owner, ids, requested, deadline, **kw):
+                # Exercise real settlement with an independent per-attempt
+                # limit, as can happen when the fund is short of cash.
+                return credit_ops.retire_household(owner, ids, min(requested, 10 * RAW), deadline, **kw)
+
+        d.net_credit_ops = OneSlice()
+        ru, rb = active_reserves(chain, pool_address, usdc, buck)
+        state.update(ru=ru / RAW, rb=rb / RAW)
+        agent._save_or_pay_down(d, state, cash_after_buy, counters)
+        first_retired = remaining - credit.functions.issuanceOf(buyer_id).call()[0]
+        assert first_retired == 10 * RAW and agent._net_repayment_reserve is not None
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_buy
+        d.net_credit_ops = credit_ops
+        ru, rb = active_reserves(chain, pool_address, usdc, buck)
+        state.update(ru=ru / RAW, rb=rb / RAW)
+        agent._save_or_pay_down(d, state, cash_after_buy, counters)
+        retired = remaining - credit.functions.issuanceOf(buyer_id).call()[0]
+        assert retired > first_retired and retired == agent.unwound == counters["bcdRetired"]
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_buy
+        assert credit.functions.issuanceOf(tid).call()[0] == 1_200 * RAW
+
+        # A transport can lose the response after a successful settlement.
+        # No authorization remains in that case, but the household must not
+        # count or retry the uncertain transaction without reconciling it.
+        chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
+        second_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 1).call()
+        credit_ops.issue(buyer.address, second_id, 200 * RAW, 100 * RAW)
+        _exec(chain, buyer, buck, "transfer", [provider.address, 100 * RAW])
+        receipts = []
+
+        def lose_settlement_receipt(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            if target.address == fund.address:
+                receipts.append(receipt)
+                raise RuntimeError("simulated lost response after successful settlement")
+            return receipt
+
+        class LostReceipt(NetCreditOps):
+            def retire_household(self, owner, ids, requested, deadline, **kw):
+                return super().retire_household(owner, ids, min(requested, RAW), deadline, **kw)
+
+        agent2 = CreditHouseholdAgent(8)
+        agent2.proxy, agent2._token_ids = buyer, [second_id]
+        agent2._basket_receipts, agent2._receipt_book, agent2._savings_proxy = [], {}, None
+        agent2.p = agent.p.copy()
+        agent2.max_impact_bp = 9000
+        agent2.unwound = agent2.trade_loss = 0
+        agent2.last_error = agent2.last_action = ""
+        d.net_credit_ops = LostReceipt(chain, stack, lose_settlement_receipt)
+        ru, rb = active_reserves(chain, pool_address, usdc, buck)
+        state2 = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
+        agent2._save_or_pay_down(d, state2, cash_after_buy, {})
+        cash_after_lost = usdc.functions.balanceOf(buyer.address).call()
+        assert receipts and receipts[0]["status"] == 1
+        assert credit.functions.issuanceOf(second_id).call()[0] == 99 * RAW
+        assert buck.functions.reductionAuthorization(second_id).call()[0] == 0
+        assert agent2.unwound == 0 and "outcome uncertain" in agent2.last_error
+        agent2._save_or_pay_down(d, state2, cash_after_lost, {})
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost
+        with pytest.raises(ValueError, match="reconcile"):
+            agent2.cancel_pending_repayment(d)
+
+        # The same uncertainty exists if the market purchase succeeds but
+        # the client loses its response before it can start settlement.
+        chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
+        third_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 2).call()
+        credit_ops.issue(buyer.address, third_id, 200 * RAW, 100 * RAW)
+        _exec(chain, buyer, buck, "transfer", [provider.address, 100 * RAW])
+        buy_receipts = []
+
+        def lose_buy_receipt(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            buy_receipts.append(receipt)
+            raise RuntimeError("simulated lost buy response")
+
+        agent3 = CreditHouseholdAgent(9)
+        agent3.proxy, agent3._token_ids = buyer, [third_id]
+        agent3._basket_receipts, agent3._receipt_book, agent3._savings_proxy = [], {}, None
+        agent3.p = agent.p.copy()
+        agent3.max_impact_bp = 9000
+        agent3.unwound = agent3.trade_loss = 0
+        agent3.last_error = agent3.last_action = ""
+        d.net_credit_ops = credit_ops
+        d.net_market_ops = NetMarketOps(chain, buck, guard, lose_buy_receipt)
+        ru, rb = active_reserves(chain, pool_address, usdc, buck)
+        state3 = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
+        cash3 = usdc.functions.balanceOf(buyer.address).call()
+        with pytest.raises(RuntimeError, match="lost buy"):
+            agent3._save_or_pay_down(d, state3, cash3, {})
+        cash_after_lost_buy = usdc.functions.balanceOf(buyer.address).call()
+        assert buy_receipts and buy_receipts[0]["status"] == 1 and cash_after_lost_buy < cash3
+        assert agent3._net_trade_uncertain and credit.functions.issuanceOf(third_id).call()[0] == 100 * RAW
+        agent3._save_or_pay_down(d, state3, cash_after_lost_buy, {})
+        assert "buyback outcome uncertain" in agent3.last_error
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost_buy
         assert not chain.mismatches

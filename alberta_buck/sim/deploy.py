@@ -155,6 +155,8 @@ class Deployment:
     basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "equity" | "equity-ops"
     buck_artifact: str = ""       # actual deployed contract, recorded in saved vectors
     buck_accounting: str = ""     # accounting model implemented by that deployment
+    net_credit_ops: Any = None    # selected-NFT net operations, on a future net deployment
+    net_market_ops: Any = None    # guarded net BUCK purchases, on a future net deployment
     venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs": the one signal engine left

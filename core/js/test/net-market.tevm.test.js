@@ -7,6 +7,9 @@ import { getContractAddress } from "viem";
 import { devAccount, tevmSession } from "../src/backends.js";
 import { buildBuckWorld, onboard, insureAsset, advanceTime, DAY } from "../src/buckworld.js";
 import { netCreditOps } from "../src/net-world.js";
+import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
+import { netHouseholdRepaymentOps } from "../src/agents/net-repayment.js";
+import { Q96 } from "../src/v3.js";
 import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, fiatIn, buyBuck, buyBuckExact, sellBuck }
   from "../src/market.js";
 
@@ -107,6 +110,135 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       [market.pool.address, 1_000_000n, 0n, market.pool.address, 0n],
       { account: buyer.account, expect: "revert" });
     assert.equal(wrongRecipient.status, "reverted");
+
+    // The existing adaptive household uses guarded purchases and counts only
+    // confirmed selected-NFT settlements. This exercises one isolated action,
+    // not the unported household setup, savings basket or five-year world.
+    const agent = new CreditHouseholdAgent({ account: buyer.account, settings: {
+      surplus_policy: "adaptive", paydown_share: .1, paydown_double: .005, max_impact_bp: 9000, divest_rate: 0,
+    } });
+    let failSettlement = true, limitSlice = true;
+    const failingOps = netCreditOps(s, world.net, (owner, target, name, args) => {
+      if (target.address === world.net.fund.address) throw new Error("simulated settlement transport failure");
+      return s.send(target, name, args, { account: owner });
+    });
+    const limitedOps = { ...creditOps, retireHousehold: (owner, ids, target, expires, opts) =>
+      (failSettlement ? failingOps : creditOps).retireHousehold(owner, ids,
+        !failSettlement && limitSlice && target > 10_000_000n ? 10_000_000n : target, expires, opts) };
+    const hworld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [buyerId], creditOps: limitedOps }) };
+    const [liquidity, slot, t0] = await Promise.all([s.call(market.pool, "liquidity"),
+      s.call(market.pool, "slot0"), s.call(market.pool, "token0")]);
+    const r0 = liquidity * Q96 / slot[0], r1 = liquidity * slot[0] / Q96;
+    const [ru, rb] = (t0.toLowerCase() === market.usdc.address.toLowerCase() ? [r0, r1] : [r1, r0])
+      .map((v) => Number(v) / 1e6);
+    const state = { ru, rb, fee: .0005, basket_usd: 1.5 * ru / rb };
+    const remaining = (await creditOps.facility(buyerId)).issued;
+    await creditOps.authorizeReduction(buyer.account, buyerId, 1_000_000n, 0n,
+      (await s.client.getBlock()).timestamp + 3600n);
+    const beforeHousehold = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    await agent.saveOrPayDown(hworld, state, beforeHousehold);
+    assert.equal(agent.lastAction, "repay-pending");
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), beforeHousehold);
+    assert.equal((await creditOps.facility(buyerId)).issued, remaining);
+    await creditOps.cancelReduction(buyer.account, buyerId);
+    await agent.saveOrPayDown(hworld, state, beforeHousehold);
+    const cashAfterBuy = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    assert.ok(cashAfterBuy < beforeHousehold);
+    assert.notEqual(agent.netRepaymentReserve, null);
+    assert.equal(agent.lastAction, "repay-pending");
+    assert.equal(agent.unwound, 0n);
+    assert.equal((await creditOps.facility(buyerId)).issued, remaining);
+    assert.ok((await s.call(world.buck, "reductionAuthorization", [buyerId]))[0] > 0n);
+    await agent.saveOrPayDown(hworld, state, cashAfterBuy);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterBuy);
+    const original = await s.call(world.buck, "reductionAuthorization", [buyerId]);
+    await creditOps.authorizeReduction(buyer.account, buyerId, original[0], original[1] + 1n, original[2]);
+    await assert.rejects(agent.cancelPendingRepayment(hworld), /changed/);
+    await creditOps.authorizeReduction(buyer.account, buyerId, ...original);
+    await agent.cancelPendingRepayment(hworld);
+    failSettlement = false;
+    const [laterLiquidity, laterSlot] = await Promise.all([s.call(market.pool, "liquidity"), s.call(market.pool, "slot0")]);
+    const a0 = laterLiquidity * Q96 / laterSlot[0], a1 = laterLiquidity * laterSlot[0] / Q96;
+    [state.ru, state.rb] = (t0.toLowerCase() === market.usdc.address.toLowerCase() ? [a0, a1] : [a1, a0])
+      .map((v) => Number(v) / 1e6);
+    await agent.saveOrPayDown(hworld, state, cashAfterBuy);
+    const firstRetired = remaining - (await creditOps.facility(buyerId)).issued;
+    assert.equal(firstRetired, 10_000_000n);
+    assert.notEqual(agent.netRepaymentReserve, null);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterBuy);
+    limitSlice = false;
+    await agent.saveOrPayDown(hworld, state, cashAfterBuy);
+    const retired = remaining - (await creditOps.facility(buyerId)).issued;
+    assert.ok(retired > firstRetired);
+    assert.equal(retired, agent.unwound);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterBuy);
+    assert.equal((await s.call(world.credit, "issuanceOf", [market.providerCreditId]))[0], provider[0]);
+
+    // Even if the transaction succeeds but its response is lost, this agent
+    // must stop with an uncertain outcome instead of buying or paying twice.
+    const lostId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
+    await creditOps.issue(buyer.account, lostId, 200_000_000n, 100_000_000n);
+    await sellBuck(world, market, buyer, 99_000_000n);
+    const receipts = [];
+    const lostOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      if (target.address === world.net.fund.address) {
+        receipts.push(receipt);
+        throw new Error("simulated lost response after successful settlement");
+      }
+      return receipt;
+    });
+    const lostLimited = { ...lostOps, retireHousehold: (owner, ids, target, expires, opts) =>
+      lostOps.retireHousehold(owner, ids, target > 1_000_000n ? 1_000_000n : target, expires, opts) };
+    const lostWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostId], creditOps: lostLimited }) };
+    const agent2 = new CreditHouseholdAgent({ account: buyer.account, settings: {
+      surplus_policy: "adaptive", paydown_share: .1, paydown_double: .005, max_impact_bp: 9000, divest_rate: 0,
+    } });
+    const [newLiquidity, newSlot] = await Promise.all([s.call(market.pool, "liquidity"), s.call(market.pool, "slot0")]);
+    const b0 = newLiquidity * Q96 / newSlot[0], b1 = newLiquidity * newSlot[0] / Q96;
+    const [newRu, newRb] = (t0.toLowerCase() === market.usdc.address.toLowerCase() ? [b0, b1] : [b1, b0])
+      .map((v) => Number(v) / 1e6);
+    const state2 = { ru: newRu, rb: newRb, fee: .0005, basket_usd: 1.5 * newRu / newRb };
+    const cash2 = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    await agent2.saveOrPayDown(lostWorld, state2, cash2);
+    const cashAfterLost = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    assert.ok(receipts.length && receipts[0].status === "success");
+    assert.equal((await creditOps.facility(lostId)).issued, 99_000_000n);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostId]))[0], 0n);
+    assert.equal(agent2.unwound, 0n);
+    assert.match(agent2.lastError, /outcome uncertain/);
+    await agent2.saveOrPayDown(lostWorld, state2, cashAfterLost);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLost);
+    await assert.rejects(agent2.cancelPendingRepayment(lostWorld), /reconcile/);
+
+    const lostBuyId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
+    await creditOps.issue(buyer.account, lostBuyId, 200_000_000n, 100_000_000n);
+    await sellBuck(world, market, buyer, 99_000_000n);
+    const purchases = [];
+    const loseBuy = async (...args) => {
+      purchases.push(await buyBuck(...args));
+      throw new Error("simulated lost buy response");
+    };
+    const lostBuyWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps, buy: loseBuy }) };
+    const agent3 = new CreditHouseholdAgent({ account: buyer.account, settings: {
+      surplus_policy: "adaptive", paydown_share: .1, paydown_double: .005, max_impact_bp: 9000, divest_rate: 0,
+    } });
+    const [buyLiquidity, buySlot] = await Promise.all([s.call(market.pool, "liquidity"), s.call(market.pool, "slot0")]);
+    const c0 = buyLiquidity * Q96 / buySlot[0], c1 = buyLiquidity * buySlot[0] / Q96;
+    const [buyRu, buyRb] = (t0.toLowerCase() === market.usdc.address.toLowerCase() ? [c0, c1] : [c1, c0])
+      .map((v) => Number(v) / 1e6);
+    const state3 = { ru: buyRu, rb: buyRb, fee: .0005, basket_usd: 1.5 * buyRu / buyRb };
+    const cash3 = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    await assert.rejects(agent3.saveOrPayDown(lostBuyWorld, state3, cash3), /lost buy response/);
+    const cashAfterLostBuy = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    assert.ok(purchases.length && cashAfterLostBuy < cash3 && agent3.netTradeUncertain);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, 100_000_000n);
+    await agent3.saveOrPayDown(lostBuyWorld, state3, cashAfterLostBuy);
+    assert.match(agent3.lastError, /buyback outcome uncertain/);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLostBuy);
   }
   // A nominal pool can remain nonzero when its full-value balance is zero.
   // Exact net output must refuse without consuming the buyer's settlement.
