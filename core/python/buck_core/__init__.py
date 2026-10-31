@@ -10,14 +10,14 @@ Dependency rule: buck_core never imports alberta_buck.
 
 from buck_core.artifacts import link_bytecode, load_artifact, repo_root
 from buck_core.session import (
-    CALL_GAS, DEPLOY_GAS, Expect, Journal, Web3Session,
+    CALL_GAS, DEPLOY_GAS, Expect, Journal, TransactionReceiptPending, TransactionReverted, Web3Session,
 )
 from buck_core.net_world import (FacilityState, HouseholdCreditState, HouseholdRetirement, IssueQuote, NetCreditOps, NetMarketOps,
                                  NetPurchase, NetReduction, NetStack, NetTransferValue, ReductionPending, ReductionPlan,
                                  PremiumRefundQuote, ReliefRateQuote, deploy_net_stack, net_transfer_value)
 
 __all__ = [
-    "CALL_GAS", "DEPLOY_GAS", "Expect", "Journal", "Web3Session",
+    "CALL_GAS", "DEPLOY_GAS", "Expect", "Journal", "TransactionReceiptPending", "TransactionReverted", "Web3Session",
     "link_bytecode", "load_artifact", "repo_root",
     "FacilityState", "IssueQuote", "NetCreditOps", "NetStack", "deploy_net_stack",
     "HouseholdCreditState", "HouseholdRetirement", "ReductionPending", "ReductionPlan", "NetMarketOps", "NetPurchase", "NetReduction",

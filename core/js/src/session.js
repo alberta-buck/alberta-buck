@@ -23,6 +23,25 @@ export const CALL_GAS = 12_000_000n;
 // ceiling rather than a constraint.
 export const DEPLOY_GAS = 29_000_000n;
 
+/** Submission returned a hash but the receipt could not be obtained. */
+export class TransactionReceiptPending extends Error {
+  constructor(transactionHash, cause) {
+    super(`transaction ${transactionHash} submitted; receipt unavailable`, { cause });
+    this.name = "TransactionReceiptPending";
+    this.transactionHash = transactionHash;
+  }
+}
+
+/** A mined transaction reverted; keep its receipt for reconciliation. */
+export class TransactionReverted extends Error {
+  constructor(functionName, reason, receipt) {
+    super(`tx reverted: ${functionName} :: ${reason}`);
+    this.name = "TransactionReverted";
+    this.receipt = receipt;
+    this.transactionHash = receipt.transactionHash;
+  }
+}
+
 export class Session {
   /**
    * @param client viem client with public + wallet actions
@@ -59,7 +78,9 @@ export class Session {
       address: contract.address, abi: contract.abi, functionName, args,
       account: acct, gas, value, chain: null, ...this.txOverrides,
     });
-    const rcpt = await this.client.waitForTransactionReceipt({ hash });
+    let rcpt;
+    try { rcpt = await this.client.waitForTransactionReceipt({ hash }); }
+    catch (err) { throw new TransactionReceiptPending(hash, err); }
     const ok = rcpt.status === "success";
     const err = ok ? "" : await this.#revertReason(
       contract, functionName, args, acct, gas, value, rcpt.blockNumber);
@@ -76,7 +97,7 @@ export class Session {
     }
     if (!ok && expect === "ok") {
       this.mismatches.push(entry);
-      throw new Error(`tx reverted: ${functionName} :: ${err}`);
+      throw new TransactionReverted(functionName, err, rcpt);
     }
     return rcpt;
   }
@@ -89,7 +110,9 @@ export class Session {
       abi: artifact.abi, bytecode: artifact.bytecode, args,
       account: acct, gas, chain: null, ...this.txOverrides,
     });
-    const rcpt = await this.client.waitForTransactionReceipt({ hash });
+    let rcpt;
+    try { rcpt = await this.client.waitForTransactionReceipt({ hash }); }
+    catch (err) { throw new TransactionReceiptPending(hash, err); }
     const ok = rcpt.status === "success";
     this.#journalOp("deploy", "constructor", acct.address, "ok", ok, rcpt,
                     ok ? "" : "deploy reverted", tag || `deploy:${name}`);
@@ -118,7 +141,7 @@ export class Session {
     const entry = {
       tag, op, fn, sender,
       expect, outcome: ok ? "ok" : "revert",
-      matched: (ok ? "ok" : "revert") === expect,
+      matched: expect === "either" || (ok ? "ok" : "revert") === expect,
       gas: Number(rcpt.gasUsed ?? 0n),
       tx: rcpt.transactionHash ?? "",
       block: Number(rcpt.blockNumber ?? 0n),

@@ -3,7 +3,7 @@
 
 export { FIELDS, JournalWriter, parseJournal, mismatches, totalGas,
          summarize } from "./journal.js";
-export { CALL_GAS, DEPLOY_GAS, Session } from "./session.js";
+export { CALL_GAS, DEPLOY_GAS, Session, TransactionReceiptPending, TransactionReverted } from "./session.js";
 export { linkArtifact } from "./artifacts.js";
 export { deployNetStack, netCreditOps, netTransferValue, ReductionPending } from "./net-world.js";
 export { buildBuckWorld, worldRecord, attachBuckWorld, attachNetBuckWorld } from "./buckworld.js";

@@ -84,15 +84,19 @@ runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
 quote and issue. Current fund relief and the immediate mixed insurer-pool
 refund can also be observed at one block; these observations are not guarantees
-of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3 diagnostic seeds BUCK/USDC, ages its
+of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3
+diagnostic seeds BUCK/USDC, ages its
 Carrying pool and reports the buyer's actual net BUCK. The Python and JS market
 fixtures both buy back BUCK and explicitly retire a selected NFT; a purchase
 alone does not reduce that liability. They also exercise the existing adaptive
 household's isolated discount action, including a pending-authorization stop.
-The rest of the new-model household lifecycle is not yet implemented. These fixtures have no
-household economy, leveraged basket or insurer investment strategy; they are
-not a five-year simulation or deployment recipe. The same target builds the
-sandbox artifact bundle and checks that a browser-safe Tevm session can link
+The rest of the new-model household lifecycle is not yet implemented. These
+fixtures have no household economy, leveraged basket or insurer investment
+strategy; they are not a five-year simulation or deployment recipe. The same
+target runs session tests for submitted transaction hashes, mined reverts and
+correctly journaled operations that may succeed or revert. The household still
+needs to retain and reconcile the hash before it can resume automatically.
+The target also builds the sandbox artifact bundle and checks that a browser-safe Tevm session can link
 and deploy the new stack from it. Its single-pool guard enforces net output
 and settlement limits atomically; it is not a price oracle. The interactive sandbox is not yet migrated.
 Built artifacts and JavaScript dependencies are required.

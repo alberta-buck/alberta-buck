@@ -11,8 +11,8 @@ Two kinds of senders:
   * a generated EOA (`eth_account.LocalAccount`) -- we sign locally
     (web3 v7: `signed.raw_transaction`).
 
-Expectations: every state-changing op declares expect=Expect.OK (default)
-or Expect.REVERT.  An unexpected revert raises RuntimeError carrying the
+Expectations: every state-changing op declares expect=Expect.OK (default),
+Expect.REVERT or Expect.EITHER. An unexpected revert raises RuntimeError carrying the
 Solidity revert reason (exactly the pre-session behavior); an unexpected
 success logs a warning and returns normally.  Either way the outcome is
 journaled, and contradictions accumulate in ``session.mismatches``.
@@ -48,6 +48,7 @@ class Expect(enum.Enum):
     """Declared expectation for a state-changing operation."""
     OK = "ok"
     REVERT = "revert"
+    EITHER = "either"
 
 
 def _txhex(h: Any) -> str:
@@ -60,6 +61,23 @@ def _txhex(h: Any) -> str:
         s = h.hex()
         return s if s.startswith("0x") else "0x" + s
     return str(h)
+
+
+class TransactionReceiptPending(RuntimeError):
+    """Submission returned a hash but the receipt could not be obtained."""
+
+    def __init__(self, transaction_hash: Any):
+        self.transaction_hash = _txhex(transaction_hash)
+        super().__init__(f"transaction {self.transaction_hash} submitted; receipt unavailable")
+
+
+class TransactionReverted(RuntimeError):
+    """A mined transaction reverted; its receipt is available for reconciliation."""
+
+    def __init__(self, function: str, reason: str, receipt):
+        self.receipt = receipt
+        self.transaction_hash = _txhex(receipt.get("transactionHash"))
+        super().__init__(f"tx reverted: {function} :: {reason}")
 
 
 class Journal:
@@ -195,7 +213,10 @@ class Web3Session:
                 "gasPrice": 0,
                 "value": value,
             })
-        return self.w3.eth.wait_for_transaction_receipt(h)
+        try:
+            return self.w3.eth.wait_for_transaction_receipt(h)
+        except Exception as exc:
+            raise TransactionReceiptPending(h) from exc
 
     def _revert_reason(self, fn, from_addr: str, gas: int, value: int,
                        block: int) -> str:
@@ -226,14 +247,19 @@ class Web3Session:
         expect=Expect.OK (default): a revert raises RuntimeError with the
         Solidity reason.  expect=Expect.REVERT: a revert is the expected
         outcome (reason in ``last_revert_reason``); an unexpected success
-        logs a warning.  Every outcome is journaled when a journal is set.
+        logs a warning. Expect.EITHER accepts either mined result. A receipt
+        timeout after submission raises TransactionReceiptPending with its
+        hash. Every mined outcome is journaled when a journal is set.
         """
         fn = contract_fn_call
         sender = sender if sender is not None else self.deployer
         from_addr = sender.address if isinstance(sender, LocalAccount) \
             else Web3.to_checksum_address(sender)
-        rcpt = self._execute_tx(fn, sender, from_addr, gas, value)
-        self.clear_balance_cache()
+        try:
+            rcpt = self._execute_tx(fn, sender, from_addr, gas, value)
+        finally:
+            # Submission may have succeeded even if obtaining the receipt failed.
+            self.clear_balance_cache()
 
         fname = fn.fn_name if hasattr(fn, "fn_name") else str(fn)
         ok = rcpt["status"] == 1
@@ -249,7 +275,7 @@ class Web3Session:
         if not ok:
             if expect is Expect.OK:
                 self.mismatches.append(entry)
-                raise RuntimeError(f"tx reverted: {fname} :: {reason}")
+                raise TransactionReverted(fname, reason, rcpt)
         return rcpt
 
     def call(self, contract_fn_call):
@@ -296,7 +322,7 @@ class Web3Session:
         entry = {
             "tag": tag, "op": op, "fn": fname, "sender": sender,
             "expect": expect.value, "outcome": outcome,
-            "matched": outcome == expect.value,
+            "matched": expect is Expect.EITHER or outcome == expect.value,
             "gas": int(rcpt.get("gasUsed", 0)),
             "tx": _txhex(rcpt.get("transactionHash")),
             "block": int(rcpt.get("blockNumber", 0)),

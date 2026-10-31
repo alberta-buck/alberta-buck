@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from buck_core.session import Expect, Journal, Web3Session
+from buck_core.session import Expect, Journal, TransactionReceiptPending, TransactionReverted, Web3Session
 
 DEPLOYER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
@@ -57,8 +57,9 @@ def test_ok_expected_ok():
 
 def test_revert_expected_ok_raises_with_reason():
     s = StubSession(status=0, reason="BUCK: sender identity not verified")
-    with pytest.raises(RuntimeError, match="transfer.*not verified"):
+    with pytest.raises(TransactionReverted, match="transfer.*not verified") as exc:
         s.send(_Fn())
+    assert exc.value.receipt["status"] == 0 and exc.value.transaction_hash == "0x" + "aa" * 32
     assert len(s.mismatches) == 1
     assert s.mismatches[0]["outcome"] == "revert"
 
@@ -69,6 +70,35 @@ def test_revert_expected_revert_returns_receipt():
     assert rcpt["status"] == 0
     assert s.mismatches == []
     assert s.last_revert_reason == "BUCK: overdraw"
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_either_accepts_success_or_revert_and_journals_the_result(tmp_path, status):
+    s = StubSession(status=status, reason="expected refusal", journal=tmp_path / "either.jsonl")
+    assert s.send(_Fn(), expect=Expect.EITHER)["status"] == status
+    s.journal.close()
+    assert not s.mismatches and Journal.load(tmp_path / "either.jsonl")[0]["matched"] is True
+
+
+def test_receipt_timeout_keeps_the_submitted_hash_and_invalidates_cache():
+    class WaitFailEth(_FakeEth):
+        def wait_for_transaction_receipt(self, _hash):
+            raise TimeoutError("simulated receipt timeout")
+
+    class FakeW3:
+        eth = WaitFailEth()
+
+    class SentFn(_Fn):
+        def transact(self, _tx):
+            return b"\xab" * 32
+
+    s = Web3Session(FakeW3(), DEPLOYER)
+    s._balance_cache[("token", "owner")] = 10
+    with pytest.raises(TransactionReceiptPending) as exc:
+        s.send(SentFn())
+    assert exc.value.transaction_hash == "0x" + "ab" * 32
+    assert isinstance(exc.value.__cause__, TimeoutError)
+    assert not s._balance_cache and not s.mismatches
 
 
 def test_ok_expected_revert_warns_and_counts(caplog):
