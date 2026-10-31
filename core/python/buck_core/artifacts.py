@@ -83,7 +83,7 @@ def load_artifact(name: str, sol_file: str | None = None, *,
 
     When ``libraries`` is provided, its keys must be fully qualified
     ``source:Library`` names from the artifact's creation link references.
-    The currently published bundle does not include that metadata.
+    Bundles containing linked contracts must retain that metadata.
 
     The fallback is what lets a pip-installed ``alberta_buck`` deploy a
     world at all: ``repo_root()`` raises ``FileNotFoundError`` when no
@@ -111,8 +111,6 @@ def load_artifact(name: str, sol_file: str | None = None, *,
 
     abi, bytecode = buck_contracts.artifact(name)
     if libraries is not None:
-        # The published bundle currently has no link-reference metadata. A
-        # future bundle must retain it before linked contracts can be loaded
-        # outside a built checkout.
-        bytecode = link_bytecode(bytecode, {}, libraries)
+        entry = buck_contracts.contracts()[name]
+        bytecode = link_bytecode(bytecode, entry.get("linkReferences", {}), libraries)
     return abi, bytecode

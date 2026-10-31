@@ -33,6 +33,12 @@ export const NEEDED = [
   "BuckCreditHarness",         // eq world: credits to proxies that never opt in
   "BuckKControllerDirect",
   "Buck",
+  // Experimental net model; retain both deployed libraries' link metadata.
+  "BuckNet",
+  "BuckNetMaturity",
+  "BuckNetTransfers",
+  "BuckNetQuoter",
+  "JubileeFund",
   "WETH9",
   // eq world: the equity basket on the basket machine (the default)
   "BuckBasketEquity",
@@ -48,15 +54,19 @@ export const NEEDED = [
   "BuckWithBasketHooks",
 ];
 
-// The sandbox: production contracts only (no test harnesses), so a fresh
-// clone needs no full Foundry build -- the BUCK stack, MockERC20 and SimLP
-// are in alberta-buck-contracts, Uniswap's factory, pool and WETH9 are
-// staged from Uniswap's npm packages, and only the pool adapter is compiled.
+// The sandbox: no test harnesses. The BuckNet stack is experimental; including
+// its artifacts does not make it production-ready. The Makefile builds this
+// checkout's contracts while the published artifact package lacks this stack.
 export const SANDBOX = [
   "IdentityRegistry",
   "BuckCredit",
   "BuckKControllerDirect",
   "Buck",
+  "BuckNet",
+  "BuckNetMaturity",
+  "BuckNetTransfers",
+  "BuckNetQuoter",
+  "JubileeFund",
   "MockERC20",
   "SimLP",
   "UniswapV3Factory",

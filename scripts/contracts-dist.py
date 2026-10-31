@@ -68,6 +68,13 @@ GROTH16 = (
 # Uniswap implementations, which share the directory.
 CONTRACTS = [
     "Buck",                    # ERC-20, demurrage + credit limits
+    "BuckNet",                 # experimental net-demurrage token; linked below
+    "BuckNetMaturity",         # linked BuckNet library
+    "BuckNetTransfers",        # linked BuckNet library
+    "BuckNetQuoter",           # optional per-facility issuance quotes
+    "JubileeFund",             # experimental separate fund coordinator
+    "JubileeClaimBook",        # created by BuckNet
+    "BuckRenewalConsent",      # created by BuckNet
     "BuckCredit",              # ERC-721, insured asset with depreciation
     "BuckKControllerDirect",   # the on-chain PID controller
     "IdentityRegistry",        # identity accumulator + verifier wiring
@@ -98,6 +105,9 @@ CONTRACTS = [
     "DepositFoldVerifierAdapter",           # A1/A2 folded deposit gates
     "IdentityMembershipB1VerifierAdapter",  # B1 depositor membership
 ] + GROTH16
+
+EXPERIMENTAL = {"BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter",
+                "JubileeFund", "JubileeClaimBook", "BuckRenewalConsent"}
 
 # Until v1.0.0 every verifier above comes from scripts/snark/setup*.sh, which
 # contributes FIXED, PUBLISHED entropy: the toxic waste is known, so anyone can
@@ -167,6 +177,13 @@ def collect(expect_solc: str):
             "bytecode": art["bytecode"]["object"],
             "deployedBytecode": deployed,
         }
+        for source_key, target_key in (("bytecode", "linkReferences"),
+                                       ("deployedBytecode", "deployedLinkReferences")):
+            references = art.get(source_key, {}).get("linkReferences", {})
+            if references:
+                contracts[name][target_key] = references
+        if name in EXPERIMENTAL:
+            contracts[name]["experimental"] = True
         if name in GROTH16:
             contracts[name]["trustedSetup"] = DEV_SETUP["kind"]
         if settings is None and md:
@@ -178,6 +195,41 @@ def collect(expect_solc: str):
                 "evmVersion": s.get("evmVersion"),
             }
     return contracts, settings, problems
+
+
+def check_link_references(name: str, code: str, refs: dict, kind: str) -> list[str]:
+    """Check offsets and replace links locally to reject unresolved bytecode.
+
+    Foundry offsets count bytes.  Substitution is for validation only: emitted
+    bytecode remains unlinked and retains the metadata required by consumers.
+    """
+    errors = []
+    if not isinstance(code, str) or not code.startswith("0x") or len(code) % 2:
+        return [f"{name}: invalid {kind} bytecode"]
+    data, spans = code[2:], []
+    if not isinstance(refs, dict):
+        return [f"{name}: invalid {kind} link metadata"]
+    for source, libraries in refs.items():
+        if not isinstance(libraries, dict):
+            return [f"{name}: invalid {kind} link metadata for {source}"]
+        for library, locations in libraries.items():
+            if not isinstance(locations, list):
+                return [f"{name}: invalid {kind} locations for {source}:{library}"]
+            for location in locations:
+                if not isinstance(location, dict):
+                    return [f"{name}: invalid {kind} location for {source}:{library}"]
+                start, length = location.get("start"), location.get("length")
+                if (type(start) is not int or type(length) is not int or start < 0 or length != 20
+                        or 2 * (start + length) > len(data)):
+                    return [f"{name}: invalid {kind} location for {source}:{library}"]
+                end = start + length
+                if any(start < b and a < end for a, b in spans):
+                    return [f"{name}: overlapping {kind} link locations"]
+                spans.append((start, end))
+                data = data[:2 * start] + "00" * length + data[2 * end:]
+    if re.fullmatch(r"[0-9a-fA-F]*", data) is None:
+        errors.append(f"{name}: unresolved {kind} library placeholder or invalid bytecode")
+    return errors
 
 
 def generated(sol: str, iface: str) -> dict:
@@ -214,6 +266,9 @@ def main() -> int:
 
     # Everything shipped must deploy where the size limits hold.
     for name, c in contracts.items():
+        problems += check_link_references(name, c["bytecode"], c.get("linkReferences", {}), "creation")
+        problems += check_link_references(name, c["deployedBytecode"],
+                                          c.get("deployedLinkReferences", {}), "runtime")
         runtime, init = len(c["deployedBytecode"]) // 2 - 1, len(c["bytecode"]) // 2 - 1
         if runtime > EIP170:
             problems.append(f"{name}: {runtime}-byte runtime exceeds EIP-170 ({EIP170})")

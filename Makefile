@@ -262,8 +262,9 @@ net-demurrage-smoke: sim-build
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
 	done
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }
+	node core/js/bin/bundle-artifacts.mjs sandbox
 	python -m pytest core/python/tests/test_artifacts.py alberta_buck/test/test_net_demurrage_smoke.py -q
-	cd core/js && node --test test/artifacts.test.js test/net-demurrage.tevm.test.js
+	cd core/js && node --test test/artifacts.test.js test/net-demurrage.tevm.test.js test/net-sandbox-bundle.tevm.test.js
 
 
 # ── Documentation rendering ─────────────────────────────────────────
@@ -1686,7 +1687,7 @@ core-js-deps:
 
 # Bundle the forge artifacts the JS platform needs into one importable
 # module (core/js/artifacts/bundle.mjs) -- the browser cannot read out/.
-core-js-artifacts:
+core-js-artifacts: sim-build
 	node core/js/bin/bundle-artifacts.mjs
 
 # The Python kernel bindings: PyO3 cdylibs built with plain cargo (the
@@ -1804,13 +1805,11 @@ core-eqsim: sim-build core-build-wasm
 # names one for a static deployment (written to dist/sim-server.json); the
 # sim server itself serves the page with its own (make nix-venv-sim-savings).
 #
-# A fresh clone needs no full Foundry build: the BUCK stack, MockERC20 and
-# SimLP come from the published alberta-buck-contracts (or out/, once
-# built), Uniswap's factory, pool and WETH9 from Uniswap's npm packages
-# (stage-uniswap), the Universal Router and Permit2 from their vendored
-# builds, and only the pool binding adapter -- not yet published -- is
-# compiled, on its own.  The first build also fetches the npm dependencies
-# and compiles the identity kernel to wasm (Rust): minutes, once.
+# The sandbox bundles the experimental linked BuckNet stack as well as the
+# legacy stack. Until a compatible artifact package is published, sim-build
+# builds the checkout's contracts first. Uniswap's artifacts come from npm;
+# the Universal Router and Permit2 use the checked-in vendored builds. The
+# first build also installs npm dependencies and builds the identity wasm.
 SANDBOX_DIST = core/js/sandbox/dist
 SANDBOX_ADAPTER = out/UniswapV3BindingAdapter.sol/UniswapV3BindingAdapter.json
 .PHONY: sandbox sandbox-build sandbox-deps sandbox-artifacts sandbox-screenshots
@@ -1821,7 +1820,7 @@ sandbox-deps:
 $(SANDBOX_ADAPTER):
 	forge build src/adapters/UniswapV3BindingAdapter.sol $(FORGE_OPTS)
 
-sandbox-artifacts:	sandbox-deps $(SANDBOX_ADAPTER)
+sandbox-artifacts:	sandbox-deps sim-build $(SANDBOX_ADAPTER)
 	@test -f out/UniswapV3Factory.sol/UniswapV3Factory.json || node scripts/stage-uniswap.mjs
 	node core/js/bin/bundle-artifacts.mjs sandbox
 

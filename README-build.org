@@ -85,8 +85,12 @@ The experimental =BuckNet= now links =BuckNetTransfers= and =BuckNetMaturity= li
 Foundry links them for its tests. The Python and JavaScript local smoke fixtures deploy and
 link them from creation-bytecode metadata, but are not production deployment scripts. A
 future deployment or economy must deploy and link these libraries on that chain; the legacy
-deployment script does not do so. The published contract bundle does not yet carry these
-link references.
+deployment script does not do so. Local contract-bundle generation now includes the
+experimental net stack and its creation/runtime link metadata alongside legacy contracts;
+the already published package is unchanged until a release. =make nix-contracts-dist-check=
+checks compiler, bytecode links and code-size limits without publishing. The generated
+browser sandbox bundle also includes the experimental artifacts; its existing interface
+still runs the legacy model until its separate migration is complete.
 
 * Useful checks
 
