@@ -263,6 +263,16 @@ contract JubileeFundTest is Test {
         identity.bindContract(target, BN254.g1(),
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), true, carrying);
     }
+
+    function test_configuredFundCannotAuthorizeOrRevokeAnotherIdentityBinding() public {
+        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        vm.prank(GOV);
+        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
+        fund.authorizeIdentityBinding(identity, ALICE, BN254.g1(), E);
+        vm.prank(GOV);
+        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
+        fund.revokeIdentityBinding(identity);
+    }
     function _credit(address owner, uint256 face, uint32 rate) internal returns (uint256 id) {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, rate);

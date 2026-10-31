@@ -17,9 +17,12 @@ Python and JavaScript can now link the two =BuckNet= libraries from built
 Foundry creation-bytecode metadata. =make nix-venv-net-demurrage-smoke=
 uses those linkers in isolated Anvil and Tevm fixtures, issues credit, ages it
 and reduces it; the Python path compares against the demurrage reference.
-This deliberately small cash-only fixture has no household, market, premium,
-dynamic K or leveraged basket. The actual economy, browser artifact bundle,
-sandbox deployment, production linking and snapshot paths remain unmigrated.
+The cash-only fixtures include a neutral-reference dynamic K, separate insurer
+pools and nonzero premiums; they do not yet include a household, market or
+leveraged basket. An opt-in JavaScript diagnostic world uses the real identity
+registry and verifies its own saved wiring and captured code hashes on restore.
+The actual economy, interactive sandbox, production linking and full sandbox
+snapshot paths remain unmigrated.
 
 The authoritative implementation checklist is
 [[file:demurrage-implementation-plan.org][the demurrage plan]]. The unresolved leveraged-basket valuation and liquidity

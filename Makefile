@@ -262,9 +262,10 @@ net-demurrage-smoke: sim-build
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
 	done
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }
+	@test -f core/js/kernel/node/buck_identity_bg.wasm || { echo 'identity kernel missing; run make nix-core-build-wasm'; exit 1; }
 	node core/js/bin/bundle-artifacts.mjs sandbox
 	python -m pytest core/python/tests/test_artifacts.py alberta_buck/test/test_net_demurrage_smoke.py -q
-	cd core/js && node --test test/artifacts.test.js test/net-demurrage.tevm.test.js test/net-sandbox-bundle.tevm.test.js
+	cd core/js && node --test test/artifacts.test.js test/net-demurrage.tevm.test.js test/net-sandbox-bundle.tevm.test.js test/net-buckworld.tevm.test.js
 
 
 # ── Documentation rendering ─────────────────────────────────────────

@@ -67,6 +67,7 @@ export const SANDBOX = [
   "BuckNetTransfers",
   "BuckNetQuoter",
   "JubileeFund",
+  "BuckBasketEquity",
   "MockERC20",
   "SimLP",
   "UniswapV3Factory",

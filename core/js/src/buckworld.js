@@ -23,6 +23,7 @@
 
 import { encodeFunctionData, keccak256, parseEventLogs, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { deployNetStack } from "./net-world.js";
 
 // BN254.sol struct components are UPPERCASE X/Y at the ABI.
 const g = (p) => ({ X: p.x, Y: p.y });
@@ -73,6 +74,8 @@ export const WORLD_OPERATOR_FIELDS = {
  * @param opts.registryArtifact "IdentityRegistry" (default) or the test
  *                  harness for synthetic worlds
  * @param opts.creditArtifact   "BuckCredit" (default) or the test harness
+ * @param opts.accounting "legacy" (default) or "net" for an experimental
+ *                  cash-only BuckNet world with a neutral K reference.
  * @returns world {session, artifacts, id, reg, credit, kctrl, buck, gov,
  *                 poolAcct, pool (its handle, when the world made it),
  *                 operator (the world operator's handle, likewise),
@@ -87,6 +90,11 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   }
   const gas = 15_000_000n;
   const gov = opts.gov ?? session.account.address;
+  const accounting = opts.accounting ?? "legacy";
+  if (!["legacy", "net"].includes(accounting)) throw new Error(`unknown accounting model: ${accounting}`);
+  if (accounting === "net" && (opts.poolAcct || opts.buckArtifact || gov.toLowerCase() !== session.account.address.toLowerCase())) {
+    throw new Error("net world currently requires its own insurer pool and the session account as governance");
+  }
   const p = { ...DEPLOY_DEFAULTS, ...(opts.params ?? {}) };
   const rng = opts.rng ?? id.randScalar;
 
@@ -147,16 +155,47 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   const kctrl = await session.deploy(artifacts("BuckKControllerDirect"),
     [p.kp, p.ki, p.kd, p.dt, p.kmin, p.kmax, p.k0, gov],
     { name: "BuckKControllerDirect", gas });
-  // Production Buck has no basket hooks; a world that wires one of the
-  // pro-rata baskets (eqworld) passes buckArtifact = "BuckWithBasketHooks",
-  // the sims' subclass that keeps them.  Either way it is labelled "Buck".
-  const buck = await session.deploy(artifacts(opts.buckArtifact ?? "Buck"),
-    [credit.address, kctrl.address, reg.address, poolAcct],
-    { name: "Buck", gas });
-  await session.send(reg, "setBuck", [buck.address], { tag: "world:reg.setBuck" });
-  await session.send(credit, "setBuck", [buck.address], { tag: "world:credit.setBuck" });
+  let buck, net = null;
+  if (accounting === "net") {
+    net = await deployNetStack(session, artifacts, { registry: reg, credit, controller: kctrl, governance: gov });
+    buck = net.token;
+    // The real registry requires the target contract to authorize its exact
+    // binding; the registered operator then completes the certification.
+    const bindArgs = [operator.account.address, g(operator.kp.pk), ct(operator.E)];
+    await session.send(net.fund, "authorizeIdentityBinding", [reg.address, ...bindArgs], { tag: "world:fund.authorize" });
+    await session.send(reg, "bindContract", [net.fund.address, ...bindArgs.slice(1), true, true],
+      { tag: "world:fund.bind", account: operator.account });
+    // A real insurer pool is registered to its own binder and approves only
+    // BuckNet's refund path. Other insurers need their own pools.
+    await session.send(buck, "setInsurerPool", [pool.address], { tag: "world:insurer.pool", account: operator.account });
+    await session.send(pool, "exec", [buck.address, encodeFunctionData({ abi: buck.abi, functionName: "approve",
+      args: [buck.address, (1n << 256n) - 1n] })], { tag: "world:insurer.refund-allowance" });
+    net.factory = await session.deploy(artifacts("UniswapV3Factory"), [], { name: "NetBasketFactory", gas });
+    net.basket = await session.deploy(artifacts("BuckBasketEquity"),
+      [buck.address, kctrl.address, net.factory.address, gov, 3000, 600, 64, 500n, 1000n],
+      { name: "NetCashBasket", gas });
+    await session.send(net.basket, "enableNetAccounting", [], { tag: "world:basket.net" });
+    await session.send(net.fund, "configure", [buck.address, net.basket.address], { tag: "world:fund.configure" });
+    // The empty basket is not bound to K or populated with liquidity. This is
+    // a cash-only diagnostic, not the leveraged or market-driven economy.
+    net.chainId = await session.client.getChainId();
+    net.codeHashes = {};
+    for (const [name, contract] of Object.entries({ registry: reg, credit, controller: kctrl, token: buck, pool,
+      fund: net.fund, basket: net.basket, factory: net.factory, quoter: net.quoter,
+      maturityLibrary: net.maturityLibrary, transfersLibrary: net.transfersLibrary })) {
+      const code = await session.client.getCode({ address: contract.address });
+      if (!code || code === "0x") throw new Error(`net world ${name} has no code`);
+      net.codeHashes[name] = keccak256(code);
+    }
+  } else {
+    // Legacy pro-rata worlds may still use their explicitly hooked subclass.
+    buck = await session.deploy(artifacts(opts.buckArtifact ?? "Buck"),
+      [credit.address, kctrl.address, reg.address, poolAcct], { name: "Buck", gas });
+    await session.send(reg, "setBuck", [buck.address], { tag: "world:reg.setBuck" });
+    await session.send(credit, "setBuck", [buck.address], { tag: "world:credit.setBuck" });
+  }
 
-  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, pool, operator,
+  return { session, artifacts, id, reg, credit, kctrl, buck, gov, poolAcct, pool, operator, net, accounting,
            issuer, names: { reg: regName, credit: creditName } };
 }
 
@@ -167,7 +206,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
  * serialize with codec.js.
  */
 export function worldRecord(world) {
-  return {
+  const record = {
     names: { ...world.names },
     addresses: {
       reg: world.reg.address, credit: world.credit.address,
@@ -179,11 +218,25 @@ export function worldRecord(world) {
     operator: world.operator?.account.address ?? null,
     issuer: { ...world.issuer },
   };
+  if (world.accounting === "net") {
+    record.accounting = "net";
+    record.net = { chainId: world.net.chainId, fund: world.net.fund.address, basket: world.net.basket.address,
+      factory: world.net.factory.address, quoter: world.net.quoter.address,
+      maturityLibrary: world.net.maturityLibrary.address, transfersLibrary: world.net.transfersLibrary.address,
+      codeHashes: { ...world.net.codeHashes } };
+  }
+  return record;
 }
 
 /** Rebuild a world's handles from worldRecord() over a chain that already
  *  holds its contracts -- no deployment, no transactions. */
 export function attachBuckWorld(session, artifacts, record, opts = {}) {
+  if (record.accounting === "net") throw new Error("use attachNetBuckWorld to verify a net-model restore");
+  if (record.net || (record.accounting && record.accounting !== "legacy")) throw new Error("unknown saved accounting model");
+  return attachWorld(session, artifacts, record, opts);
+}
+
+function attachWorld(session, artifacts, record, opts) {
   const id = opts.identity;
   if (!id) throw new Error("attachBuckWorld needs opts.identity (the buck-identity kernel API)");
   const at = (name, addr) => session.contractAt(artifacts(name).abi, addr);
@@ -195,11 +248,70 @@ export function attachBuckWorld(session, artifacts, record, opts = {}) {
     reg: at(record.names.reg, a.reg),
     credit: at(record.names.credit, a.credit),
     kctrl: at("BuckKControllerDirect", a.kctrl),
-    buck: at("Buck", a.buck),
+    buck: at(record.accounting === "net" ? "BuckNet" : "Buck", a.buck),
     gov: record.gov, poolAcct: record.poolAcct,
     issuer: { ...record.issuer },
     names: { ...record.names },
+    accounting: record.accounting ?? "legacy",
   };
+}
+
+/** Restore a saved experimental net world, rejecting mismatched contracts,
+ *  libraries, chain, fund and basket before handing it to a caller. */
+export async function attachNetBuckWorld(session, artifacts, record, opts = {}) {
+  if (record.accounting !== "net" || !record.net || !record.pooled || !record.operator)
+    throw new Error("incomplete net world record");
+  const w = attachWorld(session, artifacts, record, opts);
+  const operator = privateKeyToAccount(WORLD_OPERATOR_KEY);
+  if (operator.address.toLowerCase() !== record.operator.toLowerCase()) throw new Error("net world operator mismatch");
+  w.operator.account = operator;
+  const at = (name, address) => {
+    if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error(`invalid ${name} address`);
+    return session.contractAt(artifacts(name).abi, address);
+  };
+  const n = record.net;
+  w.net = { registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
+    fund: at("JubileeFund", n.fund), basket: at("BuckBasketEquity", n.basket),
+    factory: at("UniswapV3Factory", n.factory), quoter: at("BuckNetQuoter", n.quoter),
+    maturityLibrary: at("BuckNetMaturity", n.maturityLibrary), transfersLibrary: at("BuckNetTransfers", n.transfersLibrary),
+    chainId: n.chainId, codeHashes: { ...n.codeHashes } };
+  if (String(await session.client.getChainId()) !== String(n.chainId)) throw new Error("net world chain mismatch");
+  const matches = async (contract, method, expected, args = []) => {
+    const actual = await session.call(contract, method, args);
+    if (String(actual).toLowerCase() !== String(expected).toLowerCase()) throw new Error(`net world ${method} mismatch`);
+  };
+  for (const [c, method, expected] of [
+    [w.reg, "buck", w.buck.address], [w.credit, "buck", w.buck.address],
+    [w.buck, "buckCredit", w.credit.address], [w.buck, "buckK", w.kctrl.address],
+    [w.buck, "identity", w.reg.address], [w.buck, "jubilee", w.net.fund.address],
+    [w.net.fund, "token", w.buck.address], [w.net.fund, "basket", w.net.basket.address],
+    [w.net.basket, "buck", w.buck.address], [w.net.quoter, "token", w.buck.address],
+  ]) await matches(c, method, expected);
+  await matches(w.buck, "insurerPool", w.poolAcct, [record.operator]);
+  await matches(w.reg, "binderOf", record.operator, [w.poolAcct]);
+  if (!await session.call(w.reg, "isVerified", [w.net.fund.address])
+      || !await session.call(w.reg, "isCarrying", [w.net.fund.address])
+      || !await session.call(w.reg, "isVerified", [w.poolAcct])
+      || !await session.call(w.reg, "isCarrying", [w.poolAcct])
+      || !await session.call(w.net.basket, "netAccounting")) throw new Error("net world mode mismatch");
+  // These hashes detect an inconsistent saved chain/record pair. They are
+  // recorded by the original deployment, not an independent security audit.
+  for (const [name, c] of Object.entries({ registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
+    pool: w.pool, fund: w.net.fund, basket: w.net.basket, factory: w.net.factory, quoter: w.net.quoter,
+    maturityLibrary: w.net.maturityLibrary, transfersLibrary: w.net.transfersLibrary })) {
+    const deployed = await session.client.getCode({ address: c.address });
+    if (!deployed || deployed === "0x") throw new Error("net world contract has no code");
+    if (!n.codeHashes?.[name] || keccak256(deployed) !== n.codeHashes[name])
+      throw new Error(`net world ${name} code hash mismatch`);
+  }
+  const code = await session.client.getCode({ address: w.buck.address });
+  if (!code || code === "0x") throw new Error("net world token has no code");
+  for (const lib of [w.net.maturityLibrary, w.net.transfersLibrary]) {
+    const libCode = await session.client.getCode({ address: lib.address });
+    if (!libCode || libCode === "0x" || !code.toLowerCase().includes(lib.address.slice(2).toLowerCase()))
+      throw new Error("net world library mismatch");
+  }
+  return w;
 }
 
 /**
