@@ -78,6 +78,59 @@ class IssueQuote:
 
 
 @dataclass(frozen=True)
+class HouseholdCreditState:
+    """An owner's money and independent facilities, in raw token units."""
+    spendable: int
+    issued: int
+    unactivated: int
+    premium_nominal: int
+    facilities: tuple[FacilityState, ...]
+
+
+@dataclass(frozen=True)
+class ReductionPlan:
+    token_id: int
+    principal: int
+    relief_scaled: int
+    minimum_relief_scaled: int
+    cash_scaled: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class NetReduction:
+    principal: int
+    relief_scaled: int
+    premium_nominal: int
+    receipt: Any
+
+    @property
+    def owner_cost_scaled(self) -> int:
+        return self.principal * 10**36 - self.relief_scaled
+
+
+@dataclass(frozen=True)
+class HouseholdRetirement:
+    requested: int
+    retired: int
+    relief_scaled: int
+    owner_cost_scaled: int
+    premium_nominal: int
+    status: str
+    blocked_token_id: int | None
+    settlements: tuple[NetReduction, ...]
+
+
+class ReductionPending(RuntimeError):
+    """Settlement failed after authorization; inspect the chain before retrying."""
+
+    def __init__(self, plan: ReductionPlan):
+        self.plan = plan
+        super().__init__(f"reduction of facility {plan.token_id} failed after authorization; "
+                         "check the on-chain authorization and retry or cancel it")
+
+
+@dataclass(frozen=True)
 class NetTransferValue:
     count: int
     nominal: int
@@ -169,6 +222,9 @@ class NetCreditOps:
         return self.chain.send(getattr(contract.functions, method)(*args), sender=owner)
 
     def facility(self, token_id: int) -> FacilityState:
+        return self._facility(token_id)
+
+    def _facility(self, token_id: int, spendable: int | None = None) -> FacilityState:
         credit, token = self.stack.credit, self.stack.token
         owner = credit.functions.ownerOf(token_id).call()
         face, active, rate = credit.functions.creditInfo(token_id).call()
@@ -176,7 +232,28 @@ class NetCreditOps:
         return FacilityState(token_id, owner, face, active, rate, issued, seconds,
                              token.functions.premiumPrincipal(token_id).call(),
                              token.functions.facilityPool(token_id).call(),
-                             token.functions.balanceOf(owner).call())
+                             token.functions.balanceOf(owner).call() if spendable is None else spendable)
+
+    def household(self, owner, token_ids) -> HouseholdCreditState:
+        """Read one wallet once and add only its explicitly selected facilities.
+
+        The wallet is money, not a signed liability; purchasing or receiving
+        BUCK does not change any facility's issued principal. Duplicate or
+        foreign NFTs are rejected instead of silently corrupting the totals.
+        """
+        address = getattr(owner, "address", owner)
+        ids = tuple(token_ids)
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate household facility")
+        if self.stack.registry.functions.isCarrying(address).call():
+            raise ValueError("household wallet must be non-Carrying")
+        spendable = self.stack.token.functions.balanceOf(address).call()
+        facilities = tuple(self._facility(token_id, spendable) for token_id in ids)
+        if any(f.owner.lower() != address.lower() for f in facilities):
+            raise ValueError("foreign household facility")
+        return HouseholdCreditState(
+            spendable, sum(f.issued for f in facilities),
+            sum(f.face - f.activated for f in facilities), sum(f.premium_nominal for f in facilities), facilities)
 
     def quote_issue(self, token_id: int, coverage: int) -> IssueQuote:
         owner = self.stack.credit.functions.ownerOf(token_id).call()
@@ -197,3 +274,120 @@ class NetCreditOps:
 
     def reduce_authorized(self, owner, token_id: int, principal: int):
         return self.execute(owner, self.stack.fund, "reduce", [token_id, principal])
+
+    def cancel_reduction(self, owner, token_id: int):
+        return self.authorize_reduction(owner, token_id, 0, 0, 0)
+
+    def plan_reduction(self, owner, token_id: int, requested: int, *, buffer: int = 1,
+                       relief_slippage_bp: int = 100) -> ReductionPlan:
+        """Size one selected NFT reduction against real cash and relief.
+
+        The conservative owner budget excludes the prospective premium refund
+        and uses the minimum accepted relief. Fund liquidity and owner funds
+        may change before settlement; the contract remains authoritative.
+        An existing authorization is never overwritten. All scaled values are
+        in 1e36 fractional units per raw BUCK unit.
+        """
+        if (not all(type(v) is int for v in (token_id, requested, buffer, relief_slippage_bp))
+                or token_id < 0 or requested < 0 or buffer < 0 or not 0 <= relief_slippage_bp <= 10_000):
+            raise ValueError("invalid reduction budget or relief tolerance")
+        address = getattr(owner, "address", owner)
+        if self.stack.registry.functions.isCarrying(address).call():
+            raise ValueError("household wallet must be non-Carrying")
+        facility = self.facility(token_id)
+        if facility.owner.lower() != address.lower():
+            raise ValueError("foreign household facility")
+        pending, _, _ = self.stack.token.functions.reductionAuthorization(token_id).call()
+        if pending:
+            return ReductionPlan(token_id, 0, 0, 0, 0, "authorization-pending")
+        amount = min(requested, facility.issued)
+        budget_scaled = max(0, facility.spendable - buffer) * 10**36
+        if not amount:
+            return ReductionPlan(token_id, 0, 0, 0, 0, "no-principal")
+        reason = "quote-unstable"
+        for _ in range(16):
+            relief, cash, exceeds = self.quote_reduction(token_id, amount)
+            floor = relief * (10_000 - relief_slippage_bp) // 10_000
+            need = amount * 10**36 - floor
+            candidate = amount
+            if exceeds:
+                candidate = min(candidate, amount * (cash // 10) // relief)
+                reason = "fund-liquidity"
+            if need > budget_scaled:
+                candidate = min(candidate, amount * budget_scaled // need)
+                reason = "owner-funds"
+            if candidate == amount:
+                return ReductionPlan(token_id, amount, relief, floor, cash, "ready")
+            if not candidate:
+                return ReductionPlan(token_id, 0, relief, floor, cash, reason)
+            amount = candidate
+        return ReductionPlan(token_id, 0, 0, 0, 0, reason)
+
+    def settle_plan(self, owner, plan: ReductionPlan, deadline: int):
+        """Authorize and settle a ready plan; surface a possibly pending authorization.
+
+        Reads and transactions are separate: an intervening callback, balance,
+        mark or liquidity change can make settlement fail. After any exception
+        from the second transaction, inspect the chain before retrying/canceling.
+        """
+        if plan.reason != "ready" or plan.principal <= 0:
+            raise ValueError("reduction plan is not ready")
+        if self.stack.token.functions.reductionAuthorization(plan.token_id).call()[0]:
+            raise ValueError("reduction authorization already pending")
+        self.authorize_reduction(owner, plan.token_id, plan.principal, plan.minimum_relief_scaled, deadline)
+        try:
+            receipt = self.reduce_authorized(owner, plan.token_id, plan.principal)
+        except Exception as exc:
+            raise ReductionPending(plan) from exc
+        if not receipt or receipt.get("status") != 1:
+            raise ReductionPending(plan)
+        address = getattr(owner, "address", owner)
+        events = self.stack.token.events.FacilityReduced().process_receipt(receipt, errors=DISCARD)
+        events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()
+                  and e["args"]["owner"].lower() == address.lower() and e["args"]["tokenId"] == plan.token_id]
+        if len(events) != 1 or events[0]["args"]["principal"] != plan.principal:
+            raise ValueError("settlement receipt missing or ambiguous; inspect the transaction before retrying")
+        event = events[0]["args"]
+        return NetReduction(event["principal"], event["reliefScaled"], event["premiumRefund"], receipt)
+
+    def retire_household(self, owner, token_ids, requested: int, deadline: int, *, buffer: int = 1,
+                         relief_slippage_bp: int = 100) -> HouseholdRetirement:
+        """Retire an ordered household's actual facilities, returning settled events only.
+
+        Each facility is planned against fresh state. A refusal stops the batch;
+        a failed second transaction returns ``authorization-pending`` and its
+        NFT, so the caller can inspect and retry or cancel without inventing a
+        repayment. Earlier successful transactions remain in ``settlements``.
+        """
+        if (not all(type(v) is int for v in (requested, deadline, buffer, relief_slippage_bp))
+                or requested < 0 or not 0 <= deadline < 2**64 or buffer < 0
+                or not 0 <= relief_slippage_bp <= 10_000):
+            raise ValueError("invalid reduction budget or relief tolerance")
+        ids = tuple(token_ids)
+        self.household(owner, ids)  # reject duplicates and foreign NFTs before any transaction
+        settled = []
+        retired = 0
+        status, blocked = "complete", None
+        for token_id in ids:
+            if retired >= requested:
+                break
+            plan = self.plan_reduction(owner, token_id, requested - retired,
+                                       buffer=buffer, relief_slippage_bp=relief_slippage_bp)
+            if plan.reason == "no-principal":
+                continue
+            if plan.reason != "ready":
+                status, blocked = plan.reason, token_id
+                break
+            try:
+                result = self.settle_plan(owner, plan, deadline)
+            except ReductionPending:
+                status, blocked = "authorization-pending", token_id
+                break
+            settled.append(result)
+            retired += result.principal
+        else:
+            if retired < requested:
+                status = "partial"
+        return HouseholdRetirement(requested, retired, sum(x.relief_scaled for x in settled),
+                                   sum(x.owner_cost_scaled for x in settled),
+                                   sum(x.premium_nominal for x in settled), status, blocked, tuple(settled))

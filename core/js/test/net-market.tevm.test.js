@@ -77,8 +77,13 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal((await s.call(world.credit, "issuanceOf", [market.providerCreditId]))[0], provider[0]);
     assert.equal((await creditOps.facility(buyerId)).issued, 100_000_000n);
     const deadline = (await s.client.getBlock()).timestamp + 3600n;
-    await creditOps.authorizeReduction(buyer.account, buyerId, 10_000_000n, 0n, deadline);
-    await creditOps.reduceAuthorized(buyer.account, buyerId, 10_000_000n);
+    const plan = await creditOps.planReduction(buyer.account, buyerId, 10_000_000n);
+    assert.equal(plan.reason, "ready");
+    assert.equal(plan.principal, 10_000_000n);
+    const settled = await creditOps.settlePlan(buyer.account, plan, deadline);
+    assert.equal(settled.principal, 10_000_000n);
+    assert.ok(settled.reliefScaled > 0n && settled.reliefScaled < settled.principal * 10n ** 36n);
+    assert.equal(settled.ownerCostScaled + settled.reliefScaled, settled.principal * 10n ** 36n);
     assert.equal((await creditOps.facility(buyerId)).issued, 90_000_000n);
     const beforeExact = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     const exact = await buyBuckExact(world, market, buyer, 20_000_000n, 40_000_000n);

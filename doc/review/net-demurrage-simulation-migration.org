@@ -50,7 +50,7 @@ proof, artifact and receipt work that must accompany this migration.
 | Python other actors | =equilibrium_agents.py= and bootstrappers contain many legacy mint, burn, lien and relief assumptions | Audit only actors used by the supported household economy and its explicit shocks first. Convert those to the same actual issuance/settlement operations; keep a distinct old stress actor only where its failure check lacks a replacement. Do not substitute a synthetic signed balance for contract state. |
 | Fund and pools | Current deployment has no independent fund or per-insurer liquidity agent | Add a clearly scheduled keeper for capped-claim maturity processing, reserve checkpoints, bounded investment and independent sales below target. Configure conversion routes and slippage limits for keeper sales. Model insurer cash and asset recovery independently and record deferred matured principal, pending refunds, cap refusals and residual positions. |
 | Telemetry and acceptance | =credit_households.py= builds household net worth and =economy.py= checks exits using =drawn - jub= | Record outstanding principal, target claim, actual paid relief, spendable BUCK, active coverage, premium deposit/refund and basket mark separately. An exited facility has zero outstanding principal and released coverage; do not subtract an unpaid target from the principal a second time. Show fund cash, shares and actual returns alongside household ROI. |
-| JS deployment and persistence | =core/js/src/buckworld.js= deploys and restores legacy =Buck=; =bundle-artifacts.mjs= omits the new fund/token | Extend the browser's deployment, artifact bundle and snapshot/restore record to include the actual token, optional quoter, fund, claim book, consent and insurer pools. Recreate the same basket and reserve settings on restore. Keep the savings server's Python deployment in sync. |
+| JS deployment and persistence | =buildBuckWorld= has an opt-in cash-only net deployment and consistency-checked programmatic restore; the interactive sandbox and equilibrium world still use legacy =Buck=. The browser bundle includes the net stack. | Integrate model selection and safe restores into the interactive sandbox and equilibrium world, with actual fund, claim book, consent and per-insurer pools. Recreate basket and reserve settings on restore. Keep the savings server's Python deployment in sync. |
 | JS household execution | =core/js/src/agents/household-ops.js= and =scenarios/eqworld.js= read signed debt and use legacy mint/burn | Implement the same per-NFT issue, net trade, authorization and reduction semantics as Python, with executable shared vectors. Update both the browser-only demo and the savings sandbox views, including each investor's basis, mark and ROI. |
 | Reports and provenance | =loop.py= closes a vector before PDF generation; =economy.py= freezes source and repairs missing PDFs | Keep automatic PDF generation on every completed five-year run. New vectors and reports identify the actual BUCK artifact and accounting model; an old vector without that field is =unrecorded=. Continue to preserve completed JSON if rendering fails. |
 
@@ -64,8 +64,9 @@ maximum new spendable BUCK within current numerical limits. The reserve is
 held, not spent. It is an estimate: a positive capacity does not imply that
 the owner has the reserve or that a valid insurer pool, current claim book,
 configured fund and unchanged K will be available at execution. Users must
-also check =maturitiesPending= and handle transaction refusal. No current
-economy or sandbox deploys or uses this quoter yet.
+also check =maturitiesPending= and handle transaction refusal. The cash-only
+diagnostic world deploys this quoter, but no five-year household economy or
+interactive sandbox has been migrated to it yet.
 
 To retire, the owner authorizes a specific NFT/principal and minimum net
 relief, then invokes =JubileeFund.reduce=. Relief uses the facility's share of
@@ -77,6 +78,26 @@ unavailable marks, insurer liquidity and unsettled maturities must remain
 visible; they cannot be silently turned into an imagined payment. At 50 years
 of pooled average age, =closeMatured= releases the NFT without spending the
 owner's BUCK and transfers unburned issuance to Jubilee's deferred obligation.
+
+The shared Python =NetCreditOps= and JavaScript =netCreditOps= now provide a
+household facility summary and a one-NFT reduction plan. The summary reads the
+ordinary wallet once and sums only the supplied, owner-verified NFTs; duplicate
+and foreign IDs are errors. The plan caps principal against the latest actual
+fund liquidity and the owner's spendable balance less a caller-supplied raw
+BUCK buffer. It budgets against a minimum acceptable marked relief, not an
+ideal claim, and does not assume the nominal premium refund will be full net
+value. These are advisory reads; timestamps, callbacks and prices may change
+before execution. The plan refuses to overwrite an existing authorization.
+Settlement returns principal, actual scaled relief and nominal premium from
+the authoritative event; the recorded owner debit excludes the refund. If the
+second transaction fails or its outcome is uncertain, inspect the on-chain
+authorization before retrying or canceling. No agent should count a purchase,
+an authorization or a failed settlement as paid-down principal. These
+primitives also provide ordered household retirement across several facilities:
+each NFT is planned afresh and successful transaction receipts are kept if a
+later settlement becomes pending. A partial batch is not an exit. These
+primitives still need to be wired into both existing household agents and all
+exit paths; they are not an economic simulation by themselves.
 
 * Acceptance before retiring the legacy economy
 

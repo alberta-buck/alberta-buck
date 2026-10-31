@@ -13,7 +13,7 @@ import pytest
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
-from buck_core import deploy_net_stack, net_transfer_value, NetCreditOps
+from buck_core import deploy_net_stack, net_transfer_value, NetCreditOps, ReductionPending
 from buck_core.session import Expect
 
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
@@ -124,6 +124,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         _exec(chain, insurer, buck, "setInsurerPool", [pool.address])
         _exec(chain, insurer2, buck, "setInsurerPool", [pool2.address])
         _exec(chain, pool, buck, "approve", [buck.address, 2**256 - 1])
+        _exec(chain, pool2, buck, "approve", [buck.address, 2**256 - 1])
         chain.send(basket.functions.enableNetAccounting())
         chain.send(fund.functions.configure(buck.address, basket.address))
 
@@ -187,11 +188,53 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert ops.facility(debtor_id).issued == issued
         assert ops.facility(second_id).issued == VECTOR["second_issued"]
         anvil.warp_to(issued_at + YEAR)
+        household = ops.household(debtor.address, [debtor_id, second_id])
+        assert household.issued == issued + VECTOR["second_issued"]
+        assert household.premium_nominal == premium + VECTOR["second_premium"]
+        assert household.spendable == buck.functions.balanceOf(debtor.address).call()
+        with pytest.raises(ValueError, match="duplicate"):
+            ops.household(debtor.address, [debtor_id, debtor_id])
+        with pytest.raises(ValueError, match="foreign"):
+            ops.household(debtor.address, [provider_id])
+        with pytest.raises(ValueError, match="non-Carrying"):
+            ops.household(pool.address, [])
+        capped = ops.plan_reduction(debtor.address, debtor_id, issued)
+        assert capped.reason == "ready" and 0 < capped.principal < issued
+        affordable = ops.plan_reduction(debtor.address, debtor_id, reduction, buffer=household.spendable - 1000)
+        assert affordable.reason == "ready" and 0 < affordable.principal < reduction
+        assert affordable.principal * Q - affordable.minimum_relief_scaled <= 1000 * Q
+        empty = ops.plan_reduction(debtor.address, debtor_id, reduction, buffer=household.spendable + 1)
+        assert empty.reason == "owner-funds" and empty.principal == 0
+        with pytest.raises(ValueError, match="invalid"):
+            ops.plan_reduction(debtor.address, debtor_id, reduction, relief_slippage_bp=1.5)
+        assert ops.facility(debtor_id).issued == issued  # planning is read-only
         before_pool_net = buck.functions.netBalanceOf(pool.address).call()
         assert before_pool_net < premium
         relief, _, exceeds = ops.quote_reduction(debtor_id, reduction)
         assert 0 < relief < reduction * Q and not exceeds
+        plan = ops.plan_reduction(debtor.address, debtor_id, reduction)
+        assert plan.reason == "ready" and plan.principal == reduction
         ops.authorize_reduction(debtor.address, debtor_id, reduction, 0, issued_at + YEAR + 3600)
+        assert ops.plan_reduction(debtor.address, debtor_id, reduction).reason == "authorization-pending"
+        ops.cancel_reduction(debtor.address, debtor_id)
+        # A failed second operation must leave the authorization for an
+        # explicit retry; neither the purchase nor the first tx retires debt.
+        def fail_reduce(owner, target, method, args):
+            if target.address == fund.address:
+                raise RuntimeError("simulated settlement transport failure")
+            return _exec(chain, actors[owner.lower()], target, method, args)
+        failing = NetCreditOps(chain, stack, fail_reduce)
+        with pytest.raises(ReductionPending) as failed:
+            failing.settle_plan(debtor.address, plan, issued_at + YEAR + 3600)
+        assert failed.value.plan == plan
+        assert buck.functions.reductionAuthorization(debtor_id).call()[0] == reduction
+        assert ops.facility(debtor_id).issued == issued
+        ops.cancel_reduction(debtor.address, debtor_id)
+        pending = failing.retire_household(debtor.address, [debtor_id, second_id], reduction,
+                                          issued_at + YEAR + 3600)
+        assert pending.status == "authorization-pending" and pending.blocked_token_id == debtor_id
+        assert pending.retired == 0 and not pending.settlements
+        assert buck.functions.reductionAuthorization(debtor_id).call()[0] == reduction
         reduced = ops.reduce_authorized(debtor.address, debtor_id, reduction)
         refund = net_transfer_value(buck, reduced, pool.address, debtor.address)
         assert refund.count == 1 and refund.nominal == VECTOR["nominal_refund"]
@@ -202,4 +245,14 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert buck.functions.balanceOf(pool.address).call() == premium - VECTOR["nominal_refund"]
         assert ops.facility(second_id).issued == VECTOR["second_issued"]
         assert buck.functions.balanceOf(pool2.address).call() == VECTOR["second_premium"]
+        # A household batch uses real events, consuming the selected NFTs in
+        # order; it does not add their common wallet balance twice.
+        deadline = issued_at + YEAR + 3600
+        first = ops.retire_household(debtor.address, [second_id], 9 * RAW, deadline)
+        assert first.status == "complete" and first.retired == 9 * RAW
+        batch = ops.retire_household(debtor.address, [second_id, debtor_id], 2 * RAW, deadline)
+        assert batch.status == "complete" and batch.retired == 2 * RAW and len(batch.settlements) == 2
+        assert ops.facility(second_id).issued == 0
+        assert ops.facility(debtor_id).issued == issued - 2 * RAW
+        assert batch.relief_scaled + batch.owner_cost_scaled == batch.retired * Q
         assert not chain.mismatches

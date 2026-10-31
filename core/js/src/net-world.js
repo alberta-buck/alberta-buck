@@ -5,6 +5,17 @@
 import { linkArtifact } from "./artifacts.js";
 import { parseEventLogs } from "viem";
 
+const Q = 10n ** 36n;
+const min = (...values) => values.reduce((a, b) => a < b ? a : b);
+
+export class ReductionPending extends Error {
+  constructor(plan, cause) {
+    super(`reduction of facility ${plan.tokenId} failed after authorization; check the on-chain authorization and retry or cancel it`, { cause });
+    this.name = "ReductionPending";
+    this.plan = plan;
+  }
+}
+
 /** Sum authenticated BuckNet delivery events for one transfer direction.
  *  netScaled uses 1e36 fractional units per raw BUCK; a zero net value is
  *  valid, so callers must check count rather than treating zero as missing. */
@@ -42,14 +53,15 @@ export async function deployNetStack(session, artifacts, { registry, credit, con
 export function netCreditOps(session, stack, execute = null) {
   const { credit, token, fund, quoter } = stack;
   const send = execute ?? ((owner, target, name, args) => session.send(target, name, args, { account: owner }));
-  const facility = async (tokenId) => {
+  const readFacility = async (tokenId, knownSpendable) => {
     const owner = await session.call(credit, "ownerOf", [tokenId]);
     const [[face, activated, premiumRate], [issued, claimSeconds], premiumNominal, insurerPool, spendable] =
       await Promise.all([session.call(credit, "creditInfo", [tokenId]), session.call(credit, "issuanceOf", [tokenId]),
         session.call(token, "premiumPrincipal", [tokenId]), session.call(token, "facilityPool", [tokenId]),
-        session.call(token, "balanceOf", [owner])]);
+        knownSpendable ?? session.call(token, "balanceOf", [owner])]);
     return { tokenId, owner, face, activated, premiumRate, issued, claimSeconds, premiumNominal, insurerPool, spendable };
   };
+  const facility = (tokenId) => readFacility(tokenId);
   const quoteIssue = async (tokenId, coverage) => {
     const owner = await session.call(credit, "ownerOf", [tokenId]);
     const [[presentCoverage, premium, reserveRequired, maxSpendable], ownerSpendable] = await Promise.all([
@@ -58,7 +70,7 @@ export function netCreditOps(session, stack, execute = null) {
     const reserveShortfall = reserveRequired > ownerSpendable ? reserveRequired - ownerSpendable : 0n;
     return { presentCoverage, premium, reserveRequired, maxSpendable, ownerSpendable, reserveShortfall };
   };
-  return {
+  const ops = {
     facility, quoteIssue,
     issue: (owner, id, coverage, spendable) => send(owner, token, "issue", [id, coverage, spendable]),
     quoteReduction: (id, principal) => session.call(fund, "previewRelief", [id, principal]),
@@ -66,4 +78,103 @@ export function netCreditOps(session, stack, execute = null) {
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),
     reduceAuthorized: (owner, id, principal) => send(owner, fund, "reduce", [id, principal]),
   };
+  ops.cancelReduction = (owner, id) => ops.authorizeReduction(owner, id, 0n, 0n, 0n);
+  ops.household = async (owner, tokenIds) => {
+    const address = owner.address ?? owner;
+    if (new Set(tokenIds.map(String)).size !== tokenIds.length) throw new Error("duplicate household facility");
+    if (await session.call(stack.registry, "isCarrying", [address])) throw new Error("household wallet must be non-Carrying");
+    const spendable = await session.call(token, "balanceOf", [address]);
+    const facilities = await Promise.all(tokenIds.map((tokenId) => readFacility(tokenId, spendable)));
+    if (facilities.some((f) => f.owner.toLowerCase() !== address.toLowerCase())) throw new Error("foreign household facility");
+    return { spendable,
+      issued: facilities.reduce((n, f) => n + f.issued, 0n),
+      unactivated: facilities.reduce((n, f) => n + f.face - f.activated, 0n),
+      premiumNominal: facilities.reduce((n, f) => n + f.premiumNominal, 0n), facilities };
+  };
+  // A wallet is money, never signed debt. Size one selected NFT reduction
+  // against the minimum accepted relief and actual fund liquidity; do not
+  // assume the insurer's nominal premium refund will cover the debit.
+  ops.planReduction = async (owner, tokenId, requested, { buffer = 1n, reliefSlippageBp = 100 } = {}) => {
+    if (!((typeof tokenId === "bigint" && tokenId >= 0n)
+          || (Number.isSafeInteger(tokenId) && tokenId >= 0))
+        || typeof requested !== "bigint" || typeof buffer !== "bigint"
+        || requested < 0n || buffer < 0n || !Number.isInteger(reliefSlippageBp)
+        || reliefSlippageBp < 0 || reliefSlippageBp > 10000) throw new Error("invalid reduction budget or relief tolerance");
+    tokenId = BigInt(tokenId);
+    const address = owner.address ?? owner;
+    if (await session.call(stack.registry, "isCarrying", [address])) throw new Error("household wallet must be non-Carrying");
+    const f = await facility(tokenId);
+    if (f.owner.toLowerCase() !== address.toLowerCase()) throw new Error("foreign household facility");
+    const [pending] = await session.call(token, "reductionAuthorization", [tokenId]);
+    const result = (principal, reliefScaled, minimumReliefScaled, cashScaled, reason) =>
+      ({ tokenId, principal, reliefScaled, minimumReliefScaled, cashScaled, reason });
+    if (pending) return result(0n, 0n, 0n, 0n, "authorization-pending");
+    let amount = min(requested, f.issued), reason = "quote-unstable";
+    const budget = (f.spendable > buffer ? f.spendable - buffer : 0n) * Q;
+    if (!amount) return result(0n, 0n, 0n, 0n, "no-principal");
+    for (let i = 0; i < 16; i++) {
+      const [relief, cash, exceeds] = await ops.quoteReduction(tokenId, amount);
+      const floor = relief * BigInt(10000 - reliefSlippageBp) / 10000n, need = amount * Q - floor;
+      let candidate = amount;
+      if (exceeds) { candidate = min(candidate, amount * (cash / 10n) / relief); reason = "fund-liquidity"; }
+      if (need > budget) { candidate = min(candidate, amount * budget / need); reason = "owner-funds"; }
+      if (candidate === amount) return result(amount, relief, floor, cash, "ready");
+      if (!candidate) return result(0n, relief, floor, cash, reason);
+      amount = candidate;
+    }
+    return result(0n, 0n, 0n, 0n, reason);
+  };
+  ops.settlePlan = async (owner, plan, deadline) => {
+    if (plan.reason !== "ready" || plan.principal <= 0n) throw new Error("reduction plan is not ready");
+    const [pending] = await session.call(token, "reductionAuthorization", [plan.tokenId]);
+    if (pending) throw new Error("reduction authorization already pending");
+    await ops.authorizeReduction(owner, plan.tokenId, plan.principal, plan.minimumReliefScaled, deadline);
+    let receipt;
+    try { receipt = await ops.reduceAuthorized(owner, plan.tokenId, plan.principal); }
+    catch (err) { throw new ReductionPending(plan, err); }
+    if (receipt?.status !== "success") throw new ReductionPending(plan);
+    const address = owner.address ?? owner;
+    const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityReduced" })
+      .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()
+        && e.args.owner.toLowerCase() === address.toLowerCase() && e.args.tokenId === plan.tokenId);
+    if (events.length !== 1 || events[0].args.principal !== plan.principal) {
+      throw new Error("settlement receipt missing or ambiguous; inspect the transaction before retrying");
+    }
+    const { principal, reliefScaled, premiumRefund } = events[0].args;
+    return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt };
+  };
+  // Each NFT is a separate transaction. Report completed events even if a
+  // later authorization remains pending; a purchase is never a repayment.
+  ops.retireHousehold = async (owner, tokenIds, requested, deadline, options = {}) => {
+    const { buffer = 1n, reliefSlippageBp = 100 } = options;
+    const validDeadline = (typeof deadline === "bigint" && deadline >= 0n && deadline < 2n ** 64n)
+      || (Number.isSafeInteger(deadline) && deadline >= 0);
+    if (typeof requested !== "bigint" || requested < 0n || !validDeadline || typeof buffer !== "bigint" || buffer < 0n
+        || !Number.isInteger(reliefSlippageBp) || reliefSlippageBp < 0 || reliefSlippageBp > 10000) {
+      throw new Error("invalid reduction budget or relief tolerance");
+    }
+    await ops.household(owner, tokenIds); // reject duplicates and foreign NFTs before sending anything
+    const result = { requested, retired: 0n, reliefScaled: 0n, ownerCostScaled: 0n,
+      premiumNominal: 0n, status: "complete", blockedTokenId: null, settlements: [] };
+    for (const tokenId of tokenIds) {
+      if (result.retired >= requested) break;
+      const plan = await ops.planReduction(owner, tokenId, requested - result.retired, options);
+      if (plan.reason === "no-principal") continue;
+      if (plan.reason !== "ready") { result.status = plan.reason; result.blockedTokenId = tokenId; break; }
+      let settled;
+      try { settled = await ops.settlePlan(owner, plan, deadline); }
+      catch (err) {
+        if (!(err instanceof ReductionPending)) throw err;
+        result.status = "authorization-pending"; result.blockedTokenId = tokenId; break;
+      }
+      result.settlements.push(settled);
+      result.retired += settled.principal;
+      result.reliefScaled += settled.reliefScaled;
+      result.ownerCostScaled += settled.ownerCostScaled;
+      result.premiumNominal += settled.premiumNominal;
+    }
+    if (result.status === "complete" && result.retired < requested) result.status = "partial";
+    return result;
+  };
+  return ops;
 }

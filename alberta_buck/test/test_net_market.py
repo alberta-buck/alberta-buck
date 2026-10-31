@@ -88,8 +88,11 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         # A market purchase alone does not retire credit. The owner authorizes
         # and settles one specific NFT, reducing issuance only at that point.
         now = anvil.w3.eth.get_block("latest")["timestamp"]
-        credit_ops.authorize_reduction(buyer.address, buyer_id, 10 * RAW, 0, now + 3600)
-        credit_ops.reduce_authorized(buyer.address, buyer_id, 10 * RAW)
+        plan = credit_ops.plan_reduction(buyer.address, buyer_id, 10 * RAW)
+        assert plan.reason == "ready" and plan.principal == 10 * RAW
+        settled = credit_ops.settle_plan(buyer.address, plan, now + 3600)
+        assert settled.principal == 10 * RAW and 0 < settled.relief_scaled < 10 * RAW * 10**36
+        assert settled.owner_cost_scaled + settled.relief_scaled == settled.principal * 10**36
         assert credit.functions.issuanceOf(buyer_id).call()[0] == 90 * RAW
         assert credit.functions.issuanceOf(tid).call()[0] == 1_200 * RAW
         before = usdc.functions.balanceOf(buyer.address).call()
