@@ -1,0 +1,57 @@
+#+TITLE: BuckNet economy and sandbox implementation checklist
+#+DATE: 2026-10-30
+#+OPTIONS: ^:nil toc:2
+
+* Handoff
+
+This work starts at =27336e25= on =feature/bucknet-economy=, in the isolated
+=.claude/worktrees/bucknet-economy= checkout. The existing
+[[file:demurrage-implementation-plan.org][contract checklist]], [[file:net-demurrage-invariants.org][contract invariants]], [[file:net-demurrage-simulation-migration.org][economy migration map]] and
+[[file:net-demurrage-interface-migration.org][core, Notes and proof migration map]] remain authoritative for acceptance.
+Commit independently tested milestones and keep the progress table current.
+Do not use this worktree's experiments as evidence for production deployment.
+
+The user chose nominal Carrying services, an adaptive household default and
+explicit policy comparisons. Preserve the low-K exit guard. Keep legacy =Buck=
+and its simulations until the new paths demonstrate equivalent economic and
+failure detection; then retire only code whose distinct coverage is replaced.
+The cash-only net basket can support early integration diagnostics but cannot
+stand in for the existing leveraged basket without resolving the
+[[file:basket-jubilee-crossholding.org][cross-holding valuation and liquidity problem]].
+
+* Ordered milestones
+
+- [ ] Provide reusable Python and browser-safe JavaScript deployment and
+  operation primitives for linked =BuckNet=, its independent verified fund,
+  dynamic K, per-insurer Carrying pools, issuance quotes and selected-NFT
+  authorized reductions. Exercise real contract state and ordinary versus
+  Carrying amounts, nonzero premiums, reserve refusal and refund behavior.
+- [ ] Wire these primitives into the existing Python and JavaScript household
+  agents, maintaining shared adaptive/comparison decisions, randomized
+  arrivals and thresholds, real swaps, spending buffers, explicit paydown,
+  and individual savings basis/mark/ROI. Do not equate a purchase with debt
+  retirement or rely on a synthetic signed balance.
+- [ ] Integrate fund and insurer keepers, maturity batches, liquidity caps,
+  actual proceeds, refusal/retry telemetry and safe snapshots; support the
+  existing routed markets and household accounting in both runtimes.
+- [ ] Resolve and verify leveraged basket credit and fund cross-holdings,
+  preserving exit and solvency guards; test repricing, dilution, self-holding,
+  zero liquidity, shocks and insurer/fund callbacks. The cash-only model must
+  be labeled distinctly while this remains open.
+- [ ] Extend artifact bundles, local linking, core bindings, Notes receipts,
+  proof statements/migration and the neutral-service allowlist as specified
+  in the companion interface plan. Test real proof paths against =BuckNet=.
+- [ ] Run a short new-model smoke and shared actual-EVM operation vectors on
+  Python and JavaScript, then frozen five-year baseline, policy and stress
+  campaigns. Every completed run needs reproducible JSON and an adjacent PDF;
+  report rendering failures and preserve data. Record contract provenance.
+- [ ] Compare the retained old stress, routing, credit and low-K detections;
+  retire legacy agents or contracts only after their distinct checks pass in
+  the replacement. Record tests, remaining fork/security/production gates
+  and the precise proposed merge scope.
+
+* Progress and verification log
+
+| Date | Milestone | Evidence / next action | Commit |
+|------+-----------+------------------------+--------|
+| 2026-10-30 | Branch | Fresh worktree based on the verified demurrage implementation. The Nix Python environment and built development artifacts were reproduced locally; no production deployments or five-year net-model runs. | This commit |

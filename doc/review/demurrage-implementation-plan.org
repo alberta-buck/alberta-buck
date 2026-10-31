@@ -27,6 +27,8 @@ The [[file:net-demurrage-invariants.org][responsibilities and invariants map]] r
 transition preconditions and postconditions, tested findings and candidate
 simplifications. The [[file:net-demurrage-interface-migration.org][core, Notes and proof migration plan]] covers consumers,
 the monetary meaning of Notes, proof statements and safe migration.
+The [[file:bucknet-economy-implementation.org][BuckNet economy implementation checklist]] tracks the follow-on branch,
+milestones and verification toward the five-year runs and sandboxes.
 
 Commit each independently reviewable and validated milestone, recording its
 commit and verification below. Update this file when a task or decision changes;
