@@ -18,6 +18,13 @@
     {"name": "no carry at even a small discount, where paying down begins", "state": {"mortgage": 0, "ru": 9960000}, "settings": {"carry_utilization": 0.5, "retire_disc": 0.03}, "kind": "invest", "go": false},
     {"name": "no carry beyond the share already drawn", "state": {"mortgage": 0, "drawn": 400000}, "settings": {"carry_utilization": 0.5}, "kind": "invest", "go": false}
   ],
+  "net_refinance": [
+    {"name": "target relief and fresh premium", "state": {"accounting": "net", "joined": true, "expected_relief_rate": 0.02, "premium_refund_fraction": 1.0, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}, "usd": 95000, "buck": 100000, "go": true},
+    {"name": "weak relief and old insurer pool", "state": {"accounting": "net", "joined": true, "expected_relief_rate": 0.0, "premium_refund_fraction": 0.5, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}, "usd": 95000, "buck": 100000, "go": false},
+    {"name": "spending an already issued wallet adds no relief", "state": {"accounting": "net", "joined": true, "spendable": 100000, "unactivated": 0, "expected_relief_rate": 0.02, "premium_refund_fraction": 1.0, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}, "usd": 99000, "buck": 100000, "go": true},
+    {"name": "insurer recovery and above target relief", "state": {"accounting": "net", "joined": true, "spendable": 20000, "expected_relief_rate": 0.04, "premium_refund_fraction": 0.8, "expected_refund_growth": 0.01, "expected_wallet_growth": -0.02}, "usd": 95000, "buck": 100000, "go": true},
+    {"name": "valuable wallet alternative discourages refinancing", "state": {"accounting": "net", "joined": true, "spendable": 100000, "unactivated": 0, "expected_relief_rate": 0.02, "premium_refund_fraction": 1.0, "expected_refund_growth": -0.02, "expected_wallet_growth": 0.1}, "usd": 99000, "buck": 100000, "go": false}
+  ],
   "surplus": [
     ["adaptive", 1.1, 1.2, 0.003, 0.02, 0.02, "retire"],
     ["adaptive", 1.1, 1.0, 0.003, 0.02, 0.02, "invest"],

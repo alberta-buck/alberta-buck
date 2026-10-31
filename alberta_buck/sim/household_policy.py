@@ -278,13 +278,22 @@ def premium_sale(capacity, ru, rb, fee, basket_usd, premium, impact_bp):
 
 
 def terms(state, p, investment=False):
+    net                         = state.get("accounting") == "net"
+    forecasts                   = ("expected_relief_rate", "premium_refund_fraction", "expected_refund_growth",
+                                   "expected_wallet_growth")
+    if net and any(state.get(key) is None for key in forecasts):
+        raise ValueError("net household needs explicit relief and insurer refund forecasts")
     return carry.RefiTerms(
         debt=state["mortgage"], rate=0. if investment else p["apr"], face=state["face"],
         premium_bp=p["premium_bp"], joined=state["joined"], payback_y=p["theta"], k=state["k"],
         headroom=state["spendable"], unactivated=state["unactivated"],
         fixed_cost=0. if state["joined"] else p["switch_k"] * 1000,
         penalty_months=0. if investment or state["at_renewal"] else p["penalty_months"],
-        risk=p["risk"], opp_rate=p["apr"], buck_value=state["basket_usd"])
+        risk=p["risk"], opp_rate=p["apr"], buck_value=state["basket_usd"],
+        expected_relief_rate=state.get("expected_relief_rate"),
+        premium_refund_fraction=state.get("premium_refund_fraction", 1.),
+        expected_refund_growth=state.get("expected_refund_growth"), wallet_already_issued=net,
+        expected_wallet_growth=state.get("expected_wallet_growth", 0.))
 
 
 def issuance(state, p):

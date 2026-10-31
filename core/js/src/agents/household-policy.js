@@ -207,21 +207,35 @@ export const buckIn = (usd, ru, rb, fee) => usd >= ru ? Infinity : usd * rb / ((
 export const NO = Object.freeze({ go: false, usd: 0, buck: 0, coverage: 0, deposit: 0,
                                   carry: 0, one_time: 0, value: 0, parts: {} });
 
+function validateForecast(reliefRate, refundFraction, refundGrowth, walletGrowth) {
+  if (!Number.isFinite(reliefRate) || reliefRate < 0) throw new Error("invalid expected relief rate");
+  if (!Number.isFinite(refundFraction) || refundFraction < 0 || refundFraction > 1) throw new Error("invalid premium refund fraction");
+  if (!Number.isFinite(refundGrowth) || refundGrowth < -1) throw new Error("invalid expected refund growth");
+  if (!Number.isFinite(walletGrowth) || walletGrowth < -1) throw new Error("invalid expected wallet growth");
+}
+
 export function refinance(t, usd, buck) {
+  const reliefRate = t.expected_relief_rate ?? .02, refundFraction = t.premium_refund_fraction ?? 1;
+  const refundGrowth = t.expected_refund_growth ?? -.02, walletGrowth = t.expected_wallet_growth ?? 0;
+  validateForecast(reliefRate, refundFraction, refundGrowth, walletGrowth);
   const e = t.premium_bp / 1000, spc = t.k * .99 - e;
   const need = Math.max(0, buck - t.headroom);
   const cov = need === 0 ? 0 : spc > 0 ? need / spc : Infinity;
   if (!Number.isFinite(cov)) return NO;
   const dep = cov * e, value = buck * t.buck_value, valueDep = dep * t.buck_value;
+  const refundValue = valueDep * refundFraction;
+  const newlyIssued = t.wallet_already_issued ? Math.max(0, buck - t.headroom) : buck;
   const parts = {
-    interest: usd * t.rate, relief: (value + valueDep) * .02,
+    interest: usd * t.rate, relief: (newlyIssued * t.buck_value + valueDep) * reliefRate,
     premium: t.joined ? 0 : t.face * t.premium_bp / 10000,
-    deposit_opp: -valueDep * (t.opp_rate ?? t.rate), deposit_age: -valueDep * .02,
+    deposit_opp: -refundValue * (t.opp_rate ?? t.rate), deposit_age: refundValue * refundGrowth,
+    deposit_write_down: -(valueDep - refundValue),
+    wallet_carry: t.wallet_already_issued ? -Math.min(buck, t.headroom) * t.buck_value * walletGrowth : 0,
     risk: -value * t.risk, execution: -(value - usd), fixed: -t.fixed_cost,
     penalty: -usd * t.rate * t.penalty_months / 12,
   };
-  const carry = ["interest", "relief", "premium", "deposit_opp", "deposit_age", "risk"].reduce((s, k) => s + parts[k], 0);
-  const one_time = -(parts.execution + parts.fixed + parts.penalty);
+  const carry = ["interest", "relief", "premium", "deposit_opp", "deposit_age", "wallet_carry", "risk"].reduce((s, k) => s + parts[k], 0);
+  const one_time = -(parts.execution + parts.fixed + parts.penalty + parts.deposit_write_down);
   const net = t.payback_y * carry - one_time;
   return { go: usd > 0 && carry > 0 && net > 0, usd, buck, coverage: cov, deposit: dep,
            carry, one_time, value: net, parts };
@@ -266,12 +280,22 @@ export function premiumSale(cap, ru, rb, fee, basket, premium, impact) {
 }
 
 export function terms(s, p, investment = false) {
+  const net = s.accounting === "net";
+  if (net && ["expected_relief_rate", "premium_refund_fraction", "expected_refund_growth", "expected_wallet_growth"]
+    .some((key) => s[key] === undefined || s[key] === null)) {
+    throw new Error("net household needs explicit relief and insurer refund forecasts");
+  }
+  validateForecast(s.expected_relief_rate ?? .02, s.premium_refund_fraction ?? 1,
+    s.expected_refund_growth ?? -.02, s.expected_wallet_growth ?? 0);
   return { debt: s.mortgage, rate: investment ? 0 : p.apr, face: s.face,
     premium_bp: p.premium_bp, joined: s.joined, payback_y: p.theta, k: s.k,
     headroom: s.spendable, unactivated: s.unactivated,
     fixed_cost: s.joined ? 0 : p.switch_k * 1000,
     penalty_months: investment || s.at_renewal ? 0 : p.penalty_months,
-    risk: p.risk, opp_rate: p.apr, buck_value: s.basket_usd };
+    risk: p.risk, opp_rate: p.apr, buck_value: s.basket_usd,
+    expected_relief_rate: s.expected_relief_rate, premium_refund_fraction: s.premium_refund_fraction ?? 1,
+    expected_refund_growth: s.expected_refund_growth, wallet_already_issued: net,
+    expected_wallet_growth: s.expected_wallet_growth ?? 0 };
 }
 
 export function issuance(s, p) {

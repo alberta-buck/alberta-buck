@@ -801,7 +801,7 @@ economy-smoke: sim-build core-build-py
 		--backend pyrevm --days $(ECONOMY_SMOKE_DAYS) --out "$(ECONOMY_SMOKE_OUT)"
 	python -m alberta_buck.sim.report "$(ECONOMY_SMOKE_OUT)"
 economy-test: sim-build core-build-py core-build-wasm
-	python -m pytest alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
+	python -m pytest alberta_buck/test/test_carry.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
 		alberta_buck/test/test_economy.py alberta_buck/test/test_sim_report.py $(PYTEST_ARGS)
 	cd core/js && node --test test/household-policy.test.js test/credit-household.tevm.test.js
 

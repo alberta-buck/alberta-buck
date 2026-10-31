@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from alberta_buck.sim import household_policy as hp
+from alberta_buck.sim import carry, household_policy as hp
 
 ROOT                            = Path(__file__).resolve().parents[2]
 FIXTURE                         = json.loads((ROOT / "test/fixtures/household-policy.json").read_text())
@@ -19,6 +19,37 @@ def test_issuance_cases(case):
     assert (kind, v.go) == (case["kind"], case["go"])
     if v.go:
         assert v.value > 0 and v.carry > 0
+
+
+@pytest.mark.parametrize("case", FIXTURE["net_refinance"], ids=lambda c: c["name"])
+def test_net_refinance_uses_explicit_forecasts_and_existing_wallet(case):
+    p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
+    t = hp.terms(FIXTURE["state"] | case["state"], p)
+    v = carry.refinance(t, case["usd"], case["buck"])
+    assert v.go == case["go"]
+    expected_new = max(0, case["buck"] - t.headroom)
+    assert v.parts["relief"] == pytest.approx((expected_new + v.deposit) * t.expected_relief_rate)
+    assert v.parts["deposit_write_down"] == pytest.approx(-v.deposit * (1 - t.premium_refund_fraction))
+    assert v.parts["deposit_age"] == pytest.approx(v.deposit * t.premium_refund_fraction * t.expected_refund_growth)
+    assert v.parts["wallet_carry"] == pytest.approx(-min(case["buck"], t.headroom) * t.expected_wallet_growth)
+
+
+def test_net_refinance_requires_available_explicit_forecasts():
+    p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"])
+    with pytest.raises(ValueError, match="explicit"):
+        hp.terms(FIXTURE["state"] | {"accounting": "net"}, p)
+    with pytest.raises(ValueError, match="refund fraction"):
+        hp.terms(FIXTURE["state"] | FIXTURE["net_refinance"][0]["state"] | {"premium_refund_fraction": 1.1}, p)
+
+
+@pytest.mark.parametrize("field,value,error", [("expected_relief_rate", -.01, "relief"),
+                                                ("expected_refund_growth", -1.01, "growth"),
+                                                ("expected_wallet_growth", -1.01, "wallet"),
+                                                ("premium_refund_fraction", float("nan"), "fraction")])
+def test_net_refinance_rejects_invalid_forecasts(field, value, error):
+    p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"])
+    with pytest.raises(ValueError, match=error):
+        hp.terms(FIXTURE["state"] | FIXTURE["net_refinance"][0]["state"] | {field: value}, p)
 
 
 @pytest.mark.parametrize("case", FIXTURE["surplus"])
@@ -162,7 +193,9 @@ console.log(JSON.stringify({
  arrivals: [arrivals(0), arrivals(50)],
  population: hp.population({initial: 24, arrival_rate: 12, saver_share: .25}),
  divest: Array.from({length: 8}, (_, i) => hp.divestDay(f.seed, `0/debtor/${i}`, 30, .1)),
- decisions: f.issuance.map(c => hp.issuance({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings})))
+ decisions: f.issuance.map(c => hp.issuance({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings}))),
+ netRefinance: f.net_refinance.map(c => hp.refinance(hp.terms({...f.state, ...c.state},
+     hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3})), c.usd, c.buck))
 }));
 """
     js                          = json.loads(subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT,
@@ -179,5 +212,10 @@ console.log(JSON.stringify({
             FIXTURE["seed"], "0", FIXTURE["settings"] | case["settings"]))
         pv                      = asdict(verdict)
         assert kind == jkind
+        assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
+        assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+    for case, jv in zip(FIXTURE["net_refinance"], js["netRefinance"]):
+        p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
+        pv = asdict(carry.refinance(hp.terms(FIXTURE["state"] | case["state"], p), case["usd"], case["buck"]))
         assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
         assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)

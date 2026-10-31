@@ -54,6 +54,30 @@ proof, artifact and receipt work that must accompany this migration.
 | JS household execution | =core/js/src/agents/household-ops.js= and =scenarios/eqworld.js= read signed debt and use legacy mint/burn | Implement the same per-NFT issue, net trade, authorization and reduction semantics as Python, with executable shared vectors. Update both the browser-only demo and the savings sandbox views, including each investor's basis, mark and ROI. |
 | Reports and provenance | =loop.py= closes a vector before PDF generation; =economy.py= freezes source and repairs missing PDFs | Keep automatic PDF generation on every completed five-year run. New vectors and reports identify the actual BUCK artifact and accounting model; an old vector without that field is =unrecorded=. Continue to preserve completed JSON if rendering fails. |
 
+The shared refinancing comparison accepts explicit BuckNet forecasts for an
+annual effective relief rate, the premium refund's expected initial net value
+as a fraction of its nominal amount, the refund claim's annual net growth,
+and the expected annual return of the wallet money's alternative use.
+It counts relief only on newly issued principal and the premium, not on money
+already in the ordinary wallet. An estimated loss of refund value is a
+one-time cost. The marked refund's opportunity cost and expected growth, plus
+the return foregone or demurrage avoided by spending wallet money, enter
+annual carry. A net-model state must supply all four forecasts; it may
+not silently inherit the legacy 2% assumptions. Legacy scenarios retain their
+prior defaults and the same policy comparisons.
+
+These are *decision forecasts*, not guarantees or settlement quotes. A future
+net household adapter must explain how it derives and updates them from the
+fund's marked assets and capped claims, the insurer's mixed Carrying pool and
+any disclosed strategy. The expected premium refund fraction should reflect
+the proposed deposit's effect on the pool, not assume that today's cash-only
+ratio captures invested assets. Funding reserve, maturity, per-NFT issuance,
+mark unavailability and the 10% liquid-relief limit still require separate
+checks at execution. The simple annualized comparison does not yet forecast
+claim saturation, future liquidity or nonlinear returns over the holding
+horizon; run sensitivity comparisons rather than treating one estimate as
+the actual settlement rate.
+
 The new =BuckNet.issue= requires a selected NFT, activated coverage and desired
 new spendable amount; insurance funding and K checks must use the actual
 contract rules. The optional [[file:../../src/BuckNetQuoter.sol][BuckNetQuoter]] reads one NFT's current activated

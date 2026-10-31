@@ -30,12 +30,14 @@ Both paths insure the same asset at the same rate:
     retired), plus the pool's accrued age the refund carries back to the
     member (demurrage, Buck._carryingTransfer).
 
-The Jubilee relief accrues on the lien -- the BUCK actually issued, which is
-the BUCK drawn plus the deposit (both come out of the same signed balance)
--- at the demurrage rate (doc/JUBILEE-ISSUANCE.org).  So the deposit's
-relief exactly pays the age its refund carries back, and the relief the
-refinance adds is 2% of the BUCK drawn.  (It used to accrue on the coverage
-activated, about 1/K of the draw.)
+The legacy comparison assumes 2% annual Jubilee relief on the BUCK drawn
+and premium principal, and 2% annual loss on the premium refund. For BuckNet,
+those are forecasts rather than guaranteed outcomes: the marked fund and
+insurer pool can change. A BuckNet wallet is already-issued money, so spending
+it adds no new relief. Net-model callers supply explicit forecasts and an
+estimated net refund fraction; the latter can reflect a pool's carried fees
+and any disclosed strategy. These annualized estimates are decision inputs,
+not actual settlement quotes or a substitute for the fund's liquidity cap.
 
 So joining the BUCK system SAVES the external premium outright, and the
 insurance leg costs only the deposit's opportunity: with the whole face
@@ -123,6 +125,24 @@ class RefiTerms:
     opp_rate: float | None = None  # the deposit's opportunity; None = `rate`
     k_margin: float = 0.99      # K may move at the mint (Buck.mint runs compute())
     buck_value: float = 1.0     # basket-parity USD value of one BUCK, not a fixed dollar peg
+    # Forecasts, not promises: net-mode callers must provide these explicitly.
+    expected_relief_rate: float | None = None   # annual relief per newly issued BUCK
+    premium_refund_fraction: float = 1.0        # estimated net value / nominal premium on entry
+    expected_refund_growth: float | None = None  # annual change in that net refund claim
+    wallet_already_issued: bool = False          # net-mode headroom is money already issued
+    expected_wallet_growth: float = 0.0         # annual return on the wallet's alternative use
+
+    def __post_init__(self):
+        if (self.expected_relief_rate is not None and
+                (not math.isfinite(self.expected_relief_rate) or self.expected_relief_rate < 0)):
+            raise ValueError("invalid expected relief rate")
+        if not math.isfinite(self.premium_refund_fraction) or not 0 <= self.premium_refund_fraction <= 1:
+            raise ValueError("invalid premium refund fraction")
+        if (self.expected_refund_growth is not None and
+                (not math.isfinite(self.expected_refund_growth) or self.expected_refund_growth < -1)):
+            raise ValueError("invalid expected refund growth")
+        if not math.isfinite(self.expected_wallet_growth) or self.expected_wallet_growth < -1:
+            raise ValueError("invalid expected wallet growth")
 
     @property
     def spend_per_cover(self) -> float:
@@ -178,19 +198,30 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
     dep = cov * deposit_rate(t.premium_bp)
     value_buck                  = buck * t.buck_value
     value_dep                   = dep * t.buck_value
+    refund_value                = value_dep * t.premium_refund_fraction
+    newly_issued                = max(0., buck - t.headroom) if t.wallet_already_issued else buck
+    relief_rate                 = RELIEF if t.expected_relief_rate is None else t.expected_relief_rate
+    refund_growth               = -DEMURRAGE if t.expected_refund_growth is None else t.expected_refund_growth
     opp = t.rate if t.opp_rate is None else t.opp_rate
     parts = {
         # external interest no longer paid
         "interest": usd * t.rate,
         # the Jubilee relief the new lien earns: the BUCK drawn and the
         # deposit drawn with it
-        "relief": (value_buck + value_dep) * RELIEF,
+        "relief": (newly_issued * t.buck_value + value_dep) * relief_rate,
         # the external premium stops once the asset is insured through BUCK
         "premium": 0.0 if t.joined else t.face * t.premium_bp / 10_000.0,
         # the deposit: an outlay, whose cost is the opportunity it forgoes...
-        "deposit_opp": -value_dep * opp,
-        # ...and the pool's accrued age its refund carries back
-        "deposit_age": -value_dep * DEMURRAGE,
+        "deposit_opp": -refund_value * opp,
+        # ...and the expected change in the insurer's net refund value
+        "deposit_age": refund_value * refund_growth,
+        # The newly paid full-value premium can immediately share old carried
+        # fees. This is an estimate of the claim's initial mark, not a burn.
+        "deposit_write_down": -(value_dep - refund_value),
+        # Spending existing money gives up its alternative return. A negative
+        # return (for example idle wallet demurrage) is a cost avoided.
+        "wallet_carry": (-min(buck, t.headroom) * t.buck_value * t.expected_wallet_growth
+                         if t.wallet_already_issued else 0.),
         # owing a basket-indexed unit against USD income
         "risk": -value_buck * t.risk,
         # execution: the liability, at par, beyond the USD it retired
@@ -199,8 +230,8 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
         "penalty": -usd * t.rate * t.penalty_months / 12.0,
     }
     carry = sum(parts[k] for k in ("interest", "relief", "premium",
-                                   "deposit_opp", "deposit_age", "risk"))
-    one_time = -(parts["execution"] + parts["fixed"] + parts["penalty"])
+                                   "deposit_opp", "deposit_age", "wallet_carry", "risk"))
+    one_time = -(parts["execution"] + parts["fixed"] + parts["penalty"] + parts["deposit_write_down"])
     value = t.payback_y * carry - one_time
     return RefiVerdict(go=(usd > 0 and carry > 0 and value > 0), usd=usd,
                        buck=buck, coverage=cov, deposit=dep, carry=carry,

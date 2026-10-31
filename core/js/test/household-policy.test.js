@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { profile, issuance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
+import { profile, issuance, terms, refinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
   ROLES } from "../src/agents/household-policy.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
@@ -9,6 +9,25 @@ for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
   const [kind, v] = issuance({ ...f.state, ...c.state }, profile(f.seed, "0", { ...f.settings, ...c.settings }));
   assert.equal(kind, c.kind); assert.equal(v.go, c.go);
   if (v.go) assert.ok(v.value > 0 && v.carry > 0);
+});
+for (const c of f.net_refinance) test(`net refinance: ${c.name}`, () => {
+  const p = profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 });
+  const t = terms({ ...f.state, ...c.state }, p), v = refinance(t, c.usd, c.buck);
+  assert.equal(v.go, c.go);
+  assert.ok(Math.abs(v.parts.relief - (Math.max(0, c.buck - t.headroom) + v.deposit) * t.expected_relief_rate) < 1e-8);
+  assert.ok(Math.abs(v.parts.deposit_write_down + v.deposit * (1 - t.premium_refund_fraction)) < 1e-8);
+  assert.ok(Math.abs(v.parts.deposit_age - v.deposit * t.premium_refund_fraction * t.expected_refund_growth) < 1e-8);
+  assert.ok(Math.abs(v.parts.wallet_carry + Math.min(c.buck, t.headroom) * t.expected_wallet_growth) < 1e-8);
+});
+test("net refinance requires valid explicit forecasts", () => {
+  const p = profile(f.seed, "0", f.settings);
+  assert.throws(() => terms({ ...f.state, accounting: "net" }, p), /explicit/);
+  assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, premium_refund_fraction: 1.1 }, p), /refund fraction/);
+  for (const [field, value, error] of [["expected_relief_rate", -.01, /relief/],
+    ["expected_refund_growth", -1.01, /growth/], ["expected_wallet_growth", -1.01, /wallet/],
+    ["premium_refund_fraction", NaN, /fraction/]]) {
+    assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, [field]: value }, p), error);
+  }
 });
 test("household surplus policies use basket parity after trading costs", () => {
   for (const c of f.surplus) assert.equal(surplusAction(...c.slice(0, -1)), c.at(-1));
