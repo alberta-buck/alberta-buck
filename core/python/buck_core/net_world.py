@@ -130,6 +130,7 @@ class HouseholdRetirement:
     pending_transaction_hash: str | None
     pending_reverted: bool
     pending_phase: str | None
+    error: str | None
     settlements: tuple[NetReduction, ...]
 
 
@@ -437,35 +438,46 @@ class NetCreditOps:
             raise ValueError("reduction plan is not ready")
         if self.stack.token.functions.reductionAuthorization(plan.token_id).call()[0]:
             raise ValueError("reduction authorization already pending")
+        authorized = None
         try:
             authorized = self.authorize_reduction(owner, plan.token_id, plan.principal,
                                                   plan.minimum_relief_scaled, deadline)
+            if not authorized or authorized.get("status") != 1:
+                tx_hash = _txhex(authorized.get("transactionHash")) if authorized else ""
+                raise ReductionPending(plan, tx_hash or None,
+                                       bool(tx_hash and authorized.get("status") == 0), "authorization")
+            self.authorization_from_receipt(owner, plan, deadline, authorized)
+        except ReductionPending:
+            raise
         except Exception as exc:
-            raise ReductionPending(plan, getattr(exc, "transaction_hash", None),
+            tx_hash = getattr(exc, "transaction_hash", None)
+            if not tx_hash:
+                try:
+                    tx_hash = _txhex(authorized.get("transactionHash")) or None
+                except (AttributeError, TypeError):
+                    pass
+            raise ReductionPending(plan, tx_hash,
                                    isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0
                                    and bool(exc.transaction_hash), "authorization") from exc
-        if not authorized or authorized.get("status") != 1:
-            tx_hash = _txhex(authorized.get("transactionHash")) if authorized else ""
-            raise ReductionPending(plan, tx_hash or None,
-                                   bool(tx_hash and authorized.get("status") == 0), "authorization")
-        try:
-            self.authorization_from_receipt(owner, plan, deadline, authorized)
-        except Exception as exc:
-            raise ReductionPending(plan, _txhex(authorized.get("transactionHash")) or None,
-                                   phase="authorization") from exc
+        receipt = None
         try:
             receipt = self.reduce_authorized(owner, plan.token_id, plan.principal)
+            if not receipt or receipt.get("status") != 1:
+                tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
+                raise ReductionPending(plan, tx_hash or None, bool(tx_hash and receipt.get("status") == 0))
+            return self.reduction_from_receipt(owner, plan.token_id, plan.principal, receipt)
+        except ReductionPending:
+            raise
         except Exception as exc:
-            raise ReductionPending(plan, getattr(exc, "transaction_hash", None),
+            tx_hash = getattr(exc, "transaction_hash", None)
+            if not tx_hash:
+                try:
+                    tx_hash = _txhex(receipt.get("transactionHash")) or None
+                except (AttributeError, TypeError):
+                    pass
+            raise ReductionPending(plan, tx_hash,
                                    isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0
                                    and bool(exc.transaction_hash)) from exc
-        if not receipt or receipt.get("status") != 1:
-            tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
-            raise ReductionPending(plan, tx_hash or None, bool(tx_hash and receipt.get("status") == 0))
-        try:
-            return self.reduction_from_receipt(owner, plan.token_id, plan.principal, receipt)
-        except Exception as exc:
-            raise ReductionPending(plan, _txhex(receipt.get("transactionHash"))) from exc
 
     def authorization_from_receipt(self, owner, plan: ReductionPlan, deadline: int, receipt,
                                    expected_hash: str | None = None):
@@ -517,12 +529,16 @@ class NetCreditOps:
         settled = []
         retired = 0
         status, blocked, pending_principal, pending_minimum, pending_deadline = "complete", None, None, None, None
-        pending_hash, pending_reverted, pending_phase = None, False, None
+        pending_hash, pending_reverted, pending_phase, error = None, False, None, None
         for token_id in ids:
             if retired >= requested:
                 break
-            plan = self.plan_reduction(owner, token_id, requested - retired,
-                                       buffer=buffer, relief_slippage_bp=relief_slippage_bp)
+            try:
+                plan = self.plan_reduction(owner, token_id, requested - retired,
+                                           buffer=buffer, relief_slippage_bp=relief_slippage_bp)
+            except Exception as exc:
+                status, blocked, error = "plan-unavailable", token_id, str(exc)[:200]
+                break
             if plan.reason == "no-principal":
                 continue
             if plan.reason != "ready":
@@ -536,6 +552,11 @@ class NetCreditOps:
                 pending_hash, pending_reverted = exc.transaction_hash, exc.reverted
                 pending_phase = exc.phase
                 break
+            except Exception as exc:
+                # settle_plan wraps exceptions after transaction submission in
+                # ReductionPending; this is a failure of its preflight read.
+                status, blocked, error = "preflight-unavailable", token_id, str(exc)[:200]
+                break
             settled.append(result)
             retired += result.principal
         else:
@@ -544,5 +565,5 @@ class NetCreditOps:
         return HouseholdRetirement(requested, retired, sum(x.relief_scaled for x in settled),
                                    sum(x.owner_cost_scaled for x in settled),
                                    sum(x.premium_nominal for x in settled), status, blocked, pending_principal,
-                                   pending_minimum, pending_deadline, pending_hash, pending_reverted, pending_phase,
+                                   pending_minimum, pending_deadline, pending_hash, pending_reverted, pending_phase, error,
                                    tuple(settled))

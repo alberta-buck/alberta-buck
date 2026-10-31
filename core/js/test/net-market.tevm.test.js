@@ -382,6 +382,19 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
     await creditOps.cancelReduction(buyer.account, lostBuyId); // explicit external recovery in this fixture
 
+    const malformedAuthOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      return name === "authorizeReduction" && args[1] ? {} : receipt;
+    });
+    const malformedBatch = await malformedAuthOps.retireHousehold(buyer.account, [lostBuyId], 1_000_000n,
+      (await s.client.getBlock()).timestamp + 3600n);
+    assert.equal(malformedBatch.status, "authorization-pending");
+    assert.equal(malformedBatch.pendingPhase, "authorization");
+    assert.equal(malformedBatch.pendingTransactionHash, null);
+    assert.equal(malformedBatch.retired, 0n);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
+    await creditOps.cancelReduction(buyer.account, lostBuyId);
+
     // Preserve the first actual settlement if the second NFT's authorization
     // response is lost in the middle of a multi-facility batch.
     const batchIds = [];
@@ -397,17 +410,94 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       }
       return receipt;
     });
-    const batch = await batchOps.retireHousehold(buyer.account, batchIds, 2_000_000n,
-      (await s.client.getBlock()).timestamp + 3600n);
+    let failNextBalance = false, capturedBatch;
+    const badSession = Object.create(s);
+    badSession.call = async (...args) => {
+      if (failNextBalance && args[0].address === world.buck.address && args[1] === "balanceOf") {
+        throw new Error("simulated post-settlement balance read failure");
+      }
+      return s.call(...args);
+    };
+    const capture = (ops) => ({ ...ops, retireHousehold: async (...args) => {
+      capturedBatch = await ops.retireHousehold(...args);
+      failNextBalance = true;
+      return capturedBatch;
+    } });
+    const badBalanceWorld = (ids, ops) => ({ accounting: "net", households: netHouseholdRepaymentOps(
+      { ...world, session: badSession }, market, { facilityIds: () => ids, creditOps: capture(ops) }) });
+    const agent4 = new CreditHouseholdAgent({ account: buyer.account });
+    agent4.netRepaymentReserve = 1n;
+    assert.equal(await agent4.retireAcquired(badBalanceWorld(batchIds, batchOps), 2_000_000n, 0n), 1_000_000n);
+    const batch = capturedBatch;
     assert.equal(batch.retired, 1_000_000n);
     assert.equal(batch.settlements.length, 1);
     assert.equal(batch.status, "authorization-pending");
     assert.equal(batch.pendingPhase, "authorization");
     assert.equal(batch.blockedTokenId, batchIds[1]);
     assert.ok(batch.pendingTransactionHash);
+    assert.equal(agent4.netPendingHash, batch.pendingTransactionHash);
+    assert.equal(agent4.netRepaymentReserve, 1n);
     assert.equal((await creditOps.facility(batchIds[0])).issued, 0n);
     assert.equal((await creditOps.facility(batchIds[1])).issued, 1_000_000n);
     await creditOps.cancelReduction(buyer.account, batchIds[1]);
+
+    const newSmallFacility = async () => {
+      const id = await insureAsset(world, world.operator.account, buyer, { face: 2_000_000n, premiumRate: 0 });
+      await creditOps.issue(buyer.account, id, 2_000_000n, 1_000_000n);
+      return id;
+    };
+    let first = await newSmallFacility(), second = await newSmallFacility();
+    const planFailureOps = netCreditOps(s, world.net);
+    const realPlan = planFailureOps.planReduction;
+    planFailureOps.planReduction = async (...args) => {
+      if (args[1] === second) throw new Error("simulated planning read failure");
+      return realPlan(...args);
+    };
+    failNextBalance = false;
+    const agent5 = new CreditHouseholdAgent({ account: buyer.account });
+    agent5.netRepaymentReserve = 1n;
+    assert.equal(await agent5.retireAcquired(badBalanceWorld([first, second], planFailureOps), 2_000_000n, 0n), 1_000_000n);
+    assert.equal(capturedBatch.status, "plan-unavailable");
+    assert.equal(capturedBatch.blockedTokenId, second);
+    assert.equal(capturedBatch.retired, 1_000_000n);
+    assert.equal(capturedBatch.settlements.length, 1);
+    assert.match(capturedBatch.error, /planning read failure/);
+    assert.match(agent5.lastError, /plan-unavailable/);
+    assert.equal(agent5.netRepaymentReserve, 1n);
+    const recheckWorld = badBalanceWorld([first, second], planFailureOps);
+    assert.equal(await agent5.pendingRepayment(recheckWorld), true);
+    await agent5.act(recheckWorld, 0, 0);
+    assert.equal(agent5.lastAction, "repay-recheck");
+    assert.equal(agent5.netRepaymentInterrupted, false);
+    assert.equal((await creditOps.facility(first)).issued, 0n);
+    assert.equal((await creditOps.facility(second)).issued, 1_000_000n);
+
+    first = await newSmallFacility(); second = await newSmallFacility();
+    const preflightFailureOps = netCreditOps(s, world.net), realSettle = preflightFailureOps.settlePlan;
+    preflightFailureOps.settlePlan = async (owner, plan, deadline) => {
+      if (plan.tokenId === second) throw new Error("simulated authorization preflight failure");
+      return realSettle(owner, plan, deadline);
+    };
+    const failedPreflight = await preflightFailureOps.retireHousehold(buyer.account, [first, second], 2_000_000n,
+      (await s.client.getBlock()).timestamp + 3600n);
+    assert.equal(failedPreflight.status, "preflight-unavailable");
+    assert.equal(failedPreflight.blockedTokenId, second);
+    assert.equal(failedPreflight.retired, 1_000_000n);
+    assert.equal(failedPreflight.settlements.length, 1);
+    assert.equal((await creditOps.facility(first)).issued, 0n);
+    assert.equal((await creditOps.facility(second)).issued, 1_000_000n);
+
+    first = await newSmallFacility();
+    failNextBalance = false;
+    const agent6 = new CreditHouseholdAgent({ account: buyer.account });
+    agent6.netRepaymentReserve = 1n;
+    assert.equal(await agent6.retireAcquired(badBalanceWorld([first], creditOps), 2_000_000n, 0n), 1_000_000n);
+    assert.equal(capturedBatch.status, "partial");
+    assert.equal(capturedBatch.retired, 1_000_000n);
+    assert.match(agent6.lastError, /balance unavailable/);
+    assert.equal(agent6.netRepaymentReserve, 1n);
+    assert.equal(await agent6.pendingRepayment(badBalanceWorld([first], creditOps)), true);
+    assert.equal((await creditOps.facility(first)).issued, 0n);
   }
   // A nominal pool can remain nonzero when its full-value balance is zero.
   // Exact net output must refuse without consuming the buyer's settlement.

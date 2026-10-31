@@ -98,7 +98,9 @@ correctly journaled operations that may succeed or revert. The household keeps
 the hash when available and can explicitly reconcile its matching receipt.
 Interrupted authorizations and settlements are tracked separately; an
 authorization is never counted as repayment, and earlier completed facilities
-remain recorded if a later authorization is interrupted. Automatic recovery
+remain recorded if a later authorization or planning read is interrupted. A
+failed post-settlement balance read conservatively retains the reserve.
+Automatic recovery
 of known receipts runs at the start of a household's daily turn and consumes
 that turn. Cancellation, finality handling and snapshot persistence remain open.
 Tevm snapshots do not retain transaction receipts, so a saved hash alone is

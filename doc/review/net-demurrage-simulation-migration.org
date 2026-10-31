@@ -104,6 +104,25 @@ also check =maturitiesPending= and handle transaction refusal. The cash-only
 diagnostic world deploys this quoter, but no five-year household economy or
 interactive sandbox has been migrated to it yet.
 
+For the next household issuance integration, check each NFT's already
+activated capacity with =quoteIssue(id, 0)= before activating more coverage.
+Quote additional coverage on the selected NFT, budget the full premium and a
+reserve buffer that can survive a block of demurrage, and compare the total
+cost of the reserve purchase with the projected benefit. A successful issue
+increases principal by spendable issuance *plus* premium; the latter goes to
+the insurer pool. The reserve remains the household's spendable BUCK. Quote
+again immediately before submission and preserve the transaction receipt:
+coverage, K, balances and the fund's maturity state can change between calls.
+An interrupted issue or sale must stop and reconcile just like repayment.
+
+Do not assume that quote capacity is strictly increasing with added coverage.
+The premium rate can approach the current K, and separate integer rounding of
+the K limit and premium can produce small local decreases. A coverage search
+must either prove its bounds for the actual rates and rounding or conservatively
+report that it cannot size the proposed issue. Test existing capacity, low K,
+depreciation, rounding boundaries, partial funding and multiple NFTs against
+the real quoter before replacing the legacy household activation path.
+
 To retire, the owner authorizes a specific NFT/principal and minimum net
 relief, then invokes =JubileeFund.reduce=. Relief uses the facility's share of
 net liquid cash plus the marked receipt, and reverts if it exceeds 10% of
@@ -131,7 +150,13 @@ authorization before retrying or canceling. No agent should count a purchase,
 an authorization or a failed settlement as paid-down principal. These
 primitives also provide ordered household retirement across several facilities:
 each NFT is planned afresh and successful transaction receipts are kept if a
-later settlement becomes pending. A partial batch is not an exit. These
+later settlement becomes pending. A later planning or preflight read failure
+also returns the earlier completed receipts and a visible failure status. The
+household retains its buyback reserve if a follow-up balance read fails and
+waits for a later turn to reread state before spending again. Custom transaction
+dispatchers must preserve submitted transaction hashes and signal uncertain
+outcomes as required by the operations; an unknown submitted transaction must
+not be represented as an ordinary preflight failure. A partial batch is not an exit. These
 primitives still need to be wired into both existing household agents and all
 exit paths; they are not an economic simulation by themselves.
 

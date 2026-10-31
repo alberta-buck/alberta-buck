@@ -64,6 +64,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_pending_reverted = False
         self._net_pending_phase = None
         self._net_authorization_confirmed = False
+        self._net_repayment_interrupted = False         # re-read state on a later turn after a failed read
         self._net_trade_uncertain = False               # uncertain guarded buy must be reconciled
         self._net_pending_buy_hash = None
         self.wallet_bought      = 0
@@ -286,6 +287,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                                    if principal else f"facility {tracked} repayment outcome uncertain; reconcile receipt")
             self.last_action    = "repay-pending"
             return True
+        if getattr(self, "_net_repayment_interrupted", False):
+            self.last_action    = "repay-wait"
+            return True
         for token_id in self._token_ids:
             if d.buck.functions.reductionAuthorization(token_id).call()[0]:
                 self.last_error = f"facility {token_id} repayment pending; reconcile or cancel before buying more"
@@ -323,6 +327,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                     self.last_action = "repay-pending"
                 else:
                     self._pending_repayment(d)
+                return True
+            if getattr(self, "_net_repayment_interrupted", False):
+                self._net_repayment_interrupted = False
+                self.last_action = "repay-recheck"
                 return True
             return self._pending_repayment(d)
         except Exception as exc:
@@ -470,11 +478,26 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._net_pending_reverted = result.pending_reverted
             self._net_pending_phase = result.pending_phase
             self._net_authorization_confirmed = False
-        held                    = d.buck.functions.balanceOf(self.proxy.address).call()
-        if result.retired >= target or held <= buffer:
-            self._net_repayment_reserve = None
-        if result.status not in ("complete", "partial"):
+            # Do not let another RPC failure discard earlier successful
+            # settlements or the pending transaction's evidence.
             self.last_error     = f"repayment {result.status} at facility {result.blocked_token_id}"
+            return result.retired
+        if result.retired >= target:
+            self._net_repayment_reserve = None
+        else:
+            try:
+                held            = d.buck.functions.balanceOf(self.proxy.address).call()
+                if held <= buffer:
+                    self._net_repayment_reserve = None
+            except Exception as exc:
+                # Preserve the reserve conservatively and report completed
+                # settlements even if the follow-up balance is unavailable.
+                self._net_repayment_interrupted = True
+                self.last_error = f"repayment balance unavailable: {exc!r}"[:200]
+        if result.status not in ("complete", "partial"):
+            self._net_repayment_interrupted = True
+            detail              = f": {result.error}" if result.error else ""
+            self.last_error     = f"repayment {result.status} at facility {result.blocked_token_id}{detail}"[:200]
         return result.retired
 
     def _issue(self, d, state, kind, v, ctr):

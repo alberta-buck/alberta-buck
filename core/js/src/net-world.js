@@ -242,16 +242,23 @@ export function netCreditOps(session, stack, execute = null) {
     const result = { requested, retired: 0n, reliefScaled: 0n, ownerCostScaled: 0n,
       premiumNominal: 0n, status: "complete", blockedTokenId: null, pendingPrincipal: null,
       pendingMinimumReliefScaled: null, pendingDeadline: null, pendingTransactionHash: null,
-      pendingReverted: false, pendingPhase: null, settlements: [] };
+      pendingReverted: false, pendingPhase: null, error: null, settlements: [] };
     for (const tokenId of tokenIds) {
       if (result.retired >= requested) break;
-      const plan = await ops.planReduction(owner, tokenId, requested - result.retired, options);
+      let plan;
+      try { plan = await ops.planReduction(owner, tokenId, requested - result.retired, options); }
+      catch (err) { result.status = "plan-unavailable"; result.blockedTokenId = tokenId; result.error = String(err).slice(0, 200); break; }
       if (plan.reason === "no-principal") continue;
       if (plan.reason !== "ready") { result.status = plan.reason; result.blockedTokenId = tokenId; break; }
       let settled;
       try { settled = await ops.settlePlan(owner, plan, deadline); }
       catch (err) {
-        if (!(err instanceof ReductionPending)) throw err;
+        // settlePlan wraps all exceptions after submission in ReductionPending;
+        // another exception is from its preflight, before a transaction.
+        if (!(err instanceof ReductionPending)) {
+          result.status = "preflight-unavailable"; result.blockedTokenId = tokenId;
+          result.error = String(err).slice(0, 200); break;
+        }
         result.status = "authorization-pending"; result.blockedTokenId = tokenId; result.pendingPrincipal = plan.principal;
         result.pendingMinimumReliefScaled = plan.minimumReliefScaled; result.pendingDeadline = BigInt(deadline);
         result.pendingTransactionHash = err.transactionHash; result.pendingReverted = err.reverted;

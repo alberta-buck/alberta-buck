@@ -99,8 +99,15 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
       // Once settlement's outcome is uncertain, return the saved plan before
       // any further RPC read can fail and erase the information the agent needs.
       if (result.status === "authorization-pending") return { ...result, reserve: buffer };
-      const remaining = await s.call(world.buck, "balanceOf", [me]);
-      return { ...result, reserve: result.retired >= target || remaining <= buffer ? null : buffer };
+      if (result.retired >= target) return { ...result, reserve: null };
+      try {
+        const remaining = await s.call(world.buck, "balanceOf", [me]);
+        return { ...result, reserve: remaining <= buffer ? null : buffer };
+      } catch (err) {
+        // The read must not erase completed settlement receipts. Keep the
+        // pre-purchase reserve until a later read can establish the balance.
+        return { ...result, reserve: buffer, balanceError: String(err).slice(0, 200) };
+      }
     },
   };
 }

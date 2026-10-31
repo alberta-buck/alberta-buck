@@ -66,6 +66,7 @@ export class CreditHouseholdAgent {
     this.netPendingReverted = false;
     this.netPendingPhase = null;
     this.netAuthorizationConfirmed = false;
+    this.netRepaymentInterrupted = false; // require a later fresh read after a failed batch
     this.netTradeUncertain = false;
     this.netPendingBuyHash = null;
   }
@@ -158,6 +159,7 @@ export class CreditHouseholdAgent {
       this.lastAction = "repay-pending";
       return true;
     }
+    if (this.netRepaymentInterrupted) { this.lastAction = "repay-wait"; return true; }
     if (typeof world.households.pending !== "function") throw new Error("BuckNet pending repayment check unavailable");
     const pending = await world.households.pending(this.account);
     if (pending) { this.lastError = "repayment pending; reconcile or cancel before buying more"; this.lastAction = "repay-pending"; }
@@ -185,6 +187,10 @@ export class CreditHouseholdAgent {
           this.lastError = "repayment authorization requires explicit cancellation";
           this.lastAction = "repay-pending";
         } else await this.pendingRepayment(world);
+        return true;
+      }
+      if (this.netRepaymentInterrupted) {
+        this.netRepaymentInterrupted = false; this.lastAction = "repay-recheck";
         return true;
       }
       return await this.pendingRepayment(world);
@@ -300,7 +306,13 @@ export class CreditHouseholdAgent {
       this.netPendingPhase = r.pendingPhase;
       this.netAuthorizationConfirmed = false;
     }
-    if (!["complete", "partial"].includes(r.status)) this.lastError = `repayment ${r.status} at facility ${r.blockedTokenId}`;
+    if (!["complete", "partial"].includes(r.status)) {
+      if (r.status !== "authorization-pending") this.netRepaymentInterrupted = true;
+      this.lastError = `repayment ${r.status} at facility ${r.blockedTokenId}${r.error ? `: ${r.error}` : ""}`.slice(0, 200);
+    } else if (r.balanceError) {
+      this.netRepaymentInterrupted = true;
+      this.lastError = `repayment balance unavailable: ${r.balanceError}`.slice(0, 200);
+    }
     return r.retired;
   }
 

@@ -392,6 +392,18 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert credit.functions.issuanceOf(third_id).call()[0] == before_principal
         credit_ops.cancel_reduction(buyer.address, third_id)  # explicit external recovery in this fixture
 
+        def malformed_authorization_response(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            return object() if method == "authorizeReduction" and args[1] else receipt
+
+        malformed_ops = NetCreditOps(chain, stack, malformed_authorization_response)
+        malformed_batch = malformed_ops.retire_household(
+            buyer.address, [third_id], RAW, anvil.w3.eth.get_block("latest")["timestamp"] + 3600)
+        assert malformed_batch.status == "authorization-pending"
+        assert malformed_batch.pending_phase == "authorization" and malformed_batch.pending_transaction_hash is None
+        assert malformed_batch.retired == 0 and credit.functions.issuanceOf(third_id).call()[0] == before_principal
+        credit_ops.cancel_reduction(buyer.address, third_id)
+
         # If the second authorization's response is lost, the first NFT's
         # successfully settled principal and receipt still belong in the batch.
         batch_ids = []
@@ -408,12 +420,89 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
             return receipt
 
         batch_ops = NetCreditOps(chain, stack, lose_second_authorization)
-        deadline = anvil.w3.eth.get_block("latest")["timestamp"] + 3600
-        batch = batch_ops.retire_household(buyer.address, batch_ids, 2 * RAW, deadline)
+        captured = []
+
+        class Capture:
+            def __init__(self, ops):
+                self.ops = ops
+
+            def retire_household(self, *args, **kwargs):
+                result = self.ops.retire_household(*args, **kwargs)
+                captured.append(result)
+                return result
+
+        # An unavailable post-batch balance must not erase the earlier
+        # settlement or the pending authorization's exact transaction data.
+        bad_balance = SimpleNamespace(buck=object(), w3=d.w3, buck_accounting="net", net_credit_ops=Capture(batch_ops))
+        agent4 = CreditHouseholdAgent(10)
+        agent4.proxy, agent4._token_ids, agent4._net_repayment_reserve = buyer, batch_ids, 1
+        agent4.last_error = ""
+        assert agent4._retire_acquired(bad_balance, 2 * RAW, 0) == RAW
+        batch = captured.pop()
         assert batch.retired == RAW and len(batch.settlements) == 1
         assert batch.status == "authorization-pending" and batch.pending_phase == "authorization"
         assert batch.blocked_token_id == batch_ids[1] and batch.pending_transaction_hash
+        assert agent4._net_pending_hash == batch.pending_transaction_hash and agent4._net_repayment_reserve == 1
         assert credit.functions.issuanceOf(batch_ids[0]).call()[0] == 0
         assert credit.functions.issuanceOf(batch_ids[1]).call()[0] == RAW
         credit_ops.cancel_reduction(buyer.address, batch_ids[1])
+
+        def new_small_facility():
+            index = credit.functions.balanceOf(buyer.address).call()
+            chain.send(credit.functions.createCredit(buyer.address, 0, 2 * RAW, 2 * RAW, 0, 0, 0, 0))
+            token_id = credit.functions.tokenOfOwnerByIndex(buyer.address, index).call()
+            credit_ops.issue(buyer.address, token_id, 2 * RAW, RAW)
+            return token_id
+
+        first, second = new_small_facility(), new_small_facility()
+
+        class PlanUnavailable(NetCreditOps):
+            def plan_reduction(self, owner, token_id, requested, **kwargs):
+                if token_id == second:
+                    raise ConnectionError("simulated planning read failure")
+                return super().plan_reduction(owner, token_id, requested, **kwargs)
+
+        bad_balance.net_credit_ops = Capture(PlanUnavailable(chain, stack, credit_ops.execute))
+        agent5 = CreditHouseholdAgent(11)
+        agent5.proxy, agent5._token_ids, agent5._net_repayment_reserve = buyer, [first, second], 1
+        agent5.last_error = ""
+        assert agent5._retire_acquired(bad_balance, 2 * RAW, 0) == RAW
+        failed_plan = captured.pop()
+        assert failed_plan.status == "plan-unavailable" and failed_plan.blocked_token_id == second
+        assert failed_plan.retired == RAW and len(failed_plan.settlements) == 1
+        assert "planning read failure" in failed_plan.error and "plan-unavailable" in agent5.last_error
+        assert agent5._net_repayment_reserve == 1 and agent5._pending_repayment(bad_balance)
+        agent5.arrive_day, agent5.exited = 0, False
+        agent5.act(bad_balance, None, 0, 0, {})
+        assert agent5.last_action == "repay-recheck" and not agent5._net_repayment_interrupted
+        assert credit.functions.issuanceOf(first).call()[0] == 0
+        assert credit.functions.issuanceOf(second).call()[0] == RAW
+
+        first, second = new_small_facility(), new_small_facility()
+
+        class PreflightUnavailable(NetCreditOps):
+            def settle_plan(self, owner, plan, deadline):
+                if plan.token_id == second:
+                    raise ConnectionError("simulated authorization preflight failure")
+                return super().settle_plan(owner, plan, deadline)
+
+        deadline = anvil.w3.eth.get_block("latest")["timestamp"] + 3600
+        batch = PreflightUnavailable(chain, stack, credit_ops.execute).retire_household(
+            buyer.address, [first, second], 2 * RAW, deadline)
+        assert batch.status == "preflight-unavailable" and batch.blocked_token_id == second
+        assert batch.retired == RAW and len(batch.settlements) == 1
+        assert credit.functions.issuanceOf(first).call()[0] == 0
+        assert credit.functions.issuanceOf(second).call()[0] == RAW
+
+        first = new_small_facility()
+        bad_balance.net_credit_ops = Capture(credit_ops)
+        agent6 = CreditHouseholdAgent(12)
+        agent6.proxy, agent6._token_ids, agent6._net_repayment_reserve = buyer, [first], 1
+        agent6.last_error = ""
+        assert agent6._retire_acquired(bad_balance, 2 * RAW, 0) == RAW
+        partial = captured.pop()
+        assert partial.status == "partial" and partial.retired == RAW
+        assert "balance unavailable" in agent6.last_error and agent6._net_repayment_reserve == 1
+        assert agent6._pending_repayment(bad_balance)
+        assert credit.functions.issuanceOf(first).call()[0] == 0
         assert not chain.mismatches
