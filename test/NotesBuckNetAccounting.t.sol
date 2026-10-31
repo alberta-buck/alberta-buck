@@ -108,15 +108,26 @@ contract NotesBuckNetAccountingTest is Test {
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), hex"01");
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bool found;
+        bool foundNet;
+        uint256 deliveredScaled;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(buck) || logs[i].topics.length != 3
-                || logs[i].topics[0] != keccak256("Transfer(address,address,uint256)")) continue;
+            if (logs[i].emitter != address(buck) || logs[i].topics.length != 3) continue;
             if (address(uint160(uint256(logs[i].topics[1]))) != address(notes)
                 || address(uint160(uint256(logs[i].topics[2]))) != BOB) continue;
-            assertEq(abi.decode(logs[i].data, (uint256)), 100e6);
-            found = true;
+            if (logs[i].topics[0] == keccak256("Transfer(address,address,uint256)")) {
+                assertEq(abi.decode(logs[i].data, (uint256)), 100e6);
+                found = true;
+            } else if (logs[i].topics[0] == keccak256("NetValueTransfer(address,address,uint256,uint256)")) {
+                (uint256 nominal, uint256 scaled) = abi.decode(logs[i].data, (uint256, uint256));
+                assertEq(nominal, 100e6);
+                deliveredScaled = scaled;
+                foundNet = true;
+            }
         }
         assertTrue(found);
+        assertTrue(foundNet);
+        (uint256 bobHeld, uint256 bobUnspent) = buck.heldAndUnspentScaled(BOB);
+        assertEq(deliveredScaled, bobHeld + bobUnspent);
         assertTrue(notes.nullifiers(42));
         assertEq(notes.noteFaceSum(), 0);
         assertEq(buck.balanceOf(address(notes)), 0);

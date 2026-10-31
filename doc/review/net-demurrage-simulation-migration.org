@@ -18,9 +18,12 @@ Foundry creation-bytecode metadata. =make nix-venv-net-demurrage-smoke=
 uses those linkers in isolated Anvil and Tevm fixtures, issues credit, ages it
 and reduces it; the Python path compares against the demurrage reference.
 The cash-only fixtures include a neutral-reference dynamic K, separate insurer
-pools and nonzero premiums; they do not yet include a household, market or
-leveraged basket. An opt-in JavaScript diagnostic world uses the real identity
-registry and verifies its own saved wiring and captured code hashes on restore.
+pools and nonzero premiums. An opt-in JavaScript diagnostic world uses the real
+identity registry and verifies its own saved wiring and captured code hashes on
+restore. It can seed a real BUCK/USDC V3 market and reports an aged pool's
+actual net BUCK output from the token's =NetValueTransfer= event. Exact-output
+and minimum-net-output buys are refused until an on-chain net guard exists.
+There is not yet a migrated household economy or leveraged basket.
 The actual economy, interactive sandbox, production linking and full sandbox
 snapshot paths remain unmigrated.
 

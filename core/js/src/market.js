@@ -21,6 +21,7 @@
 import { encodeFunctionData, maxUint160, maxUint256, maxUint48, parseEventLogs } from "viem";
 
 import { MINT_MAX, identityApprove, onboard } from "./buckworld.js";
+import { netTransferValue } from "./net-world.js";
 import { deployUniversalRouter, encodePath, urSwapArgs } from "./router.js";
 import { Q96, fullRangeTicks, sqrtPriceX96, spotFromSqrtPriceX96 } from "./v3.js";
 
@@ -101,10 +102,20 @@ export async function buildMarket(world, artifacts, opts = {}) {
   const now = (await s.client.getBlock()).timestamp;
   await exec(credit, credit.abi, "setCreditIssuer", [me.address, true],
     "market:simlp:acceptInsurer");
-  await s.send(credit, "createCredit",
+  const creditReceipt = await s.send(credit, "createCredit",
     [simlp.address, 0, face, 0n, 0, 0, now, 0], { tag: "market:simlp:credit" });
-  await exec(buck, buck.abi, "mint", [MINT_MAX], "market:simlp:activate",
-    { gas: 3_000_000n });
+  let providerCreditId = null;
+  if (world.accounting === "net") {
+    const [created] = parseEventLogs({ abi: credit.abi, logs: creditReceipt.logs, eventName: "CreditCreated" });
+    if (!created) throw new Error("market provider credit event missing");
+    providerCreditId = created.args.tokenId;
+    const [, , , maxSpendable] = await s.call(world.net.quoter, "quoteIssue", [providerCreditId, face]);
+    if (maxSpendable < depth) throw new Error("market provider cannot issue enough BUCK to seed liquidity");
+    await exec(buck, buck.abi, "issue", [providerCreditId, face, maxSpendable], "market:simlp:issue",
+      { gas: 3_000_000n });
+  } else {
+    await exec(buck, buck.abi, "mint", [MINT_MAX], "market:simlp:activate", { gas: 3_000_000n });
+  }
   await s.send(usdc, "mint", [simlp.address, 2n * depth], { tag: "market:simlp:usdc" });
   const [t0, t1] = buck.address.toLowerCase() < usdc.address.toLowerCase()
     ? [buck.address, usdc.address] : [usdc.address, buck.address];
@@ -121,7 +132,7 @@ export async function buildMarket(world, artifacts, opts = {}) {
     poolInitCode: artifacts("UniswapV3Pool").bytecode,
   });
 
-  return { usdc, v3f, adapter, pool, simlp, weth, permit2, router, fee: POOL_FEE, operator };
+  return { usdc, v3f, adapter, pool, simlp, weth, permit2, router, fee: POOL_FEE, operator, providerCreditId };
 }
 
 // ABI-encode one call for SimLP.exec.
@@ -136,7 +147,9 @@ export function marketRecord(market) {
     a[k] = market[k].address;
   }
   const { account, ...operator } = market.operator;
-  return { addresses: a, fee: market.fee, operator };
+  const record = { addresses: a, fee: market.fee, operator };
+  if (market.providerCreditId !== null && market.providerCreditId !== undefined) record.providerCreditId = market.providerCreditId;
+  return record;
 }
 
 /** Rebuild a market's handles from marketRecord() over a restored chain;
@@ -147,7 +160,8 @@ export function attachMarket(session, artifacts, record) {
     pool: "UniswapV3Pool", simlp: "SimLP", weth: "WETH9", permit2: "Permit2",
     router: "UniversalRouter",
   };
-  const m = { fee: record.fee, operator: { ...record.operator, account: session.account } };
+  const m = { fee: record.fee, operator: { ...record.operator, account: session.account },
+    providerCreditId: record.providerCreditId ?? null };
   for (const [k, name] of Object.entries(names)) {
     m[k] = session.contractAt(artifacts(name).abi, record.addresses[k]);
   }
@@ -248,12 +262,15 @@ export async function openTrading(world, market, holder, opts = {}) {
 }
 
 // One single-pool swap through the router, the holder paying by Permit2 and
-// receiving directly; returns {paid, received}, read from the two transfers
-// between the holder and the pool (not from balances: a BUCK balance
-// shrinks by demurrage from block to block).
+// receiving directly. For BuckNet, the ERC-20 Transfer event is nominal;
+// NetValueTransfer records the full-value amount actually delivered.
 async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
   const s = world.session;
   const h = acctOf(holder);
+  const netBuckOutput = world.accounting === "net" && same(tokenOut.address, world.buck.address);
+  if (netBuckOutput && (o.exactOut || o.limit > 0n)) {
+    throw new Error("a net BUCK minimum or exact output needs an on-chain net-value guard");
+  }
   const path = o.exactOut
     ? encodePath([tokenOut.address, market.fee, tokenIn.address])
     : encodePath([tokenIn.address, market.fee, tokenOut.address]);
@@ -265,8 +282,21 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
     .filter((e) => same(e.address, token.address) && same(e.args.from, from)
                    && same(e.args.to, to))
     .reduce((sum, e) => sum + e.args.value, 0n);
-  return { paid: moved(tokenIn, h.address, market.pool.address),
-           received: moved(tokenOut, market.pool.address, h.address) };
+  const paid = moved(tokenIn, h.address, market.pool.address);
+  const received = moved(tokenOut, market.pool.address, h.address);
+  if (world.accounting !== "net") return { paid, received };
+  const scale = 10n ** 36n;
+  if (same(tokenOut.address, world.buck.address)) {
+    const net = netTransferValue(world.buck, rcpt, market.pool.address, h.address);
+    if ((received > 0n && !net.count) || net.nominal !== received) throw new Error("net BUCK transfer evidence mismatch");
+    return { paid, received: net.netScaled / scale, receivedScaled: net.netScaled, nominalReceived: received };
+  }
+  if (same(tokenIn.address, world.buck.address)) {
+    const net = netTransferValue(world.buck, rcpt, h.address, market.pool.address);
+    if ((paid > 0n && !net.count) || net.nominal !== paid) throw new Error("net BUCK transfer evidence mismatch");
+    return { paid: net.netScaled / scale, paidScaled: net.netScaled, nominalPaid: paid, received };
+  }
+  return { paid, received };
 }
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();

@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
@@ -177,12 +178,20 @@ contract BuckNetTest is Test {
         uint256 firstNet = buck.netBalanceOf(address(first));
         assertApproxEqAbs(firstNet, 32_749_230, 1);
 
+        (uint256 grossScaled, uint256 netScaled) = buck.accountBalancesScaled(address(first));
+        uint256 expected = Math.mulDiv(netScaled, 10e6 * Q, grossScaled);
+        vm.expectEmit(true, true, false, true, address(buck));
+        emit BuckNet.NetValueTransfer(address(first), address(second), 10e6, expected);
         first.transferToken(buck, address(second), 10e6);
         assertEq(buck.balanceOf(address(first)), 30e6);
         assertEq(buck.balanceOf(address(second)), 10e6);
         uint256 secondNet = buck.netBalanceOf(address(second));
         assertApproxEqAbs(secondNet, firstNet / 4, 1);
 
+        (grossScaled, netScaled) = buck.accountBalancesScaled(address(second));
+        expected = Math.mulDiv(netScaled, 10e6 * Q, grossScaled);
+        vm.expectEmit(true, true, false, true, address(buck));
+        emit BuckNet.NetValueTransfer(address(second), BOB, 10e6, expected);
         second.transferToken(buck, BOB, 10e6);
         assertEq(buck.balanceOf(address(second)), 0);
         assertEq(buck.balanceOf(BOB), secondNet);

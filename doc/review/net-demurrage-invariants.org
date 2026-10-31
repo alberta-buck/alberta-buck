@@ -62,7 +62,9 @@ A Carrying account currently reports its *gross nominal transferable units*
 from =balanceOf=, and =netBalanceOf= reports its full-value economic balance.
 Sending nominal =n= moves its proportional net value, rounded down in scaled
 units. A recipient can therefore receive less net value than =n=, although the
-ERC-20 =Transfer= event reports =n=. The fund's nominal gross includes gross
+ERC-20 =Transfer= event reports =n=. =NetValueTransfer= separately records
+the nominal amount and the actual full-value transfer component in =Q=-scaled
+raw units; a zero net delivery can be valid. The fund's nominal gross includes gross
 self-demurrage; it can exceed total issued supply even though its net value
 cannot. Summing Carrying =balanceOf= values is not a supply calculation.
 
@@ -115,7 +117,7 @@ depends on the token's authorization and reentrancy guard.
 | Event-free account decay | Correct checkpoint and mode; outstanding supply is unchanged during the interval. | Both held and unspent net parts use continuous =exp(-0.02*t/Y)=, rounded down at =Q= precision. An untouched 100 BUCK is about 98.019867 after one year, not exactly 98. The independently accruing NFT target remains linear. |
 | Fund checkpoint | Its prior net cash is no greater than issued supply. | With constant issued =P= and net cash =C=, ideal net cash becomes =P-(P-C)*exp(-t/T)=. Gross fees include the fund's own fees; self-payment is not a second net inflow. Lifetime flow counters retain whole units plus fractional remainders. |
 | =issue(id,coverage,spendable)= | Owner is verified and ordinary; fund is verified Carrying; selected NFT is owned, authorized, not mature, and claim book is current. Coverage, premium, insurer pool, funding reserve, K and numeric bounds pass. | That NFT's principal and total supply increase by =spendable + premium=; the account receives issued-unspent BUCK and pays the full-value premium to that facility's recorded insurer pool. Its existing issuance age is checkpointed before adding fresh zero-age principal. Failures roll back all changes. |
-| =transfer= / =transferFrom= | Verified parties and required identity fragments; allowance for =transferFrom=; sufficient sender balance in the mode's currently implemented units. | No NFT principal or total supply changes. A nominal Carrying transfer carries the proportional fee; an ordinary transfer debits full net value. Transfer/event and recipient semantics must be resolved as above before interoperability is claimed. |
+| =transfer= / =transferFrom= | Verified parties and required identity fragments; allowance for =transferFrom=; sufficient sender balance in the mode's currently implemented units. | No NFT principal or total supply changes. A nominal Carrying transfer carries the proportional fee; an ordinary transfer debits full net value. The ERC-20 event states nominal units and =NetValueTransfer= states the exact scaled net movement. Integrator and privacy consequences remain to be evaluated. |
 | Registry mode change | The binder acts before the registry freezes the flag; only the registry callback changes the ledger. A facility with outstanding principal cannot become Carrying; the fund and registered insurer pools cannot stop being Carrying. A separate neutral-service allowlist is not yet enforced. | The ledger checkpoints the account before changing representation and preserves its net held/unspent value, subject to fixed-point rounding. The owner-NFT scan is currently unbounded in that owner's NFT count. |
 
 Checkpoints must occur *before* changing the outstanding supply. =totalIssued=
@@ -206,7 +208,9 @@ The existing =Notes= contract is immutable to its BUCK token and its mint and
 spend amounts are note *face*. Its proof establishes the documented commitment,
 membership, identity and nullifier relationships; it does not prove the
 recipient's actual net BUCK balance delta. With the current Carrying ledger,
-notes of different ages in one pool share the pool's average carried fee.
+notes of different ages in one pool share the pool's average carried fee. The
+new token event records the actual net transfer, but the existing Notes proof
+and receipt do not bind or verify that event.
 =NotesBuckNetAccountingTest= demonstrates both outcomes with stub proof
 verifiers: it is an accounting test, not a cryptographic-security test.
 

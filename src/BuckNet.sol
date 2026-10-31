@@ -69,6 +69,9 @@ contract BuckNet is IERC20, IERC20Metadata {
     event ApproveReceipt(address indexed owner, address indexed spender, bytes32 receiptHash);
     event BuckTransferReceipt(address indexed from, address indexed to, uint256 amount,
                               bytes32 fromCipherHash, bytes32 toCipherHash);
+    /// @notice Nominal ERC-20 amount and full-value delivery, in fractional
+    ///         raw BUCK units scaled by 1e36. ERC-20 Transfer remains nominal.
+    event NetValueTransfer(address indexed from, address indexed to, uint256 nominal, uint256 netScaled);
     event InsurerPoolSet(address indexed insurer, address indexed pool);
     event FacilityIssued(address indexed owner, uint256 indexed tokenId, uint256 coverage,
                          uint256 principal, uint256 premium, address pool);

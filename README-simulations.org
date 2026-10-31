@@ -82,12 +82,13 @@ reference. A second case uses a dynamic K controller at a neutral reference,
 two insurer pools, a nonzero premium and the real funding reserve; both
 runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
-quote and issue. These are fixtures with no market, household, leveraged basket
-or insurer investment strategy; they are not a five-year simulation or
-deployment recipe. The same target builds the sandbox artifact bundle and
-checks that a browser-safe Tevm session can link and deploy the new stack from
-it. This is not yet a migrated interactive sandbox. Built artifacts and
-JavaScript dependencies are required.
+quote and issue. A JavaScript real-V3 diagnostic seeds BUCK/USDC, ages its
+Carrying pool and reports the buyer's actual net BUCK. These fixtures have no
+household economy, leveraged basket or insurer investment strategy; they are
+not a five-year simulation or deployment recipe. The same target builds the
+sandbox artifact bundle and checks that a browser-safe Tevm session can link
+and deploy the new stack from it. The interactive sandbox is not yet migrated.
+Built artifacts and JavaScript dependencies are required.
 
 The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,
 pre-issuance reserve and available credit for a particular NFT. It has contract

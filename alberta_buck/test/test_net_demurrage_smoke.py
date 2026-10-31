@@ -13,7 +13,7 @@ import pytest
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
-from buck_core import deploy_net_stack, NetCreditOps
+from buck_core import deploy_net_stack, net_transfer_value, NetCreditOps
 from buck_core.session import Expect
 
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
@@ -192,7 +192,10 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         relief, _, exceeds = ops.quote_reduction(debtor_id, reduction)
         assert 0 < relief < reduction * Q and not exceeds
         ops.authorize_reduction(debtor.address, debtor_id, reduction, 0, issued_at + YEAR + 3600)
-        ops.reduce_authorized(debtor.address, debtor_id, reduction)
+        reduced = ops.reduce_authorized(debtor.address, debtor_id, reduction)
+        refund = net_transfer_value(buck, reduced, pool.address, debtor.address)
+        assert refund.count == 1 and refund.nominal == VECTOR["nominal_refund"]
+        assert 0 < refund.net_scaled < refund.nominal * Q
         after = ops.facility(debtor_id)
         assert after.issued == issued - reduction
         assert after.premium_nominal == premium - VECTOR["nominal_refund"]

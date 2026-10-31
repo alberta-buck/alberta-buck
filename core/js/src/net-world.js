@@ -3,6 +3,18 @@
 // A deployed stack is not usable until the Carrying fund is bound and a basket
 // configured; premium-bearing facilities also need their insurer's own pool.
 import { linkArtifact } from "./artifacts.js";
+import { parseEventLogs } from "viem";
+
+/** Sum authenticated BuckNet delivery events for one transfer direction.
+ *  netScaled uses 1e36 fractional units per raw BUCK; a zero net value is
+ *  valid, so callers must check count rather than treating zero as missing. */
+export function netTransferValue(token, receipt, from, to) {
+  const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+  const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "NetValueTransfer" })
+    .filter((e) => same(e.address, token.address) && same(e.args.from, from) && same(e.args.to, to));
+  return events.reduce((out, e) => ({ count: out.count + 1, nominal: out.nominal + e.args.nominal,
+    netScaled: out.netScaled + e.args.netScaled }), { count: 0, nominal: 0n, netScaled: 0n });
+}
 
 export async function deployNetStack(session, artifacts, { registry, credit, controller, governance,
                                                          creditDeployer, registryGovernor } = {}) {

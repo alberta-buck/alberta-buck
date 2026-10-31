@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from buck_core.artifacts import load_artifact
+from web3.logs import DISCARD
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,27 @@ class IssueQuote:
     @property
     def reserve_shortfall(self) -> int:
         return max(0, self.reserve_required - self.owner_spendable)
+
+
+@dataclass(frozen=True)
+class NetTransferValue:
+    count: int
+    nominal: int
+    net_scaled: int
+
+
+def net_transfer_value(token, receipt, sender: str, recipient: str) -> NetTransferValue:
+    """Sum authentic transfer-delivery events for a direction and token.
+
+    A zero net amount can be real; ``count`` distinguishes it from no event.
+    ``net_scaled`` is in 1e36 fractional units per external raw BUCK unit.
+    """
+    events = token.events.NetValueTransfer().process_receipt(receipt, errors=DISCARD)
+    selected = [e for e in events if e["address"].lower() == token.address.lower()
+                and e["args"]["from"].lower() == sender.lower()
+                and e["args"]["to"].lower() == recipient.lower()]
+    return NetTransferValue(len(selected), sum(e["args"]["nominal"] for e in selected),
+                            sum(e["args"]["netScaled"] for e in selected))
 
 
 class NetCreditOps:

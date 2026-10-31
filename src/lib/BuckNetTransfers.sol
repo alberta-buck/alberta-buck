@@ -12,6 +12,8 @@ library BuckNetTransfers {
     using BuckLedger for BuckLedger.Ledger;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
+    /// @dev Full-value delivery in 1e36 fractional units per raw BUCK unit.
+    event NetValueTransfer(address indexed from, address indexed to, uint256 nominal, uint256 netScaled);
     event BuckTransferReceipt(address indexed from, address indexed to, uint256 amount,
                               bytes32 fromCipherHash, bytes32 toCipherHash);
     error BadAddress();
@@ -34,8 +36,9 @@ library BuckNetTransfers {
             if (!identity.isPublicIdentity(to)) revert UnauthorizedTransfer();
             fromHash = _identityHash(identity, from);
         }
-        ledger.transfer(from, to, amount, identity.isCarrying(from), identity.isCarrying(to));
+        uint256 net = ledger.transfer(from, to, amount, identity.isCarrying(from), identity.isCarrying(to));
         emit Transfer(from, to, amount);
+        emit NetValueTransfer(from, to, amount, net);
         emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
     }
 

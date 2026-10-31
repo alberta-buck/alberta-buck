@@ -82,9 +82,11 @@ to understand it, and the current proof system does not establish net value.
   ordering. An individually aged or guaranteed net entitlement would be a
   different product with its own funding and proof requirements.
 - [ ] Specify what a receipt claims: committed face, actual net delivered,
-  or both. Where net delivery is asserted, define an authenticated on-chain
-  observation/event and its units and rounding, and assess its privacy and
-  indexer implications. A nominal ERC-20 or Notes event alone is insufficient.
+  or both. =BuckNet.NetValueTransfer= now exposes the transfer's exact
+  =1e36=-scaled net raw units alongside nominal units. Define how a receipt
+  authenticates the matching transaction/log, what its rounding means and how
+  it survives reorganizations; assess the event's privacy and indexer
+  implications. A nominal ERC-20 or Notes event alone is insufficient.
 - [ ] Adapt =Notes= transfers and pool solvency checks to the selected API;
   protect approved amounts and identity-bound transfers, and test reverting
   transfer, a Carrying issuer, a Carrying recipient, mixed-age batches, all
