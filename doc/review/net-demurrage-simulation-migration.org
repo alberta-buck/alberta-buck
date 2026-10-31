@@ -106,6 +106,13 @@ also check =maturitiesPending= and handle transaction refusal. The cash-only
 diagnostic world deploys this quoter, but no five-year household economy or
 interactive sandbox has been migrated to it yet.
 
+The present =issue= ABI does not let the owner cap the premium. A MARKED
+asset can be revalued by its insurer between quotation and execution, and an
+inactive facility's terms can be changed, so the actual premium and resulting
+principal can exceed the household's estimate while the requested spendable
+amount remains unchanged. Add an owner-specified maximum premium, analogous
+to renewal, and verify atomic rollback before relying on issuance decisions.
+
 For the next household issuance integration, check each NFT's already
 activated capacity with =quoteIssue(id, 0)= before activating more coverage.
 The decision kernel now accepts activated, unissued facility capacity as a
@@ -133,6 +140,11 @@ the 50-year limit. The policy bounds new spendable issuance *and the newly
 issued premium principal* by the same shared limit. This uses the current
 account room conservatively; a prior wallet sale or premium transfer may
 change it. None of these properties promises that a later issue will succeed.
+The unactivated-coverage estimate remains optimistic if a facility is already
+over-issued at current K or its asset mark: part of newly activated coverage
+and its premium must first repair that facility's shortfall. The eventual
+per-NFT issuance planner must account for that repair, its funding and actual
+quote before using the aggregate estimate to submit a transaction.
 Quote additional coverage on the selected NFT, budget the full premium and a
 reserve buffer that can survive a block of demurrage, and compare the total
 cost of the reserve purchase with the projected benefit. A successful issue

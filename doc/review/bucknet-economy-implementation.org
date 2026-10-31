@@ -34,10 +34,18 @@ stand in for the existing leveraged basket without resolving the
 - [ ] Complete net issuance planning and execution. The isolated household
   state now reads activated capacity from same-block per-NFT quotes with
   shared account/supply bounds, marks unactivated coverage at its present
-  value and bounds new issuance including premium principal. Compare spending
-  existing wallet BUCK with retaining it and issuing instead, including the
+  value and bounds new issuance including premium principal. Per-NFT planning
+  must first price any K/asset-mark shortfall that additional coverage repairs;
+  the aggregate unactivated estimate is optimistic for an over-issued NFT.
+  Compare spending existing wallet BUCK with retaining it and issuing instead, including the
   lost alternative return, incremental relief, premium and funding reserve.
   Keep the two runtimes and actual transaction receipts consistent.
+- [ ] Bound the premium in =BuckNet.issue= at execution. An insurer can
+  change a MARKED asset's value after a quote, and an inactive NFT's terms can
+  also change, increasing premium principal while preserving the requested
+  spendable BUCK. Match renewal's owner-specified =maxPremium=, update every
+  contract/client caller and artifact, and test exact boundary, adverse
+  repricing, atomic rollback and size limits before using it in households.
 - [X] Exercise the existing adaptive household's discount buyback on real
   BuckNet/V3 fixtures in both languages, enforcing a net-output floor and
   counting actual selected-NFT settlements. Keep the remaining net lifecycle
