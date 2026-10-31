@@ -38,6 +38,7 @@ export const NEEDED = [
   "BuckNetMaturity",
   "BuckNetTransfers",
   "BuckNetQuoter",
+  "BuckNetSwapGuard",
   "JubileeFund",
   "WETH9",
   // eq world: the equity basket on the basket machine (the default)
@@ -66,6 +67,7 @@ export const SANDBOX = [
   "BuckNetMaturity",
   "BuckNetTransfers",
   "BuckNetQuoter",
+  "BuckNetSwapGuard",
   "JubileeFund",
   "BuckBasketEquity",
   "MockERC20",

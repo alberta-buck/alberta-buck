@@ -73,9 +73,12 @@ to understand it, and the current proof system does not establish net value.
   token orders, with ordinary and Carrying participants. Nominal pool reserves
   can stay stable while their net economic value falls. In particular check
   swaps from a Carrying pool directly to an ordinary recipient: a nominal
-  output or router minimum may differ from net received. Specify quotes,
-  slippage, potential wrappers and failure handling before claiming economic
-  or integrator compatibility.
+  output or router minimum may differ from net received. The experimental
+  =BuckNetSwapGuard= supports one canonical BUCK/settlement pool with an
+  atomic net minimum or net exact output; real-V3 tests cover both token orders,
+  refunds and refused limits. Complete LP mint/collect/burn, multi-hop,
+  zero-value, adverse-token, callback and independent security review before
+  claiming general integrator compatibility.
 - [ ] Treat Notes face as nominal for the selected Carrying-pool design and
   disclose the pool-average carried fee and estimated net outcome. Test
   mixed-age entry and exit, dust, donations, extreme ages, insolvency and

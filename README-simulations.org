@@ -83,11 +83,14 @@ two insurer pools, a nonzero premium and the real funding reserve; both
 runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
 quote and issue. A JavaScript real-V3 diagnostic seeds BUCK/USDC, ages its
-Carrying pool and reports the buyer's actual net BUCK. These fixtures have no
+Carrying pool and reports the buyer's actual net BUCK. The Python and JS market
+fixtures both buy back BUCK and explicitly retire a selected NFT; a purchase
+alone does not reduce that liability. These fixtures have no
 household economy, leveraged basket or insurer investment strategy; they are
 not a five-year simulation or deployment recipe. The same target builds the
 sandbox artifact bundle and checks that a browser-safe Tevm session can link
-and deploy the new stack from it. The interactive sandbox is not yet migrated.
+and deploy the new stack from it. Its single-pool guard enforces net output
+and settlement limits atomically; it is not a price oracle. The interactive sandbox is not yet migrated.
 Built artifacts and JavaScript dependencies are required.
 
 The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,

@@ -12,13 +12,17 @@ See [[file:doc/review/net-demurrage-simulation-migration.org][the migration chec
 The JavaScript core now has an *opt-in diagnostic*:
 =buildBuckWorld(session, artifacts, {identity, accounting: "net"})= builds a
 cash-only =BuckNet= world using the real identity registry, a separate Jubilee
-fund and the operator's own insurer pool. =make nix-venv-net-demurrage-smoke=
+fund and an operator-bound simulation insurer pool. The pool is a public
+=SimLP= fixture with unrestricted =exec=; it is not a production insurer.
+=make nix-venv-net-demurrage-smoke=
 tests issuance, reduction and a verified save/restore using the same artifact
 bundle delivered to the browser. A separate test seeds its BUCK/USDC V3 market
 and checks the actual net amount received from an aged Carrying pool. The empty
-basket is not bound to the K controller, and the interactive sandbox still opens the legacy
-world. The restore checks captured code hashes and wiring for consistency;
-the saved hashes are not an independent code audit.
+basket is not bound to the K controller, and the interactive sandbox still
+opens the legacy world. Net buys in the diagnostic use an atomic single-pool
+net-output guard; the guard is not a multi-hop router or a price oracle. The
+restore checks captured code hashes and wiring for consistency; the saved
+hashes are not an independent code audit.
 
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|

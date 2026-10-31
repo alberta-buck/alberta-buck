@@ -252,19 +252,19 @@ demurrage-test:
 # Deploy the experimental linked BuckNet + external Jubilee fund in fresh
 # Python/Anvil and JavaScript/Tevm fixtures, then exercise issuance, insurer
 # deposits, the funding gate and a one-year cash-only reduction. The dynamic
-# controller has a neutral reference; no market, household, leveraged basket
-# or insurer investment strategy is modeled.
+# controller has a neutral reference. The market test uses one real V3 pool;
+# no household economy, leveraged basket or insurer strategy is modeled.
 #   make nix-venv-net-demurrage-smoke
 .PHONY: net-demurrage-smoke
 net-demurrage-smoke: sim-build
 	@command -v anvil >/dev/null || { echo 'anvil missing; use make nix-venv-net-demurrage-smoke'; exit 1; }
-	@for name in BuckNet BuckNetMaturity BuckNetTransfers BuckNetQuoter JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory BuckBasketEquity SimLP; do \
+	@for name in BuckNet BuckNetMaturity BuckNetTransfers BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity MockERC20 SimLP; do \
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
 	done
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }
 	@test -f core/js/kernel/node/buck_identity_bg.wasm || { echo 'identity kernel missing; run make nix-core-build-wasm'; exit 1; }
 	node core/js/bin/bundle-artifacts.mjs sandbox
-	python -m pytest core/python/tests/test_artifacts.py alberta_buck/test/test_net_demurrage_smoke.py -q
+	python -m pytest core/python/tests/test_artifacts.py alberta_buck/test/test_net_demurrage_smoke.py alberta_buck/test/test_net_market.py -q
 	cd core/js && node --test test/artifacts.test.js test/net-demurrage.tevm.test.js test/net-sandbox-bundle.tevm.test.js test/net-buckworld.tevm.test.js test/net-market.tevm.test.js
 
 

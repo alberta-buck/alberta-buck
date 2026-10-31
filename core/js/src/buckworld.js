@@ -165,8 +165,9 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     await session.send(net.fund, "authorizeIdentityBinding", [reg.address, ...bindArgs], { tag: "world:fund.authorize" });
     await session.send(reg, "bindContract", [net.fund.address, ...bindArgs.slice(1), true, true],
       { tag: "world:fund.bind", account: operator.account });
-    // A real insurer pool is registered to its own binder and approves only
-    // BuckNet's refund path. Other insurers need their own pools.
+    // This simulation-only SimLP pool is registered to its own binder and
+    // approves BuckNet's refund path. SimLP has an unrestricted exec and is
+    // not a production insurer pool. Other insurers need their own pools.
     await session.send(buck, "setInsurerPool", [pool.address], { tag: "world:insurer.pool", account: operator.account });
     await session.send(pool, "exec", [buck.address, encodeFunctionData({ abi: buck.abi, functionName: "approve",
       args: [buck.address, (1n << 256n) - 1n] })], { tag: "world:insurer.refund-allowance" });

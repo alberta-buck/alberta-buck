@@ -20,9 +20,12 @@ and reduces it; the Python path compares against the demurrage reference.
 The cash-only fixtures include a neutral-reference dynamic K, separate insurer
 pools and nonzero premiums. An opt-in JavaScript diagnostic world uses the real
 identity registry and verifies its own saved wiring and captured code hashes on
-restore. It can seed a real BUCK/USDC V3 market and reports an aged pool's
-actual net BUCK output from the token's =NetValueTransfer= event. Exact-output
-and minimum-net-output buys are refused until an on-chain net guard exists.
+restore. Python/Anvil and JavaScript/Tevm can seed real BUCK/USDC V3 markets and report an aged pool's
+actual net BUCK output from the token's =NetValueTransfer= event. An
+experimental one-pool guard enforces minimum-net and exact-net buys atomically;
+it does not provide a multi-hop route or establish a fair market price.
+Both market fixtures verify that a purchase does not retire principal until
+the owner authorizes and settles a particular NFT.
 There is not yet a migrated household economy or leveraged basket.
 The actual economy, interactive sandbox, production linking and full sandbox
 snapshot paths remain unmigrated.

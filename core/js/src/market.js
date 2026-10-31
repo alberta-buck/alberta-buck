@@ -18,7 +18,7 @@
 // traded with, as the transfer gate requires of every private<->public
 // transfer -- and its Permit2 approvals.
 
-import { encodeFunctionData, maxUint160, maxUint256, maxUint48, parseEventLogs } from "viem";
+import { encodeFunctionData, keccak256, maxUint160, maxUint256, maxUint48, parseEventLogs } from "viem";
 
 import { MINT_MAX, identityApprove, onboard } from "./buckworld.js";
 import { netTransferValue } from "./net-world.js";
@@ -132,7 +132,13 @@ export async function buildMarket(world, artifacts, opts = {}) {
     poolInitCode: artifacts("UniswapV3Pool").bytecode,
   });
 
-  return { usdc, v3f, adapter, pool, simlp, weth, permit2, router, fee: POOL_FEE, operator, providerCreditId };
+  const guard = world.accounting === "net"
+    ? await s.deploy(artifacts("BuckNetSwapGuard"), [buck.address, usdc.address, v3f.address],
+      { name: "BuckNetSwapGuard", gas }) : null;
+  const guardCodeHash = guard ? keccak256(await s.client.getCode({ address: guard.address })) : null;
+
+  return { usdc, v3f, adapter, pool, simlp, weth, permit2, router, guard, guardCodeHash,
+    fee: POOL_FEE, operator, providerCreditId };
 }
 
 // ABI-encode one call for SimLP.exec.
@@ -146,8 +152,10 @@ export function marketRecord(market) {
   for (const k of ["usdc", "v3f", "adapter", "pool", "simlp", "weth", "permit2", "router"]) {
     a[k] = market[k].address;
   }
+  if (market.guard) a.guard = market.guard.address;
   const { account, ...operator } = market.operator;
   const record = { addresses: a, fee: market.fee, operator };
+  if (market.guard) { record.accounting = "net"; record.guardCodeHash = market.guardCodeHash; }
   if (market.providerCreditId !== null && market.providerCreditId !== undefined) record.providerCreditId = market.providerCreditId;
   return record;
 }
@@ -155,6 +163,11 @@ export function marketRecord(market) {
 /** Rebuild a market's handles from marketRecord() over a restored chain;
  *  the operator is the session's (deployer) account. */
 export function attachMarket(session, artifacts, record) {
+  if (record.accounting === "net" || record.addresses.guard) throw new Error("use attachNetMarket to verify a net market");
+  return attachMarketHandles(session, artifacts, record);
+}
+
+function attachMarketHandles(session, artifacts, record) {
   const names = {
     usdc: "MockERC20", v3f: "UniswapV3Factory", adapter: "UniswapV3BindingAdapter",
     pool: "UniswapV3Pool", simlp: "SimLP", weth: "WETH9", permit2: "Permit2",
@@ -165,6 +178,29 @@ export function attachMarket(session, artifacts, record) {
   for (const [k, name] of Object.entries(names)) {
     m[k] = session.contractAt(artifacts(name).abi, record.addresses[k]);
   }
+  m.guard = record.addresses.guard ? session.contractAt(artifacts("BuckNetSwapGuard").abi, record.addresses.guard) : null;
+  return m;
+}
+
+/** Verify a restored net market before approving its settlement guard. Saved
+ *  hashes detect inconsistent records; they are not an independent audit. */
+export async function attachNetMarket(session, artifacts, record, world) {
+  if (world.accounting !== "net" || record.accounting !== "net" || !record.addresses.guard || !record.guardCodeHash)
+    throw new Error("incomplete net market record");
+  const m = attachMarketHandles(session, artifacts, record);
+  const code = await session.client.getCode({ address: m.guard.address });
+  if (!code || code === "0x" || keccak256(code) !== record.guardCodeHash) throw new Error("net market guard code mismatch");
+  const matches = async (contract, name, expected, args = []) => {
+    if ((await session.call(contract, name, args)).toLowerCase() !== expected.toLowerCase())
+      throw new Error(`net market ${name} mismatch`);
+  };
+  await matches(m.guard, "buck", world.buck.address);
+  await matches(m.guard, "settlement", m.usdc.address);
+  await matches(m.guard, "factory", m.v3f.address);
+  await matches(m.v3f, "getPool", m.pool.address, [world.buck.address, m.usdc.address, m.fee]);
+  if (!await session.call(world.reg, "isVerified", [m.pool.address])
+      || !await session.call(world.reg, "isCarrying", [m.pool.address])) throw new Error("net market pool mode mismatch");
+  m.guardCodeHash = record.guardCodeHash;
   return m;
 }
 
@@ -181,6 +217,8 @@ export function marketContracts(market, artifacts) {
   for (const [k, [name, art]] of Object.entries(names)) {
     out[market[k].address] = { name, role: art, abi: artifacts(art).abi };
   }
+  if (market.guard) out[market.guard.address] = { name: "Net BUCK swap guard", role: "BuckNetSwapGuard",
+    abi: artifacts("BuckNetSwapGuard").abi };
   return out;
 }
 
@@ -213,6 +251,7 @@ const UNLIMITED_PERMIT2 = maxUint160 >> 1n;
  *  Permit2 approvals for the router. */
 export async function tradingOpen(world, market, address) {
   const s = world.session;
+  if (world.accounting === "net" && !market.guard) return false;
   const frag = await s.call(world.buck, "receiptFragment", [address, market.pool.address]);
   if (/^0x0*$/.test(frag)) return false;
   for (const token of [world.buck, market.usdc]) {
@@ -223,6 +262,8 @@ export async function tradingOpen(world, market, address) {
       [address, token.address, market.router.address]);
     if (amount < UNLIMITED_PERMIT2) return false;
   }
+  if (world.accounting === "net" && await s.call(market.usdc, "allowance", [address, market.guard.address]) < UNLIMITED_ERC20)
+    return false;
   return true;
 }
 
@@ -259,6 +300,13 @@ export async function openTrading(world, market, holder, opts = {}) {
         { account: h, tag: `trade:permit2-router:${sym}` });
     }
   }
+  if (world.accounting === "net") {
+    if (!market.guard) throw new Error("net market guard is missing");
+    if (await s.call(market.usdc, "allowance", [h.address, market.guard.address]) < UNLIMITED_ERC20) {
+      await s.send(market.usdc, "approve", [market.guard.address, maxUint256],
+        { account: h, tag: "trade:approve-net-guard" });
+    }
+  }
 }
 
 // One single-pool swap through the router, the holder paying by Permit2 and
@@ -268,8 +316,21 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
   const s = world.session;
   const h = acctOf(holder);
   const netBuckOutput = world.accounting === "net" && same(tokenOut.address, world.buck.address);
-  if (netBuckOutput && (o.exactOut || o.limit > 0n)) {
-    throw new Error("a net BUCK minimum or exact output needs an on-chain net-value guard");
+  if (netBuckOutput) {
+    if (!market.guard) throw new Error("net market guard is missing");
+    const name = o.exactOut ? "buyExactOutput" : "buyExactInput";
+    const args = [market.pool.address, o.amount, o.limit, h.address, 0n];
+    const rcpt = await s.send(market.guard, name, args, { account: h, gas: 2_000_000n, tag });
+    const purchases = parseEventLogs({ abi: market.guard.abi, logs: rcpt.logs, eventName: "NetBuckPurchased" })
+      .filter((e) => same(e.address, market.guard.address) && same(e.args.buyer, h.address)
+        && same(e.args.recipient, h.address) && same(e.args.pool, market.pool.address));
+    if (purchases.length !== 1) throw new Error("net BUCK purchase event missing or ambiguous");
+    const [purchase] = purchases;
+    const net = netTransferValue(world.buck, rcpt, market.pool.address, h.address);
+    if (!net.count || net.nominal !== purchase.args.nominal || net.netScaled !== purchase.args.netScaled)
+      throw new Error("net BUCK transfer evidence mismatch");
+    return { paid: purchase.args.paid, received: net.netScaled / (10n ** 36n),
+      receivedScaled: net.netScaled, nominalReceived: net.nominal };
   }
   const path = o.exactOut
     ? encodePath([tokenOut.address, market.fee, tokenIn.address])
@@ -286,11 +347,6 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
   const received = moved(tokenOut, market.pool.address, h.address);
   if (world.accounting !== "net") return { paid, received };
   const scale = 10n ** 36n;
-  if (same(tokenOut.address, world.buck.address)) {
-    const net = netTransferValue(world.buck, rcpt, market.pool.address, h.address);
-    if ((received > 0n && !net.count) || net.nominal !== received) throw new Error("net BUCK transfer evidence mismatch");
-    return { paid, received: net.netScaled / scale, receivedScaled: net.netScaled, nominalReceived: received };
-  }
   if (same(tokenIn.address, world.buck.address)) {
     const net = netTransferValue(world.buck, rcpt, h.address, market.pool.address);
     if ((paid > 0n && !net.count) || net.nominal !== paid) throw new Error("net BUCK transfer evidence mismatch");

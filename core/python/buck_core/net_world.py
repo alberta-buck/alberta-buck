@@ -84,6 +84,17 @@ class NetTransferValue:
     net_scaled: int
 
 
+@dataclass(frozen=True)
+class NetPurchase:
+    paid: int
+    nominal_received: int
+    net_scaled: int
+
+    @property
+    def received(self) -> int:
+        return self.net_scaled // 10**36
+
+
 def net_transfer_value(token, receipt, sender: str, recipient: str) -> NetTransferValue:
     """Sum authentic transfer-delivery events for a direction and token.
 
@@ -96,6 +107,47 @@ def net_transfer_value(token, receipt, sender: str, recipient: str) -> NetTransf
                 and e["args"]["to"].lower() == recipient.lower()]
     return NetTransferValue(len(selected), sum(e["args"]["nominal"] for e in selected),
                             sum(e["args"]["netScaled"] for e in selected))
+
+
+class NetMarketOps:
+    """Atomic full-value BUCK buys through a configured single-pool guard.
+
+    The payer must approve settlement to the guard; BUCK travels directly
+    from the Carrying pool to the recipient. ``execute`` may dispatch through
+    a simulation proxy. All limits and returned values use raw token units,
+    except the explicitly named ``net_scaled`` field.
+    """
+
+    def __init__(self, chain, token, guard, execute: Callable | None = None):
+        self.chain, self.token, self.guard = chain, token, guard
+        self.execute = execute or self._send
+
+    def _send(self, owner, contract, method, args):
+        return self.chain.send(getattr(contract.functions, method)(*args), sender=owner)
+
+    def _buy(self, owner, pool, method: str, args: list, recipient: str) -> NetPurchase:
+        receipt = self.execute(owner, self.guard, method, args)
+        buyer = getattr(owner, "address", owner)
+        events = self.guard.events.NetBuckPurchased().process_receipt(receipt, errors=DISCARD)
+        events = [e for e in events if e["address"].lower() == self.guard.address.lower()
+                  and e["args"]["buyer"].lower() == buyer.lower()
+                  and e["args"]["recipient"].lower() == recipient.lower()
+                  and e["args"]["pool"].lower() == pool.lower()]
+        if len(events) != 1:
+            raise ValueError("net BUCK purchase evidence missing or ambiguous")
+        event = events[0]["args"]
+        transfer = net_transfer_value(self.token, receipt, pool, recipient)
+        if not transfer.count or transfer.nominal != event["nominal"] or transfer.net_scaled != event["netScaled"]:
+            raise ValueError("net BUCK transfer evidence mismatch")
+        return NetPurchase(event["paid"], transfer.nominal, transfer.net_scaled)
+
+    def buy_exact_input(self, owner, pool: str, amount_in: int, minimum_net: int,
+                        recipient: str, price_limit: int = 0) -> NetPurchase:
+        return self._buy(owner, pool, "buyExactInput", [pool, amount_in, minimum_net, recipient, price_limit], recipient)
+
+    def buy_exact_output(self, owner, pool: str, desired_net: int, maximum_in: int,
+                         recipient: str, price_limit: int = 0) -> NetPurchase:
+        return self._buy(owner, pool, "buyExactOutput", [pool, desired_net, maximum_in, recipient, price_limit], recipient)
 
 
 class NetCreditOps:
