@@ -160,8 +160,6 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert cash_after_buy < cash_before and agent._net_repayment_reserve is not None
         assert agent.last_action == "repay-pending" and agent.unwound == 0
         assert agent._net_pending_reverted and agent._net_pending_hash
-        agent.act(d, None, 0, 0, {})
-        assert "explicit cancellation" in agent.last_error
         assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
         assert buck.functions.reductionAuthorization(buyer_id).call()[0] > 0
         agent._save_or_pay_down(d, state, cash_after_buy, counters)
@@ -350,9 +348,79 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent3.act(d, None, 0, 0, {})
         assert agent3.last_action == "authorize-reconciled"
         assert agent3._net_authorization_confirmed and agent3.unwound == before_unwound
-        agent3.cancel_pending_repayment(d)
+        cancellation_receipts = []
+
+        def lose_cancellation(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            if method == "authorizeReduction" and args[1] == 0:
+                cancellation_receipts.append(receipt)
+                raise TransactionReceiptPending(receipt["transactionHash"])
+            return receipt
+
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_cancellation)
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "cancel-pending" and agent3._net_cancel_hash
+        assert buck.functions.reductionAuthorization(third_id).call()[0] == 0
+        assert cancellation_receipts[0]["status"] == 1 and agent3.unwound == before_unwound
+        with pytest.raises(ValueError, match="cancellation outcome uncertain"):
+            agent3.cancel_pending_repayment(d)
+        cancellation_hash = agent3._net_cancel_hash
+        agent3._net_cancel_hash = "0x" + "11" * 32
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "cancel-pending" and agent3._net_cancel_uncertain
+        agent3._net_cancel_hash = cancellation_hash
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "repay-canceled" and not agent3._net_cancel_uncertain
+        assert agent3._net_pending_token is None
         assert buck.functions.reductionAuthorization(third_id).call()[0] == 0
         assert credit.functions.issuanceOf(third_id).call()[0] == before_principal
+
+        # A mined cancellation revert leaves the authorization in place. The
+        # next turn can retry it, but cannot count a repayment.
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_authorization)
+        assert agent3._retire_acquired(d, RAW, 0) == 0
+        agent3.act(d, None, 0, 0, {})
+        assert agent3._net_authorization_confirmed
+
+        def refuse_cancellation(owner, target, method, args):
+            if method == "authorizeReduction" and args[1] == 0:
+                data = target.encode_abi(method, args=[args[0] + 10**9, 0, 0, 0])
+                receipt = chain.send(actors[owner.lower()].functions.exec(target.address, bytes.fromhex(data[2:])),
+                                     expect=Expect.REVERT)
+                raise TransactionReverted(method, "simulated cancellation refusal", receipt)
+            return _exec(chain, actors[owner.lower()], target, method, args)
+
+        d.net_credit_ops = NetCreditOps(chain, stack, refuse_cancellation)
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "repay-pending" and not agent3._net_cancel_uncertain
+        assert buck.functions.reductionAuthorization(third_id).call()[0] == RAW
+
+        def lose_reverted_cancellation(owner, target, method, args):
+            if method == "authorizeReduction" and args[1] == 0:
+                data = target.encode_abi(method, args=[args[0] + 10**9, 0, 0, 0])
+                receipt = chain.send(actors[owner.lower()].functions.exec(target.address, bytes.fromhex(data[2:])),
+                                     expect=Expect.REVERT)
+                raise TransactionReceiptPending(receipt["transactionHash"])
+            return _exec(chain, actors[owner.lower()], target, method, args)
+
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_reverted_cancellation)
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "cancel-pending" and agent3._net_cancel_hash
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "cancel-reverted" and not agent3._net_cancel_uncertain
+        assert buck.functions.reductionAuthorization(third_id).call()[0] == RAW
+
+        def cancel_without_event(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            return dict(receipt) | {"logs": []} if method == "authorizeReduction" and args[1] == 0 else receipt
+
+        d.net_credit_ops = NetCreditOps(chain, stack, cancel_without_event)
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "cancel-pending" and agent3._net_cancel_hash
+        assert buck.functions.reductionAuthorization(third_id).call()[0] == 0
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "repay-canceled" and agent3._net_pending_token is None
+        assert agent3.unwound == before_unwound
 
         # A mined authorization revert did not authorize or settle anything;
         # reconcile that receipt before allowing another attempt.
@@ -403,6 +471,38 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert malformed_batch.pending_phase == "authorization" and malformed_batch.pending_transaction_hash is None
         assert malformed_batch.retired == 0 and credit.functions.issuanceOf(third_id).call()[0] == before_principal
         credit_ops.cancel_reduction(buyer.address, third_id)
+
+        # No cancellation hash means the household cannot safely tell a
+        # pending transaction from a completed cancellation after a restart.
+        agent7 = CreditHouseholdAgent(13)
+        agent7.proxy, agent7._token_ids, agent7._net_repayment_reserve = buyer, [third_id], 1
+        agent7.arrive_day, agent7.exited = 0, False
+        agent7.unwound = agent7.trade_loss = 0
+        agent7.last_error = agent7.last_action = ""
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_authorization)
+        assert agent7._retire_acquired(d, RAW, 0) == 0
+        agent7.act(d, None, 0, 0, {})
+        assert agent7._net_authorization_confirmed
+        cancel_attempts = []
+
+        def lose_cancellation_without_hash(owner, target, method, args):
+            receipt = _exec(chain, actors[owner.lower()], target, method, args)
+            if method == "authorizeReduction" and args[1] == 0:
+                cancel_attempts.append(receipt)
+                raise RuntimeError("transport lost both cancellation receipt and hash")
+            return receipt
+
+        d.net_credit_ops = NetCreditOps(chain, stack, lose_cancellation_without_hash)
+        agent7.act(d, None, 0, 0, {})
+        assert agent7.last_action == "cancel-pending" and agent7._net_cancel_uncertain and not agent7._net_cancel_hash
+        assert buck.functions.reductionAuthorization(third_id).call()[0] == 0
+        agent7.act(d, None, 0, 0, {})
+        assert agent7.last_action == "cancel-pending" and len(cancel_attempts) == 1
+        with pytest.raises(ValueError, match="known transaction hash"):
+            agent7.reconcile_pending_cancellation(d)
+        with pytest.raises(ValueError, match="cancellation outcome uncertain"):
+            agent7.cancel_pending_repayment(d)
+        assert credit.functions.issuanceOf(third_id).call()[0] == before_principal
 
         # If the second authorization's response is lost, the first NFT's
         # successfully settled principal and receipt still belong in the batch.

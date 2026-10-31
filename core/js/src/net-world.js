@@ -210,7 +210,7 @@ export function netCreditOps(session, stack, execute = null) {
     if (pending) throw new Error("reduction authorization already pending");
     let authorized;
     try { authorized = await ops.authorizeReduction(owner, plan.tokenId, plan.principal, plan.minimumReliefScaled, deadline); }
-    catch (err) { throw new ReductionPending(plan, err, { phase: "authorization", transactionHash: err.transactionHash ?? null,
+    catch (err) { throw new ReductionPending(plan, err, { phase: "authorization", transactionHash: err?.transactionHash ?? null,
       reverted: err instanceof TransactionReverted && err.receipt.status === "reverted" && Boolean(err.transactionHash) }); }
     if (authorized?.status !== "success") throw new ReductionPending(plan, null, { phase: "authorization",
       transactionHash: authorized?.transactionHash ?? null,
@@ -219,7 +219,7 @@ export function netCreditOps(session, stack, execute = null) {
     catch (err) { throw new ReductionPending(plan, err, { phase: "authorization", transactionHash: authorized.transactionHash ?? null }); }
     let receipt;
     try { receipt = await ops.reduceAuthorized(owner, plan.tokenId, plan.principal); }
-    catch (err) { throw new ReductionPending(plan, err, { transactionHash: err.transactionHash ?? null,
+    catch (err) { throw new ReductionPending(plan, err, { transactionHash: err?.transactionHash ?? null,
       reverted: err instanceof TransactionReverted && err.receipt.status === "reverted" && Boolean(err.transactionHash) }); }
     if (receipt?.status !== "success") throw new ReductionPending(plan, null,
       { transactionHash: receipt?.transactionHash ?? null,

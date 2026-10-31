@@ -454,7 +454,7 @@ class NetCreditOps:
             if not tx_hash:
                 try:
                     tx_hash = _txhex(authorized.get("transactionHash")) or None
-                except (AttributeError, TypeError):
+                except Exception:
                     pass
             raise ReductionPending(plan, tx_hash,
                                    isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0
@@ -473,7 +473,7 @@ class NetCreditOps:
             if not tx_hash:
                 try:
                     tx_hash = _txhex(receipt.get("transactionHash")) or None
-                except (AttributeError, TypeError):
+                except Exception:
                     pass
             raise ReductionPending(plan, tx_hash,
                                    isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0

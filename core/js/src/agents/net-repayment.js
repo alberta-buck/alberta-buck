@@ -2,6 +2,7 @@
 // household lifecycle, savings basket and sandbox integration remain separate.
 import { buyBuck, netPurchaseFromReceipt } from "../market.js";
 import { netCreditOps } from "../net-world.js";
+import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 
 /**
  * Prepare the existing household's cash/balance/read/pending/buy/retire operations.
@@ -34,6 +35,22 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
     }
     return receipt;
   };
+  const validateCancellation = async (account, id, expected) => {
+    const ids = await facilityIds(account);
+    await creditOps.household(address(account), ids); // reject foreign facilities
+    if (!ids.some((candidate) => BigInt(candidate) === BigInt(id))) throw new Error("foreign household facility");
+    const actual = await s.call(world.buck, "reductionAuthorization", [id]);
+    if (!expected[0] || actual.some((value, i) => value !== expected[i])) {
+      throw new Error("pending repayment changed; reconcile transaction before canceling");
+    }
+  };
+  const cancellationEvidence = async (account, id, receipt, hash) => {
+    const h = holder(account);
+    creditOps.authorizationFromReceipt(h.account ?? h,
+      { tokenId: id, principal: 0n, minimumReliefScaled: 0n }, 0n, receipt, hash);
+    const actual = await s.call(world.buck, "reductionAuthorization", [id]);
+    if (actual.some((value) => value !== 0n)) throw new Error("repayment cancellation changed; reconcile before proceeding");
+  };
   return {
     cash: (account) => s.call(market.usdc, "balanceOf", [address(account)]),
     balance: (account) => s.call(world.buck, "balanceOf", [address(account)]),
@@ -48,16 +65,23 @@ export function netHouseholdRepaymentOps(world, market, { facilityIds, ownerFor 
       return false;
     },
     authorization: async (_account, id) => (await s.call(world.buck, "reductionAuthorization", [id]))[0],
+    validateCancellation,
     cancel: async (account, id, expected) => {
-      const ids = await facilityIds(account), h = holder(account);
-      await creditOps.household(address(account), ids); // reject foreign facilities
-      if (!ids.some((candidate) => BigInt(candidate) === BigInt(id))) throw new Error("foreign household facility");
-      const actual = await s.call(world.buck, "reductionAuthorization", [id]);
-      if (!expected[0] || actual.some((value, i) => value !== expected[i])) {
-        throw new Error("pending repayment changed; reconcile transaction before canceling");
+      await validateCancellation(account, id, expected);
+      const h = holder(account), receipt = await creditOps.cancelReduction(h.account ?? h, id);
+      if (receipt?.status === "reverted" && receipt.transactionHash) {
+        throw new TransactionReverted("cancelReduction", "cancellation reverted", receipt);
       }
-      await creditOps.cancelReduction(h.account ?? h, id);
-      if ((await s.call(world.buck, "reductionAuthorization", [id]))[0]) throw new Error("repayment cancellation not confirmed");
+      if (receipt?.status !== "success" || !receipt.transactionHash) throw new TransactionReceiptPending(receipt?.transactionHash ?? null);
+      try { await cancellationEvidence(account, id, receipt, receipt.transactionHash); }
+      catch (err) { throw new TransactionReceiptPending(receipt.transactionHash, err); }
+      return receipt;
+    },
+    reconcileCancellation: async (account, id, hash) => {
+      const receipt = await receiptFor(hash);
+      if (receipt.status === "reverted") return { reverted: true };
+      await cancellationEvidence(account, id, receipt, hash);
+      return { reverted: false };
     },
     reconcileBuy: async (account, hash) => {
       const receipt = await receiptFor(hash);

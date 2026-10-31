@@ -106,6 +106,14 @@ interactive sandbox has been migrated to it yet.
 
 For the next household issuance integration, check each NFT's already
 activated capacity with =quoteIssue(id, 0)= before activating more coverage.
+The present decision kernel counts existing wallet BUCK and unactivated
+coverage but does not yet include activated, unissued facility capacity. That
+can suppress profitable refinancing or investment even when a zero-coverage
+issue would require no new premium. Add this as a separate policy input: it is
+new issuance eligible for future relief, not wallet BUCK already issued, and
+it does not require a second premium deposit. Per-NFT quotes share numerical
+account and total-supply limits, so do not sum their maxima without applying
+those common bounds; re-quote the selected facility before execution.
 Quote additional coverage on the selected NFT, budget the full premium and a
 reserve buffer that can survive a block of demurrage, and compare the total
 cost of the reserve purchase with the projected benefit. A successful issue
@@ -171,7 +179,7 @@ conservative fixed floor. A pending authorization stops further purchases and
 is visible for reconciliation or cancellation. The household also retains the
 selected NFT, principal, minimum relief and deadline when a settlement's outcome is uncertain:
 an absent authorization can mean the transaction succeeded, so it cannot be
-treated as a failure or canceled blindly. Explicit cancellation is permitted
+treated as a failure or canceled blindly. Cancellation after settlement is permitted
 only while the same authorization is still present and its settlement is known
 to have reverted; a matching authorization alone does not prove that a
 submitted settlement will not mine. A guarded purchase with an uncertain
@@ -191,7 +199,7 @@ the batch records that distinct phase and any earlier successful settlements.
 Reconciliation requires the exact authorization event and still-matching
 on-chain terms; it records no repayment. A known reverted authorization can
 be cleared only after verifying no authorization is currently present. If
-the authorization did succeed, it can be explicitly canceled after that
+the authorization did succeed, it can be canceled after that
 receipt and state are verified, subject to the single-dispatcher assumption
 below. A missing receipt or transaction hash leaves the stop in place. The
 household's daily turn now tries to reconcile a known purchase, authorization
@@ -199,12 +207,16 @@ or settlement receipt before performing any other action. A successful
 reconciliation consumes that turn, and failed lookups remain stopped. While
 stopped, income and external-debt payments are delayed; the existing monthly
 accounting catches up when the household resumes. A long unresolved outage
-therefore needs a separate treatment before it can model payment defaults. It does
-not automatically cancel a confirmed authorization or reverted settlement;
-that separate cancellation transaction can itself have an uncertain outcome.
+therefore needs a separate treatment before it can model payment defaults. In
+the single-dispatcher simulation, a confirmed authorization or reverted
+settlement is canceled on a later turn after its exact terms are rechecked.
+That cancellation has its own pending hash and must be reconciled against its
+matching event and current on-chain state before any retry. A mined revert can
+be retried; a missing hash remains stopped. An expired authorization with an
+unknown earlier outcome is not automatically assumed safe to cancel.
 The isolated tests assume a single dispatcher and immediate finality. Real
-finality/reorganization handling, automatic cancellation, hash provenance
-across restores and persistence have not yet been implemented.
+finality/reorganization handling, hash provenance across restores and
+persistence have not yet been implemented.
 
 The current Tevm snapshot saves chain state and time, *not transaction history
 or logs*. A transaction hash alone therefore cannot recover a receipt after a

@@ -67,6 +67,8 @@ export class CreditHouseholdAgent {
     this.netPendingPhase = null;
     this.netAuthorizationConfirmed = false;
     this.netRepaymentInterrupted = false; // require a later fresh read after a failed batch
+    this.netCancelUncertain = false;
+    this.netCancelHash = null;
     this.netTradeUncertain = false;
     this.netPendingBuyHash = null;
   }
@@ -151,6 +153,11 @@ export class CreditHouseholdAgent {
       this.lastAction = "buy-pending";
       return true;
     }
+    if (this.netCancelUncertain) {
+      this.lastError = "repayment cancellation outcome uncertain; reconcile receipt";
+      this.lastAction = "cancel-pending";
+      return true;
+    }
     if (this.netPendingToken !== null) {
       if (typeof world.households.authorization !== "function") throw new Error("BuckNet repayment reconciliation unavailable");
       const principal = await world.households.authorization(this.account, this.netPendingToken);
@@ -168,9 +175,9 @@ export class CreditHouseholdAgent {
 
   // Reconcile one known receipt before submitting more household work. The
   // recovered outcome consumes this turn. Unknown hashes, untracked
-  // authorizations and confirmed authorization/reverted settlement remain
-  // stopped for explicit recovery. The simulation assumes one dispatcher and
-  // immediate finality; a live client needs nonce serialization and finality.
+  // authorizations remain stopped. Confirmed authorization/reverted settlement
+  // can be canceled by this dispatcher. The simulation assumes one dispatcher
+  // and immediate finality; a live client needs nonce serialization and finality.
   async recoverPendingOperations(world) {
     if (world.accounting !== "net") return false;
     try {
@@ -179,13 +186,17 @@ export class CreditHouseholdAgent {
         else await this.pendingRepayment(world);
         return true;
       }
+      if (this.netCancelUncertain) {
+        if (this.netCancelHash) await this.reconcilePendingCancellation(world);
+        else await this.pendingRepayment(world);
+        return true;
+      }
       if (this.netPendingToken !== null) {
         const recover = (this.netPendingPhase === "authorization" && !this.netAuthorizationConfirmed)
           || (this.netPendingPhase === "settlement" && !this.netPendingReverted);
         if (recover && this.netPendingHash) await this.reconcilePendingRepayment(world);
         else if (this.netAuthorizationConfirmed || (this.netPendingPhase === "settlement" && this.netPendingReverted)) {
-          this.lastError = "repayment authorization requires explicit cancellation";
-          this.lastAction = "repay-pending";
+          await this.cancelPendingRepayment(world);
         } else await this.pendingRepayment(world);
         return true;
       }
@@ -195,7 +206,7 @@ export class CreditHouseholdAgent {
       }
       return await this.pendingRepayment(world);
     } catch (err) {
-      this.lastAction = this.netTradeUncertain ? "buy-pending" : "repay-pending";
+      this.lastAction = this.netTradeUncertain ? "buy-pending" : this.netCancelUncertain ? "cancel-pending" : "repay-pending";
       this.lastError = `transaction reconciliation: ${err}`.slice(0, 200);
       return true;
     }
@@ -220,19 +231,49 @@ export class CreditHouseholdAgent {
   }
 
   async cancelPendingRepayment(world) {
+    if (this.netCancelUncertain) throw new Error("cancellation outcome uncertain; reconcile receipt before canceling again");
     if (this.netPendingToken === null || !this.netPendingPrincipal || this.netPendingMinimum === null
-        || this.netPendingDeadline === null || typeof world.households.cancel !== "function") {
+        || this.netPendingDeadline === null || typeof world.households.cancel !== "function"
+        || typeof world.households.validateCancellation !== "function") {
       throw new Error("pending repayment needs transaction reconciliation");
     }
     const safe = (this.netPendingPhase === "settlement" && this.netPendingReverted)
       || (this.netPendingPhase === "authorization" && this.netAuthorizationConfirmed);
     if (!safe) throw new Error("settlement outcome uncertain; reconcile transaction before canceling");
-    await world.households.cancel(this.account, this.netPendingToken,
-      [this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline]);
+    const expected = [this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline];
+    await world.households.validateCancellation(this.account, this.netPendingToken, expected);
+    this.netCancelUncertain = true; this.netCancelHash = null;
+    try { await world.households.cancel(this.account, this.netPendingToken, expected); }
+    catch (err) {
+      if (err instanceof TransactionReverted && err.transactionHash && err.receipt.status === "reverted") {
+        this.netCancelUncertain = false;
+      } else if (err instanceof TransactionReceiptPending) this.netCancelHash = err.transactionHash ?? null;
+      throw err;
+    }
+    this.clearPendingRepayment();
+    this.lastError = ""; this.lastAction = "repay-canceled";
+  }
+
+  clearPendingRepayment() {
     this.netPendingToken = null; this.netPendingPrincipal = 0n;
     this.netPendingMinimum = null; this.netPendingDeadline = null;
     this.netPendingHash = null; this.netPendingReverted = false;
     this.netPendingPhase = null; this.netAuthorizationConfirmed = false;
+    this.netCancelUncertain = false; this.netCancelHash = null;
+  }
+
+  async reconcilePendingCancellation(world) {
+    if (!this.netCancelUncertain || !this.netCancelHash || this.netPendingToken === null
+        || typeof world.households.reconcileCancellation !== "function") {
+      throw new Error("cancellation needs a known transaction hash for reconciliation");
+    }
+    const r = await world.households.reconcileCancellation(this.account, this.netPendingToken, this.netCancelHash);
+    if (r.reverted) {
+      this.netCancelUncertain = false; this.netCancelHash = null;
+      this.lastError = ""; this.lastAction = "cancel-reverted";
+      return;
+    }
+    this.clearPendingRepayment();
     this.lastError = ""; this.lastAction = "repay-canceled";
   }
 
@@ -262,10 +303,7 @@ export class CreditHouseholdAgent {
       const r = await world.households.reconcileAuthorization(this.account, this.netPendingToken,
         this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline, this.netPendingHash);
       if (r.reverted) {
-        this.netPendingToken = null; this.netPendingPrincipal = 0n;
-        this.netPendingMinimum = null; this.netPendingDeadline = null;
-        this.netPendingHash = null; this.netPendingReverted = false;
-        this.netPendingPhase = null; this.netAuthorizationConfirmed = false;
+        this.clearPendingRepayment();
         this.lastError = ""; this.lastAction = "authorize-reverted";
       } else {
         this.netAuthorizationConfirmed = true;
@@ -282,10 +320,7 @@ export class CreditHouseholdAgent {
       return 0n;
     }
     this.unwound += r.principal;
-    this.netPendingToken = null; this.netPendingPrincipal = 0n;
-    this.netPendingMinimum = null; this.netPendingDeadline = null;
-    this.netPendingHash = null; this.netPendingReverted = false;
-    this.netPendingPhase = null; this.netAuthorizationConfirmed = false;
+    this.clearPendingRepayment();
     this.lastError = ""; this.lastAction = "repay-reconciled";
     return r.principal;
   }

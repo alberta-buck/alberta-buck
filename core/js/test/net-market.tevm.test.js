@@ -169,8 +169,6 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(agent.lastAction, "repay-pending");
     assert.equal(agent.unwound, 0n);
     assert.ok(agent.netPendingReverted && agent.netPendingHash);
-    await agent.act(hworld, 0, 0);
-    assert.match(agent.lastError, /explicit cancellation/);
     assert.equal((await creditOps.facility(buyerId)).issued, remaining);
     assert.ok((await s.call(world.buck, "reductionAuthorization", [buyerId]))[0] > 0n);
     await agent.saveOrPayDown(hworld, state, cashAfterBuy);
@@ -338,9 +336,87 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(agent3.lastAction, "authorize-reconciled");
     assert.equal(agent3.netAuthorizationConfirmed, true);
     assert.equal(agent3.unwound, beforeUnwound);
-    await agent3.cancelPendingRepayment(authWorld);
+    const cancellationReceipts = [];
+    const lostCancelOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      if (name === "authorizeReduction" && args[1] === 0n) {
+        cancellationReceipts.push(receipt);
+        throw new TransactionReceiptPending(receipt.transactionHash);
+      }
+      return receipt;
+    });
+    const lostCancelWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: lostCancelOps }) };
+    await agent3.act(lostCancelWorld, 0, 0);
+    assert.equal(agent3.lastAction, "cancel-pending");
+    assert.ok(agent3.netCancelHash && agent3.netCancelUncertain);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 0n);
+    assert.equal(cancellationReceipts[0].status, "success");
+    assert.equal(agent3.unwound, beforeUnwound);
+    await assert.rejects(agent3.cancelPendingRepayment(lostCancelWorld), /cancellation outcome uncertain/);
+    const cancellationHash = agent3.netCancelHash;
+    agent3.netCancelHash = `0x${"11".repeat(32)}`;
+    await agent3.act(lostCancelWorld, 0, 0);
+    assert.equal(agent3.lastAction, "cancel-pending");
+    assert.equal(agent3.netCancelUncertain, true);
+    agent3.netCancelHash = cancellationHash;
+    await agent3.act(lostCancelWorld, 0, 0);
+    assert.equal(agent3.lastAction, "repay-canceled");
+    assert.equal(agent3.netCancelUncertain, false);
+    assert.equal(agent3.netPendingToken, null);
     assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 0n);
     assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
+
+    // A mined cancellation revert retains the authorization and may be
+    // retried on the next turn without counting repayment.
+    assert.equal(await agent3.retireAcquired(authWorld, 1_000_000n, 0n), 0n);
+    await agent3.act(authWorld, 0, 0);
+    assert.equal(agent3.netAuthorizationConfirmed, true);
+    const refuseCancelOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      if (name === "authorizeReduction" && args[1] === 0n) {
+        const receipt = await s.send(target, name, [args[0] + 1_000_000_000n, 0n, 0n, 0n],
+          { account: owner, expect: "revert" });
+        throw new TransactionReverted(name, "simulated cancellation refusal", receipt);
+      }
+      return s.send(target, name, args, { account: owner });
+    });
+    const refusedCancelWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: refuseCancelOps }) };
+    await agent3.act(refusedCancelWorld, 0, 0);
+    assert.equal(agent3.lastAction, "repay-pending");
+    assert.equal(agent3.netCancelUncertain, false);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 1_000_000n);
+    const lostRevertedCancelOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      if (name === "authorizeReduction" && args[1] === 0n) {
+        const receipt = await s.send(target, name, [args[0] + 1_000_000_000n, 0n, 0n, 0n],
+          { account: owner, expect: "revert" });
+        throw new TransactionReceiptPending(receipt.transactionHash);
+      }
+      return s.send(target, name, args, { account: owner });
+    });
+    const lostRevertedWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: lostRevertedCancelOps }) };
+    await agent3.act(lostRevertedWorld, 0, 0);
+    assert.equal(agent3.lastAction, "cancel-pending");
+    assert.ok(agent3.netCancelHash);
+    await agent3.act(lostRevertedWorld, 0, 0);
+    assert.equal(agent3.lastAction, "cancel-reverted");
+    assert.equal(agent3.netCancelUncertain, false);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 1_000_000n);
+    const cancelWithoutEventOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      return name === "authorizeReduction" && args[1] === 0n ? { ...receipt, logs: [] } : receipt;
+    });
+    const missingCancelWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: cancelWithoutEventOps }) };
+    await agent3.act(missingCancelWorld, 0, 0);
+    assert.equal(agent3.lastAction, "cancel-pending");
+    assert.ok(agent3.netCancelHash);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 0n);
+    await agent3.act(missingCancelWorld, 0, 0);
+    assert.equal(agent3.lastAction, "repay-canceled");
+    assert.equal(agent3.netPendingToken, null);
+    assert.equal(agent3.unwound, beforeUnwound);
 
     // A confirmed authorization revert also leaves principal untouched; its
     // receipt must be reconciled before the household tries again.
@@ -394,6 +470,36 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(malformedBatch.retired, 0n);
     assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
     await creditOps.cancelReduction(buyer.account, lostBuyId);
+
+    // A cancellation with no surviving hash cannot be retried safely even
+    // when the on-chain authorization has already disappeared.
+    const agent7 = new CreditHouseholdAgent({ account: buyer.account });
+    agent7.netRepaymentReserve = 1n;
+    assert.equal(await agent7.retireAcquired(authWorld, 1_000_000n, 0n), 0n);
+    await agent7.act(authWorld, 0, 0);
+    assert.equal(agent7.netAuthorizationConfirmed, true);
+    const cancelAttempts = [];
+    const noHashCancelOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
+      const receipt = await s.send(target, name, args, { account: owner });
+      if (name === "authorizeReduction" && args[1] === 0n) {
+        cancelAttempts.push(receipt);
+        throw new Error("transport lost both cancellation receipt and hash");
+      }
+      return receipt;
+    });
+    const noHashCancelWorld = { accounting: "net", households: netHouseholdRepaymentOps(world, market,
+      { facilityIds: () => [lostBuyId], creditOps: noHashCancelOps }) };
+    await agent7.act(noHashCancelWorld, 0, 0);
+    assert.equal(agent7.lastAction, "cancel-pending");
+    assert.equal(agent7.netCancelUncertain, true);
+    assert.equal(agent7.netCancelHash, null);
+    assert.equal((await s.call(world.buck, "reductionAuthorization", [lostBuyId]))[0], 0n);
+    await agent7.act(noHashCancelWorld, 0, 0);
+    assert.equal(agent7.lastAction, "cancel-pending");
+    assert.equal(cancelAttempts.length, 1);
+    await assert.rejects(agent7.reconcilePendingCancellation(noHashCancelWorld), /known transaction hash/);
+    await assert.rejects(agent7.cancelPendingRepayment(noHashCancelWorld), /cancellation outcome uncertain/);
+    assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);
 
     // Preserve the first actual settlement if the second NFT's authorization
     // response is lost in the middle of a multi-facility batch.

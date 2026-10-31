@@ -35,12 +35,13 @@ stand in for the existing leveraged basket without resolving the
   BuckNet/V3 fixtures in both languages, enforcing a net-output floor and
   counting actual selected-NFT settlements. Keep the remaining net lifecycle
   paths explicitly disabled until their own integration is complete.
-- [ ] Implement automatic handling of pending and expired reduction
-  authorizations, reconciling uncertain transaction outcomes before retrying
-  or canceling and preserving already-acquired BUCK and settlement counters.
-  Reconcile uncertain purchases as well. Persist the pending transaction and
-  buyback reserve through snapshots, and decide how an unfinished buyback is
-  invested or held when the market subsequently turns to a premium.
+- [ ] Complete handling of pending and expired reduction authorizations.
+  The single-dispatcher diagnostic now reconciles known purchases, settlement
+  attempts and cancellations, and cancels confirmed failed plans; unknown
+  outcomes remain stopped. Specify expiry, transaction finality and owner
+  serialization for live clients. Persist the pending transaction evidence
+  and buyback reserve through snapshots, and decide how an unfinished buyback
+  is invested or held when the market subsequently turns to a premium.
 - [ ] Revisit the adaptive policy's heterogeneity: decision phases and many
   parameters are randomized, but its paydown starts at any positive discount
   and does not use the sampled =retire_disc=. If adding a personal deadband,
@@ -85,4 +86,5 @@ stand in for the existing leveraged basket without resolving the
 | 2026-10-31 | Household outcome evidence | Submitted hashes and mined-revert evidence flow to the isolated buyback action. It permits explicit cancellation only for an exactly matching authorization after a known mined revert. Explicit reconciliation authenticates a saved transaction receipt and matching purchase or facility event, records successful repayment once and retains acquired BUCK for a later attempt. The focused latest Python and JavaScript receipt tests passed 12 and one case respectively; the combined net smoke at the preceding checkpoint passed 17 Python and nine JS cases. Automatic scheduling, finality and persistence remain open. | =087b664d= |
 | 2026-10-31 | Authorization outcome evidence | Credit operations distinguish an interrupted authorization from interrupted settlement, verify its receipt and exact terms, and preserve earlier batch settlements. A household cannot count authorization as paydown or blindly retry it; no-hash cases remain stopped. Anvil and Tevm market tests cover successful and reverted authorization, tampered terms, missing hash and partial-batch recovery. =make nix-venv-net-demurrage-smoke=: 17 Python and nine JS tests passed. Cancellation still assumes a single dispatcher; automatic scheduling, cancellation transaction recovery and persistence remain open. | =dde2667c= |
 | 2026-10-31 | Daily receipt recovery | Before starting another account action, a simulated household attempts to reconcile a known purchase, authorization or settlement receipt. A recovered outcome consumes the turn; a missing receipt, unknown hash or untracked authorization remains stopped. Known cancellation cases remain explicit. The focused Anvil and Tevm fixtures passed three Python and one JS market case, including these turns without issuing or trading again; ten legacy Python household regressions also passed. Tevm snapshots discard receipts, so save/restore of unresolved actions is still blocked on an explicit design. | =940f972b= |
-| 2026-10-31 | Partial batch accounting | Earlier successful facility settlements survive a later planning, preflight or post-settlement balance read failure. An interrupted household holds its reserve and waits to recheck state before additional spending. Anvil and Tevm fixtures cover these conditions and a pending later authorization. =make nix-venv-net-demurrage-smoke=: 17 Python and nine JS tests passed. Automatic cancellation and recovery of a cancellation transaction remain open. | This commit |
+| 2026-10-31 | Partial batch accounting | Earlier successful facility settlements survive a later planning, preflight or post-settlement balance read failure. An interrupted household holds its reserve and waits to recheck state before additional spending. Anvil and Tevm fixtures cover these conditions and a pending later authorization. =make nix-venv-net-demurrage-smoke=: 17 Python and nine JS tests passed. Automatic cancellation and recovery of a cancellation transaction remained open at that checkpoint. | =a9921a79= |
+| 2026-10-31 | Cancellation recovery | A single simulated dispatcher cancels an exactly matched confirmed authorization or reverted settlement, and authenticates the cancellation event. A lost cancellation response retains its hash and blocks retries until its receipt is reconciled; a missing hash stays stopped. The Anvil and Tevm fixtures cover successful, reverted, missing-evidence and no-hash outcomes. =make nix-venv-net-demurrage-smoke=: 17 Python and nine JS tests passed. Persistence, chain finality and safe multi-client serialization remain open. | This commit |

@@ -102,7 +102,10 @@ remain recorded if a later authorization or planning read is interrupted. A
 failed post-settlement balance read conservatively retains the reserve.
 Automatic recovery
 of known receipts runs at the start of a household's daily turn and consumes
-that turn. Cancellation, finality handling and snapshot persistence remain open.
+that turn. The simulated single dispatcher cancels a verified orphaned
+authorization or one whose settlement reverted, and reconciles an uncertain
+cancellation before taking further action. Finality handling and snapshot
+persistence remain open.
 Tevm snapshots do not retain transaction receipts, so a saved hash alone is
 not sufficient to resume an unresolved action after restore.
 The target also builds the sandbox artifact bundle and checks that a browser-safe Tevm session can link
