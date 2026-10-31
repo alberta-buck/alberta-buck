@@ -157,6 +157,8 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       (await s.client.getBlock()).timestamp + 3600n);
     await agent.saveOrPayDown(hworld, state, beforeHousehold);
     assert.equal(agent.lastAction, "repay-pending");
+    await agent.act(hworld, 0, 0);
+    assert.equal(agent.lastAction, "repay-pending"); // untracked authorization blocks the whole turn
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), beforeHousehold);
     assert.equal((await creditOps.facility(buyerId)).issued, remaining);
     await creditOps.cancelReduction(buyer.account, buyerId);
@@ -167,6 +169,8 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(agent.lastAction, "repay-pending");
     assert.equal(agent.unwound, 0n);
     assert.ok(agent.netPendingReverted && agent.netPendingHash);
+    await agent.act(hworld, 0, 0);
+    assert.match(agent.lastError, /explicit cancellation/);
     assert.equal((await creditOps.facility(buyerId)).issued, remaining);
     assert.ok((await s.call(world.buck, "reductionAuthorization", [buyerId]))[0] > 0n);
     await agent.saveOrPayDown(hworld, state, cashAfterBuy);
@@ -238,8 +242,17 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await assert.rejects(agent2.cancelPendingRepayment(lostWorld), /reconcile/);
     assert.throws(() => lostOps.reductionFromReceipt(buyer.account, lostId, 1_000_000n, receipts[0],
       `0x${"11".repeat(32)}`), /hash mismatch/);
-    assert.equal(await agent2.reconcilePendingRepayment(lostWorld), 1_000_000n);
+    const realHash = agent2.netPendingHash;
+    agent2.netPendingHash = `0x${"11".repeat(32)}`;
+    await agent2.act(lostWorld, 0, 0);
+    assert.equal(agent2.lastAction, "repay-pending");
+    assert.equal(agent2.unwound, 0n);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLost);
+    agent2.netPendingHash = realHash;
+    await agent2.act(lostWorld, 0, 0);
+    assert.equal(agent2.lastAction, "repay-reconciled");
     assert.equal(agent2.unwound, 1_000_000n);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLost);
     await assert.rejects(agent2.reconcilePendingRepayment(lostWorld), /known transaction hash/);
 
     const lostBuyId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
@@ -279,9 +292,11 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       assert.equal(err.transactionHash, agent3.netPendingBuyHash);
       return true;
     });
-    assert.ok(await agent3.reconcilePendingBuy(lostBuyWorld) > 0n);
+    await agent3.act(lostBuyWorld, 0, 0);
+    assert.equal(agent3.lastAction, "buy-reconciled");
     assert.equal(agent3.netTradeUncertain, false);
     assert.notEqual(agent3.netRepaymentReserve, null);
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLostBuy);
     await assert.rejects(agent3.reconcilePendingBuy(lostBuyWorld), /known transaction hash/);
     const [resumeLiquidity, resumeSlot] = await Promise.all([s.call(market.pool, "liquidity"), s.call(market.pool, "slot0")]);
     const d0 = resumeLiquidity * Q96 / resumeSlot[0], d1 = resumeLiquidity * resumeSlot[0] / Q96;
@@ -319,7 +334,8 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await creditOps.authorizeReduction(buyer.account, lostBuyId, auth[0], auth[1] + 1n, auth[2]);
     await assert.rejects(agent3.reconcilePendingRepayment(authWorld), /changed/);
     await creditOps.authorizeReduction(buyer.account, lostBuyId, ...auth);
-    assert.equal(await agent3.reconcilePendingRepayment(authWorld), 0n);
+    await agent3.act(authWorld, 0, 0);
+    assert.equal(agent3.lastAction, "authorize-reconciled");
     assert.equal(agent3.netAuthorizationConfirmed, true);
     assert.equal(agent3.unwound, beforeUnwound);
     await agent3.cancelPendingRepayment(authWorld);
@@ -341,7 +357,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(agent3.netPendingPhase, "authorization");
     assert.equal(agent3.netPendingReverted, true);
     await assert.rejects(agent3.cancelPendingRepayment(refusedAuthWorld), /outcome uncertain/);
-    assert.equal(await agent3.reconcilePendingRepayment(refusedAuthWorld), 0n);
+    await agent3.act(refusedAuthWorld, 0, 0);
     assert.equal(agent3.netPendingToken, null);
     assert.equal(agent3.lastAction, "authorize-reverted");
     assert.equal(agent3.unwound, beforeUnwound);
@@ -358,6 +374,9 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(agent3.netPendingPhase, "authorization");
     assert.equal(agent3.netPendingHash, null);
     assert.equal(await agent3.pendingRepayment(noHashWorld), true);
+    await agent3.act(noHashWorld, 0, 0);
+    assert.equal(agent3.lastAction, "repay-pending");
+    assert.equal(agent3.netPendingPhase, "authorization");
     await assert.rejects(agent3.reconcilePendingRepayment(noHashWorld), /known transaction hash/);
     await assert.rejects(agent3.cancelPendingRepayment(noHashWorld), /outcome uncertain/);
     assert.equal((await creditOps.facility(lostBuyId)).issued, beforePrincipal);

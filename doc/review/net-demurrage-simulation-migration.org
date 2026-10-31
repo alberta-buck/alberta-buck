@@ -153,8 +153,8 @@ submitted settlement will not mine. A guarded purchase with an uncertain
 outcome also stops subsequent purchases until its receipt is reconciled. The JavaScript
 =netHouseholdRepaymentOps= provides just these operations for a registered
 holder with the market handshake and settlement allowance already in place;
-proxy simulations must supply their own dispatch. Automatic
-retry/reconciliation, persistence of this reserve across snapshots and its
+proxy simulations must supply their own dispatch. Automatic retry and
+persistence of this reserve across snapshots and its
 handling when prices move to a premium are still required. Pending NFT and
 principal, completed events and any transaction identifier must also survive
 snapshots for reliable recovery. Submitted hashes and known-revert status now
@@ -168,9 +168,24 @@ on-chain terms; it records no repayment. A known reverted authorization can
 be cleared only after verifying no authorization is currently present. If
 the authorization did succeed, it can be explicitly canceled after that
 receipt and state are verified, subject to the single-dispatcher assumption
-below. A missing receipt or transaction hash leaves the stop in place. Automatic
-scheduling, finality/reorganization handling, hash provenance across restores
-and persistence have not yet been implemented.
+below. A missing receipt or transaction hash leaves the stop in place. The
+household's daily turn now tries to reconcile a known purchase, authorization
+or settlement receipt before performing any other action. A successful
+reconciliation consumes that turn, and failed lookups remain stopped. While
+stopped, income and external-debt payments are delayed; the existing monthly
+accounting catches up when the household resumes. A long unresolved outage
+therefore needs a separate treatment before it can model payment defaults. It does
+not automatically cancel a confirmed authorization or reverted settlement;
+that separate cancellation transaction can itself have an uncertain outcome.
+The isolated tests assume a single dispatcher and immediate finality. Real
+finality/reorganization handling, automatic cancellation, hash provenance
+across restores and persistence have not yet been implemented.
+
+The current Tevm snapshot saves chain state and time, *not transaction history
+or logs*. A transaction hash alone therefore cannot recover a receipt after a
+restore. Before enabling net-household saves, either retain and authenticate the
+necessary receipts and chain provenance or refuse a snapshot while an outcome
+is unresolved. Never restore an uncertain action as though it had failed.
 
 The diagnostic assumes a single transaction dispatcher for each household.
 With concurrent clients, another settlement may be submitted under the same

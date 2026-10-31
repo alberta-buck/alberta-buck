@@ -164,6 +164,37 @@ export class CreditHouseholdAgent {
     return Boolean(pending);
   }
 
+  // Reconcile one known receipt before submitting more household work. The
+  // recovered outcome consumes this turn. Unknown hashes, untracked
+  // authorizations and confirmed authorization/reverted settlement remain
+  // stopped for explicit recovery. The simulation assumes one dispatcher and
+  // immediate finality; a live client needs nonce serialization and finality.
+  async recoverPendingOperations(world) {
+    if (world.accounting !== "net") return false;
+    try {
+      if (this.netTradeUncertain) {
+        if (this.netPendingBuyHash) await this.reconcilePendingBuy(world);
+        else await this.pendingRepayment(world);
+        return true;
+      }
+      if (this.netPendingToken !== null) {
+        const recover = (this.netPendingPhase === "authorization" && !this.netAuthorizationConfirmed)
+          || (this.netPendingPhase === "settlement" && !this.netPendingReverted);
+        if (recover && this.netPendingHash) await this.reconcilePendingRepayment(world);
+        else if (this.netAuthorizationConfirmed || (this.netPendingPhase === "settlement" && this.netPendingReverted)) {
+          this.lastError = "repayment authorization requires explicit cancellation";
+          this.lastAction = "repay-pending";
+        } else await this.pendingRepayment(world);
+        return true;
+      }
+      return await this.pendingRepayment(world);
+    } catch (err) {
+      this.lastAction = this.netTradeUncertain ? "buy-pending" : "repay-pending";
+      this.lastError = `transaction reconciliation: ${err}`.slice(0, 200);
+      return true;
+    }
+  }
+
   async buyForRepayment(world, spend, minNet) {
     if (world.accounting !== "net") return world.households.buy(this.account, spend, { minNet });
     if (typeof world.households.balance !== "function") throw new Error("BuckNet wallet balance unavailable");
@@ -526,6 +557,7 @@ export class CreditHouseholdAgent {
 
   async act(world, day, tick) {
     if (tick || day < this.arrive_day || this.exited) return;
+    if (await this.recoverPendingOperations(world)) return;
     if (!this.started) {
       const cash = units((this.investor ? this.p.invest_cash_k : this.p.cash_k) * 1000);
       await world.fiatIn(this.account, cash, { tag: "household:starting-cash" });

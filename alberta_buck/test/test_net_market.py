@@ -113,6 +113,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent.max_impact_bp = 9000
         agent.unwound = agent.trade_loss = 0
         agent.last_error = agent.last_action = ""
+        agent.arrive_day, agent.exited = 0, False
         d = SimpleNamespace(buck=buck, credit=credit, usdc=usdc, pool_ub=pool_address, fee_ub=500,
                             chain=chain, w3=chain.w3, buck_accounting="net", net_credit_ops=credit_ops,
                             net_market_ops=market, basket_impl="equity")
@@ -138,6 +139,8 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         credit_ops.authorize_reduction(buyer.address, buyer_id, RAW, 0, now + 3600)
         agent._save_or_pay_down(d, state, cash_before, {})
         assert agent.last_action == "repay-pending"
+        agent.act(d, None, 0, 0, {})
+        assert agent.last_action == "repay-pending"  # untracked authorization blocks the whole turn
         assert usdc.functions.balanceOf(buyer.address).call() == cash_before
         assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
         credit_ops.cancel_reduction(buyer.address, buyer_id)
@@ -157,6 +160,8 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert cash_after_buy < cash_before and agent._net_repayment_reserve is not None
         assert agent.last_action == "repay-pending" and agent.unwound == 0
         assert agent._net_pending_reverted and agent._net_pending_hash
+        agent.act(d, None, 0, 0, {})
+        assert "explicit cancellation" in agent.last_error
         assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
         assert buck.functions.reductionAuthorization(buyer_id).call()[0] > 0
         agent._save_or_pay_down(d, state, cash_after_buy, counters)
@@ -225,6 +230,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent2.max_impact_bp = 9000
         agent2.unwound = agent2.trade_loss = 0
         agent2.last_error = agent2.last_action = ""
+        agent2.arrive_day, agent2.exited = 0, False
         d.net_credit_ops = LostReceipt(chain, stack, lose_settlement_receipt)
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
         state2 = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
@@ -241,9 +247,17 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         with pytest.raises(ValueError, match="hash mismatch"):
             d.net_credit_ops.reduction_from_receipt(buyer.address, second_id, RAW, receipts[0],
                                                     expected_hash="0x" + "11" * 32)
+        real_hash = agent2._net_pending_hash
+        agent2._net_pending_hash = "0x" + "11" * 32
+        agent2.act(d, None, 0, 0, {})
+        assert agent2.last_action == "repay-pending" and agent2.unwound == 0
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost
+        agent2._net_pending_hash = real_hash
         reconciled = {}
-        assert agent2.reconcile_pending_repayment(d, reconciled) == RAW
+        agent2.act(d, None, 0, 0, reconciled)
+        assert agent2.last_action == "repay-reconciled"
         assert agent2.unwound == RAW and reconciled["bcdRetired"] == RAW
+        assert reconciled["hhPaidDown"] == RAW and usdc.functions.balanceOf(buyer.address).call() == cash_after_lost
         with pytest.raises(ValueError, match="known transaction hash"):
             agent2.reconcile_pending_repayment(d, {})
 
@@ -267,6 +281,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent3.max_impact_bp = 9000
         agent3.unwound = agent3.trade_loss = 0
         agent3.last_error = agent3.last_action = ""
+        agent3.arrive_day, agent3.exited = 0, False
         d.net_credit_ops = credit_ops
         d.net_market_ops = NetMarketOps(chain, buck, guard, lose_buy_receipt)
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
@@ -289,8 +304,10 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         with pytest.raises(TransactionReceiptPending) as missing:
             bad_evidence.buy_exact_input(buyer.address, pool_address, RAW, 0, buyer.address)
         assert missing.value.transaction_hash == agent3._net_pending_buy_hash
-        assert agent3.reconcile_pending_buy(d) > 0
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "buy-reconciled"
         assert not agent3._net_trade_uncertain and agent3._net_repayment_reserve is not None
+        assert usdc.functions.balanceOf(buyer.address).call() == cash_after_lost_buy
         with pytest.raises(ValueError, match="known transaction hash"):
             agent3.reconcile_pending_buy(d)
         d.net_credit_ops = OneSlice()
@@ -330,7 +347,8 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         with pytest.raises(ValueError, match="changed"):
             agent3.reconcile_pending_repayment(d, {})
         credit_ops.authorize_reduction(buyer.address, third_id, *auth)
-        assert agent3.reconcile_pending_repayment(d, {}) == 0
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "authorize-reconciled"
         assert agent3._net_authorization_confirmed and agent3.unwound == before_unwound
         agent3.cancel_pending_repayment(d)
         assert buck.functions.reductionAuthorization(third_id).call()[0] == 0
@@ -351,7 +369,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert agent3._net_pending_phase == "authorization" and agent3._net_pending_reverted
         with pytest.raises(ValueError, match="outcome uncertain"):
             agent3.cancel_pending_repayment(d)
-        assert agent3.reconcile_pending_repayment(d, {}) == 0
+        agent3.act(d, None, 0, 0, {})
         assert agent3._net_pending_token is None and agent3.last_action == "authorize-reverted"
         assert agent3.unwound == before_unwound and credit.functions.issuanceOf(third_id).call()[0] == before_principal
 
@@ -365,6 +383,8 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert agent3._retire_acquired(d, RAW, 0) == 0
         assert agent3._net_pending_phase == "authorization" and agent3._net_pending_hash is None
         assert agent3._pending_repayment(d)
+        agent3.act(d, None, 0, 0, {})
+        assert agent3.last_action == "repay-pending" and agent3._net_pending_phase == "authorization"
         with pytest.raises(ValueError, match="known transaction hash"):
             agent3.reconcile_pending_repayment(d, {})
         with pytest.raises(ValueError, match="outcome uncertain"):

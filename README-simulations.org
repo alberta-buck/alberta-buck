@@ -98,8 +98,11 @@ correctly journaled operations that may succeed or revert. The household keeps
 the hash when available and can explicitly reconcile its matching receipt.
 Interrupted authorizations and settlements are tracked separately; an
 authorization is never counted as repayment, and earlier completed facilities
-remain recorded if a later authorization is interrupted. Automatic recovery,
-finality handling and snapshot persistence remain open.
+remain recorded if a later authorization is interrupted. Automatic recovery
+of known receipts runs at the start of a household's daily turn and consumes
+that turn. Cancellation, finality handling and snapshot persistence remain open.
+Tevm snapshots do not retain transaction receipts, so a saved hash alone is
+not sufficient to resume an unresolved action after restore.
 The target also builds the sandbox artifact bundle and checks that a browser-safe Tevm session can link
 and deploy the new stack from it. Its single-pool guard enforces net output
 and settlement limits atomically; it is not a price oracle. The interactive sandbox is not yet migrated.

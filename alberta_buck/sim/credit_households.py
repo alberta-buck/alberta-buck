@@ -293,6 +293,44 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 return True
         return False
 
+    def _recover_pending_operations(self, d, ctr):
+        """Reconcile one known receipt before this household submits more work.
+
+        A recovered outcome consumes this turn. Unknown hashes, an untracked
+        authorization and a confirmed authorization or reverted settlement
+        remain stopped for explicit cancellation or external reconciliation.
+        This simulation assumes a single dispatcher and immediate finality.
+        """
+        if getattr(d, "buck_accounting", "") != "net":
+            return False
+        try:
+            if getattr(self, "_net_trade_uncertain", False):
+                if getattr(self, "_net_pending_buy_hash", None):
+                    self.reconcile_pending_buy(d)
+                else:
+                    self._pending_repayment(d)
+                return True
+            if getattr(self, "_net_pending_token", None) is not None:
+                phase           = getattr(self, "_net_pending_phase", None)
+                auth_confirmed  = getattr(self, "_net_authorization_confirmed", False)
+                reverted        = getattr(self, "_net_pending_reverted", False)
+                recover         = (phase == "authorization" and not auth_confirmed) or (
+                                   phase == "settlement" and not reverted)
+                if recover and getattr(self, "_net_pending_hash", None):
+                    self.reconcile_pending_repayment(d, ctr)
+                elif auth_confirmed or (phase == "settlement" and reverted):
+                    self.last_error = "repayment authorization requires explicit cancellation"
+                    self.last_action = "repay-pending"
+                else:
+                    self._pending_repayment(d)
+                return True
+            return self._pending_repayment(d)
+        except Exception as exc:
+            self.last_action    = "buy-pending" if getattr(self, "_net_trade_uncertain", False) else "repay-pending"
+            self.last_error     = f"transaction reconciliation: {exc!r}"[:200]
+            ctr["household_err"] = self.last_error
+            return True
+
     def cancel_pending_repayment(self, d):
         """Cancel a still-present matching authorization; never infer an absent transaction failed."""
         token_id                = getattr(self, "_net_pending_token", None)
@@ -392,7 +430,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self.proxy.address, token_id, principal, receipt, expected_hash=tx_hash)
         self.unwound           += settled.principal
         ctr["bcdRetired"]       = ctr.get("bcdRetired", 0) + settled.principal
-        ctr["hhPaidDown"]       = ctr.get("hhPaidDown", 0) + settled.principal
+        if self.p["surplus_policy"] == "adaptive":
+            ctr["hhPaidDown"]   = ctr.get("hhPaidDown", 0) + settled.principal
         self._net_pending_token = None
         self._net_pending_principal = 0
         self._net_pending_minimum = self._net_pending_deadline = None
@@ -959,6 +998,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
 
     def act(self, d, scenario, day, tick, ctr):
         if tick or day < self.arrive_day or self.exited:
+            return
+        if self._recover_pending_operations(d, ctr):
             return
         if not self._started:
             cash                = int(self.p["invest_cash_k" if self.investor else "cash_k"] * 1000 * PARITY)
