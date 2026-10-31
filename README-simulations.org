@@ -82,7 +82,9 @@ reference. A second case uses a dynamic K controller at a neutral reference,
 two insurer pools, a nonzero premium and the real funding reserve; both
 runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
-quote and issue. A JavaScript real-V3 diagnostic seeds BUCK/USDC, ages its
+quote and issue. Current fund relief and the immediate mixed insurer-pool
+refund can also be observed at one block; these observations are not guarantees
+of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3 diagnostic seeds BUCK/USDC, ages its
 Carrying pool and reports the buyer's actual net BUCK. The Python and JS market
 fixtures both buy back BUCK and explicitly retire a selected NFT; a purchase
 alone does not reduce that liability. These fixtures have no

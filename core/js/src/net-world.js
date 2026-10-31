@@ -6,7 +6,11 @@ import { linkArtifact } from "./artifacts.js";
 import { parseEventLogs } from "viem";
 
 const Q = 10n ** 36n;
+const WAD = 10n ** 18n;
+const YEAR = 365n * 86400n + 6n * 3600n;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const min = (...values) => values.reduce((a, b) => a < b ? a : b);
+const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeInteger(id) && id >= 0);
 
 export class ReductionPending extends Error {
   constructor(plan, cause) {
@@ -77,6 +81,45 @@ export function netCreditOps(session, stack, execute = null) {
     authorizeReduction: (owner, id, principal, minimumReliefScaled, deadline) =>
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),
     reduceAuthorized: (owner, id, principal) => send(owner, fund, "reduce", [id, principal]),
+  };
+  // These are same-block observations, not predictions. Mark failures and
+  // maturity backlogs propagate rather than becoming an invented rate.
+  ops.quoteReliefRate = async (tokenId, principal) => {
+    if (!validId(tokenId) || typeof principal !== "bigint" || principal <= 0n) throw new Error("invalid relief rate sample");
+    tokenId = BigInt(tokenId);
+    const blockNumber = (await session.client.getBlock()).number;
+    const read = (c, functionName, args) => session.client.readContract({ address: c.address, abi: c.abi,
+      functionName, args, blockNumber });
+    const [selected, total] = await read(token, "selectedClaimSeconds", [tokenId, principal]);
+    const [relief, cash, exceeds] = await read(fund, "previewRelief", [tokenId, principal]);
+    return { blockNumber, selectedSeconds: selected, totalSeconds: total, reliefScaled: relief, cashScaled: cash,
+      exceedsLiquidityLimit: exceeds, annualRateWad: selected ? relief * YEAR * WAD / (selected * Q) : null,
+      capped: selected > 0n && relief === principal * Q };
+  };
+  // A proposed full-value premium dilutes only the current pool account in
+  // this estimate. Outside positions and later liquidity actions are unknown.
+  ops.quotePremiumRefund = async (tokenId, coverage) => {
+    if (!validId(tokenId) || typeof coverage !== "bigint" || coverage < 0n) throw new Error("invalid premium sample");
+    tokenId = BigInt(tokenId);
+    const blockNumber = (await session.client.getBlock()).number;
+    const read = (c, functionName, args) => session.client.readContract({ address: c.address, abi: c.abi,
+      functionName, args, blockNumber });
+    const [, premium] = await read(quoter, "quoteIssue", [tokenId, coverage]);
+    const result = (pool, grossScaled, netScaled, refundFractionWad, reason) =>
+      ({ blockNumber, premium, pool, grossScaled, netScaled, refundFractionWad, reason });
+    if (!premium) return result(null, 0n, 0n, null, "no-premium");
+    let pool = await read(token, "facilityPool", [tokenId]);
+    if (pool.toLowerCase() === ZERO_ADDRESS) {
+      const insurer = await read(credit, "insurerOf", [tokenId]);
+      pool = await read(token, "insurerPool", [insurer]);
+    }
+    if (pool.toLowerCase() === ZERO_ADDRESS) return result(null, 0n, 0n, null, "no-insurer-pool");
+    const [verified, carrying] = await Promise.all([read(stack.registry, "isVerified", [pool]),
+      read(stack.registry, "isCarrying", [pool])]);
+    if (!verified || !carrying) return result(pool, 0n, 0n, null, "invalid-insurer-pool");
+    const [gross, net] = await read(token, "accountBalancesScaled", [pool]);
+    const fraction = (net + premium * Q) * WAD / (gross + premium * Q);
+    return result(pool, gross, net, fraction, "cash-only");
   };
   ops.cancelReduction = (owner, id) => ops.authorizeReduction(owner, id, 0n, 0n, 0n);
   ops.household = async (owner, tokenIds) => {

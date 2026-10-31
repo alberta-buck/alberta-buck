@@ -5,6 +5,7 @@ economy, market, insurer model, leveraged basket, or five-year validation.
 """
 
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -58,6 +59,10 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert credit.functions.ownerOf(0).call() == actor.address
         issued = _exec(chain, actor, buck, "issue", [0, 100 * RAW, 100 * RAW])
         issued_at = anvil.w3.eth.get_block(issued["blockNumber"])["timestamp"]
+        ops = NetCreditOps(chain, stack)
+        fresh = ops.quote_relief_rate(0, RAW)
+        assert fresh.selected_seconds == 0 and fresh.annual_rate_wad is None
+        assert ops.quote_premium_refund(0, 0).reason == "no-premium"
 
         model = DemurrageLedger()
         model.issue_unspent("facility", 100, "owner", credit_limit=100)
@@ -75,6 +80,13 @@ def test_linked_net_issuance_and_reduction_match_reference():
         quote, _, exceeds = fund.functions.previewRelief(0, RAW).call()
         assert not exceeds
         assert quote / Q / RAW == pytest.approx(model.quote_marked_retirement("facility", 1).relief, abs=1e-6)
+        observed = ops.quote_relief_rate(0, RAW)
+        # Without investment returns the observed net fund value after one
+        # year is 1 - exp(-.02), not the full linear 2% target.
+        assert observed.annual_rate_wad / 10**18 == pytest.approx(1 - math.exp(-.02), abs=1e-8)
+        assert not observed.capped and not observed.exceeds_liquidity_limit
+        too_large = ops.quote_relief_rate(0, 100 * RAW)
+        assert too_large.exceeds_liquidity_limit and not too_large.capped
 
         deadline = issued_at + YEAR + 3600
         _exec(chain, actor, buck, "authorizeReduction", [0, RAW, 0, deadline])
@@ -86,6 +98,19 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert credit.functions.issuanceOf(0).call()[0] == 99 * RAW
         assert buck.functions.balanceOf(actor.address).call() / RAW == pytest.approx(model.balance_of("owner"), abs=2e-6)
         assert buck.functions.fundBalancesScaled().call()[1] / Q / RAW == pytest.approx(model.jubilee, abs=2e-6)
+
+        # An old claim can be fully capped after new liquidity is contributed;
+        # the implied annual rate is then only a lower bound on the fund mark.
+        anvil.warp_to(issued_at + 49 * YEAR)
+        chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
+        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 100 * RAW])
+        _exec(chain, actor, buck, "transfer", [fund.address, 40 * RAW])
+        capped = ops.quote_relief_rate(0, RAW)
+        assert capped.capped and capped.relief_scaled == RAW * Q and capped.annual_rate_wad is not None
+        anvil.warp_to(issued_at + 51 * YEAR)
+        assert buck.functions.maturitiesPending().call()
+        with pytest.raises(Exception):
+            ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
         assert not chain.mismatches
 
 
@@ -255,4 +280,28 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert ops.facility(second_id).issued == 0
         assert ops.facility(debtor_id).issued == issued - 2 * RAW
         assert batch.relief_scaled + batch.owner_cost_scaled == batch.retired * Q
+
+        # Actual fund cash changing changes the inferred current rate; the
+        # sample observes the contract's own mark rather than a fixed 2%.
+        before_rate = ops.quote_relief_rate(debtor_id, RAW)
+        _exec(chain, provider, buck, "transfer", [fund.address, 2 * RAW])
+        after_rate = ops.quote_relief_rate(debtor_id, RAW)
+        assert after_rate.annual_rate_wad > before_rate.annual_rate_wad
+
+        # Quote the existing insurer pool after it has aged, including the
+        # dilution from a new full-value premium. With this cash-only insurer
+        # the estimate agrees with the pool after actual issuance.
+        _exec(chain, insurer, credit, "createCredit", [debtor.address, 0, face, face, 0, 0, 0, 50])
+        third_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 2).call()
+        refund = ops.quote_premium_refund(third_id, face)
+        assert refund.reason == "cash-only" and refund.pool == pool.address
+        assert refund.premium == 5 * RAW and 0 < refund.refund_fraction_wad < 10**18
+        ops.issue(debtor.address, third_id, face, RAW)
+        gross, net = buck.functions.accountBalancesScaled(pool.address).call()
+        assert abs(net * 10**18 // gross - refund.refund_fraction_wad) < 10**10
+        _exec(chain, debtor, credit, "setCreditIssuer", [provider.address, True])
+        _exec(chain, provider, credit, "createCredit", [debtor.address, 0, face, face, 0, 0, 0, 50])
+        fourth_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 3).call()
+        missing = ops.quote_premium_refund(fourth_id, face)
+        assert missing.reason == "no-insurer-pool" and missing.refund_fraction_wad is None
         assert not chain.mismatches

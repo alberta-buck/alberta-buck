@@ -69,9 +69,21 @@ prior defaults and the same policy comparisons.
 These are *decision forecasts*, not guarantees or settlement quotes. A future
 net household adapter must explain how it derives and updates them from the
 fund's marked assets and capped claims, the insurer's mixed Carrying pool and
-any disclosed strategy. The expected premium refund fraction should reflect
-the proposed deposit's effect on the pool, not assume that today's cash-only
-ratio captures invested assets. Funding reserve, maturity, per-NFT issuance,
+any disclosed strategy. The shared operations can sample a single block's
+authoritative =previewRelief= and selected claim seconds, annualizing their
+ratio without implementing another basket valuation. A fresh claim has no
+observable rate; a quote capped at principal yields only a lower bound; and
+the current 10% liquid-cash refusal is reported separately. A closed,
+no-return 100-BUCK example observes about 1.9801% after one year, not the 2%
+linear target. These observations are not future returns.
+
+For a proposed premium, the shared operations also estimate the new refund
+fraction from the insurer pool's current gross/net BUCK account and the
+full-value proposed deposit. This includes dilution from the deposit, but it
+does not mark investments held elsewhere or predict what an insurer may
+redeem before a refund; callers must label it as a cash-only observation. An
+unknown or invalid insurer pool is not a zero-value refund. Funding reserve,
+maturity, per-NFT issuance,
 mark unavailability and the 10% liquid-relief limit still require separate
 checks at execution. The simple annualized comparison does not yet forecast
 claim saturation, future liquidity or nonlinear returns over the holding

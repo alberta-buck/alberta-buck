@@ -14,6 +14,11 @@ from typing import Any, Callable
 from buck_core.artifacts import load_artifact
 from web3.logs import DISCARD
 
+Q = 10**36
+WAD = 10**18
+YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
 
 @dataclass(frozen=True)
 class NetStack:
@@ -119,6 +124,29 @@ class HouseholdRetirement:
     status: str
     blocked_token_id: int | None
     settlements: tuple[NetReduction, ...]
+
+
+@dataclass(frozen=True)
+class ReliefRateQuote:
+    block_number: int
+    selected_seconds: int
+    total_seconds: int
+    relief_scaled: int
+    cash_scaled: int
+    exceeds_liquidity_limit: bool
+    annual_rate_wad: int | None
+    capped: bool
+
+
+@dataclass(frozen=True)
+class PremiumRefundQuote:
+    block_number: int
+    premium: int
+    pool: str | None
+    gross_scaled: int
+    net_scaled: int
+    refund_fraction_wad: int | None
+    reason: str
 
 
 class ReductionPending(RuntimeError):
@@ -266,6 +294,52 @@ class NetCreditOps:
     def quote_reduction(self, token_id: int, principal: int):
         """Return (scaled net relief, scaled cash, exceeds the 10% cap)."""
         return self.stack.fund.functions.previewRelief(token_id, principal).call()
+
+    def quote_relief_rate(self, token_id: int, principal: int) -> ReliefRateQuote:
+        """Infer today's marked annual relief rate from one same-block NFT quote.
+
+        A fresh claim has no rate. A principal-capped quote provides only a
+        lower bound; an exceeded liquidity cap remains visible. This is a
+        current valuation, not a forecast of future fund returns or liquidity.
+        """
+        if type(token_id) is not int or token_id < 0 or type(principal) is not int or principal <= 0:
+            raise ValueError("invalid relief rate sample")
+        block = self.chain.w3.eth.block_number
+        selected, total = self.stack.token.functions.selectedClaimSeconds(token_id, principal).call(
+            block_identifier=block)
+        relief, cash, exceeds = self.stack.fund.functions.previewRelief(token_id, principal).call(
+            block_identifier=block)
+        rate = relief * YEAR * WAD // (selected * Q) if selected else None
+        return ReliefRateQuote(block, selected, total, relief, cash, exceeds, rate,
+                               bool(selected and relief == principal * Q))
+
+    def quote_premium_refund(self, token_id: int, coverage: int) -> PremiumRefundQuote:
+        """Estimate the immediate mixed-pool refund fraction for new coverage.
+
+        Only the pool's current BUCK account and the proposed full-value
+        premium are included. Other insurer investments, future activity and
+        liquidity preparation are unknown; the result is not a refund promise.
+        """
+        if type(token_id) is not int or token_id < 0 or type(coverage) is not int or coverage < 0:
+            raise ValueError("invalid premium sample")
+        block = self.chain.w3.eth.block_number
+        token, credit = self.stack.token, self.stack.credit
+        _, premium, _, _ = self.stack.quoter.functions.quoteIssue(token_id, coverage).call(block_identifier=block)
+        if not premium:
+            return PremiumRefundQuote(block, 0, None, 0, 0, None, "no-premium")
+        pool = token.functions.facilityPool(token_id).call(block_identifier=block)
+        if pool.lower() == ZERO_ADDRESS:
+            insurer = credit.functions.insurerOf(token_id).call(block_identifier=block)
+            pool = token.functions.insurerPool(insurer).call(block_identifier=block)
+        if pool.lower() == ZERO_ADDRESS:
+            return PremiumRefundQuote(block, premium, None, 0, 0, None, "no-insurer-pool")
+        verified = self.stack.registry.functions.isVerified(pool).call(block_identifier=block)
+        carrying = self.stack.registry.functions.isCarrying(pool).call(block_identifier=block)
+        if not verified or not carrying:
+            return PremiumRefundQuote(block, premium, pool, 0, 0, None, "invalid-insurer-pool")
+        gross, net = token.functions.accountBalancesScaled(pool).call(block_identifier=block)
+        fraction = (net + premium * Q) * WAD // (gross + premium * Q)
+        return PremiumRefundQuote(block, premium, pool, gross, net, fraction, "cash-only")
 
     def authorize_reduction(self, owner, token_id: int, principal: int,
                             minimum_relief_scaled: int, deadline: int):
