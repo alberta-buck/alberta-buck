@@ -4,22 +4,26 @@ This is a cash-only, zero-premium accounting smoke test. It is not a household
 economy, market, insurer model, leveraged basket, or five-year validation.
 """
 
+import json
 import shutil
 from pathlib import Path
 
 import pytest
 
 from alberta_buck.sim.anvil import Anvil
-from alberta_buck.sim.chain import Chain, load_artifact
+from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
+from buck_core import deploy_net_stack, NetCreditOps
+from buck_core.session import Expect
 
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
 RAW = 10**6
 Q = 10**36
 ROOT = Path(__file__).resolve().parents[2]
-REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "JubileeFund",
+VECTOR = json.loads((ROOT / "test/fixtures/bucknet-credit-operations.json").read_text())
+REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
-            "BuckBasketEquity", "SimLP")
+            "BuckKControllerDirect", "BuckBasketEquity", "SimLP")
 
 
 def _exec(chain, actor, target, method, args):
@@ -39,24 +43,14 @@ def test_linked_net_issuance_and_reduction_match_reference():
         registry = chain.deploy("IdentityRegistryHarness", gov)
         credit = chain.deploy("BuckCredit")
         controller = chain.deploy("BuckKControllerStatic", 10**18, gov)
-        fund = chain.deploy("JubileeFund", gov)
-        maturity = chain.deploy("BuckNetMaturity")
-        transfers = chain.deploy("BuckNetTransfers")
-        libraries = {
-            "src/lib/BuckNetMaturity.sol:BuckNetMaturity": maturity.address,
-            "src/lib/BuckNetTransfers.sol:BuckNetTransfers": transfers.address,
-        }
-        abi, bytecode = load_artifact("BuckNet", libraries=libraries)
-        buck = chain.deploy("BuckNet", credit.address, controller.address, registry.address, fund.address,
-                            abi=abi, bytecode=bytecode)
+        stack = deploy_net_stack(chain, registry, credit, controller, gov)
+        fund, buck = stack.fund, stack.token
         factory = chain.deploy("UniswapV3Factory")
         basket = chain.deploy("BuckBasketEquity", buck.address, controller.address, factory.address,
                               gov, 3000, 600, 64, 500, 1000)
         actor = chain.deploy("SimLP")  # Public test-only contract identity, not an agent model.
         for target, carrying in ((fund.address, True), (basket.address, False), (actor.address, False)):
             chain.send(registry.functions.bindContract(target, (1, 2), ((1, 2), (1, 2)), True, carrying))
-        chain.send(credit.functions.setBuck(buck.address))
-        chain.send(registry.functions.setBuck(buck.address))
         chain.send(basket.functions.enableNetAccounting())
         chain.send(fund.functions.configure(buck.address, basket.address))
         _exec(chain, actor, credit, "setCreditIssuer", [gov, True])
@@ -70,8 +64,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert buck.functions.balanceOf(actor.address).call() == 100 * RAW
         assert buck.functions.totalIssued().call() == 100 * RAW
         runtime = anvil.w3.eth.get_code(buck.address).hex().lower()
-        assert maturity.address[2:].lower() in runtime
-        assert transfers.address[2:].lower() in runtime
+        assert stack.maturity_library.address[2:].lower() in runtime
+        assert stack.transfers_library.address[2:].lower() in runtime
 
         anvil.warp_to(issued_at + YEAR)
         model.advance(1)
@@ -92,4 +86,117 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert credit.functions.issuanceOf(0).call()[0] == 99 * RAW
         assert buck.functions.balanceOf(actor.address).call() / RAW == pytest.approx(model.balance_of("owner"), abs=2e-6)
         assert buck.functions.fundBalancesScaled().call()[1] / Q / RAW == pytest.approx(model.jubilee, abs=2e-6)
+        assert not chain.mismatches
+
+
+@pytest.mark.skipif(
+    not shutil.which("anvil") or not all((ROOT / "out" / f"{name}.sol" / f"{name}.json").is_file()
+                                         for name in REQUIRED),
+    reason="requires anvil and built net/simulation artifacts; run make nix-sim-build",
+)
+def test_net_credit_ops_premium_reserve_and_explicit_reduction():
+    """Real contract fixture: dynamic controller at a neutral, unbound reference.
+
+    No market or household behavior is modeled here. SimLP identities and a
+    no-strategy insurer pool are test infrastructure, not production actors.
+    """
+    with Anvil(timestamp=1_900_000_000) as anvil:
+        chain = Chain(anvil.w3, anvil.w3.eth.accounts[0])
+        gov = chain.deployer
+        registry = chain.deploy("IdentityRegistryHarness", gov)
+        credit = chain.deploy("BuckCredit")
+        controller = chain.deploy("BuckKControllerDirect", 100_000_000_000, 643_004, 0,
+                                  1800, 0, 950_000_000_000_000_000, 750_000_000_000_000_000, gov)
+        stack = deploy_net_stack(chain, registry, credit, controller, gov)
+        buck, fund = stack.token, stack.fund
+        factory = chain.deploy("UniswapV3Factory")
+        basket = chain.deploy("BuckBasketEquity", buck.address, controller.address, factory.address,
+                              gov, 3000, 600, 64, 500, 1000)
+        insurer, insurer2, provider, debtor, pool, pool2 = (chain.deploy("SimLP") for _ in range(6))
+        g = (1, 2)
+        e = (g, g)
+        for target, carrying in ((fund.address, True), (basket.address, False),
+                                 (insurer.address, False), (insurer2.address, False),
+                                 (provider.address, False), (debtor.address, False)):
+            chain.send(registry.functions.bindContract(target, g, e, True, carrying))
+        _exec(chain, insurer, registry, "bindContract", [pool.address, g, e, True, True])
+        _exec(chain, insurer2, registry, "bindContract", [pool2.address, g, e, True, True])
+        _exec(chain, insurer, buck, "setInsurerPool", [pool.address])
+        _exec(chain, insurer2, buck, "setInsurerPool", [pool2.address])
+        _exec(chain, pool, buck, "approve", [buck.address, 2**256 - 1])
+        chain.send(basket.functions.enableNetAccounting())
+        chain.send(fund.functions.configure(buck.address, basket.address))
+
+        actors = {a.address.lower(): a for a in (provider, debtor)}
+        ops = NetCreditOps(chain, stack, lambda owner, contract, method, args:
+                           _exec(chain, actors[owner.lower()], contract, method, args))
+        face, premium = VECTOR["face"], VECTOR["premium"]
+        reserve, buffer = VECTOR["reserve"], VECTOR["reserve_buffer"]
+        spendable, issued, reduction = VECTOR["requested_spendable"], VECTOR["issued"], VECTOR["reduction"]
+        for actor, rate in ((provider, 0), (debtor, VECTOR["premium_rate_bp"])):
+            _exec(chain, actor, credit, "setCreditIssuer", [insurer.address, True])
+            _exec(chain, insurer, credit, "createCredit", [actor.address, 0, face, face, 0, 0, 0, rate])
+        provider_id = credit.functions.tokenOfOwnerByIndex(provider.address, 0).call()
+        debtor_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 0).call()
+        ops.issue(provider.address, provider_id, face, VECTOR["provider_issuance"])
+        quote = ops.quote_issue(debtor_id, face)
+        assert (quote.premium, quote.reserve_required, quote.max_spendable, quote.reserve_shortfall) == (
+            premium, reserve, spendable, reserve)
+        data = buck.encode_abi("issue", args=[debtor_id, face, spendable])
+        refused = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
+        assert refused["status"] == 0
+        assert ops.facility(debtor_id).issued == 0
+
+        # A reserve equal at quote time can decay below the gate in the next
+        # block, even when the current quote shows no shortfall.
+        _exec(chain, provider, buck, "transfer", [debtor.address, reserve])
+        assert ops.quote_issue(debtor_id, face).reserve_shortfall == 0
+        now = anvil.w3.eth.get_block("latest")["timestamp"]
+        anvil.warp_to(now + 1)
+        assert ops.quote_issue(debtor_id, face).reserve_shortfall > 0
+        refused = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
+        assert refused["status"] == 0
+        _exec(chain, provider, buck, "transfer", [debtor.address, buffer])
+        assert ops.quote_issue(debtor_id, face).reserve_shortfall == 0
+        issue_receipt = ops.issue(debtor.address, debtor_id, face, spendable)
+        issued_at = anvil.w3.eth.get_block(issue_receipt["blockNumber"])["timestamp"]
+        state = ops.facility(debtor_id)
+        assert (state.face, state.activated, state.issued, state.premium_nominal) == (
+            face, face, issued, premium)
+        assert state.insurer_pool == pool.address
+        assert buck.functions.balanceOf(pool.address).call() == premium
+        assert buck.functions.balanceOf(pool2.address).call() == 0
+
+        # The same household has a separate facility with another insurer.
+        _exec(chain, debtor, credit, "setCreditIssuer", [insurer2.address, True])
+        _exec(chain, insurer2, credit, "createCredit",
+              [debtor.address, 0, face, face, 0, 0, 0, VECTOR["second_premium_rate_bp"]])
+        second_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 1).call()
+        second_quote = ops.quote_issue(second_id, face)
+        assert second_quote.premium == VECTOR["second_premium"]
+        assert second_quote.reserve_shortfall == 0
+        ops.issue(debtor.address, second_id, face, VECTOR["second_spendable"])
+        second = ops.facility(second_id)
+        assert second.issued == VECTOR["second_issued"]
+        assert second.insurer_pool == pool2.address
+        assert buck.functions.balanceOf(pool2.address).call() == VECTOR["second_premium"]
+
+        # Receiving BUCK is not a repayment: only the explicitly authorized
+        # selected-NFT reduction changes issued principal.
+        _exec(chain, provider, buck, "transfer", [debtor.address, reduction])
+        assert ops.facility(debtor_id).issued == issued
+        assert ops.facility(second_id).issued == VECTOR["second_issued"]
+        anvil.warp_to(issued_at + YEAR)
+        before_pool_net = buck.functions.netBalanceOf(pool.address).call()
+        assert before_pool_net < premium
+        relief, _, exceeds = ops.quote_reduction(debtor_id, reduction)
+        assert 0 < relief < reduction * Q and not exceeds
+        ops.authorize_reduction(debtor.address, debtor_id, reduction, 0, issued_at + YEAR + 3600)
+        ops.reduce_authorized(debtor.address, debtor_id, reduction)
+        after = ops.facility(debtor_id)
+        assert after.issued == issued - reduction
+        assert after.premium_nominal == premium - VECTOR["nominal_refund"]
+        assert buck.functions.balanceOf(pool.address).call() == premium - VECTOR["nominal_refund"]
+        assert ops.facility(second_id).issued == VECTOR["second_issued"]
+        assert buck.functions.balanceOf(pool2.address).call() == VECTOR["second_premium"]
         assert not chain.mismatches

@@ -3,15 +3,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeFunctionData } from "viem";
+import { readFileSync } from "node:fs";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact } from "../src/nodefs.js";
-import { linkArtifact } from "../src/artifacts.js";
+import { deployNetStack, netCreditOps } from "../src/index.js";
 import { advanceTime } from "../src/buckworld.js";
 
 const RAW = 1_000_000n;
 const YEAR = 365 * 86400 + 6 * 3600;
-const required = ["BuckNet", "BuckNetMaturity", "BuckNetTransfers", "JubileeFund", "IdentityRegistryHarness",
-  "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory", "BuckBasketEquity", "SimLP"];
+const V = JSON.parse(readFileSync(new URL("../../../test/fixtures/bucknet-credit-operations.json", import.meta.url)));
+const required = ["BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
+  "BuckCredit", "BuckKControllerStatic", "BuckKControllerDirect", "UniswapV3Factory", "BuckBasketEquity", "SimLP"];
 let skip = false;
 try {
   for (const name of required) loadArtifact(name);
@@ -27,15 +29,8 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   const registry = await deploy("IdentityRegistryHarness", [gov]);
   const credit = await deploy("BuckCredit");
   const controller = await deploy("BuckKControllerStatic", [10n ** 18n, gov]);
-  const fund = await deploy("JubileeFund", [gov]);
-  const maturity = await deploy("BuckNetMaturity");
-  const transfers = await deploy("BuckNetTransfers");
-  const linked = linkArtifact(loadArtifact("BuckNet"), {
-    "src/lib/BuckNetMaturity.sol:BuckNetMaturity": maturity.address,
-    "src/lib/BuckNetTransfers.sol:BuckNetTransfers": transfers.address,
-  });
-  const buck = await s.deploy(linked, [credit.address, controller.address, registry.address, fund.address],
-    { name: "BuckNet" });
+  const stack = await deployNetStack(s, loadArtifact, { registry, credit, controller, governance: gov });
+  const { fund, token: buck } = stack;
   const factory = await deploy("UniswapV3Factory");
   const basket = await deploy("BuckBasketEquity",
     [buck.address, controller.address, factory.address, gov, 3000, 600, 64, 500n, 1000n]);
@@ -45,8 +40,6 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   for (const [target, carrying] of [[fund.address, true], [basket.address, false], [actor.address, false]]) {
     await s.send(registry, "bindContract", [target, g, E, true, carrying]);
   }
-  await s.send(credit, "setBuck", [buck.address]);
-  await s.send(registry, "setBuck", [buck.address]);
   await s.send(basket, "enableNetAccounting");
   await s.send(fund, "configure", [buck.address, basket.address]);
   const exec = (target, functionName, args) => s.send(actor, "exec", [target.address,
@@ -69,5 +62,106 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.equal(await s.call(buck, "totalIssued"), 99n * RAW);
   assert.equal((await s.call(credit, "issuanceOf", [0n]))[0], 99n * RAW);
   assert.ok((await s.call(buck, "fundBalancesScaled"))[1] < cash);
+  assert.deepEqual(s.mismatches, []);
+});
+
+test("per-NFT operations honor the premium reserve and repay explicitly", { skip }, async () => {
+  // The PID controller is real, but has no basket reference in this fixture:
+  // this tests its neutral funding gate, not market-driven K or a household.
+  const s = await tevmSession();
+  const gov = s.account.address;
+  const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
+  const registry = await deploy("IdentityRegistryHarness", [gov]);
+  const credit = await deploy("BuckCredit");
+  const controller = await deploy("BuckKControllerDirect", [100_000_000_000n, 643_004n, 0n,
+    1800n, 0n, 950_000_000_000_000_000n, 750_000_000_000_000_000n, gov]);
+  const stack = await deployNetStack(s, loadArtifact, { registry, credit, controller, governance: gov });
+  const { fund, token: buck } = stack;
+  const factory = await deploy("UniswapV3Factory");
+  const basket = await deploy("BuckBasketEquity",
+    [buck.address, controller.address, factory.address, gov, 3000, 600, 64, 500n, 1000n]);
+  const insurer = await deploy("SimLP"), insurer2 = await deploy("SimLP");
+  const provider = await deploy("SimLP"), debtor = await deploy("SimLP");
+  const pool = await deploy("SimLP"), pool2 = await deploy("SimLP");
+  const g = { X: 1n, Y: 2n }, E = { R: g, C: g };
+  for (const [target, carrying] of [[fund.address, true], [basket.address, false], [insurer.address, false],
+    [insurer2.address, false], [provider.address, false], [debtor.address, false]]) {
+    await s.send(registry, "bindContract", [target, g, E, true, carrying]);
+  }
+  const exec = (actor, target, functionName, args, expect = "ok") => s.send(actor, "exec", [target.address,
+    encodeFunctionData({ abi: target.abi, functionName, args })], { expect });
+  await exec(insurer, registry, "bindContract", [pool.address, g, E, true, true]);
+  await exec(insurer2, registry, "bindContract", [pool2.address, g, E, true, true]);
+  await exec(insurer, buck, "setInsurerPool", [pool.address]);
+  await exec(insurer2, buck, "setInsurerPool", [pool2.address]);
+  await exec(pool, buck, "approve", [buck.address, (1n << 256n) - 1n]);
+  await s.send(basket, "enableNetAccounting");
+  await s.send(fund, "configure", [buck.address, basket.address]);
+
+  const actors = new Map([provider, debtor].map((actor) => [actor.address.toLowerCase(), actor]));
+  const ops = netCreditOps(s, stack, (owner, target, method, args) =>
+    exec(actors.get(owner.toLowerCase()), target, method, args));
+  const face = BigInt(V.face), premium = BigInt(V.premium), reserve = BigInt(V.reserve);
+  const spendable = BigInt(V.requested_spendable), issued = BigInt(V.issued), reduction = BigInt(V.reduction);
+  for (const [actor, rate] of [[provider, 0], [debtor, V.premium_rate_bp]]) {
+    await exec(actor, credit, "setCreditIssuer", [insurer.address, true]);
+    await exec(insurer, credit, "createCredit", [actor.address, 0, face, face, 0, 0, 0, rate]);
+  }
+  const providerId = await s.call(credit, "tokenOfOwnerByIndex", [provider.address, 0n]);
+  const debtorId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 0n]);
+  await ops.issue(provider.address, providerId, face, BigInt(V.provider_issuance));
+  const quote = await ops.quoteIssue(debtorId, face);
+  assert.deepEqual([quote.premium, quote.reserveRequired, quote.maxSpendable, quote.reserveShortfall],
+    [premium, reserve, spendable, reserve]);
+  const refused = await exec(debtor, buck, "issue", [debtorId, face, spendable], "revert");
+  assert.equal(refused.status, "reverted");
+  assert.equal((await ops.facility(debtorId)).issued, 0n);
+
+  // Exact reserve at one block can fall short as early as the next second.
+  await exec(provider, buck, "transfer", [debtor.address, reserve]);
+  assert.equal((await ops.quoteIssue(debtorId, face)).reserveShortfall, 0n);
+  await advanceTime({ session: s }, 1);
+  assert.ok((await ops.quoteIssue(debtorId, face)).reserveShortfall > 0n);
+  const decayed = await exec(debtor, buck, "issue", [debtorId, face, spendable], "revert");
+  assert.equal(decayed.status, "reverted");
+  await exec(provider, buck, "transfer", [debtor.address, BigInt(V.reserve_buffer)]);
+  assert.equal((await ops.quoteIssue(debtorId, face)).reserveShortfall, 0n);
+  await ops.issue(debtor.address, debtorId, face, spendable);
+  const state = await ops.facility(debtorId);
+  assert.deepEqual([state.face, state.activated, state.issued, state.premiumNominal],
+    [face, face, issued, premium]);
+  assert.equal(state.insurerPool.toLowerCase(), pool.address.toLowerCase());
+  assert.equal(await s.call(buck, "balanceOf", [pool.address]), premium);
+  assert.equal(await s.call(buck, "balanceOf", [pool2.address]), 0n);
+
+  // The same household's second facility remains with its own insurer.
+  await exec(debtor, credit, "setCreditIssuer", [insurer2.address, true]);
+  await exec(insurer2, credit, "createCredit", [debtor.address, 0, face, face, 0, 0, 0, V.second_premium_rate_bp]);
+  const secondId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 1n]);
+  const secondQuote = await ops.quoteIssue(secondId, face);
+  assert.equal(secondQuote.premium, BigInt(V.second_premium));
+  assert.equal(secondQuote.reserveShortfall, 0n);
+  await ops.issue(debtor.address, secondId, face, BigInt(V.second_spendable));
+  const second = await ops.facility(secondId);
+  assert.equal(second.issued, BigInt(V.second_issued));
+  assert.equal(second.insurerPool.toLowerCase(), pool2.address.toLowerCase());
+  assert.equal(await s.call(buck, "balanceOf", [pool2.address]), BigInt(V.second_premium));
+
+  await exec(provider, buck, "transfer", [debtor.address, reduction]);
+  assert.equal((await ops.facility(debtorId)).issued, issued);
+  assert.equal((await ops.facility(secondId)).issued, BigInt(V.second_issued));
+  await advanceTime({ session: s }, YEAR);
+  assert.ok(await s.call(buck, "netBalanceOf", [pool.address]) < premium);
+  const [relief, , exceeds] = await ops.quoteReduction(debtorId, reduction);
+  assert.ok(relief > 0n && !exceeds);
+  const deadline = (await s.client.getBlock()).timestamp + 3600n;
+  await ops.authorizeReduction(debtor.address, debtorId, reduction, 0n, deadline);
+  await ops.reduceAuthorized(debtor.address, debtorId, reduction);
+  const after = await ops.facility(debtorId);
+  assert.equal(after.issued, issued - reduction);
+  assert.equal(after.premiumNominal, premium - BigInt(V.nominal_refund));
+  assert.equal(await s.call(buck, "balanceOf", [pool.address]), premium - BigInt(V.nominal_refund));
+  assert.equal((await ops.facility(secondId)).issued, BigInt(V.second_issued));
+  assert.equal(await s.call(buck, "balanceOf", [pool2.address]), BigInt(V.second_premium));
   assert.deepEqual(s.mismatches, []);
 });

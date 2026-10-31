@@ -76,15 +76,20 @@ fund, insurer pools, and basket changes are in the [[file:doc/review/credit-faci
 =make nix-venv-net-demurrage-smoke= builds the simulation artifacts and
 deploys the linked experimental =BuckNet=, separate =JubileeFund=, and
 cash-only equity basket in fresh local Python/Anvil and JavaScript/Tevm
-fixtures. Both issue 100 BUCK, advance a year and reduce the credit by one
-BUCK; Python also compares the balances and marked relief with the independent
-reference. It requires the checkout's built artifacts and JavaScript
-dependencies. The fixture has static K, no premium, no market or household,
-and no leveraged basket; it is not a five-year simulation or deployment recipe.
+fixtures. A zero-premium case issues 100 BUCK, advances a year and reduces one
+BUCK; Python also compares balances and marked relief with the independent
+reference. A second case uses a dynamic K controller at a neutral reference,
+two insurer pools, a nonzero premium and the real funding reserve; both
+runtimes consume the same operation vector and confirm that a transfer is not
+debt retirement. It also demonstrates that an exact reserve can decay between
+quote and issue. These are fixtures with no market, household, leveraged basket
+or insurer investment strategy; they are not a five-year simulation or
+deployment recipe. Built artifacts and JavaScript dependencies are required.
 
 The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,
 pre-issuance reserve and available credit for a particular NFT. It has contract
-tests, but neither household implementation calls it yet. It is a current
+tests and reusable [[file:core/python/buck_core/net_world.py][Python]] / [[file:core/js/src/net-world.js][JavaScript]] deployment and per-facility helpers, but
+neither household implementation calls it yet. It is a current
 estimate rather than a guarantee that an issue transaction will succeed; the
 [[file:doc/review/net-demurrage-simulation-migration.org][migration checklist]] lists its remaining integration and execution checks.
 
