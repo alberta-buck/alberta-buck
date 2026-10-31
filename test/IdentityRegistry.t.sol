@@ -6,6 +6,7 @@ import {BN254} from "../src/BN254.sol";
 import {IContractBindingAdapter} from "../src/IContractBindingAdapter.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
+import {JubileeFund} from "../src/JubileeFund.sol";
 
 contract BindingAdapterMetadataStub is IContractBindingAdapter {
     address public immutable override registry;
@@ -486,6 +487,42 @@ contract IdentityRegistryTest is Test {
         vm.prank(alice);
         reg.bindContract(pool, _alicePk(), _aliceE(), true, true);
         assertEq(reg.pendingBindingAuthorization(pool), bytes32(0));
+    }
+
+    function test_jubileeFundAuthorizesOnlyGovernedPublicCarryingBinding() public {
+        _registerAlice();
+        JubileeFund fund = new JubileeFund(GOV);
+        vm.prank(alice);
+        vm.expectRevert(JubileeFund.NotGovernance.selector);
+        fund.authorizeIdentityBinding(reg, alice, _alicePk(), _aliceE());
+        vm.prank(GOV);
+        fund.authorizeIdentityBinding(reg, alice, _alicePk(), _aliceE());
+        vm.prank(alice);
+        vm.expectRevert(bytes("target did not authorize binding"));
+        reg.bindContract(address(fund), _alicePk(), _aliceE(), true, false);
+        vm.prank(alice);
+        reg.bindContract(address(fund), _alicePk(), _aliceE(), true, true);
+        assertTrue(reg.isVerified(address(fund)));
+        assertTrue(reg.isPublicIdentity(address(fund)));
+        assertTrue(reg.isCarrying(address(fund)));
+        assertEq(reg.binderOf(address(fund)), alice);
+        assertEq(reg.pendingBindingAuthorization(address(fund)), bytes32(0));
+    }
+
+    function test_jubileeFundGovernanceCanRevokePendingBinding() public {
+        _registerAlice();
+        JubileeFund fund = new JubileeFund(GOV);
+        vm.prank(GOV);
+        fund.authorizeIdentityBinding(reg, alice, _alicePk(), _aliceE());
+        vm.prank(alice);
+        vm.expectRevert(JubileeFund.NotGovernance.selector);
+        fund.revokeIdentityBinding(reg);
+        vm.prank(GOV);
+        fund.revokeIdentityBinding(reg);
+        assertEq(reg.pendingBindingAuthorization(address(fund)), bytes32(0));
+        vm.prank(alice);
+        vm.expectRevert(bytes("target did not authorize binding"));
+        reg.bindContract(address(fund), _alicePk(), _aliceE(), true, true);
     }
 
     function test_setBindingAdapter_isGovernedAndChecksMetadata() public {

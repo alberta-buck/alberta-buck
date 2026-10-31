@@ -9,6 +9,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {BuckNet} from "./BuckNet.sol";
 import {BuckCredit} from "./BuckCredit.sol";
+import {BN254} from "./BN254.sol";
+import {IdentityRegistry} from "./IdentityRegistry.sol";
 import {IBuckBasketPosition} from "./basket/IBuckBasketPosition.sol";
 import {IBuckBasketVenue} from "./basket/IBuckBasketVenue.sol";
 import {JubileeReserveMath} from "./lib/JubileeReserveMath.sol";
@@ -144,6 +146,26 @@ contract JubileeFund is IERC721Receiver {
     constructor(address governance_) {
         if (governance_ == address(0)) revert InvalidConfiguration();
         governance = governance_;
+    }
+
+    /// @notice Permit a certified operator to bind this fund as a public
+    ///         Carrying service in the chosen registry before configuration.
+    /// @dev The registry still checks the operator's certified identity and
+    ///      the exact key, ciphertext and flags. Only governance may choose
+    ///      or replace a pending authorization; no token or fund is configured.
+    function authorizeIdentityBinding(
+        IdentityRegistry registry, address binder, BN254.G1Point calldata pk, IdentityRegistry.ElGamalCT calldata E
+    ) external {
+        if (msg.sender != governance) revert NotGovernance();
+        if (address(registry).code.length == 0 || address(token) != address(0)) revert InvalidConfiguration();
+        registry.authorizeContractBinding(binder, pk, E, true, true);
+    }
+
+    /// @notice Cancel a pending identity binding before it is consumed.
+    function revokeIdentityBinding(IdentityRegistry registry) external {
+        if (msg.sender != governance) revert NotGovernance();
+        if (address(registry).code.length == 0 || address(token) != address(0)) revert InvalidConfiguration();
+        registry.revokeContractBindingAuthorization();
     }
 
     /// @notice One-shot binding after the fund, token, basket and identity
