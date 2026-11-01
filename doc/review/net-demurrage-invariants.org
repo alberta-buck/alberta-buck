@@ -388,7 +388,13 @@ reduction or renewal with a nonzero claim refreshes after any insurer
 preparation, before quoting relief; failures roll back the publication. A
 cash-only fund with no receipt has a zero mark. A test invokes the wheel
 under the real BuckNet guard during issuance: token views work and a nested
-token transfer is rejected. This is not yet a compatibility-burn test. The
+token transfer is rejected. The fund now exposes a token-only
+=refreshBurnValuation= and a view of the guarded mark used for quotes. A
+test-only BuckNet subclass invokes the new hook under the actual token guard:
+the wheel publishes without moving cash, receipt shares, work cursor or
+pending work, and a changed receipt invalidates the prior quote. Pool
+preparation must precede this refresh, or a later callback must force a new
+refresh. The public compatible =burn= is still absent. The
 current full valuation scans every constituent without a practical work/gas
 limit; a supported size bound or coherent incremental approach is required
 before making it mandatory in a production burn.

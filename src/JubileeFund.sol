@@ -218,6 +218,28 @@ contract JubileeFund is IERC721Receiver {
         return (_positionMark(), _positionKey());
     }
 
+    /// @notice Refresh the position mark for an authorized token burn.
+    /// @dev Only BuckNet may call while it holds its token-wide guard. The
+    ///      wheel publication reads its source and market through static
+    ///      calls; it cannot trade, redeem, transfer BUCK or pay a work reward.
+    ///      Pool liquidity preparation must already be complete, because a
+    ///      later state-changing callback can invalidate this mark. An empty
+    ///      position has mark zero. The existing live-mark fallback remains
+    ///      transitional when no wheel has been configured.
+    function refreshBurnValuation() external configured nonReentrant returns (uint256 mark) {
+        if (msg.sender != address(token)) revert NotToken();
+        return _refreshPositionMark();
+    }
+
+    /// @notice Read the guarded position mark available to an advisory quote.
+    /// @dev With a configured wheel this is its last publication, which can
+    ///      be older than the mark refreshed by the eventual burn. It checks
+    ///      the position key and current price band and reserves no funds.
+    ///      Without a wheel the transitional live-mark fallback applies.
+    function reliefPositionMark() external view configured returns (uint256) {
+        return _lastPositionMark();
+    }
+
     /// @notice Governance override for an explicitly bounded investment in
     ///         the same receipt. Scheduled investment is the normal path;
     ///         this override may intentionally spend into the reserve.

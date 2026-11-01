@@ -23,6 +23,7 @@ help:
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
 	  '  make nix-match-BuckNetBurnMathTest # proposed retirement calculation and fuzzing' \
 	  '  make nix-match-BuckNetBurnRoundingTest  # proposed calculation vs real settlements' \
+	  '  make nix-match-JubileeBurnValuationTest  # wheel refresh under token guard' \
 	  '  make nix-deploy-dry-run            # legacy stub-verifier bootstrap, no broadcast' \
 	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
 	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \

@@ -66,6 +66,7 @@ make nix-match-BuckNetMintCompatibilityTest # ordinary-owner compatibility mint 
 make nix-match-BuckNetQuoteTest            # quotes checked against real BuckNet issuance
 make nix-match-BuckNetBurnMathTest         # proposed retirement math and exhaustive fuzzing
 make nix-match-BuckNetBurnRoundingTest     # candidate vs real fund and insurer settlements
+make nix-match-JubileeBurnValuationTest    # token-only mark refresh under the BuckNet guard
 make nix-deploy-dry-run                    # local EVM; no broadcast
 make nix-venv-test-python                  # Python reference and simulator tests
 make nix-venv-core-test-py                 # Python platform tests

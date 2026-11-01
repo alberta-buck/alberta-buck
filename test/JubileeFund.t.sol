@@ -243,7 +243,7 @@ contract JubileeFundTest is Test {
         credit = new BuckCredit();
         k = new NetK();
         fund = new JubileeFund(GOV);
-        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        buck = _newBuck();
         basket = new JubileeBasketMock(address(buck));
         credit.setBuck(address(buck));
         vm.prank(GOV);
@@ -259,6 +259,9 @@ contract JubileeFundTest is Test {
         credit.setCreditIssuer(INSURER, true);
         vm.prank(GOV);
         fund.configure(buck, IJubileeBasket(address(basket)));
+    }
+    function _newBuck() internal virtual returns (BuckNet) {
+        return new BuckNet(address(credit), address(k), address(identity), address(fund));
     }
     function _bind(address target, bool carrying, address binder) internal {
         if (target.code.length == 0) vm.etch(target, hex"60006000fd");
