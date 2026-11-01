@@ -23,8 +23,9 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         assertEq(buck.balanceOf(address(pool)), 20);
         uint256 beforeBalance = buck.balanceOf(ALICE);
         BuckNetBurnMath.Snapshot memory candidate = _candidate(alice, pool);
-        BuckNetBurnMath.Plan memory four = BuckNetBurnMath.plan(candidate, 4);
-        BuckNetBurnMath.Plan memory five = BuckNetBurnMath.plan(candidate, 5);
+        BuckNetBurnMath.Coverage memory c = _coverage(alice);
+        BuckNetBurnMath.Plan memory four = BuckNetBurnMath.plan(candidate, c, 4);
+        BuckNetBurnMath.Plan memory five = BuckNetBurnMath.plan(candidate, c, 5);
         assertEq(uint256(four.status), uint256(BuckNetBurnMath.Status.Found));
         assertEq(uint256(five.status), uint256(BuckNetBurnMath.Status.Found));
         assertEq(four.principal, 4);
@@ -67,7 +68,7 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         vm.warp(t0 + 3 * YEAR);
         BuckNetBurnMath.Snapshot memory candidate = _candidate(alice, pool);
         uint256 beforeBalance = buck.balanceOf(ALICE);
-        BuckNetBurnMath.Plan memory plan = BuckNetBurnMath.plan(candidate, 100e6);
+        BuckNetBurnMath.Plan memory plan = BuckNetBurnMath.plan(candidate, _coverage(alice), 100e6);
         assertEq(uint256(plan.status), uint256(BuckNetBurnMath.Status.Found));
         assertGt(plan.refundNominal, 0);
         assertLt(plan.refundNetScaled, plan.refundNominal * Q);
@@ -79,7 +80,7 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         assertEq(refund, plan.refundNominal);
     }
 
-    function test_monetaryCandidateDoesNotPromiseTheCoverageCheckWillPass() public {
+    function test_candidateSkipsAProportionalCoverageShortfall() public {
         JubileeInsurerPoolMock pool = _pool();
         _credit(BOB, 1_000, 0);
         vm.prank(INSURER);
@@ -91,9 +92,9 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         buck.issue(id, 4, 2, 0, address(0));
         assertEq(credit.depreciatedFaceValue(id), 3);
         BuckNetBurnMath.Snapshot memory candidate = _candidate(id, pool);
-        BuckNetBurnMath.Plan memory one = BuckNetBurnMath.plan(candidate, 1);
+        BuckNetBurnMath.Plan memory one = BuckNetBurnMath.plan(candidate, _coverage(id), 1);
         assertEq(uint256(one.status), uint256(BuckNetBurnMath.Status.Found));
-        assertEq(one.principal, 1);
+        assertEq(one.principal, 2);
         _authorize(ALICE, id, 1, 0);
         vm.expectRevert(BuckNet.CreditExceeded.selector);
         vm.prank(ALICE);
@@ -101,9 +102,9 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         assertEq(buck.balanceOf(ALICE), 2);
         (uint256 stillIssued,) = credit.issuanceOf(id);
         assertEq(stillIssued, 2);
-        _authorize(ALICE, id, 2, 0);
+        _authorize(ALICE, id, one.principal, 0);
         vm.prank(ALICE);
-        fund.reduce(id, 2); // full retirement is possible
+        fund.reduce(id, one.principal); // full retirement is possible
         assertEq(buck.balanceOf(ALICE), 0);
     }
 
@@ -118,9 +119,9 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         vm.prank(ALICE);
         buck.issue(id, 5, 3, 0, address(0));
         assertEq(credit.depreciatedFaceValue(id), 4);
-        BuckNetBurnMath.Plan memory two = BuckNetBurnMath.plan(_candidate(id, pool), 2);
+        BuckNetBurnMath.Plan memory two = BuckNetBurnMath.plan(_candidate(id, pool), _coverage(id), 2);
         assertEq(uint256(two.status), uint256(BuckNetBurnMath.Status.Found));
-        assertEq(two.principal, 2);
+        assertEq(two.principal, 3);
         uint256 snapshot = vm.snapshotState();
         _authorize(ALICE, id, 1, 0);
         vm.prank(ALICE);
@@ -130,10 +131,16 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         vm.expectRevert(BuckNet.CreditExceeded.selector);
         vm.prank(ALICE);
         fund.reduce(id, 2); // 2 would create a K shortfall
-        _authorize(ALICE, id, 3, 0);
+        _authorize(ALICE, id, two.principal, 0);
         vm.prank(ALICE);
-        fund.reduce(id, 3); // 3 is permitted
+        fund.reduce(id, two.principal); // 3 is permitted
         assertEq(buck.balanceOf(ALICE), 0);
+    }
+
+    function _coverage(uint256 id) internal view returns (BuckNetBurnMath.Coverage memory) {
+        (uint256 face, uint256 active,) = credit.creditInfo(id);
+        return BuckNetBurnMath.Coverage({face: face, active: active,
+                                         mark: credit.depreciatedFaceValue(id), k: k.currentBuckK()});
     }
 
     function _candidate(uint256 id, JubileeInsurerPoolMock pool)

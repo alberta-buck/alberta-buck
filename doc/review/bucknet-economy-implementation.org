@@ -139,18 +139,21 @@ rather than silently following both.
   A real token/fund/insurer test shows that retiring four raw units can
   decrease the wallet by four while retiring five decreases it by only three:
   the nominal insurer refund and fractional Jubilee relief both rise. The
-  standalone =BuckNetBurnMath= prototype finds a least monetary candidate
-  without assuming those outcomes are monotone. It is *not* connected to a
-  token entry point or a complete quote. It models an already prepared pool;
-  choose and test how insurer preparation occurs without allowing token
-  reentry or using a stale post-callback mark. Ownership, identity, coverage,
-  K, position freshness, authorization, events, other ledger constraints and
-  atomic settlement remain the responsibility of the eventual integration.
+  standalone =BuckNetBurnMath= prototype finds a least monetary and
+  coverage/K candidate without assuming those outcomes are monotone. It is
+  *not* connected to a token entry point or a complete quote. It models an
+  already prepared pool; choose and test how insurer preparation occurs
+  without allowing token reentry or using a stale post-callback mark.
+  Ownership, identity, position freshness, authorization, events, other
+  ledger constraints and atomic settlement remain integration work.
   Coverage eligibility also need not be monotone: rounding depreciated face
   and proportional coverage can allow retirement of one raw unit, reject
   two because the K shortfall worsens, and allow full retirement of three.
   Do not treat a rejected monetary candidate as proof that every larger
-  principal fails; derive a bounded search and test its full constraints.
+  principal fails. The prototype checks such candidates in bounded steps, but
+  can exhaust 256 steps in a concrete modest-sized facility even though full
+  retirement is valid. Improve the search or define an explicit safe fallback,
+  and measure practical gas before exposing it as a production burn.
 - [ ] Permit an *approved neutral Carrying service* to own and use a facility.
   Design and enforce the service authorization before enabling this path,
   including safe delisting and access to settlement; a registry identity
@@ -501,4 +504,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Mint rounding regression | With K=.75 and a 20% premium deposit, four raw units of coverage can issue three raw units while five can issue only two. An actual issuance and both quotes confirm the non-monotone edge; 18 =BuckNetQuoteTest= cases pass. The compatible allocator must account for it rather than use naive binary search. | =97268d51= |
 | 2026-11-01 | Bounded per-facility issuance quote | =quoteSpendable= uses integer lower bounds and a bounded fixed-point search to select least coverage for a requested ordinary-account balance increase. It reports the premium and reserve, and distinguishes impossible from a 256-step work limit. A 10,000-case independent exhaustive fuzz comparison and 20 quote tests, including actual premium, pre-funded and K-shortfall issuance, pass. Python Anvil and JS Tevm each call the new quote successfully; the artifact check passes. At that checkpoint the quote was advisory; Carrying owners, batch selection and token =mint= were not yet implemented. | =c98b0bdc= |
 | 2026-11-01 | Ordinary-owner mint compatibility | Both =mint= overloads and =quoteMint= select ordered per-facility issuance, with a single starting premium reserve, exact per-slice rounding, callback rechecks and an actual balance-increase postcondition. The maximum sentinel follows that order rather than claiming global optimality. The planner's 10,000-case exhaustive integer comparisons passed; the final run passed 44 mint-compatibility/inherited, seven math, 20 quote and 201 Jubilee tests. The cash-only smoke passed 26 Python and 20 JS tests, and the artifact check passed; net JS snapshots now require version 4. Runtime is 23,064 bytes for BuckNet and 24,516 for BuckCredit. Carrying mint, burn, full identity parity and production gas bounds remain open. | =8b20f4d9= |
-| 2026-11-01 | Ordinary burn monetary candidate | A real cash-only fund and insurer pool show that retiring four raw units can decrease the wallet by four but retiring five decreases it by three. A standalone bounded fixed-point calculation selects least principal from exact fractional wallet, marked relief, nominal refund and pool net value; it checks the supplied relief and refund limits without clipping. The independent exhaustive fuzz comparison passed 100,000 cases; six math tests and 48 real-fund/inherited tests passed, including a three-year aged insurer refund and actual settlements. A depreciated NFT demonstrates that K eligibility can pass at one unit, fail at two, and pass at three. =make nix-test= passed 1,573 tests with one fork test skipped. This is a monetary prototype only: compatible burn, authorization, K/coverage, state-changing preparation, wheel integration, multi-NFT sequencing and Carrying owners remain open. | This commit |
+| 2026-11-01 | Ordinary burn monetary candidate | A real cash-only fund and insurer pool show that retiring four raw units can decrease the wallet by four but retiring five decreases it by three. A standalone bounded fixed-point calculation selects least principal from exact fractional wallet, marked relief, nominal refund and pool net value; it checks the supplied relief and refund limits without clipping. The independent exhaustive fuzz comparison passed 100,000 cases; six math tests and 48 real-fund/inherited tests passed, including a three-year aged insurer refund and actual settlements. A depreciated NFT demonstrates that K eligibility can pass at one unit, fail at two, and pass at three. =make nix-test= passed 1,573 tests with one fork test skipped. At that checkpoint the prototype was monetary only; compatible burn, authorization, K/coverage, state-changing preparation, wheel integration, multi-NFT sequencing and Carrying owners remained open. | =2693243f= |
+| 2026-11-01 | Collateral-aware burn candidate | The bounded candidate now applies the same depreciated face, proportional coverage and no-worse-K-shortfall calculation as settlement; its safe skips do not assume K eligibility is monotone. It correctly chooses a larger principal in both real-token rounding cases. Seven math tests passed with 100,000 independent exhaustive vectors, and 48 real-fund/inherited tests passed. A separate regression proves that 256 steps can be exhausted even though full retirement is feasible, so availability/gas optimization is a production gate. This isolated candidate is not a public burn or quote, and the other integration and Carrying checks remain open. | This commit |
