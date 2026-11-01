@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from alberta_buck.sim.anvil import Anvil
+from alberta_buck.sim import carry
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
 from buck_core import (bound_activated_capacity, deploy_net_stack, net_transfer_value, IssuancePending,
@@ -497,6 +498,18 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert repaired.shortfall_before == v["shortfall_before"] and repaired.shortfall_after_premium == 0
         assert repaired.premium == v["repair_premium"] and repaired.max_spendable == v["repair_max_spendable"]
         assert repaired.reasons == ()
+        # The exact repair premium can turn a seemingly profitable mortgage
+        # refinance into a loss; do not score the aggregate coverage estimate.
+        added_mark = (repaired.after_coverage - repaired.before_coverage) / RAW
+        terms = carry.RefiTerms(debt=10, rate=.06, face=100, premium_bp=100, joined=True, payback_y=3,
+                                 k=repaired.current_k / 10**18, headroom=0, unactivated=added_mark,
+                                 expected_relief_rate=.02, expected_refund_growth=-.02,
+                                 wallet_already_issued=True, issuance_limit=1000)
+        naive = carry.refinance(terms, 1, 1)
+        accurate = carry.refinance_quoted(terms, 1, 0, 1, added_mark, repaired.premium / RAW)
+        assert naive.go and not accurate.go and accurate.deposit == 1.8
+        # Separately verify that the contract can execute this candidate;
+        # the economic decision above would decline it under these forecasts.
         previous = ops.facility(depreciating_id)
         ops.issue(debtor.address, depreciating_id, v["remaining_coverage"], requested, repaired.premium, pool.address)
         updated = ops.facility(depreciating_id)

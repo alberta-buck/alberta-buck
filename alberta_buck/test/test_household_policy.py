@@ -82,6 +82,71 @@ def test_net_activated_capacity_is_new_issuance_without_a_second_premium():
     assert v.parts["wallet_carry"] == pytest.approx(-20_000 * mixed.expected_wallet_growth)
 
 
+def quoted_terms(case=None):
+    p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
+    state = FIXTURE["state"] | FIXTURE["net_refinance"][-1]["state"] | {
+        "spendable": 100_000, "expected_wallet_growth": .1} | (case or {})
+    return hp.terms(state, p)
+
+
+@pytest.mark.parametrize("case", FIXTURE["quoted_refinance"], ids=lambda c: c["name"])
+def test_quoted_refinance_prices_selected_wallet_issue_and_reserve(case):
+    t = quoted_terms(case.get("state"))
+    v = carry.refinance_quoted(t, case["usd"], case["wallet"], case["new_spendable"], case["coverage"],
+                                case["premium"], reserve_cost=case.get("reserve_cost", 0),
+                                reserve_carry=case.get("reserve_carry", 0))
+    assert v.go == case["go"]
+    assert v.parts["relief"] == pytest.approx((case["new_spendable"] + case["premium"]) * t.expected_relief_rate)
+    assert v.parts["wallet_carry"] == pytest.approx(-case["wallet"] * t.expected_wallet_growth)
+    assert v.parts["reserve_cost"] == -case.get("reserve_cost", 0)
+    assert v.parts["reserve_carry"] == -case.get("reserve_carry", 0)
+
+
+def test_quoted_refinance_can_retain_a_valuable_wallet():
+    t = quoted_terms()
+    old = carry.refinance(t, 99_000, 100_000)
+    retain = carry.refinance_quoted(t, 99_000, 0, 100_000, 0, 0)
+    assert not old.go and retain.go and retain.value > old.value
+
+
+def quoted_candidate(case):
+    return dict(usd=case["usd"], wallet_used=case["wallet"], new_spendable=case["new_spendable"],
+                present_coverage=case["coverage"], premium=case["premium"],
+                reserve_cost=case.get("reserve_cost", 0), reserve_carry=case.get("reserve_carry", 0))
+
+
+def test_best_quoted_refinance_selects_from_a_feasible_menu_and_breaks_ties():
+    candidates = [quoted_candidate(FIXTURE["quoted_refinance"][i]) for i in (0, 1, 2, 4)]
+    index, choice = carry.best_quoted_refinance(quoted_terms(), candidates)
+    assert index == 1 and choice.go and choice.buck == 100_000
+    index, none = carry.best_quoted_refinance(quoted_terms(), candidates[:1])
+    assert index is None and not none.go
+
+    t = quoted_terms({"expected_wallet_growth": -.02})
+    issue, wallet = candidates[1], candidates[0]
+    index, choice = carry.best_quoted_refinance(t, [issue, wallet])
+    assert index == 1 and choice.go  # exact tie: existing money adds no debt
+    oversized = issue | {"present_coverage": 500}
+    index, choice = carry.best_quoted_refinance(t, [oversized, issue])
+    assert index == 1 and choice.coverage == 0  # don't activate unused coverage
+    with pytest.raises(ValueError, match="wallet funds"):
+        carry.best_quoted_refinance(t, [issue | {"wallet_used": 100_001}])
+
+
+@pytest.mark.parametrize("overrides,error", [
+    ({"usd": 400_001}, "external debt"), ({"wallet_used": 100_001}, "wallet funds"),
+    ({"new_spendable": -1}, "invalid"), ({"premium": float("nan")}, "invalid"),
+    ({"new_spendable": 0, "present_coverage": 1}, "without issuance"),
+    ({"reserve_cost": 1}, "without a premium"),
+    ({"premium": 1}, "exceeds added coverage"),
+    ({"new_spendable": 100_000_000_001}, "shared issuance limit"),
+])
+def test_quoted_refinance_rejects_inconsistent_inputs(overrides, error):
+    args = dict(usd=99_000, wallet_used=0, new_spendable=100_000, present_coverage=0, premium=0)
+    with pytest.raises(ValueError, match=error):
+        carry.refinance_quoted(quoted_terms(), **(args | overrides))
+
+
 def test_net_shared_limit_includes_the_new_premium_principal():
     p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
     state = FIXTURE["state"] | FIXTURE["net_refinance"][-1]["state"] | {
@@ -239,7 +304,16 @@ console.log(JSON.stringify({
  divest: Array.from({length: 8}, (_, i) => hp.divestDay(f.seed, `0/debtor/${i}`, 30, .1)),
  decisions: f.issuance.map(c => hp.issuance({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings}))),
  netRefinance: f.net_refinance.map(c => hp.refinance(hp.terms({...f.state, ...c.state},
-     hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3})), c.usd, c.buck))
+     hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3})), c.usd, c.buck)),
+ quotedRefinance: f.quoted_refinance.map(c => hp.refinanceQuoted(hp.terms({...f.state, ...f.net_refinance.at(-1).state,
+     spendable: 100000, expected_wallet_growth: .1, ...(c.state ?? {})},
+     hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3})), c.usd, c.wallet, c.new_spendable,
+     c.coverage, c.premium, {reserveCost: c.reserve_cost ?? 0, reserveCarry: c.reserve_carry ?? 0})),
+ quotedSelection: hp.bestQuotedRefinance(hp.terms({...f.state, ...f.net_refinance.at(-1).state,
+     spendable: 100000, expected_wallet_growth: .1}, hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3})),
+     [0, 1, 2, 4].map(i => {const c = f.quoted_refinance[i]; return {usd: c.usd, wallet_used: c.wallet,
+       new_spendable: c.new_spendable, present_coverage: c.coverage, premium: c.premium,
+       reserve_cost: c.reserve_cost ?? 0, reserve_carry: c.reserve_carry ?? 0};}))
 }));
 """
     js                          = json.loads(subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT,
@@ -263,3 +337,16 @@ console.log(JSON.stringify({
         pv = asdict(carry.refinance(hp.terms(FIXTURE["state"] | case["state"], p), case["usd"], case["buck"]))
         assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
         assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+    for case, jv in zip(FIXTURE["quoted_refinance"], js["quotedRefinance"]):
+        pv = asdict(carry.refinance_quoted(quoted_terms(case.get("state")), case["usd"], case["wallet"],
+            case["new_spendable"], case["coverage"], case["premium"], reserve_cost=case.get("reserve_cost", 0),
+            reserve_carry=case.get("reserve_carry", 0)))
+        assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
+        assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+    index, verdict = carry.best_quoted_refinance(quoted_terms(),
+        [quoted_candidate(FIXTURE["quoted_refinance"][i]) for i in (0, 1, 2, 4)])
+    assert js["quotedSelection"]["index"] == index
+    pv = asdict(verdict)
+    jv = js["quotedSelection"]["verdict"]
+    assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
+    assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)

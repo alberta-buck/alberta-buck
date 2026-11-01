@@ -9,6 +9,7 @@ import { loadArtifact } from "../src/nodefs.js";
 import { boundActivatedCapacity, deployNetStack, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
 import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
+import { refinance, refinanceQuoted } from "../src/agents/household-policy.js";
 
 const RAW = 1_000_000n;
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -436,6 +437,18 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.ok(repaired.premium <= BigInt(v.repair_premium) && repaired.premium > BigInt(v.repair_premium) - 10n);
   assert.ok(repaired.maxSpendable <= BigInt(v.repair_max_spendable) && repaired.maxSpendable > BigInt(v.repair_max_spendable) - 10n);
   assert.deepEqual(repaired.reasons, []);
+  // A real repair premium can make the aggregate-coverage estimate look
+  // worthwhile even when the exact quoted refinance loses money.
+  const addedMark = Number(repaired.afterCoverage - repaired.beforeCoverage) / Number(RAW);
+  const terms = { debt: 10, rate: .06, face: 100, premium_bp: 100, joined: true, payback_y: 3,
+    k: Number(repaired.currentK) / 1e18, headroom: 0, unactivated: addedMark, fixed_cost: 0, penalty_months: 0,
+    risk: 0, opp_rate: .06, buck_value: 1, expected_relief_rate: .02, premium_refund_fraction: 1,
+    expected_refund_growth: -.02, expected_wallet_growth: 0, wallet_already_issued: true,
+    activated_capacity: 0, issuance_limit: 1000 };
+  const naive = refinance(terms, 1, 1);
+  const accurate = refinanceQuoted(terms, 1, 0, 1, addedMark, Number(repaired.premium) / Number(RAW));
+  assert.ok(naive.go && !accurate.go && Math.abs(accurate.deposit - 1.8) < .00001);
+  // Verify contract feasibility separately; the forecast above declines it.
   const previous = await ops.facility(depreciatingId);
   await ops.issue(debtor.address, depreciatingId, BigInt(v.remaining_coverage), requested, repaired.premium, pool.address);
   const updated = await ops.facility(depreciatingId);

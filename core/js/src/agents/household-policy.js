@@ -235,23 +235,83 @@ export function refinance(t, usd, buck) {
   const need = Math.max(0, newSpendable - activatedCapacity);
   const cov = need === 0 ? 0 : spc > 0 ? need / spc : Infinity;
   if (!Number.isFinite(cov) || (t.issuance_limit != null && newSpendable + cov * e > t.issuance_limit)) return NO;
-  const dep = cov * e, value = buck * t.buck_value, valueDep = dep * t.buck_value;
-  const refundValue = valueDep * refundFraction;
   const newlyIssued = t.wallet_already_issued ? Math.max(0, buck - t.headroom) : buck;
+  const walletUsed = t.wallet_already_issued ? Math.min(buck, t.headroom) : 0;
+  return scoreRefinance(t, usd, buck, cov, cov * e, newlyIssued, walletUsed);
+}
+
+function scoreRefinance(t, usd, buck, cov, dep, newlyIssued, walletUsed, reserveCosts = null) {
+  const reliefRate = t.expected_relief_rate ?? .02, refundFraction = t.premium_refund_fraction ?? 1;
+  const refundGrowth = t.expected_refund_growth ?? -.02, walletGrowth = t.expected_wallet_growth ?? 0;
+  const value = buck * t.buck_value, valueDep = dep * t.buck_value;
+  const refundValue = valueDep * refundFraction;
   const parts = {
     interest: usd * t.rate, relief: (newlyIssued * t.buck_value + valueDep) * reliefRate,
     premium: t.joined ? 0 : t.face * t.premium_bp / 10000,
     deposit_opp: -refundValue * (t.opp_rate ?? t.rate), deposit_age: refundValue * refundGrowth,
     deposit_write_down: -(valueDep - refundValue),
-    wallet_carry: t.wallet_already_issued ? -Math.min(buck, t.headroom) * t.buck_value * walletGrowth : 0,
+    wallet_carry: -walletUsed * t.buck_value * walletGrowth,
     risk: -value * t.risk, execution: -(value - usd), fixed: -t.fixed_cost,
     penalty: -usd * t.rate * t.penalty_months / 12,
   };
-  const carry = ["interest", "relief", "premium", "deposit_opp", "deposit_age", "wallet_carry", "risk"].reduce((s, k) => s + parts[k], 0);
-  const one_time = -(parts.execution + parts.fixed + parts.penalty + parts.deposit_write_down);
+  let carry = ["interest", "relief", "premium", "deposit_opp", "deposit_age", "wallet_carry", "risk"].reduce((s, k) => s + parts[k], 0);
+  let one_time = -(parts.execution + parts.fixed + parts.penalty + parts.deposit_write_down);
+  if (reserveCosts !== null) {
+    parts.reserve_cost = -reserveCosts.cost;
+    parts.reserve_carry = -reserveCosts.carry;
+    one_time += reserveCosts.cost;
+    carry -= reserveCosts.carry;
+  }
   const net = t.payback_y * carry - one_time;
   return { go: usd > 0 && carry > 0 && net > 0, usd, buck, coverage: cov, deposit: dep,
            carry, one_time, value: net, parts };
+}
+
+/** Value a selected wallet/new-issue split. USD is the expected mortgage
+ * principal actually retired after the trade. Coverage is its present marked
+ * increment, not the face amount sent to the token. Reserve cost and carry
+ * are incremental USD losses (or negative benefits), excluding the still
+ * owned reserve and costs already in wallet opportunity. This float forecast
+ * does not replace integer contract feasibility or a guarded market quote. */
+export function refinanceQuoted(t, usd, walletUsed, newSpendable, presentCoverage, premium,
+  { reserveCost = 0, reserveCarry = 0 } = {}) {
+  if (!t.wallet_already_issued || t.expected_relief_rate == null || t.expected_refund_growth == null
+      || [usd, walletUsed, newSpendable, presentCoverage, premium].some((v) => !Number.isFinite(v) || v < 0)
+      || !Number.isFinite(reserveCost) || !Number.isFinite(reserveCarry)) {
+    throw new Error("invalid quoted refinance inputs");
+  }
+  validateForecast(t.expected_relief_rate, t.premium_refund_fraction ?? 1, t.expected_refund_growth, t.expected_wallet_growth ?? 0);
+  validateIssuanceLimit(t.issuance_limit);
+  if (!Number.isFinite(t.debt) || t.debt < 0 || usd > t.debt) throw new Error("quoted refinance exceeds external debt");
+  if (!Number.isFinite(t.headroom) || t.headroom < 0 || walletUsed > t.headroom) throw new Error("quoted refinance exceeds wallet funds");
+  if (newSpendable === 0 && (presentCoverage || premium || reserveCost || reserveCarry)) {
+    throw new Error("quoted refinance has issuance costs without issuance");
+  }
+  if (premium === 0 && (reserveCost || reserveCarry)) throw new Error("quoted refinance has reserve costs without a premium");
+  if (t.issuance_limit == null || newSpendable + premium > t.issuance_limit) throw new Error("quoted refinance exceeds shared issuance limit");
+  if (premium > presentCoverage) throw new Error("quoted refinance premium exceeds added coverage");
+  return scoreRefinance(t, usd, walletUsed + newSpendable, presentCoverage, premium, newSpendable, walletUsed,
+    { cost: reserveCost, carry: reserveCarry });
+}
+
+/** Choose among an explicit menu of already feasible candidates; do not infer
+ * that capacity is monotone. Exact value ties prefer less coverage and then
+ * less new issuance. This finite menu is not a proof of a global optimum. */
+export function bestQuotedRefinance(t, candidates) {
+  if (!Array.isArray(candidates)) throw new Error("invalid quoted refinance candidates");
+  let index = null, verdict = NO, selected = null;
+  candidates.forEach((candidate, i) => {
+    const v = refinanceQuoted(t, candidate.usd, candidate.wallet_used, candidate.new_spendable,
+      candidate.present_coverage, candidate.premium,
+      { reserveCost: candidate.reserve_cost ?? 0, reserveCarry: candidate.reserve_carry ?? 0 });
+    if (!v.go) return;
+    if (selected === null || v.value > verdict.value || (v.value === verdict.value
+        && (candidate.present_coverage < selected.present_coverage ||
+            (candidate.present_coverage === selected.present_coverage && candidate.new_spendable < selected.new_spendable)))) {
+      index = i; verdict = v; selected = candidate;
+    }
+  });
+  return { index, verdict };
 }
 
 const capacity = (t) => {

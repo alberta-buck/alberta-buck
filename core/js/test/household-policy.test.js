@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { profile, issuance, terms, refinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
+import { profile, issuance, terms, refinance, refinanceQuoted, bestQuotedRefinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
   ROLES } from "../src/agents/household-policy.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 
@@ -71,6 +71,46 @@ test("net activated capacity issues without another premium", () => {
   assert.ok(Math.abs(mixedV.coverage - 25000 / (mixed.k * .99 - mixed.premium_bp / 1000)) < 1e-8);
   assert.ok(Math.abs(mixedV.parts.relief - (55000 + mixedV.deposit) * mixed.expected_relief_rate) < 1e-8);
   assert.ok(Math.abs(mixedV.parts.wallet_carry + 20000 * mixed.expected_wallet_growth) < 1e-8);
+});
+const quotedTerms = (state = {}) => terms({ ...f.state, ...f.net_refinance.at(-1).state,
+  spendable: 100000, expected_wallet_growth: .1, ...state }, profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 }));
+for (const c of f.quoted_refinance) test(`quoted refinance: ${c.name}`, () => {
+  const t = quotedTerms(c.state), v = refinanceQuoted(t, c.usd, c.wallet, c.new_spendable, c.coverage, c.premium,
+    { reserveCost: c.reserve_cost ?? 0, reserveCarry: c.reserve_carry ?? 0 });
+  assert.equal(v.go, c.go);
+  assert.ok(Math.abs(v.parts.relief - (c.new_spendable + c.premium) * t.expected_relief_rate) < 1e-8);
+  assert.ok(Math.abs(v.parts.wallet_carry + c.wallet * t.expected_wallet_growth) < 1e-8);
+  assert.equal(v.parts.reserve_cost, -(c.reserve_cost ?? 0));
+  assert.equal(v.parts.reserve_carry, -(c.reserve_carry ?? 0));
+});
+test("quoted refinance can retain a valuable wallet", () => {
+  const t = quotedTerms(), old = refinance(t, 99000, 100000), retain = refinanceQuoted(t, 99000, 0, 100000, 0, 0);
+  assert.equal(old.go, false);
+  assert.ok(retain.go && retain.value > old.value);
+});
+const quotedCandidate = (c) => ({ usd: c.usd, wallet_used: c.wallet, new_spendable: c.new_spendable,
+  present_coverage: c.coverage, premium: c.premium, reserve_cost: c.reserve_cost ?? 0, reserve_carry: c.reserve_carry ?? 0 });
+test("quoted refinance selects the best feasible candidate without unnecessary activation", () => {
+  const choices = [0, 1, 2, 4].map((i) => quotedCandidate(f.quoted_refinance[i]));
+  const selected = bestQuotedRefinance(quotedTerms(), choices);
+  assert.equal(selected.index, 1);
+  assert.ok(selected.verdict.go && selected.verdict.buck === 100000);
+  assert.equal(bestQuotedRefinance(quotedTerms(), choices.slice(0, 1)).index, null);
+  const t = quotedTerms({ expected_wallet_growth: -.02 });
+  assert.equal(bestQuotedRefinance(t, [choices[1], choices[0]]).index, 1); // exact tie: no new debt
+  assert.equal(bestQuotedRefinance(t, [{ ...choices[1], present_coverage: 500 }, choices[1]]).index, 1);
+  assert.throws(() => bestQuotedRefinance(t, [{ ...choices[1], wallet_used: 100001 }]), /wallet funds/);
+});
+test("quoted refinance rejects inconsistent inputs", () => {
+  const t = quotedTerms();
+  assert.throws(() => refinanceQuoted(t, 400001, 0, 100000, 0, 0), /external debt/);
+  assert.throws(() => refinanceQuoted(t, 99000, 100001, 100000, 0, 0), /wallet funds/);
+  assert.throws(() => refinanceQuoted(t, 99000, 0, -1, 0, 0), /invalid/);
+  assert.throws(() => refinanceQuoted(t, 99000, 0, 100000, 0, NaN), /invalid/);
+  assert.throws(() => refinanceQuoted(t, 99000, 0, 0, 1, 0), /without issuance/);
+  assert.throws(() => refinanceQuoted(t, 99000, 0, 100000, 0, 0, { reserveCost: 1 }), /without a premium/);
+  assert.throws(() => refinanceQuoted(t, 99000, 0, 100000, 0, 1), /exceeds added coverage/);
+  assert.throws(() => refinanceQuoted(t, 99000, 0, 100000000001, 0, 0), /shared issuance limit/);
 });
 test("a maturity backlog blocks new credit without hiding wallet BUCK", async () => {
   const agent = new CreditHouseholdAgent({ account: "0x1", settings: { divest_rate: 0 } });

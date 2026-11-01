@@ -213,10 +213,16 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
     if not math.isfinite(cov):
         return NO
     dep = cov * deposit_rate(t.premium_bp)
+    newly_issued = max(0., buck - t.headroom) if t.wallet_already_issued else buck
+    wallet_used = min(buck, t.headroom) if t.wallet_already_issued else 0.
+    return _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used)
+
+
+def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_costs=None):
+    """Common valuation; feasibility and token-unit rounding belong to the caller."""
     value_buck                  = buck * t.buck_value
     value_dep                   = dep * t.buck_value
     refund_value                = value_dep * t.premium_refund_fraction
-    newly_issued                = max(0., buck - t.headroom) if t.wallet_already_issued else buck
     relief_rate                 = RELIEF if t.expected_relief_rate is None else t.expected_relief_rate
     refund_growth               = -DEMURRAGE if t.expected_refund_growth is None else t.expected_refund_growth
     opp = t.rate if t.opp_rate is None else t.opp_rate
@@ -237,8 +243,7 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
         "deposit_write_down": -(value_dep - refund_value),
         # Spending existing money gives up its alternative return. A negative
         # return (for example idle wallet demurrage) is a cost avoided.
-        "wallet_carry": (-min(buck, t.headroom) * t.buck_value * t.expected_wallet_growth
-                         if t.wallet_already_issued else 0.),
+        "wallet_carry": -wallet_used * t.buck_value * t.expected_wallet_growth,
         # owing a basket-indexed unit against USD income
         "risk": -value_buck * t.risk,
         # execution: the liability, at par, beyond the USD it retired
@@ -249,10 +254,74 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
     carry = sum(parts[k] for k in ("interest", "relief", "premium",
                                    "deposit_opp", "deposit_age", "wallet_carry", "risk"))
     one_time = -(parts["execution"] + parts["fixed"] + parts["penalty"] + parts["deposit_write_down"])
+    if reserve_costs is not None:
+        one_time_cost, annual_cost = reserve_costs
+        parts["reserve_cost"] = -one_time_cost
+        parts["reserve_carry"] = -annual_cost
+        one_time += one_time_cost
+        carry -= annual_cost
     value = t.payback_y * carry - one_time
     return RefiVerdict(go=(usd > 0 and carry > 0 and value > 0), usd=usd,
                        buck=buck, coverage=cov, deposit=dep, carry=carry,
                        one_time=one_time, value=value, parts=parts)
+
+
+def refinance_quoted(t: RefiTerms, usd: float, wallet_used: float, new_spendable: float,
+                     present_coverage: float, premium: float, *, reserve_cost: float = 0.,
+                     reserve_carry: float = 0.) -> RefiVerdict:
+    """Value a proposed split between already-held money and one quoted issue.
+
+    Amounts use whole units; ``usd`` is the external mortgage principal the
+    household expects actually to retire after trading. ``present_coverage`` is the marked increment,
+    not the face-unit argument to issue. The premium must come from the actual
+    per-NFT quote. Reserve costs are the incremental, unrecovered acquisition
+    and annual carrying costs in USD, excluding the still-owned reserve and
+    anything already included in wallet opportunity. They can be negative if
+    acquiring/holding the reserve has a net benefit.
+
+    This is an economic forecast, not an issuance or trade check. The caller
+    must first establish exact integer feasibility, reserve funding, a guarded
+    market quote and an appropriate current block; repeat as necessary before
+    transacting. No gross reserve purchase is treated as a loss of principal.
+    """
+    amounts = (usd, wallet_used, new_spendable, present_coverage, premium)
+    if (not t.wallet_already_issued or t.expected_relief_rate is None or t.expected_refund_growth is None or
+            any(not math.isfinite(v) or v < 0 for v in amounts) or
+            not math.isfinite(reserve_cost) or not math.isfinite(reserve_carry)):
+        raise ValueError("invalid quoted refinance inputs")
+    if not math.isfinite(t.debt) or t.debt < 0 or usd > t.debt:
+        raise ValueError("quoted refinance exceeds external debt")
+    if not math.isfinite(t.headroom) or t.headroom < 0 or wallet_used > t.headroom:
+        raise ValueError("quoted refinance exceeds wallet funds")
+    if new_spendable == 0 and (present_coverage or premium or reserve_cost or reserve_carry):
+        raise ValueError("quoted refinance has issuance costs without issuance")
+    if premium == 0 and (reserve_cost or reserve_carry):
+        raise ValueError("quoted refinance has reserve costs without a premium")
+    if t.issuance_limit is None or new_spendable + premium > t.issuance_limit:
+        raise ValueError("quoted refinance exceeds shared issuance limit")
+    if premium > present_coverage:
+        raise ValueError("quoted refinance premium exceeds added coverage")
+    return _score_refinance(t, usd, wallet_used + new_spendable, present_coverage, premium,
+                            new_spendable, wallet_used, (reserve_cost, reserve_carry))
+
+
+def best_quoted_refinance(t: RefiTerms, candidates):
+    """Choose the best worthwhile candidate from an explicitly supplied menu.
+
+    Each mapping has the arguments of ``refinance_quoted``. Candidates must
+    already have exact token and market feasibility; this finite menu does not
+    search for an optimum or infer monotonicity. Exact ties prefer less added
+    coverage, then less new issuance, avoiding unnecessary activation or debt.
+    """
+    best_index, best, best_key = None, NO, None
+    for index, candidate in enumerate(candidates):
+        verdict = refinance_quoted(t, **candidate)
+        if not verdict.go:
+            continue
+        key = (verdict.value, -candidate["present_coverage"], -candidate["new_spendable"])
+        if best_key is None or key > best_key:
+            best_index, best, best_key = index, verdict, key
+    return best_index, best
 
 
 # Sizes tried, as fractions of the most the household can retire.  The

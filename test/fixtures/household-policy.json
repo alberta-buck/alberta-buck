@@ -26,6 +26,15 @@
     {"name": "valuable wallet alternative discourages refinancing", "state": {"accounting": "net", "joined": true, "spendable": 100000, "unactivated": 0, "activated_capacity": 0, "issuance_limit": 100000000000, "expected_relief_rate": 0.02, "premium_refund_fraction": 1.0, "expected_refund_growth": -0.02, "expected_wallet_growth": 0.1}, "usd": 99000, "buck": 100000, "go": false},
     {"name": "activated facility room issues without another premium", "state": {"accounting": "net", "joined": true, "spendable": 0, "unactivated": 0, "activated_capacity": 100000, "issuance_limit": 100000000000, "expected_relief_rate": 0.02, "premium_refund_fraction": 1.0, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}, "usd": 99000, "buck": 100000, "go": true}
   ],
+  "quoted_refinance": [
+    {"name": "valuable wallet makes spending unattractive", "usd": 99000, "wallet": 100000, "new_spendable": 0, "coverage": 0, "premium": 0, "go": false},
+    {"name": "retain valuable wallet and issue activated capacity", "usd": 99000, "wallet": 0, "new_spendable": 100000, "coverage": 0, "premium": 0, "go": true},
+    {"name": "mix wallet and quoted premium issue", "usd": 99000, "wallet": 20000, "new_spendable": 80000, "coverage": 20000, "premium": 1000, "go": true},
+    {"name": "aged insurer reduces the premium refund", "state": {"premium_refund_fraction": 0.5}, "usd": 95000, "wallet": 0, "new_spendable": 100000, "coverage": 200000, "premium": 10000, "go": true},
+    {"name": "reserve purchase friction changes the decision", "usd": 99000, "wallet": 0, "new_spendable": 100000, "coverage": 20000, "premium": 1000, "reserve_cost": 15000, "go": false},
+    {"name": "reserve carrying costs change the decision", "usd": 99000, "wallet": 0, "new_spendable": 100000, "coverage": 20000, "premium": 1000, "reserve_carry": 5000, "go": false},
+    {"name": "reserve acquisition can provide a benefit", "usd": 99000, "wallet": 0, "new_spendable": 100000, "coverage": 20000, "premium": 1000, "reserve_cost": -1000, "go": true}
+  ],
   "surplus": [
     ["adaptive", 1.1, 1.2, 0.003, 0.02, 0.02, "retire"],
     ["adaptive", 1.1, 1.0, 0.003, 0.02, 0.02, "invest"],

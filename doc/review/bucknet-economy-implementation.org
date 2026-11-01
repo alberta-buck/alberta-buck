@@ -38,13 +38,14 @@ stand in for the existing leveraged basket without resolving the
   per-NFT candidate assessments now expose a K/asset-mark shortfall and price
   selected additional coverage and its premium against the real quoter. The
   household must use those candidates for decisions: its aggregate unactivated
-  estimate remains optimistic for an over-issued NFT. Select coverage without
-  assuming the exact integer quote is monotone, account for its funding gate,
-  and integrate the single-issue receipt primitive with persistent household
-  transaction and trade evidence before enabling issuance.
-  Compare spending existing wallet BUCK with retaining it and issuing instead, including the
-  lost alternative return, incremental relief, premium and funding reserve.
-  Keep the two runtimes and actual transaction receipts consistent.
+  estimate remains optimistic for an over-issued NFT. Both policy kernels can
+  now value and choose among explicit, already-feasible wallet/new-issuance
+  alternatives, including quoted premium, wallet opportunity and incremental
+  reserve costs. Generate a useful coverage/market candidate menu without
+  assuming the exact integer quote is monotone; obtain reserve and return
+  forecasts; then integrate the decision and single-issue receipt primitive
+  with persistent household transaction and trade evidence before enabling
+  issuance. Extend the comparison to a saver's basket-investment decision.
 - [X] Bound the premium in =BuckNet.issue= at execution. A self-issued
   MARKED asset's value can change after a quote, and an insurer can change an
   inactive NFT's terms, increasing premium principal while preserving the
@@ -120,4 +121,5 @@ stand in for the existing leveraged basket without resolving the
 | 2026-10-31 | Issuance premium ceiling | =BuckNet.issue= and both local clients require an explicit =maxPremium=. Repricing above it reverts coverage activation, issuance and insurer payment; exact-boundary and self-issued MARKED tests pass. Unversioned diagnostic net snapshots and incompatible artifacts are rejected. =make nix-test=: 1,445 passed, one fork test skipped; =make nix-venv-net-demurrage-smoke=: 18 Python and ten JS passed; =make nix-contracts-dist-check= passed. BuckNet runtime is 23,383 bytes and BuckCredit is 24,516 bytes. The new ABI has not been deployed or published. | =ff1c90fe= |
 | 2026-10-31 | Per-facility issuance candidates | Python and JS assess caller-selected coverage and issuance at one block, report the existing K shortfall and remaining shortfall after premium, and flag observed funding, identity, pool, maturity, authorization and capacity blockers. Matching focused Anvil and Tevm tests passed three cases each: they exercise a K shock and show an over-issued, depreciating facility can issue after sufficient additional coverage and premium. The broader smoke at the preceding assessment checkpoint passed 18 Python and ten JS cases. These assessments do not yet choose economically optimal coverage or enable the net household issuance lifecycle. | =810934aa= |
 | 2026-10-31 | Owner-approved premium pool | A reproduced pool switch prompted an owner-specified pool on =issue= and a pool bound into the renewal consent digest. Changed pools revert all issuance or renewal effects, while zero-premium issuance does not require a pool. Both clients, actual-EVM fixtures, old snapshot/ABI rejection, invariants and the demurrage PDF/text are updated. =make nix-test=: 1,447 passed and one fork test skipped; focused renewal and BuckNet tests passed 62 and 41 cases; =make nix-venv-net-demurrage-smoke=: 18 Python and ten JS passed; final focused client tests and =make nix-contracts-dist-check= passed. Runtime: BuckNet 23,479 bytes, BuckCredit 24,516 bytes. This breaking experimental ABI is not deployed or published. | =fb8afe28= |
-| 2026-10-31 | Issuance outcome evidence | Python and JS submit one selected candidate and authenticate the resulting facility event against the saved transaction hash and exact economic terms. Focused Anvil/Tevm tests passed three cases each and cover lost replies, missing hashes or events, a confirmed revert, mismatched/duplicate evidence and recovery. This is an operation primitive: household scheduling, idempotent application, snapshots, finality, economic selection and guarded sales remain open. | This commit |
+| 2026-10-31 | Issuance outcome evidence | Python and JS submit one selected candidate and authenticate the resulting facility event against the saved transaction hash and exact economic terms. Focused Anvil/Tevm tests passed three cases each and cover lost replies, missing hashes or events, a confirmed revert, mismatched/duplicate evidence and recovery. This is an operation primitive: household scheduling, idempotent application, snapshots, finality, economic selection and guarded sales remain open. | =3c824eb9= |
+| 2026-10-31 | Quoted refinancing comparisons | Python and JS score and select among caller-supplied feasible wallet/new-issuance alternatives, using actual quoted premium, wallet opportunity, relief and incremental reserve costs. Shared vectors cover retaining a valuable wallet, insurer haircuts, reserve friction and tie-breaking. A real depreciated NFT shows that an aggregate estimate may approve a refinance which its actual repair premium makes unattractive. Focused policy/actual-EVM tests passed 91 Python and 38 JS cases. The running net household, candidate generation, saver investment, persistence and trade execution are still open. | This commit |
