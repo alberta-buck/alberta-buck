@@ -21,6 +21,8 @@ help:
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
+	  '  make nix-match-BuckNetBurnMathTest # proposed retirement calculation and fuzzing' \
+	  '  make nix-match-BuckNetBurnRoundingTest  # proposed calculation vs real settlements' \
 	  '  make nix-deploy-dry-run            # legacy stub-verifier bootstrap, no broadcast' \
 	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
 	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \

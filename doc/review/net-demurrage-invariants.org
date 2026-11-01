@@ -312,6 +312,36 @@ globally optimal across alternative orders. =quoteMint= uses that planner but
 does not reserve funding or promise a pool or K; the bounded =issue= API is
 available when a caller needs a premium ceiling and an expected pool.
 
+The standalone =BuckNetBurnMath= prototype addresses the inverse monetary
+question for one *ordinary* owner and one fixed, already prepared pool. Let
+=W= be the scaled wallet before settlement, =Q= the scale, =N>0= the requested
+whole-raw-unit balance decrease, =p= retired principal, =R(p)= full-value
+scaled marked relief and =F(p)= the scaled net value of the insurer's nominal
+proportional refund. The actual visible decrease is at least =N= precisely
+when
+
+#+begin_example
+p*Q >= (N-1)*Q + (W mod Q) + 1 + R(p) + F(p).
+#+end_example
+
+Both =R= and =F= are nondecreasing in =p=, even though the visible decrease is
+not. The candidate starts at =N= and repeatedly rounds the right side up to
+whole principal; every skipped principal fails the inequality, so a fixed
+point is the least monetary solution for that snapshot. It rejects a
+candidate above the liquid/shared relief cap, unavailable nominal refund,
+or the owner's temporary refund-receipt limit. Its 256-step =WorkLimit= is
+distinct from impossibility. This calculation does *not* check identity,
+ownership, K/coverage, all ledger limits, authorization, wheel freshness,
+preparation callbacks or multi-facility sequencing; it is not yet wired to
+=burn= or =quoteBurn=. Relief, pool balances, allowance and wallet must be
+re-read after any state-changing pool preparation. In a multi-NFT operation,
+cash, claim totals, shared budget, wallet and pool composition can all change
+after each settlement; reusing a single initial snapshot would be incorrect.
+In actual settlement, rounding the proportional face reduction and the
+depreciated mark can make the K check pass at one principal, fail at the next,
+then pass on full retirement. Thus neither a monotone search over principal
+nor one failed monetary candidate is sufficient to select a legal burn.
+
 The wheel currently scans bounded slots with a cursor and an idle-per-block
 memo; existing equity and response kinds catch failed basket work. Fund work
 must re-arm the wheel when a cash, claim or mark change makes a slot due, and
