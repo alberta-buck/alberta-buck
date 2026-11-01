@@ -148,9 +148,11 @@ not yet the running household's net issuance path or a savings-policy model.
 An Anvil/Tevm depreciation case illustrates the distinction: the aggregate
 approximation judges a one-BUCK refinance worthwhile, while the actual premium
 needed to repair that NFT's shortfall makes the same proposed refinance
-unattractive under the stated forecasts. The fixture separately exercises the
-contract transaction to check that it is technically possible; that is not an
-agent choosing to execute the losing refinance.
+unattractive under the stated forecasts. A smaller candidate from the menu below
+is worthwhile under the fixture's hypothetical return and sale assumptions;
+the fixture issues that selected candidate with its premium ceiling narrowed
+to the quote. It does not model a market sale, mortgage repayment, or a complete
+household.
 
 The activated-capacity quote requires a verified non-Carrying owner and
 distinct NFTs owned by that account. It reads the owner, each zero-coverage
@@ -168,6 +170,19 @@ over-issued at current K or its asset mark: part of newly activated coverage
 and its premium must first repair that facility's shortfall. The eventual
 per-NFT issuance planner must account for that repair, its funding and actual
 quote before using the aggregate estimate to submit a transaction.
+Python =issue_coverage_menu= and JavaScript =issueCoverageMenu= now provide at
+most 15 face-coverage choices for one NFT and requested new spendable amount.
+If already-activated coverage suffices they return only zero new coverage.
+Otherwise they include zero, a bounded set across the available face and an
+integer estimate near the requested issuance after the existing shortfall and
+premium, with neighboring values. Each result is an exact assessment pinned to
+the same block; failed choices remain visible. The estimate itself is not a
+guarantee of feasibility, minimum activation or optimality, particularly at
+rounding boundaries or when K is at or below the premium rate. These calls
+repeat several RPC reads per choice and have not been benchmarked at five-year
+population scale. A real household still needs a bounded menu of sale sizes,
+wallet splits and per-candidate insurer/market/return forecasts, then must
+reassess the chosen terms and narrow its premium ceiling before submitting.
 The Python =assess_issue_candidate= and JavaScript =assessIssueCandidate=
 helpers now assess a caller-selected NFT, face-coverage increment and exact
 spendable amount at one block. They report the old marked K shortfall, the

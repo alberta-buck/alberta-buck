@@ -16,7 +16,7 @@ from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim import carry
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
-from buck_core import (bound_activated_capacity, deploy_net_stack, net_transfer_value, IssuancePending,
+from buck_core import (bound_activated_capacity, deploy_net_stack, issue_coverage_candidates, net_transfer_value, IssuancePending,
                        NetCreditOps, ReductionPending, TransactionReceiptPending)
 from buck_core.session import Expect, _txhex
 
@@ -46,6 +46,18 @@ def test_activated_capacity_shared_integer_limits():
         bound_activated_capacity([4], max_balance * Q, 1, 0)
     with pytest.raises(ValueError, match="invalid"):
         bound_activated_capacity([4], 0, 0, max_uint // Q + 1)
+
+
+def test_coverage_candidates_are_bounded_and_include_repair_estimates():
+    choices = issue_coverage_candidates(100, 40, 30, 14, 75 * 10**16, 100, 1)
+    assert choices == (0, 1, 7, 15, 22, 26, 30, 34, 37, 38, 42, 45, 52, 60)
+    assert issue_coverage_candidates(100, 40, 0, 14, 10**18, 100, 1) == (0,)
+    slow = issue_coverage_candidates(100, 40, 30, 14, 10**17, 100, 1)
+    assert len(slow) <= 15 and slow[0] == 0 and slow[-1] == 60
+    for bad in ((100, 101, 30, 14, 10**18, 100, 1), (100, 40, 101, 14, 10**18, 100, 1),
+                (100, 40, 30, 14, 10**18, 1000, 1), (100, 40, 30, 14, 10**18, 100, 0)):
+        with pytest.raises(ValueError, match="coverage"):
+            issue_coverage_candidates(*bad)
 
 
 @pytest.mark.skipif(
@@ -137,6 +149,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert capacity.maturities_pending and capacity.potential_capacity > 0 and capacity.capacity == 0
         pending = ops.assess_issue_candidate(actor.address, 1, 0, RAW, 0)
         assert "maturities-pending" in pending.reasons
+        assert ops.issue_coverage_menu(actor.address, 1, RAW, 0) == (pending,)
         with pytest.raises(Exception):
             ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
         chain.send(buck.functions.processMaturities(10))
@@ -442,6 +455,8 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         before = ops.facility(third_id)
         existing = ops.quote_issue(third_id, 0)
         assert existing.premium == existing.reserve_required == 0 and existing.max_spendable >= RAW
+        activated_menu = ops.issue_coverage_menu(debtor.address, third_id, RAW, 0)
+        assert len(activated_menu) == 1 and not activated_menu[0].reasons and activated_menu[0].coverage == 0
         capacity = ops.quote_household_activated_capacity(debtor.address, [debtor_id, third_id])
         assert not capacity.maturities_pending
         assert capacity.block_number == chain.w3.eth.block_number
@@ -508,11 +523,23 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         naive = carry.refinance(terms, 1, 1)
         accurate = carry.refinance_quoted(terms, 1, 0, 1, added_mark, repaired.premium / RAW)
         assert naive.go and not accurate.go and accurate.deposit == 1.8
-        # Separately verify that the contract can execute this candidate;
-        # the economic decision above would decline it under these forecasts.
+        menu = ops.issue_coverage_menu(debtor.address, depreciating_id, requested, 2 * RAW, reserve_buffer=buffer)
+        assert len(menu) <= 15 and all(item.block_number == repaired.block_number for item in menu)
+        ready = [item for item in menu if not item.reasons]
+        choices = [dict(usd=1, wallet_used=0, new_spendable=1,
+                        present_coverage=(item.after_coverage - item.before_coverage) / RAW,
+                        premium=item.premium / RAW) for item in ready]
+        selected, value = carry.best_quoted_refinance(terms, choices)
+        assert selected is not None and value.go
+        chosen = ready[selected]
+        assert 30 * RAW < chosen.coverage < 32 * RAW and chosen.premium < repaired.premium
+        # Bind the actual quoted premium before submitting the economically
+        # preferred candidate; a later price increase must not be accepted.
+        chosen = replace(chosen, max_premium=chosen.premium)
         previous = ops.facility(depreciating_id)
-        ops.issue(debtor.address, depreciating_id, v["remaining_coverage"], requested, repaired.premium, pool.address)
+        result_issue = ops.issue_candidate(debtor.address, chosen)
         updated = ops.facility(depreciating_id)
-        assert updated.activated == previous.activated + v["remaining_coverage"]
-        assert previous.issued + requested < updated.issued <= previous.issued + requested + repaired.premium
+        assert updated.activated == previous.activated + chosen.coverage
+        assert updated.issued == previous.issued + result_issue.principal
+        assert result_issue.premium <= chosen.premium
         assert not chain.mismatches

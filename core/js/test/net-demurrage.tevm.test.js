@@ -6,10 +6,10 @@ import { encodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact } from "../src/nodefs.js";
-import { boundActivatedCapacity, deployNetStack, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
+import { boundActivatedCapacity, deployNetStack, issueCoverageCandidates, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
 import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
-import { refinance, refinanceQuoted } from "../src/agents/household-policy.js";
+import { bestQuotedRefinance, refinance, refinanceQuoted } from "../src/agents/household-policy.js";
 
 const RAW = 1_000_000n;
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -33,6 +33,19 @@ test("activated capacity respects shared integer limits", () => {
   assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 0n, maxUint / q - 3n), { potentialCapacity: 3n, sharedLimit: 3n });
   assert.throws(() => boundActivatedCapacity([4n], maxBalance * q, 1n, 0n), /invalid/);
   assert.throws(() => boundActivatedCapacity([4n], 0n, 0n, maxUint / q + 1n), /invalid/);
+});
+
+test("coverage candidates are bounded and include repair estimates", () => {
+  assert.deepEqual(issueCoverageCandidates(100n, 40n, 30n, 14n, 75n * 10n ** 16n, 100n, 1n),
+    [0n, 1n, 7n, 15n, 22n, 26n, 30n, 34n, 37n, 38n, 42n, 45n, 52n, 60n]);
+  assert.deepEqual(issueCoverageCandidates(100n, 40n, 0n, 14n, 10n ** 18n, 100n, 1n), [0n]);
+  const slow = issueCoverageCandidates(100n, 40n, 30n, 14n, 10n ** 17n, 100n, 1n);
+  assert.ok(slow.length <= 15 && slow[0] === 0n && slow.at(-1) === 60n);
+  for (const bad of [[100n, 101n, 30n, 14n, 10n ** 18n, 100n, 1n],
+    [100n, 40n, 101n, 14n, 10n ** 18n, 100n, 1n],
+    [100n, 40n, 30n, 14n, 10n ** 18n, 1000n, 1n], [100n, 40n, 30n, 14n, 10n ** 18n, 100n, 0n]]) {
+    assert.throws(() => issueCoverageCandidates(...bad), /coverage/);
+  }
 });
 
 test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, async () => {
@@ -112,6 +125,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.ok(capacity.potentialCapacity > 0n);
   assert.equal(capacity.capacity, 0n);
   assert.ok((await ops.assessIssueCandidate(actor.address, 1n, 0n, RAW, 0n)).reasons.includes("maturities-pending"));
+  assert.equal((await ops.issueCoverageMenu(actor.address, 1n, RAW, 0n)).length, 1);
   await assert.rejects(ops.quoteReliefRate(0n, RAW)); // stale denominator must not become a forecast
   await s.send(buck, "processMaturities", [10n]);
   assert.equal(await s.call(buck, "maturitiesPending"), false);
@@ -380,6 +394,10 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(existing.premium, 0n);
   assert.equal(existing.reserveRequired, 0n);
   assert.ok(existing.maxSpendable >= RAW);
+  const activatedMenu = await ops.issueCoverageMenu(debtor.address, thirdId, RAW, 0n);
+  assert.equal(activatedMenu.length, 1);
+  assert.deepEqual(activatedMenu[0].reasons, []);
+  assert.equal(activatedMenu[0].coverage, 0n);
   const householdCapacity = await ops.quoteHouseholdActivatedCapacity(debtor.address, [debtorId, thirdId]);
   assert.equal(householdCapacity.maturitiesPending, false);
   assert.equal(householdCapacity.blockNumber, (await s.client.getBlock()).number);
@@ -448,11 +466,23 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const naive = refinance(terms, 1, 1);
   const accurate = refinanceQuoted(terms, 1, 0, 1, addedMark, Number(repaired.premium) / Number(RAW));
   assert.ok(naive.go && !accurate.go && Math.abs(accurate.deposit - 1.8) < .00001);
-  // Verify contract feasibility separately; the forecast above declines it.
+  const menu = await ops.issueCoverageMenu(debtor.address, depreciatingId, requested, 2n * RAW,
+    { reserveBuffer: BigInt(V.reserve_buffer) });
+  assert.ok(menu.length <= 15 && menu.every((item) => item.blockNumber === repaired.blockNumber));
+  const ready = menu.filter((item) => !item.reasons.length);
+  const choices = ready.map((item) => ({ usd: 1, wallet_used: 0, new_spendable: 1,
+    present_coverage: Number(item.afterCoverage - item.beforeCoverage) / Number(RAW), premium: Number(item.premium) / Number(RAW) }));
+  const selected = bestQuotedRefinance(terms, choices);
+  assert.notEqual(selected.index, null);
+  assert.ok(selected.verdict.go);
+  const chosen = ready[selected.index];
+  assert.ok(chosen.coverage > 30n * RAW && chosen.coverage < 32n * RAW && chosen.premium < repaired.premium);
+  // Narrow the maximum to the economically priced premium before submitting.
   const previous = await ops.facility(depreciatingId);
-  await ops.issue(debtor.address, depreciatingId, BigInt(v.remaining_coverage), requested, repaired.premium, pool.address);
+  const resultIssue = await ops.issueCandidate(debtor.address, { ...chosen, maxPremium: chosen.premium });
   const updated = await ops.facility(depreciatingId);
-  assert.equal(updated.activated, previous.activated + BigInt(v.remaining_coverage));
-  assert.ok(updated.issued > previous.issued + requested && updated.issued <= previous.issued + requested + repaired.premium);
+  assert.equal(updated.activated, previous.activated + chosen.coverage);
+  assert.equal(updated.issued, previous.issued + resultIssue.principal);
+  assert.ok(resultIssue.premium <= chosen.premium);
   assert.deepEqual(s.mismatches, []);
 });

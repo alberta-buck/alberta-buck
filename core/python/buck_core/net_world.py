@@ -157,6 +157,37 @@ def bound_activated_capacity(capacities, held_scaled: int, unspent_scaled: int, 
     return min(sum(values), shared), shared
 
 
+def issue_coverage_candidates(face: int, activated: int, mark: int, principal: int, k: int,
+                              premium_rate_bp: int, requested: int) -> tuple[int, ...]:
+    """Return a bounded menu of face increments near the needed coverage.
+
+    Inputs and results are exact integer token units; K is scaled by 1e18.
+    The estimate includes an existing facility shortfall and premium, but
+    its candidates must be quoted individually. It does not assume those
+    integer quotes are monotone or promise a globally minimal activation.
+    """
+    values = (face, activated, mark, principal, k, premium_rate_bp, requested)
+    if (any(type(v) is not int or v < 0 or v > MAX_UINT256 for v in values) or
+            activated > face or mark > face or premium_rate_bp * 10 >= 10_000 or requested == 0):
+        raise ValueError("invalid issuance coverage inputs")
+    remaining = face - activated
+    if not remaining or not mark:
+        return (0,)
+    choices = {0, 1, remaining}
+    choices.update(remaining * n // 8 for n in range(1, 8))
+    before = mark * activated // face
+    before_limit = before * k // WAD
+    needed = max(0, principal + requested - before_limit)
+    spread = k - premium_rate_bp * 10 * WAD // 10_000
+    if needed and spread > 0:
+        ceil_div = lambda a, b: (a + b - 1) // b
+        present = ceil_div(needed * WAD, spread)
+        estimate = min(remaining, ceil_div(present * face, mark))
+        step = ceil_div(face, mark)
+        choices.update(max(0, min(remaining, estimate + offset * step)) for offset in (-2, -1, 0, 1, 2))
+    return tuple(sorted(choices))
+
+
 @dataclass(frozen=True)
 class ReductionPlan:
     token_id: int
@@ -461,6 +492,32 @@ class NetCreditOps:
                               k, max(0, principal - before * k // WAD),
                               max(0, principal + premium - after * k // WAD), premium, reserve, reserve_buffer,
                               spendable, shortfall, maximum, pool, tuple(reasons))
+
+    def issue_coverage_menu(self, owner, token_id: int, requested_spendable: int, max_premium: int,
+                            *, reserve_buffer: int = 0) -> tuple[IssueCandidate, ...]:
+        """Quote a small, explicitly bounded set of coverage increments at one block.
+
+        Use no extra coverage when currently activated room suffices. Otherwise
+        report the exact assessment for each candidate, including failures;
+        the caller decides which are affordable and worth exercising. This
+        finite menu is not an exhaustive search or an execution promise.
+        """
+        block = self.chain.w3.eth.block_number
+        zero = self.assess_issue_candidate(owner, token_id, 0, requested_spendable, max_premium,
+                                           reserve_buffer=reserve_buffer, block_number=block)
+        common_blockers = {"fund-unavailable", "maturities-pending", "authorization-pending", "facility-matured"}
+        if not zero.reasons or common_blockers.intersection(zero.reasons):
+            return (zero,)
+        read = lambda fn: fn.call(block_identifier=block)
+        credit = self.stack.credit
+        face, activated, rate = read(credit.functions.creditInfo(token_id))
+        mark = read(credit.functions.depreciatedFaceValue(token_id))
+        principal, _ = read(credit.functions.issuanceOf(token_id))
+        k = read(self.stack.controller.functions.currentBuckK())
+        coverages = issue_coverage_candidates(face, activated, mark, principal, k, rate, requested_spendable)
+        return (zero,) + tuple(self.assess_issue_candidate(owner, token_id, coverage, requested_spendable, max_premium,
+                                                           reserve_buffer=reserve_buffer, block_number=block)
+                               for coverage in coverages if coverage)
 
     def quote_household_activated_capacity(self, owner, token_ids) -> ActivatedCapacityQuote:
         """Observe activated room and unactivated marked coverage at one block.

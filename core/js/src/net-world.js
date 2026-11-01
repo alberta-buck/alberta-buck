@@ -27,6 +27,34 @@ export function boundActivatedCapacity(capacities, heldScaled, unspentScaled, to
   return { potentialCapacity, sharedLimit };
 }
 
+/** Bounded face-coverage menu near the desired new spendable amount. All
+ * inputs are exact integers; K is scaled by 1e18. Actual quotes can move up
+ * or down with rounding and must be checked individually. */
+export function issueCoverageCandidates(face, activated, mark, principal, k, premiumRateBp, requested) {
+  if ([face, activated, mark, principal, k, premiumRateBp, requested]
+    .some((v) => typeof v !== "bigint" || v < 0n || v > MAX_UINT256)
+      || activated > face || mark > face || premiumRateBp * 10n >= 10000n || requested === 0n) {
+    throw new Error("invalid issuance coverage inputs");
+  }
+  const remaining = face - activated;
+  if (!remaining || !mark) return [0n];
+  const choices = new Set([0n, 1n, remaining]);
+  for (let n = 1n; n < 8n; n++) choices.add(remaining * n / 8n);
+  const before = mark * activated / face, beforeLimit = before * k / WAD;
+  const needed = principal + requested > beforeLimit ? principal + requested - beforeLimit : 0n;
+  const spread = k - premiumRateBp * 10n * WAD / 10000n;
+  if (needed && spread > 0n) {
+    const ceilDiv = (a, b) => (a + b - 1n) / b;
+    const estimate = min(remaining, ceilDiv(ceilDiv(needed * WAD, spread) * face, mark));
+    const step = ceilDiv(face, mark);
+    for (const offset of [-2n, -1n, 0n, 1n, 2n]) {
+      const candidate = estimate + offset * step;
+      choices.add(candidate < 0n ? 0n : min(candidate, remaining));
+    }
+  }
+  return [...choices].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+}
+
 export class ReductionPending extends Error {
   constructor(plan, cause, { transactionHash = null, reverted = false, phase = "settlement" } = {}) {
     super(`${phase} of facility ${plan.tokenId} needs transaction reconciliation`, { cause });
@@ -175,6 +203,26 @@ export function netCreditOps(session, stack, execute = null) {
       shortfallBefore: priorPrincipal > beforeLimit ? priorPrincipal - beforeLimit : 0n,
       shortfallAfterPremium: priorPrincipal + premium > afterLimit ? priorPrincipal + premium - afterLimit : 0n,
       premium, reserveRequired, reserveBuffer, ownerSpendable, reserveShortfall, maxSpendable, premiumPool, reasons };
+  };
+  // No additional coverage is needed when the zero-coverage quote already
+  // passes. Otherwise each bounded candidate is assessed at the same block.
+  ops.issueCoverageMenu = async (owner, tokenId, requestedSpendable, maxPremium, { reserveBuffer = 0n } = {}) => {
+    const blockNumber = (await session.client.getBlock()).number;
+    const zero = await ops.assessIssueCandidate(owner, tokenId, 0n, requestedSpendable, maxPremium,
+      { reserveBuffer, blockNumber });
+    tokenId = zero.tokenId;
+    const common = new Set(["fund-unavailable", "maturities-pending", "authorization-pending", "facility-matured"]);
+    if (!zero.reasons.length || zero.reasons.some((reason) => common.has(reason))) return [zero];
+    const read = (c, functionName, args = []) => session.client.readContract({ address: c.address, abi: c.abi,
+      functionName, args, blockNumber });
+    const [[face, activated, rate], mark, [principal], k] = await Promise.all([
+      read(credit, "creditInfo", [tokenId]), read(credit, "depreciatedFaceValue", [tokenId]),
+      read(credit, "issuanceOf", [tokenId]), read(stack.controller, "currentBuckK"),
+    ]);
+    const coverage = issueCoverageCandidates(face, activated, mark, principal, k, BigInt(rate), requestedSpendable);
+    const others = await Promise.all(coverage.filter(Boolean).map((amount) =>
+      ops.assessIssueCandidate(owner, tokenId, amount, requestedSpendable, maxPremium, { reserveBuffer, blockNumber })));
+    return [zero, ...others];
   };
   // Authenticate one selected facility event and its saved hash. The caller
   // must apply it once, serialize account actions and handle chain finality.
