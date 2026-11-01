@@ -12,7 +12,7 @@ import { netHouseholdRepaymentOps } from "../src/agents/net-repayment.js";
 import { Q96 } from "../src/v3.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
 import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, fiatIn, buyBuck, buyBuckExact, sellBuck,
-  netPurchaseFromReceipt }
+  netPurchaseFromReceipt, netSaleFromReceipt }
   from "../src/market.js";
 
 let identity;
@@ -55,6 +55,14 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const forgedGuard = structuredClone(recorded);
     forgedGuard.addresses.guard = market.pool.address;
     await assert.rejects(attachNetMarket(s, artifact, forgedGuard, world), /guard code mismatch/);
+    for (const name of ["router", "permit2"]) {
+      const wrong = structuredClone(recorded);
+      wrong.addresses[name] = market.pool.address;
+      await assert.rejects(attachNetMarket(s, artifact, wrong, world), new RegExp(`${name} code mismatch`));
+      const old = structuredClone(recorded);
+      delete old[`${name}CodeHash`];
+      await assert.rejects(attachNetMarket(s, artifact, old, world), /incomplete net market record/);
+    }
     assert.equal((await s.call(market.pool, "token0")).toLowerCase() === world.buck.address.toLowerCase(), buckIs0);
     assert.ok(market.providerCreditId !== null);
     const provider = await s.call(world.credit, "issuanceOf", [market.providerCreditId]);
@@ -68,8 +76,32 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const buyerId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
     const creditOps = netCreditOps(s, world.net);
     await creditOps.issue(buyer.account, buyerId, 200_000_000n, 100_000_000n, 0n, ZERO);
-    const sale = await sellBuck(world, market, buyer, 99_000_000n);
+    const buckBefore = await s.call(world.buck, "balanceOf", [buyer.account.address]);
+    const saleUsdBefore = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
+    await assert.rejects(sellBuck(world, market, buyer, 99_000_000n), /minimum output/);
+    const unknownSaleSession = { ...s, call: s.call.bind(s), send: async () => { throw new Error("dispatch outcome unavailable"); } };
+    await assert.rejects(sellBuck({ ...world, session: unknownSaleSession }, market, buyer, 99_000_000n, { minOut: 1n }),
+      (err) => err instanceof TransactionReceiptPending && !err.transactionHash);
+    await assert.rejects(sellBuck(world, market, buyer, 99_000_000n, { minOut: 1_000_000_000n }), TransactionReverted);
+    const buckAfterRefusal = await s.call(world.buck, "balanceOf", [buyer.account.address]);
+    assert.ok(buckBefore >= buckAfterRefusal && buckBefore - buckAfterRefusal <= 10n); // only elapsed demurrage
+    assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), saleUsdBefore);
+    const sale = await sellBuck(world, market, buyer, 99_000_000n, { minOut: 1n });
     assert.ok(sale.received > 0n);
+    assert.equal(sale.nominalPaid, 99_000_000n);
+    assert.equal(sale.paidScaled, 99_000_000n * 10n ** 36n);
+    const saleReceipt = await s.client.getTransactionReceipt({ hash: sale.transactionHash });
+    assert.deepEqual(netSaleFromReceipt(world, market, buyer, saleReceipt,
+      { expectedHash: sale.transactionHash, expectedInput: 99_000_000n, minimumOut: 1n }), sale);
+    assert.throws(() => netSaleFromReceipt(world, market, buyer, saleReceipt,
+      { expectedHash: `0x${"11".repeat(32)}`, expectedInput: 99_000_000n, minimumOut: 1n }), /hash mismatch/);
+    assert.throws(() => netSaleFromReceipt(world, market, buyer, saleReceipt,
+      { expectedHash: sale.transactionHash, expectedInput: 1n, minimumOut: 1n }), /does not match bounds/);
+    assert.throws(() => netSaleFromReceipt(world, market, buyer, saleReceipt,
+      { expectedHash: sale.transactionHash, expectedInput: 99_000_000n, minimumOut: sale.received + 1n }), /does not match bounds/);
+    const duplicateSale = { ...saleReceipt, logs: [...saleReceipt.logs, ...saleReceipt.logs] };
+    assert.throws(() => netSaleFromReceipt(world, market, buyer, duplicateSale,
+      { expectedHash: sale.transactionHash, expectedInput: 99_000_000n, minimumOut: 1n }), /ambiguous/);
     assert.equal((await creditOps.facility(buyerId)).issued, 100_000_000n);
     await advanceTime(world, 365 * DAY + 6 * 3600);
     const poolNominal = await s.call(world.buck, "balanceOf", [market.pool.address]);
@@ -214,7 +246,16 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     // must stop with an uncertain outcome instead of buying or paying twice.
     const lostId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
     await creditOps.issue(buyer.account, lostId, 200_000_000n, 100_000_000n, 0n, ZERO);
-    await sellBuck(world, market, buyer, 99_000_000n);
+    const missingSaleSession = { ...s, call: s.call.bind(s), send: async (...args) => ({ ...(await s.send(...args)), logs: [] }) };
+    let salePending;
+    await assert.rejects(sellBuck({ ...world, session: missingSaleSession }, market, buyer, 99_000_000n, { minOut: 1n }),
+      (err) => { salePending = err; return err instanceof TransactionReceiptPending && Boolean(err.transactionHash); });
+    const actualSaleReceipt = await s.client.getTransactionReceipt({ hash: salePending.transactionHash });
+    const recoveredSale = netSaleFromReceipt(world, market, buyer, actualSaleReceipt,
+      { expectedHash: salePending.transactionHash, expectedInput: 99_000_000n, minimumOut: 1n });
+    assert.equal(recoveredSale.nominalPaid, 99_000_000n);
+    assert.ok(recoveredSale.received > 0n);
+    assert.equal((await creditOps.facility(lostId)).issued, 100_000_000n); // sale did not retire the NFT
     const receipts = [];
     const lostOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
       const receipt = await s.send(target, name, args, { account: owner });
@@ -265,7 +306,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
 
     const lostBuyId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
     await creditOps.issue(buyer.account, lostBuyId, 200_000_000n, 100_000_000n, 0n, ZERO);
-    await sellBuck(world, market, buyer, 99_000_000n);
+    await sellBuck(world, market, buyer, 99_000_000n, { minOut: 1n });
     const purchases = [];
     const loseBuy = async (...args) => {
       purchases.push(await buyBuck(...args));

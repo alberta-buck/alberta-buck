@@ -21,8 +21,10 @@ and checks the actual net amount received from an aged Carrying pool. The empty
 basket is not bound to the K controller, and the interactive sandbox still
 opens the legacy world. Net buys in the diagnostic use an atomic single-pool
 net-output guard; the guard is not a multi-hop router or a price oracle. The
-restore checks captured code hashes and wiring for consistency; the saved
-hashes are not an independent code audit. Net world records now identify the
+restore checks captured guard, router and Permit2 code hashes and wiring for
+consistency; the saved hashes are not an independent code audit and cannot
+authenticate a maliciously forged record. Older net market records without
+the router and Permit2 hashes are rejected. Net world records now identify the
 pool-bound, premium-limited issuance ABI; older experimental records are rejected
 on restore rather than being reopened with incompatible contract calls.
 

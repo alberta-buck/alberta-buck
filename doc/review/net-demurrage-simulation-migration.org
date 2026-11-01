@@ -234,6 +234,23 @@ snapshots do not retain receipts, so saving an unresolved issuance needs the
 same explicit evidence design as unresolved buybacks. A confirmed issue still
 does not imply a sale or a reduction in external debt.
 
+The Python =NetMarketOps.sell_exact_input= and JavaScript =sellBuck= net path
+use the existing Universal Router and Permit2 for a single BUCK/USDC sale,
+with direct payer-to-pool BUCK transfer and a required positive minimum USDC
+output. They authenticate the BUCK nominal/net transfer and settlement payout
+in the transaction receipt. Both report a lost or incomplete response as
+pending and a known mined revert separately; the caller must retain the exact
+terms/hash, apply the result once and handle finality. The pool's canonical
+address, verification and Carrying mode are checked before submission, not
+atomically with the router call. The router and Permit2 must be trusted and
+correctly configured; an output minimum is not a fair-price oracle. These
+helpers assume a standard settlement token, not arbitrary fee-on-transfer or
+rebasing behavior. A verified sale produces proceeds, not mortgage retirement.
+The actual household must choose the minimum, reconcile the sale, and record
+the separately confirmed external payment. The Python route encoder now lives
+in =buck_core.router= and is re-exported by the existing simulator module; the
+legacy prefunded defaults are unchanged.
+
 Do not assume that quote capacity is strictly increasing with added coverage.
 The premium rate can approach the current K, and separate integer rounding of
 the K limit and premium can produce small local decreases. A coverage search

@@ -256,7 +256,7 @@ demurrage-test:
 # no household economy, leveraged basket or insurer strategy is modeled.
 #   make nix-venv-net-demurrage-smoke
 .PHONY: net-demurrage-smoke
-net-demurrage-smoke: sim-build
+net-demurrage-smoke: sim-build core-js-check-worktree
 	@command -v anvil >/dev/null || { echo 'anvil missing; use make nix-venv-net-demurrage-smoke'; exit 1; }
 	@for name in BuckNet BuckNetMaturity BuckNetTransfers BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity MockERC20 SimLP; do \
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
@@ -264,8 +264,8 @@ net-demurrage-smoke: sim-build
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }
 	@test -f core/js/kernel/node/buck_identity_bg.wasm || { echo 'identity kernel missing; run make nix-core-build-wasm'; exit 1; }
 	node core/js/bin/bundle-artifacts.mjs sandbox
-	python -m pytest core/python/tests/test_artifacts.py core/python/tests/test_session.py alberta_buck/test/test_net_demurrage_smoke.py alberta_buck/test/test_net_market.py -q
-	cd core/js && node --test test/artifacts.test.js test/session.test.js test/session.tevm.test.js test/net-demurrage.tevm.test.js test/net-sandbox-bundle.tevm.test.js test/net-buckworld.tevm.test.js test/net-market.tevm.test.js
+	python -m pytest core/python/tests/test_artifacts.py core/python/tests/test_router.py core/python/tests/test_session.py alberta_buck/test/test_net_demurrage_smoke.py alberta_buck/test/test_net_market.py -q
+	cd core/js && node --test test/artifacts.test.js test/session.test.js test/session.tevm.test.js test/net-demurrage.tevm.test.js test/net-sandbox-bundle.tevm.test.js test/net-buckworld.tevm.test.js test/net-market-record.test.js test/net-market.tevm.test.js
 
 
 # ── Documentation rendering ─────────────────────────────────────────
@@ -1604,7 +1604,7 @@ sim-plot-eq-%:
 #
 #   make nix-venv-core-identity-vectors
 
-.PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps
+.PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps core-js-check-worktree
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
 .PHONY: core-wallet-vectors core-registry-vectors
 .PHONY: core-vectors-sync core-vectors-check
@@ -1684,7 +1684,15 @@ contracts-dist-check:	contracts-dist-build
 	python3 scripts/contracts-dist.py --check
 
 core-js-deps:
+	@test ! -L core/js/node_modules || { echo 'core/js/node_modules is a symlink; remove the symlink itself before installing dependencies'; exit 1; }
 	cd core/js && npm ci
+
+# npm workspaces link the kernel to ../kernel.  Sharing an entire
+# node_modules directory with another worktree silently redirects that link
+# to the other worktree, so its wasm may be missing or stale for this build.
+core-js-check-worktree:
+	@node -e 'const fs = require("fs"); try { if (fs.realpathSync("core/js/node_modules/alberta-buck-kernel") !== fs.realpathSync("core/js/kernel")) process.exit(1); } catch (_) { process.exit(1); }' || { \
+	  echo 'core/js kernel is missing or belongs to another worktree; install core/js dependencies in this worktree (see README-build.org)'; exit 1; }
 
 # Bundle the forge artifacts the JS platform needs into one importable
 # module (core/js/artifacts/bundle.mjs) -- the browser cannot read out/.
@@ -1715,7 +1723,7 @@ core-build-py:
 # package.json into each out-dir naming whichever crate built last; we
 # overwrite both with the one field that must be right -- the module type
 # governing how Node parses the .js files in that directory.
-core-build-wasm:
+core-build-wasm: core-js-check-worktree
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target nodejs \
@@ -1735,7 +1743,7 @@ core-build-wasm:
 #   make nix-core-demo-buckworld    # Phase 4: the interactive buckworld
 #   python3 -m http.server -d core/js/demo 8000
 #   open http://localhost:8000/identity-proofs.html   (or buckworld.html)
-core-build-wasm-web:
+core-build-wasm-web: core-js-check-worktree
 	@test -x core/js/node_modules/.bin/wasm-pack || { echo "wasm-pack missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/rust/bindings/js-identity && ../../../js/node_modules/.bin/wasm-pack \
 		build --release --target web \
@@ -1816,6 +1824,7 @@ SANDBOX_ADAPTER = out/UniswapV3BindingAdapter.sol/UniswapV3BindingAdapter.json
 .PHONY: sandbox sandbox-build sandbox-deps sandbox-artifacts sandbox-screenshots
 sandbox-deps:
 	@test -d core/js/node_modules || $(MAKE) core-js-deps
+	@$(MAKE) --no-print-directory core-js-check-worktree
 	@test -d node_modules/@uniswap/v3-core || npm ci --no-audit --no-fund --loglevel=error
 
 $(SANDBOX_ADAPTER):
@@ -1974,7 +1983,7 @@ core-build:	core-build-py core-build-wasm
 core-test-py:
 	python -m pytest core/python/tests -q
 
-core-test-js:
+core-test-js: core-js-check-worktree
 	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/js && node --test $(JS_TEST_ARGS)
 

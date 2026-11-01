@@ -104,6 +104,13 @@ strategy; they are not a five-year simulation or deployment recipe. The same
 target runs session tests for submitted transaction hashes, mined reverts and
 correctly journaled operations that may succeed or revert. The household keeps
 the hash when available and can explicitly reconcile its matching receipt.
+The Python and JavaScript net-market primitives can also sell BUCK through the
+existing single-pool Universal Router with a positive minimum USDC output and
+receipt reconciliation. They do not themselves repay a mortgage or establish
+a fair price; the household must choose its limit and handle pending evidence.
+Restored JavaScript net markets now require recorded guard, router and Permit2
+code hashes; these detect inconsistent records, not maliciously forged records
+or independently audited contracts.
 Interrupted authorizations and settlements are tracked separately; an
 authorization is never counted as repayment, and earlier completed facilities
 remain recorded if a later authorization or planning read is interrupted. A

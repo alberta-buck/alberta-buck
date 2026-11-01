@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 
 from web3 import Web3
+from buck_core.router import encode_path, ur_exec_args
 
 from alberta_buck.sim.gauge import oriented, pool_state, read_pool_state
 
@@ -71,28 +72,3 @@ def quote_path(w3, erc20_abi, hops: list[tuple[str, str, str, int]],
         if amt == 0:
             return 0
     return amt
-
-
-# ---- Universal Router V3_SWAP_EXACT_IN encoding --------------------- #
-
-def encode_path(tokens_fees: list) -> bytes:
-    """[tokenA, fee0, tokenB, fee1, tokenC, ...] -> packed V3 path bytes."""
-    out = b""
-    for i, item in enumerate(tokens_fees):
-        if i % 2 == 0:  # address
-            out += bytes.fromhex(Web3.to_checksum_address(item)[2:])
-        else:           # uint24 fee
-            out += int(item).to_bytes(3, "big")
-    return out
-
-
-def ur_exec_args(recipient: str, amount_in: int, path: bytes):
-    """(commands, inputs) for UniversalRouter.execute V3_SWAP_EXACT_IN,
-    pre-fund route (payerIsUser=false, router pays from its own balance)."""
-    from eth_abi import encode
-    commands = bytes([0x00])  # V3_SWAP_EXACT_IN
-    inp = encode(
-        ["address", "uint256", "uint256", "bytes", "bool", "uint256[]"],
-        [Web3.to_checksum_address(recipient), amount_in, 0, path, False, []],
-    )
-    return commands, [inp]

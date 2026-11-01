@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from buck_core.artifacts import load_artifact
+from buck_core.router import encode_path, ur_exec_args
 from buck_core.session import TransactionReceiptPending, TransactionReverted, _txhex
 from web3 import Web3
 from web3.logs import DISCARD
@@ -299,6 +300,18 @@ class NetPurchase:
         return self.net_scaled // 10**36
 
 
+@dataclass(frozen=True)
+class NetSale:
+    nominal_paid: int
+    paid_scaled: int
+    received: int
+    receipt: Any
+
+    @property
+    def paid(self) -> int:
+        return self.paid_scaled // Q
+
+
 def net_transfer_value(token, receipt, sender: str, recipient: str) -> NetTransferValue:
     """Sum authentic transfer-delivery events for a direction and token.
 
@@ -314,16 +327,20 @@ def net_transfer_value(token, receipt, sender: str, recipient: str) -> NetTransf
 
 
 class NetMarketOps:
-    """Atomic full-value BUCK buys through a configured single-pool guard.
+    """BUCK buys and bounded sales through configured single-pool venues.
 
-    The payer must approve settlement to the guard; BUCK travels directly
-    from the Carrying pool to the recipient. ``execute`` may dispatch through
-    a simulation proxy. All limits and returned values use raw token units,
-    except the explicitly named ``net_scaled`` field.
+    For buys the payer approves settlement to the guard and BUCK travels from
+    the Carrying pool directly to the recipient. ``execute`` may dispatch
+    through a simulation proxy. All limits and returned values use raw token units,
+    except explicitly named scaled fields. Sales require a trusted Universal
+    Router and settlement handle plus ERC-20 and Permit2 approvals. The
+    router pays the canonical pool directly and enforces the minimum output;
+    no fair-price oracle or general multihop behavior is implied.
     """
 
-    def __init__(self, chain, token, guard, execute: Callable | None = None):
+    def __init__(self, chain, token, guard, execute: Callable | None = None, *, router=None, settlement=None):
         self.chain, self.token, self.guard = chain, token, guard
+        self.router, self.settlement = router, settlement
         self.execute = execute or self._send
 
     def _send(self, owner, contract, method, args):
@@ -369,6 +386,92 @@ class NetMarketOps:
     def buy_exact_output(self, owner, pool: str, desired_net: int, maximum_in: int,
                          recipient: str, price_limit: int = 0) -> NetPurchase:
         return self._buy(owner, pool, "buyExactOutput", [pool, desired_net, maximum_in, recipient, price_limit], recipient)
+
+    def sale_from_receipt(self, owner, pool: str, recipient: str, amount_in: int, minimum_out: int, receipt,
+                          *, expected_hash: str) -> NetSale:
+        """Authenticate a sale's exact transfer evidence; it is not debt repayment."""
+        if not receipt or receipt.get("status") != 1 or self.settlement is None:
+            raise ValueError("net sale receipt is not successful")
+        if (not isinstance(expected_hash, str) or not expected_hash or
+                _txhex(receipt.get("transactionHash")).lower() != expected_hash.lower()):
+            raise ValueError("net sale transaction hash mismatch")
+        if type(amount_in) is not int or amount_in <= 0 or type(minimum_out) is not int or minimum_out <= 0:
+            raise ValueError("invalid net sale bounds")
+        seller = getattr(owner, "address", owner)
+        transfers = self.token.events.Transfer().process_receipt(receipt, errors=DISCARD)
+        transfers = [e for e in transfers if e["address"].lower() == self.token.address.lower() and
+                     e["args"]["from"].lower() == seller.lower() and e["args"]["to"].lower() == pool.lower()]
+        payouts = self.settlement.events.Transfer().process_receipt(receipt, errors=DISCARD)
+        payouts = [e for e in payouts if e["address"].lower() == self.settlement.address.lower() and
+                   e["args"]["from"].lower() == pool.lower() and e["args"]["to"].lower() == recipient.lower()]
+        if len(transfers) != 1 or len(payouts) != 1:
+            raise ValueError("net sale transfer evidence missing or ambiguous")
+        nominal, received = transfers[0]["args"]["value"], payouts[0]["args"]["value"]
+        net = net_transfer_value(self.token, receipt, seller, pool)
+        if (not nominal or not received or net.count != 1 or net.nominal != nominal or
+                nominal > amount_in or received < minimum_out):
+            raise ValueError("net sale transfer evidence does not match bounds")
+        return NetSale(nominal, net.net_scaled, received, receipt)
+
+    def sell_exact_input(self, owner, pool: str, amount_in: int, minimum_out: int, recipient: str, fee: int) -> NetSale:
+        """Submit a bounded user-paid BUCK sale, preserving uncertain outcomes.
+
+        The router and Permit2 must be trusted and configured for the guard's
+        factory. Account actions must be serialized; a missing transaction
+        hash is not permission to retry. USDC is counted only after the sale
+        event evidence is authenticated, and paying a mortgage is separate.
+        A price-limited pool can consume less than the requested input.
+        """
+        if (self.router is None or self.settlement is None or type(amount_in) is not int or
+                not 0 < amount_in < 2**160 or type(minimum_out) is not int or not 0 < minimum_out <= MAX_UINT256 or
+                type(fee) is not int or not 0 <= fee < 2**24 or
+                not Web3.is_address(pool) or not Web3.is_address(recipient)):
+            raise ValueError("invalid net sale configuration or bounds")
+        pool, recipient = Web3.to_checksum_address(pool), Web3.to_checksum_address(recipient)
+        if pool.lower() == ZERO_ADDRESS or recipient.lower() in (ZERO_ADDRESS, pool.lower()):
+            raise ValueError("invalid net sale pool or recipient")
+        if (self.guard.functions.buck().call().lower() != self.token.address.lower() or
+                self.guard.functions.settlement().call().lower() != self.settlement.address.lower()):
+            raise ValueError("net sale guard wiring mismatch")
+        factory_abi = [{"type": "function", "name": "getPool", "stateMutability": "view", "inputs": [
+            {"name": "tokenA", "type": "address"}, {"name": "tokenB", "type": "address"},
+            {"name": "fee", "type": "uint24"}], "outputs": [{"name": "pool", "type": "address"}]}]
+        factory = self.chain.w3.eth.contract(address=self.guard.functions.factory().call(), abi=factory_abi)
+        expected = factory.functions.getPool(self.token.address, self.settlement.address, fee).call()
+        if expected.lower() != pool.lower():
+            raise ValueError("net sale pool is not canonical")
+        flag_abi = [{"type": "function", "name": name, "stateMutability": "view",
+                     "inputs": [{"name": "account", "type": "address"}],
+                     "outputs": [{"name": "value", "type": "bool"}]}
+                    for name in ("isVerified", "isCarrying")]
+        identity = self.chain.w3.eth.contract(address=self.token.functions.identity().call(), abi=flag_abi)
+        if not identity.functions.isVerified(pool).call() or not identity.functions.isCarrying(pool).call():
+            raise ValueError("net sale pool must be verified and Carrying")
+        path = encode_path([self.token.address, fee, self.settlement.address])
+        commands, inputs = ur_exec_args(recipient, amount_in, path, minimum_out=minimum_out, payer_is_user=True)
+        receipt = None
+        try:
+            receipt = self.execute(owner, self.router, "execute", [commands, inputs])
+            tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
+            if receipt and receipt.get("status") == 0 and tx_hash:
+                raise TransactionReverted("execute", "net sale reverted", receipt)
+            if not receipt or receipt.get("status") != 1 or not tx_hash:
+                raise TransactionReceiptPending(tx_hash or None)
+            return self.sale_from_receipt(owner, pool, recipient, amount_in, minimum_out, receipt, expected_hash=tx_hash)
+        except TransactionReverted as exc:
+            if not exc.transaction_hash or exc.receipt.get("status") != 0:
+                raise TransactionReceiptPending(exc.transaction_hash or None) from exc
+            raise
+        except TransactionReceiptPending:
+            raise
+        except Exception as exc:
+            tx_hash = getattr(exc, "transaction_hash", None)
+            if not tx_hash:
+                try:
+                    tx_hash = _txhex(receipt.get("transactionHash")) or None
+                except Exception:
+                    pass
+            raise TransactionReceiptPending(tx_hash) from exc
 
 
 class NetCreditOps:

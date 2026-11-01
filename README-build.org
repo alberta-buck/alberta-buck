@@ -43,6 +43,12 @@ resolved from this checkout. The optional compiled kernel has its own build step
 base packages can also use their pure-Python implementation. A fresh dependency installation
 requires network access. Existing locked Nix tools and installed dependencies can be reused.
 
+Install =core/js/node_modules= separately in each worktree. npm links its kernel workspace to
+the adjacent =core/js/kernel=; sharing the whole =node_modules= directory through a symlink
+can silently load another checkout's wasm. The core JS build and test targets check that link.
+If it is a symlink to another worktree, remove the symlink itself (not its target) before
+running =make nix-core-js-deps= in this worktree.
+
 For ordinary edits, rerun the affected build, not the entire first-checkout sequence. Contracts
 build into =out/=; kernels into =core/python/buck_core/= and =core/js/kernel/=; browser output
 into =core/js/sandbox/dist/=. These generated products are not committed.

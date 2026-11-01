@@ -1,16 +1,20 @@
 """A real V3/Anvil cash-only guard fixture; not a household economy."""
+import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from web3 import Web3
 
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent
 from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
-from buck_core import Expect, NetCreditOps, NetMarketOps, ReductionPlan, TransactionReceiptPending, TransactionReverted, deploy_net_stack
+from buck_core import (Expect, NetCreditOps, NetMarketOps, ReductionPlan, TransactionReceiptPending,
+                       TransactionReverted, deploy_net_stack, load_artifact)
+from buck_core.session import _txhex
 
 RAW = 10**6
 ZERO = "0x" + "00" * 20
@@ -76,17 +80,83 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
         buyer_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 0).call()
         credit_ops.issue(buyer.address, buyer_id, 200 * RAW, 100 * RAW, 0, ZERO)
-        # Simulate the borrower having spent the issuance before buying it back.
-        _exec(chain, buyer, buck, "transfer", [provider.address, 100 * RAW])
+        # Exercise the same direct, user-paid Universal Router path as the JS
+        # market. The two approvals are explicit and local to this fixture.
+        def vendored(name):
+            artifact = json.loads((ROOT / "alberta_buck/sim/artifacts" / f"{name}.json").read_text())
+            return artifact["abi"], artifact["bytecode"]["object"]
+        permit_abi, permit_bytecode = vendored("Permit2")
+        permit = chain.deploy("Permit2", abi=permit_abi, bytecode=permit_bytecode)
+        weth = chain.deploy("WETH9")
+        _, pool_bytecode = load_artifact("UniswapV3Pool")
+        pool_hash = Web3.keccak(hexstr=pool_bytecode if pool_bytecode.startswith("0x") else "0x" + pool_bytecode)
+        router_abi, router_bytecode = vendored("UniversalRouter")
+        params = (permit.address, weth.address, ZERO, factory.address, bytes(32), pool_hash, ZERO, ZERO, ZERO, ZERO)
+        router = chain.deploy("UniversalRouter", params, abi=router_abi, bytecode=router_bytecode)
+        _exec(chain, buyer, buck, "approve", [permit.address, 2**256 - 1])
+        _exec(chain, buyer, permit, "approve", [buck.address, router.address, 2**160 - 1, 2**48 - 1])
+        def sale_send(owner, target, method, args):
+            data = target.encode_abi(method, args=args)
+            return chain.send(actors[owner.lower()].functions.exec(target.address, bytes.fromhex(data[2:])),
+                              expect=Expect.EITHER)
+        sales = NetMarketOps(chain, buck, guard, sale_send, router=router, settlement=usdc)
+        before_buck = buck.functions.balanceOf(buyer.address).call()
+        before_usdc = usdc.functions.balanceOf(buyer.address).call()
+        with pytest.raises(ValueError, match="bounds"):
+            sales.sell_exact_input(buyer.address, pool_address, RAW, 0, buyer.address, 500)
+        with pytest.raises(ValueError, match="pool or recipient"):
+            sales.sell_exact_input(buyer.address, pool_address, RAW, 1, pool_address, 500)
+        def unknown_sale(*_args):
+            raise RuntimeError("dispatch outcome unavailable")
+        unknown_sales = NetMarketOps(chain, buck, guard, unknown_sale, router=router, settlement=usdc)
+        with pytest.raises(TransactionReceiptPending) as unknown:
+            unknown_sales.sell_exact_input(buyer.address, pool_address, RAW, 1, buyer.address, 500)
+        assert not unknown.value.transaction_hash
+        with pytest.raises(TransactionReverted) as refused:
+            sales.sell_exact_input(buyer.address, pool_address, RAW, 500 * RAW, buyer.address, 500)
+        assert refused.value.transaction_hash
+        after_buck = buck.functions.balanceOf(buyer.address).call()
+        assert 0 <= before_buck - after_buck <= 10  # elapsed demurrage only
+        assert usdc.functions.balanceOf(buyer.address).call() == before_usdc
+        with pytest.raises(ValueError, match="canonical"):
+            sales.sell_exact_input(buyer.address, provider.address, RAW, 1, buyer.address, 500)
+        def lost_sale(owner, target, method, args):
+            receipt = sale_send(owner, target, method, args)
+            assert receipt["status"] == 1
+            raise TransactionReceiptPending(receipt["transactionHash"])
+        lost_sales = NetMarketOps(chain, buck, guard, lost_sale, router=router, settlement=usdc)
+        with pytest.raises(TransactionReceiptPending) as pending_sale:
+            lost_sales.sell_exact_input(buyer.address, pool_address, RAW, 1, buyer.address, 500)
+        assert pending_sale.value.transaction_hash
+        sale_receipt = anvil.w3.eth.get_transaction_receipt(pending_sale.value.transaction_hash)
+        sale = sales.sale_from_receipt(buyer.address, pool_address, buyer.address, RAW, 1, sale_receipt,
+                                       expected_hash=pending_sale.value.transaction_hash)
+        assert sale.nominal_paid == sale.paid == RAW and sale.paid_scaled == RAW * 10**36 and sale.received > 0
+        assert credit.functions.issuanceOf(buyer_id).call()[0] == 100 * RAW
+        with pytest.raises(ValueError, match="hash mismatch"):
+            sales.sale_from_receipt(buyer.address, pool_address, buyer.address, RAW, 1, sale_receipt,
+                                    expected_hash="0x" + "00" * 32)
+        with pytest.raises(ValueError, match="does not match bounds"):
+            sales.sale_from_receipt(buyer.address, pool_address, buyer.address, RAW - 1, 1, sale_receipt,
+                                    expected_hash=_txhex(sale_receipt["transactionHash"]))
+        duplicate = dict(sale_receipt)
+        duplicate["logs"] = list(sale_receipt["logs"]) * 2
+        with pytest.raises(ValueError, match="ambiguous"):
+            sales.sale_from_receipt(buyer.address, pool_address, buyer.address, RAW, 1, duplicate,
+                                    expected_hash=_txhex(sale_receipt["transactionHash"]))
+        # Spend the remaining wallet before the later buyback.
+        remaining_wallet = buck.functions.balanceOf(buyer.address).call()
+        _exec(chain, buyer, buck, "transfer", [provider.address, max(0, remaining_wallet - 2)])
         market = NetMarketOps(chain, buck, guard, lambda owner, target, method, args:
                               _exec(chain, buyer, target, method, args))
         at = anvil.w3.eth.get_block("latest")["timestamp"]
         anvil.warp_to(at + YEAR)
         assert buck.functions.netBalanceOf(pool_address).call() < buck.functions.balanceOf(pool_address).call()
+        wallet_before = buck.functions.balanceOf(buyer.address).call()
         purchase = market.buy_exact_input(buyer.address, pool_address, 100 * RAW, 70 * RAW, buyer.address)
         assert purchase.paid == 100 * RAW
         assert 70 * RAW <= purchase.received < purchase.nominal_received
-        assert buck.functions.balanceOf(buyer.address).call() == purchase.received
+        assert abs(buck.functions.balanceOf(buyer.address).call() - wallet_before - purchase.received) <= 2
         assert credit.functions.issuanceOf(tid).call()[0] == 1_200 * RAW
         assert credit.functions.issuanceOf(buyer_id).call()[0] == 100 * RAW
         # A market purchase alone does not retire credit. The owner authorizes
