@@ -15,7 +15,7 @@ const RAW = 1_000_000n;
 const ZERO = "0x0000000000000000000000000000000000000000";
 const YEAR = 365 * 86400 + 6 * 3600;
 const V = JSON.parse(readFileSync(new URL("../../../test/fixtures/bucknet-credit-operations.json", import.meta.url)));
-const required = ["BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
+const required = ["BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
   "BuckCredit", "BuckKControllerStatic", "BuckKControllerDirect", "UniswapV3Factory", "BuckBasketEquity", "SimLP"];
 let skip = false;
 try {

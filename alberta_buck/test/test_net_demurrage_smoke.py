@@ -26,7 +26,7 @@ Q = 10**36
 ZERO = "0x" + "00" * 20
 ROOT = Path(__file__).resolve().parents[2]
 VECTOR = json.loads((ROOT / "test/fixtures/bucknet-credit-operations.json").read_text())
-REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund",
+REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
             "BuckKControllerDirect", "BuckBasketEquity", "SimLP")
 
@@ -97,7 +97,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert buck.functions.totalIssued().call() == 100 * RAW
         runtime = anvil.w3.eth.get_code(buck.address).hex().lower()
         assert stack.maturity_library.address[2:].lower() in runtime
-        assert stack.transfers_library.address[2:].lower() in runtime
+        assert stack.token_ops_library.address[2:].lower() in runtime
         chain.send(controller.functions.setBuckK(5 * 10**17))
         shocked = ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0)
         assert shocked.current_k == 5 * 10**17 and shocked.shortfall_before == 50 * RAW

@@ -9,7 +9,7 @@ import {BuckTypes} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 import {BuckLedger} from "./lib/BuckLedger.sol";
 import {BuckNetMaturity} from "./lib/BuckNetMaturity.sol";
-import {BuckNetTransfers} from "./lib/BuckNetTransfers.sol";
+import {BuckNetTokenOps, IBuckNetIssuanceK} from "./lib/BuckNetTokenOps.sol";
 import {BuckRenewal, BuckRenewalConsent} from "./BuckRenewalConsent.sol";
 import {JubileeClaimBook} from "./JubileeClaimBook.sol";
 
@@ -239,51 +239,18 @@ contract BuckNet is IERC20, IERC20Metadata {
     function issue(uint256 tokenId, uint256 coverage, uint256 spendable, uint256 maxPremium, address expectedPool)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {
-        _enableModeHook();
-        if (!identity.isVerified(msg.sender) || !identity.isVerified(jubilee)) revert NotVerified();
-        if (identity.isCarrying(msg.sender) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
-        if (buckCredit.ownerOf(tokenId) != msg.sender) revert NotOwner();
-        if (spendable == 0) revert BadAmount();
-        claimBook.totalSeconds(); // Do not update a stale capped benchmark.
-        uint256 k = buckK.compute();
-        uint256 preFunding = _book.balanceOf(msg.sender);
-        uint256 beforeValue = buckCredit.currentValue(tokenId);
-        if (coverage != 0) buckCredit.activateFromBuck(tokenId, msg.sender, coverage);
-        uint256 afterValue = buckCredit.currentValue(tokenId);
-        if (afterValue < beforeValue) revert CreditExceeded();
-        (,, uint32 premiumRate) = buckCredit.creditInfo(tokenId);
-        uint256 effectiveRate = uint256(premiumRate) * POOL_ROI_INV;
-        if (effectiveRate >= BP) revert BadPremiumRate();
-        premium = Math.mulDiv(afterValue - beforeValue, effectiveRate, BP);
-        if (premium > maxPremium) revert PremiumLimitExceeded();
-        uint256 factor = buckK.fundingFactor();
-        if (premium != 0 && preFunding < Math.mulDiv(premium, factor, K_SCALE)) revert FundingInsufficient();
-        principal = spendable + premium;
-        (uint256 oldPrincipal, uint256 oldSeconds) = buckCredit.issuanceOf(tokenId);
-        if (oldPrincipal != 0 && oldSeconds == oldPrincipal * RELIEF_SECONDS) revert FacilityMatured();
-        if (oldPrincipal + principal > Math.mulDiv(afterValue, k, K_SCALE)) revert CreditExceeded();
-
-        address pool;
-        if (premium != 0) {
-            pool = facilityPool[tokenId];
-            if (pool == address(0)) {
-                pool = insurerPool[buckCredit.insurerOf(tokenId)];
-                if (pool == address(0)) revert NoInsurerPool();
-                facilityPool[tokenId] = pool;
-            }
-            if (pool != expectedPool) revert InsurerPoolChanged();
-            if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
-        }
-        buckCredit.recordIssuanceFromBuck(tokenId, msg.sender, principal);
-        _syncClaim(tokenId);
-        _book.issue(msg.sender, principal, false);
-        emit Transfer(address(0), msg.sender, principal);
-        if (premium != 0) {
-            premiumPrincipal[tokenId] += premium;
-            _transfer(msg.sender, pool, premium);
-        }
-        emit FacilityIssued(msg.sender, tokenId, coverage, principal, premium, pool);
-        IBuckNetReserveHook(jubilee).checkpointIssuance();
+        BuckNetTokenOps.IssueDependencies memory d = BuckNetTokenOps.IssueDependencies({
+            credit: buckCredit,
+            controller: IBuckNetIssuanceK(address(buckK)),
+            identity: identity,
+            claims: claimBook,
+            jubilee: jubilee
+        });
+        BuckNetTokenOps.IssueRequest memory r = BuckNetTokenOps.IssueRequest({
+            tokenId: tokenId, coverage: coverage, spendable: spendable,
+            maxPremium: maxPremium, expectedPool: expectedPool
+        });
+        return BuckNetTokenOps.issue(_book, facilityPool, premiumPrincipal, insurerPool, _receiptFragments, d, r);
     }
 
     /// @notice Authorize one exact facility reduction with a net-relief floor.
@@ -487,7 +454,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     function _transfer(address from, address to, uint256 amount) private {
-        BuckNetTransfers.send(_book, _receiptFragments, identity, from, to, amount);
+        BuckNetTokenOps.send(_book, _receiptFragments, identity, from, to, amount);
     }
 
     /// @notice Called by the opted-in identity registry before it changes a
@@ -502,10 +469,6 @@ contract BuckNet is IERC20, IERC20Metadata {
         if (!carrying && poolInsurer[account] != address(0)) revert NotCarryingPool();
         if (carrying && buckCredit.hasIssuedPrincipal(account)) revert CreditExceeded();
         _book.syncMode(account, carrying);
-    }
-
-    function _enableModeHook() private {
-        identity.enableCarryingModeHook();
     }
 
     function _approve(address owner, address spender, uint256 amount) private {

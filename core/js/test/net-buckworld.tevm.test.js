@@ -142,7 +142,7 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   assert.equal((await ops.facility(id)).issued, 59_000_000n);
 
   const saved = decodeJSON(encodeJSON({ chain: await snapshotTevm(s), world: worldRecord(world) }));
-  assert.equal(saved.world.net.issueAbiVersion, 2);
+  assert.equal(saved.world.net.issueAbiVersion, 3);
   const restoredSession = await tevmSession();
   await restoreTevm(restoredSession, saved.chain);
   assert.throws(() => attachBuckWorld(restoredSession, artifact, saved.world, { identity }), /attachNetBuckWorld/);
@@ -150,7 +150,7 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   delete oldRecord.net.issueAbiVersion;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, oldRecord, { identity }), /issuance ABI version/);
   const wrongVersion = structuredClone(saved.world);
-  wrongVersion.net.issueAbiVersion = 1;
+  wrongVersion.net.issueAbiVersion = 2;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongVersion, { identity }), /issuance ABI version/);
   const oldArtifact = (name) => name === "BuckNet"
     ? { ...artifact(name), abi: artifact(name).abi.filter((entry) => entry.name !== "issue") } : artifact(name);

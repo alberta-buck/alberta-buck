@@ -36,7 +36,7 @@ export const NEEDED = [
   // Experimental net model; retain both deployed libraries' link metadata.
   "BuckNet",
   "BuckNetMaturity",
-  "BuckNetTransfers",
+  "BuckNetTokenOps",
   "BuckNetQuoter",
   "BuckNetSwapGuard",
   "JubileeFund",
@@ -65,7 +65,7 @@ export const SANDBOX = [
   "Buck",
   "BuckNet",
   "BuckNetMaturity",
-  "BuckNetTransfers",
+  "BuckNetTokenOps",
   "BuckNetQuoter",
   "BuckNetSwapGuard",
   "JubileeFund",

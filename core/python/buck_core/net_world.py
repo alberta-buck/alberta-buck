@@ -34,7 +34,7 @@ class NetStack:
     token: Any
     quoter: Any
     maturity_library: Any
-    transfers_library: Any
+    token_ops_library: Any
 
 
 def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_deployer=None):
@@ -47,17 +47,17 @@ def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_
     gov_address = getattr(governance, "address", governance)
     fund = chain.deploy("JubileeFund", gov_address)
     maturity = chain.deploy("BuckNetMaturity")
-    transfers = chain.deploy("BuckNetTransfers")
+    token_ops = chain.deploy("BuckNetTokenOps")
     abi, bytecode = load_artifact("BuckNet", libraries={
         "src/lib/BuckNetMaturity.sol:BuckNetMaturity": maturity.address,
-        "src/lib/BuckNetTransfers.sol:BuckNetTransfers": transfers.address,
+        "src/lib/BuckNetTokenOps.sol:BuckNetTokenOps": token_ops.address,
     })
     token = chain.deploy("BuckNet", credit.address, controller.address, registry.address, fund.address,
                          abi=abi, bytecode=bytecode)
     quoter = chain.deploy("BuckNetQuoter", token.address)
     chain.send(credit.functions.setBuck(token.address), sender=credit_deployer)
     chain.send(registry.functions.setBuck(token.address), sender=governance)
-    return NetStack(registry, credit, controller, fund, token, quoter, maturity, transfers)
+    return NetStack(registry, credit, controller, fund, token, quoter, maturity, token_ops)
 
 
 @dataclass(frozen=True)

@@ -87,14 +87,16 @@ and regeneration, executable papers, release builds and deployment procedures re
 [[file:doc/DEVELOP.org][doc/DEVELOP.org]] and [[file:alberta-buck-deployment.org][the deployment book]]. Simulations do not replace contract tests.
 The deployment dry run exercises the legacy bootstrap with stub Notes verifiers. It does not
 deploy the experimental =BuckNet= stack or establish readiness for a live deployment.
-The experimental =BuckNet= now links =BuckNetTransfers= and =BuckNetMaturity= libraries;
+The experimental =BuckNet= now links =BuckNetTokenOps= and =BuckNetMaturity= libraries;
 Foundry links them for its tests. The Python and JavaScript local smoke fixtures deploy and
 link them from creation-bytecode metadata, but are not production deployment scripts. A
 future deployment or economy must deploy and link these libraries on that chain; the legacy
 deployment script does not do so. Experimental =BuckNet.issue= requires an explicit
 maximum premium and expected insurer pool; renewal consent also commits the expected
-new premium pool. Clients and saved net-world records from older ABIs must be upgraded
-or rejected. Local contract-bundle generation now includes the
+new premium pool. Saved JavaScript net-world records use version 3 for the renamed
+token-operations library and reject older deployment graphs even though the =issue= ABI
+is unchanged. Clients and saved records from older builds must be upgraded or rejected.
+Local contract-bundle generation now includes the
 experimental net stack and its creation/runtime link metadata alongside legacy contracts;
 the already published package is unchanged until a release. =make nix-contracts-dist-check=
 checks compiler, bytecode links and code-size limits without publishing. The generated

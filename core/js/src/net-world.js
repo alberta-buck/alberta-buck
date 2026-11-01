@@ -93,17 +93,17 @@ export async function deployNetStack(session, artifacts, { registry, credit, con
   const deploy = (name, args = []) => session.deploy(artifacts(name), args, { name });
   const fund = await deploy("JubileeFund", [gov]);
   const maturityLibrary = await deploy("BuckNetMaturity");
-  const transfersLibrary = await deploy("BuckNetTransfers");
+  const tokenOpsLibrary = await deploy("BuckNetTokenOps");
   const linked = linkArtifact(artifacts("BuckNet"), {
     "src/lib/BuckNetMaturity.sol:BuckNetMaturity": maturityLibrary.address,
-    "src/lib/BuckNetTransfers.sol:BuckNetTransfers": transfersLibrary.address,
+    "src/lib/BuckNetTokenOps.sol:BuckNetTokenOps": tokenOpsLibrary.address,
   });
   const token = await session.deploy(linked, [credit.address, controller.address, registry.address, fund.address],
     { name: "BuckNet" });
   const quoter = await deploy("BuckNetQuoter", [token.address]);
   await session.send(credit, "setBuck", [token.address], { account: creditDeployer });
   await session.send(registry, "setBuck", [token.address], { account: registryGovernor });
-  return { registry, credit, controller, fund, token, quoter, maturityLibrary, transfersLibrary };
+  return { registry, credit, controller, fund, token, quoter, maturityLibrary, tokenOpsLibrary };
 }
 
 /** Actual per-facility amounts; never synthesize a signed debt from a wallet.

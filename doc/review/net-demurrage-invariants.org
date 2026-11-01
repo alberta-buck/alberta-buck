@@ -170,7 +170,12 @@ these are trust assumptions, not consequences of the arithmetic. =BuckNet=
 trusts its designated fund to calculate the marked policy; the token itself
 checks the owner's authorization, bounds and liquid cap, not the mark's
 fairness. Linked library =delegatecall= code runs in the token's context and
-depends on the token's authorization and reentrancy guard.
+depends on the token's authorization and reentrancy guard. The linked
+=BuckNetTokenOps= library carries both issuance and identity-checked
+transfers: its issuance receives the host's own storage references and
+immutable dependencies, keeps the original =msg.sender=, and is reached
+under the host's guard. It must not be used as an independent ledger or be
+called with a different host's state and assumptions.
 
 ** Account decay, issuance and transfers
 

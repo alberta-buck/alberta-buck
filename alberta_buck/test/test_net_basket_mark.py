@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RAW = 10**6
 YEAR = 365 * 86400 + 6 * 3600
 ZERO = "0x" + "00" * 20
-REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund",
+REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
             "BuckBasketEquity", "SimLP", "MockERC20")
 

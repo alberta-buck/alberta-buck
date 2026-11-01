@@ -70,7 +70,7 @@ CONTRACTS = [
     "Buck",                    # ERC-20, demurrage + credit limits
     "BuckNet",                 # experimental net-demurrage token; linked below
     "BuckNetMaturity",         # linked BuckNet library
-    "BuckNetTransfers",        # linked BuckNet library
+    "BuckNetTokenOps",        # linked BuckNet library
     "BuckNetQuoter",           # optional per-facility issuance quotes
     "BuckNetSwapGuard",        # experimental net-output V3 guard
     "JubileeFund",             # experimental separate fund coordinator
@@ -107,7 +107,7 @@ CONTRACTS = [
     "IdentityMembershipB1VerifierAdapter",  # B1 depositor membership
 ] + GROTH16
 
-EXPERIMENTAL = {"BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "BuckNetSwapGuard",
+EXPERIMENTAL = {"BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "BuckNetSwapGuard",
                 "JubileeFund", "JubileeClaimBook", "BuckRenewalConsent"}
 
 # Until v1.0.0 every verifier above comes from scripts/snark/setup*.sh, which

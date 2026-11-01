@@ -29,7 +29,7 @@ import { deployNetStack } from "./net-world.js";
 const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const g2 = (p) => ({ X: [p.x[0], p.x[1]], Y: [p.y[0], p.y[1]] });
-const NET_ISSUE_ABI_VERSION = 2; // owner premium ceiling and expected insurer pool
+const NET_ISSUE_ABI_VERSION = 3; // issue ABI plus linked token-operations deployment graph
 
 function requireNetIssueAbi(artifact) {
   const issues = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "issue") ?? [];
@@ -193,7 +193,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     net.codeHashes = {};
     for (const [name, contract] of Object.entries({ registry: reg, credit, controller: kctrl, token: buck, pool,
       fund: net.fund, basket: net.basket, factory: net.factory, quoter: net.quoter,
-      maturityLibrary: net.maturityLibrary, transfersLibrary: net.transfersLibrary })) {
+      maturityLibrary: net.maturityLibrary, tokenOpsLibrary: net.tokenOpsLibrary })) {
       const code = await session.client.getCode({ address: contract.address });
       if (!code || code === "0x") throw new Error(`net world ${name} has no code`);
       net.codeHashes[name] = keccak256(code);
@@ -234,7 +234,7 @@ export function worldRecord(world) {
     record.net = { chainId: world.net.chainId, issueAbiVersion: world.net.issueAbiVersion,
       fund: world.net.fund.address, basket: world.net.basket.address,
       factory: world.net.factory.address, quoter: world.net.quoter.address,
-      maturityLibrary: world.net.maturityLibrary.address, transfersLibrary: world.net.transfersLibrary.address,
+      maturityLibrary: world.net.maturityLibrary.address, tokenOpsLibrary: world.net.tokenOpsLibrary.address,
       codeHashes: { ...world.net.codeHashes } };
   }
   return record;
@@ -287,7 +287,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   w.net = { registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
     fund: at("JubileeFund", n.fund), basket: at("BuckBasketEquity", n.basket),
     factory: at("UniswapV3Factory", n.factory), quoter: at("BuckNetQuoter", n.quoter),
-    maturityLibrary: at("BuckNetMaturity", n.maturityLibrary), transfersLibrary: at("BuckNetTransfers", n.transfersLibrary),
+    maturityLibrary: at("BuckNetMaturity", n.maturityLibrary), tokenOpsLibrary: at("BuckNetTokenOps", n.tokenOpsLibrary),
     chainId: n.chainId, issueAbiVersion: n.issueAbiVersion, codeHashes: { ...n.codeHashes } };
   if (String(await session.client.getChainId()) !== String(n.chainId)) throw new Error("net world chain mismatch");
   const matches = async (contract, method, expected, args = []) => {
@@ -312,7 +312,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   // recorded by the original deployment, not an independent security audit.
   for (const [name, c] of Object.entries({ registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
     pool: w.pool, fund: w.net.fund, basket: w.net.basket, factory: w.net.factory, quoter: w.net.quoter,
-    maturityLibrary: w.net.maturityLibrary, transfersLibrary: w.net.transfersLibrary })) {
+    maturityLibrary: w.net.maturityLibrary, tokenOpsLibrary: w.net.tokenOpsLibrary })) {
     const deployed = await session.client.getCode({ address: c.address });
     if (!deployed || deployed === "0x") throw new Error("net world contract has no code");
     if (!n.codeHashes?.[name] || keccak256(deployed) !== n.codeHashes[name])
@@ -320,7 +320,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   }
   const code = await session.client.getCode({ address: w.buck.address });
   if (!code || code === "0x") throw new Error("net world token has no code");
-  for (const lib of [w.net.maturityLibrary, w.net.transfersLibrary]) {
+  for (const lib of [w.net.maturityLibrary, w.net.tokenOpsLibrary]) {
     const libCode = await session.client.getCode({ address: lib.address });
     if (!libCode || libCode === "0x" || !code.toLowerCase().includes(lib.address.slice(2).toLowerCase()))
       throw new Error("net world library mismatch");
