@@ -48,9 +48,9 @@ library BuckNetMintMath {
     ///      the unfloored inequality accelerates the case K > premium rate.
     ///      WorkLimit means the bound was reached, not that no solution exists.
     function plan(Snapshot memory s, uint256 target) internal pure returns (Plan memory result) {
+        _validate(s);
+        if (target == 0) revert InvalidSnapshot();
         uint256 max = BuckTypes.MAX_BALANCE;
-        if (s.face > max || s.mark > s.face || s.activated > s.face || s.principal > max
-            || s.accountRoom > max || s.effectiveRate >= BP || target == 0) revert InvalidSnapshot();
         if (s.face == 0 || s.mark == 0 || s.k == 0 || target > s.accountRoom
             || target > max - s.principal) {
             result.status = Status.Impossible;
@@ -114,6 +114,50 @@ library BuckNetMintMath {
             premium = nextPremium;
         }
         result.status = Status.WorkLimit;
+    }
+
+    /// @notice Find the greatest feasible spendable amount up to requested,
+    ///         and its least-coverage plan. A work limit is never interpreted
+    ///         as an infeasible amount.
+    /// @dev Feasibility is monotone in the requested amount even though the
+    ///      capacity of adjacent coverage amounts is not: a coverage that can
+    ///      issue N can also issue a smaller positive amount at the same
+    ///      premium. Binary search is over this feasibility predicate only.
+    function planAtMost(Snapshot memory s, uint256 requested)
+        internal pure returns (uint256 spendable, Plan memory result)
+    {
+        _validate(s);
+        if (requested == 0) revert InvalidSnapshot();
+        uint256 upper = Math.min(requested, Math.min(s.accountRoom, BuckTypes.MAX_BALANCE - s.principal));
+        if (upper == 0) {
+            result.status = Status.Impossible;
+            return (0, result);
+        }
+        result = plan(s, upper);
+        if (result.status == Status.Found) return (upper, result);
+        if (result.status == Status.WorkLimit) return (0, result);
+
+        uint256 lo;
+        uint256 hi = upper - 1;
+        while (lo < hi) {
+            uint256 mid = lo + (hi - lo + 1) / 2;
+            Plan memory candidate = plan(s, mid);
+            if (candidate.status == Status.WorkLimit) return (0, candidate);
+            if (candidate.status == Status.Found) lo = mid;
+            else hi = mid - 1;
+        }
+        if (lo == 0) {
+            result.status = Status.Impossible;
+            return (0, result);
+        }
+        result = plan(s, lo);
+        return (lo, result);
+    }
+
+    function _validate(Snapshot memory s) private pure {
+        uint256 max = BuckTypes.MAX_BALANCE;
+        if (s.face > max || s.mark > s.face || s.activated > s.face || s.principal > max
+            || s.accountRoom > max || s.effectiveRate >= BP) revert InvalidSnapshot();
     }
 
     /// @dev Saturate before multiplication so even an unusually large K

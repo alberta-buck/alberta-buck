@@ -75,7 +75,10 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   const targetQuote = await s.call(stack.quoter, "quoteSpendable", [0n, 37n * RAW]);
   assert.deepEqual([targetQuote[0], targetQuote[1], targetQuote[2], Number(targetQuote[3]), targetQuote[4]],
     [37n * RAW, 0n, 0n, 0, 1n]);
-  await exec(buck, "issue", [0n, 100n * RAW, 100n * RAW, 0n, ZERO]);
+  const aggregateQuote = await s.client.readContract({ address: buck.address, abi: buck.abi,
+    functionName: "quoteMint", args: [100n * RAW, [0n]], account: actor.address });
+  assert.deepEqual(aggregateQuote, [100n * RAW, 0n]);
+  await exec(buck, "mint", [100n * RAW]);
   const issuedAt = (await s.client.getBlock()).timestamp;
   const ops = netCreditOps(s, stack);
   const fresh = await ops.quoteReliefRate(0n, RAW);

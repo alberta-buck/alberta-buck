@@ -15,7 +15,7 @@ tested milestone; preserve the historical progress table below.
 Continue in =feature/bucknet-economy= at
 =.claude/worktrees/bucknet-economy=, or a fresh branch from it if isolation is
 needed. Do not modify the unrelated working-tree changes in the main checkout.
-At =f95a404f=, =src/Buck.sol= is still the signed-balance legacy token;
+At this checkpoint, =src/Buck.sol= is still the signed-balance legacy token;
 =src/BuckNet.sol=, its ledger, per-NFT credit and separate Jubilee fund are
 an experimental clean-genesis implementation. The legacy token is still used
 by the actual economy and sandboxes. No leveraged BuckNet five-year campaign
@@ -118,6 +118,15 @@ rather than silently following both.
   coverage: separate floors for K and premium can make a larger activation
   yield one raw unit less. Derive and validate an exact or explicitly bounded
   selection algorithm against an independent integer reference.
+  *Partial implementation:* both entry points now support ordinary owners.
+  Each facility uses an exact least-coverage search with an explicit 256-step
+  failure, and an outer search over the monotone feasibility of the requested
+  spendable amount. A batch checks its combined premium against the one
+  pre-mint reserve, repeats K/funding checks, pays each recorded insurer pool
+  and verifies the actual balance change atomically. The maximum sentinel
+  follows the selected order; it is not proven globally optimal over other
+  orders or shared limits. Duplicate or foreign IDs revert. Identity proof
+  parity, approved Carrying owners and production gas bounds remain open.
 - [ ] Restore =burn(uint256)= and =burn(uint256,uint256[])= as atomic token
   entry points, retaining explicit NFT order and most-expensive-first default.
   Map the requested actual =balanceOf= decrease to the correct per-NFT
@@ -160,10 +169,12 @@ rather than silently following both.
   The burn quote should expose whether the requested visible balance change
   fits the shared block budget and the operation-level liquidity limit, and
   help callers choose a feasible smaller request without silently clipping it.
-  =BuckNetQuoter.quoteSpendable= now finds the least coverage for one
-  ordinary facility using the current snapshot and reports premium and
-  reserve; it distinguishes a work limit from infeasibility. This is not yet
-  the compatible batch quote or a guarantee of future execution.
+  =BuckNetQuoter.quoteSpendable= finds the least coverage for one ordinary
+  facility and reports premium and reserve. BuckNet's legacy-shaped
+  =quoteMint= uses the same ordered batch planner as ordinary =mint=. Neither
+  reserves K, verifies that premium funding will be available, or guarantees
+  future execution. Both distinguish a work limit from infeasibility;
+  Carrying quotes and =quoteBurn= remain open.
 - [X] Restore =creditLimit=, =mintsBacked= and =mintsPrincipal= with units and
   per-facility constraints documented. A two-facility test covers inactive
   coverage, a premium deposit, a K change and partial settlement.
@@ -198,8 +209,12 @@ rather than silently following both.
   pre/postcondition documentation; remove descriptions of signed balances or
   implicit draw/repayment only where they are no longer true.
 - [ ] Measure linked runtime and creation size, gas and deployment graph.
-  BuckNet is already near EIP-170's runtime limit and BuckCredit is closer;
+  BuckNet is below EIP-170's runtime limit and BuckCredit is closer;
   prefer a linked library when appropriate and verify caller/storage context.
+  The batch planner performs quadratic NFT selection/duplicate checks, up to
+  79 feasibility probes per facility and up to 256 inner iterations per probe.
+  Measure worst-case gas and specify a supported NFT count before production;
+  a computational work limit is not proof that an allocation is impossible.
   The old and new constructors both take four addresses but their fourth
   argument denotes an insurer pool and Jubilee fund respectively: make
   deployment/model selection explicit so the wrong graph cannot silently
@@ -353,15 +368,16 @@ rather than silently following both.
 The user selected actual =balanceOf= changes for compatible mint and burn,
 approved Carrying facility owners, a shared per-block 10% cash budget and the
 last published wheel mark. The shared budget and an optional valuation-only
-wheel path are implemented. The current prototype still rejects Carrying
-owners, lacks compatible mint/burn entry points, falls back to a guarded live
+wheel path are implemented. The current prototype implements compatible mint
+for ordinary owners but still rejects Carrying owners, lacks compatible burn,
+falls back to a guarded live
 mark when no valuation wheel is configured, and does not make the wheel
 perform the fund's investment or liquidity work. The wheel mark path has not
 been validated with leveraged basket credit. Do not treat the remaining
 selected policies as implemented.
 
-For example, if the fund has 100 liquid BUCK, the current guard can permit one
-operation paying 10 and another in the same block paying 9. The shared
+For example, if the fund has 100 liquid BUCK, an operation-only guard would
+permit one payment of 10 and another in the same block paying 9. The shared
 block budget snapshots the fund's net cash immediately before the block's
 first *positive* protected outflow, allows at most 10% of that snapshot across protected
 outflows in that block, and still checks each operation against current cash.
@@ -397,6 +413,7 @@ make nix-venv-demurrage-test
 make nix-match-BuckTest
 make nix-match-BuckNetTest
 make nix-match-BuckNetMintMathTest
+make nix-match-BuckNetMintCompatibilityTest
 make nix-match-BuckNetQuoteTest
 make nix-match-WorkWheelTest
 make nix-match-JubileeMarkedReliefTest
@@ -465,4 +482,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Plain approval parity | Plain =approve(address(0), N)= now matches legacy Buck; the proof-bearing overload still rejects an unverified recipient before changing allowance. All 28 BuckNet tests pass; runtime at that checkpoint was 24,188 bytes. The full token-API and identity-parity migration remains open. | =f95a404f= |
 | 2026-11-01 | Reuse linked token operations | Issuance moved into the existing transfer library, renamed =BuckNetTokenOps= to reflect both responsibilities. The original owner, guard, ledger, per-facility premium pools, identity receipts, claim updates and fund checkpoint remain in one atomic transition. The linked runtime falls to 22,039 bytes, leaving 2,537 under EIP-170; no extra deployed library was added. BuckNet, quote and Jubilee suites passed 28, 17 and 201 cases; the artifact check and cash-only net smoke passed (26 Python, 20 JS). Python/JS deployments and bundle metadata use the renamed library; JS net-world records use version 3 and reject the old graph. Compatible mint/burn, Carrying owners and the leveraged economy remain open. | =dd0c1dce= |
 | 2026-11-01 | Mint rounding regression | With K=.75 and a 20% premium deposit, four raw units of coverage can issue three raw units while five can issue only two. An actual issuance and both quotes confirm the non-monotone edge; 18 =BuckNetQuoteTest= cases pass. The compatible allocator must account for it rather than use naive binary search. | =97268d51= |
-| 2026-11-01 | Bounded per-facility issuance quote | =quoteSpendable= uses integer lower bounds and a bounded fixed-point search to select least coverage for a requested ordinary-account balance increase. It reports the premium and reserve, and distinguishes impossible from a 256-step work limit. A 10,000-case independent exhaustive fuzz comparison and 20 quote tests, including actual premium, pre-funded and K-shortfall issuance, pass. Python Anvil and JS Tevm each call the new quote successfully; the artifact check passes. The quote is advisory; Carrying owners, batch selection and token =mint= are not implemented. | This commit |
+| 2026-11-01 | Bounded per-facility issuance quote | =quoteSpendable= uses integer lower bounds and a bounded fixed-point search to select least coverage for a requested ordinary-account balance increase. It reports the premium and reserve, and distinguishes impossible from a 256-step work limit. A 10,000-case independent exhaustive fuzz comparison and 20 quote tests, including actual premium, pre-funded and K-shortfall issuance, pass. Python Anvil and JS Tevm each call the new quote successfully; the artifact check passes. At that checkpoint the quote was advisory; Carrying owners, batch selection and token =mint= were not yet implemented. | =c98b0bdc= |
+| 2026-11-01 | Ordinary-owner mint compatibility | Both =mint= overloads and =quoteMint= select ordered per-facility issuance, with a single starting premium reserve, exact per-slice rounding, callback rechecks and an actual balance-increase postcondition. The maximum sentinel follows that order rather than claiming global optimality. The planner's 10,000-case exhaustive integer comparisons passed; the final run passed 44 mint-compatibility/inherited, seven math, 20 quote and 201 Jubilee tests. The cash-only smoke passed 26 Python and 20 JS tests, and the artifact check passed; net JS snapshots now require version 4. Runtime is 23,064 bytes for BuckNet and 24,516 for BuckCredit. Carrying mint, burn, full identity parity and production gas bounds remain open. | This commit |

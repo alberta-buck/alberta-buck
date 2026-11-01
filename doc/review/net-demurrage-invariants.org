@@ -277,8 +277,8 @@ exact net movement from those ERC-20 events alone.
 
 ** Planned compatibility and wheel transitions
 
-The following are requirements for the [[file:bucknet-economy-implementation.org][unified replacement plan]], *not*
-claims about the currently implemented prototype. The original =Buck.sol=
+The following are requirements for the [[file:bucknet-economy-implementation.org][unified replacement plan]]; some are
+implemented only in part as described below. The original =Buck.sol=
 documentation is a source for the public contract and intended checks; retain
 accurate explanations, but replace any signed-balance or implicit-repayment
 description that no longer applies. The owner selected actual =balanceOf=
@@ -287,8 +287,9 @@ and the last published wheel mark, refreshed at burn preflight by a
 valuation-only wheel call. The shared block budget is implemented. A
 configured fund now refreshes a wheel-published mark during its existing
 reduction/renewal path; a fund with no configured wheel still uses the earlier
-guarded live mark. Compatibility =burn= and real deployment wiring are not
-implemented.
+guarded live mark. Compatible =mint= and =quoteMint= now support ordinary
+owners, while Carrying mint, compatible =burn= and real deployment wiring
+are not implemented.
 
 | Proposed transition | Preconditions | Required postconditions and failure behavior |
 |---------------------+---------------+----------------------------------------------|
@@ -298,6 +299,18 @@ implemented.
 | Wheel-driven fund investment | The wheel is authorized for the fund's bounded work; the reserve, matured budget, threshold, receipt ownership, net transfer and entry/minimum-share guards hold. | A new deposit creates one receipt or a top-up returns the same receipt ID, updating shares and basis from net value actually received. Fund outflow and budget counters use actual net BUCK, and failed work leaves no partial transfer or fake progress. |
 | Wheel-driven fund redemption | The fund owns the selected receipt; its cash is below the selected target and share, route, exit, low-K and minimum-proceeds checks permit the work. | Only actually retired shares leave the position; the same receipt remains while shares remain. The fund records verified net BUCK actually received and any successfully converted new in-kind proceeds. Zero, partial, underwater and failed work are observable and do not mint cash, bypass exit guards or delete the remaining receipt. |
 | Matured release | Owner requests closure after the selected facility's average issuance age reaches 50 years, and any due claim-book backlog is processed. | The lien and NFT close even if the fund or insurer is illiquid; unburned principal remains in total supply and the capped benchmark as a Jubilee obligation, and an unpaid nominal premium remains a claim on the original pool. Later fund burns observe the applicable liquidity guard. |
+
+Ordinary =mint= currently plans each facility against one K and one starting
+wallet reserve, enforcing the combined premium reserve before issuance. It
+checks K and the funding factor after each external checkpoint, and verifies
+the actual post-mint wallet increase. At each facility it finds the maximum
+feasible requested amount and least face coverage without assuming adjacent
+coverage yields monotone proceeds. A bounded search can return
+=AllocationWorkLimit=, which says nothing about economic feasibility. For the
+maximum sentinel the allocation follows the selected order and is not proven
+globally optimal across alternative orders. =quoteMint= uses that planner but
+does not reserve funding or promise a pool or K; the bounded =issue= API is
+available when a caller needs a premium ceiling and an expected pool.
 
 The wheel currently scans bounded slots with a cursor and an idle-per-block
 memo; existing equity and response kinds catch failed basket work. Fund work

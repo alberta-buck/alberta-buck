@@ -86,7 +86,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
         chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
         assert credit.functions.ownerOf(0).call() == actor.address
         assert tuple(stack.quoter.functions.quoteSpendable(0, 37 * RAW).call()) == (37 * RAW, 0, 0, 0, 1)
-        issued = _exec(chain, actor, buck, "issue", [0, 100 * RAW, 100 * RAW, 0, ZERO])
+        assert tuple(buck.functions.quoteMint(100 * RAW, [0]).call({"from": actor.address})) == (100 * RAW, 0)
+        issued = _exec(chain, actor, buck, "mint", [100 * RAW])
         issued_at = anvil.w3.eth.get_block(issued["blockNumber"])["timestamp"]
         ops = NetCreditOps(chain, stack)
         fresh = ops.quote_relief_rate(0, RAW)

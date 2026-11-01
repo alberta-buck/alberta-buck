@@ -28,9 +28,23 @@ contract NetK {
 ///      proportional positions and calculate the payout from actual proceeds.
 contract MockNetFund {
     TestWheel public valuationWheel;
+    NetK public factorController;
+    uint256 public factorAfterCheckpoint;
+    NetK public kController;
+    uint256 public kAfterCheckpoint;
     function setValuationWheel(TestWheel wheel) external { valuationWheel = wheel; }
+    function setFactorOnCheckpoint(NetK controller, uint256 factor) external {
+        factorController = controller;
+        factorAfterCheckpoint = factor;
+    }
+    function setKOnCheckpoint(NetK controller, uint256 value) external {
+        kController = controller;
+        kAfterCheckpoint = value;
+    }
     function checkpointIssuance() external {
         if (address(valuationWheel) != address(0)) valuationWheel.refreshValuation();
+        if (address(factorController) != address(0)) factorController.setFactor(factorAfterCheckpoint);
+        if (address(kController) != address(0)) kController.setK(kAfterCheckpoint);
     }
     function settle(BuckNet token, address owner, uint256 id, uint256 principal, uint256 reliefScaled) external {
         token.settleFromJubilee(owner, id, principal, reliefScaled);

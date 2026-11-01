@@ -75,6 +75,8 @@ contract BuckNet is IERC20, IERC20Metadata {
     event InsurerPoolSet(address indexed insurer, address indexed pool);
     event FacilityIssued(address indexed owner, uint256 indexed tokenId, uint256 coverage,
                          uint256 principal, uint256 premium, address pool);
+    event Minted(address indexed account, uint256 amount, uint256 premium, uint256 creditValue,
+                 uint256 buckKValue, uint256 newLimit);
     event ReductionAuthorized(address indexed owner, uint256 indexed tokenId, uint256 principal,
                               uint256 minimumReliefScaled, uint64 deadline);
     event FacilityReduced(address indexed owner, uint256 indexed tokenId, uint256 principal,
@@ -105,6 +107,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error NotRegistry();
     error ReliefLiquidityLimit();
     error FacilityMatured();
+    error AllocationWorkLimit();
 
     modifier nonReentrant() {
         if (_entered) revert Reentrant();
@@ -228,6 +231,44 @@ contract BuckNet is IERC20, IERC20Metadata {
         emit InsurerPoolSet(msg.sender, pool);
     }
 
+    /// @notice Issue at least `amount` additional spendable BUCK using the
+    ///         owner's cheapest-premium facilities first. The maximum sentinel
+    ///         requests the maximum found in that order under the current
+    ///         bounds. Approved Carrying owners are not yet supported.
+    function mint(uint256 amount) external nonReentrant {
+        _mintAllocated(amount, new uint256[](0), true);
+    }
+
+    /// @notice Issue using the caller's selected NFT order. The old signature
+    ///         contains no caller-provided premium or insurer-pool bound.
+    function mint(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
+        _mintAllocated(amount, tokenIds, false);
+    }
+
+    /// @notice Quote the selected facilities at the currently published K.
+    /// @dev Like the original shape, this does not reserve K or the premium
+    ///      funding. The executed mint rechecks its full atomic transition.
+    function quoteMint(uint256 amount, uint256[] calldata tokenIds)
+        external view returns (uint256 totalCoverage, uint256 poolPrincipal)
+    {
+        return BuckNetTokenOps.quoteMint(_book, facilityPool, insurerPool, _issueDependencies(), amount, tokenIds);
+    }
+
+    function _mintAllocated(uint256 amount, uint256[] memory tokenIds, bool automatic) private {
+        BuckNetTokenOps.mint(_book, facilityPool, premiumPrincipal, insurerPool, _receiptFragments,
+                             _issueDependencies(), amount, tokenIds, automatic);
+    }
+
+    function _issueDependencies() private view returns (BuckNetTokenOps.IssueDependencies memory) {
+        return BuckNetTokenOps.IssueDependencies({
+            credit: buckCredit,
+            controller: IBuckNetIssuanceK(address(buckK)),
+            identity: identity,
+            claims: claimBook,
+            jubilee: jubilee
+        });
+    }
+
     /// @notice Activate coverage and issue BUCK against one selected NFT.
     /// @param tokenId The owner's BuckCredit NFT.
     /// @param coverage Face units to activate; zero can use existing capacity.
@@ -239,18 +280,12 @@ contract BuckNet is IERC20, IERC20Metadata {
     function issue(uint256 tokenId, uint256 coverage, uint256 spendable, uint256 maxPremium, address expectedPool)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {
-        BuckNetTokenOps.IssueDependencies memory d = BuckNetTokenOps.IssueDependencies({
-            credit: buckCredit,
-            controller: IBuckNetIssuanceK(address(buckK)),
-            identity: identity,
-            claims: claimBook,
-            jubilee: jubilee
-        });
         BuckNetTokenOps.IssueRequest memory r = BuckNetTokenOps.IssueRequest({
             tokenId: tokenId, coverage: coverage, spendable: spendable,
             maxPremium: maxPremium, expectedPool: expectedPool
         });
-        return BuckNetTokenOps.issue(_book, facilityPool, premiumPrincipal, insurerPool, _receiptFragments, d, r);
+        return BuckNetTokenOps.issue(_book, facilityPool, premiumPrincipal, insurerPool, _receiptFragments,
+                                     _issueDependencies(), r);
     }
 
     /// @notice Authorize one exact facility reduction with a net-relief floor.

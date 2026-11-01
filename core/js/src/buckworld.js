@@ -29,12 +29,19 @@ import { deployNetStack } from "./net-world.js";
 const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const g2 = (p) => ({ X: [p.x[0], p.x[1]], Y: [p.y[0], p.y[1]] });
-const NET_ISSUE_ABI_VERSION = 3; // issue ABI plus linked token-operations deployment graph
+const NET_ISSUE_ABI_VERSION = 4; // linked token operations plus ordinary-owner mint ABI
 
 function requireNetIssueAbi(artifact) {
   const issues = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "issue") ?? [];
   if (issues.length !== 1 || issues[0].inputs?.map((input) => input.type).join(",") !== "uint256,uint256,uint256,uint256,address") {
     throw new Error("BuckNet artifact lacks the pool-bound premium-limited issuance ABI");
+  }
+  const mints = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "mint") ?? [];
+  const mintShapes = mints.map((entry) => entry.inputs?.map((input) => input.type).join(",")).sort();
+  const quotes = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "quoteMint") ?? [];
+  if (mintShapes.length !== 2 || mintShapes[0] !== "uint256" || mintShapes[1] !== "uint256,uint256[]"
+      || quotes.length !== 1 || quotes[0].inputs?.map((input) => input.type).join(",") !== "uint256,uint256[]") {
+    throw new Error("BuckNet artifact lacks the ordinary-owner mint ABI");
   }
 }
 

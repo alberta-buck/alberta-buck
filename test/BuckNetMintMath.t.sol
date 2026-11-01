@@ -58,6 +58,64 @@ contract BuckNetMintMathTest is Test {
         }
     }
 
+    function testFuzz_planAtMostMatchesTheBestExhaustiveCandidate(
+        uint8 f, uint8 a, uint8 m, uint8 p, uint8 k, uint16 r, uint8 room, uint8 target
+    ) public pure {
+        uint256 face = uint256(f) % 40 + 1;
+        uint256 mark = uint256(m) % (face + 1);
+        uint256 active = uint256(a) % (face + 1);
+        uint256 issued = uint256(p) % 60;
+        uint256 factor = uint256(k) * 1e16;
+        uint256 rate = uint256(r) % 10_000;
+        uint256 accountRoom = uint256(room) % 61;
+        uint256 requested = uint256(target) % 60 + 1;
+        BuckNetMintMath.Snapshot memory s = BuckNetMintMath.Snapshot({
+            face: face, activated: active, mark: mark, principal: issued,
+            k: factor, effectiveRate: rate, accountRoom: accountRoom
+        });
+
+        uint256 best;
+        uint256 expectedCoverage;
+        uint256 expectedPremium;
+        uint256 beforeValue = mark * active / face;
+        for (uint256 extra; extra <= face - active; ++extra) {
+            uint256 present = mark * (active + extra) / face;
+            uint256 premium = (present - beforeValue) * rate / 10_000;
+            uint256 cap = present * factor / K_SCALE;
+            if (premium > accountRoom || cap <= issued + premium) continue;
+            uint256 available = cap - issued - premium;
+            available = Math.min(available, accountRoom - premium);
+            available = Math.min(available, requested);
+            if (available > best) {
+                best = available;
+                expectedCoverage = extra;
+                expectedPremium = premium;
+            }
+        }
+
+        (uint256 amount, BuckNetMintMath.Plan memory result) = BuckNetMintMath.planAtMost(s, requested);
+        assertEq(amount, best);
+        if (best == 0) {
+            assertEq(uint256(result.status), uint256(BuckNetMintMath.Status.Impossible));
+        } else {
+            assertEq(uint256(result.status), uint256(BuckNetMintMath.Status.Found));
+            assertEq(result.coverage, expectedCoverage);
+            assertEq(result.premium, expectedPremium);
+        }
+    }
+
+    function test_planAtMostFindsTheBestNonMonotoneCoverage() public pure {
+        BuckNetMintMath.Snapshot memory s = BuckNetMintMath.Snapshot({
+            face: 5, activated: 0, mark: 5, principal: 0,
+            k: 0.75e18, effectiveRate: 2000, accountRoom: 5
+        });
+        (uint256 amount, BuckNetMintMath.Plan memory result) = BuckNetMintMath.planAtMost(s, 5);
+        assertEq(uint256(result.status), uint256(BuckNetMintMath.Status.Found));
+        assertEq(amount, 3);
+        assertEq(result.coverage, 4);
+        assertEq(result.premium, 0);
+    }
+
     function test_lowerBoundAcceleratesNearEqualKAndPremium() public pure {
         BuckNetMintMath.Snapshot memory s = BuckNetMintMath.Snapshot({
             face: 100_000, activated: 0, mark: 100_000, principal: 0,
