@@ -81,10 +81,12 @@ position j target relief = r * integral(P_j(t) dt)
 #+end_example
 
 BUCK-years are the integral of outstanding issued BUCK, including issued but
-unspent BUCK, not the age of a potential credit limit. When an issuance position is reduced, its
-target relief is computed from its BUCK-years. Jubilee first redeems a
-proportion of its investment positions and computes the actual relief from
-its available full-value BUCK; the account repays the remaining principal.
+unspent BUCK, not the age of a potential credit limit. When an issuance
+position is reduced, its target relief is computed from its BUCK-years.
+Actual relief is the position's proportional share of Jubilee's net liquid
+BUCK and marked investment value. It is paid from already-liquid, full-value
+BUCK; the account repays the remaining principal. Jubilee manages its basket
+position separately, not during the credit-reduction transaction.
 Actual relief can be lower or higher than the target, but is bounded by the
 principal being reduced and by the available net BUCK. In the reference, a partial
 reduction takes a pro-rata share of that position's accumulated BUCK-years.
@@ -169,9 +171,11 @@ The target relief at year 50 is 100, but the fund directly holds only
 for example by selling other assets or realizing returns, would leave 100 in
 the fund; a 100 BUCK Jubilee payment can then extinguish the credit. The
 external consideration and market price are not represented by the closed
-BUCK ledger. Under the available-relief rule the actual relief is computed
-from the fund's net liquid BUCK after any proportional redemption; the
-borrower pays the remainder. No separate fixed 100 BUCK payout is assumed.
+BUCK ledger. Under the marked-relief rule the actual relief uses the fund's
+net cash and marked position; an ordinary reduction pays only from net liquid
+BUCK within the liquidity guard, and the borrower pays the remainder. No
+separate fixed 100 BUCK payout is assumed. The matured-lien procedure below
+releases the owner without requiring the owner to pay a fund shortfall.
 
 * Fund investments and liquidity
 
@@ -203,8 +207,11 @@ selected fraction of its net cash and marked basket receipt, without selling
 the receipt during that transaction. The calculated net relief must be no
 more than 10% of the available net cash, otherwise the reduction reverts. The
 borrower supplies the difference; if the borrower lacks that amount, the
-reduction cannot complete. A separate keeper can redeem basket shares to
-replenish the cash reserve. A modeled investment return must
+reduction cannot complete. Basket-wheel work is intended to invest excess
+cash or redeem basket shares to replenish the reserve in separate operations;
+the current prototype uses a separate keeper, and wheel integration and mark
+freshness are not yet implemented. See the [[file:doc/review/bucknet-economy-implementation.org][unified replacement plan]].
+A modeled investment return must
 have a source, such as a transfer from a counterparty, a realized external
 asset sale, or new, separately recorded issuance. It must not appear solely
 because the fund paid demurrage to itself. The reference includes an idealized

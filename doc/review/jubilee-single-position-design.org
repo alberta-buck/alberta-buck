@@ -14,14 +14,16 @@ and fund-checkpoint analysis remain useful with those corrections.
 The basket findings below describe the code before the implementation branch:
 =BuckBasketEquity= now has same-asset =increasePosition= and exact-share
 =redeemShares= entry points, and uses credited net equity for deposits. See
-the [[file:demurrage-implementation-plan.org][implementation checklist]] for current validation and outstanding
+the [[file:bucknet-economy-implementation.org][unified replacement plan]] for current validation and outstanding
 manager, fixed-point, and contract integration work.
 
-This is a proposed design, not an implemented or audited contract. It follows
+This is a historical proposal, not an implemented or audited contract. It follows
 [[file:../../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] and the available-relief reference in
 [[file:../../alberta_buck/sim/demurrage_reference.py][demurrage_reference.py]]. The intended behavior is net-balance demurrage,
-Carrying transfers with their proportional fee, a full-value Jubilee payment,
-and relief determined after a proportional basket redemption.
+Carrying transfers with their proportional fee and a full-value Jubilee payment.
+Its proportional-sale payout was superseded by the [[file:jubilee-marked-relief.org][marked-relief design]]:
+credit reduction uses net cash plus a position mark, pays only from liquid
+cash, and does not redeem basket shares in the same transaction.
 
 The smallest practical design keeps one Buck token and the existing equity
 basket, adds a small Jubilee position manager, and lets an existing basket

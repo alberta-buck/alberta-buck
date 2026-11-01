@@ -1,17 +1,22 @@
-#+TITLE: Buck net-demurrage implementation plan and checklist
+#+TITLE: Buck net-demurrage: historical contract implementation record
 #+DATE: 2026-10-29
 #+OPTIONS: ^:nil toc:3
 
-* How to continue this work
+* Status and handoff
 
-This is the handoff and progress record for =feature/demurrage-contract-implementation=,
-started from =291560c1= on =feature/net-demurrage-model=. Work in the isolated
-=.claude/worktrees/demurrage-contracts= checkout. Do not change the separate
-main checkout or rely on its uncommitted work. The accounting decisions and
+The single current checklist, worktree, priorities and replacement path are in
+[[file:bucknet-economy-implementation.org][the unified BuckNet replacement plan]]. This document preserves the
+earlier contract branch's test evidence and constraints as a dated technical
+record. Its previous checklist and ordering are available in Git; update the
+unified plan, not this record, for new work.
+
+This records =feature/demurrage-contract-implementation=, started from
+=291560c1= on =feature/net-demurrage-model= in the former
+=.claude/worktrees/demurrage-contracts= checkout. The accounting decisions and
 examples are in [[file:credit-facility-accounting-design.org][the facility accounting design]]; the token/pool audit is in
 [[file:net-demurrage-analysis.org][the earlier audit]]. The [[file:basket-jubilee-crossholding.org][basket/Jubilee cross-holding note]] analyzes a
-new issue for leveraged basket credit. This plan is an implementation checklist, not an assertion
-that the existing deployed contracts follow the proposed rules.
+new issue for leveraged basket credit. This record is not an assertion that
+the existing deployed contracts follow the proposed rules.
 
 The proposed holder-and-insurer authorization, premium settlement and rounding
 for renewal are in [[file:atomic-renewal-design.org][the atomic renewal design]].
@@ -19,22 +24,20 @@ The [[file:carrying-mode-transition.org][Carrying-mode transition note]] records
 conservation and credit-owner restrictions.
 The [[file:jubilee-inkind-conversion.org][in-kind conversion note]] records bounded TOKEN-to-BUCK conversion and
 the remaining tradeoffs when an owner explicitly accepts cash-only relief.
-The [[file:net-demurrage-simulation-migration.org][simulation migration checklist]] maps the actual legacy deployment and agent
-assumptions, and records acceptance criteria for a replacement economy.
+The [[file:net-demurrage-simulation-migration.org][simulation migration map]] records legacy deployment and agent
+assumptions and historical acceptance detail.
 The [[file:jubilee-marked-relief.org][marked-relief note]] analyzes the proposed no-sale proportional value,
 the required aggregate-age denominator, and the remaining basket-mark audit.
 The [[file:net-demurrage-invariants.org][responsibilities and invariants map]] records the current contract boundaries,
 transition preconditions and postconditions, tested findings and candidate
 simplifications. The [[file:net-demurrage-interface-migration.org][core, Notes and proof migration plan]] covers consumers,
 the monetary meaning of Notes, proof statements and safe migration.
-The [[file:bucknet-economy-implementation.org][BuckNet economy implementation checklist]] tracks the follow-on branch,
-milestones and verification toward the five-year runs and sandboxes.
+The [[file:bucknet-economy-implementation.org][unified replacement plan]] tracks the follow-on branch, next
+milestone and current acceptance for contracts, five-year runs and sandboxes.
 
-Commit each independently reviewable and validated milestone, recording its
-commit and verification below. Update this file when a task or decision changes;
-leave unfinished boxes explicit so another session can continue. Preserve existing
-low-K basket exit/solvency checks and identity/authorization checks. Do not deploy
-or imply that old five-year simulation results validate the new contracts.
+Commit each independently reviewable and validated milestone, and record its
+evidence in the unified plan. Preserve existing low-K basket exit/solvency and
+identity/authorization checks. Old five-year results do not validate BuckNet.
 
 A fresh worktree needs the project's ignored local dependencies (Foundry =lib/=
 and =node_modules/=, plus the Nix/venv environment). Prefer the documented Make
@@ -66,301 +69,19 @@ make nix-test
 make nix-venv-economy-test
 #+end_src
 
-Run from this worktree. Tests using =vm.deployCode= need the staged Uniswap
+Run from the current worktree named in the unified plan. Tests using =vm.deployCode= need the staged Uniswap
 artifacts; generated SNARK test fixtures are separate and the Makefile reports
 when those suites are skipped. The pre-existing user checkout and its long runs
 must not be disturbed.
 
-* Decisions and invariants
+* Consolidated decisions and milestones
 
-- [X] Use the selected share of net cash plus the marked basket position,
-  capped by principal, as the default relief. Pay only from existing cash and
-  revert if the payout exceeds 10% of that net cash. The old proportional-sale
-  and reserve-ratio formulas remain reference comparisons.
-- [X] Carrying services use nominal =balanceOf=, transfers, allowances and
-  events. Carried fees affect their net value and pass proportionally on
-  transfer; ordinary accounts report net spendable value. Services are meant
-  for BUCK-neutral flows, and their users must understand pooled fees.
-- [ ] Enforce the intended allowlist of BUCK-neutral service contracts and
-  verify ordinary/Carrying, pool/recipient, insurer, Notes and AMM behavior.
-  Current registry binding is not an independent neutral-service allowlist.
-- [X] An ordinary account's held and issued-but-unspent net BUCK are
-  simultaneously spendable. New, not-yet-issued capacity is separate.
-  Transfers do not retire any facility implicitly.
-- [X] A facility's outstanding issued principal and integral of BUCK-seconds
-  belong to the selected BuckCredit NFT, not to an account-sign state. Issued
-  but unspent BUCK start incurring demurrage immediately. Early actual relief
-  is not an unconditional promise of the 2% target; at maturity the fund
-  assumes any unburned principal when the lien is released.
-- [X] Jubilee is a separate Carrying fund and holds at most one adjustable
-  basket receipt. The keeper sells separately when cash is below target;
-  reductions and renewals do not sell. Gross up the nominal Carrying outflow
-  to deliver full net relief. A partial or in-kind keeper sale counts actual
-  net BUCK, preserves unsold shares and never bypasses low-K exits.
-- [X] Each insurer receives its own facilities' *full-value* premium deposits;
-  a release returns the agreed *nominal* deposit with the pool's average
-  carried demurrage from the same recorded pool. No cross-insurer subsidy.
-- [X] Require the holder's maximum acceptable premium on each issuance and
-  revert atomically if current terms or a changed mark exceed it. The
-  [[file:bucknet-economy-implementation.org][economy checklist]] tracks matching clients, artifacts and snapshot compatibility.
-- [X] Renewal checkpoints and settles only the selected facility, updates
-  insured value, rate and any new issuance atomically, and must not temporarily
-  deactivate coverage or worsen a pre-existing K shortfall.
-- [ ] Finalize and verify exact rounding, 50-year cap, per-facility partial
-  retirement, total issuance, fee transfer/settlement, and migration invariants
-  against independent high-precision references. An isolated contract
-  prototype exists; full cross-implementation proof remains open.
-- [X] Prototype an exact aggregate benchmark for separately capped NFT
-  claimable seconds without enumerating all owners on each operation.
-- [ ] Integrate and stress-test bounded maturity processing, keeper liveness,
-  per-NFT atomic synchronization, and final payout rounding; the benchmark
-  library must never be trusted unless its host authenticates updates.
-- [ ] Decide explicit semantics for Carrying facility owners, NFT transfers,
-  and any existing delegated demurrage feature; preserve capabilities unless
-  their removal is separately agreed and replacement coverage is demonstrated.
-- [X] Protect the one-shot BuckCredit token assignment from third-party
-  preemption and wire the legacy deployment script to its deployed token.
-
-* Milestones
-
-** New: separate Jubilee reserve rebalancing from credit settlement
-
-The desired design makes Jubilee redemption a separate keeper transaction.
-A normal reduction or renewal must not redeem a basket position, and its
-actual net relief must not exceed 10% of Jubilee's net liquid BUCK immediately
-before settlement. Revert, rather than silently reduce relief, when this limit
-is exceeded. Preserve owner authorization and minimum relief, Carrying gross-up,
-the single basket receipt, in-kind slippage bounds and low-K basket safeguards.
-
-The user also requires that a 50-year-old facility can release its lien and
-refund its premium from its own insurer pool, even when its owner has spent
-all issued BUCK. A strict per-transaction liquidity limit alone cannot ensure
-that outcome: the facility may be large relative to the fund, the basket can
-be illiquid or lose value, and a final raw-unit remainder cannot always be
-split. Insurer refunds can independently be illiquid. The owner cannot be
-assumed to hold the BUCK issued by the facility. The user chose to release
-the matured lien and record any unburned issuance as an explicit Jubilee
-obligation, retaining it in supply until the fund burns it. Maturity is when
-the facility's pooled average issuance age reaches 50 years; individual
-top-ups do not each require a separately aged tranche. An unpaid insurer
-refund remains a claim on the original pool and can be retried.
-
-- [X] Implement and test a separately authorized keeper sale when the liquid
-  reserve is below target, with explicit share, route and minimum-proceeds
-  bounds and atomic rollback. It must not bypass a low-K basket exit.
-- [X] Implement the age-weighted marked-portfolio formula for reductions and
-  renewals without selling; enforce the 10% net-liquidity cap and owner's
-  minimum on actual net relief in both the fund and token.
-- [ ] Audit net-mark accuracy, stale or manipulated prices, executable value
-  and the effects of repeated withdrawals against a marked portfolio.
-- [X] Add an interim spot/TWAP deviation guard using the basket's configured
-  bounded tolerance; refuse stale-mark reductions and renewals and test retry
-  after price convergence. Keep the broader oracle and liveness audit open.
-- [X] Prepare insurer refund liquidity before taking a reduction/renewal
-  mark, and test callback-driven price changes, consent and full rollback.
-- [X] Correct the experimental net basket's pool marks for Carrying BUCK fees
-  using exact pool gross and net balances; verify one real V3 pool after an
-  idle period and retain the legacy basket path. The full fair-mark and
-  execution audit, other TOKEN order and oracle protection are still open.
-- [X] Prototype 50-year release, fund shortfalls and insurer-pool refunds
-  without relying on the former owner's BUCK balance. The NFT is burned,
-  issuance is retained as deferred Jubilee principal, and the aggregate
-  benchmark includes the obligation until BUCK are actually burned.
-- [ ] Audit and stress the maturity release, insurer refund retries, linked
-  library deployments and deferred-burn liveness, including raw-unit dust.
-- [ ] Rework the independent Python reference, integration tests and paper;
-  stress large/small facilities, a poor or illiquid basket, claim ordering,
-  refunds, concurrent maturity and keeper liveness.
-- [X] Update the Python reference, CLI and paper for marked cash-only
-  reductions and renewal; retain older sale-based policies as explicit
-  comparisons. Verify full 100-year fee accrual and the 50-year claim cap.
-- [X] Prototype matured-lien release, retained supply, deferred fund burns and
-  deferred original-pool refunds in the independent Python reference. The
-  isolated Solidity closure and settlement paths were subsequently implemented;
-  the remaining audit and production integration are still open.
-- [X] Run the locally available full contract suite, including the generated
-  proof and regression fixtures, and record the fork-dependent exclusion.
-  Continue committing each independently verified change in this worktree.
-- [ ] Run the fork-dependent coverage with a suitable RPC and complete the
-  outstanding integration, simulation and production-readiness checks below.
-
-** 0. Worktree and plan
-
-The following completed milestones record prior stages and their tests. The
-current settlement policy is the no-sale design above; historical completion
-entries do not preserve the retired sale-on-claim interfaces.
-
-- [X] Start an implementation branch from the committed reference/design.
-- [X] Write and commit this checklist before contract edits.
-- [X] Establish local dependencies and record baseline test commands/results.
-
-** 1. Reference payout default
-
-- [X] Make proportional allocation the default in previews, retirement, renewal
-  and CLI. Keep =reserve= explicitly selectable for comparison.
-- [X] Test two equal debtors, positive/negative portfolio return, partial
-  reductions, zero-age/zero-proceeds, actual versus quoted proceeds, renewal,
-  available cash, and rollback. Update CLI, paper, README, and design language.
-- [X] Run =make nix-venv-demurrage-test= and regenerate the demurrage PDF.
-- [X] Commit this standalone policy change and record verification.
-
-** 2. Existing BuckBasket position additions
-
-- [X] Inspect the real equity basket receipt, ownership and transfer callbacks,
-  current deposit/redeem paths, fee treatment, metadata and low-K checks.
-- [X] Add a public top-up for an existing position, leaving the normal deposit
-  that creates a new receipt available. Reuse pricing, entry/exit controls and
-  security boundaries; require the correct owner and basket/asset.
-- [X] Credit shares and basis from *net BUCK actually received*, not nominal
-  Carrying units. Define/validate metadata for mixed or incompatible assets,
-  zero amounts, slippage/minimum shares and overflow. Return the same position
-  ID and an unambiguous result; preserve a fair average cost basis.
-- [X] Add a precise proportional reduction for Jubilee that reports
-  actual proceeds, shares retired and residual shares. Zero requested shares
-  must not invoke legacy =bp == 0= full-redemption semantics. Do not assume an
-  exit yields BUCK or all requested shares.
-- [X] Test existing deposit and redemption, same ID and ownership, aged
-  Carrying deposits, no dilution, fee/basis updates, callback reentrancy,
-  bad IDs, full and partial exits, fee-on-transfer TOKEN, in-kind and low K.
-- [ ] Test additional mixed-age and extreme dust scenarios against the new
-  fixed-point BUCK and external Jubilee after those contracts are implemented.
-- [X] Run targeted Foundry basket tests using staged artifacts; commit each
-  coherent interface/implementation step and document results.
-
-** 3. Fixed-point demurrage and per-NFT credit
-
-- [X] Implement standalone fixed-point continuous net decay without the
-  existing exponential clamp. Test 1, 49, 50, 51, 100 and 1,000 years, tiny
-  and large balances, and checkpoint-frequency rounding against independently
-  generated high-precision numbers. Test the nominal Carrying gross-up and
-  per-NFT relief arithmetic separately.
-- [X] Implement a standalone account/fund ledger with held, issued-unspent,
-  Carrying nominal and net state. Test mixed-age transfers, lazy fund accrual,
-  50-year closure, full-net relief, dust, bounds and conservation.
-- [ ] Integrate that ledger into Buck, preserving identity, allowance, mode
-  changes, events and caller authorization; prove conservation across real
-  token operations and external contracts.
-- [X] Synchronize permitted registry Carrying-mode changes with the isolated
-  ledger, preserving net value, unspent portions and accrued Jubilee value.
-  Protect active credit holders, the Jubilee account and insurer pools.
-- [ ] Specify account state for held, issued-but-unspent and Carrying nominal
-  amounts; write model-parity tests for =balanceOf=, =transfer=, =transferFrom=,
-  deposits, fees, total supply, and owner/recipient net amounts.
-- [X] Add restricted per-NFT issuance, seconds, proportional reduction and
-  renewal checkpoint hooks, separate from coverage. Test differently aged
-  positions, multiple issuances, 50-year cap, ownership, authorization,
-  reappraisal and partial reductions with fuzzed amounts/ages.
-- [X] Connect the NFT hooks to issuance and reductions in an isolated token
-  prototype. Exercise K changes, premium flows, independent facilities,
-  funding-factor checks, owner authorization and long-idle retirement.
-- [X] Add an optional shared read-only issuance estimate for Python/JS clients,
-  including current coverage, premium, funding reserve and numerical bounds.
-  The token does not depend on it; the agents and deployments still need wiring.
-- [X] Move the aggregate capped-claim heap into a token-owned contract that
-  fetches each facility's actual NFT data, rejects unauthorized updates, and
-  permits bounded public maturity processing. Preserve the token's views.
-- [ ] Complete atomic renewal and migrate the production Buck integration;
-  the new book is not populated by legacy Buck.
-- [ ] Implement conserved issuance, transfer, fund checkpoint and reduction
-  paths; retain or deliberately replace compatibility APIs only with tests and
-  recorded rationale. Include event and allowance behavior.
-- [X] Record full-width cumulative fund demurrage, transfers, relief,
-  investments and actual sale proceeds, with fractional remainders. Verify
-  the cash reconciliation and gross versus net demurrage distinctions.
-- [X] Implement same-insurer atomic renewal in the isolated contracts with
-  separate owner/insurer authorization, actual relief, updated valuation and
-  premium, optional issuance and no worse K shortfall. Test the real basket.
-- [X] Verify the owner-selected insurer pool at premium-bearing issuance and
-  renewal, including a pool changed after quoting or consent, full rollback,
-  both client ABIs and old-snapshot rejection. Pool identity does not fix its
-  mark or guarantee an insurer refund.
-- [ ] Audit renewal for production, support any separately authorized insurer
-  change, and integrate concrete insurer strategies and migration.
-- [X] Specify renewal approvals, staleness, proceeds, rounding and premium
-  flow. Restrict active net-model term changes to Buck and validate its update
-  against the recorded insurer's envelope. The Buck renewal executor is pending.
-- [ ] Ensure insurer-specific pools and recorded deposits can invest/withdraw;
-  nominal refunds use the original pool and its average carried fee. Verify
-  insolvency and callback rollback without using another pool.
-- [ ] Cross-check Solidity against the Python reference and independent
-  high-precision vectors; include conservation/fuzz and time-warp tests.
-- [ ] Commit coherent tested stages and update compatibility/deployment notes.
-
-** 4. External Jubilee and integration
-
-- [X] Implement and test a coordinator against BuckNet and a controllable
-  basket: age-weighted marked relief paid from cash, one adjustable receipt,
-  full-value Carrying gross-up, owner authorization and pre-refund insurer
-  liquidity callback.
-- [X] Connect the real equity basket to BuckNet in a restricted cash-only
-  mode before deposits. Test actual fund receipt additions, partial sales,
-  zero-equity sale failure, Carrying fee pricing, daily wheel dispatch and
-  an in-kind exit through a real V3 pool.
-- [X] Exercise marked cash-limited payouts against the real cash-only equity
-  basket. Gross up Carrying payout without double-crediting fund self-demurrage.
-- [X] Connect the capped aggregate benchmark, deferred mature principal,
-  fractional reduction and whole-raw-unit renewal rounding, and the reserve
-  investment schedule and threshold in the isolated prototype.
-- [X] Implement and fuzz-test the one-day half-life budget against observed
-  fund cash and capped claims. Checkpoint on issuance and fund actions; let a
-  trusted keeper invest after the configured minimum with price bounds.
-- [ ] Verify ownership, identity, allowances, callback/reentrancy boundaries,
-  fund-to-basket interactions, in-kind/partial/zero exits and transaction
-  rollback. Do not relax low-K constraints.
-- [X] Convert a keeper sale's newly received in-kind TOKEN into net BUCK with
-  keeper-specified bounds; failed conversion rolls back without losing shares.
-- [ ] Audit marked value versus actual liquidation and its effects on claim
-  ordering, price impact, real fee-on-transfer pools, fund insolvency, deferred
-  mature principal and historical in-kind inventory.
-- [ ] Integrate and verify Buck, BuckCredit, Jubilee, basket and insurer
-  contracts together; update deployment paths and interfaces.
-- [X] Link the experimental token's two libraries in Python and JavaScript
-  from Foundry metadata, and smoke-test their actual deployment, issuance,
-  elapsed-time accounting and cash-only reduction against the reference.
-  Economy, browser-bundle and production deployments remain separate work.
-- [ ] Resolve and test how a leveraged basket prices its own Jubilee claim
-  when the fund holds basket shares, including circular marks, dilution,
-  actual redemption liquidity and guarded low-K behavior.
-- [X] Add an exact-arithmetic diagnostic for the idealized cross-holding fixed
-  points, caps, dilution and the gap between marked and executable relief.
-- [ ] Update Rust and Python/JavaScript consumers and sandboxes; retire only
-  duplicated code whose distinct coverage has a replacement.
-- [ ] Run relevant complete tests/builds and fresh five-year campaigns with
-  automatically generated reports. Document evidence, known failures and any
-  migration or clean-genesis requirement before proposing a merge/deployment.
-- [ ] Review the sandbox's locked JavaScript dependencies and their actual
-  exposure before publishing a new release; test any dependency updates.
-
-** 5. Core, Notes, proofs and migration
-
-Use the detailed [[file:net-demurrage-interface-migration.org][interface migration checklist]] for exact file mappings, proof
-statements, ordering and acceptance. The main gates are:
-
-- [X] Inventory the current token, Notes and client semantics, and document
-  transition pre/postconditions and simplification candidates.
-- [ ] Implement and test the Carrying service allowlist; verify the existing
-  nominal transfer and mixed-age pooling rules and provide clear net-value
-  disclosures. Specify receipt claims and evidence before changing any public
-  API or proof.
-- [ ] Implement bit-accurate net arithmetic and wide integer/rounding support
-  in Rust, PyO3, WASM and Python/JS interfaces, with shared independent vectors
-  and explicit legacy-version handling.
-- [ ] Update contract artifact generation, link metadata, deployment, all
-  core/alberta_buck wallet interfaces, events, snapshots and restores. Preserve
-  or explicitly replace delegated-demurrage capabilities and identity gates.
-- [ ] Design a non-replayable Notes migration across immutable token/pool
-  addresses and separately stored nullifiers. Decide whether new proof domains
-  are needed; update circuits, provers, verifiers, receipt schemas and matched
-  ceremony artifacts only when the chosen statements require it.
-- [ ] Verify real A1/A2/B1 proofs and adverse/rollback paths against the new
-  token, including ages, mixed deposits, actual recipient net value and
-  cross-pool replay. Distinguish stub accounting tests and development keys
-  from production cryptographic assurance.
-- [ ] Implement the five-year and JS sandbox migration gates in the companion
-  plan; run a short smoke, common vectors and then fresh frozen five-year
-  baseline/policy/shock campaigns. Generate JSON and PDF on every completed
-  five-year run and retain provenance; do not retire distinct legacy checks
-  until their replacement coverage is demonstrated.
+The active decisions, priorities and acceptance gates now live in the
+[[file:bucknet-economy-implementation.org][unified replacement plan]], and the concrete transition pre/postconditions
+are in [[file:net-demurrage-invariants.org][the invariant map]]. The prior contract-branch checklist is
+available in Git at =81e12c8b:doc/review/demurrage-implementation-plan.org=.
+The progress log and historical implementation constraints below retain the
+original evidence and context without maintaining a second checklist.
 
 * Progress and verification log
 
@@ -411,7 +132,7 @@ statements, ordering and acceptance. The main gates are:
 | 2026-10-30 | Insurer callback ordering | A controlled callback changed the basket after the old quote, reproducing stale relief in both reduction and renewal. Liquidity preparation now precedes the marked quote; renewal rechecks consent and principal, and one-use forwarding wrappers were removed. Callback-driven repricing and owner-minimum rollback pass in the 59-test renewal suite. The full oracle and callback audit remains open. | =8b43a9ba= |
 | 2026-10-30 | Invariant and integration review | Added the responsibilities/invariant map and the simulation, client, Notes and proof migration checklists. Two BuckNet/Notes tests with stub proof gates demonstrate nominal/net amounts and mixed-age pooling; a real A1 proof spends in two independently funded legacy Notes pools with the same root. Renewal minimum-failure rollback preserves both consents. User confirmed nominal Carrying-service semantics; a new test covers aged Carrying-to-Carrying and Carrying-to-ordinary transfers. =make nix-test=: 1,439 passed and one fork-dependent test skipped; =make nix-venv-demurrage-test=: 105 passed. The service allowlist, real BuckNet proof integration and a five-year net economy remain open. | This commit |
 
-* Open implementation constraints
+* Historical implementation constraints (snapshot)
 
 The fixed 10% limit can prevent a final tiny deferred BUCK burn if liquid net
 cash is smaller than ten raw BUCK units. The former owner's lien is already

@@ -7,7 +7,7 @@ policy code; they serve different purposes from the five-year acceptance campaig
 Both the browser-only and Python-backed worlds currently deploy legacy signed
 BUCK accounting, not the experimental =BuckNet= and =JubileeFund= contracts.
 The sandboxes cannot yet demonstrate or validate the new demurrage model.
-See [[file:doc/review/net-demurrage-simulation-migration.org][the migration checklist]] for the outstanding work.
+See [[file:doc/review/bucknet-economy-implementation.org][the unified BuckNet replacement plan]] for the outstanding work.
 
 The JavaScript core now has an *opt-in diagnostic*:
 =buildBuckWorld(session, artifacts, {identity, accounting: "net"})= builds a

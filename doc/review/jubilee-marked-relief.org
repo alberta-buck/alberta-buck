@@ -8,6 +8,9 @@ This note analyzes the no-sale valuation implemented by the experimental
 =JubileeFund.reduce= and =renew= and the Python reference. The prototype is
 not deployed, has not been validated by a five-year run, and still requires
 the oracle, executable-liquidity and leveraged-basket work described below.
+The [[file:bucknet-economy-implementation.org][unified replacement plan]] covers the intended wheel-based mark and
+fund work. This note describes the current per-operation cash guard and live
+mark, not a completed block-wide guard or a published wheel mark.
 
 * The numerator and denominator
 

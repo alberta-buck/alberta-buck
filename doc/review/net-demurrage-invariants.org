@@ -9,8 +9,8 @@ This is a review and verification map for the *experimental clean-genesis*
 the system is intended to maintain. It is not a formal proof, a deployment
 specification, or evidence from a five-year household economy. The existing
 =src/Buck.sol=, deployed Notes contracts, and current economy use the legacy
-model. The [[file:demurrage-implementation-plan.org][implementation plan]] owns the outstanding work; the
-[[file:net-demurrage-interface-migration.org][interface and proof migration plan]] covers clients and Notes.
+model. The [[file:bucknet-economy-implementation.org][unified replacement plan]] owns the current sequence and
+outstanding work; the [[file:net-demurrage-interface-migration.org][interface and proof reference]] details clients and Notes.
 
 Several entries below are *requirements to prove*, not claims that all
 rounding, market or adversarial cases are already proven. The selected
@@ -189,6 +189,37 @@ exact net movement from those ERC-20 events alone.
 | =burnDeferred= | Authorized fund keeper/governance; positive principal <= =D= and <= 10% of current net fund cash. | Fund net, =D= and total supply fall by the same principal; the capped aggregate benchmark loses =principal*T=. No basket sale occurs in this burn. Tiny raw-unit dust can be unburnable under the strict cap. |
 | Scheduled investment | Authorized keeper/governance, current aggregate, sufficiently matured budget and configured minimum; caller bounds nominal outlay, credited value and shares. | At most one fund-owned receipt exists; an existing receipt is increased in place. The spending is actual net BUCK, not the fund's nominal gross. Budget cannot exceed current observed excess. The half-life is of observed cash excess, not a direct ROI EMA. |
 | Scheduled sale | Authorized keeper/governance; cash below target; requested receipt shares, routes and minimum actual net proceeds are bounded. | Only shares actually retired leave the receipt; newly received TOKEN is converted or the sale reverts. Existing in-kind inventory is not silently sold. Low-K exit and basket solvency guards remain in force. A sale can fail or have poor proceeds. |
+
+** Planned compatibility and wheel transitions
+
+The following are requirements for the [[file:bucknet-economy-implementation.org][unified replacement plan]], *not*
+claims about the currently implemented prototype. The original =Buck.sol=
+documentation is a source for the public contract and intended checks; retain
+accurate explanations, but replace any signed-balance or implicit-repayment
+description that no longer applies. The precise legacy burn unit, block-wide
+liquidity budget and wheel-mark freshness policy are awaiting the owner's
+answers. The currently implemented 10% guard is per operation and the fund
+reads a guarded live basket mark, not a published wheel mark.
+
+| Proposed transition | Preconditions | Required postconditions and failure behavior |
+|---------------------+---------------+----------------------------------------------|
+| Compatible mint | The original caller owns every selected NFT and is verified; ordered/default selection, current K and marks, pool binding, premium, shared pre-mint reserve, account and supply bounds and claim-book state are valid. | All selected facilities, BUCK issuance, credited wallet value, premium transfers, fund checkpoint and compatibility/new events agree atomically. Issued-but-unspent BUCK and the NFT principal begin aging. A failure rolls back the entire batch. Legacy parameters contain no caller-specified premium or pool bound; a separate bounded API must retain those protections. |
+| Compatible burn | Owner and selected facilities are authenticated; the requested compatibility amount is translated into exact facility principal, relief and coverage; the fund mark and insurer refund are valid and the full net relief fits the applicable pre-burn liquid-cash guard. | Exactly the selected principal leaves supply, split between the owner's net BUCK and the fund's full-value relief. NFT age, coverage, the original insurer's nominal refund and fund/claim counters move consistently. Insufficient cash, unsafe mark, bad owner, callback failure or a limit breach reverts all effects; no amount is silently clipped and no basket sale occurs in the burn. |
+| Shared liquidity budget, if selected | A block/clock and a pre-outflow fund cash snapshot have been defined; reductions, renewals and fund-debt burns are classified consistently. | The sum of protected relief outflows cannot bypass the selected per-block allowance through batches, NFTs, owners, repeated transactions, callbacks or a different entry point. Operation-level checks still apply. A new block offers an opportunity for wheel work; it does not assert that a tick happened. |
+| Wheel-derived fund mark | The basket's actual position, share count, gain fee, pool net/nominal values, observations and selected valuation policy are available; any chosen staleness and price guards are satisfied. | The fund's one receipt is marked in full-value BUCK using the existing basket valuation, without counting its carried fee or the same underlying twice. Claim-derived mutual ownership is resolved by a tested non-recursive policy; a mark is an estimate, not liquid cash or a promise of executable proceeds. Invalid/stale inputs fail closed under the selected policy. |
+| Wheel-driven fund investment | The wheel is authorized for the fund's bounded work; the reserve, matured budget, threshold, receipt ownership, net transfer and entry/minimum-share guards hold. | A new deposit creates one receipt or a top-up returns the same receipt ID, updating shares and basis from net value actually received. Fund outflow and budget counters use actual net BUCK, and failed work leaves no partial transfer or fake progress. |
+| Wheel-driven fund redemption | The fund owns the selected receipt; its cash is below the selected target and share, route, exit, low-K and minimum-proceeds checks permit the work. | Only actually retired shares leave the position; the same receipt remains while shares remain. The fund records verified net BUCK actually received and any successfully converted new in-kind proceeds. Zero, partial, underwater and failed work are observable and do not mint cash, bypass exit guards or delete the remaining receipt. |
+| Matured release | Owner requests closure after the selected facility's average issuance age reaches 50 years, and any due claim-book backlog is processed. | The lien and NFT close even if the fund or insurer is illiquid; unburned principal remains in total supply and the capped benchmark as a Jubilee obligation, and an unpaid nominal premium remains a claim on the original pool. Later fund burns observe the applicable liquidity guard. |
+
+The wheel currently scans bounded slots with a cursor and an idle-per-block
+memo; existing equity and response kinds catch failed basket work. Fund work
+must re-arm the wheel when a cash, claim or mark change makes a slot due, and
+must surface refusals and actual work in telemetry rather than treating a
+caught failure as an executed replenishment. Integrating the fund's current
+keeper entry points into that scheduler is future work. In particular,
+=tick(maxWork,maxScan)= does not accept the route and slippage inputs the
+fund's current scheduled investment and sale methods require; granting the
+wheel keeper authorization alone cannot supply or validate those inputs.
 
 ** Basket, identity and proofs
 

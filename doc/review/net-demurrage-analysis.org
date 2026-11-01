@@ -8,16 +8,18 @@ later [[file:credit-facility-accounting-design.org][credit-facility accounting d
 its account-sign encoding should remain the intended design: activated,
 issued-but-unspent BUCK incur demurrage and relief belongs to each credit NFT.
 
-This is an audit of =src/Buck.sol= and its Rust math mirror, not a claim that
-net-balance demurrage is implemented. The existing contract charges the raw
-positive balance and advances the Jubilee on outstanding issuance. The desired
+This is an audit of the legacy =src/Buck.sol= and its Rust math mirror, not a
+claim that legacy Buck implements net-balance demurrage. That contract charges
+the raw positive balance and advances the Jubilee on outstanding issuance. The desired
 model treats accrued demurrage as already belonging to Jubilee, and bases
 gross demurrage and target relief on outstanding issuance, including BUCK in
-the fund. Actual relief is computed from full-value cash after proportional
-position redemption. Jubilee's demurrage paid to itself is gross activity but
+the fund. The later [[file:jubilee-marked-relief.org][marked-relief design]] computes actual relief from net
+cash and the marked basket position, paying it from liquid cash without a
+position sale in the reduction. Jubilee's demurrage paid to itself is gross activity but
 does not increase its net assets. The signed
-balance guard described below has been corrected; the accrual and Jubilee
-redesign remains to be implemented and validated. Do not use the old 50-year
+balance guard described below has been corrected in the feature worktree; an
+experimental accrual and Jubilee redesign exists in =BuckNet= but remains to
+be integrated and validated. See the [[file:bucknet-economy-implementation.org][unified replacement plan]]. Do not use the old 50-year
 relief assumptions as proof that the redesigned system is funded.
 
 * What the current contract does

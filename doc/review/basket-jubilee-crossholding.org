@@ -4,6 +4,11 @@
 
 * Why this needs separate treatment
 
+The [[file:bucknet-economy-implementation.org][unified BuckNet replacement plan]] is the current implementation
+sequence. Its intended valuation and fund operations reuse the basket wheel;
+this note analyzes the still-unresolved leveraged-ownership constraints, not
+a separate basket or upkeep design.
+
 The fund's receipt is a claim on the basket. If the basket issues its own BUCK
 credit, the basket also has a claim on the fund when it reduces that facility.
 The current payout uses a mark of the fund's basket position without selling

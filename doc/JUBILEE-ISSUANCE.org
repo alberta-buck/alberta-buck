@@ -10,7 +10,9 @@ gross demurrage, including Jubilee's self-payments. The current fund accrual
 must be reconsidered: a self-payment does not create fund assets. See
 [[file:../alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]] and
 [[file:review/net-demurrage-analysis.org][Net-balance demurrage: audit and redesign]]. The corrected accrual is not yet
-implemented.
+implemented in the legacy =Buck= described here. An experimental =BuckNet=
+implementation exists; its current status, API compatibility work and
+replacement sequence are in the [[file:review/bucknet-economy-implementation.org][unified implementation plan]].
 
 * 0. Status
 

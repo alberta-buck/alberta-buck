@@ -14,7 +14,8 @@ record the actual BUCK artifact, address and accounting model in
 =meta.buck_contract=; PDFs and campaign summaries show the recorded model.
 Older vectors lacking that metadata are labeled =unrecorded=: check their
 frozen source manifest instead of inferring an accounting model from the date.
-The remaining migration is mapped in [[file:doc/review/net-demurrage-simulation-migration.org][the simulation migration checklist]].
+The current sequence is in [[file:doc/review/bucknet-economy-implementation.org][the unified BuckNet replacement plan]];
+the [[file:doc/review/net-demurrage-simulation-migration.org][simulation migration map]] retains detailed legacy references.
 
 * What each suite detects
 
@@ -144,7 +145,7 @@ tests and reusable [[file:core/python/buck_core/net_world.py][Python]] / [[file:
 isolated net household state reads activated capacity through it; normal net
 household setup and issuance remain disabled. It is a current estimate rather
 than a guarantee that an issue transaction will succeed; the
-[[file:doc/review/net-demurrage-simulation-migration.org][migration checklist]] lists its remaining integration and execution checks.
+[[file:doc/review/bucknet-economy-implementation.org][unified replacement plan]] lists its remaining integration and execution checks.
 
 * The household default
 
