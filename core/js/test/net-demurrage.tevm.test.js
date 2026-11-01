@@ -6,7 +6,8 @@ import { encodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact } from "../src/nodefs.js";
-import { boundActivatedCapacity, deployNetStack, netCreditOps, ReductionPending } from "../src/index.js";
+import { boundActivatedCapacity, deployNetStack, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
+import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
 
 const RAW = 1_000_000n;
@@ -90,6 +91,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   await exec(buck, "authorizeReduction", [0n, RAW, 0n, deadline]);
   const pending = await ops.assessIssueCandidate(actor.address, 0n, 0n, RAW, 0n);
   assert.ok(pending.reasons.includes("authorization-pending"));
+  await assert.rejects(ops.issueCandidate(actor.address, { ...pending, reasons: [] }), /authorization pending/);
   await exec(fund, "reduce", [0n, RAW]);
   assert.equal(await s.call(buck, "totalIssued"), 99n * RAW);
   assert.equal((await s.call(credit, "issuanceOf", [0n]))[0], 99n * RAW);
@@ -165,7 +167,33 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   }
   const providerId = await s.call(credit, "tokenOfOwnerByIndex", [provider.address, 0n]);
   const debtorId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 0n]);
-  await ops.issue(provider.address, providerId, face, BigInt(V.provider_issuance), 0n, ZERO);
+  // Preserve the hash when the dispatch response disappears after mining;
+  // authenticate the event before any future action can count the issuance.
+  const providerPlan = await ops.assessIssueCandidate(provider.address, providerId, face, BigInt(V.provider_issuance), 0n);
+  assert.deepEqual(providerPlan.reasons, []);
+  const unknownOps = netCreditOps(s, stack, async () => { throw new Error("dispatch outcome unavailable"); });
+  await assert.rejects(unknownOps.issueCandidate(provider.address, providerPlan),
+    (err) => err instanceof IssuancePending && err.transactionHash === null && !err.reverted);
+  assert.equal((await ops.facility(providerId)).issued, 0n);
+  const lostOps = netCreditOps(s, stack, async (owner, target, method, args) => {
+    const receipt = await exec(actors.get(owner.toLowerCase()), target, method, args);
+    throw new TransactionReceiptPending(receipt.transactionHash);
+  });
+  let interrupted;
+  await assert.rejects(lostOps.issueCandidate(provider.address, providerPlan), (err) => {
+    interrupted = err;
+    return err instanceof IssuancePending && Boolean(err.transactionHash) && !err.reverted;
+  });
+  const providerReceipt = await s.client.getTransactionReceipt({ hash: interrupted.transactionHash });
+  const evidence = ops.issuanceFromReceipt(provider.address, providerPlan, providerReceipt, interrupted.transactionHash);
+  assert.deepEqual([evidence.principal, evidence.premium, evidence.spendable, evidence.pool.toLowerCase()],
+    [BigInt(V.provider_issuance), 0n, BigInt(V.provider_issuance), ZERO]);
+  assert.throws(() => ops.issuanceFromReceipt(provider.address, providerPlan, providerReceipt, `0x${"00".repeat(32)}`), /hash/);
+  assert.throws(() => ops.issuanceFromReceipt(provider.address, { ...providerPlan, coverage: face - 1n },
+    providerReceipt, interrupted.transactionHash), /candidate/);
+  const duplicated = { ...providerReceipt, logs: [...providerReceipt.logs, ...providerReceipt.logs] };
+  assert.throws(() => ops.issuanceFromReceipt(provider.address, providerPlan, duplicated, interrupted.transactionHash), /ambiguous/);
+  assert.equal((await ops.facility(providerId)).issued, BigInt(V.provider_issuance));
   const quote = await ops.quoteIssue(debtorId, face);
   assert.deepEqual([quote.premium, quote.reserveRequired, quote.maxSpendable, quote.reserveShortfall],
     [premium, reserve, spendable, reserve]);
@@ -176,6 +204,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.deepEqual([candidate.premium, candidate.reserveRequired, candidate.maxSpendable], [premium, reserve, spendable]);
   assert.equal(candidate.reserveShortfall, reserve + BigInt(V.reserve_buffer));
   assert.deepEqual(candidate.reasons, ["reserve-shortfall"]);
+  await assert.rejects(ops.issueCandidate(debtor.address, candidate), /not available/);
   assert.deepEqual(await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium,
     { reserveBuffer: BigInt(V.reserve_buffer), blockNumber: candidate.blockNumber }), candidate);
   assert.ok((await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium - 1n)).reasons.includes("premium-limit"));
@@ -213,17 +242,24 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal((await ops.facility(debtorId)).issued, 0n);
   assert.equal(await s.call(buck, "balanceOf", [pool.address]), 0n);
   await exec(insurer, credit, "updateCredit", [debtorId, face, face, 0, 0, 0, V.premium_rate_bp]);
+  let debtorPlan = await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium);
+  assert.deepEqual(debtorPlan.reasons, []);
   const replacement = await deploy("SimLP");
   await exec(insurer, registry, "bindContract", [replacement.address, g, E, true, true]);
   await exec(insurer, buck, "setInsurerPool", [replacement.address]);
-  const changedPool = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium, pool.address], "revert");
-  assert.equal(changedPool.status, "reverted");
+  const eitherOps = netCreditOps(s, stack, (owner, target, method, args) =>
+    exec(actors.get(owner.toLowerCase()), target, method, args, "revert"));
+  await assert.rejects(eitherOps.issueCandidate(debtor.address, debtorPlan),
+    (err) => err instanceof IssuancePending && Boolean(err.transactionHash) && err.reverted);
   assert.equal(await s.call(buck, "totalIssued"), supplyBefore);
   assert.equal((await ops.facility(debtorId)).activated, 0n);
   assert.equal((await ops.facility(debtorId)).issued, 0n);
   assert.equal(await s.call(buck, "balanceOf", [replacement.address]), 0n);
   await exec(insurer, buck, "setInsurerPool", [pool.address]);
-  await ops.issue(debtor.address, debtorId, face, spendable, premium, pool.address);
+  debtorPlan = await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium);
+  const issuedEvent = await ops.issueCandidate(debtor.address, debtorPlan);
+  assert.deepEqual([issuedEvent.principal, issuedEvent.premium, issuedEvent.pool.toLowerCase()],
+    [issued, premium, pool.address.toLowerCase()]);
   const state = await ops.facility(debtorId);
   assert.deepEqual([state.face, state.activated, state.issued, state.premiumNominal],
     [face, face, issued, premium]);
@@ -320,7 +356,20 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(refund.reason, "cash-only");
   assert.equal(refund.pool.toLowerCase(), pool.address.toLowerCase());
   assert.ok(refund.premium === 5n * RAW && refund.refundFractionWad > 0n && refund.refundFractionWad < 10n ** 18n);
-  await ops.issue(debtor.address, thirdId, face, RAW, refund.premium, pool.address);
+  const thirdPlan = await ops.assessIssueCandidate(debtor.address, thirdId, face, RAW, refund.premium);
+  const omitEvents = netCreditOps(s, stack, async (owner, target, method, args) => {
+    const receipt = await exec(actors.get(owner.toLowerCase()), target, method, args);
+    return { ...receipt, logs: [] };
+  });
+  let omitted;
+  await assert.rejects(omitEvents.issueCandidate(debtor.address, thirdPlan), (err) => {
+    omitted = err;
+    return err instanceof IssuancePending && Boolean(err.transactionHash) && !err.reverted;
+  });
+  const actual = await s.client.getTransactionReceipt({ hash: omitted.transactionHash });
+  const verified = ops.issuanceFromReceipt(debtor.address, thirdPlan, actual, omitted.transactionHash);
+  assert.equal(verified.premium, refund.premium);
+  assert.equal(verified.principal, RAW + refund.premium);
   const [gross, net] = await s.call(buck, "accountBalancesScaled", [pool.address]);
   const delta = net * 10n ** 18n / gross - refund.refundFractionWad;
   assert.ok((delta < 0n ? -delta : delta) < 10n ** 10n);

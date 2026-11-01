@@ -38,6 +38,16 @@ export class ReductionPending extends Error {
   }
 }
 
+export class IssuancePending extends Error {
+  constructor(candidate, cause, { transactionHash = null, reverted = false } = {}) {
+    super(`issuance of facility ${candidate.tokenId} needs transaction reconciliation`, { cause });
+    this.name = "IssuancePending";
+    this.candidate = candidate;
+    this.transactionHash = transactionHash;
+    this.reverted = reverted;
+  }
+}
+
 /** Sum authenticated BuckNet delivery events for one transfer direction.
  *  netScaled uses 1e36 fractional units per raw BUCK; a zero net value is
  *  valid, so callers must check count rather than treating zero as missing. */
@@ -165,6 +175,54 @@ export function netCreditOps(session, stack, execute = null) {
       shortfallBefore: priorPrincipal > beforeLimit ? priorPrincipal - beforeLimit : 0n,
       shortfallAfterPremium: priorPrincipal + premium > afterLimit ? priorPrincipal + premium - afterLimit : 0n,
       premium, reserveRequired, reserveBuffer, ownerSpendable, reserveShortfall, maxSpendable, premiumPool, reasons };
+  };
+  // Authenticate one selected facility event and its saved hash. The caller
+  // must apply it once, serialize account actions and handle chain finality.
+  ops.issuanceFromReceipt = (owner, candidate, receipt, expectedHash) => {
+    if (!candidate || receipt?.status !== "success") throw new Error("issuance receipt is not successful");
+    if (typeof expectedHash !== "string" || !expectedHash || !receipt.transactionHash
+        || receipt.transactionHash.toLowerCase() !== expectedHash.toLowerCase()) {
+      throw new Error("issuance transaction hash mismatch");
+    }
+    const address = owner.address ?? owner;
+    const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityIssued" })
+      .filter((e) => e.address.toLowerCase() === token.address.toLowerCase());
+    if (events.length !== 1) throw new Error("issuance receipt missing or ambiguous");
+    const { owner: eventOwner, tokenId, coverage, principal, premium, pool } = events[0].args;
+    if (eventOwner.toLowerCase() !== address.toLowerCase() || tokenId !== candidate.tokenId
+        || coverage !== candidate.coverage || premium > candidate.maxPremium
+        || principal !== candidate.requestedSpendable + premium
+        || pool.toLowerCase() !== (premium ? candidate.premiumPool : ZERO_ADDRESS).toLowerCase()) {
+      throw new Error("issuance receipt does not match candidate");
+    }
+    return { tokenId, coverage, spendable: candidate.requestedSpendable, principal, premium, pool, receipt };
+  };
+  // A quote is not an economic decision or transaction guarantee. Once
+  // submission is attempted, even a missing hash is an uncertain outcome.
+  ops.issueCandidate = async (owner, candidate) => {
+    if (!candidate || !Array.isArray(candidate.reasons) || candidate.reasons.length) {
+      throw new Error("issuance candidate is not available");
+    }
+    const address = owner.address ?? owner;
+    if ((await session.call(credit, "ownerOf", [candidate.tokenId])).toLowerCase() !== address.toLowerCase()) {
+      throw new Error("foreign household facility");
+    }
+    if ((await session.call(token, "reductionAuthorization", [candidate.tokenId]))[0]) {
+      throw new Error("reduction authorization pending");
+    }
+    let receipt;
+    try {
+      receipt = await ops.issue(owner, candidate.tokenId, candidate.coverage, candidate.requestedSpendable,
+        candidate.maxPremium, candidate.premiumPool);
+      if (receipt?.status !== "success" || !receipt.transactionHash) throw new IssuancePending(candidate, null,
+        { transactionHash: receipt?.transactionHash ?? null,
+          reverted: receipt?.status === "reverted" && Boolean(receipt?.transactionHash) });
+      return ops.issuanceFromReceipt(owner, candidate, receipt, receipt.transactionHash);
+    } catch (err) {
+      if (err instanceof IssuancePending) throw err;
+      throw new IssuancePending(candidate, err, { transactionHash: err?.transactionHash ?? receipt?.transactionHash ?? null,
+        reverted: err instanceof TransactionReverted && err.receipt.status === "reverted" && Boolean(err.transactionHash) });
+    }
   };
   // Quote each NFT and its present unactivated mark at the same block. The
   // shared account/supply limit is applied once, not once per facility, and

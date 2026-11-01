@@ -7,6 +7,7 @@ economy, market, insurer model, leveraged basket, or five-year validation.
 import json
 import math
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,8 +15,9 @@ import pytest
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
-from buck_core import bound_activated_capacity, deploy_net_stack, net_transfer_value, NetCreditOps, ReductionPending
-from buck_core.session import Expect
+from buck_core import (bound_activated_capacity, deploy_net_stack, net_transfer_value, IssuancePending,
+                       NetCreditOps, ReductionPending, TransactionReceiptPending)
+from buck_core.session import Expect, _txhex
 
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
 RAW = 10**6
@@ -109,6 +111,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
         _exec(chain, actor, buck, "authorizeReduction", [0, RAW, 0, deadline])
         pending = ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0)
         assert "authorization-pending" in pending.reasons
+        with pytest.raises(ValueError, match="authorization pending"):
+            ops.issue_candidate(actor.address, replace(pending, reasons=()))
         retired = _exec(chain, actor, fund, "reduce", [0, RAW])
         retired_at = anvil.w3.eth.get_block(retired["blockNumber"])["timestamp"]
         model.advance((retired_at - issued_at - YEAR) / YEAR)
@@ -193,7 +197,39 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
             _exec(chain, insurer, credit, "createCredit", [actor.address, 0, face, face, 0, 0, 0, rate])
         provider_id = credit.functions.tokenOfOwnerByIndex(provider.address, 0).call()
         debtor_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 0).call()
-        ops.issue(provider.address, provider_id, face, VECTOR["provider_issuance"], 0, ZERO)
+        # A lost receipt cannot trigger another issue. Recover the actual
+        # event by hash and reject mismatched or duplicated evidence.
+        provider_plan = ops.assess_issue_candidate(provider.address, provider_id, face, VECTOR["provider_issuance"], 0)
+        assert provider_plan.reasons == ()
+        def unknown_issue(_owner, _contract, _method, _args):
+            raise RuntimeError("dispatch outcome unavailable")
+        with pytest.raises(IssuancePending) as unknown:
+            NetCreditOps(chain, stack, unknown_issue).issue_candidate(provider.address, provider_plan)
+        assert unknown.value.transaction_hash is None and not unknown.value.reverted
+        assert ops.facility(provider_id).issued == 0
+        def lost_issue(owner, contract, method, args):
+            receipt = _exec(chain, actors[owner.lower()], contract, method, args)
+            raise TransactionReceiptPending(receipt["transactionHash"])
+        lost_ops = NetCreditOps(chain, stack, lost_issue)
+        with pytest.raises(IssuancePending) as interrupted:
+            lost_ops.issue_candidate(provider.address, provider_plan)
+        assert interrupted.value.transaction_hash and not interrupted.value.reverted
+        receipt = anvil.w3.eth.get_transaction_receipt(interrupted.value.transaction_hash)
+        evidence = ops.issuance_from_receipt(provider.address, provider_plan, receipt,
+                                             expected_hash=interrupted.value.transaction_hash)
+        assert (evidence.principal, evidence.premium, evidence.spendable, evidence.pool.lower()) == (
+            VECTOR["provider_issuance"], 0, VECTOR["provider_issuance"], ZERO)
+        with pytest.raises(ValueError, match="hash"):
+            ops.issuance_from_receipt(provider.address, provider_plan, receipt, expected_hash="0x" + "00" * 32)
+        with pytest.raises(ValueError, match="candidate"):
+            ops.issuance_from_receipt(provider.address, replace(provider_plan, coverage=face - 1), receipt,
+                                      expected_hash=_txhex(receipt["transactionHash"]))
+        duplicate = dict(receipt)
+        duplicate["logs"] = list(receipt["logs"]) * 2
+        with pytest.raises(ValueError, match="ambiguous"):
+            ops.issuance_from_receipt(provider.address, provider_plan, duplicate,
+                                      expected_hash=_txhex(receipt["transactionHash"]))
+        assert ops.facility(provider_id).issued == VECTOR["provider_issuance"]
         quote = ops.quote_issue(debtor_id, face)
         assert (quote.premium, quote.reserve_required, quote.max_spendable, quote.reserve_shortfall) == (
             premium, reserve, spendable, reserve)
@@ -203,6 +239,8 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert candidate.premium_pool.lower() == pool.address.lower()
         assert (candidate.premium, candidate.reserve_required, candidate.max_spendable) == (premium, reserve, spendable)
         assert candidate.reserve_shortfall == reserve + buffer and candidate.reasons == ("reserve-shortfall",)
+        with pytest.raises(ValueError, match="not available"):
+            ops.issue_candidate(debtor.address, candidate)
         assert ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium, reserve_buffer=buffer,
                                           block_number=candidate.block_number) == candidate
         assert "premium-limit" in ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable,
@@ -250,15 +288,27 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert ops.facility(debtor_id).activated == ops.facility(debtor_id).issued == 0
         assert buck.functions.balanceOf(pool.address).call() == 0
         _exec(chain, insurer, credit, "updateCredit", [debtor_id, face, face, 0, 0, 0, rate])
+        debtor_plan = ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium)
+        assert debtor_plan.reasons == ()
         replacement = chain.deploy("SimLP")
         _exec(chain, insurer, registry, "bindContract", [replacement.address, g, e, True, True])
         _exec(chain, insurer, buck, "setInsurerPool", [replacement.address])
-        changed_pool = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
-        assert changed_pool["status"] == 0 and buck.functions.totalIssued().call() == before_supply
+        def issue_either(owner, contract, method, args):
+            encoded = contract.encode_abi(method, args=args)
+            return chain.send(actors[owner.lower()].functions.exec(contract.address, bytes.fromhex(encoded[2:])),
+                              expect=Expect.EITHER)
+        either_ops = NetCreditOps(chain, stack, issue_either)
+        with pytest.raises(IssuancePending) as changed_pool:
+            either_ops.issue_candidate(debtor.address, debtor_plan)
+        assert changed_pool.value.reverted and changed_pool.value.transaction_hash
+        assert buck.functions.totalIssued().call() == before_supply
         assert ops.facility(debtor_id).activated == ops.facility(debtor_id).issued == 0
         assert buck.functions.balanceOf(replacement.address).call() == 0
         _exec(chain, insurer, buck, "setInsurerPool", [pool.address])
-        issue_receipt = ops.issue(debtor.address, debtor_id, face, spendable, premium, pool.address)
+        debtor_plan = ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium)
+        issued_event = ops.issue_candidate(debtor.address, debtor_plan)
+        assert (issued_event.principal, issued_event.premium, issued_event.pool.lower()) == (issued, premium, pool.address.lower())
+        issue_receipt = issued_event.receipt
         issued_at = anvil.w3.eth.get_block(issue_receipt["blockNumber"])["timestamp"]
         state = ops.facility(debtor_id)
         assert (state.face, state.activated, state.issued, state.premium_nominal) == (
@@ -372,7 +422,18 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         refund = ops.quote_premium_refund(third_id, face)
         assert refund.reason == "cash-only" and refund.pool == pool.address
         assert refund.premium == 5 * RAW and 0 < refund.refund_fraction_wad < 10**18
-        ops.issue(debtor.address, third_id, face, RAW, refund.premium, pool.address)
+        third_plan = ops.assess_issue_candidate(debtor.address, third_id, face, RAW, refund.premium)
+        def omit_events(owner, contract, method, args):
+            receipt = dict(_exec(chain, actors[owner.lower()], contract, method, args))
+            receipt["logs"] = []
+            return receipt
+        with pytest.raises(IssuancePending) as omitted:
+            NetCreditOps(chain, stack, omit_events).issue_candidate(debtor.address, third_plan)
+        assert omitted.value.transaction_hash and not omitted.value.reverted
+        actual = anvil.w3.eth.get_transaction_receipt(omitted.value.transaction_hash)
+        verified = ops.issuance_from_receipt(debtor.address, third_plan, actual,
+                                             expected_hash=omitted.value.transaction_hash)
+        assert verified.premium == refund.premium and verified.principal == RAW + refund.premium
         gross, net = buck.functions.accountBalancesScaled(pool.address).call()
         assert abs(net * 10**18 // gross - refund.refund_fraction_wad) < 10**10
         # Already-activated facility room is new issuance, not wallet money;

@@ -176,6 +176,20 @@ reports the zero address for its unused pool argument. The reserve remains the h
 again immediately before submission and preserve the transaction receipt:
 coverage, K, balances and the fund's maturity state can change between calls.
 An interrupted issue or sale must stop and reconcile just like repayment.
+The isolated Python =issue_candidate=/=issuance_from_receipt= and JavaScript
+=issueCandidate=/=issuanceFromReceipt= primitives now preserve issuance
+evidence. They accept one selected candidate, check that no reduction is
+pending, and return issued principal only after authenticating one token event
+against the exact transaction hash, owner, NFT, face increment, spendable
+amount, premium ceiling and pool. A known revert, a missing receipt, missing
+event or missing hash is surfaced as =IssuancePending=, with the hash and
+revert status when available. An unknown hash is not permission to retry.
+The caller must store the candidate and outcome, serialize the owner's
+transactions, apply each receipt once and decide finality; the helpers do not
+yet provide those household or persistence policies. In particular, Tevm
+snapshots do not retain receipts, so saving an unresolved issuance needs the
+same explicit evidence design as unresolved buybacks. A confirmed issue still
+does not imply a sale or a reduction in external debt.
 
 Do not assume that quote capacity is strictly increasing with added coverage.
 The premium rate can approach the current K, and separate integer rounding of

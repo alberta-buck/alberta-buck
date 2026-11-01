@@ -115,6 +115,17 @@ class IssueCandidate:
 
 
 @dataclass(frozen=True)
+class NetIssuance:
+    token_id: int
+    coverage: int
+    spendable: int
+    principal: int
+    premium: int
+    pool: str
+    receipt: Any
+
+
+@dataclass(frozen=True)
 class HouseholdCreditState:
     """An owner's money and independent facilities, in raw token units."""
     spendable: int
@@ -220,6 +231,16 @@ class ReductionPending(RuntimeError):
         self.reverted = reverted
         self.phase = phase
         super().__init__(f"{phase} of facility {plan.token_id} needs transaction reconciliation")
+
+
+class IssuancePending(RuntimeError):
+    """A submitted issue needs its exact receipt before it can be counted."""
+
+    def __init__(self, candidate: IssueCandidate, transaction_hash: str | None = None, reverted: bool = False):
+        self.candidate = candidate
+        self.transaction_hash = transaction_hash
+        self.reverted = reverted
+        super().__init__(f"issuance of facility {candidate.token_id} needs transaction reconciliation")
 
 
 @dataclass(frozen=True)
@@ -490,6 +511,69 @@ class NetCreditOps:
             raise ValueError("invalid expected insurer pool")
         return self.execute(owner, self.stack.token, "issue",
                             [token_id, coverage, spendable, max_premium, Web3.to_checksum_address(expected_pool)])
+
+    def issuance_from_receipt(self, owner, candidate: IssueCandidate, receipt, *, expected_hash: str) -> NetIssuance:
+        """Authenticate one exact issued facility; the caller must deduplicate it.
+
+        A hash recovered from a receipt is evidence for this single dispatcher,
+        not chain finality. Reject extra issuance events rather than quietly
+        ignoring another facility changed by a custom dispatcher.
+        """
+        if not isinstance(candidate, IssueCandidate) or not receipt or receipt.get("status") != 1:
+            raise ValueError("issuance receipt is not successful")
+        if (not isinstance(expected_hash, str) or not expected_hash or
+                _txhex(receipt.get("transactionHash")).lower() != expected_hash.lower()):
+            raise ValueError("issuance transaction hash mismatch")
+        address = getattr(owner, "address", owner)
+        events = self.stack.token.events.FacilityIssued().process_receipt(receipt, errors=DISCARD)
+        events = [e for e in events if e["address"].lower() == self.stack.token.address.lower()]
+        if len(events) != 1:
+            raise ValueError("issuance receipt missing or ambiguous")
+        event = events[0]["args"]
+        if (event["owner"].lower() != address.lower() or event["tokenId"] != candidate.token_id or
+                event["coverage"] != candidate.coverage or event["premium"] > candidate.max_premium or
+                event["principal"] != candidate.requested_spendable + event["premium"] or
+                event["pool"].lower() != (candidate.premium_pool if event["premium"] else ZERO_ADDRESS).lower()):
+            raise ValueError("issuance receipt does not match candidate")
+        return NetIssuance(candidate.token_id, event["coverage"], candidate.requested_spendable,
+                           event["principal"], event["premium"], event["pool"], receipt)
+
+    def issue_candidate(self, owner, candidate: IssueCandidate) -> NetIssuance:
+        """Submit one observed candidate and authenticate its resulting event.
+
+        Reassess the economics before this call. State may change again at
+        execution, where the token enforces the ceiling and pool. The caller
+        must serialize an owner's actions and retain any IssuancePending,
+        including an unknown hash, before deciding whether retry is safe.
+        """
+        if not isinstance(candidate, IssueCandidate) or candidate.reasons:
+            raise ValueError("issuance candidate is not available")
+        address = getattr(owner, "address", owner)
+        if self.stack.credit.functions.ownerOf(candidate.token_id).call().lower() != address.lower():
+            raise ValueError("foreign household facility")
+        if self.stack.token.functions.reductionAuthorization(candidate.token_id).call()[0]:
+            raise ValueError("reduction authorization pending")
+        receipt = None
+        try:
+            receipt = self.issue(owner, candidate.token_id, candidate.coverage, candidate.requested_spendable,
+                                 candidate.max_premium, candidate.premium_pool)
+            tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
+            if not receipt or receipt.get("status") != 1 or not tx_hash:
+                raise IssuancePending(candidate, tx_hash or None,
+                                      bool(tx_hash and receipt and receipt.get("status") == 0))
+            return self.issuance_from_receipt(owner, candidate, receipt, expected_hash=tx_hash)
+        except IssuancePending:
+            raise
+        except Exception as exc:
+            tx_hash = getattr(exc, "transaction_hash", None)
+            if not tx_hash:
+                try:
+                    tx_hash = _txhex(receipt.get("transactionHash")) or None
+                except Exception:
+                    pass
+            raise IssuancePending(candidate, tx_hash,
+                                  isinstance(exc, TransactionReverted) and exc.receipt.get("status") == 0
+                                  and bool(exc.transaction_hash)) from exc
 
     def quote_reduction(self, token_id: int, principal: int):
         """Return (scaled net relief, scaled cash, exceeds the 10% cap)."""
