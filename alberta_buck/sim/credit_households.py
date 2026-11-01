@@ -56,6 +56,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                                    else policy.divest_day(scenario.seed, self.member, self.arrive_day, p["divest_rate"]))
         self._wallet            = None                  # the BUCK working balance, apart from the lien
         self._net_repayment_reserve = None              # pre-buyback balance while acquired BUCK waits
+        self._net_repayment_target = None               # remaining principal of the original buyback
         self._net_pending_token = None                  # uncertain settlement must be reconciled
         self._net_pending_principal = 0
         self._net_pending_minimum = None
@@ -240,23 +241,36 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 state["unactivated"] = 0  # no issuance can pass until the keeper advances the claim book
         return state
 
-    def _buy_cash(self, d, budget, minimum_net=0, *, for_repayment=False):
+    def _buy_cash(self, d, budget, minimum_net=0, *, for_repayment=False, repayment_target=None):
         if getattr(d, "buck_accounting", "") == "net":
             cash                = d.chain.balance_of(d.usdc, self.proxy.address)
             spend               = min(cash, budget)
             if spend <= 0:
                 return 0
             if for_repayment:
+                if (type(repayment_target) is not int or repayment_target <= 0 or
+                        getattr(self, "_net_repayment_reserve", None) is not None or
+                        getattr(self, "_net_repayment_target", None) is not None):
+                    raise ValueError("buyback requires a new positive repayment target")
                 self._net_repayment_reserve = d.buck.functions.balanceOf(self.proxy.address).call() + 1
+                self._net_repayment_target = repayment_target
                 self._net_trade_uncertain = True
                 self._net_pending_buy_hash = None
             try:
                 purchase        = d.net_market_ops.buy_exact_input(
                     self.proxy.address, d.pool_ub, spend, minimum_net, self.proxy.address)
-            except TransactionReverted:
+                if (purchase is None or type(getattr(purchase, "paid", None)) is not int or
+                        type(getattr(purchase, "received", None)) is not int or
+                        purchase.paid < 0 or purchase.paid > spend or purchase.received < minimum_net):
+                    raise TransactionReceiptPending(None)
+            except TransactionReverted as exc:
                 if for_repayment:
+                    if not exc.transaction_hash or exc.receipt.get("status") != 0:
+                        self._net_pending_buy_hash = exc.transaction_hash or None
+                        raise TransactionReceiptPending(exc.transaction_hash or None) from exc
                     self._net_trade_uncertain = False
                     self._net_repayment_reserve = None
+                    self._net_repayment_target = None
                 raise
             except TransactionReceiptPending as exc:
                 if for_repayment:
@@ -266,6 +280,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 self._net_trade_uncertain = False
                 if not purchase.received:
                     self._net_repayment_reserve = None
+                    self._net_repayment_target = None
             self.trade_loss    += purchase.paid - purchase.received
             return purchase.received
         before                  = d.buck.functions.signedBalanceOf(self.proxy.address).call()
@@ -349,7 +364,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 self._net_repayment_interrupted = False
                 self.last_action = "repay-recheck"
                 return True
-            return self._pending_repayment(d)
+            if self._pending_repayment(d):
+                return True
+            return self._resume_net_repayment(d, ctr)
         except Exception as exc:
             self.last_action    = ("buy-pending" if getattr(self, "_net_trade_uncertain", False) else
                                    "cancel-pending" if getattr(self, "_net_cancel_uncertain", False) else "repay-pending")
@@ -451,6 +468,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._net_trade_uncertain = False
             self._net_pending_buy_hash = None
             self._net_repayment_reserve = None
+            self._net_repayment_target = None
             self.last_error     = ""
             self.last_action    = "buy-reverted"
             return 0
@@ -461,6 +479,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_pending_buy_hash = None
         if not purchase.received:
             self._net_repayment_reserve = None
+            self._net_repayment_target = None
         self.last_error         = ""
         self.last_action        = "buy-reconciled"
         return purchase.received
@@ -501,6 +520,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             return 0
         settled                 = d.net_credit_ops.reduction_from_receipt(
             self.proxy.address, token_id, principal, receipt, expected_hash=tx_hash)
+        self._record_net_repayment(settled.principal)
         self.unwound           += settled.principal
         ctr["bcdRetired"]       = ctr.get("bcdRetired", 0) + settled.principal
         if self.p["surplus_policy"] == "adaptive":
@@ -510,6 +530,47 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.last_action        = "repay-reconciled"
         return settled.principal
 
+    def _record_net_repayment(self, principal):
+        """Apply a confirmed principal once to the retained buyback target."""
+        target                  = getattr(self, "_net_repayment_target", None)
+        if target is None:
+            return              # old diagnostic callers supplied no saved target
+        if principal > target:
+            raise ValueError("confirmed repayment exceeds the saved target")
+        self._net_repayment_target = target - principal
+        if not self._net_repayment_target:
+            self._net_repayment_target = self._net_repayment_reserve = None
+
+    def _resume_net_repayment(self, d, ctr):
+        """Finish the prior purchase's target before considering a new action."""
+        if getattr(d, "buck_accounting", "") != "net":
+            return False
+        reserve                 = getattr(self, "_net_repayment_reserve", None)
+        target                  = getattr(self, "_net_repayment_target", None)
+        if reserve is None and target is None:
+            return False
+        if reserve is None or type(target) is not int or target <= 0:
+            self.last_error     = "buyback target or reserve unavailable; reconcile before continuing"
+            self.last_action    = "repay-pending"
+            return True
+        issued                  = d.net_credit_ops.household(self.proxy.address, self._token_ids).issued
+        if type(issued) is not int or issued < 0:
+            raise ValueError("invalid current household principal")
+        target                  = min(target, issued)
+        if not target:
+            self._net_repayment_target = self._net_repayment_reserve = None
+            self.last_action    = "pay-down"
+            return True
+        self._net_repayment_target = target
+        retired                 = self._retire_acquired(d, target, 0)
+        self.unwound           += retired
+        ctr["bcdRetired"]       = ctr.get("bcdRetired", 0) + retired
+        if self.p["surplus_policy"] == "adaptive":
+            ctr["hhPaidDown"]   = ctr.get("hhPaidDown", 0) + retired
+        if not self._pending_repayment(d):
+            self.last_action    = "pay-down-wait" if self._net_repayment_reserve is not None else "pay-down"
+        return True
+
     def _retire_acquired(self, d, target, acquired):
         """Legacy purchases repay implicitly; BuckNet settles selected NFTs explicitly."""
         if getattr(d, "buck_accounting", "") != "net":
@@ -517,9 +578,20 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if target <= 0:
             return 0
         buffer                  = getattr(self, "_net_repayment_reserve", None)
-        if buffer is None:
+        saved_target            = getattr(self, "_net_repayment_target", None)
+        if saved_target is None:
+            if buffer is not None:
+                raise ValueError("buyback target unavailable; reconcile before continuing")
             if acquired <= 0:
                 return 0
+            self._net_repayment_target = target
+        else:
+            if type(saved_target) is not int or saved_target <= 0:
+                raise ValueError("invalid saved repayment target")
+            if buffer is None:
+                raise ValueError("buyback reserve unavailable; reconcile before continuing")
+            target              = min(target, saved_target)
+        if buffer is None:
             held                = d.buck.functions.balanceOf(self.proxy.address).call()
             # Keep at least the full balance held before the first purchase;
             # this conservative floor also protects the issuance reserve.
@@ -528,6 +600,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         deadline                = d.w3.eth.get_block("latest")["timestamp"] + 3600
         result                  = d.net_credit_ops.retire_household(
             self.proxy.address, self._token_ids, target, deadline, buffer=buffer)
+        self._record_net_repayment(result.retired)
         if result.status == "authorization-pending":
             self._net_pending_token = result.blocked_token_id
             self._net_pending_principal = result.pending_principal or 0
@@ -541,13 +614,11 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             # settlements or the pending transaction's evidence.
             self.last_error     = f"repayment {result.status} at facility {result.blocked_token_id}"
             return result.retired
-        if result.retired >= target:
-            self._net_repayment_reserve = None
-        else:
+        if self._net_repayment_reserve is not None:
             try:
                 held            = d.buck.functions.balanceOf(self.proxy.address).call()
                 if held <= buffer:
-                    self._net_repayment_reserve = None
+                    self._net_repayment_reserve = self._net_repayment_target = None
             except Exception as exc:
                 # Preserve the reserve conservatively and report completed
                 # settlements even if the follow-up balance is unavailable.
@@ -794,6 +865,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             ctr["invExits"]     = ctr.get("invExits", 0) + 1
 
     def _surplus(self, d, state, ctr):
+        if getattr(d, "buck_accounting", "") == "net":
+            if self._pending_repayment(d) or self._resume_net_repayment(d, ctr):
+                return
         if self.funding_pending:
             self.last_action    = "fund-issue"
             return
@@ -809,31 +883,20 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if action == "invest":
             self._invest_cash(d, spare, ctr)
         elif action == "retire" and state["drawn"] > 1:
-            if self._pending_repayment(d):
-                return
             ru, rb, fee          = state["ru"], state["rb"], state["fee"]
             budget              = min(spare / PARITY, ru * self.max_impact_bp / 20_000)
             want                = (min(state["drawn"], carry.usdc_out(budget, rb, ru, fee))
                                    if p["surplus_policy"] == "retire" else carry.discounted_buyback(
                                        budget, state["drawn"], ru, rb, fee, state["basket_usd"], p["retire_disc"]))
-            if getattr(d, "buck_accounting", "") == "net" and getattr(self, "_net_repayment_reserve", None) is not None:
-                retired         = self._retire_acquired(d, int(state["drawn"] * PARITY), 0)
-                self.unwound   += retired
-                ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + retired
-                want            = max(0., want - retired / PARITY)
-                if self._pending_repayment(d):
-                    return
-                if self._net_repayment_reserve is not None:
-                    self.last_action = "pay-down-wait"
-                    return
             if want > 1:
                 cost            = int(want * ru / ((rb - want) * (1 - fee)) * PARITY)
                 spend           = min(int(budget * PARITY), cost)
                 ceiling         = state["basket_usd"] * (1 - p["retire_disc"])
                 min_net         = (math.floor(spend / ceiling) + 1 if p["surplus_policy"] == "discount"
                                    and getattr(d, "buck_accounting", "") == "net" and ceiling > 0 else 0)
-                got             = self._buy_cash(d, spend, min_net, for_repayment=True)
-                retired         = self._retire_acquired(d, int(want * PARITY), got)
+                target          = int(want * PARITY)
+                got             = self._buy_cash(d, spend, min_net, for_repayment=True, repayment_target=target)
+                retired         = self._retire_acquired(d, target, got)
                 self.unwound   += retired
                 ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + retired
                 if self._pending_repayment(d):
@@ -1015,6 +1078,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         premium (household_policy.saving), and deposit them in the basket."""
         if self._pending_repayment(d):
             return
+        if self._resume_net_repayment(d, ctr):
+            return
         adaptive                = self.p["surplus_policy"] == "adaptive"
         share                   = (policy.paydown(policy.discount(state["ru"] / state["rb"], state["basket_usd"],
                                                                  state["fee"]), self.p) if adaptive else 0.)
@@ -1022,18 +1087,6 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if share > 0 and drawn > PARITY:
             target              = int(drawn * share)
             repaid              = 0
-            if getattr(d, "buck_accounting", "") == "net" and getattr(self, "_net_repayment_reserve", None) is not None:
-                retired         = self._retire_acquired(d, target, 0)
-                self.unwound   += retired
-                repaid         += retired
-                ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + retired
-                if self._pending_repayment(d):
-                    ctr["hhPaidDown"] = ctr.get("hhPaidDown", 0) + repaid
-                    return
-                if self._net_repayment_reserve is not None:
-                    ctr["hhPaidDown"] = ctr.get("hhPaidDown", 0) + repaid
-                    self.last_action = "pay-down-wait"
-                    return
             # Only receipts that fit within what is left to pay down, smallest first: a small urgency
             # must not cash out a whole savings position.
             for rid in sorted(self._basket_receipts, key=lambda r: self._receipt_book.get(r, (0, 0))[0]):
@@ -1050,8 +1103,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 spend           = min(spare, cost, _impact_cap(ru, self.max_impact_bp))
                 min_net         = (math.floor(spend / state["basket_usd"]) + 1
                                    if getattr(d, "buck_accounting", "") == "net" and state["basket_usd"] > 0 else 0)
-                got             = self._buy_cash(d, spend, min_net, for_repayment=True)
-                retired         = self._retire_acquired(d, target - repaid, got)
+                pending_target  = target - repaid
+                got             = self._buy_cash(d, spend, min_net, for_repayment=True, repayment_target=pending_target)
+                retired         = self._retire_acquired(d, pending_target, got)
                 self.unwound   += retired
                 repaid         += retired
                 ctr["bcdRetired"] = ctr.get("bcdRetired", 0) + retired

@@ -266,6 +266,8 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent._save_or_pay_down(d, state, cash_before, counters)
         cash_after_buy = usdc.functions.balanceOf(buyer.address).call()
         assert cash_after_buy < cash_before and agent._net_repayment_reserve is not None
+        original_target = agent._net_repayment_target
+        assert original_target > 10 * RAW
         assert agent.last_action == "repay-pending" and agent.unwound == 0
         assert agent._net_pending_reverted and agent._net_pending_hash
         assert credit.functions.issuanceOf(buyer_id).call()[0] == remaining
@@ -299,13 +301,20 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent._save_or_pay_down(d, state, cash_after_buy, counters)
         first_retired = remaining - credit.functions.issuanceOf(buyer_id).call()[0]
         assert first_retired == 10 * RAW and agent._net_repayment_reserve is not None
+        assert agent._net_repayment_target == original_target - first_retired
         assert usdc.functions.balanceOf(buyer.address).call() == cash_after_buy
         d.net_credit_ops = credit_ops
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
         state.update(ru=ru / RAW, rb=rb / RAW)
-        agent._save_or_pay_down(d, state, cash_after_buy, counters)
+        # The purchase was made at a discount. If the market turns to a
+        # premium after a partial settlement, finish that original target
+        # with the BUCKs already acquired; do not buy again or enlarge it.
+        premium_state = state | {"basket_usd": .5 * state["ru"] / state["rb"]}
+        agent._save_or_pay_down(d, premium_state, cash_after_buy, counters)
         retired = remaining - credit.functions.issuanceOf(buyer_id).call()[0]
         assert retired > first_retired and retired == agent.unwound == counters["bcdRetired"]
+        assert retired <= original_target
+        assert agent._net_repayment_target is None or agent._net_repayment_target == original_target - retired
         assert usdc.functions.balanceOf(buyer.address).call() == cash_after_buy
         assert credit.functions.issuanceOf(tid).call()[0] == 1_200 * RAW
 
@@ -341,6 +350,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         ru, rb = active_reserves(chain, pool_address, usdc, buck)
         state2 = {"ru": ru / RAW, "rb": rb / RAW, "fee": .0005, "basket_usd": 1.5 * ru / rb}
         agent2._save_or_pay_down(d, state2, cash_after_buy, {})
+        pending_target = agent2._net_repayment_target
         cash_after_lost = usdc.functions.balanceOf(buyer.address).call()
         assert receipts and receipts[0]["status"] == 1
         assert credit.functions.issuanceOf(second_id).call()[0] == 99 * RAW
@@ -363,6 +373,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         agent2.act(d, None, 0, 0, reconciled)
         assert agent2.last_action == "repay-reconciled"
         assert agent2.unwound == RAW and reconciled["bcdRetired"] == RAW
+        assert agent2._net_repayment_target == pending_target - RAW
         assert reconciled["hhPaidDown"] == RAW and usdc.functions.balanceOf(buyer.address).call() == cash_after_lost
         with pytest.raises(ValueError, match="known transaction hash"):
             agent2.reconcile_pending_repayment(d, {})
@@ -584,6 +595,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         # pending transaction from a completed cancellation after a restart.
         agent7 = CreditHouseholdAgent(13)
         agent7.proxy, agent7._token_ids, agent7._net_repayment_reserve = buyer, [third_id], 1
+        agent7._net_repayment_target = RAW
         agent7.arrive_day, agent7.exited = 0, False
         agent7.unwound = agent7.trade_loss = 0
         agent7.last_error = agent7.last_action = ""
@@ -644,6 +656,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         bad_balance = SimpleNamespace(buck=object(), w3=d.w3, buck_accounting="net", net_credit_ops=Capture(batch_ops))
         agent4 = CreditHouseholdAgent(10)
         agent4.proxy, agent4._token_ids, agent4._net_repayment_reserve = buyer, batch_ids, 1
+        agent4._net_repayment_target = 2 * RAW
         agent4.last_error = ""
         assert agent4._retire_acquired(bad_balance, 2 * RAW, 0) == RAW
         batch = captured.pop()
@@ -651,6 +664,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert batch.status == "authorization-pending" and batch.pending_phase == "authorization"
         assert batch.blocked_token_id == batch_ids[1] and batch.pending_transaction_hash
         assert agent4._net_pending_hash == batch.pending_transaction_hash and agent4._net_repayment_reserve == 1
+        assert agent4._net_repayment_target == RAW
         assert credit.functions.issuanceOf(batch_ids[0]).call()[0] == 0
         assert credit.functions.issuanceOf(batch_ids[1]).call()[0] == RAW
         credit_ops.cancel_reduction(buyer.address, batch_ids[1])
@@ -673,6 +687,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         bad_balance.net_credit_ops = Capture(PlanUnavailable(chain, stack, credit_ops.execute))
         agent5 = CreditHouseholdAgent(11)
         agent5.proxy, agent5._token_ids, agent5._net_repayment_reserve = buyer, [first, second], 1
+        agent5._net_repayment_target = 2 * RAW
         agent5.last_error = ""
         assert agent5._retire_acquired(bad_balance, 2 * RAW, 0) == RAW
         failed_plan = captured.pop()
@@ -680,6 +695,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         assert failed_plan.retired == RAW and len(failed_plan.settlements) == 1
         assert "planning read failure" in failed_plan.error and "plan-unavailable" in agent5.last_error
         assert agent5._net_repayment_reserve == 1 and agent5._pending_repayment(bad_balance)
+        assert agent5._net_repayment_target == RAW
         agent5.arrive_day, agent5.exited = 0, False
         agent5.act(bad_balance, None, 0, 0, {})
         assert agent5.last_action == "repay-recheck" and not agent5._net_repayment_interrupted
@@ -706,11 +722,13 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         bad_balance.net_credit_ops = Capture(credit_ops)
         agent6 = CreditHouseholdAgent(12)
         agent6.proxy, agent6._token_ids, agent6._net_repayment_reserve = buyer, [first], 1
+        agent6._net_repayment_target = 2 * RAW
         agent6.last_error = ""
         assert agent6._retire_acquired(bad_balance, 2 * RAW, 0) == RAW
         partial = captured.pop()
         assert partial.status == "partial" and partial.retired == RAW
         assert "balance unavailable" in agent6.last_error and agent6._net_repayment_reserve == 1
+        assert agent6._net_repayment_target == RAW
         assert agent6._pending_repayment(bad_balance)
         assert credit.functions.issuanceOf(first).call()[0] == 0
         assert not chain.mismatches

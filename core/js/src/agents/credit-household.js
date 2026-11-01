@@ -58,6 +58,7 @@ export class CreditHouseholdAgent {
     this.lastVerdict = null;
     this.fundingPending = false;
     this.netRepaymentReserve = null; // balance held before an unfinished buyback
+    this.netRepaymentTarget = null;  // remaining principal of the original buyback
     this.netPendingToken = null;
     this.netPendingPrincipal = 0n;
     this.netPendingMinimum = null;
@@ -213,7 +214,8 @@ export class CreditHouseholdAgent {
         this.netRepaymentInterrupted = false; this.lastAction = "repay-recheck";
         return true;
       }
-      return await this.pendingRepayment(world);
+      if (await this.pendingRepayment(world)) return true;
+      return await this.resumeNetRepayment(world);
     } catch (err) {
       this.lastAction = this.netTradeUncertain ? "buy-pending" : this.netCancelUncertain ? "cancel-pending" : "repay-pending";
       this.lastError = `transaction reconciliation: ${err}`.slice(0, 200);
@@ -221,21 +223,38 @@ export class CreditHouseholdAgent {
     }
   }
 
-  async buyForRepayment(world, spend, minNet) {
+  async buyForRepayment(world, spend, minNet, repaymentTarget = null) {
     if (world.accounting !== "net") return world.households.buy(this.account, spend, { minNet });
     if (typeof world.households.balance !== "function") throw new Error("BuckNet wallet balance unavailable");
+    if (typeof repaymentTarget !== "bigint" || repaymentTarget <= 0n || this.netRepaymentReserve !== null
+        || this.netRepaymentTarget !== null) {
+      throw new Error("buyback requires a new positive repayment target");
+    }
     this.netRepaymentReserve = await world.households.balance(this.account) + 1n;
+    this.netRepaymentTarget = repaymentTarget;
     this.netTradeUncertain = true;
     this.netPendingBuyHash = null;
     let r;
-    try { r = await world.households.buy(this.account, spend, { minNet }); }
+    try {
+      r = await world.households.buy(this.account, spend, { minNet });
+      if (!r || typeof r.spent !== "bigint" || typeof r.got !== "bigint" || r.spent < 0n
+          || r.spent > spend || r.got < minNet) {
+        throw new TransactionReceiptPending(r?.transactionHash ?? null);
+      }
+    }
     catch (err) {
-      if (err instanceof TransactionReverted) { this.netTradeUncertain = false; this.netRepaymentReserve = null; }
+      if (err instanceof TransactionReverted && err.receipt?.status === "reverted" && err.transactionHash) {
+        this.netTradeUncertain = false; this.netRepaymentReserve = null; this.netRepaymentTarget = null;
+      }
+      else if (err instanceof TransactionReverted) {
+        this.netPendingBuyHash = err.transactionHash ?? null;
+        throw new TransactionReceiptPending(this.netPendingBuyHash, err);
+      }
       else if (err instanceof TransactionReceiptPending) this.netPendingBuyHash = err.transactionHash;
       throw err;
     }
     this.netTradeUncertain = false;
-    if (!r.got) this.netRepaymentReserve = null;
+    if (!r.got) { this.netRepaymentReserve = null; this.netRepaymentTarget = null; }
     return r;
   }
 
@@ -292,13 +311,14 @@ export class CreditHouseholdAgent {
     }
     const r = await world.households.reconcileBuy(this.account, this.netPendingBuyHash);
     if (r.reverted) {
-      this.netTradeUncertain = false; this.netPendingBuyHash = null; this.netRepaymentReserve = null;
+      this.netTradeUncertain = false; this.netPendingBuyHash = null;
+      this.netRepaymentReserve = null; this.netRepaymentTarget = null;
       this.lastError = ""; this.lastAction = "buy-reverted";
       return 0n;
     }
     this.tradeLoss += r.spent - r.got;
     this.netTradeUncertain = false; this.netPendingBuyHash = null;
-    if (!r.got) this.netRepaymentReserve = null;
+    if (!r.got) { this.netRepaymentReserve = null; this.netRepaymentTarget = null; }
     this.lastError = ""; this.lastAction = "buy-reconciled";
     return r.got;
   }
@@ -328,18 +348,61 @@ export class CreditHouseholdAgent {
       this.lastError = ""; this.lastAction = "repay-reverted";
       return 0n;
     }
+    this.recordNetRepayment(r.principal);
     this.unwound += r.principal;
     this.clearPendingRepayment();
     this.lastError = ""; this.lastAction = "repay-reconciled";
     return r.principal;
   }
 
+  recordNetRepayment(principal) {
+    if (this.netRepaymentTarget === null) return; // older diagnostic callers lack saved terms
+    if (principal > this.netRepaymentTarget) throw new Error("confirmed repayment exceeds the saved target");
+    this.netRepaymentTarget -= principal;
+    if (!this.netRepaymentTarget) { this.netRepaymentTarget = null; this.netRepaymentReserve = null; }
+  }
+
+  async resumeNetRepayment(world) {
+    if (world.accounting !== "net") return false;
+    if (this.netRepaymentReserve === null && this.netRepaymentTarget === null) return false;
+    if (this.netRepaymentReserve === null || typeof this.netRepaymentTarget !== "bigint" || this.netRepaymentTarget <= 0n) {
+      this.lastError = "buyback target or reserve unavailable; reconcile before continuing";
+      this.lastAction = "repay-pending";
+      return true;
+    }
+    const issued = (await world.households.read(this.account)).drawn;
+    if (typeof issued !== "bigint" || issued < 0n) throw new Error("invalid current household principal");
+    this.netRepaymentTarget = min(this.netRepaymentTarget, issued);
+    if (!this.netRepaymentTarget) {
+      this.netRepaymentTarget = null; this.netRepaymentReserve = null; this.lastAction = "pay-down";
+      return true;
+    }
+    const retired = await this.retireAcquired(world, this.netRepaymentTarget, 0n);
+    this.unwound += retired;
+    if (!await this.pendingRepayment(world)) {
+      this.lastAction = this.netRepaymentReserve !== null ? "pay-down-wait" : "pay-down";
+    }
+    return true;
+  }
+
   async retireAcquired(world, target, acquired) {
     if (world.accounting !== "net") return acquired; // legacy purchase itself repays
-    if (target <= 0n || (acquired <= 0n && this.netRepaymentReserve === null)) return 0n;
+    if (target <= 0n) return 0n;
+    if (acquired <= 0n && this.netRepaymentReserve === null && this.netRepaymentTarget === null) return 0n;
     if (typeof world.households.retire !== "function") throw new Error("BuckNet facility repayment unavailable");
+    if (this.netRepaymentTarget === null) {
+      if (this.netRepaymentReserve !== null) throw new Error("buyback target unavailable; reconcile before continuing");
+      if (acquired <= 0n) return 0n;
+      this.netRepaymentTarget = target;
+    } else {
+      if (typeof this.netRepaymentTarget !== "bigint" || this.netRepaymentTarget <= 0n) throw new Error("invalid saved repayment target");
+      if (this.netRepaymentReserve === null) throw new Error("buyback reserve unavailable; reconcile before continuing");
+      target = min(target, this.netRepaymentTarget);
+    }
     const r = await world.households.retire(this.account, target, acquired, this.netRepaymentReserve);
     this.netRepaymentReserve = r.reserve;
+    this.recordNetRepayment(r.retired);
+    if (this.netRepaymentReserve === null) this.netRepaymentTarget = null;
     if (r.status === "authorization-pending") {
       this.netPendingToken = r.blockedTokenId;
       this.netPendingPrincipal = r.pendingPrincipal ?? 0n;
@@ -413,6 +476,7 @@ export class CreditHouseholdAgent {
   }
 
   async surplus(world, state) {
+    if (world.accounting === "net" && (await this.pendingRepayment(world) || await this.resumeNetRepayment(world))) return;
     if (this.fundingPending) { this.lastAction = "fund-issue"; return; }
     const p = this.p, { ru, rb, fee } = state;
     const spare = max(0n, await world.households.cash(this.account) - this.buffer);
@@ -420,23 +484,15 @@ export class CreditHouseholdAgent {
     const action = surplusAction(p.surplus_policy, ru / rb, state.basket_usd, fee, p.retire_disc, p.issue_premium);
     if (action === "invest") await this.invest(world, spare);
     else if (action === "retire" && state.drawn > 1) {
-      if (await this.pendingRepayment(world)) return;
       const budget = Math.min(whole(spare), ru * p.max_impact_bp / 20000);
-      let want = p.surplus_policy === "retire" ? Math.min(state.drawn, usdcOut(budget, rb, ru, fee))
+      const want = p.surplus_policy === "retire" ? Math.min(state.drawn, usdcOut(budget, rb, ru, fee))
         : discountedBuyback(budget, state.drawn, ru, rb, fee, state.basket_usd, p.retire_disc);
-      if (world.accounting === "net" && this.netRepaymentReserve !== null) {
-        const retired = await this.retireAcquired(world, units(state.drawn), 0n);
-        this.unwound += retired;
-        want = Math.max(0, want - whole(retired));
-        if (await this.pendingRepayment(world)) return;
-        if (this.netRepaymentReserve !== null) { this.lastAction = "pay-down-wait"; return; }
-      }
       if (want > 1) {
         const cost = units(want * ru / ((rb - want) * (1 - fee)));
         const spend = min(units(budget), cost), ceiling = state.basket_usd * (1 - p.retire_disc);
         const minNet = world.accounting === "net" && p.surplus_policy === "discount" && ceiling > 0
           ? units(whole(spend) / ceiling) + 1n : 0n;
-        const r = await this.buyForRepayment(world, spend, minNet);
+        const r = await this.buyForRepayment(world, spend, minNet, units(want));
         this.tradeLoss += r.spent - r.got;
         this.unwound += await this.retireAcquired(world, units(want), r.got);
         if (await this.pendingRepayment(world)) return;
@@ -481,18 +537,13 @@ export class CreditHouseholdAgent {
   // depositing them in the basket.
   async saveOrPayDown(world, state, spare) {
     if (await this.pendingRepayment(world)) return;
+    if (await this.resumeNetRepayment(world)) return;
     const ops = world.households, p = this.p;
     const share = p.surplus_policy === "adaptive" ? paydown(discount(state.ru / state.rb, state.basket_usd, state.fee), p) : 0;
     const drawn = (await ops.read(this.account)).drawn;
     if (share > 0 && drawn > E6) {
       const target = BigInt(Math.trunc(Number(drawn) * share));
       let repaid = 0n;
-      if (world.accounting === "net" && this.netRepaymentReserve !== null) {
-        const retired = await this.retireAcquired(world, target, 0n);
-        this.unwound += retired; repaid += retired;
-        if (await this.pendingRepayment(world)) return;
-        if (this.netRepaymentReserve !== null) { this.lastAction = "pay-down-wait"; return; }
-      }
       // Only receipts that fit within what is left to pay down, smallest first.
       const principal = (rid) => (this.book.get(rid) ?? { principal: 0n }).principal;
       for (const rid of [...this.receipts].sort((a, b) => (principal(a) < principal(b) ? -1 : principal(a) > principal(b) ? 1 : 0))) {
@@ -507,7 +558,7 @@ export class CreditHouseholdAgent {
         const spend = min(spare, cost, units(ru * p.max_impact_bp / 20000));
         const minNet = world.accounting === "net" && state.basket_usd > 0
           ? units(whole(spend) / state.basket_usd) + 1n : 0n;
-        const r = await this.buyForRepayment(world, spend, minNet);
+        const r = await this.buyForRepayment(world, spend, minNet, target - repaid);
         this.tradeLoss += r.spent - r.got;
         this.unwound += await this.retireAcquired(world, target - repaid, r.got);
         if (await this.pendingRepayment(world)) return;

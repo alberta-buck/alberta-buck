@@ -122,8 +122,12 @@ Automatic recovery
 of known receipts runs at the start of a household's daily turn and consumes
 that turn. The simulated single dispatcher cancels a verified orphaned
 authorization or one whose settlement reverted, and reconciles an uncertain
-cancellation before taking further action. Finality handling and snapshot
-persistence remain open.
+cancellation before taking further action. A partially settled buyback keeps
+its original remaining principal target as well as the protected pre-purchase
+balance. Later turns use the already acquired BUCK toward that target before
+other actions, even after a price reversal; they do not automatically buy more.
+If the target or reserve is missing, the household stops for reconciliation. Finality
+handling and snapshot persistence remain open.
 Tevm snapshots do not retain transaction receipts, so a saved hash alone is
 not sufficient to resume an unresolved action after restore.
 The experimental net world also records its issuance ABI version; older

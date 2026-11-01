@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachNetMarket, netSaleFromReceipt, sellBuck } from "../src/market.js";
+import { attachNetMarket, buyBuck, netSaleFromReceipt, sellBuck } from "../src/market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
 
 test("net market restore refuses missing allowance targets or code evidence", async () => {
@@ -13,6 +13,33 @@ test("net market restore refuses missing allowance targets or code evidence", as
     const missingHash = structuredClone(record);
     delete missingHash[`${name}CodeHash`];
     await assert.rejects(attachNetMarket(null, null, missingHash, { accounting: "net" }), /incomplete net market record/);
+  }
+});
+
+test("net purchase requires a transaction hash to establish success or revert", async () => {
+  const addr = (byte) => `0x${byte.repeat(40)}`;
+  const account = { address: addr("1") };
+  const market = { pool: { address: addr("2") }, guard: { address: addr("3") }, usdc: { address: addr("4") } };
+  const world = { accounting: "net", buck: { address: addr("5") }, session: {} };
+  for (const send of [
+    async () => { throw new Error("dispatch failed"); },
+    async () => { throw new TransactionReverted("buy", "unknown", { status: "reverted" }); },
+    async () => ({ status: "reverted" }),
+    async () => ({ status: "success", logs: [] }),
+    async () => null,
+  ]) {
+    world.session.send = send;
+    await assert.rejects(buyBuck(world, market, account, 100n, { minOut: 1n }),
+      (err) => err instanceof TransactionReceiptPending && !err.transactionHash);
+  }
+  const hash = `0x${"11".repeat(32)}`;
+  for (const send of [
+    async () => { throw new TransactionReverted("buy", "known", { status: "reverted", transactionHash: hash }); },
+    async () => ({ status: "reverted", transactionHash: hash }),
+  ]) {
+    world.session.send = send;
+    await assert.rejects(buyBuck(world, market, account, 100n, { minOut: 1n }),
+      (err) => err instanceof TransactionReverted && err.transactionHash === hash);
   }
 });
 

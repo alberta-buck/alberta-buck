@@ -264,6 +264,24 @@ and reconcile pending payment terms, apply each receipt exactly once to its
 own mortgage ledger, and serialize the complete issue/sale/payment sequence.
 An ERC-20 transfer alone does not establish that a real lender credited a loan.
 
+An in-memory net household now records the remaining principal target with the
+pre-purchase BUCK reserve before a discretionary buyback is submitted. Each
+confirmed settlement, including one recovered from a receipt, reduces that
+target exactly once. A later daily turn first tries the remaining target with
+BUCK already bought, including when the market has turned to a premium; it
+does not buy again as part of that retry. Before retrying, it caps the target
+at the current principal of its own facilities; if nothing remains owed, it
+releases the reserve. The target is also cleared when reached or when no BUCK
+remains above the protected reserve. A target without its reserve,
+or a reserve without its target, stops for reconciliation. This policy finishes the previously chosen action;
+it is not a price-optimization rule. These in-memory fields still need safe
+snapshot persistence and evidence, especially because Tevm snapshots discard
+transaction receipts. An unknown hash still blocks rather than authorizing a
+retry, and live use needs finality and owner serialization. A purchase failure
+is a confirmed revert only when a mined-revert receipt has a transaction
+hash; a missing hash, missing receipt or incomplete event evidence remains
+pending and preserves the target and reserve.
+
 Do not assume that quote capacity is strictly increasing with added coverage.
 The premium rate can approach the current K, and separate integer rounding of
 the K limit and premium can produce small local decreases. A coverage search
@@ -306,17 +324,17 @@ waits for a later turn to reread state before spending again. Custom transaction
 dispatchers must preserve submitted transaction hashes and signal uncertain
 outcomes as required by the operations; an unknown submitted transaction must
 not be represented as an ordinary preflight failure. A partial batch is not an exit. These
-primitives still need to be wired into both existing household agents and all
-exit paths; they are not an economic simulation by themselves.
+primitives still need the remaining household lifecycle and exit paths; they
+are not an economic simulation by themselves.
 
 One part of that wiring is now exercised in isolation: the existing adaptive
 household's discount buyback can buy through the net-output guard and settle
 the actual selected NFT in Python and JavaScript. The guard enforces a net
 average purchase below basket parity, the repayment preserves BUCK held before
 the purchase, and counters increase by the principal actually settled. If a
-limited settlement leaves acquired BUCK, the next discount decision tries
-that balance before buying more; the pre-purchase reserve is held at a
-conservative fixed floor. A pending authorization stops further purchases and
+limited settlement leaves acquired BUCK, a later turn tries the remaining
+target before other actions, including after prices reverse; the pre-purchase
+reserve is held at a conservative fixed floor. A pending authorization stops further purchases and
 is visible for reconciliation or cancellation. The household also retains the
 selected NFT, principal, minimum relief and deadline when a settlement's outcome is uncertain:
 an absent authorization can mean the transaction succeeded, so it cannot be
@@ -327,9 +345,8 @@ submitted settlement will not mine. A guarded purchase with an uncertain
 outcome also stops subsequent purchases until its receipt is reconciled. The JavaScript
 =netHouseholdRepaymentOps= provides just these operations for a registered
 holder with the market handshake and settlement allowance already in place;
-proxy simulations must supply their own dispatch. Automatic retry and
-persistence of this reserve across snapshots and its
-handling when prices move to a premium are still required. Pending NFT and
+proxy simulations must supply their own dispatch. Snapshot persistence must
+retain this reserve and target. Pending NFT and
 principal, completed events and any transaction identifier must also survive
 snapshots for reliable recovery. Submitted hashes and known-revert status now
 reach the household. A caller can explicitly reconcile a saved hash against

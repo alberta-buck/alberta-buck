@@ -347,16 +347,29 @@ class NetMarketOps:
         return self.chain.send(getattr(contract.functions, method)(*args), sender=owner)
 
     def _buy(self, owner, pool, method: str, args: list, recipient: str) -> NetPurchase:
-        receipt = self.execute(owner, self.guard, method, args)
-        if receipt and receipt.get("status") == 0:
-            raise TransactionReverted(method, "net purchase refused", receipt)
+        receipt = None
         try:
-            return self.purchase_from_receipt(owner, pool, recipient, receipt)
-        except Exception as exc:
+            receipt = self.execute(owner, self.guard, method, args)
             tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
-            if tx_hash:
-                raise TransactionReceiptPending(tx_hash) from exc
+            if receipt and receipt.get("status") == 0 and tx_hash:
+                raise TransactionReverted(method, "net purchase refused", receipt)
+            if not receipt or receipt.get("status") != 1 or not tx_hash:
+                raise TransactionReceiptPending(tx_hash or None)
+            return self.purchase_from_receipt(owner, pool, recipient, receipt, expected_hash=tx_hash)
+        except TransactionReverted as exc:
+            if exc.transaction_hash and exc.receipt.get("status") == 0:
+                raise
+            raise TransactionReceiptPending(exc.transaction_hash or None) from exc
+        except TransactionReceiptPending:
             raise
+        except Exception as exc:
+            tx_hash = getattr(exc, "transaction_hash", None)
+            if not tx_hash:
+                try:
+                    tx_hash = _txhex(receipt.get("transactionHash")) or None
+                except Exception:
+                    pass
+            raise TransactionReceiptPending(tx_hash) from exc
 
     def purchase_from_receipt(self, owner, pool: str, recipient: str, receipt,
                               expected_hash: str | None = None) -> NetPurchase:

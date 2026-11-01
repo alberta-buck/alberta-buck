@@ -356,11 +356,21 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
     if (!market.guard) throw new Error("net market guard is missing");
     const name = o.exactOut ? "buyExactOutput" : "buyExactInput";
     const args = [market.pool.address, o.amount, o.limit, h.address, 0n];
-    const rcpt = await s.send(market.guard, name, args, { account: h, gas: 2_000_000n, tag });
-    try { return netPurchaseFromReceipt(world, market, h, rcpt); }
+    let rcpt;
+    try {
+      rcpt = await s.send(market.guard, name, args, { account: h, gas: 2_000_000n, tag, expect: "either" });
+      if (rcpt?.status === "reverted" && rcpt.transactionHash) {
+        throw new TransactionReverted(name, s.lastRevertReason || "net purchase reverted", rcpt);
+      }
+      if (rcpt?.status !== "success" || !rcpt.transactionHash) {
+        throw new TransactionReceiptPending(rcpt?.transactionHash ?? null);
+      }
+      return netPurchaseFromReceipt(world, market, h, rcpt, rcpt.transactionHash);
+    }
     catch (err) {
-      if (rcpt.transactionHash) throw new TransactionReceiptPending(rcpt.transactionHash, err);
-      throw err;
+      if (err instanceof TransactionReceiptPending) throw err;
+      if (err instanceof TransactionReverted && err.receipt?.status === "reverted" && err.transactionHash) throw err;
+      throw new TransactionReceiptPending(err?.transactionHash ?? rcpt?.transactionHash ?? null, err);
     }
   }
   const path = o.exactOut

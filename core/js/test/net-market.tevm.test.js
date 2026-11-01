@@ -222,6 +222,8 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const cashAfterBuy = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     assert.ok(cashAfterBuy < beforeHousehold);
     assert.notEqual(agent.netRepaymentReserve, null);
+    const originalTarget = agent.netRepaymentTarget;
+    assert.ok(originalTarget > 10_000_000n);
     assert.equal(agent.lastAction, "repay-pending");
     assert.equal(agent.unwound, 0n);
     assert.ok(agent.netPendingReverted && agent.netPendingHash);
@@ -247,12 +249,18 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const firstRetired = remaining - (await creditOps.facility(buyerId)).issued;
     assert.equal(firstRetired, 10_000_000n);
     assert.notEqual(agent.netRepaymentReserve, null);
+    assert.equal(agent.netRepaymentTarget, originalTarget - firstRetired);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterBuy);
     limitSlice = false;
-    await agent.saveOrPayDown(hworld, state, cashAfterBuy);
+    // A later premium must not discard the original target, purchase more
+    // BUCKs or expand the amount originally committed to repayment.
+    const premiumState = { ...state, basket_usd: .5 * state.ru / state.rb };
+    await agent.saveOrPayDown(hworld, premiumState, cashAfterBuy);
     const retired = remaining - (await creditOps.facility(buyerId)).issued;
     assert.ok(retired > firstRetired);
     assert.equal(retired, agent.unwound);
+    assert.ok(retired <= originalTarget);
+    assert.ok(agent.netRepaymentTarget === null || agent.netRepaymentTarget === originalTarget - retired);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterBuy);
     assert.equal((await s.call(world.credit, "issuanceOf", [market.providerCreditId]))[0], provider[0]);
 
@@ -293,6 +301,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const state2 = { ru: newRu, rb: newRb, fee: .0005, basket_usd: 1.5 * newRu / newRb };
     const cash2 = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     await agent2.saveOrPayDown(lostWorld, state2, cash2);
+    const pendingTarget = agent2.netRepaymentTarget;
     const cashAfterLost = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     assert.ok(receipts.length && receipts[0].status === "success");
     assert.equal((await creditOps.facility(lostId)).issued, 99_000_000n);
@@ -315,6 +324,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await agent2.act(lostWorld, 0, 0);
     assert.equal(agent2.lastAction, "repay-reconciled");
     assert.equal(agent2.unwound, 1_000_000n);
+    assert.equal(agent2.netRepaymentTarget, pendingTarget - 1_000_000n);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), cashAfterLost);
     await assert.rejects(agent2.reconcilePendingRepayment(lostWorld), /known transaction hash/);
 
@@ -540,6 +550,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     // when the on-chain authorization has already disappeared.
     const agent7 = new CreditHouseholdAgent({ account: buyer.account });
     agent7.netRepaymentReserve = 1n;
+    agent7.netRepaymentTarget = 1_000_000n;
     assert.equal(await agent7.retireAcquired(authWorld, 1_000_000n, 0n), 0n);
     await agent7.act(authWorld, 0, 0);
     assert.equal(agent7.netAuthorizationConfirmed, true);
@@ -598,6 +609,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
       { ...world, session: badSession }, market, { facilityIds: () => ids, creditOps: capture(ops) }) });
     const agent4 = new CreditHouseholdAgent({ account: buyer.account });
     agent4.netRepaymentReserve = 1n;
+    agent4.netRepaymentTarget = 2_000_000n;
     assert.equal(await agent4.retireAcquired(badBalanceWorld(batchIds, batchOps), 2_000_000n, 0n), 1_000_000n);
     const batch = capturedBatch;
     assert.equal(batch.retired, 1_000_000n);
@@ -608,6 +620,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.ok(batch.pendingTransactionHash);
     assert.equal(agent4.netPendingHash, batch.pendingTransactionHash);
     assert.equal(agent4.netRepaymentReserve, 1n);
+    assert.equal(agent4.netRepaymentTarget, 1_000_000n);
     assert.equal((await creditOps.facility(batchIds[0])).issued, 0n);
     assert.equal((await creditOps.facility(batchIds[1])).issued, 1_000_000n);
     await creditOps.cancelReduction(buyer.account, batchIds[1]);
@@ -627,6 +640,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     failNextBalance = false;
     const agent5 = new CreditHouseholdAgent({ account: buyer.account });
     agent5.netRepaymentReserve = 1n;
+    agent5.netRepaymentTarget = 2_000_000n;
     assert.equal(await agent5.retireAcquired(badBalanceWorld([first, second], planFailureOps), 2_000_000n, 0n), 1_000_000n);
     assert.equal(capturedBatch.status, "plan-unavailable");
     assert.equal(capturedBatch.blockedTokenId, second);
@@ -635,6 +649,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.match(capturedBatch.error, /planning read failure/);
     assert.match(agent5.lastError, /plan-unavailable/);
     assert.equal(agent5.netRepaymentReserve, 1n);
+    assert.equal(agent5.netRepaymentTarget, 1_000_000n);
     const recheckWorld = badBalanceWorld([first, second], planFailureOps);
     assert.equal(await agent5.pendingRepayment(recheckWorld), true);
     await agent5.act(recheckWorld, 0, 0);
@@ -662,11 +677,13 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     failNextBalance = false;
     const agent6 = new CreditHouseholdAgent({ account: buyer.account });
     agent6.netRepaymentReserve = 1n;
+    agent6.netRepaymentTarget = 2_000_000n;
     assert.equal(await agent6.retireAcquired(badBalanceWorld([first], creditOps), 2_000_000n, 0n), 1_000_000n);
     assert.equal(capturedBatch.status, "partial");
     assert.equal(capturedBatch.retired, 1_000_000n);
     assert.match(agent6.lastError, /balance unavailable/);
     assert.equal(agent6.netRepaymentReserve, 1n);
+    assert.equal(agent6.netRepaymentTarget, 1_000_000n);
     assert.equal(await agent6.pendingRepayment(badBalanceWorld([first], creditOps)), true);
     assert.equal((await creditOps.facility(first)).issued, 0n);
   }
