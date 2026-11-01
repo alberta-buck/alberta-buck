@@ -45,12 +45,14 @@ able to understand the pool's accumulated fee if they leave money there.
 Eventually only approved neutral-service contracts may use Carrying mode. The
 current registry authenticates contract binding but does not enforce that
 independent allowlist; authorization and safe revocation remain open work.
-The reference restricts facility owners to non-Carrying accounts, like the
-current basket's credit-holding account. It rejects making an account
-Carrying while it has issued credit. Whether to support a Carrying facility
-owner requires defining the nominal and net views of its unspent BUCK and
-full-value premium/repayment paths; it must not silently omit that unspent
-amount from =balanceOf=.
+The current reference restricts facility owners to non-Carrying accounts, like
+the current basket's credit-holding account, and rejects changing an indebted
+account to Carrying mode. The owner has since selected support for approved
+neutral Carrying services to own and use facilities. That is not implemented:
+it requires the allowlist and nominal/net, unspent BUCK, full-value premium,
+repayment and safe mode-transition work in the
+[[file:bucknet-economy-implementation.org][unified replacement plan]]. It must not silently omit issued-unspent BUCK
+from the owner's nominal =balanceOf=.
 
 When a facility issues 1,000,000 BUCK into U with no premium or other flows,
 H is zero, U and =balanceOf= are 1,000,000, the facility's outstanding

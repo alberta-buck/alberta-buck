@@ -91,6 +91,68 @@ the registry authenticates deployed-contract binding and the binder can set
 the initial Carrying flag or change it before freezing, subject to token mode
 checks. There is no separate BUCK-service allowlist. Its authorization,
 revocation and safe exit behavior remain implementation and audit work.
+The owner has selected support for approved Carrying services owning and
+using BuckCredit facilities. The current implementation still rejects that
+case and rejects changing an indebted account to Carrying mode. Support must
+be added deliberately; neither those checks nor this qualification should be
+removed merely to make an API test pass.
+
+** Why mint and burn use balance changes
+
+The original =Buck= documentation and history define =mint(N)= in terms of
+the spendable balance the caller wants at the current K, instead of requiring
+the caller to predict how much coverage to activate. If =k= is K, =e= is the
+insurance deposit per unit of present cover, and =V= is that cover, the
+illustrative continuous calculation is ~N = (k-e)*V~. At ~k = 0.75~ and ~e = 0.10~,
+requesting 100 spendable activates about 153.846154 of cover: about 115.384615
+of credit capacity less about 15.384615 of premium. Actual raw-unit and face
+rounding require the implementation's integer calculation. See the original
+[[file:../../alberta-buck-ethereum.org::#mint-burn][mint/burn explanation]] for its selector and round-trip rationale.
+
+In the old contract the activated, unused credit was included in =balanceOf=
+even though it had not actually been issued as BUCK. The net token instead
+issues actual BUCK immediately; its =balanceOf= excludes unissued capacity.
+Both quantities need views, but their changes need not be equal. The new
+compatibility contract is that a successful =mint(N)= increases actual
+=balanceOf= by at least =N=, and =burn(N)= decreases it by at least =N=,
+in net units for an ordinary owner and nominal units for an approved Carrying
+owner. Use the measured external raw-unit difference after settlement, with
+correct checkpoints and no arithmetic underflow; otherwise revert all state.
+The maximum sentinel has its separately specified maximum-available meaning.
+
+The old intent is not an unconditional guarantee of its implementation.
+Temporary Foundry probes against the legacy contract reproduced three edge
+cases: after a K reduction, an existing 50-BUCK shortfall absorbs half of a
+=mint(100)=, leaving only a 50-BUCK visible increase; minting 1,000 for a
+Carrying owner activates capacity without increasing its nominal =balanceOf=;
+and a =burn(490)= after a year's accrued relief lowers visible balance by
+about 488, rather than 490. These probes were exploratory and removed after
+the run; permanent tests must exercise the new guarantees and regressions.
+
+For intuition, take one ordinary facility and let =p= be actual principal
+retired, =r= full-value Jubilee relief, and =f= the *net value* of the
+original insurer's nominal refund. With no unrelated balance changes and
+ignoring rounding, the owner's balance decrease is ~p-r-f~. For example,
+~p = 100~, ~r = 6~ and 10 nominal refunded from an aged pool worth ~f = 9~ result
+in an 85-BUCK decrease; a request for 85 may therefore retire 100 principal,
+subject to all actual facility, K, fund-cash, mark and insurer constraints.
+The inversion must use the actual selected facility and pool, not assume that
+the nominal refund is worth its face in net BUCK. If no valid retirement can
+achieve the requested decrease while preserving the refund and relief, it
+reverts. The separately authorized 50-year lien release is unaffected.
+
+For a Carrying owner, nominal balance and economic value must both be tracked.
+A nominal refund increases its nominal balance while bringing the insurer
+pool's proportional fee. Burning nominal units of the resulting pooled
+balance removes only their proportional net value; that net value plus the
+fund's net relief must equal principal retired. As an illustration of the
+premium problem, an owner with 100 nominal worth 80 net should be able to
+receive 20 newly issued nominal BUCK and pay a 10 *full-value* premium: the
+owner ends with 120 nominal worth 100 net and the insurer receives 10 nominal
+worth 10 net, while principal increases by 30. Transferring 10 nominal out of
+the old mixed pool would not deliver 10 net. Direct allocation of fresh
+premium to the insurer is a candidate, subject to identity, receipts, event,
+reserve, self-pool, rounding and conservation checks; it is not implemented.
 
 * State owners and transitions
 
@@ -196,17 +258,18 @@ The following are requirements for the [[file:bucknet-economy-implementation.org
 claims about the currently implemented prototype. The original =Buck.sol=
 documentation is a source for the public contract and intended checks; retain
 accurate explanations, but replace any signed-balance or implicit-repayment
-description that no longer applies. The precise legacy burn unit, block-wide
-liquidity budget and wheel-mark freshness policy are awaiting the owner's
-answers. The currently implemented 10% guard is per operation and the fund
-reads a guarded live basket mark, not a published wheel mark.
+description that no longer applies. The owner selected actual =balanceOf=
+changes, approved Carrying facility owners, a shared block-wide cash budget
+and the last published wheel mark. The currently implemented 10% guard is per
+operation, and the fund reads a guarded live basket mark; neither the shared
+budget nor published wheel mark has been implemented.
 
 | Proposed transition | Preconditions | Required postconditions and failure behavior |
 |---------------------+---------------+----------------------------------------------|
-| Compatible mint | The original caller owns every selected NFT and is verified; ordered/default selection, current K and marks, pool binding, premium, shared pre-mint reserve, account and supply bounds and claim-book state are valid. | All selected facilities, BUCK issuance, credited wallet value, premium transfers, fund checkpoint and compatibility/new events agree atomically. Issued-but-unspent BUCK and the NFT principal begin aging. A failure rolls back the entire batch. Legacy parameters contain no caller-specified premium or pool bound; a separate bounded API must retain those protections. |
-| Compatible burn | Owner and selected facilities are authenticated; the requested compatibility amount is translated into exact facility principal, relief and coverage; the fund mark and insurer refund are valid and the full net relief fits the applicable pre-burn liquid-cash guard. | Exactly the selected principal leaves supply, split between the owner's net BUCK and the fund's full-value relief. NFT age, coverage, the original insurer's nominal refund and fund/claim counters move consistently. Insufficient cash, unsafe mark, bad owner, callback failure or a limit breach reverts all effects; no amount is silently clipped and no basket sale occurs in the burn. |
-| Shared liquidity budget, if selected | A block/clock and a pre-outflow fund cash snapshot have been defined; reductions, renewals and fund-debt burns are classified consistently. | The sum of protected relief outflows cannot bypass the selected per-block allowance through batches, NFTs, owners, repeated transactions, callbacks or a different entry point. Operation-level checks still apply. A new block offers an opportunity for wheel work; it does not assert that a tick happened. |
-| Wheel-derived fund mark | The basket's actual position, share count, gain fee, pool net/nominal values, observations and selected valuation policy are available; any chosen staleness and price guards are satisfied. | The fund's one receipt is marked in full-value BUCK using the existing basket valuation, without counting its carried fee or the same underlying twice. Claim-derived mutual ownership is resolved by a tested non-recursive policy; a mark is an estimate, not liquid cash or a promise of executable proceeds. Invalid/stale inputs fail closed under the selected policy. |
+| Compatible mint | The original caller owns every selected NFT and is verified; a Carrying caller is an approved neutral service; ordered/default selection, current K and marks, pool binding, premium, shared pre-mint reserve, account and supply bounds and claim-book state are valid. | The actual =balanceOf= increase is at least =N= in the caller's units, or the whole call reverts. Facilities, issuance, premium transfers, checkpoints and events agree atomically. Issued-but-unspent BUCK and NFT principal begin aging. Legacy parameters contain no caller-specified premium or pool bound; a separate bounded API must retain those protections. |
+| Compatible burn | Owner and selected facilities are authenticated; requested =N= maps to exact principal, relief and coverage; the last valid published mark and insurer refund are usable and relief fits both the current-cash guard and shared block budget. | The actual =balanceOf= decrease is at least =N= in the caller's units, or the whole call reverts. Selected principal leaves supply, split between the owner's net value and the fund's full-value relief. NFT age, coverage, the original insurer's nominal refund and fund/claim counters move consistently. No amount is silently clipped and no basket sale occurs in the burn. |
+| Shared liquidity budget | The first protected outflow in a block snapshots net fund cash. Reductions, renewals and fund-debt burns share 10% of that snapshot; later cash inflows do not raise that block's budget. | The sum of successful protected outflows cannot exceed the block allowance through batches, NFTs, owners, callbacks or different entry points; failed transactions do not spend it. Each operation also satisfies the current-cash check. A new block offers an opportunity for wheel work; it does not assert that a tick happened. |
+| Wheel-derived fund mark | For a fund with a position, the wheel has published a usable mark for it, and freshness, position-consistency and price guards are satisfied. A fund with no position has a zero position mark. Liquid cash is observed at settlement. | Relief uses the last published full-value BUCK mark derived from the existing basket valuation without counting carried fees or underlying twice. Claim-derived mutual ownership is resolved by a tested non-recursive policy. Invalid/stale inputs fail closed; the mark is neither cash nor a promise of executable proceeds. |
 | Wheel-driven fund investment | The wheel is authorized for the fund's bounded work; the reserve, matured budget, threshold, receipt ownership, net transfer and entry/minimum-share guards hold. | A new deposit creates one receipt or a top-up returns the same receipt ID, updating shares and basis from net value actually received. Fund outflow and budget counters use actual net BUCK, and failed work leaves no partial transfer or fake progress. |
 | Wheel-driven fund redemption | The fund owns the selected receipt; its cash is below the selected target and share, route, exit, low-K and minimum-proceeds checks permit the work. | Only actually retired shares leave the position; the same receipt remains while shares remain. The fund records verified net BUCK actually received and any successfully converted new in-kind proceeds. Zero, partial, underwater and failed work are observable and do not mint cash, bypass exit guards or delete the remaining receipt. |
 | Matured release | Owner requests closure after the selected facility's average issuance age reaches 50 years, and any due claim-book backlog is processed. | The lien and NFT close even if the fund or insurer is illiquid; unburned principal remains in total supply and the capped benchmark as a Jubilee obligation, and an unpaid nominal premium remains a claim on the original pool. Later fund burns observe the applicable liquidity guard. |
