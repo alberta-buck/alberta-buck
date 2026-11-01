@@ -12,6 +12,7 @@ import {BuckNet} from "../src/BuckNet.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {JubileeClaims} from "../src/lib/JubileeClaims.sol";
 import {JubileeClaimBook} from "../src/JubileeClaimBook.sol";
+import {TestWheel} from "./wheel/WorkWheel.t.sol";
 
 contract NetK {
     uint256 public k = 1e18;
@@ -26,12 +27,30 @@ contract NetK {
 /// @dev Test only. A production fund must check caller authorization, redeem
 ///      proportional positions and calculate the payout from actual proceeds.
 contract MockNetFund {
-    function checkpointIssuance() external pure {}
+    TestWheel public valuationWheel;
+    function setValuationWheel(TestWheel wheel) external { valuationWheel = wheel; }
+    function checkpointIssuance() external {
+        if (address(valuationWheel) != address(0)) valuationWheel.refreshValuation();
+    }
     function settle(BuckNet token, address owner, uint256 id, uint256 principal, uint256 reliefScaled) external {
         token.settleFromJubilee(owner, id, principal, reliefScaled);
     }
     function mature(BuckNet token, address owner, uint256 id) external {
         token.matureFromJubilee(owner, id);
+    }
+}
+
+/// @dev Issuance calls the fund while BuckNet's guard is held. This source
+///      checks that views still work and a nested transfer hits that guard.
+contract BuckLockedValuation {
+    BuckNet public immutable token;
+    address public immutable owner;
+    constructor(BuckNet token_, address owner_) { token = token_; owner = owner_; }
+    function wheelValuation() external view returns (uint256, bytes32) {
+        (bool ok, bytes memory reason) = address(token).staticcall(
+            abi.encodeWithSelector(token.transfer.selector, owner, 1));
+        require(!ok && bytes4(reason) == BuckNet.Reentrant.selector, "guard not held");
+        return (token.balanceOf(owner), bytes32(uint256(1)));
     }
 }
 
@@ -131,6 +150,20 @@ contract BuckNetTest is Test {
         assertEq(buck.claimBook().deferredPrincipal(), principal);
         vm.expectRevert();
         credit.ownerOf(id);
+    }
+
+    function test_valuationOnlyWheelCanReadWhileBuckGuardIsHeld() public {
+        TestWheel wheel = new TestWheel(address(buck), GOV);
+        BuckLockedValuation source = new BuckLockedValuation(buck, ALICE);
+        vm.prank(GOV);
+        wheel.setValuationSource(address(source));
+        fund.setValuationWheel(wheel);
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6, type(uint256).max, address(0));
+        assertTrue(wheel.valuationReady());
+        assertEq(wheel.valuationMark(), 100e6);
+        assertEq(buck.balanceOf(ALICE), 100e6);
     }
 
     function test_registryModeChangesKeepNetBalancesAndFundValueConserved() public {

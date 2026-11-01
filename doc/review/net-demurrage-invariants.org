@@ -267,9 +267,11 @@ accurate explanations, but replace any signed-balance or implicit-repayment
 description that no longer applies. The owner selected actual =balanceOf=
 changes, approved Carrying facility owners, a shared block-wide cash budget
 and the last published wheel mark, refreshed at burn preflight by a
-valuation-only wheel call. The shared block budget is implemented, but the
-fund still reads a guarded live basket mark; the published wheel mark and
-valuation-only refresh have not been implemented.
+valuation-only wheel call. The shared block budget is implemented. A
+configured fund now refreshes a wheel-published mark during its existing
+reduction/renewal path; a fund with no configured wheel still uses the earlier
+guarded live mark. Compatibility =burn= and real deployment wiring are not
+implemented.
 
 | Proposed transition | Preconditions | Required postconditions and failure behavior |
 |---------------------+---------------+----------------------------------------------|
@@ -289,6 +291,24 @@ keeper entry points into that scheduler is future work. In particular,
 =tick(maxWork,maxScan)= does not accept the route and slippage inputs the
 fund's current scheduled investment and sale methods require; granting the
 wheel keeper authorization alone cannot supply or validate those inputs.
+
+The valuation-only entry is separate from that scan. Governance selects the
+fund as a source, and publication reads its receipt through Solidity =view=
+interfaces, hence EVM =STATICCALL= and static descendants. The wheel writes
+only its mark and source/key/block/time metadata; the call does not advance
+the work cursor or pay a reward. The fund requires that it remain the basket's
+registered wheel and checks the configured source and a key derived from its
+basket, receipt, shares and basis. Its quote checks the
+current price band but may use a publication from an earlier block: its time
+is visible on the wheel and a maximum quote age remains to be specified. A
+reduction or renewal with a nonzero claim refreshes after any insurer
+preparation, before quoting relief; failures roll back the publication. A
+cash-only fund with no receipt has a zero mark. A test invokes the wheel
+under the real BuckNet guard during issuance: token views work and a nested
+token transfer is rejected. This is not yet a compatibility-burn test. The
+current full valuation scans every constituent without a practical work/gas
+limit; a supported size bound or coherent incremental approach is required
+before making it mandatory in a production burn.
 
 ** Basket, identity and proofs
 

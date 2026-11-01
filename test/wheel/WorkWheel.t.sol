@@ -16,6 +16,27 @@ contract PayToken is ERC20 {
     function mint(address to, uint256 a) external { _mint(to, a); }
 }
 
+contract WheelValuationMock {
+    uint256 public mark;
+    bytes32 public key;
+    bool public fail;
+    function set(uint256 mark_, bytes32 key_, bool fail_) external { mark = mark_; key = key_; fail = fail_; }
+    function wheelValuation() external view returns (uint256, bytes32) {
+        require(!fail, "unavailable");
+        return (mark, key);
+    }
+}
+
+/// @dev Its ABI matches the source but attempts a state write. The wheel's
+///      view interface must force STATICCALL and reject this implementation.
+contract MutatingWheelValuation {
+    uint256 public calls;
+    function wheelValuation() external returns (uint256, bytes32) {
+        calls++;
+        return (1, bytes32(uint256(2)));
+    }
+}
+
 abstract contract KindA is WorkWheel {
     uint256 public aSlots;
     mapping(uint256 => uint256) public aPending;
@@ -196,5 +217,60 @@ contract WorkWheelTest is Test {
     function test_governance_only() public {
         vm.expectRevert(WorkWheel.NotGovernance.selector);
         w.setReserveParams(1, 1);
+    }
+
+    function test_valuationPublishesWithoutRunningSlotsOrPayingRewards() public {
+        WheelValuationMock source = new WheelValuationMock();
+        source.set(42e6, bytes32(uint256(7)), false);
+        vm.expectRevert(WorkWheel.NotGovernance.selector);
+        w.setValuationSource(address(source));
+        vm.prank(GOV);
+        w.setValuationSource(address(source));
+        w.setA(1);
+        w.setAPending(0, 1);
+        pay.mint(address(this), 100e18);
+        pay.approve(address(w), 100e18);
+        w.fund(100e18);
+        vm.prank(CALLER);
+        (uint256 mark, bytes32 key) = w.refreshValuation();
+        assertEq(mark, 42e6);
+        assertEq(key, bytes32(uint256(7)));
+        assertEq(w.valuationMark(), mark);
+        assertEq(w.valuationPositionKey(), key);
+        assertEq(w.valuationBlock(), 100);
+        assertEq(w.valuationTimestamp(), block.timestamp);
+        assertTrue(w.valuationReady());
+        assertEq(w.aPending(0), 1);
+        assertEq(w.cursor(), 0);
+        assertEq(w.reserve(), 100e18);
+        assertEq(pay.balanceOf(CALLER), 0);
+
+        // A same-block market change must be sampled on the next refresh.
+        source.set(37e6, bytes32(uint256(7)), false);
+        w.refreshValuation();
+        assertEq(w.valuationMark(), 37e6);
+    }
+
+    function test_valuationFailuresDoNotPublishAndSourceChangeInvalidates() public {
+        WheelValuationMock source = new WheelValuationMock();
+        source.set(42e6, bytes32(uint256(7)), false);
+        vm.prank(GOV);
+        w.setValuationSource(address(source));
+        w.refreshValuation();
+        source.set(5, bytes32(uint256(8)), true);
+        vm.expectRevert(bytes("unavailable"));
+        w.refreshValuation();
+        assertEq(w.valuationMark(), 42e6);
+        assertEq(w.valuationPositionKey(), bytes32(uint256(7)));
+        assertTrue(w.valuationReady());
+
+        MutatingWheelValuation mutating = new MutatingWheelValuation();
+        vm.prank(GOV);
+        w.setValuationSource(address(mutating));
+        assertFalse(w.valuationReady());
+        (bool ok,) = address(w).call{gas: 100_000}(abi.encodeCall(w.refreshValuation, ()));
+        assertFalse(ok);
+        assertEq(mutating.calls(), 0);
+        assertFalse(w.valuationReady());
     }
 }

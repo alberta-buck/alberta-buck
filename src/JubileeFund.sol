@@ -20,6 +20,7 @@ import {BuckRenewal} from "./BuckRenewalConsent.sol";
 interface IJubileeBasket is IBuckBasketPosition {
     function buck() external view returns (address);
     function receipt() external view returns (address);
+    function wheel() external view returns (address);
     function holdings(uint256 id) external view returns (uint128 shares, uint128 basis);
     function valueOf(uint256 id) external view returns (uint256);
     function LAMBDA_BP() external view returns (uint256);
@@ -40,6 +41,13 @@ interface IJubileeBasket is IBuckBasketPosition {
 ///         approved BuckNet to make the refund; failure reverts the reduction.
 interface IInsurerRefundLiquidity {
     function prepareRefund(uint256 tokenId, uint256 nominalRequired) external;
+}
+
+interface IJubileeValuationWheel {
+    function valuationSource() external view returns (address);
+    function refreshValuation() external returns (uint256 mark, bytes32 positionKey);
+    function publishedValuation() external view returns (address source, uint256 mark, bytes32 positionKey,
+                                                          uint256 atBlock, uint256 atTime, bool ready);
 }
 
 /// @notice Experimental external Jubilee coordinator for BuckNet.
@@ -63,6 +71,7 @@ contract JubileeFund is IERC721Receiver {
     address public investmentKeeper;
     BuckNet public token;
     IJubileeBasket public basket;
+    IJubileeValuationWheel public valuationWheel;
     uint256 public positionId;
     uint16 public reserveTargetBp = 1000;       // 10% of the capped target
     uint16 public investmentThresholdBp = 100;   // 1% of the reserve target
@@ -96,6 +105,7 @@ contract JubileeFund is IERC721Receiver {
     event ReserveCheckpointed(uint256 targetScaled, uint256 excessScaled, uint256 budgetScaled);
     event ReserveParametersSet(uint16 targetBp, uint16 thresholdBp);
     event InvestmentKeeperSet(address indexed keeper);
+    event ValuationWheelSet(address indexed wheel);
     event SaleDeferred(uint256 indexed positionId, bytes4 reason);
     event TokenConverted(uint256 indexed constituent, address indexed asset, uint256 amountIn, uint256 netBuckScaled);
     event MaturedPremiumPending(uint256 indexed tokenId, address indexed pool, uint256 nominal);
@@ -185,6 +195,27 @@ contract JubileeFund is IERC721Receiver {
         reserveCheckpoint = _now();
         _checkpointReserve();
         emit Configured(address(token_), address(basket_), basket_.receipt());
+    }
+
+    /// @notice Use a wheel whose valuation source is this fund. Until one is
+    ///         configured, the experimental fund keeps its legacy live mark.
+    /// @dev The wheel must be the basket's existing upkeep wheel. Merely
+    ///      setting this address does not schedule fund investment or sales.
+    function setValuationWheel(IJubileeValuationWheel wheel_) external configured nonReentrant {
+        if (msg.sender != governance) revert NotGovernance();
+        if (address(wheel_) != address(0) && (address(wheel_).code.length == 0
+            || address(wheel_) != basket.wheel() || wheel_.valuationSource() != address(this))) {
+            revert InvalidConfiguration();
+        }
+        valuationWheel = wheel_;
+        emit ValuationWheelSet(address(wheel_));
+    }
+
+    /// @notice Static source for the wheel's valuation-only publication.
+    /// @dev The key identifies the receipt, its shares and basis. It does not
+    ///      claim that the published price remains current after a market move.
+    function wheelValuation() external view configured returns (uint256 mark, bytes32 positionKey) {
+        return (_positionMark(), _positionKey());
     }
 
     /// @notice Governance override for an explicitly bounded investment in
@@ -327,7 +358,8 @@ contract JubileeFund is IERC721Receiver {
         _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
-        reliefScaled = _markedRelief(principal, selected, total, cashBefore);
+        uint256 mark = selected == 0 || total == 0 ? 0 : _refreshPositionMark();
+        reliefScaled = _markedRelief(principal, selected, total, cashBefore, mark);
         if (reliefScaled > cashBefore / 10) revert ReliefLiquidityLimit();
         premiumRefund = token.settleFromJubilee(msg.sender, tokenId, principal, reliefScaled);
         _checkpointReserve();
@@ -350,7 +382,8 @@ contract JubileeFund is IERC721Receiver {
         _checkpointReserve();
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, uint256 cashBefore) = token.fundBalancesScaled();
-        uint256 available = _markedRelief(principal, selected, total, cashBefore);
+        uint256 mark = selected == 0 || total == 0 ? 0 : _refreshPositionMark();
+        uint256 available = _markedRelief(principal, selected, total, cashBefore, mark);
         relief = available / Q;
         if (relief * Q > cashBefore / 10) revert ReliefLiquidityLimit();
         if (relief < terms.minimumRelief) revert BadAuthorization();
@@ -361,25 +394,55 @@ contract JubileeFund is IERC721Receiver {
 
     /// @notice Quote a reduction and whether current liquidity limits block it.
     /// @dev A missing or unsafe basket mark reverts rather than inventing a
-    ///      value. The owner still has to authorize execution separately.
+    ///      value. With a configured wheel this uses its last publication,
+    ///      which may be older than the next settlement's refreshed mark.
+    ///      The owner still has to authorize execution separately.
     function previewRelief(uint256 tokenId, uint256 principal)
         external view configured returns (uint256 reliefScaled, uint256 cashScaled, bool exceedsLimit)
     {
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, cashScaled) = token.fundBalancesScaled();
-        reliefScaled = _markedRelief(principal, selected, total, cashScaled);
+        uint256 mark = selected == 0 || total == 0 ? 0 : _lastPositionMark();
+        reliefScaled = _markedRelief(principal, selected, total, cashScaled, mark);
         exceedsLimit = reliefScaled > token.availableReliefScaled();
     }
 
-    function _markedRelief(uint256 principal, uint256 selected, uint256 total, uint256 cash)
-        private view returns (uint256)
+    function _markedRelief(uint256 principal, uint256 selected, uint256 total, uint256 cash, uint256 marked)
+        private pure returns (uint256)
     {
         if (selected == 0 || total == 0) return 0;
-        uint256 marked = _positionMark();
         if (marked > (type(uint256).max - cash) / Q) revert BadAmount();
         uint256 proportional = Math.mulDiv(cash + marked * Q, selected, total);
         uint256 cap = principal * Q;
         return proportional < cap ? proportional : cap;
+    }
+
+    function _positionKey() private view returns (bytes32) {
+        uint256 id = positionId;
+        if (id == 0) return keccak256(abi.encode(address(basket), id, uint128(0), uint128(0)));
+        (uint128 shares, uint128 basis) = basket.holdings(id);
+        return keccak256(abi.encode(address(basket), id, shares, basis));
+    }
+
+    function _lastPositionMark() private view returns (uint256 mark) {
+        if (positionId == 0) return 0;
+        IJubileeValuationWheel wheel = valuationWheel;
+        if (address(wheel) == address(0)) return _positionMark(); // transitional prototype
+        if (address(wheel) != basket.wheel()) revert MarkUnavailable();
+        (address source, uint256 published, bytes32 key,,, bool ready) = wheel.publishedValuation();
+        if (!ready || source != address(this) || key != _positionKey()) revert MarkUnavailable();
+        _checkPositionMarket();
+        return published;
+    }
+
+    function _refreshPositionMark() private returns (uint256 mark) {
+        if (positionId == 0) return 0;
+        IJubileeValuationWheel wheel = valuationWheel;
+        if (address(wheel) == address(0)) return _positionMark(); // transitional prototype
+        if (address(wheel) != basket.wheel() || wheel.valuationSource() != address(this)) revert MarkUnavailable();
+        bytes32 key;
+        (mark, key) = wheel.refreshValuation();
+        if (key != _positionKey()) revert MarkUnavailable();
     }
 
     /// @dev Exclude the basket's accrued gain fee. Require actual TWAP history
@@ -389,6 +452,13 @@ contract JubileeFund is IERC721Receiver {
     function _positionMark() private view returns (uint256 mark) {
         uint256 id = positionId;
         if (id == 0) return 0;
+        _checkPositionMarket();
+        mark = basket.valueOf(id);
+        (, uint128 basis) = basket.holdings(id);
+        if (mark > basis) mark -= Math.mulDiv(mark - basis, basket.LAMBDA_BP(), BP);
+    }
+
+    function _checkPositionMarket() private view {
         uint256 count = basket.constituentsLength();
         uint32 window = basket.twapWindow();
         for (uint256 i; i < count; ++i) {
@@ -412,9 +482,6 @@ contract JubileeFund is IERC721Receiver {
                 revert MarkPriceDeviation();
             }
         }
-        mark = basket.valueOf(id);
-        (, uint128 basis) = basket.holdings(id);
-        if (mark > basis) mark -= Math.mulDiv(mark - basis, basket.LAMBDA_BP(), BP);
     }
 
     /// @notice Release the caller's fully aged facility without selling the

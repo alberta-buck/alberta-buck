@@ -10,12 +10,13 @@ import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckNet} from "../src/BuckNet.sol";
-import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
+import {JubileeFund, IJubileeBasket, IJubileeValuationWheel} from "../src/JubileeFund.sol";
 import {BuckBasketReceipt} from "../src/basket/BuckBasketReceipt.sol";
 import {NetK} from "./BuckNet.t.sol";
 import {WideCounter} from "../src/lib/WideCounter.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {BuckRenewal, BuckRenewalConsent} from "../src/BuckRenewalConsent.sol";
+import {TestWheel} from "./wheel/WorkWheel.t.sol";
 
 /// @dev Exercise the real token and coordinator with a controllable basket;
 ///      this is not a substitute for integration with the real equity basket.
@@ -46,6 +47,7 @@ contract JubileeBasketMock {
     address public secondSwapPool;
     bool public secondBuckIsToken0;
     bool public secondEnabled;
+    address public wheel;
     struct Holding { uint128 shares; uint128 basis; }
     mapping(uint256 => Holding) public holdings;
     uint8 public mode; // 0 normal, 1 underwater, 2 partial, 3 zero proceeds, 4 unexpected revert
@@ -59,6 +61,7 @@ contract JubileeBasketMock {
         secondInKind = new JubileeInKindToken();
     }
     function setMode(uint8 value) external { mode = value; }
+    function setWheel(address value) external { wheel = value; }
     function realizeLoss(address recipient, uint256 amount) external { IERC20(buck).transfer(recipient, amount); }
     function setSwapPool(address pool, bool buckIsToken0) external {
         swapPool = pool;
@@ -291,6 +294,14 @@ contract JubileeFundTest is Test {
         vm.prank(GOV);
         return fund.invest(net, type(uint256).max, net, 1);
     }
+    function _valuationWheel() internal returns (TestWheel wheel) {
+        wheel = new TestWheel(address(buck), GOV);
+        basket.setWheel(address(wheel));
+        vm.prank(GOV);
+        wheel.setValuationSource(address(fund));
+        vm.prank(GOV);
+        fund.setValuationWheel(IJubileeValuationWheel(address(wheel)));
+    }
     function _pool() internal returns (JubileeInsurerPoolMock pool) {
         pool = new JubileeInsurerPoolMock(IERC20(address(buck)));
         _bind(address(pool), true, INSURER);
@@ -342,6 +353,88 @@ contract JubileeFundTest is Test {
         (uint256 second,) = fund.reduce(b, 10e6);
         assertApproxEqAbs(second, first, 1);
         assertEq(buck.totalIssued(), 180e6);
+    }
+
+    function test_wheelRefreshesTheMarkForReductionWithoutDoingWheelWork() public {
+        uint256 aliceId = _credit(ALICE, 100e6, 0);
+        _credit(BOB, 100e6, 0);
+        vm.warp(t0 + YEAR);
+        _invest(2e6);
+        TestWheel wheel = _valuationWheel();
+        wheel.setA(1);
+        wheel.setAPending(0, 1);
+        wheel.refreshValuation();
+        uint256 oldMark = wheel.valuationMark();
+        (uint256 previous,,) = fund.previewRelief(aliceId, 1e6);
+        basket.realizeLoss(BOB, 500_000);
+        (uint256 stale,,) = fund.previewRelief(aliceId, 1e6);
+        assertEq(stale, previous); // the last publication is a quote, not a hold
+        _authorize(ALICE, aliceId, 1e6, 0);
+        vm.prank(ALICE);
+        (uint256 paid,) = fund.reduce(aliceId, 1e6);
+        assertLt(paid, stale);
+        assertLt(wheel.valuationMark(), oldMark);
+        assertEq(wheel.valuationBlock(), block.number);
+        assertEq(wheel.aPending(0), 1);
+        assertEq(wheel.cursor(), 0);
+        basket.setWheel(BOB);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(aliceId, 1e6);
+        _authorize(ALICE, aliceId, 1e6, 0);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        vm.prank(ALICE);
+        fund.reduce(aliceId, 1e6);
+        basket.setWheel(address(wheel));
+        // A wheel governance change cannot make the fund accept another
+        // source's publication or fall back to an unconfigured live mark.
+        vm.prank(GOV);
+        wheel.setValuationSource(address(basket));
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(aliceId, 1e6);
+        _authorize(ALICE, aliceId, 1e6, 0);
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        vm.prank(ALICE);
+        fund.reduce(aliceId, 1e6);
+    }
+
+    function test_valuationWheelMustBeTheBasketsRegisteredWheel() public {
+        TestWheel wheel = new TestWheel(address(buck), GOV);
+        vm.prank(GOV);
+        wheel.setValuationSource(address(fund));
+        vm.expectRevert(JubileeFund.NotGovernance.selector);
+        fund.setValuationWheel(IJubileeValuationWheel(address(wheel)));
+        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
+        vm.prank(GOV);
+        fund.setValuationWheel(IJubileeValuationWheel(address(wheel)));
+        basket.setWheel(address(wheel));
+        vm.prank(GOV);
+        fund.setValuationWheel(IJubileeValuationWheel(address(wheel)));
+        assertEq(address(fund.valuationWheel()), address(wheel));
+    }
+
+    function test_wheelMarkRequiresCurrentReceiptAndFailedBurnRollsBackPublication() public {
+        uint256 aliceId = _credit(ALICE, 100e6, 0);
+        _credit(BOB, 100e6, 0);
+        vm.warp(t0 + YEAR);
+        _invest(1e6);
+        TestWheel wheel = _valuationWheel();
+        wheel.refreshValuation();
+        _invest(250_000); // same receipt, changed shares and basis
+        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
+        fund.previewRelief(aliceId, 1e6);
+        wheel.refreshValuation();
+        uint256 oldMark = wheel.valuationMark();
+        (uint256 minimum,,) = fund.previewRelief(aliceId, 1e6);
+        basket.realizeLoss(BOB, 250_000);
+        _authorize(ALICE, aliceId, 1e6, minimum);
+        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.reduce(aliceId, 1e6);
+        assertEq(wheel.valuationMark(), oldMark);
+        (uint256 authorized,,) = buck.reductionAuthorization(aliceId);
+        assertEq(authorized, 1e6);
+        wheel.refreshValuation();
+        assertLt(wheel.valuationMark(), oldMark);
     }
 
     function test_threeRawUnitMaturityReleasesLienDespiteLiquidLimit() public {

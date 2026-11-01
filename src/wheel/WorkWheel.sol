@@ -4,6 +4,12 @@ pragma solidity ^0.8.20;
 import {IERC20}    from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+/// @dev A valuation-only source must not mutate the basket, token or market.
+///      Solidity calls this view through STATICCALL, including its subcalls.
+interface IWheelValuationSource {
+    function wheelValuation() external view returns (uint256 mark, bytes32 positionKey);
+}
+
 /// @title WorkWheel -- the chassis of a basket's work wheel.
 ///
 /// @notice (alberta-buck-ethereum-wheel.org, "The work wheel".)  RebalanceDirectorBase carries one
@@ -47,11 +53,24 @@ abstract contract WorkWheel {
     uint256 public reserveCap;              // funding beyond it is refused (stays with the funder)
     uint16  public kappaBp;                 // of the reserve, per working tick
 
+    // Independent from the round-robin work cursor: a burn can publish a
+    // fresh mark without running swaps, rebalances, fund sales or rewards.
+    address public valuationSource;
+    uint256 public valuationMark;
+    bytes32 public valuationPositionKey;
+    uint256 public valuationBlock;
+    uint256 public valuationTimestamp;
+    bool public valuationReady;
+
     event Ticked(address indexed caller, uint256 work, uint256 reservePay);
     event Funded(address indexed from, uint256 taken, uint256 refused);
     event ReserveParams(uint16 kappaBp, uint256 reserveCap);
+    event ValuationSourceSet(address indexed source);
+    event ValuationPublished(address indexed source, uint256 mark, bytes32 indexed positionKey,
+                             uint256 blockNumber, uint256 timestamp);
 
     error NotGovernance();
+    error BadValuationSource();
 
     modifier onlyGov() {
         if (msg.sender != governance) revert NotGovernance();
@@ -71,6 +90,39 @@ abstract contract WorkWheel {
         kappaBp = k;
         reserveCap = cap;
         emit ReserveParams(k, cap);
+    }
+
+    /// @notice Select the single valuation source, invalidating the old mark.
+    /// @dev Setting zero disables publication. Consumers must authenticate
+    ///      both the wheel and its current source before using a mark.
+    function setValuationSource(address source) external onlyGov {
+        if (source != address(0) && source.code.length == 0) revert BadValuationSource();
+        valuationSource = source;
+        valuationReady = false;
+        emit ValuationSourceSet(source);
+    }
+
+    /// @notice Publish a valuation without advancing normal wheel work.
+    /// @dev Only the wheel's own mark and metadata are written. The source's
+    ///      view call and all of its descendants are static; no BUCK transfer,
+    ///      redemption, arb, rebalance or work reward can occur in this call.
+    ///      A reverted caller transaction also reverts this publication.
+    function refreshValuation() external returns (uint256 mark, bytes32 positionKey) {
+        address source = valuationSource;
+        if (source == address(0)) revert BadValuationSource();
+        (mark, positionKey) = IWheelValuationSource(source).wheelValuation();
+        valuationMark = mark;
+        valuationPositionKey = positionKey;
+        valuationBlock = block.number;
+        valuationTimestamp = block.timestamp;
+        valuationReady = true;
+        emit ValuationPublished(source, mark, positionKey, block.number, block.timestamp);
+    }
+
+    function publishedValuation() external view returns (address source, uint256 mark, bytes32 positionKey,
+                                                          uint256 atBlock, uint256 atTime, bool ready) {
+        return (valuationSource, valuationMark, valuationPositionKey, valuationBlock, valuationTimestamp,
+                valuationReady);
     }
 
     /// @notice Fund the reserve (the basket's yield slice).  Takes at most up

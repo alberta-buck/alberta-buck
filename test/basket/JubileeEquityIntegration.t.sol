@@ -9,12 +9,13 @@ import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../../src/BuckCredit.sol";
 import {BuckNet} from "../../src/BuckNet.sol";
 import {BuckRenewal, BuckRenewalConsent} from "../../src/BuckRenewalConsent.sol";
-import {JubileeFund, IJubileeBasket} from "../../src/JubileeFund.sol";
+import {JubileeFund, IJubileeBasket, IJubileeValuationWheel} from "../../src/JubileeFund.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
 import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
 import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {EqController, EqHolder, EqToken, IPool} from "./BuckBasketEquity.t.sol";
+import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 
 /// @dev Real BuckNet, fund and equity basket. Its experimental net mode has
 ///      no basket-issued credit, so leveraged low-K cases still need their own
@@ -365,38 +366,46 @@ contract JubileeEquityIntegrationTest is Test {
     }
 
     function test_agedPoolSaleAgainstMarkWithBuckAsToken0() public {
-        _compareAgedPoolSaleWithMark(true, 0);
+        _compareAgedPoolSaleWithMark(true, 0, false);
     }
 
     function test_agedPoolSaleAgainstMarkWithBuckAsToken1() public {
-        _compareAgedPoolSaleWithMark(false, 0);
+        _compareAgedPoolSaleWithMark(false, 0, false);
     }
 
     function test_poolDropBlocksStaleReliefWithBuckAsToken0() public {
-        _compareAgedPoolSaleWithMark(true, 1);
+        _compareAgedPoolSaleWithMark(true, 1, false);
     }
 
     function test_poolDropBlocksStaleReliefWithBuckAsToken1() public {
-        _compareAgedPoolSaleWithMark(false, 1);
+        _compareAgedPoolSaleWithMark(false, 1, false);
     }
 
     function test_poolRiseBlocksStaleReliefWithBuckAsToken0() public {
-        _compareAgedPoolSaleWithMark(true, 2);
+        _compareAgedPoolSaleWithMark(true, 2, false);
     }
 
     function test_poolRiseBlocksStaleReliefWithBuckAsToken1() public {
-        _compareAgedPoolSaleWithMark(false, 2);
+        _compareAgedPoolSaleWithMark(false, 2, false);
     }
 
     function test_smallPoolMoveAllowsReliefWithBuckAsToken0() public {
-        _compareAgedPoolSaleWithMark(true, 3);
+        _compareAgedPoolSaleWithMark(true, 3, false);
     }
 
     function test_smallPoolMoveAllowsReliefWithBuckAsToken1() public {
-        _compareAgedPoolSaleWithMark(false, 3);
+        _compareAgedPoolSaleWithMark(false, 3, false);
     }
 
-    function _compareAgedPoolSaleWithMark(bool buckIs0, uint8 shock) private {
+    function test_valuationWheelRejectsARealPoolDropWithBuckAsToken0() public {
+        _compareAgedPoolSaleWithMark(true, 1, true);
+    }
+
+    function test_valuationWheelRejectsARealPoolRiseWithBuckAsToken1() public {
+        _compareAgedPoolSaleWithMark(false, 2, true);
+    }
+
+    function _compareAgedPoolSaleWithMark(bool buckIs0, uint8 shock, bool useWheel) private {
         _bind(address(this), false, address(this));
         uint256 facility = _credit(ALICE, 2_000_000e6);
         vm.prank(ALICE);
@@ -431,6 +440,18 @@ contract JubileeEquityIntegrationTest is Test {
         vm.warp(t0 + 11 * YEAR);
         (uint256 poolGross, uint256 poolNet) = buck.accountBalancesScaled(pool);
         assertLt(poolNet * 100, poolGross * 85);
+        BasketMachineWheel wheel;
+        if (useWheel) {
+            wheel = new BasketMachineWheel(address(buck), assetAddress, GOV, 0, 0);
+            vm.startPrank(GOV);
+            wheel.setValuationSource(address(fund));
+            wheel.setEquity(address(basket));
+            (bool ok,) = address(basket).call(abi.encodeWithSignature("setWheel(address)", address(wheel)));
+            require(ok);
+            fund.setValuationWheel(IJubileeValuationWheel(address(wheel)));
+            vm.stopPrank();
+            wheel.refreshValuation();
+        }
         if (shock != 0) {
             (uint256 reliefBefore,,) = fund.previewRelief(facility, 10_000e6);
             // The pool has the required TWAP history, but an external TOKEN
@@ -441,6 +462,7 @@ contract JubileeEquityIntegrationTest is Test {
             IPool(pool).swap(address(this), zeroForOne, input,
                 zeroForOne ? MIN_SQRT + 1 : MAX_SQRT - 1, "");
             if (shock == 3) {
+                if (useWheel) wheel.refreshValuation();
                 (uint256 normalRelief,, bool normalOverLimit) = fund.previewRelief(facility, 10_000e6);
                 assertFalse(normalOverLimit);
                 assertGt(normalRelief, 0);
@@ -464,6 +486,7 @@ contract JubileeEquityIntegrationTest is Test {
             (uint256 authorized,,) = buck.reductionAuthorization(facility);
             assertEq(authorized, 10_000e6);
             vm.warp(block.timestamp + 601);
+            if (useWheel) wheel.refreshValuation();
             (uint256 reliefAfter,, bool overLimit) = fund.previewRelief(facility, 10_000e6);
             assertFalse(overLimit);
             if (shock == 1) assertLt(reliefAfter, reliefBefore);
