@@ -4,7 +4,7 @@
 // configured; premium-bearing facilities also need their insurer's own pool.
 import { linkArtifact } from "./artifacts.js";
 import { TransactionReverted } from "./session.js";
-import { parseEventLogs } from "viem";
+import { isAddress, parseEventLogs } from "viem";
 
 const Q = 10n ** 36n;
 const WAD = 10n ** 18n;
@@ -70,7 +70,7 @@ export async function deployNetStack(session, artifacts, { registry, credit, con
 
 /** Actual per-facility amounts; never synthesize a signed debt from a wallet.
  *  execute(owner, contract, method, args) can dispatch through an agent proxy.
- *  Issue requires an explicit BigInt maximum premium. Quotes are advisory.
+ *  Issue requires an explicit BigInt maximum premium and expected pool. Quotes are advisory.
  *  Authorization and reduction are separate transactions;
  *  a failed reduction leaves its prior authorization to retry or cancel. */
 export function netCreditOps(session, stack, execute = null) {
@@ -95,11 +95,12 @@ export function netCreditOps(session, stack, execute = null) {
   };
   const ops = {
     facility, quoteIssue,
-    issue: (owner, id, coverage, spendable, maxPremium) => {
+    issue: (owner, id, coverage, spendable, maxPremium, expectedPool) => {
       if (typeof maxPremium !== "bigint" || maxPremium < 0n || maxPremium > MAX_UINT256) {
         throw new Error("invalid maximum premium");
       }
-      return send(owner, token, "issue", [id, coverage, spendable, maxPremium]);
+      if (typeof expectedPool !== "string" || !isAddress(expectedPool)) throw new Error("invalid expected insurer pool");
+      return send(owner, token, "issue", [id, coverage, spendable, maxPremium, expectedPool]);
     },
     quoteReduction: (id, principal) => session.call(fund, "previewRelief", [id, principal]),
     authorizeReduction: (owner, id, principal, minimumReliefScaled, deadline) =>
@@ -143,7 +144,7 @@ export function netCreditOps(session, stack, execute = null) {
     if (maturitiesPending) reasons.push("maturities-pending");
     if (pending) reasons.push("authorization-pending");
     if (priorPrincipal && age >= priorPrincipal * 50n * YEAR) reasons.push("facility-matured");
-    let premiumPool = null;
+    let premiumPool = ZERO_ADDRESS;
     if (premium) {
       premiumPool = await read(token, "facilityPool", [tokenId]);
       if (premiumPool.toLowerCase() === ZERO_ADDRESS) {

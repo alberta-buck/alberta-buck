@@ -106,12 +106,13 @@ also check =maturitiesPending= and handle transaction refusal. The cash-only
 diagnostic world deploys this quoter, but no five-year household economy or
 interactive sandbox has been migrated to it yet.
 
-The revised =issue= ABI requires an owner-specified maximum premium, analogous
-to renewal. A self-issued MARKED asset can be revalued between quotation and
+The revised =issue= ABI requires an owner-specified maximum premium and
+expected insurer pool, analogous to renewal. A self-issued MARKED asset can be revalued between quotation and
 execution, and an insurer can change an inactive facility's terms; either can
 increase the actual premium and resulting principal while the requested
 spendable amount remains unchanged. Issuance reverts atomically if its premium
-exceeds the owner's ceiling. Clients must choose that ceiling explicitly.
+exceeds the owner's ceiling or its recipient differs from the expected pool.
+Clients must choose both explicitly; a zero premium does not check the pool.
 
 For the next household issuance integration, check each NFT's already
 activated capacity with =quoteIssue(id, 0)= before activating more coverage.
@@ -167,7 +168,11 @@ Quote additional coverage on the selected NFT, budget the full premium and a
 reserve buffer that can survive a block of demurrage, and compare the total
 cost of the reserve purchase with the projected benefit. A successful issue
 increases principal by spendable issuance *plus* premium; the latter goes to
-the insurer pool. The reserve remains the household's spendable BUCK. Quote
+the insurer pool. Pass the pool assessed by the household as the transaction's
+expected pool; if a nonzero premium would go elsewhere, issuance reverts.
+Renewal consent similarly commits the expected replacement pool. Neither check
+promises an unchanged pool balance or refund value. A zero-premium candidate
+reports the zero address for its unused pool argument. The reserve remains the household's spendable BUCK. Quote
 again immediately before submission and preserve the transaction receipt:
 coverage, K, balances and the fund's maturity state can change between calls.
 An interrupted issue or sale must stop and reconcile just like repayment.

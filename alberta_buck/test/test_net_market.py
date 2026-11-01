@@ -13,6 +13,7 @@ from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
 from buck_core import Expect, NetCreditOps, NetMarketOps, ReductionPlan, TransactionReceiptPending, TransactionReverted, deploy_net_stack
 
 RAW = 10**6
+ZERO = "0x" + "00" * 20
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "BuckNetSwapGuard", "JubileeFund",
@@ -57,7 +58,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         actors = {provider.address.lower(): provider, buyer.address.lower(): buyer}
         credit_ops = NetCreditOps(chain, stack, lambda owner, target, method, args:
                                   _exec(chain, actors[owner.lower()], target, method, args))
-        credit_ops.issue(provider.address, tid, 2_000 * RAW, 1_200 * RAW, 0)
+        credit_ops.issue(provider.address, tid, 2_000 * RAW, 1_200 * RAW, 0, ZERO)
 
         chain.send(factory.functions.createPool(buck.address, usdc.address, 500))
         pool_address = factory.functions.getPool(buck.address, usdc.address, 500).call()
@@ -74,7 +75,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         _exec(chain, buyer, credit, "setCreditIssuer", [gov, True])
         chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
         buyer_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 0).call()
-        credit_ops.issue(buyer.address, buyer_id, 200 * RAW, 100 * RAW, 0)
+        credit_ops.issue(buyer.address, buyer_id, 200 * RAW, 100 * RAW, 0, ZERO)
         # Simulate the borrower having spent the issuance before buying it back.
         _exec(chain, buyer, buck, "transfer", [provider.address, 100 * RAW])
         market = NetMarketOps(chain, buck, guard, lambda owner, target, method, args:
@@ -230,7 +231,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         # count or retry the uncertain transaction without reconciling it.
         chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
         second_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 1).call()
-        credit_ops.issue(buyer.address, second_id, 200 * RAW, 100 * RAW, 0)
+        credit_ops.issue(buyer.address, second_id, 200 * RAW, 100 * RAW, 0, ZERO)
         _exec(chain, buyer, buck, "transfer", [provider.address, 100 * RAW])
         receipts = []
 
@@ -287,7 +288,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         # the client loses its response before it can start settlement.
         chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
         third_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 2).call()
-        credit_ops.issue(buyer.address, third_id, 200 * RAW, 100 * RAW, 0)
+        credit_ops.issue(buyer.address, third_id, 200 * RAW, 100 * RAW, 0, ZERO)
         _exec(chain, buyer, buck, "transfer", [provider.address, 100 * RAW])
         buy_receipts = []
 
@@ -534,7 +535,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         for _ in range(2):
             chain.send(credit.functions.createCredit(buyer.address, 0, 2 * RAW, 2 * RAW, 0, 0, 0, 0))
             token_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 3 + len(batch_ids)).call()
-            credit_ops.issue(buyer.address, token_id, 2 * RAW, RAW, 0)
+            credit_ops.issue(buyer.address, token_id, 2 * RAW, RAW, 0, ZERO)
             batch_ids.append(token_id)
 
         def lose_second_authorization(owner, target, method, args):
@@ -575,7 +576,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
             index = credit.functions.balanceOf(buyer.address).call()
             chain.send(credit.functions.createCredit(buyer.address, 0, 2 * RAW, 2 * RAW, 0, 0, 0, 0))
             token_id = credit.functions.tokenOfOwnerByIndex(buyer.address, index).call()
-            credit_ops.issue(buyer.address, token_id, 2 * RAW, RAW, 0)
+            credit_ops.issue(buyer.address, token_id, 2 * RAW, RAW, 0, ZERO)
             return token_id
 
         first, second = new_small_facility(), new_small_facility()

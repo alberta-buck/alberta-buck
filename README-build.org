@@ -86,8 +86,9 @@ Foundry links them for its tests. The Python and JavaScript local smoke fixtures
 link them from creation-bytecode metadata, but are not production deployment scripts. A
 future deployment or economy must deploy and link these libraries on that chain; the legacy
 deployment script does not do so. Experimental =BuckNet.issue= requires an explicit
-maximum premium; clients and saved net-world records from the older three-argument ABI
-must be upgraded or rejected. Local contract-bundle generation now includes the
+maximum premium and expected insurer pool; renewal consent also commits the expected
+new premium pool. Clients and saved net-world records from older ABIs must be upgraded
+or rejected. Local contract-bundle generation now includes the
 experimental net stack and its creation/runtime link metadata alongside legacy contracts;
 the already published package is unchanged until a release. =make nix-contracts-dist-check=
 checks compiler, bytecode links and code-size limits without publishing. The generated

@@ -79,7 +79,7 @@ contract JubileeEquityIntegrationTest is Test {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(owner);
-        buck.issue(id, face, face, type(uint256).max);
+        buck.issue(id, face, face, type(uint256).max, address(0));
     }
     function _authorize(address owner, uint256 id, uint256 amount, uint256 minRelief) internal {
         vm.prank(owner);
@@ -228,7 +228,7 @@ contract JubileeEquityIntegrationTest is Test {
         BuckRenewalConsent consent = buck.renewalConsent();
         BuckRenewal.Terms memory terms = BuckRenewal.Terms({
             face: 200e6, floor: 200e6, activatedFace: 200e6, additionalIssuance: 50e6,
-            maxPremium: 0, minimumRelief: 0, expectedPrincipal: 100e6,
+            maxPremium: 0, expectedPool: address(0), minimumRelief: 0, expectedPrincipal: 100e6,
             expectedCreditHash: consent.currentCreditTermsHash(a),
             depType: BuckCredit.DepreciationType.NONE, depRate: 0, depStartAt: 0,
             premiumRate: 0, deadline: uint64(block.timestamp + YEAR)
@@ -513,7 +513,7 @@ contract JubileeEquityIntegrationTest is Test {
         BuckRenewalConsent consent = buck.renewalConsent();
         BuckRenewal.Terms memory terms = BuckRenewal.Terms({
             face: 2_000_000e6, floor: 2_000_000e6, activatedFace: 2_000_000e6,
-            additionalIssuance: 0, maxPremium: 0, minimumRelief: 0,
+            additionalIssuance: 0, maxPremium: 0, expectedPool: address(0), minimumRelief: 0,
             expectedPrincipal: 2_000_000e6, expectedCreditHash: consent.currentCreditTermsHash(facility),
             depType: BuckCredit.DepreciationType.NONE, depRate: 0, depStartAt: 0,
             premiumRate: 0, deadline: uint64(block.timestamp + YEAR)

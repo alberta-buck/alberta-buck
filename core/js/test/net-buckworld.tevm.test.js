@@ -12,6 +12,7 @@ import { encodeJSON, decodeJSON } from "../src/codec.js";
 let identity;
 try { identity = await import("../src/identity.js"); } catch { /* node kernel not built */ }
 const bundle = new URL("../artifacts/sandbox.mjs", import.meta.url);
+const ZERO = "0x0000000000000000000000000000000000000000";
 const skip = !identity ? "identity kernel not built (make nix-core-build-wasm)"
   : !existsSync(bundle) ? "sandbox artifacts not built (make nix-venv-net-demurrage-smoke)" : false;
 
@@ -38,7 +39,7 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   const id = await insureAsset(world, world.operator.account, holder, { face, premiumRate: 0 });
   const ops = netCreditOps(s, world.net);
   assert.equal((await ops.quoteIssue(id, face)).maxSpendable, 75_000_000n);
-  await ops.issue(holder.account, id, face, 60_000_000n, 0n);
+  await ops.issue(holder.account, id, face, 60_000_000n, 0n, ZERO);
   assert.equal((await ops.facility(id)).issued, 60_000_000n);
   await advanceTime(world, 365 * DAY + 6 * 3600);
   const [relief, , exceeds] = await ops.quoteReduction(id, 1_000_000n);
@@ -49,7 +50,7 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   assert.equal((await ops.facility(id)).issued, 59_000_000n);
 
   const saved = decodeJSON(encodeJSON({ chain: await snapshotTevm(s), world: worldRecord(world) }));
-  assert.equal(saved.world.net.issueAbiVersion, 1);
+  assert.equal(saved.world.net.issueAbiVersion, 2);
   const restoredSession = await tevmSession();
   await restoreTevm(restoredSession, saved.chain);
   assert.throws(() => attachBuckWorld(restoredSession, artifact, saved.world, { identity }), /attachNetBuckWorld/);
@@ -57,11 +58,18 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   delete oldRecord.net.issueAbiVersion;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, oldRecord, { identity }), /issuance ABI version/);
   const wrongVersion = structuredClone(saved.world);
-  wrongVersion.net.issueAbiVersion = 2;
+  wrongVersion.net.issueAbiVersion = 1;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongVersion, { identity }), /issuance ABI version/);
   const oldArtifact = (name) => name === "BuckNet"
     ? { ...artifact(name), abi: artifact(name).abi.filter((entry) => entry.name !== "issue") } : artifact(name);
   await assert.rejects(attachNetBuckWorld(restoredSession, oldArtifact, saved.world, { identity }), /issuance ABI/);
+  const ambiguousArtifact = (name) => {
+    const value = artifact(name);
+    if (name !== "BuckNet") return value;
+    const issue = value.abi.find((entry) => entry.type === "function" && entry.name === "issue");
+    return { ...value, abi: [...value.abi, { ...issue, inputs: issue.inputs.slice(0, 4) }] };
+  };
+  await assert.rejects(attachNetBuckWorld(restoredSession, ambiguousArtifact, saved.world, { identity }), /issuance ABI/);
   const beforeOldBuild = (await s.client.getBlock()).number;
   await assert.rejects(buildBuckWorld(s, oldArtifact, { identity, rng, accounting: "net" }), /issuance ABI/);
   assert.equal((await s.client.getBlock()).number, beforeOldBuild);

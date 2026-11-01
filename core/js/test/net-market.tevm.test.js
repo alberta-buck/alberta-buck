@@ -18,6 +18,7 @@ import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, 
 let identity;
 try { identity = await import("../src/identity.js"); } catch { /* node kernel not built */ }
 const bundle = new URL("../artifacts/sandbox.mjs", import.meta.url);
+const ZERO = "0x0000000000000000000000000000000000000000";
 const skip = !identity ? "identity kernel not built (make nix-core-build-wasm)"
   : !existsSync(bundle) ? "sandbox artifacts not built (make nix-venv-net-demurrage-smoke)" : false;
 const fields = (name) => ({ given_name: name, family_name: "Market", jurisdiction: "Alberta, Canada",
@@ -66,7 +67,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await openTrading(world, market, buyer, { rng });
     const buyerId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
     const creditOps = netCreditOps(s, world.net);
-    await creditOps.issue(buyer.account, buyerId, 200_000_000n, 100_000_000n, 0n);
+    await creditOps.issue(buyer.account, buyerId, 200_000_000n, 100_000_000n, 0n, ZERO);
     const sale = await sellBuck(world, market, buyer, 99_000_000n);
     assert.ok(sale.received > 0n);
     assert.equal((await creditOps.facility(buyerId)).issued, 100_000_000n);
@@ -212,7 +213,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     // Even if the transaction succeeds but its response is lost, this agent
     // must stop with an uncertain outcome instead of buying or paying twice.
     const lostId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
-    await creditOps.issue(buyer.account, lostId, 200_000_000n, 100_000_000n, 0n);
+    await creditOps.issue(buyer.account, lostId, 200_000_000n, 100_000_000n, 0n, ZERO);
     await sellBuck(world, market, buyer, 99_000_000n);
     const receipts = [];
     const lostOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
@@ -263,7 +264,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await assert.rejects(agent2.reconcilePendingRepayment(lostWorld), /known transaction hash/);
 
     const lostBuyId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
-    await creditOps.issue(buyer.account, lostBuyId, 200_000_000n, 100_000_000n, 0n);
+    await creditOps.issue(buyer.account, lostBuyId, 200_000_000n, 100_000_000n, 0n, ZERO);
     await sellBuck(world, market, buyer, 99_000_000n);
     const purchases = [];
     const loseBuy = async (...args) => {
@@ -515,7 +516,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const batchIds = [];
     for (let n = 0; n < 2; n++) {
       const id = await insureAsset(world, world.operator.account, buyer, { face: 2_000_000n, premiumRate: 0 });
-      await creditOps.issue(buyer.account, id, 2_000_000n, 1_000_000n, 0n);
+      await creditOps.issue(buyer.account, id, 2_000_000n, 1_000_000n, 0n, ZERO);
       batchIds.push(id);
     }
     const batchOps = netCreditOps(s, world.net, async (owner, target, name, args) => {
@@ -558,7 +559,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
 
     const newSmallFacility = async () => {
       const id = await insureAsset(world, world.operator.account, buyer, { face: 2_000_000n, premiumRate: 0 });
-      await creditOps.issue(buyer.account, id, 2_000_000n, 1_000_000n, 0n);
+      await creditOps.issue(buyer.account, id, 2_000_000n, 1_000_000n, 0n, ZERO);
       return id;
     };
     let first = await newSmallFacility(), second = await newSmallFacility();

@@ -64,7 +64,7 @@ contract JubileeMarkedReliefTest is Test {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, amount, amount, BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(owner);
-        buck.issue(id, amount, amount, type(uint256).max);
+        buck.issue(id, amount, amount, type(uint256).max, address(0));
     }
 
     function _authorize(uint256 id, uint256 amount, uint256 minimum) private {

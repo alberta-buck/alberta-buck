@@ -10,6 +10,7 @@ import { boundActivatedCapacity, deployNetStack, netCreditOps, ReductionPending 
 import { advanceTime } from "../src/buckworld.js";
 
 const RAW = 1_000_000n;
+const ZERO = "0x0000000000000000000000000000000000000000";
 const YEAR = 365 * 86400 + 6 * 3600;
 const V = JSON.parse(readFileSync(new URL("../../../test/fixtures/bucknet-credit-operations.json", import.meta.url)));
 const required = ["BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
@@ -56,7 +57,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
     encodeFunctionData({ abi: target.abi, functionName, args })]);
   await exec(credit, "setCreditIssuer", [gov, true]);
   await s.send(credit, "createCredit", [actor.address, 0, 100n * RAW, 100n * RAW, 0, 0, 0, 0]);
-  await exec(buck, "issue", [0n, 100n * RAW, 100n * RAW, 0n]);
+  await exec(buck, "issue", [0n, 100n * RAW, 100n * RAW, 0n, ZERO]);
   const issuedAt = (await s.client.getBlock()).timestamp;
   const ops = netCreditOps(s, stack);
   const fresh = await ops.quoteReliefRate(0n, RAW);
@@ -95,7 +96,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.ok((await s.call(buck, "fundBalancesScaled"))[1] < cash);
   await advanceTime({ session: s }, 48 * YEAR);
   await s.send(credit, "createCredit", [actor.address, 0, 100n * RAW, 100n * RAW, 0, 0, 0, 0]);
-  await exec(buck, "issue", [1n, 100n * RAW, 50n * RAW, 0n]);
+  await exec(buck, "issue", [1n, 100n * RAW, 50n * RAW, 0n, ZERO]);
   await exec(buck, "transfer", [fund.address, 40n * RAW]);
   const capped = await ops.quoteReliefRate(0n, RAW);
   assert.equal(capped.capped, true);
@@ -164,7 +165,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   }
   const providerId = await s.call(credit, "tokenOfOwnerByIndex", [provider.address, 0n]);
   const debtorId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 0n]);
-  await ops.issue(provider.address, providerId, face, BigInt(V.provider_issuance), 0n);
+  await ops.issue(provider.address, providerId, face, BigInt(V.provider_issuance), 0n, ZERO);
   const quote = await ops.quoteIssue(debtorId, face);
   assert.deepEqual([quote.premium, quote.reserveRequired, quote.maxSpendable, quote.reserveShortfall],
     [premium, reserve, spendable, reserve]);
@@ -184,8 +185,10 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   await assert.rejects(ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium,
     { blockNumber: -1n }), /candidate/);
   assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable), /maximum premium/);
-  assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable, -1n), /maximum premium/);
-  const refused = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium], "revert");
+  assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable, -1n, pool.address), /maximum premium/);
+  assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable, premium), /insurer pool/);
+  assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable, premium, "invalid"), /insurer pool/);
+  const refused = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium, pool.address], "revert");
   assert.equal(refused.status, "reverted");
   assert.equal((await ops.facility(debtorId)).issued, 0n);
 
@@ -194,14 +197,14 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal((await ops.quoteIssue(debtorId, face)).reserveShortfall, 0n);
   await advanceTime({ session: s }, 1);
   assert.ok((await ops.quoteIssue(debtorId, face)).reserveShortfall > 0n);
-  const decayed = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium], "revert");
+  const decayed = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium, pool.address], "revert");
   assert.equal(decayed.status, "reverted");
   await exec(provider, buck, "transfer", [debtor.address, BigInt(V.reserve_buffer)]);
   assert.equal((await ops.quoteIssue(debtorId, face)).reserveShortfall, 0n);
   const supplyBefore = await s.call(buck, "totalIssued"), balanceBefore = await s.call(buck, "balanceOf", [debtor.address]);
   await exec(insurer, credit, "updateCredit", [debtorId, face, face, 0, 0, 0, V.premium_rate_bp + 1]);
   assert.ok((await ops.quoteIssue(debtorId, face)).premium > premium);
-  const stale = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium], "revert");
+  const stale = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium, pool.address], "revert");
   assert.equal(stale.status, "reverted");
   assert.equal(await s.call(buck, "totalIssued"), supplyBefore);
   const balanceAfter = await s.call(buck, "balanceOf", [debtor.address]);
@@ -210,7 +213,17 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal((await ops.facility(debtorId)).issued, 0n);
   assert.equal(await s.call(buck, "balanceOf", [pool.address]), 0n);
   await exec(insurer, credit, "updateCredit", [debtorId, face, face, 0, 0, 0, V.premium_rate_bp]);
-  await ops.issue(debtor.address, debtorId, face, spendable, premium);
+  const replacement = await deploy("SimLP");
+  await exec(insurer, registry, "bindContract", [replacement.address, g, E, true, true]);
+  await exec(insurer, buck, "setInsurerPool", [replacement.address]);
+  const changedPool = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium, pool.address], "revert");
+  assert.equal(changedPool.status, "reverted");
+  assert.equal(await s.call(buck, "totalIssued"), supplyBefore);
+  assert.equal((await ops.facility(debtorId)).activated, 0n);
+  assert.equal((await ops.facility(debtorId)).issued, 0n);
+  assert.equal(await s.call(buck, "balanceOf", [replacement.address]), 0n);
+  await exec(insurer, buck, "setInsurerPool", [pool.address]);
+  await ops.issue(debtor.address, debtorId, face, spendable, premium, pool.address);
   const state = await ops.facility(debtorId);
   assert.deepEqual([state.face, state.activated, state.issued, state.premiumNominal],
     [face, face, issued, premium]);
@@ -225,7 +238,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const secondQuote = await ops.quoteIssue(secondId, face);
   assert.equal(secondQuote.premium, BigInt(V.second_premium));
   assert.equal(secondQuote.reserveShortfall, 0n);
-  await ops.issue(debtor.address, secondId, face, BigInt(V.second_spendable), secondQuote.premium);
+  await ops.issue(debtor.address, secondId, face, BigInt(V.second_spendable), secondQuote.premium, pool2.address);
   const second = await ops.facility(secondId);
   assert.equal(second.issued, BigInt(V.second_issued));
   assert.equal(second.insurerPool.toLowerCase(), pool2.address.toLowerCase());
@@ -307,7 +320,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(refund.reason, "cash-only");
   assert.equal(refund.pool.toLowerCase(), pool.address.toLowerCase());
   assert.ok(refund.premium === 5n * RAW && refund.refundFractionWad > 0n && refund.refundFractionWad < 10n ** 18n);
-  await ops.issue(debtor.address, thirdId, face, RAW, refund.premium);
+  await ops.issue(debtor.address, thirdId, face, RAW, refund.premium, pool.address);
   const [gross, net] = await s.call(buck, "accountBalancesScaled", [pool.address]);
   const delta = net * 10n ** 18n / gross - refund.refundFractionWad;
   assert.ok((delta < 0n ? -delta : delta) < 10n ** 10n);
@@ -328,7 +341,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(householdCapacity.capacity, independentSum < householdCapacity.sharedLimit ? independentSum : householdCapacity.sharedLimit);
   await assert.rejects(ops.quoteHouseholdActivatedCapacity(debtor.address, [thirdId, thirdId]), /duplicate/);
   await assert.rejects(ops.quoteHouseholdActivatedCapacity(debtor.address, [providerId]), /foreign/);
-  await ops.issue(debtor.address, thirdId, 0n, RAW, 0n);
+  await ops.issue(debtor.address, thirdId, 0n, RAW, 0n, ZERO);
   const thirdAfter = await ops.facility(thirdId);
   assert.equal(thirdAfter.activated, thirdBefore.activated);
   assert.equal(thirdAfter.premiumNominal, thirdBefore.premiumNominal);
@@ -347,7 +360,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
     start, v.premium_rate_bp]);
   const depreciatingId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 4n]);
   await ops.issue(debtor.address, depreciatingId, BigInt(v.initial_coverage), BigInt(v.initial_spendable),
-    BigInt(v.initial_premium_limit));
+    BigInt(v.initial_premium_limit), pool.address);
   await advanceTime({ session: s }, v.comparison_year * YEAR);
   const marked = await s.call(credit, "depreciatedFaceValue", [depreciatingId]);
   const active = await s.call(credit, "currentValue", [depreciatingId]);
@@ -361,6 +374,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const requested = BigInt(v.requested_spendable), expectedShortfall = BigInt(v.shortfall_before);
   const blocked = await ops.assessIssueCandidate(debtor.address, depreciatingId, 0n, requested, 0n,
     { reserveBuffer: BigInt(V.reserve_buffer) });
+  assert.equal(blocked.premiumPool, ZERO);
   assert.ok(blocked.shortfallBefore >= expectedShortfall && blocked.shortfallBefore < expectedShortfall + 10n);
   assert.equal(blocked.reserveShortfall, 0n); // no premium, no buffer gate
   assert.ok(blocked.reasons.includes("insufficient-capacity"));
@@ -374,7 +388,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.ok(repaired.maxSpendable <= BigInt(v.repair_max_spendable) && repaired.maxSpendable > BigInt(v.repair_max_spendable) - 10n);
   assert.deepEqual(repaired.reasons, []);
   const previous = await ops.facility(depreciatingId);
-  await ops.issue(debtor.address, depreciatingId, BigInt(v.remaining_coverage), requested, repaired.premium);
+  await ops.issue(debtor.address, depreciatingId, BigInt(v.remaining_coverage), requested, repaired.premium, pool.address);
   const updated = await ops.facility(depreciatingId);
   assert.equal(updated.activated, previous.activated + BigInt(v.remaining_coverage));
   assert.ok(updated.issued > previous.issued + requested && updated.issued <= previous.issued + requested + repaired.premium);

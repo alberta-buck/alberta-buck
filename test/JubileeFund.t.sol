@@ -276,8 +276,9 @@ contract JubileeFundTest is Test {
     function _credit(address owner, uint256 face, uint32 rate) internal returns (uint256 id) {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, rate);
+        address expectedPool = buck.insurerPool(INSURER);
         vm.prank(owner);
-        buck.issue(id, face, face - face * rate * 10 / 10_000, type(uint256).max);
+        buck.issue(id, face, face - face * rate * 10 / 10_000, type(uint256).max, expectedPool);
     }
     function _authorize(address owner, uint256 id, uint256 amount, uint256 minRelief) internal {
         vm.prank(owner);
@@ -789,7 +790,7 @@ contract JubileeFundTest is Test {
                           abi.encodeWithSignature("Error(string)", "checkpoint failed"));
         vm.expectRevert(abi.encodeWithSignature("Error(string)", "checkpoint failed"));
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6, type(uint256).max);
+        buck.issue(id, 100e6, 100e6, type(uint256).max, address(0));
         assertEq(buck.totalIssued(), 0);
         (, uint256 active,) = credit.creditInfo(id);
         (uint256 principal,) = credit.issuanceOf(id);
@@ -819,7 +820,7 @@ contract JubileeFundTest is Test {
                                               BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.expectRevert(JubileeFund.NotConfigured.selector);
         vm.prank(ALICE);
-        freshBuck.issue(id, 100e6, 100e6, type(uint256).max);
+        freshBuck.issue(id, 100e6, 100e6, type(uint256).max, address(0));
         assertEq(freshBuck.totalIssued(), 0);
         (, uint256 active,) = freshCredit.creditInfo(id);
         assertEq(active, 0);
@@ -1017,6 +1018,7 @@ contract JubileeRenewalTest is JubileeFundTest {
             activatedFace: activated,
             additionalIssuance: additional,
             maxPremium: type(uint256).max,
+            expectedPool: buck.insurerPool(credit.insurerOf(id)),
             minimumRelief: 0,
             expectedPrincipal: principal,
             expectedCreditHash: buck.renewalConsent().currentCreditTermsHash(id),
@@ -1214,6 +1216,37 @@ contract JubileeRenewalTest is JubileeFundTest {
         assertEq(buck.premiumPrincipal(id), 100e6);
     }
 
+    function test_renewalRejectsAnUnapprovedReplacementPoolAtomically() public {
+        JubileeInsurerPoolMock original = _pool();
+        uint256 id = _credit(ALICE, 1000e6, 100);
+        _buffer(1000e6);
+        BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 50, 200e6);
+        assertEq(terms.expectedPool, address(original));
+        bytes32 digest = _approveRenewal(id, terms);
+        JubileeInsurerPoolMock replacement = _pool();
+        terms.expectedPool = address(replacement);
+        vm.expectRevert(BuckRenewalConsent.BadAuthorization.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        terms.expectedPool = address(original);
+        vm.expectRevert(BuckNet.InsurerPoolChanged.selector);
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(principal, 1000e6);
+        assertEq(buck.facilityPool(id), address(original));
+        assertEq(buck.balanceOf(address(original)), 100e6);
+        assertEq(buck.balanceOf(address(replacement)), 0);
+        assertEq(buck.renewalConsent().proposal(id), digest);
+        assertEq(buck.renewalConsent().authorization(id), digest);
+        vm.prank(INSURER);
+        buck.setInsurerPool(address(original));
+        vm.prank(ALICE);
+        fund.renew(id, terms);
+        assertEq(buck.facilityPool(id), address(original));
+        assertEq(buck.balanceOf(address(original)), 100e6);
+    }
+
     function test_renewalMayImproveAnExistingKShortfall() public {
         uint256 id = _credit(ALICE, 1000e6, 0);
         _buffer(1000e6);
@@ -1268,7 +1301,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         fund.renew(id, terms);
         vm.expectRevert(BuckNet.FacilityMatured.selector);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1, type(uint256).max);
+        buck.issue(id, 0, 1, type(uint256).max, address(0));
         vm.prank(ALICE);
         fund.closeMatured(id);
         assertEq(buck.claimBook().deferredPrincipal(), 1000e6);
@@ -1417,11 +1450,11 @@ contract JubileeRenewalTest is JubileeFundTest {
         uint256 id = credit.createCredit(ALICE, 0, 1000e6, 1000e6,
                                          BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, 500e6, type(uint256).max);
+        buck.issue(id, 1000e6, 500e6, type(uint256).max, address(0));
         BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
         _approveRenewal(id, terms);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1, type(uint256).max);
+        buck.issue(id, 0, 1, type(uint256).max, address(0));
         vm.expectRevert(BuckRenewalConsent.BadCreditSnapshot.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);

@@ -20,6 +20,7 @@ from buck_core.session import Expect
 YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
 RAW = 10**6
 Q = 10**36
+ZERO = "0x" + "00" * 20
 ROOT = Path(__file__).resolve().parents[2]
 VECTOR = json.loads((ROOT / "test/fixtures/bucknet-credit-operations.json").read_text())
 REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTransfers", "BuckNetQuoter", "JubileeFund",
@@ -69,7 +70,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         _exec(chain, actor, credit, "setCreditIssuer", [gov, True])
         chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
         assert credit.functions.ownerOf(0).call() == actor.address
-        issued = _exec(chain, actor, buck, "issue", [0, 100 * RAW, 100 * RAW, 0])
+        issued = _exec(chain, actor, buck, "issue", [0, 100 * RAW, 100 * RAW, 0, ZERO])
         issued_at = anvil.w3.eth.get_block(issued["blockNumber"])["timestamp"]
         ops = NetCreditOps(chain, stack)
         fresh = ops.quote_relief_rate(0, RAW)
@@ -121,7 +122,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         # the implied annual rate is then only a lower bound on the fund mark.
         anvil.warp_to(issued_at + 49 * YEAR)
         chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
-        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 50 * RAW, 0])
+        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 50 * RAW, 0, ZERO])
         _exec(chain, actor, buck, "transfer", [fund.address, 40 * RAW])
         capped = ops.quote_relief_rate(0, RAW)
         assert capped.capped and capped.relief_scaled == RAW * Q and capped.annual_rate_wad is not None
@@ -192,7 +193,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
             _exec(chain, insurer, credit, "createCredit", [actor.address, 0, face, face, 0, 0, 0, rate])
         provider_id = credit.functions.tokenOfOwnerByIndex(provider.address, 0).call()
         debtor_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 0).call()
-        ops.issue(provider.address, provider_id, face, VECTOR["provider_issuance"], 0)
+        ops.issue(provider.address, provider_id, face, VECTOR["provider_issuance"], 0, ZERO)
         quote = ops.quote_issue(debtor_id, face)
         assert (quote.premium, quote.reserve_required, quote.max_spendable, quote.reserve_shortfall) == (
             premium, reserve, spendable, reserve)
@@ -215,10 +216,14 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         with pytest.raises(ValueError, match="candidate"):
             ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium, block_number=-1)
         with pytest.raises(ValueError, match="maximum premium"):
-            ops.issue(debtor.address, debtor_id, face, spendable, -1)
+            ops.issue(debtor.address, debtor_id, face, spendable, -1, pool.address)
         with pytest.raises(TypeError):
             ops.issue(debtor.address, debtor_id, face, spendable)
-        data = buck.encode_abi("issue", args=[debtor_id, face, spendable, premium])
+        with pytest.raises(TypeError):
+            ops.issue(debtor.address, debtor_id, face, spendable, premium)
+        with pytest.raises(ValueError, match="insurer pool"):
+            ops.issue(debtor.address, debtor_id, face, spendable, premium, "invalid")
+        data = buck.encode_abi("issue", args=[debtor_id, face, spendable, premium, pool.address])
         refused = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
         assert refused["status"] == 0
         assert ops.facility(debtor_id).issued == 0
@@ -245,7 +250,15 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert ops.facility(debtor_id).activated == ops.facility(debtor_id).issued == 0
         assert buck.functions.balanceOf(pool.address).call() == 0
         _exec(chain, insurer, credit, "updateCredit", [debtor_id, face, face, 0, 0, 0, rate])
-        issue_receipt = ops.issue(debtor.address, debtor_id, face, spendable, premium)
+        replacement = chain.deploy("SimLP")
+        _exec(chain, insurer, registry, "bindContract", [replacement.address, g, e, True, True])
+        _exec(chain, insurer, buck, "setInsurerPool", [replacement.address])
+        changed_pool = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
+        assert changed_pool["status"] == 0 and buck.functions.totalIssued().call() == before_supply
+        assert ops.facility(debtor_id).activated == ops.facility(debtor_id).issued == 0
+        assert buck.functions.balanceOf(replacement.address).call() == 0
+        _exec(chain, insurer, buck, "setInsurerPool", [pool.address])
+        issue_receipt = ops.issue(debtor.address, debtor_id, face, spendable, premium, pool.address)
         issued_at = anvil.w3.eth.get_block(issue_receipt["blockNumber"])["timestamp"]
         state = ops.facility(debtor_id)
         assert (state.face, state.activated, state.issued, state.premium_nominal) == (
@@ -262,7 +275,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         second_quote = ops.quote_issue(second_id, face)
         assert second_quote.premium == VECTOR["second_premium"]
         assert second_quote.reserve_shortfall == 0
-        ops.issue(debtor.address, second_id, face, VECTOR["second_spendable"], second_quote.premium)
+        ops.issue(debtor.address, second_id, face, VECTOR["second_spendable"], second_quote.premium, pool2.address)
         second = ops.facility(second_id)
         assert second.issued == VECTOR["second_issued"]
         assert second.insurer_pool == pool2.address
@@ -359,7 +372,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         refund = ops.quote_premium_refund(third_id, face)
         assert refund.reason == "cash-only" and refund.pool == pool.address
         assert refund.premium == 5 * RAW and 0 < refund.refund_fraction_wad < 10**18
-        ops.issue(debtor.address, third_id, face, RAW, refund.premium)
+        ops.issue(debtor.address, third_id, face, RAW, refund.premium, pool.address)
         gross, net = buck.functions.accountBalancesScaled(pool.address).call()
         assert abs(net * 10**18 // gross - refund.refund_fraction_wad) < 10**10
         # Already-activated facility room is new issuance, not wallet money;
@@ -377,7 +390,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
             ops.quote_household_activated_capacity(debtor.address, [third_id, third_id])
         with pytest.raises(ValueError, match="foreign"):
             ops.quote_household_activated_capacity(debtor.address, [provider_id])
-        ops.issue(debtor.address, third_id, 0, RAW, 0)
+        ops.issue(debtor.address, third_id, 0, RAW, 0, ZERO)
         after = ops.facility(third_id)
         assert after.activated == before.activated and after.premium_nominal == before.premium_nominal
         assert after.issued == before.issued + RAW
@@ -397,7 +410,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
                                                         v["depreciation_bp"], start, v["premium_rate_bp"]])
         depreciating_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 4).call()
         ops.issue(debtor.address, depreciating_id, v["initial_coverage"], v["initial_spendable"],
-                  v["initial_premium_limit"])
+                  v["initial_premium_limit"], pool.address)
         anvil.warp_to(start + v["comparison_year"] * YEAR)
         marked = credit.functions.depreciatedFaceValue(depreciating_id).call()
         active = credit.functions.currentValue(depreciating_id).call()
@@ -412,6 +425,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         requested = v["requested_spendable"]
         blocked = ops.assess_issue_candidate(debtor.address, depreciating_id, 0, requested, 0, reserve_buffer=buffer)
         assert blocked.shortfall_before == v["shortfall_before"]
+        assert blocked.premium_pool == ZERO
         assert blocked.reserve_shortfall == 0  # no premium, so no reserve buffer is required
         assert "insufficient-capacity" in blocked.reasons
         partial = ops.assess_issue_candidate(debtor.address, depreciating_id, v["partial_coverage"], requested, RAW)
@@ -423,7 +437,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert repaired.premium == v["repair_premium"] and repaired.max_spendable == v["repair_max_spendable"]
         assert repaired.reasons == ()
         previous = ops.facility(depreciating_id)
-        ops.issue(debtor.address, depreciating_id, v["remaining_coverage"], requested, repaired.premium)
+        ops.issue(debtor.address, depreciating_id, v["remaining_coverage"], requested, repaired.premium, pool.address)
         updated = ops.facility(depreciating_id)
         assert updated.activated == previous.activated + v["remaining_coverage"]
         assert previous.issued + requested < updated.issued <= previous.issued + requested + repaired.premium

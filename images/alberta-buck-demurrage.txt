@@ -73,6 +73,13 @@ Table of Contents
   not-yet-issued capacity are different quantities from outstanding
   issued BUCK.
 
+  When issuance activates insured coverage, the full-value premium
+  deposit is also newly issued principal, paid into the insurer's
+  pool. The holder sets a maximum premium in the issue transaction; if
+  the current facility terms or mark would require more, the whole
+  transaction reverts. A quote is an estimate, and the holder's separate
+  funding reserve must still satisfy the current gate.
+
   Let `I(t)' be total outstanding BUCK issuance, `r' the nominal annual
   rate, and `P_j(t)' the outstanding issuance attributable to credit
   position `j'.  As issuance changes, the system checkpoints the old
@@ -369,7 +376,12 @@ Table of Contents
   positions before paying; an insurer's deposit and refund must not be
   mixed with another insurer's pool. A renewal can settle an NFT's
   actual relief, update insurance terms, and optionally add issuance
-  atomically without first releasing its old coverage.
+  atomically without first releasing its old coverage. An issue with a
+  nonzero premium must name the pool the owner accepts; renewal terms
+  likewise bind the replacement pool. If the insurer changes its default
+  pool before the transaction, a mismatched operation reverts
+  atomically. Pool balances and future returns can still change, so
+  consent to the pool is not a promised ROI.
 
   Delegated demurrage also needs an explicit net-balance treatment: its
   payer must have enough actual remaining value, and the outcome must

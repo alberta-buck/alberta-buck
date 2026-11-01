@@ -35,7 +35,8 @@ contract BuckNetQuoter {
     /// @dev Uses current K, funding factor and credit mark. `issue` recomputes
     ///      K and checks owner, identity, pool, fund and maturity state at
     ///      execution. A positive estimate does not guarantee success. The
-    ///      caller supplies its own maximum premium to `issue`.
+    ///      caller supplies its own maximum premium and expected insurer pool
+    ///      to `issue`; the pool is checked only when a premium is due.
     function quoteIssue(uint256 tokenId, uint256 coverage)
         external view returns (uint256 presentCoverage, uint256 premium,
                                uint256 reserveRequired, uint256 maxSpendable)

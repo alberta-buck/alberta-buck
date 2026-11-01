@@ -328,7 +328,11 @@ carried fee. This differs from Jubilee relief, which must deliver full net
 value. A pool can invest and redeem its positions before paying; an insurer's
 deposit and refund must not be mixed with another insurer's pool. A renewal
 can settle an NFT's actual relief, update insurance terms, and optionally add
-issuance atomically without first releasing its old coverage.
+issuance atomically without first releasing its old coverage. An issue with a
+nonzero premium must name the pool the owner accepts; renewal terms likewise
+bind the replacement pool. If the insurer changes its default pool before the
+transaction, a mismatched operation reverts atomically. Pool balances and
+future returns can still change, so consent to the pool is not a promised ROI.
 
 Delegated demurrage also needs an explicit net-balance treatment: its payer
 must have enough actual remaining value, and the outcome must remain

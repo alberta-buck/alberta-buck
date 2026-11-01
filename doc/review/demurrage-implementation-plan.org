@@ -270,6 +270,10 @@ entries do not preserve the retired sale-on-claim interfaces.
 - [X] Implement same-insurer atomic renewal in the isolated contracts with
   separate owner/insurer authorization, actual relief, updated valuation and
   premium, optional issuance and no worse K shortfall. Test the real basket.
+- [X] Verify the owner-selected insurer pool at premium-bearing issuance and
+  renewal, including a pool changed after quoting or consent, full rollback,
+  both client ABIs and old-snapshot rejection. Pool identity does not fix its
+  mark or guarantee an insurer refund.
 - [ ] Audit renewal for production, support any separately authorized insurer
   change, and integrate concrete insurer strategies and migration.
 - [X] Specify renewal approvals, staleness, proceeds, rounding and premium

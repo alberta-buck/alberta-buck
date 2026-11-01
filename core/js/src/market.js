@@ -112,7 +112,7 @@ export async function buildMarket(world, artifacts, opts = {}) {
     providerCreditId = created.args.tokenId;
     const [, , , maxSpendable] = await s.call(world.net.quoter, "quoteIssue", [providerCreditId, face]);
     if (maxSpendable < depth) throw new Error("market provider cannot issue enough BUCK to seed liquidity");
-    await exec(buck, buck.abi, "issue", [providerCreditId, face, maxSpendable, 0n], "market:simlp:issue",
+    await exec(buck, buck.abi, "issue", [providerCreditId, face, maxSpendable, 0n, "0x0000000000000000000000000000000000000000"], "market:simlp:issue",
       { gas: 3_000_000n });
   } else {
     await exec(buck, buck.abi, "mint", [MINT_MAX], "market:simlp:activate", { gas: 3_000_000n });

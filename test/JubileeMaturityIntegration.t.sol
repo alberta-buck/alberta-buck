@@ -64,7 +64,7 @@ contract JubileeMaturityIntegrationTest is Test {
         vm.prank(INSURER);
         id = credit.createCredit(ALICE, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(ALICE);
-        buck.issue(id, face, face, type(uint256).max);
+        buck.issue(id, face, face, type(uint256).max, address(0));
     }
 
     function test_simultaneousFiftyYearMaturitiesRequirePermissionlessBatchesBeforeRelease() public {

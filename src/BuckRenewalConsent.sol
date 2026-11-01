@@ -10,6 +10,7 @@ library BuckRenewal {
         uint256 activatedFace;
         uint256 additionalIssuance;
         uint256 maxPremium;
+        address expectedPool;
         uint256 minimumRelief;
         uint256 expectedPrincipal;
         bytes32 expectedCreditHash;

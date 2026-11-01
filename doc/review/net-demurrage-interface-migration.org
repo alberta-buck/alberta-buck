@@ -28,9 +28,10 @@ Python and browser-safe JS can link a built =BuckNet= artifact and locally
 generated browser bundle for small EVM tests. Local package generation retains
 the link references; no new package has been published and no production
 deployment has been established. Experimental =BuckNet.issue= now requires an
-explicit maximum premium; old three-argument issuance clients and unversioned
-net-world snapshots cannot be silently reused. The diagnostic JS restore
-rejects unversioned records and artifacts lacking the new ABI. =BuckCredit= is near the runtime limit, so
+explicit maximum premium and expected insurer pool; renewal consent hashes the
+expected replacement pool. Old issuance clients, renewal terms and net-world
+snapshots cannot be silently reused. The diagnostic JS restore rejects old
+record versions and artifacts lacking the new issuance ABI. =BuckCredit= is near the runtime limit, so
 check exact artifacts after every Solidity change rather than assuming a new
 ABI fits.
 

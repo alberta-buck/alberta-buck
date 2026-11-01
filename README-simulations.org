@@ -115,7 +115,7 @@ persistence remain open.
 Tevm snapshots do not retain transaction receipts, so a saved hash alone is
 not sufficient to resume an unresolved action after restore.
 The experimental net world also records its issuance ABI version; older
-snapshots without the premium ceiling are rejected instead of being reopened
+snapshots without the premium ceiling and expected insurer pool are rejected instead of being reopened
 with an incompatible client.
 The target also builds the sandbox artifact bundle and checks that a browser-safe Tevm session can link
 and deploy the new stack from it. Its single-pool guard enforces net output

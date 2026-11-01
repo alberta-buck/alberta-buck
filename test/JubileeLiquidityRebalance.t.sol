@@ -54,7 +54,7 @@ contract JubileeLiquidityRebalanceTest is Test {
         uint256 id = credit.createCredit(ALICE, 0, 1_000_000e6, 1_000_000e6,
                                          BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(ALICE);
-        buck.issue(id, 1_000_000e6, 1_000_000e6, type(uint256).max);
+        buck.issue(id, 1_000_000e6, 1_000_000e6, type(uint256).max, address(0));
         vm.warp(block.timestamp + YEAR);
         // Year-one target is 2,000 BUCK; leave roughly 801 BUCK liquid.
         vm.prank(GOV);

@@ -70,7 +70,7 @@ contract NotesBuckNetAccountingTest is Test {
         vm.prank(INSURER);
         uint256 id = credit.createCredit(ALICE, 0, 100e6, 100e6, BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6, type(uint256).max);
+        buck.issue(id, 100e6, 100e6, type(uint256).max, address(0));
     }
 
     function _bind(address target, BN254.G1Point memory pk, bool carrying) private {
@@ -145,7 +145,7 @@ contract NotesBuckNetAccountingTest is Test {
         vm.prank(INSURER);
         uint256 id = credit.createCredit(ALICE, 0, 100e6, 100e6, BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6, type(uint256).max);
+        buck.issue(id, 100e6, 100e6, type(uint256).max, address(0));
         _mintNote(1235, 124, 1, 100e6);
         identity.fixturePostRoot(456);
         assertEq(notes.noteFaceSum(), 200e6);

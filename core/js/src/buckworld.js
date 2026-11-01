@@ -29,12 +29,13 @@ import { deployNetStack } from "./net-world.js";
 const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const g2 = (p) => ({ X: [p.x[0], p.x[1]], Y: [p.y[0], p.y[1]] });
-const NET_ISSUE_ABI_VERSION = 1; // first net snapshot format requiring an owner premium ceiling
+const NET_ISSUE_ABI_VERSION = 2; // owner premium ceiling and expected insurer pool
 
 function requireNetIssueAbi(artifact) {
-  const issue = artifact?.abi?.find((entry) => entry.type === "function" && entry.name === "issue"
-    && entry.inputs?.map((input) => input.type).join(",") === "uint256,uint256,uint256,uint256");
-  if (!issue) throw new Error("BuckNet artifact lacks the premium-limited issuance ABI");
+  const issues = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "issue") ?? [];
+  if (issues.length !== 1 || issues[0].inputs?.map((input) => input.type).join(",") !== "uint256,uint256,uint256,uint256,address") {
+    throw new Error("BuckNet artifact lacks the pool-bound premium-limited issuance ABI");
+  }
 }
 
 // Controller deploy defaults -- the SAME values experiment.deploy_params

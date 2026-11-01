@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from buck_core.artifacts import load_artifact
 from buck_core.session import TransactionReceiptPending, TransactionReverted, _txhex
+from web3 import Web3
 from web3.logs import DISCARD
 
 Q = 10**36
@@ -109,7 +110,7 @@ class IssueCandidate:
     owner_spendable: int
     reserve_shortfall: int
     max_spendable: int
-    premium_pool: str | None
+    premium_pool: str
     reasons: tuple[str, ...]
 
 
@@ -419,7 +420,7 @@ class NetCreditOps:
             reasons.append("authorization-pending")
         if principal and age >= principal * 50 * YEAR:
             reasons.append("facility-matured")
-        pool = None
+        pool = ZERO_ADDRESS
         if premium:
             pool = read(token.functions.facilityPool(token_id))
             if pool.lower() == ZERO_ADDRESS:
@@ -481,11 +482,14 @@ class NetCreditOps:
         return ActivatedCapacityQuote(block, tuple(facilities), unactivated_present, shared, potential,
                                       0 if pending else potential, pending)
 
-    def issue(self, owner, token_id: int, coverage: int, spendable: int, max_premium: int):
-        """Issue against one NFT with an explicit full-value premium ceiling."""
+    def issue(self, owner, token_id: int, coverage: int, spendable: int, max_premium: int, expected_pool: str):
+        """Issue with an explicit premium ceiling and expected insurer pool."""
         if type(max_premium) is not int or not 0 <= max_premium <= MAX_UINT256:
             raise ValueError("invalid maximum premium")
-        return self.execute(owner, self.stack.token, "issue", [token_id, coverage, spendable, max_premium])
+        if not isinstance(expected_pool, str) or not Web3.is_address(expected_pool):
+            raise ValueError("invalid expected insurer pool")
+        return self.execute(owner, self.stack.token, "issue",
+                            [token_id, coverage, spendable, max_premium, Web3.to_checksum_address(expected_pool)])
 
     def quote_reduction(self, token_id: int, principal: int):
         """Return (scaled net relief, scaled cash, exceeds the 10% cap)."""

@@ -94,6 +94,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error PoolNotControlled();
     error NoInsurerPool();
     error CreditExceeded();
+    error InsurerPoolChanged();
     error FundingInsufficient();
     error BadPremiumRate();
     error PremiumLimitExceeded();
@@ -202,9 +203,10 @@ contract BuckNet is IERC20, IERC20Metadata {
     /// @param coverage Face units to activate; zero can use existing capacity.
     /// @param spendable BUCK newly made available after the premium deposit.
     /// @param maxPremium Maximum full-value BUCK premium the owner accepts.
+    /// @param expectedPool Insurer pool the owner accepts for a nonzero premium.
     /// @return principal Total BUCK issued, including the premium funding.
     /// @return premium Full-value BUCK sent to the NFT's insurer pool.
-    function issue(uint256 tokenId, uint256 coverage, uint256 spendable, uint256 maxPremium)
+    function issue(uint256 tokenId, uint256 coverage, uint256 spendable, uint256 maxPremium, address expectedPool)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {
         _enableModeHook();
@@ -239,6 +241,7 @@ contract BuckNet is IERC20, IERC20Metadata {
                 if (pool == address(0)) revert NoInsurerPool();
                 facilityPool[tokenId] = pool;
             }
+            if (pool != expectedPool) revert InsurerPoolChanged();
             if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
         }
         buckCredit.recordIssuanceFromBuck(tokenId, msg.sender, principal);
@@ -326,6 +329,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         if (premium != 0) {
             pool = insurerPool[buckCredit.insurerOf(tokenId)];
             if (pool == address(0)) revert NoInsurerPool();
+            if (pool != terms.expectedPool) revert InsurerPoolChanged();
             if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
         }
         if (terms.additionalIssuance != 0) {
