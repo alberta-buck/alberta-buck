@@ -81,6 +81,28 @@ contract BuckNetQuoteTest is Test {
         assertLe(address(quoter).code.length, 24_576);
     }
 
+    function test_rawUnitRoundingMakesCoverageCapacityLocallyNonMonotone() public {
+        // At K=.75 and a 20% deposit, activating four raw units yields
+        // floor(4*.75)-floor(4*.20)=3. Activating five yields only
+        // floor(5*.75)-floor(5*.20)=2. A binary search that assumes every
+        // larger coverage quote is better can miss a valid issuance.
+        k.setK(0.75e18);
+        uint256 id = _credit(5, 200);
+        (uint256 covered4, uint256 premium4,, uint256 spendable4) = quoter.quoteIssue(id, 4);
+        (uint256 covered5, uint256 premium5,, uint256 spendable5) = quoter.quoteIssue(id, 5);
+        assertEq(covered4, 4);
+        assertEq(premium4, 0);
+        assertEq(spendable4, 3);
+        assertEq(covered5, 5);
+        assertEq(premium5, 1);
+        assertEq(spendable5, 2);
+        vm.prank(ALICE);
+        (uint256 principal, uint256 premium) = buck.issue(id, 4, 3, 0, address(0));
+        assertEq(principal, 3);
+        assertEq(premium, 0);
+        assertEq(buck.balanceOf(ALICE), 3);
+    }
+
     function test_issuePremiumCeilingRejectsRepricedInactiveFacilityAtomically() public {
         _pool();
         uint256 id = _credit(1000e6, 50);
