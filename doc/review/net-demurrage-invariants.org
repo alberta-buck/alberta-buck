@@ -172,7 +172,7 @@ reserve, self-pool, rounding and conservation checks; it is not implemented.
 
 | Block | Preconditions | Postconditions / preserved invariants |
 |-------+---------------+---------------------------------------|
-| =BuckNet= constructor | Nonzero credit, K, registry and Jubilee addresses; deployment must link the exact maturity and transfer libraries. | One token owns its ledger, one new =JubileeClaimBook= and one new =BuckRenewalConsent=; the designated fund is immutable. The constructor alone does not establish verified identities or usable wiring. |
+| =BuckNet= constructor | Nonzero credit, K, registry and Jubilee addresses; deployment must link the exact maturity and token-operations libraries. | One token owns its ledger, one new =JubileeClaimBook= and one new =BuckRenewalConsent=; the designated fund is immutable. The constructor alone does not establish verified identities or usable wiring. |
 | Credit and registry wiring | The =BuckCredit= deployer calls one-shot =setBuck=; registry governance wires the same token; relevant identities and Carrying postures are registered. | Only that token can update facility issuance and coverage. Third parties cannot seize the credit's one-shot assignment. |
 | =JubileeFund.configure= | Governance, unconfigured fund, token points to this verified Carrying fund, compatible basket/receipt and token are contracts. | The fund records one token and one basket and approves that basket. The one-time configuration must be verified against all actual deployed addresses and library code. |
 | Fund identity binding | Before configuration, only fund governance may authorize or revoke an exact binding in a contract registry. The certified binder must separately complete the registry's checks. | The authorization pins the chosen binder, key and ciphertext to public Carrying posture. An unauthorized caller cannot set it; a revoked or differently flagged binding cannot be consumed. This is not the separate neutral-service allowlist. |
@@ -183,11 +183,23 @@ trusts its designated fund to calculate the marked policy; the token itself
 checks the owner's authorization, bounds and liquid cap, not the mark's
 fairness. Linked library =delegatecall= code runs in the token's context and
 depends on the token's authorization and reentrancy guard. The linked
-=BuckNetTokenOps= library carries both issuance and identity-checked
-transfers: its issuance receives the host's own storage references and
-immutable dependencies, keeps the original =msg.sender=, and is reached
+=BuckNetTokenOps= library carries issuance, reduction and identity-checked
+transfers: its operations receive the host's own storage references and
+immutable dependencies, keep the original =msg.sender=, and are reached
 under the host's guard. It must not be used as an independent ledger or be
 called with a different host's state and assumptions.
+
+Before delegating an authorized reduction, the token authenticates the owner
+and fund, validates the exact principal, deadline and relief floor, consumes
+the shared liquid budget and checks the claim book. The library then computes
+proportional coverage and nominal insurer refund, consumes the authorization,
+checks the original pool and allowance, transfers the fee-carrying refund,
+retires principal with the specified net fund contribution, and synchronizes
+the NFT and claim book. Its final K check prevents a worsened shortfall; a
+failure reverts the budget, authorization, refund and all other effects. The
+same refund helper serves renewal, under the token's guard. Linked events are
+emitted by the token address. No external insurer preparation or basket trade
+takes place in this transition.
 
 ** Account decay, issuance and transfers
 

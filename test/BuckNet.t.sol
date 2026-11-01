@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BN254} from "../src/BN254.sol";
@@ -563,6 +564,37 @@ contract BuckNetTest is Test {
         pool.approveToken(IERC20(address(buck)));
         fund.settle(buck, ALICE, id, 1000e6, 0);
         assertEq(buck.totalIssued(), 0);
+    }
+
+    function test_sharedReductionEmitsFromTokenAndConsumesAuthorization() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6, 0, address(0));
+        _authorize(ALICE, id, 10e6, 0);
+        vm.recordLogs();
+        fund.settle(buck, ALICE, id, 10e6, 0);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 signature = keccak256("FacilityReduced(address,uint256,uint256,uint256,uint256,uint256)");
+        bool found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(buck) || logs[i].topics[0] != signature) continue;
+            assertFalse(found);
+            assertEq(address(uint160(uint256(logs[i].topics[1]))), ALICE);
+            assertEq(uint256(logs[i].topics[2]), id);
+            (uint256 principal, uint256 relief, uint256 nominal, uint256 refund) =
+                abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+            assertEq(principal, 10e6);
+            assertEq(relief, 0);
+            assertEq(nominal, 0);
+            assertEq(refund, 0);
+            found = true;
+        }
+        assertTrue(found);
+        (uint256 authorized,,) = buck.reductionAuthorization(id);
+        assertEq(authorized, 0);
+        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        fund.settle(buck, ALICE, id, 10e6, 0);
+        assertEq(buck.totalIssued(), 90e6);
     }
 
     function test_reductionRequiresOwnerAuthorizationAndReliefFloor() public {

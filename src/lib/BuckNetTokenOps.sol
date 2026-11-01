@@ -20,7 +20,7 @@ interface IBuckNetIssuanceReserveHook {
     function checkpointIssuance() external;
 }
 
-/// @notice Linked issuance and identity-checked transfers for BuckNet.
+/// @notice Linked credit operations and identity-checked transfers for BuckNet.
 /// @dev Executes with BuckNet's storage and identity. The token must enforce
 ///      its external authorization and reentrancy guard before calling.
 library BuckNetTokenOps {
@@ -47,6 +47,12 @@ library BuckNetTokenOps {
         address expectedPool;
     }
 
+    struct ReductionAuthorization {
+        uint256 principal;
+        uint256 minimumReliefScaled;
+        uint64 deadline;
+    }
+
     struct MintState {
         uint256 k;
         uint256 factor;
@@ -69,6 +75,8 @@ library BuckNetTokenOps {
                          uint256 principal, uint256 premium, address pool);
     event Minted(address indexed account, uint256 amount, uint256 premium, uint256 creditValue,
                  uint256 buckKValue, uint256 newLimit);
+    event FacilityReduced(address indexed owner, uint256 indexed tokenId, uint256 principal,
+                          uint256 reliefScaled, uint256 nominalFundSpentScaled, uint256 premiumRefund);
     error BadAddress();
     error NotVerified();
     error UnauthorizedTransfer();
@@ -83,6 +91,7 @@ library BuckNetTokenOps {
     error NoInsurerPool();
     error InsurerPoolChanged();
     error AllocationWorkLimit();
+    error InsufficientAllowance();
 
     /// @dev Preconditions: the host holds its token-wide reentrancy guard,
     ///      passes its own ledger/maps and immutable dependencies, and the
@@ -281,6 +290,76 @@ library BuckNetTokenOps {
             ids[j] = id;
             rates[j] = rate;
         }
+    }
+
+    /// @dev Preconditions: the token holds its reentrancy guard, has
+    ///      authenticated the owner and fund, validated the exact requested
+    ///      authorization and relief floor, checked the claim book and
+    ///      consumed the shared cash budget. The fund has prepared any
+    ///      insurer liquidity and supplied the current marked relief.
+    ///      Postconditions: the owner's net payment and full-value fund
+    ///      relief retire exactly principal; the original insurer returns its
+    ///      proportional nominal deposit; NFT principal, coverage and claim
+    ///      age are updated together without worsening the K shortfall. The
+    ///      old authorization is consumed, exact and ERC-20 events are
+    ///      emitted by the token, and any failure rolls everything back.
+    function settle(BuckLedger.Ledger storage ledger,
+                    mapping(uint256 => address) storage facilityPool,
+                    mapping(uint256 => uint256) storage premiumPrincipal,
+                    mapping(uint256 => ReductionAuthorization) storage authorizations,
+                    mapping(address => mapping(address => uint256)) storage allowances,
+                    mapping(address => mapping(address => bytes32)) storage fragments,
+                    IssueDependencies memory d, address owner, uint256 tokenId,
+                    uint256 principal, uint256 reliefScaled) public returns (uint256 refund)
+    {
+        (uint256 priorPrincipal,) = d.credit.issuanceOf(tokenId);
+        if (principal > priorPrincipal) revert BadAmount();
+        (, uint256 active,) = d.credit.creditInfo(tokenId);
+        uint256 coverage = principal == priorPrincipal ? active : Math.mulDiv(active, principal, priorPrincipal);
+        refund = principal == priorPrincipal ? premiumPrincipal[tokenId]
+                 : Math.mulDiv(premiumPrincipal[tokenId], principal, priorPrincipal);
+        uint256 beforeCapacity = Math.mulDiv(d.credit.currentValue(tokenId), d.controller.currentBuckK(), K_SCALE);
+        uint256 oldShortfall = priorPrincipal > beforeCapacity ? priorPrincipal - beforeCapacity : 0;
+        delete authorizations[tokenId];
+        if (refund != 0) {
+            refundPremium(ledger, facilityPool, allowances, fragments, d.identity, owner, tokenId, refund);
+            premiumPrincipal[tokenId] -= refund;
+        }
+        uint256 nominalFundSpent = ledger.retireWithFund(owner, principal, reliefScaled, false);
+        d.credit.recordReductionFromBuck(tokenId, owner, principal);
+        if (coverage != 0) d.credit.deactivateFromBuck(tokenId, owner, coverage);
+        d.claims.sync(tokenId);
+        uint256 remaining = priorPrincipal - principal;
+        uint256 afterCapacity = Math.mulDiv(d.credit.currentValue(tokenId), d.controller.currentBuckK(), K_SCALE);
+        uint256 newShortfall = remaining > afterCapacity ? remaining - afterCapacity : 0;
+        if (newShortfall > oldShortfall) revert CreditExceeded();
+        if (remaining == 0) delete facilityPool[tokenId];
+        uint256 fundRaw = Math.ceilDiv(reliefScaled, Q);
+        if (fundRaw != 0) emit Transfer(d.jubilee, address(0), fundRaw);
+        if (principal != fundRaw) emit Transfer(owner, address(0), principal - fundRaw);
+        emit FacilityReduced(owner, tokenId, principal, reliefScaled, nominalFundSpent, refund);
+    }
+
+    /// @dev The host holds its guard and has authorized the economic action.
+    ///      The original insurer pool pays nominal units with its average fee;
+    ///      allowance, service identity and the recipient's receipt rules all
+    ///      apply. No external insurer preparation occurs in this function.
+    function refundPremium(BuckLedger.Ledger storage ledger,
+                           mapping(uint256 => address) storage facilityPool,
+                           mapping(address => mapping(address => uint256)) storage allowances,
+                           mapping(address => mapping(address => bytes32)) storage fragments,
+                           IdentityRegistry identity, address owner, uint256 tokenId, uint256 amount) public
+    {
+        if (amount == 0) return;
+        address pool = facilityPool[tokenId];
+        if (pool == address(0)) revert NoInsurerPool();
+        if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
+        uint256 current = allowances[pool][address(this)];
+        if (current != type(uint256).max) {
+            if (current < amount) revert InsufficientAllowance();
+            allowances[pool][address(this)] = current - amount;
+        }
+        send(ledger, fragments, identity, pool, owner, amount);
     }
 
     /// @dev The host has authenticated any allowance and holds its guard.

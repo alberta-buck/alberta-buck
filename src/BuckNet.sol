@@ -58,12 +58,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     /// @notice Returnable premium deposit, in nominal raw BUCK.
     mapping(uint256 => uint256) public premiumPrincipal;
 
-    struct ReductionAuthorization {
-        uint256 principal;
-        uint256 minimumReliefScaled;
-        uint64 deadline;
-    }
-    mapping(uint256 => ReductionAuthorization) public reductionAuthorization;
+    mapping(uint256 => BuckNetTokenOps.ReductionAuthorization) public reductionAuthorization;
     bool private transient _entered;
 
     event ApproveReceipt(address indexed owner, address indexed spender, bytes32 receiptHash);
@@ -301,7 +296,7 @@ contract BuckNet is IERC20, IERC20Metadata {
             if (principal > issued || minimumReliefScaled > principal * FRACTION_SCALE || deadline < block.timestamp) {
                 revert BadAuthorization();
             }
-            reductionAuthorization[tokenId] = ReductionAuthorization(principal, minimumReliefScaled, deadline);
+            reductionAuthorization[tokenId] = BuckNetTokenOps.ReductionAuthorization(principal, minimumReliefScaled, deadline);
         }
         emit ReductionAuthorized(msg.sender, tokenId, principal, minimumReliefScaled, deadline);
     }
@@ -390,39 +385,14 @@ contract BuckNet is IERC20, IERC20Metadata {
         if (buckCredit.ownerOf(tokenId) != owner) revert NotOwner();
         if (!identity.isVerified(owner) || identity.isCarrying(owner)) revert NotVerified();
         if (!identity.isVerified(jubilee) || !identity.isCarrying(jubilee)) revert NotCarryingPool();
-        ReductionAuthorization memory auth = reductionAuthorization[tokenId];
+        BuckNetTokenOps.ReductionAuthorization memory auth = reductionAuthorization[tokenId];
         if (principal == 0 || principal != auth.principal || block.timestamp > auth.deadline
             || reliefScaled < auth.minimumReliefScaled) revert BadAuthorization();
         _enforceReliefLimit(reliefScaled);
         claimBook.totalSeconds();
-        (uint256 priorPrincipal,) = buckCredit.issuanceOf(tokenId);
-        if (principal > priorPrincipal) revert BadAmount();
-        (, uint256 active,) = buckCredit.creditInfo(tokenId);
-        uint256 coverage = principal == priorPrincipal ? active : Math.mulDiv(active, principal, priorPrincipal);
-        refund = principal == priorPrincipal ? premiumPrincipal[tokenId]
-                 : Math.mulDiv(premiumPrincipal[tokenId], principal, priorPrincipal);
-        uint256 beforeCapacity = Math.mulDiv(buckCredit.currentValue(tokenId), buckK.currentBuckK(), K_SCALE);
-        uint256 oldShortfall = priorPrincipal > beforeCapacity ? priorPrincipal - beforeCapacity : 0;
-        delete reductionAuthorization[tokenId];
-        if (refund != 0) {
-            _refundPremium(owner, tokenId, refund);
-            premiumPrincipal[tokenId] -= refund;
-        }
-        uint256 nominalFundSpent = _book.retireWithFund(owner, principal, reliefScaled, false);
-        buckCredit.recordReductionFromBuck(tokenId, owner, principal);
-        if (coverage != 0) buckCredit.deactivateFromBuck(tokenId, owner, coverage);
-        _syncClaim(tokenId);
-        uint256 newPrincipal = priorPrincipal - principal;
-        uint256 afterCapacity = Math.mulDiv(buckCredit.currentValue(tokenId), buckK.currentBuckK(), K_SCALE);
-        uint256 newShortfall = newPrincipal > afterCapacity ? newPrincipal - afterCapacity : 0;
-        if (newShortfall > oldShortfall) revert CreditExceeded();
-        if (newPrincipal == 0) delete facilityPool[tokenId];
-        // ERC-20 cannot express fractional raw units. Record the exact split in
-        // FacilityReduced; the integral burn events add to total principal.
-        uint256 fundRaw = Math.ceilDiv(reliefScaled, FRACTION_SCALE);
-        if (fundRaw != 0) emit Transfer(jubilee, address(0), fundRaw);
-        if (principal != fundRaw) emit Transfer(owner, address(0), principal - fundRaw);
-        emit FacilityReduced(owner, tokenId, principal, reliefScaled, nominalFundSpent, refund);
+        return BuckNetTokenOps.settle(_book, facilityPool, premiumPrincipal, reductionAuthorization,
+                                      _allowances, _receiptFragments, _issueDependencies(), owner,
+                                      tokenId, principal, reliefScaled);
     }
 
     /// @notice Release a fully aged lien without requiring the former owner
@@ -480,12 +450,8 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     function _refundPremium(address owner, uint256 tokenId, uint256 amount) private {
-        if (amount == 0) return;
-        address pool = facilityPool[tokenId];
-        if (pool == address(0)) revert NoInsurerPool();
-        if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
-        _spendAllowance(pool, address(this), amount);
-        _transfer(pool, owner, amount);
+        BuckNetTokenOps.refundPremium(_book, facilityPool, _allowances, _receiptFragments,
+                                      identity, owner, tokenId, amount);
     }
 
     function _transfer(address from, address to, uint256 amount) private {
