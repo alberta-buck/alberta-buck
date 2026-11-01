@@ -167,6 +167,10 @@ charges and market impact; the ratio is not an annualized or realized return and
 the composition of open positions changes. A missing mark, or zero basis, produces no ROI.
 For the machine, the allocation plot uses response weights including idle TOKEN and the machine's
 leaned target; older basket types retain the explicitly labeled legacy pool-weight view.
+Read-only Python and JavaScript helpers now obtain these marks from actual
+cash-only =BuckNet= basket receipts at one block. Their tests use a test-only
+registry binding; the net household and sandbox do not yet use them, and the
+production-registry basket binding still needs implementation.
 
 The comparison settings are =basket= (always invest spare cash, no discretionary paydown),
 =retire= (retire liabilities regardless of parity) and =discount= (retire below the individual

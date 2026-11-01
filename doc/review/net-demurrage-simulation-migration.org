@@ -282,6 +282,17 @@ is a confirmed revert only when a mined-revert receipt has a transaction
 hash; a missing hash, missing receipt or incomplete event evidence remains
 pending and preserves the target and reserve.
 
+The read-only =mark_net_basket_positions= and =markNetBasketPositions= helpers
+check the net token and receipt ownership and read open receipt basis and the
+basket's TWAP share mark at one block. Basis, mark and ROI are in BUCK, before
+exit costs, and exclude closed positions. Missing or foreign receipts and
+failed marks are errors. Anvil and Tevm fixtures test aging, partial redemption,
+historical reads and a restored Tevm state. Both use test-only registry binding:
+the real-registry JavaScript diagnostic currently leaves the basket unverified,
+so an ordinary holder's deposit reverts. The basket needs authorized verified
+ordinary binding and each private holder's identity approval; merely wiring
+the mark reader into the UI would not make deposits work.
+
 Do not assume that quote capacity is strictly increasing with added coverage.
 The premium rate can approach the current K, and separate integer rounding of
 the K limit and premium can produce small local decreases. A coverage search

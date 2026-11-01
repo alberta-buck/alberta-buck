@@ -5,6 +5,7 @@ export { FIELDS, JournalWriter, parseJournal, mismatches, totalGas,
          summarize } from "./journal.js";
 export { CALL_GAS, DEPLOY_GAS, Session, TransactionReceiptPending, TransactionReverted } from "./session.js";
 export { linkArtifact } from "./artifacts.js";
+export { markNetBasketPositions } from "./basket.js";
 export { boundActivatedCapacity, deployNetStack, issueCoverageCandidates, netCreditOps, netTransferValue, IssuancePending, ReductionPending } from "./net-world.js";
 export { settlementOps, settlementPaymentFromReceipt } from "./settlement.js";
 export { buildBuckWorld, worldRecord, attachBuckWorld, attachNetBuckWorld } from "./buckworld.js";

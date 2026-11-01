@@ -41,6 +41,13 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   assert.equal((await ops.quoteIssue(id, face)).maxSpendable, 75_000_000n);
   await ops.issue(holder.account, id, face, 60_000_000n, 0n, ZERO);
   assert.equal((await ops.facility(id)).issued, 60_000_000n);
+  // The real registry does not silently bind the basket: a deposit is not
+  // usable until a production-authorized basket binding is implemented.
+  assert.equal(await s.call(world.reg, "isVerified", [world.net.basket.address]), false);
+  await s.send(world.buck, "approve", [world.net.basket.address, 1_000_000n], { account: holder.account });
+  await s.send(world.net.basket, "deposit", [world.buck.address, 1_000_000n, 0n],
+    { account: holder.account, expect: "revert" });
+  assert.equal((await ops.facility(id)).issued, 60_000_000n);
   await advanceTime(world, 365 * DAY + 6 * 3600);
   const [relief, , exceeds] = await ops.quoteReduction(id, 1_000_000n);
   assert.ok(relief > 0n && !exceeds);

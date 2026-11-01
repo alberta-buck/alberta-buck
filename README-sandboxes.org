@@ -27,6 +27,10 @@ authenticate a maliciously forged record. Older net market records without
 the router and Permit2 hashes are rejected. Net world records now identify the
 pool-bound, premium-limited issuance ABI; older experimental records are rejected
 on restore rather than being reopened with incompatible contract calls.
+The cash-only basket also lacks a production-registry identity binding in this
+diagnostic: a real BUCK deposit currently reverts. The separate receipt-mark
+tests use the explicitly test-only identity harness and a holder's identity
+approval; they do not demonstrate production basket onboarding.
 
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|
