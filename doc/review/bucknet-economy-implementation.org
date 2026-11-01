@@ -48,6 +48,12 @@ stand in for the existing leveraged basket without resolving the
   decision and single-issue receipt primitive
   with persistent household transaction and trade evidence before enabling
   issuance. Extend the comparison to a saver's basket-investment decision.
+- [X] Authenticate an exact simulated-bank settlement-token payment separately
+  from the BUCK sale, including mined failure and lost-receipt recovery. The
+  actual household still needs a serialized issue/sale/payment lifecycle and
+  durable, exactly-once application of confirmed mortgage payments; the
+  primitives assume a trusted standard settlement token and immediate local
+  EVM finality.
 - [X] Bound the premium in =BuckNet.issue= at execution. A self-issued
   MARKED asset's value can change after a quote, and an insurer can change an
   inactive NFT's terms, increasing premium principal while preserving the
@@ -71,6 +77,12 @@ stand in for the existing leveraged basket without resolving the
   serialization for live clients. Persist the pending transaction evidence
   and buyback reserve through snapshots, and decide how an unfinished buyback
   is invested or held when the market subsequently turns to a premium.
+  The current reserve alone does not record the original remaining principal
+  target; after a partial settlement, recomputing the target from a later
+  price can change the intended repayment or abandon acquired BUCK. Preserve
+  the remaining target and actual completed settlements, then test a price
+  reversal, liquidity refusal and restore before changing the adaptive
+  threshold or resuming other household spending.
 - [ ] Revisit the adaptive policy's heterogeneity: decision phases and many
   parameters are randomized, but its paydown starts at any positive discount
   and does not use the sampled =retire_disc=. If adding a personal deadband,
@@ -128,5 +140,6 @@ stand in for the existing leveraged basket without resolving the
 | 2026-10-31 | Bounded coverage menu | Python and JS generate and assess at most 15 same-block face-coverage options, including a repair-aware estimate; an already activated facility needs no additional activation. Under the fixture's stated forecasts, both real-EVM tests find and issue a smaller worthwhile option while the full-coverage alternative is uneconomic. Focused policy/EVM tests passed 74 Python and 39 JS cases. The finite menu is not exhaustive, repeats reads, and needs market-size, wallet, insurer and reserve inputs before real household integration. | =b63ab9c1= |
 | 2026-10-31 | Candidate-specific insurer forecasts | The same-block cash-only insurer refund observation can be pinned to each quoted option, and the Python/JS refinancing comparison accepts each option's distinct refund fraction and growth forecast. A real depreciated-NFT fixture scores its options against their actual current pool balances, with future returns and trade outcomes still modeled assumptions. Focused policy/EVM tests passed 96 Python and 40 JS cases; final policy-validation tests passed 94 Python and 36 JS cases. External insurer positions, household execution, snapshot/finality and five-year validation remain open. | =bff5bd6a= |
 | 2026-10-31 | Shared coverage-menu reads | Python and JS memoize identical RPC reads only within one menu's block snapshot, while retaining one exact =quoteIssue= call per distinct coverage. A Tevm instrumented fixture verifies there are no duplicate identical RPC reads and a later issue triggers fresh state. Focused policy/EVM tests passed 80 Python and 40 JS cases. Separate refund quotes still read independently; population-scale performance remains unmeasured. | =1d4758dc= |
-| 2026-11-01 | Bounded BUCK sale and receipt evidence | Python and JS use the existing Universal Router/Permit2 single-pool route with a positive output minimum and authenticate BUCK and settlement transfer events. Real Anvil/Tevm cases cover refused bounds, lost or incomplete replies, exact receipt recovery and unchanged NFT principal. The combined net smoke passed 20 Python and 13 JS cases. Net market restore also checks captured router/Permit2 hashes as consistency evidence. The household does not yet schedule or persist issuance/sale/payment; pool-mode preflight is not atomic and saved hashes are not an independent audit. | This commit |
-| 2026-11-01 | Worktree-local JS builds | Node/browser kernels build and the browser sandbox's Chromium interaction test passes against this checkout. Make rejects a kernel resolved from another worktree, and its dependency target refuses to overwrite a shared =node_modules= symlink. The existing browser interface still uses legacy accounting. | This commit |
+| 2026-11-01 | Bounded BUCK sale and receipt evidence | Python and JS use the existing Universal Router/Permit2 single-pool route with a positive output minimum and authenticate BUCK and settlement transfer events. Real Anvil/Tevm cases cover refused bounds, lost or incomplete replies, exact receipt recovery and unchanged NFT principal. The combined net smoke passed 20 Python and 13 JS cases. Net market restore also checks captured router/Permit2 hashes as consistency evidence. The household does not yet schedule or persist issuance/sale/payment; pool-mode preflight is not atomic and saved hashes are not an independent audit. | =db820283= |
+| 2026-11-01 | Worktree-local JS builds | Node/browser kernels build and the browser sandbox's Chromium interaction test passes against this checkout. Make rejects a kernel resolved from another worktree, and its dependency target refuses to overwrite a shared =node_modules= symlink. The existing browser interface still uses legacy accounting. | =db820283= |
+| 2026-11-01 | Simulated-bank payment evidence | Python and JS authenticate exact standard settlement-token transfers independently of the BUCK sale. Real EVM tests cover success, mined refusal, missing hash or logs, exact receipt recovery and mismatched terms. Selected issuance, V3 sale and a separate bank payment are exercised in the market fixtures; only the confirmed payment reduces the fixture's mortgage, and the BUCK facility remains issued. The combined smoke passed 21 Python and 14 JS cases; focused tests cover the selected-issue sequence and proxy dispatch. Both legacy browser and savings sandbox interaction tests pass. The household's own lifecycle, payment deduplication and snapshot recovery remain open. | This commit |

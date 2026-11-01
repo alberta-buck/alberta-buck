@@ -11,6 +11,7 @@ import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { netHouseholdRepaymentOps } from "../src/agents/net-repayment.js";
 import { Q96 } from "../src/v3.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
+import { settlementOps } from "../src/settlement.js";
 import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, fiatIn, buyBuck, buyBuckExact, sellBuck,
   netPurchaseFromReceipt, netSaleFromReceipt }
   from "../src/market.js";
@@ -75,7 +76,9 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     await openTrading(world, market, buyer, { rng });
     const buyerId = await insureAsset(world, world.operator.account, buyer, { face: 200_000_000n, premiumRate: 0 });
     const creditOps = netCreditOps(s, world.net);
-    await creditOps.issue(buyer.account, buyerId, 200_000_000n, 100_000_000n, 0n, ZERO);
+    const candidate = await creditOps.assessIssueCandidate(buyer.account, buyerId, 200_000_000n, 100_000_000n, 0n);
+    assert.deepEqual(candidate.reasons, []);
+    assert.equal((await creditOps.issueCandidate(buyer.account, candidate)).principal, 100_000_000n);
     const buckBefore = await s.call(world.buck, "balanceOf", [buyer.account.address]);
     const saleUsdBefore = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
     await assert.rejects(sellBuck(world, market, buyer, 99_000_000n), /minimum output/);
@@ -93,6 +96,17 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const saleReceipt = await s.client.getTransactionReceipt({ hash: sale.transactionHash });
     assert.deepEqual(netSaleFromReceipt(world, market, buyer, saleReceipt,
       { expectedHash: sale.transactionHash, expectedInput: 99_000_000n, minimumOut: 1n }), sale);
+    // A sale produces USDC; only its separate payment to the simulated bank
+    // changes the modeled external mortgage. It does not retire BuckCredit.
+    let mortgage = 200_000_000n;
+    assert.equal(mortgage, 200_000_000n);
+    const bank = devAccount(9).address;
+    const bankBefore = await s.call(market.usdc, "balanceOf", [bank]);
+    const payment = await settlementOps(s, market.usdc).payExact(buyer.account, bank, sale.received);
+    mortgage -= payment.amount;
+    assert.equal(mortgage, 200_000_000n - sale.received);
+    assert.equal(await s.call(market.usdc, "balanceOf", [bank]), bankBefore + sale.received);
+    assert.equal((await creditOps.facility(buyerId)).issued, 100_000_000n);
     assert.throws(() => netSaleFromReceipt(world, market, buyer, saleReceipt,
       { expectedHash: `0x${"11".repeat(32)}`, expectedInput: 99_000_000n, minimumOut: 1n }), /hash mismatch/);
     assert.throws(() => netSaleFromReceipt(world, market, buyer, saleReceipt,

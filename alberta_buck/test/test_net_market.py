@@ -12,7 +12,7 @@ from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent
 from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
-from buck_core import (Expect, NetCreditOps, NetMarketOps, ReductionPlan, TransactionReceiptPending,
+from buck_core import (Expect, NetCreditOps, NetMarketOps, ReductionPlan, SettlementOps, TransactionReceiptPending,
                        TransactionReverted, deploy_net_stack, load_artifact)
 from buck_core.session import _txhex
 
@@ -79,7 +79,10 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         _exec(chain, buyer, credit, "setCreditIssuer", [gov, True])
         chain.send(credit.functions.createCredit(buyer.address, 0, 200 * RAW, 200 * RAW, 0, 0, 0, 0))
         buyer_id = credit.functions.tokenOfOwnerByIndex(buyer.address, 0).call()
-        credit_ops.issue(buyer.address, buyer_id, 200 * RAW, 100 * RAW, 0, ZERO)
+        candidate = credit_ops.assess_issue_candidate(buyer.address, buyer_id, 200 * RAW, 100 * RAW, 0)
+        assert candidate.reasons == ()
+        issued = credit_ops.issue_candidate(buyer.address, candidate)
+        assert issued.principal == 100 * RAW
         # Exercise the same direct, user-paid Universal Router path as the JS
         # market. The two approvals are explicit and local to this fixture.
         def vendored(name):
@@ -132,6 +135,16 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         sale = sales.sale_from_receipt(buyer.address, pool_address, buyer.address, RAW, 1, sale_receipt,
                                        expected_hash=pending_sale.value.transaction_hash)
         assert sale.nominal_paid == sale.paid == RAW and sale.paid_scaled == RAW * 10**36 and sale.received > 0
+        assert credit.functions.issuanceOf(buyer_id).call()[0] == 100 * RAW
+        # Sale proceeds are not a mortgage payment. Only a separate confirmed
+        # USDC transfer to the simulated bank reduces the modeled liability.
+        bank = anvil.w3.eth.accounts[1]
+        external_mortgage = 10 * RAW
+        assert external_mortgage == 10 * RAW
+        paid = SettlementOps(chain, usdc, sale_send).pay_exact(buyer.address, bank, sale.received)
+        external_mortgage -= paid.amount
+        assert external_mortgage == 10 * RAW - sale.received
+        assert usdc.functions.balanceOf(bank).call() == sale.received
         assert credit.functions.issuanceOf(buyer_id).call()[0] == 100 * RAW
         with pytest.raises(ValueError, match="hash mismatch"):
             sales.sale_from_receipt(buyer.address, pool_address, buyer.address, RAW, 1, sale_receipt,

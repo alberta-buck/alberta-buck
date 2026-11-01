@@ -106,8 +106,11 @@ correctly journaled operations that may succeed or revert. The household keeps
 the hash when available and can explicitly reconcile its matching receipt.
 The Python and JavaScript net-market primitives can also sell BUCK through the
 existing single-pool Universal Router with a positive minimum USDC output and
-receipt reconciliation. They do not themselves repay a mortgage or establish
-a fair price; the household must choose its limit and handle pending evidence.
+receipt reconciliation. A separate exact settlement-token transfer to a
+simulated bank provides payment evidence; only that confirmed payment changes
+the fixture's mortgage. These primitives do not establish a fair price or
+automate the household lifecycle; the household must choose its limit, handle
+pending evidence and apply each payment once.
 Restored JavaScript net markets now require recorded guard, router and Permit2
 code hashes; these detect inconsistent records, not maliciously forged records
 or independently audited contracts.
@@ -133,9 +136,10 @@ Built artifacts and JavaScript dependencies are required.
 
 The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,
 pre-issuance reserve and available credit for a particular NFT. It has contract
-tests and reusable [[file:core/python/buck_core/net_world.py][Python]] / [[file:core/js/src/net-world.js][JavaScript]] deployment and per-facility helpers, but
-neither household implementation calls it yet. It is a current
-estimate rather than a guarantee that an issue transaction will succeed; the
+tests and reusable [[file:core/python/buck_core/net_world.py][Python]] / [[file:core/js/src/net-world.js][JavaScript]] deployment and per-facility helpers. The
+isolated net household state reads activated capacity through it; normal net
+household setup and issuance remain disabled. It is a current estimate rather
+than a guarantee that an issue transaction will succeed; the
 [[file:doc/review/net-demurrage-simulation-migration.org][migration checklist]] lists its remaining integration and execution checks.
 
 * The household default

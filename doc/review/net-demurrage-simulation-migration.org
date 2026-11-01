@@ -251,6 +251,19 @@ the separately confirmed external payment. The Python route encoder now lives
 in =buck_core.router= and is re-exported by the existing simulator module; the
 legacy prefunded defaults are unchanged.
 
+=SettlementOps.pay_exact= and JavaScript =settlementOps(...).payExact= make a
+separate exact settlement-token payment to a simulated bank and authenticate
+the token, payer, recipient, amount and transaction hash from its receipt.
+Their receipt decoders reject missing or ambiguous transfer evidence. Anvil and
+Tevm tests send actual sale proceeds to the simulated bank, then reduce the
+fixture's external mortgage by the confirmed payment while leaving BuckCredit
+principal outstanding. Unknown payment outcomes remain pending; known mined
+reverts remain distinguishable. These helpers assume a trusted, standard
+non-rebasing, non-fee-on-transfer token. The household still needs to retain
+and reconcile pending payment terms, apply each receipt exactly once to its
+own mortgage ledger, and serialize the complete issue/sale/payment sequence.
+An ERC-20 transfer alone does not establish that a real lender credited a loan.
+
 Do not assume that quote capacity is strictly increasing with added coverage.
 The premium rate can approach the current K, and separate integer rounding of
 the K limit and premium can produce small local decreases. A coverage search
