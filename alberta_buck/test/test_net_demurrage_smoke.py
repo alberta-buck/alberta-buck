@@ -75,7 +75,6 @@ def test_linked_net_issuance_and_reduction_match_reference():
         fresh = ops.quote_relief_rate(0, RAW)
         assert fresh.selected_seconds == 0 and fresh.annual_rate_wad is None
         assert ops.quote_premium_refund(0, 0).reason == "no-premium"
-
         model = DemurrageLedger()
         model.issue_unspent("facility", 100, "owner", credit_limit=100)
         assert buck.functions.balanceOf(actor.address).call() == 100 * RAW
@@ -83,6 +82,11 @@ def test_linked_net_issuance_and_reduction_match_reference():
         runtime = anvil.w3.eth.get_code(buck.address).hex().lower()
         assert stack.maturity_library.address[2:].lower() in runtime
         assert stack.transfers_library.address[2:].lower() in runtime
+        chain.send(controller.functions.setBuckK(5 * 10**17))
+        shocked = ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0)
+        assert shocked.current_k == 5 * 10**17 and shocked.shortfall_before == 50 * RAW
+        assert "insufficient-capacity" in shocked.reasons
+        chain.send(controller.functions.setBuckK(10**18))
 
         anvil.warp_to(issued_at + YEAR)
         model.advance(1)
@@ -102,6 +106,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
 
         deadline = issued_at + YEAR + 3600
         _exec(chain, actor, buck, "authorizeReduction", [0, RAW, 0, deadline])
+        pending = ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0)
+        assert "authorization-pending" in pending.reasons
         retired = _exec(chain, actor, fund, "reduce", [0, RAW])
         retired_at = anvil.w3.eth.get_block(retired["blockNumber"])["timestamp"]
         model.advance((retired_at - issued_at - YEAR) / YEAR)
@@ -123,6 +129,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert buck.functions.maturitiesPending().call()
         capacity = ops.quote_household_activated_capacity(actor.address, [0, 1])
         assert capacity.maturities_pending and capacity.potential_capacity > 0 and capacity.capacity == 0
+        pending = ops.assess_issue_candidate(actor.address, 1, 0, RAW, 0)
+        assert "maturities-pending" in pending.reasons
         with pytest.raises(Exception):
             ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
         chain.send(buck.functions.processMaturities(10))
@@ -130,6 +138,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert credit.functions.depreciatedFaceValue(0).call() > credit.functions.currentValue(0).call()
         matured = ops.quote_household_activated_capacity(actor.address, [0])
         assert matured.capacity == matured.unactivated_present == 0  # a matured NFT cannot issue again
+        assert "facility-matured" in ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0).reasons
         assert not chain.mismatches
 
 
@@ -187,6 +196,24 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         quote = ops.quote_issue(debtor_id, face)
         assert (quote.premium, quote.reserve_required, quote.max_spendable, quote.reserve_shortfall) == (
             premium, reserve, spendable, reserve)
+        candidate = ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium,
+                                               reserve_buffer=buffer)
+        assert candidate.block_number == chain.w3.eth.block_number
+        assert candidate.premium_pool.lower() == pool.address.lower()
+        assert (candidate.premium, candidate.reserve_required, candidate.max_spendable) == (premium, reserve, spendable)
+        assert candidate.reserve_shortfall == reserve + buffer and candidate.reasons == ("reserve-shortfall",)
+        assert ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium, reserve_buffer=buffer,
+                                          block_number=candidate.block_number) == candidate
+        assert "premium-limit" in ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable,
+                                                             premium - 1).reasons
+        with pytest.raises(ValueError, match="foreign"):
+            ops.assess_issue_candidate(debtor.address, provider_id, face, spendable, 0)
+        with pytest.raises(ValueError, match="unactivated"):
+            ops.assess_issue_candidate(debtor.address, debtor_id, face + 1, spendable, premium)
+        with pytest.raises(ValueError, match="candidate"):
+            ops.assess_issue_candidate(debtor.address, debtor_id, face, 0, premium)
+        with pytest.raises(ValueError, match="candidate"):
+            ops.assess_issue_candidate(debtor.address, debtor_id, face, spendable, premium, block_number=-1)
         with pytest.raises(ValueError, match="maximum premium"):
             ops.issue(debtor.address, debtor_id, face, spendable, -1)
         with pytest.raises(TypeError):
@@ -359,17 +386,45 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         fourth_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 3).call()
         missing = ops.quote_premium_refund(fourth_id, face)
         assert missing.reason == "no-insurer-pool" and missing.refund_fraction_wad is None
+        assert "insurer-pool-unavailable" in ops.assess_issue_candidate(debtor.address, fourth_id, face, RAW,
+                                                                        face).reasons
         # Unactivated coverage is measured at the current marked asset value,
         # not at the original face amount; activated and unactivated portions
         # share the same depreciation schedule.
+        v = VECTOR["depreciating_candidate"]
         start = anvil.w3.eth.get_block("latest")["timestamp"]
-        _exec(chain, insurer, credit, "createCredit", [debtor.address, 0, 100 * RAW, 0, 1, 1000, start, 0])
+        _exec(chain, insurer, credit, "createCredit", [debtor.address, 0, v["face"], 0, 1,
+                                                        v["depreciation_bp"], start, v["premium_rate_bp"]])
         depreciating_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 4).call()
-        ops.issue(debtor.address, depreciating_id, 40 * RAW, 10 * RAW, 0)
-        anvil.warp_to(start + 2 * YEAR)
+        ops.issue(debtor.address, depreciating_id, v["initial_coverage"], v["initial_spendable"],
+                  v["initial_premium_limit"])
+        anvil.warp_to(start + v["comparison_year"] * YEAR)
         marked = credit.functions.depreciatedFaceValue(depreciating_id).call()
         active = credit.functions.currentValue(depreciating_id).call()
         valued = ops.quote_household_activated_capacity(debtor.address, [depreciating_id])
         assert marked == 80 * RAW and active == 32 * RAW
         assert valued.unactivated_present == marked - active == 48 * RAW
+
+        # At year seven the old principal exceeds the current marked K limit.
+        # Some new coverage and its premium must repair this NFT before it can
+        # issue. The remaining coverage still makes a positive issue possible.
+        anvil.warp_to(start + v["repair_year"] * YEAR)
+        requested = v["requested_spendable"]
+        blocked = ops.assess_issue_candidate(debtor.address, depreciating_id, 0, requested, 0, reserve_buffer=buffer)
+        assert blocked.shortfall_before == v["shortfall_before"]
+        assert blocked.reserve_shortfall == 0  # no premium, so no reserve buffer is required
+        assert "insufficient-capacity" in blocked.reasons
+        partial = ops.assess_issue_candidate(debtor.address, depreciating_id, v["partial_coverage"], requested, RAW)
+        assert partial.shortfall_after_premium > 0 and "insufficient-capacity" in partial.reasons
+        repaired = ops.assess_issue_candidate(debtor.address, depreciating_id, v["remaining_coverage"], requested, 2 * RAW,
+                                              reserve_buffer=buffer)
+        assert repaired.block_number == chain.w3.eth.block_number
+        assert repaired.shortfall_before == v["shortfall_before"] and repaired.shortfall_after_premium == 0
+        assert repaired.premium == v["repair_premium"] and repaired.max_spendable == v["repair_max_spendable"]
+        assert repaired.reasons == ()
+        previous = ops.facility(depreciating_id)
+        ops.issue(debtor.address, depreciating_id, v["remaining_coverage"], requested, repaired.premium)
+        updated = ops.facility(depreciating_id)
+        assert updated.activated == previous.activated + v["remaining_coverage"]
+        assert previous.issued + requested < updated.issued <= previous.issued + requested + repaired.premium
         assert not chain.mismatches

@@ -106,6 +106,65 @@ export function netCreditOps(session, stack, execute = null) {
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),
     reduceAuthorized: (owner, id, principal) => send(owner, fund, "reduce", [id, principal]),
   };
+  // Assess one caller-selected face-coverage amount at one block. This is
+  // neither a coverage search nor an execution/market guarantee. A household
+  // pauses for a pending reduction even though issue itself does not require
+  // that workflow guard. The extra reserve applies only to a nonzero premium.
+  ops.assessIssueCandidate = async (owner, tokenId, coverage, requestedSpendable, maxPremium,
+    { reserveBuffer = 0n, blockNumber: requestedBlock = null } = {}) => {
+    if (!validId(tokenId) || BigInt(tokenId) > MAX_UINT256 || [coverage, requestedSpendable, maxPremium, reserveBuffer]
+      .some((v) => typeof v !== "bigint" || v < 0n || v > MAX_UINT256) || requestedSpendable === 0n
+      || (requestedBlock !== null && (typeof requestedBlock !== "bigint" || requestedBlock < 0n))) {
+      throw new Error("invalid issuance candidate");
+    }
+    tokenId = BigInt(tokenId);
+    const address = owner.address ?? owner;
+    const blockNumber = requestedBlock ?? (await session.client.getBlock()).number;
+    const read = (c, functionName, args = []) => session.client.readContract({ address: c.address, abi: c.abi,
+      functionName, args, blockNumber });
+    const [verified, carrying, actualOwner, [face, activated]] = await Promise.all([
+      read(stack.registry, "isVerified", [address]), read(stack.registry, "isCarrying", [address]),
+      read(credit, "ownerOf", [tokenId]), read(credit, "creditInfo", [tokenId]),
+    ]);
+    if (!verified || carrying) throw new Error("household owner must be verified and non-Carrying");
+    if (actualOwner.toLowerCase() !== address.toLowerCase()) throw new Error("foreign household facility");
+    if (coverage > face - activated) throw new Error("issuance candidate exceeds unactivated coverage");
+    const [[before], [after, premium, reserveRequired, maxSpendable], [priorPrincipal, age], currentK,
+      ownerSpendable, [pending], configuredToken, fundVerified, fundCarrying, maturitiesPending] = await Promise.all([
+      read(quoter, "quoteIssue", [tokenId, 0n]), read(quoter, "quoteIssue", [tokenId, coverage]),
+      read(credit, "issuanceOf", [tokenId]), read(stack.controller, "currentBuckK"),
+      read(token, "balanceOf", [address]), read(token, "reductionAuthorization", [tokenId]),
+      read(fund, "token"), read(stack.registry, "isVerified", [fund.address]),
+      read(stack.registry, "isCarrying", [fund.address]), read(token, "maturitiesPending"),
+    ]);
+    if (after < before) throw new Error("issuance candidate reduced current coverage");
+    const reasons = [];
+    if (configuredToken.toLowerCase() !== token.address.toLowerCase() || !fundVerified || !fundCarrying) reasons.push("fund-unavailable");
+    if (maturitiesPending) reasons.push("maturities-pending");
+    if (pending) reasons.push("authorization-pending");
+    if (priorPrincipal && age >= priorPrincipal * 50n * YEAR) reasons.push("facility-matured");
+    let premiumPool = null;
+    if (premium) {
+      premiumPool = await read(token, "facilityPool", [tokenId]);
+      if (premiumPool.toLowerCase() === ZERO_ADDRESS) {
+        const insurer = await read(credit, "insurerOf", [tokenId]);
+        premiumPool = await read(token, "insurerPool", [insurer]);
+      }
+      if (premiumPool.toLowerCase() === ZERO_ADDRESS || !(await read(stack.registry, "isVerified", [premiumPool]))
+          || !(await read(stack.registry, "isCarrying", [premiumPool]))) reasons.push("insurer-pool-unavailable");
+    }
+    if (premium > maxPremium) reasons.push("premium-limit");
+    const bufferedReserve = reserveRequired + (premium ? reserveBuffer : 0n);
+    const reserveShortfall = bufferedReserve > ownerSpendable ? bufferedReserve - ownerSpendable : 0n;
+    if (reserveShortfall) reasons.push("reserve-shortfall");
+    if (requestedSpendable > maxSpendable) reasons.push("insufficient-capacity");
+    const beforeLimit = before * currentK / WAD, afterLimit = after * currentK / WAD;
+    return { blockNumber, tokenId, coverage, requestedSpendable, maxPremium, priorPrincipal,
+      beforeCoverage: before, afterCoverage: after, currentK,
+      shortfallBefore: priorPrincipal > beforeLimit ? priorPrincipal - beforeLimit : 0n,
+      shortfallAfterPremium: priorPrincipal + premium > afterLimit ? priorPrincipal + premium - afterLimit : 0n,
+      premium, reserveRequired, reserveBuffer, ownerSpendable, reserveShortfall, maxSpendable, premiumPool, reasons };
+  };
   // Quote each NFT and its present unactivated mark at the same block. The
   // shared account/supply limit is applied once, not once per facility, and
   // a fully aged facility cannot support another issue. K and other contract

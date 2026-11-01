@@ -57,6 +57,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   await exec(credit, "setCreditIssuer", [gov, true]);
   await s.send(credit, "createCredit", [actor.address, 0, 100n * RAW, 100n * RAW, 0, 0, 0, 0]);
   await exec(buck, "issue", [0n, 100n * RAW, 100n * RAW, 0n]);
+  const issuedAt = (await s.client.getBlock()).timestamp;
   const ops = netCreditOps(s, stack);
   const fresh = await ops.quoteReliefRate(0n, RAW);
   assert.equal(fresh.selectedSeconds, 0n);
@@ -64,7 +65,13 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.equal((await ops.quotePremiumRefund(0n, 0n)).reason, "no-premium");
   assert.equal(await s.call(buck, "balanceOf", [actor.address]), 100n * RAW);
   assert.equal(await s.call(buck, "totalIssued"), 100n * RAW);
-  await advanceTime({ session: s }, YEAR);
+  await s.send(controller, "setBuckK", [5n * 10n ** 17n]);
+  const shocked = await ops.assessIssueCandidate(actor.address, 0n, 0n, RAW, 0n);
+  assert.equal(shocked.currentK, 5n * 10n ** 17n);
+  assert.equal(shocked.shortfallBefore, 50n * RAW);
+  assert.ok(shocked.reasons.includes("insufficient-capacity"));
+  await s.send(controller, "setBuckK", [10n ** 18n]);
+  await advanceTime({ session: s }, YEAR - Number((await s.client.getBlock()).timestamp - issuedAt));
   const [, cash] = await s.call(buck, "fundBalancesScaled");
   assert.equal(await s.call(buck, "balanceOf", [actor.address]), 98_019_867n);
   const [relief, quotedCash, exceeds] = await s.call(fund, "previewRelief", [0n, RAW]);
@@ -80,6 +87,8 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.equal(tooLarge.capped, false);
   const deadline = (await s.client.getBlock()).timestamp + 3600n;
   await exec(buck, "authorizeReduction", [0n, RAW, 0n, deadline]);
+  const pending = await ops.assessIssueCandidate(actor.address, 0n, 0n, RAW, 0n);
+  assert.ok(pending.reasons.includes("authorization-pending"));
   await exec(fund, "reduce", [0n, RAW]);
   assert.equal(await s.call(buck, "totalIssued"), 99n * RAW);
   assert.equal((await s.call(credit, "issuanceOf", [0n]))[0], 99n * RAW);
@@ -98,6 +107,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.equal(capacity.maturitiesPending, true);
   assert.ok(capacity.potentialCapacity > 0n);
   assert.equal(capacity.capacity, 0n);
+  assert.ok((await ops.assessIssueCandidate(actor.address, 1n, 0n, RAW, 0n)).reasons.includes("maturities-pending"));
   await assert.rejects(ops.quoteReliefRate(0n, RAW)); // stale denominator must not become a forecast
   await s.send(buck, "processMaturities", [10n]);
   assert.equal(await s.call(buck, "maturitiesPending"), false);
@@ -105,6 +115,7 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   const matured = await ops.quoteHouseholdActivatedCapacity(actor.address, [0n]);
   assert.equal(matured.capacity, 0n);
   assert.equal(matured.unactivatedPresent, 0n); // a matured NFT cannot issue again
+  assert.ok((await ops.assessIssueCandidate(actor.address, 0n, 0n, RAW, 0n)).reasons.includes("facility-matured"));
   assert.deepEqual(s.mismatches, []);
 });
 
@@ -157,6 +168,21 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const quote = await ops.quoteIssue(debtorId, face);
   assert.deepEqual([quote.premium, quote.reserveRequired, quote.maxSpendable, quote.reserveShortfall],
     [premium, reserve, spendable, reserve]);
+  const candidate = await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium,
+    { reserveBuffer: BigInt(V.reserve_buffer) });
+  assert.equal(candidate.blockNumber, (await s.client.getBlock()).number);
+  assert.equal(candidate.premiumPool.toLowerCase(), pool.address.toLowerCase());
+  assert.deepEqual([candidate.premium, candidate.reserveRequired, candidate.maxSpendable], [premium, reserve, spendable]);
+  assert.equal(candidate.reserveShortfall, reserve + BigInt(V.reserve_buffer));
+  assert.deepEqual(candidate.reasons, ["reserve-shortfall"]);
+  assert.deepEqual(await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium,
+    { reserveBuffer: BigInt(V.reserve_buffer), blockNumber: candidate.blockNumber }), candidate);
+  assert.ok((await ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium - 1n)).reasons.includes("premium-limit"));
+  await assert.rejects(ops.assessIssueCandidate(debtor.address, providerId, face, spendable, 0n), /foreign/);
+  await assert.rejects(ops.assessIssueCandidate(debtor.address, debtorId, face + 1n, spendable, premium), /unactivated/);
+  await assert.rejects(ops.assessIssueCandidate(debtor.address, debtorId, face, 0n, premium), /candidate/);
+  await assert.rejects(ops.assessIssueCandidate(debtor.address, debtorId, face, spendable, premium,
+    { blockNumber: -1n }), /candidate/);
   assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable), /maximum premium/);
   assert.throws(() => ops.issue(debtor.address, debtorId, face, spendable, -1n), /maximum premium/);
   const refused = await exec(debtor, buck, "issue", [debtorId, face, spendable, premium], "revert");
@@ -313,16 +339,44 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const missing = await ops.quotePremiumRefund(fourthId, face);
   assert.equal(missing.reason, "no-insurer-pool");
   assert.equal(missing.refundFractionWad, null);
+  assert.ok((await ops.assessIssueCandidate(debtor.address, fourthId, face, RAW, face)).reasons.includes("insurer-pool-unavailable"));
   // The unactivated share follows the asset's actual present mark.
+  const v = V.depreciating_candidate;
   const start = (await s.client.getBlock()).timestamp;
-  await exec(insurer, credit, "createCredit", [debtor.address, 0, 100n * RAW, 0n, 1, 1000, start, 0]);
+  await exec(insurer, credit, "createCredit", [debtor.address, 0, BigInt(v.face), 0n, 1, v.depreciation_bp,
+    start, v.premium_rate_bp]);
   const depreciatingId = await s.call(credit, "tokenOfOwnerByIndex", [debtor.address, 4n]);
-  await ops.issue(debtor.address, depreciatingId, 40n * RAW, 10n * RAW, 0n);
-  await advanceTime({ session: s }, 2 * YEAR);
+  await ops.issue(debtor.address, depreciatingId, BigInt(v.initial_coverage), BigInt(v.initial_spendable),
+    BigInt(v.initial_premium_limit));
+  await advanceTime({ session: s }, v.comparison_year * YEAR);
   const marked = await s.call(credit, "depreciatedFaceValue", [depreciatingId]);
   const active = await s.call(credit, "currentValue", [depreciatingId]);
   const valued = await ops.quoteHouseholdActivatedCapacity(debtor.address, [depreciatingId]);
   assert.equal(valued.unactivatedPresent, marked - active);
   assert.ok(valued.unactivatedPresent <= 48n * RAW && valued.unactivatedPresent > 48n * RAW - 10n);
+
+  // The facility becomes over-issued as its asset depreciates. Activating a
+  // small amount cannot repair it, but its remaining coverage can.
+  await advanceTime({ session: s }, (v.repair_year - v.comparison_year) * YEAR);
+  const requested = BigInt(v.requested_spendable), expectedShortfall = BigInt(v.shortfall_before);
+  const blocked = await ops.assessIssueCandidate(debtor.address, depreciatingId, 0n, requested, 0n,
+    { reserveBuffer: BigInt(V.reserve_buffer) });
+  assert.ok(blocked.shortfallBefore >= expectedShortfall && blocked.shortfallBefore < expectedShortfall + 10n);
+  assert.equal(blocked.reserveShortfall, 0n); // no premium, no buffer gate
+  assert.ok(blocked.reasons.includes("insufficient-capacity"));
+  const partial = await ops.assessIssueCandidate(debtor.address, depreciatingId, BigInt(v.partial_coverage), requested, RAW);
+  assert.ok(partial.shortfallAfterPremium > 0n && partial.reasons.includes("insufficient-capacity"));
+  const repaired = await ops.assessIssueCandidate(debtor.address, depreciatingId, BigInt(v.remaining_coverage), requested, 2n * RAW,
+    { reserveBuffer: BigInt(V.reserve_buffer) });
+  assert.equal(repaired.blockNumber, (await s.client.getBlock()).number);
+  assert.equal(repaired.shortfallAfterPremium, 0n);
+  assert.ok(repaired.premium <= BigInt(v.repair_premium) && repaired.premium > BigInt(v.repair_premium) - 10n);
+  assert.ok(repaired.maxSpendable <= BigInt(v.repair_max_spendable) && repaired.maxSpendable > BigInt(v.repair_max_spendable) - 10n);
+  assert.deepEqual(repaired.reasons, []);
+  const previous = await ops.facility(depreciatingId);
+  await ops.issue(debtor.address, depreciatingId, BigInt(v.remaining_coverage), requested, repaired.premium);
+  const updated = await ops.facility(depreciatingId);
+  assert.equal(updated.activated, previous.activated + BigInt(v.remaining_coverage));
+  assert.ok(updated.issued > previous.issued + requested && updated.issued <= previous.issued + requested + repaired.premium);
   assert.deepEqual(s.mismatches, []);
 });

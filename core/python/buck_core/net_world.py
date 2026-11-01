@@ -86,6 +86,34 @@ class IssueQuote:
 
 
 @dataclass(frozen=True)
+class IssueCandidate:
+    """Same-block assessment of one explicitly selected issuance candidate.
+
+    Face coverage and all BUCK amounts are raw integer units. ``reasons`` is
+    empty only when the observed checks pass; this is not an execution promise.
+    """
+    block_number: int
+    token_id: int
+    coverage: int
+    requested_spendable: int
+    max_premium: int
+    prior_principal: int
+    before_coverage: int
+    after_coverage: int
+    current_k: int
+    shortfall_before: int
+    shortfall_after_premium: int
+    premium: int
+    reserve_required: int
+    reserve_buffer: int
+    owner_spendable: int
+    reserve_shortfall: int
+    max_spendable: int
+    premium_pool: str | None
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class HouseholdCreditState:
     """An owner's money and independent facilities, in raw token units."""
     spendable: int
@@ -339,6 +367,78 @@ class NetCreditOps:
         owner = self.stack.credit.functions.ownerOf(token_id).call()
         quote = self.stack.quoter.functions.quoteIssue(token_id, coverage).call()
         return IssueQuote(*quote, self.stack.token.functions.balanceOf(owner).call())
+
+    def assess_issue_candidate(self, owner, token_id: int, coverage: int, requested_spendable: int,
+                               max_premium: int, *, reserve_buffer: int = 0,
+                               block_number: int | None = None) -> IssueCandidate:
+        """Assess exactly one chosen NFT and face-coverage amount at one block.
+
+        This does not find the cheapest coverage, estimate a market trade, or
+        submit a transaction. The optional extra reserve is required only for a
+        nonzero premium. Pending reductions are blocked by the household
+        workflow even though the token does not itself prohibit a new issue.
+        K, marks, balances, permissions and the fund's mark can change before
+        execution, which still has to re-quote and use the premium ceiling.
+        A caller may pin several assessments to the same supplied block number;
+        availability of historical state and chain finality are separate.
+        """
+        values = (token_id, coverage, requested_spendable, max_premium, reserve_buffer)
+        if (any(type(v) is not int or v < 0 or v > MAX_UINT256 for v in values)
+                or requested_spendable == 0 or (block_number is not None and
+                                                (type(block_number) is not int or block_number < 0))):
+            raise ValueError("invalid issuance candidate")
+        address = getattr(owner, "address", owner)
+        block = self.chain.w3.eth.block_number if block_number is None else block_number
+        read = lambda fn: fn.call(block_identifier=block)
+        registry, credit, token, quoter, fund = (self.stack.registry, self.stack.credit, self.stack.token,
+                                                 self.stack.quoter, self.stack.fund)
+        if not read(registry.functions.isVerified(address)) or read(registry.functions.isCarrying(address)):
+            raise ValueError("household owner must be verified and non-Carrying")
+        if read(credit.functions.ownerOf(token_id)).lower() != address.lower():
+            raise ValueError("foreign household facility")
+        face, activated, _ = read(credit.functions.creditInfo(token_id))
+        if coverage > face - activated:
+            raise ValueError("issuance candidate exceeds unactivated coverage")
+        before, _, _, _ = read(quoter.functions.quoteIssue(token_id, 0))
+        after, premium, reserve, maximum = read(quoter.functions.quoteIssue(token_id, coverage))
+        if after < before:
+            raise ValueError("issuance candidate reduced current coverage")
+        principal, age = read(credit.functions.issuanceOf(token_id))
+        k = read(self.stack.controller.functions.currentBuckK())
+        spendable = read(token.functions.balanceOf(address))
+        pending, _, _ = read(token.functions.reductionAuthorization(token_id))
+        reasons = []
+        configured_token = read(fund.functions.token())
+        if (configured_token.lower() != token.address.lower() or
+                not read(registry.functions.isVerified(fund.address)) or
+                not read(registry.functions.isCarrying(fund.address))):
+            reasons.append("fund-unavailable")
+        if read(token.functions.maturitiesPending()):
+            reasons.append("maturities-pending")
+        if pending:
+            reasons.append("authorization-pending")
+        if principal and age >= principal * 50 * YEAR:
+            reasons.append("facility-matured")
+        pool = None
+        if premium:
+            pool = read(token.functions.facilityPool(token_id))
+            if pool.lower() == ZERO_ADDRESS:
+                insurer = read(credit.functions.insurerOf(token_id))
+                pool = read(token.functions.insurerPool(insurer))
+            if (pool.lower() == ZERO_ADDRESS or not read(registry.functions.isVerified(pool)) or
+                    not read(registry.functions.isCarrying(pool))):
+                reasons.append("insurer-pool-unavailable")
+        if premium > max_premium:
+            reasons.append("premium-limit")
+        shortfall = max(0, reserve + (reserve_buffer if premium else 0) - spendable)
+        if shortfall:
+            reasons.append("reserve-shortfall")
+        if requested_spendable > maximum:
+            reasons.append("insufficient-capacity")
+        return IssueCandidate(block, token_id, coverage, requested_spendable, max_premium, principal, before, after,
+                              k, max(0, principal - before * k // WAD),
+                              max(0, principal + premium - after * k // WAD), premium, reserve, reserve_buffer,
+                              spendable, shortfall, maximum, pool, tuple(reasons))
 
     def quote_household_activated_capacity(self, owner, token_ids) -> ActivatedCapacityQuote:
         """Observe activated room and unactivated marked coverage at one block.

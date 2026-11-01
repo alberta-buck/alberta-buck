@@ -12,5 +12,21 @@
   "second_spendable": 5000000,
   "second_issued": 10000000,
   "reduction": 1000000,
-  "nominal_refund": 133333
+  "nominal_refund": 133333,
+  "depreciating_candidate": {
+    "face": 100000000,
+    "initial_coverage": 40000000,
+    "initial_spendable": 10000000,
+    "initial_premium_limit": 4000000,
+    "premium_rate_bp": 100,
+    "depreciation_bp": 1000,
+    "comparison_year": 2,
+    "repair_year": 7,
+    "partial_coverage": 10000000,
+    "remaining_coverage": 60000000,
+    "requested_spendable": 1000000,
+    "shortfall_before": 5000000,
+    "repair_premium": 1800000,
+    "repair_max_spendable": 6700000
+  }
 }

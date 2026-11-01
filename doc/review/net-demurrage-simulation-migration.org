@@ -145,6 +145,24 @@ over-issued at current K or its asset mark: part of newly activated coverage
 and its premium must first repair that facility's shortfall. The eventual
 per-NFT issuance planner must account for that repair, its funding and actual
 quote before using the aggregate estimate to submit a transaction.
+The Python =assess_issue_candidate= and JavaScript =assessIssueCandidate=
+helpers now assess a caller-selected NFT, face-coverage increment and exact
+spendable amount at one block. They report the old marked K shortfall, the
+shortfall after adding coverage and its premium, the quoter's exact maximum,
+the premium, funding gate plus optional buffer, and observed blockers. They
+refuse foreign NFTs and invalid sizes and flag a pending reduction, the
+maturity queue, a matured facility, missing fund or insurer pool, a premium
+above the caller's ceiling, inadequate reserve and insufficient capacity.
+A pending reduction is a household workflow guard; the token does not enforce
+it as an issuance condition. The extra funding buffer applies only when a
+premium is due. An empty blocker list means only that these observations pass
+at that block: computed K, future account state, fund valuation and execution
+can still fail. Callers comparing several candidates can pin them to a shared
+block number, subject to RPC historical-state availability and chain finality.
+These helpers neither choose how much coverage to activate nor
+compare the economic value of a candidate, buy the reserve, trade or submit
+an issue. The aggregate policy estimate above remains provisional, and the
+net issuance lifecycle stays disabled until it uses an exact candidate plan.
 Quote additional coverage on the selected NFT, budget the full premium and a
 reserve buffer that can survive a block of demurrage, and compare the total
 cost of the reserve purchase with the projected benefit. A successful issue
