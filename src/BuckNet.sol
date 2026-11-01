@@ -131,6 +131,31 @@ contract BuckNet is IERC20, IERC20Metadata {
     function decimals() external pure returns (uint8) { return BuckTypes.DECIMALS; }
     function totalSupply() external view returns (uint256) { return _book.issued; }
     function totalIssued() external view returns (uint256) { return _book.issued; }
+
+    /// @notice K-scaled current value of the owner's activated coverage.
+    /// @dev This is the legacy credit-limit view, not spendable BUCK or a
+    ///      promise that every NFT has issuable room: issuance and the K
+    ///      bound are checked independently for each facility.
+    function creditLimit(address owner) external view returns (uint256) {
+        uint256 value = buckCredit.totalCurrentValue(owner);
+        return value == 0 ? 0 : value * buckK.currentBuckK() / K_SCALE;
+    }
+
+    /// @notice Activated face units backing this facility, as in Buck.
+    /// @dev Coverage is distinct from issued principal, which BuckCredit
+    ///      reports separately through issuanceOf. An unknown NFT returns zero.
+    function mintsBacked(uint256 tokenId) external view returns (uint256) {
+        (, uint256 active,) = buckCredit.creditInfo(tokenId);
+        return active;
+    }
+
+    /// @notice The facility's returnable premium in nominal pool BUCK.
+    /// @dev The recorded insurer pool, not the token, supplies the refund;
+    ///      its net value can be lower because Carrying fees travel with it.
+    function mintsPrincipal(uint256 tokenId) external view returns (uint256) {
+        return premiumPrincipal[tokenId];
+    }
+
     /// @notice Ordinary held plus issued-unspent net BUCK; for a Carrying
     ///         account, its currently transferable nominal units instead.
     /// @dev A Carrying sender's recipient can receive less net than the

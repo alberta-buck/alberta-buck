@@ -335,6 +335,47 @@ contract BuckNetTest is Test {
         assertEq(buck.claimSeconds(), oldSeconds);
     }
 
+    function test_legacyCreditViewsTrackCoveragePremiumAndLiveK() public {
+        MockNetInsurerPool pool = _pool(INSURER_A);
+        pool.approveToken(IERC20(address(buck)));
+        uint256 insured = _credit(ALICE, INSURER_A, 1000e6, 100);
+        uint256 free = _credit(ALICE, INSURER_A, 200e6, 0);
+
+        // Unactivated coverage is neither an issued balance nor a credit limit.
+        assertEq(buck.creditLimit(ALICE), 0);
+        assertEq(buck.mintsBacked(insured), 0);
+        assertEq(buck.mintsPrincipal(insured), 0);
+        assertEq(buck.mintsBacked(type(uint256).max), 0);
+        assertEq(buck.mintsPrincipal(type(uint256).max), 0);
+
+        vm.startPrank(ALICE);
+        buck.issue(insured, 1000e6, 900e6, type(uint256).max, address(pool));
+        buck.issue(free, 200e6, 200e6, type(uint256).max, address(0));
+        vm.stopPrank();
+        assertEq(buck.creditLimit(ALICE), 1200e6);
+        assertEq(buck.creditLimit(BOB), 0);
+        assertEq(buck.mintsBacked(insured), 1000e6);
+        assertEq(buck.mintsBacked(free), 200e6);
+        assertEq(buck.mintsPrincipal(insured), 100e6);
+        assertEq(buck.mintsPrincipal(free), 0);
+        assertEq(buck.balanceOf(ALICE), 1100e6);
+
+        // K changes the limit, not the BUCK already issued to the wallet.
+        k.setK(0.75e18);
+        assertEq(buck.creditLimit(ALICE), 900e6);
+        assertEq(buck.balanceOf(ALICE), 1100e6);
+
+        // A partial settlement releases coverage and the original pool's
+        // nominal premium pro rata, while the other facility is untouched.
+        _authorize(ALICE, insured, 500e6, 0);
+        fund.settle(buck, ALICE, insured, 500e6, 0);
+        assertEq(buck.creditLimit(ALICE), 525e6);
+        assertEq(buck.mintsBacked(insured), 500e6);
+        assertEq(buck.mintsBacked(free), 200e6);
+        assertEq(buck.mintsPrincipal(insured), 50e6);
+        assertEq(buck.mintsPrincipal(free), 0);
+    }
+
     function test_kCutDoesNotRecallIssuedUnspentAndReductionImprovesShortfall() public {
         uint256 id = _credit(ALICE, INSURER_A, 1000e6, 0);
         vm.prank(ALICE);
