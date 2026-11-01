@@ -470,9 +470,22 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const accurate = refinanceQuoted(terms, 1, 0, 1, addedMark, Number(repaired.premium) / Number(RAW),
     { premiumRefundFraction: Number(fullRefund.refundFractionWad) / 1e18 });
   assert.ok(naive.go && !accurate.go && Math.abs(accurate.deposit - 1.8) < .00001);
-  const menu = await ops.issueCoverageMenu(debtor.address, depreciatingId, requested, 2n * RAW,
+  // The menu shares identical reads within its block, including concurrent
+  // candidates, while keeping a separate exact quote for each coverage.
+  const reads = [];
+  const trackedSession = { ...s, client: { ...s.client, readContract: (request) => {
+    reads.push(request);
+    return s.client.readContract(request);
+  } } };
+  const trackedOps = netCreditOps(trackedSession, stack);
+  const menu = await trackedOps.issueCoverageMenu(debtor.address, depreciatingId, requested, 2n * RAW,
     { reserveBuffer: BigInt(V.reserve_buffer) });
   assert.ok(menu.length <= 15 && menu.every((item) => item.blockNumber === repaired.blockNumber));
+  const readKeys = reads.map((r) => JSON.stringify([r.address.toLowerCase(), r.functionName, r.args],
+    (_, value) => typeof value === "bigint" ? `bigint:${value}` : value));
+  assert.equal(new Set(readKeys).size, reads.length);
+  assert.equal(reads.filter((r) => r.functionName === "quoteIssue").length, menu.length);
+  assert.equal(reads.filter((r) => r.functionName === "currentBuckK").length, 1);
   const ready = menu.filter((item) => !item.reasons.length);
   const refunds = await Promise.all(ready.map((item) =>
     ops.quotePremiumRefund(depreciatingId, item.coverage, { blockNumber: item.blockNumber })));
@@ -498,5 +511,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.equal(updated.activated, previous.activated + chosen.coverage);
   assert.equal(updated.issued, previous.issued + resultIssue.principal);
   assert.ok(resultIssue.premium <= chosen.premium);
+  const fresh = await trackedOps.assessIssueCandidate(debtor.address, depreciatingId, 0n, requested, 0n);
+  assert.equal(fresh.priorPrincipal, updated.issued); // cache does not survive a later operation
   assert.deepEqual(s.mismatches, []);
 });

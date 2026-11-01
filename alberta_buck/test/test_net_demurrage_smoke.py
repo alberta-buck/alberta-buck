@@ -528,6 +528,9 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert naive.go and not accurate.go and accurate.deposit == 1.8
         menu = ops.issue_coverage_menu(debtor.address, depreciating_id, requested, 2 * RAW, reserve_buffer=buffer)
         assert len(menu) <= 15 and all(item.block_number == repaired.block_number for item in menu)
+        assert menu[-1] == ops.assess_issue_candidate(debtor.address, depreciating_id, menu[-1].coverage,
+                                                       requested, 2 * RAW, reserve_buffer=buffer,
+                                                       block_number=repaired.block_number)
         ready = [item for item in menu if not item.reasons]
         choices = []
         for item in ready:
@@ -551,4 +554,6 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert updated.activated == previous.activated + chosen.coverage
         assert updated.issued == previous.issued + result_issue.principal
         assert result_issue.premium <= chosen.premium
+        fresh = ops.assess_issue_candidate(debtor.address, depreciating_id, 0, requested, 0)
+        assert fresh.prior_principal == updated.issued  # no snapshot cache survives issuance
         assert not chain.mismatches

@@ -145,22 +145,28 @@ export function netCreditOps(session, stack, execute = null) {
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),
     reduceAuthorized: (owner, id, principal) => send(owner, fund, "reduce", [id, principal]),
   };
-  // Assess one caller-selected face-coverage amount at one block. This is
-  // neither a coverage search nor an execution/market guarantee. A household
-  // pauses for a pending reduction even though issue itself does not require
-  // that workflow guard. The extra reserve applies only to a nonzero premium.
-  ops.assessIssueCandidate = async (owner, tokenId, coverage, requestedSpendable, maxPremium,
-    { reserveBuffer = 0n, blockNumber: requestedBlock = null } = {}) => {
+  const validateIssueCandidate = (tokenId, coverage, requestedSpendable, maxPremium, reserveBuffer, requestedBlock) => {
     if (!validId(tokenId) || BigInt(tokenId) > MAX_UINT256 || [coverage, requestedSpendable, maxPremium, reserveBuffer]
       .some((v) => typeof v !== "bigint" || v < 0n || v > MAX_UINT256) || requestedSpendable === 0n
       || (requestedBlock !== null && (typeof requestedBlock !== "bigint" || requestedBlock < 0n))) {
       throw new Error("invalid issuance candidate");
     }
-    tokenId = BigInt(tokenId);
+    return BigInt(tokenId);
+  };
+  // Cache identical reads only within a single, ephemeral block snapshot.
+  // Store the promise before awaiting so concurrent choices share it too.
+  const issueBlockReader = (blockNumber) => {
+    const cache = new Map();
+    return (c, functionName, args = []) => {
+      const key = JSON.stringify([c.address.toLowerCase(), functionName, args],
+        (_, value) => typeof value === "bigint" ? `bigint:${value}` : value);
+      if (!cache.has(key)) cache.set(key, session.client.readContract({ address: c.address, abi: c.abi,
+        functionName, args, blockNumber }));
+      return cache.get(key);
+    };
+  };
+  const assessIssueAt = async (owner, tokenId, coverage, requestedSpendable, maxPremium, reserveBuffer, blockNumber, read) => {
     const address = owner.address ?? owner;
-    const blockNumber = requestedBlock ?? (await session.client.getBlock()).number;
-    const read = (c, functionName, args = []) => session.client.readContract({ address: c.address, abi: c.abi,
-      functionName, args, blockNumber });
     const [verified, carrying, actualOwner, [face, activated]] = await Promise.all([
       read(stack.registry, "isVerified", [address]), read(stack.registry, "isCarrying", [address]),
       read(credit, "ownerOf", [tokenId]), read(credit, "creditInfo", [tokenId]),
@@ -204,24 +210,33 @@ export function netCreditOps(session, stack, execute = null) {
       shortfallAfterPremium: priorPrincipal + premium > afterLimit ? priorPrincipal + premium - afterLimit : 0n,
       premium, reserveRequired, reserveBuffer, ownerSpendable, reserveShortfall, maxSpendable, premiumPool, reasons };
   };
+  // Assess one caller-selected face-coverage amount at one block. This is
+  // neither a coverage search nor an execution/market guarantee. A household
+  // pauses for a pending reduction even though issue itself does not require
+  // that workflow guard. The extra reserve applies only to a nonzero premium.
+  ops.assessIssueCandidate = async (owner, tokenId, coverage, requestedSpendable, maxPremium,
+    { reserveBuffer = 0n, blockNumber: requestedBlock = null } = {}) => {
+    tokenId = validateIssueCandidate(tokenId, coverage, requestedSpendable, maxPremium, reserveBuffer, requestedBlock);
+    const blockNumber = requestedBlock ?? (await session.client.getBlock()).number;
+    return assessIssueAt(owner, tokenId, coverage, requestedSpendable, maxPremium, reserveBuffer, blockNumber,
+      issueBlockReader(blockNumber));
+  };
   // No additional coverage is needed when the zero-coverage quote already
   // passes. Otherwise each bounded candidate is assessed at the same block.
   ops.issueCoverageMenu = async (owner, tokenId, requestedSpendable, maxPremium, { reserveBuffer = 0n } = {}) => {
+    tokenId = validateIssueCandidate(tokenId, 0n, requestedSpendable, maxPremium, reserveBuffer, null);
     const blockNumber = (await session.client.getBlock()).number;
-    const zero = await ops.assessIssueCandidate(owner, tokenId, 0n, requestedSpendable, maxPremium,
-      { reserveBuffer, blockNumber });
-    tokenId = zero.tokenId;
+    const read = issueBlockReader(blockNumber);
+    const zero = await assessIssueAt(owner, tokenId, 0n, requestedSpendable, maxPremium, reserveBuffer, blockNumber, read);
     const common = new Set(["fund-unavailable", "maturities-pending", "authorization-pending", "facility-matured"]);
     if (!zero.reasons.length || zero.reasons.some((reason) => common.has(reason))) return [zero];
-    const read = (c, functionName, args = []) => session.client.readContract({ address: c.address, abi: c.abi,
-      functionName, args, blockNumber });
     const [[face, activated, rate], mark, [principal], k] = await Promise.all([
       read(credit, "creditInfo", [tokenId]), read(credit, "depreciatedFaceValue", [tokenId]),
       read(credit, "issuanceOf", [tokenId]), read(stack.controller, "currentBuckK"),
     ]);
     const coverage = issueCoverageCandidates(face, activated, mark, principal, k, BigInt(rate), requestedSpendable);
     const others = await Promise.all(coverage.filter(Boolean).map((amount) =>
-      ops.assessIssueCandidate(owner, tokenId, amount, requestedSpendable, maxPremium, { reserveBuffer, blockNumber })));
+      assessIssueAt(owner, tokenId, amount, requestedSpendable, maxPremium, reserveBuffer, blockNumber, read)));
     return [zero, ...others];
   };
   // Authenticate one selected facility event and its saved hash. The caller

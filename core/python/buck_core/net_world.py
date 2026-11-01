@@ -188,6 +188,13 @@ def issue_coverage_candidates(face: int, activated: int, mark: int, principal: i
     return tuple(sorted(choices))
 
 
+def _validate_issue_candidate(token_id, coverage, requested, max_premium, reserve_buffer, block_number):
+    values = (token_id, coverage, requested, max_premium, reserve_buffer)
+    if (any(type(v) is not int or v < 0 or v > MAX_UINT256 for v in values) or requested == 0 or
+            (block_number is not None and (type(block_number) is not int or block_number < 0))):
+        raise ValueError("invalid issuance candidate")
+
+
 @dataclass(frozen=True)
 class ReductionPlan:
     token_id: int
@@ -435,38 +442,48 @@ class NetCreditOps:
         A caller may pin several assessments to the same supplied block number;
         availability of historical state and chain finality are separate.
         """
-        values = (token_id, coverage, requested_spendable, max_premium, reserve_buffer)
-        if (any(type(v) is not int or v < 0 or v > MAX_UINT256 for v in values)
-                or requested_spendable == 0 or (block_number is not None and
-                                                (type(block_number) is not int or block_number < 0))):
-            raise ValueError("invalid issuance candidate")
-        address = getattr(owner, "address", owner)
+        _validate_issue_candidate(token_id, coverage, requested_spendable, max_premium, reserve_buffer, block_number)
         block = self.chain.w3.eth.block_number if block_number is None else block_number
-        read = lambda fn: fn.call(block_identifier=block)
+        return self._assess_issue_at(owner, token_id, coverage, requested_spendable, max_premium,
+                                     reserve_buffer, block, self._issue_block_reader(block))
+
+    @staticmethod
+    def _issue_block_reader(block):
+        """Memoize only identical contract reads within one ephemeral block snapshot."""
+        cache = {}
+        def read(contract, method, *args):
+            key = (contract.address.lower(), method, args)
+            if key not in cache:
+                cache[key] = getattr(contract.functions, method)(*args).call(block_identifier=block)
+            return cache[key]
+        return read
+
+    def _assess_issue_at(self, owner, token_id, coverage, requested_spendable, max_premium, reserve_buffer, block, read):
+        address = getattr(owner, "address", owner)
         registry, credit, token, quoter, fund = (self.stack.registry, self.stack.credit, self.stack.token,
                                                  self.stack.quoter, self.stack.fund)
-        if not read(registry.functions.isVerified(address)) or read(registry.functions.isCarrying(address)):
+        if not read(registry, "isVerified", address) or read(registry, "isCarrying", address):
             raise ValueError("household owner must be verified and non-Carrying")
-        if read(credit.functions.ownerOf(token_id)).lower() != address.lower():
+        if read(credit, "ownerOf", token_id).lower() != address.lower():
             raise ValueError("foreign household facility")
-        face, activated, _ = read(credit.functions.creditInfo(token_id))
+        face, activated, _ = read(credit, "creditInfo", token_id)
         if coverage > face - activated:
             raise ValueError("issuance candidate exceeds unactivated coverage")
-        before, _, _, _ = read(quoter.functions.quoteIssue(token_id, 0))
-        after, premium, reserve, maximum = read(quoter.functions.quoteIssue(token_id, coverage))
+        before, _, _, _ = read(quoter, "quoteIssue", token_id, 0)
+        after, premium, reserve, maximum = read(quoter, "quoteIssue", token_id, coverage)
         if after < before:
             raise ValueError("issuance candidate reduced current coverage")
-        principal, age = read(credit.functions.issuanceOf(token_id))
-        k = read(self.stack.controller.functions.currentBuckK())
-        spendable = read(token.functions.balanceOf(address))
-        pending, _, _ = read(token.functions.reductionAuthorization(token_id))
+        principal, age = read(credit, "issuanceOf", token_id)
+        k = read(self.stack.controller, "currentBuckK")
+        spendable = read(token, "balanceOf", address)
+        pending, _, _ = read(token, "reductionAuthorization", token_id)
         reasons = []
-        configured_token = read(fund.functions.token())
+        configured_token = read(fund, "token")
         if (configured_token.lower() != token.address.lower() or
-                not read(registry.functions.isVerified(fund.address)) or
-                not read(registry.functions.isCarrying(fund.address))):
+                not read(registry, "isVerified", fund.address) or
+                not read(registry, "isCarrying", fund.address)):
             reasons.append("fund-unavailable")
-        if read(token.functions.maturitiesPending()):
+        if read(token, "maturitiesPending"):
             reasons.append("maturities-pending")
         if pending:
             reasons.append("authorization-pending")
@@ -474,12 +491,12 @@ class NetCreditOps:
             reasons.append("facility-matured")
         pool = ZERO_ADDRESS
         if premium:
-            pool = read(token.functions.facilityPool(token_id))
+            pool = read(token, "facilityPool", token_id)
             if pool.lower() == ZERO_ADDRESS:
-                insurer = read(credit.functions.insurerOf(token_id))
-                pool = read(token.functions.insurerPool(insurer))
-            if (pool.lower() == ZERO_ADDRESS or not read(registry.functions.isVerified(pool)) or
-                    not read(registry.functions.isCarrying(pool))):
+                insurer = read(credit, "insurerOf", token_id)
+                pool = read(token, "insurerPool", insurer)
+            if (pool.lower() == ZERO_ADDRESS or not read(registry, "isVerified", pool) or
+                    not read(registry, "isCarrying", pool)):
                 reasons.append("insurer-pool-unavailable")
         if premium > max_premium:
             reasons.append("premium-limit")
@@ -502,21 +519,21 @@ class NetCreditOps:
         the caller decides which are affordable and worth exercising. This
         finite menu is not an exhaustive search or an execution promise.
         """
+        _validate_issue_candidate(token_id, 0, requested_spendable, max_premium, reserve_buffer, None)
         block = self.chain.w3.eth.block_number
-        zero = self.assess_issue_candidate(owner, token_id, 0, requested_spendable, max_premium,
-                                           reserve_buffer=reserve_buffer, block_number=block)
+        read = self._issue_block_reader(block)
+        zero = self._assess_issue_at(owner, token_id, 0, requested_spendable, max_premium, reserve_buffer, block, read)
         common_blockers = {"fund-unavailable", "maturities-pending", "authorization-pending", "facility-matured"}
         if not zero.reasons or common_blockers.intersection(zero.reasons):
             return (zero,)
-        read = lambda fn: fn.call(block_identifier=block)
         credit = self.stack.credit
-        face, activated, rate = read(credit.functions.creditInfo(token_id))
-        mark = read(credit.functions.depreciatedFaceValue(token_id))
-        principal, _ = read(credit.functions.issuanceOf(token_id))
-        k = read(self.stack.controller.functions.currentBuckK())
+        face, activated, rate = read(credit, "creditInfo", token_id)
+        mark = read(credit, "depreciatedFaceValue", token_id)
+        principal, _ = read(credit, "issuanceOf", token_id)
+        k = read(self.stack.controller, "currentBuckK")
         coverages = issue_coverage_candidates(face, activated, mark, principal, k, rate, requested_spendable)
-        return (zero,) + tuple(self.assess_issue_candidate(owner, token_id, coverage, requested_spendable, max_premium,
-                                                           reserve_buffer=reserve_buffer, block_number=block)
+        return (zero,) + tuple(self._assess_issue_at(owner, token_id, coverage, requested_spendable, max_premium,
+                                                      reserve_buffer, block, read)
                                for coverage in coverages if coverage)
 
     def quote_household_activated_capacity(self, owner, token_ids) -> ActivatedCapacityQuote:

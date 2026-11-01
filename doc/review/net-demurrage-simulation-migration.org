@@ -183,8 +183,10 @@ premium, with neighboring values. Each result is an exact assessment pinned to
 the same block; failed choices remain visible. The estimate itself is not a
 guarantee of feasibility, minimum activation or optimality, particularly at
 rounding boundaries or when K is at or below the premium rate. These calls
-repeat several RPC reads per choice and have not been benchmarked at five-year
-population scale. A real household still needs a bounded menu of sale sizes,
+share identical owner, facility, fund and pool reads inside one ephemeral
+block snapshot; each coverage still has its own exact contract quote. Separate
+insurer refund observations still require additional reads. The menu has not
+been benchmarked at five-year population scale. A real household still needs a bounded menu of sale sizes,
 wallet splits and per-candidate insurer/market/return forecasts, then must
 reassess the chosen terms and narrow its premium ceiling before submitting.
 The Python =assess_issue_candidate= and JavaScript =assessIssueCandidate=
