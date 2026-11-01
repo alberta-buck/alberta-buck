@@ -458,20 +458,34 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   // A real repair premium can make the aggregate-coverage estimate look
   // worthwhile even when the exact quoted refinance loses money.
   const addedMark = Number(repaired.afterCoverage - repaired.beforeCoverage) / Number(RAW);
-  const terms = { debt: 10, rate: .06, face: 100, premium_bp: 100, joined: true, payback_y: 3,
+  const terms = { debt: 10, rate: .12, face: 100, premium_bp: 100, joined: true, payback_y: 10,
     k: Number(repaired.currentK) / 1e18, headroom: 0, unactivated: addedMark, fixed_cost: 0, penalty_months: 0,
-    risk: 0, opp_rate: .06, buck_value: 1, expected_relief_rate: .02, premium_refund_fraction: 1,
+    risk: 0, opp_rate: .12, buck_value: 1, expected_relief_rate: .02, premium_refund_fraction: 1,
     expected_refund_growth: -.02, expected_wallet_growth: 0, wallet_already_issued: true,
     activated_capacity: 0, issuance_limit: 1000 };
   const naive = refinance(terms, 1, 1);
-  const accurate = refinanceQuoted(terms, 1, 0, 1, addedMark, Number(repaired.premium) / Number(RAW));
+  const fullRefund = await ops.quotePremiumRefund(depreciatingId, repaired.coverage, { blockNumber: repaired.blockNumber });
+  assert.equal(fullRefund.reason, "cash-only");
+  assert.equal(fullRefund.premium, repaired.premium);
+  const accurate = refinanceQuoted(terms, 1, 0, 1, addedMark, Number(repaired.premium) / Number(RAW),
+    { premiumRefundFraction: Number(fullRefund.refundFractionWad) / 1e18 });
   assert.ok(naive.go && !accurate.go && Math.abs(accurate.deposit - 1.8) < .00001);
   const menu = await ops.issueCoverageMenu(debtor.address, depreciatingId, requested, 2n * RAW,
     { reserveBuffer: BigInt(V.reserve_buffer) });
   assert.ok(menu.length <= 15 && menu.every((item) => item.blockNumber === repaired.blockNumber));
   const ready = menu.filter((item) => !item.reasons.length);
-  const choices = ready.map((item) => ({ usd: 1, wallet_used: 0, new_spendable: 1,
-    present_coverage: Number(item.afterCoverage - item.beforeCoverage) / Number(RAW), premium: Number(item.premium) / Number(RAW) }));
+  const refunds = await Promise.all(ready.map((item) =>
+    ops.quotePremiumRefund(depreciatingId, item.coverage, { blockNumber: item.blockNumber })));
+  const choices = ready.map((item, i) => {
+    const refund = refunds[i];
+    assert.equal(refund.blockNumber, item.blockNumber);
+    assert.equal(refund.premium, item.premium);
+    assert.equal(refund.reason, "cash-only");
+    assert.equal(refund.pool.toLowerCase(), item.premiumPool.toLowerCase());
+    return { usd: 1, wallet_used: 0, new_spendable: 1,
+      present_coverage: Number(item.afterCoverage - item.beforeCoverage) / Number(RAW),
+      premium: Number(item.premium) / Number(RAW), premium_refund_fraction: Number(refund.refundFractionWad) / 1e18 };
+  });
   const selected = bestQuotedRefinance(terms, choices);
   assert.notEqual(selected.index, null);
   assert.ok(selected.verdict.go);

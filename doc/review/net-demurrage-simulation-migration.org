@@ -137,7 +137,10 @@ issuance and its premium earn additional forecast relief. The existing wallet
 can instead be retained for its expected alternative return. A proposed USD
 amount is the external principal expected to be retired, not merely a trade
 submission. The kernel includes the quoted insurer refund fraction, expected
-refund growth and incremental reserve acquisition/carry costs; the reserve's
+refund growth and incremental reserve acquisition/carry costs. Each candidate
+may use a different insurer refund fraction and growth forecast; the cash-only
+pool observation can be pinned to the same block as that candidate's quote.
+It excludes outside insurer strategies and is not a promised refund. The reserve's
 recoverable principal is not itself an expense. Candidate feasibility, the
 market quote and those reserve/return forecasts must be supplied separately.
 The finite menu is not a proof of the global optimum, nor does it assume
@@ -149,7 +152,8 @@ An Anvil/Tevm depreciation case illustrates the distinction: the aggregate
 approximation judges a one-BUCK refinance worthwhile, while the actual premium
 needed to repair that NFT's shortfall makes the same proposed refinance
 unattractive under the stated forecasts. A smaller candidate from the menu below
-is worthwhile under the fixture's hypothetical return and sale assumptions;
+is worthwhile under the fixture's same-block cash-only insurer observation and
+hypothetical future return and sale assumptions;
 the fixture issues that selected candidate with its premium ceiling narrowed
 to the quote. It does not model a market sale, mortgage repayment, or a complete
 household.

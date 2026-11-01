@@ -274,7 +274,13 @@ function scoreRefinance(t, usd, buck, cov, dep, newlyIssued, walletUsed, reserve
  * owned reserve and costs already in wallet opportunity. This float forecast
  * does not replace integer contract feasibility or a guarded market quote. */
 export function refinanceQuoted(t, usd, walletUsed, newSpendable, presentCoverage, premium,
-  { reserveCost = 0, reserveCarry = 0 } = {}) {
+  { reserveCost = 0, reserveCarry = 0, premiumRefundFraction = null, expectedRefundGrowth = null } = {}) {
+  if ((premiumRefundFraction !== null && !Number.isFinite(premiumRefundFraction))
+      || (expectedRefundGrowth !== null && !Number.isFinite(expectedRefundGrowth))) {
+    throw new Error("invalid quoted refund forecast");
+  }
+  t = { ...t, premium_refund_fraction: premiumRefundFraction ?? t.premium_refund_fraction,
+    expected_refund_growth: expectedRefundGrowth ?? t.expected_refund_growth };
   if (!t.wallet_already_issued || t.expected_relief_rate == null || t.expected_refund_growth == null
       || [usd, walletUsed, newSpendable, presentCoverage, premium].some((v) => !Number.isFinite(v) || v < 0)
       || !Number.isFinite(reserveCost) || !Number.isFinite(reserveCarry)) {
@@ -303,7 +309,9 @@ export function bestQuotedRefinance(t, candidates) {
   candidates.forEach((candidate, i) => {
     const v = refinanceQuoted(t, candidate.usd, candidate.wallet_used, candidate.new_spendable,
       candidate.present_coverage, candidate.premium,
-      { reserveCost: candidate.reserve_cost ?? 0, reserveCarry: candidate.reserve_carry ?? 0 });
+      { reserveCost: candidate.reserve_cost ?? 0, reserveCarry: candidate.reserve_carry ?? 0,
+        premiumRefundFraction: candidate.premium_refund_fraction ?? null,
+        expectedRefundGrowth: candidate.expected_refund_growth ?? null });
     if (!v.go) return;
     if (selected === null || v.value > verdict.value || (v.value === verdict.value
         && (candidate.present_coverage < selected.present_coverage ||

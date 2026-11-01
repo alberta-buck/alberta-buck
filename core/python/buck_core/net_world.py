@@ -654,16 +654,18 @@ class NetCreditOps:
         return ReliefRateQuote(block, selected, total, relief, cash, exceeds, rate,
                                bool(selected and relief == principal * Q))
 
-    def quote_premium_refund(self, token_id: int, coverage: int) -> PremiumRefundQuote:
+    def quote_premium_refund(self, token_id: int, coverage: int, *, block_number: int | None = None) -> PremiumRefundQuote:
         """Estimate the immediate mixed-pool refund fraction for new coverage.
 
         Only the pool's current BUCK account and the proposed full-value
         premium are included. Other insurer investments, future activity and
         liquidity preparation are unknown; the result is not a refund promise.
+        Supply a block number to compare it with same-block issue candidates.
         """
-        if type(token_id) is not int or token_id < 0 or type(coverage) is not int or coverage < 0:
+        if (type(token_id) is not int or token_id < 0 or type(coverage) is not int or coverage < 0 or
+                (block_number is not None and (type(block_number) is not int or block_number < 0))):
             raise ValueError("invalid premium sample")
-        block = self.chain.w3.eth.block_number
+        block = self.chain.w3.eth.block_number if block_number is None else block_number
         token, credit = self.stack.token, self.stack.credit
         _, premium, _, _ = self.stack.quoter.functions.quoteIssue(token_id, coverage).call(block_identifier=block)
         if not premium:

@@ -51,7 +51,7 @@ doc/reports/wp-t15.org.)
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # Buck.sol POOL_ROI_INV: a unit of coverage deposits this many years of its
 # annual premium with the insurance pool ("10% assumed annual ROI").
@@ -268,30 +268,41 @@ def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_
 
 def refinance_quoted(t: RefiTerms, usd: float, wallet_used: float, new_spendable: float,
                      present_coverage: float, premium: float, *, reserve_cost: float = 0.,
-                     reserve_carry: float = 0.) -> RefiVerdict:
+                     reserve_carry: float = 0., premium_refund_fraction: float | None = None,
+                     expected_refund_growth: float | None = None) -> RefiVerdict:
     """Value a proposed split between already-held money and one quoted issue.
 
     Amounts use whole units; ``usd`` is the external mortgage principal the
-    household expects actually to retire after trading. ``present_coverage`` is the marked increment,
-    not the face-unit argument to issue. The premium must come from the actual
+    household expects actually to retire after trading. ``present_coverage`` is
+    the marked increment, not the face-unit argument to issue. The premium must come from the actual
     per-NFT quote. Reserve costs are the incremental, unrecovered acquisition
     and annual carrying costs in USD, excluding the still-owned reserve and
     anything already included in wallet opportunity. They can be negative if
-    acquiring/holding the reserve has a net benefit.
+    acquiring/holding the reserve has a net benefit. Refund fraction and growth
+    can be overridden for this specific candidate's insurer and premium.
 
     This is an economic forecast, not an issuance or trade check. The caller
     must first establish exact integer feasibility, reserve funding, a guarded
     market quote and an appropriate current block; repeat as necessary before
     transacting. No gross reserve purchase is treated as a loss of principal.
     """
+    overrides = (premium_refund_fraction, expected_refund_growth)
+    if any(v is not None and (type(v) not in (int, float) or not math.isfinite(v)) for v in overrides):
+        raise ValueError("invalid quoted refund forecast")
+    if any(v is not None for v in overrides):
+        t = replace(t, premium_refund_fraction=(t.premium_refund_fraction
+                                                 if premium_refund_fraction is None else premium_refund_fraction),
+                    expected_refund_growth=(t.expected_refund_growth if expected_refund_growth is None
+                                            else expected_refund_growth))
     amounts = (usd, wallet_used, new_spendable, present_coverage, premium)
     if (not t.wallet_already_issued or t.expected_relief_rate is None or t.expected_refund_growth is None or
-            any(not math.isfinite(v) or v < 0 for v in amounts) or
-            not math.isfinite(reserve_cost) or not math.isfinite(reserve_carry)):
+            any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in amounts) or
+            any(type(v) not in (int, float) or not math.isfinite(v) for v in (reserve_cost, reserve_carry))):
         raise ValueError("invalid quoted refinance inputs")
-    if not math.isfinite(t.debt) or t.debt < 0 or usd > t.debt:
+    if type(t.debt) not in (int, float) or not math.isfinite(t.debt) or t.debt < 0 or usd > t.debt:
         raise ValueError("quoted refinance exceeds external debt")
-    if not math.isfinite(t.headroom) or t.headroom < 0 or wallet_used > t.headroom:
+    if (type(t.headroom) not in (int, float) or not math.isfinite(t.headroom) or
+            t.headroom < 0 or wallet_used > t.headroom):
         raise ValueError("quoted refinance exceeds wallet funds")
     if new_spendable == 0 and (present_coverage or premium or reserve_cost or reserve_carry):
         raise ValueError("quoted refinance has issuance costs without issuance")

@@ -83,13 +83,15 @@ two insurer pools, a nonzero premium and the real funding reserve; both
 runtimes consume the same operation vector and confirm that a transfer is not
 debt retirement. It also demonstrates that an exact reserve can decay between
 quote and issue, and that already-activated credit can issue without another
-premium. Issuance now requires an explicit maximum premium, so repricing above
-the holder's limit reverts atomically. The shared Python/JS refinancing policy distinguishes that capacity
+premium. Issuance requires an explicit maximum premium and expected insurer
+pool, so repricing or redirecting a premium outside the holder's terms reverts
+atomically. The shared Python/JS refinancing policy distinguishes that capacity
 from wallet BUCK; the isolated household state derives it and the present
 value of unactivated coverage from same-block per-facility quotes. Its shared
 numerical limit includes newly issued premium principal. The complete new-model
 household world is still being migrated. Current fund relief and the immediate mixed insurer-pool
-refund can also be observed at one block; these observations are not guarantees
+refund can also be observed at one block, including candidate-specific premium
+comparisons; these cash-only observations are not guarantees
 of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3
 diagnostic seeds BUCK/USDC, ages its
 Carrying pool and reports the buyer's actual net BUCK. The Python and JS market

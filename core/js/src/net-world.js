@@ -325,10 +325,13 @@ export function netCreditOps(session, stack, execute = null) {
   };
   // A proposed full-value premium dilutes only the current pool account in
   // this estimate. Outside positions and later liquidity actions are unknown.
-  ops.quotePremiumRefund = async (tokenId, coverage) => {
-    if (!validId(tokenId) || typeof coverage !== "bigint" || coverage < 0n) throw new Error("invalid premium sample");
+  ops.quotePremiumRefund = async (tokenId, coverage, { blockNumber: requestedBlock = null } = {}) => {
+    if (!validId(tokenId) || typeof coverage !== "bigint" || coverage < 0n
+        || (requestedBlock !== null && (typeof requestedBlock !== "bigint" || requestedBlock < 0n))) {
+      throw new Error("invalid premium sample");
+    }
     tokenId = BigInt(tokenId);
-    const blockNumber = (await session.client.getBlock()).number;
+    const blockNumber = requestedBlock ?? (await session.client.getBlock()).number;
     const read = (c, functionName, args) => session.client.readContract({ address: c.address, abi: c.abi,
       functionName, args, blockNumber });
     const [, premium] = await read(quoter, "quoteIssue", [tokenId, coverage]);

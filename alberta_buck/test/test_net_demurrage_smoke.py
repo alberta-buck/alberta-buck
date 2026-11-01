@@ -516,19 +516,28 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         # The exact repair premium can turn a seemingly profitable mortgage
         # refinance into a loss; do not score the aggregate coverage estimate.
         added_mark = (repaired.after_coverage - repaired.before_coverage) / RAW
-        terms = carry.RefiTerms(debt=10, rate=.06, face=100, premium_bp=100, joined=True, payback_y=3,
+        terms = carry.RefiTerms(debt=10, rate=.12, face=100, premium_bp=100, joined=True, payback_y=10,
                                  k=repaired.current_k / 10**18, headroom=0, unactivated=added_mark,
                                  expected_relief_rate=.02, expected_refund_growth=-.02,
                                  wallet_already_issued=True, issuance_limit=1000)
         naive = carry.refinance(terms, 1, 1)
-        accurate = carry.refinance_quoted(terms, 1, 0, 1, added_mark, repaired.premium / RAW)
+        full_refund = ops.quote_premium_refund(depreciating_id, repaired.coverage, block_number=repaired.block_number)
+        assert full_refund.reason == "cash-only" and full_refund.premium == repaired.premium
+        accurate = carry.refinance_quoted(terms, 1, 0, 1, added_mark, repaired.premium / RAW,
+                                          premium_refund_fraction=full_refund.refund_fraction_wad / 10**18)
         assert naive.go and not accurate.go and accurate.deposit == 1.8
         menu = ops.issue_coverage_menu(debtor.address, depreciating_id, requested, 2 * RAW, reserve_buffer=buffer)
         assert len(menu) <= 15 and all(item.block_number == repaired.block_number for item in menu)
         ready = [item for item in menu if not item.reasons]
-        choices = [dict(usd=1, wallet_used=0, new_spendable=1,
-                        present_coverage=(item.after_coverage - item.before_coverage) / RAW,
-                        premium=item.premium / RAW) for item in ready]
+        choices = []
+        for item in ready:
+            refund = ops.quote_premium_refund(depreciating_id, item.coverage, block_number=item.block_number)
+            assert refund.block_number == item.block_number and refund.premium == item.premium
+            assert refund.reason == "cash-only" and refund.pool.lower() == item.premium_pool.lower()
+            choices.append(dict(usd=1, wallet_used=0, new_spendable=1,
+                                present_coverage=(item.after_coverage - item.before_coverage) / RAW,
+                                premium=item.premium / RAW,
+                                premium_refund_fraction=refund.refund_fraction_wad / 10**18))
         selected, value = carry.best_quoted_refinance(terms, choices)
         assert selected is not None and value.go
         chosen = ready[selected]
