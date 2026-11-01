@@ -37,6 +37,8 @@ contract BuckNetBurnMathTest is Test {
         uint256 expectedRelief;
         uint256 expectedRefund;
         uint256 expectedRefundNet;
+        uint256 bestTarget;
+        uint256 bestPrincipal;
         // Independent integer enumeration: this deliberately does not use the
         // planner's fixed point or its algebraic lower bound.
         for (uint256 p = 1; p <= principal; ++p) {
@@ -53,12 +55,18 @@ contract BuckNetBurnMathTest is Test {
             uint256 newShortfall = left > capacityAfter ? left - capacityAfter : 0;
             if (newShortfall > oldShortfall) continue;
             uint256 afterScaled = s.walletScaled + refundNet + relief - p * Q;
-            if (afterScaled / Q + target <= s.walletScaled / Q) {
+            if (afterScaled / Q > s.walletScaled / Q) continue;
+            uint256 decrease = s.walletScaled / Q - afterScaled / Q;
+            uint256 candidateTarget = decrease < target ? decrease : target;
+            if (candidateTarget > bestTarget) {
+                bestTarget = candidateTarget;
+                bestPrincipal = p;
+            }
+            if (decrease >= target && expected == 0) {
                 expected = p;
                 expectedRelief = relief;
                 expectedRefund = refund;
                 expectedRefundNet = refundNet;
-                break;
             }
         }
         BuckNetBurnMath.Plan memory actual = BuckNetBurnMath.plan(s, c, target);
@@ -71,6 +79,14 @@ contract BuckNetBurnMathTest is Test {
             assertEq(actual.refundNominal, expectedRefund);
             assertEq(actual.refundNetScaled, expectedRefundNet);
             assertEq(actual.coverageReduction, c.active * expected / principal);
+        }
+        (uint256 actualTarget, BuckNetBurnMath.Plan memory best) = BuckNetBurnMath.planAtMost(s, c, target);
+        assertEq(actualTarget, bestTarget);
+        if (bestTarget == 0) {
+            assertEq(uint256(best.status), uint256(BuckNetBurnMath.Status.Impossible));
+        } else {
+            assertEq(uint256(best.status), uint256(BuckNetBurnMath.Status.Found));
+            assertEq(best.principal, bestPrincipal);
         }
     }
 
@@ -113,6 +129,9 @@ contract BuckNetBurnMathTest is Test {
         BuckNetBurnMath.Plan memory limited = BuckNetBurnMath.plan(s, c, 2779);
         assertEq(uint256(limited.status), uint256(BuckNetBurnMath.Status.WorkLimit));
         assertEq(limited.iterations, 256);
+        (uint256 target, BuckNetBurnMath.Plan memory bounded) = BuckNetBurnMath.planAtMost(s, c, 2779);
+        assertEq(target, 0);
+        assertEq(uint256(bounded.status), uint256(BuckNetBurnMath.Status.WorkLimit));
         BuckNetBurnMath.Plan memory full = BuckNetBurnMath.plan(s, c, 3438);
         assertEq(uint256(full.status), uint256(BuckNetBurnMath.Status.Found));
         assertEq(full.principal, 3438);
@@ -131,6 +150,20 @@ contract BuckNetBurnMathTest is Test {
         assertEq(three.principal, 3);
         assertEq(three.reliefScaled, 3 * Q / 10);
         assertEq(uint256(BuckNetBurnMath.plan(s, _noCoverage(), 4).status), uint256(BuckNetBurnMath.Status.Impossible));
+    }
+
+    function test_maximumTargetIncludesTheOriginalInsurerRefund() public pure {
+        BuckNetBurnMath.Snapshot memory s = BuckNetBurnMath.Snapshot({
+            principal: 100, issuedSeconds: 0, totalSeconds: 0, fundValueScaled: 0, reliefLimitScaled: 0,
+            premiumPrincipal: 20, poolGrossScaled: 20 * Q, poolNetScaled: 20 * Q,
+            poolAvailableNominal: 20, walletScaled: 100 * Q
+        });
+        (uint256 target, BuckNetBurnMath.Plan memory plan) =
+            BuckNetBurnMath.planAtMost(s, _noCoverage(), type(uint256).max);
+        assertEq(uint256(plan.status), uint256(BuckNetBurnMath.Status.Found));
+        assertEq(target, 80);
+        assertEq(plan.principal, 99);
+        assertEq(plan.refundNominal, 19);
     }
 
     function test_accountMustHaveRoomForItsRefundBeforeSettlement() public pure {
@@ -152,6 +185,9 @@ contract BuckNetBurnMathTest is Test {
         BuckNetBurnMath.Snapshot memory s;
         assertEq(uint256(BuckNetBurnMath.plan(s, _noCoverage(), 0).status), uint256(BuckNetBurnMath.Status.Found));
         assertEq(uint256(BuckNetBurnMath.plan(s, _noCoverage(), 1).status), uint256(BuckNetBurnMath.Status.Impossible));
+        (uint256 none, BuckNetBurnMath.Plan memory zero) = BuckNetBurnMath.planAtMost(s, _noCoverage(), 0);
+        assertEq(none, 0);
+        assertEq(uint256(zero.status), uint256(BuckNetBurnMath.Status.Found));
         s.principal = BuckTypes.MAX_BALANCE + 1;
         vm.expectRevert(BuckNetBurnMath.InvalidSnapshot.selector);
         this.callPlan(s, 0);

@@ -60,8 +60,11 @@ rather than silently following both.
   by at least =N=, after the insurer premium or refund and Jubilee relief.
   Ordinary callers use net units and approved Carrying callers use nominal
   units. Otherwise the operation reverts atomically; do not silently deliver a
-  smaller balance change. The =uint256.max= sentinel retains its separate
-  maximum-available meaning. Issued wallet BUCK and unissued facility room
+  smaller balance change. For =mint=, =uint256.max= retains its separate
+  maximum-available meaning. Legacy =burn= has no corresponding sentinel:
+  it requires the requested amount and rejects =uint256.max= in a normal
+  bounded account. Preserve that behavior unless an explicitly specified new
+  close-all API is introduced. Issued wallet BUCK and unissued facility room
   are distinct: this balance change does not promise an equal change in room.
 - Each NFT owns its issued principal and capped issuance-seconds; baseline
   relief grows linearly at 2% per year of issued principal, up to 100% at
@@ -154,6 +157,12 @@ rather than silently following both.
   can exhaust 256 steps in a concrete modest-sized facility even though full
   retirement is valid. Improve the search or define an explicit safe fallback,
   and measure practical gas before exposing it as a production burn.
+  A bounded per-facility =planAtMost= now searches the monotone feasibility
+  of requested balance decreases, rather than the non-monotone principal.
+  It propagates work exhaustion and can select a principal that makes the
+  actual balance decrease exceed that facility's target. A multi-facility
+  caller must use actual deltas after each settlement and retain atomic
+  rollback if the total requested decrease is not achieved.
 - [ ] Permit an *approved neutral Carrying service* to own and use a facility.
   Design and enforce the service authorization before enabling this path,
   including safe delisting and access to settlement; a registry identity
@@ -239,7 +248,8 @@ rather than silently following both.
   BuckNet is below EIP-170's runtime limit and BuckCredit is closer;
   prefer a linked library when appropriate and verify caller/storage context.
   The batch planner performs quadratic NFT selection/duplicate checks, up to
-  79 feasibility probes per facility and up to 256 inner iterations per probe.
+  79 binary-search iterations per facility plus initial and final probes, and
+  up to 256 inner iterations per probe.
   Measure worst-case gas and specify a supported NFT count before production;
   a computational work limit is not proof that an allocation is impossible.
   The old and new constructors both take four addresses but their fourth
@@ -517,4 +527,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Ordinary burn monetary candidate | A real cash-only fund and insurer pool show that retiring four raw units can decrease the wallet by four but retiring five decreases it by three. A standalone bounded fixed-point calculation selects least principal from exact fractional wallet, marked relief, nominal refund and pool net value; it checks the supplied relief and refund limits without clipping. The independent exhaustive fuzz comparison passed 100,000 cases; six math tests and 48 real-fund/inherited tests passed, including a three-year aged insurer refund and actual settlements. A depreciated NFT demonstrates that K eligibility can pass at one unit, fail at two, and pass at three. =make nix-test= passed 1,573 tests with one fork test skipped. At that checkpoint the prototype was monetary only; compatible burn, authorization, K/coverage, state-changing preparation, wheel integration, multi-NFT sequencing and Carrying owners remained open. | =2693243f= |
 | 2026-11-01 | Collateral-aware burn candidate | The bounded candidate now applies the same depreciated face, proportional coverage and no-worse-K-shortfall calculation as settlement; its safe skips do not assume K eligibility is monotone. It correctly chooses a larger principal in both real-token rounding cases. Seven math tests passed with 100,000 independent exhaustive vectors, and 48 real-fund/inherited tests passed. A separate regression proves that 256 steps can be exhausted even though full retirement is feasible, so availability/gas optimization is a production gate. This isolated candidate is not a public burn or quote, and the other integration and Carrying checks remain open. | =f854387c= |
 | 2026-11-01 | Shared authorized reduction transition | The existing linked =BuckNetTokenOps= library now performs the same principal, relief, insurer refund, coverage, K and claim-book transition for the existing authorized reduction. The host still validates authorization and the shared cash budget under its guard; renewal shares the pool-refund helper. An event test verifies the token emits the reduction and consumes authorization only once. Focused BuckNet, mint, real-fund and Jubilee suites passed; =make nix-test= passed 1,576 tests with one fork test skipped; the cash-only smoke passed 26 Python and 20 JS tests; the artifact check passed. Runtime is 21,650 bytes for BuckNet and 17,637 for the linked token library. One-call burn, valuation hook integration, full identity parity and production release remain open. | =d5a1d1e9= |
-| 2026-11-01 | Token-only burn valuation hook | The existing fund can refresh the registered wheel's guarded mark on a token-only call, and expose the last guarded mark to a quote. A test-only BuckNet subclass holds the real token guard while refreshing and confirms no wheel work, reward, balance or position movement; tests also cover changed receipt, changed source, a basket loss, empty position and the explicit no-wheel fallback. The Jubilee and wheel suites passed 249 and 10 tests, the final hook suite passed 48 including inherited cases, and focused Python/Anvil and JS/Tevm deployment tests passed one and two cases. The artifact check passed; JubileeFund runtime is 22,735 bytes. The public burn does not yet call this hook, and leveraged valuation, freshness and gas limits remain open. | This commit |
+| 2026-11-01 | Token-only burn valuation hook | The existing fund can refresh the registered wheel's guarded mark on a token-only call, and expose the last guarded mark to a quote. A test-only BuckNet subclass holds the real token guard while refreshing and confirms no wheel work, reward, balance or position movement; tests also cover changed receipt, changed source, a basket loss, empty position and the explicit no-wheel fallback. The Jubilee and wheel suites passed 249 and 10 tests, the final hook suite passed 48 including inherited cases, and focused Python/Anvil and JS/Tevm deployment tests passed one and two cases. The artifact check passed; JubileeFund runtime is 22,735 bytes. The public burn does not yet call this hook, and leveraged valuation, freshness and gas limits remain open. | =76ddd882= |
+| 2026-11-01 | Bounded per-facility burn allocation | The candidate can find the greatest feasible requested decrease up to a bound without assuming principal or K eligibility is monotone, and propagates an inner work-limit result. A 100,000-case independent exhaustive comparison covers both exact and bounded candidates; eight math tests and 48 real-fund/inherited tests passed, including K-driven overshoot of the target. A legacy regression confirms =burn(uint256.max)= and its quote reject the request instead of treating it as a maximum sentinel; all 54 =BuckTest= cases passed. The public burn and batch orchestration remain unimplemented, and the bounded search still needs production gas/availability work. | This commit |

@@ -118,7 +118,11 @@ compatibility contract is that a successful =mint(N)= increases actual
 in net units for an ordinary owner and nominal units for an approved Carrying
 owner. Use the measured external raw-unit difference after settlement, with
 correct checkpoints and no arithmetic underflow; otherwise revert all state.
-The maximum sentinel has its separately specified maximum-available meaning.
+For =mint=, the maximum sentinel has its separately specified
+maximum-available meaning. Legacy =burn= does not define such a sentinel:
+it requires the full requested amount and rejects =uint256.max= for a normal
+bounded account. A mathematical =planAtMost= bound is not a public burn
+sentinel or an instruction to close every facility.
 
 The experimental per-facility =BuckNetQuoter.quoteSpendable= inverts current
 coverage, K and the premium into the least additional coverage for one
@@ -364,6 +368,19 @@ then pass on full retirement. Thus neither a monotone search over principal
 nor one failed monetary candidate is sufficient to select a legal burn. The
 prototype's coverage input must be read at the same instant as its other data;
 any changed K or asset mark invalidates the candidate.
+
+For an ordered multi-facility allocator, =planAtMost= finds the greatest
+requested visible decrease up to a bound for one snapshot. Although the
+visible outcome and K eligibility are not monotone in principal, feasibility
+*is* monotone in the requested decrease: a particular settlement that drops
+the balance by =N= also satisfies every smaller positive request. The outer
+binary search uses only that predicate and propagates any inner =WorkLimit=.
+K rounding can make the selected settlement decrease the actual balance by
+more than the returned target. A batch must use the observed delta, refresh
+the other relevant state, enforce a final total-delta postcondition and revert
+the entire batch if it cannot satisfy the user's request. Up to 79 binary
+iterations plus initial and final probes can each run 256 inner steps; this
+has not been shown affordable at supported NFT counts.
 
 The wheel currently scans bounded slots with a cursor and an idle-per-block
 memo; existing equity and response kinds catch failed basket work. Fund work

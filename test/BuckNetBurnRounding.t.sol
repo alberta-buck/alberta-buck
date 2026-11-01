@@ -122,6 +122,10 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         BuckNetBurnMath.Plan memory two = BuckNetBurnMath.plan(_candidate(id, pool), _coverage(id), 2);
         assertEq(uint256(two.status), uint256(BuckNetBurnMath.Status.Found));
         assertEq(two.principal, 3);
+        (uint256 target, BuckNetBurnMath.Plan memory bounded) =
+            BuckNetBurnMath.planAtMost(_candidate(id, pool), _coverage(id), 2);
+        assertEq(target, 2);
+        assertEq(bounded.principal, 3); // the actual balance decrease will be three
         uint256 snapshot = vm.snapshotState();
         _authorize(ALICE, id, 1, 0);
         vm.prank(ALICE);

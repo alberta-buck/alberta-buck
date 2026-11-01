@@ -144,4 +144,43 @@ library BuckNetBurnMath {
         }
         result.status = Status.WorkLimit;
     }
+
+    /// @notice Find the greatest requested balance decrease up to `requested`
+    ///         for this facility, and its least-principal candidate.
+    /// @dev This is useful to an ordered multi-facility allocator. Feasibility
+    ///      is monotone in the requested decrease: a settlement achieving N
+    ///      also achieves every smaller positive target. Search that predicate,
+    ///      not the non-monotone result of adjacent principal amounts. A K
+    ///      constraint can force the actual visible decrease above the returned
+    ///      target; a caller must observe and account for that actual change.
+    ///      Any inner WorkLimit is propagated, never treated as impossible.
+    ///      At most 79 binary-search iterations plus the initial and final
+    ///      probes run a bounded inner search. Gas and supported batch sizes
+    ///      require measurement before integration.
+    function planAtMost(Snapshot memory s, Coverage memory c, uint256 requested)
+        internal pure returns (uint256 target, Plan memory result)
+    {
+        if (requested == 0) return (0, plan(s, c, 0));
+        uint256 upper = Math.min(requested, Math.min(s.principal, s.walletScaled / Q));
+        if (upper == 0) return (0, plan(s, c, requested));
+        result = plan(s, c, upper);
+        if (result.status == Status.Found) return (upper, result);
+        if (result.status == Status.WorkLimit) return (0, result);
+
+        uint256 lo;
+        uint256 hi = upper - 1;
+        while (lo < hi) {
+            uint256 mid = lo + (hi - lo + 1) / 2;
+            Plan memory candidate = plan(s, c, mid);
+            if (candidate.status == Status.WorkLimit) return (0, candidate);
+            if (candidate.status == Status.Found) lo = mid;
+            else hi = mid - 1;
+        }
+        if (lo == 0) {
+            result.status = Status.Impossible;
+            return (0, result);
+        }
+        result = plan(s, c, lo);
+        return (lo, result);
+    }
 }

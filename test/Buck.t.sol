@@ -367,6 +367,24 @@ contract BuckTest is Test {
 
     // ---- burn --------------------------------------------------------------
 
+    function test_burnMaxIsNotALegacyMaximumAvailableSentinel() public {
+        uint256 id = _grantCredit(alice, 1000e6);
+        vm.prank(alice);
+        buck.mint(100e6);
+        uint256 backed = buck.mintsBacked(id);
+        uint256 premium = buck.mintsPrincipal(id);
+        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        vm.prank(alice);
+        buck.burn(type(uint256).max);
+        assertEq(buck.mintsBacked(id), backed);
+        assertEq(buck.mintsPrincipal(id), premium);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        vm.prank(alice);
+        buck.quoteBurn(type(uint256).max, ids);
+    }
+
     function test_burn_reducesDebt() public {
         // Phase 1b: burn() repays principal -- signed raw climbs toward zero.
         // The user's spendable (balanceOf) GROWS by `refund_i` because their
