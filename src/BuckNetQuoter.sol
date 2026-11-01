@@ -6,6 +6,7 @@ import {BuckCredit} from "./BuckCredit.sol";
 import {BuckNet, IBuckNetK} from "./BuckNet.sol";
 import {BuckTypes} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
+import {BuckNetMintMath} from "./lib/BuckNetMintMath.sol";
 
 /// @notice Optional read-only issuance estimates for one experimental BuckNet.
 /// @dev No authorization or settlement uses this contract. Keeping the shared
@@ -69,5 +70,49 @@ contract BuckNetQuoter {
         room = Math.min(room, accountRoom);
         room = Math.min(room, type(uint256).max / SCALE - token.totalIssued());
         if (room > premium) maxSpendable = room - premium;
+    }
+
+    /// @notice Find the least additional coverage for a desired spendable
+    ///         amount on one facility at current observed state.
+    /// @dev Status is 0: found, 1: impossible in this snapshot, 2: work limit.
+    ///      A work limit is not a proof of impossibility. This is an advisory
+    ///      quote, not owner authorization or a guarantee that K, premium,
+    ///      reserve, identity, pool or maturity state will remain unchanged.
+    ///      Use issue with explicit maximum premium and expected pool.
+    function quoteSpendable(uint256 tokenId, uint256 target)
+        external view returns (uint256 coverage, uint256 premium, uint256 reserveRequired,
+                               BuckNetMintMath.Status status, uint256 iterations)
+    {
+        if (target == 0) revert BuckNet.BadAmount();
+        BuckCredit credit = token.buckCredit();
+        address owner = credit.ownerOf(tokenId);
+        (uint256 face, uint256 active, uint32 rate) = credit.creditInfo(tokenId);
+        if (uint256(rate) * POOL_ROI_INV >= BP) revert BuckNet.BadPremiumRate();
+        IdentityRegistry identity = token.identity();
+        if (owner == token.jubilee() || !identity.isVerified(owner) || identity.isCarrying(owner)) {
+            return (0, 0, 0, BuckNetMintMath.Status.Impossible, 0);
+        }
+        (uint256 prior, uint256 seconds_) = credit.issuanceOf(tokenId);
+        if (prior != 0 && seconds_ == prior * RELIEF_SECONDS) {
+            return (0, 0, 0, BuckNetMintMath.Status.Impossible, 0);
+        }
+        (uint256 held, uint256 unspent) = token.heldAndUnspentScaled(owner);
+        uint256 room = (BuckTypes.MAX_BALANCE * SCALE - held - unspent) / SCALE;
+        room = Math.min(room, type(uint256).max / SCALE - token.totalIssued());
+        IBuckNetK k = token.buckK();
+        BuckNetMintMath.Snapshot memory snapshot = BuckNetMintMath.Snapshot({
+            face: face, activated: active, mark: credit.depreciatedFaceValue(tokenId),
+            principal: prior, k: k.currentBuckK(), effectiveRate: uint256(rate) * POOL_ROI_INV,
+            accountRoom: room
+        });
+        BuckNetMintMath.Plan memory result = BuckNetMintMath.plan(snapshot, target);
+        if (result.status == BuckNetMintMath.Status.Found) {
+            uint256 afterValue = Math.mulDiv(snapshot.mark, active + result.coverage, face);
+            if (Math.mulDiv(afterValue, snapshot.k, K_SCALE) < prior + target + result.premium) {
+                revert BuckNet.CreditExceeded();
+            }
+            reserveRequired = Math.mulDiv(result.premium, k.fundingFactor(), K_SCALE);
+        }
+        return (result.coverage, result.premium, reserveRequired, result.status, result.iterations);
     }
 }

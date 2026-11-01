@@ -72,6 +72,9 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
     encodeFunctionData({ abi: target.abi, functionName, args })]);
   await exec(credit, "setCreditIssuer", [gov, true]);
   await s.send(credit, "createCredit", [actor.address, 0, 100n * RAW, 100n * RAW, 0, 0, 0, 0]);
+  const targetQuote = await s.call(stack.quoter, "quoteSpendable", [0n, 37n * RAW]);
+  assert.deepEqual([targetQuote[0], targetQuote[1], targetQuote[2], Number(targetQuote[3]), targetQuote[4]],
+    [37n * RAW, 0n, 0n, 0, 1n]);
   await exec(buck, "issue", [0n, 100n * RAW, 100n * RAW, 0n, ZERO]);
   const issuedAt = (await s.client.getBlock()).timestamp;
   const ops = netCreditOps(s, stack);

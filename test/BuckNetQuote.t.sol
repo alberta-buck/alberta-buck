@@ -10,6 +10,7 @@ import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckLedger} from "../src/lib/BuckLedger.sol";
 import {JubileeClaims} from "../src/lib/JubileeClaims.sol";
+import {BuckNetMintMath} from "../src/lib/BuckNetMintMath.sol";
 import {NetK, MockNetFund, MockNetInsurerPool} from "./BuckNet.t.sol";
 
 /// @dev Exercise quotes against actual issuance, including fixed-point dust
@@ -101,6 +102,54 @@ contract BuckNetQuoteTest is Test {
         assertEq(principal, 3);
         assertEq(premium, 0);
         assertEq(buck.balanceOf(ALICE), 3);
+    }
+
+    function test_spendableQuoteFindsMinimumCoverageAndActualPremium() public {
+        _pool();
+        uint256 id = _credit(1000, 200);
+        k.setK(0.75e18);
+        k.setFactor(2e18);
+        (uint256 coverage, uint256 premium, uint256 reserve, BuckNetMintMath.Status status,) =
+            quoter.quoteSpendable(id, 100);
+        assertEq(uint256(status), uint256(BuckNetMintMath.Status.Found));
+        assertEq(coverage, 182);
+        assertEq(premium, 36);
+        assertEq(reserve, 72);
+        vm.expectRevert(BuckNet.FundingInsufficient.selector);
+        vm.prank(ALICE);
+        buck.issue(id, coverage, 100, premium, address(pool));
+        uint256 funding = _credit(96, 0);
+        vm.prank(ALICE);
+        buck.issue(funding, 96, 72, 0, address(0));
+        vm.prank(ALICE);
+        (uint256 principal, uint256 paid) = buck.issue(id, coverage, 100, premium, address(pool));
+        assertEq(principal, 136);
+        assertEq(paid, 36);
+        assertEq(buck.balanceOf(ALICE), 172);
+        assertEq(buck.balanceOf(address(pool)), 36);
+    }
+
+    function test_spendableQuoteUsesExistingCapacityAndCanRepairKShortfall() public {
+        uint256 id = _credit(1000, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 400, 100, 0, address(0));
+        (uint256 coverage, uint256 premium,, BuckNetMintMath.Status status,) = quoter.quoteSpendable(id, 100);
+        assertEq(uint256(status), uint256(BuckNetMintMath.Status.Found));
+        assertEq(coverage, 0);
+        assertEq(premium, 0);
+        vm.prank(ALICE);
+        buck.issue(id, coverage, 100, 0, address(0));
+
+        k.setK(0.25e18); // existing principal 200 against a present limit of 100
+        (coverage, premium,, status,) = quoter.quoteSpendable(id, 40);
+        assertEq(uint256(status), uint256(BuckNetMintMath.Status.Found));
+        assertEq(coverage, 560); // total cover 960, giving limit 240
+        assertEq(premium, 0);
+        vm.prank(ALICE);
+        buck.issue(id, coverage, 40, 0, address(0));
+        assertEq(buck.balanceOf(ALICE), 240);
+        (uint256 issued,) = credit.issuanceOf(id);
+        assertEq(issued, 240);
     }
 
     function test_issuePremiumCeilingRejectsRepricedInactiveFacilityAtomically() public {

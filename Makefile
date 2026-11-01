@@ -19,6 +19,7 @@ help:
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
+	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-deploy-dry-run            # legacy stub-verifier bootstrap, no broadcast' \
 	  '  make nix-venv-test-python           # Python tests (PYTEST_ARGS=...)' \
 	  '  make nix-core-test-js               # JS tests (JS_TEST_ARGS=...)' \

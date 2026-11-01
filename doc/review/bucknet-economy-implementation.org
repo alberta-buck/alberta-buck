@@ -160,6 +160,10 @@ rather than silently following both.
   The burn quote should expose whether the requested visible balance change
   fits the shared block budget and the operation-level liquidity limit, and
   help callers choose a feasible smaller request without silently clipping it.
+  =BuckNetQuoter.quoteSpendable= now finds the least coverage for one
+  ordinary facility using the current snapshot and reports premium and
+  reserve; it distinguishes a work limit from infeasibility. This is not yet
+  the compatible batch quote or a guarantee of future execution.
 - [X] Restore =creditLimit=, =mintsBacked= and =mintsPrincipal= with units and
   per-facility constraints documented. A two-facility test covers inactive
   coverage, a premium deposit, a K change and partial settlement.
@@ -392,6 +396,8 @@ Use the project Make wrappers where possible; see
 make nix-venv-demurrage-test
 make nix-match-BuckTest
 make nix-match-BuckNetTest
+make nix-match-BuckNetMintMathTest
+make nix-match-BuckNetQuoteTest
 make nix-match-WorkWheelTest
 make nix-match-JubileeMarkedReliefTest
 make nix-match-JubileeMaturedReleaseTest
@@ -458,4 +464,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Valuation-only wheel prototype | The existing wheel can publish a source's static valuation without advancing its work cursor or paying a reward. Configured fund reductions and renewals refresh after insurer preparation; quotes use the last publication and validate the position key and current price band. Foundry: 27 BuckNet, 10 WorkWheel, 44 fund and 20 real-equity integration tests passed. Real V3 cases cover price rise/drop, retry and both token orders; a guard test reads Buck during a locked issuance and rejects reentry. The artifact check and cash-only net smoke (26 Python, 20 JS; wheel not configured by the smoke deployment) passed; BuckNet runtime is 24,209 bytes and JubileeFund is 22,582 bytes. Deployment wiring, valuation gas bounds, published-quote age, real leveraged basket credit, compatible burn and ordinary wheel fund work remain open. | =a47411a2= |
 | 2026-11-01 | Plain approval parity | Plain =approve(address(0), N)= now matches legacy Buck; the proof-bearing overload still rejects an unverified recipient before changing allowance. All 28 BuckNet tests pass; runtime at that checkpoint was 24,188 bytes. The full token-API and identity-parity migration remains open. | =f95a404f= |
 | 2026-11-01 | Reuse linked token operations | Issuance moved into the existing transfer library, renamed =BuckNetTokenOps= to reflect both responsibilities. The original owner, guard, ledger, per-facility premium pools, identity receipts, claim updates and fund checkpoint remain in one atomic transition. The linked runtime falls to 22,039 bytes, leaving 2,537 under EIP-170; no extra deployed library was added. BuckNet, quote and Jubilee suites passed 28, 17 and 201 cases; the artifact check and cash-only net smoke passed (26 Python, 20 JS). Python/JS deployments and bundle metadata use the renamed library; JS net-world records use version 3 and reject the old graph. Compatible mint/burn, Carrying owners and the leveraged economy remain open. | =dd0c1dce= |
-| 2026-11-01 | Mint rounding regression | With K=.75 and a 20% premium deposit, four raw units of coverage can issue three raw units while five can issue only two. An actual issuance and both quotes confirm the non-monotone edge; 18 =BuckNetQuoteTest= cases pass. The compatible allocator must account for it rather than use naive binary search. | This commit |
+| 2026-11-01 | Mint rounding regression | With K=.75 and a 20% premium deposit, four raw units of coverage can issue three raw units while five can issue only two. An actual issuance and both quotes confirm the non-monotone edge; 18 =BuckNetQuoteTest= cases pass. The compatible allocator must account for it rather than use naive binary search. | =97268d51= |
+| 2026-11-01 | Bounded per-facility issuance quote | =quoteSpendable= uses integer lower bounds and a bounded fixed-point search to select least coverage for a requested ordinary-account balance increase. It reports the premium and reserve, and distinguishes impossible from a 256-step work limit. A 10,000-case independent exhaustive fuzz comparison and 20 quote tests, including actual premium, pre-funded and K-shortfall issuance, pass. Python Anvil and JS Tevm each call the new quote successfully; the artifact check passes. The quote is advisory; Carrying owners, batch selection and token =mint= are not implemented. | This commit |

@@ -61,6 +61,8 @@ Foundry at a different output directory.
 
 #+begin_src sh
 make nix-test                              # Foundry contract tests
+make nix-match-BuckNetMintMathTest         # bounded per-facility issuance math and fuzzing
+make nix-match-BuckNetQuoteTest            # quotes checked against real BuckNet issuance
 make nix-deploy-dry-run                    # local EVM; no broadcast
 make nix-venv-test-python                  # Python reference and simulator tests
 make nix-venv-core-test-py                 # Python platform tests

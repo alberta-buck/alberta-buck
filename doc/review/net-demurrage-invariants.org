@@ -120,6 +120,18 @@ owner. Use the measured external raw-unit difference after settlement, with
 correct checkpoints and no arithmetic underflow; otherwise revert all state.
 The maximum sentinel has its separately specified maximum-available meaning.
 
+The experimental per-facility =BuckNetQuoter.quoteSpendable= inverts current
+coverage, K and the premium into the least additional coverage for one
+ordinary owner. It accounts for already activated room, per-NFT principal,
+account/supply limits and a K shortfall, and reports the required pre-existing
+reserve. Separate integer floors can make an adjacent larger coverage produce
+less spendable BUCK, so the helper does not assume monotonic quotes. It uses
+lower bounds followed by a bounded fixed-point search, and distinguishes a
+work limit from an actually impossible snapshot. Independent exhaustive small
+cases and real issuance tests exercise it. The quote does not reserve K,
+funding or insurer identity, and it is neither the legacy batch quote nor the
+planned Carrying-owner or token =mint= implementation.
+
 The old intent is not an unconditional guarantee of its implementation.
 Temporary Foundry probes against the legacy contract reproduced three edge
 cases: after a K reduction, an existing 50-BUCK shortfall absorbs half of a
