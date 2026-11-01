@@ -170,6 +170,11 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
     function fundBalancesScaled() external view returns (uint256 gross, uint256 net) { return _book.fundParts(); }
     function fundFlows() external view returns (BuckLedger.FundFlows memory) { return _book.fundFlows(); }
+    /// @notice Full-value relief available to one protected outflow now,
+    ///         including the current per-block budget; a quote, not a hold.
+    function availableReliefScaled() external view returns (uint256) {
+        return BuckNetMaturity.availableReliefScaled(_book);
+    }
     /// @notice Whole nominal Carrying BUCK needed to transfer at least `net`
     ///         full-value raw BUCK from the Jubilee fund at the current block.
     function fundNominalForNet(uint256 net) external view returns (uint256) {
@@ -444,7 +449,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     /// @notice Burn fund cash against Jubilee's assumed matured issuance.
-    ///         Each call can consume at most 10% of pre-burn net fund cash.
+    ///         This shares the block budget with reductions and renewals.
     function burnDeferredFromJubilee(uint256 principal) external nonReentrant {
         if (msg.sender != jubilee) revert NotJubilee();
         uint256 nominal = BuckNetMaturity.burn(_book, claimBook, principal);
@@ -468,9 +473,8 @@ contract BuckNet is IERC20, IERC20Metadata {
         claimBook.sync(tokenId);
     }
 
-    function _enforceReliefLimit(uint256 reliefScaled) private view {
-        (, uint256 net) = _book.fundParts();
-        if (reliefScaled > net / 10) revert ReliefLiquidityLimit();
+    function _enforceReliefLimit(uint256 reliefScaled) private {
+        BuckNetMaturity.consumeReliefBudget(_book, reliefScaled);
     }
 
     function _refundPremium(address owner, uint256 tokenId, uint256 amount) private {

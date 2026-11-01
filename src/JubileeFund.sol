@@ -310,7 +310,8 @@ contract JubileeFund is IERC721Receiver {
 
     /// @notice Reduce the caller's authorized facility using already-liquid
     ///         BUCK. Its age-weighted share of net cash and the basket mark is
-    ///         capped at principal and must not exceed 10% of net liquid cash.
+    ///         capped at principal and must fit the per-operation cash limit
+    ///         and the block budget shared with renewals and deferred burns.
     function reduce(uint256 tokenId, uint256 principal)
         external configured nonReentrant returns (uint256 reliefScaled, uint256 premiumRefund)
     {
@@ -358,7 +359,7 @@ contract JubileeFund is IERC721Receiver {
         emit RenewalRelief(msg.sender, tokenId, relief, refund, premium);
     }
 
-    /// @notice Quote a reduction before applying the 10% liquid-cash guard.
+    /// @notice Quote a reduction and whether current liquidity limits block it.
     /// @dev A missing or unsafe basket mark reverts rather than inventing a
     ///      value. The owner still has to authorize execution separately.
     function previewRelief(uint256 tokenId, uint256 principal)
@@ -367,7 +368,7 @@ contract JubileeFund is IERC721Receiver {
         (uint256 selected, uint256 total) = token.selectedClaimSeconds(tokenId, principal);
         (, cashScaled) = token.fundBalancesScaled();
         reliefScaled = _markedRelief(principal, selected, total, cashScaled);
-        exceedsLimit = reliefScaled > cashScaled / 10;
+        exceedsLimit = reliefScaled > token.availableReliefScaled();
     }
 
     function _markedRelief(uint256 principal, uint256 selected, uint256 total, uint256 cash)

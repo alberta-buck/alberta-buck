@@ -264,15 +264,24 @@ and simulation. See the
 [[file:doc/review/jubilee-marked-relief.org][marked-relief analysis]] for a numerical example, the 50-year aggregate and
 valuation limitations.
 
+The prototype also shares a per-block relief budget across facility
+reductions, renewals and burns of Jubilee's deferred obligations. The first
+positive outflow snapshots 10% of the then-liquid net cash; later cash inflows
+cannot increase that block's allowance. Each payment must also fit 10% of the
+current liquid cash. This bounds the fund's total outflow in a block; it does
+not by itself protect a borrower from an understated mark. The owner's minimum
+relief and price safeguards remain necessary. A planned valuation-only wheel
+refresh before compatibility burns is not yet implemented.
+
 At 50 years of a facility's average issuance age, its owner can instead
 release the lien without providing BUCK. The prototype burns the NFT and
 records the unburned principal as Jubilee's obligation, retaining it in
 outstanding supply and the benchmark until the fund later burns it. A premium
 deposit remains owed by the original insurer pool in nominal BUCK; if the
 pool cannot immediately return it, the refund can be retried after lien
-release. Deferred burns are limited to 10% of current net fund cash per
-operation. A strict limit can leave a small residual obligation if fewer than
-ten raw BUCK units are liquid.
+release. Deferred burns share the block budget and are also limited to 10% of
+current net fund cash per operation. A strict limit can leave a small residual
+obligation if fewer than ten raw BUCK units are liquid.
 
 If an owner leaves an already mature facility open, its claim does not grow
 beyond its principal, but the BUCK it issued remains in circulation and

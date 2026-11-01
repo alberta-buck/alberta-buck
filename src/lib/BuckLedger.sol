@@ -44,6 +44,14 @@ library BuckLedger {
         uint8 mode;
     }
 
+    /// @dev The first positive relief outflow snapshots its block's budget;
+    ///      all protected paths consume the same remaining full-value BUCK.
+    struct ReliefBudget {
+        uint256 blockNumber;
+        uint256 remainingScaled;
+        bool started;
+    }
+
     struct Ledger {
         mapping(address => Account) accounts;
         address fund;
@@ -56,6 +64,7 @@ library BuckLedger {
         WideCounter.Count fundTransfersIn;
         WideCounter.Count fundTransfersOut;
         WideCounter.Count fundRelief;
+        ReliefBudget reliefBudget;
     }
 
     /// @notice Cumulative fund flows in raw BUCK units, each with a 1e36

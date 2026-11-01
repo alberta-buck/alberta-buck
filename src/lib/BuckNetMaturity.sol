@@ -13,6 +13,41 @@ library BuckNetMaturity {
     uint256 private constant Q = 1e36;
     error ReliefLiquidityLimit();
 
+    /// @notice Full-value BUCK, in Q-scaled raw units, that can be spent on
+    ///         one protected outflow at the current block and cash balance.
+    /// @dev This is a transient quote, not a reservation. The first positive
+    ///      outflow snapshots 10% of then-current net cash for the block;
+    ///      later inflows cannot replenish that block's remaining budget.
+    function availableReliefScaled(BuckLedger.Ledger storage ledger) public view returns (uint256 available) {
+        (, uint256 net) = ledger.fundParts();
+        available = net / 10;
+        BuckLedger.ReliefBudget storage budget = ledger.reliefBudget;
+        if (budget.started && budget.blockNumber == block.number && budget.remainingScaled < available) {
+            available = budget.remainingScaled;
+        }
+    }
+
+    /// @dev The host must authenticate and lock the complete operation. A
+    ///      later revert rolls this update back together with the settlement.
+    function consumeReliefBudget(BuckLedger.Ledger storage ledger, uint256 reliefScaled) public {
+        _consumeReliefBudget(ledger, reliefScaled);
+    }
+
+    function _consumeReliefBudget(BuckLedger.Ledger storage ledger, uint256 reliefScaled) private {
+        if (reliefScaled == 0) return;
+        (, uint256 net) = ledger.fundParts();
+        uint256 perOperation = net / 10;
+        if (reliefScaled > perOperation) revert ReliefLiquidityLimit();
+        BuckLedger.ReliefBudget storage budget = ledger.reliefBudget;
+        if (!budget.started || budget.blockNumber != block.number) {
+            budget.started = true;
+            budget.blockNumber = block.number;
+            budget.remainingScaled = perOperation;
+        }
+        if (reliefScaled > budget.remainingScaled) revert ReliefLiquidityLimit();
+        budget.remainingScaled -= reliefScaled;
+    }
+
     function close(BuckCredit credit, JubileeClaimBook claims,
                    mapping(uint256 => address) storage pools,
                    mapping(uint256 => uint256) storage premiums,
@@ -30,8 +65,8 @@ library BuckNetMaturity {
     function burn(BuckLedger.Ledger storage ledger, JubileeClaimBook claims, uint256 principal)
         public returns (uint256 nominal)
     {
-        (, uint256 net) = ledger.fundParts();
-        if (principal > net / (10 * Q)) revert ReliefLiquidityLimit();
+        if (principal > type(uint256).max / Q) revert ReliefLiquidityLimit();
+        _consumeReliefBudget(ledger, principal * Q);
         nominal = ledger.retireFundDebt(principal);
         claims.consumeDeferred(principal);
     }

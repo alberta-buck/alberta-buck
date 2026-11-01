@@ -172,13 +172,13 @@ Table of Contents
   rate, the Python reference produces, ignoring rounding:
 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Years  Unspent / balanceOf  Jubilee BUCK  Gross demurrage  Jubilee self-demurrage  Target relief
+   Years  Unspent / balanceOf  Jubilee BUCK  Gross demurrage  Jubilee self-demurrage  Target relief 
   ──────────────────────────────────────────────────────────────────────────────────────────────────
-       0           100.000000      0.000000         0.000000                0.000000       0.000000
-       1            98.019867      1.980133         2.000000                0.019867       2.000000
-      25            60.653066     39.346934        50.000000               10.653066      50.000000
-      49            37.531110     62.468890        98.000000               35.531110      98.000000
-      50            36.787944     63.212056       100.000000               36.787944     100.000000
+       0           100.000000      0.000000         0.000000                0.000000       0.000000 
+       1            98.019867      1.980133         2.000000                0.019867       2.000000 
+      25            60.653066     39.346934        50.000000               10.653066      50.000000 
+      49            37.531110     62.468890        98.000000               35.531110      98.000000 
+      50            36.787944     63.212056       100.000000               36.787944     100.000000 
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   The 100 BUCK gross demurrage is the sum of 63.212056 transferred from
@@ -298,16 +298,26 @@ Table of Contents
   analysis] for a numerical example, the 50-year aggregate and valuation
   limitations.
 
+  The prototype also shares a per-block relief budget across facility
+  reductions, renewals and burns of Jubilee's deferred obligations. The
+  first positive outflow snapshots 10% of the then-liquid net cash;
+  later cash inflows cannot increase that block's allowance. Each
+  payment must also fit 10% of the current liquid cash. This bounds the
+  fund's total outflow in a block; it does not by itself protect a
+  borrower from an understated mark. The owner's minimum relief and
+  price safeguards remain necessary. A planned valuation-only wheel
+  refresh before compatibility burns is not yet implemented.
+
   At 50 years of a facility's average issuance age, its owner can
   instead release the lien without providing BUCK. The prototype burns
   the NFT and records the unburned principal as Jubilee's obligation,
   retaining it in outstanding supply and the benchmark until the fund
   later burns it. A premium deposit remains owed by the original insurer
   pool in nominal BUCK; if the pool cannot immediately return it, the
-  refund can be retried after lien release. Deferred burns are limited
-  to 10% of current net fund cash per operation. A strict limit can
-  leave a small residual obligation if fewer than ten raw BUCK units are
-  liquid.
+  refund can be retried after lien release. Deferred burns share the
+  block budget and are also limited to 10% of current net fund cash per
+  operation. A strict limit can leave a small residual obligation if
+  fewer than ten raw BUCK units are liquid.
 
   If an owner leaves an already mature facility open, its claim does not
   grow beyond its principal, but the BUCK it issued remains in

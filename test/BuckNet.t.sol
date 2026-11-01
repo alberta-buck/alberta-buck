@@ -537,6 +537,94 @@ contract BuckNetTest is Test {
         assertEq(buck.totalIssued(), 99e6);
     }
 
+    function test_reductionsShareBlockBudgetAndRetryInNextBlock() public {
+        uint256 aliceId = _credit(ALICE, INSURER_A, 100e6, 0);
+        uint256 bobId = _credit(BOB, INSURER_B, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(aliceId, 100e6, 100e6, type(uint256).max, address(0));
+        vm.prank(BOB);
+        buck.issue(bobId, 100e6, 100e6, type(uint256).max, address(0));
+        vm.warp(t0 + YEAR);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        uint256 first = cash / 15;
+        uint256 second = cash / 25;
+        assertEq(buck.availableReliefScaled(), cash / 10);
+        _authorize(ALICE, aliceId, 10e6, 0);
+        _authorize(BOB, bobId, 10e6, 0);
+        fund.settle(buck, ALICE, aliceId, 10e6, first);
+        uint256 remaining = cash / 10 - first;
+        assertEq(buck.availableReliefScaled(), remaining);
+        assertGt(second, remaining);
+        assertLe(second, (cash - first) / 10); // only the shared limit blocks it
+        uint256 bobBalance = buck.balanceOf(BOB);
+        uint256 supply = buck.totalSupply();
+        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        fund.settle(buck, BOB, bobId, 10e6, second);
+        assertEq(buck.balanceOf(BOB), bobBalance);
+        assertEq(buck.totalSupply(), supply);
+        (uint256 authorization,,) = buck.reductionAuthorization(bobId);
+        assertEq(authorization, 10e6);
+        assertEq(buck.availableReliefScaled(), remaining);
+        vm.roll(block.number + 1);
+        assertEq(buck.availableReliefScaled(), (cash - first) / 10);
+        fund.settle(buck, BOB, bobId, 10e6, second);
+        assertEq(buck.totalSupply(), supply - 10e6);
+    }
+
+    function test_zeroReliefDoesNotStartBudgetAndLaterInflowsDoNotReplenishIt() public {
+        vm.roll(0); // block zero must not be confused with an uninitialized budget
+        uint256 aliceId = _credit(ALICE, INSURER_A, 100e6, 0);
+        uint256 bobId = _credit(BOB, INSURER_B, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(aliceId, 100e6, 100e6, type(uint256).max, address(0));
+        vm.prank(BOB);
+        buck.issue(bobId, 100e6, 100e6, type(uint256).max, address(0));
+        _authorize(ALICE, aliceId, 1e6, 0);
+        fund.settle(buck, ALICE, aliceId, 1e6, 0);
+        vm.prank(BOB);
+        buck.transfer(address(fund), 10e6);
+        assertEq(buck.availableReliefScaled(), 1e6 * Q);
+        _authorize(ALICE, aliceId, 1e6, 0);
+        fund.settle(buck, ALICE, aliceId, 1e6, 600_000 * Q);
+        assertEq(buck.availableReliefScaled(), 400_000 * Q);
+        vm.prank(BOB);
+        buck.transfer(address(fund), 10e6);
+        assertEq(buck.availableReliefScaled(), 400_000 * Q);
+        _authorize(BOB, bobId, 1e6, 0);
+        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        fund.settle(buck, BOB, bobId, 1e6, 400_000 * Q + 1);
+        fund.settle(buck, BOB, bobId, 1e6, 400_000 * Q);
+        assertEq(buck.availableReliefScaled(), 0);
+        vm.roll(1);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        assertEq(buck.availableReliefScaled(), cash / 10);
+    }
+
+    function test_failedSettlementDoesNotConsumeOrStartBlockBudget() public {
+        uint256 aliceId = _credit(ALICE, INSURER_A, 100e6, 0);
+        _credit(BOB, INSURER_B, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(aliceId, 100e6, 100e6, type(uint256).max, address(0));
+        vm.prank(ALICE);
+        buck.transfer(BOB, 100e6);
+        vm.warp(t0 + YEAR);
+        (, uint256 cash) = buck.fundBalancesScaled();
+        uint256 available = cash / 10;
+        _authorize(ALICE, aliceId, 10e6, 0);
+        vm.expectRevert(BuckLedger.InsufficientBalance.selector);
+        fund.settle(buck, ALICE, aliceId, 10e6, available);
+        assertEq(buck.availableReliefScaled(), available);
+        (uint256 authorization,,) = buck.reductionAuthorization(aliceId);
+        assertEq(authorization, 10e6);
+        // If the failed attempt had snapshotted the budget, this new cash
+        // would not increase it within the current block.
+        vm.prank(BOB);
+        buck.transfer(address(fund), 10e6);
+        (, uint256 afterDonation) = buck.fundBalancesScaled();
+        assertGt(afterDonation, cash);
+        assertEq(buck.availableReliefScaled(), afterDonation / 10);
+    }
+
     function test_expiredMaturityRequiresPermissionlessProcessingBeforeIssuance() public {
         uint256 old = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);

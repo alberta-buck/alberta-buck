@@ -662,12 +662,14 @@ contract JubileeFundTest is Test {
         uint256 snapshot = vm.snapshotState();
         vm.prank(ALICE);
         (uint256 aliceFirst,) = fund.reduce(a, 500_000);
+        vm.roll(block.number + 1); // each marked payment needs its own block budget
         vm.prank(BOB);
         (uint256 bobSecond,) = fund.reduce(b, 500_000);
         assertApproxEqAbs(aliceFirst, bobSecond, 2);
         assertTrue(vm.revertToState(snapshot));
         vm.prank(BOB);
         (uint256 bobFirst,) = fund.reduce(b, 500_000);
+        vm.roll(block.number + 1);
         vm.prank(ALICE);
         (uint256 aliceSecond,) = fund.reduce(a, 500_000);
         assertApproxEqAbs(bobFirst, aliceSecond, 2);
@@ -1036,6 +1038,79 @@ contract JubileeRenewalTest is JubileeFundTest {
         consent.propose(id, digest);
         vm.prank(ALICE);
         consent.authorize(id, digest);
+    }
+
+    function test_reductionAndRenewalShareBlockBudget() public {
+        uint256 aliceId = _credit(ALICE, 1000e6, 0);
+        uint256 bobId = _credit(BOB, 2000e6, 0);
+        _buffer(1000e6);
+        vm.warp(t0 + YEAR);
+        _authorize(BOB, bobId, 2000e6, 0);
+        vm.prank(BOB);
+        fund.reduce(bobId, 2000e6);
+
+        (uint256 quote, uint256 cash, bool blocked) = fund.previewRelief(aliceId, 1000e6);
+        assertTrue(blocked);
+        assertLe(quote, cash / 10); // the block budget, not the individual cap
+        BuckRenewal.Terms memory terms = _terms(aliceId, 1000e6, 1000e6, 0, 0);
+        bytes32 digest = _approveRenewal(aliceId, terms);
+        uint256 supply = buck.totalSupply();
+        uint256 available = buck.availableReliefScaled();
+        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.prank(ALICE);
+        fund.renew(aliceId, terms);
+        assertEq(buck.totalSupply(), supply);
+        assertEq(buck.availableReliefScaled(), available);
+        assertEq(buck.renewalConsent().proposal(aliceId), digest);
+        assertEq(buck.renewalConsent().authorization(aliceId), digest);
+        vm.roll(block.number + 1);
+        vm.prank(ALICE);
+        (uint256 relief,,) = fund.renew(aliceId, terms);
+        assertEq(relief, quote / Q);
+    }
+
+    function test_deferredBurnAndRenewalShareBudgetInBothOrders() public {
+        uint256 maturedId = _credit(BOB, 1000e6, 0);
+        vm.warp(t0 + 49 * YEAR);
+        uint256 aliceId = _credit(ALICE, 1000e6, 0);
+        vm.warp(t0 + 50 * YEAR);
+        buck.processMaturities(1);
+        vm.prank(BOB);
+        fund.closeMatured(maturedId);
+        (uint256 quote, uint256 cash,) = fund.previewRelief(aliceId, 1000e6);
+        uint256 first = cash / (10 * Q) - quote / (2 * Q);
+        assertGt(first, 0);
+        vm.prank(GOV);
+        fund.burnDeferred(first);
+        (uint256 afterQuote, uint256 afterCash, bool blocked) = fund.previewRelief(aliceId, 1000e6);
+        assertTrue(blocked);
+        assertLe(afterQuote, afterCash / 10);
+        BuckRenewal.Terms memory terms = _terms(aliceId, 1000e6, 1000e6, 0, 0);
+        bytes32 digest = _approveRenewal(aliceId, terms);
+        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.prank(ALICE);
+        fund.renew(aliceId, terms);
+        assertEq(buck.renewalConsent().authorization(aliceId), digest);
+        vm.roll(100);
+        vm.prank(ALICE);
+        fund.renew(aliceId, terms);
+
+        // In the opposite order, a deferred burn must respect the same
+        // budget consumed by that renewal, even below its own cash cap.
+        uint256 available = buck.availableReliefScaled();
+        uint256 second = available / Q + 1;
+        (, uint256 currentCash) = buck.fundBalancesScaled();
+        assertLe(second * Q, currentCash / 10);
+        uint256 deferred = buck.claimBook().deferredPrincipal();
+        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.prank(GOV);
+        fund.burnDeferred(second);
+        assertEq(buck.claimBook().deferredPrincipal(), deferred);
+        assertEq(buck.availableReliefScaled(), available);
+        vm.roll(101);
+        vm.prank(GOV);
+        fund.burnDeferred(second);
+        assertEq(buck.claimBook().deferredPrincipal(), deferred - second);
     }
 
     function _changingMarketFixture() internal returns (uint256 id, JubileeMarketChangingInsurer pool) {

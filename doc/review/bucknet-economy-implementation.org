@@ -95,9 +95,10 @@ rather than silently following both.
   starting point for Jubilee's mark and investment/withdrawal work. Reuse or
   extend those components; do not build a second basket, price engine or
   independent upkeep system merely to integrate the fund. Relief uses the
-  last valid mark published by that wheel, subject to the selected freshness,
-  position-consistency and price-safety checks; it does not recompute a fresh
-  basket valuation on each burn. Liquid fund cash is still read at settlement.
+  last valid mark published by that wheel. At the start of a burn, invoke a
+  valuation-only wheel entry to refresh it without executing trades or
+  rebalancing under the token lock. Guard price and position consistency;
+  liquid fund cash is read separately at settlement.
 
 * 1. Next milestone: Buck-compatible token API
 
@@ -136,6 +137,13 @@ rather than silently following both.
   contract that changes =msg.sender=. Guard the entire transition, insurer
   preparation, claims, fund, NFT and token updates against reentrancy; a
   failure at any point must leave every participant unchanged.
+- [ ] At burn preflight, request the wheel's valuation-only refresh while
+  preserving Buck's non-reentrancy. This must not execute an ordinary wheel
+  work step, transfer BUCK, redeem the fund's position, perform swaps, or pay
+  a keeper reward through the token. Ensure the mark used for relief is the
+  one just published for the actual fund position and remains valid after any
+  insurer callbacks; reorder or revalidate if a callback can change it.
+  The current legacy Buck and BuckNet do not call a wheel on burn today.
 - [ ] Reinstate =quoteMint= and =quoteBurn= with their old argument and return
   shapes and execution-consistent rounding. Add a richer quote for per-NFT
   principal, coverage, refund, actual net relief, owner contribution and
@@ -208,12 +216,15 @@ rather than silently following both.
 
 - [ ] Use the existing =BuckBasketEquityStorage._snap=, constituent marks,
   =sharePrice/valueOf= and share/basis rules as the starting valuation source.
-  Publish a persistent Jubilee mark during the existing wheel's work and use
-  its last valid publication for relief. The prototype currently calls
+  Add a bounded valuation-only entry on the existing wheel and have each burn
+  ask it to refresh the published Jubilee mark. The entry may write the mark
+  and its metadata, but basket and market reads must be static: no arbitrary
+  upkeep, swaps, redemption, BUCK transfers or wheel rewards. Ordinary wheel
+  ticks can independently invest or replenish liquidity. The prototype calls
   =basket.valueOf= live; the wheel does *not* yet publish this mark. Specify
-  and test freshness, position changes, callbacks, same-block use, publication
-  failures and price guards. Define post-gain-fee full-value BUCK and
-  Carrying-pool adjustments; a mark is not executable liquidity.
+  and test refresh failure, stale or absent input, position changes, callbacks,
+  same-block price moves and price guards. Define post-gain-fee full-value
+  BUCK and Carrying-pool adjustments; a mark is not executable liquidity.
 - [ ] Integrate fund investment, reserve replenishment, maturity processing
   and deferred burns as bounded work in the existing =WorkWheel=/basket-wheel
   slot and tick mechanism, or a minimal extension of it. Reuse the fund's
@@ -318,16 +329,15 @@ rather than silently following both.
 
 The user selected actual =balanceOf= changes for compatible mint and burn,
 approved Carrying facility owners, a shared per-block 10% cash budget and the
-last published wheel mark. These are *requirements*, not implemented
-properties. The current prototype rejects Carrying owners, lacks compatible
-mint/burn entry points, uses per-operation 10% of pre-reduction liquid net
-cash and reads a guarded live basket mark. Repeated calls in one block can
-each consume another portion, and the wheel does not yet do the fund's work.
+last published wheel mark. The shared budget is now implemented; the current
+prototype still rejects Carrying owners, lacks compatible mint/burn entry
+points, reads a guarded live basket mark and does not make the wheel perform
+the fund's work. Do not treat the other selected policies as implemented.
 
 For example, if the fund has 100 liquid BUCK, the current guard can permit one
 operation paying 10 and another in the same block paying 9. The shared
 block budget snapshots the fund's net cash immediately before the block's
-first protected outflow, allows at most 10% of that snapshot across protected
+first *positive* protected outflow, allows at most 10% of that snapshot across protected
 outflows in that block, and still checks each operation against current cash.
 Cash received later in the same block would not increase that block's budget;
 the next block starts a new snapshot. Reductions, renewals and deferred burns
@@ -340,6 +350,15 @@ raw-unit liquidity/dust, stale marks, no wheel callers, empty or distressed
 baskets and an insolvent insurer behave without promising liquidity or
 blocking matured lien release. The cross-holding analysis remains an
 implementation gate.
+
+The block budget bounds how much Jubilee pays under a temporarily inaccurate
+mark, not how much an individual borrower could lose from an understated mark.
+It also does not guarantee that a stale or manipulated market observation is
+correct. Keep a borrower-selectable minimum relief and principal/coverage
+bound, guarded inputs, and the explicit published-mark checks. A valuation-only
+refresh is bounded separately from ordinary wheel work: a failed burn rolls back
+its own refresh, and it is not evidence that arbitrage, a fund sale, or other
+liquidity-replenishing work occurred.
 
 * Verification and reproducibility
 
@@ -411,4 +430,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Unified replacement plan and compatibility review | ABI and identity paths reviewed; 53 Buck and 22 BuckNet tests passed. Wheel, marked-relief and single-position work mapped without claiming integration. The demurrage paper, text and PDF were updated; compatibility burn units, block budget and wheel-mark freshness remain user questions. | =860c9136= |
 | 2026-11-01 | Compatible credit and premium views | BuckNet exposes legacy creditLimit, mintsBacked and mintsPrincipal without inventing a signed balance. The new two-NFT test covers premiums, live K and partial settlement; all 23 BuckNet tests and make contracts-dist-check pass. Runtime is 24,067 bytes, leaving 509 bytes under EIP-170 with the current build. Mint/burn and identity parity remain open. | =2432aed6= |
 | 2026-11-01 | Real-identity transfer coverage | A production-registry Tevm test uses two real Chaum-Pedersen proofs and checks unverified/private refusal, bad proof rollback, allowance, receipt hashes, full net transfer and unchanged NFT principal. The combined net-demurrage-smoke passed 26 Python and 20 JS tests. Shared legacy/net and all public/Carrying identity cases remain open. | =475b2427= |
-| 2026-11-01 | Numeric and liquidity decisions | Legacy Foundry probes reproduced K-shortfall under-delivery, Carrying mint with no visible increase, and accrued-relief burn with a smaller balance decrease. The owner selected actual-balance guarantees, approved Carrying facility owners, a shared block cap and the last published wheel mark. This records the target and its test obligations; the prototype has not yet implemented these choices. | This commit |
+| 2026-11-01 | Numeric and liquidity decisions | Legacy Foundry probes reproduced K-shortfall under-delivery, Carrying mint with no visible increase, and accrued-relief burn with a smaller balance decrease. The owner selected actual-balance guarantees, approved Carrying facility owners, a shared block cap and the last published wheel mark. This records the target and its test obligations. | =792c5d77= |
+| 2026-11-01 | Shared relief budget | BuckNet now shares one 10%-of-initial-net-cash block budget across reductions, renewals and deferred burns, while retaining the current-cash guard. The first positive payment snapshots the budget; failed operations and zero relief do not start it, and later inflows cannot increase it. Available relief is visible to the fund's quote. Foundry: 26 BuckNet, 193 Jubilee and 23 BuckLedger cases passed. BuckNet runtime is 24,209 bytes, 367 below EIP-170; further compatibility work needs code-size refactoring. The user also selected a valuation-only wheel refresh at burn preflight, still to implement. | This commit |
