@@ -509,7 +509,8 @@ contract BuckNet is IERC20, IERC20Metadata {
     }
 
     function _approve(address owner, address spender, uint256 amount) private {
-        if (spender == address(0)) revert BadAddress();
+        // Match Buck's plain ERC-20 approval behavior, including zero spender.
+        // Proof-bound approval still independently verifies both identities.
         _allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
     }

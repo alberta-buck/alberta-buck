@@ -166,6 +166,18 @@ contract BuckNetTest is Test {
         assertEq(buck.balanceOf(ALICE), 100e6);
     }
 
+    function test_plainApprovalPreservesLegacyZeroSpenderBehavior() public {
+        vm.prank(ALICE);
+        assertTrue(buck.approve(address(0), 123));
+        assertEq(buck.allowance(ALICE, address(0)), 123);
+        IdentityRegistry.ElGamalCT memory ciphertext;
+        IdentityRegistry.CPProof memory proof;
+        vm.expectRevert(BuckNet.NotVerified.selector);
+        vm.prank(ALICE);
+        buck.approve(address(0), 456, ciphertext, proof);
+        assertEq(buck.allowance(ALICE, address(0)), 123);
+    }
+
     function test_registryModeChangesKeepNetBalancesAndFundValueConserved() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
