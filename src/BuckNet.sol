@@ -240,6 +240,21 @@ contract BuckNet is IERC20, IERC20Metadata {
         _mintAllocated(amount, tokenIds, false);
     }
 
+    /// @notice Retire credit so the caller's actual balance decreases by at
+    ///         least `amount`, using highest-premium facilities first.
+    /// @dev The original insurer pools must already have their nominal refund
+    ///      and allowance available. Jubilee pays only from liquid cash within
+    ///      the shared block limit; no pool preparation or basket sale occurs
+    ///      under this token's guard. Approved Carrying owners remain pending.
+    function burn(uint256 amount) external nonReentrant {
+        _burnAllocated(amount, new uint256[](0), true);
+    }
+
+    /// @notice Retire credit using the caller's selected facility order.
+    function burn(uint256 amount, uint256[] calldata tokenIds) external nonReentrant {
+        _burnAllocated(amount, tokenIds, false);
+    }
+
     /// @notice Quote the selected facilities at the currently published K.
     /// @dev Like the original shape, this does not reserve K or the premium
     ///      funding. The executed mint rechecks its full atomic transition.
@@ -252,6 +267,11 @@ contract BuckNet is IERC20, IERC20Metadata {
     function _mintAllocated(uint256 amount, uint256[] memory tokenIds, bool automatic) private {
         BuckNetTokenOps.mint(_book, facilityPool, premiumPrincipal, insurerPool, _receiptFragments,
                              _issueDependencies(), amount, tokenIds, automatic);
+    }
+
+    function _burnAllocated(uint256 amount, uint256[] memory tokenIds, bool automatic) private {
+        BuckNetTokenOps.burn(_book, facilityPool, premiumPrincipal, reductionAuthorization,
+                             _allowances, _receiptFragments, _issueDependencies(), amount, tokenIds, automatic);
     }
 
     function _issueDependencies() private view returns (BuckNetTokenOps.IssueDependencies memory) {

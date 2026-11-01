@@ -140,6 +140,13 @@ test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, as
   assert.equal(matured.capacity, 0n);
   assert.equal(matured.unactivatedPresent, 0n); // a matured NFT cannot issue again
   assert.ok((await ops.assessIssueCandidate(actor.address, 0n, 0n, RAW, 0n)).reasons.includes("facility-matured"));
+  await s.send(credit, "createCredit", [actor.address, 0, 10n * RAW, 10n * RAW, 0, 0, 0, 0]);
+  await exec(buck, "mint", [10n * RAW, [2n]]);
+  const beforeBurn = await s.call(buck, "balanceOf", [actor.address]);
+  await exec(buck, "burn", [RAW, [2n]]);
+  const afterBurn = await s.call(buck, "balanceOf", [actor.address]);
+  assert.ok(beforeBurn - afterBurn >= RAW);
+  assert.ok((await s.call(credit, "issuanceOf", [2n]))[0] < 10n * RAW);
   assert.deepEqual(s.mismatches, []);
 });
 

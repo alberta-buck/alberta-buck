@@ -47,6 +47,10 @@ contract MockNetFund {
         if (address(factorController) != address(0)) factorController.setFactor(factorAfterCheckpoint);
         if (address(kController) != address(0)) kController.setK(kAfterCheckpoint);
     }
+    function refreshBurnValuation() external returns (uint256) {
+        if (address(valuationWheel) != address(0)) valuationWheel.refreshValuation();
+        return 0;
+    }
     function settle(BuckNet token, address owner, uint256 id, uint256 principal, uint256 reliefScaled) external {
         token.settleFromJubilee(owner, id, principal, reliefScaled);
     }
@@ -179,6 +183,37 @@ contract BuckNetTest is Test {
         assertTrue(wheel.valuationReady());
         assertEq(wheel.valuationMark(), 100e6);
         assertEq(buck.balanceOf(ALICE), 100e6);
+    }
+
+    function test_compatibleBurnKeepsTheGuardDuringFundHooks() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6, 0, address(0));
+        TestWheel wheel = new TestWheel(address(buck), GOV);
+        BuckLockedValuation source = new BuckLockedValuation(buck, ALICE);
+        vm.prank(GOV);
+        wheel.setValuationSource(address(source));
+        fund.setValuationWheel(wheel);
+        vm.prank(ALICE);
+        buck.burn(1e6);
+        assertTrue(wheel.valuationReady());
+        assertEq(buck.balanceOf(ALICE), 99e6);
+        assertEq(wheel.valuationMark(), 99e6);
+    }
+
+    function test_compatibleBurnRejectsKChangesDuringFundCheckpoint() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE);
+        buck.issue(id, 100e6, 100e6, 0, address(0));
+        fund.setKOnCheckpoint(k, 0.5e18);
+        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.prank(ALICE);
+        buck.burn(1e6);
+        assertEq(k.currentBuckK(), 1e18);
+        assertEq(buck.balanceOf(ALICE), 100e6);
+        assertEq(buck.totalIssued(), 100e6);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(principal, 100e6);
     }
 
     function test_plainApprovalPreservesLegacyZeroSpenderBehavior() public {

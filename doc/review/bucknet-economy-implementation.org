@@ -142,13 +142,10 @@ rather than silently following both.
   A real token/fund/insurer test shows that retiring four raw units can
   decrease the wallet by four while retiring five decreases it by only three:
   the nominal insurer refund and fractional Jubilee relief both rise. The
-  standalone =BuckNetBurnMath= prototype finds a least monetary and
-  coverage/K candidate without assuming those outcomes are monotone. It is
-  *not* connected to a token entry point or a complete quote. It models an
-  already prepared pool; choose and test how insurer preparation occurs
-  without allowing token reentry or using a stale post-callback mark.
-  Ownership, identity, position freshness, authorization, events, other
-  ledger constraints and atomic settlement remain integration work.
+  =BuckNetBurnMath= finds a least monetary and coverage/K candidate without
+  assuming those outcomes are monotone. The ordinary-owner burn entry points
+  now use it, but the quote, Carrying path and production availability are not
+  complete. The pool must already be prepared before the token lock is held.
   Coverage eligibility also need not be monotone: rounding depreciated face
   and proportional coverage can allow retirement of one raw unit, reject
   two because the K shortfall worsens, and allow full retirement of three.
@@ -163,6 +160,13 @@ rather than silently following both.
   actual balance decrease exceed that facility's target. A multi-facility
   caller must use actual deltas after each settlement and retain atomic
   rollback if the total requested decrease is not achieved.
+  *Partial implementation:* both =burn= overloads support ordinary owners,
+  use actual deltas, reject a final shortfall, share the block budget and
+  refresh the wheel mark without wheel work. Selection is greedy in the
+  requested order, not proven globally optimal. The old signatures contain
+  no minimum relief or maximum principal; callers needing explicit bounds can
+  use the separate authorized per-facility reduction. =quoteBurn=, approved
+  Carrying owners, production gas bounds and the leveraged economy remain open.
 - [ ] Permit an *approved neutral Carrying service* to own and use a facility.
   Design and enforce the service authorization before enabling this path,
   including safe delisting and access to settlement; a registry identity
@@ -183,7 +187,9 @@ rather than silently following both.
   now live in the already-linked =BuckNetTokenOps= library. The token still
   authenticates the owner/fund, verifies authorization and the relief floor,
   consumes the shared cash budget and holds its guard before delegating.
-  The library is a reusable transition, not a one-call burn implementation.
+  Ordinary one-call burn also uses this transition under the token guard, with
+  direct owner authorization and already-liquid insurer refunds. Integrated
+  insurer preparation and Carrying ownership still need work.
 - [ ] At burn preflight, request the wheel's valuation-only refresh while
   preserving Buck's non-reentrancy. This must not execute an ordinary wheel
   work step, transfer BUCK, redeem the fund's position, perform swaps, or pay
@@ -195,8 +201,10 @@ rather than silently following both.
   The fund also exposes =refreshBurnValuation= only to its configured token;
   an advisory =reliefPositionMark= reads the last guarded publication. A
   test-only BuckNet subclass calls the refresh under the actual token guard
-  and verifies no work, reward, balance or position movement. BuckNet has no
-  compatible =burn= yet, so the new hook is not wired into a public burn.
+  and verifies no work, reward, balance or position movement. Ordinary =burn=
+  now refreshes it for each facility before computing relief. Tests cover mark
+  changes and rollback; real leveraged-basket valuation and a supported
+  scan/gas bound remain open.
 - [ ] Reinstate =quoteMint= and =quoteBurn= with their old argument and return
   shapes and execution-consistent rounding. Add a richer quote for per-NFT
   principal, coverage, refund, actual net relief, owner contribution and
@@ -406,8 +414,8 @@ The user selected actual =balanceOf= changes for compatible mint and burn,
 approved Carrying facility owners, a shared per-block 10% cash budget and the
 last published wheel mark. The shared budget and an optional valuation-only
 wheel path are implemented. The current prototype implements compatible mint
-for ordinary owners but still rejects Carrying owners, lacks compatible burn,
-falls back to a guarded live
+and burn for ordinary owners but still rejects Carrying owners, lacks
+=quoteBurn= and falls back to a guarded live
 mark when no valuation wheel is configured, and does not make the wheel
 perform the fund's investment or liquidity work. The wheel mark path has not
 been validated with leveraged basket credit. Do not treat the remaining
@@ -453,6 +461,7 @@ make nix-match-BuckNetMintMathTest
 make nix-match-BuckNetMintCompatibilityTest
 make nix-match-BuckNetBurnMathTest
 make nix-match-BuckNetBurnRoundingTest
+make nix-match-BuckNetBurnCompatibilityTest
 make nix-match-JubileeBurnValuationTest
 make nix-match-BuckNetQuoteTest
 make nix-match-WorkWheelTest
@@ -528,4 +537,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Collateral-aware burn candidate | The bounded candidate now applies the same depreciated face, proportional coverage and no-worse-K-shortfall calculation as settlement; its safe skips do not assume K eligibility is monotone. It correctly chooses a larger principal in both real-token rounding cases. Seven math tests passed with 100,000 independent exhaustive vectors, and 48 real-fund/inherited tests passed. A separate regression proves that 256 steps can be exhausted even though full retirement is feasible, so availability/gas optimization is a production gate. This isolated candidate is not a public burn or quote, and the other integration and Carrying checks remain open. | =f854387c= |
 | 2026-11-01 | Shared authorized reduction transition | The existing linked =BuckNetTokenOps= library now performs the same principal, relief, insurer refund, coverage, K and claim-book transition for the existing authorized reduction. The host still validates authorization and the shared cash budget under its guard; renewal shares the pool-refund helper. An event test verifies the token emits the reduction and consumes authorization only once. Focused BuckNet, mint, real-fund and Jubilee suites passed; =make nix-test= passed 1,576 tests with one fork test skipped; the cash-only smoke passed 26 Python and 20 JS tests; the artifact check passed. Runtime is 21,650 bytes for BuckNet and 17,637 for the linked token library. One-call burn, valuation hook integration, full identity parity and production release remain open. | =d5a1d1e9= |
 | 2026-11-01 | Token-only burn valuation hook | The existing fund can refresh the registered wheel's guarded mark on a token-only call, and expose the last guarded mark to a quote. A test-only BuckNet subclass holds the real token guard while refreshing and confirms no wheel work, reward, balance or position movement; tests also cover changed receipt, changed source, a basket loss, empty position and the explicit no-wheel fallback. The Jubilee and wheel suites passed 249 and 10 tests, the final hook suite passed 48 including inherited cases, and focused Python/Anvil and JS/Tevm deployment tests passed one and two cases. The artifact check passed; JubileeFund runtime is 22,735 bytes. The public burn does not yet call this hook, and leveraged valuation, freshness and gas limits remain open. | =76ddd882= |
-| 2026-11-01 | Bounded per-facility burn allocation | The candidate can find the greatest feasible requested decrease up to a bound without assuming principal or K eligibility is monotone, and propagates an inner work-limit result. A 100,000-case independent exhaustive comparison covers both exact and bounded candidates; eight math tests and 48 real-fund/inherited tests passed, including K-driven overshoot of the target. A legacy regression confirms =burn(uint256.max)= and its quote reject the request instead of treating it as a maximum sentinel; all 54 =BuckTest= cases passed. The public burn and batch orchestration remain unimplemented, and the bounded search still needs production gas/availability work. | This commit |
+| 2026-11-01 | Bounded per-facility burn allocation | The candidate can find the greatest feasible requested decrease up to a bound without assuming principal or K eligibility is monotone, and propagates an inner work-limit result. A 100,000-case independent exhaustive comparison covers both exact and bounded candidates; eight math tests and 48 real-fund/inherited tests passed, including K-driven overshoot of the target. A legacy regression confirms =burn(uint256.max)= and its quote reject the request instead of treating it as a maximum sentinel; all 54 =BuckTest= cases passed. At that checkpoint public burn and batch orchestration were unimplemented, and the bounded search still needed production gas/availability work. | =f5ea14c2= |
+| 2026-11-01 | Ordinary-owner burn compatibility | Both legacy-shaped =burn= entry points now refresh the guarded wheel mark and use current fund, claim, wallet, insurer and K state for each ordered facility. They enforce the shared cash budget and actual total balance decrease atomically, preserve exact relief and nominal refund, and do not call an insurer or sell basket positions under the token lock. Tests cover aged multi-facility equivalence to separate fund reductions, a real private identity, K and mark changes, liquidity refusal, cross-path block limits, rollback, maturity and the explicit work-limit failure. =make nix-test= passed 1,691 tests with one fork test skipped; the cash-only smoke passed 26 Python and 20 JS cases, and the artifact check passed. JS net-world records now require version 5. Runtime: BuckNet 22,185 bytes, token-operations library 23,069 bytes and BuckCredit 24,516 bytes. A focused gas report saw up to 1,275,392 gas among its sampled =burn(uint256)= calls, including expected failures; this is not a worst-case bound. =quoteBurn=, Carrying owners, insurer preparation, practical gas bounds, leveraged valuation and the new economy remain open. | This commit |

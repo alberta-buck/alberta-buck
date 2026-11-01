@@ -303,8 +303,8 @@ and the last published wheel mark, refreshed at burn preflight by a
 valuation-only wheel call. The shared block budget is implemented. A
 configured fund now refreshes a wheel-published mark during its existing
 reduction/renewal path; a fund with no configured wheel still uses the earlier
-guarded live mark. Compatible =mint= and =quoteMint= now support ordinary
-owners, while Carrying mint, compatible =burn= and real deployment wiring
+guarded live mark. Compatible =mint=, =quoteMint= and =burn= now support
+ordinary owners. Carrying mint/burn, =quoteBurn= and real deployment wiring
 are not implemented.
 
 | Proposed transition | Preconditions | Required postconditions and failure behavior |
@@ -328,7 +328,7 @@ globally optimal across alternative orders. =quoteMint= uses that planner but
 does not reserve funding or promise a pool or K; the bounded =issue= API is
 available when a caller needs a premium ceiling and an expected pool.
 
-The standalone =BuckNetBurnMath= prototype addresses the inverse monetary and
+The =BuckNetBurnMath= planner addresses the inverse monetary and
 coverage question for one *ordinary* owner and one fixed, already prepared pool. Let
 =W= be the scaled wallet before settlement, =Q= the scale, =N>0= the requested
 whole-raw-unit balance decrease, =p= retired principal, =R(p)= full-value
@@ -355,10 +355,11 @@ nominal refund, or the owner's temporary refund-receipt limit. Its 256-step
 =WorkLimit= is distinct from impossibility. A test shows that this limit can
 be reached even on a 3,438-raw-unit facility with a valid full retirement, so
 it is not yet an adequate production availability guarantee. This calculation
-does *not* check identity,
-ownership, all ledger limits, authorization, wheel freshness,
-preparation callbacks or multi-facility sequencing; it is not yet wired to
-=burn= or =quoteBurn=. Relief, pool balances, allowance and wallet must be
+does *not* itself check identity, ownership, all ledger limits, authorization,
+wheel freshness, preparation callbacks or multi-facility sequencing. The
+ordinary-owner =burn= entry points now supply those applicable host checks,
+refresh the mark per selected facility, and use the shared settlement path;
+=quoteBurn= remains unimplemented. Relief, pool balances, allowance and wallet must be
 re-read after any state-changing pool preparation. In a multi-NFT operation,
 cash, claim totals, shared budget, wallet and pool composition can all change
 after each settlement; reusing a single initial snapshot would be incorrect.
@@ -378,7 +379,10 @@ binary search uses only that predicate and propagates any inner =WorkLimit=.
 K rounding can make the selected settlement decrease the actual balance by
 more than the returned target. A batch must use the observed delta, refresh
 the other relevant state, enforce a final total-delta postcondition and revert
-the entire batch if it cannot satisfy the user's request. Up to 79 binary
+the entire batch if it cannot satisfy the user's request. The current ordered
+batch is greedy and has not been proven globally optimal. It requires each
+insurer's nominal refund and allowance to be available before the call; it
+does not invoke the insurer's strategy while the token lock is held. Up to 79 binary
 iterations plus initial and final probes can each run 256 inner steps; this
 has not been shown affordable at supported NFT counts.
 
@@ -411,7 +415,8 @@ test-only BuckNet subclass invokes the new hook under the actual token guard:
 the wheel publishes without moving cash, receipt shares, work cursor or
 pending work, and a changed receipt invalidates the prior quote. Pool
 preparation must precede this refresh, or a later callback must force a new
-refresh. The public compatible =burn= is still absent. The
+refresh. The ordinary compatible =burn= now invokes this hook for each
+facility; Carrying burn and =quoteBurn= remain absent. The
 current full valuation scans every constituent without a practical work/gas
 limit; a supported size bound or coherent incremental approach is required
 before making it mandatory in a production burn.

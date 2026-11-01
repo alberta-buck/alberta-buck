@@ -19,6 +19,10 @@ library BuckNetMaturity {
     ///      outflow snapshots 10% of then-current net cash for the block;
     ///      later inflows cannot replenish that block's remaining budget.
     function availableReliefScaled(BuckLedger.Ledger storage ledger) public view returns (uint256 available) {
+        return _availableReliefScaled(ledger);
+    }
+
+    function _availableReliefScaled(BuckLedger.Ledger storage ledger) internal view returns (uint256 available) {
         (, uint256 net) = ledger.fundParts();
         available = net / 10;
         BuckLedger.ReliefBudget storage budget = ledger.reliefBudget;
@@ -33,7 +37,7 @@ library BuckNetMaturity {
         _consumeReliefBudget(ledger, reliefScaled);
     }
 
-    function _consumeReliefBudget(BuckLedger.Ledger storage ledger, uint256 reliefScaled) private {
+    function _consumeReliefBudget(BuckLedger.Ledger storage ledger, uint256 reliefScaled) internal {
         if (reliefScaled == 0) return;
         (, uint256 net) = ledger.fundParts();
         uint256 perOperation = net / 10;

@@ -160,6 +160,12 @@ def test_linked_net_issuance_and_reduction_match_reference():
         matured = ops.quote_household_activated_capacity(actor.address, [0])
         assert matured.capacity == matured.unactivated_present == 0  # a matured NFT cannot issue again
         assert "facility-matured" in ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0).reasons
+        chain.send(credit.functions.createCredit(actor.address, 0, 10 * RAW, 10 * RAW, 0, 0, 0, 0))
+        _exec(chain, actor, buck, "mint", [10 * RAW, [2]])
+        before_burn = buck.functions.balanceOf(actor.address).call()
+        _exec(chain, actor, buck, "burn", [RAW, [2]])
+        assert before_burn - buck.functions.balanceOf(actor.address).call() >= RAW
+        assert credit.functions.issuanceOf(2).call()[0] < 10 * RAW
         assert not chain.mismatches
 
 

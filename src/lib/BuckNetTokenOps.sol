@@ -9,6 +9,8 @@ import {JubileeClaimBook} from "../JubileeClaimBook.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BuckTypes} from "../BuckTypes.sol";
 import {BuckNetMintMath} from "./BuckNetMintMath.sol";
+import {BuckNetBurnMath} from "./BuckNetBurnMath.sol";
+import {BuckNetMaturity} from "./BuckNetMaturity.sol";
 
 interface IBuckNetIssuanceK {
     function currentBuckK() external view returns (uint256);
@@ -17,6 +19,11 @@ interface IBuckNetIssuanceK {
 }
 
 interface IBuckNetIssuanceReserveHook {
+    function checkpointIssuance() external;
+}
+
+interface IBuckNetBurnFund {
+    function refreshBurnValuation() external returns (uint256);
     function checkpointIssuance() external;
 }
 
@@ -292,11 +299,98 @@ library BuckNetTokenOps {
         }
     }
 
+    /// @dev Preconditions: the token holds its guard; the original caller is
+    ///      the ordinary NFT owner. The fund's pool liquidity is prepared in
+    ///      advance, so no insurer or basket trade is invoked here. Each
+    ///      selected facility refreshes the fund's valuation-only wheel mark,
+    ///      replans against current balances and the remaining shared cash
+    ///      budget, then settles through the same transition as fund.reduce.
+    ///      Postcondition: the caller's actual visible balance decreases by
+    ///      at least amount; otherwise every effect, including wheel marks,
+    ///      reserve checkpoints and previous slices, reverts atomically.
+    function burn(BuckLedger.Ledger storage ledger,
+                  mapping(uint256 => address) storage facilityPool,
+                  mapping(uint256 => uint256) storage premiumPrincipal,
+                  mapping(uint256 => ReductionAuthorization) storage authorizations,
+                  mapping(address => mapping(address => uint256)) storage allowances,
+                  mapping(address => mapping(address => bytes32)) storage fragments,
+                  IssueDependencies memory d, uint256 amount, uint256[] memory ids, bool automatic) public
+    {
+        d.identity.enableCarryingModeHook();
+        if (!d.identity.isVerified(msg.sender) || !d.identity.isVerified(d.jubilee)) revert NotVerified();
+        if (d.identity.isCarrying(msg.sender) || !d.identity.isCarrying(d.jubilee)) revert NotCarryingPool();
+        d.claims.totalSeconds();
+        if (automatic) {
+            ids = _cheapestFirst(d.credit, msg.sender);
+            for (uint256 i; i < ids.length / 2; ++i) {
+                (ids[i], ids[ids.length - 1 - i]) = (ids[ids.length - 1 - i], ids[i]);
+            }
+        }
+        _checkSelection(d.credit, msg.sender, ids);
+        uint256 balanceBefore = ledger.balanceOf(msg.sender);
+        if (amount > balanceBefore) revert CreditExceeded();
+        uint256 k = d.controller.compute();
+        IBuckNetBurnFund fund = IBuckNetBurnFund(d.jubilee);
+        fund.checkpointIssuance();
+        if (d.controller.currentBuckK() != k) revert CreditExceeded();
+        uint256 remaining = amount;
+        for (uint256 i; i < ids.length && remaining != 0; ++i) {
+            (uint256 prior,) = d.credit.issuanceOf(ids[i]);
+            if (prior == 0) continue;
+            uint256 mark = fund.refreshBurnValuation();
+            if (d.controller.currentBuckK() != k) revert CreditExceeded();
+            (uint256 target, BuckNetBurnMath.Plan memory candidate) =
+                _burnSlice(ledger, facilityPool, premiumPrincipal, allowances, d, ids[i], remaining, mark, k);
+            if (candidate.status == BuckNetBurnMath.Status.WorkLimit) revert AllocationWorkLimit();
+            if (target == 0) continue;
+            uint256 beforeSlice = ledger.balanceOf(msg.sender);
+            BuckNetMaturity._consumeReliefBudget(ledger, candidate.reliefScaled);
+            settle(ledger, facilityPool, premiumPrincipal, authorizations, allowances, fragments,
+                   d, msg.sender, ids[i], candidate.principal, candidate.reliefScaled);
+            uint256 afterSlice = ledger.balanceOf(msg.sender);
+            if (afterSlice > beforeSlice || beforeSlice - afterSlice < target) revert BadAmount();
+            uint256 decreased = beforeSlice - afterSlice;
+            remaining = decreased >= remaining ? 0 : remaining - decreased;
+            fund.checkpointIssuance();
+            if (d.controller.currentBuckK() != k) revert CreditExceeded();
+        }
+        if (remaining != 0) revert CreditExceeded();
+        uint256 balanceAfter = ledger.balanceOf(msg.sender);
+        if (balanceAfter > balanceBefore || balanceBefore - balanceAfter < amount) revert BadAmount();
+    }
+
+    function _burnSlice(BuckLedger.Ledger storage ledger,
+                        mapping(uint256 => address) storage facilityPool,
+                        mapping(uint256 => uint256) storage premiumPrincipal,
+                        mapping(address => mapping(address => uint256)) storage allowances,
+                        IssueDependencies memory d, uint256 tokenId, uint256 requested,
+                        uint256 mark, uint256 k)
+        private view returns (uint256 target, BuckNetBurnMath.Plan memory candidate)
+    {
+        (uint256 principal, uint256 seconds_) = d.credit.issuanceOf(tokenId);
+        (, uint256 cash) = ledger.fundParts();
+        if (mark > (type(uint256).max - cash) / Q) revert BadAmount();
+        address pool = facilityPool[tokenId];
+        (uint256 poolGross, uint256 poolNet) = ledger.grossAndNetOf(pool);
+        (uint256 held, uint256 unspent) = ledger.partsOf(msg.sender);
+        BuckNetBurnMath.Snapshot memory snapshot = BuckNetBurnMath.Snapshot({
+            principal: principal, issuedSeconds: seconds_, totalSeconds: d.claims.totalSeconds(),
+            fundValueScaled: cash + mark * Q, reliefLimitScaled: BuckNetMaturity._availableReliefScaled(ledger),
+            premiumPrincipal: premiumPrincipal[tokenId], poolGrossScaled: poolGross, poolNetScaled: poolNet,
+            poolAvailableNominal: allowances[pool][address(this)], walletScaled: held + unspent
+        });
+        (uint256 face, uint256 active,) = d.credit.creditInfo(tokenId);
+        BuckNetBurnMath.Coverage memory coverage = BuckNetBurnMath.Coverage({
+            face: face, active: active, mark: d.credit.depreciatedFaceValue(tokenId), k: k
+        });
+        return BuckNetBurnMath.planAtMost(snapshot, coverage, requested);
+    }
+
     /// @dev Preconditions: the token holds its reentrancy guard, has
-    ///      authenticated the owner and fund, validated the exact requested
-    ///      authorization and relief floor, checked the claim book and
-    ///      consumed the shared cash budget. The fund has prepared any
-    ///      insurer liquidity and supplied the current marked relief.
+    ///      authenticated the owner and fund, validated either direct owner
+    ///      authority or the exact separate authorization and relief floor,
+    ///      checked the claim book and consumed the shared cash budget. The
+    ///      insurer liquidity is prepared and the marked relief is current.
     ///      Postconditions: the owner's net payment and full-value fund
     ///      relief retire exactly principal; the original insurer returns its
     ///      proportional nominal deposit; NFT principal, coverage and claim

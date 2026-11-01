@@ -66,6 +66,7 @@ make nix-match-BuckNetMintCompatibilityTest # ordinary-owner compatibility mint 
 make nix-match-BuckNetQuoteTest            # quotes checked against real BuckNet issuance
 make nix-match-BuckNetBurnMathTest         # proposed retirement math and exhaustive fuzzing
 make nix-match-BuckNetBurnRoundingTest     # candidate vs real fund and insurer settlements
+make nix-match-BuckNetBurnCompatibilityTest # ordinary-owner burn, refund, wheel and block cap
 make nix-match-JubileeBurnValuationTest    # token-only mark refresh under the BuckNet guard
 make nix-deploy-dry-run                    # local EVM; no broadcast
 make nix-venv-test-python                  # Python reference and simulator tests
@@ -99,9 +100,15 @@ link them from creation-bytecode metadata, but are not production deployment scr
 future deployment or economy must deploy and link these libraries on that chain; the legacy
 deployment script does not do so. Experimental =BuckNet.issue= requires an explicit
 maximum premium and expected insurer pool; renewal consent also commits the expected
-new premium pool. Saved JavaScript net-world records use version 4 for the renamed
-token-operations library and the ordinary-owner =mint= ABI; they reject older deployment
+new premium pool. Saved JavaScript net-world records use version 5 for the renamed
+token-operations library and the ordinary-owner =mint= and =burn= ABIs; they reject older deployment
 graphs. Clients and saved records from older builds must be upgraded or rejected.
+The experimental one-call =burn= currently supports ordinary owners only. It
+requires the original insurer pools to have any required nominal refund and allowance
+ready before the call; its bounded allocation can revert with
+=AllocationWorkLimit=. The separate authorized =JubileeFund.reduce= path can
+still ask an insurer pool to prepare its refund before settlement. Neither
+path sells Jubilee's basket position inside the token lock.
 Local contract-bundle generation now includes the
 experimental net stack and its creation/runtime link metadata alongside legacy contracts;
 the already published package is unchanged until a release. =make nix-contracts-dist-check=
