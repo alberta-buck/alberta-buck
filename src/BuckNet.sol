@@ -96,6 +96,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     error CreditExceeded();
     error FundingInsufficient();
     error BadPremiumRate();
+    error PremiumLimitExceeded();
     error BadAmount();
     error BadAuthorization();
     error UnauthorizedTransfer();
@@ -200,9 +201,10 @@ contract BuckNet is IERC20, IERC20Metadata {
     /// @param tokenId The owner's BuckCredit NFT.
     /// @param coverage Face units to activate; zero can use existing capacity.
     /// @param spendable BUCK newly made available after the premium deposit.
+    /// @param maxPremium Maximum full-value BUCK premium the owner accepts.
     /// @return principal Total BUCK issued, including the premium funding.
     /// @return premium Full-value BUCK sent to the NFT's insurer pool.
-    function issue(uint256 tokenId, uint256 coverage, uint256 spendable)
+    function issue(uint256 tokenId, uint256 coverage, uint256 spendable, uint256 maxPremium)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {
         _enableModeHook();
@@ -221,6 +223,7 @@ contract BuckNet is IERC20, IERC20Metadata {
         uint256 effectiveRate = uint256(premiumRate) * POOL_ROI_INV;
         if (effectiveRate >= BP) revert BadPremiumRate();
         premium = Math.mulDiv(afterValue - beforeValue, effectiveRate, BP);
+        if (premium > maxPremium) revert PremiumLimitExceeded();
         uint256 factor = buckK.fundingFactor();
         if (premium != 0 && preFunding < Math.mulDiv(premium, factor, K_SCALE)) revert FundingInsufficient();
         principal = spendable + premium;

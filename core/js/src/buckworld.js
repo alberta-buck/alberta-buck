@@ -29,6 +29,13 @@ import { deployNetStack } from "./net-world.js";
 const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const g2 = (p) => ({ X: [p.x[0], p.x[1]], Y: [p.y[0], p.y[1]] });
+const NET_ISSUE_ABI_VERSION = 1; // first net snapshot format requiring an owner premium ceiling
+
+function requireNetIssueAbi(artifact) {
+  const issue = artifact?.abi?.find((entry) => entry.type === "function" && entry.name === "issue"
+    && entry.inputs?.map((input) => input.type).join(",") === "uint256,uint256,uint256,uint256");
+  if (!issue) throw new Error("BuckNet artifact lacks the premium-limited issuance ABI");
+}
 
 // Controller deploy defaults -- the SAME values experiment.deploy_params
 // derives for the Python sim (gains real*1e12: Kp = kp_frac*dk_rail/e_max
@@ -95,6 +102,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   if (accounting === "net" && (opts.poolAcct || opts.buckArtifact || gov.toLowerCase() !== session.account.address.toLowerCase())) {
     throw new Error("net world currently requires its own insurer pool and the session account as governance");
   }
+  if (accounting === "net") requireNetIssueAbi(artifacts("BuckNet"));
   const p = { ...DEPLOY_DEFAULTS, ...(opts.params ?? {}) };
   const rng = opts.rng ?? id.randScalar;
 
@@ -180,6 +188,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     // The empty basket is not bound to K or populated with liquidity. This is
     // a cash-only diagnostic, not the leveraged or market-driven economy.
     net.chainId = await session.client.getChainId();
+    net.issueAbiVersion = NET_ISSUE_ABI_VERSION;
     net.codeHashes = {};
     for (const [name, contract] of Object.entries({ registry: reg, credit, controller: kctrl, token: buck, pool,
       fund: net.fund, basket: net.basket, factory: net.factory, quoter: net.quoter,
@@ -221,7 +230,8 @@ export function worldRecord(world) {
   };
   if (world.accounting === "net") {
     record.accounting = "net";
-    record.net = { chainId: world.net.chainId, fund: world.net.fund.address, basket: world.net.basket.address,
+    record.net = { chainId: world.net.chainId, issueAbiVersion: world.net.issueAbiVersion,
+      fund: world.net.fund.address, basket: world.net.basket.address,
       factory: world.net.factory.address, quoter: world.net.quoter.address,
       maturityLibrary: world.net.maturityLibrary.address, transfersLibrary: world.net.transfersLibrary.address,
       codeHashes: { ...world.net.codeHashes } };
@@ -262,6 +272,8 @@ function attachWorld(session, artifacts, record, opts) {
 export async function attachNetBuckWorld(session, artifacts, record, opts = {}) {
   if (record.accounting !== "net" || !record.net || !record.pooled || !record.operator)
     throw new Error("incomplete net world record");
+  if (record.net.issueAbiVersion !== NET_ISSUE_ABI_VERSION) throw new Error("unsupported net world issuance ABI version");
+  requireNetIssueAbi(artifacts("BuckNet"));
   const w = attachWorld(session, artifacts, record, opts);
   const operator = privateKeyToAccount(WORLD_OPERATOR_KEY);
   if (operator.address.toLowerCase() !== record.operator.toLowerCase()) throw new Error("net world operator mismatch");
@@ -275,7 +287,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
     fund: at("JubileeFund", n.fund), basket: at("BuckBasketEquity", n.basket),
     factory: at("UniswapV3Factory", n.factory), quoter: at("BuckNetQuoter", n.quoter),
     maturityLibrary: at("BuckNetMaturity", n.maturityLibrary), transfersLibrary: at("BuckNetTransfers", n.transfersLibrary),
-    chainId: n.chainId, codeHashes: { ...n.codeHashes } };
+    chainId: n.chainId, issueAbiVersion: n.issueAbiVersion, codeHashes: { ...n.codeHashes } };
   if (String(await session.client.getChainId()) !== String(n.chainId)) throw new Error("net world chain mismatch");
   const matches = async (contract, method, expected, args = []) => {
     const actual = await session.call(contract, method, args);

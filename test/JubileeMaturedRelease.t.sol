@@ -74,7 +74,7 @@ contract JubileeMaturedReleaseTest is Test {
         vm.prank(INSURER);
         id = credit.createCredit(ALICE, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, rate);
         vm.prank(ALICE);
-        buck.issue(id, face, spendable);
+        buck.issue(id, face, spendable, type(uint256).max);
     }
 
     function _pool() private returns (JubileeInsurerPoolMock pool) {
@@ -143,7 +143,7 @@ contract JubileeMaturedReleaseTest is Test {
         buck.matureFromJubilee(ALICE, id);
         vm.warp(t0 + 49 * YEAR);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1_000_000e6);
+        buck.issue(id, 0, 1_000_000e6, type(uint256).max);
         vm.warp(t0 + 74 * YEAR);
         vm.expectRevert(JubileeClaimBook.NotMature.selector);
         vm.prank(ALICE);

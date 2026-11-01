@@ -381,8 +381,11 @@ class NetCreditOps:
         return ActivatedCapacityQuote(block, tuple(facilities), unactivated_present, shared, potential,
                                       0 if pending else potential, pending)
 
-    def issue(self, owner, token_id: int, coverage: int, spendable: int):
-        return self.execute(owner, self.stack.token, "issue", [token_id, coverage, spendable])
+    def issue(self, owner, token_id: int, coverage: int, spendable: int, max_premium: int):
+        """Issue against one NFT with an explicit full-value premium ceiling."""
+        if type(max_premium) is not int or not 0 <= max_premium <= MAX_UINT256:
+            raise ValueError("invalid maximum premium")
+        return self.execute(owner, self.stack.token, "issue", [token_id, coverage, spendable, max_premium])
 
     def quote_reduction(self, token_id: int, principal: int):
         """Return (scaled net relief, scaled cash, exceeds the 10% cap)."""

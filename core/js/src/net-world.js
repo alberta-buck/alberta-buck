@@ -70,7 +70,8 @@ export async function deployNetStack(session, artifacts, { registry, credit, con
 
 /** Actual per-facility amounts; never synthesize a signed debt from a wallet.
  *  execute(owner, contract, method, args) can dispatch through an agent proxy.
- *  Quotes are advisory. Authorization and reduction are separate transactions;
+ *  Issue requires an explicit BigInt maximum premium. Quotes are advisory.
+ *  Authorization and reduction are separate transactions;
  *  a failed reduction leaves its prior authorization to retry or cancel. */
 export function netCreditOps(session, stack, execute = null) {
   const { credit, token, fund, quoter } = stack;
@@ -94,7 +95,12 @@ export function netCreditOps(session, stack, execute = null) {
   };
   const ops = {
     facility, quoteIssue,
-    issue: (owner, id, coverage, spendable) => send(owner, token, "issue", [id, coverage, spendable]),
+    issue: (owner, id, coverage, spendable, maxPremium) => {
+      if (typeof maxPremium !== "bigint" || maxPremium < 0n || maxPremium > MAX_UINT256) {
+        throw new Error("invalid maximum premium");
+      }
+      return send(owner, token, "issue", [id, coverage, spendable, maxPremium]);
+    },
     quoteReduction: (id, principal) => session.call(fund, "previewRelief", [id, principal]),
     authorizeReduction: (owner, id, principal, minimumReliefScaled, deadline) =>
       send(owner, token, "authorizeReduction", [id, principal, minimumReliefScaled, deadline]),

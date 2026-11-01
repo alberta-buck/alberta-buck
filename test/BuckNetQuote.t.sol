@@ -73,12 +73,77 @@ contract BuckNetQuoteTest is Test {
     function _fundOwner(uint256 amount) private {
         uint256 id = _credit(amount, 0);
         vm.prank(ALICE);
-        buck.issue(id, amount, amount);
+        buck.issue(id, amount, amount, type(uint256).max);
     }
 
     function test_quoteKeepsTheTokenWithinTheEvmRuntimeLimit() public view {
         assertLe(address(buck).code.length, 24_576);
         assertLe(address(quoter).code.length, 24_576);
+    }
+
+    function test_issuePremiumCeilingRejectsRepricedInactiveFacilityAtomically() public {
+        _pool();
+        uint256 id = _credit(1000e6, 50);
+        (, uint256 quotedPremium,,) = quoter.quoteIssue(id, 1000e6);
+        assertEq(quotedPremium, 50e6);
+        vm.prank(ALICE);
+        (bool oldEntryPoint,) = address(buck).call(abi.encodeWithSignature(
+            "issue(uint256,uint256,uint256)", id, 1000e6, 800e6));
+        assertFalse(oldEntryPoint, "unbounded three-argument issue must be unavailable");
+        vm.prank(INSURER);
+        credit.updateCredit(id, 1000e6, 1000e6, BuckCredit.DepreciationType.NONE, 0, 0, 100);
+        (, uint256 repricedPremium,,) = quoter.quoteIssue(id, 1000e6);
+        assertEq(repricedPremium, 100e6);
+
+        vm.expectRevert(BuckNet.PremiumLimitExceeded.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, 800e6, quotedPremium);
+        (, uint256 activated,) = credit.creditInfo(id);
+        (uint256 principal,) = credit.issuanceOf(id);
+        assertEq(activated, 0);
+        assertEq(principal, 0);
+        assertEq(buck.totalIssued(), 0);
+        assertEq(buck.balanceOf(ALICE), 0);
+        assertEq(buck.balanceOf(address(pool)), 0);
+        assertEq(buck.premiumPrincipal(id), 0);
+        assertEq(buck.facilityPool(id), address(0));
+
+        vm.expectRevert(BuckNet.PremiumLimitExceeded.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, 800e6, repricedPremium - 1);
+        uint256 paid;
+        vm.prank(ALICE);
+        (principal, paid) = buck.issue(id, 1000e6, 800e6, repricedPremium);
+        assertEq(principal, 900e6);
+        assertEq(paid, repricedPremium);
+        assertEq(buck.balanceOf(ALICE), 800e6);
+        assertEq(buck.balanceOf(address(pool)), repricedPremium);
+    }
+
+    function test_issuePremiumCeilingRejectsChangedSelfIssuedMark() public {
+        MockNetInsurerPool ownPool = new MockNetInsurerPool();
+        _bind(address(ownPool), true, ALICE);
+        vm.startPrank(ALICE);
+        buck.setInsurerPool(address(ownPool));
+        credit.setCreditIssuer(ALICE, true);
+        uint256 id = credit.createCredit(ALICE, 0, 1000e6, 0, BuckCredit.DepreciationType.MARKED, 0, 0, 100);
+        credit.mark(id, 500e6);
+        vm.stopPrank();
+        (, uint256 quotedPremium,,) = quoter.quoteIssue(id, 1000e6);
+        assertEq(quotedPremium, 50e6);
+        vm.prank(ALICE);
+        credit.mark(id, 1000e6);
+        vm.expectRevert(BuckNet.PremiumLimitExceeded.selector);
+        vm.prank(ALICE);
+        buck.issue(id, 1000e6, 400e6, quotedPremium);
+        (, uint256 activated,) = credit.creditInfo(id);
+        assertEq(activated, 0);
+        assertEq(buck.totalIssued(), 0);
+        assertEq(buck.balanceOf(address(ownPool)), 0);
+        vm.prank(ALICE);
+        (uint256 principal, uint256 premium) = buck.issue(id, 1000e6, 400e6, 100e6);
+        assertEq(principal, 500e6);
+        assertEq(premium, 100e6);
     }
 
     function test_quoteMatchesIssuanceForSuccessiveCoverageTranches() public {
@@ -93,7 +158,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(reserve, 100e6);
         assertEq(spendable, 325e6);
         vm.prank(ALICE);
-        (uint256 principal, uint256 paid) = buck.issue(id, 500e6, spendable);
+        (uint256 principal, uint256 paid) = buck.issue(id, 500e6, spendable, type(uint256).max);
         assertEq(principal, spendable + premium);
         assertEq(paid, premium);
         assertEq(buck.balanceOf(ALICE), 300e6 + spendable);
@@ -105,7 +170,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(reserve, 100e6);
         assertEq(spendable, 325e6);
         vm.prank(ALICE);
-        buck.issue(id, 500e6, spendable);
+        buck.issue(id, 500e6, spendable, type(uint256).max);
         (principal,) = credit.issuanceOf(id);
         assertEq(principal, 750e6);
         assertEq(buck.balanceOf(address(pool)), 100e6);
@@ -121,7 +186,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(spendable, 900e6);
         vm.expectRevert(BuckNet.FundingInsufficient.selector);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, spendable);
+        buck.issue(id, 1000e6, spendable, type(uint256).max);
 
         // Bob's issuance supplies BUCK that Alice can acquire in stages. The
         // transfers model acquired BUCK; pricing and swaps belong to agents.
@@ -131,17 +196,17 @@ contract BuckNetQuoteTest is Test {
         uint256 supply = credit.createCredit(BOB, 0, 200e6, 200e6,
                                              BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(BOB);
-        buck.issue(supply, 200e6, 200e6);
+        buck.issue(supply, 200e6, 200e6, type(uint256).max);
         vm.prank(BOB);
         buck.transfer(ALICE, 75e6);
         vm.expectRevert(BuckNet.FundingInsufficient.selector);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, spendable);
+        buck.issue(id, 1000e6, spendable, type(uint256).max);
         vm.prank(BOB);
         buck.transfer(ALICE, 125e6);
         assertEq(buck.balanceOf(ALICE), reserve);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, spendable);
+        buck.issue(id, 1000e6, spendable, type(uint256).max);
         assertEq(buck.balanceOf(ALICE), reserve + spendable, "the reserve was held, not spent");
         assertEq(buck.balanceOf(address(pool)), premium);
     }
@@ -159,7 +224,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(reserve, 0);
         assertEq(spendable, 585e6);
         vm.prank(ALICE);
-        (uint256 principal, uint256 paid) = buck.issue(id, 1000e6, spendable);
+        (uint256 principal, uint256 paid) = buck.issue(id, 1000e6, spendable, type(uint256).max);
         assertEq(principal, 675e6);
         assertEq(paid, premium);
         vm.expectRevert(BuckNet.CreditExceeded.selector);
@@ -175,20 +240,20 @@ contract BuckNetQuoteTest is Test {
         assertEq(currentQuote, 50e6);
         vm.expectRevert(BuckNet.CreditExceeded.selector);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, previouslyQuoted);
+        buck.issue(id, 100e6, previouslyQuoted, type(uint256).max);
         assertEq(buck.totalIssued(), 0);
     }
 
     function test_quoteBlocksNewIssueAgainstAnAlreadyOverIssuedFacility() public {
         uint256 id = _credit(100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         k.setK(0.5e18);
         (,,, uint256 spendable) = quoter.quoteIssue(id, 0);
         assertEq(spendable, 0);
         vm.expectRevert(BuckNet.CreditExceeded.selector);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1);
+        buck.issue(id, 0, 1, type(uint256).max);
     }
 
     function test_quoteUsesTheIncrementalPresentValueAfterDepreciation() public {
@@ -197,14 +262,14 @@ contract BuckNetQuoteTest is Test {
         uint256 id = credit.createCredit(ALICE, 0, 1000e6, 0, BuckCredit.DepreciationType.LINEAR,
                                          1000, uint48(t0), 100);
         vm.prank(ALICE);
-        buck.issue(id, 400e6, 360e6);
+        buck.issue(id, 400e6, 360e6, type(uint256).max);
         vm.warp(t0 + YEAR);
         (uint256 value, uint256 premium,, uint256 spendable) = quoter.quoteIssue(id, 600e6);
         assertEq(value, 900e6);
         assertEq(premium, 54e6); // 10% of the 540-BUCK increment, not the whole 900.
         assertEq(spendable, 446e6);
         vm.prank(ALICE);
-        (uint256 principal, uint256 paid) = buck.issue(id, 600e6, spendable);
+        (uint256 principal, uint256 paid) = buck.issue(id, 600e6, spendable, type(uint256).max);
         assertEq(principal, 500e6);
         assertEq(paid, premium);
         (uint256 total,) = credit.issuanceOf(id);
@@ -219,7 +284,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(spendable, 0);
         vm.expectRevert(BuckLedger.AccountOverflow.selector);
         vm.prank(ALICE);
-        buck.issue(id, 100, 1);
+        buck.issue(id, 100, 1, type(uint256).max);
     }
 
     function test_quotePreservesFractionalHeadroomAtTheAccountLimit() public {
@@ -233,12 +298,12 @@ contract BuckNetQuoteTest is Test {
         (,,, uint256 spendable) = quoter.quoteIssue(id, room + 1);
         assertEq(spendable, room);
         vm.prank(ALICE);
-        buck.issue(id, room + 1, spendable);
+        buck.issue(id, room + 1, spendable, type(uint256).max);
         (,,, spendable) = quoter.quoteIssue(id, 0);
         assertEq(spendable, 0);
         vm.expectRevert(BuckLedger.AccountOverflow.selector);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1);
+        buck.issue(id, 0, 1, type(uint256).max);
     }
 
     function test_quoteDoesNotBypassAMaturityBacklog() public {
@@ -250,10 +315,10 @@ contract BuckNetQuoteTest is Test {
         assertEq(spendable, 50e6);
         vm.expectRevert(JubileeClaims.PendingMaturities.selector);
         vm.prank(ALICE);
-        buck.issue(id, 50e6, spendable);
+        buck.issue(id, 50e6, spendable, type(uint256).max);
         buck.processMaturities(1);
         vm.prank(ALICE);
-        buck.issue(id, 50e6, spendable);
+        buck.issue(id, 50e6, spendable, type(uint256).max);
         (uint256 principal,) = credit.issuanceOf(id);
         assertEq(principal, spendable);
     }
@@ -261,14 +326,14 @@ contract BuckNetQuoteTest is Test {
     function test_matureFacilityQuotesNoNewIssuanceEvenIfCoverageRemains() public {
         uint256 id = _credit(200e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 200e6, 100e6);
+        buck.issue(id, 200e6, 100e6, type(uint256).max);
         vm.warp(t0 + 50 * YEAR);
         buck.processMaturities(1);
         (,,, uint256 spendable) = quoter.quoteIssue(id, 0);
         assertEq(spendable, 0);
         vm.expectRevert(BuckNet.FacilityMatured.selector);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1);
+        buck.issue(id, 0, 1, type(uint256).max);
     }
 
     function test_quoteRejectsInvalidPremiumAndCarryingOwnersCannotIssue() public {
@@ -285,7 +350,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(spendable, 0);
         vm.expectRevert(BuckNet.NotCarryingPool.selector);
         vm.prank(address(pool));
-        buck.issue(carrying, 100e6, 1);
+        buck.issue(carrying, 100e6, 1, type(uint256).max);
     }
 
     function test_quoteWorksForZeroFaceAndDoesNotPromiseAPool() public {
@@ -301,7 +366,7 @@ contract BuckNetQuoteTest is Test {
         assertEq(spendable, 90e6);
         vm.expectRevert(BuckNet.NoInsurerPool.selector);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, spendable);
+        buck.issue(id, 100e6, spendable, type(uint256).max);
     }
 
     function testFuzz_quoteAgreesWithActualIssuance(
@@ -322,7 +387,7 @@ contract BuckNetQuoteTest is Test {
         if (spendable == 0) return;
         uint256 ownerBefore = buck.balanceOf(ALICE);
         vm.prank(ALICE);
-        (uint256 issued, uint256 paid) = buck.issue(id, coverage, spendable);
+        (uint256 issued, uint256 paid) = buck.issue(id, coverage, spendable, type(uint256).max);
         assertEq(issued, spendable + premium);
         assertEq(paid, premium);
         assertEq(buck.balanceOf(ALICE) - ownerBefore, spendable);

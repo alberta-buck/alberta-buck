@@ -277,7 +277,7 @@ contract JubileeFundTest is Test {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, rate);
         vm.prank(owner);
-        buck.issue(id, face, face - face * rate * 10 / 10_000);
+        buck.issue(id, face, face - face * rate * 10 / 10_000, type(uint256).max);
     }
     function _authorize(address owner, uint256 id, uint256 amount, uint256 minRelief) internal {
         vm.prank(owner);
@@ -789,7 +789,7 @@ contract JubileeFundTest is Test {
                           abi.encodeWithSignature("Error(string)", "checkpoint failed"));
         vm.expectRevert(abi.encodeWithSignature("Error(string)", "checkpoint failed"));
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         assertEq(buck.totalIssued(), 0);
         (, uint256 active,) = credit.creditInfo(id);
         (uint256 principal,) = credit.issuanceOf(id);
@@ -819,7 +819,7 @@ contract JubileeFundTest is Test {
                                               BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.expectRevert(JubileeFund.NotConfigured.selector);
         vm.prank(ALICE);
-        freshBuck.issue(id, 100e6, 100e6);
+        freshBuck.issue(id, 100e6, 100e6, type(uint256).max);
         assertEq(freshBuck.totalIssued(), 0);
         (, uint256 active,) = freshCredit.creditInfo(id);
         assertEq(active, 0);
@@ -1268,7 +1268,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         fund.renew(id, terms);
         vm.expectRevert(BuckNet.FacilityMatured.selector);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1);
+        buck.issue(id, 0, 1, type(uint256).max);
         vm.prank(ALICE);
         fund.closeMatured(id);
         assertEq(buck.claimBook().deferredPrincipal(), 1000e6);
@@ -1417,11 +1417,11 @@ contract JubileeRenewalTest is JubileeFundTest {
         uint256 id = credit.createCredit(ALICE, 0, 1000e6, 1000e6,
                                          BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, 500e6);
+        buck.issue(id, 1000e6, 500e6, type(uint256).max);
         BuckRenewal.Terms memory terms = _terms(id, 1200e6, 1200e6, 0, 0);
         _approveRenewal(id, terms);
         vm.prank(ALICE);
-        buck.issue(id, 0, 1);
+        buck.issue(id, 0, 1, type(uint256).max);
         vm.expectRevert(BuckRenewalConsent.BadCreditSnapshot.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);

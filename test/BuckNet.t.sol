@@ -106,7 +106,7 @@ contract BuckNetTest is Test {
     function test_issuedUnspentIsTheFullErc20BalanceAndCanCloseAfterFiftyYears() public {
         uint256 id = _credit(ALICE, INSURER_A, 1_000_000e6, 0);
         vm.prank(ALICE);
-        (uint256 principal, uint256 premium) = buck.issue(id, 1_000_000e6, 1_000_000e6);
+        (uint256 principal, uint256 premium) = buck.issue(id, 1_000_000e6, 1_000_000e6, type(uint256).max);
         assertEq(principal, 1_000_000e6);
         assertEq(premium, 0);
         assertEq(buck.balanceOf(ALICE), principal);
@@ -136,7 +136,7 @@ contract BuckNetTest is Test {
     function test_registryModeChangesKeepNetBalancesAndFundValueConserved() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         assertTrue(identity.carryingModeHookEnabled());
         vm.prank(ALICE);
         buck.transfer(BOB, 40e6);
@@ -169,7 +169,7 @@ contract BuckNetTest is Test {
         _bind(address(second), true, address(this));
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         vm.prank(ALICE);
         buck.transfer(address(first), 40e6);
 
@@ -204,7 +204,7 @@ contract BuckNetTest is Test {
         _credit(ALICE, INSURER_A, 10e6, 0);
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         vm.expectRevert(BuckNet.CreditExceeded.selector);
         identity.setIsCarrying(ALICE, true);
         assertFalse(identity.isCarrying(ALICE));
@@ -220,7 +220,7 @@ contract BuckNetTest is Test {
     function test_jubileeAndRegisteredInsurerPoolStayCarrying() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         MockNetInsurerPool pool = _pool(INSURER_A);
         vm.expectRevert(BuckNet.NotCarryingPool.selector);
         identity.setIsCarrying(address(fund), false);
@@ -237,9 +237,9 @@ contract BuckNetTest is Test {
         uint256 aliceId = _credit(ALICE, INSURER_A, 100e6, 0);
         uint256 bobId = _credit(BOB, INSURER_B, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(aliceId, 100e6, 100e6);
+        buck.issue(aliceId, 100e6, 100e6, type(uint256).max);
         vm.prank(BOB);
-        buck.issue(bobId, 100e6, 100e6);
+        buck.issue(bobId, 100e6, 100e6, type(uint256).max);
         vm.prank(BOB);
         buck.transfer(ALICE, 100e6);
         _authorize(ALICE, aliceId, 100e6, 0);
@@ -272,7 +272,7 @@ contract BuckNetTest is Test {
     function test_claimBookOnlyAcceptsTokenSyncAndAllowsBoundedPublicMaturityProcessing() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         JubileeClaimBook claims = buck.claimBook();
         assertEq(claims.buck(), address(buck));
         assertEq(address(claims.credit()), address(credit));
@@ -295,7 +295,7 @@ contract BuckNetTest is Test {
     function test_transferAndTransferFromUseHeldAndUnspentWithoutRetiringNft() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         vm.prank(ALICE);
         buck.transfer(BOB, 40e6);
         vm.prank(BOB);
@@ -315,11 +315,11 @@ contract BuckNetTest is Test {
     function test_twoNftsKeepDistinctAgesWhenOneFacilityIsReduced() public {
         uint256 old = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(old, 100e6, 100e6);
+        buck.issue(old, 100e6, 100e6, type(uint256).max);
         vm.warp(t0 + YEAR);
         uint256 newer = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(newer, 100e6, 100e6);
+        buck.issue(newer, 100e6, 100e6, type(uint256).max);
         vm.warp(t0 + 2 * YEAR);
         (uint256 selected, uint256 total) = buck.selectedClaimSeconds(newer, 100e6);
         assertEq(selected, 100e6 * YEAR);
@@ -338,12 +338,12 @@ contract BuckNetTest is Test {
     function test_kCutDoesNotRecallIssuedUnspentAndReductionImprovesShortfall() public {
         uint256 id = _credit(ALICE, INSURER_A, 1000e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, 1000e6);
+        buck.issue(id, 1000e6, 1000e6, type(uint256).max);
         k.setK(0.5e18);
         assertEq(buck.balanceOf(ALICE), 1000e6);
         vm.prank(ALICE);
         vm.expectRevert(BuckNet.CreditExceeded.selector);
-        buck.issue(id, 0, 1);
+        buck.issue(id, 0, 1, type(uint256).max);
         _authorize(ALICE, id, 100e6, 0);
         fund.settle(buck, ALICE, id, 100e6, 0);
         (uint256 remaining,) = credit.issuanceOf(id);
@@ -359,9 +359,9 @@ contract BuckNetTest is Test {
         uint256 aliceId = _credit(ALICE, INSURER_A, 1000e6, 100);
         uint256 bobId = _credit(BOB, INSURER_B, 1000e6, 100);
         vm.prank(ALICE);
-        buck.issue(aliceId, 1000e6, 900e6);
+        buck.issue(aliceId, 1000e6, 900e6, type(uint256).max);
         vm.prank(BOB);
-        buck.issue(bobId, 1000e6, 900e6);
+        buck.issue(bobId, 1000e6, 900e6, type(uint256).max);
         assertEq(buck.balanceOf(address(a)), 100e6);
         assertEq(buck.balanceOf(address(b)), 100e6);
         assertEq(buck.facilityPool(aliceId), address(a));
@@ -394,7 +394,7 @@ contract BuckNetTest is Test {
         pool.approveToken(IERC20(address(buck)));
         uint256 id = _credit(ALICE, INSURER_A, 1000e6, 100);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, 900e6);
+        buck.issue(id, 1000e6, 900e6, type(uint256).max);
         vm.warp(t0 + YEAR);
         (uint256 ownerHeld, uint256 ownerUnspent) = buck.heldAndUnspentScaled(ALICE);
         (uint256 poolNet,) = buck.heldAndUnspentScaled(address(pool));
@@ -416,13 +416,13 @@ contract BuckNetTest is Test {
         original.approveToken(IERC20(address(buck)));
         uint256 id = _credit(ALICE, INSURER_A, 2000e6, 100);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, 900e6);
+        buck.issue(id, 1000e6, 900e6, type(uint256).max);
         MockNetInsurerPool replacement = _pool(INSURER_A);
         vm.prank(ALICE);
-        buck.issue(id, 500e6, 450e6);
+        buck.issue(id, 500e6, 450e6, type(uint256).max);
         uint256 bobId = _credit(BOB, INSURER_B, 1000e6, 0);
         vm.prank(BOB);
-        buck.issue(bobId, 1000e6, 1000e6);
+        buck.issue(bobId, 1000e6, 1000e6, type(uint256).max);
         assertEq(buck.facilityPool(id), address(original));
         assertEq(buck.balanceOf(address(original)), 150e6);
         assertEq(buck.balanceOf(address(replacement)), 0);
@@ -449,7 +449,7 @@ contract BuckNetTest is Test {
         MockNetInsurerPool pool = _pool(INSURER_A);
         uint256 id = _credit(ALICE, INSURER_A, 1000e6, 100);
         vm.prank(ALICE);
-        buck.issue(id, 1000e6, 900e6);
+        buck.issue(id, 1000e6, 900e6, type(uint256).max);
         _authorize(ALICE, id, 1000e6, 0);
         vm.expectRevert(BuckNet.InsufficientAllowance.selector);
         fund.settle(buck, ALICE, id, 1000e6, 0);
@@ -464,7 +464,7 @@ contract BuckNetTest is Test {
     function test_reductionRequiresOwnerAuthorizationAndReliefFloor() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         vm.expectRevert(BuckNet.BadAuthorization.selector);
         fund.settle(buck, ALICE, id, 10e6, 0);
         vm.prank(BOB);
@@ -479,7 +479,7 @@ contract BuckNetTest is Test {
     function test_tokenRejectsACompromisedFundAttemptAboveTenPercentOfNetCash() public {
         uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(id, 100e6, 100e6);
+        buck.issue(id, 100e6, 100e6, type(uint256).max);
         vm.warp(t0 + YEAR);
         (, uint256 cash) = buck.fundBalancesScaled();
         _authorize(ALICE, id, 1e6, 0);
@@ -495,19 +495,19 @@ contract BuckNetTest is Test {
     function test_expiredMaturityRequiresPermissionlessProcessingBeforeIssuance() public {
         uint256 old = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(old, 100e6, 100e6);
+        buck.issue(old, 100e6, 100e6, type(uint256).max);
         vm.warp(t0 + 50 * YEAR);
         uint256 next = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
         vm.expectRevert(JubileeClaims.PendingMaturities.selector);
-        buck.issue(next, 100e6, 100e6);
+        buck.issue(next, 100e6, 100e6, type(uint256).max);
         (uint256 principal,) = credit.issuanceOf(next);
         assertEq(principal, 0);
         (uint256 processed, bool current) = buck.processMaturities(1);
         assertEq(processed, 1);
         assertTrue(current);
         vm.prank(ALICE);
-        buck.issue(next, 100e6, 100e6);
+        buck.issue(next, 100e6, 100e6, type(uint256).max);
         assertEq(buck.totalIssued(), 200e6);
     }
 
@@ -517,7 +517,7 @@ contract BuckNetTest is Test {
         k.setFactor(1e18);
         vm.prank(ALICE);
         vm.expectRevert(BuckNet.FundingInsufficient.selector);
-        buck.issue(id, 1000e6, 900e6);
+        buck.issue(id, 1000e6, 900e6, type(uint256).max);
         assertEq(buck.totalIssued(), 0);
         assertEq(buck.balanceOf(address(pool)), 0);
     }
@@ -526,11 +526,11 @@ contract BuckNetTest is Test {
         MockNetInsurerPool pool = _pool(INSURER_A);
         uint256 starter = _credit(ALICE, INSURER_A, 100e6, 0);
         vm.prank(ALICE);
-        buck.issue(starter, 100e6, 100e6);
+        buck.issue(starter, 100e6, 100e6, type(uint256).max);
         uint256 insured = _credit(ALICE, INSURER_A, 1000e6, 100);
         k.setFactor(1e18);
         vm.prank(ALICE);
-        buck.issue(insured, 1000e6, 900e6);
+        buck.issue(insured, 1000e6, 900e6, type(uint256).max);
         assertEq(buck.balanceOf(address(pool)), 100e6);
         assertEq(buck.balanceOf(ALICE), 1000e6);
         assertEq(buck.totalIssued(), 1100e6);
@@ -541,7 +541,7 @@ contract BuckNetTest is Test {
         uint256 elapsedYears = bound(years_, 0, 49);
         uint256 id = _credit(ALICE, INSURER_A, amount, 0);
         vm.prank(ALICE);
-        buck.issue(id, amount, amount);
+        buck.issue(id, amount, amount, type(uint256).max);
         vm.warp(t0 + elapsedYears * YEAR);
         if (buck.maturitiesPending()) buck.processMaturities(1);
         (, uint256 fundNet) = buck.fundBalancesScaled();

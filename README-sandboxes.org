@@ -22,7 +22,9 @@ basket is not bound to the K controller, and the interactive sandbox still
 opens the legacy world. Net buys in the diagnostic use an atomic single-pool
 net-output guard; the guard is not a multi-hop router or a price oracle. The
 restore checks captured code hashes and wiring for consistency; the saved
-hashes are not an independent code audit.
+hashes are not an independent code audit. Net world records now identify the
+premium-limited issuance ABI; unversioned experimental records are rejected
+on restore rather than being reopened with incompatible contract calls.
 
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|

@@ -69,7 +69,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         _exec(chain, actor, credit, "setCreditIssuer", [gov, True])
         chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
         assert credit.functions.ownerOf(0).call() == actor.address
-        issued = _exec(chain, actor, buck, "issue", [0, 100 * RAW, 100 * RAW])
+        issued = _exec(chain, actor, buck, "issue", [0, 100 * RAW, 100 * RAW, 0])
         issued_at = anvil.w3.eth.get_block(issued["blockNumber"])["timestamp"]
         ops = NetCreditOps(chain, stack)
         fresh = ops.quote_relief_rate(0, RAW)
@@ -115,7 +115,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         # the implied annual rate is then only a lower bound on the fund mark.
         anvil.warp_to(issued_at + 49 * YEAR)
         chain.send(credit.functions.createCredit(actor.address, 0, 100 * RAW, 100 * RAW, 0, 0, 0, 0))
-        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 50 * RAW])
+        _exec(chain, actor, buck, "issue", [1, 100 * RAW, 50 * RAW, 0])
         _exec(chain, actor, buck, "transfer", [fund.address, 40 * RAW])
         capped = ops.quote_relief_rate(0, RAW)
         assert capped.capped and capped.relief_scaled == RAW * Q and capped.annual_rate_wad is not None
@@ -183,11 +183,15 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
             _exec(chain, insurer, credit, "createCredit", [actor.address, 0, face, face, 0, 0, 0, rate])
         provider_id = credit.functions.tokenOfOwnerByIndex(provider.address, 0).call()
         debtor_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 0).call()
-        ops.issue(provider.address, provider_id, face, VECTOR["provider_issuance"])
+        ops.issue(provider.address, provider_id, face, VECTOR["provider_issuance"], 0)
         quote = ops.quote_issue(debtor_id, face)
         assert (quote.premium, quote.reserve_required, quote.max_spendable, quote.reserve_shortfall) == (
             premium, reserve, spendable, reserve)
-        data = buck.encode_abi("issue", args=[debtor_id, face, spendable])
+        with pytest.raises(ValueError, match="maximum premium"):
+            ops.issue(debtor.address, debtor_id, face, spendable, -1)
+        with pytest.raises(TypeError):
+            ops.issue(debtor.address, debtor_id, face, spendable)
+        data = buck.encode_abi("issue", args=[debtor_id, face, spendable, premium])
         refused = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
         assert refused["status"] == 0
         assert ops.facility(debtor_id).issued == 0
@@ -203,7 +207,18 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         assert refused["status"] == 0
         _exec(chain, provider, buck, "transfer", [debtor.address, buffer])
         assert ops.quote_issue(debtor_id, face).reserve_shortfall == 0
-        issue_receipt = ops.issue(debtor.address, debtor_id, face, spendable)
+        before_supply = buck.functions.totalIssued().call()
+        before_balance = buck.functions.balanceOf(debtor.address).call()
+        rate = VECTOR["premium_rate_bp"]
+        _exec(chain, insurer, credit, "updateCredit", [debtor_id, face, face, 0, 0, 0, rate + 1])
+        assert ops.quote_issue(debtor_id, face).premium > premium
+        stale = chain.send(debtor.functions.exec(buck.address, bytes.fromhex(data[2:])), expect=Expect.REVERT)
+        assert stale["status"] == 0 and buck.functions.totalIssued().call() == before_supply
+        assert 0 <= before_balance - buck.functions.balanceOf(debtor.address).call() <= 10  # time may advance
+        assert ops.facility(debtor_id).activated == ops.facility(debtor_id).issued == 0
+        assert buck.functions.balanceOf(pool.address).call() == 0
+        _exec(chain, insurer, credit, "updateCredit", [debtor_id, face, face, 0, 0, 0, rate])
+        issue_receipt = ops.issue(debtor.address, debtor_id, face, spendable, premium)
         issued_at = anvil.w3.eth.get_block(issue_receipt["blockNumber"])["timestamp"]
         state = ops.facility(debtor_id)
         assert (state.face, state.activated, state.issued, state.premium_nominal) == (
@@ -220,7 +235,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         second_quote = ops.quote_issue(second_id, face)
         assert second_quote.premium == VECTOR["second_premium"]
         assert second_quote.reserve_shortfall == 0
-        ops.issue(debtor.address, second_id, face, VECTOR["second_spendable"])
+        ops.issue(debtor.address, second_id, face, VECTOR["second_spendable"], second_quote.premium)
         second = ops.facility(second_id)
         assert second.issued == VECTOR["second_issued"]
         assert second.insurer_pool == pool2.address
@@ -317,7 +332,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         refund = ops.quote_premium_refund(third_id, face)
         assert refund.reason == "cash-only" and refund.pool == pool.address
         assert refund.premium == 5 * RAW and 0 < refund.refund_fraction_wad < 10**18
-        ops.issue(debtor.address, third_id, face, RAW)
+        ops.issue(debtor.address, third_id, face, RAW, refund.premium)
         gross, net = buck.functions.accountBalancesScaled(pool.address).call()
         assert abs(net * 10**18 // gross - refund.refund_fraction_wad) < 10**10
         # Already-activated facility room is new issuance, not wallet money;
@@ -335,7 +350,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
             ops.quote_household_activated_capacity(debtor.address, [third_id, third_id])
         with pytest.raises(ValueError, match="foreign"):
             ops.quote_household_activated_capacity(debtor.address, [provider_id])
-        ops.issue(debtor.address, third_id, 0, RAW)
+        ops.issue(debtor.address, third_id, 0, RAW, 0)
         after = ops.facility(third_id)
         assert after.activated == before.activated and after.premium_nominal == before.premium_nominal
         assert after.issued == before.issued + RAW
@@ -350,7 +365,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         start = anvil.w3.eth.get_block("latest")["timestamp"]
         _exec(chain, insurer, credit, "createCredit", [debtor.address, 0, 100 * RAW, 0, 1, 1000, start, 0])
         depreciating_id = credit.functions.tokenOfOwnerByIndex(debtor.address, 4).call()
-        ops.issue(debtor.address, depreciating_id, 40 * RAW, 10 * RAW)
+        ops.issue(debtor.address, depreciating_id, 40 * RAW, 10 * RAW, 0)
         anvil.warp_to(start + 2 * YEAR)
         marked = credit.functions.depreciatedFaceValue(depreciating_id).call()
         active = credit.functions.currentValue(depreciating_id).call()

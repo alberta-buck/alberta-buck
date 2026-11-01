@@ -79,7 +79,7 @@ contract JubileeEquityIntegrationTest is Test {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, 0);
         vm.prank(owner);
-        buck.issue(id, face, face);
+        buck.issue(id, face, face, type(uint256).max);
     }
     function _authorize(address owner, uint256 id, uint256 amount, uint256 minRelief) internal {
         vm.prank(owner);

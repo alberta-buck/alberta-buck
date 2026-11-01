@@ -100,6 +100,9 @@ must not be disturbed.
 - [X] Each insurer receives its own facilities' *full-value* premium deposits;
   a release returns the agreed *nominal* deposit with the pool's average
   carried demurrage from the same recorded pool. No cross-insurer subsidy.
+- [X] Require the holder's maximum acceptable premium on each issuance and
+  revert atomically if current terms or a changed mark exceed it. The
+  [[file:bucknet-economy-implementation.org][economy checklist]] tracks matching clients, artifacts and snapshot compatibility.
 - [X] Renewal checkpoints and settles only the selected facility, updates
   insured value, rate and any new issuance atomically, and must not temporarily
   deactivate coverage or worsen a pre-existing K shortfall.

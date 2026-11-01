@@ -62,6 +62,12 @@ service accounts, or Jubilee. The underlying asset's insured coverage and a
 user's not-yet-issued capacity are different quantities from outstanding
 issued BUCK.
 
+When issuance activates insured coverage, the full-value premium deposit is
+also newly issued principal, paid into the insurer's pool. The holder sets a
+maximum premium in the issue transaction; if the current facility terms or
+mark would require more, the whole transaction reverts. A quote is an estimate,
+and the holder's separate funding reserve must still satisfy the current gate.
+
 Let =I(t)= be total outstanding BUCK issuance, =r= the nominal annual rate,
 and =P_j(t)= the outstanding issuance attributable to credit position =j=.
 As issuance changes, the system checkpoints the old base and starts

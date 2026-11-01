@@ -106,12 +106,12 @@ also check =maturitiesPending= and handle transaction refusal. The cash-only
 diagnostic world deploys this quoter, but no five-year household economy or
 interactive sandbox has been migrated to it yet.
 
-The present =issue= ABI does not let the owner cap the premium. A MARKED
-asset can be revalued by its insurer between quotation and execution, and an
-inactive facility's terms can be changed, so the actual premium and resulting
-principal can exceed the household's estimate while the requested spendable
-amount remains unchanged. Add an owner-specified maximum premium, analogous
-to renewal, and verify atomic rollback before relying on issuance decisions.
+The revised =issue= ABI requires an owner-specified maximum premium, analogous
+to renewal. A self-issued MARKED asset can be revalued between quotation and
+execution, and an insurer can change an inactive facility's terms; either can
+increase the actual premium and resulting principal while the requested
+spendable amount remains unchanged. Issuance reverts atomically if its premium
+exceeds the owner's ceiling. Clients must choose that ceiling explicitly.
 
 For the next household issuance integration, check each NFT's already
 activated capacity with =quoteIssue(id, 0)= before activating more coverage.
