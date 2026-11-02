@@ -103,6 +103,111 @@ rather than silently following both.
   rebalancing under the token lock. Guard price and position consistency;
   liquid fund cash is read separately at settlement.
 
+* API simplification review: proposals for discussion
+
+The 2026-11-01 caller review suggests keeping the financial state transitions
+on chain and moving advisory calculations and household decisions into client
+libraries. The entries below are *proposals*, not authorization to remove
+the previously requested =mint=/=burn= compatibility interfaces. No
+external-user inventory or deployed integration survey was performed. The
+repository's callers establish a minimum migration scope, not a complete
+list of users.
+
+| API or responsibility | Repository evidence | Proposed disposition |
+|-----------------------+---------------------+----------------------|
+| ERC-20 balances, transfers, allowances and identity proofs | Wallets, pools, Notes and the real registry use these directly. | Keep enforcement, verification, receipts and authoritative state on chain; retain both plain and proof-bearing transaction paths. Proof *generation* can remain client-side. |
+| =mint=/=burn= overloads | Ordinary-owner compatibility exists; approved Carrying owners, full identity parity and practical gas bounds remain open. | Retain the requested transaction signatures while migrating. They must enforce actual balance changes, per-NFT claims, K, insurer and liquidity rules atomically; their present on-chain selection algorithms remain until explicitly changed. |
+| =quoteMint=/=quoteBurn= | No other production contract was found calling these legacy views in =src/=. The legacy Python and JS households, =eqworld= and wallet use =quoteMint=; the households use =quoteBurn=. =quoteMint= exists on BuckNet; =quoteBurn= does not. | Propose shared client-side estimates over a block-pinned snapshot, with an =eth_call= preflight of the actual transaction where available. Do not implement an additional on-chain batch =quoteBurn= before deciding. Retain =quoteMint= until its consumers and external compatibility have been assessed. |
+| =signedBalanceOf=, =signedRawBalanceOf=, =reliefOf= and =settleRelief= | The household and, separately, =BuckBasketEquity=, =BuckBasketEquityWheel=, =BasketDesk= and =BasketUpkeepFacet= consume the legacy model. | Replace each use with wallet BUCK, per-NFT principal/claim, fund value and actual settlement as appropriate. Do not synthesize a signed balance or a no-op settlement. The leveraged basket/desk must remain able to perform required credit transitions on chain. |
+| =mintFromBasket=/=burnFromBasket= | =BuckWithBasketHooks= supplies legacy privileged hooks; the pro-rata/V3 basket and monetary desk still reference them. | Inventory which implementations and failure checks remain relevant. Migrate an active issuer to real NFT-backed credit and settlement before removing its old path; do not port unbacked issuance into BuckNet. |
+| =creditLimit=, =mintsBacked=, =mintsPrincipal= | BuckNet currently exposes inexpensive aliases. =creditLimit= is K times aggregate activated value, not proof that any particular NFT can issue that amount. | Prefer explicitly named per-NFT principal, activated coverage, premium and pool views in new clients. Consider dropping aliases only after migrating on-chain and external consumers; aliases alone are not the main source of complexity. |
+| Fee/relief views and demurrage sponsorship | Sponsorship in =Buck.sol= is a two-party, state-changing agreement about *who pays*; no production caller was found in the searched Solidity, Python or JS sources. | Update obsolete fee and fund views to net-ledger/fund terminology. Decide separately whether sponsorship is still a product requirement: an SDK cannot preserve it merely by calculating a number. Do not invent a no-op substitute. |
+
+The current =BuckBasketEquity.enableNetAccounting= path is cash-only and
+=openCredit= rejects that mode. Therefore the existing cash-only smoke cannot
+establish that the leveraged basket, its desk, low-K exits or the Jubilee
+position's mark work under the new token. Its replacement needs explicit
+wallet and NFT debt accounting, legitimate issue/retirement, and a valuation
+that avoids counting the fund's basket holding twice. Do not move a necessary
+contract-to-contract transition into an SDK and thereby leave the basket
+without a callable on-chain operation.
+
+The default =economy.toml= already uses =HouseholdPopulationAgent= and sets
+the older debtor/saver agent counts to zero; 59 experiment TOMLs still name at
+least one old agent. Those historical configurations need an inventory and
+coverage comparison, not wholesale deletion. The newer household's BuckNet
+setup, issue, asset/basket exit and financial-mark paths still raise
+=NotImplementedError=, so selecting it does not yet run the new economy.
+Keep the adaptive default and explicit comparison policies while moving the
+household onto the net-ledger operations.
+
+** Shared quote and numeric-kernel design
+
+- A quote is an estimate of a specific transaction, account, block and
+  selection, not a reservation or a proof of execution. It should report
+  per-facility issuance/reduction, coverage, premium/refund, relief, actual
+  visible balance delta, liquidity and the reason for failure; distinguish
+  an incomplete work limit from a demonstrated infeasible request. Changing
+  K, prices, balances, pool allowances, wheel marks or block budget can change
+  the result before execution. The underlying transaction remains the
+  authority and must retain its checks and atomic rollback.
+- =eth_call= can simulate the real non-view transaction off chain in a
+  discarded state overlay, including its guarded valuation refresh. Use the
+  actual sender or smart-wallet dispatch, matching block, transaction data,
+  allowances and sufficient call gas. A successful preflight does not reserve
+  state or guarantee later inclusion. This is distinct from an EVM
+  =STATICCALL=: another contract cannot use a state-changing burn that way.
+  The compatible =mint=/=burn= return no allocation details, so an ordinary
+  =eth_call= can establish success or a revert but does not itself return the
+  simulated events, balance deltas or per-NFT allocation. Derive those from a
+  separately verified model or an explicitly supported simulation facility.
+- A client-side multi-facility estimate needs the current shared block-budget
+  state as well as net fund cash. =availableReliefScaled= exposes their
+  minimum for *one* outflow, not whether the budget was started or its entire
+  remainder. When the per-operation cash cap is the smaller value, that
+  minimum alone cannot generally reconstruct the budget after a virtual
+  partial payment. Consider a small read-only budget snapshot, or use the
+  transaction preflight; do not call an estimate exact without resolving this.
+  An =eth_call= may also use a freshly published mark whereas the existing
+  =previewRelief= view uses the last publication.
+- The existing [[file:../../core/rust/buck-math/src/demurrage.rs][Rust demurrage kernel]] implements the legacy gross/signed model;
+  its inputs and Python/JS bindings are =u128=/=i128=. BuckNet uses a =1e36=
+  scale on raw six-decimal BUCK: even one full BUCK is =1e42= scaled, larger
+  than =u128=. Extend or replace the numeric representation with checked
+  256-bit inputs and a sufficiently wide intermediate for full-precision
+  multiplication/division, matching Solidity overflow and rounding; pass
+  full-width Python integers and JS =BigInt= without truncation.
+- Build shared vectors against the actual contract *and* an independently
+  implemented Python integer reference. Cover ordinary and Carrying values,
+  premiums and aged pool refunds, changed K, partial/multiple NFT operations,
+  non-monotone rounding, both liquidity limits and first/second outflow in a
+  block, maturity/deferred claims, stale versus refreshed marks, and overflow.
+  Exercise the resulting Rust library through both Python and WASM bindings.
+  Keep model-specific APIs or versions explicit so legacy vectors do not
+  silently claim BuckNet equivalence.
+- Reuse the partial Python =buck_core.net_world= and JS =net-world.js=
+  block-pinned issuance and selected-facility helpers as integration starting
+  points. They already depend on the separate on-chain =BuckNetQuoter=; assess
+  whether it remains useful after the shared SDK exists before removing it.
+  Their current estimates and bounded partial reductions do not yet implement
+  the full compatible multi-facility burn quote.
+- Economic policy, arrivals, thresholds, mortgage cash flows and portfolio
+  choices already have Python/JS implementations and shared policy vectors.
+  Consolidate them further only if it reduces maintenance without obscuring
+  randomized behavior or breaking reproducibility. Solidity need not decide
+  a household's best trade or savings policy.
+
+A more aggressive option would replace automatic =mint(N)=/=burn(N)= search
+with SDK-selected per-facility actions and, if needed, an atomic bounded batch.
+That would change the previously requested transaction API and is *not*
+approved by this review. The existing =issue= is a bounded single-facility
+operation; the current authorized reduction followed by =fund.reduce= is a
+two-transaction protocol, not a drop-in atomic replacement. Any proposed
+one-call retirement/batch would need explicit owner authorization and limits,
+unchanged identity and accounting checks, K and liquidity validation, safe
+insurer preparation, maturity handling and atomic rollback. Offloading quotes
+alone does not remove the search needed by the retained convenience methods.
+
 * 1. Next milestone: Buck-compatible token API
 
 - [ ] Restore =mint(uint256)= and =mint(uint256,uint256[])= as atomic token
@@ -205,20 +310,15 @@ rather than silently following both.
   now refreshes it for each facility before computing relief. Tests cover mark
   changes and rollback; real leveraged-basket valuation and a supported
   scan/gas bound remain open.
-- [ ] Reinstate =quoteMint= and =quoteBurn= with their old argument and return
-  shapes and execution-consistent rounding. Add a richer quote for per-NFT
-  principal, coverage, refund, actual net relief, owner contribution and
-  available liquidity; distinguish a quote from a guaranteed execution.
-  Specify zero, duplicate IDs, bounded work and maximum amounts with tests.
-  The burn quote should expose whether the requested visible balance change
-  fits the shared block budget and the operation-level liquidity limit, and
-  help callers choose a feasible smaller request without silently clipping it.
-  =BuckNetQuoter.quoteSpendable= finds the least coverage for one ordinary
-  facility and reports premium and reserve. BuckNet's legacy-shaped
-  =quoteMint= uses the same ordered batch planner as ordinary =mint=. Neither
-  reserves K, verifies that premium funding will be available, or guarantees
-  future execution. Both distinguish a work limit from infeasibility;
-  Carrying quotes and =quoteBurn= remain open.
+- [ ] Decide whether to retain the old =quoteMint=/=quoteBurn= views or replace
+  their active consumers with the shared client-side estimates described
+  above. Until that decision, do not remove =quoteMint= or implement another
+  on-chain =quoteBurn=. =BuckNetQuoter.quoteSpendable= finds least coverage
+  for one ordinary facility and reports premium and reserve; BuckNet's
+  legacy-shaped =quoteMint= uses the ordered batch planner of ordinary =mint=.
+  Neither reserves K or guarantees premium funding or later execution.
+  Both distinguish a work limit from infeasibility. Carrying quotes, exact
+  multi-slice burn estimates and all quote-to-execution parity remain open.
 - [X] Restore =creditLimit=, =mintsBacked= and =mintsPrincipal= with units and
   per-facility constraints documented. A two-facility test covers inactive
   coverage, a premium deposit, a K change and partial settlement.
@@ -538,4 +638,5 @@ API review ran the local Foundry =BuckTest= and =BuckNetTest= suites: 53 and
 | 2026-11-01 | Shared authorized reduction transition | The existing linked =BuckNetTokenOps= library now performs the same principal, relief, insurer refund, coverage, K and claim-book transition for the existing authorized reduction. The host still validates authorization and the shared cash budget under its guard; renewal shares the pool-refund helper. An event test verifies the token emits the reduction and consumes authorization only once. Focused BuckNet, mint, real-fund and Jubilee suites passed; =make nix-test= passed 1,576 tests with one fork test skipped; the cash-only smoke passed 26 Python and 20 JS tests; the artifact check passed. Runtime is 21,650 bytes for BuckNet and 17,637 for the linked token library. One-call burn, valuation hook integration, full identity parity and production release remain open. | =d5a1d1e9= |
 | 2026-11-01 | Token-only burn valuation hook | The existing fund can refresh the registered wheel's guarded mark on a token-only call, and expose the last guarded mark to a quote. A test-only BuckNet subclass holds the real token guard while refreshing and confirms no wheel work, reward, balance or position movement; tests also cover changed receipt, changed source, a basket loss, empty position and the explicit no-wheel fallback. The Jubilee and wheel suites passed 249 and 10 tests, the final hook suite passed 48 including inherited cases, and focused Python/Anvil and JS/Tevm deployment tests passed one and two cases. The artifact check passed; JubileeFund runtime is 22,735 bytes. The public burn does not yet call this hook, and leveraged valuation, freshness and gas limits remain open. | =76ddd882= |
 | 2026-11-01 | Bounded per-facility burn allocation | The candidate can find the greatest feasible requested decrease up to a bound without assuming principal or K eligibility is monotone, and propagates an inner work-limit result. A 100,000-case independent exhaustive comparison covers both exact and bounded candidates; eight math tests and 48 real-fund/inherited tests passed, including K-driven overshoot of the target. A legacy regression confirms =burn(uint256.max)= and its quote reject the request instead of treating it as a maximum sentinel; all 54 =BuckTest= cases passed. At that checkpoint public burn and batch orchestration were unimplemented, and the bounded search still needed production gas/availability work. | =f5ea14c2= |
-| 2026-11-01 | Ordinary-owner burn compatibility | Both legacy-shaped =burn= entry points now refresh the guarded wheel mark and use current fund, claim, wallet, insurer and K state for each ordered facility. They enforce the shared cash budget and actual total balance decrease atomically, preserve exact relief and nominal refund, and do not call an insurer or sell basket positions under the token lock. Tests cover aged multi-facility equivalence to separate fund reductions, a real private identity, K and mark changes, liquidity refusal, cross-path block limits, rollback, maturity and the explicit work-limit failure. =make nix-test= passed 1,691 tests with one fork test skipped; the cash-only smoke passed 26 Python and 20 JS cases, and the artifact check passed. JS net-world records now require version 5. Runtime: BuckNet 22,185 bytes, token-operations library 23,069 bytes and BuckCredit 24,516 bytes. A focused gas report saw up to 1,275,392 gas among its sampled =burn(uint256)= calls, including expected failures; this is not a worst-case bound. =quoteBurn=, Carrying owners, insurer preparation, practical gas bounds, leveraged valuation and the new economy remain open. | This commit |
+| 2026-11-01 | Ordinary-owner burn compatibility | Both legacy-shaped =burn= entry points now refresh the guarded wheel mark and use current fund, claim, wallet, insurer and K state for each ordered facility. They enforce the shared cash budget and actual total balance decrease atomically, preserve exact relief and nominal refund, and do not call an insurer or sell basket positions under the token lock. Tests cover aged multi-facility equivalence to separate fund reductions, a real private identity, K and mark changes, liquidity refusal, cross-path block limits, rollback, maturity and the explicit work-limit failure. =make nix-test= passed 1,691 tests with one fork test skipped; the cash-only smoke passed 26 Python and 20 JS cases, and the artifact check passed. JS net-world records now require version 5. Runtime: BuckNet 22,185 bytes, token-operations library 23,069 bytes and BuckCredit 24,516 bytes. A focused gas report saw up to 1,275,392 gas among its sampled =burn(uint256)= calls, including expected failures; this is not a worst-case bound. =quoteBurn=, Carrying owners, insurer preparation, practical gas bounds, leveraged valuation and the new economy remain open. | =10000fc5= |
+| 2026-11-01 | API simplification review | Traced quote, signed-accounting, basket-hook and sponsorship callers. Recorded a proposal for shared full-width client estimates, the block-budget snapshot limitation, the Rust legacy-arithmetic boundary and the incomplete net household/basket paths. No API or agent was removed. Documentation review and =git diff --check= only; no contract behavior changed. | This commit |
