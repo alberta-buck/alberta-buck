@@ -4,13 +4,15 @@
 
 * Purpose and release boundary
 
-The [[file:bucknet-economy-implementation.org][unified BuckNet replacement plan]] owns the current checklist and
+The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current checklist and
 execution order. This reference retains the detailed Rust, Python and
 JavaScript, Notes and proof mappings and design choices. Its detailed
 requirements support the unified plan; status is tracked only there.
 The experimental contracts and their [[file:net-demurrage-invariants.org][transition invariants]] are not yet a
-production replacement. There is no supported state migration from legacy
-=Buck= to =BuckNet=, nor from an existing Notes pool to another token. Do not
+production replacement. The November 4 direction keeps Buck.sol as the
+foundation and ports the new accounting into it; it does not rename the
+experimental facade into Buck. There is no supported deployed-state migration
+from legacy Buck to corrected Buck, nor from an existing Notes pool to another token. Do not
 label legacy results, proof fixtures or a cash-only smoke test as validation of
 the new system.
 
@@ -20,11 +22,11 @@ the new system.
 |-----------------+----------------------------+-------------------------|
 | =core/rust/buck-math/src/demurrage.rs= | =fee_owing= and =carrying_transfer= use signed raw balances, linear BUCK-seconds and implicit debt repayment. | Add explicitly versioned net functions matching the chosen on-chain decay, modes, rounding, capped per-NFT age, issuance, retirement and fund cash semantics. Keep legacy APIs labeled and tested until their consumers are retired; never silently change their meaning. |
 | Rust wide math and Python/JS bindings | The current =u128= API and =mul_div_wide= produce a 128-bit result from a 256-bit intermediate. | Net scaled balances and lifetime counters use 256-bit values; =mulDiv= can require a 512-bit intermediate. Specify exact input/output ranges, overflow and floor/ceil behavior before choosing a fixed-width implementation or lossless limb/byte/decimal interface. Python =int= and JS =BigInt= must preserve all bits. Test overflow, zero and maximum values across Solidity, Rust, PyO3, WASM and pure references. |
-| =core/python/buck_core=, =core/js/src/buckworld.js= | Session/ABI helpers and world operations assume legacy mint, signed balance, old quotes and one insurance pool. | Restore compatible mint/burn/quote entry points as specified in the unified plan; version handles and snapshots, read nominal and net values for Carrying services and query principal/age per NFT. The present prototype requires separate authorization and fund execution; the planned compatible burn is atomic. Never synthesize a signed lien or treat unactivated coverage as issued money. |
+| =core/python/buck_core=, =core/js/src/buckworld.js= | Session/ABI helpers and world operations assume legacy mint, signed balance, old quotes and one insurance pool. | Retain Buck's mint/burn/quote entry points while correcting accounting as specified in the unified plan; version handles and snapshots, read nominal and net values for Carrying services and query principal/age per NFT. The prototype has ordinary-owner atomic mint/burn plus a separate authorized fund path, but incomplete feature coverage. Never synthesize a signed lien or treat unactivated coverage as issued money. |
 | Packaging and browser artifacts | Locally generated Python/npm bundles and the browser sandbox bundle now retain the experimental net stack and its link metadata beside legacy contracts. Existing published packages have not changed. | Verify package versions, compiler/artifact hashes, actual deployed library addresses/code and EIP-170/EIP-3860 limits. Release compatible packages only after the new deployment and clients are ready; do not replace the legacy package silently. |
 | =alberta_buck/sim= and sandbox services | Deployment, household actions, reports, saving snapshots and browser restores use legacy =Buck= assumptions. | Complete the five-year/JS map and acceptance cases in the companion migration plan. Persist token model/version, chain, verified fund, library and insurer addresses, claim/consent/keeper state and actual receipt IDs; reject incompatible restores or migrate them explicitly. |
 | Wallets, receipts and indexers | Some interfaces interpret =Transfer.value= or a note's =face= as the value paid. =FacilityReduced= can contain a fractional owner/fund split that ERC-20 burn events cannot express. | Show nominal, net and debt/coverage separately. Define receipt version, actual economic amount and evidence provenance; handle fractional events, reverted operations and chain reorganizations. Reconcile totals using correct net views and authoritative facility/fund events. Preserve identity approval and privacy rules. |
-| Delegated demurrage | Legacy =request/accept/clearDemurragePayer=, =isSponsored= and related fee views exist in =Buck.sol=; =BuckNet= has no equivalent. | Decide and document whether to preserve with conserved net accounting or explicitly retire with replacement coverage and a migration path. Do not present a silent loss of this feature as API compatibility. |
+| Delegated demurrage | Legacy =request/accept/clearDemurragePayer=, =isSponsored= and related fee views exist in =Buck.sol=; =BuckNet= has no equivalent. | Preserve automatic stable-balance fee offloading with conserved shared funding. The user permits settlement to clear an inadequately funded link and return the account to ordinary demurrage; specify the uncovered-fee policy in the unified plan. |
 
 Python and browser-safe JS can link a built =BuckNet= artifact and locally
 generated browser bundle for small EVM tests. Local package generation retains

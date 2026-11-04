@@ -5,7 +5,8 @@
 * Status and handoff
 
 The single current checklist, worktree, priorities and replacement path are in
-[[file:bucknet-economy-implementation.org][the unified BuckNet replacement plan]]. This document preserves the
+[[file:bucknet-economy-implementation.org][the unified Buck accounting plan]]. Its November 4 direction retains
+Buck.sol and ports the improved accounting into it. This document preserves the
 earlier contract branch's test evidence and constraints as a dated technical
 record. Its previous checklist and ordering are available in Git; update the
 unified plan, not this record, for new work.

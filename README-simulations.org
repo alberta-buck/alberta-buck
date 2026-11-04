@@ -14,8 +14,11 @@ record the actual BUCK artifact, address and accounting model in
 =meta.buck_contract=; PDFs and campaign summaries show the recorded model.
 Older vectors lacking that metadata are labeled =unrecorded=: check their
 frozen source manifest instead of inferring an accounting model from the date.
-The current sequence is in [[file:doc/review/bucknet-economy-implementation.org][the unified BuckNet replacement plan]];
-the [[file:doc/review/net-demurrage-simulation-migration.org][simulation migration map]] retains detailed legacy references.
+The current sequence is in [[file:doc/review/bucknet-economy-implementation.org][the unified Buck accounting plan]]:
+correct the existing Buck.sol using the BuckNet discoveries and preserve its
+functionality, then migrate the existing economy. The token name alone does
+not identify which accounting produced a result. The
+[[file:doc/review/net-demurrage-simulation-migration.org][simulation migration map]] retains detailed legacy references.
 
 * What each suite detects
 
@@ -145,7 +148,7 @@ tests and reusable [[file:core/python/buck_core/net_world.py][Python]] / [[file:
 isolated net household state reads activated capacity through it; normal net
 household setup and issuance remain disabled. It is a current estimate rather
 than a guarantee that an issue transaction will succeed; the
-[[file:doc/review/bucknet-economy-implementation.org][unified replacement plan]] lists its remaining integration and execution checks.
+[[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] lists the accounting port and integration checks.
 
 * The household default
 

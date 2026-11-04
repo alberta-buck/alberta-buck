@@ -4,11 +4,13 @@
 
 * Status and purpose
 
-The [[file:bucknet-economy-implementation.org][unified BuckNet replacement plan]] is the sole current
+The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] is the sole current
 checklist and execution order. This document retains the detailed code map,
 acceptance rationale and earlier progress as a technical reference. Its
 earlier duplicated checklists remain in Git, not in a second live plan. API
-compatibility and promotion to =src/Buck.sol= precede the full economy migration.
+correction in the existing =src/Buck.sol= precedes the full economy migration.
+The November 4 direction uses BuckNet as a donor and regression reference;
+it supersedes the earlier proposal to promote the separate token facade.
 
 The supported five-year economy and both interactive worlds currently deploy
 the *legacy signed-balance* BUCK token. They do not exercise =BuckNet=,

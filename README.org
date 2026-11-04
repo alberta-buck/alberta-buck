@@ -112,7 +112,9 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
   linear credit relief and fund accounting. The current contract uses the
   earlier model; see the [[file:doc/review/net-demurrage-analysis.org][demurrage audit]] for implementation status and the
   [[file:doc/review/credit-facility-accounting-design.org][credit-facility design]] for the proposed contract boundaries.
-  The [[file:doc/review/bucknet-economy-implementation.org][unified BuckNet replacement plan]] tracks the work and validation;
+  The [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] retains Buck.sol as the foundation,
+  bringing the experimental BuckNet's corrected calculations into it while
+  preserving its functionality. It tracks the work and validation;
   [[file:doc/review/net-demurrage-invariants.org][contract invariants]] and the [[file:doc/review/net-demurrage-interface-migration.org][core and Notes migration reference]] describe the
   experimental model's boundaries and remaining integration work.
 - [[file:alberta-buck-ethereum-basket.org][The BuckBasket]]

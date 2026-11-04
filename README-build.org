@@ -59,6 +59,12 @@ Foundry at a different output directory.
 
 * Tests
 
+The [[file:doc/review/bucknet-economy-implementation.org][current accounting plan]] corrects the existing =Buck.sol= using the
+BuckNet prototype's discoveries. =BuckNet*= tests and =net-demurrage-smoke=
+remain donor/regression diagnostics; they do not establish that Buck itself
+has been corrected. Existing economy and sandbox commands still run legacy
+Buck until the accounting port and its integration are completed.
+
 #+begin_src sh
 make nix-test                              # Foundry contract tests
 make nix-match-BuckNetMintMathTest         # bounded per-facility issuance math and fuzzing

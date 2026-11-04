@@ -32,6 +32,7 @@ help:
 	  '  make nix-venv-demurrage-returns    # 50-year comparison of funded investment returns' \
 	  '  make nix-venv-demurrage-test       # reference model regression tests' \
 	  '  make nix-venv-net-demurrage-smoke  # linked BuckNet accounting, Python + JS EVM' \
+	  'Accounting port: doc/review/bucknet-economy-implementation.org (retains Buck.sol)' \
 	  'Household economy (README-simulations.org):' \
 	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
 	  '  make nix-venv-economy-run CAMPAIGN=my-run CELLS=centre JOBS=2' \
@@ -255,6 +256,8 @@ demurrage-returns:
 demurrage-test:
 	python -m pytest alberta_buck/test/test_demurrage_*.py -q
 
+# The current plan ports the improved accounting into the existing Buck.sol;
+# this target remains a donor diagnostic, not the migrated household economy.
 # Deploy the experimental linked BuckNet + external Jubilee fund in fresh
 # Python/Anvil and JavaScript/Tevm fixtures, then exercise issuance, insurer
 # deposits, the funding gate and a one-year cash-only reduction. The dynamic

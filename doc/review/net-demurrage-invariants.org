@@ -9,8 +9,13 @@ This is a review and verification map for the *experimental clean-genesis*
 the system is intended to maintain. It is not a formal proof, a deployment
 specification, or evidence from a five-year household economy. The existing
 =src/Buck.sol=, deployed Notes contracts, and current economy use the legacy
-model. The [[file:bucknet-economy-implementation.org][unified replacement plan]] owns the current sequence and
+model. The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current sequence and
 outstanding work; the [[file:net-demurrage-interface-migration.org][interface and proof reference]] details clients and Notes.
+
+The November 4 direction is to correct the existing Buck foundation using
+this prototype's accounting discoveries, preserving Buck's functionality.
+This document describes the BuckNet donor; its facade, held/unspent split and
+omission of sponsorship are not requirements for the corrected Buck.
 
 Several entries below are *requirements to prove*, not claims that all
 rounding, market or adversarial cases are already proven. The selected

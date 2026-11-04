@@ -14,6 +14,11 @@ and commands are also explained in [[file:../../alberta-buck-demurrage.org][Demu
 The later [[file:jubilee-marked-relief.org][marked-relief design]] supersedes this document's historical
 sale-on-reduction examples and records the current liquidity and maturity policy.
 
+The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] now retains Buck.sol as the foundation
+and ports the validated discoveries into it. This reference's H/U distinction
+describes origins of fungible cash; it need not become two token balance
+fields when principal and age are retained independently on each NFT.
+
 * The accounting boundary
 
 | Party | Authoritative responsibility |
@@ -385,9 +390,11 @@ guarded arithmetic. The target reserve's responsiveness, sale frequency,
 minimum transaction size, ordering effects, and possible deliberate gaming
 also require simulation.
 
-Existing delegated demurrage is a separate user-facing feature, not needed by
-this reference. Removing it could simplify Buck but requires a decision about
-lost functionality; retaining it requires a net-balance conservation design.
+Existing delegated demurrage is a separate user-facing feature, not modeled by
+this reference. The user confirmed its preservation on November 4: complete
+automatic fee offloading, stable sponsored balances, and permission to detach
+an inadequately funded payer at settlement. The shared funding and uncovered
+fee rules are tracked in the unified plan; they require a conservation design.
 Likewise, retire older baskets or agents only when their distinct checks are
 covered. This work does not alter the low-K exit rule.
 
@@ -400,7 +407,8 @@ covered. This work does not alter the low-K exit rule.
 2. Implement and test basket same-receipt top-up and precise reduction with
    actual net deposits, basis and share changes, callbacks, fees, zero value,
    in-kind/partial exits and existing solvency checks.
-3. Implement per-facility issuance/age, separate held and unspent balance,
+3. Implement per-facility issuance/age and full net cash (combining held and
+   unspent cash when justified by the unified plan),
    =balanceOf= and ERC-20 parity, NFT ownership/authorization, K changes,
    Jubilee pre-redemption and grossed-up payment, insurer-pool refunds and
    atomic renewal. Test zero payout, no cross-insurer subsidy and rollback.
