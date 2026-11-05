@@ -22,9 +22,12 @@ mint/burn overloads, both quotes, approvals/identity receipts, sponsorship and
 the controller reserve remain. The focused canonical-token regressions and
 Carrying/sponsored burn arithmetic run against Buck itself. Existing fund,
 renewal, maturity and cash-basket checks now run against Buck, and shared
-Python/JS deployment and the browser wallet are restored. Leveraged basket,
-complete household lifecycle, scheduled wheel work, five-year evidence and
-Notes/release checks remain separate gates below.
+Python/JS deployment and the browser wallet are restored. Both basket upkeep
+facets and the separate desk now use explicit cash/principal transitions;
+real V3 and actual Jubilee settlement checks cover their contract paths.
+Public leveraged basket opening still awaits controller-unit validation and
+scheduled wheel integration. Complete household lifecycle,
+five-year evidence and Notes/release checks remain separate gates below.
 
 The browser-only wallet sandbox now uses canonical Buck, with separate cash
 and liability displays and verified format-4 restoration. The five-year
@@ -484,10 +487,23 @@ implementation sequence, before changing the primary economy builder.
   rollback, demurrage losses, 256 cash-boundary comparisons and full
   exit after separate actual debt retirement. This does not enable public
   leveraged opening before the remaining desk/wheel gates.
-- [ ] Port BasketDesk's own cash, principal and marked asset observations;
+- [X] Port BasketDesk's own cash, principal and marked asset observations;
   mark new-credit collateral without unpaid relief. Replace implicit draw /
   receipt repayment with actual issue/reduce calls, keeping turnover, capital
   floor, execution bands and its separation from depositors' assets.
+  Canonical contract paths are implemented: explicit verified ordinary/public
+  mode, bare credit marks separate from marked equity, per-sale draws,
+  measured net purchases followed by actual liquid-fund reduction, bounded
+  independent retirement and one financial lock. Refresh does not issue or
+  activate; stale cash diagnostics cannot control live inventory/capacity.
+  A missing relief mark does not inflate or block bare credit collateral.
+  Twenty-nine real-V3 cases pass, including 256 capacity/execution comparisons,
+  shared-block limits/resumption, whole-operation rollback, maturity and real
+  fund valuation reentry probes. Full contract regression: 1,597 passed,
+  one fork skip and the same four absent-proof exclusions. Platform rebuild /
+  smoke and compiler/link/size validation are recorded in the log below.
+  Retain the legacy branch for the still-unconverted control-lab/integration
+  fixtures; this is not a new simulation runner or a new fund/valuation stack.
 - [ ] Validate controller/desk signal units against Carrying-pool execution.
   BuckBasketUniswapV3.basketValueInBuck still sums nominal V3 prices, whereas
   canonical equity marks and guarded BUCK receipts include net/nominal pool
@@ -505,6 +521,10 @@ implementation sequence, before changing the primary economy builder.
   Then convert the existing primary
   Python/JS builders and household/savings lifecycle; no legacy fallback or
   silent skipped action may make the corrected economy appear to run.
+  Desk deployment must link the existing basket valuation library, bind its
+  public ordinary identity, enable canonical mode before opening its matching
+  credit, and restore that mode/code/library wiring explicitly. Report live
+  accountState rather than treating stored diagnostic counters as wallet cash.
 
 ** 4. Migrate existing clients, proofs and the household economy
 
@@ -576,8 +596,9 @@ Continue in this order:
    and reduction, and connect the existing wheel's marked reserve work.
    Basket valuation is now connected and tested through actual debt using a
    test-only opening seam. Explicit wheel issuance and bounded retirement are
-   tested, as are actual-collateral cash/in-kind exits. Next finish the desk
-   and scheduled wheel work before removing the public opening
+   tested, as are actual-collateral cash/in-kind exits and the separate desk's
+   canonical issue/purchase/retirement paths. Next validate controller units
+   and finish scheduled wheel work before removing the public opening
    gate. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
@@ -730,4 +751,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Separate backing activation from cash issuance and enforce actual collateral | A real-V3 regression first demonstrated the erroneous full-face postcheck: principal 100,000,000 exceeded the activated limit 99,999,900 after a cash-funded purchase. Explicit issue now supports positive coverage with zero spendable cash; premiums retain reserve/pool/limit checks and remain real principal. Free activation preserves cash, supply, principal and claim age, can improve a K shortfall without new currency, and cannot refresh a mature lien. The basket independently activates free backing, draws only its cash shortfall and uses actual activated collateral for headroom and purchase postconditions. Focused core/basket suites: 42 passed, including 256 capacity fuzz cases. Full make nix-test: 1,554 passed, one fork skip and the same four absent-proof exclusions. Runtime: Buck 21,160; facilities library 23,943; basket shell 23,874; component facet 14,605; machine facet 21,410 bytes. Public leveraged opening, exits/desk/wheel integration, five-year and Notes gates remain open. | =e93ef895= |
 
-| 2026-11-05 | Enforce actual debt backing on receipt and treasury exits | Five red cash-exit regressions demonstrated missing collateral enforcement. Canonical exits now check current K against actual activated backing before and after payout, leave principal/supply unchanged, retain TOKEN for a negative equity residue, and mark using final receipt shares/basis. Under-K cash and real V3 exits revert atomically; cash receipts do not impersonate repayment. Fourteen focused tests passed, including 256 cash-boundary comparisons, real LP rollback, full exit after actual retirement, fund-owned in-kind conversion, fees, losses and zero equity. Canonical acceptance before the last real-fund addition: 292 passed. Final full make nix-test: 1,568 passed, one fork skip and four absent-proof exclusions. Final platform checks: 34 Python, 20 JS and 15 wallet/browser tests passed; compiler/link/size checks passed for 53 distributed artifacts. Sharing one activated-value calculation brings the shell to 24,459 bytes, component facet 14,481 and machine facet 21,416. Next: desk accounting, nominal/net controller signal validation and scheduled wheel fund/maturity work, then public opening and primary household builders. Five-year and corrected-token Notes acceptance remain unclaimed. | This commit |
+| 2026-11-05 | Enforce actual debt backing on receipt and treasury exits | Five red cash-exit regressions demonstrated missing collateral enforcement. Canonical exits now check current K against actual activated backing before and after payout, leave principal/supply unchanged, retain TOKEN for a negative equity residue, and mark using final receipt shares/basis. Under-K cash and real V3 exits revert atomically; cash receipts do not impersonate repayment. Fourteen focused tests passed, including 256 cash-boundary comparisons, real LP rollback, full exit after actual retirement, fund-owned in-kind conversion, fees, losses and zero equity. Canonical acceptance before the last real-fund addition: 292 passed. Final full make nix-test: 1,568 passed, one fork skip and four absent-proof exclusions. Final platform checks: 34 Python, 20 JS and 15 wallet/browser tests passed; compiler/link/size checks passed for 53 distributed artifacts. Sharing one activated-value calculation brings the shell to 24,459 bytes, component facet 14,481 and machine facet 21,416. Next: desk accounting, nominal/net controller signal validation and scheduled wheel fund/maturity work, then public opening and primary household builders. Five-year and corrected-token Notes acceptance remain unclaimed. | =16faf578= |
+
+| 2026-11-05 | Port the separate desk to actual cash, principal and fund retirement | Added explicit verified ordinary/public canonical mode and early refusal if it is omitted. Refresh/mark never issue or activate; credit and the capital floor exclude unpaid claims. The desk reuses the existing linked basket valuation library for marked equity, measures net pool receipts, issues only before an actual sale, and pays down its real NFT through liquid Jubilee settlement. Cash and debt coexist; live inventory/capacity/offset views do not rely on stale diagnostic counters. Bounded manual retirement, one financial guard, final actual-collateral checks, finite turnover and positive whole-raw-unit work preserve atomic failure behavior. Twenty-nine canonical real-V3 tests passed, including 256 exact budget comparisons, shared-block refusal/resumption, unready-mark separation, callback rejection, full depositor separation, maturity and post-swap rollback. Full make nix-test: 1,597 passed, one fork skip and four absent-proof exclusions. Canonical-stack smoke: 34 Python and 20 JS passed; wallet/browser: 15 passed; compiler/link/size checks passed for 53 artifacts. Desk runtime 21,832 bytes. No primary household or five-year desk integration is claimed. Next consolidate repeated test inheritance, validate controller units and schedule existing wheel fund/maturity work. | This commit |

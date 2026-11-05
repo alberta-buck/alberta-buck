@@ -57,6 +57,7 @@ interface IMarkedCredit {
     function markOf(uint256 tokenId) external view returns (uint256);
     function issuanceOf(uint256 tokenId) external view returns (uint256 principal, uint256 seconds_);
     function creditInfo(uint256 tokenId) external view returns (uint256 face, uint256 active, uint32 premiumRate);
+    function currentValue(uint256 tokenId) external view returns (uint256);
 }
 
 /// @title BuckBasketEquityStorage -- the equity basket's books, appended to the

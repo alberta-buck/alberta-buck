@@ -149,6 +149,28 @@ Final marks use the receipt's final shares and basis, including fund ownership.
 fund-owned receipt conversion, low-K rollback, losses and treasury exits,
 including 256 comparisons with the actual cash-exit credit boundary.
 
+The separate =BasketDesk= now has explicit canonical mode, enabled before its
+credit is opened. It requires a verified public ordinary identity and links
+the same =BasketJubileeMath= library as the basket. =accountState()= reports
+live cash, actual NFT principal, marked unpaid relief, bare collateral and
+marked equity in raw BUCK. =refresh()= never issues, activates backing or
+realizes relief. Marking and the capital floor exclude unpaid claims; an
+unavailable relief mark need not block bare collateral or new issuance.
+
+Existing cash is sold before new credit. Persistent supply advice can issue
+only the cash being sold, within K, face, account/supply and programme caps.
+Purchases measure actual net BUCK rather than nominal V3 output. Without a
+liability they accumulate cash; with a liability they retire at most their
+newly purchased whole BUCK principal through the real Jubilee fund, even for
+nonpersistent advice, retaining the old credit-holder policy. Relief remains
+recorded cash. Liquidity refusal rolls back the whole purchase; independent
+=retireCredit= has the basket's raw-cost / scaled-relief bounds. Swaps consume
+finite gross turnover; reversals and retirement never replenish it. A single
+financial lock and final collateral checks protect the complete operation.
+=make nix-match-BuckCompoundDeskTest= covers these paths, including actual V3
+swaps, aged pools, callback rejection and 256 issuance-budget comparisons.
+These contract checks do not wire the desk into the primary household world.
+
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility
 principal/age, candidate premium and reserve checks, original-pool refund

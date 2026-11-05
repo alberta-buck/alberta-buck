@@ -194,7 +194,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         the desk is capitalized like one.  In production the same job
     ///         is done by treasury accrual, which is already excluded from
     ///         every depositor claim; this is the founding grant.
-    function capitalizeMonetary(uint256 i, uint256 amount) external onlyGov {
+    function capitalizeMonetary(uint256 i, uint256 amount) public virtual onlyGov {
         if (i >= constituents.length) revert NotInBasket();
         if (amount == 0) revert Amount0();
         IERC20(constituents[i].token).transferFrom(msg.sender, address(this), amount);
@@ -237,7 +237,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         controller-side decision (feed K the undamped error, or feed
     ///         the ACHIEVED action back to the integrator as anti-windup) and
     ///         it should be measured before it is chosen.
-    function monetaryDeviationOffset() external view returns (int256) {
+    function monetaryDeviationOffset() public view virtual returns (int256) {
         return int256(monetaryBuckHeld) - int256(monetaryTokenValue());
     }
 

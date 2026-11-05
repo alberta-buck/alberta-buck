@@ -158,7 +158,7 @@ unpaid claim and retains the existing separate held-BUCK offset.
 
 The focused =BuckCompoundBasketTest= uses a test-only opening seam to exercise
 actual issued debt, fair entries and real fund reductions. The production
-=openCredit= gate remains closed until desk integration
+=openCredit= gate remains closed until controller-unit validation
 and scheduled wheel work are complete. Both upkeep facets now exercise actual
 credit for cash shortfalls. The separate =retireCredit= action settles exact
 principal with caller cash/relief bounds and the fund's block budget; its
@@ -184,3 +184,13 @@ capacity. The focused exit suite covers real LP burns and fund TOKEN
 conversion, rollback, cash losses, zero equity and the integer cash boundary.
 The shell is 24,459 bytes after sharing the activated-value calculation;
 further sizeable additions should use the existing facets.
+
+The separate canonical desk reuses this library for marked equity; its fund
+holds the equity basket, so that mark has no desk self-holding term. Bare desk
+collateral and credit funding never require an unpaid-relief valuation. Live
+cash and NFT principal can coexist. Purchases against debt settle through the
+actual fund and its shared block budget; a rejected settlement rolls back
+the purchase. The desk's financial lock allows final read-only valuations
+while rejecting nested refresh, trade or retirement. Its deployment must
+link the same existing valuation library and explicitly enable canonical
+mode for its verified ordinary public identity.

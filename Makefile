@@ -23,6 +23,7 @@ help:
 	  '  make nix-buck-accounting-test      # canonical Buck compound cash/NFT/Jubilee checks' \
 	  '  make nix-match-BuckCompoundBasketFlowTest  # real V3 credit issuance and rollback' \
 	  '  make nix-match-BuckCompoundBasketRepaymentTest  # bounded principal settlement and locks' \
+	  '  make nix-match-BuckCompoundDeskTest  # canonical desk issuance, net purchases and real repayment' \
 	  '  make nix-wallet-sandbox-test       # build and test canonical wallet UI, trades and restore' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
@@ -154,6 +155,7 @@ match-%:
 # Focus a basket step with nix-match-BuckCompoundBasketFlowTest (issuance),
 # nix-match-BuckCompoundBasketRepaymentTest (bounded debt settlement), or
 # nix-match-BuckCompoundBasketExitTest (cash/in-kind, fund receipts and low K).
+# nix-match-BuckCompoundDeskTest covers the separate credit-holding desk.
 # See README-simulations.org for units, accounting gates and interpretation.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts

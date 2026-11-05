@@ -18,8 +18,9 @@ For the current corrected-Buck accounting and its path back to five-year runs,
 use the [[file:review/bucknet-economy-implementation.org][unified accounting implementation plan]]. Its basket/desk checklist
 supersedes the signed-account and implicit draw/repayment assumptions below.
 Both upkeep facets now issue real cash shortfalls, and bounded basket principal
-retirement and actual-collateral cash/in-kind exits are implemented;
-desk and scheduled wheel integration remain
+retirement and actual-collateral cash/in-kind exits are implemented.
+The desk's canonical cash, principal and fund-reduction paths are tested;
+controller-unit validation and scheduled wheel integration remain
 gates before enabling the new primary economy.
 
 * Where things stand
