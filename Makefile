@@ -151,6 +151,10 @@ match-%:
 
 # Corrected Buck acceptance subset. Legacy BuckLinear fixtures and the
 # experimental BuckNet facade are deliberately excluded from this evidence.
+# Focus a basket step with nix-match-BuckCompoundBasketFlowTest (issuance),
+# nix-match-BuckCompoundBasketRepaymentTest (bounded debt settlement), or
+# nix-match-BuckCompoundBasketExitTest (cash/in-kind, fund receipts and low K).
+# See README-simulations.org for units, accounting gates and interpretation.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts
 	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|BasketJubileeMathTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations)Test)$$' -vvv

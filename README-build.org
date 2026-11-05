@@ -72,6 +72,7 @@ explicitly importing =BuckLinear= are legacy evidence, as listed in the plan.
 #+begin_src sh
 make nix-test                              # Foundry contract tests
 make nix-buck-accounting-test              # corrected Buck acceptance subset (no legacy token facade)
+make nix-match-BuckCompoundBasketExitTest  # actual cash/debt, real V3 exits and low-K refusals
 make nix-wallet-sandbox-test               # canonical wallet controller, browser, trades and restoration
 make nix-match-BuckCashTest               # unsigned cash, Carrying value and sponsor component
 make nix-match-BuckNetMintMathTest         # bounded per-facility issuance math and fuzzing

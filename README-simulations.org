@@ -140,6 +140,15 @@ no LP and is separate from deposit/redemption's position lock.
 =make nix-match-BuckCompoundBasketRepaymentTest= covers bounds, fractional
 net costs, supply destruction, block limits, reuse and callback rejection.
 
+Canonical receipt and treasury exits require actual activated collateral to
+cover unchanged principal both before and after payout. Cash and in-kind
+withdrawals never repay that principal implicitly; an under-K exit reverts
+even with ample cash. Separate liability retirement can restore eligibility.
+Final marks use the receipt's final shares and basis, including fund ownership.
+=make nix-match-BuckCompoundBasketExitTest= checks cash, real V3 in-kind,
+fund-owned receipt conversion, low-K rollback, losses and treasury exits,
+including 256 comparisons with the actual cash-exit credit boundary.
+
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility
 principal/age, candidate premium and reserve checks, original-pool refund

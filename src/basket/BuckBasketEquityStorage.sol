@@ -93,16 +93,18 @@ interface IMarkedCredit {
 ///               a marked claim cannot be spent or guarantee a fund payout.
 ///           E4  an exit takes at most its fraction: in BUCK, its value at
 ///               LOW less the charge; in kind, exactly its fraction of the
-///               positions and wallet TOKEN. The legacy path implicitly
-///               repays its lien share; canonical leveraged exits stay gated
-///               until explicit repayment and prospective solvency pass.
+///               positions and wallet TOKEN, less retained debt backing.
+///               Canonical principal is unchanged: both opening and final
+///               activated collateral must cover it under current K. Only
+///               the legacy path implicitly repays its lien share.
 ///           E5  token.balanceOf(basket) >= idleToken[i]
-///           E6  after an in-kind exit the mark is read afresh, positions gone
+///           E6  after an exit the mark is read afresh with final positions,
+///               shares and basis, including any changed fund-owned receipt
 ///
 ///         The temporary legacy branch below is for existing signed-token
 ///         fixtures. Its signed balance/holder relief and implicit draw/repay
 ///         behavior are not valid semantics of canonical Buck. Public net-mode
-///         credit opening stays gated until explicit wheel/exit flows pass.
+///         credit opening stays gated pending desk and scheduled wheel work.
 ///
 ///         Value is in BUCK.  A position's fair value is twice its BUCK side
 ///         at the chosen price (2 L sqrtP, full range).  The marks are: TWAP
@@ -317,8 +319,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     function _headroomS(Snap memory s) internal view returns (int256) {
         uint256 m = address(credit) == address(0) ? 0 : credit.markOf(creditId);
         if (netAccounting && address(credit) != address(0)) {
-            (uint256 face, uint256 active,) = credit.creditInfo(creditId);
-            m = face == 0 ? 0 : Math.mulDiv(Math.min(m, face), active, face);
+            m = _activatedValue(m);
         }
         return int256(s.k * m / 1e18) - int256(s.lien);
     }
@@ -385,11 +386,16 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///      configured held-LP-BUCK offset. Unpaid claims are not collateral.
     function _shortfallS(Snap memory s) internal view returns (uint256) {
         if (!netAccounting || address(credit) == address(0)) return 0;
-        (uint256 face, uint256 active,) = credit.creditInfo(creditId);
-        uint256 mark = Math.min(face, _creditValueS(s, _equityS(s, MARK_LOW)));
-        uint256 value = face == 0 ? 0 : Math.mulDiv(mark, active, face);
+        uint256 value = _activatedValue(_creditValueS(s, _equityS(s, MARK_LOW)));
         uint256 limit = Math.mulDiv(value, s.k, 1e18);
         return s.lien > limit ? s.lien - limit : 0;
+    }
+
+    /// @dev The exact marked/activated value enforced by BuckCredit. Shared
+    ///      by cached headroom and prospective purchase/exit solvency checks.
+    function _activatedValue(uint256 mark) internal view returns (uint256) {
+        (uint256 face, uint256 active,) = credit.creditInfo(creditId);
+        return face == 0 ? 0 : Math.mulDiv(Math.min(mark, face), active, face);
     }
 
     /// @dev Postcondition of a canonical purchase/pair: no greater credit

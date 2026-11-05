@@ -155,14 +155,24 @@ owner/insurer consent, premium-pool isolation and no worse K shortfall.
 
 ** Responsibilities and transition invariants
 
+Coverage is backing, not currency. For example, activating 1,000 BUCK of
+zero-premium self-insured coverage with zero spendable cash issues nothing;
+a later 400-BUCK draw creates 400 BUCK of supply and 400 BUCK of aging NFT
+principal. If activation instead costs a 100-BUCK premium, that premium is
+real new principal delivered at full net value to the insurer's pool, even
+when the owner requests zero spendable cash. Its reserve and premium bounds
+still apply. Numeric mint/burn continue to mean actual balance changes.
+
 | Block | Preconditions | Postconditions |
 |-------+---------------+----------------|
 | Checkpoint / transfer | Correct verified identities and receipts; authorized Carrying mode; sufficient sender net or nominal balance; safe time/amount range. | Money moves with its correct net/nominal value; cash never goes negative; neither NFT principal nor total issued supply changes; demurrage is counted once. |
 | Mint / per-facility issue | NFT ownership and insurer consent; present-value/K capacity; exact premium terms and recorded pool; one pre-mint funding reserve for the whole batch. | Issued principal, supply, cash and premium funding increase consistently; each NFT and aggregate claim book synchronize; mint(N) increases balanceOf by at least N or all effects revert. |
+| Coverage-only activation | Positive coverage; the same identity, ownership, maturity, premium and reserve checks as explicit issue. Any new premium principal fits K; free backing may improve an existing shortfall. | With zero premium, cash, principal, supply and claim age are unchanged. A nonzero premium is actual principal paid to the recorded insurer pool. An existing lien's age is never reset. |
 | Burn / reduction | Owner-selected or documented default NFT order; exact current claim, pool refund, K and guarded mark; prepared insurer liquidity; current and shared Jubilee cash limits. | Owner net plus fund net extinguish exact principal; nominal refund comes from the original pool; coverage/age/supply decrease consistently; burn(N) achieves at least N of actual balance decrease or everything reverts. |
 | Renewal / maturity | Correct facility and consent snapshot; normal renewal funding or the independent 50-year release eligibility. | Renewal crystallizes actual relief and updates one facility atomically; maturity releases the lien, retains unburned supply as fund debt, and preserves unpaid premium refund rights. |
 | Sponsored fees | Two-party consent; verified ordinary accounts; no self-sponsorship/chains; actual payer funding, with projected spendability specified. | Sponsorship changes who bears the fee without creating net BUCK, double-counting payer money or changing NFT relief. Exhaustion, cancellation, fan-out and settlement order have explicit tested behavior. |
 | Wheel investment / redemption | Existing wheel authority; one receipt; bounded work, guarded prices, nonzero meaningful execution bounds and actual liquidity. | Position, cash, shares and basis reconcile; actual proceeds determine liquidity; no position sale, swap or keeper reward executes under Buck's monetary lock. |
+| Basket receipt / treasury exit | Position lock; actual activated backing covers principal under fresh K; requested shares and payout bounds are valid. | Principal and supply stay fixed; cash or in-kind delivery reconciles with retired shares, retained assets and fees. Final shares/basis and inventory still back principal, or every effect reverts. |
 
 The conservation target is net BUCK across actual holding accounts equaling
 issued supply within a proved rounding bound, and
@@ -463,14 +473,28 @@ implementation sequence, before changing the primary economy builder.
   complete valuation reads. Zero cannot close an NFT; repeated same-block
   calls cannot reset liquidity limits. This is an available governor/wheel
   primitive; automatic scheduling is still part of the remaining wheel work.
-- [ ] Port cash and in-kind exits using prospective actual debt/collateral.
+- [X] Port cash and in-kind exits using prospective actual debt/collateral.
   Preserve the existing low-K refusal cases and retained-share fairness. Cash
   on hand and unpaid marked relief cannot themselves justify an exit. Test
   partial/full exits, zero marks, losses and fund-owned receipt redemption.
+  Canonical exits leave principal unchanged, require actual activated backing
+  at opening and after payout, and mark only after final receipt shares/basis
+  are known. LP proceeds remain cash; treasury has the same solvency gate.
+  Fourteen focused cases cover real V3 burns, fund-owned receipt conversion,
+  rollback, demurrage losses, 256 cash-boundary comparisons and full
+  exit after separate actual debt retirement. This does not enable public
+  leveraged opening before the remaining desk/wheel gates.
 - [ ] Port BasketDesk's own cash, principal and marked asset observations;
   mark new-credit collateral without unpaid relief. Replace implicit draw /
   receipt repayment with actual issue/reduce calls, keeping turnover, capital
   floor, execution bands and its separation from depositors' assets.
+- [ ] Validate controller/desk signal units against Carrying-pool execution.
+  BuckBasketUniswapV3.basketValueInBuck still sums nominal V3 prices, whereas
+  canonical equity marks and guarded BUCK receipts include net/nominal pool
+  value. Add no-trade aging and fresh-liquidity turnover vectors, compare the
+  BVIB reference with actual net quotes, and document the intended parity
+  units before deciding whether the existing oracle needs adjustment. A
+  different unit convention must not be mistaken for a controller failure.
 - [ ] Connect bounded reserve investment/redemption and maturity processing
   to the existing wheel, with authenticated routes and positive sale bounds.
   Keep portfolio trades, insurer preparation and fund liquidity work outside
@@ -552,7 +576,8 @@ Continue in this order:
    and reduction, and connect the existing wheel's marked reserve work.
    Basket valuation is now connected and tested through actual debt using a
    test-only opening seam. Explicit wheel issuance and bounded retirement are
-   tested. Next finish prospective exit solvency and the desk before removing the public opening
+   tested, as are actual-collateral cash/in-kind exits. Next finish the desk
+   and scheduled wheel work before removing the public opening
    gate. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
@@ -703,4 +728,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Bound actual basket principal retirement outside position operations | Added retireCredit(principalRaw, maxCashCostRaw, minimumReliefScaled) for governor/wheel/self dispatch. It atomically authorizes the existing fund, checks actual net wallet debit, refreshes marks and preserves all liquidity/claim/refund rules. Separate mutually exclusive credit/position locks allow real valuation reads and reject nested repayment, deposit and upkeep. Ten tests cover full/partial settlement and reuse, fractional bounds, rollback after settlement, shared-block refusal/resumption and a registered adversarial valuation callback. Canonical acceptance before the final fractional-bound addition: 271 passed. Full contract run afterward: 1,547 passed, one fork skip; the same four absent-proof exclusions remain. Python/Anvil and JS/Tevm smoke: 34 and 20 passed. Shell runtime 23,833 bytes. Next fix full-face versus activated-backing issuance/postcheck accounting before exits; public leveraged opening and five-year/Notes gates remain closed. | =6b02b862= |
 
-| 2026-11-05 | Separate backing activation from cash issuance and enforce actual collateral | A real-V3 regression first demonstrated the erroneous full-face postcheck: principal 100,000,000 exceeded the activated limit 99,999,900 after a cash-funded purchase. Explicit issue now supports positive coverage with zero spendable cash; premiums retain reserve/pool/limit checks and remain real principal. Free activation preserves cash, supply, principal and claim age, can improve a K shortfall without new currency, and cannot refresh a mature lien. The basket independently activates free backing, draws only its cash shortfall and uses actual activated collateral for headroom and purchase postconditions. Focused core/basket suites: 42 passed, including 256 capacity fuzz cases. Full make nix-test: 1,554 passed, one fork skip and the same four absent-proof exclusions. Runtime: Buck 21,160; facilities library 23,943; basket shell 23,874; component facet 14,605; machine facet 21,410 bytes. Public leveraged opening, exits/desk/wheel integration, five-year and Notes gates remain open. | This commit |
+| 2026-11-05 | Separate backing activation from cash issuance and enforce actual collateral | A real-V3 regression first demonstrated the erroneous full-face postcheck: principal 100,000,000 exceeded the activated limit 99,999,900 after a cash-funded purchase. Explicit issue now supports positive coverage with zero spendable cash; premiums retain reserve/pool/limit checks and remain real principal. Free activation preserves cash, supply, principal and claim age, can improve a K shortfall without new currency, and cannot refresh a mature lien. The basket independently activates free backing, draws only its cash shortfall and uses actual activated collateral for headroom and purchase postconditions. Focused core/basket suites: 42 passed, including 256 capacity fuzz cases. Full make nix-test: 1,554 passed, one fork skip and the same four absent-proof exclusions. Runtime: Buck 21,160; facilities library 23,943; basket shell 23,874; component facet 14,605; machine facet 21,410 bytes. Public leveraged opening, exits/desk/wheel integration, five-year and Notes gates remain open. | =e93ef895= |
+
+| 2026-11-05 | Enforce actual debt backing on receipt and treasury exits | Five red cash-exit regressions demonstrated missing collateral enforcement. Canonical exits now check current K against actual activated backing before and after payout, leave principal/supply unchanged, retain TOKEN for a negative equity residue, and mark using final receipt shares/basis. Under-K cash and real V3 exits revert atomically; cash receipts do not impersonate repayment. Fourteen focused tests passed, including 256 cash-boundary comparisons, real LP rollback, full exit after actual retirement, fund-owned in-kind conversion, fees, losses and zero equity. Canonical acceptance before the last real-fund addition: 292 passed. Final full make nix-test: 1,568 passed, one fork skip and four absent-proof exclusions. Final platform checks: 34 Python, 20 JS and 15 wallet/browser tests passed; compiler/link/size checks passed for 53 distributed artifacts. Sharing one activated-value calculation brings the shell to 24,459 bytes, component facet 14,481 and machine facet 21,416. Next: desk accounting, nominal/net controller signal validation and scheduled wheel fund/maturity work, then public opening and primary household builders. Five-year and corrected-token Notes acceptance remain unclaimed. | This commit |

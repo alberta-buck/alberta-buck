@@ -23,9 +23,10 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 ///         Canonical snapshots distinguish net cash, actual NFT principal
 ///         and a fee-aware marked Jubilee claim. LP prices include the claim;
 ///         new-credit collateral excludes it. Public net-mode credit opening
-///         remains gated until explicit wheel spending/repayment and low-K
-///         exits are integrated. The leveraged flow described below remains
-///         the legacy fixture path, not implicit issuance by canonical Buck.
+///         remains gated until desk and scheduled wheel work are integrated.
+///         Canonical spending/repayment is explicit, and exits must preserve
+///         actual activated backing. The implicit leveraged flow described
+///         below is the legacy fixture path alone.
 ///
 ///         The basket is an ordinary credit holder: one self-issued MARKED
 ///         BuckCredit (`openCredit`), marked at its equity before it spends,
@@ -199,8 +200,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     /// @notice Select the experimental net-token integration before any
     ///         deposits or credit are opened. This mode can invest existing
-    ///         BUCK but deliberately cannot issue basket credit until explicit
-    ///         issuance, repayment and low-K behavior are integrated.
+    ///         BUCK. Normal credit opening remains gated pending desk and
+    ///         scheduled wheel integration; canonical draws are explicit.
     function enableNetAccounting() external onlyGov {
         if (netAccounting || totalShares != 0 || address(credit) != address(0)) revert AlreadyPresent();
         (bool ok, bytes memory data) = address(buck).staticcall(
@@ -403,12 +404,15 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     function _redeemShares(uint256 id, Holding storage h, uint256 shares, uint256 basis, uint256 minBuck)
         internal returns (uint256 paid, uint256 retired, uint256 remaining)
     {
-        Snap memory sn = _snap();
+        Snap memory sn = _exitSnapshot();
         (uint256 cut, uint256 cutValue) = _treasuryCut(sn, shares, basis);
         uint256 left;
         (paid, left) = _exit(shares - cut, sn, msg.sender);
         uint256 remainingBp = _retire(id, h, shares, left, basis);
         if (paid < minBuck) revert MinOut();
+        // The fund's own receipt may have changed. Value its final shares and
+        // basis, not the pre-retirement holding, when checking the mutual claim.
+        if (netAccounting) _markS(_exitSnapshot());
         // The pro-rata shells' event: nothing burned, BUCK paid, the cut's value.
         emit Redeemed(msg.sender, id, 0, paid, cutValue, remainingBp);
         return (paid, shares - left, h.shares);
@@ -448,10 +452,24 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         if (to == address(0)) revert To0();
         uint256 out = treasuryShares * bp / 10000;
         if (out == 0) revert RedeemZero();
+        Snap memory sn = _exitSnapshot();
         treasuryShares -= out;
         uint256 left;
-        (paid, left) = _exit(out, _snap(), to);
+        (paid, left) = _exit(out, sn, to);
         treasuryShares += left;
+        if (netAccounting) _markS(_exitSnapshot());
+    }
+
+    /// @dev Pre: position lock held. Canonical exits require actual activated
+    ///      collateral to cover unchanged NFT principal both before and after
+    ///      delivery. Cash receipts and marked relief cannot waive this gate.
+    ///      Post: fresh K and complete inventory/receipt observations; no debt
+    ///      is issued or retired. Failure rolls back pool burns, payouts,
+    ///      treasury fees, receipt changes and marks together.
+    function _exitSnapshot() internal returns (Snap memory s) {
+        if (netAccounting) controller.compute();
+        s = _snap();
+        if (netAccounting && _shortfallS(s) != 0) revert CreditShortfallIncreased();
     }
 
     /// @dev Retire `out` shares, paying `to`.  In BUCK when the account can
@@ -469,8 +487,10 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         if (value == 0) revert Underwater();
         pay = value * (1e18 - _chargeBuck(sn.k)) / 1e18;
 
-        // Mark the equity that stays, then pay from what Buck lets it spend.
-        _markAt(_creditValueS(sn, eLow - pay));
+        // Legacy Buck constrains an implicit draw through this prospective
+        // mark. Canonical Buck spends cash only; its final actual collateral
+        // and unchanged principal are checked after receipt retirement.
+        if (!netAccounting) _markAt(_creditValueS(sn, eLow - pay));
         if (pay <= _bk().balanceOf(address(this))) {
             totalShares = S - out;
             IERC20(address(buck)).transfer(to, pay);
@@ -482,12 +502,14 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     /// @dev The pro-rata exit, in kind: fraction `fWad` of every position and
     ///      of the wallet's TOKEN goes to `to` by transfer -- no swap, no
-    ///      market moved.  The BUCK its positions return repay its share of
-    ///      the lien (the account is one signed balance), and what they
-    ///      returned beyond that share is paid in BUCK.  Two corners:
+    ///      market moved. Canonical LP proceeds remain cash, never automatic
+    ///      repayment. Net equity is paid by retaining TOKEN for a negative
+    ///      BUCK residue (released cash + its fraction of cash-principal+claim).
+    ///      Actual principal stays fixed; _exitSnapshot guards final backing.
+    ///      Legacy Buck alone treats proceeds as implicit repayment. Corners:
     ///        * short of its lien share (leverage above one), it leaves TOKEN
     ///          behind worth the shortfall, at the low marks;
-    ///        * past what an under-water account can spend, the rest stays in
+    ///        * legacy: past what an under-water account can spend, the rest stays in
     ///          the receipt as shares at the price that remains -- the exit
     ///          completes, and nobody's claim moves ahead of anybody's.
     function _exitInKind(uint256 out, uint256 fWad, Snap memory sn, address to)
@@ -496,7 +518,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         uint256 S = totalShares;
         uint256 n = constituents.length;
         uint256[] memory toks = new uint256[](n);
-        int256 signed0 = netAccounting
+        int256 balance0 = netAccounting
             ? int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)))
             : _bk().signedBalanceOf(address(this));
         for (uint256 i = 0; i < n; i++) {
@@ -512,10 +534,10 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         }
         // What its positions returned (net of the fee their BUCK carried),
         // less its share of equity's BUCK -- the lien, net of relief.
-        int256 signed1 = netAccounting
+        int256 balance1 = netAccounting
             ? int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)))
             : _bk().signedBalanceOf(address(this));
-        int256 residue = (signed1 - signed0) + sn.buckEq * int256(fWad) / 1e18;
+        int256 residue = (balance1 - balance0) + sn.buckEq * int256(fWad) / 1e18;
         uint256 flow = 0;
         if (residue < 0) {
             uint256 tv = 0;
@@ -548,7 +570,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         }
         totalShares = S - out + left;
         dayFlow -= int256(flow);
-        _markS(_snap());                                  // fresh: its positions are gone
+        // Canonical mode checks/marks after the receipt holding also changes.
+        if (!netAccounting) _markS(_snap());
     }
 
     /// @notice (1+K)/2 of the dearest pool fee: what placing a BUCK deposit

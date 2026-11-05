@@ -10,7 +10,8 @@ coverage-release defect. The older populations below are not evidence that the n
 
 These campaigns use the earlier accounting model. Corrected Buck's unsigned
 cash, per-NFT principal, marked Jubilee claims and explicit basket issuance /
-retirement have separate contract checks; its five-year household migration
+retirement and actual-collateral exits have separate contract checks;
+its five-year household migration
 is tracked in the [[file:review/bucknet-economy-implementation.org][unified accounting plan]]. No numbers below are results of that
 unfinished migration.
 
