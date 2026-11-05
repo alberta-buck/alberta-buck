@@ -1,12 +1,12 @@
 #+TITLE: Basket credit and Jubilee cross-holdings
-#+DATE: 2026-10-29
+#+DATE: 2026-11-05
 #+OPTIONS: ^:nil toc:2
 
 * Why this needs separate treatment
 
 The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] is the current implementation
 sequence. Its intended valuation and fund operations reuse the basket wheel;
-this note analyzes the still-unresolved leveraged-ownership constraints, not
+this note analyzes the leveraged-ownership constraints, not
 a separate basket or upkeep design.
 
 The fund's receipt is a claim on the basket. If the basket issues its own BUCK
@@ -62,7 +62,7 @@ claim is about 17.142857 BUCK, but if the proportional position sale yields no
 BUCK, the fund can pay only its 5-BUCK share of pre-sale cash. Counting the
 ideal mark as guaranteed collateral would therefore be unsafe. Pricing shares
 and setting the K-backed credit limit may need different, explicitly justified
-valuations; neither outcome has yet been implemented for leveraged net mode.
+valuations. The approved policy below keeps these purposes separate.
 
 At the extreme, =A=90=, =P=100=, =C=10= and =f=r=1=. Every =E= between 0 and
 90 satisfies the simplified equations. There is no unique price to obtain by
@@ -99,16 +99,14 @@ K, transaction fees or five-year household behavior.
   complete transaction rollback on any failure. Any keeper sale is separate.
 - Do not present the cash-only prototype as leveraged or production-ready.
 
-* Proposed integration policy (awaiting the user's choice)
+* Approved integration policy (November 5)
 
-The November 4 accounting port now runs in canonical Buck, including real
-fund and cash-basket tests. Leveraged integration still needs the pricing /
-collateral decision: include marked relief in receipt pricing using the
-capped mutual-holding calculation, while excluding unpaid relief from new
-credit collateral, or exclude the claim until paid. The former is the current
-recommendation, not an approved implementation decision.
+The user approved including marked Jubilee relief in LP receipt pricing,
+while excluding unpaid relief from collateral for new credit. The November 4
+accounting port runs in canonical Buck, including real fund and cash-basket
+tests; leveraged integration remains a separate acceptance gate.
 
-For the recommended case, solve the existing single-receipt dependency for
+Solve the existing single-receipt dependency for
 TWAP equity and use that one marked claim consistently with the basket's
 entry/exit price bands. Read bare net assets, actual NFT principal/age, fund
 cash and share ownership directly; a basket mark must never call back through
@@ -117,3 +115,34 @@ separately from the unpaid-claim collateral decision. Specify rounding, caps
 and the behavior of non-unique or insolvent solutions before enabling it.
 Use the existing wheel to publish/refresh the result; do not create another
 valuation wheel or assume that a mark is immediate redeemable cash.
+
+** Exact integer valuation and conservative ambiguous prices
+
+The pure =BasketJubileeMath= helper solves in external raw BUCK units. Its
+receipt mark is =floor(f * E)= less the existing 25% fee on gains over that
+receipt's original basis. Relief uses net fund cash at the token's full
+internal precision, exactly the fund's proportional claim calculation, then
+rounds down to raw BUCK and caps at the actual principal. The simple rational
+formula above remains a diagnostic; directly using it on chain would omit
+the gain-fee branch and the execution's integer rounding.
+
+The right-hand side of the equity equation is nondecreasing and rises by at
+most one per raw unit of =E=. Hence =E - RHS(E)= is nondecreasing, with a zero
+between zero and =A=. Bisection locates its first zero in at most 256 pure
+iterations (log2(A) for ordinary balances). This is a bounded arithmetic
+calculation over one captured snapshot, with no external calls per iteration
+or successive guesses using a previous wheel mark. Choosing the first root
+gives the lowest self-consistent equity when whole-ownership or raw-unit
+rounding permits more than one price. A live basket with zero equity still
+rejects new LP entries; a singular cross-holding cannot invent collateral.
+
+Preconditions are =selected <= total= capped claim seconds,
+=fundShares <= totalShares= and =fee <= 100%=; unsafe scaled values revert.
+Postconditions are =0 <= equity <= A=, =0 <= relief <= P= and exact integer
+agreement with both equations. Cash and principal remain separate: transferring
+BUCK into the basket changes its cash, never its NFT issuance. Receipt values
+must use one direct =shares * equity / totalShares= calculation, avoiding a
+second rounding through a displayed share price. Entry/exit price bands use
+one TWAP claim; credit marks remove that unpaid claim before applying the
+existing held-BUCK offset. Real payouts still require actual cash and the
+fund's protected block budget.
