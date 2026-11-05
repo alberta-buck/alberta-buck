@@ -25,6 +25,8 @@ import {bindCarryingPool} from "./harness/CarryingPool.sol";
 ///      All times here are computed off a single `t0` captured up front.
 contract BuckDelegatedDemurrageTest is Test {
 
+    event DemurrageSponsor(address indexed account, address indexed sponsor);
+
     Buck                  internal buck;
     BuckCreditHarness     internal credit;
     BuckKControllerStatic internal kCtrl;
@@ -195,70 +197,74 @@ contract BuckDelegatedDemurrageTest is Test {
     // The cap: delegation must not become an escape hatch
     // ---------------------------------------------------------------------
 
-    /// @notice A payer can only absorb up to the point where its own fee
-    ///         would exceed its balance.  Past that the exposure stays with
-    ///         the sponsored account instead of evaporating.
-    function test_payerCapacityCap_remainderStaysWithSponsee() public {
-        _fund(bob,   1_000e6);
-        _fund(carol,     1e6);   // a thousandth of what it is asked to carry
-        _fund(dave,  1_000e6);
-        _fund(erin,      1e6);
-
-        _delegate(bob, carol);
-        _at(YEAR);
-        buck.settleDemurrage(bob);
-
-        uint256 sponsored = buck.feeOwing(bob) + buck.feeOwing(carol);
-        uint256 control   = buck.feeOwing(dave) + buck.feeOwing(erin);
-
-        emit log_named_uint("bob   fee (overflowed back)", buck.feeOwing(bob));
-        emit log_named_uint("carol fee (capped at raw)  ", buck.feeOwing(carol));
-
-        assertLe(buck.feeOwing(carol), 1e6, "never liened beyond the payer's own balance");
-        assertApproxEqAbs(buck.feeOwing(carol), 1e6, 1, "but liened right up to it");
-        assertLe(buck.balanceOf(carol), 1,  "payer effectively consumed");
-        assertGt(buck.feeOwing(bob),   0,   "overflow stayed with the sponsored account");
-        assertGe(sponsored, control,        "still conserved once the payer is tapped out");
-        assertLe(sponsored - control, 1,    "to within the same one-unit rounding");
-    }
-
-    /// @notice A payer with nothing at all absorbs nothing -- the sponsored
-    ///         account is exactly as it would be undelegated.
-    function test_emptyPayerAbsorbsNothing() public {
-        _fund(bob,  1_000e6);
+    /// @notice No partial fee or automatic detach on insufficient funding.
+    function test_underfundedPayerRevertsWithoutTakingAnyPartialFee() public {
+        _fund(bob, 1_000e6);
+        _fund(carol, 1e6);
         _fund(dave, 1_000e6);
-        _delegate(bob, carol);           // carol holds zero BUCK
-
+        _delegate(bob, carol);
         _at(YEAR);
-        assertEq(buck.feeOwing(bob), buck.feeOwing(dave), "no free ride from an empty payer");
+        uint256 payerFeeBefore = buck.feeOwing(carol);
+        uint256 payerBalanceBefore = buck.balanceOf(carol);
+        uint256 fundBefore = buck.jubileeActual();
+        vm.expectPartialRevert(Buck.DemurrageSponsorUnderfunded.selector);
         buck.settleDemurrage(bob);
-        assertEq(buck.feeOwing(bob), buck.feeOwing(dave), "and none after settlement either");
+        assertEq(buck.feeOwing(carol), payerFeeBefore);
+        assertEq(buck.balanceOf(carol), payerBalanceBefore);
+        assertEq(buck.balanceOf(bob), 1_000e6, "protected display unchanged");
+        assertEq(buck.demurragePayer(bob), carol);
+        assertEq(buck.sponseeCount(carol), 1);
+        assertEq(buck.jubileeActual(), fundBefore, "fund checkpoint rolled back too");
+        vm.prank(bob);
+        buck.clearDemurragePayer(bob);
+        assertEq(buck.feeOwing(bob), buck.feeOwing(dave), "full ordinary fee on explicit exit");
+        assertEq(buck.feeOwing(carol), payerFeeBefore, "no partial sponsor charge");
     }
 
-    /// @notice Delegation cannot be used to park exposure where it will never
-    ///         be collected: with the payer's balance drained to nothing the
-    ///         sponsored account ends up owing exactly what it would have
-    ///         owed alone.
-    function test_cannotEscapeDemurrageByDrainingThePayer() public {
-        _fund(bob,   1_000e6);
-        _fund(carol, 1_000e6);
-        _fund(dave,  1_000e6);
-
+    function test_emptyPayerBlocksSpendingUntilManualDetach() public {
+        _fund(bob, 1_000e6);
+        _fund(dave, 1_000e6);
         _delegate(bob, carol);
+        _at(YEAR);
+        vm.prank(bob);
+        vm.expectPartialRevert(Buck.DemurrageSponsorUnderfunded.selector);
+        buck.transfer(pool, 1e6);
+        assertEq(buck.demurragePayer(bob), carol);
+        assertEq(buck.balanceOf(bob), 1_000e6);
+        vm.prank(bob);
+        buck.clearDemurragePayer(bob);
+        assertEq(buck.feeOwing(bob), buck.feeOwing(dave));
+        vm.prank(bob);
+        buck.transfer(pool, 1e6);
+    }
 
-        // Carol empties herself the moment the delegation is live.  (Compute
-        // the amount first: vm.prank binds to the very next call, and
-        // balanceOf would swallow it.)
+    function test_fundingTheSponsorAllowsSettlementWithoutChangingLink() public {
+        _fund(bob, 1_000e6);
+        _delegate(bob, carol);
+        _at(YEAR);
+        vm.expectPartialRevert(Buck.DemurrageSponsorUnderfunded.selector);
+        buck.settleDemurrage(bob);
+        _fund(carol, 30e6);
+        buck.settleDemurrage(bob);
+        assertEq(buck.balanceOf(bob), 1_000e6);
+        assertEq(buck.demurragePayer(bob), carol);
+    }
+
+    function test_drainingSponsorCannotCreateSpendableValue() public {
+        _fund(bob, 1_000e6);
+        _fund(carol, 1_000e6);
+        _fund(dave, 1_000e6);
+        _delegate(bob, carol);
         _at(1);
         uint256 all = buck.balanceOf(carol);
         vm.prank(carol);
         buck.transfer(pool, all);
-
         _at(YEAR);
+        vm.expectPartialRevert(Buck.DemurrageSponsorUnderfunded.selector);
         buck.settleDemurrage(bob);
-
-        assertApproxEqRel(buck.feeOwing(bob), buck.feeOwing(dave), 1e12,
-            "a drained payer leaves the sponsee exactly where it started");
+        vm.prank(bob);
+        buck.clearDemurragePayer(bob);
+        assertApproxEqRel(buck.feeOwing(bob), buck.feeOwing(dave), 1e12);
     }
 
     // ---------------------------------------------------------------------
@@ -366,6 +372,20 @@ contract BuckDelegatedDemurrageTest is Test {
     // Teardown
     // ---------------------------------------------------------------------
 
+    function test_canonicalEventIdentifiesEstablishedSponsorAndManualDetachment() public {
+        vm.prank(bob);
+        buck.requestDemurragePayer(carol);
+        vm.expectEmit(true, true, false, true, address(buck));
+        emit DemurrageSponsor(bob, carol);
+        vm.prank(carol);
+        buck.acceptDemurragePayer(bob);
+
+        vm.expectEmit(true, true, false, true, address(buck));
+        emit DemurrageSponsor(bob, address(0));
+        vm.prank(bob);
+        buck.clearDemurragePayer(bob);
+    }
+
     function test_eitherPartyMayClear() public {
         _delegate(bob, carol);
         vm.prank(bob);
@@ -383,9 +403,9 @@ contract BuckDelegatedDemurrageTest is Test {
         buck.clearDemurragePayer(bob);
     }
 
-    /// @notice Clearing crystallises first, so the exposure accrued under the
-    ///         delegation stays with the payer rather than snapping back.
-    function test_clearCrystallisesBeforeDetaching() public {
+    /// @notice Explicit exit is unconditional; unsettled fees become ordinary
+    ///         account fees, so an empty sponsor cannot trap its dependant.
+    function test_clearDetachesBeforeOrdinaryCrystallisation() public {
         _fund(bob,   1_000e6);
         _fund(carol, 1_000e6);
         _delegate(bob, carol);
@@ -394,12 +414,12 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(bob);
         buck.clearDemurragePayer(bob);
 
-        assertEq(buck.feeOwing(bob), 0, "the sponsored year does not snap back onto bob");
-        assertApproxEqRel(buck.feeOwing(carol), 40e6, 1e15, "carol keeps what it took on");
+        assertApproxEqRel(buck.feeOwing(bob), 20e6, 1e15, "the outstanding year is self-paid");
+        assertApproxEqRel(buck.feeOwing(carol), 20e6, 1e15, "sponsor keeps only its own fees");
 
         // From here bob pays his own way again.
         _at(2 * YEAR);
-        assertApproxEqRel(buck.feeOwing(bob), 20e6, 1e15, "bob accrues alone after release");
+        assertApproxEqRel(buck.feeOwing(bob), 40e6, 1e15, "bob accrues alone after release");
     }
 
     /// @notice Sponsee count is released so a former payer can be sponsored.

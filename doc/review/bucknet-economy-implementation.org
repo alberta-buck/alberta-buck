@@ -225,6 +225,15 @@ Test exact funding, one internal unit short, zero/same-block fees, multiple
 dependants, voluntary clearing, identity/mode restrictions, and full rollback.
 Fund accrual must not receive the same sponsored fee a second time.
 
+Preserve the existing Buck behavior for Carrying receipts as well: the
+sponsor must fund the inherited fee in full, or the entire receipt reverts,
+including any earlier fee settlement in that transaction. Record the incoming
+pool's actual net contribution separately from the sponsor's compensation;
+never count the restored inherited fee as new fund income. Burn/refund quotes
+must distinguish the pool's net outflow, the nominal refund and any additional
+sponsor-funded value received by the owner. Net-output guards and receipt
+reconciliation must also separate a payment from sponsorship restoration.
+
 * Implementation sequence and checklist
 
 ** 1. Establish the retained contract's acceptance boundary
@@ -242,8 +251,11 @@ Fund accrual must not receive the same sponsored fee a second time.
 - [X] Confirm full sponsorship or a reverting settlement/spend, with no
   automatic fallback; manual detachment remains independently available and
   charges outstanding ordinary demurrage to the account.
-- [ ] Implement and test the confirmed sponsorship policy and distinguish
-  protected displayed balances from exact declining net backing.
+- [X] Implement full sponsorship or revert in the unsigned cash component
+  and the retained Buck public API, including canonical events, rollback,
+  funding-and-retry and unconditional manual detachment. Net backing remains
+  observable independently in the component; its complete token integration
+  is still part of the next monetary milestone.
 - [X] Replace all 40 Buck string guards with 32 named errors and update
   preserved failure-path tests, including the actual reentrant revert bytes.
   Python/JS clients decode or match typed errors; full existing contract and
@@ -490,4 +502,6 @@ review changes documentation only; it does not rerun or extend the historical
 
 | 2026-11-04 | Unsigned cash and full-payment-or-revert sponsorship | Added BuckCash: one packed unsigned net/checkpoint/flags slot, separate Carrying nominal value, compounded cash and full-width fund flows, exact owner/fund retirement and shared block budget. The latest user clarification replaces automatic detachment with a typed reverting settlement/spend; independent manual clear applies ordinary fees. Canonical sponsor events are emitted on establishment and manual clear. A recipient sponsorship settlement is completed before the sender spend check. make nix-match-BuckCashTest: 25 passed, including 256 randomized histories; linked runtime 8,000 bytes. This is a component milestone, not yet the Buck accounting switch or a five-year validation. | =990494ee= |
 
-| 2026-11-04 | Reuse the fund through a token boundary | Added IBuckJubilee with exactly the ERC-20, claim, premium, renewal and settlement methods the existing fund calls. JubileeFund no longer imports the concrete BuckNet implementation; BuckNet explicitly implements the same boundary without changing its public selectors or accounting. Focused Jubilee/BuckNet/maturity/valuation suites: 125 passed. This prepares reuse by corrected Buck; its monetary implementation is not yet switched. | This commit |
+| 2026-11-04 | Reuse the fund through a token boundary | Added IBuckJubilee with exactly the ERC-20, claim, premium, renewal and settlement methods the existing fund calls. JubileeFund no longer imports the concrete BuckNet implementation; BuckNet explicitly implements the same boundary without changing its public selectors or accounting. Focused Jubilee/BuckNet/maturity/valuation suites: 125 passed. This prepares reuse by corrected Buck; its monetary implementation is not yet switched. | =e761445b= |
+
+| 2026-11-04 | Apply sponsor revert policy to Buck public API | Buck now rejects any incompletely funded sponsored settlement/spend with a typed error; protected views and linkage remain stable, and failed fund checkpoints roll back. Manual clearing detaches before charging the outstanding normal fee. Canonical DemurrageSponsor events identify establishment and zero-sponsor manual exit. Preserved inherited Carrying-fee sponsorship in BuckCash, with whole-transaction rollback when unfunded. Full contract run: 1,643 passed, one fork skipped; generated-proof fixture gate unchanged. Final focused cash suite: 27 passed, including randomized conservation and inherited-fee cases. Buck still uses legacy fee/issuance accounting pending the atomic BuckCash/per-NFT integration. | This commit |

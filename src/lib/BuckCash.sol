@@ -176,6 +176,14 @@ library BuckCash {
             }
         }
         if (from == to) return netReceived;
+        uint256 recipientNet = netReceived;
+        if (fromCarrying && self.sponsor[to] != address(0) && nominal > netReceived) {
+            // Preserve Buck's complete fee offload for an aged pool receipt.
+            // The incoming pool component remains netReceived; the separately
+            // recorded sponsor payment restores its carried fee in full.
+            _paySponsor(self, to, self.sponsor[to], nominal - netReceived);
+            recipientNet = nominal;
+        }
         if (from == self.fund) {
             self.fundGross -= nominal;
             self.fundNet -= netReceived;
@@ -190,7 +198,7 @@ library BuckCash {
             self.transfersIn.add(netReceived);
             if (self.fundNet > self.issued * Q) revert FundExceedsIssuance();
         } else {
-            _credit(self, to, nominal, netReceived, toCarrying);
+            _credit(self, to, nominal, recipientNet, toCarrying);
         }
     }
 
@@ -323,19 +331,22 @@ library BuckCash {
         if (payer != address(0)) {
             uint256 fee = beforeNet - live;
             if (fee != 0) {
-                // No chains: touching the payer cannot sponsor back into us.
-                Account storage p = self.accounts[payer];
-                uint256 payerNet = _live(p);
-                p.net = uint200(payerNet);
-                p.timestamp = _now();
-                if (payerNet < fee) revert DemurrageSponsorUnderfunded(owner, payer, fee, payerNet);
-                p.net -= uint200(fee);
+                _paySponsor(self, owner, payer, fee);
                 live = beforeNet;
-                emit DemurrageSponsored(owner, payer, fee);
             }
         }
         a.net = uint200(live);
         a.timestamp = _now();
+    }
+
+    function _paySponsor(Book storage self, address owner, address payer, uint256 fee) private {
+        // No chains: a payer is ordinary and cannot itself be sponsored.
+        Account storage p = self.accounts[payer];
+        uint256 payerNet = _live(p);
+        if (payerNet < fee) revert DemurrageSponsorUnderfunded(owner, payer, fee, payerNet);
+        p.net = uint200(payerNet - fee);
+        p.timestamp = _now();
+        emit DemurrageSponsored(owner, payer, fee);
     }
 
     function _detach(Book storage self, address account) private {

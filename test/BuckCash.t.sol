@@ -132,6 +132,39 @@ contract BuckCashTest is Test {
         assertEq(cash.balance(POOL), 100e6);
     }
 
+    function test_sponsorAlsoFundsInheritedCarryingFeesWithoutCreditingFundTwice() public {
+        _fundSponsored(100e6);
+        cash.issue(POOL, 100e6, true);
+        _at(YEAR);
+        uint256 poolComponent = cash.net(POOL) / 10;
+        (, uint256 fundBefore) = cash.fundParts();
+        uint256 actualPoolPayment = cash.move(POOL, ALICE, 10e6, true, false);
+        assertEq(actualPoolPayment, poolComponent);
+        assertEq(cash.net(ALICE), 110e6 * Q, "sponsor covers inherited fee");
+        assertEq(cash.balance(ALICE), 110e6);
+        (, uint256 fundAfter) = cash.fundParts();
+        assertEq(fundAfter, fundBefore, "inherited fees already belong to fund");
+        assertApproxEqAbs(cash.net(ALICE) + cash.net(PAYER) + cash.net(POOL) + fundAfter,
+                          cash.supply() * Q, Q);
+    }
+
+    function test_unfundedInheritedFeeRevertsTheEntireReceiptAndEarlierFeeSettlement() public {
+        _fundSponsored(2_100000);
+        cash.issue(POOL, 100e6, true);
+        _at(YEAR);
+        uint256 payerBefore = cash.net(PAYER);
+        uint256 ownerBefore = cash.net(ALICE);
+        uint256 ownFee = 100e6 * Q - ownerBefore;
+        uint256 inheritedFee = 10e6 * Q - cash.net(POOL) / 10;
+        vm.expectRevert(abi.encodeWithSelector(BuckCash.DemurrageSponsorUnderfunded.selector,
+            ALICE, PAYER, inheritedFee, payerBefore - ownFee));
+        cash.move(POOL, ALICE, 10e6, true, false);
+        assertEq(cash.net(PAYER), payerBefore);
+        assertEq(cash.net(ALICE), ownerBefore);
+        assertEq(cash.balance(POOL), 100e6);
+        assertEq(cash.payer(ALICE), PAYER);
+    }
+
     function test_sponsorEstablishmentEmitsCanonicalPair() public {
         cash.issue(ALICE, 100e6, false);
         cash.issue(PAYER, 100e6, false);

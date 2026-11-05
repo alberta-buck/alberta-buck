@@ -100,6 +100,8 @@ contract Buck is IERC20, IERC20Metadata {
     error SponsorIsSponsored();
     error NotSponsored();
     error NotSponsorshipParty();
+    error DemurrageSponsorUnderfunded(address account, address sponsor,
+                                     uint256 requiredNetScaled, uint256 availableNetScaled);
     error InsufficientMintFunding();
     error InsurancePoolUnderfunded();
     error PostBurnCreditExceeded();
@@ -323,8 +325,9 @@ contract Buck is IERC20, IERC20Metadata {
     // Absorption is capped at the payer's own capacity to carry a lien --
     // the point where feeOwing(payer) would exceed rawBalance(payer).  Past
     // that the lien would be uncollectible and delegation WOULD become an
-    // escape hatch from demurrage.  Whatever the payer cannot carry stays
-    // with the sponsored account, exactly where it would have been.
+    // escape hatch from demurrage. Settlement now requires complete funding
+    // or reverts; partial exposure is never routed. Manual detachment charges
+    // the outstanding ordinary exposure to the account.
     //
     // Settlement is lazy, on the sponsored account's next touch -- the same
     // cadence at which Buck accrues everything else.  Two consequences worth
@@ -335,11 +338,10 @@ contract Buck is IERC20, IERC20Metadata {
     //     enumerating sponsees.  `settleDemurrage(account)` is a
     //     permissionless poke that forces the transfer, so a payer (or an
     //     indexer) can bring its books current whenever it wants.
-    //   - A payer that spends itself down before settlement absorbs less
-    //     than it would have, and the shortfall stays with the sponsored
-    //     account.  So a delegation is best-effort, and its failure mode is
-    //     exactly "no delegation at all" -- never a loss to anyone else, and
-    //     never demurrage that goes uncollected.
+    //   - A payer that spends itself down can make settlement and spends
+    //     revert. The account stays linked and protected until the payer is
+    //     funded, or either party explicitly clears the link and the account
+    //     carries its unsettled normal fee. No automatic fallback occurs.
     //
     // No spend decision is ever made on a stale number: every balance-moving
     // path crystallises the account it is about to debit, immediately before
@@ -406,6 +408,8 @@ contract Buck is IERC20, IERC20Metadata {
     event DemurragePayerRequested(address indexed account, address indexed payer);
     event DemurragePayerSet(address indexed account, address indexed payer);
     event DemurragePayerCleared(address indexed account, address indexed payer);
+    /// @notice Active sponsor, or zero on explicit detachment.
+    event DemurrageSponsor(address indexed account, address indexed sponsor);
 
     // ---- constructor -------------------------------------------------------
 
@@ -647,6 +651,7 @@ contract Buck is IERC20, IERC20Metadata {
         demurragePayer[account]        = msg.sender;
         demurragePayerRequest[account] = address(0);
         emit DemurragePayerSet(account, msg.sender);
+        emit DemurrageSponsor(account, msg.sender);
     }
 
     /// @notice End a delegation.  Callable by either side -- the sponsored
@@ -657,10 +662,9 @@ contract Buck is IERC20, IERC20Metadata {
         if (!(p != address(0))) revert NotSponsored();
         if (!(msg.sender == account || msg.sender == p)) revert NotSponsorshipParty();
 
-        // Crystallise first, so the rectangle accrued under the delegation
-        // lands on the payer rather than snapping back onto `account`.
+        // Explicit exit must work even when sponsorship cannot be funded.
+        // Clear first; the account carries its outstanding normal fee itself.
         _accrueJubilee();
-        _crystallize(account);
 
         AccountState memory as_ = _state[account];
         as_.flags &= ~FLAG_SPONSORED;
@@ -670,7 +674,9 @@ contract Buck is IERC20, IERC20Metadata {
         if (n != 0) sponseeCount[p] = n - 1;
 
         demurragePayer[account] = address(0);
+        _crystallize(account);
         emit DemurragePayerCleared(account, p);
+        emit DemurrageSponsor(account, address(0));
     }
 
     // ---- mint / burn -------------------------------------------------------
@@ -1584,16 +1590,16 @@ contract Buck is IERC20, IERC20Metadata {
         uint256 elapsed = block.timestamp - uint256(s.timestamp);
         if (elapsed != 0 && raw != 0) {
             uint256 delta = raw * elapsed;
-            // A sponsored account's live rectangle is destined for its payer;
-            // only the slice the payer has no room for stays here.  Note the
+            // A sponsored account's live rectangle is destined for its payer.
+            // Its protected display remains stable; actual settlement reverts
+            // if the payer cannot absorb the entire fee. Note the
             // guard: `elapsed == 0` is the state every spend check sees --
             // `_nonCarryingTransfer` crystallises `from` immediately before
             // reading `balanceOf(from)` -- so the transfer hot path never
             // reaches the payer lookup, and unsponsored accounts never test
             // more than a mask on a word already in memory.
             if (s.flags & FLAG_SPONSORED != 0) {
-                (, , uint256 take) = _payerRoom(a, delta);
-                delta -= take;
+                delta = 0;
             }
             buckSecondsLive += delta;
         }
@@ -1634,9 +1640,9 @@ contract Buck is IERC20, IERC20Metadata {
         take = deltaBs <= room ? deltaBs : room;
     }
 
-    /// @dev Writing twin of `_payerRoom`: move as much of `deltaBs` onto the
-    ///      payer as it can carry, returning the remainder that stays with
-    ///      `a`.  Writing the payer's slot also crystallises the payer's own
+    /// @dev Writing twin of `_payerRoom`: move the complete exposure or
+    ///      revert. No partial fee or automatic detachment is permitted.
+    ///      Writing the payer's slot also crystallises the payer's own
     ///      rectangle (it is folded into `pBs`), which is exactly right --
     ///      the payer is being touched, so it settles its own clock too.
     ///
@@ -1644,13 +1650,21 @@ contract Buck is IERC20, IERC20Metadata {
     ///      afterwards, so p == a would silently discard this write;
     ///      acceptDemurragePayer forbids self-payment for that reason.
     function _routeToPayer(address a, uint256 deltaBs) internal returns (uint256) {
+        if (deltaBs == 0) return 0;
         (address p, uint256 pBs, uint256 take) = _payerRoom(a, deltaBs);
-        if (take == 0) return deltaBs;
+        if (take != deltaBs) {
+            // Diagnostics use the same fractional raw units as BuckCash.
+            // This transitional Buck still computes the legacy linear fee;
+            // the unsigned accounting port replaces that base with net decay.
+            uint256 rateScaled = BASE_RATE_PER_SEC * 1e36;
+            revert DemurrageSponsorUnderfunded(a, p,
+                Math.mulDiv(deltaBs, rateScaled, SCALE), Math.mulDiv(take, rateScaled, SCALE));
+        }
         AccountState memory ps = _state[p];
         ps.buckSeconds = toBuckSeconds(pBs + take);
         ps.timestamp   = uint40(block.timestamp);
         _state[p]      = ps;
-        return deltaBs - take;
+        return 0;
     }
 
     /// @dev Fold the elapsed (balance * dt) rectangle into buckSeconds and
@@ -1667,9 +1681,9 @@ contract Buck is IERC20, IERC20Metadata {
             uint256 delta;
             if (rawSigned > 0) {
                 // Fee-seconds.  Delegated demurrage: hand the rectangle to
-                // this account's payer as far as the payer can carry it.
-                // Conserved, never destroyed -- whatever the payer has no room
-                // for stays here.  Free for the unsponsored: the flags word is
+                // this account's payer in full, or revert if underfunded.
+                // No fee is discarded or partly assigned. Free for the
+                // unsponsored: the flags word is
                 // already in memory.
                 delta = uint256(rawSigned) * elapsed;
                 if (s.flags & FLAG_SPONSORED != 0) {
