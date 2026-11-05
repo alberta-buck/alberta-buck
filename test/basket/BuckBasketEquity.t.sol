@@ -114,7 +114,7 @@ interface IPool {
 ///        test contract is the basket's work wheel (it steps the components
 ///        itself) and an outside LP and arbitrageur in every pool, drawing its
 ///        BUCK on a credit of its own.
-contract BuckBasketEquityTest is Test {
+abstract contract BuckBasketEquityFixture is Test {
     uint160 internal constant MIN_SQRT = 4295128739;
     uint160 internal constant MAX_SQRT = 1461446703485210103287273052203988822378723970342;
     address constant GOV  = address(0xA0);
@@ -300,6 +300,16 @@ contract BuckBasketEquityTest is Test {
         }
     }
 
+    /// @dev A K that leaves the basket's lien 25% over its limit. Shared
+    ///      setup belongs in a fixture, rather than rerunning its tests in
+    ///      every separate desk or accounting suite.
+    function _cutUnderWater() internal returns (uint256 k2) {
+        k2 = _lien() * 1e18 / b.markNow() * 8 / 10;
+        ctrl.setK(k2);
+    }
+}
+
+contract BuckBasketEquityTest is BuckBasketEquityFixture {
     // ---- the credit ------------------------------------------------------------ //
 
     function test_credit_isTheBasketsOwnMarkedCredit() public {
@@ -581,12 +591,6 @@ contract BuckBasketEquityTest is Test {
 
     /// Ruled (JUBILEE-ISSUANCE 6.2.2): an under-water account stops issuing,
     /// so a deposit's credit first restores the limit.
-    /// @dev A K that leaves the basket's lien 25% over its limit.
-    function _cutUnderWater() internal returns (uint256 k2) {
-        k2 = _lien() * 1e18 / b.markNow() * 8 / 10;
-        ctrl.setK(k2);
-    }
-
     function test_deposit_underWaterRestoresTheLimitFirst() public {
         _placed();
         uint256 k2 = _cutUnderWater();

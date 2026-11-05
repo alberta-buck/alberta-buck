@@ -68,6 +68,10 @@ linked libraries and explicit cash/debt integration; they are not restored
 merely because the contract artifact retains its name. The wallet sandbox
 now uses the corrected token and its own verified save format. Old test fixtures
 explicitly importing =BuckLinear= are legacy evidence, as listed in the plan.
+Shared setup lives in abstract fixtures. Desk accounting, invariants and
+machine integration use [[file:test/basket/BasketDesk.t.sol][BasketDeskFixture]] instead of inheriting another
+suite's executable tests. This removes 134 repeated executions while keeping
+the same distinct checks; the plan records the before/after inventory.
 
 #+begin_src sh
 make nix-test                              # Foundry contract tests

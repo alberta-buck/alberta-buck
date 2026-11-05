@@ -2,8 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {BuckBasketEquityTest} from "./BuckBasketEquity.t.sol";
-import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
+import {BuckBasketEquityFixture} from "./BuckBasketEquity.t.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {BasketDesk} from "../../src/basket/BasketDesk.sol";
 import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
@@ -19,11 +18,11 @@ contract EqMonDir {
 }
 
 /// @title The monetary desk as its own credit holder (BasketDesk) beside the
-///        equity basket: every equity test again with a desk present, and the
+///        equity basket: share setup without inheriting unrelated tests. The
 ///        two accounts kept apart -- the basket's mark, limit and books never
 ///        see the desk's capital or issuance (D2), the desk issues only on its
 ///        own credit (D1), and its relief is its own (D3).
-contract BasketDeskTest is BuckBasketEquityTest {
+abstract contract BasketDeskFixture is BuckBasketEquityFixture {
     BasketDesk internal desk;
     EqMonDir internal md;
 
@@ -83,6 +82,9 @@ contract BasketDeskTest is BuckBasketEquityTest {
         return s_ < 0 ? uint256(-s_) : 0;
     }
 
+}
+
+contract BasketDeskTest is BasketDeskFixture {
     /// Regression (2026-09-29, the savings sandbox): the desk's founding grant
     /// is the desk's capital, never the depositors' collateral.  The basket's
     /// credit was marked at its equity PLUS the desk's value -- one account

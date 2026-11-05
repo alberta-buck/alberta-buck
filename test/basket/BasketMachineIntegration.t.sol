@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BasketDeskTest} from "./BasketDesk.t.sol";
+import {BasketDeskFixture} from "./BasketDesk.t.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
@@ -14,7 +14,7 @@ import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 
-contract BasketMachineIntegrationTest is BasketDeskTest {
+contract BasketMachineIntegrationTest is BasketDeskFixture {
     BasketReference internal service;
     OuterBandDeskPolicy internal policy;
     BasketMachineWheel internal machine;

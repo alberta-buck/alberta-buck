@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BasketDeskTest} from "./BasketDesk.t.sol";
+import {BasketDeskFixture} from "./BasketDesk.t.sol";
 import {MonetaryDesk} from "../../src/basket/MonetaryDesk.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
 
-contract BasketDeskAccountingTest is BasketDeskTest {
+contract BasketDeskAccountingTest is BasketDeskFixture {
     function _accountMatches() internal view {
         int256 actual = buck.signedBalanceOf(address(desk));
         assertEq(desk.monetaryBuckHeld(), actual > 0 ? uint256(actual) : 0);
