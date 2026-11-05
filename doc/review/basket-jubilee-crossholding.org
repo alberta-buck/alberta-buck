@@ -158,8 +158,9 @@ unpaid claim and retains the existing separate held-BUCK offset.
 
 The focused =BuckCompoundBasketTest= uses a test-only opening seam to exercise
 actual issued debt, fair entries and real fund reductions. The production
-=openCredit= gate remains closed until controller-unit validation
-and scheduled wheel work are complete. Both upkeep facets now exercise actual
+=openCredit= gate remains closed until scheduled wheel work is complete.
+Nominal issuance and net liquidation units have distinct real-pool vectors.
+Both upkeep facets now exercise actual
 credit for cash shortfalls. The separate =retireCredit= action settles exact
 principal with caller cash/relief bounds and the fund's block budget; its
 cross-lock permits valuation reads while rejecting nested financial operations.

@@ -20,8 +20,9 @@ supersedes the signed-account and implicit draw/repayment assumptions below.
 Both upkeep facets now issue real cash shortfalls, and bounded basket principal
 retirement and actual-collateral cash/in-kind exits are implemented.
 The desk's canonical cash, principal and fund-reduction paths are tested;
-controller-unit validation and scheduled wheel integration remain
-gates before enabling the new primary economy.
+price-unit vectors distinguish nominal issuance from net buybacks.
+Scheduled wheel integration remains
+a gate before enabling the new primary economy.
 
 * Where things stand
 

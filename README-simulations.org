@@ -171,6 +171,24 @@ financial lock and final collateral checks protect the complete operation.
 swaps, aged pools, callback rejection and 256 issuance-budget comparisons.
 These contract checks do not wire the desk into the primary household world.
 
+BVIB retains its nominal V3 reference: newly issued ordinary BUCK enter a pool
+at full value as that same number of nominal units. Net liquidation marks and
+buybacks use =nominal quote * pool net / pool nominal= before swap costs.
+An idle year can therefore leave nominal BVIB unchanged while one nominal
+BUCK bought from a pool delivers about 0.9802 spendable BUCK. In the actual
+test market, 50.000030 BUCK of TOKEN value bought 49.830073 nominal BUCK but
+only 48.843352 net BUCK. A fresh paired LP input of the original size raised
+the pool's net/nominal ratio from 0.9801983 to 0.9900991 without changing
+nominal BVIB or issued supply.
+
+=make nix-match-BuckCompoundPriceUnitsTest= reproduces the four vectors,
+including a real direct-controller component reading the canonical basket.
+The controller algorithm and gains are unchanged. These are denomination
+checks, not five-year stability evidence. Household decisions must compare
+actual net buyback cost with their basket/counterfactual reference, accounting
+for carried fees, AMM fees and price impact; nominal BVIB above one can still
+leave no profitable liability buyback after those costs.
+
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility
 principal/age, candidate premium and reserve checks, original-pool refund

@@ -16,7 +16,8 @@ cash shortfall, then enforce actual activated collateral after execution.
 The separate bounded
 =BuckBasketEquity.retireCredit= settles principal through the fund, with actual
 cash/relief limits and protected valuation callbacks. Public leveraged opening
-awaits controller-unit validation and scheduled wheel integration. The desk
+awaits scheduled wheel integration. Price-unit vectors distinguish the nominal
+issuance reference from net liquidation and buyback costs. The desk
 has explicit canonical cash/principal, bare collateral and real Jubilee
 retirement paths. Cash/in-kind exits now require
 actual activated backing before and after payout; no exit implicitly repays

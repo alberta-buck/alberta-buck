@@ -25,8 +25,10 @@ renewal, maturity and cash-basket checks now run against Buck, and shared
 Python/JS deployment and the browser wallet are restored. Both basket upkeep
 facets and the separate desk now use explicit cash/principal transitions;
 real V3 and actual Jubilee settlement checks cover their contract paths.
-Public leveraged basket opening still awaits controller-unit validation and
-scheduled wheel integration. Complete household lifecycle,
+Public leveraged basket opening still awaits scheduled wheel integration.
+Nominal issuance references and net liquidation/buyback units have distinct
+real-pool vectors; no controller-policy change is required by that distinction.
+Complete household lifecycle,
 five-year evidence and Notes/release checks remain separate gates below.
 
 The browser-only wallet sandbox now uses canonical Buck, with separate cash
@@ -508,7 +510,7 @@ implementation sequence, before changing the primary economy builder.
   Fourteen focused cases cover real V3 burns, fund-owned receipt conversion,
   rollback, demurrage losses, 256 cash-boundary comparisons and full
   exit after separate actual debt retirement. This does not enable public
-  leveraged opening before the remaining desk/wheel gates.
+  leveraged opening before the remaining wheel/onboarding gates.
 - [X] Port BasketDesk's own cash, principal and marked asset observations;
   mark new-credit collateral without unpaid relief. Replace implicit draw /
   receipt repayment with actual issue/reduce calls, keeping turnover, capital
@@ -526,13 +528,23 @@ implementation sequence, before changing the primary economy builder.
   smoke and compiler/link/size validation are recorded in the log below.
   Retain the legacy branch for the still-unconverted control-lab/integration
   fixtures; this is not a new simulation runner or a new fund/valuation stack.
-- [ ] Validate controller/desk signal units against Carrying-pool execution.
+- [X] Validate controller/desk signal units against Carrying-pool execution.
   BuckBasketUniswapV3.basketValueInBuck still sums nominal V3 prices, whereas
   canonical equity marks and guarded BUCK receipts include net/nominal pool
-  value. Add no-trade aging and fresh-liquidity turnover vectors, compare the
-  BVIB reference with actual net quotes, and document the intended parity
-  units before deciding whether the existing oracle needs adjustment. A
-  different unit convention must not be mistaken for a controller failure.
+  value. Four real-pool vectors confirm the distinction: idle fees leave the
+  nominal reference and a real P-only direct-controller output unchanged;
+  full-value issuance sells at nominal ticks less trading costs; buybacks
+  receive the pool's net/nominal fraction; fresh paired LP input dilutes that
+  fee fraction without changing nominal prices or supply. Retain nominal
+  BVIB as the issuance-side reference. Collateral and liability buybacks use
+  net liquidation/execution value, not an inferred inverse-fee issuance
+  premium. One test purchase cost 50.000030 at nominal TOKEN TWAP and delivered
+  49.830073 nominal / 48.843352 net BUCK. Primary household observations must
+  preserve both units; a nominal inflation signal is not itself an actionable
+  discount after costs. This validates denominations, not closed-loop gains
+  or five-year stability; those remain separate economic acceptance gates.
+  Optional shadow-observer experiments keep their own coupled acceptance
+  boundary; these direct-reference vectors do not restore those experiments.
 - [ ] Connect bounded reserve investment/redemption and maturity processing
   to the existing wheel, with authenticated routes and positive sale bounds.
   Keep portfolio trades, insurer preparation and fund liquidity work outside
@@ -619,8 +631,9 @@ Continue in this order:
    Basket valuation is now connected and tested through actual debt using a
    test-only opening seam. Explicit wheel issuance and bounded retirement are
    tested, as are actual-collateral cash/in-kind exits and the separate desk's
-   canonical issue/purchase/retirement paths. Next validate controller units
-   and finish scheduled wheel work before removing the public opening
+   canonical issue/purchase/retirement paths. Price-unit vectors distinguish
+   nominal issuance from net liquidation. Next finish scheduled wheel work
+   before removing the public opening
    gate. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
@@ -777,4 +790,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Port the separate desk to actual cash, principal and fund retirement | Added explicit verified ordinary/public canonical mode and early refusal if it is omitted. Refresh/mark never issue or activate; credit and the capital floor exclude unpaid claims. The desk reuses the existing linked basket valuation library for marked equity, measures net pool receipts, issues only before an actual sale, and pays down its real NFT through liquid Jubilee settlement. Cash and debt coexist; live inventory/capacity/offset views do not rely on stale diagnostic counters. Bounded manual retirement, one financial guard, final actual-collateral checks, finite turnover and positive whole-raw-unit work preserve atomic failure behavior. Twenty-nine canonical real-V3 tests passed, including 256 exact budget comparisons, shared-block refusal/resumption, unready-mark separation, callback rejection, full depositor separation, maturity and post-swap rollback. Full make nix-test: 1,597 passed, one fork skip and four absent-proof exclusions. Canonical-stack smoke: 34 Python and 20 JS passed; wallet/browser: 15 passed; compiler/link/size checks passed for 53 artifacts. Desk runtime 21,832 bytes. No primary household or five-year desk integration is claimed. Next consolidate repeated test inheritance, validate controller units and schedule existing wheel fund/maturity work. | =5e58ea9d= |
 
-| 2026-11-05 | Remove repeated equity/desk test inheritance | Extracted abstract equity and desk fixtures; all original standalone equity, desk/accounting, invariant and machine-integration checks remain. ABI inventory comparison retains the same 50 distinct names and each suite's intended tests, removing exactly 134 inherited repetitions (184 to 50 executions across five suites). All five invariant handlers/checks remain; the eight handler selectors are unchanged. Focused suites: 50 passed. Full make nix-test: 1,463 passed, one fork skip and the same four absent-proof exclusions. All 51 compiled distributed contract bytecode/ABI/link fingerprints are unchanged; contracts-dist-check confirms the complete 53-artifact package digest is identical: dc3f44c2aa5b98f28aed68d5ecba4d13fc89881cad874a15edba9b543f256aa8. Existing platform/wallet evidence still describes those exact production artifacts. No economic scenario or canonical acceptance test was retired. Next controller-unit validation and wheel integration remain. | This commit |
+| 2026-11-05 | Remove repeated equity/desk test inheritance | Extracted abstract equity and desk fixtures; all original standalone equity, desk/accounting, invariant and machine-integration checks remain. ABI inventory comparison retains the same 50 distinct names and each suite's intended tests, removing exactly 134 inherited repetitions (184 to 50 executions across five suites). All five invariants and eight handler selectors remain unchanged. Focused suites: 50 passed. Full make nix-test: 1,463 passed, one fork skip and the same four absent-proof exclusions. All 51 compiled distributed contract bytecode/ABI/link fingerprints are unchanged; contracts-dist-check confirms the complete 53-artifact package digest is identical: dc3f44c2aa5b98f28aed68d5ecba4d13fc89881cad874a15edba9b543f256aa8. Existing platform/wallet evidence still describes those exact production artifacts. No economic scenario or canonical acceptance test was retired. Next controller-unit validation and wheel integration remain. | =25d97596= |
+
+| 2026-11-05 | Validate nominal issuance and net liquidation/buyback units | Four real-pool vectors reuse the canonical desk fixture without inherited tests. Idle pool fees preserve nominal BVIB and an independent P-only Direct component's output while net collateral declines; fresh full-value issuance sells at nominal ticks less trading costs. A buy costing 50.000030 at nominal TOKEN TWAP delivers 49.830073 nominal / 48.843352 spendable BUCK. Fresh paired liquidity lifts net/nominal from 0.9801983 to 0.9900991 without moving nominal price or issued supply. Documented the existing nominal issuance reference and required net execution comparison for household buybacks; controller algorithm/gains are unchanged. Focused: four passed. Full make nix-test: 1,467 passed, one fork skip and four absent-proof exclusions. All 53 production artifacts keep the same package digest, so the prior 34 Python, 20 JS and 15 wallet/browser checks still cover the exact code. These component vectors are not a closed-loop or five-year stability claim. Next: scheduled fund/maturity work in the existing wheel, public basket onboarding, primary Python/JS household migration, long runs/PDFs, then Notes/proof restoration. | This commit |

@@ -17,9 +17,9 @@ as a deposit, not a cost: the pool may invest it to earn the premiums, and retur
 deposit with its average carried demurrage when the insurance is dropped.  How much credit each
 unit of insured value supports (=BUCK_K=) is set by an
 on-chain controller that holds the BUCK's value to a basket of base commodities, so the currency is
-anchored to things rather than to policy.  In the intended design, held and issued-but-unspent
-BUCKs pay a small demurrage (2 % a year) into a Jubilee fund, so money keeps moving and old
-obligations melt; the current contract's accounting still needs to be updated.
+anchored to things rather than to policy. Ordinary BUCK cash pays demurrage on its declining
+net balance (2 % a year). Actual credit issuance independently accrues a Jubilee relief target;
+settlement uses the fund's marked value and available liquidity.
 
 Every account belongs to a person or institution an identity issuer has certified -- but the chain
 never learns who.  Identities travel encrypted; each party to a payment can later prove whom it
@@ -29,6 +29,14 @@ up without revealing the parties.
 This repository holds the whole system: the Ethereum contracts, the zero-knowledge circuits, the
 cryptographic kernels in Rust, JavaScript and Python, the simulations, and the papers that explain
 it all.
+
+The current =Buck= implementation uses unsigned compounded cash, actual per-facility
+liabilities and an external Jubilee fund, while retaining its numeric mint/burn and identity
+interfaces. The local wallet sandbox and explicit basket/desk contract flows are tested.
+Scheduled wheel integration, the primary Python/JavaScript household worlds, five-year
+campaigns and corrected-token Notes proofs remain in the
+[[file:doc/review/bucknet-economy-implementation.org][unified accounting plan]]. Hosted examples below are separate deployments;
+local build commands use this checkout. The savings economy still needs its accounting migration.
 
 * Try it
 
@@ -86,7 +94,8 @@ Start with =make help= for the supported build, test and simulation commands.
 - [[file:README-build.org][Build and test]]: Nix, the checkout's venv, dependencies and the test suites.
 - [[file:README-simulations.org][Simulations and results]]: the household economy, comparisons, diagnostics, JSON and PDFs.
 - [[file:README-sandboxes.org][Sandboxes]]: browser-only and Python-backed worlds, their tests and saved results.
-- [[file:doc/review/household-release-readiness.org][Release readiness]]: completed policy comparisons, known defects and the contract simplification plan.
+- [[file:doc/review/bucknet-economy-implementation.org][Current accounting and release gates]]: canonical contracts, validation and remaining wheel, world and proof migration.
+- [[file:doc/review/household-release-readiness.org][Earlier policy review]]: historical comparisons, known defects and contract consolidation evidence.
 
 Specialized contract, circuit and document workflows: [[file:doc/DEVELOP.org][doc/DEVELOP.org]].
 
@@ -109,12 +118,10 @@ Each paper is an Org document in this repository, rendered to PDF in =images/=.
   ([[file:images/alberta-buck-ethereum.pdf][pdf]]) -- the contracts and how they fit together.
 - [[file:alberta-buck-demurrage.org][Demurrage and the Jubilee Fund]]
   ([[file:images/alberta-buck-demurrage.pdf][pdf]]) -- the intended net-balance model,
-  linear credit relief and fund accounting. The current contract uses the
-  earlier model; see the [[file:doc/review/net-demurrage-analysis.org][demurrage audit]] for implementation status and the
-  [[file:doc/review/credit-facility-accounting-design.org][credit-facility design]] for the proposed contract boundaries.
-  The [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] retains Buck.sol as the foundation,
-  bringing the experimental BuckNet's corrected calculations into it while
-  preserving its functionality. It tracks the work and validation;
+  linear credit relief and fund accounting. The [[file:doc/review/net-demurrage-analysis.org][demurrage audit]] and
+  [[file:doc/review/credit-facility-accounting-design.org][credit-facility design]] record the design's development.
+  The [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records the completed accounting port into
+  Buck.sol and the remaining integration/validation gates. The
   [[file:doc/review/net-demurrage-invariants.org][contract invariants]] and the [[file:doc/review/net-demurrage-interface-migration.org][core and Notes migration reference]] describe the
   experimental model's boundaries and remaining integration work.
 - [[file:alberta-buck-ethereum-basket.org][The BuckBasket]]
