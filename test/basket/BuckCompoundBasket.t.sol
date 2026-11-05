@@ -21,9 +21,8 @@ contract CompoundBasketHarness is BuckBasketEquity {
     }
 
     function issueForAccounting(uint256 amount) external onlyGov {
-        uint256[] memory ids = new uint256[](1);
-        ids[0] = creditId;
-        _bk().mint(amount, ids);
+        (uint256 face, uint256 active,) = credit.creditInfo(creditId);
+        Buck(address(buck)).issue(creditId, face - active, amount, 0, address(0));
     }
 
     function sendCash(address to, uint256 amount) external onlyGov {
@@ -39,6 +38,13 @@ contract CompoundBasketHarness is BuckBasketEquity {
 
     function fundForAccounting(uint256 desired) external onlyGov returns (uint256 funded) {
         (funded,) = _fundCash(desired);
+    }
+
+    function buyFromCashForAccounting(uint256 i, uint256 desired) external onlyGov {
+        (uint256 budget, uint256 gap) = _fundCash(desired);
+        (, uint256 tokens) = _venue().monetaryLeg(i, true, budget);
+        idleToken[i] += tokens;
+        _finishBuy(gap);
     }
 
     function retireInsidePositionForAccounting(uint256 principal) external onlyGov positionLock {

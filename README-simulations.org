@@ -123,6 +123,10 @@ do not turn the five-year household economy into a completed migration.
 Both existing upkeep facets now use explicit canonical issuance: available
 credit is a planning limit, while =balanceOf= remains actual wallet cash.
 They draw only a purchase's cash shortfall and check the resulting net book.
+The basket activates its free self-insured backing separately from that draw,
+including when existing cash funds a purchase. Postchecks use actual activated
+collateral, not the full appraised face. Free activation creates no currency or
+claim age; insurance premiums, where applicable, remain real issued principal.
 Sales and fee collections leave cash until a separate successful facility
 reduction. =make nix-match-BuckCompoundBasketFlowTest= checks both real V3
 paths, K/face/maturity limits, capacity quotes and transaction rollback.

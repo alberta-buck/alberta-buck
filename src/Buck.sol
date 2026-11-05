@@ -368,6 +368,10 @@ contract Buck is IERC20Metadata, IBuckJubilee {
             amount, ids, buckK.currentBuckK(), IBuckFund(jubilee).reliefPositionMark());
         return (p.coverage, p.refund);
     }
+    /// @notice Activate coverage and issue the requested spendable cash.
+    /// @dev Positive coverage with zero spendable is permitted. Any premium
+    ///      is still funded/issued in full; zero premium creates no currency,
+    ///      principal or claim age. Both numeric mint/burn APIs are unchanged.
     function issue(uint256 id, uint256 coverage, uint256 spendable, uint256 maxPremium, address expectedPool)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {

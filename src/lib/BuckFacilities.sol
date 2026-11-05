@@ -109,15 +109,19 @@ library BuckFacilities {
     ///      are complete. Approved Carrying services can issue; revocation
     ///      prevents new issuance without blocking retirement. The premium is
     ///      freshly issued directly into the insurer pool, at full net value.
-    ///      Postcondition: supply and this NFT gain spendable+premium, the pool
-    ///      and owner receive that same cash, and all claim ages synchronize.
+    ///      Coverage-only activation may request zero spendable cash; its
+    ///      premium still creates real principal paid at full net value. If
+    ///      both spendable and premium are zero, only backing changes: cash,
+    ///      principal, supply and claim age remain unchanged. Increased free
+    ///      backing may improve an over-issued line without minting currency.
+    ///      Otherwise supply/NFT gain spendable+premium and ages synchronize.
     function issue(BuckCash.Book storage cash, State storage state,
                    mapping(address => mapping(address => bytes32)) storage fragments,
                    Dependencies memory d, Issue memory r) public returns (uint256 principal, uint256 premium)
     {
         bool carrying = _owner(state, d, msg.sender, true);
         if (d.credit.ownerOf(r.tokenId) != msg.sender) revert NotCreditOwner();
-        if (r.spendable == 0) revert BadAmount();
+        if (r.spendable == 0 && r.coverage == 0) revert BadAmount();
         d.claims.totalSeconds();
         cash.settle(msg.sender);
         uint256 beforeBalance = cash.balanceOf(msg.sender);
@@ -135,7 +139,9 @@ library BuckFacilities {
         if (premium > r.maxPremium) revert PremiumLimitExceeded();
         if (beforeBalance < Math.mulDiv(premium, d.controller.fundingFactor(), K_SCALE)) revert InsufficientMintFunding();
         principal = r.spendable + premium;
-        if (oldPrincipal + principal > Math.mulDiv(afterValue, k, K_SCALE)) revert CreditExceeded();
+        // Pure backing activation cannot worsen the shortfall: afterValue
+        // is no smaller and principal is unchanged. New currency must fit K.
+        if (principal != 0 && oldPrincipal + principal > Math.mulDiv(afterValue, k, K_SCALE)) revert CreditExceeded();
         address pool;
         if (premium != 0) {
             pool = state.facilityPool[r.tokenId];
@@ -145,11 +151,15 @@ library BuckFacilities {
             _pool(d, pool);
             state.facilityPool[r.tokenId] = pool;
         }
-        d.credit.recordIssuanceFromBuck(r.tokenId, msg.sender, principal);
-        d.claims.sync(r.tokenId);
-        cash.issue(msg.sender, r.spendable, carrying);
-        emit Transfer(address(0), msg.sender, r.spendable);
-        emit NetValueTransfer(address(0), msg.sender, r.spendable, r.spendable * Q);
+        if (principal != 0) {
+            d.credit.recordIssuanceFromBuck(r.tokenId, msg.sender, principal);
+            d.claims.sync(r.tokenId);
+        }
+        if (r.spendable != 0) {
+            cash.issue(msg.sender, r.spendable, carrying);
+            emit Transfer(address(0), msg.sender, r.spendable);
+            emit NetValueTransfer(address(0), msg.sender, r.spendable, r.spendable * Q);
+        }
         if (premium != 0) {
             state.premium[r.tokenId] += premium;
             BuckTransfer.premium(cash, fragments, d.identity, msg.sender, pool, premium);

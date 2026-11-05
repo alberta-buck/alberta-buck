@@ -15,6 +15,102 @@ import {Vm} from "forge-std/Vm.sol";
 contract BuckCompoundOperationsTest is BuckCompoundFixture {
     address constant SERVICE = address(0x5E271CE);
 
+    function test_coverageOnlyPreservesCashSupplyAndExistingClaimAge() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE); buck.issue(id, 20e6, 20e6, 0, address(0));
+        vm.warp(t0 + YEAR);
+        uint256 cash = buck.netBalanceScaled(ALICE);
+        uint256 seconds_ = buck.claimSeconds();
+        vm.recordLogs();
+        vm.prank(ALICE);
+        (uint256 principal, uint256 premium) = buck.issue(id, 80e6, 0, 0, address(0));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter == address(buck) && logs[i].topics[0] == keccak256("Transfer(address,address,uint256)")) {
+                assertTrue(logs[i].topics[1] != bytes32(0), "no currency mint on free backing activation");
+            }
+        }
+        assertEq(principal, 0);
+        assertEq(premium, 0);
+        assertEq(buck.netBalanceScaled(ALICE), cash);
+        assertEq(buck.totalIssued(), 20e6);
+        assertEq(buck.claimSeconds(), seconds_);
+        (uint256 issued, uint256 age) = credit.issuanceOf(id);
+        assertEq(issued, 20e6);
+        assertEq(age, 20e6 * YEAR);
+        (, uint256 active,) = credit.creditInfo(id);
+        assertEq(active, 100e6);
+    }
+
+    function test_coverageOnlyPremiumKeepsFundingAndPremiumBoundsAndMintsToItsPool() public {
+        _issueFree(ALICE, INSURER_A, 49e6);
+        MockCompoundInsurerPool pool = _pool(INSURER_A);
+        uint256 id = _credit(ALICE, INSURER_A, 1000e6, 100);
+        k.setFactor(0.5e18);
+        vm.expectRevert(Buck.PremiumLimitExceeded.selector);
+        vm.prank(ALICE); buck.issue(id, 1000e6, 0, 99e6, address(pool));
+        vm.expectRevert(Buck.InsufficientMintFunding.selector);
+        vm.prank(ALICE); buck.issue(id, 1000e6, 0, 100e6, address(pool));
+        (, uint256 active,) = credit.creditInfo(id);
+        assertEq(active, 0);
+        assertEq(buck.totalIssued(), 49e6);
+        _issueFree(ALICE, INSURER_A, 1e6);
+        vm.prank(ALICE);
+        (uint256 principal, uint256 premium) = buck.issue(id, 1000e6, 0, 100e6, address(pool));
+        assertEq(principal, 100e6);
+        assertEq(premium, 100e6);
+        assertEq(buck.balanceOf(ALICE), 50e6);
+        assertEq(buck.netBalanceScaled(address(pool)), 100e6 * Q);
+        assertEq(buck.premiumPrincipal(id), 100e6);
+        assertEq(buck.totalIssued(), 150e6);
+        (uint256 issued, uint256 age) = credit.issuanceOf(id);
+        assertEq(issued, 100e6);
+        assertEq(age, 0);
+    }
+
+    function test_freeCoverageCanImproveALowKShortfallButCannotCreateNewCash() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE); buck.issue(id, 20e6, 20e6, 0, address(0));
+        k.setK(0.1e18);
+        assertEq(credit.currentValue(id), 20e6);
+        vm.prank(ALICE); buck.issue(id, 80e6, 0, 0, address(0));
+        assertEq(credit.currentValue(id), 100e6);
+        assertEq(buck.balanceOf(ALICE), 20e6);
+        assertEq(buck.totalIssued(), 20e6);
+        (uint256 issued,) = credit.issuanceOf(id);
+        assertGt(issued, credit.currentValue(id) / 10);
+        vm.expectRevert(Buck.CreditExceeded.selector);
+        vm.prank(ALICE); buck.issue(id, 0, 1, 0, address(0));
+    }
+
+    function test_coverageOnlyRequiresOwnerAndDoesNotChangeNumericMintZero() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.expectRevert(Buck.NotCreditOwner.selector);
+        vm.prank(BOB); buck.issue(id, 100e6, 0, 0, address(0));
+        vm.expectRevert(Buck.BadAmount.selector);
+        vm.prank(ALICE); buck.issue(id, 0, 0, 0, address(0));
+        uint256[] memory ids = new uint256[](1); ids[0] = id;
+        vm.prank(ALICE); buck.mint(0, ids);
+        (, uint256 active,) = credit.creditInfo(id);
+        assertEq(active, 0);
+        assertEq(buck.balanceOf(ALICE), 0);
+        assertEq(buck.totalIssued(), 0);
+    }
+
+    function test_coverageOnlyCannotRefreshAFullyAgedLien() public {
+        uint256 id = _credit(ALICE, INSURER_A, 100e6, 0);
+        vm.prank(ALICE); buck.issue(id, 20e6, 20e6, 0, address(0));
+        vm.warp(t0 + 50 * YEAR);
+        buck.processMaturities(1);
+        vm.expectRevert(Buck.FacilityMatured.selector);
+        vm.prank(ALICE); buck.issue(id, 80e6, 0, 0, address(0));
+        (, uint256 active,) = credit.creditInfo(id);
+        assertEq(active, 20e6);
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(id);
+        assertEq(principal, 20e6);
+        assertEq(seconds_, 20e6 * 50 * YEAR);
+    }
+
     function _issueFree(address owner, address insurer, uint256 amount) private returns (uint256 id) {
         id = _credit(owner, insurer, amount, 0);
         vm.prank(owner);

@@ -437,7 +437,7 @@ implementation sequence, before changing the primary economy builder.
 - [X] Keep valuation shared in a linked library and move constituent
   registration into the existing venue, preserving governed access and the
   existing anchors/rounding. Retain runtime-limit acceptance for the shell.
-- [-] Replace implicit spending in both existing upkeep facets with explicit
+- [X] Replace implicit spending in both existing upkeep facets with explicit
   issuance of the cash shortfall. Mark collateral first; cap by NFT face,
   actual principal, K, account/supply limits and maturity. Do not mint maximum
   room just to activate it or report available capacity as wallet cash.
@@ -445,11 +445,14 @@ implementation sequence, before changing the primary economy builder.
   issuable principal, and mint only the requested cash shortfall. Purchase
   postchecks reject increased shortfall after actual pool execution; sale /
   fee proceeds stay cash. The policy ceiling also excludes unpaid claims.
-  The exit review exposed a remaining backing issue: the first postcheck
-  compares full marked face, whereas Buck enforces activated coverage. Next
-  permit explicit coverage activation without spendable cash, activate the
-  self-insured basket backing independently of its requested draw, and compare
-  actual activated collateral in postconditions. Preserve both numeric APIs.
+  The exit review exposed and corrected a backing issue: postchecks must use
+  actual activated collateral, not full appraised face. Explicit issue now
+  permits positive coverage with zero spendable cash; nonzero premiums still
+  require funding and create actual principal. With zero premium, backing can
+  improve even an existing K shortfall without changing cash, supply or claim
+  age. Both facets activate the basket's free self-insured backing independently
+  of the requested draw, including cash-funded purchases, then compare actual
+  activated collateral after execution. Both numeric APIs retain their semantics.
 - [X] Add bounded explicit basket debt settlement outside its position lock.
   Receiving swap proceeds or arb income leaves cash until actual principal
   is retired. Preserve owner cash bounds, exact relief/refund, the shared block
@@ -698,4 +701,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Exercise basket credit explicitly in both upkeep facets | Planning cash and credit capacity are separate. Both facets refresh K, mark collateral without unpaid claims, respect face/principal/account/supply/maturity bounds, and mint only the requested cash shortfall. Purchase postconditions re-mark actual net positions and reject a worse credit shortfall. Sale and fee proceeds remain cash until explicit retirement; the machine daily path no longer calls removed signed-account APIs. Nine real-contract funding tests passed, including 256 capacity/quote/issuance fuzz cases, 50-year refusal and full rollback after an LP mint/K cut. The preceding basket/machine/V3 regression pass covered 108 cases before the last three added checks. Runtime: component facet 14,239 bytes, machine facet 21,044; shell stays 22,648. Public leveraged opening, repayment/exit/desk/wheel work and five-year/Notes evidence remain open. | =96a701da= |
 
-| 2026-11-05 | Bound actual basket principal retirement outside position operations | Added retireCredit(principalRaw, maxCashCostRaw, minimumReliefScaled) for governor/wheel/self dispatch. It atomically authorizes the existing fund, checks actual net wallet debit, refreshes marks and preserves all liquidity/claim/refund rules. Separate mutually exclusive credit/position locks allow real valuation reads and reject nested repayment, deposit and upkeep. Ten tests cover full/partial settlement and reuse, fractional bounds, rollback after settlement, shared-block refusal/resumption and a registered adversarial valuation callback. Canonical acceptance before the final fractional-bound addition: 271 passed. Full contract run afterward: 1,547 passed, one fork skip; the same four absent-proof exclusions remain. Python/Anvil and JS/Tevm smoke: 34 and 20 passed. Shell runtime 23,833 bytes. Next fix full-face versus activated-backing issuance/postcheck accounting before exits; public leveraged opening and five-year/Notes gates remain closed. | This commit |
+| 2026-11-05 | Bound actual basket principal retirement outside position operations | Added retireCredit(principalRaw, maxCashCostRaw, minimumReliefScaled) for governor/wheel/self dispatch. It atomically authorizes the existing fund, checks actual net wallet debit, refreshes marks and preserves all liquidity/claim/refund rules. Separate mutually exclusive credit/position locks allow real valuation reads and reject nested repayment, deposit and upkeep. Ten tests cover full/partial settlement and reuse, fractional bounds, rollback after settlement, shared-block refusal/resumption and a registered adversarial valuation callback. Canonical acceptance before the final fractional-bound addition: 271 passed. Full contract run afterward: 1,547 passed, one fork skip; the same four absent-proof exclusions remain. Python/Anvil and JS/Tevm smoke: 34 and 20 passed. Shell runtime 23,833 bytes. Next fix full-face versus activated-backing issuance/postcheck accounting before exits; public leveraged opening and five-year/Notes gates remain closed. | =6b02b862= |
+
+| 2026-11-05 | Separate backing activation from cash issuance and enforce actual collateral | A real-V3 regression first demonstrated the erroneous full-face postcheck: principal 100,000,000 exceeded the activated limit 99,999,900 after a cash-funded purchase. Explicit issue now supports positive coverage with zero spendable cash; premiums retain reserve/pool/limit checks and remain real principal. Free activation preserves cash, supply, principal and claim age, can improve a K shortfall without new currency, and cannot refresh a mature lien. The basket independently activates free backing, draws only its cash shortfall and uses actual activated collateral for headroom and purchase postconditions. Focused core/basket suites: 42 passed, including 256 capacity fuzz cases. Full make nix-test: 1,554 passed, one fork skip and the same four absent-proof exclusions. Runtime: Buck 21,160; facilities library 23,943; basket shell 23,874; component facet 14,605; machine facet 21,410 bytes. Public leveraged opening, exits/desk/wheel integration, five-year and Notes gates remain open. | This commit |

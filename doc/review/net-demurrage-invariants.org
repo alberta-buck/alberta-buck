@@ -8,14 +8,27 @@ This is a review and verification map for the *experimental clean-genesis*
 =BuckNet= stack. It describes what the current code does and the properties
 the system is intended to maintain. It is not a formal proof, a deployment
 specification, or evidence from a five-year household economy. The existing
-=src/Buck.sol=, deployed Notes contracts, and current economy use the legacy
-model. The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current sequence and
+=src/Buck.sol= now implements compounded cash and actual per-facility issuance;
+the primary economy and Notes proof migration remain incomplete.
+The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current sequence and
 outstanding work; the [[file:net-demurrage-interface-migration.org][interface and proof reference]] details clients and Notes.
 
 The November 4 direction is to correct the existing Buck foundation using
 this prototype's accounting discoveries, preserving Buck's functionality.
 This document describes the BuckNet donor; its facade, held/unspent split and
 omission of sponsorship are not requirements for the corrected Buck.
+
+Canonical addition, November 5: =Buck.issue= accepts positive coverage with
+zero spendable cash. Ownership, identity, approved Carrying issuer, maturity,
+claim-book, premium, pool and funding checks still apply. Any premium is real
+new principal; a positive principal increase must fit current K. When both
+spendable and premium are zero, only backing is activated: cash, supply,
+principal and issuance age are unchanged, and even an under-K facility may
+improve its backing without creating currency. Both arguments zero revert.
+This does not change numeric =mint(0)= or introduce a =burn(0)= close sentinel.
+The basket uses this distinction to activate free backing independently of
+cash draws. Its solvency checks use =min(face,mark)*active/face=, followed by
+K, rather than treating the entire face as already active.
 
 Several entries below are *requirements to prove*, not claims that all
 rounding, market or adversarial cases are already proven. The selected

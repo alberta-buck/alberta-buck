@@ -38,6 +38,8 @@ interface IBuckNetAccount {
     function maturitiesPending() external view returns (bool);
     function jubilee() external view returns (address);
     function authorizeReduction(uint256 id, uint256 principal, uint256 minimumReliefScaled, uint64 deadline) external;
+    function issue(uint256 id, uint256 coverage, uint256 spendable, uint256 maxPremium, address expectedPool)
+        external returns (uint256 principal, uint256 premium);
 }
 
 interface IBasketCreditFund {
@@ -315,8 +317,8 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     function _headroomS(Snap memory s) internal view returns (int256) {
         uint256 m = address(credit) == address(0) ? 0 : credit.markOf(creditId);
         if (netAccounting && address(credit) != address(0)) {
-            (uint256 face,,) = credit.creditInfo(creditId);
-            m = Math.min(m, face);
+            (uint256 face, uint256 active,) = credit.creditInfo(creditId);
+            m = face == 0 ? 0 : Math.mulDiv(Math.min(m, face), active, face);
         }
         return int256(s.k * m / 1e18) - int256(s.lien);
     }
@@ -352,9 +354,11 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
 
     /// @dev Pre: authorized upkeep, no position mutation in progress. Refresh
     ///      K and collateral before exercising credit. Post: return at most
-    ///      desired, backed by actual cash; mint precisely its cash shortfall,
-    ///      never maximum headroom. The returned opening shortfall is checked
-    ///      after a purchase. Failure of mint/trade/postcheck reverts together.
+    ///      desired, backed by actual cash; mint precisely its cash shortfall.
+    ///      Activate the basket's whole free self-insured backing independently
+    ///      of that draw, including when existing cash funds the purchase.
+    ///      The returned actual coverage shortfall is checked after execution.
+    ///      Failure of backing/mint/trade/postcheck reverts together.
     function _fundCash(uint256 desired) internal returns (uint256 funded, uint256 shortfall) {
         if (!netAccounting) return (Math.min(desired, _bk().balanceOf(address(this))), 0);
         controller.compute();
@@ -362,11 +366,18 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         _markS(s);
         shortfall = _shortfallS(s);
         funded = Math.min(desired, _liquidityS(s));
-        if (funded > s.spend) {
-            uint256[] memory ids = new uint256[](1);
-            ids[0] = creditId;
-            _bk().mint(funded - s.spend, ids);
-            creditLive = true;
+        if (funded != 0 && address(credit) != address(0)) {
+            (uint256 face, uint256 active, uint32 rate) = credit.creditInfo(creditId);
+            if (rate != 0) revert NonzeroBasketPremium();
+            uint256 coverage = face - active;
+            uint256 draw = funded > s.spend ? funded - s.spend : 0;
+            (uint256 principal, uint256 age) = credit.issuanceOf(creditId);
+            // A matured lien needs release; existing cash does not renew it.
+            if (draw == 0 && principal != 0 && age == principal * (50 * (365 days + 6 hours))) coverage = 0;
+            if (draw != 0 || coverage != 0) {
+                IBuckNetAccount(address(buck)).issue(creditId, coverage, draw, 0, address(0));
+            }
+            if (draw != 0) creditLive = true;
         }
     }
 
@@ -374,9 +385,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///      configured held-LP-BUCK offset. Unpaid claims are not collateral.
     function _shortfallS(Snap memory s) internal view returns (uint256) {
         if (!netAccounting || address(credit) == address(0)) return 0;
-        (uint256 face,,) = credit.creditInfo(creditId);
+        (uint256 face, uint256 active,) = credit.creditInfo(creditId);
         uint256 mark = Math.min(face, _creditValueS(s, _equityS(s, MARK_LOW)));
-        uint256 limit = Math.mulDiv(mark, s.k, 1e18);
+        uint256 value = face == 0 ? 0 : Math.mulDiv(mark, active, face);
+        uint256 limit = Math.mulDiv(value, s.k, 1e18);
         return s.lien > limit ? s.lien - limit : 0;
     }
 

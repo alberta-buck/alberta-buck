@@ -126,6 +126,45 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         assertGt(basket.idleToken(0) + basket.idleToken(1) + basket.idleToken(2), 0);
     }
 
+    function test_cashFundedPurchaseCannotLeaveActualActivatedBackingShort() public {
+        _pools();
+        vm.startPrank(ALICE);
+        buck.approve(address(basket), type(uint256).max);
+        basket.deposit(address(buck), 100e6, 0);
+        vm.stopPrank();
+        _open(1e12);
+        vm.startPrank(GOV);
+        b.fundForAccounting(200e6);
+        b.buyFromCashForAccounting(0, 1e6);
+        vm.stopPrank();
+        assertEq(basket.lien(), 100e6);
+        uint256 actualLimit = credit.currentValue(basket.creditId()) * k.currentBuckK() / 1e18;
+        assertLe(basket.lien(), actualLimit);
+    }
+
+    function test_existingCashCanRestoreFreeBackingAfterRepaymentWithoutIssuing() public {
+        _pools();
+        vm.startPrank(ALICE);
+        buck.approve(address(basket), type(uint256).max);
+        basket.deposit(address(buck), 100e6, 0);
+        vm.stopPrank();
+        _open(1e12);
+        vm.prank(GOV);
+        b.fundForAccounting(200e6);
+        basket.retireCredit(50e6, 50e6, 0);
+        k.setK(0.02e18);
+        b.refreshMark();
+        assertLt(basket.headroom(), 0); // Only half the backing is still active.
+        uint256 supply = buck.totalIssued();
+        vm.prank(GOV);
+        b.buyFromCashForAccounting(0, 1e6);
+        assertEq(basket.lien(), 50e6);
+        assertEq(buck.totalIssued(), supply);
+        (uint256 face, uint256 active,) = credit.creditInfo(basket.creditId());
+        assertEq(active, face);
+        assertGt(basket.headroom(), 0);
+    }
+
     function test_machinePairsDepositsUsingActualIssuanceAndDailyHasNoSignedCalls() public {
         _pools();
         _open(1e12);

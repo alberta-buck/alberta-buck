@@ -163,8 +163,13 @@ and scheduled wheel work are complete. Both upkeep facets now exercise actual
 credit for cash shortfalls. The separate =retireCredit= action settles exact
 principal with caller cash/relief bounds and the fund's block budget; its
 cross-lock permits valuation reads while rejecting nested financial operations.
+The basket independently activates its whole free self-insured backing before
+spending. Actual insured collateral is =min(face,mark)*active/face=; full face
+alone cannot justify a purchase. Fresh postchecks apply K to that actual value
+and reject increased principal shortfall. Zero-cash, zero-premium activation
+changes neither currency nor Jubilee age, and can improve an existing K
+shortfall without issuing more BUCK. Numeric mint/burn semantics are unchanged.
 The runtime limit is tested explicitly. Registration lives in the existing
-venue facet behind the governed public wrapper; after adding bounded retirement,
-the share/credit shell is 23,833 bytes (743 below the limit). Substantial flow
+venue facet behind the governed public wrapper. Substantial flow
 changes should continue using the existing facet structure. This is a contract
 integration milestone, not a completed household or five-year migration.
