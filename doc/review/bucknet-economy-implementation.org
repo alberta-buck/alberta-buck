@@ -16,8 +16,8 @@ and verification log below is preserved.
 Implement in =feature/buck-compound-demurrage= at
 =.claude/worktrees/buck-compound=, created from the reviewed foundation plan
 =5096c7b4=. The foundation and BuckNet worktrees and unrelated main-checkout
-changes remain intact. Buck now has typed failure conditions; the monetary
-accounting port is the next executable milestone.
+changes remain intact. Buck now has typed failure conditions; the unsigned cash component has independent tests. Wiring it into Buck and
+its per-NFT/Jubilee transitions is the next executable milestone.
 
 The current five-year economy and both normal sandboxes still deploy legacy
 Buck. No five-year campaign has validated the corrected accounting, and the
@@ -167,7 +167,7 @@ old positive/negative balance and feesRealized/reliefRealized identities.
 | Metadata, ERC-20 approve/transfer/transferFrom/allowance, proof-bearing approve, identity checks, receipt fragments, public/private rules and allowance behavior | Keep the original public methods and identity dispatcher. Replace the money movement they call; reuse real proof/receipt regressions rather than assuming BuckNet facade equivalence. |
 | Both mint and burn overloads, NFT order/default selectors, quoteMint/quoteBurn and Minted | Retain the existing transaction and quote shapes. Rewrite allocation/settlement for actual issuance, net refunds, per-NFT relief and final balance checks; retaining their signatures does not validate the old coverage-only inversion. =mint(max)= retains its defined maximum meaning; =burn(max)= is not a close-all sentinel. |
 | K controller compute, premium reserve and live credit valuation | Preserve the existing controller and gates. Gate an entire mint on one starting reserve, excluding newly minted batch funds; distinguish capacity, principal and cash. Preserve no-worse-shortfall retirement without relaxing low-K exits. |
-| Sponsorship request/accept/clear, isSponsored and settleDemurrage | Retain automatic fee offloading and a stable sponsored balanceOf. The confirmed failure rule is all-or-nothing: if the sponsor cannot pay the entire computed fee, collect nothing from it, charge the entire normal fee to the account, and detach. Emit DemurrageSponsor(account, sponsor) on establishment and DemurrageSponsor(account, address(0)) on detachment. |
+| Sponsorship request/accept/clear, isSponsored and settleDemurrage | Retain automatic fee offloading and a stable sponsored balanceOf. The latest rule is full sponsorship or revert: inadequate sponsor funding must revert settlement/spends and leave the linkage unchanged. Manual detachment remains independently available and applies ordinary outstanding fees to the account. Emit DemurrageSponsor(account, sponsor) on establishment and DemurrageSponsor(account, address(0)) on manual detachment. |
 | insurancePool constructor argument/getter and insurer deposits/refunds | Preserve the existing argument's meaning; prefer an explicit additional Jubilee constructor argument over repurposing the fourth argument or introducing mutable wiring solely to retain its arity. Update deployment factories accordingly. New facilities must use an insurer-authorized pool; any bootstrap/default pool needs explicit insurer authorization, with no reassignment of old refunds. |
 | raw/fee/fund views and flow events | Preserve useful observations with clearly documented net/nominal units. An ordinary net balance no longer has a separate unpaid gross-balance fee lien; do not imply it does or recreate one just to satisfy an old view. Inventory callers and explicitly document any revised/retired meaning. |
 | signedBalanceOf/signedRawBalanceOf; holder-level reliefOf/redeemCost/settleRelief | Replace signed wallet/debt consumers with actual cash and per-NFT data. Holder-level automatic relief is the rejected model-branch addition, not a master feature that must be restored. Selected NFT retirement/renewal is authoritative. |
@@ -186,42 +186,44 @@ validation stays on chain. Existing transaction overloads still require an
 on-chain allocation path. An eth_call preflight checks current execution but
 neither reserves state nor returns allocation details from void mint/burn.
 
-** Confirmed all-or-nothing sponsorship
+** Confirmed sponsorship: full payment or revert
 
-Sponsorship protects the displayed balance while active. At settlement,
-compute the entire normal compound-decay fee since the last successful
-checkpoint. Settle the sponsor's own fees before evaluating its actual funds.
-If it can pay the entire fee, debit that full net amount and preserve the
-sponsored account's balance. If it cannot, collect *nothing* from it: apply
-the full normal fee to the account itself, clear the sponsored flag and link,
-release the sponsor's count, and start ordinary accrual from the remaining
-net balance at the current timestamp. Prior successfully sponsored intervals
-are not charged again. Exact funding is sufficient; a partial payment is
-never taken. No fee is split, forgiven or charged twice.
+The user's later November 4 simplification supersedes automatic failure
+fallback. At settlement, compute the complete normal compound-decay fee since
+the last successful checkpoint and settle the sponsor's own demurrage. If its
+actual funds cover the entire fee, pay that whole amount and keep the account's
+protected balance stable. Otherwise revert the whole operation with a typed
+DemurrageSponsorUnderfunded error carrying the account, sponsor, required fee
+and available net funds. Balances, checkpoints, flags and linkages roll back;
+no partial sponsor payment, automatic self-charge or automatic disconnection.
 
-The confirmed canonical event is
+The owner can fund the sponsor and retry, or explicitly detach. Manual
+detachment clears the link *before* ordinary settlement, so it cannot be
+trapped by the same insufficient-sponsor error. The account bears its complete
+outstanding normal demurrage since its last successful checkpoint; earlier
+successfully sponsored periods remain paid. Both parties retain the existing
+right to end sponsorship. No fee is split or charged twice.
+
+The canonical event is
 =DemurrageSponsor(address indexed account, address indexed sponsor)=.
-Establishment emits the actual pair; both automatic failure and voluntary
-detachment emit =(account, address(0))=. Retain request/accept consent and
-existing payer events while their consumers are migrated.
+Establishment emits the actual pair; manual detachment emits
+=(account, address(0))=. Failed settlements emit no lasting event. Existing
+request/accept consent and payer events remain during consumer migration.
 
-This permits a simpler per-settlement funded policy rather than the earlier
-pooled/pro-rata shortfall proposal. Unsettled sponsored displays are protected
-targets, not additional net backing. Exact net views and conservation use the
-underlying declining cash; settlement must fund any restoration from actual
-sponsor cash. Other unsettled sponsorship promises do not reserve that cash.
-With multiple dependants, an earlier full payment may leave a later account
-unable to receive sponsorship; that later account pays its entire normal fee
-and detaches. Document this ordering explicitly and never sum protected
-promises as newly created supply.
+Unsettled sponsored displays are protected targets, not additional net
+backing. Exact net views and conservation use the underlying declining cash;
+settlement restores value only from actual sponsor cash. Other unsettled
+sponsorship promises do not reserve that cash. With multiple dependants, an
+earlier full payment may cause a later settlement to revert until funding or
+explicit detachment. Test that ordering rather than silently allocating a
+partial contribution across accounts.
 
-Every spend settles before checking funds, so the account cannot spend an
-unfunded promise. If an oversized transfer subsequently reverts, its attempted
-detachment also reverts; an independent settleDemurrage call must allow the
-account to settle and detach before retrying. Test exact funding, one internal
-unit short, zero/same-block fees, multiple dependants, manual/automatic
-clearing, identity/mode restrictions, and rollback. Fund self-demurrage or
-normal accrual must not receive the same sponsored fee a second time.
+Every spend settles before checking funds; an unfunded promise cannot be
+spent. Explicit settleDemurrage also reverts while sponsorship is underfunded;
+manual detachment, rather than another settlement, is the recovery path.
+Test exact funding, one internal unit short, zero/same-block fees, multiple
+dependants, voluntary clearing, identity/mode restrictions, and full rollback.
+Fund accrual must not receive the same sponsored fee a second time.
 
 * Implementation sequence and checklist
 
@@ -237,8 +239,9 @@ normal accrual must not receive the same sponsored fee a second time.
   Keep each distinct failure check or record its replacement before removal.
 - [X] Confirm automatic stable-balance sponsorship and permission to detach
   an inadequately funded link at settlement; the user selected these rules.
-- [X] Confirm whole-fee sponsorship or whole-fee self-payment plus detachment,
-  with no partial sponsor contribution and an establishment/detachment event.
+- [X] Confirm full sponsorship or a reverting settlement/spend, with no
+  automatic fallback; manual detachment remains independently available and
+  charges outstanding ordinary demurrage to the account.
 - [ ] Implement and test the confirmed sponsorship policy and distinguish
   protected displayed balances from exact declining net backing.
 - [X] Replace all 40 Buck string guards with 32 named errors and update
@@ -483,4 +486,6 @@ review changes documentation only; it does not rerun or extend the historical
 | 2026-11-01 | API simplification review | Traced quote, signed-accounting, basket-hook and sponsorship callers. Recorded a proposal for shared full-width client estimates, the block-budget snapshot limitation, the Rust legacy-arithmetic boundary and the incomplete net household/basket paths. No API or agent was removed. Documentation review and =git diff --check= only; no contract behavior changed. | =32c7d17a= |
 | 2026-11-04 | Retain Buck as the accounting foundation | Compared master, model-branch Buck and BuckNet; proved the model/current Buck source blobs are identical; created feature/buck-accounting-foundation. Superseded facade replacement with an in-place Buck accounting port, preserving the identity/ERC-20, mint/burn/quote and sponsorship acceptance scope. Documented unsigned compounded cash, per-NFT capped age, fund invariants, donors, coverage and client/proof/simulation sequence. Recorded the user's stable-balance sponsorship and insufficient-funding detachment rule. No Solidity changed; make help, local-link/history checks and git diff --check passed. No new contract tests ran. | =5096c7b4= |
 
-| 2026-11-04 | Typed Buck failures and confirmed sponsorship | Created feature/buck-compound-demurrage from the reviewed plan and installed worktree-local pinned dependencies. Buck now has typed guards, preserved test selector assertions, a real reentry-byte check and Python/JS client decoding. Fixed Make quoting for regex suite names. Full make nix-test: 1,616 passed, one fork skip; four generated-proof suites excluded by the existing absent-fixture gate. Python core: 27 passed, four native-kernel skips. JS wallet with real identity proofs: one passed. The monetary model remains legacy; the unsigned cash implementation is the next milestone. | This commit |
+| 2026-11-04 | Typed Buck failures and confirmed sponsorship | Created feature/buck-compound-demurrage from the reviewed plan and installed worktree-local pinned dependencies. Buck now has typed guards, preserved test selector assertions, a real reentry-byte check and Python/JS client decoding. Fixed Make quoting for regex suite names. Full make nix-test: 1,616 passed, one fork skip; four generated-proof suites excluded by the existing absent-fixture gate. Python core: 27 passed, four native-kernel skips. JS wallet with real identity proofs: one passed. The monetary model remains legacy; the unsigned cash implementation is the next milestone. | =db3ce1d5= |
+
+| 2026-11-04 | Unsigned cash and full-payment-or-revert sponsorship | Added BuckCash: one packed unsigned net/checkpoint/flags slot, separate Carrying nominal value, compounded cash and full-width fund flows, exact owner/fund retirement and shared block budget. The latest user clarification replaces automatic detachment with a typed reverting settlement/spend; independent manual clear applies ordinary fees. Canonical sponsor events are emitted on establishment and manual clear. A recipient sponsorship settlement is completed before the sender spend check. make nix-match-BuckCashTest: 25 passed, including 256 randomized histories; linked runtime 8,000 bytes. This is a component milestone, not yet the Buck accounting switch or a five-year validation. | This commit |

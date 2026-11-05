@@ -393,8 +393,8 @@ also require simulation.
 Existing delegated demurrage is a separate user-facing feature, not modeled by
 this reference. The user confirmed its preservation on November 4: complete
 automatic fee offloading, stable sponsored balances, and permission to detach
-an inadequately funded payer at settlement. The confirmed failure rule charges the entire normal fee to the account and
-clears the link, with no partial sponsor payment. Exact net backing and event
+an inadequately funded payer at settlement. The latest rule reverts underfunded settlement/spends without disconnecting;
+manual detachment remains available and charges outstanding ordinary fees. Exact net backing and event
 rules are tracked in the unified plan.
 Likewise, retire older baskets or agents only when their distinct checks are
 covered. This work does not alter the low-K exit rule.

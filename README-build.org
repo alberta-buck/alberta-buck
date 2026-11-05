@@ -67,6 +67,7 @@ Buck until the accounting port and its integration are completed.
 
 #+begin_src sh
 make nix-test                              # Foundry contract tests
+make nix-match-BuckCashTest               # unsigned cash, Carrying value and sponsor component
 make nix-match-BuckNetMintMathTest         # bounded per-facility issuance math and fuzzing
 make nix-match-BuckNetMintCompatibilityTest # ordinary-owner compatibility mint and batch quote
 make nix-match-BuckNetQuoteTest            # quotes checked against real BuckNet issuance
