@@ -6,6 +6,8 @@ import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
 import {BasketJubileeMath} from "../../src/basket/BasketJubileeMath.sol";
 import {Buck} from "../../src/Buck.sol";
 import {JubileeFund} from "../../src/JubileeFund.sol";
+import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
+import {EqToken} from "./BuckBasketEquity.t.sol";
 
 /// @dev Test-only access to a real facility while the production opening gate
 ///      remains shut pending explicit wheel spend/repayment/exit integration.
@@ -38,6 +40,21 @@ contract CompoundBasketHarness is BuckBasketEquity {
 }
 
 contract BuckCompoundBasketTest is JubileeEquityFixture {
+    function test_registrationCannotBypassGovernanceThroughVenueDispatch() public {
+        EqToken asset = new EqToken("Asset", "AST", 18);
+        vm.expectRevert(bytes4(keccak256("NotSelf()")));
+        vm.prank(BOB);
+        IBuckBasketVenue(address(basket)).registerToken(address(asset), 18, 1e6, 10_000, 3000);
+        vm.expectRevert(bytes4(keccak256("NotGovernance()")));
+        vm.prank(BOB);
+        basket.addBasketToken(address(asset), 18, 1e6, 10_000, 3000);
+        assertEq(basket.constituentsLength(), 0);
+        vm.prank(GOV);
+        address pool = basket.addBasketToken(address(asset), 18, 1e6, 10_000, 3000);
+        assertGt(pool.code.length, 0);
+        assertEq(basket.indexOf(address(asset)), 1);
+    }
+
     function test_basketAndValuationLibraryFitEvmRuntimeLimit() public pure {
         assertLe(type(BuckBasketEquity).runtimeCode.length, 24_576);
         assertLe(type(BasketJubileeMath).runtimeCode.length, 24_576);

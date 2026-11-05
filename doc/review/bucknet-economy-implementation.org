@@ -404,8 +404,11 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   normal openCredit remains gated pending wheel/repayment/exit integration.
   BasketJubileeMath is one linked read-only valuation library shared by the
   shell and existing facets. No new wheel, fund or token mode was introduced.
-  The shell remains near the EIP-170 limit; retain the explicit runtime test
-  while moving any further substantial code into its existing facet structure.
+  Constituent registration now runs in the existing venue facet through the
+  governed shell wrapper and authenticated self-call. Moving this AMM setup
+  out of the share/credit shell retains its rules and frees runtime space:
+  shell 22,648 bytes, V3 venue 20,603, machine venue 20,915. Retain the explicit
+  runtime test and use the existing facet structure for further substantial code.
 - [ ] Complete the approved Carrying-service allowlist, safe revocation and
   settlement access; production insurer preparation and strategies; gas,
   runtime/creation limits and library/callback provenance. BuckCredit's last
@@ -421,6 +424,41 @@ net fund cash; reductions, renewals and deferred burns share its remainder.
 Later same-block inflows do not refill it. Zero/failed operations do not start
 or consume it. Marks do not promise realizable liquidity; retain borrower
 minimum-relief/principal bounds where provided and reject stale/unsafe inputs.
+
+*** Immediate basket/desk completion checklist
+
+This expands the partially completed basket/desk item above; it is the next
+implementation sequence, before changing the primary economy builder.
+
+- [X] Snapshot actual cash/principal and solve the fee-aware mutual claim;
+  price LP entries with that claim and exclude it from new-credit collateral.
+- [X] Keep valuation shared in a linked library and move constituent
+  registration into the existing venue, preserving governed access and the
+  existing anchors/rounding. Retain runtime-limit acceptance for the shell.
+- [ ] Replace implicit spending in both existing upkeep facets with explicit
+  issuance of the cash shortfall. Mark collateral first; cap by NFT face,
+  actual principal, K, account/supply limits and maturity. Do not mint maximum
+  room just to activate it or report available capacity as wallet cash.
+- [ ] Add bounded explicit basket debt settlement outside its position lock.
+  Receiving swap proceeds or arb income leaves cash until actual principal
+  is retired. Preserve owner cash bounds, exact relief/refund, the shared block
+  budget and full rollback; a liquidity refusal must not masquerade as paydown.
+- [ ] Port cash and in-kind exits using prospective actual debt/collateral.
+  Preserve the existing low-K refusal cases and retained-share fairness. Cash
+  on hand and unpaid marked relief cannot themselves justify an exit. Test
+  partial/full exits, zero marks, losses and fund-owned receipt redemption.
+- [ ] Port BasketDesk's own cash, principal and marked asset observations;
+  mark new-credit collateral without unpaid relief. Replace implicit draw /
+  receipt repayment with actual issue/reduce calls, keeping turnover, capital
+  floor, execution bands and its separation from depositors' assets.
+- [ ] Connect bounded reserve investment/redemption and maturity processing
+  to the existing wheel, with authenticated routes and positive sale bounds.
+  Keep portfolio trades, insurer preparation and fund liquidity work outside
+  Buck's token lock; its burn tick remains valuation-only.
+- [ ] Enable normal net-mode openCredit only after real-contract lifecycle,
+  low-K and fund liquidity regressions pass. Then convert the existing primary
+  Python/JS builders and household/savings lifecycle; no legacy fallback or
+  silent skipped action may make the corrected economy appear to run.
 
 ** 4. Migrate existing clients, proofs and the household economy
 
@@ -633,4 +671,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Approve LP claim pricing and implement bounded mutual valuation | Recorded the user's decision to include marked Jubilee claims in LP pricing and exclude unpaid claims from new-credit collateral. Added a nonrecursive exact integer solver including original-basis gain fees, capped age/principal, insolvency and a conservative least-root rule for singular ownership. make nix-match-BasketJubileeMathTest: ten passed, including 256 independent exhaustive integer comparisons and the entry-dilution counterexample. Added the suite to canonical accounting acceptance. This pure-math checkpoint does not enable leveraged basket credit or validate a five-year economy. | =7022e186= |
 
-| 2026-11-05 | Connect canonical basket valuation and bind shared library in clients | Basket snapshots now distinguish actual net cash, NFT principal and the capped fee-aware mutual Jubilee claim. LP entries count only delivered cash; receipt values round once; new-credit collateral excludes unpaid relief. Six real-contract accounting/size cases plus ten math cases and twenty existing V3 cash-basket cases passed (36 focused). The complete contract run passed 1,527 with one fork skip; labelled legacy coverage and absent-proof exclusions remain explicit. Platform smoke: 34 Python and 20 JS passed; wallet acceptance: 15 passed including Chromium; artifact compiler/link/size checks passed. Linked valuation keeps the shell at 24,473 bytes (103 bytes spare); the shared library is 3,076 bytes. Shared Python/JS basket deployment and version-7 restoration bind its actual code/address. Final real gain-fee integration passed six cases; final old-version/missing/substituted-library restore checks passed two JS cases. Public leveraged opening, explicit wheel/desk/exit flows, five-year runs and Notes remain open. | This commit |
+| 2026-11-05 | Connect canonical basket valuation and bind shared library in clients | Basket snapshots now distinguish actual net cash, NFT principal and the capped fee-aware mutual Jubilee claim. LP entries count only delivered cash; receipt values round once; new-credit collateral excludes unpaid relief. Six real-contract accounting/size cases plus ten math cases and twenty existing V3 cash-basket cases passed (36 focused). The complete contract run passed 1,527 with one fork skip; labelled legacy coverage and absent-proof exclusions remain explicit. Platform smoke: 34 Python and 20 JS passed; wallet acceptance: 15 passed including Chromium; artifact compiler/link/size checks passed. Linked valuation keeps the shell at 24,473 bytes (103 bytes spare); the shared library is 3,076 bytes. Shared Python/JS basket deployment and version-7 restoration bind its actual code/address. Final real gain-fee integration passed six cases; final old-version/missing/substituted-library restore checks passed two JS cases. Public leveraged opening, explicit wheel/desk/exit flows, five-year runs and Notes remain open. | =518c32f1= |
+
+| 2026-11-05 | Recover basket runtime space using the existing venue | Moved equity constituent registration beside pool setup in BuckBasketUniswapV3. The existing governed public API performs an authenticated self-call; direct fallback access cannot bypass governance. A source comparison confirms unchanged guards, weighting/anchor rounding and events. The shell falls from 24,473 to 22,648 bytes; both V3 and machine venue facets remain below EIP-170. Focused basket/machine/real-V3 suites: 99 passed. Full make nix-test: 1,528 passed, one fork skip and the same four absent-proof exclusions. Artifact size/link checks and sandbox rebuild passed; final real-identity/version-7 restore tests: two JS passed. Added the ordered basket/desk completion checklist. No public leveraged opening, five-year economy or corrected-token Notes acceptance is claimed. | This commit |

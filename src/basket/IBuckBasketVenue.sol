@@ -25,6 +25,10 @@ pragma solidity ^0.8.20;
 ///         **withdraw** (liquidity -> both sides).  The facet returns *what it
 ///         did*; the shell books ownership (treasury vs depositor).
 interface IBuckBasketVenue {
+    /// @notice Equity basket registration, invoked only by its own governed
+    ///         wrapper. Updates the shared constituent prefix; no LP/cash flows.
+    function registerToken(address token, uint8 decimals, uint256 initialPriceInBuck,
+                           uint256 weightBp, uint24 feeTier) external returns (address pool);
 
     // --- Pool setup ------------------------------------------------------- //
 

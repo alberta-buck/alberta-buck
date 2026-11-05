@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import {IERC20}             from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20}          from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {IBuckKController}   from "../IBuckKController.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
@@ -224,43 +223,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
                             uint256 weightBp, uint24 feeTier)
         external onlyGov returns (address pool)
     {
-        if (!(token != address(0) && token != address(buck))) revert BadToken();
-        if (!(weightBp <= 10000)) revert BadWeight();
-        if (!(indexOf[token] == 0)) revert AlreadyPresent();
-        if (!(initialPriceInBuck > 0)) revert BadPrice();
-
-        uint256 N = constituents.length + 1;
-        uint256 newW = weightBp > 0 ? weightBp : 10000 / N;
-        uint256 oldW = 10000 - newW;
-        uint256 oldSumW = 0;
-        for (uint256 i = 0; i < constituents.length; i++) {
-            Constituent storage c = constituents[i];
-            c.targetWeightBp = UniswapV3OracleLib.mulDiv(c.targetWeightBp, oldW, 10000);
-            if (!(c.targetWeightBp > 0 && c.targetWeightBp < 10000)) revert InvalidRescale();
-            oldSumW += c.targetWeightBp;
-            // Quantities must use the same rounded weights as the new leg.
-            // Scaling the old quantity by oldW while assigning the rounding
-            // remainder to newW makes the reference cost exceed one BUCK.
-            // Retain the original anchor price, never today's pool price.
-            c.basketAmount = UniswapV3OracleLib.mulDiv(
-                c.targetWeightBp * 1e14, 1e18, c.initialPriceInBuck);
-        }
-        if (constituents.length > 0) newW = 10000 - oldSumW;
-
-        uint256 basketAmount = UniswapV3OracleLib.mulDiv(
-            UniswapV3OracleLib.mulDiv(newW, 1e18, 10000), 1e18, initialPriceInBuck);
-        (address p, int24 lo, int24 hi, bool b0) =
-            _venue().setupPool(token, decimals, initialPriceInBuck, feeTier);
-        pool = p;
-        constituents.push(Constituent({
-            token: token, decimals: decimals, basketAmount: basketAmount,
-            initialPriceInBuck: initialPriceInBuck, feeTier: feeTier, pool: p,
-            tickLower: lo, tickUpper: hi, buckIsToken0: b0, targetWeightBp: newW,
-            treasuryLiquidity: 0
-        }));
-        indexOf[token] = constituents.length;
-        controller.reprime();
-        emit BasketTokenAdded(token, newW, initialPriceInBuck, p);
+        return _venue().registerToken(token, decimals, initialPriceInBuck, weightBp, feeTier);
     }
 
     function constituentsLength() external view returns (uint256) {
