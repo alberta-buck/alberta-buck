@@ -7,7 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {BuckNet} from "./BuckNet.sol";
+import {IBuckJubilee} from "./IBuckJubilee.sol";
 import {BuckCredit} from "./BuckCredit.sol";
 import {BN254} from "./BN254.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
@@ -69,7 +69,7 @@ contract JubileeFund is IERC721Receiver {
 
     address public immutable governance;
     address public investmentKeeper;
-    BuckNet public token;
+    IBuckJubilee public token;
     IJubileeBasket public basket;
     IJubileeValuationWheel public valuationWheel;
     uint256 public positionId;
@@ -116,6 +116,7 @@ contract JubileeFund is IERC721Receiver {
     error AlreadyConfigured();
     error NotConfigured();
     error NotOwner();
+    error FacilityMatured();
     error BadAuthorization();
     error BadAmount();
     error NominalLimit();
@@ -180,7 +181,7 @@ contract JubileeFund is IERC721Receiver {
 
     /// @notice One-shot binding after the fund, token, basket and identity
     ///         have been deployed. Only a verified Carrying fund may proceed.
-    function configure(BuckNet token_, IJubileeBasket basket_) external nonReentrant {
+    function configure(IBuckJubilee token_, IJubileeBasket basket_) external nonReentrant {
         if (msg.sender != governance) revert NotGovernance();
         if (address(token) != address(0)) revert AlreadyConfigured();
         if (address(token_).code.length == 0 || address(basket_).code.length == 0
@@ -396,7 +397,7 @@ contract JubileeFund is IERC721Receiver {
     {
         (uint256 principal,) = token.renewalConsent().checkRenewal(msg.sender, tokenId, terms);
         (, uint256 seconds_) = token.buckCredit().issuanceOf(tokenId);
-        if (principal != 0 && seconds_ == principal * RELIEF_SECONDS) revert BuckNet.FacilityMatured();
+        if (principal != 0 && seconds_ == principal * RELIEF_SECONDS) revert FacilityMatured();
         _prepareRefund(tokenId, principal, principal);
         // The callback can affect other contracts; verify the consent and
         // principal snapshot again before taking the post-callback mark.

@@ -12,6 +12,7 @@ import {BuckNetMaturity} from "./lib/BuckNetMaturity.sol";
 import {BuckNetTokenOps, IBuckNetIssuanceK} from "./lib/BuckNetTokenOps.sol";
 import {BuckRenewal, BuckRenewalConsent} from "./BuckRenewalConsent.sol";
 import {JubileeClaimBook} from "./JubileeClaimBook.sol";
+import {IBuckJubilee} from "./IBuckJubilee.sol";
 
 interface IBuckNetK {
     function currentBuckK() external view returns (uint256);
@@ -29,7 +30,7 @@ interface IBuckNetReserveHook {
 ///      and fractional event semantics remain incomplete.
 ///      Fund-authorized reductions trust the designated coordinator to apply
 ///      its marked proportional policy; the owner separately authorizes each request.
-contract BuckNet is IERC20, IERC20Metadata {
+contract BuckNet is IERC20Metadata, IBuckJubilee {
     using BuckLedger for BuckLedger.Ledger;
 
     uint256 public constant FRACTION_SCALE = 1e36;
@@ -38,12 +39,12 @@ contract BuckNet is IERC20, IERC20Metadata {
     uint256 private constant POOL_ROI_INV = 10;
     uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
 
-    BuckCredit public immutable buckCredit;
+    BuckCredit public immutable override buckCredit;
     IBuckNetK public immutable buckK;
-    IdentityRegistry public immutable identity;
-    BuckRenewalConsent public immutable renewalConsent;
-    JubileeClaimBook public immutable claimBook;
-    address public immutable jubilee;
+    IdentityRegistry public immutable override identity;
+    BuckRenewalConsent public immutable override renewalConsent;
+    JubileeClaimBook public immutable override claimBook;
+    address public immutable override jubilee;
     BuckLedger.Ledger private _book;
     mapping(address => mapping(address => uint256)) private _allowances;
     mapping(address => mapping(address => bytes32)) private _receiptFragments;
@@ -54,11 +55,11 @@ contract BuckNet is IERC20, IERC20Metadata {
     ///         remain isolated even if that insurer chooses a new pool.
     mapping(address => address) public poolInsurer;
     /// @notice The pool that actually received this facility's active deposit.
-    mapping(uint256 => address) public facilityPool;
+    mapping(uint256 => address) public override facilityPool;
     /// @notice Returnable premium deposit, in nominal raw BUCK.
-    mapping(uint256 => uint256) public premiumPrincipal;
+    mapping(uint256 => uint256) public override premiumPrincipal;
 
-    mapping(uint256 => BuckNetTokenOps.ReductionAuthorization) public reductionAuthorization;
+    mapping(uint256 => BuckNetTokenOps.ReductionAuthorization) public override reductionAuthorization;
     bool private transient _entered;
 
     event ApproveReceipt(address indexed owner, address indexed spender, bytes32 receiptHash);
@@ -166,19 +167,19 @@ contract BuckNet is IERC20, IERC20Metadata {
     function accountBalancesScaled(address owner) external view returns (uint256 gross, uint256 net) {
         return _book.grossAndNetOf(owner);
     }
-    function fundBalancesScaled() external view returns (uint256 gross, uint256 net) { return _book.fundParts(); }
+    function fundBalancesScaled() external view override returns (uint256 gross, uint256 net) { return _book.fundParts(); }
     function fundFlows() external view returns (BuckLedger.FundFlows memory) { return _book.fundFlows(); }
     /// @notice Full-value relief available to one protected outflow now,
     ///         including the current per-block budget; a quote, not a hold.
-    function availableReliefScaled() external view returns (uint256) {
+    function availableReliefScaled() external view override returns (uint256) {
         return BuckNetMaturity.availableReliefScaled(_book);
     }
     /// @notice Whole nominal Carrying BUCK needed to transfer at least `net`
     ///         full-value raw BUCK from the Jubilee fund at the current block.
-    function fundNominalForNet(uint256 net) external view returns (uint256) {
+    function fundNominalForNet(uint256 net) external view override returns (uint256) {
         return _book.fundNominalForNet(net);
     }
-    function maxFundNetPayout() external view returns (uint256) { return _book.maxNetPayout(); }
+    function maxFundNetPayout() external view override returns (uint256) { return _book.maxNetPayout(); }
     function allowance(address owner, address spender) external view returns (uint256) { return _allowances[owner][spender]; }
     function receiptFragment(address from, address to) external view returns (bytes32) {
         return _receiptFragments[from][to];
@@ -325,7 +326,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     ///         liquidity preparation. `relief` is
     ///         whole full-value raw BUCK; no other facility is touched.
     function renewFromJubilee(address owner, uint256 tokenId, BuckRenewal.Terms calldata terms, uint256 relief)
-        external nonReentrant returns (uint256 refund, uint256 premium)
+        external override nonReentrant returns (uint256 refund, uint256 premium)
     {
         if (msg.sender != jubilee) revert NotJubilee();
         if (!identity.isVerified(owner) || identity.isCarrying(owner)) revert NotVerified();
@@ -399,7 +400,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     ///      cap but cannot verify the price policy itself. No basket call
     ///      occurs while this token's reentrancy guard is held.
     function settleFromJubilee(address owner, uint256 tokenId, uint256 principal, uint256 reliefScaled)
-        external nonReentrant returns (uint256 refund)
+        external override nonReentrant returns (uint256 refund)
     {
         if (msg.sender != jubilee) revert NotJubilee();
         if (buckCredit.ownerOf(tokenId) != owner) revert NotOwner();
@@ -420,7 +421,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     /// @dev Only the external Jubilee coordinator can call; it authorizes the
     ///      owner. The claim book checks maturity and records the original
     ///      insurer's refund before the NFT and active deposit are removed.
-    function matureFromJubilee(address owner, uint256 tokenId) external nonReentrant returns (uint256 principal) {
+    function matureFromJubilee(address owner, uint256 tokenId) external override nonReentrant returns (uint256 principal) {
         if (msg.sender != jubilee) revert NotJubilee();
         if (buckCredit.ownerOf(tokenId) != owner) revert NotOwner();
         principal = BuckNetMaturity.close(buckCredit, claimBook, facilityPool, premiumPrincipal, owner, tokenId);
@@ -431,7 +432,7 @@ contract BuckNet is IERC20, IERC20Metadata {
     /// @notice Pay a matured facility's recorded nominal premium from its
     ///         original insurer pool. Anyone can trigger the payment; the
     ///         recorded beneficiary cannot be changed by the caller.
-    function claimMaturedPremium(uint256 tokenId) external nonReentrant returns (uint256 nominal) {
+    function claimMaturedPremium(uint256 tokenId) external override nonReentrant returns (uint256 nominal) {
         (address owner, address pool, uint256 amount) = claimBook.consumePremiumRefund(tokenId);
         if (!identity.isVerified(pool) || !identity.isCarrying(pool)) revert NotCarryingPool();
         _spendAllowance(pool, address(this), amount);
@@ -442,19 +443,19 @@ contract BuckNet is IERC20, IERC20Metadata {
 
     /// @notice Burn fund cash against Jubilee's assumed matured issuance.
     ///         This shares the block budget with reductions and renewals.
-    function burnDeferredFromJubilee(uint256 principal) external nonReentrant {
+    function burnDeferredFromJubilee(uint256 principal) external override nonReentrant {
         if (msg.sender != jubilee) revert NotJubilee();
         uint256 nominal = BuckNetMaturity.burn(_book, claimBook, principal);
         emit Transfer(jubilee, address(0), principal);
         emit DeferredJubileeBurned(principal, nominal);
     }
 
-    function claimSeconds() external view returns (uint256) { return claimBook.totalSeconds(); }
+    function claimSeconds() external view override returns (uint256) { return claimBook.totalSeconds(); }
     function maturitiesPending() external view returns (bool) { return claimBook.pending(); }
     function processMaturities(uint256 maxSteps) external nonReentrant returns (uint256, bool) {
         return claimBook.process(maxSteps);
     }
-    function selectedClaimSeconds(uint256 tokenId, uint256 principal) external view returns (uint256 selected, uint256 total) {
+    function selectedClaimSeconds(uint256 tokenId, uint256 principal) external view override returns (uint256 selected, uint256 total) {
         total = claimBook.totalSeconds();
         (uint256 issued, uint256 seconds_) = buckCredit.issuanceOf(tokenId);
         if (issued == 0 || principal > issued) revert BadAmount();
