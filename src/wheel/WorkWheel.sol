@@ -61,6 +61,7 @@ abstract contract WorkWheel {
     uint256 public valuationBlock;
     uint256 public valuationTimestamp;
     bool public valuationReady;
+    bool private transient _working;
 
     event Ticked(address indexed caller, uint256 work, uint256 reservePay);
     event Funded(address indexed from, uint256 taken, uint256 refused);
@@ -71,6 +72,17 @@ abstract contract WorkWheel {
 
     error NotGovernance();
     error BadValuationSource();
+    error WheelReentrant();
+
+    /// @dev Fund transfers and market callbacks cannot start another work
+    ///      scan or alter reserve funding mid-scan. Valuation publication is
+    ///      independent and remains usable during a guarded token burn.
+    modifier workGuard() {
+        if (_working) revert WheelReentrant();
+        _working = true;
+        _;
+        _working = false;
+    }
 
     modifier onlyGov() {
         if (msg.sender != governance) revert NotGovernance();
@@ -127,7 +139,7 @@ abstract contract WorkWheel {
 
     /// @notice Fund the reserve (the basket's yield slice).  Takes at most up
     ///         to the cap; the rest is never pulled.
-    function fund(uint256 amount) external {
+    function fund(uint256 amount) external workGuard {
         uint256 room = reserveCap > reserve ? reserveCap - reserve : 0;
         uint256 take = amount < room ? amount : room;
         if (take > 0) {
@@ -154,7 +166,7 @@ abstract contract WorkWheel {
     ///         (0 = all) from the cursor.  Pays `kappaBp` of the reserve when
     ///         any work was done.
     function tick(uint256 maxWork, uint256 maxScan)
-        external returns (uint256 work, uint256 reservePay)
+        external workGuard returns (uint256 work, uint256 reservePay)
     {
         uint256 clk = _clock() + 1;
         uint256 n = _slotCount();

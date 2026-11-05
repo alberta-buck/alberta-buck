@@ -268,31 +268,49 @@ contract JubileeFund is IERC721Receiver {
     {
         if (msg.sender != governance && msg.sender != investmentKeeper) revert NotInvestmentKeeper();
         (uint256 target, uint256 excess, uint256 budget) = _checkpointReserve();
+        (uint256 amount,) = _investmentQuote(target, excess, budget);
+        if (amount == 0) return (0, 0, 0);
+        uint256 spent;
+        (id, nominal, sharesAdded, spent) = _invest(amount, maxNominal, minReceived, minShares);
+        if (spent > budget || spent > excess) revert ReserveBudgetExceeded();
+        if (spent < Math.mulDiv(target, investmentThresholdBp, BP, Math.Rounding.Ceil)) {
+            revert ReserveBelowThreshold();
+        }
+        _spendBudget(spent);
+        _checkpointReserve();
+    }
+
+    /// @notice Exact scheduled outlay at the current checkpoint time, before
+    ///         slippage/share bounds. Zero means the budget is not spendable.
+    /// @dev No cash, checkpoint or receipt changes. Execution rechecks the
+    ///      same budget and rounding; this view reserves neither price nor cash.
+    function previewInvestment() external view configured returns (uint256 amount, uint256 nominal) {
+        (uint256 target, uint256 excess, uint256 budget) = previewReserve();
+        return _investmentQuote(target, excess, budget);
+    }
+
+    function _investmentQuote(uint256 target, uint256 excess, uint256 budget)
+        private view returns (uint256 amount, uint256 nominal)
+    {
         uint256 threshold = Math.mulDiv(target, investmentThresholdBp, BP, Math.Rounding.Ceil);
-        if (budget < threshold || budget < Q) return (0, 0, 0);
-        uint256 amount = budget / Q;
+        if (budget < threshold || budget < Q) return (0, 0);
+        amount = budget / Q;
         uint256 maxPayable = token.maxFundNetPayout();
         if (amount > maxPayable) amount = maxPayable;
-        if (amount == 0) return (0, 0, 0);
+        if (amount == 0) return (0, 0);
         // A whole nominal Carrying transfer can deliver slightly more than
         // the requested whole-net amount. Leave that rounding inside both
         // the matured budget and the current excess, not the cash reserve.
         (uint256 gross, uint256 net) = token.fundBalancesScaled();
-        uint256 quotedNominal = token.fundNominalForNet(amount);
-        uint256 exactNet = Math.mulDiv(net, quotedNominal * Q, gross);
+        nominal = token.fundNominalForNet(amount);
+        uint256 exactNet = Math.mulDiv(net, nominal * Q, gross);
         if (exactNet > budget || exactNet > excess) {
             amount--;
-            if (amount == 0) return (0, 0, 0);
-            quotedNominal = token.fundNominalForNet(amount);
-            exactNet = Math.mulDiv(net, quotedNominal * Q, gross);
+            if (amount == 0) return (0, 0);
+            nominal = token.fundNominalForNet(amount);
+            exactNet = Math.mulDiv(net, nominal * Q, gross);
         }
-        if (exactNet < threshold) return (0, 0, 0);
-        uint256 spent;
-        (id, nominal, sharesAdded, spent) = _invest(amount, maxNominal, minReceived, minShares);
-        if (spent > budget || spent > excess) revert ReserveBudgetExceeded();
-        if (spent < threshold) revert ReserveBelowThreshold();
-        _spendBudget(spent);
-        _checkpointReserve();
+        if (exactNet < threshold) return (0, 0);
     }
 
     /// @notice Replenish a below-target reserve in a transaction separate

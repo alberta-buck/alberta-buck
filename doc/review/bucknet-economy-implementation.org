@@ -25,7 +25,8 @@ renewal, maturity and cash-basket checks now run against Buck, and shared
 Python/JS deployment and the browser wallet are restored. Both basket upkeep
 facets and the separate desk now use explicit cash/principal transitions;
 real V3 and actual Jubilee settlement checks cover their contract paths.
-Public leveraged basket opening still awaits scheduled wheel integration.
+Fund/maturity work is now scheduled in both existing wheels. Public leveraged
+basket opening still awaits the basket's own debt scheduling and onboarding.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -420,12 +421,20 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   basket registration, source, position key, freshness and spot/TWAP bounds;
   no swaps, basket sales or wheel reward may execute under Buck's lock. Remove
   the prototype's no-wheel live-mark fallback at production wiring.
-- [ ] Reuse the existing one-position fund investment/redemption, share/basis
+- [X] Reuse the existing one-position fund investment/redemption, share/basis
   interface and wheel. Add bounded scheduled liquidity work to that wheel,
   with authentic routes/minimums, keeper authority and fair bounded scans.
   The current cash target is 10% of the capped benchmark, a one-day half-life
   on observed excess, and a 1%-of-target minimum investment. It is separate
   from the 10% payment limit. A later block does not itself run the wheel.
+  JubileeKind adds three authenticated jobs to both existing wheels, with
+  bounded heap processing, capped deferred burns and positive-bound reserve
+  trades. All target reads/execution are caught per job, failed trades roll
+  back, and a job is attempted only once per block. Cash discovery can
+  checkpoint without earning a reward; otherwise idle economies never start
+  their reserve budget. Mutating scans/funding reject callback reentry while
+  valuation publication remains independent. Primary builders must still
+  configure the same wheel/fund/basket bindings explicitly.
 - [-] Update the existing basket/desk to explicit principal/cash accounting,
   actual facility issue/retirement and unchanged low-K solvency requirements.
   Cash-only enableNetAccounting currently rejects openCredit, so it is not
@@ -439,7 +448,7 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   claim; credit marks exclude it and preserve the separate held-BUCK offset.
   Test-only opening exercises real debt, both upkeep issuance paths and
   bounded governor/wheel retirement. Normal openCredit remains gated pending
-  exits, desk and scheduled wheel integration.
+  basket debt scheduling and public onboarding.
   BasketJubileeMath is one linked read-only valuation library shared by the
   shell and existing facets. No new wheel, fund or token mode was introduced.
   Constituent registration now runs in the existing venue facet through the
@@ -545,10 +554,21 @@ implementation sequence, before changing the primary economy builder.
   or five-year stability; those remain separate economic acceptance gates.
   Optional shadow-observer experiments keep their own coupled acceptance
   boundary; these direct-reference vectors do not restore those experiments.
-- [ ] Connect bounded reserve investment/redemption and maturity processing
+- [X] Connect bounded reserve investment/redemption and maturity processing
   to the existing wheel, with authenticated routes and positive sale bounds.
   Keep portfolio trades, insurer preparation and fund liquidity work outside
   Buck's token lock; its burn tick remains valuation-only.
+  Reuse the fund's exact previewInvestment outlay, reserve half-life and
+  single receipt. Governed sale/share bounds fail closed; routes are derived
+  only from registered pools with positive net minima and price limits.
+  Thirteen real-contract checks pass; complete verification is recorded
+  with the implementation commit below.
+- [ ] Schedule the basket's own explicit principal retirement from available
+  cash outside its position lock. Reuse retireCredit and the same wheel,
+  respect the liquidity target, actual relief and shared block budget, and
+  reject/retry atomically when the fund cannot pay. Trimming or receiving
+  cash alone must not be reported as restored K backing. Preserve bounded
+  scans and prevent tiny/no-op repayments from earning repeated rewards.
 - [ ] Enable normal net-mode openCredit only after real-contract lifecycle,
   low-K and fund liquidity regressions pass. Validate the intended public,
   ordinary basket identity and zero-premium self-issued facility at that gate.
@@ -632,8 +652,9 @@ Continue in this order:
    test-only opening seam. Explicit wheel issuance and bounded retirement are
    tested, as are actual-collateral cash/in-kind exits and the separate desk's
    canonical issue/purchase/retirement paths. Price-unit vectors distinguish
-   nominal issuance from net liquidation. Next finish scheduled wheel work
-   before removing the public opening
+   nominal issuance from net liquidation. Fund reserve and maturity jobs are
+   now connected to both existing wheels. Next finish the basket's own
+   principal scheduling before removing the public opening
    gate. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
@@ -673,6 +694,7 @@ make help
 make nix-buck-accounting-test
 make nix-match-BuckCompoundBasketFlowTest
 make nix-match-BuckCompoundBasketRepaymentTest
+make nix-match-JubileeWheelTest
 make nix-venv-demurrage-test
 make nix-match-BuckTest
 make nix-match-BuckDelegatedDemurrageTest
@@ -792,4 +814,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Remove repeated equity/desk test inheritance | Extracted abstract equity and desk fixtures; all original standalone equity, desk/accounting, invariant and machine-integration checks remain. ABI inventory comparison retains the same 50 distinct names and each suite's intended tests, removing exactly 134 inherited repetitions (184 to 50 executions across five suites). All five invariants and eight handler selectors remain unchanged. Focused suites: 50 passed. Full make nix-test: 1,463 passed, one fork skip and the same four absent-proof exclusions. All 51 compiled distributed contract bytecode/ABI/link fingerprints are unchanged; contracts-dist-check confirms the complete 53-artifact package digest is identical: dc3f44c2aa5b98f28aed68d5ecba4d13fc89881cad874a15edba9b543f256aa8. Existing platform/wallet evidence still describes those exact production artifacts. No economic scenario or canonical acceptance test was retired. Next controller-unit validation and wheel integration remain. | =25d97596= |
 
-| 2026-11-05 | Validate nominal issuance and net liquidation/buyback units | Four real-pool vectors reuse the canonical desk fixture without inherited tests. Idle pool fees preserve nominal BVIB and an independent P-only Direct component's output while net collateral declines; fresh full-value issuance sells at nominal ticks less trading costs. A buy costing 50.000030 at nominal TOKEN TWAP delivers 49.830073 nominal / 48.843352 spendable BUCK. Fresh paired liquidity lifts net/nominal from 0.9801983 to 0.9900991 without moving nominal price or issued supply. Documented the existing nominal issuance reference and required net execution comparison for household buybacks; controller algorithm/gains are unchanged. Focused: four passed. Full make nix-test: 1,467 passed, one fork skip and four absent-proof exclusions. All 53 production artifacts keep the same package digest, so the prior 34 Python, 20 JS and 15 wallet/browser checks still cover the exact code. These component vectors are not a closed-loop or five-year stability claim. Next: scheduled fund/maturity work in the existing wheel, public basket onboarding, primary Python/JS household migration, long runs/PDFs, then Notes/proof restoration. | This commit |
+| 2026-11-05 | Validate nominal issuance and net liquidation/buyback units | Four real-pool vectors reuse the canonical desk fixture without inherited tests. Idle pool fees preserve nominal BVIB and an independent P-only Direct component's output while net collateral declines; fresh full-value issuance sells at nominal ticks less trading costs. A buy costing 50.000030 at nominal TOKEN TWAP delivers 49.830073 nominal / 48.843352 spendable BUCK. Fresh paired liquidity lifts net/nominal from 0.9801983 to 0.9900991 without moving nominal price or issued supply. Documented the existing nominal issuance reference and required net execution comparison for household buybacks; controller algorithm/gains are unchanged. Focused: four passed. Full make nix-test: 1,467 passed, one fork skip and four absent-proof exclusions. All 53 production artifacts keep the same package digest, so the prior 34 Python, 20 JS and 15 wallet/browser checks still cover the exact code. These component vectors are not a closed-loop or five-year stability claim. Next: scheduled fund/maturity work in the existing wheel, public basket onboarding, primary Python/JS household migration, long runs/PDFs, then Notes/proof restoration. | =2e666bc6= |
+
+| 2026-11-05 | Schedule bounded Jubilee maintenance in both existing wheels | Added one shared kind for bounded claim-heap batches, deferred burns and reserve investment/redemption using the same fund and receipt. Every attempt authenticates wiring, catches target reads/execution and runs once per block; positive net/share bounds, canonical pool routes and price limits preserve atomic refusal, low-K gates and unrelated work. Expose the fund's exact scheduled outlay quote; an unobserved excess starts its budget clock without fake work/reward. Mutating scans/funding reject callback reentry while burn valuation remains independent. Thirteen canonical fund/basket/V3 cases plus a callback regression pass, including both pool orders, entry/sale rollback, shared budget and maturity-owner separation. Full make nix-test: 1,481 passed, one fork skip and the same four absent-proof exclusions. Final Make-driven rebuild/smoke: 34 Python, 20 JS, 15 wallet/browser passed; compiler/link/runtime checks passed. Fund runtime 23,114 bytes, machine wheel 20,550, older wheel 21,746; basket shell remains 24,459. Updated Make/README and pre/post invariants. Next: actual basket principal scheduling, public onboarding, primary household builders, long runs/PDFs and Notes; no new five-year acceptance claimed. | This commit |

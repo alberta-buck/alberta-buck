@@ -404,15 +404,29 @@ does not invoke the insurer's strategy while the token lock is held. Up to 79 bi
 iterations plus initial and final probes can each run 256 inner steps; this
 has not been shown affordable at supported NFT counts.
 
-The wheel currently scans bounded slots with a cursor and an idle-per-block
-memo; existing equity and response kinds catch failed basket work. Fund work
-must re-arm the wheel when a cash, claim or mark change makes a slot due, and
-must surface refusals and actual work in telemetry rather than treating a
-caught failure as an executed replenishment. Integrating the fund's current
-keeper entry points into that scheduler is future work. In particular,
-=tick(maxWork,maxScan)= does not accept the route and slippage inputs the
-fund's current scheduled investment and sale methods require; granting the
-wheel keeper authorization alone cannot supply or validate those inputs.
+The existing wheels scan bounded slots with a cursor and an idle-per-block
+memo. JubileeKind now supplies the fund's keeper inputs from governed policy,
+the exact scheduled outlay quote and registered basket/pool observations.
+Callers cannot insert routes or weaken bounds through tick(maxWork,maxScan).
+Configuration and every attempt authenticate the token, fund, basket's wheel,
+keeper and valuation-source bindings. All target reads and job execution have
+a catch boundary, so a revoked service or failed job does not trap the scan.
+JubileeAttempted records success, actual work and a refusal's revert selector.
+Each job is attempted once per block, including failures; rearm does not reset
+that limit. A later block permits retry but does not itself execute any work.
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+----------------------------------------|
+| Claim-heap job | Valid wiring, pending maturity, governed batch of 1..64 entries. | Advances at most that batch and earns work only for actual progress. Does not close an NFT, release a lien or alter actual issuance. Exact views may remain unavailable until later bounded batches clear the backlog. |
+| Deferred burn | Exact heap, positive deferred debt, positive whole-net payment within governor cap and remaining shared block limit. | Actually extinguishes the same principal from supply and deferred debt, debiting full-value fund cash. No portfolio sale or insurer callback. No investment competes with outstanding deferred debt. |
+| Reserve checkpoint | Exact heap and newly observed excess. | Starts/grows the existing half-life budget without backdating new cash; no receipt change, work or reward. Needed even when no mint/burn occurs. |
+| Reserve investment | Matured threshold/budget, exact nominal outlay, positive net receipt credit and added-share minimum. | Uses the one receipt and actual net debit; rechecks budget, excess and threshold. TWAP share-price bounds may safely refuse during volatility. No fake cash or principal retirement. |
+| Reserve redemption | Below-target liquid cash, live guarded positive receipt mark, receipt-fraction cap and deficit sizing, positive aggregate net minimum. | Sells only bounded receipt shares, through registered constituent pools with positive per-leg net minima and governed sqrt-price movement limits; old TOKEN inventory is untouched. Underwater/low-K/price or execution refusal rolls the complete job back and earns no work. |
+| Wheel callbacks | Mutating tick/funding guard acquired before external work. | Nested scans and reserve funding revert. Independent valuation publication remains available; a successful job earns at most one work unit, irrespective of batch size. |
+
+The current canonical coverage is =make nix-match-JubileeWheelTest= plus
+=make nix-match-WorkWheelTest=. Basket-principal retirement scheduling is a
+separate remaining step; sale proceeds alone cannot repair K backing.
 
 The valuation-only entry is separate from that scan. Governance selects the
 fund as a source, and publication reads its receipt through Solidity =view=
@@ -426,15 +440,16 @@ is visible on the wheel and a maximum quote age remains to be specified. A
 reduction or renewal with a nonzero claim refreshes after any insurer
 preparation, before quoting relief; failures roll back the publication. A
 cash-only fund with no receipt has a zero mark. A test invokes the wheel
-under the real BuckNet guard during issuance: token views work and a nested
+under the real Buck guard during issuance: token views work and a nested
 token transfer is rejected. The fund now exposes a token-only
 =refreshBurnValuation= and a view of the guarded mark used for quotes. A
-test-only BuckNet subclass invokes the new hook under the actual token guard:
+test-only Buck subclass invokes the hook under the actual token guard:
 the wheel publishes without moving cash, receipt shares, work cursor or
 pending work, and a changed receipt invalidates the prior quote. Pool
 preparation must precede this refresh, or a later callback must force a new
-refresh. The ordinary compatible =burn= now invokes this hook for each
-facility; Carrying burn and =quoteBurn= remain absent. The
+refresh. Both compatible =burn= overloads now invoke this hook for each
+eligible facility; their ordinary/Carrying numeric semantics and advisory
+=quoteBurn= are covered against canonical Buck in the unified plan. The
 current full valuation scans every constituent without a practical work/gas
 limit; a supported size bound or coherent incremental approach is required
 before making it mandatory in a production burn.

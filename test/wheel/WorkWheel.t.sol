@@ -103,6 +103,24 @@ contract TestWheel is WorkWheel, KindA, KindB {
     }
 }
 
+/// @dev A market/funding callback inside a work job tries another scan and
+///      reserve pull. Only the independent valuation publication may proceed.
+contract CallbackWheel is WorkWheel {
+    bool public ran;
+    constructor(address pay, address gov) WorkWheel(pay, gov, 1000, 1_000e18) {}
+    function _slotCount() internal pure override returns (uint256) { return 1; }
+    function _due(uint256) internal view override returns (bool) { return !ran; }
+    function _run(uint256) internal override returns (uint256) {
+        (bool ok, bytes memory reason) = address(this).call(abi.encodeCall(this.tick, (1, 0)));
+        require(!ok && bytes4(reason) == WheelReentrant.selector, "nested tick accepted");
+        (ok, reason) = address(this).call(abi.encodeCall(this.fund, (0)));
+        require(!ok && bytes4(reason) == WheelReentrant.selector, "nested funding accepted");
+        this.refreshValuation();
+        ran = true;
+        return 1;
+    }
+}
+
 contract WorkWheelTest is Test {
     PayToken  pay;
     TestWheel w;
@@ -113,6 +131,18 @@ contract WorkWheelTest is Test {
         pay = new PayToken();
         w = new TestWheel(address(pay), GOV);
         vm.roll(100);
+    }
+
+    function test_workCallbacksCannotReenterButCanPublishStaticValuation() public {
+        CallbackWheel cb = new CallbackWheel(address(pay), GOV);
+        WheelValuationMock source = new WheelValuationMock();
+        source.set(42e6, bytes32(uint256(7)), false);
+        vm.prank(GOV); cb.setValuationSource(address(source));
+        pay.mint(address(this), 100e18); pay.approve(address(cb), 100e18); cb.fund(100e18);
+        (uint256 work, uint256 paid) = cb.tick(1, 0);
+        assertTrue(cb.ran()); assertEq(work, 1); assertEq(paid, 10e18);
+        assertEq(cb.reserve(), 90e18); assertEq(cb.valuationMark(), 42e6);
+        assertTrue(cb.valuationReady());
     }
 
     function test_kinds_concatenate_in_base_order() public {

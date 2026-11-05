@@ -6,6 +6,7 @@ import {ComputeKind, OpsKind} from "./UpkeepKinds.sol";
 import {IBasketUpkeep} from "../basket/IBasketUpkeep.sol";
 import {IBasketView} from "../basket/IBasketView.sol";
 import {ArbKind} from "./ArbKind.sol";
+import {JubileeKind} from "./JubileeKind.sol";
 
 interface IWheelSample {
     function isDue() external view returns (bool);
@@ -85,9 +86,10 @@ abstract contract SampleKind is WorkWheel {
     }
 }
 
-/// @notice The machine's wheel: Sample, Compute, Ops, N+2 basket components,
-///         Arb. BasketWheel keeps the older kinds for comparison runs.
-contract BasketMachineWheel is WorkWheel, SampleKind, ComputeKind, OpsKind, ResponseKind, ArbKind {
+/// @notice The machine's wheel: Sample, Jubilee, Compute, Ops, N+2 basket
+///         components, Arb. Unconfigured kinds add no slots. The initial
+///         observation precedes all portfolio work; Ops also refreshes it.
+contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, OpsKind, ResponseKind, ArbKind {
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
 
@@ -96,14 +98,14 @@ contract BasketMachineWheel is WorkWheel, SampleKind, ComputeKind, OpsKind, Resp
     }
 
     function _slotCount() internal view
-        override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind) returns (uint256)
+        override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)
     { return super._slotCount(); }
 
     function _due(uint256 s) internal view
-        override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind) returns (bool)
+        override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (bool)
     { return super._due(s); }
 
     function _run(uint256 s) internal
-        override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind) returns (uint256)
+        override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)
     { return super._run(s); }
 }

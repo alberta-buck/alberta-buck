@@ -116,8 +116,8 @@ The canonical basket valuation checks are included in
 =make nix-match-BuckCompoundBasketTest=. It tests separate cash/principal,
 fee-aware Jubilee cross-holdings, entry dilution and the exclusion of unpaid
 claims from new-credit collateral. Test-only access supplies actual issued
-basket debt while normal =openCredit= remains gated on completing low-K exits,
-desk and scheduled wheel integration. These valuation tests
+basket debt while normal =openCredit= remains gated on completing basket debt
+scheduling and public onboarding. These valuation tests
 do not turn the five-year household economy into a completed migration.
 
 Both existing upkeep facets now use explicit canonical issuance: available
@@ -170,6 +170,48 @@ financial lock and final collateral checks protect the complete operation.
 =make nix-match-BuckCompoundDeskTest= covers these paths, including actual V3
 swaps, aged pools, callback rejection and 256 issuance-budget comparisons.
 These contract checks do not wire the desk into the primary household world.
+
+Both existing wheels now support the same =JubileeKind=, adding three slots
+when configured: bounded claim-heap processing, deferred-principal burns,
+then reserve maintenance. This reuses the existing fund and its single
+receipt. Heap processing does not close anyone's NFT. Deferred burns respect
+both the governor's raw-BUCK cap and Buck's remaining shared block budget.
+The fund's existing one-day half-life and 1%-of-target threshold control
+investment. A newly observed excess starts that clock without earning a
+wheel reward; it is not backdated to the last transaction.
+
+Governance configures the basket's =wheel=, the wheel's =valuationSource=,
+the fund's =valuationWheel= and =investmentKeeper=, then calls
+=wheel.setJubilee(fund, policy)=. The policy supplies a maturity batch
+(1..64 entries), maximum receipt fraction sold per job, net slippage bound
+(2..500 bp), and raw deferred-burn cap. Every attempt rechecks those bindings;
+revocation stops the fund jobs while other wheel work can continue.
+
+Reserve sales are sized to the cash deficit and capped by the configured
+receipt fraction. Positive aggregate net proceeds protect the fund's guarded
+receipt mark after gain fees. In-kind routes use only registered constituent
+pools, limit sqrt-price movement to half the configured price tolerance,
+and sell only TOKEN newly received by the redemption. Both token orders are
+tested. Positive entry-share bounds use the basket's TWAP share price;
+volatility can cause a safe refusal and retry in a later block. Neither
+these bounds nor an investment mark promise realizable liquidity.
+
+Each fund job is attempted at most once per block, including failures.
+=rearm()= cannot reset that limit. Failed trades roll back the complete job
+and earn no reward; cash checkpoints also earn none. Actual heap progress,
+principal burned or receipt shares changed count as work. Mutating wheel
+scans and reserve funding reject callback reentry. The separate
+=refreshValuation()= remains available under the token guard and runs no
+portfolio work, regardless of which fund jobs are due.
+The =JubileeAttempted= event records the job, success, work and revert selector
+so a keeper can distinguish a refused transaction from completed maintenance.
+
+=make nix-match-JubileeWheelTest= reproduces the canonical fund/basket/V3
+cases; it is also included in =make nix-buck-accounting-test=.
+Automatic retirement of the basket's own principal and normal public credit
+opening remain the next contract steps. World builders still need to wire
+this maintenance explicitly; the existence of the wheel slots does not
+migrate an existing simulation or saved world.
 
 BVIB retains its nominal V3 reference: newly issued ordinary BUCK enter a pool
 at full value as that same number of nominal units. Net liquidation marks and
