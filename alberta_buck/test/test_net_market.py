@@ -13,7 +13,7 @@ from alberta_buck.sim.credit_households import CreditHouseholdAgent
 from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
 from buck_core import (Expect, NetCreditOps, NetMarketOps, ReductionPlan, SettlementOps, TransactionReceiptPending,
-                       TransactionReverted, deploy_net_stack, load_artifact)
+                       TransactionReverted, deploy_net_basket, deploy_net_stack, load_artifact)
 from buck_core.session import _txhex
 
 RAW = 10**6
@@ -22,7 +22,7 @@ YEAR = 365 * 24 * 60 * 60 + 6 * 60 * 60
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "BuckNetSwapGuard", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerDirect", "UniswapV3Factory", "UniswapV3Pool",
-            "BuckBasketEquity", "MockERC20", "SimLP")
+            "BuckBasketEquity", "BasketJubileeMath", "MockERC20", "SimLP")
 
 
 def _exec(chain, actor, contract, method, args):
@@ -46,8 +46,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         stack = deploy_net_stack(chain, registry, credit, controller, gov)
         buck, fund = stack.token, stack.fund
         factory = chain.deploy("UniswapV3Factory")
-        basket = chain.deploy("BuckBasketEquity", buck.address, controller.address, factory.address,
-                              gov, 3000, 600, 64, 500, 1000)
+        basket = deploy_net_basket(chain, stack, factory, gov).basket
         usdc = chain.deploy("MockERC20", "USD Coin", "USDC", 6)
         provider, buyer = chain.deploy("SimLP"), chain.deploy("SimLP")
         g, e = (1, 2), ((1, 2), (1, 2))

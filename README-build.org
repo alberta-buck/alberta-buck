@@ -113,9 +113,14 @@ the shared Python/JS deployment helper links actual creation-bytecode metadata.
 Its fifth constructor argument is the external Jubilee fund; the earlier
 insurance-pool argument is not reused. The helper then deploys the existing
 optional quoter and configures immutable authority bindings. The legacy Notes
-bootstrap does not deploy this graph. Saved net-world records use version 6,
-verify the canonical accounting identifier and record all four library/code
-bindings. They reject earlier token deployments and incomplete records.
+bootstrap does not deploy this graph. The existing basket and upkeep facets
+also link =BasketJubileeMath=, shared valuation code rather than a second
+wheel or fund. =deploy_net_basket= / =deployNetBasket= return its address and
+the fully qualified link map for those facets. Identity, venues, fund wiring
+and leverage remain explicit. Saved net-world records use version 7, verify
+the canonical accounting identifier and record the four token libraries plus
+the basket valuation library/code bindings. They reject earlier deployments
+and incomplete records.
 
 The canonical one-call =burn= supports ordinary owners and approved Carrying services. It
 requires the original insurer pools to have any required nominal refund and allowance

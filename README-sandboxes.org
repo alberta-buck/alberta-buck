@@ -30,7 +30,7 @@ stack, including guarded V3 trading in both token orders. The single-pool guard
 checks net output separately from sponsor compensation; it is not a price
 oracle or multi-hop router.
 
-Wallet save format 4 contains net-world ABI version 6, the on-chain model
+Wallet save format 4 contains net-world ABI version 7, the on-chain model
 identifier, library addresses, code hashes and verified fund/market/pool
 wiring. Incompatible imports are rejected. Browser storage uses a separate
 entry for this model; the old signed-accounting entry is retained rather than

@@ -146,3 +146,20 @@ second rounding through a displayed share price. Entry/exit price bands use
 one TWAP claim; credit marks remove that unpaid claim before applying the
 existing held-BUCK offset. Real payouts still require actual cash and the
 fund's protected block budget.
+
+** Integration status
+
+Canonical basket snapshots use the linked helper with real net cash, the
+basket NFT's actual principal/age, and direct fund receipt share/basis getters.
+The shell and existing upkeep facets share it; no second wheel or valuation
+cache is added. LP entries measure delivered cash independently of any claim
+revaluation, and =valueOf= uses one division. Credit marking removes the
+unpaid claim and retains the existing separate held-BUCK offset.
+
+The focused =BuckCompoundBasketTest= uses a test-only opening seam to exercise
+actual issued debt, fair entries and real fund reductions. The production
+=openCredit= gate remains closed until explicit wheel spending/repayment,
+prospective low-K exit solvency and desk integration are complete. The runtime
+limit is tested explicitly; the shell has little remaining code space, so
+substantial flow changes must use the existing facet structure. This is a
+valuation milestone, not a completed household or five-year migration.

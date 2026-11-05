@@ -17,7 +17,7 @@ from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim import carry
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.demurrage_reference import DemurrageLedger
-from buck_core import (bound_activated_capacity, deploy_net_stack, issue_coverage_candidates, net_transfer_value, IssuancePending,
+from buck_core import (bound_activated_capacity, deploy_net_basket, deploy_net_stack, issue_coverage_candidates, net_transfer_value, IssuancePending,
                        NetCreditOps, ReductionPending, TransactionReceiptPending)
 from buck_core.session import Expect, _txhex
 
@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VECTOR = json.loads((ROOT / "test/fixtures/bucknet-credit-operations.json").read_text())
 REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
-            "BuckKControllerDirect", "BuckBasketEquity", "SimLP")
+            "BuckKControllerDirect", "BuckBasketEquity", "BasketJubileeMath", "SimLP")
 
 
 def _exec(chain, actor, target, method, args):
@@ -76,8 +76,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         stack = deploy_net_stack(chain, registry, credit, controller, gov)
         fund, buck = stack.fund, stack.token
         factory = chain.deploy("UniswapV3Factory")
-        basket = chain.deploy("BuckBasketEquity", buck.address, controller.address, factory.address,
-                              gov, 3000, 600, 64, 500, 1000)
+        basket = deploy_net_basket(chain, stack, factory, gov).basket
         actor = chain.deploy("SimLP")  # Public test-only contract identity, not an agent model.
         for target, carrying in ((fund.address, True), (basket.address, False), (actor.address, False)):
             chain.send(registry.functions.bindContract(target, (1, 2), ((1, 2), (1, 2)), True, carrying))
@@ -193,8 +192,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
         stack = deploy_net_stack(chain, registry, credit, controller, gov)
         buck, fund = stack.token, stack.fund
         factory = chain.deploy("UniswapV3Factory")
-        basket = chain.deploy("BuckBasketEquity", buck.address, controller.address, factory.address,
-                              gov, 3000, 600, 64, 500, 1000)
+        basket = deploy_net_basket(chain, stack, factory, gov).basket
         insurer, insurer2, provider, debtor, pool, pool2 = (chain.deploy("SimLP") for _ in range(6))
         g = (1, 2)
         e = (g, g)

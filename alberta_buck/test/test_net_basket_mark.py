@@ -7,7 +7,7 @@ from web3.logs import DISCARD
 
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
-from buck_core import deploy_net_stack, mark_net_basket_positions
+from buck_core import deploy_net_basket, deploy_net_stack, mark_net_basket_positions
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +16,7 @@ YEAR = 365 * 86400 + 6 * 3600
 ZERO = "0x" + "00" * 20
 REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
-            "BuckBasketEquity", "SimLP", "MockERC20")
+            "BuckBasketEquity", "BasketJubileeMath", "SimLP", "MockERC20")
 
 
 @pytest.mark.skipif(not shutil.which("anvil") or not all(
@@ -31,8 +31,7 @@ def test_open_basket_basis_and_mark_follow_actual_receipts():
         controller = chain.deploy("BuckKControllerStatic", 10**18, gov)
         stack = deploy_net_stack(chain, registry, credit, controller, gov)
         factory = chain.deploy("UniswapV3Factory")
-        basket = chain.deploy("BuckBasketEquity", stack.token.address, controller.address, factory.address,
-                              gov, 3000, 600, 64, 500, 1000)
+        basket = deploy_net_basket(chain, stack, factory, gov).basket
         owner, stranger = chain.deploy("SimLP"), chain.deploy("SimLP")
         for target, carrying in ((stack.fund.address, True), (basket.address, False),
                                  (owner.address, False), (stranger.address, False)):

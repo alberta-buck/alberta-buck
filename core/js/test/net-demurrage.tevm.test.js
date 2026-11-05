@@ -6,7 +6,7 @@ import { encodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact } from "../src/nodefs.js";
-import { boundActivatedCapacity, deployNetStack, issueCoverageCandidates, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
+import { boundActivatedCapacity, deployNetBasket, deployNetStack, issueCoverageCandidates, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
 import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
 import { bestQuotedRefinance, refinance, refinanceQuoted } from "../src/agents/household-policy.js";
@@ -16,7 +16,7 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 const YEAR = 365 * 86400 + 6 * 3600;
 const V = JSON.parse(readFileSync(new URL("../../../test/fixtures/bucknet-credit-operations.json", import.meta.url)));
 const required = ["Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
-  "BuckCredit", "BuckKControllerStatic", "BuckKControllerDirect", "UniswapV3Factory", "BuckBasketEquity", "SimLP"];
+  "BuckCredit", "BuckKControllerStatic", "BuckKControllerDirect", "UniswapV3Factory", "BuckBasketEquity", "BasketJubileeMath", "SimLP"];
 let skip = false;
 try {
   for (const name of required) loadArtifact(name);
@@ -58,8 +58,7 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   const stack = await deployNetStack(s, loadArtifact, { registry, credit, controller, governance: gov });
   const { fund, token: buck } = stack;
   const factory = await deploy("UniswapV3Factory");
-  const basket = await deploy("BuckBasketEquity",
-    [buck.address, controller.address, factory.address, gov, 3000, 600, 64, 500n, 1000n]);
+  const { basket } = await deployNetBasket(s, loadArtifact, stack, { factory, governance: gov });
   const actor = await deploy("SimLP"); // Public local fixture; not an economic household.
   const g = { X: 1n, Y: 2n };
   const E = { R: g, C: g };
@@ -163,8 +162,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   const stack = await deployNetStack(s, loadArtifact, { registry, credit, controller, governance: gov });
   const { fund, token: buck } = stack;
   const factory = await deploy("UniswapV3Factory");
-  const basket = await deploy("BuckBasketEquity",
-    [buck.address, controller.address, factory.address, gov, 3000, 600, 64, 500n, 1000n]);
+  const { basket } = await deployNetBasket(s, loadArtifact, stack, { factory, governance: gov });
   const insurer = await deploy("SimLP"), insurer2 = await deploy("SimLP");
   const provider = await deploy("SimLP"), debtor = await deploy("SimLP");
   const pool = await deploy("SimLP"), pool2 = await deploy("SimLP");

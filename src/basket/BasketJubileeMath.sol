@@ -3,6 +3,30 @@ pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+interface IJubileeCashSnapshot {
+    function balanceOf(address owner) external view returns (uint256);
+    function netBalanceOf(address owner) external view returns (uint256);
+    function jubilee() external view returns (address);
+    function fundBalancesScaled() external view returns (uint256 gross, uint256 net);
+    function selectedClaimSeconds(uint256 id, uint256 principal) external view returns (uint256 selected, uint256 total);
+}
+
+interface IJubileeFacilitySnapshot {
+    function issuanceOf(uint256 id) external view returns (uint256 principal, uint256 seconds_);
+}
+
+interface IJubileePositionSnapshot {
+    function basket() external view returns (address);
+    function positionId() external view returns (uint256);
+    function reliefPositionMark() external view returns (uint256);
+}
+
+interface IJubileeBasketSnapshot {
+    function holdings(uint256 id) external view returns (uint128 shares, uint128 basis);
+    function totalShares() external view returns (uint256);
+    function LAMBDA_BP() external view returns (uint256);
+}
+
 /// @notice Nonrecursive receipt pricing when Jubilee owns shares of its debtor.
 /// @dev Preconditions: assets exclude this claim; principal is actual issuance;
 ///      cash is the fund's net scaled BUCK; seconds are capped issuance-seconds;
@@ -41,6 +65,56 @@ library BasketJubileeMath {
 
     error InvalidJubileeInputs();
     error JubileeValueOverflow();
+
+    /// @notice One cash/principal/claim read for the existing basket shell and
+    ///         its facets. Preconditions and exact valuation are as in claim.
+    function snapshot(address token_, address credit, uint256 id, uint256 gross)
+        public view returns (uint256 cash, uint256 principal, uint256 relief, uint256 spend)
+    {
+        IJubileeCashSnapshot token = IJubileeCashSnapshot(token_);
+        cash = token.netBalanceOf(address(this));
+        spend = token.balanceOf(address(this));
+        if (credit != address(0)) (principal,) = IJubileeFacilitySnapshot(credit).issuanceOf(id);
+        relief = claim(token_, id, principal, gross + cash);
+    }
+
+    /// @notice Read one canonical debtor's claim without calling back through
+    ///         its equity view. Linked into the shell and upkeep facets, so
+    ///         address(this) is the basket whose snapshot supplied bare assets.
+    /// @dev Pre: assets include current net cash and TWAP assets, no claim;
+    ///      principal is this NFT's issuance. Post: no state changes or mark
+    ///      publication, no external calls inside the bounded solver. Direct
+    ///      holdings/supply getters are safe during a captured basket snapshot.
+    function claim(address token_, uint256 id, uint256 principal, uint256 assets)
+        public view returns (uint256 relief)
+    {
+        if (principal == 0) return 0;
+        IJubileeCashSnapshot token = IJubileeCashSnapshot(token_);
+        Inputs memory p;
+        p.assets = assets;
+        p.principal = principal;
+        (p.selected, p.total) = token.selectedClaimSeconds(id, principal);
+        if (p.selected == 0) return 0;
+        (, p.cash) = token.fundBalancesScaled();
+        IJubileePositionSnapshot fund = IJubileePositionSnapshot(token.jubilee());
+        uint256 position = fund.positionId();
+        if (position != 0) {
+            if (fund.basket() == address(this)) {
+                IJubileeBasketSnapshot basket = IJubileeBasketSnapshot(address(this));
+                (uint128 shares, uint128 basis) = basket.holdings(position);
+                p.fundShares = shares;
+                p.basis = basis;
+                p.shares = basket.totalShares();
+                p.feeBp = basket.LAMBDA_BP();
+            } else {
+                // A fund invested in another basket has no self-price term.
+                uint256 mark = fund.reliefPositionMark();
+                if (mark > (type(uint256).max - p.cash) / Q) revert JubileeValueOverflow();
+                p.cash += mark * Q;
+            }
+        }
+        (, relief) = solve(p);
+    }
 
     function solve(Inputs memory p) internal pure returns (uint256 equity, uint256 relief) {
         if (p.selected > p.total || p.fundShares > p.shares || p.feeBp > BP) {

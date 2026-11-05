@@ -99,8 +99,9 @@ private-identity Chaum-Pedersen approvals and receipt decryption run against
 Buck. These are identity proofs, not restored Notes proof suites.
 
 The browser artifact bundle contains the same canonical token/libraries.
-Saved net-world records use ABI version 6, the on-chain =ACCOUNTING_MODEL=
-identifier, all four library addresses and contract code hashes. Older
+Saved net-world records use ABI version 7, the on-chain =ACCOUNTING_MODEL=
+identifier, the four token libraries, basket valuation library and contract
+code hashes. Older
 records, missing libraries, altered wiring and wrong models are rejected.
 Those hashes detect inconsistent saved records; they are not independent
 release provenance. Rebuild with the Make target after changing contracts.
@@ -109,6 +110,15 @@ facility-liability displays, certified per-insurer premium pools and format-4
 restoration. The household economy/savings sandbox still needs its full
 setup/issuance, exits, basket redemption and financial marks. Passing this
 smoke does not restore that lifecycle.
+
+The canonical basket valuation checks are included in
+=make nix-buck-accounting-test=; the focused suite is
+=make nix-match-BuckCompoundBasketTest=. It tests separate cash/principal,
+fee-aware Jubilee cross-holdings, entry dilution and the exclusion of unpaid
+claims from new-credit collateral. Test-only access supplies actual issued
+basket debt while normal =openCredit= remains gated on completing explicit
+wheel spending/repayment and low-K exit integration. These valuation tests
+do not turn the five-year household economy into a completed migration.
 
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility

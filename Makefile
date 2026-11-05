@@ -34,7 +34,7 @@ help:
 	  '  make nix-venv-demurrage-reference  # 50-year holder, Jubilee and relief accounting' \
 	  '  make nix-venv-demurrage-returns    # 50-year comparison of funded investment returns' \
 	  '  make nix-venv-demurrage-test       # reference model regression tests' \
-	  '  make nix-venv-net-demurrage-smoke  # linked BuckNet accounting, Python + JS EVM' \
+	  '  make nix-venv-net-demurrage-smoke  # canonical Buck accounting, Python + JS EVM' \
 	  'Accounting port: doc/review/bucknet-economy-implementation.org (retains Buck.sol)' \
 	  'Household economy (README-simulations.org):' \
 	  '  make nix-venv-economy-plan          # inspect cells and exact parameter overrides' \
@@ -277,7 +277,7 @@ demurrage-test:
 .PHONY: net-demurrage-smoke
 net-demurrage-smoke: sim-build core-js-check-worktree
 	@command -v anvil >/dev/null || { echo 'anvil missing; use make nix-venv-net-demurrage-smoke'; exit 1; }
-	@for name in Buck BuckCash BuckTransfer BuckFacilities BuckRenewalOps BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity MockERC20 SimLP; do \
+	@for name in Buck BuckCash BuckTransfer BuckFacilities BuckRenewalOps BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity BasketJubileeMath MockERC20 SimLP; do \
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
 	done
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }

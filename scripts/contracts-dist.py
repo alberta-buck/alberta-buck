@@ -81,6 +81,7 @@ CONTRACTS = [
     "BuckKControllerDirect",   # the on-chain PID controller
     "IdentityRegistry",        # identity accumulator + verifier wiring
     "BuckBasketEquity",        # the equity basket: a credit holder
+    "BasketJubileeMath",       # linked capped claim/receipt valuation
     "BuckBasketUniswapV3",     # its venue facet (V3 pools)
     "BasketDesk",              # the monetary desk: its own credit holder
     # The basket machine (doc/BASKET-MACHINE.org): one upkeep facet on a credit
@@ -109,7 +110,7 @@ CONTRACTS = [
 ] + GROTH16
 
 EXPERIMENTAL = {"Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "BuckNetSwapGuard",
-                "JubileeFund", "JubileeClaimBook", "BuckRenewalConsent"}
+                "JubileeFund", "JubileeClaimBook", "BuckRenewalConsent", "BasketJubileeMath"}
 
 # Until v1.0.0 every verifier above comes from scripts/snark/setup*.sh, which
 # contributes FIXED, PUBLISHED entropy: the toxic waste is known, so anyone can

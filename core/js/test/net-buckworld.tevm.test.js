@@ -147,7 +147,7 @@ test("real identities can use and safely restore a cash-only Buck world", { skip
   assert.equal((await ops.facility(id)).issued, 59_000_000n);
 
   const saved = decodeJSON(encodeJSON({ chain: await snapshotTevm(s), world: worldRecord(world) }));
-  assert.equal(saved.world.net.issueAbiVersion, 6);
+  assert.equal(saved.world.net.issueAbiVersion, 7);
   assert.deepEqual(Object.keys(saved.world.net.libraries).sort(),
     ["cashLibrary", "facilitiesLibrary", "renewalLibrary", "transferLibrary"]);
   assert.equal(saved.world.net.accountingModel, await s.call(world.buck, "ACCOUNTING_MODEL"));
@@ -158,7 +158,7 @@ test("real identities can use and safely restore a cash-only Buck world", { skip
   delete oldRecord.net.issueAbiVersion;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, oldRecord, { identity }), /issuance ABI version/);
   const wrongVersion = structuredClone(saved.world);
-  wrongVersion.net.issueAbiVersion = 5;
+  wrongVersion.net.issueAbiVersion = 6;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongVersion, { identity }), /issuance ABI version/);
   const wrongAccounting = structuredClone(saved.world);
   wrongAccounting.net.accountingModel = `0x${"00".repeat(32)}`;
@@ -166,6 +166,15 @@ test("real identities can use and safely restore a cash-only Buck world", { skip
   const missingLibrary = structuredClone(saved.world);
   delete missingLibrary.net.libraries.renewalLibrary;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, missingLibrary, { identity }), /invalid BuckRenewalOps address/);
+  const missingBasketLibrary = structuredClone(saved.world);
+  delete missingBasketLibrary.net.basketValuationLibrary;
+  await assert.rejects(attachNetBuckWorld(restoredSession, artifact, missingBasketLibrary, { identity }),
+    /invalid BasketJubileeMath address/);
+  const wrongBasketLibrary = structuredClone(saved.world);
+  wrongBasketLibrary.net.basketValuationLibrary = wrongBasketLibrary.net.libraries.cashLibrary;
+  wrongBasketLibrary.net.codeHashes.basketValuationLibrary = wrongBasketLibrary.net.codeHashes.cashLibrary;
+  await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongBasketLibrary, { identity }),
+    /basket library mismatch/);
   const oldArtifact = (name) => name === "Buck"
     ? { ...artifact(name), abi: artifact(name).abi.filter((entry) => entry.name !== "issue") } : artifact(name);
   await assert.rejects(attachNetBuckWorld(restoredSession, oldArtifact, saved.world, { identity }), /issuance ABI/);

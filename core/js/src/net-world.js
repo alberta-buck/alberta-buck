@@ -114,6 +114,20 @@ export async function deployNetStack(session, artifacts, { registry, credit, con
   return { registry, credit, controller, fund, token, quoter, ...libraries };
 }
 
+/** Link one basket and its existing upkeep facets with the same valuation
+ * library. Identity, fund, venues and leverage/policy choices remain explicit. */
+export async function deployNetBasket(session, artifacts, stack, { factory, governance,
+  feeTier = 3000, twapWindow = 600, observationCardinality = 64,
+  maxDeviationBp = 500n, minSeedLiquidity = 1000n, gas } = {}) {
+  const valuationLibrary = await session.deploy(artifacts("BasketJubileeMath"), [], { name: "BasketJubileeMath", gas });
+  const libraries = { "src/basket/BasketJubileeMath.sol:BasketJubileeMath": valuationLibrary.address };
+  const basket = await session.deploy(linkArtifact(artifacts("BuckBasketEquity"), libraries),
+    [stack.token.address, stack.controller.address, factory.address, governance?.address ?? governance ?? session.account.address,
+      feeTier, twapWindow, observationCardinality, maxDeviationBp, minSeedLiquidity],
+    { name: "BuckBasketEquity", gas });
+  return { basket, valuationLibrary, libraries };
+}
+
 /** Actual per-facility amounts; never synthesize a signed debt from a wallet.
  *  execute(owner, contract, method, args) can dispatch through an agent proxy.
  *  Issue requires an explicit BigInt maximum premium and expected pool. Quotes are advisory.

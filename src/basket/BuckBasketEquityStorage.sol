@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage}  from "./BuckBasketStorage.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {BasketJubileeMath} from "./BasketJubileeMath.sol";
 
 interface IBuckKSource {
     function currentBuckK() external view returns (uint256);   // 1e18
@@ -28,7 +29,7 @@ interface IBuckHolder {
     function mint(uint256 amount, uint256[] calldata tokenIds) external;
 }
 
-/// @notice Net-accounting token view used by the restricted cash-only mode.
+/// @notice Canonical cash and issuance-age views. No signed wallet or holder relief.
 interface IBuckNetAccount {
     function netBalanceOf(address a) external view returns (uint256);
     function accountBalancesScaled(address a) external view returns (uint256 gross, uint256 net);
@@ -43,6 +44,8 @@ interface IMarkedCredit {
                           uint48 depStartAt, uint32 premiumRate) external returns (uint256);
     function mark(uint256 tokenId, uint256 value) external;
     function markOf(uint256 tokenId) external view returns (uint256);
+    function issuanceOf(uint256 tokenId) external view returns (uint256 principal, uint256 seconds_);
+    function creditInfo(uint256 tokenId) external view returns (uint256 face, uint256 active, uint32 premiumRate);
 }
 
 /// @title BuckBasketEquityStorage -- the equity basket's books, appended to the
@@ -54,35 +57,41 @@ interface IMarkedCredit {
 ///         share one layout; the venue facet (`BuckBasketUniswapV3`) inherits
 ///         only `BuckBasketStorage`, of which this is a strict extension.
 ///
-///         The basket is an ordinary BUCK credit holder.  It holds one
-///         self-issued MARKED BuckCredit, marked at its equity, so Buck
-///         enforces its limit: creditLimit = K x equity.  Its debt is its
-///         lien -- its negative balance -- and it earns Jubilee relief on it
-///         like any issuer.  It never mints or burns: spending past its held
-///         BUCK issues, and BUCK it receives repay the lien.
+///         The basket is an ordinary BUCK credit holder with one self-issued
+///         MARKED BuckCredit. In canonical accounting its actual net cash and
+///         that NFT's issued principal are separate. Transfers change cash;
+///         only explicit issue/reduce operations change principal. Marking
+///         collateral does not issue BUCK or repay a facility.
 ///
 ///         The TOKEN books are explicit: the wallet (`idleToken`) and each
 ///         pool's liquidity (`liquidityOf`) are the basket's own counters,
-///         never its balances or its V3 position.  Its BUCK is one signed
-///         account at Buck, the depositors' alone: equity's BUCK is that
-///         balance plus the relief accrued on it.  Nothing else spends from
+///         never its balances or its V3 position. The depositors' BUCK equity
+///         is cash minus principal plus the marked unpaid Jubilee claim.
+///         Nothing else spends from
 ///         it -- a monetary desk is its own credit holder (`BasketDesk`),
 ///         with its own account, mark and wheel -- so its limit is the
 ///         depositors' K x equity and no one else's collateral.
 ///
-///         Invariants (the tests check E1, E2, E4, E5 and E6 directly):
-///           E1  equity(mark) = gross(mark) + signedBalance + reliefAccrued,
-///               clamped at zero (`_equityS`)
-///           E2  every spend is preceded by a mark at equity(LOW) and nothing
-///               else (`_markS` / `_markAt`), so Buck holds every issuance
-///               within K x the depositors' equity
-///           E3  the lien moves only by the basket's own spends, BUCK it
-///               receives, and relief collected: a K cut calls nothing back
+///         Canonical valuation pre/post invariants:
+///           E1  equity(mark) = max(0, gross(mark) + cash - principal + claim).
+///               One fee-aware TWAP claim serves all entry/exit price bands;
+///               it is solved without recursive fund -> basket valuation.
+///           E2  the collateral mark excludes unpaid claims. The optional
+///               held-BUCK offset is separate; the NFT face still caps value.
+///           E3  cash receipts and K cuts cannot change actual NFT principal;
+///               a marked claim cannot be spent or guarantee a fund payout.
 ///           E4  an exit takes at most its fraction: in BUCK, its value at
 ///               LOW less the charge; in kind, exactly its fraction of the
-///               positions and wallet TOKEN, its lien share repaid
+///               positions and wallet TOKEN. The legacy path implicitly
+///               repays its lien share; canonical leveraged exits stay gated
+///               until explicit repayment and prospective solvency pass.
 ///           E5  token.balanceOf(basket) >= idleToken[i]
 ///           E6  after an in-kind exit the mark is read afresh, positions gone
+///
+///         The temporary legacy branch below is for existing signed-token
+///         fixtures. Its signed balance/holder relief and implicit draw/repay
+///         behavior are not valid semantics of canonical Buck. Public net-mode
+///         credit opening stays gated until explicit wheel/exit flows pass.
 ///
 ///         Value is in BUCK.  A position's fair value is twice its BUCK side
 ///         at the chosen price (2 L sqrtP, full range).  The marks are: TWAP
@@ -151,9 +160,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///         which carry no price risk against the lien they came from.
     bool public netMark;
 
-    /// @notice Experimental BuckNet compatibility with no basket-issued
-    ///         credit. The legacy signed balance and implicit-repayment model
-    ///         are not valid for BuckNet; net credit integration is separate.
+    /// @notice Canonical compounded cash and separate facility debt. Public
+    ///         credit opening remains gated until explicit spending, repayment
+    ///         and low-K exit integration is complete. Legacy fixtures alone
+    ///         retain the earlier signed-account branch during that migration.
     bool public netAccounting;
 
     /// @notice The basket's share of a receipt's gain over its cost basis.
@@ -190,9 +200,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         IBuckBasketVenue.Marks[] m;
         uint256 k;
         int256  buckEq;                  // equity's BUCK: the account + relief
-        uint256 lien;                    // the basket's lien (0 when it holds BUCK)
-        uint256 relief;                  // relief accrued on the lien, unpaid
+        uint256 lien;                    // actual NFT principal in canonical mode
+        uint256 relief;                  // marked unpaid claim, not credit collateral
         uint256 spend;                   // what the account can spend: held + headroom
+        uint256 cash;                    // canonical actual net cash, separate from principal
     }
 
     function _k() internal view returns (uint256) {
@@ -218,14 +229,16 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         m.depth = Math.mulDiv(m.depth, net, gross);
     }
 
-    /// @dev Read the basket's account at Buck into `s`.
+    /// @dev Pre: s.m contains this snapshot's pool marks. Post: canonical cash,
+    ///      principal and claim come from their own authoritative books; cash
+    ///      changes never masquerade as principal repayment. Legacy fixtures
+    ///      alone retain the old signed account calculation.
     function _account(Snap memory s) internal view {
         IBuckHolder b = _bk();
         if (netAccounting) {
-            s.buckEq = int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)));
-            s.lien = 0;
-            s.relief = 0;
-            s.spend = b.balanceOf(address(this));
+            (s.cash, s.lien, s.relief, s.spend) = BasketJubileeMath.snapshot(
+                address(buck), address(credit), creditId, _grossS(s, MARK_TWAP));
+            s.buckEq = int256(s.cash) - int256(s.lien) + int256(s.relief);
             return;
         }
         int256 signed = b.signedBalanceOf(address(this));
@@ -290,6 +303,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///         mark is the one the step just wrote (`_markS`).
     function _headroomS(Snap memory s) internal view returns (int256) {
         uint256 m = address(credit) == address(0) ? 0 : credit.markOf(creditId);
+        if (netAccounting && address(credit) != address(0)) {
+            (uint256 face,,) = credit.creditInfo(creditId);
+            m = Math.min(m, face);
+        }
         return int256(s.k * m / 1e18) - int256(s.lien);
     }
 
@@ -304,10 +321,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return g > 1e3 ? g : 1e3;                       // a floor tiny at any BUCK decimals
     }
 
-    /// @notice Mark the credit at the basket's equity (the exiters' LOW
-    ///         marks), activating it the first time the mark is above zero,
-    ///         then re-read what the account can spend.  Every verb and wheel
-    ///         step marks before it spends (E2).
+    /// @notice Mark collateral at LOW equity excluding the unpaid claim in
+    ///         canonical mode, with the optional held-BUCK offset. Post: only
+    ///         the appraised credit value changes; no cash/principal is issued.
+    ///         The legacy fixture branch alone activates at its first mark.
     function _markS(Snap memory s) internal {
         _markAt(_creditValueS(s, _equityS(s, MARK_LOW)));
         s.spend = _bk().balanceOf(address(this));
@@ -323,21 +340,19 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///         of K x the mark, so adding the held BUCKs over K makes that
     ///         K x equity + held: the lien net of them is what K x equity bounds.
     function _creditValueS(Snap memory s, uint256 equity) internal view returns (uint256) {
+        // Approved policy: unpaid claims affect LP prices, never issuance
+        // collateral. Preserve the independent held-BUCK offset below.
+        if (netAccounting) equity = equity > s.relief ? equity - s.relief : 0;
         if (!netMark || s.k == 0) return equity;
         return equity + _heldBuckS(s) * 1e18 / s.k;
     }
 
-    /// @dev Mark the credit at `value` (activating it the first time it is
-    ///      above zero).
+    /// @dev Write the appraised value, leaving canonical issuance untouched.
     function _markAt(uint256 value) internal {
-        // The experimental net mode cannot open a basket credit yet. Issuing
-        // cash and later retiring a facility are explicit operations, not the
-        // legacy token's automatic spend/repay behavior.
-        if (netAccounting) return;
         IMarkedCredit c = credit;
         if (address(c) == address(0)) return;
         if (c.markOf(creditId) != value) c.mark(creditId, value);
-        if (!creditLive && value > 0) {
+        if (!netAccounting && !creditLive && value > 0) {
             // One mint for all the credit can give activates its whole face:
             // zero premium, so no deposit.
             uint256[] memory ids = new uint256[](1);

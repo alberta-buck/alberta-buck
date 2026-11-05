@@ -13,12 +13,20 @@ import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount} from "./BuckBas
 import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 
 /// @title BuckBasketEquity -- the BuckBasket as equity: shares, one pooled
 ///        lien, BUCK payouts, a wallet the work wheel places.
 ///
 /// @notice (alberta-buck-ethereum.org, "BuckBasketEquity: the Basket as a Credit Holder".)
+///
+///         Canonical snapshots distinguish net cash, actual NFT principal
+///         and a fee-aware marked Jubilee claim. LP prices include the claim;
+///         new-credit collateral excludes it. Public net-mode credit opening
+///         remains gated until explicit wheel spending/repayment and low-K
+///         exits are integrated. The leveraged flow described below remains
+///         the legacy fixture path, not implicit issuance by canonical Buck.
 ///
 ///         The basket is an ordinary credit holder: one self-issued MARKED
 ///         BuckCredit (`openCredit`), marked at its equity before it spends,
@@ -197,6 +205,10 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     ///         activated at the first mark above zero.
     function openCredit(address credit_, uint256 face) external onlyGov {
         if (netAccounting) revert NetCreditUnavailable();
+        _openCredit(credit_, face);
+    }
+
+    function _openCredit(address credit_, uint256 face) internal {
         if (address(credit) != address(0)) revert AlreadyPresent();
         IMarkedCredit c = IMarkedCredit(credit_);
         c.setCreditIssuer(address(this), true);
@@ -321,11 +333,19 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         // windfall at the new depositor's expense.
         if (S != 0 && eHigh == 0) revert Underwater();
         if (asset == address(buck)) {
-            int256 beforeBuckEquity = sn.buckEq;
             IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-            _account(sn);
-            if (sn.buckEq <= beforeBuckEquity) revert NoValue();
-            received = uint256(sn.buckEq - beforeBuckEquity);
+            if (netAccounting) {
+                // A deposit can revalue the mutual claim. Credit only cash
+                // actually delivered; reprice the claim after issuing shares.
+                uint256 cash = IBuckNetAccount(address(buck)).netBalanceOf(address(this));
+                if (cash <= sn.cash) revert NoValue();
+                received = cash - sn.cash;
+            } else {
+                int256 beforeBuckEquity = sn.buckEq;
+                _account(sn);
+                if (sn.buckEq <= beforeBuckEquity) revert NoValue();
+                received = uint256(sn.buckEq - beforeBuckEquity);
+            }
         } else {
             uint256 beforeBalance = IERC20(asset).balanceOf(address(this));
             IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
@@ -594,15 +614,19 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     function grossAt(uint8 mark) external view returns (uint256) { return _gross(mark); }
     function equity() external view returns (uint256) { return _equity(MARK_TWAP); }
     function kNow() external view returns (uint256) { return _k(); }
-    /// @notice The basket's lien: the BUCK it has issued (0 when it holds BUCK).
+    /// @notice Outstanding facility issuance, independent of wallet cash.
     function lien() external view returns (uint256) {
-        if (netAccounting) return 0;
+        if (netAccounting) {
+            if (address(credit) == address(0)) return 0;
+            (uint256 principal,) = credit.issuanceOf(creditId);
+            return principal;
+        }
         int256 s_ = _bk().signedBalanceOf(address(this));
         return s_ < 0 ? uint256(-s_) : 0;
     }
     /// @notice Relief accrued on the lien and not yet paid.
     function reliefAccrued() external view returns (uint256) {
-        return netAccounting ? 0 : _bk().reliefOf(address(this));
+        return netAccounting ? _snap().relief : _bk().reliefOf(address(this));
     }
     /// @notice The mark the credit carries now (the equity it was last marked at).
     function markNow() external view returns (uint256) {
@@ -610,7 +634,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     }
     /// @notice K x the mark, less the lien: the room to issue (< 0: under water).
     function headroom() external view returns (int256) {
-        int256 s_ = netAccounting ? int256(0) : _bk().signedBalanceOf(address(this));
+        if (netAccounting) return _headroomS(_snap());
+        int256 s_ = _bk().signedBalanceOf(address(this));
         uint256 m = address(credit) == address(0) ? 0 : credit.markOf(creditId);
         int256 lim = int256(_k() * m / 1e18);
         return s_ < 0 ? lim + s_ : lim;
@@ -625,26 +650,26 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     }
 
     function valueOf(uint256 id) external view returns (uint256) {
-        return uint256(holdings[id].shares) * sharePrice() / 1e18;
+        uint256 S = totalShares;
+        // One rounding, matching the fund's fixed-point receipt valuation.
+        return S == 0 ? 0 : Math.mulDiv(holdings[id].shares, _equity(MARK_TWAP), S);
     }
 
     function weightsBp() external view returns (uint256[] memory w) {
-        uint256 n = constituents.length;
-        w = new uint256[](n);
-        uint256 tot = 0;
-        for (uint256 i = 0; i < n; i++) {
-            w[i] = _marks(i).posTwap;
-            tot += w[i];
-        }
-        for (uint256 i = 0; i < n; i++) w[i] = tot == 0 ? 0 : w[i] * 10000 / tot;
+        return _weights(false);
     }
 
     /// @notice The allocation including waiting deposits and harvested TOKEN.
     function responseWeightsBp() external view returns (uint256[] memory) {
-        Snap memory s = _snap();
-        uint256[] memory values = new uint256[](s.m.length);
+        return _weights(true);
+    }
+
+    function _weights(bool includeIdle) private view returns (uint256[] memory) {
+        uint256[] memory values = new uint256[](constituents.length);
         for (uint256 i; i < values.length; ++i) {
-            values[i] = s.m[i].posTwap + idleToken[i] * s.m[i].pTwap / (10 ** constituents[i].decimals);
+            IBuckBasketVenue.Marks memory m = _marks(i);
+            values[i] = m.posTwap;
+            if (includeIdle) values[i] += idleToken[i] * m.pTwap / (10 ** constituents[i].decimals);
         }
         return PortfolioMath.weights(values);
     }

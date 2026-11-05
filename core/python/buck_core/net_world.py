@@ -68,6 +68,33 @@ def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_
 
 
 @dataclass(frozen=True)
+class NetBasket:
+    basket: Any
+    valuation_library: Any
+
+    @property
+    def libraries(self):
+        return {"src/basket/BasketJubileeMath.sol:BasketJubileeMath": self.valuation_library.address}
+
+
+def deploy_net_basket(chain, stack, factory, governance, *, fee_tier=3000, twap_window=600,
+                      observation_cardinality=64, max_deviation_bp=500, min_seed_liquidity=1000):
+    """Deploy one linked basket; identity, venues, fund and credit stay explicit.
+
+    The returned library also links the existing upkeep facets. This helper
+    selects no leverage or policy and does not run the wheel.
+    """
+    library = chain.deploy("BasketJubileeMath")
+    links = {"src/basket/BasketJubileeMath.sol:BasketJubileeMath": library.address}
+    abi, bytecode = load_artifact("BuckBasketEquity", libraries=links)
+    gov = getattr(governance, "address", governance)
+    basket = chain.deploy("BuckBasketEquity", stack.token.address, stack.controller.address, factory.address,
+                          gov, fee_tier, twap_window, observation_cardinality, max_deviation_bp, min_seed_liquidity,
+                          abi=abi, bytecode=bytecode)
+    return NetBasket(basket, library)
+
+
+@dataclass(frozen=True)
 class FacilityState:
     token_id: int
     owner: str

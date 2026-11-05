@@ -20,7 +20,7 @@ import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 /// @dev Real Buck, fund and equity basket. Its experimental net mode has
 ///      no basket-issued credit, so leveraged low-K cases still need their own
 ///      integration before this is a production basket configuration.
-contract JubileeEquityIntegrationTest is Test {
+abstract contract JubileeEquityFixture is Test {
     uint256 constant YEAR = 365 days + 6 hours;
     uint256 constant Q = 1e36;
     uint160 constant MIN_SQRT = 4295128739;
@@ -37,7 +37,7 @@ contract JubileeEquityIntegrationTest is Test {
     EqController k;
     uint256 t0;
 
-    function setUp() public {
+    function setUp() public virtual {
         vm.warp(1_000_000);
         t0 = block.timestamp;
         identity = new IdentityRegistryHarness(GOV);
@@ -47,7 +47,7 @@ contract JubileeEquityIntegrationTest is Test {
         fund = new JubileeFund(GOV);
         buck = new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
         address factory = deployCode("out/UniswapV3Factory.sol/UniswapV3Factory.json");
-        basket = new BuckBasketEquity(address(buck), address(k), factory, GOV, 3000, 600, 64, 500, 1e3);
+        basket = _makeBasket(factory);
         credit.setBuck(address(buck));
         vm.prank(GOV);
         identity.setBuck(address(buck));
@@ -68,6 +68,10 @@ contract JubileeEquityIntegrationTest is Test {
         require(ok);
         fund.configure(buck, IJubileeBasket(address(basket)));
         vm.stopPrank();
+    }
+
+    function _makeBasket(address factory) internal virtual returns (BuckBasketEquity) {
+        return new BuckBasketEquity(address(buck), address(k), factory, GOV, 3000, 600, 64, 500, 1e3);
     }
 
     function _bind(address target, bool carrying, address binder) internal {
@@ -100,6 +104,10 @@ contract JubileeEquityIntegrationTest is Test {
         if (amount0 > 0) IERC20(IPool(msg.sender).token0()).transfer(msg.sender, uint256(amount0));
         if (amount1 > 0) IERC20(IPool(msg.sender).token1()).transfer(msg.sender, uint256(amount1));
     }
+
+}
+
+contract JubileeEquityIntegrationTest is JubileeEquityFixture {
 
     function test_realBasketReusesTheFundReceiptAndPaysMarkedReliefWithoutASale() public {
         uint256 a = _credit(ALICE, 100e6);
