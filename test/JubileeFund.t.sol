@@ -9,12 +9,12 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {JubileeFund, IJubileeBasket, IJubileeValuationWheel} from "../src/JubileeFund.sol";
 import {BuckBasketReceipt} from "../src/basket/BuckBasketReceipt.sol";
-import {NetK} from "./BuckNet.t.sol";
+import {CompoundK as NetK} from "./BuckCompound.t.sol";
 import {WideCounter} from "../src/lib/WideCounter.sol";
-import {BuckLedger} from "../src/lib/BuckLedger.sol";
+import {BuckCash} from "../src/lib/BuckCash.sol";
 import {BuckRenewal, BuckRenewalConsent} from "../src/BuckRenewalConsent.sol";
 import {TestWheel} from "./wheel/WorkWheel.t.sol";
 
@@ -77,7 +77,7 @@ contract JubileeBasketMock {
     function idleToken(uint256) external pure returns (uint256) { return 0; }
     function valueOf(uint256 id) external view returns (uint256) {
         if (holdings[id].shares == 0) return 0;
-        return BuckNet(buck).netBalanceOf(address(this));
+        return Buck(buck).netBalanceOf(address(this));
     }
     function constituents(uint256 index) external view returns (
         address, uint8, uint256, uint256, uint24, address, int24, int24, bool, uint256, uint128
@@ -105,9 +105,9 @@ contract JubileeBasketMock {
         return (id, received, received);
     }
     function _receive(uint256 amount) private returns (uint256) {
-        (uint256 beforeHeld,) = BuckNet(buck).heldAndUnspentScaled(address(this));
+        (, uint256 beforeHeld) = Buck(buck).accountBalancesScaled(address(this));
         IERC20(buck).transferFrom(msg.sender, address(this), amount);
-        (uint256 afterHeld,) = BuckNet(buck).heldAndUnspentScaled(address(this));
+        (, uint256 afterHeld) = Buck(buck).accountBalancesScaled(address(this));
         return (afterHeld - beforeHeld) / Q;
     }
     function redeemShares(uint256 id, uint256 requested, uint256)
@@ -121,7 +121,7 @@ contract JubileeBasketMock {
         require(requested <= beforeShares);
         retired = mode == 2 ? requested / 2 : requested;
         if (mode != 3) {
-            paid = BuckNet(buck).netBalanceOf(address(this)) * retired / beforeShares;
+            paid = Buck(buck).netBalanceOf(address(this)) * retired / beforeShares;
             IERC20(buck).transfer(msg.sender, paid);
         } else {
             uint256 tokenAmount = inKind.balanceOf(address(this)) * retired / beforeShares;
@@ -221,7 +221,7 @@ contract JubileeMarketChangingInsurer {
     }
 }
 
-contract JubileeFundTest is Test {
+abstract contract JubileeFundFixture is Test {
     uint256 constant YEAR = 365 days + 6 hours;
     uint256 constant Q = 1e36;
     address constant GOV = address(0xA0);
@@ -230,7 +230,7 @@ contract JubileeFundTest is Test {
     address constant INSURER = address(0x1551E1);
     IdentityRegistryHarness identity;
     BuckCredit credit;
-    BuckNet buck;
+    Buck buck;
     JubileeFund fund;
     JubileeBasketMock basket;
     NetK k;
@@ -260,8 +260,8 @@ contract JubileeFundTest is Test {
         vm.prank(GOV);
         fund.configure(buck, IJubileeBasket(address(basket)));
     }
-    function _newBuck() internal virtual returns (BuckNet) {
-        return new BuckNet(address(credit), address(k), address(identity), address(fund));
+    function _newBuck() internal virtual returns (Buck) {
+        return new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
     }
     function _bind(address target, bool carrying, address binder) internal {
         if (target.code.length == 0) vm.etch(target, hex"60006000fd");
@@ -270,15 +270,6 @@ contract JubileeFundTest is Test {
             IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()}), true, carrying);
     }
 
-    function test_configuredFundCannotAuthorizeOrRevokeAnotherIdentityBinding() public {
-        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
-        vm.prank(GOV);
-        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
-        fund.authorizeIdentityBinding(identity, ALICE, BN254.g1(), E);
-        vm.prank(GOV);
-        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
-        fund.revokeIdentityBinding(identity);
-    }
     function _credit(address owner, uint256 face, uint32 rate) internal returns (uint256 id) {
         vm.prank(INSURER);
         id = credit.createCredit(owner, 0, face, face, BuckCredit.DepreciationType.NONE, 0, 0, rate);
@@ -329,6 +320,18 @@ contract JubileeFundTest is Test {
         _authorize(ALICE, a, 10e6, 0);
     }
 
+}
+
+contract JubileeFundTest is JubileeFundFixture {
+    function test_configuredFundCannotAuthorizeOrRevokeAnotherIdentityBinding() public {
+        IdentityRegistry.ElGamalCT memory E = IdentityRegistry.ElGamalCT({R: BN254.g1(), C: BN254.g1()});
+        vm.prank(GOV);
+        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
+        fund.authorizeIdentityBinding(identity, ALICE, BN254.g1(), E);
+        vm.prank(GOV);
+        vm.expectRevert(JubileeFund.InvalidConfiguration.selector);
+        fund.revokeIdentityBinding(identity);
+    }
     function test_noAgeRequiresNoSaleOrRelief() public {
         uint256 id = _credit(ALICE, 100e6, 0);
         _authorize(ALICE, id, 100e6, 0);
@@ -430,7 +433,7 @@ contract JubileeFundTest is Test {
         (uint256 minimum,,) = fund.previewRelief(aliceId, 1e6);
         basket.realizeLoss(BOB, 250_000);
         _authorize(ALICE, aliceId, 1e6, minimum);
-        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.expectRevert(Buck.BadAuthorization.selector);
         vm.prank(ALICE);
         fund.reduce(aliceId, 1e6);
         assertEq(wheel.valuationMark(), oldMark);
@@ -506,7 +509,7 @@ contract JubileeFundTest is Test {
         (invested, sold) = fund.investmentFlows();
         assertEq(_scaled(sold), 0);
         assertEq(cash + relief, afterInvestment);
-        BuckLedger.FundFlows memory flows = buck.fundFlows();
+        BuckCash.FundFlows memory flows = buck.fundFlows();
         assertEq(_scaled(flows.transfersOut), _scaled(invested));
         assertEq(_scaled(flows.transfersIn), _scaled(sold));
         assertEq(_scaled(flows.relief), relief);
@@ -612,7 +615,7 @@ contract JubileeFundTest is Test {
         assertFalse(tooLarge);
         _authorize(ALICE, a, 500_000, quote + 1);
         (uint128 shares,) = basket.holdings(id);
-        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.expectRevert(Buck.BadAuthorization.selector);
         vm.prank(ALICE);
         fund.reduce(a, 500_000);
         (uint128 afterShares,) = basket.holdings(id);
@@ -795,7 +798,7 @@ contract JubileeFundTest is Test {
         (uint128 oldShares,) = basket.holdings(id);
         (, uint256 oldCash) = buck.fundBalancesScaled();
         _authorize(ALICE, a, 1e6, 1e6 * Q);
-        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.expectRevert(Buck.BadAuthorization.selector);
         vm.prank(ALICE);
         fund.reduce(a, 1e6);
         (uint128 remaining,) = basket.holdings(id);
@@ -868,7 +871,7 @@ contract JubileeFundTest is Test {
         _credit(ALICE, 1000e6, 0);
         assertEq(fund.reserveCheckpoint(), block.timestamp);
         vm.warp(t0 + YEAR);
-        _credit(BOB, 1000e6, 0); // BuckNet observes the first year's excess now.
+        _credit(BOB, 1000e6, 0); // Buck observes the first year's excess now.
         (uint256 target, uint256 excess, uint256 budget) = fund.previewReserve();
         assertEq(target, 2e6 * Q); // 10% of 20 BUCK in capped target relief.
         assertGt(excess, 0);
@@ -901,8 +904,8 @@ contract JubileeFundTest is Test {
         BuckCredit freshCredit = new BuckCredit();
         NetK freshK = new NetK();
         JubileeFund freshFund = new JubileeFund(GOV);
-        BuckNet freshBuck = new BuckNet(address(freshCredit), address(freshK),
-                                        address(freshIdentity), address(freshFund));
+        Buck freshBuck = new Buck(address(freshCredit), address(freshK),
+                                        address(freshIdentity), INSURER, address(freshFund));
         freshCredit.setBuck(address(freshBuck));
         vm.prank(GOV);
         freshIdentity.setBuck(address(freshBuck));
@@ -916,7 +919,7 @@ contract JubileeFundTest is Test {
         vm.prank(INSURER);
         uint256 id = freshCredit.createCredit(ALICE, 0, 100e6, 100e6,
                                               BuckCredit.DepreciationType.NONE, 0, 0, 0);
-        vm.expectRevert(JubileeFund.NotConfigured.selector);
+        vm.expectRevert(Buck.InvalidConfiguration.selector);
         vm.prank(ALICE);
         freshBuck.issue(id, 100e6, 100e6, type(uint256).max, address(0));
         assertEq(freshBuck.totalIssued(), 0);
@@ -1103,7 +1106,7 @@ contract JubileeFundTest is Test {
 
 /// @dev The existing fixture exercises the coordinator, token and actual NFT;
 ///      the strategy/basket and insurer liquidity contracts remain controllable.
-contract JubileeRenewalTest is JubileeFundTest {
+contract JubileeRenewalTest is JubileeFundFixture {
     function _buffer(uint256 principal) internal { _credit(BOB, 20 * principal, 0); }
 
     function _terms(uint256 id, uint256 face, uint256 activated, uint32 rate, uint256 additional)
@@ -1152,7 +1155,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         bytes32 digest = _approveRenewal(aliceId, terms);
         uint256 supply = buck.totalSupply();
         uint256 available = buck.availableReliefScaled();
-        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.expectRevert(Buck.ReliefLiquidityLimit.selector);
         vm.prank(ALICE);
         fund.renew(aliceId, terms);
         assertEq(buck.totalSupply(), supply);
@@ -1183,7 +1186,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         assertLe(afterQuote, afterCash / 10);
         BuckRenewal.Terms memory terms = _terms(aliceId, 1000e6, 1000e6, 0, 0);
         bytes32 digest = _approveRenewal(aliceId, terms);
-        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.expectRevert(Buck.ReliefLiquidityLimit.selector);
         vm.prank(ALICE);
         fund.renew(aliceId, terms);
         assertEq(buck.renewalConsent().authorization(aliceId), digest);
@@ -1198,7 +1201,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         (, uint256 currentCash) = buck.fundBalancesScaled();
         assertLe(second * Q, currentCash / 10);
         uint256 deferred = buck.claimBook().deferredPrincipal();
-        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.expectRevert(Buck.ReliefLiquidityLimit.selector);
         vm.prank(GOV);
         fund.burnDeferred(second);
         assertEq(buck.claimBook().deferredPrincipal(), deferred);
@@ -1248,7 +1251,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         _authorize(ALICE, id, 500e6, minimum);
         uint256 oldBasket = basket.valueOf(fund.positionId());
         uint256 oldStrategy = buck.balanceOf(address(pool.strategy()));
-        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.expectRevert(Buck.BadAuthorization.selector);
         vm.prank(ALICE);
         fund.reduce(id, 500e6);
         assertEq(basket.valueOf(fund.positionId()), oldBasket);
@@ -1400,7 +1403,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         vm.prank(ALICE);
         fund.renew(id, terms);
         terms.expectedPool = address(original);
-        vm.expectRevert(BuckNet.InsurerPoolChanged.selector);
+        vm.expectRevert(Buck.InsurerPoolChanged.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);
         (uint256 principal,) = credit.issuanceOf(id);
@@ -1467,10 +1470,10 @@ contract JubileeRenewalTest is JubileeFundTest {
         buck.processMaturities(1);
         BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 0);
         _approveRenewal(id, terms);
-        vm.expectRevert(BuckNet.FacilityMatured.selector);
+        vm.expectRevert(Buck.FacilityMatured.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);
-        vm.expectRevert(BuckNet.FacilityMatured.selector);
+        vm.expectRevert(Buck.FacilityMatured.selector);
         vm.prank(ALICE);
         buck.issue(id, 0, 1, type(uint256).max, address(0));
         vm.prank(ALICE);
@@ -1486,7 +1489,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         k.setFactor(1e18);
         BuckRenewal.Terms memory terms = _terms(id, 2000e6, 2000e6, 100, 500e6);
         _approveRenewal(id, terms);
-        vm.expectRevert(BuckNet.FundingInsufficient.selector);
+        vm.expectRevert(Buck.InsufficientMintFunding.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);
         (uint256 face, uint256 active,) = credit.creditInfo(id);
@@ -1517,7 +1520,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         uint256 newShortfall = newPrincipal > newLimit ? newPrincipal - newLimit : 0;
         BuckRenewal.Terms memory terms = _terms(id, 2 * original, 2 * original, 0, additional);
         _approveRenewal(id, terms);
-        if (newShortfall > oldShortfall) vm.expectRevert(BuckNet.CreditExceeded.selector);
+        if (newShortfall > oldShortfall) vm.expectRevert(Buck.CreditExceeded.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);
         (uint256 recorded, uint256 seconds_) = credit.issuanceOf(id);
@@ -1541,7 +1544,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         k.setK(0.5e18);
         BuckRenewal.Terms memory terms = _terms(id, 1000e6, 1000e6, 0, 100e6);
         bytes32 digest = _approveRenewal(id, terms);
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.CreditExceeded.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);
         (uint128 afterShares,) = basket.holdings(position);
@@ -1642,7 +1645,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         vm.expectRevert(BuckRenewalConsent.NotOwner.selector);
         vm.prank(BOB);
         consent.authorize(id, digest);
-        vm.expectRevert(BuckNet.NotJubilee.selector);
+        vm.expectRevert(Buck.NotJubilee.selector);
         buck.renewFromJubilee(ALICE, id, terms, 0);
         terms.expectedCreditHash = bytes32(uint256(1));
         _approveRenewal(id, terms);
@@ -1667,7 +1670,7 @@ contract JubileeRenewalTest is JubileeFundTest {
         terms.minimumRelief = 0;
         terms.maxPremium = 1;
         _approveRenewal(id, terms);
-        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.expectRevert(Buck.BadAuthorization.selector);
         vm.prank(ALICE);
         fund.renew(id, terms);
         (uint256 principal,) = credit.issuanceOf(id);

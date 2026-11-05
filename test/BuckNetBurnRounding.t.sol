@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {JubileeFundTest, JubileeInsurerPoolMock} from "./JubileeFund.t.sol";
+import {JubileeFundFixture, JubileeInsurerPoolMock} from "./JubileeFund.t.sol";
 import {BuckNetBurnMath} from "../src/lib/BuckNetBurnMath.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 
 /// @dev A burn allocator must use the complete relief and refund arithmetic,
 ///      not assume a larger principal always makes balanceOf fall further.
-contract BuckNetBurnRoundingTest is JubileeFundTest {
+contract BuckNetBurnRoundingTest is JubileeFundFixture {
     function test_largerPrincipalCanProduceASmallerVisibleBalanceDecrease() public {
         JubileeInsurerPoolMock pool = _pool();
         uint256 alice = _credit(ALICE, 100, 200); // 100 issued, 20 deposited, 80 in wallet
@@ -96,7 +96,7 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         assertEq(uint256(one.status), uint256(BuckNetBurnMath.Status.Found));
         assertEq(one.principal, 2);
         _authorize(ALICE, id, 1, 0);
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.CreditExceeded.selector);
         vm.prank(ALICE);
         fund.reduce(id, 1); // proportional face reduction would create a K shortfall
         assertEq(buck.balanceOf(ALICE), 2);
@@ -132,7 +132,7 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         fund.reduce(id, 1); // 1 is permitted
         assertTrue(vm.revertToState(snapshot));
         _authorize(ALICE, id, 2, 0);
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.CreditExceeded.selector);
         vm.prank(ALICE);
         fund.reduce(id, 2); // 2 would create a K shortfall
         _authorize(ALICE, id, two.principal, 0);
@@ -154,13 +154,13 @@ contract BuckNetBurnRoundingTest is JubileeFundTest {
         (, uint256 totalSeconds) = buck.selectedClaimSeconds(id, 1);
         (, uint256 cash) = buck.fundBalancesScaled();
         (uint256 poolGross, uint256 poolNet) = buck.accountBalancesScaled(address(pool));
-        (uint256 held, uint256 unspent) = buck.heldAndUnspentScaled(ALICE);
+        uint256 wallet = buck.netBalanceScaled(ALICE);
         return BuckNetBurnMath.Snapshot({
             principal: issued, issuedSeconds: seconds_, totalSeconds: totalSeconds,
             fundValueScaled: cash, reliefLimitScaled: buck.availableReliefScaled(),
             premiumPrincipal: buck.premiumPrincipal(id), poolGrossScaled: poolGross,
             poolNetScaled: poolNet, poolAvailableNominal: buck.allowance(address(pool), address(buck)),
-            walletScaled: held + unspent
+            walletScaled: wallet
         });
     }
 }

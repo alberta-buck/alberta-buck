@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {JubileeFund, JubileeFundTest, JubileeInsurerPoolMock} from "./JubileeFund.t.sol";
+import {JubileeFund, JubileeFundFixture, JubileeInsurerPoolMock} from "./JubileeFund.t.sol";
 import {TestWheel} from "./wheel/WorkWheel.t.sol";
 
 /// @dev Exercises the original burn entry-point shapes against actual ordinary
 ///      wallet balances, a real fund and per-insurer Carrying pools.
-contract BuckNetBurnCompatibilityTest is JubileeFundTest {
+contract BuckNetBurnCompatibilityTest is JubileeFundFixture {
     function test_burnReducesTheActualBalanceAndNftPrincipal() public {
         uint256 id = _credit(ALICE, 100e6, 0);
         _authorize(ALICE, id, 3e6, 0);
@@ -173,7 +173,7 @@ contract BuckNetBurnCompatibilityTest is JubileeFundTest {
         _authorize(ALICE, first, 1e6, 0);
         uint256 beforeBalance = buck.balanceOf(ALICE);
         uint256 beforeIssued = buck.totalIssued();
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(ALICE);
         buck.burn(25e6);
         assertEq(buck.balanceOf(ALICE), beforeBalance);
@@ -192,7 +192,7 @@ contract BuckNetBurnCompatibilityTest is JubileeFundTest {
         uint256 id = _credit(ALICE, 100e6, 200);
         pool.invest(20e6);
         uint256 beforeBalance = buck.balanceOf(ALICE);
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(ALICE);
         buck.burn(10e6);
         assertEq(buck.balanceOf(ALICE), beforeBalance);
@@ -205,29 +205,28 @@ contract BuckNetBurnCompatibilityTest is JubileeFundTest {
     function test_burnRejectsExcessDuplicateAndForeignSelections() public {
         uint256 own = _credit(ALICE, 100e6, 0);
         uint256 foreign = _credit(BOB, 100e6, 0);
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(ALICE);
         buck.burn(type(uint256).max);
         uint256[] memory ids = new uint256[](2);
         ids[0] = own;
         ids[1] = own;
-        vm.expectRevert(BuckNet.BadAmount.selector);
+        vm.expectRevert(Buck.BadAmount.selector);
         vm.prank(ALICE);
         buck.burn(1, ids);
         ids[1] = foreign;
-        vm.expectRevert(BuckNet.NotOwner.selector);
+        vm.expectRevert(Buck.NotCreditOwner.selector);
         vm.prank(ALICE);
         buck.burn(1, ids);
         assertEq(buck.totalIssued(), 200e6);
         assertEq(buck.balanceOf(ALICE), 100e6);
     }
 
-    function test_burnRequiresVerifiedOrdinaryOwnerAndFund() public {
-        vm.expectRevert(BuckNet.NotVerified.selector);
+    function test_burnRequiresVerifiedOwnerAndAcceptsCarryingRepayment() public {
+        vm.expectRevert(Buck.SenderNotVerified.selector);
         vm.prank(address(0xCAFE));
         buck.burn(0);
         identity.setIsCarrying(BOB, true);
-        vm.expectRevert(BuckNet.NotCarryingPool.selector);
         vm.prank(BOB);
         buck.burn(0);
     }
@@ -283,7 +282,7 @@ contract BuckNetBurnCompatibilityTest is JubileeFundTest {
         buck.burn(10e6);
         uint256 beforeBob = buck.balanceOf(BOB);
         uint256 beforeIssued = buck.totalIssued();
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(BOB);
         buck.burn(10e6);
         assertEq(buck.balanceOf(BOB), beforeBob);
@@ -303,7 +302,7 @@ contract BuckNetBurnCompatibilityTest is JubileeFundTest {
         fund.reduce(first, 10e6);
         uint256 beforeBob = buck.balanceOf(BOB);
         uint256 beforeIssued = buck.totalIssued();
-        vm.expectRevert(BuckNet.CreditExceeded.selector);
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(BOB);
         buck.burn(10e6);
         assertEq(buck.balanceOf(BOB), beforeBob);
@@ -340,7 +339,7 @@ contract BuckNetBurnCompatibilityTest is JubileeFundTest {
         k.setK(0.4999e18);
         vm.prank(ALICE);
         buck.issue(id, 38527, 3438, 0, address(0));
-        vm.expectRevert(BuckNet.AllocationWorkLimit.selector);
+        vm.expectRevert(Buck.AllocationWorkLimit.selector);
         vm.prank(ALICE);
         buck.burn(2779);
         assertEq(buck.balanceOf(ALICE), 3438);

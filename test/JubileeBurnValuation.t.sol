@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {JubileeFund} from "../src/JubileeFund.sol";
-import {JubileeFundTest} from "./JubileeFund.t.sol";
+import {JubileeFundFixture} from "./JubileeFund.t.sol";
 import {TestWheel} from "./wheel/WorkWheel.t.sol";
 
 /// @dev Test-only entry for the future burn's valuation hook. It uses the
-///      actual BuckNet non-reentrancy modifier, not a separate mock lock.
-contract ValuationLockedBuck is BuckNet {
+///      actual Buck non-reentrancy modifier, not a separate mock lock.
+contract ValuationLockedBuck is Buck {
     constructor(address credit, address controller, address identity, address fund)
-        BuckNet(credit, controller, identity, fund) {}
+        Buck(credit, controller, identity, address(0x1551E1), fund) {}
 
     function probeBurnValuation() external nonReentrant returns (uint256) {
         (bool ok, bytes memory reason) = address(this).call(
-            abi.encodeWithSelector(BuckNet.transfer.selector, msg.sender, 1));
-        require(!ok && bytes4(reason) == BuckNet.Reentrant.selector, "token guard not held");
+            abi.encodeWithSelector(Buck.transfer.selector, msg.sender, 1));
+        require(!ok && bytes4(reason) == Buck.Reentrant.selector, "token guard not held");
         return JubileeFund(jubilee).refreshBurnValuation();
     }
 }
 
-contract JubileeBurnValuationTest is JubileeFundTest {
-    function _newBuck() internal override returns (BuckNet) {
+contract JubileeBurnValuationTest is JubileeFundFixture {
+    function _newBuck() internal override returns (Buck) {
         return new ValuationLockedBuck(address(credit), address(k), address(identity), address(fund));
     }
 

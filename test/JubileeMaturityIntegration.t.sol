@@ -6,11 +6,11 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
 import {JubileeClaims} from "../src/lib/JubileeClaims.sol";
-import {BuckLedger} from "../src/lib/BuckLedger.sol";
-import {NetK} from "./BuckNet.t.sol";
+import {BuckCash} from "../src/lib/BuckCash.sol";
+import {CompoundK as NetK} from "./BuckCompound.t.sol";
 import {JubileeBasketMock} from "./JubileeFund.t.sol";
 
 /// @dev Real token, NFT, claim book and fund; the basket is a controlled
@@ -26,7 +26,7 @@ contract JubileeMaturityIntegrationTest is Test {
 
     IdentityRegistryHarness identity;
     BuckCredit credit;
-    BuckNet buck;
+    Buck buck;
     JubileeFund fund;
     JubileeBasketMock basket;
     uint256 t0;
@@ -38,7 +38,7 @@ contract JubileeMaturityIntegrationTest is Test {
         credit = new BuckCredit();
         NetK k = new NetK();
         fund = new JubileeFund(GOV);
-        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        buck = new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
         basket = new JubileeBasketMock(address(buck));
         credit.setBuck(address(buck));
         vm.prank(GOV);
@@ -131,7 +131,7 @@ contract JubileeMaturityIntegrationTest is Test {
         assertEq(oldSeconds, 100e6 * 50 * YEAR);
         assertEq(newSeconds, oldSeconds);
         assertEq(total, 2 * oldSeconds);
-        BuckLedger.FundFlows memory flows = buck.fundFlows();
+        BuckCash.FundFlows memory flows = buck.fundFlows();
         assertEq(flows.grossDemurrage.units, 300e6);
         assertEq(flows.grossDemurrage.fraction, 0);
         assertEq(buck.totalIssued(), 200e6);

@@ -7,12 +7,12 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
 import {IBuckBasketVenue} from "../src/basket/IBuckBasketVenue.sol";
-import {BuckLedger} from "../src/lib/BuckLedger.sol";
+import {BuckCash} from "../src/lib/BuckCash.sol";
 import {WideCounter} from "../src/lib/WideCounter.sol";
-import {NetK} from "./BuckNet.t.sol";
+import {CompoundK as NetK} from "./BuckCompound.t.sol";
 import {JubileeBasketMock} from "./JubileeFund.t.sol";
 
 contract JubileeMarkedReliefTest is Test {
@@ -24,7 +24,7 @@ contract JubileeMarkedReliefTest is Test {
     address constant INSURER = address(0x1551E1);
     IdentityRegistryHarness identity;
     BuckCredit credit;
-    BuckNet buck;
+    Buck buck;
     JubileeFund fund;
     JubileeBasketMock basket;
     uint256 t0;
@@ -36,7 +36,7 @@ contract JubileeMarkedReliefTest is Test {
         credit = new BuckCredit();
         NetK k = new NetK();
         fund = new JubileeFund(GOV);
-        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        buck = new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
         basket = new JubileeBasketMock(address(buck));
         credit.setBuck(address(buck));
         vm.prank(GOV);
@@ -128,7 +128,7 @@ contract JubileeMarkedReliefTest is Test {
         vm.warp(t0 + YEAR);
         (uint256 quote,,) = fund.previewRelief(id, 50e6);
         _authorize(id, 50e6, quote + 1);
-        vm.expectRevert(BuckNet.BadAuthorization.selector);
+        vm.expectRevert(Buck.BadAuthorization.selector);
         vm.prank(ALICE);
         fund.reduce(id, 50e6);
         (uint256 authorized,,) = buck.reductionAuthorization(id);
@@ -175,25 +175,25 @@ contract JubileeMarkedReliefTest is Test {
     function test_issuanceAndReductionCheckpointAccruedFeesExactlyOnce() public {
         uint256 id = _credit(ALICE, 1000e6);
         vm.warp(t0 + YEAR);
-        BuckLedger.FundFlows memory first = buck.fundFlows();
+        BuckCash.FundFlows memory first = buck.fundFlows();
         assertEq(_scaled(first.grossDemurrage), 20e6 * Q);
         _credit(BOB, 1000e6);
-        BuckLedger.FundFlows memory afterIssuance = buck.fundFlows();
+        BuckCash.FundFlows memory afterIssuance = buck.fundFlows();
         assertEq(_scaled(afterIssuance.grossDemurrage), 20e6 * Q);
         vm.warp(t0 + 2 * YEAR);
-        BuckLedger.FundFlows memory beforeReduction = buck.fundFlows();
+        BuckCash.FundFlows memory beforeReduction = buck.fundFlows();
         assertEq(_scaled(beforeReduction.grossDemurrage), 60e6 * Q);
         (, uint256 cashBefore) = buck.fundBalancesScaled();
         _authorize(id, 50e6, 0);
         vm.prank(ALICE);
         (uint256 relief,) = fund.reduce(id, 50e6);
-        BuckLedger.FundFlows memory afterReduction = buck.fundFlows();
+        BuckCash.FundFlows memory afterReduction = buck.fundFlows();
         (, uint256 cashAfter) = buck.fundBalancesScaled();
         assertEq(_scaled(afterReduction.grossDemurrage), 60e6 * Q);
         assertEq(_scaled(afterReduction.relief), relief);
         assertEq(cashAfter, cashBefore - relief);
         vm.warp(t0 + 3 * YEAR);
-        BuckLedger.FundFlows memory nextYear = buck.fundFlows();
+        BuckCash.FundFlows memory nextYear = buck.fundFlows();
         assertEq(_scaled(nextYear.grossDemurrage), 99e6 * Q);
     }
 
@@ -202,7 +202,7 @@ contract JubileeMarkedReliefTest is Test {
         _credit(BOB, 9000e6);
         vm.warp(t0 + YEAR);
         fund.checkpointReserve();
-        BuckLedger.FundFlows memory start = buck.fundFlows();
+        BuckCash.FundFlows memory start = buck.fundFlows();
         basket.setMode(4); // A basket redemption would revert.
         for (uint256 day = 1; day <= 30; ++day) {
             vm.warp(t0 + YEAR + day * 1 days);
@@ -214,7 +214,7 @@ contract JubileeMarkedReliefTest is Test {
             fund.investScheduled(type(uint256).max, 0, 1);
         }
         assertEq(buck.totalIssued(), 10_270e6);
-        BuckLedger.FundFlows memory end = buck.fundFlows();
+        BuckCash.FundFlows memory end = buck.fundFlows();
         uint256 incoming = _scaled(end.netDemurrage) - _scaled(start.netDemurrage);
         uint256 relief = _scaled(end.relief) - _scaled(start.relief);
         assertGt(incoming, relief);

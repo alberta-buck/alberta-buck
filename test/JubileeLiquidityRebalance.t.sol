@@ -6,10 +6,10 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
 import {WideCounter} from "../src/lib/WideCounter.sol";
-import {NetK} from "./BuckNet.t.sol";
+import {CompoundK as NetK} from "./BuckCompound.t.sol";
 import {JubileeBasketMock} from "./JubileeFund.t.sol";
 
 /// @dev Rebalancing is deliberately exercised independently of settlement.
@@ -24,7 +24,7 @@ contract JubileeLiquidityRebalanceTest is Test {
 
     IdentityRegistryHarness identity;
     BuckCredit credit;
-    BuckNet buck;
+    Buck buck;
     JubileeFund fund;
     JubileeBasketMock basket;
     uint256 position;
@@ -35,7 +35,7 @@ contract JubileeLiquidityRebalanceTest is Test {
         credit = new BuckCredit();
         NetK k = new NetK();
         fund = new JubileeFund(GOV);
-        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        buck = new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
         basket = new JubileeBasketMock(address(buck));
         credit.setBuck(address(buck));
         vm.prank(GOV);

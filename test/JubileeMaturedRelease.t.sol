@@ -7,10 +7,10 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
-import {BuckNet} from "../src/BuckNet.sol";
+import {Buck} from "../src/Buck.sol";
 import {JubileeFund, IJubileeBasket} from "../src/JubileeFund.sol";
 import {JubileeClaimBook} from "../src/JubileeClaimBook.sol";
-import {NetK} from "./BuckNet.t.sol";
+import {CompoundK as NetK} from "./BuckCompound.t.sol";
 import {JubileeBasketMock, JubileeInsurerPoolMock} from "./JubileeFund.t.sol";
 
 contract JubileeGasHungryInsurerPool {
@@ -35,7 +35,7 @@ contract JubileeMaturedReleaseTest is Test {
     address constant INSURER = address(0x1551E1);
     IdentityRegistryHarness identity;
     BuckCredit credit;
-    BuckNet buck;
+    Buck buck;
     JubileeFund fund;
     JubileeBasketMock basket;
     uint256 t0;
@@ -47,7 +47,7 @@ contract JubileeMaturedReleaseTest is Test {
         credit = new BuckCredit();
         NetK k = new NetK();
         fund = new JubileeFund(GOV);
-        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        buck = new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
         basket = new JubileeBasketMock(address(buck));
         credit.setBuck(address(buck));
         vm.prank(GOV);
@@ -121,7 +121,7 @@ contract JubileeMaturedReleaseTest is Test {
         vm.expectRevert(JubileeFund.NotInvestmentKeeper.selector);
         vm.prank(BOB);
         fund.burnDeferred(limit);
-        vm.expectRevert(BuckNet.ReliefLiquidityLimit.selector);
+        vm.expectRevert(Buck.ReliefLiquidityLimit.selector);
         vm.prank(GOV);
         fund.burnDeferred(limit + 1);
         vm.prank(GOV);
@@ -139,7 +139,7 @@ contract JubileeMaturedReleaseTest is Test {
         vm.expectRevert(JubileeFund.NotOwner.selector);
         vm.prank(BOB);
         fund.closeMatured(id);
-        vm.expectRevert(BuckNet.NotJubilee.selector);
+        vm.expectRevert(Buck.NotJubilee.selector);
         vm.prank(ALICE);
         buck.matureFromJubilee(ALICE, id);
         vm.warp(t0 + 49 * YEAR);

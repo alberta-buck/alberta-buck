@@ -6,6 +6,9 @@ import {Buck} from "../src/Buck.sol";
 import {BuckCash} from "../src/lib/BuckCash.sol";
 import {BuckFacilities} from "../src/lib/BuckFacilities.sol";
 import {BuckTransfer} from "../src/lib/BuckTransfer.sol";
+import {BuckRenewal, BuckRenewalConsent} from "../src/BuckRenewalConsent.sol";
+import {BuckCredit} from "../src/BuckCredit.sol";
+import {BuckRenewalOps} from "../src/lib/BuckRenewalOps.sol";
 import {BuckCompoundFixture, MockCompoundInsurerPool} from "./BuckCompound.t.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -163,5 +166,36 @@ contract BuckCompoundOperationsTest is BuckCompoundFixture {
         assertLe(address(BuckCash).code.length, 24_576);
         assertLe(address(BuckFacilities).code.length, 24_576);
         assertLe(address(BuckTransfer).code.length, 24_576);
+        assertLe(address(BuckRenewalOps).code.length, 24_576);
+    }
+
+    function test_carryingRenewalPaysTheNewPremiumAtFullValue() public {
+        _service();
+        MockCompoundInsurerPool pool = _pool(INSURER_A);
+        pool.approveToken(IERC20(address(buck)));
+        uint256 id = _credit(SERVICE, INSURER_A, 2000e6, 100);
+        vm.prank(SERVICE); buck.issue(id, 1000e6, 900e6, 100e6, address(pool));
+        _issueFree(BOB, INSURER_B, 20000e6);
+        vm.warp(t0 + YEAR);
+        BuckRenewal.Terms memory terms = BuckRenewal.Terms({face:2500e6, floor:2500e6,
+            activatedFace:2000e6, additionalIssuance:500e6, maxPremium:100e6,
+            expectedPool:address(pool), minimumRelief:1e6, expectedPrincipal:1000e6,
+            expectedCreditHash:buck.renewalConsent().currentCreditTermsHash(id),
+            depType:BuckCredit.DepreciationType.NONE, depRate:0, depStartAt:0,
+            premiumRate:50, deadline:uint64(block.timestamp + 1 days)});
+        bytes32 digest = buck.renewalConsent().renewalDigest(SERVICE, id, terms);
+        BuckRenewalConsent consent = buck.renewalConsent();
+        vm.prank(INSURER_A); consent.propose(id, digest);
+        vm.prank(SERVICE); consent.authorize(id, digest);
+        vm.prank(address(fund));
+        (uint256 refund, uint256 premium) = buck.renewFromJubilee(SERVICE, id, terms, 1e6);
+        assertEq(refund, 100e6);
+        assertEq(premium, 100e6);
+        assertEq(buck.netBalanceScaled(address(pool)), 100e6 * Q);
+        assertEq(buck.balanceOf(address(pool)), 100e6);
+        (uint256 principal, uint256 age) = credit.issuanceOf(id);
+        assertEq(principal, 1499e6);
+        assertEq(age, 0);
+        assertEq(buck.totalIssued(), 21499e6);
     }
 }

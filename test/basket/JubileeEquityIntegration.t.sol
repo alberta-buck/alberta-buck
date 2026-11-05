@@ -7,7 +7,7 @@ import {BN254} from "../../src/BN254.sol";
 import {IdentityRegistry} from "../../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
 import {BuckCredit} from "../../src/BuckCredit.sol";
-import {BuckNet} from "../../src/BuckNet.sol";
+import {Buck} from "../../src/Buck.sol";
 import {BuckRenewal, BuckRenewalConsent} from "../../src/BuckRenewalConsent.sol";
 import {JubileeFund, IJubileeBasket, IJubileeValuationWheel} from "../../src/JubileeFund.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
@@ -17,7 +17,7 @@ import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {EqController, EqHolder, EqToken, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 
-/// @dev Real BuckNet, fund and equity basket. Its experimental net mode has
+/// @dev Real Buck, fund and equity basket. Its experimental net mode has
 ///      no basket-issued credit, so leveraged low-K cases still need their own
 ///      integration before this is a production basket configuration.
 contract JubileeEquityIntegrationTest is Test {
@@ -31,7 +31,7 @@ contract JubileeEquityIntegrationTest is Test {
     address constant INSURER = address(0x1551E1);
     IdentityRegistryHarness identity;
     BuckCredit credit;
-    BuckNet buck;
+    Buck buck;
     JubileeFund fund;
     BuckBasketEquity basket;
     EqController k;
@@ -45,7 +45,7 @@ contract JubileeEquityIntegrationTest is Test {
         k = new EqController();
         k.setK(1e18);
         fund = new JubileeFund(GOV);
-        buck = new BuckNet(address(credit), address(k), address(identity), address(fund));
+        buck = new Buck(address(credit), address(k), address(identity), INSURER, address(fund));
         address factory = deployCode("out/UniswapV3Factory.sol/UniswapV3Factory.json");
         basket = new BuckBasketEquity(address(buck), address(k), factory, GOV, 3000, 600, 64, 500, 1e3);
         credit.setBuck(address(buck));
@@ -412,7 +412,7 @@ contract JubileeEquityIntegrationTest is Test {
         buck.transfer(address(this), 1_500_000e6);
 
         // Give the same test TOKEN deterministic addresses on either side of
-        // BuckNet so both Uniswap token orders exercise the real contracts.
+        // Buck so both Uniswap token orders exercise the real contracts.
         EqToken template = new EqToken("Asset", "AST", 18);
         address assetAddress = buckIs0 ? address(type(uint160).max - 1) : address(0x100000);
         vm.etch(assetAddress, address(template).code);
