@@ -400,14 +400,16 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   complete. Canonical basket snapshots now read actual cash, actual NFT
   principal and direct fund receipt ownership. LP prices include the solved
   claim; credit marks exclude it and preserve the separate held-BUCK offset.
-  Test-only access exercises real issued basket debt and explicit reductions;
-  normal openCredit remains gated pending wheel/repayment/exit integration.
+  Test-only opening exercises real debt, both upkeep issuance paths and
+  bounded governor/wheel retirement. Normal openCredit remains gated pending
+  exits, desk and scheduled wheel integration.
   BasketJubileeMath is one linked read-only valuation library shared by the
   shell and existing facets. No new wheel, fund or token mode was introduced.
   Constituent registration now runs in the existing venue facet through the
   governed shell wrapper and authenticated self-call. Moving this AMM setup
   out of the share/credit shell retains its rules and frees runtime space:
-  shell 22,648 bytes, V3 venue 20,603, machine venue 20,915. Retain the explicit
+  shell 23,833 bytes after adding bounded retirement, V3 venue 20,603,
+  machine venue 20,915. Retain the explicit
   runtime test and use the existing facet structure for further substantial code.
 - [ ] Complete the approved Carrying-service allowlist, safe revocation and
   settlement access; production insurer preparation and strategies; gas,
@@ -435,7 +437,7 @@ implementation sequence, before changing the primary economy builder.
 - [X] Keep valuation shared in a linked library and move constituent
   registration into the existing venue, preserving governed access and the
   existing anchors/rounding. Retain runtime-limit acceptance for the shell.
-- [X] Replace implicit spending in both existing upkeep facets with explicit
+- [-] Replace implicit spending in both existing upkeep facets with explicit
   issuance of the cash shortfall. Mark collateral first; cap by NFT face,
   actual principal, K, account/supply limits and maturity. Do not mint maximum
   room just to activate it or report available capacity as wallet cash.
@@ -443,10 +445,21 @@ implementation sequence, before changing the primary economy builder.
   issuable principal, and mint only the requested cash shortfall. Purchase
   postchecks reject increased shortfall after actual pool execution; sale /
   fee proceeds stay cash. The policy ceiling also excludes unpaid claims.
-- [ ] Add bounded explicit basket debt settlement outside its position lock.
+  The exit review exposed a remaining backing issue: the first postcheck
+  compares full marked face, whereas Buck enforces activated coverage. Next
+  permit explicit coverage activation without spendable cash, activate the
+  self-insured basket backing independently of its requested draw, and compare
+  actual activated collateral in postconditions. Preserve both numeric APIs.
+- [X] Add bounded explicit basket debt settlement outside its position lock.
   Receiving swap proceeds or arb income leaves cash until actual principal
   is retired. Preserve owner cash bounds, exact relief/refund, the shared block
   budget and full rollback; a liquidity refusal must not masquerade as paydown.
+  retireCredit atomically authorizes and settles exact principal, enforcing
+  actual net wallet cost and minimum scaled relief. Its separate credit lock
+  excludes position operations and mutating upkeep callbacks while allowing
+  complete valuation reads. Zero cannot close an NFT; repeated same-block
+  calls cannot reset liquidity limits. This is an available governor/wheel
+  primitive; automatic scheduling is still part of the remaining wheel work.
 - [ ] Port cash and in-kind exits using prospective actual debt/collateral.
   Preserve the existing low-K refusal cases and retained-share fairness. Cash
   on hand and unpaid marked relief cannot themselves justify an exit. Test
@@ -460,7 +473,9 @@ implementation sequence, before changing the primary economy builder.
   Keep portfolio trades, insurer preparation and fund liquidity work outside
   Buck's token lock; its burn tick remains valuation-only.
 - [ ] Enable normal net-mode openCredit only after real-contract lifecycle,
-  low-K and fund liquidity regressions pass. Then convert the existing primary
+  low-K and fund liquidity regressions pass. Validate the intended public,
+  ordinary basket identity and zero-premium self-issued facility at that gate.
+  Then convert the existing primary
   Python/JS builders and household/savings lifecycle; no legacy fallback or
   silent skipped action may make the corrected economy appear to run.
 
@@ -533,8 +548,8 @@ Continue in this order:
    K solvency and low-K exits. Replace implicit draw/repay with explicit issuance
    and reduction, and connect the existing wheel's marked reserve work.
    Basket valuation is now connected and tested through actual debt using a
-   test-only opening seam. Explicit wheel issuance is now tested; next finish repayment,
-   prospective exit solvency and the desk before removing the public opening
+   test-only opening seam. Explicit wheel issuance and bounded retirement are
+   tested. Next finish prospective exit solvency and the desk before removing the public opening
    gate. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
@@ -572,6 +587,8 @@ do not share JS node_modules or trust another worktree's unverified library.
 #+begin_src sh
 make help
 make nix-buck-accounting-test
+make nix-match-BuckCompoundBasketFlowTest
+make nix-match-BuckCompoundBasketRepaymentTest
 make nix-venv-demurrage-test
 make nix-match-BuckTest
 make nix-match-BuckDelegatedDemurrageTest
@@ -679,4 +696,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Recover basket runtime space using the existing venue | Moved equity constituent registration beside pool setup in BuckBasketUniswapV3. The existing governed public API performs an authenticated self-call; direct fallback access cannot bypass governance. A source comparison confirms unchanged guards, weighting/anchor rounding and events. The shell falls from 24,473 to 22,648 bytes; both V3 and machine venue facets remain below EIP-170. Focused basket/machine/real-V3 suites: 99 passed. Full make nix-test: 1,528 passed, one fork skip and the same four absent-proof exclusions. Artifact size/link checks and sandbox rebuild passed; final real-identity/version-7 restore tests: two JS passed. Added the ordered basket/desk completion checklist. No public leveraged opening, five-year economy or corrected-token Notes acceptance is claimed. | =a4280eb4= |
 
-| 2026-11-05 | Exercise basket credit explicitly in both upkeep facets | Planning cash and credit capacity are separate. Both facets refresh K, mark collateral without unpaid claims, respect face/principal/account/supply/maturity bounds, and mint only the requested cash shortfall. Purchase postconditions re-mark actual net positions and reject a worse credit shortfall. Sale and fee proceeds remain cash until explicit retirement; the machine daily path no longer calls removed signed-account APIs. Nine real-contract funding tests passed, including 256 capacity/quote/issuance fuzz cases, 50-year refusal and full rollback after an LP mint/K cut. The preceding basket/machine/V3 regression pass covered 108 cases before the last three added checks. Runtime: component facet 14,239 bytes, machine facet 21,044; shell stays 22,648. Public leveraged opening, repayment/exit/desk/wheel work and five-year/Notes evidence remain open. | This commit |
+| 2026-11-05 | Exercise basket credit explicitly in both upkeep facets | Planning cash and credit capacity are separate. Both facets refresh K, mark collateral without unpaid claims, respect face/principal/account/supply/maturity bounds, and mint only the requested cash shortfall. Purchase postconditions re-mark actual net positions and reject a worse credit shortfall. Sale and fee proceeds remain cash until explicit retirement; the machine daily path no longer calls removed signed-account APIs. Nine real-contract funding tests passed, including 256 capacity/quote/issuance fuzz cases, 50-year refusal and full rollback after an LP mint/K cut. The preceding basket/machine/V3 regression pass covered 108 cases before the last three added checks. Runtime: component facet 14,239 bytes, machine facet 21,044; shell stays 22,648. Public leveraged opening, repayment/exit/desk/wheel work and five-year/Notes evidence remain open. | =96a701da= |
+
+| 2026-11-05 | Bound actual basket principal retirement outside position operations | Added retireCredit(principalRaw, maxCashCostRaw, minimumReliefScaled) for governor/wheel/self dispatch. It atomically authorizes the existing fund, checks actual net wallet debit, refreshes marks and preserves all liquidity/claim/refund rules. Separate mutually exclusive credit/position locks allow real valuation reads and reject nested repayment, deposit and upkeep. Ten tests cover full/partial settlement and reuse, fractional bounds, rollback after settlement, shared-block refusal/resumption and a registered adversarial valuation callback. Canonical acceptance before the final fractional-bound addition: 271 passed. Full contract run afterward: 1,547 passed, one fork skip; the same four absent-proof exclusions remain. Python/Anvil and JS/Tevm smoke: 34 and 20 passed. Shell runtime 23,833 bytes. Next fix full-face versus activated-backing issuance/postcheck accounting before exits; public leveraged opening and five-year/Notes gates remain closed. | This commit |

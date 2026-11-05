@@ -36,6 +36,12 @@ interface IBuckNetAccount {
     function accountBalancesScaled(address a) external view returns (uint256 gross, uint256 net);
     function totalIssued() external view returns (uint256);
     function maturitiesPending() external view returns (bool);
+    function jubilee() external view returns (address);
+    function authorizeReduction(uint256 id, uint256 principal, uint256 minimumReliefScaled, uint64 deadline) external;
+}
+
+interface IBasketCreditFund {
+    function reduce(uint256 id, uint256 principal) external returns (uint256 reliefScaled, uint256 nominalRefund);
 }
 
 /// @notice BuckCredit, as the basket sees it: the issuer of its own MARKED
@@ -204,10 +210,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     struct Snap {
         IBuckBasketVenue.Marks[] m;
         uint256 k;
-        int256  buckEq;                  // equity's BUCK: the account + relief
+        int256  buckEq;                  // canonical cash - principal + claim
         uint256 lien;                    // actual NFT principal in canonical mode
         uint256 relief;                  // marked unpaid claim, not credit collateral
-        uint256 spend;                   // what the account can spend: held + headroom
+        uint256 spend;                   // canonical cash; legacy held + headroom
         uint256 cash;                    // canonical actual net cash, separate from principal
     }
 

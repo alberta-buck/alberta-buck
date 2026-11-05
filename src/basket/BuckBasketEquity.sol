@@ -8,7 +8,7 @@ import {IBuckKController}   from "../IBuckKController.sol";
 import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
-import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount} from "./BuckBasketEquityStorage.sol";
+import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount, IBasketCreditFund} from "./BuckBasketEquityStorage.sol";
 import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
@@ -64,24 +64,38 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     using SafeERC20 for IERC20;
 
     bool private transient _positionEntered;
+    bool private transient _creditEntered;
     error PositionReentrant();
     error PositionAssetMismatch();
     error PositionOverflow();
     error PositionSharesExceeded();
     error NetCreditUnavailable();
     error InvalidNetToken();
+    error CreditCashLimit();
 
     event PositionIncreased(address indexed who, uint256 indexed receiptId, address indexed asset,
                             uint256 nominalAmount, uint256 received, uint256 sharesAdded);
     event PositionReduced(address indexed who, uint256 indexed receiptId, uint256 requestedShares,
                           uint256 paid, uint256 sharesRetired, uint256 sharesRemaining);
     event NetAccountingEnabled();
+    event CreditRetired(uint256 indexed tokenId, uint256 principal,
+                        uint256 reliefScaled, uint256 cashSpentScaled);
 
     modifier positionLock() {
-        if (_positionEntered) revert PositionReentrant();
+        if (_positionEntered || _creditEntered) revert PositionReentrant();
         _positionEntered = true;
         _;
         _positionEntered = false;
+    }
+
+    /// @dev A credit operation runs outside the position lock. Both locks
+    ///      exclude each other and reject mutating upkeep callbacks; the
+    ///      fund may still read the complete, unchanged position inventory.
+    modifier creditLock() {
+        if (_positionEntered || _creditEntered) revert PositionReentrant();
+        _creditEntered = true;
+        _;
+        _creditEntered = false;
     }
 
     constructor(
@@ -564,11 +578,46 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     function creditTreasury(uint256 amount) external positionLock {
         _requireIncomeSource();
         IERC20(address(buck)).transferFrom(msg.sender, address(this), amount);
-        emit WalletCredited(address(buck), amount);     // repays the lien, or is held
+        emit WalletCredited(address(buck), amount);     // canonical cash; legacy implicit repayment
     }
 
     function _requireIncomeSource() private view {
         if (msg.sender == address(0) || (msg.sender != wheel && msg.sender != arbitrageCreditor)) revert NotWheel();
+    }
+
+    /// @notice Retire an exact amount of this basket's issued NFT principal.
+    /// @param principal Raw issued BUCK to extinguish, never a coverage-room amount.
+    /// @param maxCashCost Maximum full-value wallet BUCK spent, in raw units.
+    /// @param minimumReliefScaled Minimum actual net Jubilee relief, scaled by 1e36.
+    /// @dev Pre: canonical basket, existing NFT and authorized governor/wheel
+    ///      (or an internal self-call), with no position operation in progress.
+    ///      K/collateral are refreshed before authorizing the fund; the fund
+    ///      owns age, refund, valuation and shared-block liquidity enforcement.
+    ///      Post: principal and supply fall only through that real settlement,
+    ///      wallet cost fits maxCashCost, and collateral is marked afresh.
+    ///      No LP is sold here. Any failure rolls back authorization, owner /
+    ///      insurer / fund cash, claim seconds and principal together. A large
+    ///      reduction may need smaller calls across blocks; zero never closes
+    ///      an NFT or means maximum.
+    function retireCredit(uint256 principal, uint256 maxCashCost, uint256 minimumReliefScaled)
+        external creditLock returns (uint256 reliefScaled, uint256 cashSpentScaled)
+    {
+        if (msg.sender != governance && msg.sender != wheel && msg.sender != address(this)) revert NotWheel();
+        if (!netAccounting || address(credit) == address(0)) revert NetCreditUnavailable();
+        if (principal == 0) revert Amount0();
+        controller.compute();
+        _markS(_snap());
+        IBuckNetAccount token = IBuckNetAccount(address(buck));
+        (, uint256 beforeNet) = token.accountBalancesScaled(address(this));
+        token.authorizeReduction(creditId, principal, minimumReliefScaled, uint64(block.timestamp));
+        (reliefScaled,) = IBasketCreditFund(token.jubilee()).reduce(creditId, principal);
+        (, uint256 afterNet) = token.accountBalancesScaled(address(this));
+        cashSpentScaled = beforeNet > afterNet ? beforeNet - afterNet : 0;
+        if (Math.ceilDiv(cashSpentScaled, 1e36) > maxCashCost) revert CreditCashLimit();
+        Snap memory s = _snap();
+        creditLive = s.lien != 0;
+        _markS(s);
+        emit CreditRetired(creditId, principal, reliefScaled, cashSpentScaled);
     }
 
     // --- Views ------------------------------------------------------------------ //
@@ -603,7 +652,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         int256 lim = int256(_k() * m / 1e18);
         return s_ < 0 ? lim + s_ : lim;
     }
-    /// @notice What the account can spend: the BUCK held plus the headroom.
+    /// @notice Actual canonical wallet cash; legacy fixtures include unused
+    ///         headroom. Upkeep's potential issuance budget is separate.
     function liquidity() external view returns (uint256) { return _bk().balanceOf(address(this)); }
     function liquidityTarget() external view returns (uint256) { return _target(); }
 
@@ -640,7 +690,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     // --- Dispatch: the components facet, else the venue ------------------------- //
 
     fallback() external {
-        if (_positionEntered && (msg.sig == IBasketUpkeep.wheelStep.selector
+        if ((_positionEntered || _creditEntered) && (msg.sig == IBasketUpkeep.wheelStep.selector
             || msg.sig == bytes4(keccak256("setWheel(address)")))) revert PositionReentrant();
         address v = (msg.sig == IBasketUpkeep.wheelStep.selector
                      || msg.sig == IBasketUpkeep.wheelDue.selector)

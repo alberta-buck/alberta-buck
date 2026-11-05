@@ -21,6 +21,8 @@ help:
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
 	  '  make nix-buck-accounting-test      # canonical Buck compound cash/NFT/Jubilee checks' \
+	  '  make nix-match-BuckCompoundBasketFlowTest  # real V3 credit issuance and rollback' \
+	  '  make nix-match-BuckCompoundBasketRepaymentTest  # bounded principal settlement and locks' \
 	  '  make nix-wallet-sandbox-test       # build and test canonical wallet UI, trades and restore' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \

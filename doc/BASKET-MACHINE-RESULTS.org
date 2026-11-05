@@ -8,6 +8,12 @@ do is in [[file:BASKET-MACHINE-TASKS.org][the task list]]. The commands at the e
 The [[file:review/household-release-readiness.org][October 26 household comparison review]] records the completed new policy campaign and its
 coverage-release defect. The older populations below are not evidence that the new exits pass.
 
+These campaigns use the earlier accounting model. Corrected Buck's unsigned
+cash, per-NFT principal, marked Jubilee claims and explicit basket issuance /
+retirement have separate contract checks; its five-year household migration
+is tracked in the [[file:review/bucknet-economy-implementation.org][unified accounting plan]]. No numbers below are results of that
+unfinished migration.
+
 * The short version
 
 The basket makes money from prices that part and come back. In the savings world, five years of

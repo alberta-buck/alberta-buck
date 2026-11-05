@@ -116,8 +116,8 @@ The canonical basket valuation checks are included in
 =make nix-match-BuckCompoundBasketTest=. It tests separate cash/principal,
 fee-aware Jubilee cross-holdings, entry dilution and the exclusion of unpaid
 claims from new-credit collateral. Test-only access supplies actual issued
-basket debt while normal =openCredit= remains gated on completing explicit
-wheel spending/repayment and low-K exit integration. These valuation tests
+basket debt while normal =openCredit= remains gated on completing low-K exits,
+desk and scheduled wheel integration. These valuation tests
 do not turn the five-year household economy into a completed migration.
 
 Both existing upkeep facets now use explicit canonical issuance: available
@@ -126,6 +126,15 @@ They draw only a purchase's cash shortfall and check the resulting net book.
 Sales and fee collections leave cash until a separate successful facility
 reduction. =make nix-match-BuckCompoundBasketFlowTest= checks both real V3
 paths, K/face/maturity limits, capacity quotes and transaction rollback.
+
+The basket's =retireCredit(principal, maxCashCost, minimumReliefScaled)= is an
+atomic governor/wheel action: principal and the cash ceiling are raw BUCK,
+while minimum relief is net BUCK scaled by =1e36=. It settles the real NFT,
+checks actual wallet cost and re-marks collateral. Fund liquidity limits still
+revert the call; large reductions need smaller calls across blocks. It sells
+no LP and is separate from deposit/redemption's position lock.
+=make nix-match-BuckCompoundBasketRepaymentTest= covers bounds, fractional
+net costs, supply destruction, block limits, reuse and callback rejection.
 
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility

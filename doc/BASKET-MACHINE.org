@@ -7,6 +7,16 @@ it decides and what bounds it. It replaces the proposal that carried this name a
 notes written while the machine was built. What the machine earns, and on what evidence, is in
 [[file:BASKET-MACHINE-RESULTS.org][the results]]. What is left to do is in [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
+Accounting update, 2026-11-05: the [[file:review/bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current
+migration state and execution order. Canonical Buck separates actual cash and
+NFT principal. LP prices include a marked Jubilee claim; new-credit collateral
+excludes unpaid claims, and pool values account for carried fees. Both upkeep
+facets explicitly issue each purchase's cash shortfall. The separate bounded
+=BuckBasketEquity.retireCredit= settles principal through the fund, with actual
+cash/relief limits and protected valuation callbacks. Public leveraged opening
+awaits exits, desk and scheduled wheel integration. Signed-account descriptions
+and recorded runs below explain the earlier model; they are historical evidence.
+
 Two older machines still ship beside this one: the equity basket's earlier upkeep (the Deploy /
 Fund / Trim facet and its turn director), kept so the two can be compared, and the pro-rata
 basket with its ops shell, its director and the shadow observer. The original basket, the Fence

@@ -41,6 +41,10 @@ contract CompoundBasketHarness is BuckBasketEquity {
         (funded,) = _fundCash(desired);
     }
 
+    function retireInsidePositionForAccounting(uint256 principal) external onlyGov positionLock {
+        this.retireCredit(principal, type(uint256).max, 0);
+    }
+
     function retireForAccounting(uint256 principal) external onlyGov returns (uint256 relief) {
         Buck token = Buck(address(buck));
         token.authorizeReduction(creditId, principal, 0, uint64(block.timestamp + 1 days));

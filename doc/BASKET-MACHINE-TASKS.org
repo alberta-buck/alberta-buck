@@ -14,6 +14,13 @@ For the current household cast, consolidation decisions and merge order, use the
 [[file:review/household-economy-plan.org][household plan]] and [[file:review/household-release-readiness.org][October 26 release review]]. The older cast, JS-default and
 package-version entries below are historical; they do not override those later decisions.
 
+For the current corrected-Buck accounting and its path back to five-year runs,
+use the [[file:review/bucknet-economy-implementation.org][unified accounting implementation plan]]. Its basket/desk checklist
+supersedes the signed-account and implicit draw/repayment assumptions below.
+Both upkeep facets now issue real cash shortfalls, and bounded basket principal
+retirement is implemented; exits, desk and scheduled wheel integration remain
+gates before enabling the new primary economy.
+
 * Where things stand
 
 - [X] The unpushed commits were rebuilt without generated output: 14 commits, 3.4 MB in place of

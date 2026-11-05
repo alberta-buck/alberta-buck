@@ -158,10 +158,13 @@ unpaid claim and retains the existing separate held-BUCK offset.
 
 The focused =BuckCompoundBasketTest= uses a test-only opening seam to exercise
 actual issued debt, fair entries and real fund reductions. The production
-=openCredit= gate remains closed until explicit wheel spending/repayment,
-prospective low-K exit solvency and desk integration are complete. The runtime
-limit is tested explicitly. Constituent registration now lives in the existing
-venue facet behind the same governed public wrapper, leaving 1,928 bytes in
-the share/credit shell for the next integration steps. Substantial flow changes
-should continue using that facet structure. This is a valuation milestone,
-not a completed household or five-year migration.
+=openCredit= gate remains closed until prospective low-K exits, desk integration
+and scheduled wheel work are complete. Both upkeep facets now exercise actual
+credit for cash shortfalls. The separate =retireCredit= action settles exact
+principal with caller cash/relief bounds and the fund's block budget; its
+cross-lock permits valuation reads while rejecting nested financial operations.
+The runtime limit is tested explicitly. Registration lives in the existing
+venue facet behind the governed public wrapper; after adding bounded retirement,
+the share/credit shell is 23,833 bytes (743 below the limit). Substantial flow
+changes should continue using the existing facet structure. This is a contract
+integration milestone, not a completed household or five-year migration.
