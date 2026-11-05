@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
+// LEGACY ACCOUNTING FIXTURE: migration coverage is tracked in
+// doc/review/bucknet-economy-implementation.org; this does not validate Buck.
+
 import {Test}    from "forge-std/Test.sol";
 import {ERC20}   from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20}  from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -9,7 +12,7 @@ import {BN254}                   from "../../src/BN254.sol";
 import {IdentityRegistry}        from "../../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "../harness/IdentityRegistryHarness.sol";
 import {bindCarryingPool}        from "../harness/CarryingPool.sol";
-import {Buck}                    from "../../src/Buck.sol";
+import {BuckLinear as Buck}                    from "../../src/legacy/BuckLinear.sol";
 import {BuckCredit}              from "../../src/BuckCredit.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";

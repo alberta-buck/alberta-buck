@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {Buck} from "../Buck.sol";
+import {BuckLinear as Buck} from "./BuckLinear.sol";
 import {toBuckQtySigned, toBuckSeconds} from "../BuckTypes.sol";
 
 /// @title BuckWithBasketHooks -- Buck plus the pro-rata baskets' mint/burn

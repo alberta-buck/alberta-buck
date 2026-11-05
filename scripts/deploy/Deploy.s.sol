@@ -3,7 +3,9 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
 import "../../src/BuckCredit.sol";
-import "../../src/Buck.sol";
+// Legacy Notes bootstrap only. Corrected economy deployment is migrated
+// through the existing Python/JS builders before this script is promoted.
+import {BuckLinear as Buck} from "../../src/legacy/BuckLinear.sol";
 import "../../src/BuckKController.sol";
 import "../../src/IdentityRegistry.sol";
 import "../../src/Notes.sol";

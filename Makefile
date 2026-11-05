@@ -20,6 +20,7 @@ help:
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
+	  '  make nix-buck-accounting-test      # canonical Buck compound cash/NFT/Jubilee checks' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
 	  '  make nix-match-BuckNetBurnMathTest # proposed retirement calculation and fuzzing' \
@@ -144,6 +145,12 @@ path-%:
 	forge test $(FORGE_OPTS) --match-path $* -vvv
 match-%:
 	forge test $(FORGE_OPTS) --match-contract '$*' -vvv
+
+# Corrected Buck acceptance subset. Legacy BuckLinear fixtures and the
+# experimental BuckNet facade are deliberately excluded from this evidence.
+.PHONY: buck-accounting-test
+buck-accounting-test: build-uniswap-artifacts
+	forge test $(FORGE_OPTS) --match-contract 'BuckCompound.*Test|BuckBurnModesTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest' -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:

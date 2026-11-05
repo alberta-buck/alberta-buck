@@ -6,10 +6,13 @@ is =alberta_buck/sim/experiments/economy.toml=; its household policies are imple
 Python and JavaScript. The Python engine is used for five-year evidence, JavaScript for browser
 interaction and cross-language contract tests. They are not independent economic hypotheses.
 
-The current economy deploys legacy =Buck= (or =BuckWithBasketHooks=), with
-signed-balance accounting. It does *not* deploy the experimental =BuckNet=
-token or =JubileeFund= on this branch. Its five-year results and the household
-tests therefore do not validate the new demurrage model. Newly saved vectors
+Historical economy runs deployed legacy =Buck= (or =BuckWithBasketHooks=),
+with signed-balance accounting. The canonical =Buck.sol= now uses compounded
+cash and per-facility Jubilee accounting, but existing economy/sandbox builders
+still require migration to its five-argument constructor, linked libraries
+and explicit cash/debt operations. Those commands are not yet restored under
+the corrected model. Historical five-year results and household tests do not
+validate that model. Newly saved vectors
 record the actual BUCK artifact, address and accounting model in
 =meta.buck_contract=; PDFs and campaign summaries show the recorded model.
 Older vectors lacking that metadata are labeled =unrecorded=: check their

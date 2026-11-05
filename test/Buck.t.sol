@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
+// LEGACY ACCOUNTING FIXTURE: migration coverage is tracked in
+// doc/review/bucknet-economy-implementation.org; this does not validate Buck.
+
 import {Test} from "forge-std/Test.sol";
 import {Vm}   from "forge-std/Vm.sol";
 import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
-import {Buck} from "../src/Buck.sol";
+import {BuckLinear as Buck} from "../src/legacy/BuckLinear.sol";
 import {BuckWithBasketHooks} from "../src/legacy/BuckWithBasketHooks.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";

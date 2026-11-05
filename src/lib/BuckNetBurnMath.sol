@@ -35,6 +35,18 @@ library BuckNetBurnMath {
         uint256 k;
     }
 
+    /// @dev Ordinary defaults preserve the reference planner. A Carrying
+    ///      owner's visible amount is nominal; a sponsored ordinary owner
+    ///      receives full nominal refunds funded by its sponsor. Self-refunds
+    ///      are bookkeeping only and do not create additional wallet cash.
+    struct Owner {
+        uint256 nominalScaled;
+        uint256 sponsorAvailableScaled;
+        bool carrying;
+        bool sponsored;
+        bool selfRefund;
+    }
+
     struct Plan {
         uint256 principal;
         uint256 reliefScaled;
@@ -73,26 +85,35 @@ library BuckNetBurnMath {
     function plan(Snapshot memory s, Coverage memory c, uint256 target)
         internal pure returns (Plan memory result)
     {
+        Owner memory ordinary;
+        return plan(s, c, ordinary, target);
+    }
+
+    function plan(Snapshot memory s, Coverage memory c, Owner memory owner, uint256 target)
+        internal pure returns (Plan memory result)
+    {
         uint256 max = BuckTypes.MAX_BALANCE;
         uint256 cap = max * Q;
         if (s.principal > max || s.premiumPrincipal > max || s.walletScaled > cap
             || s.poolGrossScaled > cap || s.poolNetScaled > s.poolGrossScaled
             || s.issuedSeconds > s.totalSeconds || c.face > max || c.mark > c.face
-            || c.active > c.face) revert InvalidSnapshot();
+            || c.active > c.face || owner.nominalScaled > cap
+            || (owner.carrying && (owner.sponsored || s.walletScaled > owner.nominalScaled))) revert InvalidSnapshot();
         if (target == 0) {
             result.status = Status.Found;
             return result;
         }
-        if (s.principal == 0 || target > s.walletScaled / Q || target > s.principal) {
+        uint256 visible = owner.carrying ? owner.nominalScaled : s.walletScaled;
+        if (s.principal == 0 || target > visible / Q || (!owner.carrying && target > s.principal)) {
             result.status = Status.Impossible;
             return result;
         }
 
-        uint256 base = (target - 1) * Q + s.walletScaled % Q + 1;
+        uint256 base = (target - 1) * Q + visible % Q + 1;
         uint256 present = c.active == 0 ? 0 : Math.mulDiv(c.mark, c.active, c.face);
         uint256 capacityBefore = Math.mulDiv(present, c.k, 1e18);
         uint256 shortfallBefore = s.principal > capacityBefore ? s.principal - capacityBefore : 0;
-        uint256 p = target;
+        uint256 p = owner.carrying ? 1 : target;
         for (uint256 step; step < MAX_STEPS; ++step) {
             result.iterations = step + 1;
             uint256 refund = Math.mulDiv(s.premiumPrincipal, p, s.principal);
@@ -101,7 +122,13 @@ library BuckNetBurnMath {
                 return result;
             }
             uint256 refundNet = refund == 0 ? 0 : Math.mulDiv(s.poolNetScaled, refund * Q, s.poolGrossScaled);
-            if (refundNet > cap - s.walletScaled) {
+            uint256 received = owner.selfRefund ? 0 : owner.sponsored ? refund * Q : refundNet;
+            if (owner.sponsored && !owner.selfRefund && received - refundNet > owner.sponsorAvailableScaled) {
+                result.status = Status.Impossible;
+                return result;
+            }
+            uint256 nominalRefund = owner.selfRefund ? 0 : refund * Q;
+            if (received > cap - s.walletScaled || (owner.carrying && nominalRefund > cap - visible)) {
                 result.status = Status.Impossible;
                 return result;
             }
@@ -111,7 +138,14 @@ library BuckNetBurnMath {
                 result.status = Status.Impossible;
                 return result;
             }
-            uint256 needed = Math.ceilDiv(base + relief + refundNet, Q);
+            // ceil(G*debit/N) >= B iff debit >= floor((B-1)*N/G)+1.
+            // Both factors in ((B-1)/(G+refund))*(N+refundNet) are
+            // nondecreasing as the proportional refund grows. The same
+            // fixed-point lower-bound jumps therefore remain valid.
+            uint256 netNeeded = owner.carrying
+                ? Math.mulDiv(base + nominalRefund - 1, s.walletScaled + received, visible + nominalRefund) + 1
+                : base + received;
+            uint256 needed = Math.ceilDiv(netNeeded + relief, Q);
             if (needed <= p) {
                 uint256 faceReduction = Math.mulDiv(c.active, p, s.principal);
                 uint256 remainingFace = c.active - faceReduction;
@@ -119,7 +153,7 @@ library BuckNetBurnMath {
                 uint256 capacityAfter = Math.mulDiv(remainingValue, c.k, 1e18);
                 uint256 left = s.principal - p;
                 uint256 shortfallAfter = left > capacityAfter ? left - capacityAfter : 0;
-                if (p * Q <= s.walletScaled + refundNet + relief && shortfallAfter <= shortfallBefore) {
+                if (p * Q <= s.walletScaled + received + relief && shortfallAfter <= shortfallBefore) {
                     result.principal = p;
                     result.reliefScaled = relief;
                     result.refundNominal = refund;
@@ -160,10 +194,18 @@ library BuckNetBurnMath {
     function planAtMost(Snapshot memory s, Coverage memory c, uint256 requested)
         internal pure returns (uint256 target, Plan memory result)
     {
-        if (requested == 0) return (0, plan(s, c, 0));
-        uint256 upper = Math.min(requested, Math.min(s.principal, s.walletScaled / Q));
-        if (upper == 0) return (0, plan(s, c, requested));
-        result = plan(s, c, upper);
+        Owner memory ordinary;
+        return planAtMost(s, c, ordinary, requested);
+    }
+
+    function planAtMost(Snapshot memory s, Coverage memory c, Owner memory owner, uint256 requested)
+        internal pure returns (uint256 target, Plan memory result)
+    {
+        if (requested == 0) return (0, plan(s, c, owner, 0));
+        uint256 visible = owner.carrying ? owner.nominalScaled / Q : Math.min(s.principal, s.walletScaled / Q);
+        uint256 upper = Math.min(requested, visible);
+        if (upper == 0) return (0, plan(s, c, owner, requested));
+        result = plan(s, c, owner, upper);
         if (result.status == Status.Found) return (upper, result);
         if (result.status == Status.WorkLimit) return (0, result);
 
@@ -171,7 +213,7 @@ library BuckNetBurnMath {
         uint256 hi = upper - 1;
         while (lo < hi) {
             uint256 mid = lo + (hi - lo + 1) / 2;
-            Plan memory candidate = plan(s, c, mid);
+            Plan memory candidate = plan(s, c, owner, mid);
             if (candidate.status == Status.WorkLimit) return (0, candidate);
             if (candidate.status == Status.Found) lo = mid;
             else hi = mid - 1;
@@ -180,7 +222,7 @@ library BuckNetBurnMath {
             result.status = Status.Impossible;
             return (0, result);
         }
-        result = plan(s, c, lo);
+        result = plan(s, c, owner, lo);
         return (lo, result);
     }
 }

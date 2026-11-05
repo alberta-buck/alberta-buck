@@ -202,6 +202,27 @@ library BuckCash {
         }
     }
 
+    /// @notice Protocol full-value payment, used for an insurance renewal.
+    /// @dev Unlike an ERC-20 nominal move, consumes enough of the sender's
+    ///      nominal basis to deliver exactly raw*Q net. The host authenticates
+    ///      consent and emits the separate nominal-basis evidence. No supply
+    ///      changes. Ordinary recipients receive full value; Carrying ones
+    ///      receive raw fresh nominal units with that same full net value.
+    function payFullValue(Book storage self, address from, address to, uint256 raw,
+                          bool fromCarrying, bool toCarrying) public returns (uint256 nominalConsumed)
+    {
+        _ordinaryAddress(self, from);
+        _ordinaryAddress(self, to);
+        if (from == to || raw > type(uint256).max / Q) revert BadAccount();
+        _bind(self, from, fromCarrying);
+        _bind(self, to, toCarrying);
+        _touch(self, from);
+        _touch(self, to);
+        uint256 net = raw * Q;
+        nominalConsumed = _debitNet(self, from, net, fromCarrying);
+        _credit(self, to, net, net, toCarrying);
+    }
+
     function settle(Book storage self, address account) public {
         _initialized(self);
         if (account == self.fund) _checkpointFund(self);
