@@ -20,12 +20,16 @@ changes remain intact. Buck now uses unsigned compounded cash and actual
 per-NFT issuance with the external Jubilee interface. Both original numeric
 mint/burn overloads, both quotes, approvals/identity receipts, sponsorship and
 the controller reserve remain. The focused canonical-token regressions and
-Carrying/sponsored burn arithmetic run against Buck itself. Renewal, the real
-fund/basket, clients, wheel integration and long-run evidence are separate
-acceptance gates below; this is not yet a restored economy or release.
+Carrying/sponsored burn arithmetic run against Buck itself. Existing fund,
+renewal, maturity and cash-basket checks now run against Buck, and shared
+Python/JS deployment and the browser wallet are restored. Leveraged basket,
+complete household lifecycle, scheduled wheel work, five-year evidence and
+Notes/release checks remain separate gates below.
 
-The current five-year economy and both normal sandboxes still have legacy
-deployment/account assumptions and require migration to Buck's new explicit
+The browser-only wallet sandbox now uses canonical Buck, with separate cash
+and liability displays and verified format-4 restoration. The five-year
+economy, Python savings sandbox and JavaScript leveraged equilibrium demo
+still have legacy deployment/account assumptions and require migration to Buck's new explicit
 Jubilee constructor dependency and linked libraries. No five-year campaign
 has validated the corrected accounting, and the
 canonical cash-only diagnostic is not the leveraged household economy. Changing
@@ -363,16 +367,19 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
 
 ** 3. Validate complete Buck functionality and reuse one basket wheel
 
-- [ ] Exercise the retained Buck through mint, aging, an identity-checked
+- [-] Exercise the retained Buck through mint, aging, an identity-checked
   Carrying-pool transfer, purchase, selected NFT burn and full rollback, with
   nonzero premium, multiple NFTs/insurers and changed K. Add real private and
   public identity combinations, invalid/wrong-domain proofs, receipt hashes,
   finite/infinite allowance, zero/self transfers and authorized mode changes.
-- [ ] Transfer donor tests for long-idle compound decay, exact per-NFT age,
+  Canonical contract, Python/JS and real-identity wallet checks cover the
+  monetary/receipt path. Keep explicit remaining domain, provenance and
+  release acceptance rather than treating legacy fixture counts as coverage.
+- [X] Transfer donor tests for long-idle compound decay, exact per-NFT age,
   mixed-age issuance, fund self-demurrage, marked gain/loss, both liquidity
   guards, shared cross-path budgets, renewal, maturity/deferred supply and
   insurer liquidity. Run against corrected Buck, not merely against BuckNet.
-- [ ] Use the existing valuation-only wheel refresh at burn start. Guard its
+- [-] Use the existing valuation-only wheel refresh at burn start. Guard its
   basket registration, source, position key, freshness and spot/TWAP bounds;
   no swaps, basket sales or wheel reward may execute under Buck's lock. Remove
   the prototype's no-wheel live-mark fallback at production wiring.
@@ -413,8 +420,10 @@ minimum-relief/principal bounds where provided and reject stale/unsafe inputs.
   even when the artifact has the same name. The shared Python/JS net-stack
   helpers now deploy Buck with four explicit linked libraries. Browser bundle
   and saved net worlds use model identity, ABI version 6, all library addresses
-  and code/wiring checks. The primary household-economy and interactive sandbox
-  builders still need their lifecycle/read/display/restore conversion.
+  and code/wiring checks. The wallet sandbox now uses those helpers and format
+  4, with per-insurer pools and a separate browser storage entry. The primary
+  household-economy, Python savings and leveraged JS equilibrium builders still
+  need their lifecycle and persistent-state conversion.
 - [ ] Port shared net math to Rust/PyO3/WASM with 256-bit inputs and full-width
   intermediate multiplication/division, lossless Python int / JS BigInt and
   the same rounding/overflow rules. The current demurrage kernel is legacy
@@ -455,6 +464,40 @@ minimum-relief/principal bounds where provided and reject stale/unsafe inputs.
   available fork/proof suites, and review JavaScript dependency advisories
   and bundle reachability. Complete security/deployment review before merge
   or publication. Passing old simulations is not new-accounting evidence.
+
+* Next economic integration boundary
+
+The user has been asked whether marked Jubilee claims should enter receipt
+pricing through the mutual-holding calculation while unpaid relief is
+excluded from collateral for new issuance (recommended), or whether claims
+should be excluded until paid. That choice is pending; elapsed time is not
+approval. The [[file:basket-jubilee-crossholding.org][cross-holding note]] gives the concrete equation and dilution
+counterexample. Do not silently choose a pricing/collateral policy just to
+make the five-year runner execute.
+
+Once resolved, continue in this order:
+
+1. Convert the existing basket/desk snapshots to actual cash and NFT principal;
+   resolve the chosen mark without recursive fund/basket calls. Keep conservative
+   K solvency and low-K exits. Replace implicit draw/repay with explicit issuance
+   and reduction, and connect the existing wheel's marked reserve work.
+2. Finish the existing Python/JS household lifecycle and primary world builders;
+   retain adaptive default and the explicit comparison policies. Port setup,
+   issuance, asset exits, basket redemption, personal marks and persistent
+   outcomes rather than adding another economy runner.
+3. Run identical operation vectors and a short real-contract household world,
+   then the five-year baselines/policy comparisons and retained shocks. Save
+   raw JSON, adjacent PDFs and campaign metadata for every completed long run.
+4. Restore the Notes accounting fixtures and real generated A1/A2/B1 proof
+   suites against the same canonical artifact, and finish release/provenance
+   gates. No new five-year run or corrected-token Notes acceptance is claimed
+   by the wallet smoke tests.
+
+Also cover voluntary release of a zero-principal facility with remaining
+activated coverage, particularly after a fully relieved renewal. Numeric
+burn(0) must not become an undocumented NFT-close sentinel; ensure the owner
+can release an unused lien and recover any original-pool premium without
+inventing or extinguishing principal.
 
 * Reference map and verification commands
 
@@ -570,4 +613,6 @@ review changes documentation only; it does not rerun or extend the historical
 
 | 2026-11-04 | Port fund/renewal/maturity evidence to canonical Buck and deduplicate fixtures | Migrated 113 distinct existing fund, renewal, marked-relief, valuation-only, nominal refund, liquidity, maturity/deferred-burn and numeric-burn tests from BuckNet to Buck. The 20 real V3 cash-basket tests also pass against Buck; they still do not cover leveraged basket credit. All nine canonical operations tests pass, including aged Carrying renewal with a full-net replacement premium. Split JubileeFundFixture from executable tests: four child suites no longer rerun the parent's 44 tests (176 repeated executions removed; no distinct test removed). Broadened the precisely anchored buck-accounting-test target so legacy suites are not counted as canonical evidence. The initial port's complete run finished with 1,685 passed, one fork skip; that count predates this fixture reduction. | =1b07b245= |
 
-| 2026-11-04 | Canonical Python/JS deployment, cash views and snapshot identity | The existing net-stack helpers now deploy Buck and its four linked libraries, not BuckNet. Neutral cash views replace held/unspent observations in the quoter and net swap guard; shared client capacity takes one cash amount. Browser/distribution bundles retain actual library metadata and omit the unused prototype facade. Net snapshots use ABI version 6, the on-chain accounting model, four library addresses, immutable wiring and code hashes; wrong/old models and missing libraries fail closed. Existing Make net-demurrage-smoke: 34 Python and 20 JavaScript checks passed, including real private identity proofs, actual V3 routing, selected retirement and restoration. Final binding checks: four Python and two JavaScript tests passed. A distinct sponsor-funded purchase test confirms full rollback when sponsor compensation would otherwise bypass the pool-output minimum. Ordinary sandbox/leveraged household lifecycle and five-year evidence remain uncompleted. | This commit |
+| 2026-11-04 | Canonical Python/JS deployment, cash views and snapshot identity | The existing net-stack helpers now deploy Buck and its four linked libraries, not BuckNet. Neutral cash views replace held/unspent observations in the quoter and net swap guard; shared client capacity takes one cash amount. Browser/distribution bundles retain actual library metadata and omit the unused prototype facade. Net snapshots use ABI version 6, the on-chain accounting model, four library addresses, immutable wiring and code hashes; wrong/old models and missing libraries fail closed. Existing Make net-demurrage-smoke: 34 Python and 20 JavaScript checks passed, including real private identity proofs, actual V3 routing, selected retirement and restoration. Final binding checks: four Python and two JavaScript tests passed. A distinct sponsor-funded purchase test confirms full rollback when sponsor compensation would otherwise bypass the pool-output minimum. Ordinary sandbox/leveraged household lifecycle and five-year evidence remain uncompleted. | =2c1a2840= |
+
+| 2026-11-04 | Restore the browser wallet sandbox on canonical accounting | Wallet controller and views now use canonical Buck, net cash and separate NFT principal/capacity. Quotes carry the holder's eth_call identity. Every insurer receives a certified Carrying pool and private premium/refund receipt; restored pools verify binder, token mapping, key and code. Guarded buys/sells use positive 1%-from-spot bounds with net pool fees reflected in the buy price. Format 4 uses version-6 model-bound restoration, and a separate browser storage entry retains legacy worlds. Updated observer trade classification, typed-error presentation, Make help/acceptance target and the human guides. make nix-wallet-sandbox-test: 15 passed (14 controller, one real Chromium). make nix-buck-accounting-test: 236 passed. Final full make nix-test: 1,511 passed, one fork skip; four absent-proof suites still explicitly excluded. No five-year run was started; the leveraged basket/household lifecycle awaits the pricing/collateral policy and implementation before Notes restoration. | This commit |

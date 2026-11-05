@@ -4,35 +4,39 @@
 Build prerequisites are in [[file:README-build.org][README-build.org]]. These interfaces share contracts and household
 policy code; they serve different purposes from the five-year acceptance campaign.
 
-Both the browser-only and Python-backed worlds currently deploy legacy signed
-BUCK accounting, not the experimental =BuckNet= and =JubileeFund= contracts.
-The sandboxes cannot yet demonstrate or validate the new demurrage model.
-The [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] retains Buck.sol as the foundation
-and ports the improved calculations into it before migrating these worlds.
-The existing BuckNet world below remains a diagnostic for the donor code.
+The browser-only wallet sandbox now deploys corrected =Buck= with compounded
+cash, per-facility liabilities, the external Jubilee fund and the same four
+libraries used by Python. Its real identity proofs, premium reserve, market
+transactions and save/restore are tested. Wallets show net cash and BUCK
+liabilities separately; each insurer owns its own certified Carrying premium
+pool. Buys account for the pool's carried fees and report actual net delivery.
+Default trades require a positive output bound within 1% of the current spot
+estimate, before execution; larger price impact can therefore refuse a trade.
 
-The JavaScript core now has an *opt-in diagnostic*:
-=buildBuckWorld(session, artifacts, {identity, accounting: "net"})= builds a
-cash-only =BuckNet= world using the real identity registry, a separate Jubilee
-fund and an operator-bound simulation insurer pool. The pool is a public
-=SimLP= fixture with unrestricted =exec=; it is not a production insurer.
-=make nix-venv-net-demurrage-smoke=
-tests issuance, reduction and a verified save/restore using the same artifact
-bundle delivered to the browser. A separate test seeds its BUCK/USDC V3 market
-and checks the actual net amount received from an aged Carrying pool. The empty
-basket is not bound to the K controller, and the interactive sandbox still
-opens the legacy world. Net buys in the diagnostic use an atomic single-pool
-net-output guard; the guard is not a multi-hop router or a price oracle. The
-restore checks captured guard, router and Permit2 code hashes and wiring for
-consistency; the saved hashes are not an independent code audit and cannot
-authenticate a maliciously forged record. Older net market records without
-the router and Permit2 hashes are rejected. Net world records now identify the
-pool-bound, premium-limited issuance ABI; older experimental records are rejected
-on restore rather than being reopened with incompatible contract calls.
-The cash-only basket also lacks a production-registry identity binding in this
-diagnostic: a real BUCK deposit currently reverts. The separate receipt-mark
-tests use the explicitly test-only identity harness and a holder's identity
-approval; they do not demonstrate production basket onboarding.
+The Python savings economy and the JavaScript leveraged equilibrium demo are
+still awaiting their explicit cash/debt and basket-credit conversion. The
+[[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
+five-year household evidence. The cash-only basket in the wallet world is not
+bound to the K controller, and production basket identity onboarding, leveraged
+positions and the household savings lifecycle remain separate work.
+
+The common JavaScript constructor is
+=buildBuckWorld(session, artifacts, {identity, accounting: "net"})=. It now
+uses =Buck=, rather than the BuckNet facade, with a separate Jubilee fund and
+operator-bound simulation insurer pool. =SimLP= is the transparent simulation
+pool account; its unrestricted =exec= is not an insurer investment strategy.
+=make nix-venv-net-demurrage-smoke= tests the shared Python/Anvil and JS/Tevm
+stack, including guarded V3 trading in both token orders. The single-pool guard
+checks net output separately from sponsor compensation; it is not a price
+oracle or multi-hop router.
+
+Wallet save format 4 contains net-world ABI version 6, the on-chain model
+identifier, library addresses, code hashes and verified fund/market/pool
+wiring. Incompatible imports are rejected. Browser storage uses a separate
+entry for this model; the old signed-accounting entry is retained rather than
+converted or overwritten. Saved hashes check record consistency, not external
+release provenance. The separate cash-only receipt-mark tests currently use
+an explicit identity harness; they do not establish production basket binding.
 
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|
@@ -51,8 +55,14 @@ make nix-sandbox SANDBOX_PORT=8980
 Open =http://127.0.0.1:8980/=. This builds =core/js/sandbox/dist/= and serves it. The EVM runs
 inside the tab. It is not a five-year economy; a page with no simulation server does not show
 the Savings tab. Its browser test exercises identity, payment, credit and reload behavior.
+Use the documented acceptance target to build and run the Node controller and
+real Chromium page together; it owns its temporary static server:
 
-* Savings sandbox
+#+begin_src sh
+make nix-wallet-sandbox-test
+#+end_src
+
+* Savings sandbox (accounting migration pending)
 
 The household-position selector shows each arrived household's remaining open basket basis,
 its current BUCK share mark and marked ROI. The return is the mark divided by remaining basis
@@ -91,7 +101,7 @@ matching =playwright-core=. =make nix-core-test-js= also runs available browser 
 reports a skip when an external savings page is not supplied. See the test output rather
 than treating a skipped browser test as coverage.
 
-* JavaScript equilibrium demo
+* JavaScript equilibrium demo (accounting migration pending)
 
 #+begin_src sh
 make nix-core-demo-eqworld-serve EQWORLD_PORT=8983

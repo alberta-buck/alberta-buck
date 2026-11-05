@@ -8,7 +8,9 @@
 
 const DB = "alberta-buck-sandbox";
 const STORE = "worlds";
-const KEY = "current";
+// Keep the legacy world's entry intact. Its immutable contracts cannot be
+// upgraded by opening this new accounting model in the same browser origin.
+const KEY = "current-compound-v1";
 
 /** A store that forgets on reload (tests; browsers without storage). */
 export function memoryStore(text = null) {

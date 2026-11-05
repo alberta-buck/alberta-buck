@@ -55,7 +55,7 @@ make nix-venv-sim-savings  # then open http://127.0.0.1:8797/ (it opens on the S
    12.50 USDC, which needs no introduction at all.
 5. *Credit*: insure Carol's home for 400,000 and ask to activate 50,000.  The quote shows the
    premium deposit and her shortfall; /Buy ... BUCKs first/, then /Activate/.
-6. /+30 days/ in the world bar: Bob's BUCKs owe a little demurrage, and the home is worth a
+6. /+30 days/ in the world bar: Bob's net BUCK cash has declined through demurrage, and the home is worth a
    little less.
 7. *Observer*: everything that happened, as anyone can see it.  Look for a name.
 
@@ -65,7 +65,8 @@ make nix-venv-sim-savings  # then open http://127.0.0.1:8797/ (it opens on the S
 
 Always in view on the tools' tabs (the Savings tab has its own): the simulated day and date, the
 block, BUCK's price in the BUCK/USDC pool, =BUCK_K= (how much credit each unit of insured value
-supports), the BUCK supply and the insurance pool.  The clock moves only when you move it: /+1 hour/, /+1 day/, /+30 days/.  /Journal/ lists
+supports), the BUCK supply and the insurers' nominal premium pools. The displayed buy price
+accounts for the market pool's carried fees, before trading fees and market impact.  The clock moves only when you move it: /+1 hour/, /+1 day/, /+30 days/.  /Journal/ lists
 every transaction with its outcome and gas -- refusals included, since they are part of the
 story.  /Export/ saves the whole world to a file, /Import/ loads one, /Reset/ starts again.
 
@@ -102,8 +103,10 @@ name, in green: =W1=, =W1: Savings=, =W1: Savings: Carol Nakamura=.
   Uniswap router never holds BUCKs and needs no identity of its own.
 - *Deposit* more USDC, as a bank transfer would.
 
-Balances show BUCKs held (after demurrage), credit drawn, what is spendable (held BUCKs plus unused
-credit), the credit limit, the demurrage owing, USDC and ETH.  Every amount in the sandbox shows six
+Balances show net BUCK cash, the separate principal issued on the wallet's BuckCredit facilities,
+available activated credit, the credit limit, USDC and ETH. Unissued credit is excluded from cash;
+receiving a payment does not retire a facility. Ordinary cash declines through compounded 2%/year
+demurrage and has no separate unpaid gross-balance fee lien.  Every amount in the sandbox shows six
 decimal places, lined up on the decimal point, with its currency in a column of its own.
 
 ** Credit
@@ -114,13 +117,17 @@ Sandbox Mutual insures simulated assets.  Pick an owner and an asset -- a home, 
 equipment, farmland or gold -- and its value; the depreciation schedule and the premium fill in
 from the asset class, and every one can be changed.  /Insure/ issues a BuckCredit NFT to the owner.
 
-Activating credit is where the premium comes in, as a deposit rather than a cost: activation
-issues ten years' worth of premium to the insurance pool, which invests it -- at an assumed 10 % a
-year -- to earn the premiums, and returns it when the insurance is dropped.  At 0.35 % a year on a
-home, activating 50,000 BUCKs of spendable credit deposits about 1,813 BUCKs -- and the contract
-lets that through only if the owner /already/ holds as much.  So a first-time owner buys the
-shortfall in the pool; the quote offers to.  Once one credit is active, its unused credit covers the
-next one's deposit.
+Activating credit issues the requested additional spendable BUCK cash and finances a
+returnable premium directly into that insurer's certified Carrying pool. The facility records
+the entire issuance, including the premium. A refund is nominal BUCK carrying the original
+pool's average demurrage; the pool can choose its own investment strategy. This sandbox's
+transparent pool account does not automatically earn investment returns.
+
+At K = 0.75 and a 0.35% annual premium, issuing 50,000 spendable BUCK requires approximately
+69,930 BUCK of coverage and a 2,448-BUCK premium deposit. At parity the reserve gate asks the
+owner to already hold half that deposit, about 1,224 BUCK. The quote offers to buy a shortfall.
+Existing net cash can fund a later reserve; unused credit cannot. Private clients provide
+the insurer's pool an identity receipt when insuring, authorizing premiums and later refunds.
 
 [[file:../images/sandbox/credit.png]]
 

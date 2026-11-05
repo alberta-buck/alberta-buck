@@ -19,14 +19,15 @@
 // keys and every credential live in the saved world, in the clear.
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { keccak256 } from "viem";
 
 import {
-  buildBuckWorld, attachBuckWorld, worldRecord, issueCredential, registerWallet,
+  buildBuckWorld, attachNetBuckWorld, worldRecord, issueCredential, registerWallet, onboard, createInsurerPool,
   identityApprove, insureAsset, activateCredit, quoteActivation, creditView, accountView,
   fundAccount, sendEth, advanceTime, DEPRECIATION, DAY,
 } from "../../src/buckworld.js";
 import {
-  buildMarket, attachMarket, marketRecord, marketContracts, fiatIn, buckPrice, poolReserves,
+  buildMarket, attachNetMarket, marketRecord, marketContracts, fiatIn, buckPrice, poolReserves,
   openTrading, tradingOpen, buyBuck, buyBuckExact, sellBuck,
 } from "../../src/market.js";
 import { snapshotTevm, restoreTevm } from "../../src/backends.js";
@@ -34,8 +35,20 @@ import { observe } from "../../src/observer.js";
 import { encodeJSON, decodeJSON } from "../../src/codec.js";
 import { JournalWriter } from "../../src/journal.js";
 
+const PROTOCOL_REASONS = {
+  InsufficientMintFunding: "insufficient mint funding: buy the required BUCK reserve before issuing credit",
+  SenderNotVerified: "sender not verified", RecipientNotVerified: "recipient not verified",
+  SenderApprovalRequired: "sender must identity-approve recipient",
+  RecipientApprovalRequired: "recipient must identity-approve sender",
+  InsufficientSpendableBalance: "insufficient spendable BUCK balance",
+  InsufficientNominalBalance: "insufficient nominal BUCK balance",
+  InsufficientCreditAllocation: "insufficient credit capacity for this issuance",
+  InsufficientCoverage: "insufficient cash or eligible credit for this retirement",
+  DemurrageSponsorUnderfunded: "demurrage sponsor needs funding; fund it or detach sponsorship",
+};
+
 export const FORMAT = "alberta-buck-sandbox";
-export const VERSION = 3;                        // 2: the market; 3: a Carrying pool contract
+export const VERSION = 4; // canonical compounded Buck, explicit liabilities and per-insurer pools
 export const BUCK = 1_000_000n;                  // 6 decimals
 export const USDC = 1_000_000n;                  // 6 decimals
 
@@ -178,7 +191,7 @@ export class SandboxApp {
       const journal = [];
       this.#attachJournal(session, journal);
       const world = await buildBuckWorld(session, this.artifacts,
-        { identity: this.identity, rng: this.rng });
+        { identity: this.identity, rng: this.rng, accounting: "net" });
       const market = await buildMarket(world, this.artifacts, { rng: this.rng });
       const head = await session.client.getBlock();
       this.session = session;
@@ -189,7 +202,6 @@ export class SandboxApp {
       this.state = {
         world: worldRecord(world),
         market: marketRecord(market),
-        insurancePool: { address: world.poolAcct },
         origin: head.timestamp,
         issued: [],                      // person numbers, never reused
         credentials: [],
@@ -395,10 +407,17 @@ export class SandboxApp {
     return this.#act(async () => {
       const w = await this.#trading(walletId);
       const acct = this.#account(w.privateKey);
-      return this.#refusing(() => (order.buck !== undefined
-        ? buyBuckExact(this.world, this.market, acct, BigInt(order.buck),
-                       BigInt(order.maxUsdc ?? (BigInt(order.buck) * 11n) / 10n))
-        : buyBuck(this.world, this.market, acct, BigInt(order.usdc))));
+      const price = await this.#netBuyPrice();
+      if (order.buck !== undefined) {
+        const wanted = BigInt(order.buck);
+        const expected = (wanted * price + BUCK - 1n) / BUCK;
+        const maximum = BigInt(order.maxUsdc ?? (expected * 101n + 99n) / 100n);
+        return this.#refusing(() => buyBuckExact(this.world, this.market, acct, wanted, maximum));
+      }
+      const input = BigInt(order.usdc);
+      const minimum = input * BUCK * 99n / (price * 100n);
+      if (minimum <= 0n) throw new SandboxError("purchase is too small for a positive net BUCK minimum");
+      return this.#refusing(() => buyBuck(this.world, this.market, acct, input, { minOut: minimum }));
     });
   }
 
@@ -406,8 +425,12 @@ export class SandboxApp {
   sell(walletId, buck) {
     return this.#act(async () => {
       const w = await this.#trading(walletId);
+      const input = BigInt(buck);
+      const price = await buckPrice(this.world, this.market); // ordinary input is full value
+      const minimum = input * price * 99n / (BUCK * 100n);
+      if (minimum <= 0n) throw new SandboxError("sale is too small for a positive USDC minimum");
       return this.#refusing(() => sellBuck(this.world, this.market,
-        this.#account(w.privateKey), BigInt(buck)));
+        this.#account(w.privateKey), input, { minOut: minimum }));
     });
   }
 
@@ -436,6 +459,11 @@ export class SandboxApp {
           depRate: terms.depRate ?? cls.depRate,
           premiumRate: terms.premiumRate ?? cls.premiumRate,
         }));
+      // Insurance already establishes the client/provider relationship. Give
+      // the private client's identity receipt to that insurer's actual pool,
+      // for both fresh premiums and the original-pool nominal refund.
+      await this.#refusing(() => identityApprove(this.world, this.#handle(w),
+        { ...ins.handle, account: { address: ins.pool } }, { rng: this.rng }));
       this.state.credits.push({ tokenId, wallet: w.id, insurer: ins.id, assetClass: cls.key });
       return tokenId;
     });
@@ -476,8 +504,9 @@ export class SandboxApp {
       const head = await s.client.getBlock();
       const [buckK, supply, price, pool, insured] = await Promise.all([
         s.call(w.kctrl, "buckK"), s.call(w.buck, "totalSupply"),
-        buckPrice(w, this.market), poolReserves(w, this.market),
-        s.call(w.buck, "balanceOf", [w.poolAcct]),
+        this.#netBuyPrice(), poolReserves(w, this.market),
+        Promise.all(this.state.insurers.map((ins) => s.call(w.buck, "balanceOf", [ins.pool])))
+          .then((values) => values.reduce((sum, value) => sum + value, 0n)),
       ]);
       const wallets = [];
       for (const x of this.state.wallets) {
@@ -514,7 +543,7 @@ export class SandboxApp {
           fields: c.card.fields, wallets: [...c.wallets],
         })),
         wallets,
-        insurers: this.state.insurers.map(({ id, label, address }) => ({ id, label, address })),
+        insurers: this.state.insurers.map(({ id, label, address, pool }) => ({ id, label, address, pool })),
         credits,
         observed: [...this.state.observed],
         journal: [...this.state.journal],
@@ -526,7 +555,10 @@ export class SandboxApp {
   /** Who is who, for the observer's "you know this; Mallory does not" layer. */
   labels() {
     const out = { [this.world.issuer.addr]: ISSUER.name };
-    for (const i of this.state.insurers) out[i.address] = i.label;
+    for (const i of this.state.insurers) {
+      out[i.address] = i.label;
+      out[i.pool] = `${i.label} premium pool`;
+    }
     for (const x of this.state.wallets) out[x.address] = this.#title(x);
     const names = this.world.names;
     out[this.world.reg.address] = names.reg;
@@ -611,18 +643,33 @@ export class SandboxApp {
     }
     const session = await this.newSession();
     await restoreTevm(session, saved.chain);
-    const world = attachBuckWorld(session, this.artifacts, saved.app.world,
+    const world = await attachNetBuckWorld(session, this.artifacts, saved.app.world,
       { identity: this.identity });
     if ((await session.client.getCode({ address: world.buck.address }) ?? "0x") === "0x") {
       throw new SandboxError("the saved chain holds no Buck contract");
     }
-    const market = attachMarket(session, this.artifacts, saved.app.market);
+    const market = await attachNetMarket(session, this.artifacts, saved.app.market, world);
+    for (const ins of saved.app.insurers) {
+      if (this.#account(ins.privateKey).address.toLowerCase() !== ins.address.toLowerCase()) {
+        throw new SandboxError("saved insurer key mismatch");
+      }
+      const pool = await session.call(world.buck, "insurerPool", [ins.address]);
+      const binder = await session.call(world.reg, "binderOf", [ins.pool]);
+      const code = await session.client.getCode({ address: ins.pool });
+      if (pool.toLowerCase() !== ins.pool.toLowerCase() || binder.toLowerCase() !== ins.address.toLowerCase()
+          || !code || code === "0x" || keccak256(code) !== ins.poolCodeHash) {
+        throw new SandboxError("saved insurer pool mismatch");
+      }
+    }
     saved.app.journal ??= [];
     this.#attachJournal(session, saved.app.journal);
     this.session = session;
     this.world = world;
     this.market = market;
     this.#known = marketContracts(market, this.artifacts);
+    for (const ins of saved.app.insurers) this.#known[ins.pool] = {
+      name: "InsurerPremiumPool", role: "premium pool", abi: this.artifacts("SimLP").abi,
+    };
     this.state = saved.app;
     this.#accounts.clear();
   }
@@ -651,7 +698,8 @@ export class SandboxApp {
       return await fn();
     } catch (e) {
       if (e instanceof SandboxError) throw e;
-      const err = new SandboxError(this.session.lastRevertReason || e.shortMessage || e.message);
+      const reason = this.session.lastRevertReason || e.shortMessage || e.message;
+      const err = new SandboxError(PROTOCOL_REASONS[reason] ?? reason);
       err.cause = e;
       throw err;
     } finally {
@@ -661,11 +709,34 @@ export class SandboxApp {
 
   async #newInsurer(label) {
     const privateKey = this.newKey();
-    const address = this.#account(privateKey).address;
-    await fundAccount(this.world, address);
-    const ins = { id: `I${this.state.insurers.length + 1}`, label, privateKey, address };
+    const account = this.#account(privateKey);
+    await fundAccount(this.world, account.address);
+    const id = `I${this.state.insurers.length + 1}`;
+    const now = (await this.session.client.getBlock()).timestamp;
+    const registered = await onboard(this.world, account, {
+      ...ISSUER.stamp, given_name: label, family_name: "Insurer",
+      id_number: `SANDBOX-INSURER-${id}`, date_of_birth: "1990-01-01", issued_at: isoOf(now),
+    }, { rng: this.rng });
+    const pool = await createInsurerPool(this.world, registered);
+    const { account: _account, ...handle } = registered;
+    const code = await this.session.client.getCode({ address: pool.address });
+    const ins = { id, label, privateKey, address: account.address, handle,
+      pool: pool.address, poolCodeHash: keccak256(code) };
     this.state.insurers.push(ins);
+    this.#known[pool.address] = {
+      name: "InsurerPremiumPool", role: "premium pool", abi: this.artifacts("SimLP").abi,
+    };
     return ins;
+  }
+
+  // Spot purchase cost of one full-value BUCK, before pool fees/impact.
+  async #netBuyPrice() {
+    const [nominalPrice, [gross, net]] = await Promise.all([
+      buckPrice(this.world, this.market),
+      this.session.call(this.world.buck, "accountBalancesScaled", [this.market.pool.address]),
+    ]);
+    if (gross === 0n || net === 0n) throw new SandboxError("pool has no full-value BUCK liquidity");
+    return (nominalPrice * gross + net - 1n) / net;
   }
 
   #addCredential(card, issuedAt) {

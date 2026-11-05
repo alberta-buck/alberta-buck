@@ -74,7 +74,8 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.deepEqual(v.insurers.map((i) => i.label), ["Sandbox Mutual"]);
     assert.equal(v.status.day, 0n);
     assert.equal(v.status.buckK, 750_000_000_000_000_000n);
-    assert.equal(v.status.buckPrice, BUCK, "BUCK opens at $1");
+    assert.ok(v.status.buckPrice >= BUCK && v.status.buckPrice <= BUCK + 5n,
+      "full-value BUCK opens near $1, allowing elapsed pool demurrage and six-decimal rounding");
     assert.ok(v.status.pool.buck > 999_000n * BUCK && v.status.pool.usdc > 999_000n * BUCK);
     assert.equal(v.status.insurancePool, 0n);
     assert.ok(v.observed.some((r) => r.fn === "deploy" && r.contract === "Buck"));
@@ -187,12 +188,19 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     await app.send(W1, W2, 1_234n * BUCK);
     await assert.rejects(app.send(W1, W3, 1n * BUCK), /recipient not verified/);
     const v = await app.view();
-    // The payment, give or take the seconds of accrual settled on the ~19
-    // BUCK she held (her premium purchase's change) as it went out.
-    const drop = before.wallets[0].signedBalance - v.wallets[0].signedBalance;
-    const off = drop > 1_234n * BUCK ? drop - 1_234n * BUCK : 1_234n * BUCK - drop;
-    assert.ok(off < 1_000n, `${before.wallets[0].signedBalance} -> ${v.wallets[0].signedBalance}`);
-    assert.equal(v.wallets[1].balance, 1_234n * BUCK);
+    const elapsed = v.status.timestamp - before.status.timestamp;
+    const year = 365n * 86400n + 6n * 3600n;
+    const payment = 1_234n * BUCK;
+    const drop = before.wallets[0].balance - v.wallets[0].balance;
+    const senderLoss = (before.wallets[0].balance * elapsed + 50n * year - 1n) / (50n * year) + 2n;
+    assert.ok(drop >= payment && drop <= payment + senderLoss);
+    // The receipt transfers the full payment; the subsequent view includes
+    // declining cash demurrage. Linear loss is a conservative upper bound
+    // on compounded loss over this observed interval.
+    const maximumLoss = (payment * elapsed + 50n * year - 1n) / (50n * year) + 1n;
+    assert.ok(v.wallets[1].balance <= payment && v.wallets[1].balance >= payment - maximumLoss);
+    assert.equal(v.wallets[0].liability, before.wallets[0].liability);
+    assert.equal(v.status.supply, before.status.supply, "payment does not issue or retire credit");
     assert.deepEqual(v.wallets[0].introduced, [W2]);
     assert.deepEqual(v.wallets[0].introducedBy, [W2]);
     const refused = v.journal.filter((e) => e.outcome === "revert");
@@ -226,22 +234,25 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(v.wallets[1].usdc, S.ENDOWMENT.usdc + sold.received);
   });
 
-  it("a second credit's premium is covered by the first's unused credit", async () => {
+  it("a second credit's premium reserve is covered by existing net cash", async () => {
     // Named: left to itself, Buck.mint draws the cheapest credit first (the home's).
     const car = await app.insure(W1, { assetClass: "vehicle", face: 30_000n * BUCK });
     const q = await app.quote(W1, 10_000n * BUCK, [car]);
-    assert.equal(q.shortfall, 0n, "balance counts unused credit");
+    assert.equal(q.shortfall, 0n, "the existing minted cash covers the reserve");
     const minted = await app.activate(W1, 10_000n * BUCK, [car]);
     assert.equal(minted.premium, q.principal);
     assert.ok(minted.premium > 6_600n * BUCK, "3 %/yr at K 0.75: e / (K - e) = 2/3 of the draw up front");
   });
 
-  it("thirty days later: demurrage owing, the home depreciated", async () => {
+  it("thirty days later: net cash declines, liabilities age and the home depreciates", async () => {
     const before = await app.view();
     await app.advance(30 * 86_400);
     const v = await app.view();
     assert.equal(v.status.day, 30n);
-    assert.ok(v.wallets[1].feeOwing > 0n);
+    assert.ok(v.wallets[1].netBalance < before.wallets[1].netBalance);
+    assert.equal(v.wallets[1].feeOwing, 0n, "ordinary cash has no separate unpaid gross-balance fee lien");
+    assert.equal(v.wallets[0].liability, before.wallets[0].liability,
+      "elapsed time changes relief age, not issued principal");
     const was = before.credits.find((x) => x.tokenId === home);
     const now = v.credits.find((x) => x.tokenId === home);
     assert.ok(now.currentValue < was.currentValue);
@@ -256,7 +267,8 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
                       "execute"]) {
       assert.ok(fns.has(fn), fn);
     }
-    const swaps = v.observed.filter((r) => r.fn === "execute" && r.contract === "UniversalRouter");
+    const swaps = v.observed.filter((r) => (r.fn === "execute" && r.contract === "UniversalRouter")
+      || (r.fn === "buyExactOutput" && r.contract === "Net BUCK swap guard"));
     assert.equal(swaps.length, 2);
     for (const r of swaps) {
       assert.ok(r.events.some((e) => e.contract === "BUCK/USDC pool" && e.name === "Swap"));
@@ -324,7 +336,7 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     assert.equal(v.status.day, 0n);
     const regs = v.observed.filter((r) => r.fn === "register");
     assert.deepEqual(regs.map((r) => r.from),
-      [app.world.operator.account.address, app.session.account.address],
-      "a new world's history: only the world's and the market's operators have registered");
+      [app.world.operator.account.address, app.session.account.address, v.insurers[0].address],
+      "the world/market operators and insurer have certified identities");
   });
 });

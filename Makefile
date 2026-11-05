@@ -21,6 +21,7 @@ help:
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
 	  '  make nix-buck-accounting-test      # canonical Buck compound cash/NFT/Jubilee checks' \
+	  '  make nix-wallet-sandbox-test       # build and test canonical wallet UI, trades and restore' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
 	  '  make nix-match-BuckNetBurnMathTest # proposed retirement calculation and fuzzing' \
@@ -1866,6 +1867,12 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 		> $(SANDBOX_DIST)/sim-server.json
 	python3 scripts/third_party_notices.py sandbox core/js/artifacts/sandbox-meta.json \
 		> $(SANDBOX_DIST)/THIRD-PARTY-NOTICES.txt
+
+# Browser-only canonical Buck acceptance. The browser check owns its temporary
+# static server; the Python savings backend and five-year economy are separate.
+.PHONY: wallet-sandbox-test
+wallet-sandbox-test: sandbox-build
+	cd core/js && node --test test/sandbox.app.tevm.test.js test/sandbox.browser.test.js
 
 # ── Licences and third-party notices in what we publish ───────────────
 #

@@ -1,6 +1,6 @@
 // Credit: Sandbox Mutual insures simulated assets.  An insured asset becomes
 // a BuckCredit NFT held by its owner; the owner activates credit against it,
-// depositing ten years' premium with the insurance pool, which invests it to
+// depositing ten years' premium with its insurer's pool, which may invest it to
 // earn the premiums and returns it when the insurance is dropped -- a deposit
 // the funding gate lets through only once the owner already holds a share of
 // it: half at parity, none once the BUCK is 2% dear, all of it at 2% cheap.
@@ -82,11 +82,12 @@ export function mountCredit(ctx) {
     h("div", { class: "row" }, field("Floor (BUCKs)", floor), field("Depreciation", dep),
       field("Rate, % a year", rate)),
     field("Premium, % of insured value a year", premium,
-      "Not spent: activating credit deposits ten years' worth with the insurance pool, which " +
-      "invests it to earn the premiums and returns it when the insurance is dropped."),
+      "Issuance deposits ten years' premium with this insurer's pool. The insurer can invest it " +
+      "to fund cover; refunds return nominal BUCK carrying the pool's average demurrage."),
     h("button", { type: "submit", class: "primary" }, "Insure"),
     h("p", { class: "discloses" }, h("b", {}, "Discloses: "), "the owner's address, the insurer, ",
-      "the asset class, its value, schedule and premium, to everyone.  Not whose asset it is."));
+      "the asset class, its value, schedule and premium, to everyone. The insurer receives " +
+      "the owner's private identity receipt."));
 
   // ---- activate -----------------------------------------------------------
   const who = h("select", { "data-key": "credit:who", "aria-label": "wallet" });
@@ -116,7 +117,7 @@ export function mountCredit(ctx) {
         h("dt", { title: "The deposit times the funding factor: half at parity, nothing once the BUCK is " +
                                "2% dear, the whole deposit at 2% cheap" }, "Must already hold"),
         h("dd", {}, money(q.required, "BUCK")),
-        h("dt", { title: "Held BUCKs plus unused credit" }, "Holds"), h("dd", {}, money(q.balance, "BUCK")),
+        h("dt", { title: "Existing net cash; unissued credit is separate" }, "Holds"), h("dd", {}, money(q.balance, "BUCK")),
         h("dt", {}, "Shortfall"), h("dd", { class: q.shortfall ? "bad" : "good" }, money(q.shortfall, "BUCK"))),
       q.shortfall === 0n
         ? h("button", {
@@ -138,10 +139,10 @@ export function mountCredit(ctx) {
 
   const activate = h("div", { class: "card form" },
     h("h2", {}, "Activate credit"),
-    h("p", { class: "hint" }, "The owner draws on their insured value: each unit of it activated ",
-      "adds BUCK_K of credit, less its premium deposit, and the amount is the credit they gain to ",
-      "spend.  The deposit goes to the insurance pool now, and the funding gate lets that through ",
-      "only once the owner already holds a share of it: half while the BUCK is at parity."),
+    h("p", { class: "hint" }, "The requested amount becomes additional spendable BUCK cash. ",
+      "The facility also issues the premium directly to its insurer's pool, and records both ",
+      "amounts as its liability. The funding gate requires existing cash for a share of that ",
+      "deposit: half while BUCK is at parity. Unissued credit does not satisfy that reserve."),
     h("div", { class: "row" }, field("Wallet", who), field("Amount (BUCKs)", amt)),
     quote,
     h("p", { class: "discloses" }, h("b", {}, "Discloses: "), "the amount, the coverage and the ",

@@ -23,7 +23,7 @@
 
 import { encodeFunctionData, keccak256, parseEventLogs, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { deployNetStack, BUCK_CASH_LIBRARIES } from "./net-world.js";
+import { deployNetStack, BUCK_CASH_LIBRARIES, netCreditOps } from "./net-world.js";
 
 // BN254.sol struct components are UPPERCASE X/Y at the ABI.
 const g = (p) => ({ X: p.x, Y: p.y });
@@ -498,8 +498,8 @@ export const DEPRECIATION = { NONE: 0, LINEAR: 1, DECLINING_BALANCE: 2 };
 // A holder handle (from onboard/registerWallet) or a bare viem account.
 const acctOf = (who) => who.account ?? who;
 
-/** Buck.mint(MINT_MAX) delivers all the listed credits can give, activating
- *  their whole faces; any other amount is the spendable it delivers. */
+/** Buck.mint(MINT_MAX) issues the maximum found in the selected order under
+ *  current bounds; another amount requests at least that balance increase. */
 export const MINT_MAX = (1n << 256n) - 1n;
 
 /**
@@ -540,9 +540,9 @@ export async function insureAsset(world, insurer, holder, terms) {
  * Buck.mint, which activates coverage on the holder's credits
  * cheapest-first (or `opts.tokenIds`) -- amount / (K - e) of it, e the
  * premium's deposit rate -- and reverts when they cannot give that much.
- * `amount` = MINT_MAX activates their whole faces.  A zero-premium credit
- * activates headroom only; a premium pays its principal into the insurance
- * pool from the holder's balance.
+ * `amount` = MINT_MAX requests the available maximum. A zero-premium credit
+ * produces actual cash; a financed premium is issued directly into the
+ * insurer's own pool at full net value.
  *
  * @returns what the Minted event reports: {coverage (face activated -- a
  *          depreciating credit needs a little more face than the present
@@ -562,9 +562,9 @@ export async function activateCredit(world, holder, amount, opts = {}) {
 
 /**
  * Create a BuckCredit NFT for `holder` and activate its whole face through
- * Buck.mint(MINT_MAX) (zero premium: activates credit headroom, K x face;
- * BUCK circulates when the holder draws by transferring).  The deployer
- * insures.
+ * Buck.mint(MINT_MAX). Canonical worlds issue actual cash explicitly;
+ * the historical headroom behavior remains confined to legacy diagnostics.
+ * The deployer insures.
  */
 export async function createCredit(world, holder, face, opts = {}) {
   const tokenId = await insureAsset(world, world.session.account, holder,
@@ -612,7 +612,7 @@ export async function cheapestFirst(world, owner) {
  * the coverage it activates and the deposit it pays), and whether the
  * funding gate lets it through: the premium's pool principal times the
  * controller's funding factor must already be covered by the holder's
- * balance (held BUCK plus unused credit) before the mint.
+ * actual cash before the mint. Quotes use that holder's eth_call identity.
  *
  * @param opts.tokenIds the credits to draw (default: as Buck.mint does)
  * @returns {coverage (face to activate), principal (the premium, paid into
@@ -624,7 +624,7 @@ export async function quoteActivation(world, holder, amount, opts = {}) {
   const addr = typeof holder === "string" ? holder : acctOf(holder).address;
   const tokenIds = opts.tokenIds ?? await cheapestFirst(world, addr);
   const [[coverage, principal], factor, balance] = await Promise.all([
-    s.call(world.buck, "quoteMint", [amount, tokenIds]),
+    s.call(world.buck, "quoteMint", [amount, tokenIds], { account: addr }),
     s.call(world.kctrl, "fundingFactor"),
     s.call(world.buck, "balanceOf", [addr]),
   ]);
@@ -644,10 +644,24 @@ export async function creditsOf(world, owner) {
   return ids;
 }
 
-/** An account as its wallet shows it: registration, balances (signed:
- *  negative is credit drawn), credit limit and demurrage owing. */
+/** Cash and facility liabilities are independent in the canonical model.
+ *  Legacy diagnostics retain their old signed view explicitly. */
 export async function accountView(world, address) {
   const s = world.session;
+  if (world.accounting === "net") {
+    const [verified, balance, netBalance, creditLimit, eth, carrying] = await Promise.all([
+      s.call(world.reg, "isVerified", [address]), s.call(world.buck, "balanceOf", [address]),
+      s.call(world.buck, "netBalanceOf", [address]), s.call(world.buck, "creditLimit", [address]),
+      s.client.getBalance({ address }), s.call(world.reg, "isCarrying", [address]),
+    ]);
+    const ids = await creditsOf(world, address);
+    const principal = await Promise.all(ids.map((id) => s.call(world.credit, "issuanceOf", [id])));
+    const liability = principal.reduce((sum, [issued]) => sum + issued, 0n);
+    const capacity = verified && !carrying
+      ? (await netCreditOps(s, world.net).quoteHouseholdActivatedCapacity(address, ids)).capacity : 0n;
+    return { address, verified, balance, netBalance, liability, creditLimit,
+      activatedCapacity: capacity, carrying, feeOwing: 0n, eth };
+  }
   const [verified, balance, signedBalance, creditLimit, feeOwing, eth] = await Promise.all([
     s.call(world.reg, "isVerified", [address]),
     s.call(world.buck, "balanceOf", [address]),
@@ -683,4 +697,22 @@ export async function advanceTime(world, seconds) {
   });
   await world.session.client.request({ method: "evm_mine", params: [] });
   return (await world.session.client.getBlock()).timestamp;
+}
+
+/** Simulation-only premium pool for one registered insurer. SimLP supplies
+ *  a transparent contract account, not a production investment strategy.
+ *  The pool explicitly authorizes its exact certified binding; the insurer
+ *  alone registers it, and it consents to nominal refunds from Buck. */
+export async function createInsurerPool(world, insurer) {
+  if (world.accounting !== "net") throw new Error("per-insurer pools require canonical Buck accounting");
+  const s = world.session;
+  const pool = await s.deploy(world.artifacts("SimLP"), [], { name: "InsurerPremiumPool" });
+  const binding = [g(insurer.kp.pk), ct(insurer.E), true, true];
+  await s.send(pool, "exec", [world.reg.address, encodeFunctionData({ abi: world.reg.abi,
+    functionName: "authorizeContractBinding", args: [insurer.account.address, ...binding] })]);
+  await s.send(world.reg, "bindContract", [pool.address, ...binding], { account: insurer.account });
+  await s.send(world.buck, "setInsurerPool", [pool.address], { account: insurer.account });
+  await s.send(pool, "exec", [world.buck.address, encodeFunctionData({ abi: world.buck.abi,
+    functionName: "approve", args: [world.buck.address, (1n << 256n) - 1n] })]);
+  return pool;
 }

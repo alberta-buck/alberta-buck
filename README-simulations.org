@@ -8,7 +8,7 @@ interaction and cross-language contract tests. They are not independent economic
 
 Historical economy runs deployed legacy =Buck= (or =BuckWithBasketHooks=),
 with signed-balance accounting. The canonical =Buck.sol= now uses compounded
-cash and per-facility Jubilee accounting, but existing economy/sandbox builders
+cash and per-facility Jubilee accounting, but the primary household-economy and savings/equilibrium builders
 still require migration to its five-argument constructor, linked libraries
 and explicit cash/debt operations. Those commands are not yet restored under
 the corrected model. Historical five-year results and household tests do not
@@ -104,9 +104,11 @@ identifier, all four library addresses and contract code hashes. Older
 records, missing libraries, altered wiring and wrong models are rejected.
 Those hashes detect inconsistent saved records; they are not independent
 release provenance. Rebuild with the Make target after changing contracts.
-The ordinary sandbox still needs migration of its controller, displays and
-restoration path; the household's full setup/issuance, exits, basket redemption
-and financial marks remain pending. Passing this smoke does not restore them.
+The ordinary wallet sandbox now uses this graph, with separate net cash and
+facility-liability displays, certified per-insurer premium pools and format-4
+restoration. The household economy/savings sandbox still needs its full
+setup/issuance, exits, basket redemption and financial marks. Passing this
+smoke does not restore that lifecycle.
 
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility

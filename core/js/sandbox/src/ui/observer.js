@@ -13,9 +13,10 @@ const PAGE = 60;
 const KINDS = {
   identity: new Set(["register", "approve", "trustIssuer", "bindContract", "authorizeContractBinding",
                      "setBindingAdapter", "createPoolAndBind"]),
-  credit: new Set(["createCredit", "setCreditIssuer", "mint", "burn"]),
+  credit: new Set(["createCredit", "setCreditIssuer", "mint", "burn", "issue", "authorizeReduction",
+                   "setInsurerPool", "reduce", "renew", "closeMatured"]),
   payments: new Set(["transfer", "transfer ETH"]),
-  market: new Set(["execute", "initialize"]),
+  market: new Set(["execute", "initialize", "buyExactInput", "buyExactOutput"]),
 };
 const kindOf = (r) => {
   if (r.fn === "deploy") return "deploys";

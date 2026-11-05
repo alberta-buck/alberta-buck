@@ -55,19 +55,18 @@ function walletCard(ctx, view, w) {
   const option = withAddr(w);
   const me = walletTitle({ id: w.id, label: w.label });
   const key = (k) => `wallet:${w.id}:${k}`;
-  const held = w.signedBalance > 0n ? w.signedBalance : 0n;
-  const drawn = w.signedBalance < 0n ? -w.signedBalance : 0n;
   const status = w.registered
     ? h("span", { class: "chip good" }, "registered")
     : h("span", { class: "chip warn" }, "not registered");
 
   const balances = h("dl", { class: "kv" },
-    h("dt", {}, "BUCKs held"), h("dd", {}, money(held, "BUCK")),
-    drawn ? h("dt", {}, "Credit drawn") : null, drawn ? h("dd", {}, money(drawn, "BUCK")) : null,
-    h("dt", { title: "Held BUCKs plus unused credit" }, "Spendable"), h("dd", {}, money(w.balance, "BUCK")),
+    h("dt", { title: "Cash after compounded demurrage; credit capacity is separate" }, "Net BUCK cash"),
+    h("dd", {}, money(w.netBalance, "BUCK")),
+    h("dt", { title: "Principal issued on your BuckCredit facilities; receiving BUCK does not retire it" }, "BUCK liability"),
+    h("dd", {}, money(w.liability, "BUCK")),
+    h("dt", { title: "Current capacity on activated coverage, subject to execution checks" }, "Available credit"),
+    h("dd", {}, money(w.activatedCapacity, "BUCK")),
     h("dt", {}, "Credit limit"), h("dd", {}, money(w.creditLimit, "BUCK")),
-    h("dt", { title: "Demurrage accrues on held BUCKs; it is settled at the next transfer" },
-      "Demurrage owing"), h("dd", {}, money(w.feeOwing, "BUCK")),
     h("dt", {}, "USDC"), h("dd", {}, money(w.usdc, "USDC")),
     h("dt", { title: "For gas" }, "ETH"), h("dd", {}, money(w.eth, "ETH", 18)),
   );

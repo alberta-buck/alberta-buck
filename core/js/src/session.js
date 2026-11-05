@@ -64,9 +64,10 @@ export class Session {
     return { abi, address };
   }
 
-  async call(contract, functionName, args = []) {
+  async call(contract, functionName, args = [], { account, blockNumber } = {}) {
     return this.client.readContract({
       address: contract.address, abi: contract.abi, functionName, args,
+      account: account?.address ?? account, blockNumber,
     });
   }
 

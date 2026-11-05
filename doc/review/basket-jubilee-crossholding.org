@@ -4,7 +4,7 @@
 
 * Why this needs separate treatment
 
-The [[file:bucknet-economy-implementation.org][unified BuckNet replacement plan]] is the current implementation
+The [[file:bucknet-economy-implementation.org][unified Buck accounting plan]] is the current implementation
 sequence. Its intended valuation and fund operations reuse the basket wheel;
 this note analyzes the still-unresolved leveraged-ownership constraints, not
 a separate basket or upkeep design.
@@ -98,3 +98,22 @@ K, transaction fees or five-year household behavior.
   lock. Protect those calls and insurer callbacks from reentrancy and require
   complete transaction rollback on any failure. Any keeper sale is separate.
 - Do not present the cash-only prototype as leveraged or production-ready.
+
+* Proposed integration policy (awaiting the user's choice)
+
+The November 4 accounting port now runs in canonical Buck, including real
+fund and cash-basket tests. Leveraged integration still needs the pricing /
+collateral decision: include marked relief in receipt pricing using the
+capped mutual-holding calculation, while excluding unpaid relief from new
+credit collateral, or exclude the claim until paid. The former is the current
+recommendation, not an approved implementation decision.
+
+For the recommended case, solve the existing single-receipt dependency for
+TWAP equity and use that one marked claim consistently with the basket's
+entry/exit price bands. Read bare net assets, actual NFT principal/age, fund
+cash and share ownership directly; a basket mark must never call back through
+a fund mark into the same basket. Preserve the existing held-BUCK offset
+separately from the unpaid-claim collateral decision. Specify rounding, caps
+and the behavior of non-unique or insolvent solutions before enabling it.
+Use the existing wheel to publish/refresh the result; do not create another
+valuation wheel or assume that a mark is immediate redeemable cash.

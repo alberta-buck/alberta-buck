@@ -67,12 +67,12 @@ export function renderWorldBar(ctx, view) {
   fill(document.getElementById("stats"),
     stat("Day", `${s.day}`, h("span", { class: "unit" }, ` ${s.date.slice(0, 10)}`)),
     stat("Block", `${s.block}`),
-    stat("BUCK price", h("span", { title: "USDC per BUCK in the BUCK/USDC pool" },
+    stat("BUCK buy price", h("span", { title: "USDC per full-value BUCK, before pool fees and market impact" },
       money(s.buckPrice, "USDC"))),
     stat("BUCK_K", h("span", { title: "Credit per unit of insured value (the controller's output)" },
       (Number(s.buckK) / 1e18).toFixed(4))),
     stat("Supply", money(s.supply, "BUCK")),
-    stat("Insurance pool", money(s.insurancePool, "BUCK")),
+    stat("Insurance pools", money(s.insurancePool, "BUCK")),
     stat("Wallets", `${s.wallets}`),
   );
   const notice = document.getElementById("notice");

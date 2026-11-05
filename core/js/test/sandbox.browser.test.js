@@ -119,14 +119,18 @@ test("the sandbox page: certify, register, introduce, trade, pay, reload", { ski
     };
     const [paid, why] = await pay("100");
     assert.equal(paid, false, "no BUCK yet");
-    assert.match(why, /exceeds spendable/);
+    assert.match(why, /insufficient spendable BUCK/);
     await ok(carol.locator("button", { hasText: "Open trading" }), /Trading open/);
     await carol.locator("input[aria-label='USDC to spend']").fill("500");
     await ok(carol.locator("button", { hasText: "Buy BUCK" }),
       /^Bought 49\d\.\d{6} BUCKs for 500\.000000 USDC\.$/);
     const [paid2] = await pay("100");
     assert.equal(paid2, true);
-    assert.match(await bob.textContent(), /BUCKs held\s*100\.000000\s*BUCKs/);
+    const receivedCash = /Net BUCK cash\s*([\d,.]+)\s*BUCKs/.exec(await bob.textContent());
+    assert.ok(receivedCash, "wallet shows net cash separately from its liabilities");
+    const received = Number(receivedCash[1].replaceAll(",", ""));
+    assert.ok(received > 99.99 && received <= 100, "the payment is subject to subsequent cash demurrage");
+    assert.match(await bob.textContent(), /BUCK liability\s*0\.000000\s*BUCKs/);
     const [paid3, said] = await pay("12.5", "USDC");
     assert.equal(paid3, true);
     assert.equal(said, "Paid 12.500000 USDC to W2.");

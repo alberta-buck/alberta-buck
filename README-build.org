@@ -63,14 +63,16 @@ The [[file:doc/review/bucknet-economy-implementation.org][current accounting pla
 BuckNet prototype's discoveries. =BuckNet*= tests and =net-demurrage-smoke=
 remain donor/regression diagnostics. =buck-accounting-test= exercises the
 corrected =Buck= itself, its unsigned cash and the independent allocation
-vectors. Existing economy/sandbox builders still need the new constructor,
+vectors. The primary household-economy and savings/equilibrium builders still need the new constructor,
 linked libraries and explicit cash/debt integration; they are not restored
-merely because the contract artifact retains its name. Old test fixtures
+merely because the contract artifact retains its name. The wallet sandbox
+now uses the corrected token and its own verified save format. Old test fixtures
 explicitly importing =BuckLinear= are legacy evidence, as listed in the plan.
 
 #+begin_src sh
 make nix-test                              # Foundry contract tests
 make nix-buck-accounting-test              # corrected Buck acceptance subset (no legacy token facade)
+make nix-wallet-sandbox-test               # canonical wallet controller, browser, trades and restoration
 make nix-match-BuckCashTest               # unsigned cash, Carrying value and sponsor component
 make nix-match-BuckNetMintMathTest         # bounded per-facility issuance math and fuzzing
 make nix-match-BuckNetMintCompatibilityTest # ordinary-owner compatibility mint and batch quote
