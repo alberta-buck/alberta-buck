@@ -87,7 +87,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         if (!_leans()) return false;
         try parity.isDue() returns (bool due) { return due; } catch { return false; }
     }
-    function _spendable() private view returns (uint256) { return _bk().balanceOf(address(this)); }
+    function _spendable() private view returns (uint256) { return _liquidityS(_snap()); }
 
     function wheelDue(uint8 kind, uint256 i) public view returns (bool) {
         if (kind == 0) return block.timestamp / 1 days > lastDay;
@@ -105,6 +105,7 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
 
     function wheelStep(uint8 kind, uint256 i) external returns (uint256) {
         if (msg.sender != wheel || wheel == address(0)) revert NotWheel();
+        if (netAccounting) controller.compute();
         if (kind == 0) return _daily();
         if (kind == 1) {
             if (i >= constituents.length || liquidityOf[i] == 0 || block.timestamp / 1 days <= lastSyncDay[i]) return 0;
@@ -119,15 +120,18 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         return _respond();
     }
 
-    /// @dev Settle the relief on the lien and mark. The day's flow is reported
-    /// and cleared; nothing here rations room by it.
+    /// @dev Refresh the canonical collateral mark; legacy fixtures settle
+    /// holder relief first. Marked claims never retire canonical principal.
+    /// The day's flow is reported and cleared; it does not ration issuance.
     function _daily() private returns (uint256) {
         uint64 day = uint64(block.timestamp / 1 days);
         if (day <= lastDay) return 0;
         uint256 flow = uint256(dayFlow < 0 ? -dayFlow : dayFlow);
         dayFlow = 0;
         lastDay = day;
-        if (_bk().signedBalanceOf(address(this)) < 0 && _bk().reliefOf(address(this)) > 0) _bk().settleRelief();
+        if (!netAccounting && _bk().signedBalanceOf(address(this)) < 0 && _bk().reliefOf(address(this)) > 0) {
+            _bk().settleRelief();
+        }
         _markS(_snap());
         emit WheelWork(0, 0, flow);
         return 1;
@@ -206,7 +210,10 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
             b.token[i] = s.m[i].posTwap / 2 + _tokenValue(s, i);
             token += b.token[i];
         }
-        b.issued = -s.buckEq - int256(held);
+        // Size intervention risk from actual cash/debt. The unpaid LP claim
+        // affects receipt prices, not the ceiling or collateral for new debt.
+        b.issued = netAccounting ? int256(s.lien) - int256(s.cash) - int256(held)
+                                : -s.buckEq - int256(held);
         int256 equity = int256(token) - b.issued;
         if (equity < 0) equity = 0;
         b.ceiling = s.k * uint256(equity) / 1e18 * CEILING_BP / 10000;
@@ -423,6 +430,9 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
     }
 
     function _buy(uint256 i, uint256 budget, bool pairOnly) internal returns (uint256 used) {
+        uint256 openingShortfall;
+        (budget, openingShortfall) = _fundCash(budget);
+        if (budget == 0) return 0;
         uint256 half = pairOnly ? 0 : budget / 2;
         uint256 spent;
         if (half > 0) {
@@ -434,5 +444,6 @@ contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
         liquidityOf[i] += l;
         idleToken[i] -= tokens;
         used = spent + bucks;
+        _finishBuy(openingShortfall);
     }
 }

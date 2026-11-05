@@ -12,7 +12,7 @@ import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorag
 ///         a state-machine step that does at most one bounded thing:
 ///
 ///           0 Daily    fold the day's net flow into the liquidity sizing;
-///                      collect the Jubilee relief on the lien; the
+///                      refresh the mark (legacy: collect holder relief); the
 ///                      director's sample
 ///           1 Sync(i)  collect pool i's fees (once a day)
 ///           2 Deploy(i) pair the wallet's TOKEN_i with the credit beyond
@@ -27,7 +27,11 @@ import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorag
 ///
 ///         The basket is a credit holder (BuckBasketEquityStorage): every
 ///         step marks its credit before it spends, the BUCK it spends are
-///         issued against its limit, and the BUCK it receives repay its lien.
+///         explicitly issued against its limit in canonical mode. Sales and
+///         fee collections supply cash; principal changes only on a separate
+///         successful facility reduction. Legacy fixtures retain implicit
+///         spending/repayment. Purchases cannot worsen the actual credit
+///         shortfall after fees and current net pool marks.
 ///         After a K cut that leaves it under water, Trim's refill is what
 ///         brings it back under the limit, at most 2 x `swapCapBp` of a pool
 ///         a step; until then exits pay in kind.
@@ -60,6 +64,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
 
     function wheelStep(uint8 kind, uint256 i) external returns (uint256 work) {
         if (msg.sender != wheel || wheel == address(0)) revert NotWheel();
+        if (netAccounting) controller.compute();
         if (kind == DAILY)  return _daily();
         if (kind == SYNC)   return _sync(i);
         if (kind > TRIM)    return 0;
@@ -100,8 +105,9 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
 
     function _sync(uint256 i) internal returns (uint256) {
         lastSyncDay[i] = uint64(block.timestamp / 1 days);
-        (uint256 t, uint256 b) = _v().positionSync(i);   // its BUCK repay the lien
+        (uint256 t, uint256 b) = _v().positionSync(i);
         idleToken[i] += t;
+        if (netAccounting) _markS(_snap());
         emit WheelWork(SYNC, i, b);
         return 1;
     }
@@ -120,6 +126,7 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
     ///      by selling into its own thin pool -- then sell part of the TOKEN
     ///      (capped) if the pair is still short; add it.
     function _deploy(Snap memory s, uint256 i) internal returns (uint256) {
+        uint256 openingShortfall = _shortfallS(s);
         uint256 one = 10 ** constituents[i].decimals;
         IBuckBasketVenue.Marks memory m = s.m[i];
         uint256 p = m.pTwap;
@@ -138,16 +145,18 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
                 (uint256 spent, uint256 got) = _v().monetaryLeg(i, false, dx);
                 idleToken[i] -= spent;
                 have += got;
-                // What the sale's BUCK freed to spend (under water: nothing).
-                uint256 sp = _bk().balanceOf(address(this));
+                // Canonical proceeds are cash, not automatic debt retirement.
+                uint256 sp = netAccounting ? _liquidityS(_snap()) : _bk().balanceOf(address(this));
                 if (have > sp) have = sp;
             }
         }
+        (have,) = _fundCash(have);
         (uint128 l, uint256 tokUsed, uint256 buckUsed) =
             _v().positionMint(i, idleToken[i], have);
-        if (l == 0) return 0;
         liquidityOf[i] += l;
         idleToken[i] -= tokUsed;
+        _finishBuy(openingShortfall);
+        if (l == 0) return 0;
         emit WheelWork(DEPLOY, i, buckUsed);
         return 1;
     }
@@ -235,8 +244,12 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         uint256 cap = _swapCap(s.m[j]);
         if (half > cap) half = cap;
         if (half == 0) return 0;
+        uint256 openingShortfall;
+        (half, openingShortfall) = _fundCash(half);
+        if (half == 0) return 0;
         (uint256 spent, uint256 got) = _v().monetaryLeg(j, true, half);
         idleToken[j] += got;
+        _finishBuy(openingShortfall);
         emit WheelWork(FUND, j, spent);
         return 1;
     }
@@ -304,12 +317,13 @@ contract BuckBasketEquityWheel is BuckBasketEquityStorage {
         uint256 pos = s.m[t].posTwap;
         uint128 l = uint128(uint256(liquidityOf[t]) * value / pos);
         if (l == 0) return 0;
-        (uint256 tok,) = _v().positionBurn(t, l);          // its BUCK repay the lien
+        (uint256 tok,) = _v().positionBurn(t, l);
         liquidityOf[t] -= l;
         if (tok > 0) {
             (uint256 spent,) = _v().monetaryLeg(t, false, tok);
             idleToken[t] += tok - spent;
         }
+        if (netAccounting) _markS(_snap());
         emit WheelWork(TRIM, t, value);
         return 1;
     }

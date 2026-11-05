@@ -120,6 +120,13 @@ basket debt while normal =openCredit= remains gated on completing explicit
 wheel spending/repayment and low-K exit integration. These valuation tests
 do not turn the five-year household economy into a completed migration.
 
+Both existing upkeep facets now use explicit canonical issuance: available
+credit is a planning limit, while =balanceOf= remains actual wallet cash.
+They draw only a purchase's cash shortfall and check the resulting net book.
+Sales and fee collections leave cash until a separate successful facility
+reduction. =make nix-match-BuckCompoundBasketFlowTest= checks both real V3
+paths, K/face/maturity limits, capacity quotes and transaction rollback.
+
 The existing [[file:core/python/buck_core/net_world.py][Python]] and
 [[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility
 principal/age, candidate premium and reserve checks, original-pool refund

@@ -32,6 +32,15 @@ contract CompoundBasketHarness is BuckBasketEquity {
 
     function refreshMark() external { _markS(_snap()); }
 
+    function availableForAccounting() external view returns (uint256 cash, uint256 newCredit) {
+        Snap memory s = _snap();
+        return (s.spend, _issuableS(s));
+    }
+
+    function fundForAccounting(uint256 desired) external onlyGov returns (uint256 funded) {
+        (funded,) = _fundCash(desired);
+    }
+
     function retireForAccounting(uint256 principal) external onlyGov returns (uint256 relief) {
         Buck token = Buck(address(buck));
         token.authorizeReduction(creditId, principal, 0, uint64(block.timestamp + 1 days));

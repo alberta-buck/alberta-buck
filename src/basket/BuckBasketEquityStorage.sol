@@ -5,6 +5,7 @@ import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage}  from "./BuckBasketStorage.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BasketJubileeMath} from "./BasketJubileeMath.sol";
+import {BuckTypes} from "../BuckTypes.sol";
 
 interface IBuckKSource {
     function currentBuckK() external view returns (uint256);   // 1e18
@@ -33,6 +34,8 @@ interface IBuckHolder {
 interface IBuckNetAccount {
     function netBalanceOf(address a) external view returns (uint256);
     function accountBalancesScaled(address a) external view returns (uint256 gross, uint256 net);
+    function totalIssued() external view returns (uint256);
+    function maturitiesPending() external view returns (bool);
 }
 
 /// @notice BuckCredit, as the basket sees it: the issuer of its own MARKED
@@ -180,6 +183,8 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     event PaidInKind(address indexed to, address indexed token, uint256 amount);
 
     error MinOut();
+    error NonzeroBasketPremium();
+    error CreditShortfallIncreased();
 
     // --- Buck and the credit --------------------------------------------------- //
 
@@ -293,10 +298,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         }
     }
 
-    /// @notice Liquidity: what the account can spend -- the BUCK held plus the
-    ///         headroom under K x equity.  Buck computes it.
-    function _liquidityS(Snap memory s) internal pure returns (uint256) {
-        return s.spend;
+    /// @notice Planning liquidity, separate from actual wallet cash (s.spend).
+    ///         Canonical credit is only potential until _fundCash mints it.
+    function _liquidityS(Snap memory s) internal view returns (uint256) {
+        return s.spend + (netAccounting ? _issuableS(s) : 0);
     }
 
     /// @notice K x the credit's mark, less the lien (< 0: under water).  The
@@ -313,7 +318,69 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     /// @notice What the wheel may place: the liquidity beyond its target.
     function _usableS(Snap memory s) internal view returns (uint256) {
         uint256 t = _targetS(s);
-        return s.spend > t ? s.spend - t : 0;
+        uint256 liquid = _liquidityS(s);
+        return liquid > t ? liquid - t : 0;
+    }
+
+    /// @dev Pre: canonical ordinary basket, one self-insured zero-premium
+    ///      MARKED NFT. Post: no state change; additional principal fits its
+    ///      face/current mark, K, principal, account and supply bounds. A
+    ///      matured facility or pending maturity book has no issuance room.
+    ///      The unpaid Jubilee claim never enters this collateral calculation.
+    function _issuableS(Snap memory s) internal view returns (uint256 room) {
+        if (address(credit) == address(0)) return 0;
+        IBuckNetAccount token = IBuckNetAccount(address(buck));
+        if (token.maturitiesPending()) return 0;
+        (uint256 principal, uint256 seconds_) = credit.issuanceOf(creditId);
+        if (principal != 0 && seconds_ == principal * (50 * (365 days + 6 hours))) return 0;
+        (uint256 face,, uint32 rate) = credit.creditInfo(creditId);
+        if (rate != 0) revert NonzeroBasketPremium();
+        uint256 mark = Math.min(face, _creditValueS(s, _equityS(s, MARK_LOW)));
+        uint256 limit = Math.mulDiv(mark, s.k, 1e18);
+        if (principal >= limit) return 0;
+        room = Math.min(limit - principal, BuckTypes.MAX_BALANCE - principal);
+        (uint256 gross,) = token.accountBalancesScaled(address(this));
+        room = Math.min(room, (BuckTypes.MAX_BALANCE * 1e36 - gross) / 1e36);
+        room = Math.min(room, type(uint256).max / 1e36 - token.totalIssued());
+    }
+
+    /// @dev Pre: authorized upkeep, no position mutation in progress. Refresh
+    ///      K and collateral before exercising credit. Post: return at most
+    ///      desired, backed by actual cash; mint precisely its cash shortfall,
+    ///      never maximum headroom. The returned opening shortfall is checked
+    ///      after a purchase. Failure of mint/trade/postcheck reverts together.
+    function _fundCash(uint256 desired) internal returns (uint256 funded, uint256 shortfall) {
+        if (!netAccounting) return (Math.min(desired, _bk().balanceOf(address(this))), 0);
+        controller.compute();
+        Snap memory s = _snap();
+        _markS(s);
+        shortfall = _shortfallS(s);
+        funded = Math.min(desired, _liquidityS(s));
+        if (funded > s.spend) {
+            uint256[] memory ids = new uint256[](1);
+            ids[0] = creditId;
+            _bk().mint(funded - s.spend, ids);
+            creditLive = true;
+        }
+    }
+
+    /// @dev Policy solvency using fresh bare collateral and the independently
+    ///      configured held-LP-BUCK offset. Unpaid claims are not collateral.
+    function _shortfallS(Snap memory s) internal view returns (uint256) {
+        if (!netAccounting || address(credit) == address(0)) return 0;
+        (uint256 face,,) = credit.creditInfo(creditId);
+        uint256 mark = Math.min(face, _creditValueS(s, _equityS(s, MARK_LOW)));
+        uint256 limit = Math.mulDiv(mark, s.k, 1e18);
+        return s.lien > limit ? s.lien - limit : 0;
+    }
+
+    /// @dev Postcondition of a canonical purchase/pair: no greater credit
+    ///      shortfall after actual fees, carried pool value and fresh marks.
+    function _finishBuy(uint256 openingShortfall) internal {
+        if (!netAccounting) return;
+        Snap memory s = _snap();
+        if (_shortfallS(s) > openingShortfall) revert CreditShortfallIncreased();
+        _markS(s);
     }
 
     function _grainS(Snap memory s) internal view returns (uint256) {

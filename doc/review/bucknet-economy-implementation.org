@@ -435,10 +435,14 @@ implementation sequence, before changing the primary economy builder.
 - [X] Keep valuation shared in a linked library and move constituent
   registration into the existing venue, preserving governed access and the
   existing anchors/rounding. Retain runtime-limit acceptance for the shell.
-- [ ] Replace implicit spending in both existing upkeep facets with explicit
+- [X] Replace implicit spending in both existing upkeep facets with explicit
   issuance of the cash shortfall. Mark collateral first; cap by NFT face,
   actual principal, K, account/supply limits and maturity. Do not mint maximum
   room just to activate it or report available capacity as wallet cash.
+  Both facets now refresh K, mark bare collateral, budget cash plus bounded
+  issuable principal, and mint only the requested cash shortfall. Purchase
+  postchecks reject increased shortfall after actual pool execution; sale /
+  fee proceeds stay cash. The policy ceiling also excludes unpaid claims.
 - [ ] Add bounded explicit basket debt settlement outside its position lock.
   Receiving swap proceeds or arb income leaves cash until actual principal
   is retired. Preserve owner cash bounds, exact relief/refund, the shared block
@@ -529,7 +533,7 @@ Continue in this order:
    K solvency and low-K exits. Replace implicit draw/repay with explicit issuance
    and reduction, and connect the existing wheel's marked reserve work.
    Basket valuation is now connected and tested through actual debt using a
-   test-only opening seam. Next complete explicit wheel issuance/repayment,
+   test-only opening seam. Explicit wheel issuance is now tested; next finish repayment,
    prospective exit solvency and the desk before removing the public opening
    gate. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
@@ -673,4 +677,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Connect canonical basket valuation and bind shared library in clients | Basket snapshots now distinguish actual net cash, NFT principal and the capped fee-aware mutual Jubilee claim. LP entries count only delivered cash; receipt values round once; new-credit collateral excludes unpaid relief. Six real-contract accounting/size cases plus ten math cases and twenty existing V3 cash-basket cases passed (36 focused). The complete contract run passed 1,527 with one fork skip; labelled legacy coverage and absent-proof exclusions remain explicit. Platform smoke: 34 Python and 20 JS passed; wallet acceptance: 15 passed including Chromium; artifact compiler/link/size checks passed. Linked valuation keeps the shell at 24,473 bytes (103 bytes spare); the shared library is 3,076 bytes. Shared Python/JS basket deployment and version-7 restoration bind its actual code/address. Final real gain-fee integration passed six cases; final old-version/missing/substituted-library restore checks passed two JS cases. Public leveraged opening, explicit wheel/desk/exit flows, five-year runs and Notes remain open. | =518c32f1= |
 
-| 2026-11-05 | Recover basket runtime space using the existing venue | Moved equity constituent registration beside pool setup in BuckBasketUniswapV3. The existing governed public API performs an authenticated self-call; direct fallback access cannot bypass governance. A source comparison confirms unchanged guards, weighting/anchor rounding and events. The shell falls from 24,473 to 22,648 bytes; both V3 and machine venue facets remain below EIP-170. Focused basket/machine/real-V3 suites: 99 passed. Full make nix-test: 1,528 passed, one fork skip and the same four absent-proof exclusions. Artifact size/link checks and sandbox rebuild passed; final real-identity/version-7 restore tests: two JS passed. Added the ordered basket/desk completion checklist. No public leveraged opening, five-year economy or corrected-token Notes acceptance is claimed. | This commit |
+| 2026-11-05 | Recover basket runtime space using the existing venue | Moved equity constituent registration beside pool setup in BuckBasketUniswapV3. The existing governed public API performs an authenticated self-call; direct fallback access cannot bypass governance. A source comparison confirms unchanged guards, weighting/anchor rounding and events. The shell falls from 24,473 to 22,648 bytes; both V3 and machine venue facets remain below EIP-170. Focused basket/machine/real-V3 suites: 99 passed. Full make nix-test: 1,528 passed, one fork skip and the same four absent-proof exclusions. Artifact size/link checks and sandbox rebuild passed; final real-identity/version-7 restore tests: two JS passed. Added the ordered basket/desk completion checklist. No public leveraged opening, five-year economy or corrected-token Notes acceptance is claimed. | =a4280eb4= |
+
+| 2026-11-05 | Exercise basket credit explicitly in both upkeep facets | Planning cash and credit capacity are separate. Both facets refresh K, mark collateral without unpaid claims, respect face/principal/account/supply/maturity bounds, and mint only the requested cash shortfall. Purchase postconditions re-mark actual net positions and reject a worse credit shortfall. Sale and fee proceeds remain cash until explicit retirement; the machine daily path no longer calls removed signed-account APIs. Nine real-contract funding tests passed, including 256 capacity/quote/issuance fuzz cases, 50-year refusal and full rollback after an LP mint/K cut. The preceding basket/machine/V3 regression pass covered 108 cases before the last three added checks. Runtime: component facet 14,239 bytes, machine facet 21,044; shell stays 22,648. Public leveraged opening, repayment/exit/desk/wheel work and five-year/Notes evidence remain open. | This commit |
