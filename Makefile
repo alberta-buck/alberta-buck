@@ -142,7 +142,7 @@ unit-%:
 path-%:
 	forge test $(FORGE_OPTS) --match-path $* -vvv
 match-%:
-	forge test $(FORGE_OPTS) --match-contract $* -vvv
+	forge test $(FORGE_OPTS) --match-contract '$*' -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:
@@ -2085,9 +2085,9 @@ venv-activate: venv-setup
 #
 nix-%:
 	@if [ -n "$(TARGET)" ]; then \
-		nix develop .#$(TARGET) $(NIX_OPTS) --command $(MAKE) $*; \
+		nix develop .#$(TARGET) $(NIX_OPTS) --command $(MAKE) "$*"; \
 	else \
-		nix develop $(NIX_OPTS) --command $(MAKE) $*; \
+		nix develop $(NIX_OPTS) --command $(MAKE) "$*"; \
 	fi
 
 #

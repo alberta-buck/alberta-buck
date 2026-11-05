@@ -96,7 +96,7 @@ contract BuckMintSpendableTest is Test {
 
     function test_mint_moreThanTheCreditsGive_reverts() public {
         uint256[] memory ids = _credit(0);
-        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        vm.expectRevert(Buck.InsufficientCreditAllocation.selector);
         buck.mint(FACE, ids);                                // at most K x FACE
     }
 
@@ -111,7 +111,7 @@ contract BuckMintSpendableTest is Test {
 
     function test_mint_skipsACreditWhoseDepositExceedsK() public {
         uint256[] memory ids = _credit(800);                 // e = 80% > K
-        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        vm.expectRevert(Buck.InsufficientCreditAllocation.selector);
         buck.mint(1e6, ids);
     }
 }

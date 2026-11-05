@@ -85,13 +85,13 @@ contract BuckCreditMarkedTest is Test {
         assertEq(buck.signedRawBalanceOf(address(this)), -750e6);
         credit.mark(tid, 800e6);                            // equity falls
         assertEq(buck.balanceOf(address(this)), 0, "no headroom: under water");
-        vm.expectRevert(bytes("BUCK: amount exceeds spendable"));
+        vm.expectRevert(Buck.InsufficientSpendableBalance.selector);
         buck.transfer(POOL, 1);
         assertEq(buck.signedRawBalanceOf(address(this)), -750e6, "no margin call: the lien stands");
     }
 
     function test_marked_cannotActivateBeforeItIsMarked() public {
-        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        vm.expectRevert(Buck.InsufficientCreditAllocation.selector);
         buck.mint(1e6, _ids());
     }
 

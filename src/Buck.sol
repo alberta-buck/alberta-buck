@@ -76,6 +76,43 @@ interface IBuckCredit {
 
 contract Buck is IERC20, IERC20Metadata {
 
+    // ---- typed failure conditions ------------------------------------------
+
+    /// @dev Named failures retain the original guard distinctions; callers
+    ///      decode selectors rather than depending on English revert text.
+    error ZeroCredit();
+    error ZeroController();
+    error ZeroIdentityRegistry();
+    error ZeroInsurancePool();
+    error Reentrant();
+    error SenderNotVerified();
+    error SpenderNotVerified();
+    error RecipientNotVerified();
+    error InvalidIdentityProof();
+    error SelfSponsorship();
+    error SponsorshipNotRequested();
+    error AccountNotVerified();
+    error SponsorNotVerified();
+    error SponsoredAccountCarrying();
+    error SponsorCarrying();
+    error AlreadySponsored();
+    error AccountIsSponsor();
+    error SponsorIsSponsored();
+    error NotSponsored();
+    error NotSponsorshipParty();
+    error InsufficientMintFunding();
+    error InsurancePoolUnderfunded();
+    error PostBurnCreditExceeded();
+    error NotCreditOwner();
+    error PremiumRateTooHigh();
+    error InsufficientCreditAllocation();
+    error InsufficientCoverage();
+    error SenderApprovalRequired();
+    error RecipientApprovalRequired();
+    error InsufficientSpendableBalance();
+    error InsufficientNominalBalance();
+    error InsufficientAllowance();
+
     // ---- immutables --------------------------------------------------------
 
     IBuckCredit       public immutable buckCredit;
@@ -143,7 +180,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///      The 4-arg identity-bound `approve` IS guarded -- it calls into the
     ///      registry.
     modifier nonReentrant() {
-        require(!_entered, "BUCK: reentrant");
+        if (!(!_entered)) revert Reentrant();
         _entered = true;
         _;
         _entered = false;
@@ -378,10 +415,10 @@ contract Buck is IERC20, IERC20Metadata {
         address _identity,
         address _insurancePool
     ) {
-        require(_buckCredit    != address(0), "buckCredit=0");
-        require(_buckK         != address(0), "buckK=0");
-        require(_identity      != address(0), "identity=0");
-        require(_insurancePool != address(0), "insurancePool=0");
+        if (!(_buckCredit    != address(0))) revert ZeroCredit();
+        if (!(_buckK         != address(0))) revert ZeroController();
+        if (!(_identity      != address(0))) revert ZeroIdentityRegistry();
+        if (!(_insurancePool != address(0))) revert ZeroInsurancePool();
         buckCredit    = IBuckCredit(_buckCredit);
         buckK         = IBuckK(_buckK);
         identity      = IdentityRegistry(_identity);
@@ -492,12 +529,9 @@ contract Buck is IERC20, IERC20Metadata {
         IdentityRegistry.ElGamalCT calldata E_bob,
         IdentityRegistry.CPProof calldata pi_CP
     ) external nonReentrant returns (bool) {
-        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
-        require(identity.isVerified(spender),    "BUCK: spender not verified");
-        require(
-            identity.verifyApprove(msg.sender, spender, E_bob, pi_CP),
-            "BUCK: bad CP proof"
-        );
+        if (!(identity.isVerified(msg.sender))) revert SenderNotVerified();
+        if (!(identity.isVerified(spender))) revert SpenderNotVerified();
+        if (!(identity.verifyApprove(msg.sender, spender, E_bob, pi_CP))) revert InvalidIdentityProof();
         bytes32 receipt = _ciphertextHash(E_bob);
         _receiptFragments[msg.sender][spender] = receipt;
         emit ApproveReceipt(msg.sender, spender, receipt);
@@ -563,7 +597,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///         demurrage.  Takes effect only once `payer` accepts.
     /// @dev    Pass address(0) to withdraw a pending request.
     function requestDemurragePayer(address payer) external nonReentrant {
-        require(payer != msg.sender, "BUCK: self payer");
+        if (!(payer != msg.sender)) revert SelfSponsorship();
         demurragePayerRequest[msg.sender] = payer;
         emit DemurragePayerRequested(msg.sender, payer);
     }
@@ -589,12 +623,12 @@ contract Buck is IERC20, IERC20Metadata {
     ///             by construction, so chains would not recurse, but they
     ///             make "who is actually paying" unanswerable by inspection.
     function acceptDemurragePayer(address account) external nonReentrant {
-        require(demurragePayerRequest[account] == msg.sender, "BUCK: not requested");
-        require(account != msg.sender,                        "BUCK: self payer");
-        require(identity.isVerified(account),                 "BUCK: account not verified");
-        require(identity.isVerified(msg.sender),              "BUCK: payer not verified");
-        require(!identity.isCarrying(account),                "BUCK: account is Carrying");
-        require(!identity.isCarrying(msg.sender),             "BUCK: payer is Carrying");
+        if (!(demurragePayerRequest[account] == msg.sender)) revert SponsorshipNotRequested();
+        if (!(account != msg.sender)) revert SelfSponsorship();
+        if (!(identity.isVerified(account))) revert AccountNotVerified();
+        if (!(identity.isVerified(msg.sender))) revert SponsorNotVerified();
+        if (!(!identity.isCarrying(account))) revert SponsoredAccountCarrying();
+        if (!(!identity.isCarrying(msg.sender))) revert SponsorCarrying();
 
         // Everything accrued so far stays where it accrued.
         _accrueJubilee();
@@ -602,9 +636,9 @@ contract Buck is IERC20, IERC20Metadata {
         _crystallize(msg.sender);
 
         AccountState memory as_ = _state[account];
-        require(as_.flags & FLAG_SPONSORED == 0, "BUCK: already sponsored");
-        require(sponseeCount[account] == 0,      "BUCK: account is a payer");
-        require(_state[msg.sender].flags & FLAG_SPONSORED == 0, "BUCK: payer is sponsored");
+        if (!(as_.flags & FLAG_SPONSORED == 0)) revert AlreadySponsored();
+        if (!(sponseeCount[account] == 0)) revert AccountIsSponsor();
+        if (!(_state[msg.sender].flags & FLAG_SPONSORED == 0)) revert SponsorIsSponsored();
 
         as_.flags |= FLAG_SPONSORED;
         _state[account] = as_;
@@ -620,8 +654,8 @@ contract Buck is IERC20, IERC20Metadata {
     ///         bleeding.
     function clearDemurragePayer(address account) external nonReentrant {
         address p = demurragePayer[account];
-        require(p != address(0), "BUCK: not sponsored");
-        require(msg.sender == account || msg.sender == p, "BUCK: not a party");
+        if (!(p != address(0))) revert NotSponsored();
+        if (!(msg.sender == account || msg.sender == p)) revert NotSponsorshipParty();
 
         // Crystallise first, so the rectangle accrued under the delegation
         // lands on the payer rather than snapping back onto `account`.
@@ -712,7 +746,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///      type(uint256).max delivers everything the listed credits can
     ///      deliver -- activating their whole faces -- instead of reverting.
     function _mintAllocated(uint256 amount, uint256[] memory tokenIds) internal {
-        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+        if (!(identity.isVerified(msg.sender))) revert SenderNotVerified();
 
         // PID cadence: compute() advances the PID if dT elapsed (cheap cached
         // read otherwise).  totalCreditValue and currentBuckK are captured
@@ -752,8 +786,7 @@ contract Buck is IERC20, IERC20Metadata {
         // (zero-cost insurance) => zero requirement => exempt.
         if (factor > 0 && poolPrincipal > 0) {
             uint256 required = poolPrincipal * factor / BUCKK_SCALE;
-            require(preFundingBalance >= required,
-                    "BUCK: insufficient mint funding");
+            if (!(preFundingBalance >= required)) revert InsufficientMintFunding();
         }
 
         // Settlement: insurance pool receives `poolPrincipal`, minter is
@@ -810,7 +843,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///                                          (the user's "spendable"
     ///                                          shrinks by exactly amount)
     function _burnAllocated(uint256 amount, uint256[] memory tokenIds) internal {
-        require(identity.isVerified(msg.sender), "BUCK: sender not verified");
+        if (!(identity.isVerified(msg.sender))) revert SenderNotVerified();
         // Burn activity amortizes the PID, and the burn releases spendable at
         // the K it returns.
         uint256 k = buckK.compute();
@@ -820,7 +853,7 @@ contract Buck is IERC20, IERC20Metadata {
         _accrueJubilee();
         if (poolRefund > 0) {
             int256 poolRaw = _state[insurancePool].balance.asInt();
-            require(int256(poolRefund) <= poolRaw, "BUCK: pool underfunded");
+            if (!(int256(poolRefund) <= poolRaw)) revert InsurancePoolUnderfunded();
             // The refund leaves the pool as any transfer from it would: a
             // Carrying pool (as the registry binds it) hands the refunded
             // share of its accrued age back to the holder.
@@ -858,8 +891,7 @@ contract Buck is IERC20, IERC20Metadata {
         // year on year, without the holder doing anything.
         int256 signedRaw = _state[msg.sender].balance.asInt();
         uint256 used     = signedRaw < 0 ? uint256(-signedRaw) : 0;
-        require(used <= creditLimit(msg.sender),
-                "BUCK: post-burn credit used exceeds limit");
+        if (!(used <= creditLimit(msg.sender))) revert PostBurnCreditExceeded();
 
         // Silence the unused-variable warning while keeping the metric
         // available for future event emission.
@@ -1014,11 +1046,11 @@ contract Buck is IERC20, IERC20Metadata {
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
             CreditSlice memory s = slices[i];
-            require(s.owner == msg.sender, "BUCK: not credit owner");
+            if (!(s.owner == msg.sender)) revert NotCreditOwner();
             // Cap is now faceValue (auto-activation can walk into unactivated
             // capacity); mintsBacked is the running tally of activated take.
             uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
-            require(effRate < BP, "BUCK: NFT rate too high");
+            if (!(effRate < BP)) revert PremiumRateTooHigh();
             // At K <= e a unit of coverage costs more deposit than it frees.
             if (k <= effRate * (BUCKK_SCALE / BP)) continue;
 
@@ -1054,8 +1086,7 @@ contract Buck is IERC20, IERC20Metadata {
             totalCoverage += take;
             poolPrincipal += principal_i;
         }
-        require(remaining == 0 || amount == type(uint256).max,
-                "BUCK: insufficient credit allocation");
+        if (!(remaining == 0 || amount == type(uint256).max)) revert InsufficientCreditAllocation();
     }
 
     function _allocateMintView(uint256 amount, uint256[] memory tokenIds, uint256 k)
@@ -1067,7 +1098,7 @@ contract Buck is IERC20, IERC20Metadata {
             uint256 tid = tokenIds[i];
             CreditSlice memory s = slices[i];
             uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
-            require(effRate < BP, "BUCK: NFT rate too high");
+            if (!(effRate < BP)) revert PremiumRateTooHigh();
             if (k <= effRate * (BUCKK_SCALE / BP)) continue;   // mirrors _allocateMint
             uint256 used = mintsBacked[tid];
             if (s.faceValue <= used) continue;
@@ -1080,8 +1111,7 @@ contract Buck is IERC20, IERC20Metadata {
             totalCoverage += take;
             poolPrincipal += principal_i;
         }
-        require(remaining == 0 || amount == type(uint256).max,
-                "BUCK: insufficient credit allocation");
+        if (!(remaining == 0 || amount == type(uint256).max)) revert InsufficientCreditAllocation();
     }
 
     function _allocateBurn(uint256 amount, uint256[] memory tokenIds, uint256 k)
@@ -1092,7 +1122,7 @@ contract Buck is IERC20, IERC20Metadata {
         for (uint256 i = 0; i < tokenIds.length && remaining > 0; i++) {
             uint256 tid = tokenIds[i];
             CreditSlice memory s = slices[i];
-            require(s.owner == msg.sender, "BUCK: not credit owner");
+            if (!(s.owner == msg.sender)) revert NotCreditOwner();
             uint256 effRate = uint256(s.premiumRate) * POOL_ROI_INV;
             // `mintsBacked` and `activatedValue` are equal by construction (M)
             // -- activation happens only in _allocateMint, and updateCredit
@@ -1125,7 +1155,7 @@ contract Buck is IERC20, IERC20Metadata {
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }
-        require(remaining == 0, "BUCK: insufficient coverage to unwind");
+        if (!(remaining == 0)) revert InsufficientCoverage();
     }
 
     function _allocateBurnView(uint256 amount, uint256[] memory tokenIds, uint256 k)
@@ -1149,7 +1179,7 @@ contract Buck is IERC20, IERC20Metadata {
             totalUnwind += unwind;
             poolRefund  += refund_i;
         }
-        require(remaining == 0, "BUCK: insufficient coverage to unwind");
+        if (!(remaining == 0)) revert InsufficientCoverage();
     }
 
     /// @dev Build the caller's NFT list sorted ascending by premiumRate.
@@ -1215,23 +1245,17 @@ contract Buck is IERC20, IERC20Metadata {
     ///      identity.  Hence the fallback is only valid when the party it
     ///      represents is already public.
     function _identityCheckedTransfer(address from, address to, uint256 amount) internal {
-        require(identity.isVerified(from), "BUCK: sender not verified");
-        require(identity.isVerified(to),   "BUCK: recipient not verified");
+        if (!(identity.isVerified(from))) revert SenderNotVerified();
+        if (!(identity.isVerified(to))) revert RecipientNotVerified();
 
         bytes32 toHash = _receiptFragments[from][to];
         if (toHash == bytes32(0)) {
-            require(
-                identity.isPublicIdentity(from),
-                "BUCK: sender must identity-approve recipient"
-            );
+            if (!(identity.isPublicIdentity(from))) revert SenderApprovalRequired();
             toHash = _identityHash(to);
         }
         bytes32 fromHash = _receiptFragments[to][from];
         if (fromHash == bytes32(0)) {
-            require(
-                identity.isPublicIdentity(to),
-                "BUCK: recipient must identity-approve sender"
-            );
+            if (!(identity.isPublicIdentity(to))) revert RecipientApprovalRequired();
             fromHash = _identityHash(from);
         }
 
@@ -1253,7 +1277,7 @@ contract Buck is IERC20, IERC20Metadata {
     ///      toward more-negative.
     function _nonCarryingTransfer(address from, address to, uint256 value) internal {
         _crystallize(from);
-        require(value <= balanceOf(from), "BUCK: amount exceeds spendable");
+        if (!(value <= balanceOf(from))) revert InsufficientSpendableBalance();
         _crystallize(to);
         // A draw (past the sender's held BUCK) or a repayment (into an
         // account below zero) moves the BUCK issued, which the fund accrues
@@ -1277,7 +1301,7 @@ contract Buck is IERC20, IERC20Metadata {
         // ---- from ----
         AccountState memory fs = _state[from];
         int256 rawSigned = fs.balance.asInt();
-        require(rawSigned >= int256(value), "BUCK: Carrying amount exceeds raw");
+        if (!(rawSigned >= int256(value))) revert InsufficientNominalBalance();
         uint256 raw = uint256(rawSigned);
 
         uint256 elapsed = block.timestamp - uint256(fs.timestamp);
@@ -1753,7 +1777,7 @@ contract Buck is IERC20, IERC20Metadata {
     function _spendAllowance(address owner, address spender, uint256 amount) internal {
         uint256 cur = _allowances[owner][spender];
         if (cur != type(uint256).max) {
-            require(cur >= amount, "BUCK: insufficient allowance");
+            if (!(cur >= amount)) revert InsufficientAllowance();
             unchecked { _allowances[owner][spender] = cur - amount; }
         }
     }

@@ -148,7 +148,7 @@ contract BuckCreditReappraisalTest is Test {
                  "used == limit");
 
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: post-burn credit used exceeds limit"));
+        vm.expectRevert(Buck.PostBurnCreditExceeded.selector);
         buck.burn(1e6, _ids(tid));
 
         // Alice earns BUCK back and repays.  Now the unwind fits.

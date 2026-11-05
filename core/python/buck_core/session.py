@@ -33,6 +33,7 @@ from typing import Any
 
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
+from eth_utils.abi import abi_to_signature
 from web3 import Web3
 
 from buck_core.artifacts import load_artifact, repo_root
@@ -42,6 +43,27 @@ log = logging.getLogger("buck_core.session")
 # Gas big enough for the largest deploy (Universal Router) without estimation.
 DEPLOY_GAS = 55_000_000
 CALL_GAS = 12_000_000
+
+
+def custom_error_name(contract_abi, error) -> str | None:
+    """Decode a typed revert selector using the called contract's error ABI.
+
+    Unknown selectors remain unknown. Names are diagnostic, not evidence of
+    where in a call graph the revert originated.
+    """
+    data = getattr(error, "data", None)
+    if not isinstance(data, (str, bytes)):
+        return None
+    try:
+        raw = bytes.fromhex(data.removeprefix("0x")) if isinstance(data, str) else data
+    except ValueError:
+        return None
+    if len(raw) < 4:
+        return None
+    for item in contract_abi or ():
+        if item.get("type") == "error" and Web3.keccak(text=abi_to_signature(item))[:4] == raw[:4]:
+            return item["name"]
+    return None
 
 
 class Expect(enum.Enum):
@@ -229,6 +251,9 @@ class Web3Session:
             fn.call({"from": from_addr, "gas": gas, "value": value},
                     block_identifier=block)
         except Exception as e:
+            decoded = custom_error_name(getattr(fn, "contract_abi", None), e)
+            if decoded is not None:
+                return decoded
             msg = getattr(e, "message", None)
             if not isinstance(msg, str) and e.args and isinstance(e.args[0], str):
                 msg = e.args[0]

@@ -207,13 +207,13 @@ contract BuckTest is Test {
     }
 
     function test_constructor_rejectsZeroAddresses() public {
-        vm.expectRevert(bytes("buckCredit=0"));
+        vm.expectRevert(Buck.ZeroCredit.selector);
         new Buck(address(0), address(kCtrl), address(reg), POOL);
-        vm.expectRevert(bytes("buckK=0"));
+        vm.expectRevert(Buck.ZeroController.selector);
         new Buck(address(credit), address(0), address(reg), POOL);
-        vm.expectRevert(bytes("identity=0"));
+        vm.expectRevert(Buck.ZeroIdentityRegistry.selector);
         new Buck(address(credit), address(kCtrl), address(0), POOL);
-        vm.expectRevert(bytes("insurancePool=0"));
+        vm.expectRevert(Buck.ZeroInsurancePool.selector);
         new Buck(address(credit), address(kCtrl), address(reg), address(0));
     }
 
@@ -221,14 +221,14 @@ contract BuckTest is Test {
 
     function test_mint_requiresVerifiedSender() public {
         vm.prank(carol);
-        vm.expectRevert(bytes("BUCK: sender not verified"));
+        vm.expectRevert(Buck.SenderNotVerified.selector);
         buck.mint(1e6);
     }
 
     function test_mint_revertsWithoutCredit() public {
         // Alice has no BuckCredit NFT yet -> insufficient credit allocation.
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        vm.expectRevert(Buck.InsufficientCreditAllocation.selector);
         buck.mint(1e6);
     }
 
@@ -322,7 +322,7 @@ contract BuckTest is Test {
         order[0] = small;
 
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        vm.expectRevert(Buck.InsufficientCreditAllocation.selector);
         buck.mint(80e6, order);
     }
 
@@ -334,7 +334,7 @@ contract BuckTest is Test {
         order[0] = bobToken;
 
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: not credit owner"));
+        vm.expectRevert(Buck.NotCreditOwner.selector);
         buck.mint(10e6, order);
     }
 
@@ -361,7 +361,7 @@ contract BuckTest is Test {
         // take=63.16e6; combined with the first mint's take=52.63e6 the
         // total would be 115.79e6 > 100e6 face -> _allocateMint runs out
         // of capacity before satisfying the remaining draw.
-        vm.expectRevert(bytes("BUCK: insufficient credit allocation"));
+        vm.expectRevert(Buck.InsufficientCreditAllocation.selector);
         buck.mint(60e6);
     }
 
@@ -373,14 +373,14 @@ contract BuckTest is Test {
         buck.mint(100e6);
         uint256 backed = buck.mintsBacked(id);
         uint256 premium = buck.mintsPrincipal(id);
-        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(alice);
         buck.burn(type(uint256).max);
         assertEq(buck.mintsBacked(id), backed);
         assertEq(buck.mintsPrincipal(id), premium);
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
-        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         vm.prank(alice);
         buck.quoteBurn(type(uint256).max, ids);
     }
@@ -502,7 +502,7 @@ contract BuckTest is Test {
         order[0] = dear;
 
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: insufficient coverage to unwind"));
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         buck.burn(10e6, order);
 
         // Burn against the cheap NFT (the one with allocation) succeeds.
@@ -689,7 +689,7 @@ contract BuckTest is Test {
         uint256[] memory order = new uint256[](1);
         order[0] = tid;
         vm.prank(alice);
-        vm.expectRevert("BUCK: insufficient coverage to unwind");
+        vm.expectRevert(Buck.InsufficientCoverage.selector);
         buck.burn(10e6, order);
     }
 
@@ -748,7 +748,7 @@ contract BuckTest is Test {
             BuckCredit.DepreciationType.NONE, 0, 0, 50   // 50bp premium, unactivated
         );
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: insufficient mint funding"));
+        vm.expectRevert(Buck.InsufficientMintFunding.selector);
         b.mint(100e6);
     }
 
@@ -914,7 +914,7 @@ contract BuckTest is Test {
         buck.approve(bob, 50e6);                 // plain approve, no receipt
 
         vm.prank(bob);
-        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient"));
+        vm.expectRevert(Buck.SenderApprovalRequired.selector);
         buck.transferFrom(alice, bob, 10e6);     // alice & bob both non-public
     }
 
@@ -929,7 +929,7 @@ contract BuckTest is Test {
         buck.approve(bob, 50e6);
 
         vm.prank(bob);
-        vm.expectRevert(bytes("BUCK: recipient not verified"));
+        vm.expectRevert(Buck.RecipientNotVerified.selector);
         buck.transferFrom(alice, carol, 10e6);   // carol unverified
     }
 
@@ -1011,21 +1011,21 @@ contract BuckTest is Test {
         IdentityRegistry.CPProof memory bad = _cpProof();
         bad.e = (bad.e + 1) % BN254.R;
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: bad CP proof"));
+        vm.expectRevert(Buck.InvalidIdentityProof.selector);
         buck.approve(bob, 100e6, E_b, bad);
     }
 
     function test_identityApprove_rejectsUnverifiedSender() public {
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(carol);
-        vm.expectRevert(bytes("BUCK: sender not verified"));
+        vm.expectRevert(Buck.SenderNotVerified.selector);
         buck.approve(bob, 100e6, E_b, _cpProof());
     }
 
     function test_identityApprove_rejectsUnverifiedSpender() public {
         IdentityRegistry.ElGamalCT memory E_b = _ct(".approve.E_for_bob");
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: spender not verified"));
+        vm.expectRevert(Buck.SpenderNotVerified.selector);
         buck.approve(carol, 100e6, E_b, _cpProof());
     }
 
@@ -1040,7 +1040,7 @@ contract BuckTest is Test {
         IdentityRegistry.ElGamalCT memory junk;
         IdentityRegistry.CPProof memory junkProof;
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: bad CP proof"));
+        vm.expectRevert(Buck.InvalidIdentityProof.selector);
         buck.approve(pool, 50e6, junk, junkProof);
     }
 
@@ -1048,7 +1048,7 @@ contract BuckTest is Test {
 
     function test_transfer_requiresVerifiedSender() public {
         vm.prank(carol);
-        vm.expectRevert(bytes("BUCK: sender not verified"));
+        vm.expectRevert(Buck.SenderNotVerified.selector);
         buck.transfer(bob, 1e6);
     }
 
@@ -1057,7 +1057,7 @@ contract BuckTest is Test {
         vm.prank(alice);
         buck.mint(100e6);
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: recipient not verified"));
+        vm.expectRevert(Buck.RecipientNotVerified.selector);
         buck.transfer(carol, 1e6);
     }
 
@@ -1068,7 +1068,7 @@ contract BuckTest is Test {
 
         // Alice has not yet approved Bob -> no receipt fragment -> must revert.
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: sender must identity-approve recipient"));
+        vm.expectRevert(Buck.SenderApprovalRequired.selector);
         buck.transfer(bob, 1e6);
     }
 

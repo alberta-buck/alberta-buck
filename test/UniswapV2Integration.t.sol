@@ -321,7 +321,7 @@ contract UniswapV2IntegrationTest is Test {
         // the same revert directly via buck.transfer to avoid the allowance
         // dance -- BUCK's demurrage override defeats forge-std's `deal`.
         vm.prank(CAROL);
-        vm.expectRevert(bytes("BUCK: sender not verified"));
+        vm.expectRevert(Buck.SenderNotVerified.selector);
         buck.transfer(pair, 1_000e6);
     }
 

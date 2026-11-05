@@ -381,7 +381,7 @@ contract BuckDemurrageTest is Test {
         assertGt(rawPlusLimit, spendable, "raw + creditLimit > spendable (fee locks held BUCK)");
 
         vm.prank(alice);
-        vm.expectRevert(bytes("BUCK: amount exceeds spendable"));
+        vm.expectRevert(Buck.InsufficientSpendableBalance.selector);
         buck.transfer(bob, spendable + 1);
 
         vm.prank(alice);

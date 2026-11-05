@@ -8,7 +8,7 @@ from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _imp
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
-from buck_core.session import _txhex
+from buck_core.session import _txhex, custom_error_name
 
 # The basket's price guard, by name or (as a bare revert reports it) by selector: keccak("Slippage()").
 SLIPPAGE                        = ("Slippage", "0x7dd37f70")
@@ -990,7 +990,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 self._proxy_exec(d, d.buck.address, d.buck.encode_abi(
                     "burn(uint256,uint256[])", args=[amount, self._token_ids]))
             except Exception as exc:
-                if "BUCK: insufficient coverage to unwind" not in str(exc):
+                if custom_error_name(d.buck.abi, exc) != "InsufficientCoverage":
                     raise
                 self.exit_retries += 1
                 continue

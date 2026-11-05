@@ -74,13 +74,13 @@ test("buckworld: onboard, activate credit, transfer, demurrage == kernel", { ski
   await session.send(world.buck, "transfer", [stranger, 250_000000n],
     { tag: "pay:unverified", expect: "revert", gas: 1_000_000n });
   assert.equal(session.mismatches.length, 0);
-  assert.equal(session.lastRevertReason, "BUCK: recipient not verified");
+  assert.equal(session.lastRevertReason, "RecipientNotVerified");
 
   // Private<->private payment needs the BILATERAL identity-approve
   // handshake first: without it, the transfer is refused...
   await session.send(world.buck, "transfer", [bob.account.address, 250_000000n],
     { tag: "pay:unapproved", expect: "revert", gas: 1_000_000n });
-  assert.equal(session.lastRevertReason, "BUCK: sender must identity-approve recipient");
+  assert.equal(session.lastRevertReason, "SenderApprovalRequired");
 
   // ...so each party re-encrypts their registered identity for the other
   // (Chaum-Pedersen proved on-chain; Bob can now DECRYPT Alice's M).

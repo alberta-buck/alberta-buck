@@ -297,7 +297,7 @@ export function installHouseholdOps(world) {
         const r = await exec(proxy, buck, "burn", [amount, ids], "household:release", "either");
         if (r.status !== "success") throw new Error(s.lastRevertReason || "coverage release reverted");
       } catch (e) {
-        if (!String(e).includes("BUCK: insufficient coverage to unwind")) throw e;
+        if (!String(e).includes("InsufficientCoverage")) throw e;
         agent.exitRetries += 1;
         continue;
       }

@@ -93,7 +93,7 @@ contract Attacker is IReenterHook {
 
     bool    public reentryAttempted;
     bool    public reentrySucceeded;
-    string  public reentryError;
+    bytes   public reentryError;
     uint256 public balanceSeenMidMint;
 
     function configure(Buck _buck, address _sink, uint256 _steal) external {
@@ -111,7 +111,7 @@ contract Attacker is IReenterHook {
         balanceSeenMidMint = buck.balanceOf(address(this));
         try buck.transfer(sink, stealAmount) {
             reentrySucceeded = true;
-        } catch Error(string memory reason) {
+        } catch (bytes memory reason) {
             reentryError = reason;
         }
     }
@@ -164,7 +164,8 @@ contract BuckReentrancyTest is Test {
 
         assertTrue(attacker.reentryAttempted(), "hook never fired -- test is vacuous");
         assertFalse(attacker.reentrySucceeded(), "re-entrant transfer went through");
-        assertEq(attacker.reentryError(), "BUCK: reentrant", "blocked, but not by the guard");
+        assertEq(attacker.reentryError(), abi.encodeWithSelector(Buck.Reentrant.selector),
+            "blocked, but not by the guard");
     }
 
     /// @notice What the guard is actually protecting: mid-mint, coverage is

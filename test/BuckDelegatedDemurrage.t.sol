@@ -267,7 +267,7 @@ contract BuckDelegatedDemurrageTest is Test {
 
     function test_requiresRequestFromSponsee() public {
         vm.prank(carol);
-        vm.expectRevert("BUCK: not requested");
+        vm.expectRevert(Buck.SponsorshipNotRequested.selector);
         buck.acceptDemurragePayer(bob);
     }
 
@@ -283,7 +283,7 @@ contract BuckDelegatedDemurrageTest is Test {
 
     function test_rejectsSelfPayment() public {
         vm.prank(bob);
-        vm.expectRevert("BUCK: self payer");
+        vm.expectRevert(Buck.SelfSponsorship.selector);
         buck.requestDemurragePayer(bob);
     }
 
@@ -291,7 +291,7 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(bob);
         buck.requestDemurragePayer(pool);
         vm.prank(pool);
-        vm.expectRevert("BUCK: payer is Carrying");
+        vm.expectRevert(Buck.SponsorCarrying.selector);
         buck.acceptDemurragePayer(bob);
     }
 
@@ -299,7 +299,7 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(pool);
         buck.requestDemurragePayer(carol);
         vm.prank(carol);
-        vm.expectRevert("BUCK: account is Carrying");
+        vm.expectRevert(Buck.SponsoredAccountCarrying.selector);
         buck.acceptDemurragePayer(pool);
     }
 
@@ -308,7 +308,7 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(stranger);
         buck.requestDemurragePayer(carol);
         vm.prank(carol);
-        vm.expectRevert("BUCK: account not verified");
+        vm.expectRevert(Buck.AccountNotVerified.selector);
         buck.acceptDemurragePayer(stranger);
     }
 
@@ -317,7 +317,7 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(bob);
         buck.requestDemurragePayer(carol);
         vm.prank(carol);
-        vm.expectRevert("BUCK: payer is sponsored");
+        vm.expectRevert(Buck.SponsorIsSponsored.selector);
         buck.acceptDemurragePayer(bob);
     }
 
@@ -326,7 +326,7 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(carol);
         buck.requestDemurragePayer(erin);
         vm.prank(erin);
-        vm.expectRevert("BUCK: account is a payer");
+        vm.expectRevert(Buck.AccountIsSponsor.selector);
         buck.acceptDemurragePayer(carol);
     }
 
@@ -335,7 +335,7 @@ contract BuckDelegatedDemurrageTest is Test {
         vm.prank(bob);
         buck.requestDemurragePayer(erin);
         vm.prank(erin);
-        vm.expectRevert("BUCK: already sponsored");
+        vm.expectRevert(Buck.AlreadySponsored.selector);
         buck.acceptDemurragePayer(bob);
     }
 
@@ -379,7 +379,7 @@ contract BuckDelegatedDemurrageTest is Test {
 
         _delegate(bob, carol);
         vm.prank(dave);
-        vm.expectRevert("BUCK: not a party");
+        vm.expectRevert(Buck.NotSponsorshipParty.selector);
         buck.clearDemurragePayer(bob);
     }
 

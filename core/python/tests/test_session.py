@@ -8,10 +8,12 @@ and JSONL journaling.  The live-EVM path is covered by the sim smoke tests
 """
 
 import logging
+from types import SimpleNamespace
 
 import pytest
+from web3 import Web3
 
-from buck_core.session import Expect, Journal, TransactionReceiptPending, TransactionReverted, Web3Session
+from buck_core.session import Expect, Journal, TransactionReceiptPending, TransactionReverted, Web3Session, custom_error_name
 
 DEPLOYER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
@@ -45,6 +47,34 @@ class StubSession(Web3Session):
 
     def _revert_reason(self, fn, from_addr, gas, value, block):
         return self._reason
+
+
+def test_typed_revert_is_decoded_for_journal_and_callers():
+    class TypedFailure(Exception):
+        data = "0x" + Web3.keccak(text="InsufficientCoverage()")[:4].hex()
+
+    class FailedFn(_Fn):
+        contract_abi = [{"type": "error", "name": "InsufficientCoverage", "inputs": []}]
+
+        def call(self, *args, **kwargs):
+            raise TypedFailure("opaque RPC custom error")
+
+    session = Web3Session(_FakeW3(), DEPLOYER)
+    assert session._revert_reason(FailedFn(), DEPLOYER, 1_000_000, 0, 1) == "InsufficientCoverage"
+
+
+@pytest.mark.parametrize("data", [None, {}, "0x", "0x00", "not hex", "0xdeadbeef"])
+def test_unknown_or_malformed_typed_revert_is_not_misclassified(data):
+    abi = [{"type": "error", "name": "InsufficientCoverage", "inputs": []}]
+    assert custom_error_name(abi, SimpleNamespace(data=data)) is None
+
+
+def test_typed_revert_uses_canonical_tuple_signature_and_preserves_raw_bytes():
+    abi = [{"type": "error", "name": "FailedTerms", "inputs": [
+        {"name": "terms", "type": "tuple", "components": [
+            {"name": "face", "type": "uint256"}, {"name": "pool", "type": "address"}]}]}]
+    raw = bytes(Web3.keccak(text="FailedTerms((uint256,address))")[:4]) + bytes(64)
+    assert custom_error_name(abi, SimpleNamespace(data=raw)) == "FailedTerms"
 
 
 def test_ok_expected_ok():
