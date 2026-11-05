@@ -15,13 +15,22 @@ interface IWheelSharePrice {
     function sharePrice() external view returns (uint256);
 }
 
-/// @notice Three bounded jobs in the basket's existing wheel: bring the
-///         claim heap current, burn deferred issuance, then maintain cash.
+interface IWheelBasketCredit {
+    function netAccounting() external view returns (bool);
+    function credit() external view returns (address);
+    function creditId() external view returns (uint256);
+    function liquidityTarget() external view returns (uint256);
+    function retireCredit(uint256 principal, uint256 maxCash, uint256 minRelief) external returns (uint256, uint256);
+}
+
+/// @notice Bounded jobs in the basket's existing wheel: bring the claim heap
+///         current, burn deferred issuance, maintain fund cash, and optionally
+///         retire the basket's own principal from cash above its target.
 /// @dev PRE: governance binds this wheel as the fund's keeper and valuation
 ///      wheel, and the basket names this wheel. Every attempt authenticates
 ///      that wiring again. Callers cannot supply routes, amounts or bounds.
 ///      POST: work means actual heap progress, principal burned or receipt
-///      shares changed. A failed attempt rolls back its entire job, pays no
+///      shares changed, or meaningful basket principal was retired. A failed attempt rolls back its entire job, pays no
 ///      reward and cannot block the other wheel kinds. Each job is attempted
 ///      at most once per block, including failures; rearm does not reset it.
 ///      Facility closure stays with the NFT owner. No job runs through the
@@ -38,9 +47,11 @@ abstract contract JubileeKind is WorkWheel {
         uint16 saleCapBp;            // maximum fraction of the one receipt
         uint16 slippageBp;           // 2..500, net mark/share and swap bounds
         uint256 deferredBurnCap;     // raw full-value BUCK per job
+        uint256 retirementMinimum;   // raw basket principal needed to earn work
+        uint256 retirementCap;       // raw basket principal per job; 0 disables
     }
     JubileePolicy public jubileePolicy;
-    uint256[3] public jubileeAttemptClock; // block.number + 1, zero = never
+    uint256[4] public jubileeAttemptClock; // block.number + 1, zero = never
 
     struct ReservePlan {
         bool sale;
@@ -53,6 +64,7 @@ abstract contract JubileeKind is WorkWheel {
     event JubileeAttempted(uint8 indexed job, bool succeeded, uint256 work, bytes4 reason);
     error BadJubileeConfiguration();
     error NotWheelSelf();
+    error RetirementInvariant();
 
     /// @notice Enable after configuring the existing basket/fund/wheel;
     ///         zero disables these jobs without changing fund ownership.
@@ -61,7 +73,9 @@ abstract contract JubileeKind is WorkWheel {
             if (policy.maturitySteps == 0 || policy.maturitySteps > 64
                 || policy.saleCapBp == 0 || policy.saleCapBp > BP
                 || policy.slippageBp < 2 || policy.slippageBp > 500
-                || policy.deferredBurnCap == 0) revert BadJubileeConfiguration();
+                || policy.deferredBurnCap == 0
+                || (policy.retirementCap != 0 && (policy.retirementMinimum == 0
+                    || policy.retirementMinimum > policy.retirementCap))) revert BadJubileeConfiguration();
             _checkFund(fund_);
         }
         jubileeFund = fund_;
@@ -81,7 +95,8 @@ abstract contract JubileeKind is WorkWheel {
     }
 
     function _slotCount() internal view virtual override returns (uint256) {
-        return super._slotCount() + (address(jubileeFund) == address(0) ? 0 : 3);
+        return super._slotCount() + (address(jubileeFund) == address(0) ? 0
+            : jubileePolicy.retirementCap == 0 ? 3 : 4);
     }
 
     function _due(uint256 s) internal view virtual override returns (bool) {
@@ -118,6 +133,7 @@ abstract contract JubileeKind is WorkWheel {
         if (job == 0) return pending;
         if (pending) return false;
         if (job == 1) return _deferredAmount(token) != 0;
+        if (job == 3) { (,, uint256 amount) = _basketRetirement(f); return amount != 0; }
         if (job != 2) return false;
         if (_reservePlan(f).amount != 0) return true;
         (, uint256 excess,) = f.previewReserve();
@@ -142,6 +158,7 @@ abstract contract JubileeKind is WorkWheel {
             f.burnDeferred(amount);
             return 1;
         }
+        if (job == 3) return _retireBasket(f);
         if (job != 2) return 0;
         ReservePlan memory p = _reservePlan(f);
         if (p.amount == 0) {
@@ -165,6 +182,59 @@ abstract contract JubileeKind is WorkWheel {
     function _deferredAmount(IBuckJubilee token) private view returns (uint256) {
         return Math.min(token.claimBook().deferredPrincipal(),
             Math.min(jubileePolicy.deferredBurnCap, token.availableReliefScaled() / Q));
+    }
+
+    /// @dev Read authoritative NFT principal, never infer it from cash. Only
+    ///      the fund's own ordinary canonical basket is eligible, with a
+    ///      matching facility. Refund/premium rules stay with its monetary
+    ///      retirement API. Fully aged facilities need the
+    ///      owner's separate maturity release, not repeated repayment attempts.
+    function _basketRetirement(JubileeFund f) private view returns (uint256 id, uint256 principal, uint256 amount) {
+        if (jubileePolicy.retirementCap == 0) return (0, 0, 0);
+        IWheelBasketCredit b = IWheelBasketCredit(address(f.basket()));
+        IBuckJubilee token = f.token();
+        if (!b.netAccounting() || b.credit() != address(token.buckCredit())
+            || token.identity().isCarrying(address(b))) return (0, 0, 0);
+        id = b.creditId();
+        uint256 seconds_;
+        (principal, seconds_) = token.buckCredit().issuanceOf(id);
+        if (principal == 0 || seconds_ == principal * (50 * (365 days + 6 hours))) return (id, principal, 0);
+        uint256 cash = token.balanceOf(address(b));
+        uint256 target = b.liquidityTarget();
+        if (cash <= target) return (id, principal, 0);
+        amount = Math.min(principal, Math.min(cash - target, jubileePolicy.retirementCap));
+        if (amount < jubileePolicy.retirementMinimum && amount != principal) amount = 0;
+    }
+
+    /// @dev PRE: exact heap, guarded scan, eligible facility and surplus cash.
+    ///      Publish before quoting; the basket prepares/settles separately from
+    ///      its position lock and the fund never sells inside that reduction.
+    ///      Scale principal down to the shared relief budget rather than skip
+    ///      relief or pretend a refused payment occurred. POST: exact principal
+    ///      reduction and the recomputed cash target still covered, or rollback.
+    ///      A complete dust tail can be cleared but earns no work reward.
+    function _retireBasket(JubileeFund f) private returns (uint256) {
+        (uint256 id, uint256 principal, uint256 amount) = _basketRetirement(f);
+        if (amount == 0) return 0;
+        IBuckJubilee token = f.token();
+        (uint256 selected,) = token.selectedClaimSeconds(id, principal);
+        if (selected != 0) this.refreshValuation();
+        (uint256 relief,, bool limited) = f.previewRelief(id, principal);
+        if (limited) {
+            // Quote the FULL facility before scaling: a partial selection
+            // rounds its BUCK-seconds down and can understate the unit rate.
+            amount = Math.min(amount, Math.mulDiv(principal, token.availableReliefScaled(), relief));
+            if (amount == 0 || (amount < jubileePolicy.retirementMinimum && amount != principal)) return 0;
+        }
+        (relief,, limited) = f.previewRelief(id, amount);
+        if (limited) revert RetirementInvariant();
+        IWheelBasketCredit b = IWheelBasketCredit(address(f.basket()));
+        b.retireCredit(amount, amount, relief);
+        (uint256 afterPrincipal,) = token.buckCredit().issuanceOf(id);
+        if (afterPrincipal != principal - amount || token.balanceOf(address(b)) < b.liquidityTarget()) {
+            revert RetirementInvariant();
+        }
+        return amount < jubileePolicy.retirementMinimum ? 0 : 1;
     }
 
     /// @dev PRE: exact claim heap. Investment reuses the fund's half-life,

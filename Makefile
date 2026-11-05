@@ -26,6 +26,7 @@ help:
 	  '  make nix-match-BuckCompoundDeskTest  # canonical desk issuance, net purchases and real repayment' \
 	  '  make nix-match-BuckCompoundPriceUnitsTest  # nominal BVIB, net buybacks and pool turnover' \
 	  '  make nix-match-JubileeWheelTest    # real fund reserve trades, maturity batches and block caps' \
+	  '  make nix-match-BasketRetirementWheelTest  # cash-floor protected actual basket repayment' \
 	  '  make nix-wallet-sandbox-test       # build and test canonical wallet UI, trades and restore' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
@@ -162,10 +163,12 @@ match-%:
 # with actual net receipts and fresh-liquidity dilution of carried fees.
 # nix-match-JubileeWheelTest exercises both existing wheels with canonical
 # fund investment, cash/in-kind redemption, maturity and deferred debt.
+# nix-match-BasketRetirementWheelTest covers optional basket repayment from
+# cash above its target, including shared-budget sizing and dust cleanup.
 # See README-simulations.org for units, accounting gates and interpretation.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts
-	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|BasketJubileeMathTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations|Wheel)Test)$$' -vvv
+	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|BasketJubileeMathTest|BasketRetirementWheelTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations|Wheel)Test)$$' -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:

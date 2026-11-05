@@ -116,8 +116,8 @@ The canonical basket valuation checks are included in
 =make nix-match-BuckCompoundBasketTest=. It tests separate cash/principal,
 fee-aware Jubilee cross-holdings, entry dilution and the exclusion of unpaid
 claims from new-credit collateral. Test-only access supplies actual issued
-basket debt while normal =openCredit= remains gated on completing basket debt
-scheduling and public onboarding. These valuation tests
+basket debt while normal =openCredit= remains gated on public onboarding
+validation. These valuation tests
 do not turn the five-year household economy into a completed migration.
 
 Both existing upkeep facets now use explicit canonical issuance: available
@@ -173,7 +173,8 @@ These contract checks do not wire the desk into the primary household world.
 
 Both existing wheels now support the same =JubileeKind=, adding three slots
 when configured: bounded claim-heap processing, deferred-principal burns,
-then reserve maintenance. This reuses the existing fund and its single
+then reserve maintenance. An optional fourth slot retires the basket's own
+principal from cash above its liquidity target. This reuses the fund and its single
 receipt. Heap processing does not close anyone's NFT. Deferred burns respect
 both the governor's raw-BUCK cap and Buck's remaining shared block budget.
 The fund's existing one-day half-life and 1%-of-target threshold control
@@ -208,8 +209,22 @@ so a keeper can distinguish a refused transaction from completed maintenance.
 
 =make nix-match-JubileeWheelTest= reproduces the canonical fund/basket/V3
 cases; it is also included in =make nix-buck-accounting-test=.
-Automatic retirement of the basket's own principal and normal public credit
-opening remain the next contract steps. World builders still need to wire
+For basket retirement, set the policy's raw =retirementMinimum= and
+=retirementCap=; zero cap disables the fourth slot. The minimum controls
+work rewards, while a complete smaller dust tail can clear without a reward.
+The job reads actual NFT principal, preserves the recomputed cash target,
+and limits actual cash cost through the existing =retireCredit= API. It quotes
+the full facility to size a batch against the shared relief budget, then
+requotes that batch before execution. Inverting a partial quote can select
+another unaffordable amount because selected BUCK-seconds round down.
+An exhausted budget neither authorizes nor counts a repayment. A fully aged
+facility still requires its owner's separate release action. No LP sale is
+forced by this job and cash on hand cannot itself make a low-K exit pass.
+=make nix-match-BasketRetirementWheelTest= includes that rounding
+counterexample, actual full/partial repayment and cash-floor/shared-budget
+checks in both existing wheels.
+
+Normal public credit opening remains the next contract step. World builders still need to wire
 this maintenance explicitly; the existence of the wheel slots does not
 migrate an existing simulation or saved world.
 

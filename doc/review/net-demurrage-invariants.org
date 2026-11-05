@@ -422,11 +422,26 @@ that limit. A later block permits retry but does not itself execute any work.
 | Reserve checkpoint | Exact heap and newly observed excess. | Starts/grows the existing half-life budget without backdating new cash; no receipt change, work or reward. Needed even when no mint/burn occurs. |
 | Reserve investment | Matured threshold/budget, exact nominal outlay, positive net receipt credit and added-share minimum. | Uses the one receipt and actual net debit; rechecks budget, excess and threshold. TWAP share-price bounds may safely refuse during volatility. No fake cash or principal retirement. |
 | Reserve redemption | Below-target liquid cash, live guarded positive receipt mark, receipt-fraction cap and deficit sizing, positive aggregate net minimum. | Sells only bounded receipt shares, through registered constituent pools with positive per-leg net minima and governed sqrt-price movement limits; old TOKEN inventory is untouched. Underwater/low-K/price or execution refusal rolls the complete job back and earns no work. |
+| Basket principal retirement | Optional cap enabled; exact heap; matching facility in the fund's canonical ordinary basket; positive cash above its liquidity target; below full maturity. | Bounded actual principal/supply reduction through retireCredit, with cash-cost and exact quoted-relief bounds. Full-facility relief sizes the batch to available shared liquidity. Recomputed cash target remains covered or all effects revert. A complete dust tail can clear without reward; no partial dust work or phantom authorization. LP shares are untouched; receiving cash alone cannot repair backing. |
 | Wheel callbacks | Mutating tick/funding guard acquired before external work. | Nested scans and reserve funding revert. Independent valuation publication remains available; a successful job earns at most one work unit, irrespective of batch size. |
 
 The current canonical coverage is =make nix-match-JubileeWheelTest= plus
-=make nix-match-WorkWheelTest=. Basket-principal retirement scheduling is a
-separate remaining step; sale proceeds alone cannot repair K backing.
+=make nix-match-WorkWheelTest= and
+=make nix-match-BasketRetirementWheelTest=. Basket-principal retirement is an
+optional fourth job in the same kind; sale proceeds alone cannot repair backing.
+
+For a facility with principal P and claim seconds S, total system seconds T
+and marked fund value V in scaled net units, its relief for p is
+=min(p*Q, floor(V * floor(S*p/P) / T))=. A partial quote rounds down its selected
+seconds, so inverting it can select another unaffordable amount. Quote R for
+the FULL P instead. For an available integer budget A < R, cap the candidate
+at =floor(P*A/R)= and requote. This is conservative: in the uncapped case,
+the unrounded full relief is below R+1, so the candidate's unrounded relief
+is below A+1 and its integer relief cannot exceed A. If R=P*Q is capped,
+the candidate itself satisfies p*Q<=A. The real mixed-age regression uses
+nine raw principal units with five BUCK-seconds and an invested fund: partial
+inversion selects two unaffordable units; the full-facility bound safely
+retires one. Execution still rechecks the quote and budget atomically.
 
 The valuation-only entry is separate from that scan. Governance selects the
 fund as a source, and publication reads its receipt through Solidity =view=

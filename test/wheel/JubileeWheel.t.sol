@@ -16,17 +16,16 @@ import {MachineEquityMock} from "./BasketMachineWheel.t.sol";
 
 /// @dev Canonical Buck, exact claim book, one fund receipt, actual equity
 ///      basket and real V3 pools. No inherited standalone test repetitions.
-contract JubileeWheelTest is JubileeEquityFixture {
-    event JubileeAttempted(uint8 indexed job, bool succeeded, uint256 work, bytes4 reason);
+abstract contract JubileeWheelFixture is JubileeEquityFixture {
     function _makeBasket(address factory) internal override returns (BuckBasketEquity) {
         return new CompoundBasketHarness(address(buck), address(k), factory, GOV);
     }
 
-    function _policy() private pure returns (JubileeKind.JubileePolicy memory) {
-        return JubileeKind.JubileePolicy(1, 1000, 100, 5e6);
+    function _policy() internal pure virtual returns (JubileeKind.JubileePolicy memory) {
+        return JubileeKind.JubileePolicy(1, 1000, 100, 5e6, 0, 0);
     }
 
-    function _attach(bool older) private returns (JubileeKind w) {
+    function _attach(bool older) internal returns (JubileeKind w) {
         w = older
             ? JubileeKind(address(new BasketWheel(address(buck), address(2), GOV, 0, 0)))
             : JubileeKind(address(new BasketMachineWheel(address(buck), address(2), GOV, 0, 0)));
@@ -39,6 +38,10 @@ contract JubileeWheelTest is JubileeEquityFixture {
         w.setJubilee(fund, _policy());
         vm.stopPrank();
     }
+}
+
+contract JubileeWheelTest is JubileeWheelFixture {
+    event JubileeAttempted(uint8 indexed job, bool succeeded, uint256 work, bytes4 reason);
 
     function test_governanceAuthenticatesWiringAndBoundsBeforeEnabling() public {
         JubileeKind w = JubileeKind(address(new BasketMachineWheel(address(buck), address(2), GOV, 0, 0)));
