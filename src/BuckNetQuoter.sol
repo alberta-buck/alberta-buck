@@ -3,12 +3,13 @@ pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BuckCredit} from "./BuckCredit.sol";
-import {BuckNet, IBuckNetK} from "./BuckNet.sol";
+import {IBuckJubilee} from "./IBuckJubilee.sol";
+import {IBuckCashView, IBuckCashK} from "./IBuckCashView.sol";
 import {BuckTypes} from "./BuckTypes.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 import {BuckNetMintMath} from "./lib/BuckNetMintMath.sol";
 
-/// @notice Optional read-only issuance estimates for one experimental BuckNet.
+/// @notice Optional read-only issuance estimates for the canonical Buck cash model.
 /// @dev No authorization or settlement uses this contract. Keeping the shared
 ///      quote outside the token preserves its EVM size headroom and lets Python,
 ///      JavaScript and wallet clients use the same integer calculation.
@@ -19,11 +20,12 @@ contract BuckNetQuoter {
     uint256 private constant POOL_ROI_INV = 10;
     uint256 private constant RELIEF_SECONDS = 50 * (365 days + 6 hours);
 
-    BuckNet public immutable token;
+    IBuckCashView public immutable token;
+    error BadAddress(); error CreditExceeded(); error BadPremiumRate(); error BadAmount();
 
-    constructor(BuckNet token_) {
-        if (address(token_).code.length == 0) revert BuckNet.BadAddress();
-        token = token_;
+    constructor(IBuckJubilee token_) {
+        if (address(token_).code.length == 0) revert BadAddress();
+        token = IBuckCashView(address(token_));
     }
 
     /// @notice Estimate issuance costs for activating `coverage` on one NFT.
@@ -32,7 +34,7 @@ contract BuckNetQuoter {
     /// @return premium Full-value BUCK deposit for the new coverage.
     /// @return reserveRequired Full-value BUCK held before issuance; it is not spent.
     /// @return maxSpendable Largest new spendable amount within the current K,
-    ///         NFT, ordinary-account and total-issuance numerical bounds.
+    ///         NFT, cash-account and total-issuance numerical bounds.
     /// @dev Uses current K, funding factor and credit mark. `issue` recomputes
     ///      K and checks owner, identity, pool, fund and maturity state at
     ///      execution. A positive estimate does not guarantee success. The
@@ -45,18 +47,18 @@ contract BuckNetQuoter {
         BuckCredit credit = token.buckCredit();
         address owner = credit.ownerOf(tokenId);
         (uint256 face, uint256 active, uint32 rate) = credit.creditInfo(tokenId);
-        if (coverage > face - active) revert BuckNet.CreditExceeded();
-        if (uint256(rate) * POOL_ROI_INV >= BP) revert BuckNet.BadPremiumRate();
+        if (coverage > face - active) revert CreditExceeded();
+        if (uint256(rate) * POOL_ROI_INV >= BP) revert BadPremiumRate();
         if (face != 0) {
             uint256 mark = credit.depreciatedFaceValue(tokenId);
             presentCoverage = Math.mulDiv(mark, active + coverage, face);
             uint256 beforeValue = Math.mulDiv(mark, active, face);
             premium = Math.mulDiv(presentCoverage - beforeValue, uint256(rate) * POOL_ROI_INV, BP);
         }
-        IBuckNetK k = token.buckK();
+        IBuckCashK k = token.buckK();
         reserveRequired = Math.mulDiv(premium, k.fundingFactor(), K_SCALE);
         IdentityRegistry identity = token.identity();
-        if (owner == token.jubilee() || !identity.isVerified(owner) || identity.isCarrying(owner)) {
+        if (!_eligible(identity, owner)) {
             return (presentCoverage, premium, reserveRequired, 0);
         }
         uint256 limit = Math.min(Math.mulDiv(presentCoverage, k.currentBuckK(), K_SCALE), BuckTypes.MAX_BALANCE);
@@ -65,8 +67,8 @@ contract BuckNetQuoter {
             return (presentCoverage, premium, reserveRequired, 0);
         }
         uint256 room = limit > prior ? limit - prior : 0;
-        (uint256 held, uint256 unspent) = token.heldAndUnspentScaled(owner);
-        uint256 accountRoom = (BuckTypes.MAX_BALANCE * SCALE - held - unspent) / SCALE;
+        (uint256 cashScaled,) = token.accountBalancesScaled(owner);
+        uint256 accountRoom = (BuckTypes.MAX_BALANCE * SCALE - cashScaled) / SCALE;
         room = Math.min(room, accountRoom);
         room = Math.min(room, type(uint256).max / SCALE - token.totalIssued());
         if (room > premium) maxSpendable = room - premium;
@@ -83,23 +85,23 @@ contract BuckNetQuoter {
         external view returns (uint256 coverage, uint256 premium, uint256 reserveRequired,
                                BuckNetMintMath.Status status, uint256 iterations)
     {
-        if (target == 0) revert BuckNet.BadAmount();
+        if (target == 0) revert BadAmount();
         BuckCredit credit = token.buckCredit();
         address owner = credit.ownerOf(tokenId);
         (uint256 face, uint256 active, uint32 rate) = credit.creditInfo(tokenId);
-        if (uint256(rate) * POOL_ROI_INV >= BP) revert BuckNet.BadPremiumRate();
+        if (uint256(rate) * POOL_ROI_INV >= BP) revert BadPremiumRate();
         IdentityRegistry identity = token.identity();
-        if (owner == token.jubilee() || !identity.isVerified(owner) || identity.isCarrying(owner)) {
+        if (!_eligible(identity, owner)) {
             return (0, 0, 0, BuckNetMintMath.Status.Impossible, 0);
         }
         (uint256 prior, uint256 seconds_) = credit.issuanceOf(tokenId);
         if (prior != 0 && seconds_ == prior * RELIEF_SECONDS) {
             return (0, 0, 0, BuckNetMintMath.Status.Impossible, 0);
         }
-        (uint256 held, uint256 unspent) = token.heldAndUnspentScaled(owner);
-        uint256 room = (BuckTypes.MAX_BALANCE * SCALE - held - unspent) / SCALE;
+        (uint256 cashScaled,) = token.accountBalancesScaled(owner);
+        uint256 room = (BuckTypes.MAX_BALANCE * SCALE - cashScaled) / SCALE;
         room = Math.min(room, type(uint256).max / SCALE - token.totalIssued());
-        IBuckNetK k = token.buckK();
+        IBuckCashK k = token.buckK();
         BuckNetMintMath.Snapshot memory snapshot = BuckNetMintMath.Snapshot({
             face: face, activated: active, mark: credit.depreciatedFaceValue(tokenId),
             principal: prior, k: k.currentBuckK(), effectiveRate: uint256(rate) * POOL_ROI_INV,
@@ -109,10 +111,18 @@ contract BuckNetQuoter {
         if (result.status == BuckNetMintMath.Status.Found) {
             uint256 afterValue = Math.mulDiv(snapshot.mark, active + result.coverage, face);
             if (Math.mulDiv(afterValue, snapshot.k, K_SCALE) < prior + target + result.premium) {
-                revert BuckNet.CreditExceeded();
+                revert CreditExceeded();
             }
             reserveRequired = Math.mulDiv(result.premium, k.fundingFactor(), K_SCALE);
         }
         return (result.coverage, result.premium, reserveRequired, result.status, result.iterations);
+    }
+    function _eligible(IdentityRegistry identity, address owner) private view returns (bool) {
+        if (owner == token.jubilee() || !identity.isVerified(owner)) return false;
+        if (!identity.isCarrying(owner)) return true;
+        // The older experimental oracle has no approved Carrying issuance.
+        // This compatibility read creates no alternate token deployment path.
+        try token.approvedCarryingIssuer(owner) returns (bool approved) { return approved; }
+        catch { return false; }
     }
 }

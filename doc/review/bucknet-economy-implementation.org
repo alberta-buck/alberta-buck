@@ -28,7 +28,7 @@ The current five-year economy and both normal sandboxes still have legacy
 deployment/account assumptions and require migration to Buck's new explicit
 Jubilee constructor dependency and linked libraries. No five-year campaign
 has validated the corrected accounting, and the
-BuckNet cash-only diagnostic is not the leveraged household economy. Changing
+canonical cash-only diagnostic is not the leveraged household economy. Changing
 the implementation behind the name Buck will not make old saved results or
 immutable deployed contracts use the new model.
 
@@ -406,11 +406,15 @@ minimum-relief/principal bounds where provided and reject stale/unsafe inputs.
 
 ** 4. Migrate existing clients, proofs and the household economy
 
-- [ ] Keep the canonical deployed artifact/name =Buck= and version its
+- [-] Keep the canonical deployed artifact/name =Buck= and version its
   accounting model, configuration and code hashes. Update Python and JS
   deployment/linking and their existing operations, avoiding a second economy
   runner or sandbox just for the corrected token. Reject incompatible restores
-  even when the artifact has the same name.
+  even when the artifact has the same name. The shared Python/JS net-stack
+  helpers now deploy Buck with four explicit linked libraries. Browser bundle
+  and saved net worlds use model identity, ABI version 6, all library addresses
+  and code/wiring checks. The primary household-economy and interactive sandbox
+  builders still need their lifecycle/read/display/restore conversion.
 - [ ] Port shared net math to Rust/PyO3/WASM with 256-bit inputs and full-width
   intermediate multiplication/division, lossless Python int / JS BigInt and
   the same rounding/overflow rules. The current demurrage kernel is legacy
@@ -564,4 +568,6 @@ review changes documentation only; it does not rerun or extend the historical
 
 | 2026-11-04 | Correct Buck itself: unsigned cash and explicit facility debt | Replaced the signed wallet engine in src/Buck.sol while retaining the original approval/receipt/allowance surface, numeric mint/burn overloads and both quotes. Added shared Cash/Transfer/Facilities/Renewal libraries, direct full-value fresh premiums, approved Carrying issuance and nominal retirement, exact virtual batch quotes, and external fund readiness checks. Canonical Buck suite: 31 passed; operations: eight passed; exhaustive Carrying/sponsored burn vectors: 256 fuzz cases; Cash: 27 passed. Those 67 focused checks exercise current accounting; labelled BuckLinear fixtures do not. Buck runtime: 21,160 bytes; Facilities: 23,805; Cash: 8,324; Transfer: 2,948; Renewal: 6,432. Full contract run completed afterward: 1,685 passed, one fork skip (including labelled legacy fixtures); real-fund renewal/basket/client and five-year evidence remain open. | =297116d9= |
 
-| 2026-11-04 | Port fund/renewal/maturity evidence to canonical Buck and deduplicate fixtures | Migrated 113 distinct existing fund, renewal, marked-relief, valuation-only, nominal refund, liquidity, maturity/deferred-burn and numeric-burn tests from BuckNet to Buck. The 20 real V3 cash-basket tests also pass against Buck; they still do not cover leveraged basket credit. All nine canonical operations tests pass, including aged Carrying renewal with a full-net replacement premium. Split JubileeFundFixture from executable tests: four child suites no longer rerun the parent's 44 tests (176 repeated executions removed; no distinct test removed). Broadened the precisely anchored buck-accounting-test target so legacy suites are not counted as canonical evidence. The initial port's complete run finished with 1,685 passed, one fork skip; that count predates this fixture reduction. | This commit |
+| 2026-11-04 | Port fund/renewal/maturity evidence to canonical Buck and deduplicate fixtures | Migrated 113 distinct existing fund, renewal, marked-relief, valuation-only, nominal refund, liquidity, maturity/deferred-burn and numeric-burn tests from BuckNet to Buck. The 20 real V3 cash-basket tests also pass against Buck; they still do not cover leveraged basket credit. All nine canonical operations tests pass, including aged Carrying renewal with a full-net replacement premium. Split JubileeFundFixture from executable tests: four child suites no longer rerun the parent's 44 tests (176 repeated executions removed; no distinct test removed). Broadened the precisely anchored buck-accounting-test target so legacy suites are not counted as canonical evidence. The initial port's complete run finished with 1,685 passed, one fork skip; that count predates this fixture reduction. | =1b07b245= |
+
+| 2026-11-04 | Canonical Python/JS deployment, cash views and snapshot identity | The existing net-stack helpers now deploy Buck and its four linked libraries, not BuckNet. Neutral cash views replace held/unspent observations in the quoter and net swap guard; shared client capacity takes one cash amount. Browser/distribution bundles retain actual library metadata and omit the unused prototype facade. Net snapshots use ABI version 6, the on-chain accounting model, four library addresses, immutable wiring and code hashes; wrong/old models and missing libraries fail closed. Existing Make net-demurrage-smoke: 34 Python and 20 JavaScript checks passed, including real private identity proofs, actual V3 routing, selected retirement and restoration. Final binding checks: four Python and two JavaScript tests passed. A distinct sponsor-funded purchase test confirms full rollback when sponsor compensation would otherwise bypass the pool-output minimum. Ordinary sandbox/leveraged household lifecycle and five-year evidence remain uncompleted. | This commit |

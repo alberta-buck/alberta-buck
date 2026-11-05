@@ -7,13 +7,14 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
-import {BuckNet} from "./BuckNet.sol";
+import {IBuckJubilee} from "./IBuckJubilee.sol";
+import {IBuckCashView} from "./IBuckCashView.sol";
 
 /// @notice Buy full-value BUCK from a canonical V3 pool with an atomic net
 ///         minimum. The pool's nominal output may carry demurrage.
 /// @dev The guard only holds the settlement token temporarily; BUCK goes
 ///      directly from the Carrying pool to the recipient. The recipient must
-///      satisfy BuckNet's own identity checks with that pool. This experimental
+///      satisfy Buck's own identity checks with that pool. This experimental
 ///      adapter is not a general router or a production deployment.
 contract BuckNetSwapGuard is IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
@@ -22,7 +23,7 @@ contract BuckNetSwapGuard is IUniswapV3SwapCallback {
     uint160 private constant MIN_SQRT = 4295128739;
     uint160 private constant MAX_SQRT = 1461446703485210103287273052203988822378723970342;
 
-    BuckNet public immutable buck;
+    IBuckCashView public immutable buck;
     IERC20 public immutable settlement;
     IUniswapV3Factory public immutable factory;
     bool private transient _entered;
@@ -43,12 +44,12 @@ contract BuckNetSwapGuard is IUniswapV3SwapCallback {
     error NetMinimum();
     error ZeroPoolValue();
 
-    constructor(BuckNet buck_, IERC20 settlement_, IUniswapV3Factory factory_) {
+    constructor(IBuckJubilee buck_, IERC20 settlement_, IUniswapV3Factory factory_) {
         if (address(buck_).code.length == 0 || address(settlement_).code.length == 0
             || address(factory_).code.length == 0 || address(buck_) == address(settlement_)) {
             revert BadConfiguration();
         }
-        buck = buck_;
+        buck = IBuckCashView(address(buck_));
         settlement = settlement_;
         factory = factory_;
     }
@@ -87,14 +88,14 @@ contract BuckNetSwapGuard is IUniswapV3SwapCallback {
         if (!buck.identity().isVerified(pool) || !buck.identity().isCarrying(pool)) revert BadPool();
         if (!buck.identity().isVerified(recipient) || buck.identity().isCarrying(recipient)) revert BadAmount();
 
+        (uint256 poolGross, uint256 poolNet) = buck.accountBalancesScaled(pool);
         uint256 nominalRequested;
         if (exactOut) {
-            (uint256 gross, uint256 net) = buck.accountBalancesScaled(pool);
-            if (gross == 0 || net == 0) revert ZeroPoolValue();
-            nominalRequested = Math.ceilDiv(Math.mulDiv(minNet * Q, gross, net, Math.Rounding.Ceil), Q);
+            if (poolGross == 0 || poolNet == 0) revert ZeroPoolValue();
+            nominalRequested = Math.ceilDiv(Math.mulDiv(minNet * Q, poolGross, poolNet, Math.Rounding.Ceil), Q);
             if (nominalRequested == 0 || nominalRequested > uint256(type(int256).max)) revert BadAmount();
         }
-        (uint256 beforeHeld, uint256 beforeUnspent) = buck.heldAndUnspentScaled(recipient);
+        (, uint256 beforeNet) = buck.accountBalancesScaled(recipient);
         uint256 beforeSettlement = settlement.balanceOf(address(this));
         settlement.safeTransferFrom(msg.sender, address(this), maxIn);
         if (settlement.balanceOf(address(this)) - beforeSettlement != maxIn) revert SettlementMismatch();
@@ -109,11 +110,12 @@ contract BuckNetSwapGuard is IUniswapV3SwapCallback {
         if (buckDelta > 0 || buckDelta == type(int256).min) revert BadPool();
         nominal = uint256(-buckDelta);
         paid = _paid;
-        (uint256 afterHeld, uint256 afterUnspent) = buck.heldAndUnspentScaled(recipient);
-        uint256 beforeNet = beforeHeld + beforeUnspent;
-        uint256 afterNet = afterHeld + afterUnspent;
-        if (afterNet < beforeNet) revert NetMinimum();
-        netScaled = afterNet - beforeNet;
+        (, uint256 afterNet) = buck.accountBalancesScaled(recipient);
+        // A sponsor can restore both the recipient's previously accrued fee
+        // and the pool's inherited fee. Those payments are not BUCK bought
+        // from this pool and must not satisfy the net-output minimum.
+        netScaled = _poolDelivery(pool, poolGross, poolNet, nominal);
+        if (afterNet < beforeNet || afterNet - beforeNet < netScaled) revert NetMinimum();
         if (netScaled < minNet * Q) revert NetMinimum();
         _pool = address(0);
         _maximum = 0;
@@ -121,6 +123,18 @@ contract BuckNetSwapGuard is IUniswapV3SwapCallback {
         if (maxIn > paid) settlement.safeTransfer(msg.sender, maxIn - paid);
         _entered = false;
         emit NetBuckPurchased(msg.sender, recipient, pool, paid, nominal, netScaled);
+    }
+
+    /// @dev The canonical V3 pool makes one nominal BUCK outflow and receives
+    ///      only the other token. Verify its actual gross/net reduction so an
+    ///      arbitrary settlement callback cannot change the quoted fee ratio.
+    function _poolDelivery(address pool, uint256 gross, uint256 net, uint256 nominal)
+        private view returns (uint256 delivered)
+    {
+        if (nominal > gross / Q) revert BadPool();
+        delivered = nominal == 0 ? 0 : Math.mulDiv(net, nominal * Q, gross);
+        (uint256 afterGross, uint256 afterNet) = buck.accountBalancesScaled(pool);
+        if (afterGross != gross - nominal * Q || afterNet != net - delivered) revert BadPool();
     }
 
     function uniswapV3SwapCallback(int256 delta0, int256 delta1, bytes calldata) external {

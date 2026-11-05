@@ -1,4 +1,4 @@
-// Experimental BuckNet deployment and per-NFT operations.  This module is
+// Canonical compounded Buck deployment and per-NFT operations.  This module is
 // browser-safe: callers inject artifacts, identities and transaction dispatch.
 // A deployed stack is not usable until the Carrying fund is bound and a basket
 // configured; premium-bearing facilities also need their insurer's own pool.
@@ -16,13 +16,13 @@ const min = (...values) => values.reduce((a, b) => a < b ? a : b);
 const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeInteger(id) && id >= 0);
 
 /** Apply the account and supply limits shared by zero-premium facility quotes. */
-export function boundActivatedCapacity(capacities, heldScaled, unspentScaled, totalIssued) {
-  const values = [...capacities, heldScaled, unspentScaled, totalIssued];
+export function boundActivatedCapacity(capacities, cashScaled, totalIssued) {
+  const values = [...capacities, cashScaled, totalIssued];
   if (values.some((v) => typeof v !== "bigint" || v < 0n)
-      || heldScaled + unspentScaled > MAX_BALANCE * Q || totalIssued > MAX_UINT256 / Q) {
+      || cashScaled > MAX_BALANCE * Q || totalIssued > MAX_UINT256 / Q) {
     throw new Error("invalid activated capacity inputs");
   }
-  const sharedLimit = min((MAX_BALANCE * Q - heldScaled - unspentScaled) / Q, MAX_UINT256 / Q - totalIssued);
+  const sharedLimit = min((MAX_BALANCE * Q - cashScaled) / Q, MAX_UINT256 / Q - totalIssued);
   const potentialCapacity = min(capacities.reduce((sum, value) => sum + value, 0n), sharedLimit);
   return { potentialCapacity, sharedLimit };
 }
@@ -87,23 +87,31 @@ export function netTransferValue(token, receipt, from, to) {
     netScaled: out.netScaled + e.args.netScaled }), { count: 0, nominal: 0n, netScaled: 0n });
 }
 
+export const BUCK_CASH_LIBRARIES = Object.freeze([
+  ["cashLibrary", "BuckCash"], ["transferLibrary", "BuckTransfer"],
+  ["facilitiesLibrary", "BuckFacilities"], ["renewalLibrary", "BuckRenewalOps"],
+]);
+
 export async function deployNetStack(session, artifacts, { registry, credit, controller, governance,
-                                                         creditDeployer, registryGovernor } = {}) {
+                                                         creditDeployer, registryGovernor, insurancePool } = {}) {
   const gov = governance?.address ?? governance ?? session.account.address;
   const deploy = (name, args = []) => session.deploy(artifacts(name), args, { name });
   const fund = await deploy("JubileeFund", [gov]);
-  const maturityLibrary = await deploy("BuckNetMaturity");
-  const tokenOpsLibrary = await deploy("BuckNetTokenOps");
-  const linked = linkArtifact(artifacts("BuckNet"), {
-    "src/lib/BuckNetMaturity.sol:BuckNetMaturity": maturityLibrary.address,
-    "src/lib/BuckNetTokenOps.sol:BuckNetTokenOps": tokenOpsLibrary.address,
-  });
-  const token = await session.deploy(linked, [credit.address, controller.address, registry.address, fund.address],
-    { name: "BuckNet" });
+  const links = {};
+  const libraries = {};
+  for (const [key, name] of BUCK_CASH_LIBRARIES) {
+    const artifact = Object.keys(links).length ? linkArtifact(artifacts(name), links) : artifacts(name);
+    const library = await session.deploy(artifact, [], { name });
+    links[`src/lib/${name}.sol:${name}`] = library.address;
+    libraries[key] = library;
+  }
+  const linked = linkArtifact(artifacts("Buck"), links);
+  const token = await session.deploy(linked,
+    [credit.address, controller.address, registry.address, insurancePool ?? gov, fund.address], { name: "Buck" });
   const quoter = await deploy("BuckNetQuoter", [token.address]);
   await session.send(credit, "setBuck", [token.address], { account: creditDeployer });
   await session.send(registry, "setBuck", [token.address], { account: registryGovernor });
-  return { registry, credit, controller, fund, token, quoter, maturityLibrary, tokenOpsLibrary };
+  return { registry, credit, controller, fund, token, quoter, ...libraries };
 }
 
 /** Actual per-facility amounts; never synthesize a signed debt from a wallet.
@@ -317,10 +325,10 @@ export function netCreditOps(session, stack, execute = null) {
     }));
     const facilities = quoted.map((item) => item.facility);
     const unactivatedPresent = quoted.reduce((sum, item) => sum + item.unactivatedPresent, 0n);
-    const [[held, unspent], totalIssued, maturitiesPending] = await Promise.all([
-      read(token, "heldAndUnspentScaled", [address]), read(token, "totalIssued"), read(token, "maturitiesPending"),
+    const [[cashScaled], totalIssued, maturitiesPending] = await Promise.all([
+      read(token, "accountBalancesScaled", [address]), read(token, "totalIssued"), read(token, "maturitiesPending"),
     ]);
-    const { potentialCapacity, sharedLimit } = boundActivatedCapacity(facilities.map((f) => f.maxSpendable), held, unspent, totalIssued);
+    const { potentialCapacity, sharedLimit } = boundActivatedCapacity(facilities.map((f) => f.maxSpendable), cashScaled, totalIssued);
     return { blockNumber, facilities, unactivatedPresent, sharedLimit, potentialCapacity,
       capacity: maturitiesPending ? 0n : potentialCapacity, maturitiesPending };
   };

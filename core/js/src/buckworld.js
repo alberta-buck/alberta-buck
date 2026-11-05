@@ -23,30 +23,36 @@
 
 import { encodeFunctionData, keccak256, parseEventLogs, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { deployNetStack } from "./net-world.js";
+import { deployNetStack, BUCK_CASH_LIBRARIES } from "./net-world.js";
 
 // BN254.sol struct components are UPPERCASE X/Y at the ABI.
 const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const g2 = (p) => ({ X: [p.x[0], p.x[1]], Y: [p.y[0], p.y[1]] });
-const NET_ISSUE_ABI_VERSION = 5; // linked token operations plus ordinary-owner mint/burn ABI
+const NET_ISSUE_ABI_VERSION = 6; // canonical Buck, unsigned cash and four linked libraries
+const COMPOUND_ACCOUNTING_MODEL = keccak256(toBytes("Buck/compounded-cash/per-facility-jubilee/v1"));
 
 function requireNetIssueAbi(artifact) {
+  const constructor = artifact?.abi?.find((entry) => entry.type === "constructor");
+  if (constructor?.inputs?.map((input) => input.type).join(",") !== "address,address,address,address,address"
+      || !artifact.abi.some((entry) => entry.type === "function" && entry.name === "ACCOUNTING_MODEL")) {
+    throw new Error("Buck artifact lacks the compounded accounting constructor and model ABI");
+  }
   const issues = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "issue") ?? [];
   if (issues.length !== 1 || issues[0].inputs?.map((input) => input.type).join(",") !== "uint256,uint256,uint256,uint256,address") {
-    throw new Error("BuckNet artifact lacks the pool-bound premium-limited issuance ABI");
+    throw new Error("Buck artifact lacks the pool-bound premium-limited issuance ABI");
   }
   const mints = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "mint") ?? [];
   const mintShapes = mints.map((entry) => entry.inputs?.map((input) => input.type).join(",")).sort();
   const quotes = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "quoteMint") ?? [];
   if (mintShapes.length !== 2 || mintShapes[0] !== "uint256" || mintShapes[1] !== "uint256,uint256[]"
       || quotes.length !== 1 || quotes[0].inputs?.map((input) => input.type).join(",") !== "uint256,uint256[]") {
-    throw new Error("BuckNet artifact lacks the ordinary-owner mint ABI");
+    throw new Error("Buck artifact lacks the ordinary-owner mint ABI");
   }
   const burns = artifact?.abi?.filter((entry) => entry.type === "function" && entry.name === "burn") ?? [];
   const burnShapes = burns.map((entry) => entry.inputs?.map((input) => input.type).join(",")).sort();
   if (burnShapes.length !== 2 || burnShapes[0] !== "uint256" || burnShapes[1] !== "uint256,uint256[]") {
-    throw new Error("BuckNet artifact lacks the ordinary-owner burn ABI");
+    throw new Error("Buck artifact lacks the ordinary-owner burn ABI");
   }
 }
 
@@ -115,7 +121,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   if (accounting === "net" && (opts.poolAcct || opts.buckArtifact || gov.toLowerCase() !== session.account.address.toLowerCase())) {
     throw new Error("net world currently requires its own insurer pool and the session account as governance");
   }
-  if (accounting === "net") requireNetIssueAbi(artifacts("BuckNet"));
+  if (accounting === "net") requireNetIssueAbi(artifacts("Buck"));
   const p = { ...DEPLOY_DEFAULTS, ...(opts.params ?? {}) };
   const rng = opts.rng ?? id.randScalar;
 
@@ -178,7 +184,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     { name: "BuckKControllerDirect", gas });
   let buck, net = null;
   if (accounting === "net") {
-    net = await deployNetStack(session, artifacts, { registry: reg, credit, controller: kctrl, governance: gov });
+    net = await deployNetStack(session, artifacts, { registry: reg, credit, controller: kctrl, governance: gov, insurancePool: poolAcct });
     buck = net.token;
     // The real registry requires the target contract to authorize its exact
     // binding; the registered operator then completes the certification.
@@ -202,10 +208,12 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     // a cash-only diagnostic, not the leveraged or market-driven economy.
     net.chainId = await session.client.getChainId();
     net.issueAbiVersion = NET_ISSUE_ABI_VERSION;
+    net.accountingModel = await session.call(buck, "ACCOUNTING_MODEL");
+    if (net.accountingModel !== COMPOUND_ACCOUNTING_MODEL) throw new Error("unsupported Buck accounting model");
     net.codeHashes = {};
     for (const [name, contract] of Object.entries({ registry: reg, credit, controller: kctrl, token: buck, pool,
       fund: net.fund, basket: net.basket, factory: net.factory, quoter: net.quoter,
-      maturityLibrary: net.maturityLibrary, tokenOpsLibrary: net.tokenOpsLibrary })) {
+      ...Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key]) => [key, net[key]])) })) {
       const code = await session.client.getCode({ address: contract.address });
       if (!code || code === "0x") throw new Error(`net world ${name} has no code`);
       net.codeHashes[name] = keccak256(code);
@@ -244,9 +252,10 @@ export function worldRecord(world) {
   if (world.accounting === "net") {
     record.accounting = "net";
     record.net = { chainId: world.net.chainId, issueAbiVersion: world.net.issueAbiVersion,
+      accountingModel: world.net.accountingModel,
       fund: world.net.fund.address, basket: world.net.basket.address,
       factory: world.net.factory.address, quoter: world.net.quoter.address,
-      maturityLibrary: world.net.maturityLibrary.address, tokenOpsLibrary: world.net.tokenOpsLibrary.address,
+      libraries: Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key]) => [key, world.net[key].address])),
       codeHashes: { ...world.net.codeHashes } };
   }
   return record;
@@ -272,7 +281,7 @@ function attachWorld(session, artifacts, record, opts) {
     reg: at(record.names.reg, a.reg),
     credit: at(record.names.credit, a.credit),
     kctrl: at("BuckKControllerDirect", a.kctrl),
-    buck: at(record.accounting === "net" ? "BuckNet" : "Buck", a.buck),
+    buck: at("Buck", a.buck),
     gov: record.gov, poolAcct: record.poolAcct,
     issuer: { ...record.issuer },
     names: { ...record.names },
@@ -286,7 +295,8 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   if (record.accounting !== "net" || !record.net || !record.pooled || !record.operator)
     throw new Error("incomplete net world record");
   if (record.net.issueAbiVersion !== NET_ISSUE_ABI_VERSION) throw new Error("unsupported net world issuance ABI version");
-  requireNetIssueAbi(artifacts("BuckNet"));
+  if (record.net.accountingModel !== COMPOUND_ACCOUNTING_MODEL) throw new Error("unsupported Buck accounting model");
+  requireNetIssueAbi(artifacts("Buck"));
   const w = attachWorld(session, artifacts, record, opts);
   const operator = privateKeyToAccount(WORLD_OPERATOR_KEY);
   if (operator.address.toLowerCase() !== record.operator.toLowerCase()) throw new Error("net world operator mismatch");
@@ -299,8 +309,8 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   w.net = { registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
     fund: at("JubileeFund", n.fund), basket: at("BuckBasketEquity", n.basket),
     factory: at("UniswapV3Factory", n.factory), quoter: at("BuckNetQuoter", n.quoter),
-    maturityLibrary: at("BuckNetMaturity", n.maturityLibrary), tokenOpsLibrary: at("BuckNetTokenOps", n.tokenOpsLibrary),
-    chainId: n.chainId, issueAbiVersion: n.issueAbiVersion, codeHashes: { ...n.codeHashes } };
+    ...Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key, name]) => [key, at(name, n.libraries?.[key])])),
+    chainId: n.chainId, issueAbiVersion: n.issueAbiVersion, accountingModel: n.accountingModel, codeHashes: { ...n.codeHashes } };
   if (String(await session.client.getChainId()) !== String(n.chainId)) throw new Error("net world chain mismatch");
   const matches = async (contract, method, expected, args = []) => {
     const actual = await session.call(contract, method, args);
@@ -310,6 +320,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
     [w.reg, "buck", w.buck.address], [w.credit, "buck", w.buck.address],
     [w.buck, "buckCredit", w.credit.address], [w.buck, "buckK", w.kctrl.address],
     [w.buck, "identity", w.reg.address], [w.buck, "jubilee", w.net.fund.address],
+    [w.buck, "ACCOUNTING_MODEL", COMPOUND_ACCOUNTING_MODEL],
     [w.net.fund, "token", w.buck.address], [w.net.fund, "basket", w.net.basket.address],
     [w.net.basket, "buck", w.buck.address], [w.net.quoter, "token", w.buck.address],
   ]) await matches(c, method, expected);
@@ -324,7 +335,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   // recorded by the original deployment, not an independent security audit.
   for (const [name, c] of Object.entries({ registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
     pool: w.pool, fund: w.net.fund, basket: w.net.basket, factory: w.net.factory, quoter: w.net.quoter,
-    maturityLibrary: w.net.maturityLibrary, tokenOpsLibrary: w.net.tokenOpsLibrary })) {
+    ...Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key]) => [key, w.net[key]])) })) {
     const deployed = await session.client.getCode({ address: c.address });
     if (!deployed || deployed === "0x") throw new Error("net world contract has no code");
     if (!n.codeHashes?.[name] || keccak256(deployed) !== n.codeHashes[name])
@@ -332,7 +343,8 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   }
   const code = await session.client.getCode({ address: w.buck.address });
   if (!code || code === "0x") throw new Error("net world token has no code");
-  for (const lib of [w.net.maturityLibrary, w.net.tokenOpsLibrary]) {
+  for (const [key] of BUCK_CASH_LIBRARIES) {
+    const lib = w.net[key];
     const libCode = await session.client.getCode({ address: lib.address });
     if (!libCode || libCode === "0x" || !code.toLowerCase().includes(lib.address.slice(2).toLowerCase()))
       throw new Error("net world library mismatch");

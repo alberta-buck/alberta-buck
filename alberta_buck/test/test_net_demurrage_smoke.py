@@ -1,4 +1,4 @@
-"""A linked BuckNet deployment against the independent demurrage reference.
+"""A linked Buck deployment against the independent demurrage reference.
 
 This is a cash-only, zero-premium accounting smoke test. It is not a household
 economy, market, insurer model, leveraged basket, or five-year validation.
@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from web3 import Web3
 
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim import carry
@@ -26,7 +27,7 @@ Q = 10**36
 ZERO = "0x" + "00" * 20
 ROOT = Path(__file__).resolve().parents[2]
 VECTOR = json.loads((ROOT / "test/fixtures/bucknet-credit-operations.json").read_text())
-REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "JubileeFund",
+REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
             "BuckKControllerDirect", "BuckBasketEquity", "SimLP")
 
@@ -39,13 +40,13 @@ def _exec(chain, actor, target, method, args):
 def test_activated_capacity_shared_integer_limits():
     max_balance, max_uint = 2**79 - 1, 2**256 - 1
     held = (max_balance - 10) * Q
-    assert bound_activated_capacity([4, 4], held, 5 * Q, 0) == (5, 5)
-    assert bound_activated_capacity([4, 4], held, 5 * Q + 1, 0) == (4, 4)
-    assert bound_activated_capacity([4, 4], held, 0, max_uint // Q - 3) == (3, 3)
+    assert bound_activated_capacity([4, 4], held + 5 * Q, 0) == (5, 5)
+    assert bound_activated_capacity([4, 4], held + 5 * Q + 1, 0) == (4, 4)
+    assert bound_activated_capacity([4, 4], held, max_uint // Q - 3) == (3, 3)
     with pytest.raises(ValueError, match="invalid"):
-        bound_activated_capacity([4], max_balance * Q, 1, 0)
+        bound_activated_capacity([4], max_balance * Q + 1, 0)
     with pytest.raises(ValueError, match="invalid"):
-        bound_activated_capacity([4], 0, 0, max_uint // Q + 1)
+        bound_activated_capacity([4], 0, max_uint // Q + 1)
 
 
 def test_coverage_candidates_are_bounded_and_include_repair_estimates():
@@ -98,8 +99,10 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert buck.functions.balanceOf(actor.address).call() == 100 * RAW
         assert buck.functions.totalIssued().call() == 100 * RAW
         runtime = anvil.w3.eth.get_code(buck.address).hex().lower()
-        assert stack.maturity_library.address[2:].lower() in runtime
-        assert stack.token_ops_library.address[2:].lower() in runtime
+        for library in (stack.cash_library, stack.transfer_library, stack.facilities_library, stack.renewal_library):
+            assert library.address[2:].lower() in runtime
+        assert buck.functions.ACCOUNTING_MODEL().call() == Web3.keccak(
+            text="Buck/compounded-cash/per-facility-jubilee/v1")
         chain.send(controller.functions.setBuckK(5 * 10**17))
         shocked = ops.assess_issue_candidate(actor.address, 0, 0, RAW, 0)
         assert shocked.current_k == 5 * 10**17 and shocked.shortfall_before == 50 * RAW

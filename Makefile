@@ -150,7 +150,7 @@ match-%:
 # experimental BuckNet facade are deliberately excluded from this evidence.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts
-	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations)Test)$$' -vvv
+	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations)Test)$$' -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:
@@ -265,8 +265,8 @@ demurrage-test:
 	python -m pytest alberta_buck/test/test_demurrage_*.py -q
 
 # The current plan ports the improved accounting into the existing Buck.sol;
-# this target remains a donor diagnostic, not the migrated household economy.
-# Deploy the experimental linked BuckNet + external Jubilee fund in fresh
+# this target validates the canonical token deployment, not the household economy.
+# Deploy canonical linked Buck + external Jubilee fund in fresh
 # Python/Anvil and JavaScript/Tevm fixtures, then exercise issuance, insurer
 # deposits, the funding gate and a one-year cash-only reduction. The dynamic
 # controller has a neutral reference. The market test uses one real V3 pool
@@ -276,7 +276,7 @@ demurrage-test:
 .PHONY: net-demurrage-smoke
 net-demurrage-smoke: sim-build core-js-check-worktree
 	@command -v anvil >/dev/null || { echo 'anvil missing; use make nix-venv-net-demurrage-smoke'; exit 1; }
-	@for name in BuckNet BuckNetMaturity BuckNetTokenOps BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity MockERC20 SimLP; do \
+	@for name in Buck BuckCash BuckTransfer BuckFacilities BuckRenewalOps BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity MockERC20 SimLP; do \
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
 	done
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }

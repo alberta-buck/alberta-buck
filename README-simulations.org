@@ -31,7 +31,7 @@ not identify which accounting produced a result. The
 | Household policy/contract tests | Do both languages make the same decisions and move real funds correctly? | =economy-test= | pytest and Node test results |
 | Routing and contract tests | Do swaps, identities, accounting, guards and interfaces work? | =test-python=, =test= | Test failures and targeted vectors |
 | Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
-| Net-contract smoke | Can Python and JS link BuckNet and exercise its basic cash-only accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
+| Canonical accounting smoke | Can Python and JS link corrected Buck and exercise its basic cash accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
 | Fund return comparison | Can Jubilee reach its 50-year target in a closed BUCK economy? | =demurrage-returns= | No-return and explicitly funded 2% return tables |
 | Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |
@@ -80,78 +80,51 @@ proof that the contract prototype is production-ready. See [[file:alberta-buck-d
 the remaining policy and contract decisions. The proposed token, facilities,
 fund, insurer pools, and basket changes are in the [[file:doc/review/credit-facility-accounting-design.org][contract design]].
 
-=make nix-venv-net-demurrage-smoke= builds the simulation artifacts and
-deploys the linked experimental =BuckNet=, separate =JubileeFund=, and
-cash-only equity basket in fresh local Python/Anvil and JavaScript/Tevm
-fixtures. A zero-premium case issues 100 BUCK, advances a year and reduces one
-BUCK; Python also compares balances and marked relief with the independent
-reference. A second case uses a dynamic K controller at a neutral reference,
-two insurer pools, a nonzero premium and the real funding reserve; both
-runtimes consume the same operation vector and confirm that a transfer is not
-debt retirement. It also demonstrates that an exact reserve can decay between
-quote and issue, and that already-activated credit can issue without another
-premium. Issuance requires an explicit maximum premium and expected insurer
-pool, so repricing or redirecting a premium outside the holder's terms reverts
-atomically. The shared Python/JS refinancing policy distinguishes that capacity
-from wallet BUCK; the isolated household state derives it and the present
-value of unactivated coverage from same-block per-facility quotes. Its shared
-numerical limit includes newly issued premium principal. The complete new-model
-household world is still being migrated. Current fund relief and the immediate mixed insurer-pool
-refund can also be observed at one block, including candidate-specific premium
-comparisons; these cash-only observations are not guarantees
-of future returns, liquidity or insurer strategy proceeds. A JavaScript real-V3
-diagnostic seeds BUCK/USDC, ages its
-Carrying pool and reports the buyer's actual net BUCK. The Python and JS market
-fixtures both buy back BUCK and explicitly retire a selected NFT; a purchase
-alone does not reduce that liability. They also exercise the existing adaptive
-household's isolated discount action, including a pending-authorization stop.
-The rest of the new-model household lifecycle is not yet implemented. These
-fixtures have no household economy, leveraged basket or insurer investment
-strategy; they are not a five-year simulation or deployment recipe. The same
-target runs session tests for submitted transaction hashes, mined reverts and
-correctly journaled operations that may succeed or revert. The household keeps
-the hash when available and can explicitly reconcile its matching receipt.
-The Python and JavaScript net-market primitives can also sell BUCK through the
-existing single-pool Universal Router with a positive minimum USDC output and
-receipt reconciliation. A separate exact settlement-token transfer to a
-simulated bank provides payment evidence; only that confirmed payment changes
-the fixture's mortgage. These primitives do not establish a fair price or
-automate the household lifecycle; the household must choose its limit, handle
-pending evidence and apply each payment once.
-Restored JavaScript net markets now require recorded guard, router and Permit2
-code hashes; these detect inconsistent records, not maliciously forged records
-or independently audited contracts.
-Interrupted authorizations and settlements are tracked separately; an
-authorization is never counted as repayment, and earlier completed facilities
-remain recorded if a later authorization or planning read is interrupted. A
-failed post-settlement balance read conservatively retains the reserve.
-Automatic recovery
-of known receipts runs at the start of a household's daily turn and consumes
-that turn. The simulated single dispatcher cancels a verified orphaned
-authorization or one whose settlement reverted, and reconciles an uncertain
-cancellation before taking further action. A partially settled buyback keeps
-its original remaining principal target as well as the protected pre-purchase
-balance. Later turns use the already acquired BUCK toward that target before
-other actions, even after a price reversal; they do not automatically buy more.
-If the target or reserve is missing, the household stops for reconciliation. Finality
-handling and snapshot persistence remain open.
-Tevm snapshots do not retain transaction receipts, so a saved hash alone is
-not sufficient to resume an unresolved action after restore.
-The experimental net world also records its issuance ABI version; older
-snapshots without the premium ceiling and expected insurer pool are rejected instead of being reopened
-with an incompatible client.
-The target also builds the sandbox artifact bundle and checks that a browser-safe Tevm session can link
-and deploy the new stack from it. Its single-pool guard enforces net output
-and settlement limits atomically; it is not a price oracle. The interactive sandbox is not yet migrated.
-Built artifacts and JavaScript dependencies are required.
+=make nix-venv-net-demurrage-smoke= builds this checkout and deploys the
+canonical =Buck= implementation in Python/Anvil and JavaScript/Tevm. It no
+longer deploys the BuckNet facade. The explicit library graph is =BuckCash=,
+=BuckTransfer=, =BuckFacilities= and =BuckRenewalOps=, followed by Buck with its
+original four dependency meanings and a fifth, separate Jubilee address.
+The fund, claim book, renewal consent and cash-only equity basket are real
+contracts. These are accounting and integration checks, not a leveraged
+household economy or a five-year acceptance run.
 
-The optional read-only [[file:src/BuckNetQuoter.sol][BuckNetQuoter]] estimates the present coverage, premium,
-pre-issuance reserve and available credit for a particular NFT. It has contract
-tests and reusable [[file:core/python/buck_core/net_world.py][Python]] / [[file:core/js/src/net-world.js][JavaScript]] deployment and per-facility helpers. The
-isolated net household state reads activated capacity through it; normal net
-household setup and issuance remain disabled. It is a current estimate rather
-than a guarantee that an issue transaction will succeed; the
-[[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] lists the accounting port and integration checks.
+The checks cover one-year compounded cash and marked relief against the
+independent reference; dynamic K and nonzero premiums from two insurer pools;
+pre-issuance reserves, including decay between quote and execution; guarded
+real V3 buys and Universal Router sells; and a separate confirmed payment to
+a simulated mortgage bank. Transfers and purchases never count as NFT debt
+retirement. Python and JavaScript use the same operation vectors. Real
+private-identity Chaum-Pedersen approvals and receipt decryption run against
+Buck. These are identity proofs, not restored Notes proof suites.
+
+The browser artifact bundle contains the same canonical token/libraries.
+Saved net-world records use ABI version 6, the on-chain =ACCOUNTING_MODEL=
+identifier, all four library addresses and contract code hashes. Older
+records, missing libraries, altered wiring and wrong models are rejected.
+Those hashes detect inconsistent saved records; they are not independent
+release provenance. Rebuild with the Make target after changing contracts.
+The ordinary sandbox still needs migration of its controller, displays and
+restoration path; the household's full setup/issuance, exits, basket redemption
+and financial marks remain pending. Passing this smoke does not restore them.
+
+The existing [[file:core/python/buck_core/net_world.py][Python]] and
+[[file:core/js/src/net-world.js][JavaScript]] operations expose actual per-facility
+principal/age, candidate premium and reserve checks, original-pool refund
+estimates, bounded explicit retirement and receipt reconciliation. Their
+[[file:src/BuckNetQuoter.sol][optional facility quoter]] keeps its transitional
+artifact name but reads a neutral cash interface. Capacity is separate from
+wallet cash; no held/unspent split is synthesized. The net swap guard counts
+the Carrying pool's actual delivery separately from any sponsor restoration,
+so a sponsor payment cannot satisfy a purchase's minimum BUCK output.
+
+Unknown outcomes retain their transaction evidence and stop dependent work.
+A confirmed bank payment is applied once; authorization alone is never a debt
+repayment. Pending buybacks preserve their remaining principal target and
+pre-purchase reserve, and later turns use already purchased BUCK before buying
+again. Tevm snapshots do not preserve transaction receipts: a saved hash alone
+cannot establish the outcome after restoration. Finality and full household
+snapshot recovery remain part of the [[file:doc/review/bucknet-economy-implementation.org][unified accounting plan]].
 
 * The household default
 

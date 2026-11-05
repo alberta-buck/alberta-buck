@@ -1,4 +1,4 @@
-// A linked, cash-only BuckNet smoke run in the browser-compatible EVM.
+// A linked, cash-only Buck smoke run in the browser-compatible EVM.
 // Test identities and static K deliberately do not model a real economy.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -15,12 +15,12 @@ const RAW = 1_000_000n;
 const ZERO = "0x0000000000000000000000000000000000000000";
 const YEAR = 365 * 86400 + 6 * 3600;
 const V = JSON.parse(readFileSync(new URL("../../../test/fixtures/bucknet-credit-operations.json", import.meta.url)));
-const required = ["BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
+const required = ["Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund", "IdentityRegistryHarness",
   "BuckCredit", "BuckKControllerStatic", "BuckKControllerDirect", "UniswapV3Factory", "BuckBasketEquity", "SimLP"];
 let skip = false;
 try {
   for (const name of required) loadArtifact(name);
-  if (!loadArtifact("BuckNet").linkReferences) skip = "BuckNet link metadata unavailable; build the checkout";
+  if (!loadArtifact("Buck").linkReferences) skip = "Buck link metadata unavailable; build the checkout";
 } catch {
   skip = "net/simulation artifacts unavailable; run make nix-sim-build";
 }
@@ -28,11 +28,11 @@ try {
 test("activated capacity respects shared integer limits", () => {
   const q = 10n ** 36n, maxBalance = 2n ** 79n - 1n, maxUint = 2n ** 256n - 1n;
   const held = (maxBalance - 10n) * q;
-  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 5n * q, 0n), { potentialCapacity: 5n, sharedLimit: 5n });
-  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 5n * q + 1n, 0n), { potentialCapacity: 4n, sharedLimit: 4n });
-  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, 0n, maxUint / q - 3n), { potentialCapacity: 3n, sharedLimit: 3n });
-  assert.throws(() => boundActivatedCapacity([4n], maxBalance * q, 1n, 0n), /invalid/);
-  assert.throws(() => boundActivatedCapacity([4n], 0n, 0n, maxUint / q + 1n), /invalid/);
+  assert.deepEqual(boundActivatedCapacity([4n, 4n], held + 5n * q, 0n), { potentialCapacity: 5n, sharedLimit: 5n });
+  assert.deepEqual(boundActivatedCapacity([4n, 4n], held + 5n * q + 1n, 0n), { potentialCapacity: 4n, sharedLimit: 4n });
+  assert.deepEqual(boundActivatedCapacity([4n, 4n], held, maxUint / q - 3n), { potentialCapacity: 3n, sharedLimit: 3n });
+  assert.throws(() => boundActivatedCapacity([4n], maxBalance * q + 1n, 0n), /invalid/);
+  assert.throws(() => boundActivatedCapacity([4n], 0n, maxUint / q + 1n), /invalid/);
 });
 
 test("coverage candidates are bounded and include repair estimates", () => {
@@ -48,7 +48,7 @@ test("coverage candidates are bounded and include repair estimates", () => {
   }
 });
 
-test("linked BuckNet issues, accrues and retires cash-only credit", { skip }, async () => {
+test("linked Buck issues, accrues and retires cash-only credit", { skip }, async () => {
   const s = await tevmSession();
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });

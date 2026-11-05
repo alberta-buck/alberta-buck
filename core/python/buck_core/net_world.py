@@ -1,4 +1,4 @@
-"""Deployment and per-facility operations for the experimental BuckNet stack.
+"""Deployment and per-facility operations for the canonical compounded Buck stack.
 
 No identity, insurer or basket policy is implied by deployment.  The caller
 must bind the fund as Carrying, configure a compatible basket and register each
@@ -33,11 +33,13 @@ class NetStack:
     fund: Any
     token: Any
     quoter: Any
-    maturity_library: Any
-    token_ops_library: Any
+    cash_library: Any
+    transfer_library: Any
+    facilities_library: Any
+    renewal_library: Any
 
 
-def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_deployer=None):
+def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_deployer=None, insurance_pool=None):
     """Deploy and link a clean-genesis monetary stack and wire both authorities.
 
     ``credit_deployer`` must be the account that deployed BuckCredit.  The
@@ -46,18 +48,23 @@ def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_
     """
     gov_address = getattr(governance, "address", governance)
     fund = chain.deploy("JubileeFund", gov_address)
-    maturity = chain.deploy("BuckNetMaturity")
-    token_ops = chain.deploy("BuckNetTokenOps")
-    abi, bytecode = load_artifact("BuckNet", libraries={
-        "src/lib/BuckNetMaturity.sol:BuckNetMaturity": maturity.address,
-        "src/lib/BuckNetTokenOps.sol:BuckNetTokenOps": token_ops.address,
-    })
-    token = chain.deploy("BuckNet", credit.address, controller.address, registry.address, fund.address,
+    libraries = {}
+    deployed = []
+    # Dependency order is explicit: every artifact uses creation-bytecode link
+    # metadata, and none of the prototype token's orchestration is deployed.
+    for name in ("BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps"):
+        abi, bytecode = load_artifact(name, libraries=libraries or None)
+        library = chain.deploy(name, abi=abi, bytecode=bytecode)
+        libraries[f"src/lib/{name}.sol:{name}"] = library.address
+        deployed.append(library)
+    abi, bytecode = load_artifact("Buck", libraries=libraries)
+    pool_address = getattr(insurance_pool, "address", insurance_pool) or gov_address
+    token = chain.deploy("Buck", credit.address, controller.address, registry.address, pool_address, fund.address,
                          abi=abi, bytecode=bytecode)
     quoter = chain.deploy("BuckNetQuoter", token.address)
     chain.send(credit.functions.setBuck(token.address), sender=credit_deployer)
     chain.send(registry.functions.setBuck(token.address), sender=governance)
-    return NetStack(registry, credit, controller, fund, token, quoter, maturity, token_ops)
+    return NetStack(registry, credit, controller, fund, token, quoter, *deployed)
 
 
 @dataclass(frozen=True)
@@ -148,13 +155,13 @@ class ActivatedCapacityQuote:
     maturities_pending: bool
 
 
-def bound_activated_capacity(capacities, held_scaled: int, unspent_scaled: int, total_issued: int):
+def bound_activated_capacity(capacities, cash_scaled: int, total_issued: int):
     """Apply BuckNetQuoter's shared numerical bounds to independent zero-premium quotes."""
     values = tuple(capacities)
-    if (any(type(v) is not int or v < 0 for v in (*values, held_scaled, unspent_scaled, total_issued))
-            or held_scaled + unspent_scaled > MAX_BALANCE * Q or total_issued > MAX_UINT256 // Q):
+    if (any(type(v) is not int or v < 0 for v in (*values, cash_scaled, total_issued))
+            or cash_scaled > MAX_BALANCE * Q or total_issued > MAX_UINT256 // Q):
         raise ValueError("invalid activated capacity inputs")
-    shared = min((MAX_BALANCE * Q - held_scaled - unspent_scaled) // Q, MAX_UINT256 // Q - total_issued)
+    shared = min((MAX_BALANCE * Q - cash_scaled) // Q, MAX_UINT256 // Q - total_issued)
     return min(sum(values), shared), shared
 
 
@@ -686,9 +693,9 @@ class NetCreditOps:
                 if present > mark:
                     raise ValueError("activated coverage exceeds current face mark")
                 unactivated_present += mark - present
-        held, unspent = read(token.functions.heldAndUnspentScaled(address))
+        cash_scaled, _ = read(token.functions.accountBalancesScaled(address))
         total = read(token.functions.totalIssued())
-        potential, shared = bound_activated_capacity((capacity for _, capacity in facilities), held, unspent, total)
+        potential, shared = bound_activated_capacity((capacity for _, capacity in facilities), cash_scaled, total)
         pending = read(token.functions.maturitiesPending())
         return ActivatedCapacityQuote(block, tuple(facilities), unactivated_present, shared, potential,
                                       0 if pending else potential, pending)

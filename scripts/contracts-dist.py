@@ -68,9 +68,10 @@ GROTH16 = (
 # Uniswap implementations, which share the directory.
 CONTRACTS = [
     "Buck",                    # ERC-20, demurrage + credit limits
-    "BuckNet",                 # experimental net-demurrage token; linked below
-    "BuckNetMaturity",         # linked BuckNet library
-    "BuckNetTokenOps",        # linked BuckNet library
+    "BuckCash",                # linked unsigned cash and compounded demurrage
+    "BuckTransfer",            # linked original identity/receipt dispatcher
+    "BuckFacilities",          # linked explicit NFT issuance/retirement
+    "BuckRenewalOps",          # linked atomic same-insurer renewal
     "BuckNetQuoter",           # optional per-facility issuance quotes
     "BuckNetSwapGuard",        # experimental net-output V3 guard
     "JubileeFund",             # experimental separate fund coordinator
@@ -107,7 +108,7 @@ CONTRACTS = [
     "IdentityMembershipB1VerifierAdapter",  # B1 depositor membership
 ] + GROTH16
 
-EXPERIMENTAL = {"BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "BuckNetSwapGuard",
+EXPERIMENTAL = {"Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "BuckNetSwapGuard",
                 "JubileeFund", "JubileeClaimBook", "BuckRenewalConsent"}
 
 # Until v1.0.0 every verifier above comes from scripts/snark/setup*.sh, which

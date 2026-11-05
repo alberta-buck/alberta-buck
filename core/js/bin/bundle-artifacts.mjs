@@ -33,10 +33,11 @@ export const NEEDED = [
   "BuckCreditHarness",         // eq world: credits to proxies that never opt in
   "BuckKControllerDirect",
   "Buck",
-  // Experimental net model; retain both deployed libraries' link metadata.
-  "BuckNet",
-  "BuckNetMaturity",
-  "BuckNetTokenOps",
+  // Canonical Buck accounting graph; preserve creation-bytecode link metadata.
+  "BuckCash",
+  "BuckTransfer",
+  "BuckFacilities",
+  "BuckRenewalOps",
   "BuckNetQuoter",
   "BuckNetSwapGuard",
   "JubileeFund",
@@ -55,7 +56,7 @@ export const NEEDED = [
   "BuckWithBasketHooks",
 ];
 
-// The sandbox: no test harnesses. The BuckNet stack is experimental; including
+// The sandbox: no test harnesses. The corrected Buck stack is under migration; including
 // its artifacts does not make it production-ready. The Makefile builds this
 // checkout's contracts while the published artifact package lacks this stack.
 export const SANDBOX = [
@@ -63,9 +64,10 @@ export const SANDBOX = [
   "BuckCredit",
   "BuckKControllerDirect",
   "Buck",
-  "BuckNet",
-  "BuckNetMaturity",
-  "BuckNetTokenOps",
+  "BuckCash",
+  "BuckTransfer",
+  "BuckFacilities",
+  "BuckRenewalOps",
   "BuckNetQuoter",
   "BuckNetSwapGuard",
   "JubileeFund",

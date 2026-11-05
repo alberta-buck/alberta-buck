@@ -10,9 +10,9 @@ import { loadArtifact } from "../src/nodefs.js";
 const path = new URL("../artifacts/sandbox.mjs", import.meta.url);
 const skip = existsSync(path) ? false : "sandbox artifacts not generated; run make nix-venv-net-demurrage-smoke";
 
-test("browser bundle links and deploys the BuckNet stack", { skip }, async () => {
+test("browser bundle links and deploys the Buck stack", { skip }, async () => {
   const { artifact } = await import(path);
-  assert.deepEqual(artifact("BuckNet").linkReferences, loadArtifact("BuckNet").linkReferences);
+  assert.deepEqual(artifact("Buck").linkReferences, loadArtifact("Buck").linkReferences);
   const s = await tevmSession();
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(artifact(name), args, { name });

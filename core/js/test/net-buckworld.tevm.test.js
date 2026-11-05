@@ -1,4 +1,4 @@
-// A cash-only BuckNet world with the actual credential registry, compiled
+// A cash-only Buck world with the actual credential registry, compiled
 // identity kernel and the same generated artifacts the browser receives.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 const skip = !identity ? "identity kernel not built (make nix-core-build-wasm)"
   : !existsSync(bundle) ? "sandbox artifacts not built (make nix-venv-net-demurrage-smoke)" : false;
 
-test("BuckNet preserves private identity approval and transfer receipts", { skip }, async () => {
+test("Buck preserves private identity approval and transfer receipts", { skip }, async () => {
   const { artifact } = await import(bundle);
   let seed = 0x253fa91n;
   const rng = () => {
@@ -106,7 +106,7 @@ test("BuckNet preserves private identity approval and transfer receipts", { skip
   assert.deepEqual(s.mismatches, []);
 });
 
-test("real identities can use and safely restore a cash-only BuckNet world", { skip }, async () => {
+test("real identities can use and safely restore a cash-only Buck world", { skip }, async () => {
   const { artifact } = await import(bundle);
   let seed = 0x14a2b3c4n;
   const rng = () => {
@@ -147,7 +147,10 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   assert.equal((await ops.facility(id)).issued, 59_000_000n);
 
   const saved = decodeJSON(encodeJSON({ chain: await snapshotTevm(s), world: worldRecord(world) }));
-  assert.equal(saved.world.net.issueAbiVersion, 5);
+  assert.equal(saved.world.net.issueAbiVersion, 6);
+  assert.deepEqual(Object.keys(saved.world.net.libraries).sort(),
+    ["cashLibrary", "facilitiesLibrary", "renewalLibrary", "transferLibrary"]);
+  assert.equal(saved.world.net.accountingModel, await s.call(world.buck, "ACCOUNTING_MODEL"));
   const restoredSession = await tevmSession();
   await restoreTevm(restoredSession, saved.chain);
   assert.throws(() => attachBuckWorld(restoredSession, artifact, saved.world, { identity }), /attachNetBuckWorld/);
@@ -155,20 +158,26 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   delete oldRecord.net.issueAbiVersion;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, oldRecord, { identity }), /issuance ABI version/);
   const wrongVersion = structuredClone(saved.world);
-  wrongVersion.net.issueAbiVersion = 4;
+  wrongVersion.net.issueAbiVersion = 5;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongVersion, { identity }), /issuance ABI version/);
-  const oldArtifact = (name) => name === "BuckNet"
+  const wrongAccounting = structuredClone(saved.world);
+  wrongAccounting.net.accountingModel = `0x${"00".repeat(32)}`;
+  await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongAccounting, { identity }), /accounting model/);
+  const missingLibrary = structuredClone(saved.world);
+  delete missingLibrary.net.libraries.renewalLibrary;
+  await assert.rejects(attachNetBuckWorld(restoredSession, artifact, missingLibrary, { identity }), /invalid BuckRenewalOps address/);
+  const oldArtifact = (name) => name === "Buck"
     ? { ...artifact(name), abi: artifact(name).abi.filter((entry) => entry.name !== "issue") } : artifact(name);
   await assert.rejects(attachNetBuckWorld(restoredSession, oldArtifact, saved.world, { identity }), /issuance ABI/);
-  const noMintArtifact = (name) => name === "BuckNet"
+  const noMintArtifact = (name) => name === "Buck"
     ? { ...artifact(name), abi: artifact(name).abi.filter((entry) => entry.name !== "mint") } : artifact(name);
   await assert.rejects(attachNetBuckWorld(restoredSession, noMintArtifact, saved.world, { identity }), /mint ABI/);
-  const noBurnArtifact = (name) => name === "BuckNet"
+  const noBurnArtifact = (name) => name === "Buck"
     ? { ...artifact(name), abi: artifact(name).abi.filter((entry) => entry.name !== "burn") } : artifact(name);
   await assert.rejects(attachNetBuckWorld(restoredSession, noBurnArtifact, saved.world, { identity }), /burn ABI/);
   const ambiguousArtifact = (name) => {
     const value = artifact(name);
-    if (name !== "BuckNet") return value;
+    if (name !== "Buck") return value;
     const issue = value.abi.find((entry) => entry.type === "function" && entry.name === "issue");
     return { ...value, abi: [...value.abi, { ...issue, inputs: issue.inputs.slice(0, 4) }] };
   };
@@ -185,7 +194,7 @@ test("real identities can use and safely restore a cash-only BuckNet world", { s
   await restoredOps.reduceAuthorized(holder.account, id, 1_000_000n);
   assert.equal((await restoredOps.facility(id)).issued, 58_000_000n);
   const wrongFund = structuredClone(saved.world);
-  wrongFund.net.fund = wrongFund.net.maturityLibrary;
+  wrongFund.net.fund = wrongFund.net.libraries.cashLibrary;
   await assert.rejects(attachNetBuckWorld(restoredSession, artifact, wrongFund, { identity }), /mismatch/);
   const wrongChain = structuredClone(saved.world);
   wrongChain.net.chainId = Number(wrongChain.net.chainId) + 1;

@@ -83,7 +83,7 @@ make nix-deploy-dry-run                    # local EVM; no broadcast
 make nix-venv-test-python                  # Python reference and simulator tests
 make nix-venv-core-test-py                 # Python platform tests
 make nix-core-test-js                     # JS platform and available browser tests
-make nix-venv-net-demurrage-smoke          # linked BuckNet, reference and JS local EVM smoke
+make nix-venv-net-demurrage-smoke          # canonical linked Buck, Python/JS EVM and real identity proofs
 make nix-core-test-rust                   # Rust kernels and shared-vector checks
 make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
@@ -105,16 +105,17 @@ and regeneration, executable papers, release builds and deployment procedures re
 [[file:doc/DEVELOP.org][doc/DEVELOP.org]] and [[file:alberta-buck-deployment.org][the deployment book]]. Simulations do not replace contract tests.
 The deployment dry run exercises the legacy bootstrap with stub Notes verifiers. It does not
 deploy the experimental =BuckNet= stack or establish readiness for a live deployment.
-The experimental =BuckNet= now links =BuckNetTokenOps= and =BuckNetMaturity= libraries;
-Foundry links them for its tests. The Python and JavaScript local smoke fixtures deploy and
-link them from creation-bytecode metadata, but are not production deployment scripts. A
-future deployment or economy must deploy and link these libraries on that chain; the legacy
-deployment script does not do so. Experimental =BuckNet.issue= requires an explicit
-maximum premium and expected insurer pool; renewal consent also commits the expected
-new premium pool. Saved JavaScript net-world records use version 5 for the renamed
-token-operations library and the ordinary-owner =mint= and =burn= ABIs; they reject older deployment
-graphs. Clients and saved records from older builds must be upgraded or rejected.
-The experimental one-call =burn= currently supports ordinary owners only. It
+The corrected =Buck= links =BuckCash=, =BuckTransfer=, =BuckFacilities= and
+=BuckRenewalOps= in that dependency order. Foundry links them for its tests;
+the shared Python/JS deployment helper links actual creation-bytecode metadata.
+Its fifth constructor argument is the external Jubilee fund; the earlier
+insurance-pool argument is not reused. The helper then deploys the existing
+optional quoter and configures immutable authority bindings. The legacy Notes
+bootstrap does not deploy this graph. Saved net-world records use version 6,
+verify the canonical accounting identifier and record all four library/code
+bindings. They reject earlier token deployments and incomplete records.
+
+The canonical one-call =burn= supports ordinary owners and approved Carrying services. It
 requires the original insurer pools to have any required nominal refund and allowance
 ready before the call; its bounded allocation can revert with
 =AllocationWorkLimit=. The separate authorized =JubileeFund.reduce= path can

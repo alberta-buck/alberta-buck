@@ -1,4 +1,4 @@
-"""Real cash-only BuckNet basket receipts, not a leveraged economy."""
+"""Real cash-only Buck basket receipts, not a leveraged economy."""
 import shutil
 from pathlib import Path
 
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RAW = 10**6
 YEAR = 365 * 86400 + 6 * 3600
 ZERO = "0x" + "00" * 20
-REQUIRED = ("BuckNet", "BuckNetMaturity", "BuckNetTokenOps", "BuckNetQuoter", "JubileeFund",
+REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
             "BuckBasketEquity", "SimLP", "MockERC20")
 
